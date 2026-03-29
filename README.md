@@ -8,24 +8,17 @@ Discord message → Agentus → tmux pane (Claude Code) → response → Discord
 
 ## Quick Start
 
-### Prerequisites
-
-- Node.js 20+
-- tmux
-- [yq](https://github.com/mikefarah/yq) and [jq](https://jqlang.github.io/jq/) (`apt install yq jq` or `brew install yq jq`)
-- A Discord bot token
-
 ### Setup
 
 ```bash
 git clone https://github.com/adelost/agentus
 cd agentus
-npm install
-
-# Configure
-cp .env.example .env          # add your DISCORD_TOKEN
-cp agents.yaml.example agents.yaml  # map your channels + agents
+bash bin/setup.sh
 ```
+
+The setup script checks and installs prerequisites (Node.js 20+, tmux, yq, jq, Claude Code), runs `npm install`, and creates config files.
+
+After setup, add your Discord token to `.env` and configure `agents.yaml`.
 
 ### Create a Discord Bot
 

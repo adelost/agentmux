@@ -4,6 +4,7 @@
   "description": "Discord bridge for tmux-based coding agents (Claude Code)",
   "type": "module",
   "scripts": {
+    "setup": "bash bin/setup.sh",
     "start": "node index.mjs",
     "dev": "bash bin/start.sh",
     "test": "vitest run"
