@@ -42,7 +42,6 @@ function loadEnv() {
 loadEnv();
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const AGENT_BIN = process.env.AGENT_PATH || resolve(__dir, "bin/agent");
 const AGENTS_YAML = process.env.AGENTS_YAML || resolve(__dir, "agents.yaml");
 const TIMEOUT = parseInt(process.env.TIMEOUT_S || "600") * 1000;
 const WHISPER_URL = process.env.WHISPER_URL || "http://localhost:2022/v1/audio/transcriptions";
@@ -50,11 +49,6 @@ const SHELL_PATH = process.env.SHELL_PATH || `${process.env.HOME}/bin:${process.
 const TMUX_SOCKET = process.env.TMUX_SOCKET || "/tmp/agentus-tmux.sock";
 const TTS_VOICE = process.env.TTS_VOICE || "sv-SE-MattiasNeural";
 const STATE_FILE = process.env.STATE_FILE || "/tmp/agentus-state.json";
-const PIDFILE = process.env.PIDFILE || "/tmp/agentus.pid";
-
-// Pass socket + config to agent bash script via env
-process.env.TMUX_SOCKET = TMUX_SOCKET;
-process.env.AGENTS_YAML = AGENTS_YAML;
 
 if (!TOKEN) {
   console.error("Set DISCORD_TOKEN in .env");
@@ -73,7 +67,7 @@ const appState = createState(STATE_FILE);
 if (appState.get("tts") === undefined) appState.set("tts", process.env.TTS === "1");
 if (appState.get("thinking") === undefined) appState.set("thinking", true);
 
-const agent = createAgent({ agentBin: AGENT_BIN, tmuxSocket: TMUX_SOCKET, timeout: TIMEOUT, run, tmuxExec });
+const agent = createAgent({ tmuxSocket: TMUX_SOCKET, configPath: AGENTS_YAML, timeout: TIMEOUT, run, tmuxExec });
 const attachments = createAttachmentHandler({ run, transcribeScript: process.env.TRANSCRIBE_SCRIPT || resolve(__dir, "bin/transcribe-whisper.sh") });
 const tts = createTTS({ run, state: appState, voice: TTS_VOICE });
 

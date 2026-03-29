@@ -73,22 +73,6 @@ else
   install_pkg tmux || { dim "Install: apt install tmux / brew install tmux"; MISSING=1; }
 fi
 
-# yq
-if command -v yq &>/dev/null; then
-  ok "yq"
-else
-  fail "yq not found"
-  install_pkg yq || { dim "Install: apt install yq / brew install yq"; MISSING=1; }
-fi
-
-# jq
-if command -v jq &>/dev/null; then
-  ok "jq"
-else
-  fail "jq not found"
-  install_pkg jq || { dim "Install: apt install jq / brew install jq"; MISSING=1; }
-fi
-
 # Claude Code
 if command -v claude &>/dev/null; then
   ok "Claude Code"

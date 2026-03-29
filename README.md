@@ -16,7 +16,7 @@ cd agentus
 bash bin/setup.sh
 ```
 
-The setup script checks and installs prerequisites (Node.js 20+, tmux, yq, jq, Claude Code), runs `npm install`, and creates config files.
+The setup script checks and installs prerequisites (Node.js 20+, tmux, Claude Code), runs `npm install`, and creates config files.
 
 After setup, add your Discord token to `.env` and configure `agents.yaml`.
 
@@ -96,10 +96,8 @@ Prefix with `.N` to target a specific pane: `.1 fix the bug`
 You (Discord)
   ↓ message
 Agentus (Node.js)
-  ↓ bin/agent <name> <prompt>
-tmux session
-  ↓ send-keys to pane
-Claude Code (running in pane)
+  ↓ tmux send-keys
+Claude Code (in tmux pane)
   ↓ works...
 Agentus polls tmux
   ↓ extracts response
@@ -107,7 +105,7 @@ You (Discord)
   ↓ reply
 ```
 
-Agentus doesn't run Claude Code itself. It connects to existing tmux sessions where Claude Code is already running (or starts them on first message).
+Agentus manages tmux sessions directly via Node.js. It creates sessions, starts Claude Code, sends prompts, and extracts responses -- no external scripts needed.
 
 ## Tests
 
