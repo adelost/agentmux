@@ -1,0 +1,13 @@
+cd /home/adelost/lsrc/ai-dsl
+conda: error: environment not found
+adelost@Abyss:~/lsrc/ai-dsl$
+▐▛ Claude Code v1.0.23
+Opus 4.6 · /home/adelost/lsrc/ai-dsl
+
+❯ hello
+
+● Hi! How can I help you today?
+
+✻ Brewed for 1s
+
+❯

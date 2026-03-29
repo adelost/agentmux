@@ -1,0 +1,21 @@
+❯ research how websockets work in Deno
+
+● I'll research this for you.
+
+● Agent(Explore)
+  ⎿  WebSocket in Deno uses the standard WebSocket API. The server side uses
+     Deno.serve() with upgrade. Found examples in src/ws.ts and docs/api.md.
+
+● Based on the research:
+
+  Deno has native WebSocket support on both client and server:
+
+  **Client:** Standard `new WebSocket(url)` API, same as browsers.
+
+  **Server:** Use `Deno.serve()` and check for the `upgrade: websocket` header, then call `Deno.upgradeWebSocket(request)`.
+
+  Your codebase already has an example in `src/ws.ts`.
+
+✻ Brewed for 25s
+
+❯

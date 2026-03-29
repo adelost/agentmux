@@ -1,0 +1,13 @@
+❯ what is TypeScript?
+
+● TypeScript is a typed superset of JavaScript that compiles to plain JavaScript.
+
+✻ Brewed for 2s
+
+❯ and what about Rust?
+
+● Rust is a systems programming language focused on safety, speed, and concurrency. It prevents memory errors at compile time without a garbage collector.
+
+✻ Brewed for 3s
+
+❯

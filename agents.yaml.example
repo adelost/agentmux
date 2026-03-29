@@ -1,0 +1,31 @@
+# Agentus — agent-to-Discord channel mapping
+#
+# Each entry is a coding agent running in a tmux session.
+# The `discord` field maps Discord channel IDs to tmux panes.
+#
+# Get channel IDs: Discord > Settings > Advanced > Developer Mode,
+# then right-click a channel > Copy Channel ID.
+
+# Simple: one channel, one agent
+myproject:
+  dir: /home/you/projects/myproject
+  id: 00000000-0000-0000-0000-000000000001
+  discord: "1234567890123456789"
+  panes:
+    - name: claude
+      cmd: claude --continue --dangerously-skip-permissions
+
+# Advanced: multiple channels mapped to different panes
+multi:
+  dir: /home/you/projects/multi
+  id: 00000000-0000-0000-0000-000000000002
+  discord:
+    "1111111111111111111": 0    # channel-1 → pane 0
+    "2222222222222222222": 1    # channel-2 → pane 1
+  layout: main-vertical
+  panes:
+    - name: claude
+      cmd: claude --continue --dangerously-skip-permissions
+    - name: claude-2
+      cmd: claude --dangerously-skip-permissions
+      defer: true               # defer: only cd to dir, start claude on first prompt

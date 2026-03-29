@@ -1,0 +1,11 @@
+❯ deploy to production
+
+● Bash(npm run deploy)
+  ⎿  Error: Exit code 1
+     Error: ECONNREFUSED - could not connect to deploy target
+
+● The deploy failed. The server at the deploy target isn't responding. Check if the server is running and the firewall allows connections on port 22.
+
+✻ Brewed for 8s
+
+❯

@@ -1,0 +1,26 @@
+❯ add the new modules to the design doc
+
+● Update(portfolio/DESIGN-CONCEPTS.md)
+  ⎿  Added 262 lines
+      360
+      361  ---
+      362
+      363 +---
+      364 +
+      365 +## Moduler — tillval som kan lyfta alla koncept
+      366 +
+      367 +Dessa är fristående byggblock. Välj de som passar, plugga in i valfritt koncept.
+      368 +
+      369 +### Modul A: Scroll-driven video ("Scrubber")
+      370 +
+      371 +Vad: Scrollhjulet styr videons playback. Scrolla ner = spola framåt.
+      372 +Scrolla upp = bakåt. Videon "fastnar" på skärmen medan du scrollar igenom den.
+      373 +
+      374 +Hur det funkar tekniskt:
+      375 +- GSAP ScrollTrigger + video.currentTime
+
+● Done. Added 6 new modules to the design document.
+
+✻ Brewed for 30s
+
+❯

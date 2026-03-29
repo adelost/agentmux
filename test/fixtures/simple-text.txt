@@ -1,0 +1,7 @@
+❯ what is 2+2?
+
+● The answer is 4.
+
+✻ Brewed for 2s
+
+❯

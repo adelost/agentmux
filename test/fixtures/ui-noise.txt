@@ -1,0 +1,20 @@
+❯ explain the codebase
+
+● Read 2 files (ctrl+o to expand)
+
+  How is Claude doing?
+  0: Dismiss
+  1: Bad
+  2: Fine
+  3: Good
+
+● This is a Node.js Discord bot that bridges Discord messages to Claude Code agents running in tmux sessions.
+
+  The key files are:
+  - `index.mjs` - main entry point, Discord client setup
+  - `lib.mjs` - pure helper functions
+  - `agent.mjs` - tmux/agent interaction
+
+💡 agent log _claw [-n N | --full] for more
+
+❯

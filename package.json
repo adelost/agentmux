@@ -1,0 +1,21 @@
+{
+  "name": "agentus",
+  "version": "1.0.0",
+  "description": "Discord bridge for tmux-based coding agents (Claude Code)",
+  "type": "module",
+  "scripts": {
+    "start": "node index.mjs",
+    "dev": "bash bin/start.sh",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@discordjs/opus": "^0.10.0",
+    "@discordjs/voice": "^0.19.0",
+    "discord.js": "^14.18.0",
+    "js-yaml": "^4.1.1"
+  },
+  "devDependencies": {
+    "bdd-vitest": "^2.0.0",
+    "vitest": "^4.0.18"
+  }
+}
