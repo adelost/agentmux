@@ -12,7 +12,7 @@ function setup({ paneOutput = "" } = {}) {
     tmuxExec,
     run,
     tmuxSocket: "/tmp/test.sock",
-    agentBin: "/usr/bin/agent",
+    configPath: "/tmp/test-agents.yaml",
     delay: noop,
     timeout: 300000,
   });
@@ -33,11 +33,11 @@ feature("dismissBlockingPrompt", () => {
       ({ dismissBlockingPrompt }) => dismissBlockingPrompt("_api:.0"),
     ],
     then: [
-      "returns true and sends dismiss keystroke (retries once since mock keeps returning survey)",
+      "returns 'dismiss' and sends dismiss keystroke",
       (result, { tmuxExec }) => {
-        expect(result).toBe(true);
-        // 2 iterations × (capture + send-keys) = 4 calls
-        expect(tmuxExec).toHaveBeenCalledTimes(4);
+        expect(result).toBe("dismiss");
+        // 1 capture + 1 send-keys = 2 calls
+        expect(tmuxExec).toHaveBeenCalledTimes(2);
         expect(tmuxExec.mock.calls[1][0]).toContain("send-keys");
       },
     ],
@@ -53,9 +53,9 @@ feature("dismissBlockingPrompt", () => {
       ({ dismissBlockingPrompt }) => dismissBlockingPrompt("_api:.0"),
     ],
     then: [
-      "returns false without sending keys",
+      "returns null without sending keys",
       (result, { tmuxExec }) => {
-        expect(result).toBe(false);
+        expect(result).toBeNull();
         expect(tmuxExec).toHaveBeenCalledTimes(1);
       },
     ],
