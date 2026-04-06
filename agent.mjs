@@ -173,35 +173,41 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     } catch {}
   }
 
-  // --- Dismiss blocking prompts ---
+  // --- Dismiss blocking prompts (data-driven) ---
 
-  /** Auto-select "Resume from summary" when Claude asks about old sessions. */
-  async function dismissResumePrompt(target) {
-    try {
-      const { stdout } = await tmux(`capture-pane -t '${esc(target)}' -p -S -20`);
-      if (stdout.includes("Resume from summary") && stdout.includes("Enter to confirm")) {
-        // Option 1 is already selected by default, just press Enter
-        await tmux(`send-keys -t '${esc(target)}' Enter`);
-        await wait(3000);
-        return true;
-      }
-    } catch {}
-    return false;
-  }
+  const BLOCKING_PROMPTS = [
+    {
+      name: "resume",
+      match: (text) => text.includes("Resume from summary") && text.includes("Enter to confirm"),
+      keys: "Enter",
+      waitMs: 3000,
+    },
+    {
+      name: "dismiss",
+      match: (text) => text.includes("0: Dismiss"),
+      keys: "'0' Enter",
+      waitMs: 500,
+    },
+  ];
 
   async function dismissBlockingPrompt(target) {
-    // Check for resume prompt first
-    if (await dismissResumePrompt(target)) return true;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const { stdout } = await tmux(`capture-pane -t '${esc(target)}' -p`);
-        const lastLines = stdout.trimEnd().split("\n").slice(-3).join("\n");
-        if (!lastLines.includes("0: Dismiss")) return false;
-        await tmux(`send-keys -t '${esc(target)}' '0' Enter`);
-        await wait(500);
-      } catch {}
+    let paneText;
+    try {
+      const { stdout } = await tmux(`capture-pane -t '${esc(target)}' -p -S -20`);
+      paneText = stdout;
+    } catch (err) {
+      console.warn(`dismiss: capture failed for ${target}: ${err.message}`);
+      return null;
     }
-    return true;
+
+    for (const prompt of BLOCKING_PROMPTS) {
+      if (prompt.match(paneText)) {
+        await tmux(`send-keys -t '${esc(target)}' ${prompt.keys}`);
+        await wait(prompt.waitMs);
+        return prompt.name;
+      }
+    }
+    return null;
   }
 
   async function getResponse(agentName, pane) {
@@ -277,8 +283,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`);
         if (/claude|node/.test(stdout.trim())) {
           await wait(1000);
-          // Handle resume prompt that appears on old sessions
-          await dismissResumePrompt(target);
+          // Handle resume/dismiss prompts that may appear on startup
+          await dismissBlockingPrompt(target);
           return;
         }
       } catch {}
