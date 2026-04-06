@@ -4,7 +4,8 @@
 export const UI_NOISE = [
   /^[─━═▪ ]{3,}$/,
   /^❯/,
-  /^[✻✢·] /,               // thinking animation (Herding, Cogitated, etc)
+  /^[✻✢✽✶✷✸✹✺✿❋⚙◉∗⊛·˙] /,  // thinking animation (Herding, Cogitated, etc)
+  /^[A-Z][a-z]+(?:ing|ed)…$/,  // bare thinking words: "Musing…", "Cogitated…"
   /How is Claude doing/,
   /^\s+\d+: (Bad|Fine|Good|Dismiss)/,
   /💡 agent log/,

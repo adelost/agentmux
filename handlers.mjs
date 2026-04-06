@@ -29,9 +29,15 @@ const HELP_TEXT = [
   "Prefix with `.N` to target pane N (e.g. `.1 /raw`)",
 ].join("\n");
 
+function formatContext(ctx) {
+  if (!ctx) return "";
+  const k = Math.round(ctx.tokens / 1000);
+  return `\n_context: ${ctx.percent}% (${k}k)_`;
+}
+
 function sendTextReply(msg, text, context) {
   const chunks = splitMessage(text);
-  const ctxSuffix = context != null ? `\n_context: ${context}%_` : "";
+  const ctxSuffix = formatContext(context);
   return (async () => {
     for (let i = 0; i < chunks.length; i++) {
       const isLast = i === chunks.length - 1;
@@ -79,8 +85,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           if (unsent.length) {
             const text = unsent.join("\n\n").trim();
             const context = agent.getContextPercent(mapping.dir);
-            const ctxSuffix = context != null ? `\n_context: ${context}%_` : "";
-            for (const chunk of splitMessage(text + ctxSuffix)) {
+            for (const chunk of splitMessage(text + formatContext(context))) {
               await msg.send(chunk).catch(() => {});
             }
             sentCount = segments.length;
@@ -140,7 +145,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
             const text = unsent.join("\n\n").trim();
             const context = agent.getContextPercent(mapping.dir);
             if (text) await sendTextReply(msg, text, context);
-            else if (context != null) await msg.reply(`_context: ${context}%_`);
+            else if (context) await msg.reply(formatContext(context).trim());
             resolve();
           } catch { clearInterval(check); clearInterval(progress.timer); resolve(); }
         }, 3000);
@@ -156,7 +161,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     "/status": async (msg, mapping, pane) => {
       const override = overrides.has(msg.channelId) ? " (override)" : "";
       const context = agent.getContextPercent(mapping.dir);
-      const ctxStr = context != null ? `${context}%` : "unknown";
+      const ctxStr = context ? `${context.percent}% (${Math.round(context.tokens / 1000)}k)` : "unknown";
       await msg.reply(`**${mapping.name}** pane ${pane}${override} · context: ${ctxStr}`);
     },
 
@@ -220,7 +225,10 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     return msg.reply(`switched to **${parsed.name}** pane ${parsed.pane}`);
   }
 
+  const ts = () => new Date().toLocaleTimeString("sv");
+
   async function processMessage(msg, mapping, cleanPrompt, pane, tmpFiles) {
+    console.log(`[${ts()}] ← ${mapping.name}:${pane} "${cleanPrompt.slice(0, 80)}"`);
     const stopTyping = msg.startTyping();
     const streaming = state.get("thinking", true);
     const progress = agent.startProgressTimer(msg.send, mapping.name, pane, { streaming });
@@ -232,9 +240,11 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       const unsent = segments.slice(progress.sentCount());
       const text = unsent.join("\n\n").trim() || segments.join("\n\n").trim() || "(empty response)";
 
+      console.log(`[${ts()}] → ${mapping.name}:${pane} (${text.length} chars, ctx ${context?.percent ?? '?'}%, ${segments.length} seg, ${unsent.length} unsent)`);
       await sendTextReply(msg, text, context);
       await tts.sendFollowup(msg.send, text, tmpFiles);
     } catch (err) {
+      console.log(`[${ts()}] ✗ ${mapping.name}:${pane} ${err.message}`);
       const errMsg = err.killed ? "Timeout" : `${err.stderr || err.message}`;
       await msg.reply(errMsg).catch(() => {});
     } finally {

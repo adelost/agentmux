@@ -176,11 +176,15 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   async function isBusy(agentName, pane) {
     const raw = await capturePane(agentName, pane, 20);
+    // "esc to interrupt" = definitely working (most reliable signal)
+    if (raw.includes("esc to interrupt")) return true;
+    // Search last ~10 lines for ❯ prompt (status lines, Welter, separators may follow it)
     const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
-    const last = lines[lines.length - 1] || "";
-    if (!last.startsWith("❯")) return true;
-    if (last.replace(/^❯\s*/, "").length > 0) return true;
-    return false;
+    const tail = lines.slice(-10);
+    const promptLine = tail.findLast((l) => l.startsWith("❯"));
+    if (!promptLine) return true;                          // no prompt visible = working
+    if (promptLine.replace(/^❯\s*/, "").length > 0) return true; // has pending input
+    return false;                                          // idle
   }
 
   async function getResponseSegments(agentName, pane) {
@@ -354,7 +358,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
           if (u) {
             const total = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) +
               (u.cache_read_input_tokens || 0) + (u.output_tokens || 0);
-            return Math.round((total / CONTEXT_MAX) * 100);
+            return { percent: Math.round((total / CONTEXT_MAX) * 100), tokens: total };
           }
         } catch {}
       }
