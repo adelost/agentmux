@@ -40,12 +40,14 @@ export async function ensureAndAttach(ctx, name, configPath) {
   const { loadConfig } = await import("./config.mjs");
   const config = loadConfig(configPath);
   const panes = config[name]?.panes || [];
+  const claudePanes = panes.filter((p) => p?.cmd?.includes("claude")).map((_, i) => i);
 
-  // ensureReady creates session, sets up panes, starts claude, handles dismiss
-  for (let i = 0; i < panes.length; i++) {
-    if (panes[i]?.cmd?.includes("claude")) {
-      await ctx.agent.ensureReady(name, i);
-    }
+  // Step 1: create session + panes (sequential, once)
+  await ctx.agent.ensureReady(name, claudePanes[0] ?? 0);
+
+  // Step 2: start remaining claude panes in parallel (session already exists)
+  if (claudePanes.length > 1) {
+    await Promise.all(claudePanes.slice(1).map((i) => ctx.agent.ensureReady(name, i)));
   }
 }
 

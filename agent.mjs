@@ -3,7 +3,6 @@
 
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
-import { randomUUID } from "crypto";
 import { load as loadYaml } from "js-yaml";
 import { esc, stripAnsi, extractActivity, formatDuration } from "./lib.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "./core/extract.mjs";
@@ -179,38 +178,22 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await wait(500);
   }
 
-  /** Check if a dir has existing Claude sessions. */
-  function hasExistingSessions(dir) {
-    const encodedDir = dir.replace(/\//g, "-");
-    const projectDir = join(process.env.HOME, ".claude", "projects", encodedDir);
-    try { return readdirSync(projectDir).some((f) => f.endsWith(".jsonl")); }
-    catch { return false; }
+  /** Always --continue. Session isolation via .agents/N/ makes it safe. */
+  function resolveSessionFlag() {
+    return "--continue";
   }
 
-  /** --continue if session exists in dir, otherwise --session-id with unique UUID. */
-  function resolveSessionFlag(dir) {
-    if (hasExistingSessions(dir)) return "--continue";
-    return `--session-id ${randomUUID()}`;
-  }
-
-  /** Wait for claude to load. Only poll for prompts if resuming old session. */
-  async function waitForClaudeReady(target, agentName, pane, rootDir) {
+  /** Wait for claude to load, dismiss any blocking prompts if they appear. */
+  async function waitForClaudeReady(target, agentName, pane) {
     // Wait for claude process to appear
     for (let i = 0; i < 15; i++) {
       if (await isAlreadyRunning(target)) break;
       await wait(500);
     }
 
-    // New session = no resume prompt possible. Just wait for idle.
-    const dir = paneDir(rootDir, pane);
-    if (!hasExistingSessions(dir)) {
-      await wait(2000); // brief startup grace
-      return;
-    }
-
-    // Old session = may get resume/dismiss prompt. Poll until handled or idle.
+    // Poll for resume/dismiss or idle (old sessions may prompt)
     for (let j = 0; j < 8; j++) {
-      await wait(2000);
+      await wait(1000);
       const dismissed = await dismissBlockingPrompt(target);
       if (dismissed) return;
       if (!(await isBusy(agentName, pane))) return;
@@ -307,7 +290,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     if (isClaudeCmd(paneCmd)) {
       await startClaude(agentName, target, config.dir, pane);
-      await waitForClaudeReady(target, agentName, pane, config.dir);
+      await waitForClaudeReady(target, agentName, pane);
     }
   }
 
