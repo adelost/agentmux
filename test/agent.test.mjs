@@ -14,12 +14,13 @@ feature("paneDir — session isolation per pane", () => {
 
   const cleanup = () => rmSync(root, { recursive: true, force: true });
 
-  component("pane 0 returns root dir unchanged", {
+  component("pane 0 returns .agents/0/ subdir", {
     given: ["a root dir", setup],
     when: ["paneDir called with pane 0", (root) => paneDir(root, 0)],
     then: [
-      "returns root dir", (dir, root) => {
-        expect(dir).toBe(root);
+      "returns .agents/0 path", (dir, root) => {
+        expect(dir).toBe(join(root, ".agents", "0"));
+        expect(existsSync(dir)).toBe(true);
         cleanup();
       },
     ],
