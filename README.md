@@ -3,12 +3,19 @@
 Discord bridge for tmux-based coding agents. Send messages in Discord, get responses from Claude Code running in tmux.
 
 ```
-Discord message → Agentus → tmux pane (Claude Code) → response → Discord
+You (phone/desktop)
+  ↓ Discord message
+Agentus (Node.js)
+  ↓ tmux send-keys
+Claude Code (in tmux pane)
+  ↓ works...
+Agentus polls tmux
+  ↓ extracts response
+You (Discord)
+  ↓ reply with context %
 ```
 
 ## Quick Start
-
-### Setup
 
 ```bash
 git clone https://github.com/adelost/agentus
@@ -16,53 +23,84 @@ cd agentus
 bash bin/setup.sh
 ```
 
-The setup script checks and installs prerequisites (Node.js 20+, tmux, Claude Code), runs `npm install`, and creates config files.
+Setup checks prerequisites (Node.js 20+, tmux, Claude Code), installs npm deps, and creates config files. Then follow these steps:
 
-After setup, add your Discord token to `.env` and configure `agents.yaml`.
-
-### Create a Discord Bot
+### 1. Create a Discord Bot
 
 1. Go to [discord.com/developers/applications](https://discord.com/developers/applications)
-2. New Application > name it > Bot > Reset Token > copy token to `.env`
-3. Bot > enable **Message Content Intent**
-4. OAuth2 > URL Generator > select `bot` scope > select permissions: Send Messages, Read Message History, Attach Files
-5. Open the generated URL to invite the bot to your server
+2. Click **New Application**, name it (e.g. "Agentus")
+3. Go to **Bot** in the sidebar
+4. Click **Reset Token**, copy the token
+5. Paste it in `.env` as `DISCORD_TOKEN=your-token-here`
+6. Scroll down and enable **Message Content Intent**
+7. Go to **OAuth2 > URL Generator** in the sidebar
+8. Check **bot** under Scopes
+9. Check these Bot Permissions: **Send Messages**, **Read Message History**, **Attach Files**, **Manage Channels**
+10. Copy the generated URL at the bottom, open it in your browser
+11. Select your Discord server and authorize
 
-### Configure agents.yaml
+### 2. Get your Discord Server ID
 
-Map Discord channels to tmux sessions. Each agent runs Claude Code in a tmux pane.
+1. Open Discord Settings > App Settings > **Advanced** > enable **Developer Mode**
+2. Right-click your server name in the sidebar > **Copy Server ID**
+
+### 3. Configure agentus.yaml
+
+Edit `agentus.yaml` with your server ID and projects:
 
 ```yaml
-myproject:
-  dir: /home/you/projects/myproject
-  id: 00000000-0000-0000-0000-000000000001
-  discord: "CHANNEL_ID_HERE"
-  panes:
-    - name: claude
-      cmd: claude --continue --dangerously-skip-permissions
+guild: "YOUR_SERVER_ID"
+category: "Agent Cave"       # Discord category for agent channels
+
+agents:
+  myproject:
+    dir: ~/projects/myproject
+    claude: 3                # 3 Claude Code panes = 3 Discord channels
+    shells: 3                # 3 empty terminals for running commands
+
+  another-project:
+    dir: ~/projects/another
+    claude: 3
+    services:                # named service panes (no Discord channel)
+      - npm run dev
+      - npm run test
 ```
 
-Get channel IDs: Discord Settings > Advanced > Developer Mode, then right-click channel > Copy Channel ID.
+Each agent gets:
+- `claude: N` panes with Claude Code (each gets a Discord channel)
+- `services:` for background commands (dev server, etc.)
+- `shells: N` empty terminals for manual use
 
-See `agents.yaml.example` for multi-pane setups.
-
-### Run
+### 4. Start and Sync
 
 ```bash
-# Production (with auto-restart on crash)
-npm run dev
-
-# Simple (no restart loop)
-npm start
+npm run dev                  # start Agentus (with auto-restart)
 ```
 
-## Commands
+Then in any existing Discord channel where the bot is present, type:
 
-Type these in a mapped Discord channel:
+```
+/sync
+```
+
+This creates all the Discord channels automatically under the configured category. You only need to run `/sync` once (or when you change `agentus.yaml`).
+
+### 5. Start coding via Discord
+
+Send a message in any created channel (e.g. `#myproject`):
+
+```
+fix the bug in auth.ts
+```
+
+Agentus sends it to Claude Code, streams progress, and replies with the result.
+
+## Commands
 
 | Command | Description |
 |---------|-------------|
 | `/help` | Show all commands |
+| `/sync` | Create/sync Discord channels from agentus.yaml |
 | `/peek` | Last response from agent |
 | `/raw` | Last 50 lines of tmux pane (raw) |
 | `/status` | Current agent, pane, context% |
@@ -73,57 +111,64 @@ Type these in a mapped Discord channel:
 | `/esc` | Send Escape to interrupt agent |
 | `/use <agent>[.pane]` | Switch channel target |
 | `/use reset` | Back to yaml default |
-| `/reload` | Reload agents.yaml |
+| `/reload` | Reload config |
 | `/restart` | Restart Agentus |
 
-Prefix with `.N` to target a specific pane: `.1 fix the bug`
+**Pane targeting:** prefix with `.N` to target a specific pane: `.2 fix the bug` sends to pane 2.
 
 ## Features
 
 - **Multi-agent**: Route different Discord channels to different coding agents
-- **Multi-pane**: Multiple Claude Code instances per project (e.g. frontend + backend)
+- **Multi-pane**: Multiple Claude Code instances per project
+- **Channel sync**: `/sync` creates Discord channels from config
 - **Streaming**: Real-time progress updates while agent works
 - **Follow mode**: Stream output even when typing directly in tmux
-- **Voice**: Send voice messages, transcribed via Whisper
-- **Attachments**: Send images/files, passed to the agent
-- **TTS**: Text-to-speech responses (edge-tts)
+- **Session isolation**: Each pane gets its own Claude session history
+- **Voice**: Send voice messages (transcribed via Whisper)
+- **Attachments**: Images and files forwarded to the agent
 - **Context tracking**: Shows context window usage % and token count
-- **Session isolation**: Each pane gets its own Claude session history (no conflicts with `--continue`)
 - **Auto-restart**: Crash recovery via `bin/start.sh`
+- **Auto-dismiss**: Handles resume prompts and feedback surveys automatically
 
 ## Session Isolation
 
 Claude Code ties session history to the working directory. When multiple panes share the same dir, `--continue` picks up the wrong session.
 
 Agentus solves this automatically:
-- **Pane 0** runs in the project root (e.g. `/home/you/projects/myproject`)
-- **Pane 1+** runs in `root/.agents/N/` (e.g. `.agents/1/`, `.agents/2/`)
+- **Pane 0** runs in the project root
+- **Pane 1+** runs in `root/.agents/N/`
 
-Each pane gets its own session history, so `--continue` is safe on all panes. The `.agents/` directory is automatically added to `.gitignore`.
+Each pane gets isolated session history. `--continue` is safe on all panes. `.agents/` is auto-added to `.gitignore`. Claude Code searches upward for `CLAUDE.md`, so all panes read the project config.
 
-Claude Code searches upward for `CLAUDE.md`, so pane 1+ still reads the project's config. And since the git repo root is the parent, all files are accessible.
+## tmux Integration
 
-## How It Works
+Agentus creates tmux sessions you can attach to directly:
 
-```
-You (Discord)
-  ↓ message
-Agentus (Node.js)
-  ↓ tmux send-keys
-Claude Code (in tmux pane)
-  ↓ works...
-Agentus polls tmux
-  ↓ extracts response
-You (Discord)
-  ↓ reply
+```bash
+# If you have the agent CLI (optional)
+agent myproject              # attach to tmux session
+agent myproject "fix bug"    # send prompt from terminal
+
+# Or use tmux directly
+tmux -S /tmp/agentus-tmux.sock attach -t myproject
 ```
 
-Agentus manages tmux sessions directly via Node.js. It creates sessions, starts Claude Code, sends prompts, and extracts responses -- no external scripts needed.
+## Environment Variables
+
+All optional (set in `.env`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DISCORD_TOKEN` | (required) | Discord bot token |
+| `AGENTUS_YAML` | `./agentus.yaml` | Path to config |
+| `TMUX_SOCKET` | `/tmp/agentus-tmux.sock` | tmux socket path |
+| `TIMEOUT_S` | `600` | Max wait for response (seconds) |
+| `TTS_VOICE` | `sv-SE-MattiasNeural` | edge-tts voice |
 
 ## Tests
 
 ```bash
-npm test
+npm test     # 168 tests
 ```
 
 ## License
