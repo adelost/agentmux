@@ -3,7 +3,7 @@
 
 export const UI_NOISE = [
   /^[─━═▪ ]{3,}$/,
-  /^❯/,
+  /^[❯›]/,                     // Claude Code (❯) and Codex (›) prompts
   /^[✻✢✽✶✷✸✹✺✿❋⚙◉∗⊛·˙] /,  // thinking animation (Herding, Cogitated, etc)
   /^[A-Z][a-z]+(?:ing|ed)…$/,  // bare thinking words: "Musing…", "Cogitated…"
   /How is Claude doing/,
@@ -24,6 +24,15 @@ export const UI_NOISE = [
   /^[▐▛▝▜▘]{2}/,
   /^Claude Code v[\d.]+/,
   /^(Opus|Sonnet|Haiku|Claude) [\d.]+ ·/,
+  /^>_ OpenAI Codex/,             // Codex startup banner
+  /^gpt-[\d.]+ \w+ ·/,            // Codex status line (gpt-5.4 xhigh · 99% left)
+  /^model:\s/,                     // Codex config line
+  /^directory:\s/,                 // Codex config line
+  /^╭|^╰|^│/,                     // Codex box drawing
+  /^Tip: /,                        // Codex tips
+  /Press enter to continue/,
+  /Do you trust the contents/,
+  /bubblewrap/,
   /^~\//,
   /^context: \d+%/,
   /^\[(image|file) attached:/,   // injected attachment paths from Agentus
