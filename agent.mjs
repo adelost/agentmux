@@ -173,9 +173,25 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     } catch {}
   }
 
-  // --- Dismiss ---
+  // --- Dismiss blocking prompts ---
+
+  /** Auto-select "Resume from summary" when Claude asks about old sessions. */
+  async function dismissResumePrompt(target) {
+    try {
+      const { stdout } = await tmux(`capture-pane -t '${esc(target)}' -p -S -20`);
+      if (stdout.includes("Resume from summary") && stdout.includes("Enter to confirm")) {
+        // Option 1 is already selected by default, just press Enter
+        await tmux(`send-keys -t '${esc(target)}' Enter`);
+        await wait(3000);
+        return true;
+      }
+    } catch {}
+    return false;
+  }
 
   async function dismissBlockingPrompt(target) {
+    // Check for resume prompt first
+    if (await dismissResumePrompt(target)) return true;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const { stdout } = await tmux(`capture-pane -t '${esc(target)}' -p`);
@@ -261,6 +277,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`);
         if (/claude|node/.test(stdout.trim())) {
           await wait(1000);
+          // Handle resume prompt that appears on old sessions
+          await dismissResumePrompt(target);
           return;
         }
       } catch {}
