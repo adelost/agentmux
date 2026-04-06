@@ -1,5 +1,5 @@
 // Agent interaction: send prompts, wait for responses, track progress.
-// Manages tmux sessions directly — no external bash scripts needed.
+// Manages tmux sessions directly. Single source of truth for claude startup + dismiss.
 
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
@@ -10,62 +10,68 @@ import { extractText, extractLastTurn, classifyLines, extractSegments } from "./
 
 const CONTEXT_MAX = 200_000;
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
-const MIN_WINDOW_WIDTH = 300;
-const MIN_WINDOW_HEIGHT = 80;
+const MIN_WINDOW = { width: 300, height: 80 };
 
-/** Get working dir for a pane. Pane 0 = root, pane N = root/.agents/N/ (session isolation). */
+// --- Session isolation ---
+
+/** Pane 0 = root dir, pane N = root/.agents/N/ (isolated session history). */
 export function paneDir(rootDir, pane) {
   if (pane === 0) return rootDir;
   const dir = join(rootDir, ".agents", String(pane));
   mkdirSync(dir, { recursive: true });
-  // Ensure .agents is gitignored
-  const gitignore = join(rootDir, ".gitignore");
-  try {
-    const content = existsSync(gitignore) ? readFileSync(gitignore, "utf-8") : "";
-    if (!content.includes(".agents")) {
-      writeFileSync(gitignore, content.trimEnd() + "\n.agents/\n");
-    }
-  } catch {}
+  ensureGitignored(rootDir, ".agents/");
   return dir;
 }
 
+function ensureGitignored(rootDir, entry) {
+  const gitignore = join(rootDir, ".gitignore");
+  try {
+    const content = existsSync(gitignore) ? readFileSync(gitignore, "utf-8") : "";
+    if (!content.includes(entry)) {
+      writeFileSync(gitignore, content.trimEnd() + "\n" + entry + "\n");
+    }
+  } catch (err) {
+    console.warn(`gitignore update failed: ${err.message}`);
+  }
+}
+
+// --- Blocking prompts (data-driven) ---
+
+const BLOCKING_PROMPTS = [
+  {
+    name: "resume",
+    match: (text) => text.includes("Resume from summary") && text.includes("Enter to confirm"),
+    keys: "Enter",
+    waitMs: 3000,
+  },
+  {
+    name: "dismiss",
+    match: (text) => text.includes("0: Dismiss"),
+    keys: "'0' Enter",
+    waitMs: 500,
+  },
+];
+
+// --- Agent factory ---
+
 export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxExec }) {
   const wait = delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const tmux = (cmd) => tmuxExec(`tmux -S '${esc(tmuxSocket)}' ${cmd}`);
 
-  // --- Config (YAML) ---
+  // --- Config ---
 
   function loadConfig() {
-    try {
-      return loadYaml(readFileSync(configPath, "utf-8")) || {};
-    } catch {
-      return {};
-    }
+    try { return loadYaml(readFileSync(configPath, "utf-8")) || {}; }
+    catch { return {}; }
   }
 
-  function getAgentConfig(name) {
+  function agentConfig(name) {
     const config = loadConfig();
     if (!config[name]?.dir) throw new Error(`Agent '${name}' not found in ${configPath}`);
     return config[name];
   }
 
-  function getPaneCmd(name, idx) {
-    const config = loadConfig();
-    return config[name]?.panes?.[idx]?.cmd || "bash";
-  }
-
-  function isDeferred(name, idx) {
-    const config = loadConfig();
-    return config[name]?.panes?.[idx]?.defer === true;
-  }
-
-  function getLayout(name) {
-    const config = loadConfig();
-    return config[name]?.layout || "main-vertical";
-  }
-
-  // --- tmux helpers ---
-
-  const tmux = (cmd) => tmuxExec(`tmux -S '${esc(tmuxSocket)}' ${cmd}`);
+  // --- tmux primitives ---
 
   async function hasSession(name) {
     try { await tmux(`has-session -t '${esc(name)}'`); return true; } catch { return false; }
@@ -76,97 +82,18 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await tmux(`new-session -d -s '${esc(name)}'`);
     await tmux(`source-file ~/.tmux.conf`).catch(() => {});
     await tmux(`set-option -g window-size largest`).catch(() => {});
-    // Ensure minimum window size
+    await ensureMinWindowSize(name);
+  }
+
+  async function ensureMinWindowSize(name) {
     try {
       const { stdout: w } = await tmux(`display -t '${esc(name)}' -p '#{window_width}'`);
       const { stdout: h } = await tmux(`display -t '${esc(name)}' -p '#{window_height}'`);
       const curW = parseInt(w), curH = parseInt(h);
-      if (curW < MIN_WINDOW_WIDTH || curH < MIN_WINDOW_HEIGHT) {
-        const newW = Math.max(curW, MIN_WINDOW_WIDTH);
-        const newH = Math.max(curH, MIN_WINDOW_HEIGHT);
-        await tmux(`resize-window -t '${esc(name)}' -x ${newW} -y ${newH}`).catch(() => {});
+      if (curW < MIN_WINDOW.width || curH < MIN_WINDOW.height) {
+        await tmux(`resize-window -t '${esc(name)}' -x ${Math.max(curW, MIN_WINDOW.width)} -y ${Math.max(curH, MIN_WINDOW.height)}`).catch(() => {});
       }
     } catch {}
-  }
-
-  async function setupPanes(name, dir) {
-    const config = loadConfig();
-    const panes = config[name]?.panes || [];
-    if (!panes.length) return;
-
-    // Count existing panes
-    let existing = 1;
-    try {
-      const { stdout } = await tmux(`list-panes -t '${esc(name)}'`);
-      existing = stdout.trim().split("\n").length;
-    } catch {}
-
-    // Create additional panes
-    for (let i = existing; i < panes.length; i++) {
-      await tmux(`split-window -t '${esc(name)}' -h`).catch(() => {});
-    }
-
-    // Apply layout
-    await tmux(`select-layout -t '${esc(name)}' '${getLayout(name)}'`).catch(() => {});
-
-    // Start commands in each pane
-    for (let i = 0; i < panes.length; i++) {
-      const target = `${name}:.${i}`;
-
-      // Skip if something is already running
-      try {
-        const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`);
-        const cmd = stdout.trim();
-        if (/claude|node|make|vite|python/.test(cmd)) continue;
-      } catch {}
-
-      const isClaudePane = panes[i].cmd?.includes("claude");
-      const workDir = isClaudePane ? paneDir(dir, i) : dir;
-      if (isClaudePane) {
-        // Only cd to dir. ensureReady handles claude startup + dismiss.
-        await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(workDir)}' Enter`);
-      } else if (isDeferred(name, i)) {
-        await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(workDir)}' Enter`);
-      } else {
-        await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(workDir)} && ${panes[i].cmd}' Enter`);
-      }
-      await wait(500);
-    }
-
-    await tmux(`select-pane -t '${esc(name)}:.0'`).catch(() => {});
-  }
-
-  async function startClaude(name, target, rootDir, id, pane = 0) {
-    // Check if pane is dead
-    try {
-      const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_dead}'`);
-      if (stdout.trim() === "1") {
-        await tmux(`respawn-pane -t '${esc(target)}' -k`).catch(() => {});
-        await wait(500);
-      }
-    } catch {}
-
-    // Check if claude is already running
-    try {
-      const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`);
-      if (/claude|node/.test(stdout.trim())) return;
-    } catch {}
-
-    // Pane 0 = root, pane N = .agents/N/ (isolated session history)
-    const dir = paneDir(rootDir, pane);
-
-    // Determine session flag
-    const encodedDir = dir.replace(/\//g, "-");
-    const projectDir = join(process.env.HOME, ".claude", "projects", encodedDir);
-    const safeId = id || randomUUID();
-    let sessionFlag = `--session-id ${safeId}`;
-    try {
-      const files = readdirSync(projectDir).filter((f) => f.endsWith(".jsonl"));
-      if (files.length) sessionFlag = "--continue";
-    } catch {}
-
-    await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)} && claude ${CLAUDE_FLAGS} ${sessionFlag}' Enter`);
-    await wait(2000);
   }
 
   async function exitCopyMode(target) {
@@ -179,22 +106,113 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     } catch {}
   }
 
-  // --- Dismiss blocking prompts (data-driven) ---
+  // --- Pane setup ---
 
-  const BLOCKING_PROMPTS = [
-    {
-      name: "resume",
-      match: (text) => text.includes("Resume from summary") && text.includes("Enter to confirm"),
-      keys: "Enter",
-      waitMs: 3000,
-    },
-    {
-      name: "dismiss",
-      match: (text) => text.includes("0: Dismiss"),
-      keys: "'0' Enter",
-      waitMs: 500,
-    },
-  ];
+  async function setupPanes(name, dir) {
+    const config = loadConfig();
+    const panes = config[name]?.panes || [];
+    if (!panes.length) return;
+
+    const existing = await countPanes(name);
+    for (let i = existing; i < panes.length; i++) {
+      await tmux(`split-window -t '${esc(name)}' -h`).catch(() => {});
+    }
+
+    const layout = config[name]?.layout || "main-vertical";
+    await tmux(`select-layout -t '${esc(name)}' '${layout}'`).catch(() => {});
+
+    for (let i = 0; i < panes.length; i++) {
+      const target = `${name}:.${i}`;
+      if (await isAlreadyRunning(target)) continue;
+
+      const workDir = isClaudeCmd(panes[i].cmd) ? paneDir(dir, i) : dir;
+      const shouldStartNow = !isClaudeCmd(panes[i].cmd) && !panes[i].defer;
+
+      if (shouldStartNow) {
+        await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(workDir)} && ${panes[i].cmd}' Enter`);
+      } else {
+        // Claude panes: only cd. ensureReady handles startup + dismiss.
+        // Deferred panes: only cd.
+        await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(workDir)}' Enter`);
+      }
+      await wait(500);
+    }
+    await tmux(`select-pane -t '${esc(name)}:.0'`).catch(() => {});
+  }
+
+  async function countPanes(name) {
+    try {
+      const { stdout } = await tmux(`list-panes -t '${esc(name)}'`);
+      return stdout.trim().split("\n").length;
+    } catch { return 1; }
+  }
+
+  async function isAlreadyRunning(target) {
+    try {
+      const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`);
+      return /claude|node|make|vite|python/.test(stdout.trim());
+    } catch { return false; }
+  }
+
+  function isClaudeCmd(cmd) {
+    return cmd?.includes("claude") || false;
+  }
+
+  // --- Claude lifecycle ---
+
+  async function startClaude(name, target, rootDir, id, pane = 0) {
+    if (await isPaneDead(target)) await respawnPane(target);
+    if (await isAlreadyRunning(target)) return;
+
+    const dir = paneDir(rootDir, pane);
+    const sessionFlag = resolveSessionFlag(dir, id);
+    await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)} && claude ${CLAUDE_FLAGS} ${sessionFlag}' Enter`);
+    await wait(2000);
+  }
+
+  async function isPaneDead(target) {
+    try {
+      const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_dead}'`);
+      return stdout.trim() === "1";
+    } catch { return false; }
+  }
+
+  async function respawnPane(target) {
+    await tmux(`respawn-pane -t '${esc(target)}' -k`).catch(() => {});
+    await wait(500);
+  }
+
+  function resolveSessionFlag(dir, id) {
+    const encodedDir = dir.replace(/\//g, "-");
+    const projectDir = join(process.env.HOME, ".claude", "projects", encodedDir);
+    try {
+      if (readdirSync(projectDir).some((f) => f.endsWith(".jsonl"))) return "--continue";
+    } catch {}
+    return `--session-id ${id || randomUUID()}`;
+  }
+
+  /** Wait for claude to load, dismiss any blocking prompts. */
+  async function waitForClaudeReady(target, agentName, pane) {
+    for (let i = 0; i < 20; i++) {
+      if (await isAlreadyRunning(target)) {
+        await pollForBlockingPrompts(target, agentName, pane);
+        return;
+      }
+      await wait(500);
+    }
+  }
+
+  /** Poll for resume/dismiss prompts or idle state (up to 16s). */
+  async function pollForBlockingPrompts(target, agentName, pane) {
+    for (let j = 0; j < 8; j++) {
+      await wait(2000);
+      const dismissed = await dismissBlockingPrompt(target);
+      if (dismissed) return;
+      if (!(await isBusy(agentName, pane))) return;
+    }
+  }
+
+  // --- Dismiss ---
 
   async function dismissBlockingPrompt(target) {
     let paneText;
@@ -216,46 +234,40 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return null;
   }
 
+  // --- Query ---
+
   async function getResponse(agentName, pane) {
     const raw = await capturePane(agentName, pane, 5000);
-    const text = extractText(raw);
-    return text || "(empty response)";
+    return extractText(raw) || "(empty response)";
   }
 
   async function isBusy(agentName, pane) {
     const raw = await capturePane(agentName, pane, 20);
-    // "esc to interrupt" = definitely working (most reliable signal)
     if (raw.includes("esc to interrupt")) return true;
-    // Search last ~10 lines for ❯ prompt (status lines, Welter, separators may follow it)
     const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
-    const tail = lines.slice(-10);
-    const promptLine = tail.findLast((l) => l.startsWith("❯"));
-    if (!promptLine) return true;                          // no prompt visible = working
-    if (promptLine.replace(/^❯\s*/, "").length > 0) return true; // has pending input
-    return false;                                          // idle
+    const promptLine = lines.slice(-10).findLast((l) => l.startsWith("❯"));
+    if (!promptLine) return true;
+    return promptLine.replace(/^❯\s*/, "").length > 0;
   }
 
   async function getResponseSegments(agentName, pane) {
     const raw = await capturePane(agentName, pane, 5000);
-    const lastTurn = extractLastTurn(raw);
-    return extractSegments(classifyLines(lastTurn));
+    return extractSegments(classifyLines(extractLastTurn(raw)));
   }
 
-  // --- Send prompt ---
+  async function capturePane(agentName, pane, lines = 50) {
+    const { stdout } = await tmux(`capture-pane -t '${esc(agentName)}:.${pane}' -p -S -${lines}`);
+    return stripAnsi(stdout).trimEnd() || "(empty)";
+  }
+
+  // --- Send ---
 
   async function sendPrompt(agentName, prompt, pane) {
     const target = `${agentName}:.${pane}`;
     await exitCopyMode(target);
 
-    // Long prompts: use paste-buffer to avoid truncation
     if (prompt.length > 500) {
-      const tmpFile = `/tmp/agentus-prompt-${process.pid}.txt`;
-      const bufName = `prompt_${process.pid}_${Date.now()}`;
-      writeFileSync(tmpFile, prompt);
-      await tmux(`load-buffer -b '${bufName}' '${esc(tmpFile)}'`);
-      await tmux(`paste-buffer -b '${bufName}' -t '${esc(target)}'`);
-      try { unlinkSync(tmpFile); } catch {}
-      await wait(5000);
+      await sendLongPrompt(target, prompt);
     } else {
       await tmux(`send-keys -t '${esc(target)}' -l -- '${esc(prompt)}'`);
       await wait(1000);
@@ -263,46 +275,36 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await tmux(`send-keys -t '${esc(target)}' Enter`);
   }
 
+  async function sendLongPrompt(target, prompt) {
+    const tmpFile = `/tmp/agentus-prompt-${process.pid}.txt`;
+    const bufName = `prompt_${process.pid}_${Date.now()}`;
+    writeFileSync(tmpFile, prompt);
+    await tmux(`load-buffer -b '${bufName}' '${esc(tmpFile)}'`);
+    await tmux(`paste-buffer -b '${bufName}' -t '${esc(target)}'`);
+    try { unlinkSync(tmpFile); } catch {}
+    await wait(5000);
+  }
+
+  // --- Orchestration ---
+
   async function ensureReady(agentName, pane) {
-    const config = getAgentConfig(agentName);
-    const dir = config.dir;
+    const config = agentConfig(agentName);
     const isNew = !(await hasSession(agentName));
 
     await ensureSession(agentName);
-
     if (isNew) {
-      await setupPanes(agentName, dir);
+      await setupPanes(agentName, config.dir);
       await wait(2000);
     }
 
     const target = `${agentName}:.${pane}`;
-    const paneCmd = getPaneCmd(agentName, pane);
+    const paneCmd = config.panes?.[pane]?.cmd || "bash";
 
-    // Ensure claude is running in claude panes
-    if (paneCmd.includes("claude")) {
-      await startClaude(agentName, target, dir, config.id, pane);
-    }
-
-    // Wait for claude to load, then poll for blocking prompts (resume takes 3-5s to appear)
-    for (let i = 0; i < 20; i++) {
-      try {
-        const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`);
-        if (/claude|node/.test(stdout.trim())) {
-          // Claude running - poll for prompts or idle state
-          for (let j = 0; j < 8; j++) {
-            await wait(2000);
-            const dismissed = await dismissBlockingPrompt(target);
-            if (dismissed) return;
-            if (!(await isBusy(agentName, pane))) return; // idle = ready
-          }
-          return;
-        }
-      } catch {}
-      await wait(500);
+    if (isClaudeCmd(paneCmd)) {
+      await startClaude(agentName, target, config.dir, config.id, pane);
+      await waitForClaudeReady(target, agentName, pane);
     }
   }
-
-  // --- Public API ---
 
   async function sendOnly(agentName, prompt, pane) {
     await ensureReady(agentName, pane);
@@ -310,16 +312,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   }
 
   async function sendAndWait(agentName, prompt, pane) {
-    let wasStarting = false;
-    try {
-      const { stdout } = await tmux(`display-message -t '${esc(agentName)}:.${pane}' -p '#{pane_current_command}'`);
-      if (!stdout.trim().includes("claude")) wasStarting = true;
-    } catch { wasStarting = true; }
-
+    const wasStarting = !(await isAlreadyRunning(`${agentName}:.${pane}`));
     await ensureReady(agentName, pane);
     await sendPrompt(agentName, prompt, pane);
 
-    // Wait for agent to start working, then finish
     await wait(wasStarting ? 8000 : 3000);
 
     const deadline = Date.now() + timeout;
@@ -327,8 +323,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     let idleStreak = 0;
 
     while (Date.now() < deadline) {
-      const target = `${agentName}:.${pane}`;
-      await exitCopyMode(target);
+      await exitCopyMode(`${agentName}:.${pane}`);
       const busy = await isBusy(agentName, pane);
 
       if (busy) { sawWorking = true; idleStreak = 0; }
@@ -340,12 +335,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       await wait(2000);
     }
 
-    const target = `${agentName}:.${pane}`;
-    await dismissBlockingPrompt(target);
+    await dismissBlockingPrompt(`${agentName}:.${pane}`);
     return getResponse(agentName, pane);
   }
 
-  // --- Activity / progress ---
+  // --- Progress ---
 
   async function peekActivity(agentName, pane) {
     try {
@@ -362,9 +356,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     const timer = setInterval(async () => {
       try {
-        const raw = await capturePane(agentName, pane, 200);
-        const lastTurn = extractLastTurn(raw);
-        const segments = extractSegments(classifyLines(lastTurn));
+        const segments = await getResponseSegments(agentName, pane);
 
         if (streaming && segments.length > 1 && sentCount < segments.length - 1) {
           while (sentCount < segments.length - 1) {
@@ -420,38 +412,21 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     } catch { return null; }
   }
 
-  // --- Low-level ---
+  // --- Low-level (exposed for CLI) ---
 
   async function sendEscape(agentName, pane) {
     await tmux(`send-keys -t '${esc(agentName)}:.${pane}' Escape`);
   }
 
-  async function capturePane(agentName, pane, lines = 50) {
-    const target = `${agentName}:.${pane}`;
-    const { stdout } = await tmux(`capture-pane -t '${esc(target)}' -p -S -${lines}`);
-    const text = stripAnsi(stdout).trimEnd();
-    return text || "(empty)";
-  }
-
   async function checkAgent(agentName) {
-    // Quick check: session exists and claude is running
     if (!(await hasSession(agentName))) throw new Error(`No session: ${agentName}`);
-    const { stdout } = await tmux(`display-message -t '${esc(agentName)}:.0' -p '#{pane_current_command}'`);
-    if (!/claude|node/.test(stdout.trim())) throw new Error(`Claude not running in ${agentName}`);
+    if (!(await isAlreadyRunning(`${agentName}:.0`))) throw new Error(`Claude not running in ${agentName}`);
   }
 
   return {
-    ensureReady,
-    sendAndWait,
-    sendOnly,
-    getResponse,
-    getResponseSegments,
-    isBusy,
-    capturePane,
-    sendEscape,
-    dismissBlockingPrompt,
-    startProgressTimer,
-    getContextPercent,
-    checkAgent,
+    ensureReady, sendAndWait, sendOnly,
+    getResponse, getResponseSegments, isBusy,
+    capturePane, sendEscape, dismissBlockingPrompt,
+    startProgressTimer, getContextPercent, checkAgent,
   };
 }
