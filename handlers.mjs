@@ -2,7 +2,8 @@
 // Channel-agnostic — works with any ChannelMessage from channels/*.mjs.
 
 import { splitMessage, parsePane, parseCommand, parseUseArg } from "./lib.mjs";
-import { unlinkSync } from "fs";
+import { readFileSync, unlinkSync } from "fs";
+import { executeSync } from "./core/sync-discord.mjs";
 
 function cleanupTmpFiles(files) {
   for (const f of files) {
@@ -23,6 +24,7 @@ const HELP_TEXT = [
   "`/thinking` — toggle real-time text streaming (default: on)",
   "`/follow` — toggle: stream output even when typing in tmux",
   "`/tts` — toggle text-to-speech for this channel",
+  "`/sync` — create/sync Discord channels from agentus.yaml",
   "`/reload` — reload agents.yaml",
   "`/restart` — restart Agentus",
   "",
@@ -48,9 +50,9 @@ function sendTextReply(msg, text, context) {
 
 /**
  * Create message handler with all dependencies injected.
- * @param {{ agent, attachments, tts, getMapping, overrides, channelMap, reloadConfig }} deps
+ * @param {{ agent, attachments, tts, getMapping, overrides, channelMap, reloadConfig, discordChannel?, agentusYamlPath?, agentsYamlPath? }} deps
  */
-export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig }) {
+export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentusYamlPath, agentsYamlPath }) {
   const queues = new Map();
   const followers = new Map(); // channelId → { timer, sentCount, lastHash }
 
@@ -188,6 +190,37 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     "/follow": async (msg, mapping, pane) => {
       await startFollow(msg, mapping, pane);
+    },
+
+    "/sync": async (msg) => {
+      if (!discordChannel || !agentusYamlPath) {
+        await msg.reply("sync not configured (missing agentus.yaml path or discord channel)");
+        return;
+      }
+      if (state.get("syncRunning")) {
+        await msg.reply("sync already in progress");
+        return;
+      }
+      state.set("syncRunning", true);
+      try {
+        await msg.reply("syncing...");
+        const configYaml = readFileSync(agentusYamlPath, "utf-8");
+        const { guild: guildId } = await import("./sync.mjs").then((m) => m.parseAgentusConfig(configYaml));
+        const guild = await discordChannel.getGuild(guildId);
+        const results = await executeSync({ guild, configYaml, state, agentsYamlPath });
+        reloadConfig();
+
+        const lines = [];
+        if (results.created.length) lines.push(`**created:** ${results.created.join(", ")}`);
+        if (results.existing.length) lines.push(`**existing:** ${results.existing.join(", ")}`);
+        if (results.orphaned.length) lines.push(`**orphaned (not deleted):** ${results.orphaned.join(", ")}`);
+        lines.push(`${results.created.length + results.existing.length} channel(s) synced`);
+        await msg.reply(lines.join("\n"));
+      } catch (err) {
+        await msg.reply(`sync failed: ${err.message}`);
+      } finally {
+        state.set("syncRunning", false);
+      }
     },
 
     "/reload": async (msg) => {

@@ -1,0 +1,30 @@
+guild: "1466971230669373495"
+category: "Agent Cave"
+
+agents:
+  ai:
+    dir: ~/lsrc/ai-dsl
+    claude: 3
+    services:
+      - make ui
+      - make api
+    layout: main-vertical
+
+  api:
+    dir: ~/lsrc/decl-worker-api
+    claude: 3
+
+  claw:
+    dir: ~/.openclaw/workspace
+    claude: 3
+
+  lsrc:
+    dir: ~/lsrc
+    claude: 3
+
+  skybar:
+    dir: ~/lsrc/skybar
+    claude: 3
+    services:
+      - npm run dev
+    layout: main-vertical
