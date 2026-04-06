@@ -258,24 +258,14 @@ feature("generateAgentsYaml", () => {
     }],
   });
 
-  component("first claude pane has no defer, rest have defer", {
+  component("all claude panes start immediately (no defer)", {
     given: ["agent with 3 claude panes", () => {
       const agents = new Map([["test", { dir: "/tmp", claude: 3, services: [], shells: 0 }]]);
       return { agents, channelMap: new Map(), agentIds: new Map([["test", "uuid"]]) };
     }],
     when: ["generating yaml", ({ agents, channelMap, agentIds }) => generateAgentsYaml(agents, channelMap, agentIds)],
-    then: ["pane 0 no defer, pane 1+ defer", (yamlStr) => {
-      // Parse back to verify structure
-      const lines = yamlStr.split("\n");
-      // First claude pane should NOT have defer
-      const firstClaudeIdx = lines.findIndex((l) => l.includes("name: claude"));
-      const secondClaudeIdx = lines.findIndex((l) => l.includes("name: claude-2"));
-      // Check no defer between first and second
-      const between = lines.slice(firstClaudeIdx, secondClaudeIdx).join("\n");
-      expect(between).not.toContain("defer");
-      // Check defer exists after second
-      const afterSecond = lines.slice(secondClaudeIdx, secondClaudeIdx + 3).join("\n");
-      expect(afterSecond).toContain("defer: true");
+    then: ["no defer on any pane (session isolation makes it safe)", (yamlStr) => {
+      expect(yamlStr).not.toContain("defer");
     }],
   });
 

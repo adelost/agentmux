@@ -121,7 +121,6 @@ export function generateAgentsYaml(agents, channelMap, agentIds) {
     const panes = [];
     for (let i = 0; i < config.claude; i++) {
       const pane = { name: i === 0 ? "claude" : `claude-${i + 1}`, cmd: CLAUDE_CMD };
-      if (i > 0) pane.defer = true;
       panes.push(pane);
     }
     for (let i = 0; i < config.services.length; i++) {
