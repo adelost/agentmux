@@ -18,6 +18,8 @@ export const UI_NOISE = [
   /^(Read|Wrote|Edit|Searched for) \d+.+\(ctrl/,
   /^cd \//,
   /^conda:/,
+  /^Overriding existing handler/,
+  /^Set JSC_SIGNAL/,
   /^\w+@\S+[:\$]/,          // shell prompt (user@host)
   /^[▐▛▝▜▘]{2}/,
   /^Claude Code v[\d.]+/,
