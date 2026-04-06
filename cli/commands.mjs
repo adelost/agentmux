@@ -6,6 +6,9 @@ import { formatAgentRow, statusIcon, truncate } from "./format.mjs";
 import { hasSession, ensureAndAttach, attachSession, killSession, listPanes, getPaneStatus, sendKeys, selectOption, createTmuxContext } from "./tmux.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
 import { stripAnsi, extractActivity, formatDuration } from "../lib.mjs";
+import { runOneshot, showRunLog } from "./run.mjs";
+import { executePlan, showPlanLog } from "./plan.mjs";
+import { showEvents } from "./events.mjs";
 
 // --- Flag parsing ---
 
@@ -303,6 +306,31 @@ export async function dispatch(argv, ctx) {
       return cmdEsc(name, flags, ctx);
     }
 
+    case "run": {
+      if (rest[0] === "log") {
+        const { flags } = parseFlags(rest.slice(1), { n: "number", f: "boolean" });
+        return showRunLog(flags.n || 50, flags.f || false);
+      }
+      if (rest.length < 2) { console.error("Usage: agent run <dir> \"prompt\" [-n channel] [-m session] [-t timeout]"); process.exit(1); }
+      const { flags } = parseFlags(rest.slice(2), { n: "string", m: "string", t: "number", fg: "boolean", model: "string" });
+      return runOneshot({ dir: rest[0], prompt: rest[1], timeout: flags.t || 600, notifyChannel: flags.n, msgSession: flags.m, model: flags.model, fg: flags.fg || true });
+    }
+
+    case "plan": {
+      if (rest[0] === "log") return showPlanLog();
+      if (rest[0] === "status") { console.log("TODO: plan status"); return; }
+      const { flags } = parseFlags(rest.slice(1), { n: "string", m: "string", t: "number", p: "boolean", d: "boolean", fg: "boolean", model: "string" });
+      const goal = rest[0] && !rest[0].startsWith("-") ? rest[0] : null;
+      if (!goal && !flags.d) { console.error("Usage: agent plan <dir> \"goal\" [-n channel]"); process.exit(1); }
+      return executePlan({ dir: ".", goal: goal || "", timeout: flags.t || 600, notifyChannel: flags.n, msgSession: flags.m, model: flags.model, planOnly: flags.p, dispatchOnly: flags.d, fg: flags.fg });
+    }
+
+    case "events": {
+      const { flags } = parseFlags(rest, { n: "number", f: "boolean" });
+      console.log(showEvents(undefined, flags.n || 30, flags.f || false));
+      return;
+    }
+
     case "r":
     case "resume":
       return cmdResume(ctx);
@@ -319,8 +347,11 @@ export async function dispatch(argv, ctx) {
 
         // Background notification worker (if -n or -m)
         if (flags.n || flags.m) {
-          // TODO: Wave 3 - spawn notify worker
-          console.log(`Will notify when '${name}' is done.`);
+          const { notifyWorker } = await import("./notify.mjs");
+          const pane = flags.p || 0;
+          // Fire and forget - runs until agent is done
+          notifyWorker({ name, pane, timeout: flags.t || 600, notifyChannel: flags.n, msgSession: flags.m, prompt, agent: ctx.agent }).catch(() => {});
+          console.log(`🔔 Will notify when '${name}' is done.`);
         }
       } else {
         // Attach
