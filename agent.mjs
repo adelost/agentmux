@@ -178,9 +178,14 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await wait(500);
   }
 
-  /** Always --continue. Session isolation via .agents/N/ makes it safe. */
-  function resolveSessionFlag() {
-    return "--continue";
+  /** --continue if session exists, otherwise no flag (new session). */
+  function resolveSessionFlag(dir) {
+    const encodedDir = dir.replace(/\//g, "-");
+    const projectDir = join(process.env.HOME, ".claude", "projects", encodedDir);
+    try {
+      if (readdirSync(projectDir).some((f) => f.endsWith(".jsonl"))) return "--continue";
+    } catch {}
+    return "";
   }
 
   /** Wait for claude to load, dismiss any blocking prompts if they appear. */
