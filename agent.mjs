@@ -180,30 +180,36 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await wait(500);
   }
 
-  /** --continue if session exists in dir, otherwise --session-id with unique UUID. */
-  function resolveSessionFlag(dir) {
+  /** Check if a dir has existing Claude sessions. */
+  function hasExistingSessions(dir) {
     const encodedDir = dir.replace(/\//g, "-");
     const projectDir = join(process.env.HOME, ".claude", "projects", encodedDir);
-    try {
-      if (readdirSync(projectDir).some((f) => f.endsWith(".jsonl"))) return "--continue";
-    } catch {}
-    // Always generate fresh UUID - each pane dir gets its own session
+    try { return readdirSync(projectDir).some((f) => f.endsWith(".jsonl")); }
+    catch { return false; }
+  }
+
+  /** --continue if session exists in dir, otherwise --session-id with unique UUID. */
+  function resolveSessionFlag(dir) {
+    if (hasExistingSessions(dir)) return "--continue";
     return `--session-id ${randomUUID()}`;
   }
 
-  /** Wait for claude to load, dismiss any blocking prompts. */
-  async function waitForClaudeReady(target, agentName, pane) {
-    for (let i = 0; i < 20; i++) {
-      if (await isAlreadyRunning(target)) {
-        await pollForBlockingPrompts(target, agentName, pane);
-        return;
-      }
+  /** Wait for claude to load. Only poll for prompts if resuming old session. */
+  async function waitForClaudeReady(target, agentName, pane, rootDir) {
+    // Wait for claude process to appear
+    for (let i = 0; i < 15; i++) {
+      if (await isAlreadyRunning(target)) break;
       await wait(500);
     }
-  }
 
-  /** Poll for resume/dismiss prompts or idle state (up to 16s). */
-  async function pollForBlockingPrompts(target, agentName, pane) {
+    // New session = no resume prompt possible. Just wait for idle.
+    const dir = paneDir(rootDir, pane);
+    if (!hasExistingSessions(dir)) {
+      await wait(2000); // brief startup grace
+      return;
+    }
+
+    // Old session = may get resume/dismiss prompt. Poll until handled or idle.
     for (let j = 0; j < 8; j++) {
       await wait(2000);
       const dismissed = await dismissBlockingPrompt(target);
@@ -302,7 +308,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     if (isClaudeCmd(paneCmd)) {
       await startClaude(agentName, target, config.dir, pane);
-      await waitForClaudeReady(target, agentName, pane);
+      await waitForClaudeReady(target, agentName, pane, config.dir);
     }
   }
 
