@@ -39,6 +39,10 @@ export function createDiscordChannel({ token }) {
       if (ch) await ch.send(text);
     },
 
+    async getGuild(guildId) {
+      return client.guilds.fetch(guildId);
+    },
+
     stop() {
       client.destroy();
     },

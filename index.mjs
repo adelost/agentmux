@@ -43,6 +43,7 @@ loadEnv();
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const AGENTS_YAML = process.env.AGENTS_YAML || resolve(__dir, "agents.yaml");
+const AGENTUS_YAML = process.env.AGENTUS_YAML || resolve(__dir, "agentus.yaml");
 const TIMEOUT = parseInt(process.env.TIMEOUT_S || "600") * 1000;
 const WHISPER_URL = process.env.WHISPER_URL || "http://localhost:2022/v1/audio/transcriptions";
 const SHELL_PATH = process.env.SHELL_PATH || `${process.env.HOME}/bin:${process.env.PATH}`;
@@ -97,4 +98,7 @@ const handlers = createHandlers({
   overrides,
   channelMap,
   reloadConfig,
+  discordChannel: discord,
+  agentusYamlPath: AGENTUS_YAML,
+  agentsYamlPath: AGENTS_YAML,
 });
