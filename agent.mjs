@@ -125,15 +125,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const target = `${name}:.${i}`;
       if (await isAlreadyRunning(target)) continue;
 
-      const workDir = isClaudeCmd(panes[i].cmd) ? paneDir(dir, i) : dir;
-      const shouldStartNow = !isClaudeCmd(panes[i].cmd) && !panes[i].defer;
-
-      if (shouldStartNow) {
-        await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(workDir)} && ${panes[i].cmd}' Enter`);
+      if (isClaudeCmd(panes[i].cmd)) {
+        // Claude panes: skip entirely. startClaude (via ensureReady) does cd + start + dismiss.
+        continue;
+      } else if (panes[i].defer) {
+        await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)}' Enter`);
       } else {
-        // Claude panes: only cd. ensureReady handles startup + dismiss.
-        // Deferred panes: only cd.
-        await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(workDir)}' Enter`);
+        await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)} && ${panes[i].cmd}' Enter`);
       }
       await wait(500);
     }
@@ -160,12 +158,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   // --- Claude lifecycle ---
 
-  async function startClaude(name, target, rootDir, id, pane = 0) {
+  async function startClaude(name, target, rootDir, pane = 0) {
     if (await isPaneDead(target)) await respawnPane(target);
     if (await isAlreadyRunning(target)) return;
 
     const dir = paneDir(rootDir, pane);
-    const sessionFlag = resolveSessionFlag(dir, id);
+    const sessionFlag = resolveSessionFlag(dir);
     await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)} && claude ${CLAUDE_FLAGS} ${sessionFlag}' Enter`);
     await wait(2000);
   }
@@ -182,13 +180,15 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await wait(500);
   }
 
-  function resolveSessionFlag(dir, id) {
+  /** --continue if session exists in dir, otherwise --session-id with unique UUID. */
+  function resolveSessionFlag(dir) {
     const encodedDir = dir.replace(/\//g, "-");
     const projectDir = join(process.env.HOME, ".claude", "projects", encodedDir);
     try {
       if (readdirSync(projectDir).some((f) => f.endsWith(".jsonl"))) return "--continue";
     } catch {}
-    return `--session-id ${id || randomUUID()}`;
+    // Always generate fresh UUID - each pane dir gets its own session
+    return `--session-id ${randomUUID()}`;
   }
 
   /** Wait for claude to load, dismiss any blocking prompts. */
@@ -301,7 +301,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const paneCmd = config.panes?.[pane]?.cmd || "bash";
 
     if (isClaudeCmd(paneCmd)) {
-      await startClaude(agentName, target, config.dir, config.id, pane);
+      await startClaude(agentName, target, config.dir, pane);
       await waitForClaudeReady(target, agentName, pane);
     }
   }
