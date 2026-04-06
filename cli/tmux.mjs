@@ -37,30 +37,14 @@ export function attachSession(socket, name) {
 
 /** Ensure session exists with all panes set up and claude started. */
 export async function ensureAndAttach(ctx, name, configPath) {
-  const isNew = !(await hasSession(ctx, name));
+  const { loadConfig } = await import("./config.mjs");
+  const config = loadConfig(configPath);
+  const panes = config[name]?.panes || [];
 
-  if (isNew) {
-    // Create session
-    await ctx.tmux(`new-session -d -s '${esc(name)}'`);
-    await ctx.tmux(`source-file ~/.tmux.conf`).catch(() => {});
-    await ctx.tmux(`set-option -g window-size largest`).catch(() => {});
-  }
-
-  // Setup panes + start claude via agent.mjs (handles dismiss automatically)
-  // We trigger ensureReady for pane 0 which sets up all panes if new
-  await ctx.agent.sendOnly(name, "", 0).catch(() => {});
-
-  // Wait briefly for panes to initialize
-  if (isNew) {
-    await new Promise((r) => setTimeout(r, 3000));
-    // Start claude in remaining panes
-    const { loadConfig } = await import("./config.mjs");
-    const config = loadConfig(configPath);
-    const panes = config[name]?.panes || [];
-    for (let i = 1; i < panes.length; i++) {
-      if (panes[i]?.cmd?.includes("claude")) {
-        await ctx.agent.sendOnly(name, "", i).catch(() => {});
-      }
+  // ensureReady creates session, sets up panes, starts claude, handles dismiss
+  for (let i = 0; i < panes.length; i++) {
+    if (panes[i]?.cmd?.includes("claude")) {
+      await ctx.agent.ensureReady(name, i);
     }
   }
 }
