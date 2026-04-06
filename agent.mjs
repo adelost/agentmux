@@ -14,9 +14,8 @@ const MIN_WINDOW = { width: 300, height: 80 };
 
 // --- Session isolation ---
 
-/** Pane 0 = root dir, pane N = root/.agents/N/ (isolated session history). */
+/** Every pane gets its own dir: root/.agents/N/ (isolated session history). */
 export function paneDir(rootDir, pane) {
-  if (pane === 0) return rootDir;
   const dir = join(rootDir, ".agents", String(pane));
   mkdirSync(dir, { recursive: true });
   ensureGitignored(rootDir, ".agents/");
