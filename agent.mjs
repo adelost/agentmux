@@ -238,9 +238,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const raw = await capturePane(agentName, pane, 20);
     if (raw.includes("esc to interrupt")) return true;
     const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
-    const promptLine = lines.slice(-10).findLast((l) => l.startsWith("❯"));
+    const tail = lines.slice(-10);
+    // Claude Code uses ❯, Codex uses ›
+    const promptLine = tail.findLast((l) => l.startsWith("❯") || l.startsWith("›"));
     if (!promptLine) return true;
-    return promptLine.replace(/^❯\s*/, "").length > 0;
+    return promptLine.replace(/^[❯›]\s*/, "").length > 0;
   }
 
   async function getResponseSegments(agentName, pane) {
