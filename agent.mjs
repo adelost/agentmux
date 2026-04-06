@@ -3,6 +3,7 @@
 
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
+import { randomUUID } from "crypto";
 import { load as loadYaml } from "js-yaml";
 import { esc, stripAnsi, extractActivity, formatDuration } from "./lib.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "./core/extract.mjs";
@@ -119,8 +120,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         if (/claude|node|make|vite|python/.test(cmd)) continue;
       } catch {}
 
-      const workDir = panes[i].cmd?.includes("claude") ? paneDir(dir, i) : dir;
-      if (isDeferred(name, i)) {
+      const isClaudePane = panes[i].cmd?.includes("claude");
+      const workDir = isClaudePane ? paneDir(dir, i) : dir;
+      if (isClaudePane) {
+        // Only cd to dir. ensureReady handles claude startup + dismiss.
+        await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(workDir)}' Enter`);
+      } else if (isDeferred(name, i)) {
         await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(workDir)}' Enter`);
       } else {
         await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(workDir)} && ${panes[i].cmd}' Enter`);
@@ -153,7 +158,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     // Determine session flag
     const encodedDir = dir.replace(/\//g, "-");
     const projectDir = join(process.env.HOME, ".claude", "projects", encodedDir);
-    let sessionFlag = `--session-id ${id}`;
+    const safeId = id || randomUUID();
+    let sessionFlag = `--session-id ${safeId}`;
     try {
       const files = readdirSync(projectDir).filter((f) => f.endsWith(".jsonl"));
       if (files.length) sessionFlag = "--continue";
@@ -277,14 +283,18 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       await startClaude(agentName, target, dir, config.id, pane);
     }
 
-    // Wait for claude to be loaded
+    // Wait for claude to load, then poll for blocking prompts (resume takes 3-5s to appear)
     for (let i = 0; i < 20; i++) {
       try {
         const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`);
         if (/claude|node/.test(stdout.trim())) {
-          await wait(1000);
-          // Handle resume/dismiss prompts that may appear on startup
-          await dismissBlockingPrompt(target);
+          // Claude running - poll for prompts or idle state
+          for (let j = 0; j < 8; j++) {
+            await wait(2000);
+            const dismissed = await dismissBlockingPrompt(target);
+            if (dismissed) return;
+            if (!(await isBusy(agentName, pane))) return; // idle = ready
+          }
           return;
         }
       } catch {}

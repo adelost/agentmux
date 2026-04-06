@@ -2,6 +2,7 @@
 // generate legacy agents.yaml. Pure functions — no Discord API calls.
 
 import yaml from "js-yaml";
+import { randomUUID } from "crypto";
 
 const CLAUDE_CMD = "claude --continue --dangerously-skip-permissions";
 
@@ -102,7 +103,7 @@ export function generateAgentsYaml(agents, channelMap, agentIds) {
     const config = agents.get(name);
     const entry = {
       dir: config.dir,
-      id: agentIds.get(name),
+      id: agentIds.get(name) || randomUUID(),
     };
 
     // Discord channel mapping (only claude panes)
