@@ -87,8 +87,21 @@ Prefix with `.N` to target a specific pane: `.1 fix the bug`
 - **Voice**: Send voice messages, transcribed via Whisper
 - **Attachments**: Send images/files, passed to the agent
 - **TTS**: Text-to-speech responses (edge-tts)
-- **Context tracking**: Shows context window usage %
+- **Context tracking**: Shows context window usage % and token count
+- **Session isolation**: Each pane gets its own Claude session history (no conflicts with `--continue`)
 - **Auto-restart**: Crash recovery via `bin/start.sh`
+
+## Session Isolation
+
+Claude Code ties session history to the working directory. When multiple panes share the same dir, `--continue` picks up the wrong session.
+
+Agentus solves this automatically:
+- **Pane 0** runs in the project root (e.g. `/home/you/projects/myproject`)
+- **Pane 1+** runs in `root/.agents/N/` (e.g. `.agents/1/`, `.agents/2/`)
+
+Each pane gets its own session history, so `--continue` is safe on all panes. The `.agents/` directory is automatically added to `.gitignore`.
+
+Claude Code searches upward for `CLAUDE.md`, so pane 1+ still reads the project's config. And since the git repo root is the parent, all files are accessible.
 
 ## How It Works
 

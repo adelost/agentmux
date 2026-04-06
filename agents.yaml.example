@@ -1,10 +1,14 @@
-# Agentus — agent-to-Discord channel mapping
+# Agentus — agent configuration
 #
 # Each entry is a coding agent running in a tmux session.
 # The `discord` field maps Discord channel IDs to tmux panes.
 #
 # Get channel IDs: Discord > Settings > Advanced > Developer Mode,
 # then right-click a channel > Copy Channel ID.
+#
+# Session isolation: Pane 0 runs in root dir. Pane 1+ runs in
+# root/.agents/N/ so each pane gets its own Claude session history.
+# This means --continue is safe on all panes (no session conflicts).
 
 # Simple: one channel, one agent
 myproject:
@@ -15,17 +19,21 @@ myproject:
     - name: claude
       cmd: claude --continue --dangerously-skip-permissions
 
-# Advanced: multiple channels mapped to different panes
+# Advanced: multiple panes with isolated sessions
 multi:
   dir: /home/you/projects/multi
   id: 00000000-0000-0000-0000-000000000002
   discord:
-    "1111111111111111111": 0    # channel-1 → pane 0
-    "2222222222222222222": 1    # channel-2 → pane 1
+    "1111111111111111111": 0    # channel-1 → pane 0 (root dir)
+    "2222222222222222222": 1    # channel-2 → pane 1 (.agents/1/)
+    "3333333333333333333": 2    # channel-3 → pane 2 (.agents/2/)
   layout: main-vertical
   panes:
     - name: claude
       cmd: claude --continue --dangerously-skip-permissions
     - name: claude-2
-      cmd: claude --dangerously-skip-permissions
+      cmd: claude --continue --dangerously-skip-permissions
       defer: true               # defer: only cd to dir, start claude on first prompt
+    - name: claude-3
+      cmd: claude --continue --dangerously-skip-permissions
+      defer: true

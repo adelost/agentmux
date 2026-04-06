@@ -1,7 +1,7 @@
 // Agent interaction: send prompts, wait for responses, track progress.
 // Manages tmux sessions directly — no external bash scripts needed.
 
-import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, unlinkSync } from "fs";
+import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 import { load as loadYaml } from "js-yaml";
 import { esc, stripAnsi, extractActivity, formatDuration } from "./lib.mjs";
@@ -11,6 +11,22 @@ const CONTEXT_MAX = 200_000;
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
 const MIN_WINDOW_WIDTH = 300;
 const MIN_WINDOW_HEIGHT = 80;
+
+/** Get working dir for a pane. Pane 0 = root, pane N = root/.agents/N/ (session isolation). */
+export function paneDir(rootDir, pane) {
+  if (pane === 0) return rootDir;
+  const dir = join(rootDir, ".agents", String(pane));
+  mkdirSync(dir, { recursive: true });
+  // Ensure .agents is gitignored
+  const gitignore = join(rootDir, ".gitignore");
+  try {
+    const content = existsSync(gitignore) ? readFileSync(gitignore, "utf-8") : "";
+    if (!content.includes(".agents")) {
+      writeFileSync(gitignore, content.trimEnd() + "\n.agents/\n");
+    }
+  } catch {}
+  return dir;
+}
 
 export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxExec }) {
   const wait = delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -103,10 +119,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         if (/claude|node|make|vite|python/.test(cmd)) continue;
       } catch {}
 
+      const workDir = panes[i].cmd?.includes("claude") ? paneDir(dir, i) : dir;
       if (isDeferred(name, i)) {
-        await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)}' Enter`);
+        await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(workDir)}' Enter`);
       } else {
-        await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)} && ${panes[i].cmd}' Enter`);
+        await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(workDir)} && ${panes[i].cmd}' Enter`);
       }
       await wait(500);
     }
@@ -114,7 +131,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await tmux(`select-pane -t '${esc(name)}:.0'`).catch(() => {});
   }
 
-  async function startClaude(name, target, dir, id) {
+  async function startClaude(name, target, rootDir, id, pane = 0) {
     // Check if pane is dead
     try {
       const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_dead}'`);
@@ -129,6 +146,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`);
       if (/claude|node/.test(stdout.trim())) return;
     } catch {}
+
+    // Pane 0 = root, pane N = .agents/N/ (isolated session history)
+    const dir = paneDir(rootDir, pane);
 
     // Determine session flag
     const encodedDir = dir.replace(/\//g, "-");
@@ -232,7 +252,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     // Ensure claude is running in claude panes
     if (paneCmd.includes("claude")) {
-      await startClaude(agentName, target, dir, config.id);
+      await startClaude(agentName, target, dir, config.id, pane);
     }
 
     // Wait for claude to be loaded
