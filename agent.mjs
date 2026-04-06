@@ -431,6 +431,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   }
 
   return {
+    ensureReady,
     sendAndWait,
     sendOnly,
     getResponse,
