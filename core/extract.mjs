@@ -8,11 +8,21 @@ const DIFF_LINE = /^\s+\d+\s+[+-]/;
 const DIFF_CONTEXT = /^\s+\d+\s{2,}/;
 const EXPANDED_HINT = /… \+\d+ lines \(ctrl\+o/;
 
-/** Extract the last turn from raw tmux buffer (everything after the last ❯ prompt) */
+/** Extract the last turn from raw tmux buffer (everything after the last user prompt) */
 const extractLastTurn = (raw) => {
-  const lastPrompt = raw.lastIndexOf("\n❯ ");
-  if (lastPrompt === -1) return raw;
-  return raw.slice(lastPrompt);
+  // Find the LAST user input prompt (❯ followed by non-whitespace text on same line).
+  // Empty idle prompts (just ❯) and ❯ inside other text are skipped.
+  // We search backwards by splitting on lines.
+  const lines = raw.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    // Match user input: ❯ followed by space and actual text
+    if (/^❯ \S/.test(line)) {
+      return lines.slice(i).join("\n");
+    }
+  }
+  // No user prompt found - return everything (first turn)
+  return raw;
 };
 
 /** Check if a line is a tool call */
