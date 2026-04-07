@@ -263,8 +263,9 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
   /**
    * Stream text + tool calls as they appear in tmux. Single source of truth.
    * Polls every 2s, sends new items, dedupes by content, ends when idle.
+   * Uses prompt-text matching to find the exact turn (no scrollback confusion).
    */
-  async function streamResponse(msg, mapping, pane) {
+  async function streamResponse(msg, mapping, pane, promptText) {
     const sent = new Set();          // dedupe: hashes of sent items
     let sawWorking = false;
     let idleStreak = 0;
@@ -272,7 +273,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     const maxDuration = 600_000;     // 10 min hard cap
 
     const flushNew = async () => {
-      const items = await agent.getResponseStream(mapping.name, pane);
+      const items = await agent.getResponseStream(mapping.name, pane, promptText);
       for (const item of items) {
         const key = `${item.type}:${item.content}`;
         if (sent.has(key)) continue;
@@ -313,7 +314,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     try {
       await agent.sendOnly(mapping.name, cleanPrompt, pane);
-      await streamResponse(msg, mapping, pane);
+      await streamResponse(msg, mapping, pane, cleanPrompt);
       console.log(`[${ts()}] → ${mapping.name}:${pane} done`);
     } catch (err) {
       console.log(`[${ts()}] ✗ ${mapping.name}:${pane} ${err.message}`);
