@@ -261,46 +261,41 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
   const ts = () => new Date().toLocaleTimeString("sv");
 
   /**
-   * Stream text + tool calls as they appear in tmux. Single source of truth.
-   * Polls every 2s, sends new items, dedupes by content, ends when idle.
-   * Uses prompt-text matching to find the exact turn (no scrollback confusion).
+   * Wait for agent to fully complete (idle 2 polls in a row), then send the result.
+   * No streaming - just wait, then send. Avoids all timing/scrollback issues.
    */
   async function streamResponse(msg, mapping, pane, promptText) {
-    const sent = new Set();          // dedupe: hashes of sent items
+    const startTime = Date.now();
+    const maxDuration = 600_000;
     let sawWorking = false;
     let idleStreak = 0;
-    const startTime = Date.now();
-    const maxDuration = 600_000;     // 10 min hard cap
 
-    const flushNew = async () => {
-      const items = await agent.getResponseStream(mapping.name, pane, promptText);
-      for (const item of items) {
-        const key = `${item.type}:${item.content}`;
-        if (sent.has(key)) continue;
-        sent.add(key);
-        const formatted = item.type === "tool" ? `*${item.content}*` : item.content;
-        await msg.send(formatted).catch(() => {});
-      }
-    };
+    // Initial wait for prompt to land in buffer (~1.5s normally, scaled by pollInterval for tests)
+    await new Promise((r) => setTimeout(r, Math.min(1500, pollInterval * 750)));
 
+    // Wait for completion (idle confirmed)
     while (Date.now() - startTime < maxDuration) {
-      await flushNew();
       const busy = await agent.isBusy(mapping.name, pane);
-
       if (busy) { sawWorking = true; idleStreak = 0; }
       else {
-        idleStreak += 2;
-        if (sawWorking && idleStreak >= 4) break;     // confirmed idle
-        if (!sawWorking && idleStreak >= 6) break;    // never started?
+        idleStreak += 1;
+        if (sawWorking && idleStreak >= 2) break;
+        if (!sawWorking && idleStreak >= 4) break;
       }
       await new Promise((r) => setTimeout(r, pollInterval));
     }
 
-    // Final sweep + dismiss any prompts
+    // Dismiss any blocking prompts
     await agent.dismissBlockingPrompt(`${mapping.name}:.${pane}`).catch(() => {});
-    await flushNew();
 
-    // Send context% as final message
+    // Get final response - matched to our exact prompt
+    const items = await agent.getResponseStream(mapping.name, pane, promptText);
+    for (const item of items) {
+      const formatted = item.type === "tool" ? `*${item.content}*` : item.content;
+      await msg.send(formatted).catch(() => {});
+    }
+
+    // Context% at the end
     const context = agent.getContextPercent(mapping.dir);
     if (context) {
       const k = Math.round(context.tokens / 1000);
