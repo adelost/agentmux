@@ -5,7 +5,10 @@ export const UI_NOISE = [
   /^[─━═▪ ]{3,}$/,
   /^[❯›]/,                     // Claude Code (❯) and Codex (›) prompts
   /^[✻✢✽✶✷✸✹✺✿❋⚙◉∗⊛·˙] /,  // thinking animation (Herding, Cogitated, etc)
-  /^[A-Z][a-z]+(?:ing|ed)…$/,  // bare thinking words: "Musing…", "Cogitated…"
+  /^[A-Z][\w-]*(?:ing|ed)…/,    // thinking words: "Musing…", "Topsy-turvying… (4s)"
+  /thinking with high effort/,
+  /thought for \d+s/,
+  /^[A-Z][a-z]+ for \d+[ms] /,    // "Cogitated for 14s ..."
   /How is Claude doing/,
   /^\s+\d+: (Bad|Fine|Good|Dismiss)/,
   /💡 agent log/,
