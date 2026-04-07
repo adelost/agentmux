@@ -388,9 +388,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   // --- Context ---
 
-  function getContextPercent(agentDir) {
+  function getContextPercent(agentDir, pane = 0) {
     try {
-      const encoded = agentDir.replace(/[\/\.]/g, "-");
+      // Read from the pane's actual dir (.agents/N/) where Claude stores its session
+      const dir = paneDir(agentDir, pane);
+      const encoded = dir.replace(/[\/\.]/g, "-");
       const projectDir = join(process.env.HOME, ".claude", "projects", encoded);
       const files = readdirSync(projectDir)
         .filter((f) => f.endsWith(".jsonl"))

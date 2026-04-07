@@ -86,7 +86,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           const unsent = segments.slice(sentCount);
           if (unsent.length) {
             const text = unsent.join("\n\n").trim();
-            const context = agent.getContextPercent(mapping.dir);
+            const context = agent.getContextPercent(mapping.dir, pane);
             for (const chunk of splitMessage(text + formatContext(context))) {
               await msg.send(chunk).catch(() => {});
             }
@@ -123,7 +123,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       const busy = await agent.isBusy(mapping.name, pane);
       if (!busy) {
         const text = await agent.getResponse(mapping.name, pane);
-        const context = agent.getContextPercent(mapping.dir);
+        const context = agent.getContextPercent(mapping.dir, pane);
         await sendTextReply(msg, text, context);
         return;
       }
@@ -145,7 +145,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
             const segments = await agent.getResponseSegments(mapping.name, pane);
             const unsent = segments.slice(progress.sentCount());
             const text = unsent.join("\n\n").trim();
-            const context = agent.getContextPercent(mapping.dir);
+            const context = agent.getContextPercent(mapping.dir, pane);
             if (text) await sendTextReply(msg, text, context);
             else if (context) await msg.reply(formatContext(context).trim());
             resolve();
@@ -156,13 +156,13 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     "/raw": async (msg, mapping, pane) => {
       const text = await agent.capturePane(mapping.name, pane);
-      const context = agent.getContextPercent(mapping.dir);
+      const context = agent.getContextPercent(mapping.dir, pane);
       await sendTextReply(msg, text, context);
     },
 
     "/status": async (msg, mapping, pane) => {
       const override = overrides.has(msg.channelId) ? " (override)" : "";
-      const context = agent.getContextPercent(mapping.dir);
+      const context = agent.getContextPercent(mapping.dir, pane);
       const ctxStr = context ? `${context.percent}% (${Math.round(context.tokens / 1000)}k)` : "unknown";
       await msg.reply(`**${mapping.name}** pane ${pane}${override} · context: ${ctxStr}`);
     },
@@ -296,7 +296,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     }
 
     // Context% at the end
-    const context = agent.getContextPercent(mapping.dir);
+    const context = agent.getContextPercent(mapping.dir, pane);
     if (context) {
       const k = Math.round(context.tokens / 1000);
       await msg.send(`_context: ${context.percent}% (${k}k)_`).catch(() => {});
