@@ -21,7 +21,8 @@ export const UI_NOISE = [
   /^Overriding existing handler/,
   /^Set JSC_SIGNAL/,
   /^\w+@\S+[:\$]/,          // shell prompt (user@host)
-  /^[▐▛▝▜▘]{2}/,
+  /^\s*[▐▛▝▜▘█▌▙▟]{2}/,           // Claude Code banner art (any leading whitespace)
+  /^-dangerously-skip-permissions/,
   /^Claude Code v[\d.]+/,
   /^(Opus|Sonnet|Haiku|Claude) [\d.]+ ·/,
   /^>_ OpenAI Codex/,             // Codex startup banner
