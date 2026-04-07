@@ -5,7 +5,7 @@ import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, unlinkS
 import { join } from "path";
 import { load as loadYaml } from "js-yaml";
 import { esc, stripAnsi, extractActivity, formatDuration } from "./lib.mjs";
-import { extractText, extractLastTurn, classifyLines, extractSegments } from "./core/extract.mjs";
+import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream } from "./core/extract.mjs";
 
 const CONTEXT_MAX = 200_000;
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
@@ -250,6 +250,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return extractSegments(classifyLines(extractLastTurn(raw)));
   }
 
+  /** Get text + tool calls in order as a mixed stream. */
+  async function getResponseStream(agentName, pane) {
+    const raw = await capturePane(agentName, pane, 5000);
+    return extractMixedStream(classifyLines(extractLastTurn(raw)));
+  }
+
   async function capturePane(agentName, pane, lines = 50) {
     const { stdout } = await tmux(`capture-pane -t '${esc(agentName)}:.${pane}' -p -S -${lines}`);
     return stripAnsi(stdout).trimEnd() || "(empty)";
@@ -420,7 +426,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   return {
     ensureReady, sendAndWait, sendOnly,
-    getResponse, getResponseSegments, isBusy,
+    getResponse, getResponseSegments, getResponseStream, isBusy,
     capturePane, sendEscape, dismissBlockingPrompt,
     startProgressTimer, getContextPercent, checkAgent,
   };

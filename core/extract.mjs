@@ -109,5 +109,68 @@ export const extractSegments = (classified) => {
   return segments.filter(Boolean);
 };
 
+/**
+ * Format a raw tool call line into a compact one-liner.
+ * "● Bash(cd /skybar && pwd)" → "Bash cd /skybar && pwd"
+ * "● Read(file.ts)" → "Read file.ts"
+ * "● Edit(file.svelte)" → "Edit file.svelte"
+ */
+export function formatToolCall(rawLine) {
+  const stripped = rawLine.replace(/^●\s*/, "").trim();
+  // Match Tool(args) pattern
+  const match = stripped.match(/^([A-Z][a-zA-Z]+)\((.*)\)\s*$/);
+  if (!match) return stripped;
+
+  const [, tool, rawArgs] = match;
+  let args = rawArgs;
+
+  // Tool-specific simplification
+  if (tool === "Bash") {
+    // Truncate long commands
+    args = args.length > 80 ? args.slice(0, 77) + "..." : args;
+  } else if (tool === "Read" || tool === "Write" || tool === "Edit") {
+    // Just the filename, no full path if too long
+    args = args.split(/[,\s]/)[0];
+    const parts = args.split("/");
+    if (parts.length > 3) args = ".../" + parts.slice(-2).join("/");
+  } else if (tool === "Glob" || tool === "Grep") {
+    args = args.length > 60 ? args.slice(0, 57) + "..." : args;
+  }
+
+  return `${tool} ${args}`;
+}
+
+/**
+ * Extract a stream of items (text segments + tool calls) in order.
+ * Returns array of { type: 'text' | 'tool', content: string }
+ */
+export function extractMixedStream(classified) {
+  const items = [];
+  let textBuffer = [];
+
+  const flushText = () => {
+    const text = textBuffer.join("\n").trim();
+    if (text) items.push({ type: "text", content: text });
+    textBuffer = [];
+  };
+
+  for (const line of classified) {
+    if (line.type === "text") {
+      textBuffer.push(line.content);
+    } else if (line.type === "empty") {
+      textBuffer.push("");
+    } else if (line.type === "tool") {
+      // Only the first line of a tool block (the ● line, not the ⎿ result)
+      if (line.content.startsWith("●")) {
+        flushText();
+        items.push({ type: "tool", content: formatToolCall(line.content) });
+      }
+      // Skip ⎿ results, indented continuations, etc
+    }
+  }
+  flushText();
+  return items;
+}
+
 // Exported for testing
 export { extractLastTurn, classifyLines, isToolLine, isToolResult, isNoise, isTextBullet };
