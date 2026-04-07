@@ -10,20 +10,33 @@ const EXPANDED_HINT = /… \+\d+ lines \(ctrl\+o/;
 
 /** Extract the last turn from raw tmux buffer (everything after the last user prompt) */
 const extractLastTurn = (raw) => {
-  // Find the LAST user input prompt (❯ followed by non-whitespace text on same line).
-  // Empty idle prompts (just ❯) and ❯ inside other text are skipped.
-  // We search backwards by splitting on lines.
   const lines = raw.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    // Match user input: ❯ followed by space and actual text
-    if (/^❯ \S/.test(line)) {
+    if (/^❯ \S/.test(lines[i])) {
       return lines.slice(i).join("\n");
     }
   }
-  // No user prompt found - return everything (first turn)
   return raw;
 };
+
+/**
+ * Extract a specific turn matching a known prompt text.
+ * Way more reliable than extractLastTurn when there are multiple turns in scrollback.
+ */
+export function extractTurnByPrompt(raw, promptText) {
+  if (!promptText) return extractLastTurn(raw);
+  const promptStart = promptText.trim().slice(0, 60); // first 60 chars
+  const lines = raw.split("\n");
+  // Search backwards for the matching prompt
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (line.startsWith("❯ ") && line.slice(2).trim().startsWith(promptStart)) {
+      return lines.slice(i).join("\n");
+    }
+  }
+  // Fallback if exact match not found
+  return extractLastTurn(raw);
+}
 
 /** Check if a line is a tool call */
 const isToolLine = (line) => TOOL_LINE.test(line);

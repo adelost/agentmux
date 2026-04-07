@@ -5,7 +5,7 @@ import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, unlinkS
 import { join } from "path";
 import { load as loadYaml } from "js-yaml";
 import { esc, stripAnsi, extractActivity, formatDuration } from "./lib.mjs";
-import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream } from "./core/extract.mjs";
+import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
 
 const CONTEXT_MAX = 200_000;
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
@@ -250,10 +250,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return extractSegments(classifyLines(extractLastTurn(raw)));
   }
 
-  /** Get text + tool calls in order as a mixed stream. */
-  async function getResponseStream(agentName, pane) {
+  /** Get text + tool calls in order. If promptText given, finds that exact turn. */
+  async function getResponseStream(agentName, pane, promptText = null) {
     const raw = await capturePane(agentName, pane, 5000);
-    return extractMixedStream(classifyLines(extractLastTurn(raw)));
+    const turn = promptText ? extractTurnByPrompt(raw, promptText) : extractLastTurn(raw);
+    return extractMixedStream(classifyLines(turn));
   }
 
   async function capturePane(agentName, pane, lines = 50) {
