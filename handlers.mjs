@@ -52,7 +52,7 @@ function sendTextReply(msg, text, context) {
  * Create message handler with all dependencies injected.
  * @param {{ agent, attachments, tts, getMapping, overrides, channelMap, reloadConfig, discordChannel?, agentusYamlPath?, agentsYamlPath? }} deps
  */
-export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentusYamlPath, agentsYamlPath }) {
+export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentusYamlPath, agentsYamlPath, pollInterval = 2000 }) {
   const queues = new Map();
   const followers = new Map(); // channelId → { timer, sentCount, lastHash }
 
@@ -260,29 +260,67 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
   const ts = () => new Date().toLocaleTimeString("sv");
 
+  /**
+   * Stream text + tool calls as they appear in tmux. Single source of truth.
+   * Polls every 2s, sends new items, dedupes by content, ends when idle.
+   */
+  async function streamResponse(msg, mapping, pane) {
+    const sent = new Set();          // dedupe: hashes of sent items
+    let sawWorking = false;
+    let idleStreak = 0;
+    const startTime = Date.now();
+    const maxDuration = 600_000;     // 10 min hard cap
+
+    const flushNew = async () => {
+      const items = await agent.getResponseStream(mapping.name, pane);
+      for (const item of items) {
+        const key = `${item.type}:${item.content}`;
+        if (sent.has(key)) continue;
+        sent.add(key);
+        const formatted = item.type === "tool" ? `*${item.content}*` : item.content;
+        await msg.send(formatted).catch(() => {});
+      }
+    };
+
+    while (Date.now() - startTime < maxDuration) {
+      await flushNew();
+      const busy = await agent.isBusy(mapping.name, pane);
+
+      if (busy) { sawWorking = true; idleStreak = 0; }
+      else {
+        idleStreak += 2;
+        if (sawWorking && idleStreak >= 4) break;     // confirmed idle
+        if (!sawWorking && idleStreak >= 6) break;    // never started?
+      }
+      await new Promise((r) => setTimeout(r, pollInterval));
+    }
+
+    // Final sweep + dismiss any prompts
+    await agent.dismissBlockingPrompt(`${mapping.name}:.${pane}`).catch(() => {});
+    await flushNew();
+
+    // Send context% as final message
+    const context = agent.getContextPercent(mapping.dir);
+    if (context) {
+      const k = Math.round(context.tokens / 1000);
+      await msg.send(`_context: ${context.percent}% (${k}k)_`).catch(() => {});
+    }
+  }
+
   async function processMessage(msg, mapping, cleanPrompt, pane, tmpFiles) {
     console.log(`[${ts()}] ← ${mapping.name}:${pane} "${cleanPrompt.slice(0, 80)}"`);
     const stopTyping = msg.startTyping();
-    const streaming = state.get("thinking", true);
-    const progress = agent.startProgressTimer(msg.send, mapping.name, pane, { streaming });
 
     try {
-      await agent.sendAndWait(mapping.name, cleanPrompt, pane);
-      const context = agent.getContextPercent(mapping.dir);
-      const segments = await agent.getResponseSegments(mapping.name, pane);
-      const unsent = segments.slice(progress.sentCount());
-      const text = unsent.join("\n\n").trim() || segments.join("\n\n").trim() || "(empty response)";
-
-      console.log(`[${ts()}] → ${mapping.name}:${pane} (${text.length} chars, ctx ${context?.percent ?? '?'}%, ${segments.length} seg, ${unsent.length} unsent)`);
-      await sendTextReply(msg, text, context);
-      await tts.sendFollowup(msg.send, text, tmpFiles);
+      await agent.sendOnly(mapping.name, cleanPrompt, pane);
+      await streamResponse(msg, mapping, pane);
+      console.log(`[${ts()}] → ${mapping.name}:${pane} done`);
     } catch (err) {
       console.log(`[${ts()}] ✗ ${mapping.name}:${pane} ${err.message}`);
       const errMsg = err.killed ? "Timeout" : `${err.stderr || err.message}`;
       await msg.reply(errMsg).catch(() => {});
     } finally {
       stopTyping();
-      clearInterval(progress.timer);
       cleanupTmpFiles(tmpFiles);
     }
   }

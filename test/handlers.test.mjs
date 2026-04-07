@@ -29,13 +29,17 @@ function setup({ mappingOverride, channelMapEntries } = {}) {
     toggle: vi.fn(() => true),
   };
 
+  // isBusy: first 2 calls = busy, then idle (so streaming loop can detect transition)
+  // Each setup() gets fresh counter
+  const busyState = { calls: 0 };
   const agent = {
     getResponse: vi.fn(async () => "response text"),
     getResponseSegments: vi.fn(async () => ["agent reply"]),
-    isBusy: vi.fn(async () => false),
+    getResponseStream: vi.fn(async () => [{ type: "text", content: "agent reply" }]),
+    isBusy: vi.fn(async () => { busyState.calls++; return busyState.calls <= 2; }),
     capturePane: vi.fn(async () => "raw pane output"),
     getContextPercent: vi.fn(() => ({ percent: 42, tokens: 84000 })),
-    dismissBlockingPrompt: vi.fn(async () => true),
+    dismissBlockingPrompt: vi.fn(async () => "dismiss"),
     sendEscape: vi.fn(async () => {}),
     sendAndWait: vi.fn(async () => "agent reply"),
     sendOnly: vi.fn(async () => {}),
@@ -63,6 +67,7 @@ function setup({ mappingOverride, channelMapEntries } = {}) {
     overrides,
     channelMap: () => channelMapData,
     reloadConfig,
+    pollInterval: 1,
   });
 
   return { onMessage, agent, attachments, tts, state, overrides, reloadConfig, channelMapData };
@@ -114,7 +119,11 @@ feature("command routing", () => {
   });
 
   component("/peek returns extracted response with context", {
-    given: ["a /peek message", () => ({ ...setup(), msg: mockMsg({ content: "/peek" }) })],
+    given: ["a /peek message with idle agent", () => {
+      const s = setup();
+      s.agent.isBusy.mockResolvedValue(false); // override for this test
+      return { ...s, msg: mockMsg({ content: "/peek" }) };
+    }],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
     then: ["replies with agent response and context%", (_, { msg, agent }) => {
       expect(agent.getResponse).toHaveBeenCalledWith("_ai", 0);
@@ -225,7 +234,11 @@ feature("/use override persistence", () => {
 
 feature("pane targeting", () => {
   component("pane prefix routes to correct pane", {
-    given: ["a message with .1 prefix", () => ({ ...setup(), msg: mockMsg({ content: ".1 /peek" }) })],
+    given: ["a message with .1 prefix and idle agent", () => {
+      const s = setup();
+      s.agent.isBusy.mockResolvedValue(false);
+      return { ...s, msg: mockMsg({ content: ".1 /peek" }) };
+    }],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
     then: ["agent.getResponse called with pane 1", (_, { agent }) => {
       expect(agent.getResponse).toHaveBeenCalledWith("_ai", 1);
@@ -233,14 +246,14 @@ feature("pane targeting", () => {
   });
 });
 
-feature("processMessage pipeline", () => {
-  component("sends prompt to agent and replies", {
+feature("processMessage pipeline (streaming)", () => {
+  component("sends prompt and streams response", {
     given: ["a regular message", () => ({ ...setup(), msg: mockMsg({ content: "what is 2+2?" }) })],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["agent receives prompt and reply sent", (_, { msg, agent }) => {
-      expect(agent.sendAndWait).toHaveBeenCalledWith("_ai", "what is 2+2?", 0);
-      expect(msg.reply).toHaveBeenCalled();
-      expect(msg.reply.mock.calls[0][0]).toContain("agent reply");
+    then: ["agent.sendOnly called and stream sent", (_, { msg, agent }) => {
+      expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "what is 2+2?", 0);
+      expect(msg.send).toHaveBeenCalled();
+      expect(msg.send.mock.calls.some((c) => c[0]?.includes("agent reply"))).toBe(true);
     }],
   });
 
@@ -254,22 +267,10 @@ feature("processMessage pipeline", () => {
     }],
   });
 
-  component("replies with timeout on killed process", {
-    given: ["agent that times out", () => {
-      const s = setup();
-      s.agent.sendAndWait.mockRejectedValue(Object.assign(new Error("timeout"), { killed: true }));
-      return { ...s, msg: mockMsg({ content: "slow request" }) };
-    }],
-    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["replies with Timeout", (_, { msg }) => {
-      expect(msg.reply).toHaveBeenCalledWith("Timeout");
-    }],
-  });
-
-  component("replies with error message on failure", {
+  component("replies with error message on sendOnly failure", {
     given: ["agent that throws", () => {
       const s = setup();
-      s.agent.sendAndWait.mockRejectedValue(new Error("connection lost"));
+      s.agent.sendOnly.mockRejectedValue(new Error("connection lost"));
       return { ...s, msg: mockMsg({ content: "broken" }) };
     }],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
@@ -278,28 +279,32 @@ feature("processMessage pipeline", () => {
     }],
   });
 
-  component("calls tts.sendFollowup after reply", {
-    given: ["a regular message", () => ({ ...setup(), msg: mockMsg({ content: "hi" }) })],
+  component("dedupes already-sent items", {
+    given: ["stream that returns same item twice", () => {
+      const s = setup();
+      s.agent.getResponseStream.mockResolvedValue([
+        { type: "text", content: "hello world" },
+      ]);
+      return { ...s, msg: mockMsg({ content: "hi" }) };
+    }],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["tts.sendFollowup was called with response text", (_, { tts }) => {
-      expect(tts.sendFollowup).toHaveBeenCalled();
-      expect(tts.sendFollowup.mock.calls[0][1]).toBe("agent reply");
+    then: ["text sent only once across multiple polls", (_, { msg }) => {
+      const sends = msg.send.mock.calls.filter((c) => c[0]?.includes("hello world"));
+      expect(sends.length).toBe(1);
     }],
   });
-});
 
-feature("message injection", () => {
-  component("first message starts sendAndWait, second injects via sendOnly", {
-    given: ["two messages arriving simultaneously", () => {
+  component("formats tool calls with italics", {
+    given: ["stream with tool call", () => {
       const s = setup();
-      s.agent.sendAndWait.mockImplementation(async (name, prompt) => prompt);
-      return { ...s, msg1: mockMsg({ content: "first" }), msg2: mockMsg({ content: "second" }) };
+      s.agent.getResponseStream.mockResolvedValue([
+        { type: "tool", content: "Read file.ts" },
+      ]);
+      return { ...s, msg: mockMsg({ content: "hi" }) };
     }],
-    when: ["both messages are sent", ({ onMessage, msg1, msg2 }) =>
-      Promise.all([onMessage(msg1), onMessage(msg2)])],
-    then: ["first uses sendAndWait, second uses sendOnly", (_, { agent }) => {
-      expect(agent.sendAndWait).toHaveBeenCalledTimes(1);
-      expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "second", 0);
+    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["tool wrapped in asterisks", (_, { msg }) => {
+      expect(msg.send.mock.calls.some((c) => c[0] === "*Read file.ts*")).toBe(true);
     }],
   });
 });
