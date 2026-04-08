@@ -71,6 +71,76 @@ feature("splitMessage", () => {
   });
 });
 
+feature("splitMessage: code-fence awareness", () => {
+  unit("closes and reopens a code block that crosses a chunk boundary", {
+    given: ["a long python code block", () => {
+      const code = Array.from({ length: 60 }, (_, i) => `line_${i} = ${i} * ${i}`).join("\n");
+      return "```python\n" + code + "\n```";
+    }],
+    when: ["splitting at max=500", (text) => splitMessage(text, 500)],
+    then: ["every chunk is a well-formed code block", (chunks) => {
+      expect(chunks.length).toBeGreaterThan(1);
+      for (const chunk of chunks) {
+        const fenceCount = (chunk.match(/```/g) || []).length;
+        expect(fenceCount % 2).toBe(0);
+        expect(chunk.startsWith("```")).toBe(true);
+      }
+    }],
+  });
+
+  unit("preserves the language tag across chunks", {
+    given: ["long javascript block", () => {
+      const code = Array.from({ length: 40 }, (_, i) => `const x${i} = "value ${i}";`).join("\n");
+      return "```javascript\n" + code + "\n```";
+    }],
+    when: ["splitting at max=500", (text) => splitMessage(text, 500)],
+    then: ["every chunk uses the same language", (chunks) => {
+      for (const chunk of chunks) {
+        expect(chunk).toMatch(/```javascript/);
+      }
+    }],
+  });
+
+  unit("dunder methods survive a mid-chunk split", {
+    given: ["python class with many __dunder__ methods over 2000 chars", () => {
+      const methods = Array.from({ length: 50 }, (_, i) =>
+        `    def __method${i}__(self):\n        return self.__data__[${i}]`).join("\n\n");
+      return "```python\nclass Foo:\n" + methods + "\n```";
+    }],
+    when: ["splitting at default max", (text) => splitMessage(text)],
+    then: ["chunks are all well-formed code blocks with dunders intact", (chunks) => {
+      expect(chunks.length).toBeGreaterThan(1);
+      for (const chunk of chunks) {
+        const fenceCount = (chunk.match(/```/g) || []).length;
+        expect(fenceCount % 2).toBe(0);
+      }
+      const all = chunks.join("");
+      expect(all).toContain("__method0__");
+      expect(all).toContain("__data__");
+    }],
+  });
+
+  unit("plain text without fences is unchanged (no fence markers added)", {
+    given: ["long plain text", () => "word ".repeat(1000)],
+    when: ["splitting", (text) => splitMessage(text)],
+    then: ["no fence markers introduced", (chunks) => {
+      for (const chunk of chunks) {
+        expect(chunk).not.toContain("```");
+      }
+    }],
+  });
+
+  unit("small code block stays in one chunk, unchanged", {
+    given: ["tiny code block", () => "Here is code:\n```py\nx = 1\n```\nDone."],
+    when: ["splitting", (text) => splitMessage(text)],
+    then: ["one chunk with code intact", (chunks) => {
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]).toContain("```py");
+      expect(chunks[0]).toContain("x = 1");
+    }],
+  });
+});
+
 feature("esc (shell escape)", () => {
   unit("escapes single quotes", {
     when: ["escaping it's", () => esc("it's")],

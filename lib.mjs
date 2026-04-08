@@ -8,23 +8,82 @@ import { stripBullet } from "./core/dialects.mjs";
 export const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
 
 /**
- * Split text into Discord-safe chunks (max 1900 to leave room for ``` wrapper).
- * Tries to break at newlines; falls back to hard cut.
+ * Split text into Discord-safe chunks (max 1900 chars, Discord limit is 2000).
+ * Breaks at newlines when possible, hard-cut otherwise.
+ *
+ * Code-fence aware: if a chunk ends inside an open ```lang block, the chunk
+ * gets a closing ``` appended and the next chunk gets a matching ```lang
+ * prefix. Without this, Discord renders the middle chunks as markdown text
+ * and `__dunder__` becomes **bold**, which eats the underscores. This is
+ * exactly what broke the Python Matrix class snippet.
  */
 export function splitMessage(text, max = 1900) {
   if (text.length <= max) return [text];
-  const chunks = [];
+
+  // Reserve ~20 chars per chunk for injected fence markers (but not on tiny maxes used in tests)
+  const effectiveMax = Math.max(1, max > 40 ? max - 20 : max);
+
+  const rawChunks = [];
   let rest = text;
   while (rest.length > 0) {
-    if (rest.length <= max) {
-      chunks.push(rest);
+    if (rest.length <= effectiveMax) {
+      rawChunks.push(rest);
       break;
     }
-    let cut = rest.lastIndexOf("\n", max);
-    if (cut <= 0) cut = max;
-    chunks.push(rest.slice(0, cut));
+    let cut = rest.lastIndexOf("\n", effectiveMax);
+    if (cut <= 0) cut = effectiveMax;
+    rawChunks.push(rest.slice(0, cut));
     rest = rest.slice(cut).replace(/^\n/, "");
   }
+
+  // Track open code-fence state across chunks so each chunk is
+  // a well-formed Discord message.
+  const FENCE = /```(\w*)/g;
+  let openLang = null; // null = not in a code block; string = current fence language
+  const chunks = [];
+
+  for (const rawChunk of rawChunks) {
+    // If we were inside a code block coming into this chunk, prepend opener
+    let chunk = openLang !== null ? "```" + openLang + "\n" + rawChunk : rawChunk;
+
+    // Count fences inside this chunk (after any injected opener)
+    // to decide whether we end inside an open block.
+    const fences = [...chunk.matchAll(FENCE)];
+    let insideBlock = openLang !== null;
+    let currentLang = openLang;
+
+    // Walk through fences to determine final state
+    // Reset and re-walk from the injected-opener perspective
+    insideBlock = false;
+    currentLang = null;
+    // The injected opener (if present) starts at position 0 of chunk
+    if (openLang !== null) {
+      insideBlock = true;
+      currentLang = openLang;
+    }
+    // Count fence toggles in the *original* rawChunk content to match Discord render
+    const rawFences = [...rawChunk.matchAll(FENCE)];
+    for (const m of rawFences) {
+      if (insideBlock) {
+        insideBlock = false;
+        currentLang = null;
+      } else {
+        insideBlock = true;
+        currentLang = m[1] || "";
+      }
+    }
+
+    // If we're still inside a code block at end of chunk, close it
+    if (insideBlock) {
+      chunk = chunk + "\n```";
+      openLang = currentLang;
+    } else {
+      openLang = null;
+    }
+
+    chunks.push(chunk);
+  }
+
   return chunks;
 }
 
