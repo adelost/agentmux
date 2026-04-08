@@ -1,0 +1,4 @@
+{"type":"user","message":{"role":"user","content":"first prompt"},"uuid":"u1","timestamp":"2026-04-08T20:00:00Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"working..."}],"stop_reason":null},"uuid":"a1","timestamp":"2026-04-08T20:00:01Z"}
+{"type":"queue-operation","operation":"enqueue","content":"queued second prompt","timestamp":"2026-04-08T20:00:02Z"}
+{"type":"attachment","attachment":{"type":"queued_command","prompt":"queued second prompt","commandMode":"prompt"},"uuid":"att1","timestamp":"2026-04-08T20:00:03Z"}

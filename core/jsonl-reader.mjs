@@ -124,12 +124,11 @@ export function isPromptInJsonl(paneDir, promptText) {
 
 /**
  * Find the index of the last user event whose prompt text matches the needle.
- * If a needle is given and no exact match exists, return -1 — do NOT fall
- * back to "last user prompt of any kind", because when two agents share a
- * pane dir (e.g. cdx and claw both rooted at workspace/.agents/0/) the last
- * prompt in Claude's jsonl may belong to the other agent entirely.
+ * Only matches type:user events (real turn starts, not queue-operation or
+ * attachment events) — used for walking forward over turn events.
  *
- * Only fall back to "last user prompt" when no needle is given.
+ * Strict matching: if a needle is given and no type:user event matches,
+ * return -1. No fallback to "last user prompt" (could be another agent's).
  */
 function findUserPromptIndex(events, promptText) {
   const needle = promptText?.trim();
@@ -138,13 +137,26 @@ function findUserPromptIndex(events, promptText) {
       const text = userPromptText(events[i]);
       if (text && text.trim() === needle) return i;
     }
-    return -1; // strict: no match means no match
+    return -1;
   }
-  // No needle → return the latest user prompt
   for (let i = events.length - 1; i >= 0; i--) {
     if (userPromptText(events[i]) !== null) return i;
   }
   return -1;
+}
+
+/**
+ * True if the prompt appears anywhere in events (user, queue-operation,
+ * attachment). Uses extractPromptFromEvent so all three shapes match.
+ */
+function promptAppearsInEvents(events, promptText) {
+  const needle = promptText?.trim();
+  if (!needle) return false;
+  for (const e of events) {
+    const text = extractPromptFromEvent(e);
+    if (text && text.trim() === needle) return true;
+  }
+  return false;
 }
 
 /**
@@ -211,7 +223,13 @@ export function isBusyFromJsonl(paneDir, promptText = null) {
   if (events.length === 0) return null;
 
   const userIdx = findUserPromptIndex(events, promptText);
-  if (userIdx === -1) return null;
+  if (userIdx === -1) {
+    // No type:user event matches. If the prompt is queued (queue-operation
+    // or attachment event), claude is still on a prior turn but will pick
+    // ours up — treat as busy.
+    if (promptText && promptAppearsInEvents(events, promptText)) return true;
+    return null;
+  }
 
   // Walk forward from the user prompt, tracking the last assistant event.
   // Break when we hit a *new* user prompt (not a tool_result) — that's the
