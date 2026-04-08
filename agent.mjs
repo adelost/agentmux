@@ -11,13 +11,6 @@ import { extractFromJsonl } from "./core/jsonl-reader.mjs";
 
 const CONTEXT_MAX = 200_000;
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
-// Minimum width for the tmux window. We only force width, not height, so:
-//   - Claude's bottom bar renders in full (no "esc to interrup" truncation)
-//     which is required for isBusy to catch the busy signal
-//   - The window height follows the attached client ('window-size largest'
-//     grows it to match the largest attached terminal) so users can see the
-//     whole pane when they attach for debugging
-const MIN_WINDOW_WIDTH = 300;
 
 // --- Session isolation ---
 
@@ -87,27 +80,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (await hasSession(name)) return;
     await tmux(`new-session -d -s '${esc(name)}'`);
     await tmux(`source-file ~/.tmux.conf`).catch(() => {});
-    // latest: window size follows the most recently attached client.
-    // When a user attaches to debug, tmux auto-resizes the window to match
-    // their terminal. When no client is attached, we force a minimum width
-    // so Claude's bottom bar isn't truncated (busy signal readable).
-    await tmux(`set-option -g window-size latest`).catch(() => {});
-    await ensureMinWindowSize(name);
-  }
-
-  async function ensureMinWindowSize(name) {
-    try {
-      // If there's an attached client, tmux handles sizing via window-size
-      // latest — don't fight it. Only force width when no client exists.
-      const { stdout: clients } = await tmux(`list-clients -t '${esc(name)}'`).catch(() => ({ stdout: "" }));
-      if (clients.trim()) return;
-
-      const { stdout: w } = await tmux(`display -t '${esc(name)}' -p '#{window_width}'`);
-      const curW = parseInt(w);
-      if (curW < MIN_WINDOW_WIDTH) {
-        await tmux(`resize-window -t '${esc(name)}' -x ${MIN_WINDOW_WIDTH}`).catch(() => {});
-      }
-    } catch {}
+    // Let tmux handle window sizing naturally. We used to force a minimum
+    // window width to prevent Claude's bottom bar from truncating
+    // "esc to interrupt", but busy-signal detection now matches the
+    // truncated form "esc to interrup" directly (see dialects.mjs), so
+    // the width-forcing was both useless (narrow panes still truncated)
+    // and harmful (fought the attached client's terminal geometry).
   }
 
   async function exitCopyMode(target) {
@@ -376,9 +354,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const isNew = !(await hasSession(agentName));
 
     await ensureSession(agentName);
-    // Resize every time, not only when session is new. Existing sessions may
-    // have shrunk (80 col) which truncates Claude's "esc to interrupt" signal.
-    await ensureMinWindowSize(agentName);
     if (isNew) {
       await setupPanes(agentName, config.dir);
       await wait(2000);
