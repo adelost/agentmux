@@ -269,20 +269,39 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
   async function streamResponse(msg, mapping, pane, promptText, tmpFiles = []) {
     const startTime = Date.now();
     const maxDuration = 600_000;
+
+    // Step 1: Confirm the agent received our prompt by waiting until it's
+    // echoed back in the buffer. Positive signal, no hope-and-wait timing.
+    // Test envs scale timeouts down via pollInterval.
+    const echoTimeout = Math.max(100, Math.min(15_000, pollInterval * 7500));
+    const echoed = await agent.waitForPromptEcho(mapping.name, pane, promptText, echoTimeout);
+    if (!echoed) {
+      console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not echoed within ${echoTimeout}ms`);
+      await msg.send(`⚠️ Agent did not acknowledge prompt within ${Math.round(echoTimeout / 1000)}s. Pane may be dead — try \`/raw\` to inspect.`)
+        .catch((err) => console.warn(`send warning failed: ${err.message}`));
+      return;
+    }
+
+    // Step 2: Wait for completion (idle 2 polls in a row after we saw busy).
+    // Since echo is confirmed, we can safely require sawWorking — no more
+    // silent fallback on "maybe the agent was just fast".
     let sawWorking = false;
     let idleStreak = 0;
+    const workMaxMs = 60_000; // If echo but no busy signal within 60s, fail loud
 
-    // Initial wait for prompt to land in buffer (~1.5s normally, scaled by pollInterval for tests)
-    await new Promise((r) => setTimeout(r, Math.min(1500, pollInterval * 750)));
-
-    // Wait for completion (idle confirmed)
     while (Date.now() - startTime < maxDuration) {
       const busy = await agent.isBusy(mapping.name, pane);
       if (busy) { sawWorking = true; idleStreak = 0; }
       else {
         idleStreak += 1;
         if (sawWorking && idleStreak >= 2) break;
-        if (!sawWorking && idleStreak >= 4) break;
+      }
+      // Fail-loud escape: echo confirmed but agent never went busy within 60s.
+      // Extract whatever is there and warn — this usually means the agent is
+      // stuck in a UI mode (e.g. permission dialog) we didn't detect.
+      if (!sawWorking && Date.now() - startTime > workMaxMs) {
+        console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} echoed prompt but never signaled busy within ${workMaxMs}ms`);
+        break;
       }
       await new Promise((r) => setTimeout(r, pollInterval));
     }

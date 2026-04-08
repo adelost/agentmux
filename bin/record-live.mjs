@@ -74,14 +74,20 @@ async function main() {
   await agent.sendOnly(agentName, prompt, pane);
   const startTime = Date.now();
 
-  // Initial grace period so prompt lands in the buffer
-  await new Promise((r) => setTimeout(r, 1500));
+  // Step 1: Wait for the prompt to be echoed back in the pane — positive
+  // confirmation that the agent received the input.
+  const echoed = await agent.waitForPromptEcho(agentName, pane, prompt, 15_000);
+  if (!echoed) {
+    console.error(`\nERROR: prompt not echoed within 15s. Pane may be dead.`);
+    process.exit(1);
+  }
 
-  // Wait for completion (idle 2 polls in a row)
+  // Step 2: Wait for completion (idle 2 polls in a row after we saw busy)
   const maxDuration = 10 * 60 * 1000;
   let sawWorking = false;
   let idleStreak = 0;
   const pollMs = 2000;
+  const workMaxMs = 60_000;
 
   while (Date.now() - startTime < maxDuration) {
     const busy = await agent.isBusy(agentName, pane);
@@ -93,7 +99,10 @@ async function main() {
     } else {
       idleStreak += 1;
       if (sawWorking && idleStreak >= 2) break;
-      if (!sawWorking && idleStreak >= 4) break;
+    }
+    if (!sawWorking && Date.now() - startTime > workMaxMs) {
+      process.stdout.write("\n!! Agent echoed prompt but never went busy within 60s — extracting anyway\n");
+      break;
     }
     await new Promise((r) => setTimeout(r, pollMs));
   }

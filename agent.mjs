@@ -278,6 +278,29 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return stripAnsi(stdout).trimEnd() || "(empty)";
   }
 
+  /**
+   * Poll the pane until the user's prompt text appears in the buffer,
+   * confirming the agent has actually received the input.
+   *
+   * This is the positive signal that replaces the old "wait some ms and hope"
+   * approach: no matter how slow the agent is to start processing (cold start,
+   * large context, SIGWINCH redraw), we can trust it got the message once we
+   * see it echoed back.
+   *
+   * @returns true if echo seen, false on timeout
+   */
+  async function waitForPromptEcho(agentName, pane, promptText, timeoutMs = 15000) {
+    const needle = promptText.trim().slice(0, 30);
+    if (!needle) return true; // empty prompt, nothing to wait for
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const raw = await capturePane(agentName, pane, 100);
+      if (raw.includes(needle)) return true;
+      await wait(200);
+    }
+    return false;
+  }
+
   // --- Send ---
 
   async function sendPrompt(agentName, prompt, pane) {
@@ -449,7 +472,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   return {
     ensureReady, sendAndWait, sendOnly,
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, isBusy,
-    capturePane, sendEscape, dismissBlockingPrompt,
+    capturePane, sendEscape, dismissBlockingPrompt, waitForPromptEcho,
     startProgressTimer, getContextPercent, checkAgent,
   };
 }
