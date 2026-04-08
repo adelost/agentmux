@@ -295,7 +295,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const raw = await capturePane(agentName, pane, 5000);
     const turn = promptText ? extractTurnByPrompt(raw, promptText) : extractLastTurn(raw);
     const items = extractMixedStream(classifyLines(turn));
-    return { raw, turn, items };
+    return { raw, turn, items, source: "tmux" };
   }
 
   async function capturePane(agentName, pane, lines = 50) {

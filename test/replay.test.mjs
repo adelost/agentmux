@@ -29,11 +29,15 @@ function replay(recording) {
   return { turn, items };
 }
 
-const recordings = loadRecordings();
+const allRecordings = loadRecordings();
+// Only recordings captured via the tmux extract path can be replayed against
+// the extract pipeline. jsonl-sourced recordings have a synthesized raw/turn
+// that wasn't produced by tmux, so re-extracting from it is meaningless.
+const recordings = allRecordings.filter((r) => r.source !== "jsonl");
 
 feature("replay: extract pipeline on recorded data", () => {
   if (recordings.length === 0) {
-    unit("no recordings yet — skipping", {
+    unit("no tmux recordings to replay", {
       when: ["checking", () => null],
       then: ["nothing to replay", () => expect(true).toBe(true)],
     });
@@ -53,7 +57,7 @@ feature("replay: extract pipeline on recorded data", () => {
 
 feature("replay: sanity checks on recorded data", () => {
   if (recordings.length === 0) {
-    unit("no recordings yet — skipping sanity checks", {
+    unit("no tmux recordings to sanity-check", {
       when: ["checking", () => null],
       then: ["nothing to check", () => expect(true).toBe(true)],
     });

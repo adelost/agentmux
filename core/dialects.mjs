@@ -9,11 +9,17 @@
 
 // All progress/thinking icons Claude Code rotates through while working.
 // Observed variants: ✻ Musing, ✢ Frolicking, ✽ ..., · Orchestrating, * Waddling,
-// ∗ Cogitating, ◉, ⚙, ❋, and more. The UI picks one and rotates; pattern
-// matching any of them against a "Verbing…" suffix reliably signals "busy".
+// ∗ Cogitating, ◉, ⚙, ❋, and more. The UI picks one and rotates.
+//
+// The literal ellipsis `…` is the busy marker — present-progressive phase.
+// Past-tense completion lines ("✻ Worked for 32s", "✻ Cogitated for 14s",
+// "✻ Brewed for 2s") do NOT have … and mean the agent is DONE. If we matched
+// those as busy we'd hang forever waiting for something that already finished.
 const CLAUDE_PROGRESS_ICONS = "✻✢✽✶✷✸✹✺✿❋⚙◉∗⊛·˙*";
-const CLAUDE_PROGRESS_LINE = new RegExp(`^[${CLAUDE_PROGRESS_ICONS}] [A-Z][a-z]+(ing|ed)`);
-const CLAUDE_PROGRESS_LINE_ANY = new RegExp(`(^|\\s)[${CLAUDE_PROGRESS_ICONS}] [A-Z][a-z]+(ing|ed)`, "m");
+const CLAUDE_PROGRESS_LINE = new RegExp(`^[${CLAUDE_PROGRESS_ICONS}] [A-Z][a-z]+ing…`);
+const CLAUDE_PROGRESS_LINE_ANY = new RegExp(`(^|\\s)[${CLAUDE_PROGRESS_ICONS}] [A-Z][a-z]+ing…`, "m");
+// Past-tense completion lines are noise (they appear briefly after the turn ends)
+const CLAUDE_COMPLETED_LINE = new RegExp(`^[${CLAUDE_PROGRESS_ICONS}] [A-Z][a-z]+ed for \\d`);
 
 export const CLAUDE = {
   name: "claude",
@@ -49,7 +55,8 @@ export const CLAUDE = {
     /^\s+\d+: (Bad|Fine|Good|Dismiss)/,        // survey options
     /^\s*\d+\s+tokens\s*$/,                    // v2.1.96 bottom status: "27257 tokens"
     /^\s*● (high|medium|low) · \/effort\s*$/,  // v2.1.96 effort indicator
-    CLAUDE_PROGRESS_LINE,                      // mid-response progress line as noise
+    CLAUDE_PROGRESS_LINE,                      // active progress: "✻ Musing…"
+    CLAUDE_COMPLETED_LINE,                      // completed progress: "✻ Worked for 32s"
   ],
 };
 

@@ -192,5 +192,5 @@ export function extractFromJsonl(paneDir, promptText = null) {
   // Synthesize a raw/turn string for recording. Not used for re-extract.
   const raw = merged.map((i) => (i.type === "tool" ? `[tool] ${i.content}` : i.content)).join("\n\n");
 
-  return { items: merged, raw, turn: raw };
+  return { items: merged, raw, turn: raw, source: "jsonl", jsonlFile: jsonl };
 }
