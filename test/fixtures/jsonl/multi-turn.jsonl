@@ -1,0 +1,4 @@
+{"type":"user","message":{"role":"user","content":"hello"},"uuid":"u1","timestamp":"2026-04-08T20:00:00Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hi there."}]},"uuid":"a1","timestamp":"2026-04-08T20:00:01Z"}
+{"type":"user","message":{"role":"user","content":"what time is it?"},"uuid":"u2","timestamp":"2026-04-08T20:00:02Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I don't know the time."}]},"uuid":"a2","timestamp":"2026-04-08T20:00:03Z"}

@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"what is 2+2?"},"uuid":"u1","timestamp":"2026-04-08T20:00:00Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The answer is 4."}]},"uuid":"a1","timestamp":"2026-04-08T20:00:01Z"}

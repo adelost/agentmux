@@ -1,0 +1,196 @@
+// Read Claude Code's session jsonl as the source of truth for responses.
+//
+// Claude Code writes every interaction to ~/.claude/projects/{encoded-dir}/{uuid}.jsonl
+// as a stream of JSON events. Each line is one event: user message, assistant
+// message, system hook, file snapshot, etc. The assistant messages contain
+// structured content arrays with text (including code fences), tool_use entries,
+// and thinking blocks — *exactly* what Claude produced, before any UI rendering
+// stripped it down to indented plaintext for tmux.
+//
+// This module reads that structured data and returns items in the same shape
+// as our tmux extract pipeline: [{ type: "text"|"tool", content: string }].
+// Downstream code (handlers, recorder, Discord send) doesn't know the difference.
+
+import { readdirSync, readFileSync, statSync, existsSync } from "fs";
+import { join } from "path";
+
+const CLAUDE_PROJECTS_DIR = () => join(process.env.HOME, ".claude", "projects");
+
+/**
+ * Claude Code's path encoding: every `/` and `.` becomes a `-`.
+ * Example: /home/adelost/lsrc/.agents/1 → -home-adelost-lsrc--agents-1
+ */
+function encodePath(dir) {
+  return dir.replace(/[\/\.]/g, "-");
+}
+
+/** Find the most-recently-modified jsonl file in a project dir, or null. */
+function latestJsonlFile(projectDir) {
+  if (!existsSync(projectDir)) return null;
+  try {
+    const files = readdirSync(projectDir)
+      .filter((f) => f.endsWith(".jsonl"))
+      .map((f) => {
+        const path = join(projectDir, f);
+        return { path, mtime: statSync(path).mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+    return files[0]?.path ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Parse every JSON line in a jsonl file, skipping malformed lines. */
+function parseJsonl(filePath) {
+  const content = readFileSync(filePath, "utf-8");
+  const events = [];
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      events.push(JSON.parse(line));
+    } catch {
+      // skip malformed line
+    }
+  }
+  return events;
+}
+
+/**
+ * Extract the string user content from an event. Returns null if the content
+ * is a tool_result array (which is technically a user event but contains tool
+ * output rather than a new prompt) or missing.
+ */
+function userPromptText(event) {
+  if (event?.type !== "user") return null;
+  const content = event.message?.content;
+  if (typeof content === "string") return content;
+  // Array content in a user event usually means tool_result — not a prompt
+  return null;
+}
+
+/**
+ * Find the index of the last user event whose prompt text matches the needle.
+ * Falls back to the last user prompt of any kind if no match.
+ * Returns -1 if no usable user event exists.
+ */
+function findUserPromptIndex(events, promptText) {
+  const needle = promptText?.trim();
+  if (needle) {
+    for (let i = events.length - 1; i >= 0; i--) {
+      const text = userPromptText(events[i]);
+      if (text && text.trim() === needle) return i;
+    }
+  }
+  // Fallback: last user prompt of any kind
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (userPromptText(events[i]) !== null) return i;
+  }
+  return -1;
+}
+
+/**
+ * Format a tool_use block into a compact one-line string suitable for Discord.
+ * Claude: { name: "Bash", input: { command: "ls" } } → "Bash ls"
+ */
+export function formatJsonlToolCall(toolUse) {
+  const { name = "Tool", input = {} } = toolUse;
+
+  if (name === "Bash") {
+    const cmd = String(input.command || "");
+    return `Bash ${cmd.length > 80 ? cmd.slice(0, 77) + "..." : cmd}`;
+  }
+
+  if (name === "Read" || name === "Write" || name === "Edit") {
+    const path = String(input.file_path || input.path || "");
+    const parts = path.split("/");
+    const short = parts.length > 3 ? ".../" + parts.slice(-2).join("/") : path;
+    return `${name} ${short}`;
+  }
+
+  if (name === "Glob" || name === "Grep") {
+    const pat = String(input.pattern || "");
+    return `${name} ${pat.length > 60 ? pat.slice(0, 57) + "..." : pat}`;
+  }
+
+  if (name === "Task" || name === "Agent") {
+    const sub = input.subagent_type || input.description || "";
+    return `${name} ${sub}`;
+  }
+
+  // Generic fallback: show first 1-2 args compactly
+  const entries = Object.entries(input).slice(0, 2);
+  const args = entries
+    .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
+    .join(" ");
+  return args ? `${name} ${args}` : name;
+}
+
+/**
+ * Extract items (text + tool calls) from the last assistant response
+ * matching a specific user prompt.
+ *
+ * @param {string} paneDir - The pane's working dir (e.g. ~/lsrc/.agents/1)
+ * @param {string|null} promptText - User prompt text to match against
+ * @returns {{ items: Array<{type:"text"|"tool", content:string}>, raw: string, turn: string } | null}
+ *
+ * Returns null if no jsonl exists for this paneDir or if no matching turn
+ * is found. Callers should fall back to tmux extract in that case.
+ */
+export function extractFromJsonl(paneDir, promptText = null) {
+  const projectDir = join(CLAUDE_PROJECTS_DIR(), encodePath(paneDir));
+  const jsonl = latestJsonlFile(projectDir);
+  if (!jsonl) return null;
+
+  const events = parseJsonl(jsonl);
+  if (events.length === 0) return null;
+
+  const userIdx = findUserPromptIndex(events, promptText);
+  if (userIdx === -1) return null;
+
+  // Walk forward from the user event, collecting assistant content until
+  // we hit the next real user prompt (tool_result user events are skipped).
+  const items = [];
+  for (let i = userIdx + 1; i < events.length; i++) {
+    const e = events[i];
+
+    if (e.type === "user") {
+      // Tool-result user events don't end the turn; real new prompts do.
+      if (userPromptText(e) !== null) break;
+      continue;
+    }
+
+    if (e.type !== "assistant") continue;
+    const content = e.message?.content;
+    if (!Array.isArray(content)) continue;
+
+    for (const block of content) {
+      if (block.type === "text" && typeof block.text === "string") {
+        const text = block.text.trim();
+        if (text) items.push({ type: "text", content: text });
+      } else if (block.type === "tool_use") {
+        items.push({ type: "tool", content: formatJsonlToolCall(block) });
+      }
+      // thinking, reasoning, etc — skipped on purpose
+    }
+  }
+
+  if (items.length === 0) return null;
+
+  // Merge adjacent text items (Claude sometimes splits a response into
+  // multiple assistant events without tool calls between them)
+  const merged = [];
+  for (const item of items) {
+    const last = merged[merged.length - 1];
+    if (last && last.type === "text" && item.type === "text") {
+      last.content = last.content + "\n\n" + item.content;
+    } else {
+      merged.push({ ...item });
+    }
+  }
+
+  // Synthesize a raw/turn string for recording. Not used for re-extract.
+  const raw = merged.map((i) => (i.type === "tool" ? `[tool] ${i.content}` : i.content)).join("\n\n");
+
+  return { items: merged, raw, turn: raw };
+}

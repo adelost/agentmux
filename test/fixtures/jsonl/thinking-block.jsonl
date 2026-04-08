@@ -1,0 +1,3 @@
+{"type":"user","message":{"role":"user","content":"think about cats"},"uuid":"u1","timestamp":"2026-04-08T20:00:00Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Cats are interesting because..."}]},"uuid":"a1","timestamp":"2026-04-08T20:00:01Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Cats are curious."}]},"uuid":"a2","timestamp":"2026-04-08T20:00:02Z"}
