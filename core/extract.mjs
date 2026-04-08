@@ -1,23 +1,30 @@
-// Extract clean text responses from raw Claude Code tmux output.
+// Extract clean text responses from raw tmux output.
 // Strategy: NEGATIVE filtering. Remove known tool/UI patterns, keep the rest.
+//
+// Dialect-agnostic: all Claude/Codex differences live in ./dialects.mjs.
+// This module combines dialect data to classify each line.
 
-import { TOOL_CALL as TOOL_LINE, isNoise } from "./noise.mjs";
+import { isNoise, isToolCall } from "./noise.mjs";
+import {
+  matchesAnyBullet,
+  matchesAnyToolResult,
+  matchesAnyPromptWithText,
+  matchesAnyPromptPrefix,
+  stripBullet,
+} from "./dialects.mjs";
 
-const TOOL_RESULT = /^\s*[⎿└]/;    // Claude uses ⎿, Codex uses └. \s matches U+00A0.
+// Non-dialect-specific patterns (diff rendering, expand hints)
 const DIFF_LINE = /^\s+\d+\s+[+-]/;
 const DIFF_CONTEXT = /^\s+\d+\s{2,}/;
 const EXPANDED_HINT = /… \+\d+ lines \(ctrl\+o/;
-const BULLET = /^[●•] /;   // ● = Claude Code, • = Codex
 
-// Prompt markers: ❯ = Claude Code, › = Codex
-const PROMPT_MARKER = /^[❯›] \S/;
-const PROMPT_PREFIX = /^[❯›] /;
+// --- Turn extraction -----------------------------------------------------
 
 /** Extract the last turn from raw tmux buffer (everything after the last user prompt) */
 const extractLastTurn = (raw) => {
   const lines = raw.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
-    if (PROMPT_MARKER.test(lines[i])) {
+    if (matchesAnyPromptWithText(lines[i])) {
       return lines.slice(i).join("\n");
     }
   }
@@ -30,28 +37,28 @@ const extractLastTurn = (raw) => {
  */
 export function extractTurnByPrompt(raw, promptText) {
   if (!promptText) return extractLastTurn(raw);
-  const promptStart = promptText.trim().slice(0, 60); // first 60 chars
+  const promptStart = promptText.trim().slice(0, 60);
   const lines = raw.split("\n");
-  // Search backwards for the matching prompt
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
-    if (PROMPT_PREFIX.test(line) && line.slice(2).trim().startsWith(promptStart)) {
+    if (matchesAnyPromptPrefix(line) && line.slice(2).trim().startsWith(promptStart)) {
       return lines.slice(i).join("\n");
     }
   }
-  // Fallback if exact match not found
   return extractLastTurn(raw);
 }
 
-/** Check if a line is a tool call */
-const isToolLine = (line) => TOOL_LINE.test(line);
+// --- Line classification -------------------------------------------------
 
-/** Check if a line is a tool result (⎿ prefix, diff lines, expand hints) */
+/** Check if a line is a tool call (any dialect) */
+const isToolLine = (line) => isToolCall(line);
+
+/** Check if a line is a tool result (⎿/└ prefix, diff lines, expand hints) */
 const isToolResult = (line) =>
-  TOOL_RESULT.test(line) || DIFF_LINE.test(line) || DIFF_CONTEXT.test(line) || EXPANDED_HINT.test(line);
+  matchesAnyToolResult(line) || DIFF_LINE.test(line) || DIFF_CONTEXT.test(line) || EXPANDED_HINT.test(line);
 
-/** Check if a line is a text-output bullet (● or • followed by actual text) */
-const isTextBullet = (line) => BULLET.test(line) && !isToolLine(line);
+/** Check if a line is a text-output bullet (● or • followed by actual text, but not a tool call) */
+const isTextBullet = (line) => matchesAnyBullet(line) && !isToolLine(line);
 
 /**
  * Parse raw tmux buffer into structured lines with types.
@@ -79,10 +86,10 @@ const classifyLines = (raw) => {
 
     if (isTextBullet(trimmed)) {
       inToolBlock = false;
-      return { type: "text", content: trimmed.replace(BULLET, "") };
+      return { type: "text", content: stripBullet(trimmed) };
     }
 
-    // Non-indented line after a tool block = new text section (Claude's response)
+    // Non-indented line after a tool block = new text section
     if (inToolBlock && !trimmed.startsWith(" ") && !trimmed.startsWith("\t")) {
       inToolBlock = false;
       return { type: "text", content: trimmed };
@@ -95,10 +102,12 @@ const classifyLines = (raw) => {
   });
 };
 
+// --- High-level extract --------------------------------------------------
+
 /**
- * Extract clean text from raw Claude Code tmux output.
+ * Extract clean text from raw tmux output.
  * Returns the text response with tool calls, UI noise, and diffs stripped.
- * Only processes the last turn (after the last ❯ prompt).
+ * Only processes the last turn.
  */
 export const extractText = (raw) => {
   const lastTurn = extractLastTurn(raw);
@@ -107,7 +116,6 @@ export const extractText = (raw) => {
     .filter((l) => l.type === "text")
     .map((l) => l.content);
 
-  // Collapse multiple consecutive empty-ish lines
   const result = textLines
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
@@ -145,7 +153,7 @@ export const extractSegments = (classified) => {
  * Codex:  "• Explored" → "Explored"
  */
 export function formatToolCall(rawLine) {
-  const stripped = rawLine.replace(/^[●•]\s*/, "").trim();
+  const stripped = stripBullet(rawLine).trim();
   // Match Tool(args) pattern (Claude style)
   const match = stripped.match(/^([A-Z][a-zA-Z]+)\((.*)\)\s*$/);
   if (!match) return stripped;
@@ -153,12 +161,9 @@ export function formatToolCall(rawLine) {
   const [, tool, rawArgs] = match;
   let args = rawArgs;
 
-  // Tool-specific simplification
   if (tool === "Bash") {
-    // Truncate long commands
     args = args.length > 80 ? args.slice(0, 77) + "..." : args;
   } else if (tool === "Read" || tool === "Write" || tool === "Edit") {
-    // Just the filename, no full path if too long
     args = args.split(/[,\s]/)[0];
     const parts = args.split("/");
     if (parts.length > 3) args = ".../" + parts.slice(-2).join("/");
@@ -189,8 +194,8 @@ export function extractMixedStream(classified) {
     } else if (line.type === "empty") {
       textBuffer.push("");
     } else if (line.type === "tool") {
-      // Only the first line of a tool block (the ● or • line, not the ⎿/└ result)
-      if (BULLET.test(line.content)) {
+      // Only the first line of a tool block (the bullet line, not the result continuation)
+      if (matchesAnyBullet(line.content)) {
         flushText();
         items.push({ type: "tool", content: formatToolCall(line.content) });
       }

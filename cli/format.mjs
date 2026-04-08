@@ -1,6 +1,7 @@
 // Output formatting for agent CLI. Status icons, tables, truncation.
 
 import { stripAnsi } from "../lib.mjs";
+import { ALL_DIALECTS } from "../core/dialects.mjs";
 
 /** Detect pane status from captured content. */
 export function detectPaneStatus(paneContent) {
@@ -10,10 +11,11 @@ export function detectPaneStatus(paneContent) {
   if (/Enter to select|Esc to cancel/.test(text)) return "menu";
   if (/Resume from summary/.test(text)) return "resume";
   if (/0: Dismiss/.test(text)) return "dismiss";
-  // Search last 10 lines for idle prompt
+  // Search last 10 lines for any dialect's prompt marker
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
   const tail = lines.slice(-10);
-  if (tail.findLast((l) => l.startsWith("❯"))) return "idle";
+  const hasPrompt = tail.findLast((l) => ALL_DIALECTS.some((d) => l.startsWith(d.promptChar)));
+  if (hasPrompt) return "idle";
   return "unknown";
 }
 
