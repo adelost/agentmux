@@ -36,7 +36,9 @@ function loadEnv() {
   try {
     const vars = parseEnv(readFileSync(resolve(__dir, "..", ".env"), "utf-8"));
     for (const [k, v] of Object.entries(vars)) if (!process.env[k]) process.env[k] = v;
-  } catch {}
+  } catch (err) {
+    if (err.code !== "ENOENT") console.warn(`.env load failed: ${err.message}`);
+  }
 }
 loadEnv();
 
@@ -108,10 +110,11 @@ async function main() {
   }
   if (sawWorking) process.stdout.write("\n");
 
-  await agent.dismissBlockingPrompt(`${agentName}:.${pane}`).catch(() => {});
+  await agent.dismissBlockingPrompt(`${agentName}:.${pane}`)
+    .catch((err) => console.warn(`dismiss failed: ${err.message}`));
 
   const { raw, turn, items, source } = await agent.getResponseStreamWithRaw(agentName, pane, prompt);
-  const context = agent.getContextPercent(agentDir, pane);
+  const context = agent.getContextPercent(agentName, pane);
 
   const discordSent = [];
   for (const item of items) {

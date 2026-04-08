@@ -4,11 +4,14 @@
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 import { load as loadYaml } from "js-yaml";
-import { esc, stripAnsi, extractActivity, formatDuration } from "./lib.mjs";
+import { esc, stripAnsi } from "./lib.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
 import { detectDialect } from "./core/dialects.mjs";
 import { extractFromJsonl, isBusyFromJsonl } from "./core/jsonl-reader.mjs";
 import { extractFromCodexJsonl, isBusyFromCodexJsonl } from "./core/codex-jsonl-reader.mjs";
+import { getContextPercent as getContextPercentByDialect } from "./core/context.mjs";
+import { findBlockingPrompt } from "./core/dismiss.mjs";
+import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
 
 const CONTEXT_MAX = 200_000;
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
@@ -34,23 +37,6 @@ function ensureGitignored(rootDir, entry) {
     console.warn(`gitignore update failed: ${err.message}`);
   }
 }
-
-// --- Blocking prompts (data-driven) ---
-
-const BLOCKING_PROMPTS = [
-  {
-    name: "resume",
-    match: (text) => text.includes("Resume from summary") && text.includes("Enter to confirm"),
-    keys: "Enter",
-    waitMs: 3000,
-  },
-  {
-    name: "dismiss",
-    match: (text) => text.includes("0: Dismiss"),
-    keys: "'0' Enter",
-    waitMs: 500,
-  },
-];
 
 // --- Agent factory ---
 
@@ -80,7 +66,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   async function ensureSession(name) {
     if (await hasSession(name)) return;
     await tmux(`new-session -d -s '${esc(name)}'`);
-    await tmux(`source-file ~/.tmux.conf`).catch(() => {});
+    await tmux(`source-file ~/.tmux.conf`).catch((err) =>
+      console.warn(`tmux: source-file .tmux.conf failed: ${err.message}`));
     // Let tmux handle window sizing naturally. We used to force a minimum
     // window width to prevent Claude's bottom bar from truncating
     // "esc to interrupt", but busy-signal detection now matches the
@@ -96,7 +83,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         await tmux(`send-keys -t '${esc(target)}' q`);
         await wait(300);
       }
-    } catch {}
+    } catch (err) {
+      // Target pane may not exist yet — expected during startup. Log only
+      // if this looks unexpected (anything other than "no such pane").
+      if (!/no such/.test(err.message || "")) {
+        console.warn(`exitCopyMode(${target}) failed: ${err.message}`);
+      }
+    }
   }
 
   // --- Pane setup ---
@@ -108,11 +101,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     const existing = await countPanes(name);
     for (let i = existing; i < panes.length; i++) {
-      await tmux(`split-window -t '${esc(name)}' -h`).catch(() => {});
+      await tmux(`split-window -t '${esc(name)}' -h`).catch((err) =>
+        console.warn(`setupPanes: split-window ${name} failed: ${err.message}`));
     }
 
     const layout = config[name]?.layout || "main-vertical";
-    await tmux(`select-layout -t '${esc(name)}' '${layout}'`).catch(() => {});
+    await tmux(`select-layout -t '${esc(name)}' '${layout}'`).catch((err) =>
+      console.warn(`setupPanes: select-layout ${layout} failed: ${err.message}`));
 
     for (let i = 0; i < panes.length; i++) {
       const target = `${name}:.${i}`;
@@ -128,21 +123,28 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       }
       await wait(500);
     }
-    await tmux(`select-pane -t '${esc(name)}:.0'`).catch(() => {});
+    await tmux(`select-pane -t '${esc(name)}:.0'`).catch((err) =>
+      console.warn(`setupPanes: select-pane 0 failed: ${err.message}`));
   }
 
   async function countPanes(name) {
     try {
       const { stdout } = await tmux(`list-panes -t '${esc(name)}'`);
       return stdout.trim().split("\n").length;
-    } catch { return 1; }
+    } catch (err) {
+      // Session may not exist yet — treat as 1 default pane
+      return 1;
+    }
   }
 
   async function isAlreadyRunning(target) {
     try {
       const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`);
       return /claude|node|make|vite|python/.test(stdout.trim());
-    } catch { return false; }
+    } catch {
+      // Target doesn't exist → not running
+      return false;
+    }
   }
 
   function isClaudeCmd(cmd) {
@@ -165,11 +167,15 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     try {
       const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_dead}'`);
       return stdout.trim() === "1";
-    } catch { return false; }
+    } catch {
+      // Target doesn't exist → not dead (doesn't exist yet)
+      return false;
+    }
   }
 
   async function respawnPane(target) {
-    await tmux(`respawn-pane -t '${esc(target)}' -k`).catch(() => {});
+    await tmux(`respawn-pane -t '${esc(target)}' -k`).catch((err) =>
+      console.warn(`respawnPane(${target}) failed: ${err.message}`));
     await wait(500);
   }
 
@@ -212,14 +218,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       return null;
     }
 
-    for (const prompt of BLOCKING_PROMPTS) {
-      if (prompt.match(paneText)) {
-        await tmux(`send-keys -t '${esc(target)}' ${prompt.keys}`);
-        await wait(prompt.waitMs);
-        return prompt.name;
-      }
-    }
-    return null;
+    const prompt = findBlockingPrompt(paneText);
+    if (!prompt) return null;
+
+    await tmux(`send-keys -t '${esc(target)}' ${prompt.keys}`);
+    await wait(prompt.waitMs);
+    return prompt.name;
   }
 
   // --- Query ---
@@ -236,8 +240,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const cmd = config.panes?.[pane]?.cmd || "";
       if (cmd.includes("codex")) return "codex";
       if (cmd.includes("claude")) return "claude";
-    } catch {}
-    return null;
+      return null;
+    } catch (err) {
+      console.warn(`paneDialectName(${agentName}) failed: ${err.message}`);
+      return null;
+    }
   }
 
   async function isBusy(agentName, pane, promptText = null) {
@@ -260,7 +267,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         // safety escape if this never resolves.
         return true;
       }
-    } catch {}
+    } catch (err) {
+      console.warn(`isBusy(${agentName}) dispatch failed, falling back to tmux: ${err.message}`);
+    }
 
     // Fallback: tmux parsing (Codex, missing jsonl, no matching prompt yet)
     const raw = await capturePane(agentName, pane, 20);
@@ -385,7 +394,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     writeFileSync(tmpFile, prompt);
     await tmux(`load-buffer -b '${bufName}' '${esc(tmpFile)}'`);
     await tmux(`paste-buffer -b '${bufName}' -t '${esc(target)}'`);
-    try { unlinkSync(tmpFile); } catch {}
+    try { unlinkSync(tmpFile); } catch (err) {
+      console.warn(`sendLongPrompt: cleanup ${tmpFile} failed: ${err.message}`);
+    }
     await wait(5000);
   }
 
@@ -443,79 +454,40 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return getResponse(agentName, pane);
   }
 
-  // --- Progress ---
+  // --- Progress timer (thin wrapper around core/progress.mjs) ---
 
-  async function peekActivity(agentName, pane) {
-    try {
-      const { stdout } = await tmux(`capture-pane -t '${esc(agentName)}:.${pane}' -p -S -10`);
-      return extractActivity(stdout);
-    } catch { return null; }
-  }
-
-  function startProgressTimer(send, agentName, pane, { streaming = false } = {}) {
-    const start = Date.now();
-    let sentCount = 0;
-    let lastNewAt = Date.now();
-    let lastActivityMsg = "";
-
-    const timer = setInterval(async () => {
-      try {
-        const segments = await getResponseSegments(agentName, pane);
-
-        if (streaming && segments.length > 1 && sentCount < segments.length - 1) {
-          while (sentCount < segments.length - 1) {
-            send(segments[sentCount]).catch(() => {});
-            sentCount++;
-          }
-          lastNewAt = Date.now();
-          return;
+  function startProgressTimer(send, agentName, pane, opts = {}) {
+    return createProgressTimer({
+      send,
+      getSegments: () => getResponseSegments(agentName, pane),
+      capturePane: async () => {
+        try {
+          const { stdout } = await tmux(`capture-pane -t '${esc(agentName)}:.${pane}' -p -S -10`);
+          return stdout;
+        } catch (err) {
+          console.warn(`progress capturePane failed: ${err.message}`);
+          return null;
         }
-
-        const silent = (Date.now() - lastNewAt) / 1000;
-        if (silent >= 30) {
-          const label = formatDuration(Math.floor((Date.now() - start) / 1000));
-          const activity = await peekActivity(agentName, pane);
-          const msg = activity ? `working (${label}) — ${activity}` : `working (${label})`;
-          if (msg !== lastActivityMsg) {
-            send(msg).catch(() => {});
-            lastActivityMsg = msg;
-            lastNewAt = Date.now();
-          }
-        }
-      } catch {}
-    }, 3000);
-
-    return { timer, sentCount: () => sentCount };
+      },
+    }, opts);
   }
 
   // --- Context ---
 
-  function getContextPercent(agentDir, pane = 0) {
+  /**
+   * Get { percent, tokens } for a pane. Dispatches to the right session
+   * store based on the pane's configured cmd (claude vs codex).
+   */
+  function getContextPercent(agentName, pane = 0) {
     try {
-      // Read from the pane's actual dir (.agents/N/) where Claude stores its session
-      const dir = paneDir(agentDir, pane);
-      const encoded = dir.replace(/[\/\.]/g, "-");
-      const projectDir = join(process.env.HOME, ".claude", "projects", encoded);
-      const files = readdirSync(projectDir)
-        .filter((f) => f.endsWith(".jsonl"))
-        .map((f) => ({ name: f, mtime: statSync(join(projectDir, f)).mtimeMs }))
-        .sort((a, b) => b.mtime - a.mtime);
-      if (!files.length) return null;
-      const content = readFileSync(join(projectDir, files[0].name), "utf-8");
-      const lines = content.trimEnd().split("\n");
-      for (let i = lines.length - 1; i >= Math.max(0, lines.length - 30); i--) {
-        try {
-          const entry = JSON.parse(lines[i]);
-          const u = entry?.message?.usage;
-          if (u) {
-            const total = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) +
-              (u.cache_read_input_tokens || 0) + (u.output_tokens || 0);
-            return { percent: Math.round((total / CONTEXT_MAX) * 100), tokens: total };
-          }
-        } catch {}
-      }
+      const config = agentConfig(agentName);
+      const dir = paneDir(config.dir, pane);
+      const dialect = paneDialectName(agentName, pane);
+      return getContextPercentByDialect(dir, dialect);
+    } catch (err) {
+      console.warn(`getContextPercent(${agentName}) failed: ${err.message}`);
       return null;
-    } catch { return null; }
+    }
   }
 
   // --- Low-level (exposed for CLI) ---
