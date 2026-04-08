@@ -266,7 +266,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
    * Wait for agent to fully complete (idle 2 polls in a row), then send the result.
    * No streaming - just wait, then send. Avoids all timing/scrollback issues.
    */
-  async function streamResponse(msg, mapping, pane, promptText) {
+  async function streamResponse(msg, mapping, pane, promptText, tmpFiles = []) {
     const startTime = Date.now();
     const maxDuration = 600_000;
     let sawWorking = false;
@@ -288,7 +288,8 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     }
 
     // Dismiss any blocking prompts
-    await agent.dismissBlockingPrompt(`${mapping.name}:.${pane}`).catch(() => {});
+    await agent.dismissBlockingPrompt(`${mapping.name}:.${pane}`)
+      .catch((err) => console.warn(`dismiss failed: ${err.message}`));
 
     // Get final response - matched to our exact prompt.
     // Use the raw-aware variant when recording so we can persist the exact
@@ -300,20 +301,34 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     } else {
       items = await agent.getResponseStream(mapping.name, pane, promptText);
     }
+
+    // Send each item, splitting long content to stay under Discord's 2000 char limit
     for (const item of items) {
       const formatted = item.type === "tool" ? `*${item.content}*` : item.content;
-      sent.push(formatted);
-      await msg.send(formatted).catch(() => {});
+      for (const chunk of splitMessage(formatted)) {
+        sent.push(chunk);
+        await msg.send(chunk)
+          .catch((err) => console.warn(`send failed for ${mapping.name}:${pane}: ${err.message}`));
+      }
     }
 
     // Context% at the end
     const context = agent.getContextPercent(mapping.dir, pane);
-    let contextMsg = null;
     if (context) {
       const k = Math.round(context.tokens / 1000);
-      contextMsg = `_context: ${context.percent}% (${k}k)_`;
+      const contextMsg = `_context: ${context.percent}% (${k}k)_`;
       sent.push(contextMsg);
-      await msg.send(contextMsg).catch(() => {});
+      await msg.send(contextMsg)
+        .catch((err) => console.warn(`send context failed: ${err.message}`));
+    }
+
+    // TTS: speak the text parts of the response (skips tool calls)
+    if (tts.isEnabled && tts.isEnabled()) {
+      const ttsText = items.filter((i) => i.type === "text").map((i) => i.content).join("\n\n");
+      if (ttsText) {
+        await tts.sendFollowup(msg.send, ttsText, tmpFiles)
+          .catch((err) => console.warn(`tts failed: ${err.message}`));
+      }
     }
 
     if (rec.enabled) {
@@ -338,12 +353,13 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     try {
       await agent.sendOnly(mapping.name, cleanPrompt, pane);
-      await streamResponse(msg, mapping, pane, cleanPrompt);
+      await streamResponse(msg, mapping, pane, cleanPrompt, tmpFiles);
       console.log(`[${ts()}] → ${mapping.name}:${pane} done`);
     } catch (err) {
       console.log(`[${ts()}] ✗ ${mapping.name}:${pane} ${err.message}`);
       const errMsg = err.killed ? "Timeout" : `${err.stderr || err.message}`;
-      await msg.reply(errMsg).catch(() => {});
+      await msg.reply(errMsg)
+        .catch((replyErr) => console.warn(`error reply failed: ${replyErr.message}`));
     } finally {
       stopTyping();
       cleanupTmpFiles(tmpFiles);

@@ -36,6 +36,11 @@ function setup({ mappingOverride, channelMapEntries } = {}) {
     getResponse: vi.fn(async () => "response text"),
     getResponseSegments: vi.fn(async () => ["agent reply"]),
     getResponseStream: vi.fn(async () => [{ type: "text", content: "agent reply" }]),
+    getResponseStreamWithRaw: vi.fn(async () => ({
+      raw: "raw pane output",
+      turn: "turn",
+      items: [{ type: "text", content: "agent reply" }],
+    })),
     isBusy: vi.fn(async () => { busyState.calls++; return busyState.calls <= 2; }),
     capturePane: vi.fn(async () => "raw pane output"),
     getContextPercent: vi.fn(() => ({ percent: 42, tokens: 84000 })),
@@ -51,6 +56,7 @@ function setup({ mappingOverride, channelMapEntries } = {}) {
   };
 
   const tts = {
+    isEnabled: vi.fn(() => false),
     toggle: vi.fn(() => true),
     sendFollowup: vi.fn(async () => {}),
   };
@@ -305,6 +311,75 @@ feature("processMessage pipeline (streaming)", () => {
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
     then: ["tool wrapped in asterisks", (_, { msg }) => {
       expect(msg.send.mock.calls.some((c) => c[0] === "*Read file.ts*")).toBe(true);
+    }],
+  });
+
+  component("splits long items into Discord-size chunks", {
+    given: ["stream with a 3000-char text item", () => {
+      const s = setup();
+      const longText = "x".repeat(3000);
+      s.agent.getResponseStream.mockResolvedValue([
+        { type: "text", content: longText },
+      ]);
+      return { ...s, msg: mockMsg({ content: "hi" }), longText };
+    }],
+    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["sent as multiple chunks, each under 2000 chars", (_, { msg, longText }) => {
+      const sendCalls = msg.send.mock.calls.map((c) => c[0]);
+      // Exclude the context line
+      const textChunks = sendCalls.filter((c) => !c.startsWith("_context"));
+      expect(textChunks.length).toBeGreaterThan(1);
+      for (const chunk of textChunks) {
+        expect(chunk.length).toBeLessThanOrEqual(2000);
+      }
+      // Reassembled content is the original text
+      expect(textChunks.join("")).toBe(longText);
+    }],
+  });
+
+  component("calls tts.sendFollowup when tts is enabled", {
+    given: ["a message with tts enabled", () => {
+      const s = setup();
+      s.tts.isEnabled.mockReturnValue(true);
+      s.agent.getResponseStream.mockResolvedValue([
+        { type: "tool", content: "Read file.ts" },
+        { type: "text", content: "here it is" },
+      ]);
+      return { ...s, msg: mockMsg({ content: "hi" }) };
+    }],
+    when: ["onMessage completes", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["sendFollowup called with text only (no tool calls)", (_, { tts }) => {
+      expect(tts.sendFollowup).toHaveBeenCalledTimes(1);
+      const spokenText = tts.sendFollowup.mock.calls[0][1];
+      expect(spokenText).toBe("here it is");
+      expect(spokenText).not.toContain("Read file.ts");
+    }],
+  });
+
+  component("does not call tts.sendFollowup when tts is disabled", {
+    given: ["a message with tts disabled", () => {
+      const s = setup();
+      s.tts.isEnabled.mockReturnValue(false);
+      return { ...s, msg: mockMsg({ content: "hi" }) };
+    }],
+    when: ["onMessage completes", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["sendFollowup never called", (_, { tts }) => {
+      expect(tts.sendFollowup).not.toHaveBeenCalled();
+    }],
+  });
+
+  component("does not call tts.sendFollowup when response has no text", {
+    given: ["tts enabled but tool-only response", () => {
+      const s = setup();
+      s.tts.isEnabled.mockReturnValue(true);
+      s.agent.getResponseStream.mockResolvedValue([
+        { type: "tool", content: "Bash ls" },
+      ]);
+      return { ...s, msg: mockMsg({ content: "hi" }) };
+    }],
+    when: ["onMessage completes", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["sendFollowup skipped since no text to speak", (_, { tts }) => {
+      expect(tts.sendFollowup).not.toHaveBeenCalled();
     }],
   });
 });
