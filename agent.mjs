@@ -87,16 +87,23 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (await hasSession(name)) return;
     await tmux(`new-session -d -s '${esc(name)}'`);
     await tmux(`source-file ~/.tmux.conf`).catch(() => {});
-    await tmux(`set-option -g window-size largest`).catch(() => {});
+    // latest: window size follows the most recently attached client.
+    // When a user attaches to debug, tmux auto-resizes the window to match
+    // their terminal. When no client is attached, we force a minimum width
+    // so Claude's bottom bar isn't truncated (busy signal readable).
+    await tmux(`set-option -g window-size latest`).catch(() => {});
     await ensureMinWindowSize(name);
   }
 
   async function ensureMinWindowSize(name) {
     try {
+      // If there's an attached client, tmux handles sizing via window-size
+      // latest — don't fight it. Only force width when no client exists.
+      const { stdout: clients } = await tmux(`list-clients -t '${esc(name)}'`).catch(() => ({ stdout: "" }));
+      if (clients.trim()) return;
+
       const { stdout: w } = await tmux(`display -t '${esc(name)}' -p '#{window_width}'`);
       const curW = parseInt(w);
-      // Only enforce width. Height is left to tmux + client so users can
-      // see the full pane when they attach with their own terminal.
       if (curW < MIN_WINDOW_WIDTH) {
         await tmux(`resize-window -t '${esc(name)}' -x ${MIN_WINDOW_WIDTH}`).catch(() => {});
       }
