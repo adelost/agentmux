@@ -237,14 +237,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   async function isBusy(agentName, pane) {
     const raw = await capturePane(agentName, pane, 20);
-    // Universal busy signal works for both dialects
-    if (raw.includes("esc to interrupt")) return true;
-
     const dialect = detectDialect(raw);
 
+    // Dialect-specific busy signals (esc to interrupt, ✻ thinking, Working...)
+    if (dialect.busySignals?.some((sig) => raw.includes(sig))) return true;
+
     // Dialects that always show a placeholder in their prompt (e.g. Codex)
-    // can't use prompt-has-text as a busy signal. Rely on "esc to interrupt"
-    // (already checked) and dialect-specific "Working" patterns in noise.
+    // can't use prompt-has-text as a busy signal. Rely on busySignals only.
     if (!dialect.idleWhenPromptEmpty) return false;
 
     // Dialects with an empty prompt when idle (e.g. Claude Code)
@@ -311,6 +310,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const isNew = !(await hasSession(agentName));
 
     await ensureSession(agentName);
+    // Resize every time, not only when session is new. Existing sessions may
+    // have shrunk (80 col) which truncates Claude's "esc to interrupt" signal.
+    await ensureMinWindowSize(agentName);
     if (isNew) {
       await setupPanes(agentName, config.dir);
       await wait(2000);
