@@ -48,6 +48,7 @@ function setup({ mappingOverride, channelMapEntries } = {}) {
     sendEscape: vi.fn(async () => {}),
     sendAndWait: vi.fn(async () => "agent reply"),
     sendOnly: vi.fn(async () => {}),
+    waitForPromptEcho: vi.fn(async () => true),
     startProgressTimer: vi.fn(() => ({ timer: setInterval(() => {}, 99999), sentCount: () => 0 })),
   };
 
@@ -380,6 +381,49 @@ feature("processMessage pipeline (streaming)", () => {
     when: ["onMessage completes", ({ onMessage, msg }) => onMessage(msg)],
     then: ["sendFollowup skipped since no text to speak", (_, { tts }) => {
       expect(tts.sendFollowup).not.toHaveBeenCalled();
+    }],
+  });
+
+  component("waits for prompt echo before polling for busy", {
+    given: ["a regular message", () => ({ ...setup(), msg: mockMsg({ content: "what is 2+2?" }) })],
+    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["waitForPromptEcho called with the prompt text", (_, { agent }) => {
+      expect(agent.waitForPromptEcho).toHaveBeenCalled();
+      const [agentName, paneArg, promptArg] = agent.waitForPromptEcho.mock.calls[0];
+      expect(agentName).toBe("_ai");
+      expect(paneArg).toBe(0);
+      expect(promptArg).toBe("what is 2+2?");
+    }],
+  });
+
+  component("fails loud when prompt is never echoed", {
+    given: ["an agent that never echoes the prompt", () => {
+      const s = setup();
+      s.agent.waitForPromptEcho.mockResolvedValue(false);
+      return { ...s, msg: mockMsg({ content: "probably lost" }) };
+    }],
+    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["warns user, skips extract + context", (_, { msg, agent }) => {
+      // Warning sent
+      const sends = msg.send.mock.calls.map((c) => c[0]);
+      expect(sends.some((s) => s.includes("did not acknowledge"))).toBe(true);
+      // Extract never runs when echo times out
+      expect(agent.getResponseStream).not.toHaveBeenCalled();
+      expect(agent.getResponseStreamWithRaw).not.toHaveBeenCalled();
+      // Context line also skipped
+      expect(sends.some((s) => s.startsWith("_context"))).toBe(false);
+    }],
+  });
+
+  component("does not run busy loop when echo timeout fires", {
+    given: ["echo timeout", () => {
+      const s = setup();
+      s.agent.waitForPromptEcho.mockResolvedValue(false);
+      return { ...s, msg: mockMsg({ content: "timeout case" }) };
+    }],
+    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["isBusy never polled", (_, { agent }) => {
+      expect(agent.isBusy).not.toHaveBeenCalled();
     }],
   });
 });
