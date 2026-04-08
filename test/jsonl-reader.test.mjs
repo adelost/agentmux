@@ -207,6 +207,33 @@ feature("isBusyFromJsonl: full tool turn that completed", () => {
   });
 });
 
+feature("isBusyFromJsonl: max_tokens is not terminal", () => {
+  unit("returns busy when latest stop is max_tokens (claude will continue)", {
+    given: ["max_tokens fixture with follow-up", () => setupFakeProject("max-tokens-continuation.jsonl")],
+    when: ["checking busy for the prompt", ({ paneDir }) => isBusyFromJsonl(paneDir, "write a lot")],
+    then: ["not busy — end_turn came after max_tokens", (r, { cleanup }) => {
+      // This fixture has max_tokens FOLLOWED BY end_turn in the same turn.
+      // isBusy should see the final end_turn and return false.
+      expect(r).toBe(false);
+      cleanup();
+    }],
+  });
+});
+
+feature("extractFromJsonl: max_tokens + continuation merges both texts", () => {
+  unit("captures both the max_tokens message and the end_turn continuation", {
+    given: ["max_tokens fixture", () => setupFakeProject("max-tokens-continuation.jsonl")],
+    when: ["extracting", ({ paneDir }) => extractFromJsonl(paneDir, "write a lot")],
+    then: ["merged text contains both parts", (result, { cleanup }) => {
+      expect(result).not.toBeNull();
+      const text = result.items.map((i) => i.content).join(" ");
+      expect(text).toContain("Part one");
+      expect(text).toContain("Part two");
+      cleanup();
+    }],
+  });
+});
+
 feature("isBusyFromJsonl: queued prompt (claude busy on prior turn)", () => {
   unit("returns true when the prompt exists only as queue-operation", {
     given: ["queued-prompt fixture", () => setupFakeProject("queued-prompt.jsonl")],
