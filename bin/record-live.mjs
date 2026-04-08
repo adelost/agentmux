@@ -90,7 +90,7 @@ async function main() {
   const workMaxMs = 60_000;
 
   while (Date.now() - startTime < maxDuration) {
-    const busy = await agent.isBusy(agentName, pane);
+    const busy = await agent.isBusy(agentName, pane, prompt);
     if (busy) {
       if (!sawWorking) process.stdout.write("working");
       else process.stdout.write(".");

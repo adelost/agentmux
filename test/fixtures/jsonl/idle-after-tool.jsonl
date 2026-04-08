@@ -1,0 +1,4 @@
+{"type":"user","message":{"role":"user","content":"read and summarize"},"uuid":"u1","timestamp":"2026-04-08T20:00:00Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/a.txt"}}],"stop_reason":"tool_use"},"uuid":"a1","timestamp":"2026-04-08T20:00:01Z"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"file contents"}]},"uuid":"u2","timestamp":"2026-04-08T20:00:02Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The file says X."}],"stop_reason":"end_turn"},"uuid":"a2","timestamp":"2026-04-08T20:00:03Z"}

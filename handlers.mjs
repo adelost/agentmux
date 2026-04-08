@@ -290,7 +290,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     const workMaxMs = 60_000; // If echo but no busy signal within 60s, fail loud
 
     while (Date.now() - startTime < maxDuration) {
-      const busy = await agent.isBusy(mapping.name, pane);
+      const busy = await agent.isBusy(mapping.name, pane, promptText);
       if (busy) { sawWorking = true; idleStreak = 0; }
       else {
         idleStreak += 1;

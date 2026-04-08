@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"write a long story"},"uuid":"u1","timestamp":"2026-04-08T20:00:00Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Once upon a time"}],"stop_reason":null},"uuid":"a1","timestamp":"2026-04-08T20:00:01Z"}
