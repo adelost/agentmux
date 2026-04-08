@@ -40,9 +40,19 @@ export const UI_NOISE = [
   /^~\//,
   /^context: \d+%/,
   /^\[(image|file) attached:/,   // injected attachment paths from Agentus
+  /^\s*\d+\s+tokens\s*$/,         // Claude Code v2.1.96+ bottom status: "27257 tokens"
+  /^\s*● (high|medium|low) · \/effort\s*$/,  // Claude Code v2.1.96+ effort indicator
+  /^\s*gpt-[\d.]+ \w+ · \d+% left/,   // Codex bottom status: "gpt-5.4 xhigh · 96% left · ~/path"
+  /^\s*• Working \(/,                  // Codex busy indicator
 ];
 
-// Tool calls: ● ToolName(args) or summary lines like ● Searched for N...
-export const TOOL_CALL = /^● (?:[A-Za-z]+\(|Searched for \d|Wrote \d|Read \d|Edit \d)/;
+// Tool calls:
+//   Claude: ● ToolName(args) or ● Searched for N... etc.
+//   Codex: • Verb object (Explored, Ran cmd, Read file, Wrote file, Edit file, Updated, Searched, Listed, Viewed)
+const CODEX_VERBS = "Explored|Ran|Read|Wrote|Edit|Edited|Update|Updated|Search|Searched|List|Listed|View|Viewed|Create|Created|Delete|Deleted";
+export const TOOL_CALL = new RegExp(
+  `^(?:● (?:[A-Za-z]+\\(|Searched for \\d|Wrote \\d|Read \\d|Edit \\d))` +
+  `|^(?:• (?:${CODEX_VERBS})\\b)`
+);
 
 export const isNoise = (line) => UI_NOISE.some((p) => p.test(line));

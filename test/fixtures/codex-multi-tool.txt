@@ -1,0 +1,15 @@
+› kör 'date' och säg tiden. max 1 mening.
+
+• Jag kör date igen och återger tiden i en mening.
+
+• Ran date '+%H:%M %Z'
+  └ 19:11 CEST
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• Klockan är 19:11 CEST.
+
+
+› Find and fix a bug in @filename
+
+  gpt-5.4 xhigh · 96% left · ~/.openclaw/workspace
