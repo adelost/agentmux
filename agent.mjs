@@ -11,7 +11,13 @@ import { extractFromJsonl } from "./core/jsonl-reader.mjs";
 
 const CONTEXT_MAX = 200_000;
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
-const MIN_WINDOW = { width: 300, height: 80 };
+// Minimum width for the tmux window. We only force width, not height, so:
+//   - Claude's bottom bar renders in full (no "esc to interrup" truncation)
+//     which is required for isBusy to catch the busy signal
+//   - The window height follows the attached client ('window-size largest'
+//     grows it to match the largest attached terminal) so users can see the
+//     whole pane when they attach for debugging
+const MIN_WINDOW_WIDTH = 300;
 
 // --- Session isolation ---
 
@@ -88,10 +94,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   async function ensureMinWindowSize(name) {
     try {
       const { stdout: w } = await tmux(`display -t '${esc(name)}' -p '#{window_width}'`);
-      const { stdout: h } = await tmux(`display -t '${esc(name)}' -p '#{window_height}'`);
-      const curW = parseInt(w), curH = parseInt(h);
-      if (curW < MIN_WINDOW.width || curH < MIN_WINDOW.height) {
-        await tmux(`resize-window -t '${esc(name)}' -x ${Math.max(curW, MIN_WINDOW.width)} -y ${Math.max(curH, MIN_WINDOW.height)}`).catch(() => {});
+      const curW = parseInt(w);
+      // Only enforce width. Height is left to tmux + client so users can
+      // see the full pane when they attach with their own terminal.
+      if (curW < MIN_WINDOW_WIDTH) {
+        await tmux(`resize-window -t '${esc(name)}' -x ${MIN_WINDOW_WIDTH}`).catch(() => {});
       }
     } catch {}
   }
