@@ -239,8 +239,14 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const raw = await capturePane(agentName, pane, 20);
     const dialect = detectDialect(raw);
 
-    // Dialect-specific busy signals (esc to interrupt, ✻ thinking, Working...)
-    if (dialect.busySignals?.some((sig) => raw.includes(sig))) return true;
+    // Dialect-specific busy signals. Each entry can be a string (substring
+    // match) or a RegExp (pattern match) — supports both literal indicators
+    // like "esc to interrup" and shape-matchers like /\w+ing…\s*\(/ for
+    // thinking verbs (Musing…, Orchestrating…, Doing…).
+    const hit = dialect.busySignals?.some((sig) =>
+      typeof sig === "string" ? raw.includes(sig) : sig.test(raw),
+    );
+    if (hit) return true;
 
     // Dialects that always show a placeholder in their prompt (e.g. Codex)
     // can't use prompt-has-text as a busy signal. Rely on busySignals only.
@@ -274,7 +280,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   }
 
   async function capturePane(agentName, pane, lines = 50) {
-    const { stdout } = await tmux(`capture-pane -t '${esc(agentName)}:.${pane}' -p -S -${lines}`);
+    // -J joins wrapped lines into single logical lines. Without this, narrow
+    // panes (e.g. 42-col panes in main-vertical layouts) split the prompt and
+    // response across multiple lines, confusing extract which treats
+    // continuation lines as new text segments.
+    const { stdout } = await tmux(`capture-pane -t '${esc(agentName)}:.${pane}' -p -J -S -${lines}`);
     return stripAnsi(stdout).trimEnd() || "(empty)";
   }
 

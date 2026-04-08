@@ -11,6 +11,7 @@ import {
   matchesAnyPromptWithText,
   matchesAnyPromptPrefix,
   stripBullet,
+  ALL_DIALECTS,
 } from "./dialects.mjs";
 
 // Non-dialect-specific patterns (diff rendering, expand hints)
@@ -60,19 +61,54 @@ const isToolResult = (line) =>
 /** Check if a line is a text-output bullet (● or • followed by actual text, but not a tool call) */
 const isTextBullet = (line) => matchesAnyBullet(line) && !isToolLine(line);
 
+/** True if a line starts with any dialect's prompt glyph (noise-worthy prompt line) */
+const isPromptLine = (line) =>
+  ALL_DIALECTS.some((d) => line.startsWith(d.promptChar));
+
 /**
  * Parse raw tmux buffer into structured lines with types.
  * Returns array of { type: 'text' | 'tool' | 'noise' | 'empty', content: string }
+ *
+ * Tracks two kinds of block state across lines:
+ *   inToolBlock - indented lines belong to a preceding tool call
+ *   inPromptCont - indented lines belong to a preceding wordwrapped prompt
+ *
+ * Wordwrapped prompt example (narrow pane):
+ *   ❯ Ge mig en mindre berättelse om en
+ *     katt... som hoppar fallskärm        <- this is continuation of the prompt
+ *   ● Whiskers första hopp                <- this is the real response
+ *
+ * Without inPromptCont tracking, "  katt..." would fall through to the default
+ * text classifier and leak into the extracted response.
  */
 const classifyLines = (raw) => {
   const lines = raw.split("\n");
   let inToolBlock = false;
+  let inPromptCont = false;
 
-  return lines.map((line) => {
-    const trimmed = line.trimEnd();
+  return lines.map((rawLine) => {
+    const trimmed = rawLine.trimEnd();
+    const isIndented = rawLine.startsWith(" ") || rawLine.startsWith("\t");
 
-    if (!trimmed) return { type: "empty", content: "" };
-    if (isNoise(trimmed)) return { type: "noise", content: trimmed };
+    if (!trimmed) {
+      inPromptCont = false;
+      return { type: "empty", content: "" };
+    }
+
+    // Prompt continuation (wordwrapped): indented line following a prompt line
+    // that isn't itself a bullet, tool-result, or new tool call.
+    if (inPromptCont && isIndented && !matchesAnyBullet(trimmed) && !isToolLine(trimmed) && !isToolResult(trimmed)) {
+      return { type: "noise", content: trimmed };
+    }
+
+    if (isNoise(trimmed)) {
+      // Start tracking prompt continuation when we see a prompt line
+      inPromptCont = isPromptLine(trimmed);
+      return { type: "noise", content: trimmed };
+    }
+
+    // Any non-noise content resets prompt-continuation state
+    inPromptCont = false;
 
     if (isToolLine(trimmed)) {
       inToolBlock = true;
@@ -90,7 +126,7 @@ const classifyLines = (raw) => {
     }
 
     // Non-indented line after a tool block = new text section
-    if (inToolBlock && !trimmed.startsWith(" ") && !trimmed.startsWith("\t")) {
+    if (inToolBlock && !isIndented) {
       inToolBlock = false;
       return { type: "text", content: trimmed };
     }

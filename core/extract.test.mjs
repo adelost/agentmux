@@ -219,6 +219,58 @@ feature("extractText: tool results with non-breaking space indent", () => {
   });
 });
 
+feature("extract: wordwrapped prompt continuation (narrow panes)", () => {
+  unit("strips prompt continuation lines from text output", {
+    given: ["tmux buffer with wordwrapped prompt", () => [
+      "❯ Ge mig en mindre berättelse om en",
+      "  katt... som hoppar fallskärm",
+      "",
+      "● Whiskers första hopp",
+      "",
+      "  Whiskers var en katt med stora drömmar.",
+    ].join("\n")],
+    when: ["extracting text", (raw) => extractText(raw)],
+    then: ["only the response remains, prompt continuation gone", (text) => {
+      expect(text).toContain("Whiskers första hopp");
+      expect(text).toContain("Whiskers var en katt med stora drömmar.");
+      expect(text).not.toContain("katt... som hoppar fallskärm");
+      expect(text).not.toContain("Ge mig");
+    }],
+  });
+
+  unit("handles multi-line wordwrapped prompt", {
+    given: ["prompt wrapped over 3 lines", () => [
+      "❯ This is a really long prompt that",
+      "  continues on a second line and also",
+      "  spills onto a third line here",
+      "",
+      "● Short answer.",
+    ].join("\n")],
+    when: ["extracting text", (raw) => extractText(raw)],
+    then: ["all 3 prompt lines stripped, only response remains", (text) => {
+      expect(text).toBe("Short answer.");
+      expect(text).not.toContain("continues");
+      expect(text).not.toContain("spills");
+    }],
+  });
+
+  unit("does not strip indented text that follows a response bullet", {
+    given: ["response with indented paragraph continuation", () => [
+      "❯ tell me about cats",
+      "",
+      "● Cats are curious.",
+      "  They like boxes and",
+      "  warm sunbeams.",
+    ].join("\n")],
+    when: ["extracting text", (raw) => extractText(raw)],
+    then: ["indented continuation of the response is kept", (text) => {
+      expect(text).toContain("Cats are curious.");
+      expect(text).toContain("They like boxes and");
+      expect(text).toContain("warm sunbeams.");
+    }],
+  });
+});
+
 feature("extract: codex dialect (• bullet, └ tool result, verb tool calls)", () => {
   unit("extracts text + tool + text in order for codex output", {
     given: ["codex multi-tool fixture", () => fixture("codex-multi-tool.txt")],
