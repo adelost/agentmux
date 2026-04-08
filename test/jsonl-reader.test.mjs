@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, copyFileSync, rmSync, writeFileSync } from "fs"
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
-import { extractFromJsonl, formatJsonlToolCall } from "../core/jsonl-reader.mjs";
+import { extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl } from "../core/jsonl-reader.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const fixtureFile = (name) => join(__dir, "fixtures/jsonl", name);
@@ -136,6 +136,74 @@ feature("extractFromJsonl: prompt not found", () => {
     then: ["still returns the last assistant response", (result, { cleanup }) => {
       expect(result).not.toBeNull();
       expect(result.items[0].content).toBe("The answer is 4.");
+      cleanup();
+    }],
+  });
+});
+
+// --- isBusyFromJsonl ----------------------------------------------------
+
+feature("isBusyFromJsonl: streaming assistant with null stop_reason", () => {
+  unit("returns true (busy) — claude still writing", {
+    given: ["streaming fixture", () => setupFakeProject("busy-streaming.jsonl")],
+    when: ["checking", ({ paneDir }) => isBusyFromJsonl(paneDir, "write a long story")],
+    then: ["busy", (r, { cleanup }) => {
+      expect(r).toBe(true);
+      cleanup();
+    }],
+  });
+});
+
+feature("isBusyFromJsonl: user prompt with no assistant response yet", () => {
+  unit("returns true (busy) — claude hasn't started", {
+    given: ["user-only fixture", () => setupFakeProject("busy-no-assistant.jsonl")],
+    when: ["checking", ({ paneDir }) => isBusyFromJsonl(paneDir, "hello")],
+    then: ["busy", (r, { cleanup }) => {
+      expect(r).toBe(true);
+      cleanup();
+    }],
+  });
+});
+
+feature("isBusyFromJsonl: tool_use followed by tool_result, no final assistant", () => {
+  unit("returns true (busy) — claude owes us an assistant message", {
+    given: ["tool pending fixture", () => setupFakeProject("busy-tool-pending.jsonl")],
+    when: ["checking", ({ paneDir }) => isBusyFromJsonl(paneDir, "read the file")],
+    then: ["busy", (r, { cleanup }) => {
+      expect(r).toBe(true);
+      cleanup();
+    }],
+  });
+});
+
+feature("isBusyFromJsonl: assistant with stop_reason end_turn", () => {
+  unit("returns false (idle) — turn complete", {
+    given: ["end_turn fixture", () => setupFakeProject("idle-end-turn.jsonl")],
+    when: ["checking", ({ paneDir }) => isBusyFromJsonl(paneDir, "say hi")],
+    then: ["idle", (r, { cleanup }) => {
+      expect(r).toBe(false);
+      cleanup();
+    }],
+  });
+});
+
+feature("isBusyFromJsonl: full tool turn that completed", () => {
+  unit("returns false (idle) — tool executed and assistant wrote final", {
+    given: ["complete tool turn", () => setupFakeProject("idle-after-tool.jsonl")],
+    when: ["checking", ({ paneDir }) => isBusyFromJsonl(paneDir, "read and summarize")],
+    then: ["idle", (r, { cleanup }) => {
+      expect(r).toBe(false);
+      cleanup();
+    }],
+  });
+});
+
+feature("isBusyFromJsonl: missing jsonl file", () => {
+  unit("returns null so caller can fall back", {
+    given: ["nonexistent pane", () => ({ paneDir: "/nope/.agents/99", cleanup: () => {} })],
+    when: ["checking", ({ paneDir }) => isBusyFromJsonl(paneDir, "anything")],
+    then: ["null", (r, { cleanup }) => {
+      expect(r).toBeNull();
       cleanup();
     }],
   });

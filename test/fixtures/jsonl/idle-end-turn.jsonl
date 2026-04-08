@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"say hi"},"uuid":"u1","timestamp":"2026-04-08T20:00:00Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hi!"}],"stop_reason":"end_turn"},"uuid":"a1","timestamp":"2026-04-08T20:00:01Z"}

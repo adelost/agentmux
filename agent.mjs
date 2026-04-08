@@ -7,7 +7,7 @@ import { load as loadYaml } from "js-yaml";
 import { esc, stripAnsi, extractActivity, formatDuration } from "./lib.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
 import { detectDialect } from "./core/dialects.mjs";
-import { extractFromJsonl } from "./core/jsonl-reader.mjs";
+import { extractFromJsonl, isBusyFromJsonl } from "./core/jsonl-reader.mjs";
 
 const CONTEXT_MAX = 200_000;
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
@@ -228,7 +228,19 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return extractText(raw) || "(empty response)";
   }
 
-  async function isBusy(agentName, pane) {
+  async function isBusy(agentName, pane, promptText = null) {
+    // Source of truth: Claude's session jsonl has the authoritative stop_reason
+    // on the latest assistant message. No tmux rendering to parse, no pane
+    // width to care about, no progress icons to match. If jsonl exists for
+    // this pane and has a matching turn, trust it.
+    try {
+      const config = agentConfig(agentName);
+      const dir = paneDir(config.dir, pane);
+      const jsonlResult = isBusyFromJsonl(dir, promptText);
+      if (jsonlResult !== null) return jsonlResult;
+    } catch {}
+
+    // Fallback: tmux parsing (Codex, missing jsonl, no matching prompt yet)
     const raw = await capturePane(agentName, pane, 20);
     const dialect = detectDialect(raw);
 

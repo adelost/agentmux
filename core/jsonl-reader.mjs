@@ -69,6 +69,10 @@ function userPromptText(event) {
   return null;
 }
 
+// stop_reasons that mean "claude is done with this turn". Anything else
+// (null, "tool_use", missing) means claude is still working.
+const TERMINAL_STOP_REASONS = new Set(["end_turn", "stop_sequence", "max_tokens", "refusal"]);
+
 /**
  * Find the index of the last user event whose prompt text matches the needle.
  * Falls back to the last user prompt of any kind if no match.
@@ -124,6 +128,69 @@ export function formatJsonlToolCall(toolUse) {
     .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
     .join(" ");
   return args ? `${name} ${args}` : name;
+}
+
+/**
+ * Determine whether Claude is busy for a given pane, using the session jsonl
+ * as source of truth instead of parsing the tmux pane text.
+ *
+ * Claude writes every event to ~/.claude/projects/{encoded}/{session}.jsonl
+ * including the final assistant message with a stop_reason field. If the most
+ * recent assistant event for our turn has a terminal stop_reason
+ * (end_turn / stop_sequence / max_tokens / refusal) and there is nothing
+ * pending after it, the agent is idle. Everything else means it's still
+ * working (streaming, tool_use pausing for a result, etc).
+ *
+ * @param {string} paneDir - The pane's working dir (e.g. ~/lsrc/.agents/1)
+ * @param {string|null} promptText - Our user prompt; used to anchor the walk
+ * @returns {boolean | null}
+ *   true  = claude is busy
+ *   false = claude is idle (turn complete)
+ *   null  = can't tell (no jsonl, no matching prompt) → caller should fall back
+ */
+export function isBusyFromJsonl(paneDir, promptText = null) {
+  const projectDir = join(CLAUDE_PROJECTS_DIR(), encodePath(paneDir));
+  const jsonl = latestJsonlFile(projectDir);
+  if (!jsonl) return null;
+
+  const events = parseJsonl(jsonl);
+  if (events.length === 0) return null;
+
+  const userIdx = findUserPromptIndex(events, promptText);
+  if (userIdx === -1) return null;
+
+  // Walk forward from the user prompt, tracking the last assistant event.
+  // Break when we hit a *new* user prompt (not a tool_result) — that's the
+  // start of the next turn.
+  let lastAssistant = null;
+  let pendingToolResult = false;
+
+  for (let i = userIdx + 1; i < events.length; i++) {
+    const e = events[i];
+    if (e.type === "user") {
+      if (userPromptText(e) !== null) break; // new turn starts here
+      // Otherwise it's a tool_result — claude will respond with a new
+      // assistant message; until that arrives, we're still busy.
+      pendingToolResult = true;
+      continue;
+    }
+    if (e.type !== "assistant") continue;
+    lastAssistant = e;
+    pendingToolResult = false;
+  }
+
+  // User prompt seen but no assistant response yet → claude is thinking
+  if (!lastAssistant) return true;
+
+  // There's a tool_result waiting for a new assistant message → busy
+  if (pendingToolResult) return true;
+
+  // Final assistant event: check its stop_reason
+  const reason = lastAssistant.message?.stop_reason;
+  if (TERMINAL_STOP_REASONS.has(reason)) return false;
+
+  // null / "tool_use" / missing / unknown → still working
+  return true;
 }
 
 /**
