@@ -2,7 +2,7 @@ import { unit, feature, expect } from "bdd-vitest";
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { extractText, classifyLines, extractSegments, extractMixedStream, isToolLine, isTextBullet } from "./extract.mjs";
+import { extractText, classifyLines, extractSegments, extractMixedStream, isToolLine, isTextBullet, dewrapParagraphs } from "./extract.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => readFileSync(join(__dir, "../test/fixtures", name), "utf-8");
@@ -215,6 +215,94 @@ feature("extractText: tool results with non-breaking space indent", () => {
       // Find the ⎿ line
       const toolResult = lines.find((l) => l.content.includes("Found 0 files"));
       expect(toolResult.type).toBe("tool");
+    }],
+  });
+});
+
+feature("dewrapParagraphs", () => {
+  unit("joins wordwrapped lines within a paragraph", {
+    given: ["wrapped paragraph", () => [
+      "Murre hoppade från balkongen med en",
+      "pizzakartong fastspänd på ryggen och var",
+      "helt övertygad om att det skulle fungera.",
+    ].join("\n")],
+    when: ["dewrapping", (text) => dewrapParagraphs(text)],
+    then: ["joined with spaces, one line", (result) => {
+      expect(result).toBe("Murre hoppade från balkongen med en pizzakartong fastspänd på ryggen och var helt övertygad om att det skulle fungera.");
+    }],
+  });
+
+  unit("preserves empty lines as paragraph breaks", {
+    given: ["two paragraphs", () => [
+      "First paragraph with some",
+      "wordwrapped text here.",
+      "",
+      "Second paragraph also wraps",
+      "over two lines.",
+    ].join("\n")],
+    when: ["dewrapping", (text) => dewrapParagraphs(text)],
+    then: ["two joined lines separated by blank", (result) => {
+      expect(result).toBe("First paragraph with some wordwrapped text here.\n\nSecond paragraph also wraps over two lines.");
+    }],
+  });
+
+  unit("keeps list items on their own lines", {
+    given: ["list", () => [
+      "Here are the steps:",
+      "- first item",
+      "- second item",
+      "- third item",
+    ].join("\n")],
+    when: ["dewrapping", (text) => dewrapParagraphs(text)],
+    then: ["list items separated from intro and each other", (result) => {
+      expect(result).toBe("Here are the steps:\n- first item\n- second item\n- third item");
+    }],
+  });
+
+  unit("keeps numbered list items separate", {
+    given: ["numbered list", () => [
+      "Todo:",
+      "1. first thing",
+      "2. second thing",
+    ].join("\n")],
+    when: ["dewrapping", (text) => dewrapParagraphs(text)],
+    then: ["numbers preserved as separate lines", (result) => {
+      expect(result).toBe("Todo:\n1. first thing\n2. second thing");
+    }],
+  });
+
+  unit("keeps fenced code blocks on their own lines", {
+    given: ["text with code fence", () => [
+      "Run this:",
+      "```",
+      "npm test",
+      "```",
+      "and it works.",
+    ].join("\n")],
+    when: ["dewrapping", (text) => dewrapParagraphs(text)],
+    then: ["fences and code on own lines", (result) => {
+      expect(result).toContain("Run this:");
+      expect(result).toContain("```");
+      expect(result).toContain("npm test");
+      expect(result).toContain("and it works.");
+    }],
+  });
+
+  unit("handles the Murre story case end-to-end", {
+    given: ["narrow-pane cat story", () => [
+      "Murre hoppade från balkongen med en",
+      "pizzakartong fastspänd på ryggen och var",
+      "helt övertygad om att det skulle",
+      "fungera. Det gjorde det inte. Men",
+      "grannens hortensior var mjuka, och",
+      "pizzan var fortfarande varm när han åt",
+      "upp den i busken.",
+    ].join("\n")],
+    when: ["dewrapping", (text) => dewrapParagraphs(text)],
+    then: ["one clean line for Discord", (result) => {
+      expect(result).not.toContain("\n");
+      expect(result).toContain("Murre hoppade");
+      expect(result).toContain("upp den i busken.");
     }],
   });
 });
