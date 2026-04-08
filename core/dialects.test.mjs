@@ -154,3 +154,44 @@ feature("stripBullet", () => {
     then: ["unchanged", (r) => expect(r).toBe("no bullet here")],
   });
 });
+
+feature("Claude busy regex: present vs past tense", () => {
+  // Helper: run raw through Claude's regex busy signals
+  const isBusyByRegex = (raw) => CLAUDE.busySignals.some((s) =>
+    typeof s === "string" ? raw.includes(s) : s.test(raw));
+
+  unit("PRESENT '✻ Musing…' is busy", {
+    when: ["checking", () => isBusyByRegex("✻ Musing… (2s · ↓ 40 tokens)")],
+    then: ["busy", (r) => expect(r).toBe(true)],
+  });
+
+  unit("PRESENT '· Orchestrating…' is busy", {
+    when: ["checking", () => isBusyByRegex("· Orchestrating… (9s · ↓ 129 tokens)")],
+    then: ["busy", (r) => expect(r).toBe(true)],
+  });
+
+  unit("PRESENT '* Waddling…' is busy", {
+    when: ["checking", () => isBusyByRegex("* Waddling… (6s · ↓ 85 tokens)")],
+    then: ["busy", (r) => expect(r).toBe(true)],
+  });
+
+  unit("PRESENT '✢ Frolicking…' is busy", {
+    when: ["checking", () => isBusyByRegex("✢ Frolicking… (15s · ↓ 311 tokens)")],
+    then: ["busy", (r) => expect(r).toBe(true)],
+  });
+
+  unit("PAST '✻ Worked for 32s' is NOT busy (regression)", {
+    when: ["checking", () => isBusyByRegex("✻ Worked for 32s")],
+    then: ["idle", (r) => expect(r).toBe(false)],
+  });
+
+  unit("PAST '✻ Cogitated for 14s' is NOT busy", {
+    when: ["checking", () => isBusyByRegex("✻ Cogitated for 14s · ↓ 500 tokens")],
+    then: ["idle", (r) => expect(r).toBe(false)],
+  });
+
+  unit("PAST '✻ Brewed for 2s' is NOT busy", {
+    when: ["checking", () => isBusyByRegex("✻ Brewed for 2s")],
+    then: ["idle", (r) => expect(r).toBe(false)],
+  });
+});

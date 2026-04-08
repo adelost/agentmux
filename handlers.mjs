@@ -314,9 +314,9 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     // Use the raw-aware variant when recording so we can persist the exact
     // input to the extract pipeline alongside its output.
     const sent = [];
-    let raw = null, turn = null, items;
+    let raw = null, turn = null, items, source = null;
     if (rec.enabled) {
-      ({ raw, turn, items } = await agent.getResponseStreamWithRaw(mapping.name, pane, promptText));
+      ({ raw, turn, items, source } = await agent.getResponseStreamWithRaw(mapping.name, pane, promptText));
     } else {
       items = await agent.getResponseStream(mapping.name, pane, promptText);
     }
@@ -362,6 +362,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         context,
         discordSent: sent,
         durationMs: Date.now() - startTime,
+        source,
       });
     }
   }
