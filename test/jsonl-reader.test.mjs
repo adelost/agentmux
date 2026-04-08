@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, copyFileSync, rmSync, writeFileSync } from "fs"
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
-import { extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl } from "../core/jsonl-reader.mjs";
+import { extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl, isPromptInJsonl } from "../core/jsonl-reader.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const fixtureFile = (name) => join(__dir, "fixtures/jsonl", name);
@@ -201,6 +201,46 @@ feature("isBusyFromJsonl: full tool turn that completed", () => {
     given: ["complete tool turn", () => setupFakeProject("idle-after-tool.jsonl")],
     when: ["checking", ({ paneDir }) => isBusyFromJsonl(paneDir, "read and summarize")],
     then: ["idle", (r, { cleanup }) => {
+      expect(r).toBe(false);
+      cleanup();
+    }],
+  });
+});
+
+feature("isBusyFromJsonl: queued prompt (claude busy on prior turn)", () => {
+  unit("returns true when the prompt exists only as queue-operation", {
+    given: ["queued-prompt fixture", () => setupFakeProject("queued-prompt.jsonl")],
+    when: ["checking busy for queued prompt", ({ paneDir }) => isBusyFromJsonl(paneDir, "queued second prompt")],
+    then: ["busy — claude will pick it up after current turn", (r, { cleanup }) => {
+      expect(r).toBe(true);
+      cleanup();
+    }],
+  });
+});
+
+feature("isPromptInJsonl: matches queue-operation and attachment events", () => {
+  unit("finds prompt in queue-operation event", {
+    given: ["queued fixture", () => setupFakeProject("queued-prompt.jsonl")],
+    when: ["checking", ({ paneDir }) => isPromptInJsonl(paneDir, "queued second prompt")],
+    then: ["found", (r, { cleanup }) => {
+      expect(r).toBe(true);
+      cleanup();
+    }],
+  });
+
+  unit("still finds prompt in plain type:user event", {
+    given: ["simple fixture", () => setupFakeProject("simple-text.jsonl")],
+    when: ["checking", ({ paneDir }) => isPromptInJsonl(paneDir, "what is 2+2?")],
+    then: ["found", (r, { cleanup }) => {
+      expect(r).toBe(true);
+      cleanup();
+    }],
+  });
+
+  unit("returns false when prompt is nowhere in jsonl", {
+    given: ["simple fixture", () => setupFakeProject("simple-text.jsonl")],
+    when: ["checking wrong prompt", ({ paneDir }) => isPromptInJsonl(paneDir, "not in there")],
+    then: ["not found", (r, { cleanup }) => {
       expect(r).toBe(false);
       cleanup();
     }],
