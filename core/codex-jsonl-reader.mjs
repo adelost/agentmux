@@ -88,6 +88,29 @@ function latestSessionFor(paneDir) {
 }
 
 /**
+ * Check if a given prompt has been written to Codex's rollout jsonl for
+ * this pane. Echo confirmation via data, not tmux pane text.
+ *
+ * @returns boolean (true = prompt found) or null (no session file)
+ */
+export function isPromptInCodexJsonl(paneDir, promptText) {
+  const needle = promptText?.trim();
+  if (!needle) return null;
+
+  const file = latestSessionFor(paneDir);
+  if (!file) return null;
+
+  const events = parseJsonl(file);
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type !== "event_msg") continue;
+    if (e.payload?.type !== "user_message") continue;
+    if (e.payload.message === needle) return true;
+  }
+  return false;
+}
+
+/**
  * Check if Codex is busy for a given pane.
  *
  * @returns {boolean | null}
