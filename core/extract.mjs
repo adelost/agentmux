@@ -138,26 +138,68 @@ const classifyLines = (raw) => {
   });
 };
 
+// --- De-wrap ------------------------------------------------------------
+
+/**
+ * Join wordwrapped continuation lines within a paragraph into a single line.
+ *
+ * Narrow tmux panes (42 col in main-vertical layouts) make Claude break each
+ * sentence across multiple lines. In Discord those lines become separate
+ * paragraphs which looks broken — Discord already wordwraps on its own, so
+ * we want one line per logical paragraph.
+ *
+ * Rules:
+ *   - Empty line  → paragraph break (flush current + keep the blank)
+ *   - List item (- / * / • / 1.) → its own line (flush first)
+ *   - Fenced code block (```) → flushed and kept on its own line
+ *   - Everything else → append to the current paragraph, joined with space
+ */
+const LIST_OR_FENCE = /^(```|[-*+•]\s|\d+\.\s)/;
+
+export function dewrapParagraphs(text) {
+  const lines = text.split("\n");
+  const out = [];
+  let current = [];
+
+  const flush = () => {
+    if (current.length) out.push(current.join(" "));
+    current = [];
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flush();
+      out.push("");
+      continue;
+    }
+    if (LIST_OR_FENCE.test(trimmed)) {
+      flush();
+      out.push(trimmed);
+      continue;
+    }
+    current.push(trimmed);
+  }
+  flush();
+
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 // --- High-level extract --------------------------------------------------
 
 /**
  * Extract clean text from raw tmux output.
  * Returns the text response with tool calls, UI noise, and diffs stripped.
- * Only processes the last turn.
+ * Only processes the last turn. Wordwrapped paragraphs are dewrapped.
  */
 export const extractText = (raw) => {
   const lastTurn = extractLastTurn(raw);
   const classified = classifyLines(lastTurn);
   const textLines = classified
-    .filter((l) => l.type === "text")
+    .filter((l) => l.type === "text" || l.type === "empty")
     .map((l) => l.content);
 
-  const result = textLines
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-
-  return result || null;
+  return dewrapParagraphs(textLines.join("\n")) || null;
 };
 
 /**
@@ -219,7 +261,7 @@ export function extractMixedStream(classified) {
   let textBuffer = [];
 
   const flushText = () => {
-    const text = textBuffer.join("\n").trim();
+    const text = dewrapParagraphs(textBuffer.join("\n"));
     if (text) items.push({ type: "text", content: text });
     textBuffer = [];
   };
