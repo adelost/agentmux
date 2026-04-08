@@ -2,6 +2,7 @@
 
 import yaml from "js-yaml";
 import { TOOL_CALL, isNoise } from "./core/noise.mjs";
+import { stripBullet } from "./core/dialects.mjs";
 
 /** Strip ANSI escape codes from terminal output */
 export const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
@@ -47,13 +48,14 @@ export function parseEnv(content) {
 
 /**
  * Extract current activity from tmux pane capture.
- * Returns a short description of what Claude is doing, or null.
+ * Returns a short description of what the agent is doing, or null.
+ * Dialect-agnostic: strips any known bullet glyph.
  */
 export function extractActivity(paneContent) {
   const lines = stripAnsi(paneContent).split("\n").map((l) => l.trim()).filter((l) => l && !isNoise(l));
   if (!lines.length) return null;
   const pick = lines.findLast((l) => TOOL_CALL.test(l)) || lines[lines.length - 1];
-  const clean = pick.replace(/^● /, "");
+  const clean = stripBullet(pick);
   return clean.length > 60 ? clean.slice(0, 57) + "…" : clean;
 }
 

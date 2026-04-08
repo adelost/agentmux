@@ -6,6 +6,7 @@ import { join } from "path";
 import { load as loadYaml } from "js-yaml";
 import { esc, stripAnsi, extractActivity, formatDuration } from "./lib.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
+import { detectDialect } from "./core/dialects.mjs";
 
 const CONTEXT_MAX = 200_000;
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
@@ -236,18 +237,22 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   async function isBusy(agentName, pane) {
     const raw = await capturePane(agentName, pane, 20);
+    // Universal busy signal works for both dialects
     if (raw.includes("esc to interrupt")) return true;
+
+    const dialect = detectDialect(raw);
+
+    // Dialects that always show a placeholder in their prompt (e.g. Codex)
+    // can't use prompt-has-text as a busy signal. Rely on "esc to interrupt"
+    // (already checked) and dialect-specific "Working" patterns in noise.
+    if (!dialect.idleWhenPromptEmpty) return false;
+
+    // Dialects with an empty prompt when idle (e.g. Claude Code)
     const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
     const tail = lines.slice(-10);
-    // Codex always shows a placeholder in its prompt when idle ("Find and fix a bug in @filename"),
-    // so we can't use prompt-has-text as a busy signal for codex. Rely on "esc to interrupt"
-    // (already checked above) and "• Working" for codex.
-    const isCodex = tail.some((l) => l.startsWith("›"));
-    if (isCodex) return false;
-    // Claude Code: idle when last ❯ prompt is empty
-    const promptLine = tail.findLast((l) => l.startsWith("❯"));
+    const promptLine = tail.findLast((l) => l.startsWith(dialect.promptChar));
     if (!promptLine) return true;
-    return promptLine.replace(/^❯\s*/, "").length > 0;
+    return promptLine.slice(dialect.promptChar.length).trim().length > 0;
   }
 
   async function getResponseSegments(agentName, pane) {
