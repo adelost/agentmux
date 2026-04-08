@@ -7,6 +7,7 @@ import { load as loadYaml } from "js-yaml";
 import { esc, stripAnsi, extractActivity, formatDuration } from "./lib.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
 import { detectDialect } from "./core/dialects.mjs";
+import { extractFromJsonl } from "./core/jsonl-reader.mjs";
 
 const CONTEXT_MAX = 200_000;
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
@@ -271,8 +272,26 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return items;
   }
 
-  /** Same as getResponseStream but also returns raw buffer + turn slice (for recording). */
+  /**
+   * Same as getResponseStream but also returns raw buffer + turn slice (for recording).
+   *
+   * Source-of-truth strategy:
+   *   1. Prefer Claude's jsonl session file — it has exact text with code fences,
+   *      structured tool_use blocks, and no UI rendering artifacts. This eliminates
+   *      narrow-pane wordwrap, progress-icon interference, code-block destruction, etc.
+   *   2. Fall back to tmux extract if jsonl is missing (Codex or fresh session)
+   *      or contains no matching turn (e.g. echo confirmed but claude crashed
+   *      before writing the response).
+   */
   async function getResponseStreamWithRaw(agentName, pane, promptText = null) {
+    const config = agentConfig(agentName);
+    const dir = paneDir(config.dir, pane);
+
+    // Try jsonl source of truth first
+    const jsonl = extractFromJsonl(dir, promptText);
+    if (jsonl && jsonl.items.length > 0) return jsonl;
+
+    // Fallback: tmux parsing (Codex, missing jsonl, or partial write race)
     const raw = await capturePane(agentName, pane, 5000);
     const turn = promptText ? extractTurnByPrompt(raw, promptText) : extractLastTurn(raw);
     const items = extractMixedStream(classifyLines(turn));

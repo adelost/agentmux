@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"show me python matrix code"},"uuid":"u1","timestamp":"2026-04-08T20:00:00Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"```python\nimport numpy as np\n\n# Create a matrix\nA = np.array([[1, 2], [3, 4]])\nprint(A)\n```\n\nThis creates a 2x2 matrix."}]},"uuid":"a1","timestamp":"2026-04-08T20:00:01Z"}
