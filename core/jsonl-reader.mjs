@@ -75,8 +75,12 @@ const TERMINAL_STOP_REASONS = new Set(["end_turn", "stop_sequence", "max_tokens"
 
 /**
  * Find the index of the last user event whose prompt text matches the needle.
- * Falls back to the last user prompt of any kind if no match.
- * Returns -1 if no usable user event exists.
+ * If a needle is given and no exact match exists, return -1 — do NOT fall
+ * back to "last user prompt of any kind", because when two agents share a
+ * pane dir (e.g. cdx and claw both rooted at workspace/.agents/0/) the last
+ * prompt in Claude's jsonl may belong to the other agent entirely.
+ *
+ * Only fall back to "last user prompt" when no needle is given.
  */
 function findUserPromptIndex(events, promptText) {
   const needle = promptText?.trim();
@@ -85,8 +89,9 @@ function findUserPromptIndex(events, promptText) {
       const text = userPromptText(events[i]);
       if (text && text.trim() === needle) return i;
     }
+    return -1; // strict: no match means no match
   }
-  // Fallback: last user prompt of any kind
+  // No needle → return the latest user prompt
   for (let i = events.length - 1; i >= 0; i--) {
     if (userPromptText(events[i]) !== null) return i;
   }
