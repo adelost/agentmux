@@ -69,9 +69,20 @@ function userPromptText(event) {
   return null;
 }
 
-// stop_reasons that mean "claude is done with this turn". Anything else
-// (null, "tool_use", missing) means claude is still working.
-const TERMINAL_STOP_REASONS = new Set(["end_turn", "stop_sequence", "max_tokens", "refusal"]);
+// stop_reasons that mean "claude is done with this turn".
+//
+// IMPORTANT: max_tokens is NOT terminal in agentic Claude Code. When claude
+// hits its per-message output budget mid-thought, it stops with max_tokens
+// and then immediately continues in a fresh assistant message — same turn,
+// same user prompt. Treating max_tokens as terminal causes agentus to bail
+// halfway through long turns (observed on the "plocka ut" turn: extract
+// grabbed 14 items when the real turn had 20+ and ended with end_turn).
+//
+// Anything NOT in this set means claude is still working:
+//   null / undefined  — streaming in progress
+//   "tool_use"        — pausing for a tool result
+//   "max_tokens"      — budget hit, will continue automatically
+const TERMINAL_STOP_REASONS = new Set(["end_turn", "stop_sequence", "refusal"]);
 
 /**
  * Extract any prompt-like text from a single jsonl event. Claude Code records
