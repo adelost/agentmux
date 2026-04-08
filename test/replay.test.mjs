@@ -63,14 +63,15 @@ feature("replay: sanity checks on recorded data", () => {
   for (const r of recordings) {
     unit(`${r.file}: prompt was echoed in raw buffer`, {
       given: ["recording", () => r],
-      when: ["checking raw contains prompt", (rec) => ({
+      when: ["checking raw contains prompt start", (rec) => ({
         rec,
-        hasPrompt: rec.raw.includes(rec.prompt.slice(0, Math.min(40, rec.prompt.length))),
+        // Only check first 20 chars - narrow panes wordwrap longer prompts,
+        // breaking them across lines. The first 20 chars always fit on one
+        // line even on a 42-col pane.
+        hasPrompt: rec.raw.includes(rec.prompt.slice(0, Math.min(20, rec.prompt.length))),
       })],
-      then: ["raw should contain the prompt text we sent", ({ rec, hasPrompt }) => {
-        // If this fails, extractTurnByPrompt will fall back to extractLastTurn
-        // which can return the wrong turn entirely.
-        expect(hasPrompt, `prompt "${rec.prompt.slice(0, 60)}" not found in raw buffer`).toBe(true);
+      then: ["raw should contain the prompt start", ({ rec, hasPrompt }) => {
+        expect(hasPrompt, `prompt "${rec.prompt.slice(0, 40)}" not found in raw buffer`).toBe(true);
       }],
     });
 

@@ -7,6 +7,14 @@
 
 // --- Claude Code ---------------------------------------------------------
 
+// All progress/thinking icons Claude Code rotates through while working.
+// Observed variants: ✻ Musing, ✢ Frolicking, ✽ ..., · Orchestrating, * Waddling,
+// ∗ Cogitating, ◉, ⚙, ❋, and more. The UI picks one and rotates; pattern
+// matching any of them against a "Verbing…" suffix reliably signals "busy".
+const CLAUDE_PROGRESS_ICONS = "✻✢✽✶✷✸✹✺✿❋⚙◉∗⊛·˙*";
+const CLAUDE_PROGRESS_LINE = new RegExp(`^[${CLAUDE_PROGRESS_ICONS}] [A-Z][a-z]+(ing|ed)`);
+const CLAUDE_PROGRESS_LINE_ANY = new RegExp(`(^|\\s)[${CLAUDE_PROGRESS_ICONS}] [A-Z][a-z]+(ing|ed)`, "m");
+
 export const CLAUDE = {
   name: "claude",
 
@@ -21,11 +29,15 @@ export const CLAUDE = {
   // isBusy behavior: Claude's ❯ prompt is empty when idle, has text when typing
   idleWhenPromptEmpty: true,
 
-  // Substrings that indicate the agent is actively working.
-  // Narrow panes may truncate "esc to interrupt" to "esc to interrup" —
-  // "interrup" is included for that case. ✻ / Doing… cover the pre-response
-  // thinking phase where interrupt text hasn't rendered yet.
-  busySignals: ["esc to interrup", "✻ ", "Doing…"],
+  // Signals that the agent is actively working. Entries may be strings
+  // (substring match) or RegExp (pattern match).
+  //   - "esc to interrup": covers truncation on narrow panes (missing "t")
+  //   - CLAUDE_PROGRESS_LINE_ANY: catches every thinking/progress phase:
+  //     "✻ Musing… (2s)", "· Orchestrating…", "* Waddling…", "✢ Frolicking…"
+  busySignals: [
+    "esc to interrup",
+    CLAUDE_PROGRESS_LINE_ANY,
+  ],
 
   // Banners/noise specific to Claude Code
   noise: [
@@ -37,6 +49,7 @@ export const CLAUDE = {
     /^\s+\d+: (Bad|Fine|Good|Dismiss)/,        // survey options
     /^\s*\d+\s+tokens\s*$/,                    // v2.1.96 bottom status: "27257 tokens"
     /^\s*● (high|medium|low) · \/effort\s*$/,  // v2.1.96 effort indicator
+    CLAUDE_PROGRESS_LINE,                      // mid-response progress line as noise
   ],
 };
 
