@@ -52,7 +52,9 @@ function sendTextReply(msg, text, context) {
  * Create message handler with all dependencies injected.
  * @param {{ agent, attachments, tts, getMapping, overrides, channelMap, reloadConfig, discordChannel?, agentusYamlPath?, agentsYamlPath? }} deps
  */
-export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentusYamlPath, agentsYamlPath, pollInterval = 2000 }) {
+export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentusYamlPath, agentsYamlPath, recorder, pollInterval = 2000 }) {
+  const noopRecorder = { save: () => {}, enabled: false };
+  const rec = recorder || noopRecorder;
   const queues = new Map();
   const followers = new Map(); // channelId → { timer, sentCount, lastHash }
 
@@ -288,18 +290,45 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     // Dismiss any blocking prompts
     await agent.dismissBlockingPrompt(`${mapping.name}:.${pane}`).catch(() => {});
 
-    // Get final response - matched to our exact prompt
-    const items = await agent.getResponseStream(mapping.name, pane, promptText);
+    // Get final response - matched to our exact prompt.
+    // Use the raw-aware variant when recording so we can persist the exact
+    // input to the extract pipeline alongside its output.
+    const sent = [];
+    let raw = null, turn = null, items;
+    if (rec.enabled) {
+      ({ raw, turn, items } = await agent.getResponseStreamWithRaw(mapping.name, pane, promptText));
+    } else {
+      items = await agent.getResponseStream(mapping.name, pane, promptText);
+    }
     for (const item of items) {
       const formatted = item.type === "tool" ? `*${item.content}*` : item.content;
+      sent.push(formatted);
       await msg.send(formatted).catch(() => {});
     }
 
     // Context% at the end
     const context = agent.getContextPercent(mapping.dir, pane);
+    let contextMsg = null;
     if (context) {
       const k = Math.round(context.tokens / 1000);
-      await msg.send(`_context: ${context.percent}% (${k}k)_`).catch(() => {});
+      contextMsg = `_context: ${context.percent}% (${k}k)_`;
+      sent.push(contextMsg);
+      await msg.send(contextMsg).catch(() => {});
+    }
+
+    if (rec.enabled) {
+      rec.save({
+        ts: new Date().toISOString(),
+        agent: mapping.name,
+        pane,
+        prompt: promptText,
+        raw,
+        turn,
+        items,
+        context,
+        discordSent: sent,
+        durationMs: Date.now() - startTime,
+      });
     }
   }
 

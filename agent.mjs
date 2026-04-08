@@ -239,10 +239,15 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (raw.includes("esc to interrupt")) return true;
     const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
     const tail = lines.slice(-10);
-    // Claude Code uses ❯, Codex uses ›
-    const promptLine = tail.findLast((l) => l.startsWith("❯") || l.startsWith("›"));
+    // Codex always shows a placeholder in its prompt when idle ("Find and fix a bug in @filename"),
+    // so we can't use prompt-has-text as a busy signal for codex. Rely on "esc to interrupt"
+    // (already checked above) and "• Working" for codex.
+    const isCodex = tail.some((l) => l.startsWith("›"));
+    if (isCodex) return false;
+    // Claude Code: idle when last ❯ prompt is empty
+    const promptLine = tail.findLast((l) => l.startsWith("❯"));
     if (!promptLine) return true;
-    return promptLine.replace(/^[❯›]\s*/, "").length > 0;
+    return promptLine.replace(/^❯\s*/, "").length > 0;
   }
 
   async function getResponseSegments(agentName, pane) {
@@ -252,9 +257,16 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   /** Get text + tool calls in order. If promptText given, finds that exact turn. */
   async function getResponseStream(agentName, pane, promptText = null) {
+    const { items } = await getResponseStreamWithRaw(agentName, pane, promptText);
+    return items;
+  }
+
+  /** Same as getResponseStream but also returns raw buffer + turn slice (for recording). */
+  async function getResponseStreamWithRaw(agentName, pane, promptText = null) {
     const raw = await capturePane(agentName, pane, 5000);
     const turn = promptText ? extractTurnByPrompt(raw, promptText) : extractLastTurn(raw);
-    return extractMixedStream(classifyLines(turn));
+    const items = extractMixedStream(classifyLines(turn));
+    return { raw, turn, items };
   }
 
   async function capturePane(agentName, pane, lines = 50) {
@@ -429,7 +441,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   return {
     ensureReady, sendAndWait, sendOnly,
-    getResponse, getResponseSegments, getResponseStream, isBusy,
+    getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, isBusy,
     capturePane, sendEscape, dismissBlockingPrompt,
     startProgressTimer, getContextPercent, checkAgent,
   };

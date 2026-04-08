@@ -2,7 +2,7 @@ import { unit, feature, expect } from "bdd-vitest";
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { extractText, classifyLines, extractSegments, isToolLine, isTextBullet } from "./extract.mjs";
+import { extractText, classifyLines, extractSegments, extractMixedStream, isToolLine, isTextBullet } from "./extract.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => readFileSync(join(__dir, "../test/fixtures", name), "utf-8");
@@ -196,6 +196,65 @@ feature("extractText: agent subagent", () => {
       expect(text).toContain("Deno has native WebSocket support");
       expect(text).toContain("src/ws.ts");
       expect(text).not.toContain("Agent(Explore)");
+    }],
+  });
+});
+
+feature("extractText: tool results with non-breaking space indent", () => {
+  unit("classifies '⎿  Found 0 files' as tool when indented with U+00A0", {
+    given: ["line with U+00A0 indent", () => [
+      "❯ test",
+      "",
+      "● Search(pattern: \"**/x\")",
+      "\u00a0\u00a0⎿ \u00a0Found 0 files",
+      "",
+      "● Not found.",
+    ].join("\n")],
+    when: ["classifying", (raw) => classifyLines(raw)],
+    then: ["⎿ line is tool, not text", (lines) => {
+      // Find the ⎿ line
+      const toolResult = lines.find((l) => l.content.includes("Found 0 files"));
+      expect(toolResult.type).toBe("tool");
+    }],
+  });
+});
+
+feature("extract: codex dialect (• bullet, └ tool result, verb tool calls)", () => {
+  unit("extracts text + tool + text in order for codex output", {
+    given: ["codex multi-tool fixture", () => fixture("codex-multi-tool.txt")],
+    when: ["extracting mixed stream", (raw) => extractMixedStream(classifyLines(raw))],
+    then: ["3 items: text, tool, text - no status bar leak", (items) => {
+      expect(items).toHaveLength(3);
+      expect(items[0]).toEqual({ type: "text", content: "Jag kör date igen och återger tiden i en mening." });
+      expect(items[1]).toEqual({ type: "tool", content: "Ran date '+%H:%M %Z'" });
+      expect(items[2]).toEqual({ type: "text", content: "Klockan är 19:11 CEST." });
+      // Status bar not in any text
+      const joined = items.map((i) => i.content).join(" ");
+      expect(joined).not.toContain("gpt-5.4");
+      expect(joined).not.toContain("Find and fix a bug");
+      expect(joined).not.toContain("•");   // bullet should be stripped
+    }],
+  });
+
+  unit("strips • bullet from codex text", {
+    given: ["simple codex text", () => "› hej\n\n• Stockholm\n\n  gpt-5.4 xhigh · 100% left · ~/x"],
+    when: ["extracting text", (raw) => extractText(raw)],
+    then: ["bullet stripped, status bar removed", (text) => {
+      expect(text).toBe("Stockholm");
+    }],
+  });
+});
+
+feature("extractText: Claude Code v2.1.96 bottom status bar", () => {
+  unit("strips 'N tokens' counter and '● high · /effort' status", {
+    given: ["v2196-status fixture", () => fixture("claude-v2196-status-bar.txt")],
+    when: ["extracting text", (raw) => extractText(raw)],
+    then: ["only the actual response remains", (text) => {
+      expect(text).toBe("Claw 🦀");
+      expect(text).not.toContain("27257 tokens");
+      expect(text).not.toContain("tokens");
+      expect(text).not.toContain("/effort");
+      expect(text).not.toContain("bypass permissions");
     }],
   });
 });

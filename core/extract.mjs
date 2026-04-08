@@ -3,16 +3,21 @@
 
 import { TOOL_CALL as TOOL_LINE, isNoise } from "./noise.mjs";
 
-const TOOL_RESULT = /^[  ]*⎿/;
+const TOOL_RESULT = /^\s*[⎿└]/;    // Claude uses ⎿, Codex uses └. \s matches U+00A0.
 const DIFF_LINE = /^\s+\d+\s+[+-]/;
 const DIFF_CONTEXT = /^\s+\d+\s{2,}/;
 const EXPANDED_HINT = /… \+\d+ lines \(ctrl\+o/;
+const BULLET = /^[●•] /;   // ● = Claude Code, • = Codex
+
+// Prompt markers: ❯ = Claude Code, › = Codex
+const PROMPT_MARKER = /^[❯›] \S/;
+const PROMPT_PREFIX = /^[❯›] /;
 
 /** Extract the last turn from raw tmux buffer (everything after the last user prompt) */
 const extractLastTurn = (raw) => {
   const lines = raw.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
-    if (/^❯ \S/.test(lines[i])) {
+    if (PROMPT_MARKER.test(lines[i])) {
       return lines.slice(i).join("\n");
     }
   }
@@ -30,7 +35,7 @@ export function extractTurnByPrompt(raw, promptText) {
   // Search backwards for the matching prompt
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
-    if (line.startsWith("❯ ") && line.slice(2).trim().startsWith(promptStart)) {
+    if (PROMPT_PREFIX.test(line) && line.slice(2).trim().startsWith(promptStart)) {
       return lines.slice(i).join("\n");
     }
   }
@@ -45,8 +50,8 @@ const isToolLine = (line) => TOOL_LINE.test(line);
 const isToolResult = (line) =>
   TOOL_RESULT.test(line) || DIFF_LINE.test(line) || DIFF_CONTEXT.test(line) || EXPANDED_HINT.test(line);
 
-/** Check if a line is a text-output bullet (● followed by actual text) */
-const isTextBullet = (line) => line.startsWith("● ") && !isToolLine(line);
+/** Check if a line is a text-output bullet (● or • followed by actual text) */
+const isTextBullet = (line) => BULLET.test(line) && !isToolLine(line);
 
 /**
  * Parse raw tmux buffer into structured lines with types.
@@ -74,7 +79,7 @@ const classifyLines = (raw) => {
 
     if (isTextBullet(trimmed)) {
       inToolBlock = false;
-      return { type: "text", content: trimmed.replace(/^● /, "") };
+      return { type: "text", content: trimmed.replace(BULLET, "") };
     }
 
     // Non-indented line after a tool block = new text section (Claude's response)
@@ -134,13 +139,14 @@ export const extractSegments = (classified) => {
 
 /**
  * Format a raw tool call line into a compact one-liner.
- * "● Bash(cd /skybar && pwd)" → "Bash cd /skybar && pwd"
- * "● Read(file.ts)" → "Read file.ts"
- * "● Edit(file.svelte)" → "Edit file.svelte"
+ * Claude: "● Bash(cd /skybar && pwd)" → "Bash cd /skybar && pwd"
+ * Claude: "● Read(file.ts)" → "Read file.ts"
+ * Codex:  "• Ran date '+%F'" → "Ran date '+%F'"
+ * Codex:  "• Explored" → "Explored"
  */
 export function formatToolCall(rawLine) {
-  const stripped = rawLine.replace(/^●\s*/, "").trim();
-  // Match Tool(args) pattern
+  const stripped = rawLine.replace(/^[●•]\s*/, "").trim();
+  // Match Tool(args) pattern (Claude style)
   const match = stripped.match(/^([A-Z][a-zA-Z]+)\((.*)\)\s*$/);
   if (!match) return stripped;
 
@@ -183,12 +189,12 @@ export function extractMixedStream(classified) {
     } else if (line.type === "empty") {
       textBuffer.push("");
     } else if (line.type === "tool") {
-      // Only the first line of a tool block (the ● line, not the ⎿ result)
-      if (line.content.startsWith("●")) {
+      // Only the first line of a tool block (the ● or • line, not the ⎿/└ result)
+      if (BULLET.test(line.content)) {
         flushText();
         items.push({ type: "tool", content: formatToolCall(line.content) });
       }
-      // Skip ⎿ results, indented continuations, etc
+      // Skip ⎿/└ results, indented continuations, etc
     }
   }
   flushText();

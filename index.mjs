@@ -21,6 +21,7 @@ import { parseEnv } from "./lib.mjs";
 import { createAgent } from "./agent.mjs";
 import { createAttachmentHandler } from "./attachments.mjs";
 import { createState } from "./core/state.mjs";
+import { createRecorder } from "./core/recorder.mjs";
 import { createTTS } from "./tts.mjs";
 import { createHandlers } from "./handlers.mjs";
 import { startBot } from "./bot.mjs";
@@ -71,6 +72,10 @@ if (appState.get("thinking") === undefined) appState.set("thinking", true);
 const agent = createAgent({ tmuxSocket: TMUX_SOCKET, configPath: AGENTS_YAML, timeout: TIMEOUT, run, tmuxExec });
 const attachments = createAttachmentHandler({ run, transcribeScript: process.env.TRANSCRIBE_SCRIPT || resolve(__dir, "bin/transcribe-whisper.sh") });
 const tts = createTTS({ run, state: appState, voice: TTS_VOICE });
+const recorder = createRecorder({
+  dir: process.env.AGENTUS_RECORD === "1" ? resolve(__dir, "test/recordings") : null,
+});
+if (recorder.enabled) console.log(`recorder | enabled → ${resolve(__dir, "test/recordings")}`);
 
 // --- Channels ---
 
@@ -101,4 +106,5 @@ const handlers = createHandlers({
   discordChannel: discord,
   agentusYamlPath: AGENTUS_YAML,
   agentsYamlPath: AGENTS_YAML,
+  recorder,
 });
