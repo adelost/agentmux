@@ -21,6 +21,12 @@ export const CLAUDE = {
   // isBusy behavior: Claude's ❯ prompt is empty when idle, has text when typing
   idleWhenPromptEmpty: true,
 
+  // Substrings that indicate the agent is actively working.
+  // Narrow panes may truncate "esc to interrupt" to "esc to interrup" —
+  // "interrup" is included for that case. ✻ / Doing… cover the pre-response
+  // thinking phase where interrupt text hasn't rendered yet.
+  busySignals: ["esc to interrup", "✻ ", "Doing…"],
+
   // Banners/noise specific to Claude Code
   noise: [
     /^\s*[▐▛▝▜▘█▌▙▟]{2}/,                    // banner box drawing
@@ -54,6 +60,9 @@ export const CODEX = {
   // Codex shows a placeholder ("Find and fix a bug in @filename") in the prompt
   // even when idle, so prompt-has-text is NOT a reliable busy signal.
   idleWhenPromptEmpty: false,
+
+  // Codex busy indicators. "esc to interrup" catches truncation on narrow panes.
+  busySignals: ["esc to interrup", "• Working ("],
 
   noise: [
     /^>_ OpenAI Codex/,                          // startup banner

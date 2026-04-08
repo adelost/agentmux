@@ -18,6 +18,7 @@ feature("dialect data integrity", () => {
       hasToolCallPattern: d.toolCallPattern instanceof RegExp,
       hasIdleFlag: typeof d.idleWhenPromptEmpty === "boolean",
       hasNoiseArray: Array.isArray(d.noise),
+      hasBusySignals: Array.isArray(d.busySignals) && d.busySignals.length > 0,
     }))],
     then: ["all fields present", (results) => {
       for (const r of results) {
@@ -27,6 +28,22 @@ feature("dialect data integrity", () => {
         expect(r.hasToolCallPattern, `${r.name}: toolCallPattern`).toBe(true);
         expect(r.hasIdleFlag, `${r.name}: idleWhenPromptEmpty`).toBe(true);
         expect(r.hasNoiseArray, `${r.name}: noise`).toBe(true);
+        expect(r.hasBusySignals, `${r.name}: busySignals`).toBe(true);
+      }
+    }],
+  });
+
+  unit("busy signals cover truncated 'esc to interrupt'", {
+    given: ["all dialects", () => ALL_DIALECTS],
+    when: ["checking each dialect", (ds) => ds.map((d) => ({
+      name: d.name,
+      covers: d.busySignals.some((s) => "esc to interrup".includes(s) || s.includes("esc to interrup")),
+    }))],
+    then: ["every dialect catches 'esc to interrup' (truncated)", (results) => {
+      // "esc to interrup" (no trailing t) happens when tmux pane is too narrow
+      // and truncates the UI. Every dialect should catch that substring.
+      for (const r of results) {
+        expect(r.covers, `${r.name} must cover truncated interrupt`).toBe(true);
       }
     }],
   });
