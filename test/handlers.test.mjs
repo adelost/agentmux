@@ -134,7 +134,7 @@ feature("command routing", () => {
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
     then: ["replies with agent response and context%", (_, { msg, agent }) => {
       expect(agent.getResponse).toHaveBeenCalledWith("_ai", 0);
-      expect(agent.getContextPercent).toHaveBeenCalledWith("/home/user/project", 0);
+      expect(agent.getContextPercent).toHaveBeenCalledWith("_ai", 0);
       expect(msg.reply).toHaveBeenCalledTimes(1);
       expect(msg.reply.mock.calls[0][0]).toContain("response text");
       expect(msg.reply.mock.calls[0][0]).toContain("context: 42%");

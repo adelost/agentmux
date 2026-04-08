@@ -7,7 +7,11 @@ import { executeSync } from "./core/sync-discord.mjs";
 
 function cleanupTmpFiles(files) {
   for (const f of files) {
-    try { unlinkSync(f); } catch {}
+    try { unlinkSync(f); }
+    catch (err) {
+      // File may have been cleaned up elsewhere; only surface unexpected errors
+      if (err.code !== "ENOENT") console.warn(`cleanupTmpFiles: ${f}: ${err.message}`);
+    }
   }
 }
 
@@ -88,9 +92,10 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           const unsent = segments.slice(sentCount);
           if (unsent.length) {
             const text = unsent.join("\n\n").trim();
-            const context = agent.getContextPercent(mapping.dir, pane);
+            const context = agent.getContextPercent(mapping.name, pane);
             for (const chunk of splitMessage(text + formatContext(context))) {
-              await msg.send(chunk).catch(() => {});
+              await msg.send(chunk).catch((err) =>
+                console.warn(`follow: send chunk failed: ${err.message}`));
             }
             sentCount = segments.length;
           }
@@ -104,11 +109,14 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         const segments = await agent.getResponseSegments(mapping.name, pane);
         if (segments.length > 1 && sentCount < segments.length - 1) {
           while (sentCount < segments.length - 1) {
-            await msg.send(segments[sentCount]).catch(() => {});
+            await msg.send(segments[sentCount]).catch((err) =>
+              console.warn(`follow: send segment failed: ${err.message}`));
             sentCount++;
           }
         }
-      } catch {}
+      } catch (err) {
+        console.warn(`follow: poll tick failed: ${err.message}`);
+      }
     }, 3000);
 
     followers.set(key, { timer, stop: () => clearInterval(timer) });
@@ -125,7 +133,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       const busy = await agent.isBusy(mapping.name, pane);
       if (!busy) {
         const text = await agent.getResponse(mapping.name, pane);
-        const context = agent.getContextPercent(mapping.dir, pane);
+        const context = agent.getContextPercent(mapping.name, pane);
         await sendTextReply(msg, text, context);
         return;
       }
@@ -147,24 +155,29 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
             const segments = await agent.getResponseSegments(mapping.name, pane);
             const unsent = segments.slice(progress.sentCount());
             const text = unsent.join("\n\n").trim();
-            const context = agent.getContextPercent(mapping.dir, pane);
+            const context = agent.getContextPercent(mapping.name, pane);
             if (text) await sendTextReply(msg, text, context);
             else if (context) await msg.reply(formatContext(context).trim());
             resolve();
-          } catch { clearInterval(check); clearInterval(progress.timer); resolve(); }
+          } catch (err) {
+            console.warn(`/peek follow: poll failed: ${err.message}`);
+            clearInterval(check);
+            clearInterval(progress.timer);
+            resolve();
+          }
         }, 3000);
       });
     },
 
     "/raw": async (msg, mapping, pane) => {
       const text = await agent.capturePane(mapping.name, pane);
-      const context = agent.getContextPercent(mapping.dir, pane);
+      const context = agent.getContextPercent(mapping.name, pane);
       await sendTextReply(msg, text, context);
     },
 
     "/status": async (msg, mapping, pane) => {
       const override = overrides.has(msg.channelId) ? " (override)" : "";
-      const context = agent.getContextPercent(mapping.dir, pane);
+      const context = agent.getContextPercent(mapping.name, pane);
       const ctxStr = context ? `${context.percent}% (${Math.round(context.tokens / 1000)}k)` : "unknown";
       await msg.reply(`**${mapping.name}** pane ${pane}${override} · context: ${ctxStr}`);
     },
@@ -332,7 +345,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     }
 
     // Context% at the end
-    const context = agent.getContextPercent(mapping.dir, pane);
+    const context = agent.getContextPercent(mapping.name, pane);
     if (context) {
       const k = Math.round(context.tokens / 1000);
       const contextMsg = `_context: ${context.percent}% (${k}k)_`;
@@ -400,7 +413,9 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     const parsed = parseCommand(cleanPrompt);
 
     if (parsed?.cmd === "/use") {
-      await handleUse(msg, parsed.args).catch((err) => msg.reply(`error: ${err.message}`).catch(() => {}));
+      await handleUse(msg, parsed.args).catch((err) =>
+        msg.reply(`error: ${err.message}`).catch((replyErr) =>
+          console.warn(`/use error reply failed: ${replyErr.message}`)));
       cleanupTmpFiles(tmpFiles);
       return;
     }
@@ -409,7 +424,8 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       try {
         await commands[parsed.cmd](msg, mapping, pane);
       } catch (err) {
-        await msg.reply(`${parsed.cmd} failed: ${err.message}`).catch(() => {});
+        await msg.reply(`${parsed.cmd} failed: ${err.message}`).catch((replyErr) =>
+          console.warn(`${parsed.cmd} error reply failed: ${replyErr.message}`));
       }
       cleanupTmpFiles(tmpFiles);
       return;
@@ -417,7 +433,8 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     // Follow mode: just inject prompt, follow-loop handles output
     if (followers.has(msg.channelId)) {
-      agent.sendOnly(mapping.name, cleanPrompt, pane).catch(() => {});
+      agent.sendOnly(mapping.name, cleanPrompt, pane).catch((err) =>
+        console.warn(`follow inject sendOnly failed: ${err.message}`));
       cleanupTmpFiles(tmpFiles);
       return;
     }
@@ -427,7 +444,8 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     if (active) {
       // Agent already processing — inject message directly (no wait)
-      agent.sendOnly(mapping.name, cleanPrompt, pane).catch(() => {});
+      agent.sendOnly(mapping.name, cleanPrompt, pane).catch((err) =>
+        console.warn(`queue inject sendOnly failed: ${err.message}`));
       cleanupTmpFiles(tmpFiles);
       return;
     }
