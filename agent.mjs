@@ -8,6 +8,7 @@ import { esc, stripAnsi, extractActivity, formatDuration } from "./lib.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
 import { detectDialect } from "./core/dialects.mjs";
 import { extractFromJsonl, isBusyFromJsonl } from "./core/jsonl-reader.mjs";
+import { extractFromCodexJsonl, isBusyFromCodexJsonl } from "./core/codex-jsonl-reader.mjs";
 
 const CONTEXT_MAX = 200_000;
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
@@ -228,16 +229,37 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return extractText(raw) || "(empty response)";
   }
 
+  /** Derive which agent dialect a pane runs from its configured cmd. */
+  function paneDialectName(agentName, pane) {
+    try {
+      const config = agentConfig(agentName);
+      const cmd = config.panes?.[pane]?.cmd || "";
+      if (cmd.includes("codex")) return "codex";
+      if (cmd.includes("claude")) return "claude";
+    } catch {}
+    return null;
+  }
+
   async function isBusy(agentName, pane, promptText = null) {
-    // Source of truth: Claude's session jsonl has the authoritative stop_reason
-    // on the latest assistant message. No tmux rendering to parse, no pane
-    // width to care about, no progress icons to match. If jsonl exists for
-    // this pane and has a matching turn, trust it.
+    // Source of truth: read the agent's own session file instead of parsing
+    // tmux rendering. Dispatch on the pane's configured cmd so we don't
+    // cross-read another agent's jsonl (cdx and claw can share pane dirs).
     try {
       const config = agentConfig(agentName);
       const dir = paneDir(config.dir, pane);
-      const jsonlResult = isBusyFromJsonl(dir, promptText);
-      if (jsonlResult !== null) return jsonlResult;
+      const dialect = paneDialectName(agentName, pane);
+
+      if (dialect === "codex") {
+        const r = isBusyFromCodexJsonl(dir);
+        if (r !== null) return r;
+      } else if (dialect === "claude") {
+        const r = isBusyFromJsonl(dir, promptText);
+        if (r !== null) return r;
+        // jsonl exists but our prompt isn't there yet — claude hasn't
+        // written it. Assume busy so we keep polling. workMaxMs is the
+        // safety escape if this never resolves.
+        return true;
+      }
     } catch {}
 
     // Fallback: tmux parsing (Codex, missing jsonl, no matching prompt yet)
@@ -290,12 +312,20 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   async function getResponseStreamWithRaw(agentName, pane, promptText = null) {
     const config = agentConfig(agentName);
     const dir = paneDir(config.dir, pane);
+    const dialect = paneDialectName(agentName, pane);
 
-    // Try jsonl source of truth first
-    const jsonl = extractFromJsonl(dir, promptText);
-    if (jsonl && jsonl.items.length > 0) return jsonl;
+    // Dispatch to the pane's actual dialect — not trial-and-error. Otherwise
+    // cdx and claw (which can share pane dirs like .agents/0/) would read
+    // each other's jsonl files.
+    if (dialect === "codex") {
+      const codex = extractFromCodexJsonl(dir);
+      if (codex && codex.items.length > 0) return codex;
+    } else if (dialect === "claude") {
+      const claude = extractFromJsonl(dir, promptText);
+      if (claude && claude.items.length > 0) return claude;
+    }
 
-    // Fallback: tmux parsing (Codex, missing jsonl, or partial write race)
+    // Last-resort fallback: tmux parsing
     const raw = await capturePane(agentName, pane, 5000);
     const turn = promptText ? extractTurnByPrompt(raw, promptText) : extractLastTurn(raw);
     const items = extractMixedStream(classifyLines(turn));

@@ -110,7 +110,7 @@ async function main() {
 
   await agent.dismissBlockingPrompt(`${agentName}:.${pane}`).catch(() => {});
 
-  const { raw, turn, items } = await agent.getResponseStreamWithRaw(agentName, pane, prompt);
+  const { raw, turn, items, source } = await agent.getResponseStreamWithRaw(agentName, pane, prompt);
   const context = agent.getContextPercent(agentDir, pane);
 
   const discordSent = [];
@@ -133,7 +133,7 @@ async function main() {
     context,
     discordSent,
     durationMs: Date.now() - startTime,
-    source: "record-live",
+    source: source || "tmux",
   });
 
   console.log(`\n--- Recording saved to ${recordingsDir} ---`);

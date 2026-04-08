@@ -129,11 +129,20 @@ feature("extractFromJsonl: missing project dir", () => {
   });
 });
 
-feature("extractFromJsonl: prompt not found", () => {
-  unit("falls back to the last user prompt when needle does not match", {
+feature("extractFromJsonl: prompt not found (strict matching)", () => {
+  unit("returns null when a specific prompt is given but no match exists", {
     given: ["simple fixture", () => setupFakeProject("simple-text.jsonl")],
     when: ["extracting with wrong prompt", ({ paneDir }) => extractFromJsonl(paneDir, "something else")],
-    then: ["still returns the last assistant response", (result, { cleanup }) => {
+    then: ["null — do not fall back to last turn (could be another agent's)", (result, { cleanup }) => {
+      expect(result).toBeNull();
+      cleanup();
+    }],
+  });
+
+  unit("returns the latest turn when no prompt is given (null needle)", {
+    given: ["simple fixture", () => setupFakeProject("simple-text.jsonl")],
+    when: ["extracting with no prompt", ({ paneDir }) => extractFromJsonl(paneDir, null)],
+    then: ["returns the last assistant response", (result, { cleanup }) => {
       expect(result).not.toBeNull();
       expect(result.items[0].content).toBe("The answer is 4.");
       cleanup();
