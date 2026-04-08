@@ -7,8 +7,8 @@ import { load as loadYaml } from "js-yaml";
 import { esc, stripAnsi } from "./lib.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
 import { detectDialect } from "./core/dialects.mjs";
-import { extractFromJsonl, isBusyFromJsonl } from "./core/jsonl-reader.mjs";
-import { extractFromCodexJsonl, isBusyFromCodexJsonl } from "./core/codex-jsonl-reader.mjs";
+import { extractFromJsonl, isBusyFromJsonl, isPromptInJsonl } from "./core/jsonl-reader.mjs";
+import { extractFromCodexJsonl, isBusyFromCodexJsonl, isPromptInCodexJsonl } from "./core/codex-jsonl-reader.mjs";
 import { getContextPercent as getContextPercentByDialect } from "./core/context.mjs";
 import { findBlockingPrompt } from "./core/dismiss.mjs";
 import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
@@ -354,20 +354,35 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
    * Poll the pane until the user's prompt text appears in the buffer,
    * confirming the agent has actually received the input.
    *
-   * This is the positive signal that replaces the old "wait some ms and hope"
-   * approach: no matter how slow the agent is to start processing (cold start,
-   * large context, SIGWINCH redraw), we can trust it got the message once we
-   * see it echoed back.
+   * Source of truth: the agent's own session jsonl. When the user prompt
+   * appears there, we know for certain the agent received it — no tmux
+   * pane width tricks, no wordwrap to fight. Falls back to tmux text
+   * matching when no jsonl is available.
    *
    * @returns true if echo seen, false on timeout
    */
   async function waitForPromptEcho(agentName, pane, promptText, timeoutMs = 15000) {
-    const needle = promptText.trim().slice(0, 30);
-    if (!needle) return true; // empty prompt, nothing to wait for
+    const needle = promptText?.trim();
+    if (!needle) return true;
+
+    const dir = paneDir(agentConfig(agentName).dir, pane);
+    const dialect = paneDialectName(agentName, pane);
+
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const raw = await capturePane(agentName, pane, 100);
-      if (raw.includes(needle)) return true;
+      // Try jsonl first (width-independent, reliable)
+      let found = null;
+      if (dialect === "claude") found = isPromptInJsonl(dir, promptText);
+      else if (dialect === "codex") found = isPromptInCodexJsonl(dir, promptText);
+      if (found === true) return true;
+
+      // Fallback: tmux text match for unknown dialects or when jsonl is
+      // missing entirely. Use a short needle so narrow panes still match.
+      if (found === null) {
+        const raw = await capturePane(agentName, pane, 100);
+        if (raw.includes(needle.slice(0, 20))) return true;
+      }
+
       await wait(200);
     }
     return false;

@@ -74,6 +74,55 @@ function userPromptText(event) {
 const TERMINAL_STOP_REASONS = new Set(["end_turn", "stop_sequence", "max_tokens", "refusal"]);
 
 /**
+ * Extract any prompt-like text from a single jsonl event. Claude Code records
+ * the same prompt in several places depending on timing:
+ *
+ *   { type: "user", message: { content: "..." } }            // direct user event
+ *   { type: "queue-operation", operation: "enqueue",         // sent while busy
+ *     content: "..." }
+ *   { type: "attachment", attachment: { type: "queued_command",
+ *     prompt: "..." } }                                       // queue ack
+ *
+ * All three are legitimate "agent received the prompt" signals.
+ */
+function extractPromptFromEvent(event) {
+  if (!event) return null;
+  if (event.type === "user" && typeof event.message?.content === "string") {
+    return event.message.content;
+  }
+  if (event.type === "queue-operation" && event.operation === "enqueue" && typeof event.content === "string") {
+    return event.content;
+  }
+  if (event.type === "attachment" && event.attachment?.type === "queued_command" && typeof event.attachment.prompt === "string") {
+    return event.attachment.prompt;
+  }
+  return null;
+}
+
+/**
+ * Check if a given prompt has been written to Claude's jsonl for this pane.
+ * Reliable echo-confirmation signal — no pane width or wordwrap involved.
+ * Matches user events, queue-operations, and attachment queue-acks.
+ *
+ * @returns boolean or null (no jsonl file → caller should fall back)
+ */
+export function isPromptInJsonl(paneDir, promptText) {
+  const needle = promptText?.trim();
+  if (!needle) return null;
+
+  const projectDir = join(CLAUDE_PROJECTS_DIR(), encodePath(paneDir));
+  const jsonl = latestJsonlFile(projectDir);
+  if (!jsonl) return null;
+
+  const events = parseJsonl(jsonl);
+  for (let i = events.length - 1; i >= 0; i--) {
+    const text = extractPromptFromEvent(events[i]);
+    if (text && text.trim() === needle) return true;
+  }
+  return false;
+}
+
+/**
  * Find the index of the last user event whose prompt text matches the needle.
  * If a needle is given and no exact match exists, return -1 — do NOT fall
  * back to "last user prompt of any kind", because when two agents share a
