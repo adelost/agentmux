@@ -3,12 +3,21 @@
 
 import { writeFileSync } from "fs";
 import { extname } from "path";
-import { downloadBuffer } from "./lib.mjs";
 
 const TEXT_EXTENSIONS =
   /\.(txt|md|json|yaml|yml|csv|xml|log|ts|js|py|sh|html|css|toml|ini|cfg|env)$/i;
 
-export function createAttachmentHandler({ run, transcribeScript }) {
+/**
+ * Dependencies:
+ *   run              - promisified exec(`cmd`, timeoutMs) → { stdout, stderr }
+ *   transcribeScript - absolute path to a shell script that takes an audio
+ *                      file path and prints transcribed text on stdout
+ *   downloadBuffer   - async fn (url) → Buffer (injected so tests don't hit
+ *                      the network; defaults live in index.mjs wiring)
+ *   writeTmp         - optional override for writeFileSync, used only by tests
+ *                      that don't want /tmp writes
+ */
+export function createAttachmentHandler({ run, transcribeScript, downloadBuffer, writeTmp = writeFileSync }) {
 
   async function buildPrompt(msg, tmpFiles) {
     let rawText = msg.text.trim();
@@ -44,7 +53,7 @@ export function createAttachmentHandler({ run, transcribeScript }) {
       const buffer = await downloadBuffer(att.url);
       const ext = (att.name || "voice.ogg").split(".").pop();
       const tmpPath = `/tmp/discord-voice-${msg.id}.${ext}`;
-      writeFileSync(tmpPath, buffer);
+      writeTmp(tmpPath, buffer);
       tmpFiles.push(tmpPath);
       const { stdout } = await run(`'${transcribeScript}' '${tmpPath}'`, 60000);
       const text = stdout.trim();
@@ -65,7 +74,7 @@ export function createAttachmentHandler({ run, transcribeScript }) {
       const buffer = await downloadBuffer(att.url);
       const ext = extname(att.name || ".bin") || ".bin";
       const tmpPath = `/tmp/discord-media-${msg.id}-${att.id}${ext}`;
-      writeFileSync(tmpPath, buffer);
+      writeTmp(tmpPath, buffer);
       tmpFiles.push(tmpPath);
       return tmpPath;
     } catch (err) {
