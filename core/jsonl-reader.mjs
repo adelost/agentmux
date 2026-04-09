@@ -24,21 +24,53 @@ function encodePath(dir) {
   return dir.replace(/[\/\.]/g, "-");
 }
 
-/** Find the most-recently-modified jsonl file in a project dir, or null. */
-function latestJsonlFile(projectDir) {
-  if (!existsSync(projectDir)) return null;
+/** List jsonl files in a project dir, newest-first. */
+function listJsonlFiles(projectDir) {
+  if (!existsSync(projectDir)) return [];
   try {
-    const files = readdirSync(projectDir)
+    return readdirSync(projectDir)
       .filter((f) => f.endsWith(".jsonl"))
       .map((f) => {
         const path = join(projectDir, f);
         return { path, mtime: statSync(path).mtimeMs };
       })
       .sort((a, b) => b.mtime - a.mtime);
-    return files[0]?.path ?? null;
   } catch {
-    return null;
+    return [];
   }
+}
+
+/**
+ * Find the jsonl file containing a given prompt, plus its parsed events.
+ *
+ * Claude Code starts a fresh jsonl file on /clear and /compact. If the user
+ * runs either mid-turn, `latestJsonlFile` would return the new (empty) file
+ * while our prompt is still sitting in the OLD file. Scanning all files
+ * newest-first until one contains the needle survives that rotation.
+ *
+ * If no needle is given, returns the newest file (current behavior for
+ * context/telemetry callers that don't care about a specific prompt).
+ *
+ * @returns { jsonl, events } or null if nothing matches
+ */
+function findJsonlAndEvents(projectDir, needle) {
+  const files = listJsonlFiles(projectDir);
+  if (files.length === 0) return null;
+
+  if (!needle) {
+    const events = parseJsonl(files[0].path);
+    return { jsonl: files[0].path, events };
+  }
+
+  const needleTrim = needle.trim();
+  for (const { path } of files) {
+    const events = parseJsonl(path);
+    for (const e of events) {
+      const text = extractPromptFromEvent(e);
+      if (text && text.trim() === needleTrim) return { jsonl: path, events };
+    }
+  }
+  return null;
 }
 
 /** Parse every JSON line in a jsonl file, skipping malformed lines. */
@@ -122,15 +154,11 @@ export function isPromptInJsonl(paneDir, promptText) {
   if (!needle) return null;
 
   const projectDir = join(CLAUDE_PROJECTS_DIR(), encodePath(paneDir));
-  const jsonl = latestJsonlFile(projectDir);
-  if (!jsonl) return null;
+  if (!existsSync(projectDir) || listJsonlFiles(projectDir).length === 0) return null;
 
-  const events = parseJsonl(jsonl);
-  for (let i = events.length - 1; i >= 0; i--) {
-    const text = extractPromptFromEvent(events[i]);
-    if (text && text.trim() === needle) return true;
-  }
-  return false;
+  // findJsonlAndEvents scans all files newest-first for the needle, so it
+  // returns non-null iff some file contains the prompt.
+  return findJsonlAndEvents(projectDir, needle) !== null;
 }
 
 /**
@@ -227,17 +255,28 @@ export function formatJsonlToolCall(toolUse) {
  */
 export function isBusyFromJsonl(paneDir, promptText = null) {
   const projectDir = join(CLAUDE_PROJECTS_DIR(), encodePath(paneDir));
-  const jsonl = latestJsonlFile(projectDir);
-  if (!jsonl) return null;
+  const found = findJsonlAndEvents(projectDir, promptText);
+  if (!found) {
+    // No file contains the needle. Two subcases:
+    //   1. No jsonl files at all → null (caller falls back)
+    //   2. Files exist but needle isn't in any of them → could mean the
+    //      prompt is still queued in a newer file as queue-operation, so
+    //      check the latest file for that case.
+    if (listJsonlFiles(projectDir).length === 0) return null;
+    if (!promptText) return null;
+    const latest = findJsonlAndEvents(projectDir, null);
+    if (!latest) return null;
+    if (promptAppearsInEvents(latest.events, promptText)) return true;
+    return null;
+  }
 
-  const events = parseJsonl(jsonl);
+  const { events } = found;
   if (events.length === 0) return null;
 
   const userIdx = findUserPromptIndex(events, promptText);
   if (userIdx === -1) {
-    // No type:user event matches. If the prompt is queued (queue-operation
-    // or attachment event), claude is still on a prior turn but will pick
-    // ours up — treat as busy.
+    // File contained the needle as a queue-operation / attachment but not
+    // as a type:user event → claude hasn't started our turn yet → busy.
     if (promptText && promptAppearsInEvents(events, promptText)) return true;
     return null;
   }
@@ -289,10 +328,10 @@ export function isBusyFromJsonl(paneDir, promptText = null) {
  */
 export function extractFromJsonl(paneDir, promptText = null) {
   const projectDir = join(CLAUDE_PROJECTS_DIR(), encodePath(paneDir));
-  const jsonl = latestJsonlFile(projectDir);
-  if (!jsonl) return null;
+  const found = findJsonlAndEvents(projectDir, promptText);
+  if (!found) return null;
 
-  const events = parseJsonl(jsonl);
+  const { jsonl, events } = found;
   if (events.length === 0) return null;
 
   const userIdx = findUserPromptIndex(events, promptText);
