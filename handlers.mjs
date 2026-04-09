@@ -286,7 +286,11 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     // Step 1: Confirm the agent received our prompt by waiting until it's
     // echoed back in the buffer. Positive signal, no hope-and-wait timing.
     // Test envs scale timeouts down via pollInterval.
-    const echoTimeout = Math.max(100, Math.min(15_000, pollInterval * 7500));
+    //
+    // 45s cap (was 15s) covers claude's /compact pause: 15-25s of no
+    // jsonl writes while compaction runs and a fresh session file is
+    // created. 15s was tight enough to false-fail on /compact turns.
+    const echoTimeout = Math.max(100, Math.min(45_000, pollInterval * 7500));
     const echoed = await agent.waitForPromptEcho(mapping.name, pane, promptText, echoTimeout);
     if (!echoed) {
       console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not echoed within ${echoTimeout}ms`);
@@ -334,13 +338,24 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       items = await agent.getResponseStream(mapping.name, pane, promptText);
     }
 
-    // Send each item, splitting long content to stay under Discord's 2000 char limit
+    // Collect all chunks first so we know whether to pace. Discord's
+    // per-channel bot rate limit is 5 messages per 5s; bursting a long
+    // response through splitMessage can trip it. discord.js retries on
+    // 429 automatically but the retry backoff spams logs and ruins the
+    // streaming feel. Adding a small gap between chunks once we're
+    // beyond the safe burst keeps us well under the limit.
+    const chunks = [];
     for (const item of items) {
       const formatted = item.type === "tool" ? `*${item.content}*` : item.content;
-      for (const chunk of splitMessage(formatted)) {
-        sent.push(chunk);
-        await msg.send(chunk)
-          .catch((err) => console.warn(`send failed for ${mapping.name}:${pane}: ${err.message}`));
+      for (const chunk of splitMessage(formatted)) chunks.push(chunk);
+    }
+    const pacePerChunk = chunks.length > 3 ? 400 : 0;
+    for (let i = 0; i < chunks.length; i++) {
+      sent.push(chunks[i]);
+      await msg.send(chunks[i])
+        .catch((err) => console.warn(`send failed for ${mapping.name}:${pane}: ${err.message}`));
+      if (pacePerChunk > 0 && i < chunks.length - 1) {
+        await new Promise((r) => setTimeout(r, pacePerChunk));
       }
     }
 
