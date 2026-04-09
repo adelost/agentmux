@@ -1,5 +1,5 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { mkdtempSync, mkdirSync, copyFileSync, rmSync, writeFileSync } from "fs";
+import { mkdtempSync, mkdirSync, copyFileSync, rmSync, writeFileSync, utimesSync } from "fs";
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
@@ -28,11 +28,25 @@ function setupFakeProject(fixtureName, paneDir = "/fake/lsrc/.agents/1") {
 
   return {
     paneDir,
+    projectDir,
     cleanup: () => {
       process.env.HOME = origHome;
       rmSync(fakeHome, { recursive: true, force: true });
     },
   };
+}
+
+/**
+ * Drop a second jsonl file into the same project dir and make it newer
+ * than the original (simulating /clear or /compact mid-session).
+ */
+function addNewerSession(projectDir, fixtureName, name = "session-new999.jsonl") {
+  const dest = join(projectDir, name);
+  copyFileSync(fixtureFile(fixtureName), dest);
+  // Bump mtime so the copy is strictly newer than the other file
+  const now = Date.now() / 1000;
+  utimesSync(dest, now, now + 10);
+  return dest;
 }
 
 // --- extractFromJsonl ---------------------------------------------------
@@ -145,6 +159,37 @@ feature("extractFromJsonl: prompt not found (strict matching)", () => {
     then: ["returns the last assistant response", (result, { cleanup }) => {
       expect(result).not.toBeNull();
       expect(result.items[0].content).toBe("The answer is 4.");
+      cleanup();
+    }],
+  });
+});
+
+feature("extractFromJsonl: session rotation (/clear or /compact mid-turn)", () => {
+  unit("finds a prompt in the older jsonl even when a newer empty session exists", {
+    given: ["old file has the prompt, newer file has a different turn", () => {
+      const ctx = setupFakeProject("simple-text.jsonl"); // "what is 2+2?" → "The answer is 4."
+      // Simulate /clear: a fresh jsonl appears and becomes the newest file.
+      // Our prompt is still in the original file, not the new one.
+      addNewerSession(ctx.projectDir, "multi-turn.jsonl");
+      return ctx;
+    }],
+    when: ["extracting the original prompt", ({ paneDir }) => extractFromJsonl(paneDir, "what is 2+2?")],
+    then: ["still finds the turn in the older file", (result, { cleanup }) => {
+      expect(result).not.toBeNull();
+      expect(result.items).toEqual([{ type: "text", content: "The answer is 4." }]);
+      cleanup();
+    }],
+  });
+
+  unit("isBusy also looks in older files when current prompt is in one of them", {
+    given: ["older file is mid-turn (streaming), newer file has a different idle turn", () => {
+      const ctx = setupFakeProject("busy-streaming.jsonl"); // "write a long story" still streaming
+      addNewerSession(ctx.projectDir, "simple-text.jsonl");
+      return ctx;
+    }],
+    when: ["checking busy for the older prompt", ({ paneDir }) => isBusyFromJsonl(paneDir, "write a long story")],
+    then: ["reports busy — old session still streaming", (r, { cleanup }) => {
+      expect(r).toBe(true);
       cleanup();
     }],
   });
