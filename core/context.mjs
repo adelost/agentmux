@@ -14,6 +14,30 @@ const CLAUDE_PROJECTS_DIR = () => join(process.env.HOME, ".claude", "projects");
 const CODEX_SESSIONS_DIR = () => join(process.env.HOME, ".codex", "sessions");
 const CLAUDE_DEFAULT_MAX = 200_000;
 
+// Context window by model. Claude Code on Opus/Sonnet 4.6 opts in to the
+// 1M-context beta via header; the jsonl records only the model ID, not the
+// beta flag, so we key off model name. Any model not listed here uses
+// CLAUDE_DEFAULT_MAX (200k).
+//
+// If you add a model that supports 1M context, put it here. The default
+// 200k is the conservative floor for anything we don't recognize.
+const CLAUDE_MODEL_MAX = {
+  "claude-opus-4-6": 1_000_000,
+  "claude-sonnet-4-6": 1_000_000,
+};
+
+function claudeMaxForModel(model) {
+  if (!model) return CLAUDE_DEFAULT_MAX;
+  if (CLAUDE_MODEL_MAX[model] != null) return CLAUDE_MODEL_MAX[model];
+  // Prefix match for future dated variants like "claude-opus-4-6-20260401"
+  for (const prefix of Object.keys(CLAUDE_MODEL_MAX)) {
+    if (model.startsWith(prefix + "-") || model.startsWith(prefix + "[")) {
+      return CLAUDE_MODEL_MAX[prefix];
+    }
+  }
+  return CLAUDE_DEFAULT_MAX;
+}
+
 // --- Claude path -------------------------------------------------------
 
 function encodeClaudePath(dir) {
@@ -56,7 +80,13 @@ function getContextFromClaudeJsonl(paneDir) {
         (u.cache_creation_input_tokens || 0) +
         (u.cache_read_input_tokens || 0) +
         (u.output_tokens || 0);
-      return { percent: Math.round((total / CLAUDE_DEFAULT_MAX) * 100), tokens: total };
+      // Pick max from the model on this same entry. Self-correcting safety
+      // net: if we ever observe a total that exceeds the declared max
+      // (e.g. new model not yet in the table), bump up so we don't report
+      // >100% nonsense.
+      const declared = claudeMaxForModel(entry.message?.model);
+      const max = Math.max(declared, total);
+      return { percent: Math.round((total / max) * 100), tokens: total };
     } catch {
       // malformed line, try the next
     }
