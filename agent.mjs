@@ -13,7 +13,6 @@ import { getContextPercent as getContextPercentByDialect } from "./core/context.
 import { findBlockingPrompt } from "./core/dismiss.mjs";
 import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
 
-const CONTEXT_MAX = 200_000;
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
 
 // --- Session isolation ---
@@ -174,9 +173,46 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   }
 
   async function respawnPane(target) {
-    await tmux(`respawn-pane -t '${esc(target)}' -k`).catch((err) =>
-      console.warn(`respawnPane(${target}) failed: ${err.message}`));
-    await wait(500);
+    // Record the old pid so we can confirm the new shell forked. Without
+    // this, the 500ms hard-wait was either wasteful (shell ready in 50ms)
+    // or insufficient (tmux hadn't finished respawning yet), and the
+    // subsequent `cd && claude` send-keys could go to a pty that hadn't
+    // been wired to a readline loop yet.
+    let oldPid = "";
+    try {
+      const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_pid}'`);
+      oldPid = stdout.trim();
+    } catch {
+      // pane may not exist yet or be fully dead — treat as unknown pid
+    }
+
+    try {
+      await tmux(`respawn-pane -t '${esc(target)}' -k`);
+    } catch (err) {
+      console.warn(`respawnPane(${target}) failed: ${err.message}`);
+      return;
+    }
+
+    // Poll for a new shell pid to appear. Tmux send-keys buffers to the
+    // pty even before readline is active, so as long as the fork happened
+    // we're safe to start sending commands — .bashrc will consume them
+    // once it finishes initializing.
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      try {
+        const [pidRes, cmdRes] = await Promise.all([
+          tmux(`display-message -t '${esc(target)}' -p '#{pane_pid}'`),
+          tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`),
+        ]);
+        const newPid = pidRes.stdout.trim();
+        const cmd = cmdRes.stdout.trim();
+        if (newPid && newPid !== oldPid && /^(bash|zsh|sh|fish|dash)$/.test(cmd)) return;
+      } catch {
+        // keep polling
+      }
+      await wait(100);
+    }
+    console.warn(`respawnPane(${target}) timed out waiting for new shell`);
   }
 
   /** --continue if session exists, otherwise no flag (new session). */
