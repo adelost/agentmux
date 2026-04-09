@@ -327,7 +327,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     // cdx and claw (which can share pane dirs like .agents/0/) would read
     // each other's jsonl files.
     if (dialect === "codex") {
-      const codex = extractFromCodexJsonl(dir);
+      const codex = extractFromCodexJsonl(dir, promptText);
       if (codex && codex.items.length > 0) return codex;
     } else if (dialect === "claude") {
       const claude = extractFromJsonl(dir, promptText);

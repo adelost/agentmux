@@ -163,33 +163,91 @@ export function formatCodexToolCall(payload) {
 }
 
 /**
- * Extract items from the most recent codex turn.
+ * Find the [start, end) index range for the turn matching a prompt needle.
  *
- * Walks from the last task_started event forward, collecting assistant
- * message texts (both 'commentary' and 'final' phases) and function_calls
- * in order. Returns the same { items, raw, turn, source } shape as the
- * Claude jsonl reader.
+ * Codex records each prompt as an `event_msg:user_message` event. Turn
+ * boundaries are clean: after the user_message, response_item events flow
+ * in, then `task_complete` closes the turn, then the next `task_started`
+ * and `user_message` begin the following turn.
+ *
+ * Walking from user_message forward until the next user_message (or end)
+ * gives us exactly one turn's worth of content. Matching on prompt text
+ * survives the "two prompts in quick succession" race where the last
+ * task_started isn't the one we sent.
+ *
+ * Returns null if no matching user_message exists.
  */
-export function extractFromCodexJsonl(paneDir) {
+function findCodexTurnRange(events, promptText) {
+  const needle = promptText?.trim();
+
+  // With a needle: find the matching user_message (most recent match first).
+  if (needle) {
+    let startIdx = -1;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e.type === "event_msg" && e.payload?.type === "user_message" && e.payload.message === needle) {
+        startIdx = i;
+        break;
+      }
+    }
+    if (startIdx === -1) return null;
+
+    // End: next user_message after startIdx, or end of events
+    let endIdx = events.length;
+    for (let i = startIdx + 1; i < events.length; i++) {
+      const e = events[i];
+      if (e.type === "event_msg" && e.payload?.type === "user_message") {
+        endIdx = i;
+        break;
+      }
+    }
+    return { startIdx, endIdx };
+  }
+
+  // No needle: use the last user_message (same semantics as "last turn").
+  // Falls back to last task_started for very early turns that haven't
+  // produced a user_message event yet.
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type === "event_msg" && e.payload?.type === "user_message") {
+      return { startIdx: i, endIdx: events.length };
+    }
+  }
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type === "event_msg" && e.payload?.type === "task_started") {
+      return { startIdx: i, endIdx: events.length };
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract items from a codex turn.
+ *
+ * If promptText is given, returns the turn whose user_message matches that
+ * text (necessary when a later prompt has already started — last
+ * task_started is no longer ours). Without a needle, returns the most
+ * recent turn.
+ *
+ * Walks forward from the user_message collecting response_item:message
+ * (assistant role) and response_item:function_call events in order, until
+ * the next user_message or end of events. Returns { items, raw, turn,
+ * source, jsonlFile } — same shape as the Claude jsonl reader.
+ */
+export function extractFromCodexJsonl(paneDir, promptText = null) {
   const file = latestSessionFor(paneDir);
   if (!file) return null;
 
   const events = parseJsonl(file);
   if (events.length === 0) return null;
 
-  // Find the last task_started event
-  let startIdx = -1;
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i];
-    if (e.type === "event_msg" && e.payload?.type === "task_started") {
-      startIdx = i;
-      break;
-    }
-  }
-  if (startIdx === -1) return null;
+  const range = findCodexTurnRange(events, promptText);
+  if (!range) return null;
+  const { startIdx, endIdx } = range;
 
   const items = [];
-  for (let i = startIdx + 1; i < events.length; i++) {
+  for (let i = startIdx + 1; i < endIdx; i++) {
     const e = events[i];
     if (e.type !== "response_item") continue;
     const p = e.payload;
