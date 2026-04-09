@@ -17,7 +17,7 @@ import { promisify } from "util";
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { parseEnv } from "./lib.mjs";
+import { parseEnv, downloadBuffer } from "./lib.mjs";
 import { createAgent } from "./agent.mjs";
 import { createAttachmentHandler } from "./attachments.mjs";
 import { createState } from "./core/state.mjs";
@@ -70,7 +70,11 @@ if (appState.get("tts") === undefined) appState.set("tts", process.env.TTS === "
 if (appState.get("thinking") === undefined) appState.set("thinking", true);
 
 const agent = createAgent({ tmuxSocket: TMUX_SOCKET, configPath: AGENTS_YAML, timeout: TIMEOUT, run, tmuxExec });
-const attachments = createAttachmentHandler({ run, transcribeScript: process.env.TRANSCRIBE_SCRIPT || resolve(__dir, "bin/transcribe-whisper.sh") });
+const attachments = createAttachmentHandler({
+  run,
+  transcribeScript: process.env.TRANSCRIBE_SCRIPT || resolve(__dir, "bin/transcribe-whisper.sh"),
+  downloadBuffer,
+});
 const tts = createTTS({ run, state: appState, voice: TTS_VOICE });
 const recorder = createRecorder({
   dir: process.env.AGENTUS_RECORD === "1" ? resolve(__dir, "test/recordings") : null,
