@@ -64,27 +64,52 @@ function readSessionMeta(filePath) {
 }
 
 /**
- * Find the most recent codex rollout file whose session_meta.cwd matches
- * (or is a prefix of) the given pane dir.
+ * Find the most specific codex rollout file matching a pane dir.
  *
  * Codex records `cwd` at session start. A pane may cd into subdirs later,
- * but the session file stays the same. We match on the pane dir or any
- * parent, picking the newest file by mtime.
+ * but the session file stays the same. Matching rules (in priority order):
+ *
+ *   1. Exact cwd == paneDir (most reliable)
+ *   2. cwd is an ancestor of paneDir (pane cd'd deeper since start)
+ *
+ * When multiple ancestors match (e.g. both /foo and /foo/bar have sessions
+ * for paneDir /foo/bar/sub), prefer the *closest* ancestor — the one with
+ * the longest cwd prefix. That's the session that actually started in the
+ * pane's directory tree, not some unrelated codex running in /foo.
+ *
+ * Ties on specificity break to newest mtime.
+ *
+ * We deliberately do NOT match sessions whose cwd is a *descendant* of
+ * paneDir (e.g. paneDir=/foo/bar, cwd=/foo/bar/sub). That would pick up
+ * any codex running inside our workspace, not our pane's own codex.
  */
 function latestSessionFor(paneDir) {
   const base = CODEX_SESSIONS_DIR();
   const files = findJsonlFiles(base)
-    .map((path) => ({ path, mtime: statSync(path).mtimeMs }))
-    .sort((a, b) => b.mtime - a.mtime);
+    .map((path) => ({ path, mtime: statSync(path).mtimeMs }));
 
-  for (const { path } of files) {
+  const candidates = [];
+  for (const { path, mtime } of files) {
     const meta = readSessionMeta(path);
-    if (!meta?.cwd) continue;
-    if (paneDir === meta.cwd || paneDir.startsWith(meta.cwd + "/") || meta.cwd.startsWith(paneDir + "/")) {
-      return path;
+    const cwd = meta?.cwd;
+    if (!cwd) continue;
+    if (paneDir === cwd) {
+      candidates.push({ path, mtime, specificity: cwd.length, exact: true });
+    } else if (paneDir.startsWith(cwd + "/")) {
+      candidates.push({ path, mtime, specificity: cwd.length, exact: false });
     }
   }
-  return null;
+
+  if (candidates.length === 0) return null;
+
+  // Priority: exact > longest prefix > newest mtime
+  candidates.sort((a, b) => {
+    if (a.exact !== b.exact) return a.exact ? -1 : 1;
+    if (a.specificity !== b.specificity) return b.specificity - a.specificity;
+    return b.mtime - a.mtime;
+  });
+
+  return candidates[0].path;
 }
 
 /**

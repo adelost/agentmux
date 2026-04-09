@@ -1,5 +1,5 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
@@ -28,11 +28,32 @@ function setupFakeCodex(events, paneDir = "/fake/workspace") {
 
   return {
     paneDir,
+    fakeHome,
     cleanup: () => {
       process.env.HOME = origHome;
       rmSync(fakeHome, { recursive: true, force: true });
     },
   };
+}
+
+/**
+ * Drop a second codex rollout file into the same sessions tree with a
+ * different cwd, and set its mtime to be either older or newer than the
+ * original. Used for specificity-priority tests.
+ */
+function addExtraRollout(fakeHome, cwd, name, { mtime, turnId = "T", prompt = "extra" } = {}) {
+  const sessionDir = join(fakeHome, ".codex", "sessions", "2026", "04", "09");
+  const path = join(sessionDir, name);
+  const events = [
+    { type: "session_meta", payload: { cwd } },
+    { type: "event_msg", payload: { type: "task_started", turn_id: turnId } },
+    { type: "event_msg", payload: { type: "user_message", message: prompt } },
+    { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: `response from ${cwd}` }] } },
+    { type: "event_msg", payload: { type: "task_complete", turn_id: turnId } },
+  ];
+  writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  if (mtime != null) utimesSync(path, mtime, mtime);
+  return path;
 }
 
 /** Canonical two-turn rollout: turn A completes, then turn B is the latest. */
@@ -149,6 +170,75 @@ feature("isBusyFromCodexJsonl: task lifecycle", () => {
     when: ["checking busy", ({ paneDir }) => isBusyFromCodexJsonl(paneDir)],
     then: ["busy", (r, { cleanup }) => {
       expect(r).toBe(true);
+      cleanup();
+    }],
+  });
+});
+
+feature("latestSessionFor: cwd specificity", () => {
+  unit("prefers exact cwd match over a newer ancestor cwd", {
+    given: ["ancestor session /workspace (newer), exact session /workspace/pane (older)", () => {
+      const paneDir = "/workspace/pane";
+      const ctx = setupFakeCodex([
+        // The "main" rollout setup creates a file at paneDir /fake/workspace. We
+        // don't want that matching, so set paneDir to something else entirely.
+        { type: "session_meta", payload: { cwd: "/unrelated" } },
+      ], paneDir);
+      // Exact match in a quieter file (older)
+      addExtraRollout(ctx.fakeHome, "/workspace/pane", "rollout-exact.jsonl",
+        { mtime: 1_000, prompt: "exact-prompt" });
+      // Ancestor match in a newer file — would win by mtime alone
+      addExtraRollout(ctx.fakeHome, "/workspace", "rollout-ancestor.jsonl",
+        { mtime: 2_000, prompt: "ancestor-prompt" });
+      return ctx;
+    }],
+    when: ["extracting with a needle only the exact file has",
+      ({ paneDir }) => extractFromCodexJsonl(paneDir, "exact-prompt")],
+    then: ["returns exact-match content, not newer ancestor", (result, { cleanup }) => {
+      expect(result).not.toBeNull();
+      expect(result.items[0].content).toBe("response from /workspace/pane");
+      cleanup();
+    }],
+  });
+
+  unit("prefers closer ancestor over more distant ancestor", {
+    given: ["two ancestors at different depths", () => {
+      const paneDir = "/a/b/c/d";
+      const ctx = setupFakeCodex([
+        { type: "session_meta", payload: { cwd: "/unrelated" } },
+      ], paneDir);
+      // Far ancestor, newer
+      addExtraRollout(ctx.fakeHome, "/a", "rollout-far.jsonl",
+        { mtime: 2_000, prompt: "far-prompt" });
+      // Close ancestor, older — should still win by specificity
+      addExtraRollout(ctx.fakeHome, "/a/b/c", "rollout-close.jsonl",
+        { mtime: 1_000, prompt: "close-prompt" });
+      return ctx;
+    }],
+    when: ["extracting with no needle (let latestSessionFor pick)",
+      ({ paneDir }) => extractFromCodexJsonl(paneDir, null)],
+    then: ["picks the closer ancestor", (result, { cleanup }) => {
+      expect(result).not.toBeNull();
+      expect(result.items[0].content).toBe("response from /a/b/c");
+      cleanup();
+    }],
+  });
+
+  unit("does not match a descendant cwd (another codex inside the workspace)", {
+    given: ["pane /workspace, session started inside /workspace/sub", () => {
+      const paneDir = "/workspace";
+      const ctx = setupFakeCodex([
+        { type: "session_meta", payload: { cwd: "/unrelated" } },
+      ], paneDir);
+      // Descendant session — must NOT match
+      addExtraRollout(ctx.fakeHome, "/workspace/sub", "rollout-desc.jsonl",
+        { mtime: 2_000, prompt: "desc-prompt" });
+      return ctx;
+    }],
+    when: ["extracting with descendant prompt",
+      ({ paneDir }) => extractFromCodexJsonl(paneDir, "desc-prompt")],
+    then: ["returns null — descendant is not our pane's session", (result, { cleanup }) => {
+      expect(result).toBeNull();
       cleanup();
     }],
   });
