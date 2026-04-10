@@ -5,12 +5,6 @@ import { splitMessage, parsePane, parseCommand, parseUseArg } from "./lib.mjs";
 import { readFileSync, unlinkSync } from "fs";
 import { executeSync } from "./core/sync-discord.mjs";
 
-// Claude Code internal slash commands that produce no assistant response in
-// the session jsonl. Sent as fire-and-forget via sendOnly — no echo wait,
-// no streaming, no extract. User typed as //compact in Discord (the //→/
-// normalization happens in parseCommand).
-const CLAUDE_PASSTHROUGH = new Set(["/compact", "/clear"]);
-
 function cleanupTmpFiles(files) {
   for (const f of files) {
     try { unlinkSync(f); }
@@ -482,13 +476,15 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       return;
     }
 
-    // Claude-internal slash commands: fire-and-forget. These are processed
-    // by Claude Code's own UI and produce no assistant response in the
-    // jsonl. Sending them through processMessage would make waitForPromptEcho
-    // time out because the prompt never appears as a user event.
-    if (parsed && CLAUDE_PASSTHROUGH.has(parsed.cmd)) {
+    // Unknown // command → pass through to claude as a slash command.
+    // Claude Code internal commands (/compact, /clear, /new, /model etc.)
+    // produce no assistant response in jsonl. Sending them through the
+    // normal processMessage pipeline would timeout on waitForPromptEcho.
+    // Agentus commands (matched above) always take priority.
+    if (parsed && !commands[parsed.cmd] && parsed.cmd !== "/use") {
+      const claudeCmd = parsed.args ? `${parsed.cmd} ${parsed.args}` : parsed.cmd;
       try {
-        await agent.sendOnly(mapping.name, parsed.cmd, pane);
+        await agent.sendOnly(mapping.name, claudeCmd, pane);
         await msg.reply(`sent \`${parsed.cmd}\``);
       } catch (err) {
         await msg.reply(`${parsed.cmd} failed: ${err.message}`).catch(() => {});
