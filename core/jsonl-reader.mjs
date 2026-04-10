@@ -286,11 +286,12 @@ export function isBusyFromJsonl(paneDir, promptText = null) {
   // start of the next turn.
   let lastAssistant = null;
   let pendingToolResult = false;
+  let nextTurnExists = false;
 
   for (let i = userIdx + 1; i < events.length; i++) {
     const e = events[i];
     if (e.type === "user") {
-      if (userPromptText(e) !== null) break; // new turn starts here
+      if (userPromptText(e) !== null) { nextTurnExists = true; break; }
       // Otherwise it's a tool_result — claude will respond with a new
       // assistant message; until that arrives, we're still busy.
       pendingToolResult = true;
@@ -300,6 +301,13 @@ export function isBusyFromJsonl(paneDir, promptText = null) {
     lastAssistant = e;
     pendingToolResult = false;
   }
+
+  // If a later user prompt exists in the jsonl, claude accepted new input
+  // which proves our turn finished — regardless of what stop_reason says.
+  // This handles compacted sessions where stop_reason is null (the event
+  // was written during streaming but the final end_turn was lost or never
+  // written). Without this, isBusy polls for 10 minutes until maxDuration.
+  if (nextTurnExists && lastAssistant) return false;
 
   // User prompt seen but no assistant response yet → claude is thinking
   if (!lastAssistant) return true;

@@ -319,6 +319,31 @@ feature("isPromptInJsonl: matches queue-operation and attachment events", () => 
   });
 });
 
+feature("isBusyFromJsonl: compacted session with null stop_reason", () => {
+  unit("returns idle when a later user prompt proves the turn finished", {
+    given: ["compacted fixture: stop=null but next user prompt exists", () =>
+      setupFakeProject("compacted-no-stop-reason.jsonl")],
+    when: ["checking busy for the first prompt", ({ paneDir }) =>
+      isBusyFromJsonl(paneDir, "find the typos")],
+    then: ["idle — next turn proves this one completed", (r, { cleanup }) => {
+      expect(r).toBe(false);
+      cleanup();
+    }],
+  });
+
+  unit("extract still works despite null stop_reason", {
+    given: ["same compacted fixture", () =>
+      setupFakeProject("compacted-no-stop-reason.jsonl")],
+    when: ["extracting", ({ paneDir }) =>
+      extractFromJsonl(paneDir, "find the typos")],
+    then: ["returns the assistant text from the null-stop turn", (result, { cleanup }) => {
+      expect(result).not.toBeNull();
+      expect(result.items[0].content).toBe("Two typos found.");
+      cleanup();
+    }],
+  });
+});
+
 feature("isBusyFromJsonl: missing jsonl file", () => {
   unit("returns null so caller can fall back", {
     given: ["nonexistent pane", () => ({ paneDir: "/nope/.agents/99", cleanup: () => {} })],
