@@ -319,6 +319,31 @@ export function isBusyFromJsonl(paneDir, promptText = null) {
   const reason = lastAssistant.message?.stop_reason;
   if (TERMINAL_STOP_REASONS.has(reason)) return false;
 
+  // Staleness check for damaged/compacted sessions: if the assistant has
+  // real text content but stop_reason is null, AND the jsonl file hasn't
+  // been written to in 15+ seconds, the turn is done. During active
+  // streaming claude writes events every ~200ms so the file stays fresh;
+  // a stale file with null stop_reason means the end_turn was lost.
+  //
+  // Observed in prod: 4 separate 10-minute hangs on 2026-04-09, all caused
+  // by null stop_reason on sessions with 25 lines (compacted). The
+  // nextTurnExists check above catches multi-turn cases; this catches the
+  // last-turn case where no subsequent user prompt exists yet.
+  if (reason === null || reason === undefined) {
+    const hasContent = Array.isArray(lastAssistant.message?.content) &&
+      lastAssistant.message.content.some(
+        (b) => b.type === "text" && b.text?.trim(),
+      );
+    if (hasContent) {
+      try {
+        const mtime = statSync(found.jsonl).mtimeMs;
+        if (Date.now() - mtime > 15_000) return false;
+      } catch {
+        // stat failed — can't determine staleness, stay busy
+      }
+    }
+  }
+
   // null / "tool_use" / missing / unknown → still working
   return true;
 }

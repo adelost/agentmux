@@ -344,6 +344,37 @@ feature("isBusyFromJsonl: compacted session with null stop_reason", () => {
   });
 });
 
+feature("isBusyFromJsonl: stale file with null stop_reason (last turn, no next prompt)", () => {
+  unit("returns idle when the file is stale (>15s) and assistant has text", {
+    given: ["stale-null-stop fixture with old mtime", () => {
+      const ctx = setupFakeProject("stale-null-stop.jsonl");
+      // Backdate the file to 30s ago so the staleness check triggers
+      const jsonlPath = join(ctx.projectDir, "session-abc123.jsonl");
+      const past = (Date.now() / 1000) - 30;
+      utimesSync(jsonlPath, past, past);
+      return ctx;
+    }],
+    when: ["checking busy", ({ paneDir }) => isBusyFromJsonl(paneDir, "review this CV")],
+    then: ["idle — stale file + text content = compaction artifact", (r, { cleanup }) => {
+      expect(r).toBe(false);
+      cleanup();
+    }],
+  });
+
+  unit("returns busy when the file is fresh (<15s) — could still be streaming", {
+    given: ["same fixture but with current mtime", () => {
+      const ctx = setupFakeProject("stale-null-stop.jsonl");
+      // Touch the file to make it fresh (default mtime is now, so no-op needed)
+      return ctx;
+    }],
+    when: ["checking busy", ({ paneDir }) => isBusyFromJsonl(paneDir, "review this CV")],
+    then: ["busy — file is fresh, null stop_reason could mean active streaming", (r, { cleanup }) => {
+      expect(r).toBe(true);
+      cleanup();
+    }],
+  });
+});
+
 feature("isBusyFromJsonl: missing jsonl file", () => {
   unit("returns null so caller can fall back", {
     given: ["nonexistent pane", () => ({ paneDir: "/nope/.agents/99", cleanup: () => {} })],
