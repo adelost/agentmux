@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"review this CV"},"uuid":"u1","timestamp":"2026-04-09T19:07:42Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Two issues found in the CV."}],"stop_reason":null},"uuid":"a1","timestamp":"2026-04-09T19:07:44Z"}
