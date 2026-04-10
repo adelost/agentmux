@@ -5,6 +5,12 @@ import { splitMessage, parsePane, parseCommand, parseUseArg } from "./lib.mjs";
 import { readFileSync, unlinkSync } from "fs";
 import { executeSync } from "./core/sync-discord.mjs";
 
+// Claude Code internal slash commands that produce no assistant response in
+// the session jsonl. Sent as fire-and-forget via sendOnly — no echo wait,
+// no streaming, no extract. User typed as //compact in Discord (the //→/
+// normalization happens in parseCommand).
+const CLAUDE_PASSTHROUGH = new Set(["/compact", "/clear"]);
+
 function cleanupTmpFiles(files) {
   for (const f of files) {
     try { unlinkSync(f); }
@@ -52,6 +58,10 @@ function sendTextReply(msg, text, context) {
   })();
 }
 
+function formatAgentError(err) {
+  return err?.killed ? "Timeout" : `${err?.stderr || err?.message || err}`;
+}
+
 /**
  * Create message handler with all dependencies injected.
  * @param {{ agent, attachments, tts, getMapping, overrides, channelMap, reloadConfig, discordChannel?, agentusYamlPath?, agentsYamlPath? }} deps
@@ -61,6 +71,17 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
   const rec = recorder || noopRecorder;
   const queues = new Map();
   const followers = new Map(); // channelId → { timer, sentCount, lastHash }
+
+  function enqueuePaneJob(queueKey, work) {
+    const prev = queues.get(queueKey) || Promise.resolve();
+    const next = prev.catch(() => {}).then(work);
+    let tracked;
+    tracked = next.finally(() => {
+      if (queues.get(queueKey) === tracked) queues.delete(queueKey);
+    });
+    queues.set(queueKey, tracked);
+    return tracked;
+  }
 
   function startFollow(msg, mapping, pane) {
     const key = msg.channelId;
@@ -275,6 +296,16 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
   const ts = () => new Date().toLocaleTimeString("sv");
 
+  async function hasReadyResponse(mapping, pane, promptText) {
+    if (!agent.hasResponseForPrompt) return false;
+    try {
+      return await agent.hasResponseForPrompt(mapping.name, pane, promptText);
+    } catch (err) {
+      console.warn(`hasReadyResponse failed for ${mapping.name}:${pane}: ${err.message}`);
+      return false;
+    }
+  }
+
   /**
    * Wait for agent to fully complete (idle 2 polls in a row), then send the result.
    * No streaming - just wait, then send. Avoids all timing/scrollback issues.
@@ -312,6 +343,11 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       else {
         idleStreak += 1;
         if (sawWorking && idleStreak >= 2) break;
+        // Queued prompts can finish before their Discord-side waiter reaches
+        // the front of our local pane queue. If the turn is already fully
+        // extractable from structured session data, don't sit in the
+        // fail-loud loop waiting for a busy signal that's already gone.
+        if (!sawWorking && await hasReadyResponse(mapping, pane, promptText)) break;
       }
       // Fail-loud escape: echo confirmed but agent never went busy within 60s.
       // Extract whatever is there and warn — this usually means the agent is
@@ -395,18 +431,18 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     }
   }
 
-  async function processMessage(msg, mapping, cleanPrompt, pane, tmpFiles) {
-    console.log(`[${ts()}] ← ${mapping.name}:${pane} "${cleanPrompt.slice(0, 80)}"`);
+  async function processMessage(msg, mapping, cleanPrompt, pane, tmpFiles, { injected = null, queued = false } = {}) {
+    console.log(`[${ts()}] ← ${mapping.name}:${pane}${queued ? " [queued]" : ""} "${cleanPrompt.slice(0, 80)}"`);
     const stopTyping = msg.startTyping();
 
     try {
-      await agent.sendOnly(mapping.name, cleanPrompt, pane);
+      if (injected) await injected;
+      else await agent.sendOnly(mapping.name, cleanPrompt, pane);
       await streamResponse(msg, mapping, pane, cleanPrompt, tmpFiles);
-      console.log(`[${ts()}] → ${mapping.name}:${pane} done`);
+      console.log(`[${ts()}] → ${mapping.name}:${pane}${queued ? " [queued]" : ""} done`);
     } catch (err) {
-      console.log(`[${ts()}] ✗ ${mapping.name}:${pane} ${err.message}`);
-      const errMsg = err.killed ? "Timeout" : `${err.stderr || err.message}`;
-      await msg.reply(errMsg)
+      console.log(`[${ts()}] ✗ ${mapping.name}:${pane}${queued ? " [queued]" : ""} ${err.message}`);
+      await msg.reply(formatAgentError(err))
         .catch((replyErr) => console.warn(`error reply failed: ${replyErr.message}`));
     } finally {
       stopTyping();
@@ -446,6 +482,21 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       return;
     }
 
+    // Claude-internal slash commands: fire-and-forget. These are processed
+    // by Claude Code's own UI and produce no assistant response in the
+    // jsonl. Sending them through processMessage would make waitForPromptEcho
+    // time out because the prompt never appears as a user event.
+    if (parsed && CLAUDE_PASSTHROUGH.has(parsed.cmd)) {
+      try {
+        await agent.sendOnly(mapping.name, parsed.cmd, pane);
+        await msg.reply(`sent \`${parsed.cmd}\``);
+      } catch (err) {
+        await msg.reply(`${parsed.cmd} failed: ${err.message}`).catch(() => {});
+      }
+      cleanupTmpFiles(tmpFiles);
+      return;
+    }
+
     // Follow mode: just inject prompt, follow-loop handles output
     if (followers.has(msg.channelId)) {
       agent.sendOnly(mapping.name, cleanPrompt, pane).catch((err) =>
@@ -455,20 +506,15 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     }
 
     const queueKey = `${mapping.name}:${pane}`;
-    const active = queues.get(queueKey);
-
-    if (active) {
-      // Agent already processing — inject message directly (no wait)
-      agent.sendOnly(mapping.name, cleanPrompt, pane).catch((err) =>
-        console.warn(`queue inject sendOnly failed: ${err.message}`));
-      cleanupTmpFiles(tmpFiles);
-      return;
+    if (queues.has(queueKey)) {
+      const injected = agent.sendOnly(mapping.name, cleanPrompt, pane)
+        .catch((err) => { throw err; });
+      return enqueuePaneJob(queueKey, () =>
+        processMessage(msg, mapping, cleanPrompt, pane, tmpFiles, { injected, queued: true }));
     }
 
-    const job = processMessage(msg, mapping, cleanPrompt, pane, tmpFiles)
-      .finally(() => queues.delete(queueKey));
-    queues.set(queueKey, job);
-    return job;
+    return enqueuePaneJob(queueKey, () =>
+      processMessage(msg, mapping, cleanPrompt, pane, tmpFiles));
   }
 
   return { onMessage };
