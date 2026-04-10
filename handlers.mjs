@@ -429,9 +429,13 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     console.log(`[${ts()}] ← ${mapping.name}:${pane}${queued ? " [queued]" : ""} "${cleanPrompt.slice(0, 80)}"`);
     const stopTyping = msg.startTyping();
 
+    // Hint the agent to produce speech-friendly output when TTS is active
+    const ttsHint = tts.isEnabled?.() ? "\n[tts on — keep it speakable, skip formatting]" : "";
+    const promptToSend = ttsHint ? cleanPrompt + ttsHint : cleanPrompt;
+
     try {
       if (injected) await injected;
-      else await agent.sendOnly(mapping.name, cleanPrompt, pane);
+      else await agent.sendOnly(mapping.name, promptToSend, pane);
       await streamResponse(msg, mapping, pane, cleanPrompt, tmpFiles);
       console.log(`[${ts()}] → ${mapping.name}:${pane}${queued ? " [queued]" : ""} done`);
     } catch (err) {
