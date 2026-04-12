@@ -44,13 +44,13 @@ loadEnv();
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const AGENTS_YAML = process.env.AGENTS_YAML || resolve(__dir, "agents.yaml");
-const AGENTUS_YAML = process.env.AGENTUS_YAML || resolve(__dir, "agentus.yaml");
+const AGENTMUX_YAML = process.env.AGENTMUX_YAML || process.env.AGENTUS_YAML || resolve(__dir, "agentmux.yaml");
 const TIMEOUT = parseInt(process.env.TIMEOUT_S || "600") * 1000;
 const WHISPER_URL = process.env.WHISPER_URL || "http://localhost:2022/v1/audio/transcriptions";
 const SHELL_PATH = process.env.SHELL_PATH || `${process.env.HOME}/bin:${process.env.PATH}`;
-const TMUX_SOCKET = process.env.TMUX_SOCKET || "/tmp/agentus-tmux.sock";
+const TMUX_SOCKET = process.env.TMUX_SOCKET || "/tmp/agentmux.sock";
 const TTS_VOICE = process.env.TTS_VOICE || "sv-SE-MattiasNeural";
-const STATE_FILE = process.env.STATE_FILE || "/tmp/agentus-state.json";
+const STATE_FILE = process.env.STATE_FILE || "/tmp/agentmux-state.json";
 
 if (!TOKEN) {
   console.error("Set DISCORD_TOKEN in .env");
@@ -108,7 +108,7 @@ const handlers = createHandlers({
   channelMap,
   reloadConfig,
   discordChannel: discord,
-  agentusYamlPath: AGENTUS_YAML,
+  agentusYamlPath: AGENTMUX_YAML,
   agentsYamlPath: AGENTS_YAML,
   recorder,
 });

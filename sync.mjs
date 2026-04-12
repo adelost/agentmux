@@ -1,4 +1,4 @@
-// Sync logic: parse agentus.yaml, generate channel names, build sync plans,
+// Sync logic: parse agentmux.yaml, generate channel names, build sync plans,
 // generate legacy agents.yaml. Pure functions — no Discord API calls.
 
 import yaml from "js-yaml";
@@ -13,17 +13,17 @@ export function expandTilde(p) {
 }
 
 /**
- * Parse agentus.yaml content into normalized config.
+ * Parse agentmux.yaml content into normalized config.
  * @returns {{ guild: string, category: string, agents: Map<string, { dir, claude, services, shells, layout }> }}
  */
 export function parseAgentusConfig(yamlContent) {
   const doc = yaml.load(yamlContent);
-  if (!doc?.guild) throw new Error("agentus.yaml: 'guild' is required");
-  if (!doc?.agents || typeof doc.agents !== "object") throw new Error("agentus.yaml: 'agents' section is required");
+  if (!doc?.guild) throw new Error("agentmux.yaml: 'guild' is required");
+  if (!doc?.agents || typeof doc.agents !== "object") throw new Error("agentmux.yaml: 'agents' section is required");
 
   const agents = new Map();
   for (const [name, config] of Object.entries(doc.agents)) {
-    if (!config?.dir) throw new Error(`agentus.yaml: agent '${name}' needs a 'dir'`);
+    if (!config?.dir) throw new Error(`agentmux.yaml: agent '${name}' needs a 'dir'`);
     agents.set(name, {
       dir: expandTilde(config.dir),
       claude: config.claude ?? 1,
