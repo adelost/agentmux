@@ -377,6 +377,30 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return { raw, turn, items, source: "tmux" };
   }
 
+  /**
+   * True when the source-of-truth session store already contains response
+   * items for this exact prompt. No tmux fallback here, we only want a
+   * positive signal from structured data.
+   */
+  function hasResponseForPrompt(agentName, pane, promptText) {
+    const needle = promptText?.trim();
+    if (!needle) return false;
+
+    const config = agentConfig(agentName);
+    const dir = paneDir(config.dir, pane);
+    const dialect = paneDialectName(agentName, pane);
+
+    if (dialect === "codex") {
+      const codex = extractFromCodexJsonl(dir, promptText);
+      return Boolean(codex?.items?.length);
+    }
+    if (dialect === "claude") {
+      const claude = extractFromJsonl(dir, promptText);
+      return Boolean(claude?.items?.length);
+    }
+    return false;
+  }
+
   async function capturePane(agentName, pane, lines = 50) {
     // -J joins wrapped lines into single logical lines. Without this, narrow
     // panes (e.g. 42-col panes in main-vertical layouts) split the prompt and
@@ -554,7 +578,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   return {
     ensureReady, sendAndWait, sendOnly,
-    getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, isBusy,
+    getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
     capturePane, sendEscape, dismissBlockingPrompt, waitForPromptEcho,
     startProgressTimer, getContextPercent, checkAgent,
   };

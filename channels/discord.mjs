@@ -43,6 +43,10 @@ export function createDiscordChannel({ token }) {
       return client.guilds.fetch(guildId);
     },
 
+    isAlive() {
+      return client.isReady() && client.ws.status === 0;
+    },
+
     stop() {
       client.destroy();
     },

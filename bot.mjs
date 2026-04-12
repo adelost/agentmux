@@ -98,9 +98,34 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
     }
   })();
 
+  // --- Heartbeat ---
+
+  let shuttingDown = false;
+  let failCount = 0;
+  const HEARTBEAT_INTERVAL = 30_000;
+  const MAX_FAILURES = 3; // 3 consecutive failures (~90s) before restart
+
+  const heartbeat = setInterval(() => {
+    if (shuttingDown) return;
+    const alive = channels.every((ch) => !ch.isAlive || ch.isAlive());
+    if (alive) {
+      failCount = 0;
+      return;
+    }
+    failCount++;
+    console.warn(`[heartbeat] channel unhealthy (${failCount}/${MAX_FAILURES})`);
+    if (failCount >= MAX_FAILURES) {
+      console.error(`[heartbeat] ${MAX_FAILURES} consecutive failures, exiting for restart`);
+      try { unlinkSync(PIDFILE); } catch {}
+      process.exit(1);
+    }
+  }, HEARTBEAT_INTERVAL);
+
   // --- Shutdown ---
 
   const shutdown = () => {
+    shuttingDown = true;
+    clearInterval(heartbeat);
     console.log("\nShutting down...");
     try { unlinkSync(PIDFILE); } catch {}
     for (const channel of channels) channel.stop();

@@ -41,6 +41,7 @@ function setup({ mappingOverride, channelMapEntries } = {}) {
       turn: "turn",
       items: [{ type: "text", content: "agent reply" }],
     })),
+    hasResponseForPrompt: vi.fn(async () => false),
     isBusy: vi.fn(async () => { busyState.calls++; return busyState.calls <= 2; }),
     capturePane: vi.fn(async () => "raw pane output"),
     getContextPercent: vi.fn(() => ({ percent: 42, tokens: 84000 })),
@@ -424,6 +425,50 @@ feature("processMessage pipeline (streaming)", () => {
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
     then: ["isBusy never polled", (_, { agent }) => {
       expect(agent.isBusy).not.toHaveBeenCalled();
+    }],
+  });
+
+  component("queued follow-up prompt gets its own response stream", {
+    given: ["two messages to the same busy pane", () => {
+      const s = setup();
+      const first = mockMsg({ content: "first prompt" });
+      const second = mockMsg({ content: "second prompt" });
+
+      let releaseFirstBusy;
+      const firstBusy = new Promise((resolve) => { releaseFirstBusy = resolve; });
+      let firstBusyCalls = 0;
+
+      s.agent.isBusy.mockImplementation(async (_, __, promptText) => {
+        if (promptText === "first prompt") {
+          firstBusyCalls++;
+          if (firstBusyCalls === 1) return firstBusy;
+          return false;
+        }
+        if (promptText === "second prompt") return false;
+        return false;
+      });
+      s.agent.hasResponseForPrompt.mockImplementation(async (_, __, promptText) =>
+        promptText === "second prompt");
+      s.agent.getResponseStream.mockImplementation(async (_, __, promptText) => [{
+        type: "text",
+        content: `reply for ${promptText}`,
+      }]);
+
+      return { ...s, first, second, releaseFirstBusy };
+    }],
+    when: ["both messages are processed", async ({ onMessage, first, second, releaseFirstBusy }) => {
+      const firstRun = onMessage(first);
+      await new Promise((r) => setTimeout(r, 0));
+      const secondRun = onMessage(second);
+      releaseFirstBusy(true);
+      await Promise.all([firstRun, secondRun]);
+    }],
+    then: ["the queued message is also streamed back to Discord", (_, { first, second, agent }) => {
+      expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "first prompt", 0);
+      expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "second prompt", 0);
+      expect(first.send.mock.calls.some((c) => c[0]?.includes("reply for first prompt"))).toBe(true);
+      expect(second.send.mock.calls.some((c) => c[0]?.includes("reply for second prompt"))).toBe(true);
+      expect(agent.hasResponseForPrompt).toHaveBeenCalledWith("_ai", 0, "second prompt");
     }],
   });
 });
