@@ -1,7 +1,7 @@
 {
-  "name": "agentus",
+  "name": "agentmux",
   "version": "1.0.0",
-  "description": "Discord bridge for tmux-based coding agents (Claude Code)",
+  "description": "Discord bridge for tmux-based coding agents (Claude Code, Codex)",
   "type": "module",
   "scripts": {
     "setup": "bash bin/setup.sh",

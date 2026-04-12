@@ -28,9 +28,9 @@ const HELP_TEXT = [
   "`/thinking` — toggle real-time text streaming (default: on)",
   "`/follow` — toggle: stream output even when typing in tmux",
   "`/tts` — toggle text-to-speech for this channel",
-  "`/sync` — create/sync Discord channels from agentus.yaml",
+  "`/sync` — create/sync Discord channels from agentmux.yaml",
   "`/reload` — reload agents.yaml",
-  "`/restart` — restart Agentus",
+  "`/restart` — restart agentmux",
   "",
   "Prefix with `.N` to target pane N (e.g. `.1 /raw`)",
 ].join("\n");
@@ -224,7 +224,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     "/sync": async (msg) => {
       if (!discordChannel || !agentusYamlPath) {
-        await msg.reply("sync not configured (missing agentus.yaml path or discord channel)");
+        await msg.reply("sync not configured (missing agentmux.yaml path or discord channel)");
         return;
       }
       if (state.get("syncRunning")) {

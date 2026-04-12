@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
 import { buildChannelMap } from "./lib.mjs";
 
-const PIDFILE = process.env.PIDFILE || "/tmp/agentus.pid";
+const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
 
 function ensureSingleInstance() {
   if (existsSync(PIDFILE)) {

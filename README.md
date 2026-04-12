@@ -1,4 +1,4 @@
-# Agentus
+# agentmux
 
 Discord bridge for tmux-based coding agents. Send messages in Discord, get responses from Claude Code (or Codex) running in tmux panes.
 
@@ -18,8 +18,8 @@ You (Discord)
 ## Quick Start
 
 ```bash
-git clone https://github.com/adelost/agentus
-cd agentus
+git clone https://github.com/adelost/agentmux
+cd agentmux
 bash bin/setup.sh
 ```
 
@@ -44,9 +44,9 @@ Setup checks prerequisites (Node.js 20+, tmux, Claude Code), installs npm deps, 
 1. Open Discord Settings > App Settings > **Advanced** > enable **Developer Mode**
 2. Right-click your server name in the sidebar > **Copy Server ID**
 
-### 3. Configure agentus.yaml
+### 3. Configure agentmux.yaml
 
-Edit `agentus.yaml` with your server ID and projects:
+Edit `agentmux.yaml` with your server ID and projects:
 
 ```yaml
 guild: "YOUR_SERVER_ID"
@@ -83,7 +83,7 @@ Then in any existing Discord channel where the bot is present, type:
 /sync
 ```
 
-This creates all the Discord channels automatically under the configured category. You only need to run `/sync` once (or when you change `agentus.yaml`).
+This creates all the Discord channels automatically under the configured category. You only need to run `/sync` once (or when you change `agentmux.yaml`).
 
 ### 5. Start coding via Discord
 
@@ -100,7 +100,7 @@ Agentus sends it to Claude Code, streams progress, and replies with the result.
 | Command | Description |
 |---------|-------------|
 | `/help` | Show all commands |
-| `/sync` | Create/sync Discord channels from agentus.yaml |
+| `/sync` | Create/sync Discord channels from agentmux.yaml |
 | `/peek` | Last response from agent |
 | `/raw` | Last 50 lines of tmux pane (raw) |
 | `/status` | Current agent, pane, context% |
@@ -155,7 +155,7 @@ agent myproject              # attach to tmux session
 agent myproject "fix bug"    # send prompt from terminal
 
 # Or use tmux directly
-tmux -S /tmp/agentus-tmux.sock attach -t myproject
+tmux -S /tmp/agentmux-tmux.sock attach -t myproject
 ```
 
 ## Environment Variables
@@ -165,8 +165,8 @@ All optional (set in `.env`):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DISCORD_TOKEN` | (required) | Discord bot token |
-| `AGENTUS_YAML` | `./agentus.yaml` | Path to config |
-| `TMUX_SOCKET` | `/tmp/agentus-tmux.sock` | tmux socket path |
+| `AGENTUS_YAML` | `./agentmux.yaml` | Path to config |
+| `TMUX_SOCKET` | `/tmp/agentmux-tmux.sock` | tmux socket path |
 | `TIMEOUT_S` | `600` | Max wait for response (seconds) |
 | `TTS_VOICE` | `sv-SE-MattiasNeural` | edge-tts voice |
 | `AGENTUS_RECORD` | `0` | Set to `1` to save request/response recordings |
