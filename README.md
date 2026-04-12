@@ -1,18 +1,18 @@
 # Agentus
 
-Discord bridge for tmux-based coding agents. Send messages in Discord, get responses from Claude Code running in tmux.
+Discord bridge for tmux-based coding agents. Send messages in Discord, get responses from Claude Code (or Codex) running in tmux panes.
 
 ```
 You (phone/desktop)
-  ↓ Discord message
+  -> Discord message
 Agentus (Node.js)
-  ↓ tmux send-keys
+  -> tmux send-keys
 Claude Code (in tmux pane)
-  ↓ works...
-Agentus polls tmux
-  ↓ extracts response
+  -> works...
+Agentus reads session jsonl
+  -> extracts structured response
 You (Discord)
-  ↓ reply with context %
+  -> reply with context %
 ```
 
 ## Quick Start
@@ -116,17 +116,22 @@ Agentus sends it to Claude Code, streams progress, and replies with the result.
 
 **Pane targeting:** prefix with `.N` to target a specific pane: `.2 fix the bug` sends to pane 2.
 
+**Claude commands:** any `//command` that isn't an Agentus command is forwarded to Claude as a slash command. `//compact`, `//clear`, `//new`, `//model sonnet` etc. all work.
+
 ## Features
 
+- **jsonl source of truth**: Reads Claude Code's session jsonl files directly for response extraction and busy detection. No tmux text parsing, no wordwrap bugs, no progress-icon interference. Codex rollout files supported too.
 - **Multi-agent**: Route different Discord channels to different coding agents
 - **Multi-pane**: Multiple Claude Code instances per project
 - **Channel sync**: `/sync` creates Discord channels from config
 - **Streaming**: Real-time progress updates while agent works
 - **Follow mode**: Stream output even when typing directly in tmux
-- **Session isolation**: Each pane gets its own Claude session history
+- **Session isolation**: Each pane gets its own Claude session in `.agents/N/`
 - **Voice**: Send voice messages (transcribed via Whisper)
+- **TTS**: Text-to-speech for responses (with automatic speech-friendly formatting hints)
 - **Attachments**: Images and files forwarded to the agent
-- **Context tracking**: Shows context window usage % and token count
+- **Context tracking**: Model-aware context window usage (supports 1M-context Opus/Sonnet)
+- **Recording**: Saves request/response pairs for replay testing (auto-rotation, max 500)
 - **Auto-restart**: Crash recovery via `bin/start.sh`
 - **Auto-dismiss**: Handles resume prompts and feedback surveys automatically
 
@@ -164,11 +169,12 @@ All optional (set in `.env`):
 | `TMUX_SOCKET` | `/tmp/agentus-tmux.sock` | tmux socket path |
 | `TIMEOUT_S` | `600` | Max wait for response (seconds) |
 | `TTS_VOICE` | `sv-SE-MattiasNeural` | edge-tts voice |
+| `AGENTUS_RECORD` | `0` | Set to `1` to save request/response recordings |
 
 ## Tests
 
 ```bash
-npm test     # 168 tests
+npm test     # 381 tests
 ```
 
 ## License
