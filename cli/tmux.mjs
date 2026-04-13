@@ -76,7 +76,7 @@ export async function listPanes(ctx, name) {
 export async function getPaneStatus(ctx, name, pane) {
   try {
     const { stdout } = await ctx.tmux(
-      `capture-pane -t '${esc(name)}:.${pane}' -p -S -30`,
+      `capture-pane -t '${esc(name)}:.${pane}' -J -p -S -30`,
     );
     return detectPaneStatus(stripAnsi(stdout));
   } catch {

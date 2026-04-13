@@ -29,12 +29,15 @@ export function startProgressTimer({ send, getSegments, capturePane }, { streami
     try {
       const segments = await getSegments();
 
+      // Batch all new complete segments per tick into one message
       if (streaming && segments.length > 1 && sentCount < segments.length - 1) {
+        const batch = [];
         while (sentCount < segments.length - 1) {
-          send(segments[sentCount]).catch((err) =>
-            console.warn(`progress: send segment failed: ${err.message}`));
+          batch.push(segments[sentCount]);
           sentCount++;
         }
+        send(batch.join("\n\n")).catch((err) =>
+          console.warn(`progress: send segment failed: ${err.message}`));
         lastNewAt = Date.now();
         return;
       }

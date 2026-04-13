@@ -121,13 +121,16 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         if (!busy) return; // idle, nothing to do
 
         // Busy: stream complete segments (all except last which may still grow)
+        // Batch all new segments per tick into one message
         const segments = await agent.getResponseSegments(mapping.name, pane);
         if (segments.length > 1 && sentCount < segments.length - 1) {
+          const batch = [];
           while (sentCount < segments.length - 1) {
-            await msg.send(segments[sentCount]).catch((err) =>
-              console.warn(`follow: send segment failed: ${err.message}`));
+            batch.push(segments[sentCount]);
             sentCount++;
           }
+          await msg.send(batch.join("\n\n")).catch((err) =>
+            console.warn(`follow: send segment failed: ${err.message}`));
         }
       } catch (err) {
         console.warn(`follow: poll tick failed: ${err.message}`);
@@ -368,17 +371,13 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       items = await agent.getResponseStream(mapping.name, pane, promptText);
     }
 
-    // Collect all chunks first so we know whether to pace. Discord's
-    // per-channel bot rate limit is 5 messages per 5s; bursting a long
-    // response through splitMessage can trip it. discord.js retries on
-    // 429 automatically but the retry backoff spams logs and ruins the
-    // streaming feel. Adding a small gap between chunks once we're
-    // beyond the safe burst keeps us well under the limit.
-    const chunks = [];
-    for (const item of items) {
-      const formatted = item.type === "tool" ? `*${item.content}*` : item.content;
-      for (const chunk of splitMessage(formatted)) chunks.push(chunk);
-    }
+    // Merge all items (text + tool calls) into one message, then split
+    // only for Discord's max message size. Tool calls are shown as italic
+    // lines inline rather than as separate messages.
+    const fullText = items
+      .map((item) => item.type === "tool" ? `*${item.content}*` : item.content)
+      .join("\n\n");
+    const chunks = splitMessage(fullText);
     const pacePerChunk = chunks.length > 3 ? 400 : 0;
     for (let i = 0; i < chunks.length; i++) {
       sent.push(chunks[i]);
