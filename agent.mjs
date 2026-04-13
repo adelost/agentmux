@@ -247,7 +247,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   async function dismissBlockingPrompt(target) {
     let paneText;
     try {
-      const { stdout } = await tmux(`capture-pane -t '${esc(target)}' -p -S -20`);
+      const { stdout } = await tmux(`capture-pane -t '${esc(target)}' -J -p -S -20`);
       paneText = stdout;
     } catch (err) {
       console.warn(`dismiss: capture failed for ${target}: ${err.message}`);
@@ -537,7 +537,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       getSegments: () => getResponseSegments(agentName, pane),
       capturePane: async () => {
         try {
-          const { stdout } = await tmux(`capture-pane -t '${esc(agentName)}:.${pane}' -p -S -10`);
+          const { stdout } = await tmux(`capture-pane -t '${esc(agentName)}:.${pane}' -J -p -S -10`);
           return stdout;
         } catch (err) {
           console.warn(`progress capturePane failed: ${err.message}`);
