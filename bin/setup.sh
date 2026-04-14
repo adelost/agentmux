@@ -1,5 +1,5 @@
 #!/bin/bash
-# Agentus setup — install prerequisites and configure
+# agentmux setup — install prerequisites and configure
 set -euo pipefail
 
 RED='\033[0;31m'
@@ -11,7 +11,7 @@ ok()   { echo -e "  ${GREEN}✓${RESET} $1"; }
 fail() { echo -e "  ${RED}✗${RESET} $1"; }
 dim()  { echo -e "  ${DIM}$1${RESET}"; }
 
-echo "Agentus setup"
+echo "agentmux setup"
 echo ""
 
 # --- Detect package manager ---
@@ -120,16 +120,20 @@ else
   fi
 fi
 
-if [[ ! -f agents.yaml ]]; then
-  cp agents.yaml.example agents.yaml
+if [[ ! -f agentmux.yaml ]]; then
+  cp agentmux.yaml.example agentmux.yaml
   echo ""
-  echo "  Created agents.yaml — configure your agents:"
-  dim "  nano agents.yaml"
+  echo "  Created agentmux.yaml — add your server ID and projects:"
+  dim "  nano agentmux.yaml"
 else
-  ok "agents.yaml exists"
+  ok "agentmux.yaml exists"
 fi
 
 # --- Done ---
 
 echo ""
-echo -e "${GREEN}Ready!${RESET} Run: npm run dev"
+echo -e "${GREEN}Ready!${RESET}"
+echo "  1. Edit .env with your Discord bot token"
+echo "  2. Edit agentmux.yaml with your server ID and projects"
+echo "  3. Run: npm run dev"
+echo "  4. Type /sync in Discord to create channels"
