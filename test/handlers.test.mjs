@@ -397,34 +397,31 @@ feature("processMessage pipeline (streaming)", () => {
     }],
   });
 
-  component("fails loud when prompt is never echoed", {
+  component("warns but continues when prompt is never echoed", {
     given: ["an agent that never echoes the prompt", () => {
       const s = setup();
       s.agent.waitForPromptEcho.mockResolvedValue(false);
       return { ...s, msg: mockMsg({ content: "probably lost" }) };
     }],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["warns user, skips extract + context", (_, { msg, agent }) => {
+    then: ["warns user but still extracts response", (_, { msg, agent }) => {
       // Warning sent
       const sends = msg.send.mock.calls.map((c) => c[0]);
       expect(sends.some((s) => s.includes("did not acknowledge"))).toBe(true);
-      // Extract never runs when echo times out
-      expect(agent.getResponseStream).not.toHaveBeenCalled();
-      expect(agent.getResponseStreamWithRaw).not.toHaveBeenCalled();
-      // Context line also skipped
-      expect(sends.some((s) => s.startsWith("_context"))).toBe(false);
+      // Extract still runs (no longer bails out)
+      expect(agent.getResponseStream).toHaveBeenCalled();
     }],
   });
 
-  component("does not run busy loop when echo timeout fires", {
+  component("still polls isBusy when echo timeout fires", {
     given: ["echo timeout", () => {
       const s = setup();
       s.agent.waitForPromptEcho.mockResolvedValue(false);
       return { ...s, msg: mockMsg({ content: "timeout case" }) };
     }],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["isBusy never polled", (_, { agent }) => {
-      expect(agent.isBusy).not.toHaveBeenCalled();
+    then: ["isBusy is polled (continues after warning)", (_, { agent }) => {
+      expect(agent.isBusy).toHaveBeenCalled();
     }],
   });
 
