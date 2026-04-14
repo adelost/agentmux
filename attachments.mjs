@@ -4,20 +4,8 @@
 import { writeFileSync } from "fs";
 import { extname } from "path";
 
-const TEXT_EXTENSIONS =
-  /\.(txt|md|json|yaml|yml|csv|xml|log|ts|js|py|sh|html|css|toml|ini|cfg|env)$/i;
-
-const DOCUMENT_EXTENSIONS =
-  /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp|rtf|epub)$/i;
-
-const DOCUMENT_CONTENT_TYPES = [
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument",
-  "application/vnd.oasis.opendocument",
-  "application/rtf",
-  "application/epub",
-];
+// No whitelist needed — all non-audio attachments are downloaded and passed
+// to Claude, which can read most file types (PDF, images, text, archives, etc).
 
 /**
  * Dependencies:
@@ -37,10 +25,6 @@ export function createAttachmentHandler({ run, transcribeScript, downloadBuffer,
     for (const att of msg.attachments) {
       const isAudio = att.contentType?.startsWith("audio/");
       const isImage = att.contentType?.startsWith("image/");
-      const isText = att.contentType?.startsWith("text/") ||
-        TEXT_EXTENSIONS.test(att.name || "");
-      const isDocument = DOCUMENT_CONTENT_TYPES.some(t => att.contentType?.startsWith(t)) ||
-        DOCUMENT_EXTENSIONS.test(att.name || "");
 
       if (isAudio) {
         const transcribed = await transcribeAudio(msg, att, tmpFiles);
@@ -48,7 +32,7 @@ export function createAttachmentHandler({ run, transcribeScript, downloadBuffer,
         const tagged = `[transcribed voice, may contain speech-to-text errors — interpret intent] ${transcribed}`;
         if (!rawText) rawText = tagged;
         else rawText = `${rawText}\n${tagged}`;
-      } else if (isImage || isText || isDocument) {
+      } else {
         const path = await downloadToTmp(msg, att, tmpFiles);
         if (path) {
           const label = isImage ? "image" : "file";
