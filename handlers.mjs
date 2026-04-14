@@ -321,10 +321,9 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     const echoTimeout = Math.max(100, Math.min(45_000, pollInterval * 7500));
     const echoed = await agent.waitForPromptEcho(mapping.name, pane, promptText, echoTimeout);
     if (!echoed) {
-      console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not echoed within ${echoTimeout}ms`);
-      await msg.send(`⚠️ Agent did not acknowledge prompt within ${Math.round(echoTimeout / 1000)}s. Pane may be dead — try \`/raw\` to inspect.`)
+      console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not echoed within ${echoTimeout}ms — continuing anyway`);
+      await msg.send(`⚠️ Agent did not acknowledge prompt within ${Math.round(echoTimeout / 1000)}s. Waiting for response anyway...`)
         .catch((err) => console.warn(`send warning failed: ${err.message}`));
-      return;
     }
 
     // Step 2: Wait for completion (idle 2 polls in a row after we saw busy).
