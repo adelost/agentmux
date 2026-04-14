@@ -1,4 +1,4 @@
-# Agentus — agent configuration
+# agentmux — agent configuration
 #
 # Each entry is a coding agent running in a tmux session.
 # The `discord` field maps Discord channel IDs to tmux panes.

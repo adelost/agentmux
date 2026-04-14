@@ -5,11 +5,11 @@ Discord bridge for tmux-based coding agents. Send messages in Discord, get respo
 ```
 You (phone/desktop)
   -> Discord message
-Agentus (Node.js)
+agentmux (Node.js)
   -> tmux send-keys
 Claude Code (in tmux pane)
   -> works...
-Agentus reads session jsonl
+agentmux reads session jsonl
   -> extracts structured response
 You (Discord)
   -> reply with context %
@@ -28,7 +28,7 @@ Setup checks prerequisites (Node.js 20+, tmux, Claude Code), installs npm deps, 
 ### 1. Create a Discord Bot
 
 1. Go to [discord.com/developers/applications](https://discord.com/developers/applications)
-2. Click **New Application**, name it (e.g. "Agentus")
+2. Click **New Application**, name it (e.g. "agentmux")
 3. Go to **Bot** in the sidebar
 4. Click **Reset Token**, copy the token
 5. Paste it in `.env` as `DISCORD_TOKEN=your-token-here`
@@ -74,7 +74,7 @@ Each agent gets:
 ### 4. Start and Sync
 
 ```bash
-npm run dev                  # start Agentus (with auto-restart)
+npm run dev                  # start agentmux (with auto-restart)
 ```
 
 Then in any existing Discord channel where the bot is present, type:
@@ -93,7 +93,35 @@ Send a message in any created channel (e.g. `#myproject`):
 fix the bug in auth.ts
 ```
 
-Agentus sends it to Claude Code, streams progress, and replies with the result.
+agentmux sends it to Claude Code, streams progress, and replies with the result.
+
+## Multi-machine setup
+
+Each machine runs its own agentmux instance. To avoid conflicts, use a separate Discord category per machine:
+
+```yaml
+# Machine A: agentmux.yaml
+guild: "YOUR_SERVER_ID"
+category: "Desktop"
+
+agents:
+  myproject:
+    dir: ~/projects/myproject
+    claude: 3
+```
+
+```yaml
+# Machine B: agentmux.yaml
+guild: "YOUR_SERVER_ID"
+category: "Laptop"
+
+agents:
+  myproject:
+    dir: ~/projects/myproject
+    claude: 3
+```
+
+Both connect to the same Discord server but create channels under different categories. No conflicts, same bot token works.
 
 ## Commands
 
@@ -112,11 +140,11 @@ Agentus sends it to Claude Code, streams progress, and replies with the result.
 | `/use <agent>[.pane]` | Switch channel target |
 | `/use reset` | Back to yaml default |
 | `/reload` | Reload config |
-| `/restart` | Restart Agentus |
+| `/restart` | Restart agentmux |
 
 **Pane targeting:** prefix with `.N` to target a specific pane: `.2 fix the bug` sends to pane 2.
 
-**Claude commands:** any `//command` that isn't an Agentus command is forwarded to Claude as a slash command. `//compact`, `//clear`, `//new`, `//model sonnet` etc. all work.
+**Claude commands:** any `//command` that isn't an agentmux command is forwarded to Claude as a slash command. `//compact`, `//clear`, `//new`, `//model sonnet` etc. all work.
 
 ## Features
 
@@ -129,7 +157,7 @@ Agentus sends it to Claude Code, streams progress, and replies with the result.
 - **Session isolation**: Each pane gets its own Claude session in `.agents/N/`
 - **Voice**: Send voice messages (transcribed via Whisper)
 - **TTS**: Text-to-speech for responses (with automatic speech-friendly formatting hints)
-- **Attachments**: Images and files forwarded to the agent
+- **Attachments**: Images, PDFs, documents, and any file type forwarded to the agent
 - **Context tracking**: Model-aware context window usage (supports 1M-context Opus/Sonnet)
 - **Recording**: Saves request/response pairs for replay testing (auto-rotation, max 500)
 - **Auto-restart**: Crash recovery via `bin/start.sh`
@@ -139,7 +167,7 @@ Agentus sends it to Claude Code, streams progress, and replies with the result.
 
 Claude Code ties session history to the working directory. When multiple panes share the same dir, `--continue` picks up the wrong session.
 
-Agentus solves this automatically:
+agentmux solves this automatically:
 - **Pane 0** runs in the project root
 - **Pane 1+** runs in `root/.agents/N/`
 
@@ -147,7 +175,7 @@ Each pane gets isolated session history. `--continue` is safe on all panes. `.ag
 
 ## tmux Integration
 
-Agentus creates tmux sessions you can attach to directly:
+agentmux creates tmux sessions you can attach to directly:
 
 ```bash
 # If you have the agent CLI (optional)
@@ -165,16 +193,16 @@ All optional (set in `.env`):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DISCORD_TOKEN` | (required) | Discord bot token |
-| `AGENTUS_YAML` | `./agentmux.yaml` | Path to config |
+| `AGENTMUX_YAML` | `./agentmux.yaml` | Path to config |
 | `TMUX_SOCKET` | `/tmp/agentmux-tmux.sock` | tmux socket path |
 | `TIMEOUT_S` | `600` | Max wait for response (seconds) |
 | `TTS_VOICE` | `sv-SE-MattiasNeural` | edge-tts voice |
-| `AGENTUS_RECORD` | `0` | Set to `1` to save request/response recordings |
+| `AGENTMUX_RECORD` | `0` | Set to `1` to save request/response recordings |
 
 ## Tests
 
 ```bash
-npm test     # 381 tests
+npm test     # 390 tests
 ```
 
 ## License

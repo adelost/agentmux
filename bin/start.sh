@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Agentus supervisor: auto-restart on crash, immediate restart on /restart (exit 75).
-# Clean stop: SIGTERM (agent stop agentus) or exit 0.
+# agentmux supervisor: auto-restart on crash, immediate restart on /restart (exit 75).
+# Clean stop: SIGTERM or exit 0.
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"

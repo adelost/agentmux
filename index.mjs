@@ -77,7 +77,7 @@ const attachments = createAttachmentHandler({
 });
 const tts = createTTS({ run, state: appState, voice: TTS_VOICE });
 const recorder = createRecorder({
-  dir: process.env.AGENTUS_RECORD === "1" ? resolve(__dir, "test/recordings") : null,
+  dir: (process.env.AGENTMUX_RECORD || process.env.AGENTUS_RECORD) === "1" ? resolve(__dir, "test/recordings") : null,
 });
 if (recorder.enabled) console.log(`recorder | enabled → ${resolve(__dir, "test/recordings")}`);
 
