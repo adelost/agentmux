@@ -195,6 +195,54 @@ export function parseUseArg(arg) {
   return { name: m[1], pane: m[2] ? parseInt(m[2], 10) : 0 };
 }
 
+/** Supported image extensions for inline upload. */
+export const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
+
+/** Max file size for Discord upload (free tier is 25MB). */
+export const MAX_IMAGE_SIZE = 25 * 1024 * 1024;
+
+/**
+ * Extract image markers from response text. Agents include `[image: /path]`
+ * on its own line to attach a file to the Discord reply.
+ * Returns { text: string (markers stripped), paths: string[] }.
+ */
+export function extractImageMarkers(text) {
+  const regex = /^\[image:\s*([^\]]+)\]\s*$/gm;
+  const paths = [];
+  const cleaned = text
+    .replace(regex, (_, p) => {
+      paths.push(p.trim());
+      return "";
+    })
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { text: cleaned, paths };
+}
+
+/**
+ * Check that an image path is safe to upload.
+ * Returns { ok: true, path } or { ok: false, error }.
+ * Infra errors (missing file, wrong type) return ok: false, not throw.
+ */
+export function validateImagePath(path, statFn) {
+  if (!path.startsWith("/")) return { ok: false, error: "path must be absolute" };
+  const lower = path.toLowerCase();
+  if (!IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext))) {
+    return { ok: false, error: "unsupported image format" };
+  }
+  try {
+    const stat = statFn(path);
+    if (!stat.isFile()) return { ok: false, error: "not a file" };
+    if (stat.size > MAX_IMAGE_SIZE) {
+      const mb = Math.round(stat.size / 1024 / 1024);
+      return { ok: false, error: `too large (${mb}MB > 25MB)` };
+    }
+    return { ok: true, path };
+  } catch {
+    return { ok: false, error: "file not found" };
+  }
+}
+
 /**
  * Download a URL to a Buffer.
  */
