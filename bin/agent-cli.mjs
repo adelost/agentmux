@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // agent. Node.js CLI for managing Claude Code tmux sessions.
-// Replaces the bash agent script with shared Agentus code.
+// Replaces the bash agent script with shared agentmux code.
 
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";

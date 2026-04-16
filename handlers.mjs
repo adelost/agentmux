@@ -500,7 +500,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     // Claude Code internal commands (/compact, /clear, /new, /model etc.)
     // produce no assistant response in jsonl. Sending them through the
     // normal processMessage pipeline would timeout on waitForPromptEcho.
-    // Agentus commands (matched above) always take priority.
+    // agentmux commands (matched above) always take priority.
     if (parsed && !commands[parsed.cmd] && parsed.cmd !== "/use") {
       const claudeCmd = parsed.args ? `${parsed.cmd} ${parsed.args}` : parsed.cmd;
       try {
