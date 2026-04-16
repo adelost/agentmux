@@ -158,6 +158,7 @@ Both connect to the same Discord server but create channels under different cate
 - **Voice**: Send voice messages (transcribed via Whisper)
 - **TTS**: Text-to-speech for responses (with automatic speech-friendly formatting hints)
 - **Attachments**: Images, PDFs, documents, and any file type forwarded to the agent
+- **Image replies**: Agent can attach images to Discord replies by writing `[image: /path/to/file.png]` on its own line
 - **Context tracking**: Model-aware context window usage (supports 1M-context Opus/Sonnet)
 - **Recording**: Saves request/response pairs for replay testing (auto-rotation, max 500)
 - **Auto-restart**: Crash recovery via `bin/start.sh`

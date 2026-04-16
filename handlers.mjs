@@ -1,8 +1,8 @@
 // Message handling: commands, agent routing, reply pipeline.
 // Channel-agnostic. Works with any ChannelMessage from channels/*.mjs.
 
-import { splitMessage, parsePane, parseCommand, parseUseArg } from "./lib.mjs";
-import { readFileSync, unlinkSync } from "fs";
+import { splitMessage, parsePane, parseCommand, parseUseArg, extractImageMarkers, validateImagePath } from "./lib.mjs";
+import { readFileSync, unlinkSync, statSync } from "fs";
 import { executeSync } from "./core/sync-discord.mjs";
 
 function cleanupTmpFiles(files) {
@@ -373,14 +373,32 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     // Merge all items (text + tool calls) into one message, then split
     // only for Discord's max message size. Tool calls are shown as italic
     // lines inline rather than as separate messages.
-    const fullText = items
+    const rawText = items
       .map((item) => item.type === "tool" ? `*${item.content}*` : item.content)
       .join("\n\n");
+
+    // Extract [image: /path] markers. Attach valid paths to first chunk.
+    // Invalid markers (missing file, too big, wrong format) get replaced with
+    // an inline warning so the user knows the agent tried but failed.
+    const { text: cleanedText, paths: imagePaths } = extractImageMarkers(rawText);
+    const validFiles = [];
+    const failedMarkers = [];
+    for (const p of imagePaths) {
+      const result = validateImagePath(p, statSync);
+      if (result.ok) validFiles.push(result.path);
+      else failedMarkers.push(`⚠️ image skipped: \`${p}\` (${result.error})`);
+    }
+    const fullText = [cleanedText, ...failedMarkers].filter(Boolean).join("\n\n") || "(no text)";
+
     const chunks = splitMessage(fullText);
     const pacePerChunk = chunks.length > 3 ? 400 : 0;
     for (let i = 0; i < chunks.length; i++) {
       sent.push(chunks[i]);
-      await msg.send(chunks[i])
+      // Attach image files to the first chunk only
+      const payload = (i === 0 && validFiles.length)
+        ? { content: chunks[i], files: validFiles }
+        : chunks[i];
+      await msg.send(payload)
         .catch((err) => console.warn(`send failed for ${mapping.name}:${pane}: ${err.message}`));
       if (pacePerChunk > 0 && i < chunks.length - 1) {
         await new Promise((r) => setTimeout(r, pacePerChunk));

@@ -2,6 +2,7 @@ import { unit, feature, expect } from "bdd-vitest";
 import {
   stripAnsi, splitMessage, esc, parseEnv, buildChannelMap,
   formatDuration, extractActivity, parsePane, parseCommand, parseUseArg,
+  extractImageMarkers, validateImagePath, MAX_IMAGE_SIZE,
 } from "./lib.mjs";
 
 feature("stripAnsi", () => {
@@ -475,5 +476,121 @@ feature("parseUseArg", () => {
   unit("pane defaults to 0", {
     when: ["parsing agent without pane", () => parseUseArg("_claw")],
     then: ["pane=0", (r) => expect(r.pane).toBe(0)],
+  });
+});
+
+feature("extractImageMarkers", () => {
+  unit("extracts single image marker", {
+    given: ["text with one image", () => "Here is the graph:\n[image: /tmp/graph.png]"],
+    when: ["extracting markers", (t) => extractImageMarkers(t)],
+    then: ["text stripped, path collected", (r) => {
+      expect(r.paths).toEqual(["/tmp/graph.png"]);
+      expect(r.text).toBe("Here is the graph:");
+    }],
+  });
+
+  unit("extracts multiple image markers", {
+    given: ["text with two images", () => "First:\n[image: /tmp/a.png]\nSecond:\n[image: /tmp/b.jpg]"],
+    when: ["extracting markers", (t) => extractImageMarkers(t)],
+    then: ["both paths collected", (r) => {
+      expect(r.paths).toEqual(["/tmp/a.png", "/tmp/b.jpg"]);
+      expect(r.text).toContain("First:");
+      expect(r.text).toContain("Second:");
+      expect(r.text).not.toContain("[image:");
+    }],
+  });
+
+  unit("returns empty paths when no markers", {
+    when: ["extracting from plain text", () => extractImageMarkers("Just regular text.")],
+    then: ["no paths, text unchanged", (r) => {
+      expect(r.paths).toEqual([]);
+      expect(r.text).toBe("Just regular text.");
+    }],
+  });
+
+  unit("trims whitespace in path", {
+    when: ["extracting padded path", () => extractImageMarkers("[image:   /tmp/x.png  ]")],
+    then: ["path trimmed", (r) => expect(r.paths).toEqual(["/tmp/x.png"])],
+  });
+
+  unit("ignores inline markers not on own line", {
+    when: ["extracting inline marker", () => extractImageMarkers("See [image: /tmp/x.png] inline")],
+    then: ["not extracted", (r) => {
+      expect(r.paths).toEqual([]);
+      expect(r.text).toContain("[image:");
+    }],
+  });
+
+  unit("collapses excess newlines after stripping", {
+    given: ["text with marker between paragraphs", () => "Para one\n\n[image: /tmp/x.png]\n\nPara two"],
+    when: ["extracting", (t) => extractImageMarkers(t)],
+    then: ["no triple newlines", (r) => {
+      expect(r.text).not.toMatch(/\n{3,}/);
+      expect(r.paths).toEqual(["/tmp/x.png"]);
+    }],
+  });
+});
+
+// Fake stat for validateImagePath tests
+const fakeStat = (size, isFile = true) => () => ({ size, isFile: () => isFile });
+const missingStat = () => { throw new Error("ENOENT"); };
+
+feature("validateImagePath", () => {
+  unit("accepts valid absolute png path", {
+    when: ["validating", () => validateImagePath("/tmp/x.png", fakeStat(1024))],
+    then: ["ok: true", (r) => expect(r).toEqual({ ok: true, path: "/tmp/x.png" })],
+  });
+
+  unit("rejects relative path", {
+    when: ["validating", () => validateImagePath("x.png", fakeStat(1024))],
+    then: ["error: path must be absolute", (r) => {
+      expect(r.ok).toBe(false);
+      expect(r.error).toBe("path must be absolute");
+    }],
+  });
+
+  unit("rejects unsupported extension", {
+    when: ["validating pdf", () => validateImagePath("/tmp/x.pdf", fakeStat(1024))],
+    then: ["error: unsupported image format", (r) => {
+      expect(r.ok).toBe(false);
+      expect(r.error).toBe("unsupported image format");
+    }],
+  });
+
+  unit("rejects file over 25MB", {
+    when: ["validating big file", () => validateImagePath("/tmp/x.png", fakeStat(MAX_IMAGE_SIZE + 1))],
+    then: ["error: too large", (r) => {
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/too large/);
+    }],
+  });
+
+  unit("rejects directory", {
+    when: ["validating dir", () => validateImagePath("/tmp/x.png", fakeStat(1024, false))],
+    then: ["error: not a file", (r) => {
+      expect(r.ok).toBe(false);
+      expect(r.error).toBe("not a file");
+    }],
+  });
+
+  unit("rejects missing file", {
+    when: ["validating missing", () => validateImagePath("/tmp/x.png", missingStat)],
+    then: ["error: file not found", (r) => {
+      expect(r.ok).toBe(false);
+      expect(r.error).toBe("file not found");
+    }],
+  });
+
+  unit("accepts all supported extensions", {
+    given: ["test paths for all extensions", () => [".png", ".jpg", ".jpeg", ".gif", ".webp"]],
+    when: ["validating each", (exts) => exts.map((ext) => validateImagePath(`/tmp/x${ext}`, fakeStat(1024)))],
+    then: ["all ok", (results) => {
+      expect(results.every((r) => r.ok)).toBe(true);
+    }],
+  });
+
+  unit("case-insensitive extension matching", {
+    when: ["validating uppercase", () => validateImagePath("/tmp/X.PNG", fakeStat(1024))],
+    then: ["ok: true", (r) => expect(r.ok).toBe(true)],
   });
 });
