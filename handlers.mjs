@@ -1,5 +1,5 @@
 // Message handling: commands, agent routing, reply pipeline.
-// Channel-agnostic — works with any ChannelMessage from channels/*.mjs.
+// Channel-agnostic. Works with any ChannelMessage from channels/*.mjs.
 
 import { splitMessage, parsePane, parseCommand, parseUseArg } from "./lib.mjs";
 import { readFileSync, unlinkSync } from "fs";
@@ -58,9 +58,9 @@ function formatAgentError(err) {
 
 /**
  * Create message handler with all dependencies injected.
- * @param {{ agent, attachments, tts, getMapping, overrides, channelMap, reloadConfig, discordChannel?, agentusYamlPath?, agentsYamlPath? }} deps
+ * @param {{ agent, attachments, tts, getMapping, overrides, channelMap, reloadConfig, discordChannel?, agentmuxYamlPath?, agentsYamlPath? }} deps
  */
-export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentusYamlPath, agentsYamlPath, recorder, pollInterval = 2000 }) {
+export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentmuxYamlPath, agentsYamlPath, recorder, pollInterval = 2000 }) {
   const noopRecorder = { save: () => {}, enabled: false };
   const rec = recorder || noopRecorder;
   const queues = new Map();
@@ -155,7 +155,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         await sendTextReply(msg, text, context);
         return;
       }
-      // Agent is working — follow with streaming until idle
+      // Agent is working, follow with streaming until idle
       const streaming = state.get("thinking", true);
       const progress = agent.startProgressTimer(msg.send, mapping.name, pane, { streaming });
       await new Promise((resolve) => {
@@ -226,7 +226,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     },
 
     "/sync": async (msg) => {
-      if (!discordChannel || !agentusYamlPath) {
+      if (!discordChannel || !agentmuxYamlPath) {
         await msg.reply("sync not configured (missing agentmux.yaml path or discord channel)");
         return;
       }
@@ -237,8 +237,8 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       state.set("syncRunning", true);
       try {
         await msg.reply("syncing...");
-        const configYaml = readFileSync(agentusYamlPath, "utf-8");
-        const { guild: guildId } = await import("./sync.mjs").then((m) => m.parseAgentusConfig(configYaml));
+        const configYaml = readFileSync(agentmuxYamlPath, "utf-8");
+        const { guild: guildId } = await import("./sync.mjs").then((m) => m.parseConfig(configYaml));
         const guild = await discordChannel.getGuild(guildId);
         const results = await executeSync({ guild, configYaml, state, agentsYamlPath });
         reloadConfig();
@@ -327,7 +327,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     }
 
     // Step 2: Wait for completion (idle 2 polls in a row after we saw busy).
-    // Since echo is confirmed, we can safely require sawWorking — no more
+    // Since echo is confirmed, we can safely require sawWorking. No more
     // silent fallback on "maybe the agent was just fast".
     let sawWorking = false;
     let idleStreak = 0;
@@ -346,7 +346,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         if (!sawWorking && await hasReadyResponse(mapping, pane, promptText)) break;
       }
       // Fail-loud escape: echo confirmed but agent never went busy within 60s.
-      // Extract whatever is there and warn — this usually means the agent is
+      // Extract whatever is there and warn. This usually means the agent is
       // stuck in a UI mode (e.g. permission dialog) we didn't detect.
       if (!sawWorking && Date.now() - startTime > workMaxMs) {
         console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} echoed prompt but never signaled busy within ${workMaxMs}ms`);

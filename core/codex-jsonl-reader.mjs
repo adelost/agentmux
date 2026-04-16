@@ -73,7 +73,7 @@ function readSessionMeta(filePath) {
  *   2. cwd is an ancestor of paneDir (pane cd'd deeper since start)
  *
  * When multiple ancestors match (e.g. both /foo and /foo/bar have sessions
- * for paneDir /foo/bar/sub), prefer the *closest* ancestor — the one with
+ * for paneDir /foo/bar/sub), prefer the *closest* ancestor, the one with
  * the longest cwd prefix. That's the session that actually started in the
  * pane's directory tree, not some unrelated codex running in /foo.
  *
@@ -141,7 +141,7 @@ export function isPromptInCodexJsonl(paneDir, promptText) {
  * @returns {boolean | null}
  *   true  = busy (task_started without matching task_complete)
  *   false = idle (all task_started turns have a task_complete)
- *   null  = unknown (no session file found — caller should fall back)
+ *   null  = unknown (no session file found, caller should fall back)
  */
 export function isBusyFromCodexJsonl(paneDir) {
   const file = latestSessionFor(paneDir);
@@ -251,14 +251,14 @@ function findCodexTurnRange(events, promptText) {
  * Extract items from a codex turn.
  *
  * If promptText is given, returns the turn whose user_message matches that
- * text (necessary when a later prompt has already started — last
+ * text (necessary when a later prompt has already started. The last
  * task_started is no longer ours). Without a needle, returns the most
  * recent turn.
  *
  * Walks forward from the user_message collecting response_item:message
  * (assistant role) and response_item:function_call events in order, until
  * the next user_message or end of events. Returns { items, raw, turn,
- * source, jsonlFile } — same shape as the Claude jsonl reader.
+ * source, jsonlFile }. Same shape as the Claude jsonl reader.
  */
 export function extractFromCodexJsonl(paneDir, promptText = null) {
   const file = latestSessionFor(paneDir);

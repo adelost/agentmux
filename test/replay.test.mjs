@@ -1,5 +1,5 @@
 // Replay test: re-run extract pipeline against real recordings.
-// Recordings are produced by running agentus with AGENTUS_RECORD=1.
+// Recordings are produced by running agentmux with AGENTMUX_RECORD=1.
 // This is our regression net: any extract change must still reproduce
 // the exact items that were sent to Discord on real data.
 

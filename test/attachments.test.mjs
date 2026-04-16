@@ -232,7 +232,7 @@ feature("buildPrompt: multiple attachments", () => {
     })],
     when: ["buildPrompt", async ({ ctx, msg, tmpFiles }) =>
       ctx.handler.buildPrompt(msg, tmpFiles)],
-    then: ["text, image marker, transcript marker — in order", (result, { tmpFiles }) => {
+    then: ["text, image marker, transcript marker, in order", (result, { tmpFiles }) => {
       expect(result).toMatch(/^hej\n\[image attached:[^\]]+\]\n\[transcribed voice[^\]]+\]/);
       expect(result).toContain("beskriv bilden");
       // Both attachments wrote to tmp

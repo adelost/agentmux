@@ -1,4 +1,4 @@
-// Pure helper functions — no side effects, fully testable.
+// Pure helper functions. No side effects, fully testable.
 
 import yaml from "js-yaml";
 import { TOOL_CALL, isNoise } from "./core/noise.mjs";

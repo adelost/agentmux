@@ -4,11 +4,11 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { paneDir } from "../agent.mjs";
 
-feature("paneDir — session isolation per pane", () => {
+feature("paneDir, session isolation per pane", () => {
   let root;
 
   const setup = () => {
-    root = mkdtempSync(join(tmpdir(), "agentus-test-"));
+    root = mkdtempSync(join(tmpdir(), "agentmux-test-"));
     return root;
   };
 

@@ -1,4 +1,4 @@
-// Request recorder — persists real Discord requests as replay fixtures.
+// Request recorder. Persists real Discord requests as replay fixtures.
 // Each recording captures what went into extract + what came out, so
 // extract changes can be regression-tested against real data.
 
@@ -45,7 +45,7 @@ export function createRecorder({ dir, maxRecordings = DEFAULT_MAX_RECORDINGS }) 
 /**
  * Delete recordings beyond the keep count, oldest-first by mtime.
  * Runs after every save so the dir size stays bounded even during long
- * agentus runs (previously it grew unbounded and eventually filled disk).
+ * agentmux runs (previously it grew unbounded and eventually filled disk).
  */
 function pruneOldRecordings(dir, keep) {
   let files;

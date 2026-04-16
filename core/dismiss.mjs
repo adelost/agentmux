@@ -23,7 +23,7 @@ export const BLOCKING_PROMPTS = [
 
 /**
  * Scan captured pane text for a blocking prompt and return the first match,
- * or null. Pure function — no side effects.
+ * or null. Pure function, no side effects.
  */
 export function findBlockingPrompt(paneText) {
   for (const prompt of BLOCKING_PROMPTS) {

@@ -83,7 +83,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         await wait(300);
       }
     } catch (err) {
-      // Target pane may not exist yet — expected during startup. Log only
+      // Target pane may not exist yet, expected during startup. Log only
       // if this looks unexpected (anything other than "no such pane").
       if (!/no such/.test(err.message || "")) {
         console.warn(`exitCopyMode(${target}) failed: ${err.message}`);
@@ -131,7 +131,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const { stdout } = await tmux(`list-panes -t '${esc(name)}'`);
       return stdout.trim().split("\n").length;
     } catch (err) {
-      // Session may not exist yet — treat as 1 default pane
+      // Session may not exist yet, treat as 1 default pane
       return 1;
     }
   }
@@ -183,7 +183,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_pid}'`);
       oldPid = stdout.trim();
     } catch {
-      // pane may not exist yet or be fully dead — treat as unknown pid
+      // pane may not exist yet or be fully dead, treat as unknown pid
     }
 
     try {
@@ -195,7 +195,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     // Poll for a new shell pid to appear. Tmux send-keys buffers to the
     // pty even before readline is active, so as long as the fork happened
-    // we're safe to start sending commands — .bashrc will consume them
+    // we're safe to start sending commands. .bashrc will consume them
     // once it finishes initializing.
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline) {
@@ -298,7 +298,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       } else if (dialect === "claude") {
         const r = isBusyFromJsonl(dir, promptText);
         if (r !== null) return r;
-        // jsonl exists but our prompt isn't there yet — claude hasn't
+        // jsonl exists but our prompt isn't there yet. Claude hasn't
         // written it. Assume busy so we keep polling. workMaxMs is the
         // safety escape if this never resolves.
         return true;
@@ -312,7 +312,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const dialect = detectDialect(raw);
 
     // Dialect-specific busy signals. Each entry can be a string (substring
-    // match) or a RegExp (pattern match) — supports both literal indicators
+    // match) or a RegExp (pattern match). Supports both literal indicators
     // like "esc to interrup" and shape-matchers like /\w+ing…\s*\(/ for
     // thinking verbs (Musing…, Orchestrating…, Doing…).
     const hit = dialect.busySignals?.some((sig) =>
@@ -347,7 +347,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
    * Same as getResponseStream but also returns raw buffer + turn slice (for recording).
    *
    * Source-of-truth strategy:
-   *   1. Prefer Claude's jsonl session file — it has exact text with code fences,
+   *   1. Prefer Claude's jsonl session file. It has exact text with code fences,
    *      structured tool_use blocks, and no UI rendering artifacts. This eliminates
    *      narrow-pane wordwrap, progress-icon interference, code-block destruction, etc.
    *   2. Fall back to tmux extract if jsonl is missing (Codex or fresh session)
@@ -359,7 +359,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const dir = paneDir(config.dir, pane);
     const dialect = paneDialectName(agentName, pane);
 
-    // Dispatch to the pane's actual dialect — not trial-and-error. Otherwise
+    // Dispatch to the pane's actual dialect, not trial-and-error. Otherwise
     // cdx and claw (which can share pane dirs like .agents/0/) would read
     // each other's jsonl files.
     if (dialect === "codex") {
@@ -415,7 +415,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
    * confirming the agent has actually received the input.
    *
    * Source of truth: the agent's own session jsonl. When the user prompt
-   * appears there, we know for certain the agent received it — no tmux
+   * appears there, we know for certain the agent received it. No tmux
    * pane width tricks, no wordwrap to fight. Falls back to tmux text
    * matching when no jsonl is available.
    *
@@ -464,7 +464,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   }
 
   async function sendLongPrompt(target, prompt) {
-    const tmpFile = `/tmp/agentus-prompt-${process.pid}.txt`;
+    const tmpFile = `/tmp/agentmux-prompt-${process.pid}.txt`;
     const bufName = `prompt_${process.pid}_${Date.now()}`;
     writeFileSync(tmpFile, prompt);
     await tmux(`load-buffer -b '${bufName}' '${esc(tmpFile)}'`);

@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { dirname } from "path";
 import { randomUUID } from "crypto";
 import { ChannelType } from "discord.js";
-import { parseAgentusConfig, generateChannelNames, buildSyncPlan, generateAgentsYaml } from "../sync.mjs";
+import { parseConfig, generateChannelNames, buildSyncPlan, generateAgentsYaml } from "../sync.mjs";
 
 /**
  * Execute a full sync: read config, create Discord channels, generate agents.yaml.
@@ -18,7 +18,7 @@ export async function executeSync({ guild, configYaml, state, agentsYamlPath }) 
     throw new Error("Bot needs ManageChannels permission. Update bot permissions in Discord Developer Portal → OAuth2 → Bot Permissions.");
   }
 
-  const config = parseAgentusConfig(configYaml);
+  const config = parseConfig(configYaml);
   const desired = generateChannelNames(config.agents);
 
   // Find or create category

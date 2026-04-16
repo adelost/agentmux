@@ -9,7 +9,7 @@ import { getContextPercent } from "../core/context.mjs";
  * usage block. Returns { paneDir, cleanup }.
  */
 function setupFakeClaudeContext({ model, input = 0, cacheRead = 0, cacheCreate = 0, output = 0 }, paneDir = "/fake/workspace") {
-  const fakeHome = mkdtempSync(join(tmpdir(), "agentus-context-test-"));
+  const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-context-test-"));
   const origHome = process.env.HOME;
   process.env.HOME = fakeHome;
 

@@ -17,7 +17,7 @@ import {
  * so the reader can match the pane dir.
  */
 function setupFakeCodex(events, paneDir = "/fake/workspace") {
-  const fakeHome = mkdtempSync(join(tmpdir(), "agentus-codex-test-"));
+  const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-codex-test-"));
   const origHome = process.env.HOME;
   process.env.HOME = fakeHome;
 
@@ -138,7 +138,7 @@ feature("extractFromCodexJsonl: prompt-matching across multiple turns", () => {
   unit("returns null when prompt text doesn't match any turn", {
     given: ["two-turn rollout", () => setupFakeCodex(twoTurnRollout("/fake/workspace"))],
     when: ["extracting with a bogus prompt", ({ paneDir }) => extractFromCodexJsonl(paneDir, "never sent")],
-    then: ["null — do not fall back to latest turn", (result, { cleanup }) => {
+    then: ["null, do not fall back to latest turn", (result, { cleanup }) => {
       expect(result).toBeNull();
       cleanup();
     }],
@@ -187,7 +187,7 @@ feature("latestSessionFor: cwd specificity", () => {
       // Exact match in a quieter file (older)
       addExtraRollout(ctx.fakeHome, "/workspace/pane", "rollout-exact.jsonl",
         { mtime: 1_000, prompt: "exact-prompt" });
-      // Ancestor match in a newer file — would win by mtime alone
+      // Ancestor match in a newer file, would win by mtime alone
       addExtraRollout(ctx.fakeHome, "/workspace", "rollout-ancestor.jsonl",
         { mtime: 2_000, prompt: "ancestor-prompt" });
       return ctx;
@@ -210,7 +210,7 @@ feature("latestSessionFor: cwd specificity", () => {
       // Far ancestor, newer
       addExtraRollout(ctx.fakeHome, "/a", "rollout-far.jsonl",
         { mtime: 2_000, prompt: "far-prompt" });
-      // Close ancestor, older — should still win by specificity
+      // Close ancestor, older. Should still win by specificity
       addExtraRollout(ctx.fakeHome, "/a/b/c", "rollout-close.jsonl",
         { mtime: 1_000, prompt: "close-prompt" });
       return ctx;
@@ -230,14 +230,14 @@ feature("latestSessionFor: cwd specificity", () => {
       const ctx = setupFakeCodex([
         { type: "session_meta", payload: { cwd: "/unrelated" } },
       ], paneDir);
-      // Descendant session — must NOT match
+      // Descendant session, must NOT match
       addExtraRollout(ctx.fakeHome, "/workspace/sub", "rollout-desc.jsonl",
         { mtime: 2_000, prompt: "desc-prompt" });
       return ctx;
     }],
     when: ["extracting with descendant prompt",
       ({ paneDir }) => extractFromCodexJsonl(paneDir, "desc-prompt")],
-    then: ["returns null — descendant is not our pane's session", (result, { cleanup }) => {
+    then: ["returns null, descendant is not our pane's session", (result, { cleanup }) => {
       expect(result).toBeNull();
       cleanup();
     }],

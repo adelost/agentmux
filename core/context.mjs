@@ -152,7 +152,7 @@ function getContextFromCodexJsonl(paneDir) {
 
   // Walk backwards for the most recent token_count event. Use last_token_usage
   // (current turn's input+output), NOT total_token_usage (cumulative across
-  // the whole session — that can exceed the context window and isn't what
+  // the whole session, which can exceed the context window and isn't what
   // "context used" means).
   for (let i = lines.length - 1; i >= 0; i--) {
     if (!lines[i].trim()) continue;

@@ -1,6 +1,6 @@
 // Dialects: data-driven description of the tmux-based coding agents we support.
-// Each dialect is a plain object. Extract/noise/agent read from this data —
-// there should be no hardcoded "if claude / if codex" branches elsewhere.
+// Each dialect is a plain object. Extract/noise/agent read from this data.
+// There should be no hardcoded "if claude / if codex" branches elsewhere.
 //
 // To add a new dialect (Aider, Gemini CLI, etc.) create a new object here
 // and add it to ALL_DIALECTS. Nothing else needs to change.
@@ -11,7 +11,7 @@
 // Observed variants: ✻ Musing, ✢ Frolicking, ✽ ..., · Orchestrating, * Waddling,
 // ∗ Cogitating, ◉, ⚙, ❋, and more. The UI picks one and rotates.
 //
-// The literal ellipsis `…` is the busy marker — present-progressive phase.
+// The literal ellipsis `…` is the busy marker, the present-progressive phase.
 // Past-tense completion lines ("✻ Worked for 32s", "✻ Cogitated for 14s",
 // "✻ Brewed for 2s") do NOT have … and mean the agent is DONE. If we matched
 // those as busy we'd hang forever waiting for something that already finished.

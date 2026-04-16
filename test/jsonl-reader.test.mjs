@@ -15,7 +15,7 @@ const fixtureFile = (name) => join(__dir, "fixtures/jsonl", name);
  * corresponds to `paneDir`. Returns the paneDir plus a cleanup function.
  */
 function setupFakeProject(fixtureName, paneDir = "/fake/lsrc/.agents/1") {
-  const fakeHome = mkdtempSync(join(tmpdir(), "agentus-jsonl-test-"));
+  const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-jsonl-test-"));
   const origHome = process.env.HOME;
   process.env.HOME = fakeHome;
 
@@ -147,7 +147,7 @@ feature("extractFromJsonl: prompt not found (strict matching)", () => {
   unit("returns null when a specific prompt is given but no match exists", {
     given: ["simple fixture", () => setupFakeProject("simple-text.jsonl")],
     when: ["extracting with wrong prompt", ({ paneDir }) => extractFromJsonl(paneDir, "something else")],
-    then: ["null — do not fall back to last turn (could be another agent's)", (result, { cleanup }) => {
+    then: ["null, do not fall back to last turn (could be another agent's)", (result, { cleanup }) => {
       expect(result).toBeNull();
       cleanup();
     }],
@@ -188,7 +188,7 @@ feature("extractFromJsonl: session rotation (/clear or /compact mid-turn)", () =
       return ctx;
     }],
     when: ["checking busy for the older prompt", ({ paneDir }) => isBusyFromJsonl(paneDir, "write a long story")],
-    then: ["reports busy — old session still streaming", (r, { cleanup }) => {
+    then: ["reports busy, old session still streaming", (r, { cleanup }) => {
       expect(r).toBe(true);
       cleanup();
     }],
@@ -198,7 +198,7 @@ feature("extractFromJsonl: session rotation (/clear or /compact mid-turn)", () =
 // --- isBusyFromJsonl ----------------------------------------------------
 
 feature("isBusyFromJsonl: streaming assistant with null stop_reason", () => {
-  unit("returns true (busy) — claude still writing", {
+  unit("returns true (busy), claude still writing", {
     given: ["streaming fixture", () => setupFakeProject("busy-streaming.jsonl")],
     when: ["checking", ({ paneDir }) => isBusyFromJsonl(paneDir, "write a long story")],
     then: ["busy", (r, { cleanup }) => {
@@ -209,7 +209,7 @@ feature("isBusyFromJsonl: streaming assistant with null stop_reason", () => {
 });
 
 feature("isBusyFromJsonl: user prompt with no assistant response yet", () => {
-  unit("returns true (busy) — claude hasn't started", {
+  unit("returns true (busy), claude hasn't started", {
     given: ["user-only fixture", () => setupFakeProject("busy-no-assistant.jsonl")],
     when: ["checking", ({ paneDir }) => isBusyFromJsonl(paneDir, "hello")],
     then: ["busy", (r, { cleanup }) => {
@@ -220,7 +220,7 @@ feature("isBusyFromJsonl: user prompt with no assistant response yet", () => {
 });
 
 feature("isBusyFromJsonl: tool_use followed by tool_result, no final assistant", () => {
-  unit("returns true (busy) — claude owes us an assistant message", {
+  unit("returns true (busy), claude owes us an assistant message", {
     given: ["tool pending fixture", () => setupFakeProject("busy-tool-pending.jsonl")],
     when: ["checking", ({ paneDir }) => isBusyFromJsonl(paneDir, "read the file")],
     then: ["busy", (r, { cleanup }) => {
@@ -231,7 +231,7 @@ feature("isBusyFromJsonl: tool_use followed by tool_result, no final assistant",
 });
 
 feature("isBusyFromJsonl: assistant with stop_reason end_turn", () => {
-  unit("returns false (idle) — turn complete", {
+  unit("returns false (idle), turn complete", {
     given: ["end_turn fixture", () => setupFakeProject("idle-end-turn.jsonl")],
     when: ["checking", ({ paneDir }) => isBusyFromJsonl(paneDir, "say hi")],
     then: ["idle", (r, { cleanup }) => {
@@ -242,7 +242,7 @@ feature("isBusyFromJsonl: assistant with stop_reason end_turn", () => {
 });
 
 feature("isBusyFromJsonl: full tool turn that completed", () => {
-  unit("returns false (idle) — tool executed and assistant wrote final", {
+  unit("returns false (idle), tool executed and assistant wrote final", {
     given: ["complete tool turn", () => setupFakeProject("idle-after-tool.jsonl")],
     when: ["checking", ({ paneDir }) => isBusyFromJsonl(paneDir, "read and summarize")],
     then: ["idle", (r, { cleanup }) => {
@@ -256,7 +256,7 @@ feature("isBusyFromJsonl: max_tokens is not terminal", () => {
   unit("returns busy when latest stop is max_tokens (claude will continue)", {
     given: ["max_tokens fixture with follow-up", () => setupFakeProject("max-tokens-continuation.jsonl")],
     when: ["checking busy for the prompt", ({ paneDir }) => isBusyFromJsonl(paneDir, "write a lot")],
-    then: ["not busy — end_turn came after max_tokens", (r, { cleanup }) => {
+    then: ["not busy, end_turn came after max_tokens", (r, { cleanup }) => {
       // This fixture has max_tokens FOLLOWED BY end_turn in the same turn.
       // isBusy should see the final end_turn and return false.
       expect(r).toBe(false);
@@ -283,7 +283,7 @@ feature("isBusyFromJsonl: queued prompt (claude busy on prior turn)", () => {
   unit("returns true when the prompt exists only as queue-operation", {
     given: ["queued-prompt fixture", () => setupFakeProject("queued-prompt.jsonl")],
     when: ["checking busy for queued prompt", ({ paneDir }) => isBusyFromJsonl(paneDir, "queued second prompt")],
-    then: ["busy — claude will pick it up after current turn", (r, { cleanup }) => {
+    then: ["busy, claude will pick it up after current turn", (r, { cleanup }) => {
       expect(r).toBe(true);
       cleanup();
     }],
@@ -325,7 +325,7 @@ feature("isBusyFromJsonl: compacted session with null stop_reason", () => {
       setupFakeProject("compacted-no-stop-reason.jsonl")],
     when: ["checking busy for the first prompt", ({ paneDir }) =>
       isBusyFromJsonl(paneDir, "find the typos")],
-    then: ["idle — next turn proves this one completed", (r, { cleanup }) => {
+    then: ["idle, next turn proves this one completed", (r, { cleanup }) => {
       expect(r).toBe(false);
       cleanup();
     }],
@@ -355,20 +355,20 @@ feature("isBusyFromJsonl: stale file with null stop_reason (last turn, no next p
       return ctx;
     }],
     when: ["checking busy", ({ paneDir }) => isBusyFromJsonl(paneDir, "review this CV")],
-    then: ["idle — stale file + text content = compaction artifact", (r, { cleanup }) => {
+    then: ["idle, stale file + text content = compaction artifact", (r, { cleanup }) => {
       expect(r).toBe(false);
       cleanup();
     }],
   });
 
-  unit("returns busy when the file is fresh (<15s) — could still be streaming", {
+  unit("returns busy when the file is fresh (<15s), could still be streaming", {
     given: ["same fixture but with current mtime", () => {
       const ctx = setupFakeProject("stale-null-stop.jsonl");
       // Touch the file to make it fresh (default mtime is now, so no-op needed)
       return ctx;
     }],
     when: ["checking busy", ({ paneDir }) => isBusyFromJsonl(paneDir, "review this CV")],
-    then: ["busy — file is fresh, null stop_reason could mean active streaming", (r, { cleanup }) => {
+    then: ["busy, file is fresh, null stop_reason could mean active streaming", (r, { cleanup }) => {
       expect(r).toBe(true);
       cleanup();
     }],
