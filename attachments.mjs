@@ -1,10 +1,10 @@
 // Process message attachments: transcribe audio, download images/files.
-// Channel-agnostic — works with normalized ChannelMessage from channels/*.mjs.
+// Channel-agnostic. Works with normalized ChannelMessage from channels/*.mjs.
 
 import { writeFileSync } from "fs";
 import { extname } from "path";
 
-// No whitelist needed — all non-audio attachments are downloaded and passed
+// No whitelist needed. All non-audio attachments are downloaded and passed
 // to Claude, which can read most file types (PDF, images, text, archives, etc).
 
 /**

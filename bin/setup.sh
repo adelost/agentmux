@@ -1,5 +1,5 @@
 #!/bin/bash
-# agentmux setup — install prerequisites and configure
+# agentmux setup. Install prerequisites and configure.
 set -euo pipefail
 
 RED='\033[0;31m'
@@ -109,7 +109,7 @@ echo "Checking config..."
 if [[ ! -f .env ]]; then
   cp .env.example .env
   echo ""
-  echo "  Created .env — add your DISCORD_TOKEN:"
+  echo "  Created .env, add your DISCORD_TOKEN:"
   dim "  nano .env"
 else
   ok ".env exists"
@@ -123,7 +123,7 @@ fi
 if [[ ! -f agentmux.yaml ]]; then
   cp agentmux.yaml.example agentmux.yaml
   echo ""
-  echo "  Created agentmux.yaml — add your server ID and projects:"
+  echo "  Created agentmux.yaml, add your server ID and projects:"
   dim "  nano agentmux.yaml"
 else
   ok "agentmux.yaml exists"

@@ -1,6 +1,6 @@
 // UI noise patterns shared across all tmux-based agents.
 // Dialect-specific patterns (Claude banner, Codex status bar, etc.)
-// live in ./dialects.mjs — this file only holds cross-cutting noise.
+// live in ./dialects.mjs. This file only holds cross-cutting noise.
 
 import { ALL_DIALECTS, matchesAnyToolCall } from "./dialects.mjs";
 

@@ -145,7 +145,7 @@ const classifyLines = (raw) => {
  *
  * Narrow tmux panes (42 col in main-vertical layouts) make Claude break each
  * sentence across multiple lines. In Discord those lines become separate
- * paragraphs which looks broken — Discord already wordwraps on its own, so
+ * paragraphs which looks broken. Discord already wordwraps on its own, so
  * we want one line per logical paragraph.
  *
  * Rules:

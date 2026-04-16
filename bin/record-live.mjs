@@ -76,7 +76,7 @@ async function main() {
   await agent.sendOnly(agentName, prompt, pane);
   const startTime = Date.now();
 
-  // Step 1: Wait for the prompt to be echoed back in the pane — positive
+  // Step 1: Wait for the prompt to be echoed back in the pane. Positive
   // confirmation that the agent received the input.
   const echoed = await agent.waitForPromptEcho(agentName, pane, prompt, 15_000);
   if (!echoed) {

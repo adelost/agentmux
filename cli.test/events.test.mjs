@@ -46,7 +46,7 @@ feature("buildActions", () => {
 feature("createEventLogger", () => {
   unit("writes to log file", {
     given: ["a temp log file", () => {
-      const dir = mkdtempSync(join(tmpdir(), "agentus-events-test-"));
+      const dir = mkdtempSync(join(tmpdir(), "agentmux-events-test-"));
       return { logFile: join(dir, "events.log"), dir };
     }],
     when: ["logging an event", ({ logFile }) => {

@@ -7,7 +7,7 @@ import { createRecorder } from "../core/recorder.mjs";
 // --- Test helpers ---
 
 function freshDir() {
-  return mkdtempSync(join(tmpdir(), "agentus-recorder-test-"));
+  return mkdtempSync(join(tmpdir(), "agentmux-recorder-test-"));
 }
 
 function listJsons(dir) {

@@ -9,7 +9,7 @@ import {
 
 let root;
 const setup = () => {
-  root = mkdtempSync(join(tmpdir(), "agentus-config-test-"));
+  root = mkdtempSync(join(tmpdir(), "agentmux-config-test-"));
   return join(root, "agents.yaml");
 };
 const cleanup = () => rmSync(root, { recursive: true, force: true });
@@ -59,7 +59,7 @@ feature("loadConfig", () => {
   });
 
   component("returns empty object for missing file", {
-    given: ["a non-existent path", () => "/tmp/nonexistent-agentus-test.yaml"],
+    given: ["a non-existent path", () => "/tmp/nonexistent-agentmux-test.yaml"],
     when: ["loading", (path) => loadConfig(path)],
     then: ["returns {}", (config) => expect(config).toEqual({})],
   });

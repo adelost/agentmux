@@ -1,5 +1,5 @@
 // Bot lifecycle: singleton lock, channel management, config, preflight, shutdown.
-// Channel-agnostic — receives channels array, delegates messaging to them.
+// Channel-agnostic. Receives channels array, delegates messaging to them.
 
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
 import { buildChannelMap } from "./lib.mjs";

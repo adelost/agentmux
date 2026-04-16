@@ -4,7 +4,7 @@ import { unlinkSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
-const tmpPath = () => join(tmpdir(), `agentus-state-test-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+const tmpPath = () => join(tmpdir(), `agentmux-state-test-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
 
 const cleanup = (path) => { try { unlinkSync(path); } catch {} };
 
@@ -54,12 +54,12 @@ feature("createState", () => {
     given: ["state with saved value", () => {
       const p = tmpPath();
       const s1 = createState(p);
-      s1.set("name", "agentus");
+      s1.set("name", "agentmux");
       return { path: p };
     }],
     when: ["creating new state from same file", ({ path }) => createState(path).get("name")],
     then: ["value survives", (val, { path }) => {
-      expect(val).toBe("agentus");
+      expect(val).toBe("agentmux");
       cleanup(path);
     }],
   });

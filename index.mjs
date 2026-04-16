@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Agentus — Discord bridge for tmux-based coding agents (Claude Code).
+// agentmux. Discord bridge for tmux-based coding agents (Claude Code).
 // Entry point: loads config, creates services, wires everything together.
 
 // Crash guard: log and exit (start.sh restarts us)
@@ -108,7 +108,7 @@ const handlers = createHandlers({
   channelMap,
   reloadConfig,
   discordChannel: discord,
-  agentusYamlPath: AGENTMUX_YAML,
+  agentmuxYamlPath: AGENTMUX_YAML,
   agentsYamlPath: AGENTS_YAML,
   recorder,
 });

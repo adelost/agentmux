@@ -4,7 +4,7 @@
 // as a stream of JSON events. Each line is one event: user message, assistant
 // message, system hook, file snapshot, etc. The assistant messages contain
 // structured content arrays with text (including code fences), tool_use entries,
-// and thinking blocks — *exactly* what Claude produced, before any UI rendering
+// and thinking blocks. *Exactly* what Claude produced, before any UI rendering
 // stripped it down to indented plaintext for tmux.
 //
 // This module reads that structured data and returns items in the same shape
@@ -97,7 +97,7 @@ function userPromptText(event) {
   if (event?.type !== "user") return null;
   const content = event.message?.content;
   if (typeof content === "string") return content;
-  // Array content in a user event usually means tool_result — not a prompt
+  // Array content in a user event usually means tool_result, not a prompt
   return null;
 }
 
@@ -105,15 +105,15 @@ function userPromptText(event) {
 //
 // IMPORTANT: max_tokens is NOT terminal in agentic Claude Code. When claude
 // hits its per-message output budget mid-thought, it stops with max_tokens
-// and then immediately continues in a fresh assistant message — same turn,
-// same user prompt. Treating max_tokens as terminal causes agentus to bail
+// and then immediately continues in a fresh assistant message. Same turn,
+// same user prompt. Treating max_tokens as terminal causes agentmux to bail
 // halfway through long turns (observed on the "plocka ut" turn: extract
 // grabbed 14 items when the real turn had 20+ and ended with end_turn).
 //
 // Anything NOT in this set means claude is still working:
-//   null / undefined  — streaming in progress
-//   "tool_use"        — pausing for a tool result
-//   "max_tokens"      — budget hit, will continue automatically
+//   null / undefined  = streaming in progress
+//   "tool_use"        = pausing for a tool result
+//   "max_tokens"      = budget hit, will continue automatically
 const TERMINAL_STOP_REASONS = new Set(["end_turn", "stop_sequence", "refusal"]);
 
 /**
@@ -144,7 +144,7 @@ function extractPromptFromEvent(event) {
 
 /**
  * Check if a given prompt has been written to Claude's jsonl for this pane.
- * Reliable echo-confirmation signal — no pane width or wordwrap involved.
+ * Reliable echo-confirmation signal. No pane width or wordwrap involved.
  * Matches user events, queue-operations, and attachment queue-acks.
  *
  * @returns boolean or null (no jsonl file → caller should fall back)
@@ -164,7 +164,7 @@ export function isPromptInJsonl(paneDir, promptText) {
 /**
  * Find the index of the last user event whose prompt text matches the needle.
  * Only matches type:user events (real turn starts, not queue-operation or
- * attachment events) — used for walking forward over turn events.
+ * attachment events). Used for walking forward over turn events.
  *
  * Strict matching: if a needle is given and no type:user event matches,
  * return -1. No fallback to "last user prompt" (could be another agent's).
@@ -282,7 +282,7 @@ export function isBusyFromJsonl(paneDir, promptText = null) {
   }
 
   // Walk forward from the user prompt, tracking the last assistant event.
-  // Break when we hit a *new* user prompt (not a tool_result) — that's the
+  // Break when we hit a *new* user prompt (not a tool_result). That's the
   // start of the next turn.
   let lastAssistant = null;
   let pendingToolResult = false;
@@ -292,7 +292,7 @@ export function isBusyFromJsonl(paneDir, promptText = null) {
     const e = events[i];
     if (e.type === "user") {
       if (userPromptText(e) !== null) { nextTurnExists = true; break; }
-      // Otherwise it's a tool_result — claude will respond with a new
+      // Otherwise it's a tool_result. Claude will respond with a new
       // assistant message; until that arrives, we're still busy.
       pendingToolResult = true;
       continue;
@@ -303,7 +303,7 @@ export function isBusyFromJsonl(paneDir, promptText = null) {
   }
 
   // If a later user prompt exists in the jsonl, claude accepted new input
-  // which proves our turn finished — regardless of what stop_reason says.
+  // which proves our turn finished, regardless of what stop_reason says.
   // This handles compacted sessions where stop_reason is null (the event
   // was written during streaming but the final end_turn was lost or never
   // written). Without this, isBusy polls for 10 minutes until maxDuration.
@@ -339,7 +339,7 @@ export function isBusyFromJsonl(paneDir, promptText = null) {
         const mtime = statSync(found.jsonl).mtimeMs;
         if (Date.now() - mtime > 15_000) return false;
       } catch {
-        // stat failed — can't determine staleness, stay busy
+        // stat failed, can't determine staleness, stay busy
       }
     }
   }
@@ -393,7 +393,7 @@ export function extractFromJsonl(paneDir, promptText = null) {
       } else if (block.type === "tool_use") {
         items.push({ type: "tool", content: formatJsonlToolCall(block) });
       }
-      // thinking, reasoning, etc — skipped on purpose
+      // thinking, reasoning, etc. Skipped on purpose
     }
   }
 
