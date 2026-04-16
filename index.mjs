@@ -44,7 +44,7 @@ loadEnv();
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const AGENTS_YAML = process.env.AGENTS_YAML || resolve(__dir, "agents.yaml");
-const AGENTMUX_YAML = process.env.AGENTMUX_YAML || process.env.AGENTUS_YAML || resolve(__dir, "agentmux.yaml");
+const AGENTMUX_YAML = process.env.AGENTMUX_YAML || resolve(__dir, "agentmux.yaml");
 const TIMEOUT = parseInt(process.env.TIMEOUT_S || "600") * 1000;
 const WHISPER_URL = process.env.WHISPER_URL || "http://localhost:2022/v1/audio/transcriptions";
 const SHELL_PATH = process.env.SHELL_PATH || `${process.env.HOME}/bin:${process.env.PATH}`;
@@ -77,7 +77,7 @@ const attachments = createAttachmentHandler({
 });
 const tts = createTTS({ run, state: appState, voice: TTS_VOICE });
 const recorder = createRecorder({
-  dir: (process.env.AGENTMUX_RECORD || process.env.AGENTUS_RECORD) === "1" ? resolve(__dir, "test/recordings") : null,
+  dir: process.env.AGENTMUX_RECORD === "1" ? resolve(__dir, "test/recordings") : null,
 });
 if (recorder.enabled) console.log(`recorder | enabled → ${resolve(__dir, "test/recordings")}`);
 
