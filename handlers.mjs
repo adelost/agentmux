@@ -311,12 +311,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     const startTime = Date.now();
     const maxDuration = 600_000;
 
-    // Dismiss any blocking prompt (survey, resume) before we start waiting.
-    // Surveys can eat queued prompt input if they appear between sendOnly
-    // and the agent processing the text. Dismissing early prevents that.
     const target = `${mapping.name}:.${pane}`;
-    await agent.dismissBlockingPrompt(target)
-      .catch((err) => console.warn(`pre-dismiss failed: ${err.message}`));
 
     // Step 1: Confirm the agent received our prompt.
     // Queued prompts were already injected via sendOnly while the previous
@@ -445,7 +440,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     }
   }
 
-  async function processMessage(msg, mapping, cleanPrompt, pane, tmpFiles, { injected = null, queued = false } = {}) {
+  async function processMessage(msg, mapping, cleanPrompt, pane, tmpFiles, { queued = false } = {}) {
     console.log(`[${ts()}] ← ${mapping.name}:${pane}${queued ? " [queued]" : ""} "${cleanPrompt.slice(0, 80)}"`);
     const stopTyping = msg.startTyping();
 
@@ -454,8 +449,11 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     const promptToSend = ttsHint ? cleanPrompt + ttsHint : cleanPrompt;
 
     try {
-      if (injected) await injected;
-      else await agent.sendOnly(mapping.name, promptToSend, pane);
+      // Dismiss any blocking prompt (survey, resume) before sending.
+      // Surveys eat tmux input, so we must clear them first.
+      await agent.dismissBlockingPrompt(`${mapping.name}:.${pane}`)
+        .catch((err) => console.warn(`pre-send dismiss failed: ${err.message}`));
+      await agent.sendOnly(mapping.name, promptToSend, pane);
       await streamResponse(msg, mapping, pane, cleanPrompt, tmpFiles, { queued });
       console.log(`[${ts()}] → ${mapping.name}:${pane}${queued ? " [queued]" : ""} done`);
     } catch (err) {
@@ -527,10 +525,11 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     const queueKey = `${mapping.name}:${pane}`;
     if (queues.has(queueKey)) {
-      const injected = agent.sendOnly(mapping.name, cleanPrompt, pane)
-        .catch((err) => { throw err; });
+      // Don't sendOnly now. The prompt would sit in tmux's input buffer
+      // and get eaten by a survey that pops up before the agent processes it.
+      // Instead, let processMessage send after dismiss when it's our turn.
       return enqueuePaneJob(queueKey, () =>
-        processMessage(msg, mapping, cleanPrompt, pane, tmpFiles, { injected, queued: true }));
+        processMessage(msg, mapping, cleanPrompt, pane, tmpFiles, { queued: true }));
     }
 
     return enqueuePaneJob(queueKey, () =>
