@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Discord bridge for tmux-based coding agents (Claude Code, Codex)",
   "type": "module",
+  "bin": {
+    "amux": "./bin/agent-cli.mjs"
+  },
   "scripts": {
     "setup": "bash bin/setup.sh",
     "start": "node index.mjs",
