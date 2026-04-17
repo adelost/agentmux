@@ -249,9 +249,8 @@ All optional (set in `.env`):
 
 **Agent not responding / "did not acknowledge prompt"**
 - Type `/raw` in the Discord channel to see what the tmux pane looks like
-- If you see a survey ("How is Claude doing?"), type `/dismiss` to clear it
 - If the agent is stuck, type `/esc` to interrupt and try again
-- Claude Code surveys are suppressed automatically (`ANTHROPIC_DISABLE_SURVEY=1`), but existing sessions started before agentmux need a restart to pick it up
+- Surveys are suppressed automatically (`ANTHROPIC_DISABLE_SURVEY=1`) and auto-dismissed by the retry loop. If you still see one (e.g. from a session started before agentmux), type `/dismiss`
 
 **Restarting a stuck Claude session**
 - Send `//new` in the Discord channel to start a fresh Claude session
