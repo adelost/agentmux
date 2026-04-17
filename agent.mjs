@@ -158,7 +158,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     const dir = paneDir(rootDir, pane);
     const sessionFlag = resolveSessionFlag(dir);
-    await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)} && claude ${CLAUDE_FLAGS} ${sessionFlag}' Enter`);
+    await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)} && ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_FLAGS} ${sessionFlag}' Enter`);
     await wait(2000);
   }
 

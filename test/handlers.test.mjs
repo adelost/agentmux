@@ -397,18 +397,23 @@ feature("processMessage pipeline (streaming)", () => {
     }],
   });
 
-  component("warns but continues when prompt is never echoed", {
-    given: ["an agent that never echoes the prompt", () => {
+  component("retries 3 times and warns when prompt is never delivered", {
+    given: ["an agent that never echoes and stays idle", () => {
       const s = setup();
       s.agent.waitForPromptEcho.mockResolvedValue(false);
+      s.agent.isBusy.mockResolvedValue(false);
+      // hasResponseForPrompt returns true so polling loop exits quickly
+      s.agent.hasResponseForPrompt.mockResolvedValue(true);
       return { ...s, msg: mockMsg({ content: "probably lost" }) };
     }],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["warns user but still extracts response", (_, { msg, agent }) => {
-      // Warning sent
+    then: ["retries send 3 times, warns user, still extracts", (_, { msg, agent }) => {
+      // sendOnly called 3 times (retry loop)
+      expect(agent.sendOnly.mock.calls.length).toBe(3);
+      // Warning sent after 3 failed attempts
       const sends = msg.send.mock.calls.map((c) => c[0]);
-      expect(sends.some((s) => s.includes("did not acknowledge"))).toBe(true);
-      // Extract still runs (no longer bails out)
+      expect(sends.some((s) => typeof s === "string" && s.includes("3 attempts"))).toBe(true);
+      // Extract still runs
       expect(agent.getResponseStream).toHaveBeenCalled();
     }],
   });
