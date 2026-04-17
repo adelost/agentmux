@@ -1,12 +1,18 @@
 # agentmux
 
-Control Claude Code and Codex agents from your phone via Discord. Send prompts, get responses, orchestrate multiple agents in parallel.
-
-Works on Linux, macOS, and WSL. Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+Control Claude Code and Codex agents from your phone via Discord.
 
 ```
 Discord message → agentmux → Claude Code (tmux) → response → Discord reply
 ```
+
+- **Voice in, text out** - send voice messages, get them transcribed and processed
+- **Text in, voice out** - TTS reads responses back to you
+- **Send files, get images** - screenshots, PDFs, code files in both directions
+- **Multi-agent orchestration** - agents delegate tasks to each other via `amux` CLI
+- **Works from anywhere** - phone, tablet, another machine. Just open Discord.
+
+Works on Linux, macOS, and WSL. Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
 
 ## Quick Start
 
