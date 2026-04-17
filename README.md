@@ -176,9 +176,26 @@ agentmux solves this automatically:
 
 Each pane gets isolated session history. `--continue` is safe on all panes. `.agents/` is auto-added to `.gitignore`. Claude Code searches upward for `CLAUDE.md`, so all panes read the project config.
 
-## tmux Integration
+## CLI (`amux`)
 
-agentmux creates tmux sessions you can attach to directly:
+After `npm link` (or global install), the `amux` command manages agent sessions:
+
+```bash
+amux                         # list all agents
+amux myproject               # attach to tmux session
+amux myproject "fix the bug" # send prompt from terminal
+amux wait myproject          # wait until agent is idle
+amux log myproject           # show last response
+amux ps                      # show all pane statuses
+```
+
+An agent can orchestrate other agents by calling `amux` from its terminal:
+
+```bash
+amux other-project "run the tests and report results"
+```
+
+Or attach directly via tmux:
 
 ```bash
 tmux -S /tmp/agentmux.sock attach -t myproject
