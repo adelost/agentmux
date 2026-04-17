@@ -4,7 +4,7 @@
 import yaml from "js-yaml";
 import { randomUUID } from "crypto";
 
-const CLAUDE_CMD = "claude --continue --dangerously-skip-permissions";
+const DEFAULT_AGENT_CMD = "claude --continue --dangerously-skip-permissions";
 
 /** Expand ~ to $HOME in paths */
 export function expandTilde(p) {
@@ -26,7 +26,7 @@ export function parseConfig(yamlContent) {
     if (!config?.dir) throw new Error(`agentmux.yaml: agent '${name}' needs a 'dir'`);
     agents.set(name, {
       dir: expandTilde(config.dir),
-      claude: config.claude ?? 1,
+      panes: config.panes ?? config.claude ?? 1,
       services: config.services ?? [],
       shells: config.shells ?? 0,
       layout: config.layout ?? (config.services?.length || config.shells ? "main-vertical" : undefined),
@@ -50,8 +50,8 @@ export function generateChannelNames(agents) {
   const sortedNames = [...agents.keys()].sort();
 
   for (const name of sortedNames) {
-    const { claude } = agents.get(name);
-    for (let i = 0; i < claude; i++) {
+    const { panes } = agents.get(name);
+    for (let i = 0; i < panes; i++) {
       result.push({
         agentName: name,
         channelName: i === 0 ? name : `${name}-${i + 1}`,
@@ -108,7 +108,7 @@ export function generateAgentsYaml(agents, channelMap, agentIds) {
 
     // Discord channel mapping (only claude panes)
     const discord = {};
-    for (let i = 0; i < config.claude; i++) {
+    for (let i = 0; i < config.panes; i++) {
       const channelName = i === 0 ? name : `${name}-${i + 1}`;
       const channelId = channelMap.get(channelName);
       if (channelId) discord[channelId] = i;
@@ -118,10 +118,10 @@ export function generateAgentsYaml(agents, channelMap, agentIds) {
     // Layout
     if (config.layout) entry.layout = config.layout;
 
-    // Panes: claude first, then services, then shells
+    // Panes: coding agents first, then services, then shells
     const panes = [];
-    for (let i = 0; i < config.claude; i++) {
-      const pane = { name: i === 0 ? "claude" : `claude-${i + 1}`, cmd: CLAUDE_CMD };
+    for (let i = 0; i < config.panes; i++) {
+      const pane = { name: i === 0 ? "claude" : `claude-${i + 1}`, cmd: DEFAULT_AGENT_CMD };
       panes.push(pane);
     }
     for (let i = 0; i < config.services.length; i++) {

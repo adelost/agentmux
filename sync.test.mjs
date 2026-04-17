@@ -61,7 +61,7 @@ feature("parseConfig", () => {
       expect(config.category).toBe("Agent Cave");
       expect(config.agents.size).toBe(1);
       const skybar = config.agents.get("skybar");
-      expect(skybar.claude).toBe(3);
+      expect(skybar.panes).toBe(3);
       expect(skybar.dir).toBe(`${process.env.HOME}/lsrc/skybar`);
     }],
   });
@@ -72,7 +72,7 @@ feature("parseConfig", () => {
     then: ["all agents parsed correctly", (config) => {
       expect(config.agents.size).toBe(3);
       const ai = config.agents.get("ai");
-      expect(ai.claude).toBe(3);
+      expect(ai.panes).toBe(3);
       expect(ai.services).toEqual(["make ui", "make api"]);
       expect(ai.layout).toBe("main-vertical");
       const claw = config.agents.get("claw");
@@ -81,11 +81,11 @@ feature("parseConfig", () => {
     }],
   });
 
-  component("defaults claude to 1 when omitted", {
-    given: ["yaml with no claude field", () => `guild: "1"\nagents:\n  test:\n    dir: /tmp\n`],
+  component("defaults agents to 1 when omitted", {
+    given: ["yaml with no agents field", () => `guild: "1"\nagents:\n  test:\n    dir: /tmp\n`],
     when: ["parsing", (y) => parseConfig(y)],
-    then: ["claude defaults to 1", (config) => {
-      expect(config.agents.get("test").claude).toBe(1);
+    then: ["agents defaults to 1", (config) => {
+      expect(config.agents.get("test").panes).toBe(1);
     }],
   });
 
@@ -115,8 +115,8 @@ feature("parseConfig", () => {
 });
 
 feature("generateChannelNames", () => {
-  component("single agent with 3 claude panes", {
-    given: ["one agent", () => new Map([["skybar", { claude: 3 }]])],
+  component("single agent with 3 panes", {
+    given: ["one agent", () => new Map([["skybar", { panes: 3 }]])],
     when: ["generating names", (agents) => generateChannelNames(agents)],
     then: ["returns 3 channels with correct names", (channels) => {
       expect(channels).toEqual([
@@ -127,8 +127,8 @@ feature("generateChannelNames", () => {
     }],
   });
 
-  component("single agent with 1 claude pane", {
-    given: ["one agent", () => new Map([["api", { claude: 1 }]])],
+  component("single agent with 1 pane", {
+    given: ["one agent", () => new Map([["api", { panes: 1 }]])],
     when: ["generating names", (agents) => generateChannelNames(agents)],
     then: ["returns 1 channel", (channels) => {
       expect(channels).toHaveLength(1);
@@ -138,9 +138,9 @@ feature("generateChannelNames", () => {
 
   component("multiple agents sorted alphabetically", {
     given: ["three agents", () => new Map([
-      ["skybar", { claude: 2 }],
-      ["ai", { claude: 1 }],
-      ["claw", { claude: 1 }],
+      ["skybar", { panes: 2 }],
+      ["ai", { panes: 1 }],
+      ["claw", { panes: 1 }],
     ])],
     when: ["generating names", (agents) => generateChannelNames(agents)],
     then: ["sorted: ai, claw, skybar, skybar-2", (channels) => {
@@ -240,7 +240,7 @@ feature("generateAgentsYaml", () => {
   component("generates correct structure", {
     given: ["agents with channels and IDs", () => {
       const agents = new Map([
-        ["skybar", { dir: "/home/user/skybar", claude: 2, services: ["npm run dev"], shells: 0, layout: "main-vertical" }],
+        ["skybar", { dir: "/home/user/skybar", panes: 2, services: ["npm run dev"], shells: 0, layout: "main-vertical" }],
       ]);
       const channelMap = new Map([["skybar", "100"], ["skybar-2", "101"]]);
       const agentIds = new Map([["skybar", "uuid-1"]]);

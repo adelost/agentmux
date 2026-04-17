@@ -4,12 +4,12 @@ category: "Agent Cave"       # Discord category for agent channels
 agents:
   myproject:
     dir: ~/projects/myproject
-    claude: 3                # 3 Claude Code panes = 3 Discord channels
+    panes: 3                 # 3 coding agent panes = 3 Discord channels
     shells: 3                # 3 empty terminals for running commands
 
   another-project:
     dir: ~/projects/another
-    claude: 3
+    panes: 3
     services:                # named service panes (no Discord channel)
       - npm run dev
       - npm run test

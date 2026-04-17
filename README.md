@@ -54,19 +54,19 @@ category: "Agent Cave"       # Discord category for agent channels
 agents:
   myproject:
     dir: ~/projects/myproject
-    claude: 3                # 3 Claude Code panes = 3 Discord channels
+    panes: 3                 # 3 coding agent panes = 3 Discord channels
     shells: 3                # 3 empty terminals for running commands
 
   another-project:
     dir: ~/projects/another
-    claude: 3
+    panes: 3
     services:                # named service panes (no Discord channel)
       - npm run dev
       - npm run test
 ```
 
 Each agent gets:
-- `claude: N` panes with Claude Code (each gets a Discord channel)
+- `panes: N` coding agent panes (each gets a Discord channel)
 - `services:` for background commands (dev server, etc.)
 - `shells: N` empty terminals for manual use
 
@@ -106,7 +106,7 @@ category: "Desktop"
 agents:
   myproject:
     dir: ~/projects/myproject
-    claude: 3
+    panes: 3
 ```
 
 ```yaml
@@ -117,7 +117,7 @@ category: "Laptop"
 agents:
   myproject:
     dir: ~/projects/myproject
-    claude: 3
+    panes: 3
 ```
 
 Both connect to the same Discord server but create channels under different categories. No conflicts, same bot token works.
