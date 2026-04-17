@@ -307,30 +307,13 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
    * Wait for agent to fully complete (idle 2 polls in a row), then send the result.
    * No streaming - just wait, then send. Avoids all timing/scrollback issues.
    */
-  async function streamResponse(msg, mapping, pane, promptText, tmpFiles = [], { queued = false } = {}) {
+  async function streamResponse(msg, mapping, pane, promptText, tmpFiles = []) {
     const startTime = Date.now();
     const maxDuration = 600_000;
-
     const target = `${mapping.name}:.${pane}`;
 
-    // Step 1: Confirm the agent received our prompt.
-    // Queued prompts were already injected via sendOnly while the previous
-    // job was running, so the echo may have come and gone before we even
-    // start polling. Skip the echo check entirely for queued prompts.
-    if (!queued) {
-      // 45s cap (was 15s) covers claude's /compact pause: 15-25s of no
-      // jsonl writes while compaction runs and a fresh session file is
-      // created. 15s was tight enough to false-fail on /compact turns.
-      const echoTimeout = Math.max(100, Math.min(45_000, pollInterval * 7500));
-      const echoed = await agent.waitForPromptEcho(mapping.name, pane, promptText, echoTimeout);
-      if (!echoed) {
-        console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not echoed within ${echoTimeout}ms`);
-        await msg.send(`⚠️ Agent did not acknowledge prompt within ${Math.round(echoTimeout / 1000)}s. Pane may be dead, try \`/raw\` to inspect.`)
-          .catch((err) => console.warn(`send warning failed: ${err.message}`));
-      }
-    }
-
-    // Step 2: Wait for completion (idle 2 polls in a row after we saw busy).
+    // Wait for completion (idle 2 polls in a row after we saw busy).
+    // Echo verification is handled by the retry loop in processMessage.
     let sawWorking = false;
     let idleStreak = 0;
     const workMaxMs = 60_000; // If echo but no busy signal within 60s, fail loud
@@ -449,12 +432,36 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     const promptToSend = ttsHint ? cleanPrompt + ttsHint : cleanPrompt;
 
     try {
-      // Dismiss any blocking prompt (survey, resume) before sending.
-      // Surveys eat tmux input, so we must clear them first.
-      await agent.dismissBlockingPrompt(`${mapping.name}:.${pane}`)
-        .catch((err) => console.warn(`pre-send dismiss failed: ${err.message}`));
-      await agent.sendOnly(mapping.name, promptToSend, pane);
-      await streamResponse(msg, mapping, pane, cleanPrompt, tmpFiles, { queued });
+      // Retry loop: dismiss → send → verify echo. If a survey ate the
+      // prompt (no echo + agent still idle), dismiss again and resend.
+      // isBusy guard prevents double-send when echo detection is just slow.
+      const target = `${mapping.name}:.${pane}`;
+      const echoTimeout = Math.max(50, Math.min(15_000, pollInterval * 500));
+      let delivered = false;
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await agent.dismissBlockingPrompt(target)
+          .catch((err) => console.warn(`dismiss attempt ${attempt} failed: ${err.message}`));
+        await agent.sendOnly(mapping.name, promptToSend, pane);
+
+        const echoed = await agent.waitForPromptEcho(mapping.name, pane, cleanPrompt, echoTimeout);
+        if (echoed) { delivered = true; break; }
+
+        const busy = await agent.isBusy(mapping.name, pane, cleanPrompt);
+        if (busy) { delivered = true; break; } // prompt received, echo just slow
+
+        if (attempt < 3) {
+          console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not echoed (attempt ${attempt}/3), retrying`);
+        }
+      }
+
+      if (!delivered) {
+        console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not delivered after 3 attempts`);
+        await msg.send("⚠️ Agent did not acknowledge prompt after 3 attempts. Pane may be dead, try `/raw` to inspect.")
+          .catch((err) => console.warn(`send warning failed: ${err.message}`));
+      }
+
+      await streamResponse(msg, mapping, pane, cleanPrompt, tmpFiles);
       console.log(`[${ts()}] → ${mapping.name}:${pane}${queued ? " [queued]" : ""} done`);
     } catch (err) {
       console.log(`[${ts()}] ✗ ${mapping.name}:${pane}${queued ? " [queued]" : ""} ${err.message}`);
