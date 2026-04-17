@@ -67,14 +67,17 @@ To attach an image to your Discord reply, write on its own line:
 Supported formats: .png, .jpg, .jpeg, .gif, .webp (max 25MB).
 `;
 
+// Write hints as both CLAUDE.md (for Claude Code) and AGENTS.md (for Codex).
+// Both tools auto-read their respective file from cwd upward.
 function ensureAgentHints(rootDir) {
-  const hintsPath = join(rootDir, ".agents", "CLAUDE.md");
-  try {
-    if (!existsSync(hintsPath)) {
-      writeFileSync(hintsPath, AGENT_HINTS);
+  const agentsDir = join(rootDir, ".agents");
+  for (const name of ["CLAUDE.md", "AGENTS.md"]) {
+    const path = join(agentsDir, name);
+    try {
+      if (!existsSync(path)) writeFileSync(path, AGENT_HINTS);
+    } catch (err) {
+      console.warn(`agent hints write failed (${name}): ${err.message}`);
     }
-  } catch (err) {
-    console.warn(`agent hints write failed: ${err.message}`);
   }
 }
 
