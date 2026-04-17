@@ -197,6 +197,18 @@ All optional (set in `.env`):
 | `TTS_VOICE` | `sv-SE-MattiasNeural` | edge-tts voice ([list](https://gist.github.com/BettyJJ/17cbaa1de96235a7f5773b8571c32980)) |
 | `AGENTMUX_RECORD` | `0` | Set to `1` to save request/response recordings |
 
+## Troubleshooting
+
+**Agent not responding / "did not acknowledge prompt"**
+- Type `/raw` in the Discord channel to see what the tmux pane looks like
+- If you see a survey ("How is Claude doing?"), type `/dismiss` to clear it
+- If the agent is stuck, type `/esc` to interrupt and try again
+- Claude Code surveys are suppressed automatically (`ANTHROPIC_DISABLE_SURVEY=1`), but existing sessions started before agentmux need a restart to pick it up
+
+**Restarting a stuck Claude session**
+- Send `//new` in the Discord channel to start a fresh Claude session
+- Or attach directly: `tmux -S /tmp/agentmux.sock attach -t myproject` and fix manually
+
 ## Tests
 
 ```bash
