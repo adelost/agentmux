@@ -2,6 +2,8 @@
 
 Discord bridge for tmux-based coding agents. Send messages in Discord, get responses from Claude Code (or Codex) running in tmux panes.
 
+Works on Linux, macOS, and WSL. Requires a [Claude Code](https://docs.anthropic.com/en/docs/claude-code) subscription.
+
 ```
 You (phone/desktop)
   -> Discord message
@@ -179,12 +181,7 @@ Each pane gets isolated session history. `--continue` is safe on all panes. `.ag
 agentmux creates tmux sessions you can attach to directly:
 
 ```bash
-# If you have the agent CLI (optional)
-agent myproject              # attach to tmux session
-agent myproject "fix bug"    # send prompt from terminal
-
-# Or use tmux directly
-tmux -S /tmp/agentmux-tmux.sock attach -t myproject
+tmux -S /tmp/agentmux.sock attach -t myproject
 ```
 
 ## Environment Variables
@@ -195,15 +192,15 @@ All optional (set in `.env`):
 |----------|---------|-------------|
 | `DISCORD_TOKEN` | (required) | Discord bot token |
 | `AGENTMUX_YAML` | `./agentmux.yaml` | Path to config |
-| `TMUX_SOCKET` | `/tmp/agentmux-tmux.sock` | tmux socket path |
+| `TMUX_SOCKET` | `/tmp/agentmux.sock` | tmux socket path |
 | `TIMEOUT_S` | `600` | Max wait for response (seconds) |
-| `TTS_VOICE` | `sv-SE-MattiasNeural` | edge-tts voice |
+| `TTS_VOICE` | `sv-SE-MattiasNeural` | edge-tts voice ([list](https://gist.github.com/BettyJJ/17cbaa1de96235a7f5773b8571c32980)) |
 | `AGENTMUX_RECORD` | `0` | Set to `1` to save request/response recordings |
 
 ## Tests
 
 ```bash
-npm test     # 390 tests
+npm test
 ```
 
 ## License
