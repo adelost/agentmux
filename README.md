@@ -1,20 +1,11 @@
 # agentmux
 
-Discord bridge for tmux-based coding agents. Send messages in Discord, get responses from Claude Code (or Codex) running in tmux panes.
+Control Claude Code and Codex agents from your phone via Discord. Send prompts, get responses, orchestrate multiple agents in parallel.
 
-Works on Linux, macOS, and WSL. Requires a [Claude Code](https://docs.anthropic.com/en/docs/claude-code) subscription.
+Works on Linux, macOS, and WSL. Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
 
 ```
-You (phone/desktop)
-  -> Discord message
-agentmux (Node.js)
-  -> tmux send-keys
-Claude Code (in tmux pane)
-  -> works...
-agentmux reads session jsonl
-  -> extracts structured response
-You (Discord)
-  -> reply with context %
+Discord message → agentmux → Claude Code (tmux) → response → Discord reply
 ```
 
 ## Quick Start
@@ -150,21 +141,30 @@ Both connect to the same Discord server but create channels under different cate
 
 ## Features
 
-- **jsonl source of truth**: Reads Claude Code's session jsonl files directly for response extraction and busy detection. No tmux text parsing, no wordwrap bugs, no progress-icon interference. Codex rollout files supported too.
-- **Multi-agent**: Route different Discord channels to different coding agents
-- **Multi-pane**: Multiple Claude Code instances per project
-- **Channel sync**: `/sync` creates Discord channels from config
-- **Streaming**: Real-time progress updates while agent works
-- **Follow mode**: Stream output even when typing directly in tmux
-- **Session isolation**: Each pane gets its own Claude session in `.agents/N/`
-- **Voice**: Send voice messages (transcribed via Whisper)
-- **TTS**: Text-to-speech for responses (with automatic speech-friendly formatting hints)
-- **Attachments**: Images, PDFs, documents, and any file type forwarded to the agent
-- **Image replies**: Agent can attach images to Discord replies by writing `[image: /path/to/file.png]` on its own line
-- **Context tracking**: Model-aware context window usage (supports 1M-context Opus/Sonnet)
-- **Recording**: Saves request/response pairs for replay testing (auto-rotation, max 500)
-- **Auto-restart**: Crash recovery via `bin/start.sh`
-- **Auto-dismiss**: Handles resume prompts and feedback surveys automatically
+**Core**
+- Multi-agent routing (different Discord channels to different projects)
+- Multi-pane (multiple Claude Code instances per project)
+- `/sync` auto-creates Discord channels from config
+- Session isolation (each pane gets its own Claude session in `.agents/N/`)
+
+**Reliability**
+- jsonl source of truth for response extraction (no tmux parsing bugs)
+- Retry loop with echo verification for prompt delivery
+- Auto-dismiss surveys and blocking prompts
+- Auto-restart on crash (`bin/start.sh`)
+- Context tracking (model-aware, supports 1M-context Opus/Sonnet)
+
+**Media**
+- Voice messages (transcribed via Whisper)
+- Text-to-speech responses
+- Image/PDF/document attachments (both directions)
+- Agent can attach images via `[image: /path/to/file.png]`
+
+**Orchestration**
+- `amux` CLI for agent-to-agent communication
+- Auto-generated hints (`.agents/CLAUDE.md` + `.agents/AGENTS.md`)
+- Agents discover commands automatically, survives `/compact`
+- Fan-out parallel work across agents
 
 ## Session Isolation
 
@@ -200,7 +200,7 @@ tmux -S /tmp/agentmux.sock attach -t myproject
 
 ## Agent orchestration
 
-Agents can orchestrate other agents from their terminal using `amux`. agentmux auto-generates a `.agentmux.md` hints file in each project root so agents discover the commands automatically.
+Agents can orchestrate other agents from their terminal using `amux`. agentmux auto-generates `.agents/CLAUDE.md` and `.agents/AGENTS.md` so agents discover the commands automatically (Claude Code and Codex respectively).
 
 **Example: delegate tests to another agent**
 ```bash
