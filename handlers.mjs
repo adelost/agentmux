@@ -311,6 +311,13 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     const startTime = Date.now();
     const maxDuration = 600_000;
 
+    // Dismiss any blocking prompt (survey, resume) before we start waiting.
+    // Surveys can eat queued prompt input if they appear between sendOnly
+    // and the agent processing the text. Dismissing early prevents that.
+    const target = `${mapping.name}:.${pane}`;
+    await agent.dismissBlockingPrompt(target)
+      .catch((err) => console.warn(`pre-dismiss failed: ${err.message}`));
+
     // Step 1: Confirm the agent received our prompt.
     // Queued prompts were already injected via sendOnly while the previous
     // job was running, so the echo may have come and gone before we even
@@ -329,8 +336,6 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     }
 
     // Step 2: Wait for completion (idle 2 polls in a row after we saw busy).
-    // Since echo is confirmed, we can safely require sawWorking. No more
-    // silent fallback on "maybe the agent was just fast".
     let sawWorking = false;
     let idleStreak = 0;
     const workMaxMs = 60_000; // If echo but no busy signal within 60s, fail loud
@@ -341,17 +346,14 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       else {
         idleStreak += 1;
         if (sawWorking && idleStreak >= 2) break;
-        // Queued prompts can finish before their Discord-side waiter reaches
-        // the front of our local pane queue. If the turn is already fully
-        // extractable from structured session data, don't sit in the
-        // fail-loud loop waiting for a busy signal that's already gone.
         if (!sawWorking && await hasReadyResponse(mapping, pane, promptText)) break;
+        // Dismiss surveys/dialogs that may appear while we poll.
+        // Without this, a survey popping up mid-wait blocks the agent forever.
+        await agent.dismissBlockingPrompt(target)
+          .catch((err) => console.warn(`poll-dismiss failed: ${err.message}`));
       }
-      // Fail-loud escape: echo confirmed but agent never went busy within 60s.
-      // Extract whatever is there and warn. This usually means the agent is
-      // stuck in a UI mode (e.g. permission dialog) we didn't detect.
       if (!sawWorking && Date.now() - startTime > workMaxMs) {
-        console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} echoed prompt but never signaled busy within ${workMaxMs}ms`);
+        console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not processed within ${workMaxMs}ms`);
         break;
       }
       await new Promise((r) => setTimeout(r, pollInterval));
