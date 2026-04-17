@@ -187,12 +187,7 @@ amux myproject "fix the bug" # send prompt from terminal
 amux wait myproject          # wait until agent is idle
 amux log myproject           # show last response
 amux ps                      # show all pane statuses
-```
-
-An agent can orchestrate other agents by calling `amux` from its terminal:
-
-```bash
-amux other-project "run the tests and report results"
+amux esc myproject           # interrupt an agent
 ```
 
 Or attach directly via tmux:
@@ -200,6 +195,34 @@ Or attach directly via tmux:
 ```bash
 tmux -S /tmp/agentmux.sock attach -t myproject
 ```
+
+## Agent orchestration
+
+Agents can orchestrate other agents from their terminal using `amux`. agentmux auto-generates a `.agentmux.md` hints file in each project root so agents discover the commands automatically.
+
+**Example: delegate tests to another agent**
+```bash
+# From agent A's terminal
+amux api "run all tests and report failures"
+amux wait api
+amux log api
+```
+
+**Example: check what all agents are doing**
+```bash
+amux ps
+```
+
+**Example: fan-out work**
+```bash
+# Send tasks to multiple agents in parallel
+amux frontend "update the dashboard component" &
+amux backend "add the new API endpoint" &
+wait
+# Both agents work simultaneously
+```
+
+This makes it possible to build workflows where one agent coordinates others, similar to a lead developer delegating tasks to a team.
 
 ## Environment Variables
 

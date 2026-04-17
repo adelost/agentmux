@@ -22,7 +22,55 @@ export function paneDir(rootDir, pane) {
   const dir = join(rootDir, ".agents", String(pane));
   mkdirSync(dir, { recursive: true });
   ensureGitignored(rootDir, ".agents/");
+  ensureAgentmuxHints(rootDir);
   return dir;
+}
+
+const AGENTMUX_HINTS = `# agentmux
+
+You are running inside agentmux. You can orchestrate other agents from your terminal.
+
+## Available commands
+
+\`\`\`bash
+amux ps                          # show all agents and their status
+amux log <agent>                 # see another agent's last response
+amux <agent> "do something"      # send a task to another agent
+amux wait <agent>                # wait until an agent finishes
+amux esc <agent>                 # interrupt an agent
+\`\`\`
+
+## Examples
+
+\`\`\`bash
+# Ask the api agent to run tests, wait for result, read the output
+amux api "run all tests" && amux wait api && amux log api
+
+# Check what all agents are doing
+amux ps
+\`\`\`
+
+## Image replies
+
+To attach an image to your Discord reply, write on its own line:
+
+\`\`\`
+[image: /absolute/path/to/file.png]
+\`\`\`
+
+Supported formats: .png, .jpg, .jpeg, .gif, .webp (max 25MB).
+`;
+
+function ensureAgentmuxHints(rootDir) {
+  const hintsPath = join(rootDir, ".agentmux.md");
+  try {
+    if (!existsSync(hintsPath)) {
+      writeFileSync(hintsPath, AGENTMUX_HINTS);
+      ensureGitignored(rootDir, ".agentmux.md");
+    }
+  } catch (err) {
+    console.warn(`agentmux hints write failed: ${err.message}`);
+  }
 }
 
 function ensureGitignored(rootDir, entry) {
