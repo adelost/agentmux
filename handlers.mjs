@@ -320,15 +320,17 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     while (Date.now() - startTime < maxDuration) {
       const busy = await agent.isBusy(mapping.name, pane, promptText);
+      // Dismiss on every tick, not just idle. isBusy can return true
+      // indefinitely if prompt-matching fails, so a survey would never
+      // get dismissed if we only ran this during idle ticks.
+      await agent.dismissBlockingPrompt(target)
+        .catch((err) => console.warn(`poll-dismiss failed: ${err.message}`));
+
       if (busy) { sawWorking = true; idleStreak = 0; }
       else {
         idleStreak += 1;
         if (sawWorking && idleStreak >= 2) break;
         if (!sawWorking && await hasReadyResponse(mapping, pane, promptText)) break;
-        // Dismiss surveys/dialogs that may appear while we poll.
-        // Without this, a survey popping up mid-wait blocks the agent forever.
-        await agent.dismissBlockingPrompt(target)
-          .catch((err) => console.warn(`poll-dismiss failed: ${err.message}`));
       }
       if (!sawWorking && Date.now() - startTime > workMaxMs) {
         console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not processed within ${workMaxMs}ms`);
