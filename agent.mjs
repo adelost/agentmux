@@ -22,11 +22,14 @@ export function paneDir(rootDir, pane) {
   const dir = join(rootDir, ".agents", String(pane));
   mkdirSync(dir, { recursive: true });
   ensureGitignored(rootDir, ".agents/");
-  ensureAgentmuxHints(rootDir);
+  ensureAgentHints(rootDir);
   return dir;
 }
 
-const AGENTMUX_HINTS = `# agentmux
+// Placed in .agents/CLAUDE.md so Claude Code auto-reads it from any pane
+// (panes run in .agents/N/, Claude searches upward for CLAUDE.md).
+// Survives /compact because CLAUDE.md is system context, not conversation.
+const AGENT_HINTS = `# agentmux
 
 You are running inside agentmux. You can orchestrate other agents from your terminal.
 
@@ -48,6 +51,9 @@ amux api "run all tests" && amux wait api && amux log api
 
 # Check what all agents are doing
 amux ps
+
+# Fan-out: send tasks to multiple agents in parallel
+amux frontend "update dashboard" & amux backend "add endpoint" & wait
 \`\`\`
 
 ## Image replies
@@ -61,15 +67,14 @@ To attach an image to your Discord reply, write on its own line:
 Supported formats: .png, .jpg, .jpeg, .gif, .webp (max 25MB).
 `;
 
-function ensureAgentmuxHints(rootDir) {
-  const hintsPath = join(rootDir, ".agentmux.md");
+function ensureAgentHints(rootDir) {
+  const hintsPath = join(rootDir, ".agents", "CLAUDE.md");
   try {
     if (!existsSync(hintsPath)) {
-      writeFileSync(hintsPath, AGENTMUX_HINTS);
-      ensureGitignored(rootDir, ".agentmux.md");
+      writeFileSync(hintsPath, AGENT_HINTS);
     }
   } catch (err) {
-    console.warn(`agentmux hints write failed: ${err.message}`);
+    console.warn(`agent hints write failed: ${err.message}`);
   }
 }
 

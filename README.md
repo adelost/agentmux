@@ -176,6 +176,8 @@ agentmux solves this automatically:
 
 Each pane gets isolated session history. `--continue` is safe on all panes. `.agents/` is auto-added to `.gitignore`. Claude Code searches upward for `CLAUDE.md`, so all panes read the project config.
 
+agentmux also auto-generates `.agents/CLAUDE.md` with available CLI commands and orchestration hints. Claude Code reads this automatically from every pane (since they run inside `.agents/N/`), and it survives `/compact` because `CLAUDE.md` is loaded as system context, not conversation history.
+
 ## CLI (`amux`)
 
 After `npm link` (or global install), the `amux` command manages agent sessions:
