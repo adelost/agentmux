@@ -273,7 +273,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   /** --continue if session exists, otherwise no flag (new session). */
   function resolveSessionFlag(dir) {
-    const encodedDir = dir.replace(/\//g, "-");
+    // Claude Code encodes project dirs by replacing both / and . with -
+    const encodedDir = dir.replace(/[\/\.]/g, "-");
     const projectDir = join(process.env.HOME, ".claude", "projects", encodedDir);
     try {
       if (readdirSync(projectDir).some((f) => f.endsWith(".jsonl"))) return "--continue";
