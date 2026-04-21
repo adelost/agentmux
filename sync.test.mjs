@@ -441,4 +441,51 @@ feature("generateAgentsYaml", () => {
       expect(aiPos).toBeLessThan(skybarPos);
     }],
   });
+
+  component("preserves per-pane labels from existing yaml", {
+    given: ["config + existing yaml with labels on some panes", () => {
+      const agents = new Map([
+        ["ai", { dir: "/tmp", panes: 2, services: ["npm dev"], shells: 1, layout: "main-vertical" }],
+      ]);
+      const channelMap = new Map();
+      const agentIds = new Map([["ai", "uuid"]]);
+      const existingYaml = {
+        ai: {
+          panes: [
+            { name: "claude", cmd: "claude", label: "agentmux dev" },
+            { name: "claude-2", cmd: "claude" },             // no label
+            { name: "service-1", cmd: "npm dev", label: "dev server" },
+            { name: "shell-1", cmd: "bash" },                 // no label
+          ],
+        },
+      };
+      return { agents, channelMap, agentIds, existingYaml };
+    }],
+    when: ["regenerating yaml", ({ agents, channelMap, agentIds, existingYaml }) =>
+      generateAgentsYaml(agents, channelMap, agentIds, existingYaml)],
+    then: ["labels survive at correct pane positions", (yamlStr) => {
+      expect(yamlStr).toMatch(/label:\s*(?:"agentmux dev"|agentmux dev)/);
+      expect(yamlStr).toMatch(/label:\s*(?:"dev server"|dev server)/);
+      // Position matters: label should be attached to claude (pane 0),
+      // not claude-2 (pane 1)
+      const claudeIdx = yamlStr.indexOf("name: claude\n");
+      const claude2Idx = yamlStr.indexOf("name: claude-2\n");
+      const devLabelIdx = yamlStr.search(/label:\s*(?:"agentmux dev"|agentmux dev)/);
+      expect(devLabelIdx).toBeGreaterThan(claudeIdx);
+      expect(devLabelIdx).toBeLessThan(claude2Idx);
+    }],
+  });
+
+  component("no existingYaml = no label fields (backward-compat)", {
+    given: ["config but no prior yaml", () => ({
+      agents: new Map([["ai", { dir: "/tmp", panes: 1, services: [], shells: 0 }]]),
+      channelMap: new Map(),
+      agentIds: new Map([["ai", "uuid"]]),
+    })],
+    when: ["generating without existingYaml", ({ agents, channelMap, agentIds }) =>
+      generateAgentsYaml(agents, channelMap, agentIds)],
+    then: ["output has no label field", (yamlStr) => {
+      expect(yamlStr).not.toContain("label:");
+    }],
+  });
 });

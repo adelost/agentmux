@@ -7,10 +7,11 @@
 // them in-place to the new format (#claw-0, #claw-1, #claw-2), preserving
 // message history. Renames go in pane-ascending order to avoid name collisions.
 
-import { writeFileSync, mkdirSync } from "fs";
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from "fs";
 import { dirname } from "path";
 import { randomUUID } from "crypto";
 import { ChannelType } from "discord.js";
+import yaml from "js-yaml";
 import { parseConfig, buildMigrationPlan, generateAgentsYaml } from "../sync.mjs";
 
 /**
@@ -111,7 +112,13 @@ export async function executeSync({ guild, configYaml, state, agentsYamlPath }) 
   };
   state.set("sync", syncState);
 
-  const yamlContent = generateAgentsYaml(config.agents, channelMap, agentIds);
+  // Read existing agents.yaml (if any) so user-set per-pane labels survive sync.
+  let existingYaml = null;
+  if (existsSync(agentsYamlPath)) {
+    try { existingYaml = yaml.load(readFileSync(agentsYamlPath, "utf-8")); }
+    catch (err) { console.warn(`sync: could not parse existing ${agentsYamlPath}: ${err.message}`); }
+  }
+  const yamlContent = generateAgentsYaml(config.agents, channelMap, agentIds, existingYaml);
   mkdirSync(dirname(agentsYamlPath), { recursive: true });
   writeFileSync(agentsYamlPath, yamlContent);
 

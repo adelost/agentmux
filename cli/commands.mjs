@@ -265,7 +265,14 @@ async function cmdPs(ctx) {
       const icon = statusIcon(status);
       const ctxCell = formatContextCell(context);
       const cmd = p.command.padEnd(6);
-      console.log(`  ${icon} p${p.index}  ${cmd} ${ctxCell}  ${truncate(preview, 60)}`);
+      // Per-pane `label:` in agents.yaml is a human-set purpose tag
+      // (e.g. "agentmux dev", "tandem-tagger deploy"). When present,
+      // it replaces the live preview (which is usually just claude's
+      // status line) because the label is the info an orchestrator
+      // actually needs to pick a pane. Falls back to preview when empty.
+      const label = a.panes[p.index]?.label;
+      const display = label ? `[${truncate(label, 40)}]` : truncate(preview, 60);
+      console.log(`  ${icon} p${p.index}  ${cmd} ${ctxCell}  ${display}`);
     }
   }
 
@@ -378,7 +385,8 @@ async function cmdTop(ctx, flags = {}) {
       if (!CONTEXT_DIALECT[p.command]) continue;
       const { status, preview, context } = await inspectPane(ctx, a, p);
       if (!context) continue;
-      rows.push({ agent: a.name, pane: p.index, status, context, preview });
+      const label = a.panes[p.index]?.label || null;
+      rows.push({ agent: a.name, pane: p.index, status, context, preview, label });
     }
   }
 
@@ -397,7 +405,8 @@ async function cmdTop(ctx, flags = {}) {
     const ctxCell = formatContextCell(r.context);
     const agentCell = r.agent.padEnd(10);
     const paneCell = `p${r.pane}`.padEnd(3);
-    console.log(`  ${icon} ${ctxCell}  ${agentCell} ${paneCell}  ${truncate(r.preview, 50)}`);
+    const display = r.label ? `[${truncate(r.label, 40)}]` : truncate(r.preview, 50);
+    console.log(`  ${icon} ${ctxCell}  ${agentCell} ${paneCell}  ${display}`);
   }
 }
 
