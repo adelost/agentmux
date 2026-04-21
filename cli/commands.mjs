@@ -5,10 +5,11 @@ import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 import { readFileSync, existsSync, unlinkSync } from "fs";
 import { loadConfig, listAgents, getAgent, addAgent, removeAgent, resolveAgent, saveLast, getLast, getPaneCount } from "./config.mjs";
-import { formatAgentRow, statusIcon, truncate } from "./format.mjs";
+import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens } from "./format.mjs";
 import { hasSession, ensureAndAttach, attachSession, killSession, listPanes, getPaneStatus, sendKeys, selectOption, createTmuxContext } from "./tmux.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
 import { stripAnsi, esc, extractActivity, formatDuration } from "../lib.mjs";
+import { getContextFromPane } from "../core/context.mjs";
 import { runOneshot, showRunLog } from "./run.mjs";
 import { executePlan, showPlanLog } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
@@ -225,6 +226,25 @@ async function cmdLog(name, flags, ctx) {
   }
 }
 
+// Pane commands that correspond to a dialect we can read context for.
+// Bash/other commands get a blank context cell.
+const CONTEXT_DIALECT = { claude: "claude", codex: "codex" };
+
+/** Gather status + preview + context for one pane. Safe: never throws. */
+async function inspectPane(ctx, agent, pane) {
+  const status = await getPaneStatus(ctx, agent.name, pane.index).catch(() => "unknown");
+  let content = "";
+  try { content = await ctx.agent.capturePane(agent.name, pane.index, 100); }
+  catch {}
+  const lines = stripAnsi(content).split("\n").filter((l) => l.trim());
+  // Claude right-aligns its tail rows with tons of whitespace; collapse it
+  // so the preview looks readable when rendered into a left-aligned column.
+  const preview = (lines[lines.length - 1] || "").trim();
+  const dialect = CONTEXT_DIALECT[pane.command] || null;
+  const context = dialect === "claude" ? getContextFromPane(content, agent.dir) : null;
+  return { status, preview, context };
+}
+
 async function cmdPs(ctx) {
   const agents = listAgents(ctx.configPath);
   let count = 0;
@@ -238,23 +258,143 @@ async function cmdPs(ctx) {
     console.log(`  Panes: ${panes.length}`);
 
     for (const p of panes) {
-      const status = await getPaneStatus(ctx, a.name, p.index);
+      const { status, preview, context } = await inspectPane(ctx, a, p);
       const icon = statusIcon(status);
-
-      // Last line as preview
-      try {
-        const raw = await ctx.agent.capturePane(a.name, p.index, 5);
-        const lines = stripAnsi(raw).split("\n").filter(Boolean);
-        const preview = truncate(lines[lines.length - 1] || "", 60);
-        console.log(`  ${icon} p${p.index}  (${p.command.padEnd(8)}) ${p.width}x${p.height}  ${preview}`);
-      } catch {
-        console.log(`  ${icon} p${p.index}  (${p.command})`);
-      }
+      const ctxCell = formatContextCell(context);
+      const cmd = p.command.padEnd(6);
+      console.log(`  ${icon} p${p.index}  ${cmd} ${ctxCell}  ${truncate(preview, 60)}`);
     }
   }
 
   if (count === 0) console.log("No running agents.");
   console.log("\nStatus: 🟢 working  🔴 needs input  💤 idle/done  ⚪ unknown");
+}
+
+/**
+ * Bulk-compact claude panes above a context-percent threshold.
+ *
+ * Rationale: a parked claude pane at 80% context costs a full re-read
+ * of ~800k tokens on every new turn. /compact summarizes history into
+ * working memory and drops token count an order of magnitude, while
+ * preserving session intent (unlike /clear which nukes it).
+ *
+ * Defaults skip panes the user is mid-interaction with: working,
+ * permission, menu. --force overrides.
+ *
+ * Statuses we compact by default: idle, unknown (mostly idle or just-spawned).
+ */
+const COMPACT_UNSAFE_STATUSES = new Set(["working", "permission", "menu"]);
+
+// Don't bother compacting panes below this absolute token count. Rationale:
+// on a 200k-context pane, 20% is only 40k — compacting saves nothing
+// meaningful. On a 1M-context pane, 20% is 200k, worth compacting. This
+// floor makes the default threshold sensible across both context sizes.
+const COMPACT_MIN_TOKENS = 200_000;
+
+async function cmdCompact(ctx, flags = {}, positional = []) {
+  const threshold = positional[0] != null ? parseInt(positional[0]) : 20;
+  if (Number.isNaN(threshold) || threshold < 0 || threshold > 100) {
+    console.error(`Invalid threshold '${positional[0]}'. Must be 0-100.`);
+    process.exit(1);
+  }
+  const minTokens = flags["min-tokens"] != null ? parseInt(flags["min-tokens"]) : COMPACT_MIN_TOKENS;
+  const dry = !!flags.dry;
+  const force = !!flags.force;
+
+  const agents = listAgents(ctx.configPath);
+  const targets = [];
+  const skipped = [];
+
+  for (const a of agents) {
+    if (!(await hasSession(ctx, a.name))) continue;
+    const panes = await listPanes(ctx, a.name);
+    for (const p of panes) {
+      if (p.command !== "claude") continue;
+      const { status, context } = await inspectPane(ctx, a, p);
+      if (!context) continue;
+      if (context.percent < threshold) continue;
+      if (context.tokens < minTokens) continue;
+      const unsafe = COMPACT_UNSAFE_STATUSES.has(status);
+      if (unsafe && !force) {
+        skipped.push({ agent: a.name, pane: p.index, context, status });
+        continue;
+      }
+      targets.push({ agent: a.name, pane: p.index, context, status });
+    }
+  }
+
+  console.log(`Threshold: ≥${threshold}% and ≥${formatTokens(minTokens)} tokens  |  Action: ${dry ? "dry-run" : "compact"}${force ? "  |  FORCE (will compact working panes)" : ""}`);
+
+  if (targets.length) {
+    console.log(`\nCompacting ${targets.length} pane(s):`);
+    for (const t of targets) {
+      console.log(`  ${t.agent.padEnd(10)} p${t.pane}  ${t.context.percent}%  ${formatTokens(t.context.tokens)}  (${t.status})`);
+    }
+  }
+  if (skipped.length) {
+    console.log(`\nSkipped ${skipped.length} pane(s) — currently active. Use --force to include:`);
+    for (const s of skipped) {
+      console.log(`  ${s.agent.padEnd(10)} p${s.pane}  ${s.context.percent}%  ${formatTokens(s.context.tokens)}  (${s.status})`);
+    }
+  }
+  if (!targets.length && !skipped.length) {
+    console.log(`\nNo claude panes above ${threshold}%. Nothing to do.`);
+    return;
+  }
+
+  if (dry || !targets.length) return;
+
+  console.log("");
+  for (const t of targets) {
+    try {
+      const target = `${t.agent}:.${t.pane}`;
+      await ctx.tmux(`send-keys -t '${esc(target)}' -l -- '/compact'`);
+      await ctx.tmux(`send-keys -t '${esc(target)}' Enter`);
+      console.log(`✓ ${t.agent} p${t.pane}: /compact sent`);
+    } catch (err) {
+      console.log(`✗ ${t.agent} p${t.pane}: ${err.message}`);
+    }
+  }
+  console.log(`\nNote: /compact runs asynchronously in each pane. Run 'amux top' in a minute to see new values.`);
+}
+
+/**
+ * Cross-session context leaderboard. Sorts all claude/codex panes by
+ * percent descending (tokens as tie-breaker). Helps answer "which pane
+ * is closest to the context ceiling right now?" without manual digging.
+ */
+async function cmdTop(ctx, flags = {}) {
+  const agents = listAgents(ctx.configPath);
+  const rows = [];
+
+  for (const a of agents) {
+    if (!(await hasSession(ctx, a.name))) continue;
+    const panes = await listPanes(ctx, a.name);
+    for (const p of panes) {
+      if (!CONTEXT_DIALECT[p.command]) continue;
+      const { status, preview, context } = await inspectPane(ctx, a, p);
+      if (!context) continue;
+      rows.push({ agent: a.name, pane: p.index, status, context, preview });
+    }
+  }
+
+  if (!rows.length) { console.log("No claude/codex panes with context data."); return; }
+
+  const sortBy = flags.sort === "tokens" ? "tokens" : "percent";
+  rows.sort((a, b) => {
+    if (sortBy === "tokens") return b.context.tokens - a.context.tokens;
+    // Primary: percent desc. Secondary: tokens desc (breaks ties deterministically).
+    return (b.context.percent - a.context.percent) || (b.context.tokens - a.context.tokens);
+  });
+
+  const n = flags.n || rows.length;
+  for (const r of rows.slice(0, n)) {
+    const icon = statusIcon(r.status);
+    const ctxCell = formatContextCell(r.context);
+    const agentCell = r.agent.padEnd(10);
+    const paneCell = `p${r.pane}`.padEnd(3);
+    console.log(`  ${icon} ${ctxCell}  ${agentCell} ${paneCell}  ${truncate(r.preview, 50)}`);
+  }
 }
 
 async function cmdSelect(name, choice, flags, ctx) {
@@ -310,7 +450,12 @@ Usage:
   agent wait <name|:nr> [-t S]    Wait until agent is ready
   agent select <name|:nr> <N>     Select menu option N
   agent esc <name|:nr>            Send Escape (cancel/interrupt)
-  agent ps                        Show all running agents + status
+  agent ps                        Show all running agents + status + context%
+  agent top [--sort tokens] [-n N] Cross-session context leaderboard
+  agent compact [threshold=20]    Send /compact to claude panes ≥ threshold%
+                                  Also requires ≥200k tokens absolute (--min-tokens N to change)
+    --dry                         Show what would compact, do nothing
+    --force                       Include 'working' panes (default: skip)
   agent r                         Resume last agent
   agent help                      Show this message
 
@@ -325,6 +470,8 @@ const FLAG_SPECS = {
   wait: { p: "number", t: "number", a: "boolean" },
   log: { n: "number", p: "number", full: "boolean", f: "boolean", text: "boolean", t: "boolean" },
   ps: { n: "number" },
+  top: { n: "number", sort: "string" },
+  compact: { dry: "boolean", force: "boolean", "min-tokens": "number" },
   select: { p: "number" },
   esc: { p: "number" },
 };
@@ -385,6 +532,16 @@ export async function dispatch(argv, ctx) {
 
     case "ps":
       return cmdPs(ctx);
+
+    case "top": {
+      const { flags } = parseFlags(rest, FLAG_SPECS.top);
+      return cmdTop(ctx, flags);
+    }
+
+    case "compact": {
+      const { flags, positional } = parseFlags(rest, FLAG_SPECS.compact);
+      return cmdCompact(ctx, flags, positional);
+    }
 
     case "select": {
       if (rest.length < 2) { console.error("Usage: agent select <name|:nr> <N>"); process.exit(1); }
