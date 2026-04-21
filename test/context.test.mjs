@@ -2,7 +2,7 @@ import { feature, unit, expect } from "bdd-vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { getContextPercent } from "../core/context.mjs";
+import { getContextPercent, getContextFromPane } from "../core/context.mjs";
 
 /**
  * Build a claude project jsonl with a single assistant event carrying a
@@ -99,5 +99,100 @@ feature("getContextPercent (claude): model-based max lookup", () => {
       expect(r.percent).toBe(10);
       cleanup();
     }],
+  });
+});
+
+feature("getContextFromPane: reads from pane content (per-pane correct)", () => {
+  const WIDE_ACTIVE = [
+    "   current work",
+    "",
+    "───────────────────────────────────────────────────────────────────────────────",
+    "❯ ",
+    "───────────────────────────────────────────────────────────────────────────────",
+    "  ⬆ /gsd-update │ Opus 4.7 (1M context) │ 0 ████░░░░░░ 41%",
+    "  ⏵⏵ bypass permissions on (shift+tab to cycle)",
+    "                                                                340360 tokens",
+    "                                           current: 2.1.114 · latest: 2.1.116",
+  ].join("\n");
+
+  const IDLE = [
+    "                     new task? /clear to save 134.8k tokens",
+    "                     new task? /clear to save 134.8k tokens",
+  ].join("\n");
+
+  const NARROW_NO_BAR = [
+    "──────────────────",
+    "❯ ",
+    "──────────────────",
+    "  ⬆ /gsd-update…",
+    "  ⏵⏵ bypass",
+    "   253255 tokens",
+    "  new task? /cl…",
+  ].join("\n");
+
+  const THINKING_NOISE = [
+    "✻ Musing… (2s · ↓ 40 tokens)",
+    "  ⬆ /gsd-update │ Opus 4.7 (1M context) │ 0 ████░░░░░░ 7%",
+    "                                                                 70000 tokens",
+  ].join("\n");
+
+  unit("wide active pane: reads progress bar 41% + counter 340360", {
+    given: ["wide active pane content", () => WIDE_ACTIVE],
+    when: ["parsing pane", (c) => getContextFromPane(c)],
+    then: ["41% and 340360 tokens", (r) => {
+      expect(r).not.toBeNull();
+      expect(r.percent).toBe(41);
+      expect(r.tokens).toBe(340_360);
+    }],
+  });
+
+  unit("idle pane: parses 'save N.Nk tokens' as 134800", {
+    given: ["idle pane hint", () => IDLE],
+    when: ["parsing pane", (c) => getContextFromPane(c)],
+    then: ["134800 tokens", (r) => {
+      expect(r).not.toBeNull();
+      expect(r.tokens).toBe(134_800);
+    }],
+  });
+
+  unit("narrow pane without '(1M context)': falls back to 200k default → 100% capped", {
+    given: ["narrow pane, 253k tokens, no progress bar, no 1M hint", () => NARROW_NO_BAR],
+    when: ["parsing pane with no paneDir", (c) => getContextFromPane(c)],
+    then: ["tokens correct, percent capped at 100", (r) => {
+      expect(r.tokens).toBe(253_255);
+      expect(r.percent).toBe(100);
+    }],
+  });
+
+  unit("narrow pane with paneDir fallback: uses jsonl model → 25% of 1M", {
+    given: ["narrow pane + a fake claude-opus-4-7 jsonl in cwd", () => {
+      const ctx = setupFakeClaudeContext({ model: "claude-opus-4-7", cacheRead: 1 });
+      return { content: NARROW_NO_BAR, paneDir: ctx.paneDir, cleanup: ctx.cleanup };
+    }],
+    when: ["parsing pane with paneDir", ({ content, paneDir }) => getContextFromPane(content, paneDir)],
+    then: ["253255 tokens at ~25% of 1M", (r, { cleanup }) => {
+      expect(r.tokens).toBe(253_255);
+      expect(r.percent).toBe(25);
+      cleanup();
+    }],
+  });
+
+  unit("thinking-indicator tokens delta ignored: uses status bar counter not '↓ 40 tokens'", {
+    given: ["active pane with thinking delta + real counter", () => THINKING_NOISE],
+    when: ["parsing pane", (c) => getContextFromPane(c)],
+    then: ["70000 tokens, 7% (not 40)", (r) => {
+      expect(r.tokens).toBe(70_000);
+      expect(r.percent).toBe(7);
+    }],
+  });
+
+  unit("empty content returns null", {
+    when: ["parsing empty", () => getContextFromPane("")],
+    then: ["null", (r) => { expect(r).toBeNull(); }],
+  });
+
+  unit("no tokens found returns null", {
+    when: ["parsing content without tokens marker", () => getContextFromPane("just text\nno numbers here")],
+    then: ["null", (r) => { expect(r).toBeNull(); }],
   });
 });

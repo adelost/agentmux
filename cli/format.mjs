@@ -45,3 +45,20 @@ export function truncate(str, max = 80) {
   if (str.length <= max) return str;
   return str.slice(0, max - 1) + "…";
 }
+
+/** Abbreviate a token count: 134800 → "134.8k", 1200000 → "1.2M". */
+export function formatTokens(n) {
+  if (n == null) return "";
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
+  if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, "") + "k";
+  return String(n);
+}
+
+/** Format "{percent}% {tokens}" into a fixed-width column for agent ps.
+ *  ctx is { percent, tokens } from getContextFromPane, or null. */
+export function formatContextCell(ctx) {
+  if (!ctx) return "          "; // 10 spaces, preserves column alignment
+  const pct = `${ctx.percent}%`;
+  const tok = formatTokens(ctx.tokens);
+  return `${pct.padStart(4)} ${tok.padEnd(5)}`;
+}

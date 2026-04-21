@@ -42,6 +42,34 @@ function claudeMaxForModel(model) {
   return CLAUDE_DEFAULT_MAX;
 }
 
+// Read the most recent claude model name from any jsonl in paneDir's project
+// store. Used by the pane-content path to infer max context window when the
+// pane itself is too narrow to show the "(1M context)" hint.
+function readLatestClaudeModel(paneDir) {
+  const projectDir = join(CLAUDE_PROJECTS_DIR(), encodeClaudePath(paneDir));
+  if (!existsSync(projectDir)) return null;
+  let files;
+  try {
+    files = readdirSync(projectDir)
+      .filter((f) => f.endsWith(".jsonl"))
+      .map((f) => ({ name: f, mtime: statSync(join(projectDir, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+  } catch { return null; }
+  if (!files.length) return null;
+  let content;
+  try { content = readFileSync(join(projectDir, files[0].name), "utf-8"); }
+  catch { return null; }
+  const lines = content.trimEnd().split("\n");
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 30); i--) {
+    try {
+      const entry = JSON.parse(lines[i]);
+      const model = entry?.message?.model;
+      if (model) return model;
+    } catch {}
+  }
+  return null;
+}
+
 // --- Claude path -------------------------------------------------------
 
 function encodeClaudePath(dir) {
@@ -192,4 +220,69 @@ export function getContextPercent(paneDir, dialect) {
   if (dialect === "codex") return getContextFromCodexJsonl(paneDir);
   if (dialect === "claude") return getContextFromClaudeJsonl(paneDir);
   return null;
+}
+
+// --- Pane-content path -------------------------------------------------
+//
+// The jsonl path above keys off cwd, so multiple claude panes sharing a
+// workspace all resolve to the same "latest session" and report the same
+// number. The pane's own status bar is per-pane correct because each pane
+// renders its own live counter. This path reads those numbers directly.
+
+const BLOCK_CHARS = /[█▓▒░]/;
+
+/**
+ * Extract context usage from a tmux pane's captured content.
+ *
+ * Handles three visible states:
+ *   - Active wide:    progress bar "N ████░░░░░░ NN%" + counter "N tokens"
+ *   - Active narrow:  counter "N tokens" only (progress bar truncated away)
+ *   - Idle:           "new task? /clear to save N.Nk tokens"
+ *
+ * If the pane is too narrow to show "(1M context)" the max is read from the
+ * latest jsonl in paneDir as fallback.
+ *
+ * @param {string} paneContent - Output from tmux capture-pane (ANSI-stripped)
+ * @param {string|null} paneDir - The pane's cwd, for model fallback. Optional.
+ * @returns {{ percent: number, tokens: number } | null}
+ */
+export function getContextFromPane(paneContent, paneDir = null) {
+  if (!paneContent) return null;
+  const lines = paneContent.split("\n");
+  const tail = lines.slice(-80);
+
+  // Tokens: the status bar's own line is "<spaces>N tokens" with nothing
+  // else on it. Anchoring to a pure line avoids matching "✻ Musing… (↓ 40
+  // tokens)" delta indicators or chat text that mentions tokens.
+  let tokens = null;
+  for (let i = tail.length - 1; i >= 0; i--) {
+    const line = tail[i];
+    let m = line.match(/^\s*(\d+)\s+tokens\s*$/);
+    if (m) { tokens = parseInt(m[1]); break; }
+    m = line.match(/save\s+(\d+(?:\.\d+)?)k\s+tokens/i);
+    if (m) { tokens = Math.round(parseFloat(m[1]) * 1000); break; }
+  }
+  if (tokens === null) return null;
+
+  // Percent from the progress bar line. Block-char presence is the anchor.
+  let percent = null;
+  for (const line of tail) {
+    if (BLOCK_CHARS.test(line)) {
+      const m = line.match(/(\d+)\s*%/);
+      if (m) { percent = parseInt(m[1]); break; }
+    }
+  }
+
+  if (percent === null) {
+    let max = null;
+    if (/\(1M context\)/i.test(paneContent)) max = 1_000_000;
+    if (max === null && paneDir) {
+      const model = readLatestClaudeModel(paneDir);
+      if (model) max = claudeMaxForModel(model);
+    }
+    if (max === null) max = CLAUDE_DEFAULT_MAX;
+    percent = Math.min(100, Math.round((tokens / max) * 100));
+  }
+
+  return { percent, tokens };
 }
