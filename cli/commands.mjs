@@ -1,14 +1,21 @@
 // Command dispatch for agent CLI. Routes argv to handlers.
 // Intent-driven: each command is a clear function name.
 
+import { fileURLToPath } from "url";
+import { dirname, resolve } from "path";
+import { readFileSync, existsSync, unlinkSync } from "fs";
 import { loadConfig, listAgents, getAgent, addAgent, removeAgent, resolveAgent, saveLast, getLast, getPaneCount } from "./config.mjs";
 import { formatAgentRow, statusIcon, truncate } from "./format.mjs";
 import { hasSession, ensureAndAttach, attachSession, killSession, listPanes, getPaneStatus, sendKeys, selectOption, createTmuxContext } from "./tmux.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
-import { stripAnsi, extractActivity, formatDuration } from "../lib.mjs";
+import { stripAnsi, esc, extractActivity, formatDuration } from "../lib.mjs";
 import { runOneshot, showRunLog } from "./run.mjs";
 import { executePlan, showPlanLog } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
+
+// Bridge = the Discord bot itself (not a Claude agent). Singleton infra.
+const BRIDGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const BRIDGE_SESSION = "amux";
 
 // --- Flag parsing ---
 
@@ -70,6 +77,81 @@ async function cmdStop(name, ctx) {
   }
   await killSession(ctx, name);
   console.log(`Stopped '${name}'.`);
+}
+
+async function cmdServe(flags, ctx) {
+  // Single-instance guard: the tmux session can outlive the bot (clean exit 0
+  // breaks start.sh's loop without tearing the session down). So trust the PID
+  // lock, not the session — verify node is alive before bailing out.
+  if (await hasSession(ctx, BRIDGE_SESSION)) {
+    if (isBridgeAlive()) {
+      console.log(`Bridge already running. Stop with 'amux stop', or attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
+      return;
+    }
+    console.log("Stale bridge session detected (no live process). Cleaning up...");
+    await killSession(ctx, BRIDGE_SESSION);
+  }
+  if (flags.fg || flags.f) {
+    const { spawn } = await import("child_process");
+    const child = spawn("bash", ["bin/start.sh"], { cwd: BRIDGE_DIR, stdio: "inherit" });
+    return new Promise((res) => child.on("exit", res));
+  }
+  await ctx.tmux(`new-session -d -s '${esc(BRIDGE_SESSION)}' -c '${esc(BRIDGE_DIR)}' 'bash bin/start.sh'`);
+  console.log(`Bridge started (session: ${BRIDGE_SESSION}). Attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
+}
+
+function isBridgeAlive() {
+  const pidfile = process.env.PIDFILE || "/tmp/agentmux.pid";
+  try {
+    const pid = parseInt(readFileSync(pidfile, "utf-8").trim());
+    if (!pid) return false;
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function cmdUnserve(ctx) {
+  const hadSession = await hasSession(ctx, BRIDGE_SESSION);
+  // Also kill the PID directly: under WSL tmux kill-session sometimes leaves
+  // node reparented to init, which then blocks the next `amux serve` via
+  // its pidfile lock. Belt + suspenders.
+  killBridgeByPid();
+  if (hadSession) await killSession(ctx, BRIDGE_SESSION);
+  if (!hadSession && !existsSync("/tmp/agentmux.pid")) {
+    console.log("Bridge is not running.");
+    return;
+  }
+  console.log("Bridge stopped.");
+}
+
+function killBridgeByPid() {
+  const pidfile = process.env.PIDFILE || "/tmp/agentmux.pid";
+  try {
+    const pid = parseInt(readFileSync(pidfile, "utf-8").trim());
+    if (pid) {
+      try { process.kill(pid, "SIGTERM"); } catch {}
+    }
+  } catch {}
+  try { unlinkSync(pidfile); } catch {}
+}
+
+async function cmdStopAll(ctx) {
+  const agents = listAgents(ctx.configPath);
+  const stopped = [];
+  for (const a of agents) {
+    if (await hasSession(ctx, a.name)) {
+      await killSession(ctx, a.name);
+      stopped.push(a.name);
+    }
+  }
+  if (await hasSession(ctx, BRIDGE_SESSION)) {
+    await killSession(ctx, BRIDGE_SESSION);
+    stopped.push("bridge");
+  }
+  if (!stopped.length) console.log("Nothing to stop.");
+  else console.log(`Stopped: ${stopped.join(", ")}.`);
 }
 
 async function cmdSend(name, prompt, flags, ctx) {
@@ -218,6 +300,9 @@ Usage:
   agent add <name> <dir>          Add new agent
   agent rm <name|:nr>             Remove agent
   agent stop <name|:nr>           Stop tmux session (keep config)
+  agent serve [-f]                Start Discord bridge (daemon). -f = foreground
+  agent stop                      Stop Discord bridge (no arg = bridge)
+  agent stop --all                Stop bridge + all agent sessions
   agent log <name|:nr> [-n N]     Show agent output
     --text                        All text blocks, no tool calls
     --full                        Full tmux buffer
@@ -270,9 +355,18 @@ export async function dispatch(argv, ctx) {
     }
 
     case "stop": {
-      if (!rest[0]) { console.error("Usage: agent stop <name|:nr>"); process.exit(1); }
-      const name = resolveAgent(rest[0], ctx.configPath);
+      const { flags, positional } = parseFlags(rest, { all: "boolean" });
+      // --all → stop bridge + every agent session.
+      if (flags.all) return cmdStopAll(ctx);
+      // No arg, or 'serve'/'bridge' → stop the bridge (infra daemon).
+      if (!positional[0] || positional[0] === "serve" || positional[0] === "bridge") return cmdUnserve(ctx);
+      const name = resolveAgent(positional[0], ctx.configPath);
       return cmdStop(name, ctx);
+    }
+
+    case "serve": {
+      const { flags } = parseFlags(rest, { fg: "boolean", f: "boolean" });
+      return cmdServe(flags, ctx);
     }
 
     case "wait": {

@@ -243,11 +243,43 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         const results = await executeSync({ guild, configYaml, state, agentsYamlPath });
         reloadConfig();
 
+        // Reconcile live tmux sessions against the freshly-regenerated config.
+        // Fixes the case where agentmux.yaml `panes` changed but the running
+        // session still has old panes with wrong commands (bash where claude
+        // is expected, etc).
+        const reconcileSummaries = [];
+        try {
+          const { parseConfig } = await import("./sync.mjs");
+          const cfg = parseConfig(configYaml);
+          for (const agentName of cfg.agents.keys()) {
+            try {
+              const summary = await agent.reconcileSession(agentName);
+              if (summary && !summary.skipped && (summary.added || summary.respawned.length || summary.mismatches?.length || summary.extras)) {
+                reconcileSummaries.push(summary);
+              }
+            } catch (err) {
+              console.warn(`/sync: reconcile ${agentName} failed: ${err.message}`);
+            }
+          }
+        } catch (err) {
+          console.warn(`/sync: reconcile skipped: ${err.message}`);
+        }
+
         const lines = [];
         if (results.created.length) lines.push(`**created:** ${results.created.join(", ")}`);
+        if (results.renamed?.length) lines.push(`**renamed:** ${results.renamed.join(", ")}`);
         if (results.existing.length) lines.push(`**existing:** ${results.existing.join(", ")}`);
         if (results.orphaned.length) lines.push(`**orphaned (not deleted):** ${results.orphaned.join(", ")}`);
-        lines.push(`${results.created.length + results.existing.length} channel(s) synced`);
+        for (const s of reconcileSummaries) {
+          const parts = [];
+          if (s.added) parts.push(`+${s.added} pane(s)`);
+          if (s.respawned.length) parts.push(`respawned ${s.respawned.map((r) => `p${r.pane} (${r.was}→${r.expected})`).join(", ")}`);
+          if (s.mismatches?.length) parts.push(`mismatched (claude running, not touched): ${s.mismatches.map((m) => `p${m.pane} (${m.has} vs ${m.expected})`).join(", ")}`);
+          if (s.extras) parts.push(`${s.extras} extra pane(s) left untouched`);
+          lines.push(`**${s.name} session:** ${parts.join("; ")}`);
+        }
+        const total = results.created.length + (results.renamed?.length || 0) + results.existing.length;
+        lines.push(`${total} channel(s) synced`);
         await msg.reply(lines.join("\n"));
       } catch (err) {
         await msg.reply(`sync failed: ${err.message}`);

@@ -17,7 +17,7 @@ agents:
 
   claw:
     dir: ~/.openclaw/workspace
-    claude: 3
+    panes: 6
     shells: 3
 
   lsrc:
