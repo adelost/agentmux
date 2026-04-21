@@ -29,7 +29,13 @@ export function createAttachmentHandler({ run, transcribeScript, downloadBuffer,
       if (isAudio) {
         const transcribed = await transcribeAudio(msg, att, tmpFiles);
         if (transcribed === null) return null;
+        // Same disclaimer in both destinations: the agent (via pane text)
+        // and the Discord reply. The "interpret intent" hint is as useful
+        // for the human reading the reply as it is for the agent reading
+        // the prompt — anyone seeing it knows this is AI-transcribed and
+        // may have word-level errors.
         const tagged = `[transcribed voice, may contain speech-to-text errors — interpret intent] ${transcribed}`;
+        await msg.reply(`*${tagged}*`).catch(() => {});
         if (!rawText) rawText = tagged;
         else rawText = `${rawText}\n${tagged}`;
       } else {
@@ -59,7 +65,8 @@ export function createAttachmentHandler({ run, transcribeScript, downloadBuffer,
         await msg.reply("*(could not transcribe voice message)*");
         return null;
       }
-      await msg.reply(`*[transcribed voice] ${text}*`);
+      // Reply with the tagged transcript is done by the caller (buildPrompt)
+      // so the Discord reply and pane-bound text share one source of truth.
       return text;
     } catch (err) {
       await msg.reply(`Transcription failed: ${err.message}`).catch(() => {});
