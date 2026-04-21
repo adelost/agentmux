@@ -195,8 +195,13 @@ export function buildSyncPlan(desired, existing) {
  * @param {Map<string, object>} agents - parsed agent configs
  * @param {Map<string, string>} channelMap - channelName → channelId
  * @param {Map<string, string>} agentIds - agentName → UUID
+ * @param {object} [existingYaml] - previous agents.yaml parsed, for
+ *   preserving user-set per-pane fields (label) across regenerations.
+ *   agentmux.yaml (the sync source) has no slot for labels, so they
+ *   only live in agents.yaml itself; without this merge they'd be
+ *   wiped every /sync.
  */
-export function generateAgentsYaml(agents, channelMap, agentIds) {
+export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = null) {
   const result = {};
   const sortedNames = [...agents.keys()].sort();
 
@@ -219,17 +224,33 @@ export function generateAgentsYaml(agents, channelMap, agentIds) {
     // Layout
     if (config.layout) entry.layout = config.layout;
 
-    // Panes: coding agents first, then services, then shells
+    // Panes: coding agents first, then services, then shells.
+    // Preserve per-pane `label` from existingYaml when pane positions match.
+    const existingPanes = existingYaml?.[name]?.panes || [];
+    const preserveLabel = (idx) => existingPanes[idx]?.label;
+
     const panes = [];
+    let paneIdx = 0;
     for (let i = 0; i < config.panes; i++) {
       const pane = { name: i === 0 ? "claude" : `claude-${i + 1}`, cmd: DEFAULT_AGENT_CMD };
+      const label = preserveLabel(paneIdx);
+      if (label) pane.label = label;
       panes.push(pane);
+      paneIdx++;
     }
     for (let i = 0; i < config.services.length; i++) {
-      panes.push({ name: `service-${i + 1}`, cmd: config.services[i] });
+      const pane = { name: `service-${i + 1}`, cmd: config.services[i] };
+      const label = preserveLabel(paneIdx);
+      if (label) pane.label = label;
+      panes.push(pane);
+      paneIdx++;
     }
     for (let i = 0; i < config.shells; i++) {
-      panes.push({ name: `shell-${i + 1}`, cmd: "bash" });
+      const pane = { name: `shell-${i + 1}`, cmd: "bash" };
+      const label = preserveLabel(paneIdx);
+      if (label) pane.label = label;
+      panes.push(pane);
+      paneIdx++;
     }
     entry.panes = panes;
 
