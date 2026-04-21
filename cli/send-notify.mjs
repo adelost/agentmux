@@ -66,6 +66,13 @@ export async function sendToChannel(channelName, message) {
   return gatewaySend("send", { target: channelId, message });
 }
 
+/** Send a message directly to a Discord channel by raw channel ID.
+ *  Used by the pane-mirror path where IDs come from agent config (no
+ *  name lookup needed). */
+export async function sendToChannelId(channelId, message) {
+  return gatewaySend("send", { target: channelId, message });
+}
+
 /** Send a message to an OpenClaw session. */
 export async function sendToSession(sessionKey, message) {
   return gatewaySend("chat.inject", { session: sessionKey, content: message, role: "assistant" });

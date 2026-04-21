@@ -6,7 +6,7 @@ import { dirname, resolve } from "path";
 import { readFileSync, existsSync, unlinkSync } from "fs";
 import { loadConfig, listAgents, getAgent, addAgent, removeAgent, resolveAgent, saveLast, getLast, getPaneCount } from "./config.mjs";
 import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens } from "./format.mjs";
-import { hasSession, ensureAndAttach, attachSession, killSession, listPanes, getPaneStatus, sendKeys, selectOption, createTmuxContext } from "./tmux.mjs";
+import { hasSession, ensureAndAttach, attachSession, killSession, listPanes, getPaneStatus, sendKeys, selectOption, createTmuxContext, sendToPane } from "./tmux.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
 import { stripAnsi, esc, extractActivity, formatDuration } from "../lib.mjs";
 import { getContextFromPane } from "../core/context.mjs";
@@ -158,7 +158,10 @@ async function cmdStopAll(ctx) {
 async function cmdSend(name, prompt, flags, ctx) {
   saveLast(ctx.lastFile, name);
   const pane = flags.p || 0;
-  await ctx.agent.sendOnly(name, prompt, pane);
+  // Goes through sendToPane so Discord-bound panes mirror automatically.
+  // The CLI-initiated send has no source tag — it should look indistinguishable
+  // from what the user would've typed in the panel directly.
+  await sendToPane(ctx, name, pane, prompt);
   if (!flags.q) console.log(`Sent to '${name}' (pane ${pane}): ${truncate(prompt)}`);
 }
 
@@ -347,9 +350,10 @@ async function cmdCompact(ctx, flags = {}, positional = []) {
   console.log("");
   for (const t of targets) {
     try {
-      const target = `${t.agent}:.${t.pane}`;
-      await ctx.tmux(`send-keys -t '${esc(target)}' -l -- '/compact'`);
-      await ctx.tmux(`send-keys -t '${esc(target)}' Enter`);
+      // Mirror to Discord with an "amux:compact" source tag so channel
+      // watchers can tell this was a bulk-compact action vs a manual
+      // /compact somebody typed. Transparency without noise.
+      await sendToPane(ctx, t.agent, t.pane, "/compact", { source: "amux:compact" });
       console.log(`✓ ${t.agent} p${t.pane}: /compact sent`);
     } catch (err) {
       console.log(`✗ ${t.agent} p${t.pane}: ${err.message}`);
