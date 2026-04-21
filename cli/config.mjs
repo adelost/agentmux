@@ -39,6 +39,31 @@ export function getAgent(configPath, name) {
   return { name, ...agent, dir: expandTilde(agent.dir) };
 }
 
+/**
+ * Find the Discord channel bound to a specific pane of an agent.
+ *
+ * Agent config shape:
+ *   discord:
+ *     "<channelId>": <paneIndex>   // object form, per-pane bindings
+ *     "<channelId>"                 // scalar form (legacy, implicit pane 0)
+ *
+ * Returns the first channelId whose mapped pane matches, or null.
+ * Returning one (not an array) because a pane→multi-channel fan-out is
+ * not a pattern we support today — the sync tool writes 1:1 bindings.
+ */
+export function findChannelForPane(configPath, agentName, paneIndex) {
+  const config = loadConfig(configPath);
+  const disc = config[agentName]?.discord;
+  if (!disc) return null;
+  if (typeof disc === "string") return paneIndex === 0 ? disc : null;
+  if (typeof disc === "object") {
+    for (const [channelId, pane] of Object.entries(disc)) {
+      if (Number(pane) === Number(paneIndex)) return String(channelId);
+    }
+  }
+  return null;
+}
+
 /** List all agents sorted by name. */
 export function listAgents(configPath) {
   const config = loadConfig(configPath);

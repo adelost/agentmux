@@ -5,7 +5,9 @@ import { tmpdir } from "os";
 import {
   ensureConfig, loadConfig, saveConfig, getAgent, listAgents,
   addAgent, removeAgent, resolveAgent, saveLast, getLast,
+  findChannelForPane,
 } from "../cli/config.mjs";
+import { writeFileSync } from "fs";
 
 let root;
 const setup = () => {
@@ -206,5 +208,90 @@ feature("saveLast + getLast", () => {
     given: ["nonexistent path", () => "/tmp/nonexistent-last-test"],
     when: ["loading", (path) => getLast(path)],
     then: ["returns null", (result) => expect(result).toBeNull()],
+  });
+});
+
+feature("findChannelForPane", () => {
+  const YAML_WITH_DISCORD = `
+ai:
+  dir: /home/user/ai
+  discord:
+    "channel-0": 0
+    "channel-1": 1
+    "channel-2": 2
+  panes:
+    - name: claude
+      cmd: claude
+legacy:
+  dir: /home/user/legacy
+  discord: "legacy-channel-id"
+  panes:
+    - name: claude
+      cmd: claude
+bare:
+  dir: /home/user/bare
+  panes:
+    - name: claude
+      cmd: claude
+`;
+
+  const writeSample = () => {
+    const path = setup();
+    writeFileSync(path, YAML_WITH_DISCORD);
+    return path;
+  };
+
+  component("object form: returns channelId for matching pane", {
+    given: ["config with per-pane discord bindings", writeSample],
+    when: ["looking up ai pane 1", (path) => findChannelForPane(path, "ai", 1)],
+    then: ["returns 'channel-1'", (r) => {
+      expect(r).toBe("channel-1");
+      cleanup();
+    }],
+  });
+
+  component("object form: returns null for unmapped pane", {
+    given: ["config with per-pane bindings (0,1,2)", writeSample],
+    when: ["looking up ai pane 9 (not mapped)", (path) => findChannelForPane(path, "ai", 9)],
+    then: ["returns null", (r) => {
+      expect(r).toBeNull();
+      cleanup();
+    }],
+  });
+
+  component("scalar form: returns string for pane 0 only", {
+    given: ["config with scalar discord (implicit pane 0)", writeSample],
+    when: ["looking up legacy pane 0", (path) => findChannelForPane(path, "legacy", 0)],
+    then: ["returns 'legacy-channel-id'", (r) => {
+      expect(r).toBe("legacy-channel-id");
+      cleanup();
+    }],
+  });
+
+  component("scalar form: returns null for pane 1 (scalar = pane 0 only)", {
+    given: ["config with scalar discord", writeSample],
+    when: ["looking up legacy pane 1", (path) => findChannelForPane(path, "legacy", 1)],
+    then: ["returns null", (r) => {
+      expect(r).toBeNull();
+      cleanup();
+    }],
+  });
+
+  component("no discord field: returns null (silent fallback)", {
+    given: ["agent config with no discord bindings", writeSample],
+    when: ["looking up bare pane 0", (path) => findChannelForPane(path, "bare", 0)],
+    then: ["returns null — no mirror", (r) => {
+      expect(r).toBeNull();
+      cleanup();
+    }],
+  });
+
+  component("unknown agent: returns null (don't crash)", {
+    given: ["valid config", writeSample],
+    when: ["looking up nonexistent agent", (path) => findChannelForPane(path, "ghost", 0)],
+    then: ["returns null", (r) => {
+      expect(r).toBeNull();
+      cleanup();
+    }],
   });
 });
