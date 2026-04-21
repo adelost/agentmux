@@ -43,7 +43,7 @@ export function parseConfig(yamlContent) {
 /**
  * Generate Discord channel names from agent config.
  * Returns a flat, alphabetically sorted list of { agentName, channelName, pane }.
- * Naming: #agent (pane 0), #agent-2 (pane 1), #agent-3 (pane 2).
+ * Naming: #agent-0 (pane 0), #agent-1 (pane 1), #agent-2 (pane 2)... matches tmux pane index.
  */
 export function generateChannelNames(agents) {
   const result = [];
@@ -54,12 +54,113 @@ export function generateChannelNames(agents) {
     for (let i = 0; i < panes; i++) {
       result.push({
         agentName: name,
-        channelName: i === 0 ? name : `${name}-${i + 1}`,
+        channelName: `${name}-${i}`,
         pane: i,
       });
     }
   }
   return result;
+}
+
+/**
+ * Classify a Discord channel name against known agent names.
+ * Legacy format: `{agent}` = pane 0, `{agent}-N` (N>=2) = pane N-1.
+ * New format: `{agent}-N` = pane N (0-indexed).
+ *
+ * Legacy is detected per-agent by the presence of a bare `{agent}` channel in the guild.
+ * @returns {{ agentName, pane, format: "new"|"legacy" } | null}
+ */
+export function classifyAgentChannel(channelName, agentNames, existingNamesLower) {
+  const lower = channelName.toLowerCase();
+  // Longest first so "api-proxy" wins over "api" when matching "api-proxy-0".
+  const sorted = [...agentNames].sort((a, b) => b.length - a.length);
+  for (const name of sorted) {
+    const nameLower = name.toLowerCase();
+    if (lower === nameLower) {
+      return { agentName: name, pane: 0, format: "legacy" };
+    }
+    const prefix = nameLower + "-";
+    if (!lower.startsWith(prefix)) continue;
+    const rest = lower.slice(prefix.length);
+    if (!/^\d+$/.test(rest)) continue;
+    const n = parseInt(rest, 10);
+    const isLegacyAgent = existingNamesLower.has(nameLower);
+    if (isLegacyAgent && n >= 2) {
+      return { agentName: name, pane: n - 1, format: "legacy" };
+    }
+    return { agentName: name, pane: n, format: "new" };
+  }
+  return null;
+}
+
+/**
+ * Group existing Discord channels by the agent they belong to.
+ * @param {Array<{ name, id, parentId }>} existing
+ * @param {string[]} agentNames
+ * @returns {{ byAgent: Map<string, Array>, orphans: Array }}
+ */
+export function classifyExistingChannels(existing, agentNames) {
+  const existingNamesLower = new Set(existing.map((ch) => ch.name.toLowerCase()));
+  const byAgent = new Map();
+  const orphans = [];
+  for (const ch of existing) {
+    const info = classifyAgentChannel(ch.name, agentNames, existingNamesLower);
+    if (!info) { orphans.push(ch); continue; }
+    const list = byAgent.get(info.agentName) ?? [];
+    list.push({ ...ch, pane: info.pane, format: info.format });
+    byAgent.set(info.agentName, list);
+  }
+  return { byAgent, orphans };
+}
+
+/**
+ * Build a migration-aware sync plan. For each agent, figure out which existing
+ * channels to rename, which to create, and which are extras beyond configured panes.
+ *
+ * @param {Map<string, { panes: number }>} agents
+ * @param {Array<{ name, id, parentId }>} existingChannels - all text channels in guild
+ * @returns {{ renames, creates, keep, extras, orphans }}
+ *   renames:  [{ id, from, to, agentName, pane }]      - legacy → new name
+ *   creates:  [{ agentName, channelName, pane }]       - missing panes
+ *   keep:     [{ id, channelName, agentName, pane }]   - already on new name
+ *   extras:   [{ id, name, agentName, pane }]          - claimed but beyond configured panes
+ *   orphans:  [{ name, id, parentId }]                 - unrelated to any agent
+ */
+export function buildMigrationPlan(agents, existingChannels) {
+  const agentNames = [...agents.keys()];
+  const { byAgent, orphans } = classifyExistingChannels(existingChannels, agentNames);
+
+  const renames = [];
+  const creates = [];
+  const keep = [];
+  const extras = [];
+
+  for (const name of agentNames) {
+    const config = agents.get(name);
+    const claimed = byAgent.get(name) ?? [];
+
+    // If multiple channels claim the same pane, keep first-seen; rest are extras.
+    const byPane = new Map();
+    for (const c of claimed) {
+      if (c.pane >= config.panes) { extras.push(c); continue; }
+      if (byPane.has(c.pane)) { extras.push(c); continue; }
+      byPane.set(c.pane, c);
+    }
+
+    for (let p = 0; p < config.panes; p++) {
+      const target = `${name}-${p}`;
+      const ch = byPane.get(p);
+      if (!ch) {
+        creates.push({ agentName: name, channelName: target, pane: p });
+      } else if (ch.name === target) {
+        keep.push({ id: ch.id, channelName: ch.name, agentName: name, pane: p, parentId: ch.parentId });
+      } else {
+        renames.push({ id: ch.id, from: ch.name, to: target, agentName: name, pane: p, parentId: ch.parentId });
+      }
+    }
+  }
+
+  return { renames, creates, keep, extras, orphans };
 }
 
 /**
@@ -109,7 +210,7 @@ export function generateAgentsYaml(agents, channelMap, agentIds) {
     // Discord channel mapping (only claude panes)
     const discord = {};
     for (let i = 0; i < config.panes; i++) {
-      const channelName = i === 0 ? name : `${name}-${i + 1}`;
+      const channelName = `${name}-${i}`;
       const channelId = channelMap.get(channelName);
       if (channelId) discord[channelId] = i;
     }

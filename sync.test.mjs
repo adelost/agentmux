@@ -1,5 +1,14 @@
 import { feature, component, expect } from "bdd-vitest";
-import { parseConfig, generateChannelNames, buildSyncPlan, generateAgentsYaml, expandTilde } from "./sync.mjs";
+import {
+  parseConfig,
+  generateChannelNames,
+  buildSyncPlan,
+  generateAgentsYaml,
+  expandTilde,
+  classifyAgentChannel,
+  classifyExistingChannels,
+  buildMigrationPlan,
+} from "./sync.mjs";
 
 // --- Helpers ---
 
@@ -118,11 +127,11 @@ feature("generateChannelNames", () => {
   component("single agent with 3 panes", {
     given: ["one agent", () => new Map([["skybar", { panes: 3 }]])],
     when: ["generating names", (agents) => generateChannelNames(agents)],
-    then: ["returns 3 channels with correct names", (channels) => {
+    then: ["returns 3 channels, 0-indexed", (channels) => {
       expect(channels).toEqual([
-        { agentName: "skybar", channelName: "skybar", pane: 0 },
-        { agentName: "skybar", channelName: "skybar-2", pane: 1 },
-        { agentName: "skybar", channelName: "skybar-3", pane: 2 },
+        { agentName: "skybar", channelName: "skybar-0", pane: 0 },
+        { agentName: "skybar", channelName: "skybar-1", pane: 1 },
+        { agentName: "skybar", channelName: "skybar-2", pane: 2 },
       ]);
     }],
   });
@@ -130,9 +139,9 @@ feature("generateChannelNames", () => {
   component("single agent with 1 pane", {
     given: ["one agent", () => new Map([["api", { panes: 1 }]])],
     when: ["generating names", (agents) => generateChannelNames(agents)],
-    then: ["returns 1 channel", (channels) => {
+    then: ["returns 1 channel with -0 suffix", (channels) => {
       expect(channels).toHaveLength(1);
-      expect(channels[0].channelName).toBe("api");
+      expect(channels[0].channelName).toBe("api-0");
     }],
   });
 
@@ -143,8 +152,143 @@ feature("generateChannelNames", () => {
       ["claw", { panes: 1 }],
     ])],
     when: ["generating names", (agents) => generateChannelNames(agents)],
-    then: ["sorted: ai, claw, skybar, skybar-2", (channels) => {
-      expect(channels.map((c) => c.channelName)).toEqual(["ai", "claw", "skybar", "skybar-2"]);
+    then: ["sorted: ai-0, claw-0, skybar-0, skybar-1", (channels) => {
+      expect(channels.map((c) => c.channelName)).toEqual(["ai-0", "claw-0", "skybar-0", "skybar-1"]);
+    }],
+  });
+});
+
+feature("classifyAgentChannel", () => {
+  component("new format: agent-0 maps to pane 0", {
+    given: ["channel ai-0 with agent ai", () => ({ ch: "ai-0", agents: ["ai"], existing: new Set(["ai-0"]) })],
+    when: ["classifying", ({ ch, agents, existing }) => classifyAgentChannel(ch, agents, existing)],
+    then: ["new format, pane 0", (r) => {
+      expect(r).toEqual({ agentName: "ai", pane: 0, format: "new" });
+    }],
+  });
+
+  component("legacy format: bare agent name = pane 0", {
+    given: ["channel claw (bare)", () => ({ ch: "claw", agents: ["claw"], existing: new Set(["claw", "claw-2"]) })],
+    when: ["classifying", ({ ch, agents, existing }) => classifyAgentChannel(ch, agents, existing)],
+    then: ["legacy pane 0", (r) => {
+      expect(r).toEqual({ agentName: "claw", pane: 0, format: "legacy" });
+    }],
+  });
+
+  component("legacy format: agent-2 maps to pane 1 when bare exists", {
+    given: ["channel claw-2 with legacy bare claw", () => ({ ch: "claw-2", agents: ["claw"], existing: new Set(["claw", "claw-2"]) })],
+    when: ["classifying", ({ ch, agents, existing }) => classifyAgentChannel(ch, agents, existing)],
+    then: ["legacy pane 1", (r) => {
+      expect(r).toEqual({ agentName: "claw", pane: 1, format: "legacy" });
+    }],
+  });
+
+  component("new format without legacy: agent-2 is pane 2", {
+    given: ["channel ai-2 with no bare ai", () => ({ ch: "ai-2", agents: ["ai"], existing: new Set(["ai-0", "ai-1", "ai-2"]) })],
+    when: ["classifying", ({ ch, agents, existing }) => classifyAgentChannel(ch, agents, existing)],
+    then: ["new pane 2", (r) => {
+      expect(r).toEqual({ agentName: "ai", pane: 2, format: "new" });
+    }],
+  });
+
+  component("orphan channels return null", {
+    given: ["channel with no agent match", () => ({ ch: "general", agents: ["ai", "claw"], existing: new Set(["general"]) })],
+    when: ["classifying", ({ ch, agents, existing }) => classifyAgentChannel(ch, agents, existing)],
+    then: ["returns null", (r) => expect(r).toBe(null)],
+  });
+
+  component("longest agent name wins on prefix collision", {
+    given: ["channel api-proxy-0 with agents api and api-proxy", () => ({
+      ch: "api-proxy-0",
+      agents: ["api", "api-proxy"],
+      existing: new Set(["api-proxy-0"]),
+    })],
+    when: ["classifying", ({ ch, agents, existing }) => classifyAgentChannel(ch, agents, existing)],
+    then: ["matches api-proxy", (r) => expect(r.agentName).toBe("api-proxy")],
+  });
+});
+
+feature("classifyExistingChannels", () => {
+  component("groups by agent, separates orphans", {
+    given: ["mixed channels", () => ({
+      existing: [
+        { name: "ai-0", id: "1", parentId: null },
+        { name: "ai-1", id: "2", parentId: null },
+        { name: "general", id: "3", parentId: null },
+      ],
+      agents: ["ai", "claw"],
+    })],
+    when: ["classifying", ({ existing, agents }) => classifyExistingChannels(existing, agents)],
+    then: ["ai grouped, general orphan", ({ byAgent, orphans }) => {
+      expect(byAgent.get("ai")).toHaveLength(2);
+      expect(byAgent.get("claw")).toBeUndefined();
+      expect(orphans).toHaveLength(1);
+      expect(orphans[0].name).toBe("general");
+    }],
+  });
+});
+
+feature("buildMigrationPlan", () => {
+  component("legacy channels produce rename actions", {
+    given: ["legacy claw channels", () => ({
+      agents: new Map([["claw", { panes: 3 }]]),
+      existing: [
+        { name: "claw", id: "A", parentId: "cat-old" },
+        { name: "claw-2", id: "B", parentId: "cat-old" },
+        { name: "claw-3", id: "C", parentId: "cat-old" },
+      ],
+    })],
+    when: ["planning", ({ agents, existing }) => buildMigrationPlan(agents, existing)],
+    then: ["3 renames, 0 creates", (plan) => {
+      expect(plan.renames).toHaveLength(3);
+      expect(plan.creates).toHaveLength(0);
+      const renameMap = Object.fromEntries(plan.renames.map((r) => [r.from, r.to]));
+      expect(renameMap).toEqual({ "claw": "claw-0", "claw-2": "claw-1", "claw-3": "claw-2" });
+    }],
+  });
+
+  component("already-migrated channels produce keep actions", {
+    given: ["new-format claw channels", () => ({
+      agents: new Map([["claw", { panes: 2 }]]),
+      existing: [
+        { name: "claw-0", id: "A", parentId: "cat" },
+        { name: "claw-1", id: "B", parentId: "cat" },
+      ],
+    })],
+    when: ["planning", ({ agents, existing }) => buildMigrationPlan(agents, existing)],
+    then: ["2 keep, 0 renames, 0 creates", (plan) => {
+      expect(plan.renames).toHaveLength(0);
+      expect(plan.keep).toHaveLength(2);
+      expect(plan.creates).toHaveLength(0);
+    }],
+  });
+
+  component("adds creates for missing panes", {
+    given: ["1 existing, config wants 3", () => ({
+      agents: new Map([["ai", { panes: 3 }]]),
+      existing: [{ name: "ai-0", id: "A", parentId: null }],
+    })],
+    when: ["planning", ({ agents, existing }) => buildMigrationPlan(agents, existing)],
+    then: ["ai-1 and ai-2 created", (plan) => {
+      expect(plan.creates.map((c) => c.channelName).sort()).toEqual(["ai-1", "ai-2"]);
+    }],
+  });
+
+  component("extra channels beyond configured panes are reported", {
+    given: ["5 existing, config wants 2", () => ({
+      agents: new Map([["ai", { panes: 2 }]]),
+      existing: [
+        { name: "ai-0", id: "A", parentId: null },
+        { name: "ai-1", id: "B", parentId: null },
+        { name: "ai-2", id: "C", parentId: null },
+        { name: "ai-3", id: "D", parentId: null },
+      ],
+    })],
+    when: ["planning", ({ agents, existing }) => buildMigrationPlan(agents, existing)],
+    then: ["ai-2 and ai-3 are extras", (plan) => {
+      expect(plan.keep).toHaveLength(2);
+      expect(plan.extras).toHaveLength(2);
+      expect(plan.extras.map((c) => c.name).sort()).toEqual(["ai-2", "ai-3"]);
     }],
   });
 });
@@ -242,7 +386,7 @@ feature("generateAgentsYaml", () => {
       const agents = new Map([
         ["skybar", { dir: "/home/user/skybar", panes: 2, services: ["npm run dev"], shells: 0, layout: "main-vertical" }],
       ]);
-      const channelMap = new Map([["skybar", "100"], ["skybar-2", "101"]]);
+      const channelMap = new Map([["skybar-0", "100"], ["skybar-1", "101"]]);
       const agentIds = new Map([["skybar", "uuid-1"]]);
       return { agents, channelMap, agentIds };
     }],

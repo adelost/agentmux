@@ -65,6 +65,19 @@ To attach an image to your Discord reply, write on its own line:
 \`\`\`
 
 Supported formats: .png, .jpg, .jpeg, .gif, .webp (max 25MB).
+
+## Root cause > symptoms
+
+Always fix the cause, not the symptom. Before patching, ask *why* it's happening.
+
+- ❌ Test fails → skip the test
+- ✅ Test fails → is the test wrong, or the code?
+- ❌ Hook blocks commit → --no-verify
+- ✅ Hook blocks → why? fix the underlying issue
+- ❌ Error in prod → wrap in try/catch and swallow
+- ✅ Error in prod → trace the path, fix the source
+
+Quick workaround is OK when deliberate (time pressure, experiment) — but **call it out**: "patching surface, root cause is X, fix later."
 `;
 
 // Write hints as both CLAUDE.md (for Claude Code) and AGENTS.md (for Codex).
@@ -195,7 +208,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   async function isAlreadyRunning(target) {
     try {
       const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`);
-      return /claude|node|make|vite|python/.test(stdout.trim());
+      // Pane is "free" only if a shell is at the prompt. Anything else
+      // (claude, rclone, ssh, vim, tail, ...) means a process owns the
+      // pane — don't send-keys into it, they'd land as stdin to that process.
+      return !/^(bash|zsh|fish|sh|dash)$/.test(stdout.trim());
     } catch {
       // Target doesn't exist → not running
       return false;
@@ -204,6 +220,92 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   function isClaudeCmd(cmd) {
     return cmd?.includes("claude") || false;
+  }
+
+  function isShellProc(cmd) {
+    return /^(bash|zsh|fish|sh|dash)$/.test(cmd);
+  }
+
+  // True when a pane's current process matches the type expected by config.
+  // Services are matched loosely: any non-shell, non-claude process is assumed
+  // to be the configured service (npm/make/etc spawn varied binaries).
+  function paneTypeMatches(currCmd, wantCmd) {
+    if (isClaudeCmd(wantCmd)) return /^(claude|node)$/.test(currCmd);
+    if (wantCmd === "bash") return isShellProc(currCmd);
+    return !isShellProc(currCmd) && !/^(claude|node)$/.test(currCmd);
+  }
+
+  // --- Reconciliation ---
+
+  /**
+   * Align a live tmux session with its config: add missing panes, respawn panes
+   * whose current process doesn't match the configured command type. Leaves
+   * correctly-matching panes untouched (preserves running claude/service state).
+   *
+   * Claude panes that get respawned are left as idle shells; startClaude runs
+   * on demand next time the pane is used.
+   */
+  async function reconcileSession(name) {
+    const config = loadConfig();
+    const cfg = config[name];
+    if (!cfg?.panes?.length) return { skipped: true, reason: "no config" };
+    if (!(await hasSession(name))) return { skipped: true, reason: "no session" };
+
+    const summary = { name, added: 0, respawned: [], unchanged: 0, extras: 0 };
+    const wanted = cfg.panes;
+
+    const currentCount = await countPanes(name);
+    for (let i = currentCount; i < wanted.length; i++) {
+      try {
+        await tmux(`split-window -t '${esc(name)}' -h`);
+        summary.added++;
+      } catch (err) {
+        console.warn(`reconcile: split-window ${name} failed: ${err.message}`);
+      }
+    }
+    if (summary.added > 0) {
+      const layout = cfg.layout || "main-vertical";
+      await tmux(`select-layout -t '${esc(name)}' '${layout}'`).catch(() => {});
+    }
+    if (currentCount > wanted.length) summary.extras = currentCount - wanted.length;
+
+    for (let i = 0; i < wanted.length; i++) {
+      const target = `${name}:.${i}`;
+      const want = wanted[i];
+      let currCmd = "";
+      try {
+        const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`);
+        currCmd = stdout.trim();
+      } catch { continue; }
+
+      if (paneTypeMatches(currCmd, want.cmd)) { summary.unchanged++; continue; }
+
+      // Safety: never respawn a pane that's running claude, even if config
+      // says something else. User may have active work there; forcing a slot
+      // into a shell would destroy context. Report as a mismatch instead.
+      if (/^(claude|node)$/.test(currCmd)) {
+        summary.mismatches = summary.mismatches || [];
+        summary.mismatches.push({ pane: i, has: currCmd, expected: want.name });
+        continue;
+      }
+
+      // Only respawn panes where the current process is a shell (idle) or a
+      // clearly non-interactive process (tail, rclone, etc). This is what
+      // fixes the original bug: pane has `tail` but config wants claude.
+      try {
+        if (isClaudeCmd(want.cmd) || want.cmd === "bash") {
+          // Leave as shell; startClaude runs on demand when pane is used.
+          await tmux(`respawn-pane -k -t '${esc(target)}' -c '${esc(cfg.dir)}'`);
+        } else {
+          await tmux(`respawn-pane -k -t '${esc(target)}' -c '${esc(cfg.dir)}' '${esc(want.cmd)}'`);
+        }
+        summary.respawned.push({ pane: i, was: currCmd, expected: want.name });
+      } catch (err) {
+        console.warn(`reconcile: respawn ${target} failed: ${err.message}`);
+      }
+    }
+
+    return summary;
   }
 
   // --- Claude lifecycle ---
@@ -637,6 +739,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     ensureReady, sendAndWait, sendOnly,
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
     capturePane, sendEscape, dismissBlockingPrompt, waitForPromptEcho,
-    startProgressTimer, getContextPercent, checkAgent,
+    startProgressTimer, getContextPercent, checkAgent, reconcileSession,
   };
 }

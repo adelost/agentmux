@@ -23,11 +23,15 @@ const CLAUDE_DEFAULT_MAX = 200_000;
 // 200k is the conservative floor for anything we don't recognize.
 const CLAUDE_MODEL_MAX = {
   "claude-opus-4-6": 1_000_000,
+  "claude-opus-4-7": 1_000_000,
   "claude-sonnet-4-6": 1_000_000,
 };
 
 function claudeMaxForModel(model) {
   if (!model) return CLAUDE_DEFAULT_MAX;
+  // "[1m]" suffix on the model ID is Claude Code's explicit 1M-context flag,
+  // independent of which dated variant we're on — trust it when present.
+  if (model.includes("[1m]")) return 1_000_000;
   if (CLAUDE_MODEL_MAX[model] != null) return CLAUDE_MODEL_MAX[model];
   // Prefix match for future dated variants like "claude-opus-4-6-20260401"
   for (const prefix of Object.keys(CLAUDE_MODEL_MAX)) {
