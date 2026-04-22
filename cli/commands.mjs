@@ -11,7 +11,7 @@ import { hasSession, ensureAndAttach, attachSession, killSession, listPanes, get
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
 import { stripAnsi, esc, extractActivity, formatDuration } from "../lib.mjs";
 import { getContextFromPane } from "../core/context.mjs";
-import { readLastTurns, parseSinceArg } from "../core/jsonl-reader.mjs";
+import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor } from "../core/jsonl-reader.mjs";
 import { regenerateAgentsYaml } from "../sync.mjs";
 import yaml from "js-yaml";
 import { spawn } from "child_process";
@@ -340,6 +340,154 @@ async function cmdLog(name, flags, ctx) {
     return;
   }
   console.log(formatTurnsForDisplay(jsonl.turns));
+}
+
+// --- Timeline / watch: unified cross-pane event view -----------------------
+
+// Role+type → icon mapping. Keep this table close to the formatter so a new
+// event category (e.g. "error") is a one-line addition, not a refactor.
+const TIMELINE_ICONS = {
+  user: "🎤",
+  agent: "🤖",
+  tool: "🔧",
+  error: "⚠️",
+};
+
+const TIMELINE_CONTENT_CAP = 80;
+
+/** Compact time string ("HH:MM") for a timeline row; "--:--" if missing. */
+function formatTimelineTime(iso) {
+  if (!iso) return "--:--";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "--:--";
+  return d.toTimeString().slice(0, 5); // local HH:MM
+}
+
+/** Collapse newlines so a multi-line prompt doesn't blow up one row. */
+function oneLine(s) {
+  return String(s).replace(/\s+/g, " ").trim();
+}
+
+/** Map a row's (role, type) to the icon category shown in the stream. */
+function timelineCategory(row) {
+  if (row.type === "tool") return "tool";
+  if (row.type === "error") return "error";
+  if (row.role === "user") return "user";
+  return "agent";
+}
+
+/** Render one event row for the terminal stream. */
+function formatTimelineRow(row) {
+  const time = formatTimelineTime(row.timestamp);
+  const where = `${row.agent}:${row.pane}`.padEnd(12);
+  const cat = timelineCategory(row);
+  const icon = TIMELINE_ICONS[cat] || "·";
+  const label = cat.padEnd(5);
+  const content = oneLine(row.content);
+  const quoted = cat === "tool" ? content : `"${content}"`;
+  const capped = quoted.length > TIMELINE_CONTENT_CAP ? quoted.slice(0, TIMELINE_CONTENT_CAP - 3) + "..." : quoted;
+  return `${time}  ${where}  ${icon} ${label}  ${capped}`;
+}
+
+/**
+ * Pull a snapshot of rows from all configured panes, respecting filters.
+ * Validates flags inline so both cmdTimeline and cmdWatch share the parsing.
+ */
+function collectTimelineRows(ctx, flags, { applyLimit }) {
+  const agents = listAgents(ctx.configPath);
+
+  let agentFilter = null;
+  if (flags.agent) {
+    agentFilter = resolveAgent(flags.agent, ctx.configPath);
+    if (!agents.some((a) => a.name === agentFilter)) {
+      console.error(`unknown agent '${flags.agent}'. Known: ${agents.map((a) => a.name).join(", ") || "(none)"}`);
+      process.exit(1);
+    }
+  }
+
+  let paneFilter = null;
+  if (flags.pane != null) {
+    if (!agentFilter) {
+      console.error("--pane requires --agent. Which agent's pane should I filter to?");
+      process.exit(1);
+    }
+    const paneCount = getPaneCount(ctx.configPath, agentFilter);
+    if (flags.pane < 0 || flags.pane >= paneCount) {
+      console.error(`pane ${flags.pane} does not exist. '${agentFilter}' has ${paneCount} pane${paneCount === 1 ? "" : "s"} (0-${paneCount - 1}).`);
+      process.exit(1);
+    }
+    paneFilter = flags.pane;
+  }
+
+  let since = null;
+  if (flags.since) {
+    since = parseSinceArg(flags.since);
+    if (!since) {
+      console.error(`invalid --since '${flags.since}'. Use ISO or relative ("30min", "2h", "1d").`);
+      process.exit(1);
+    }
+  }
+
+  let grep = null;
+  if (flags.grep) {
+    try { grep = new RegExp(flags.grep, "i"); }
+    catch (err) {
+      console.error(`invalid --grep regex: ${err.message}`);
+      process.exit(1);
+    }
+  }
+
+  const limit = applyLimit ? (flags.n || 30) : null;
+  return readAllTurnsAcrossPanes({ agents, since, agent: agentFilter, pane: paneFilter, grep, limit });
+}
+
+/**
+ * Live-tail rows across every pane. Polls the underlying jsonl files once per
+ * TIMELINE_POLL_MS and emits rows we haven't printed yet, keyed by
+ * (timestamp + agent:pane + content-prefix) to avoid duplicate prints when
+ * two events share a millisecond.
+ *
+ * Deliberately polling (not fs.watch) because fs.watch on WSL and macOS has
+ * well-known reliability gaps — missed events are worse than a 1s delay here.
+ */
+const TIMELINE_POLL_MS = 1000;
+
+async function followTimeline(ctx, flags) {
+  const emitted = new Set();
+  const rowKey = (r) => `${r.timestamp || ""}|${r.agent}:${r.pane}|${(r.content || "").slice(0, 40)}`;
+
+  // Print the initial snapshot so the viewer has context, then switch to tail-only.
+  const initial = collectTimelineRows(ctx, flags, { applyLimit: true });
+  for (const r of initial) {
+    console.log(formatTimelineRow(r));
+    emitted.add(rowKey(r));
+  }
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    await new Promise((r) => setTimeout(r, TIMELINE_POLL_MS));
+    const rows = collectTimelineRows(ctx, flags, { applyLimit: false });
+    for (const r of rows) {
+      const k = rowKey(r);
+      if (emitted.has(k)) continue;
+      emitted.add(k);
+      console.log(formatTimelineRow(r));
+    }
+  }
+}
+
+async function cmdTimeline(ctx, flags) {
+  if (flags.follow || flags.f) return followTimeline(ctx, flags);
+  const rows = collectTimelineRows(ctx, flags, { applyLimit: true });
+  if (!rows.length) {
+    console.log("(no events match)");
+    return;
+  }
+  for (const r of rows) console.log(formatTimelineRow(r));
+}
+
+async function cmdWatch(ctx, flags) {
+  return followTimeline(ctx, flags);
 }
 
 // Pane commands that correspond to a dialect we can read context for.
@@ -742,6 +890,14 @@ Usage:
   agent esc <name|:nr>            Send Escape (cancel/interrupt)
   agent ps                        Show all running agents + status + context%
   agent top [--sort tokens] [-n N] Cross-session context leaderboard
+  agent timeline [-n N]           Cross-pane event stream (kronologisk)
+    --since T                     Only events at/after T (ISO or '30min')
+    --agent NAME                  Filter to one agent
+    --pane N                      Filter to one pane (requires --agent)
+    --grep PAT                    Regex filter on content
+    --follow, -f                  Live-tail (like tail -f)
+  agent watch [--agent] [--pane]  Shortcut for 'timeline --follow'
+    [--grep PAT]
   agent edit                      Open agentmux.yaml in $EDITOR (source config)
   agent label <agent> <pane> <text> Set per-pane label (shown in amux ps/top)
     --clear                       Remove the label instead of setting one
@@ -775,6 +931,19 @@ const FLAG_SPECS = {
   },
   ps: { n: "number" },
   top: { n: "number", sort: "string" },
+  timeline: {
+    n: "number",
+    agent: "string",
+    pane: "number",
+    since: "string",
+    grep: "string",
+    follow: "boolean", f: "boolean",
+  },
+  watch: {
+    agent: "string",
+    pane: "number",
+    grep: "string",
+  },
   compact: { dry: "boolean", force: "boolean", "min-tokens": "number" },
   label: { clear: "boolean" },
   labels: {},
@@ -843,6 +1012,16 @@ export async function dispatch(argv, ctx) {
     case "top": {
       const { flags } = parseFlags(rest, FLAG_SPECS.top);
       return cmdTop(ctx, flags);
+    }
+
+    case "timeline": {
+      const { flags } = parseFlags(rest, FLAG_SPECS.timeline);
+      return cmdTimeline(ctx, flags);
+    }
+
+    case "watch": {
+      const { flags } = parseFlags(rest, FLAG_SPECS.watch);
+      return cmdWatch(ctx, flags);
     }
 
     case "compact": {
