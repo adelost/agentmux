@@ -4,6 +4,7 @@ import {
   generateChannelNames,
   buildSyncPlan,
   generateAgentsYaml,
+  regenerateAgentsYaml,
   expandTilde,
   classifyAgentChannel,
   classifyExistingChannels,
@@ -486,6 +487,131 @@ feature("generateAgentsYaml", () => {
       generateAgentsYaml(agents, channelMap, agentIds)],
     then: ["output has no label field", (yamlStr) => {
       expect(yamlStr).not.toContain("label:");
+    }],
+  });
+
+  component("source labels (config.labels) override existingYaml labels", {
+    given: ["source says 'from source', existing says 'from old'", () => {
+      const agents = new Map([
+        ["ai", { dir: "/tmp", panes: 1, services: [], shells: 0, labels: { 0: "from source" } }],
+      ]);
+      const existingYaml = {
+        ai: { panes: [{ name: "claude", cmd: "claude", label: "from old" }] },
+      };
+      return { agents, channelMap: new Map(), agentIds: new Map([["ai", "uuid"]]), existingYaml };
+    }],
+    when: ["regenerating", ({ agents, channelMap, agentIds, existingYaml }) =>
+      generateAgentsYaml(agents, channelMap, agentIds, existingYaml)],
+    then: ["source wins", (yamlStr) => {
+      expect(yamlStr).toContain("from source");
+      expect(yamlStr).not.toContain("from old");
+    }],
+  });
+});
+
+feature("parseConfig: labels", () => {
+  component("reads per-pane labels from source yaml", {
+    given: ["source with labels", () => `
+guild: "12345"
+agents:
+  claw:
+    dir: /tmp/claw
+    panes: 3
+    labels:
+      0: "tandem-tagger deploy"
+      2: "agentmux dev"
+`],
+    when: ["parsing", (src) => parseConfig(src)],
+    then: ["labels parsed by pane index", (result) => {
+      const claw = result.agents.get("claw");
+      expect(claw.labels).toEqual({ 0: "tandem-tagger deploy", 2: "agentmux dev" });
+    }],
+  });
+
+  component("missing labels section = empty labels map", {
+    given: ["source without labels", () => `
+guild: "12345"
+agents:
+  claw:
+    dir: /tmp/claw
+    panes: 1
+`],
+    when: ["parsing", (src) => parseConfig(src)],
+    then: ["labels is empty object", (result) => {
+      expect(result.agents.get("claw").labels).toEqual({});
+    }],
+  });
+
+  component("empty-string label value is dropped (noise filter)", {
+    given: ["source with empty label", () => `
+guild: "12345"
+agents:
+  claw:
+    dir: /tmp
+    panes: 2
+    labels:
+      0: ""
+      1: "real label"
+`],
+    when: ["parsing", (src) => parseConfig(src)],
+    then: ["only non-empty labels kept", (result) => {
+      expect(result.agents.get("claw").labels).toEqual({ 1: "real label" });
+    }],
+  });
+});
+
+feature("regenerateAgentsYaml", () => {
+  component("writes source labels into agents.yaml without needing Discord", {
+    given: ["source yaml + existing agents.yaml with channel mappings", () => {
+      const sourceYaml = `
+guild: "12345"
+agents:
+  claw:
+    dir: /tmp/claw
+    panes: 2
+    labels:
+      0: "main dev"
+`;
+      const existingYaml = `
+claw:
+  dir: /tmp/claw
+  id: claw-uuid
+  discord:
+    "channel-a": 0
+    "channel-b": 1
+  panes:
+    - name: claude
+      cmd: claude
+      label: old-label
+    - name: claude-2
+      cmd: claude
+`;
+      return { sourceYaml, existingYaml };
+    }],
+    when: ["regenerating", ({ sourceYaml, existingYaml }) =>
+      regenerateAgentsYaml(sourceYaml, existingYaml)],
+    then: ["source label wins, channel-IDs carried over", (out) => {
+      expect(out).toContain("main dev");
+      expect(out).not.toContain("old-label");
+      expect(out).toMatch(/channel-a["']?\s*:\s*0/);
+      expect(out).toContain("claw-uuid");
+    }],
+  });
+
+  component("first-run (no existing agents.yaml) works", {
+    given: ["source yaml only", () => `
+guild: "12345"
+agents:
+  claw:
+    dir: /tmp/claw
+    panes: 1
+    labels:
+      0: "fresh"
+`],
+    when: ["regenerating without existing", (sourceYaml) =>
+      regenerateAgentsYaml(sourceYaml, null)],
+    then: ["label lands in output", (out) => {
+      expect(out).toContain("fresh");
     }],
   });
 });
