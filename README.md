@@ -196,6 +196,8 @@ amux wait myproject          # wait until agent is idle
 amux log myproject           # show last 3 turns from session jsonl (structured)
 amux log myproject --tmux    # raw tmux capture (use --since / --grep to filter jsonl)
 amux ps                      # show all pane statuses
+amux timeline                # cross-pane event stream (kronologisk)
+amux watch                   # live-tail every pane in one view
 amux esc myproject           # interrupt an agent
 ```
 
@@ -254,6 +256,43 @@ If you scripted against the old default, add `--text` to keep the previous
 behavior. Pane/agent validation is also stricter: out-of-bounds panes and
 names like `claw:0` now error with a helpful message instead of silently
 doing something wrong.
+
+### `amux timeline` / `amux watch` (1.4.0)
+
+`amux ps` is a snapshot, `amux log` is per-pane. For orchestrators that want
+to *see every pane at once, kronologiskt*, 1.4.0 adds a unified cross-pane
+stream reading directly from the session jsonl files.
+
+```bash
+amux timeline                       # last 30 events across every pane
+amux timeline -n 100                # last 100 events
+amux timeline --since 30min         # only events from the last 30 min
+amux timeline --agent claw          # filter to one agent
+amux timeline --agent claw --pane 2 # filter to one pane
+amux timeline --grep "deploy"       # regex filter on content
+amux timeline --follow              # live-tail (Ctrl+C to stop)
+
+amux watch                          # shortcut for 'timeline --follow'
+amux watch --agent claw --grep err  # tail one agent, only rows matching /err/i
+```
+
+Each row is one event:
+
+```
+10:42  claw:1        🎤 user   "GO — kör hela planen..."
+10:43  claw:1        🤖 agent  "Kod-fix för pick-longest-duration..."
+10:44  claw:5        🎤 user   "Nytt projekt: voice PWA..."
+10:45  claw:1        🔧 tool   Bash git commit -m "..."
+10:50  claw:1        🤖 agent  "🎉 Deploy klar (7m 54s)..."
+```
+
+Icons: 🎤 user prompt, 🤖 assistant text, 🔧 tool call, ⚠️ error. Content is
+capped at 80 chars per row; use `amux log <agent> -p N --grep PAT` for the
+full version of a specific turn.
+
+`--follow` polls the jsonl files once per second (not `fs.watch`, which is
+unreliable on WSL and macOS). Use it in a split pane while you work in the
+other.
 
 ## Voice PWA support
 
