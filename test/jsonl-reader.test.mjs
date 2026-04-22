@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, copyFileSync, rmSync, writeFileSync, utimesSync
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
-import { extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl, isPromptInJsonl, readLastTurns, parseSinceArg } from "../core/jsonl-reader.mjs";
+import { extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl, isPromptInJsonl, readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor } from "../core/jsonl-reader.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const fixtureFile = (name) => join(__dir, "fixtures/jsonl", name);
@@ -538,5 +538,153 @@ feature("parseSinceArg: ISO and relative forms", () => {
   unit("empty string returns null", {
     when: ["parsing empty", () => parseSinceArg("")],
     then: ["null", (r) => expect(r).toBeNull()],
+  });
+});
+
+// --- readAllTurnsAcrossPanes (cross-pane event stream for `amux timeline`) -
+
+/**
+ * Build a fake $HOME where two panes of an agent each have their own
+ * session jsonl. Mirrors how Claude Code keys its project dir off the
+ * pane's cwd (agent.dir/.agents/N). Returns an `agents` list ready to
+ * pass into readAllTurnsAcrossPanes, plus a cleanup hook.
+ */
+function setupTwoPaneTimeline(fixtures) {
+  const fakeHome = mkdtempSync(join(tmpdir(), "amux-timeline-test-"));
+  const origHome = process.env.HOME;
+  process.env.HOME = fakeHome;
+
+  const agentDir = "/fake/lsrc/demo";
+  const agent = { name: "demo", dir: agentDir, panes: [{ name: "claude" }, { name: "claude-2" }] };
+
+  for (let paneIdx = 0; paneIdx < fixtures.length; paneIdx++) {
+    const paneDir = panePathFor(agent, paneIdx);
+    const encoded = paneDir.replace(/[\/\.]/g, "-");
+    const projectDir = join(fakeHome, ".claude", "projects", encoded);
+    mkdirSync(projectDir, { recursive: true });
+    copyFileSync(fixtureFile(fixtures[paneIdx]), join(projectDir, "session.jsonl"));
+  }
+
+  return {
+    agents: [agent],
+    cleanup: () => {
+      process.env.HOME = origHome;
+      rmSync(fakeHome, { recursive: true, force: true });
+    },
+  };
+}
+
+feature("readAllTurnsAcrossPanes: merges events from multiple panes in timestamp order", () => {
+  unit("two panes with non-overlapping timestamps interleave correctly", {
+    // pane 0 events run 20:00:00-20:00:03, pane 1 identical. Both use the
+    // same multi-turn fixture so we can assert merge-sort by pane keeps
+    // order stable: all events at a given ts appear before the next ts.
+    given: ["two panes each with multi-turn fixture", () => setupTwoPaneTimeline(["multi-turn.jsonl", "multi-turn.jsonl"])],
+    when: ["reading all rows", ({ agents }) => readAllTurnsAcrossPanes({ agents })],
+    then: ["rows sorted ascending by timestamp", (rows, { cleanup }) => {
+      expect(rows.length).toBe(8); // 2 panes * 4 events
+      for (let i = 1; i < rows.length; i++) {
+        const a = Date.parse(rows[i - 1].timestamp);
+        const b = Date.parse(rows[i].timestamp);
+        expect(a).toBeLessThanOrEqual(b);
+      }
+      // Every row carries its origin
+      for (const r of rows) {
+        expect(r.agent).toBe("demo");
+        expect([0, 1]).toContain(r.pane);
+        expect(["user", "assistant"]).toContain(r.role);
+      }
+      cleanup();
+    }],
+  });
+
+  unit("--agent filter limits rows to one agent", {
+    given: ["two panes", () => {
+      const s = setupTwoPaneTimeline(["multi-turn.jsonl", "multi-turn.jsonl"]);
+      // Add a second agent with its own pane so the filter has something to drop
+      const otherDir = "/fake/lsrc/other";
+      const other = { name: "other", dir: otherDir, panes: [{ name: "claude" }] };
+      const encoded = panePathFor(other, 0).replace(/[\/\.]/g, "-");
+      const projectDir = join(process.env.HOME, ".claude", "projects", encoded);
+      mkdirSync(projectDir, { recursive: true });
+      copyFileSync(fixtureFile("multi-turn.jsonl"), join(projectDir, "session.jsonl"));
+      s.agents.push(other);
+      return s;
+    }],
+    when: ["filtering to 'demo'", ({ agents }) => readAllTurnsAcrossPanes({ agents, agent: "demo" })],
+    then: ["only demo rows present", (rows, { cleanup }) => {
+      expect(rows.length).toBe(8);
+      expect(rows.every((r) => r.agent === "demo")).toBe(true);
+      cleanup();
+    }],
+  });
+
+  unit("--pane filter narrows to a single pane of an agent", {
+    given: ["two panes", () => setupTwoPaneTimeline(["multi-turn.jsonl", "multi-turn.jsonl"])],
+    when: ["filtering to pane 1", ({ agents }) => readAllTurnsAcrossPanes({ agents, agent: "demo", pane: 1 })],
+    then: ["only pane 1 rows present", (rows, { cleanup }) => {
+      expect(rows.length).toBe(4);
+      expect(rows.every((r) => r.pane === 1)).toBe(true);
+      cleanup();
+    }],
+  });
+
+  unit("--since drops rows before the threshold", {
+    given: ["two panes", () => setupTwoPaneTimeline(["multi-turn.jsonl", "multi-turn.jsonl"])],
+    when: ["since 20:00:02Z", ({ agents }) => readAllTurnsAcrossPanes({ agents, since: new Date("2026-04-08T20:00:02Z") })],
+    then: ["only turn 2's events remain", (rows, { cleanup }) => {
+      // Each pane contributes 2 events at or after 20:00:02Z → 4 total
+      expect(rows.length).toBe(4);
+      for (const r of rows) {
+        expect(Date.parse(r.timestamp)).toBeGreaterThanOrEqual(Date.parse("2026-04-08T20:00:02Z"));
+      }
+      cleanup();
+    }],
+  });
+
+  unit("--grep keeps only rows whose content matches", {
+    given: ["two panes", () => setupTwoPaneTimeline(["multi-turn.jsonl", "multi-turn.jsonl"])],
+    when: ["grep /time/i", ({ agents }) => readAllTurnsAcrossPanes({ agents, grep: /time/i })],
+    then: ["only 'time'-bearing rows", (rows, { cleanup }) => {
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.every((r) => /time/i.test(r.content))).toBe(true);
+      cleanup();
+    }],
+  });
+
+  unit("--limit caps to the N most recent rows", {
+    given: ["two panes", () => setupTwoPaneTimeline(["multi-turn.jsonl", "multi-turn.jsonl"])],
+    when: ["limit 3", ({ agents }) => readAllTurnsAcrossPanes({ agents, limit: 3 })],
+    then: ["last 3 rows returned, still ordered", (rows, { cleanup }) => {
+      expect(rows.length).toBe(3);
+      for (let i = 1; i < rows.length; i++) {
+        expect(Date.parse(rows[i - 1].timestamp)).toBeLessThanOrEqual(Date.parse(rows[i].timestamp));
+      }
+      cleanup();
+    }],
+  });
+
+  unit("with-tools fixture produces tool rows with role=assistant", {
+    given: ["one pane with tools", () => setupTwoPaneTimeline(["with-tools.jsonl"])],
+    when: ["reading", ({ agents }) => readAllTurnsAcrossPanes({ agents })],
+    then: ["at least one tool row", (rows, { cleanup }) => {
+      const tools = rows.filter((r) => r.type === "tool");
+      expect(tools.length).toBeGreaterThan(0);
+      for (const t of tools) expect(t.role).toBe("assistant");
+      cleanup();
+    }],
+  });
+
+  unit("pane with no jsonl contributes no rows (silently skipped)", {
+    given: ["agent with two panes but only pane 0 has data", () => setupTwoPaneTimeline(["multi-turn.jsonl"])],
+    when: ["reading", ({ agents }) => {
+      agents[0].panes.push({ name: "claude-2" }); // pane 1 exists in config but has no jsonl dir
+      return readAllTurnsAcrossPanes({ agents });
+    }],
+    then: ["only pane 0 rows returned", (rows, { cleanup }) => {
+      expect(rows.length).toBe(4);
+      expect(rows.every((r) => r.pane === 0)).toBe(true);
+      cleanup();
+    }],
   });
 });

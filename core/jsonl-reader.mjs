@@ -532,3 +532,105 @@ export function readLastTurns(paneDir, opts = {}) {
 
   return { turns, jsonlFile: files[0].path };
 }
+
+// ---------------------------------------------------------------------------
+// Cross-pane event stream for `amux timeline` and `amux watch`.
+// Unlike readLastTurns (per-pane, grouped into turns), this reads every
+// configured pane's jsonl store and returns a flat, merge-sorted stream of
+// events so an orchestrator can follow all sessions in one view.
+
+/** Project dir for a pane (where Claude Code stores the session jsonl). */
+function projectDirFor(paneDir) {
+  return join(CLAUDE_PROJECTS_DIR(), encodePath(paneDir));
+}
+
+/**
+ * Flatten every jsonl event in a project dir to timeline rows.
+ * Returns [{ timestamp, role, type, content, raw }] sorted by timestamp
+ * ascending. Rows with missing timestamps get the file's mtime as fallback.
+ * Only pulls from the newest jsonl in the project dir (the active session);
+ * older files are from prior /clear or /compact rotations.
+ */
+function eventsFromProjectDir(projectDir) {
+  if (!existsSync(projectDir)) return [];
+  const files = listJsonlFiles(projectDir);
+  if (files.length === 0) return [];
+  const latest = files[0];
+  const events = parseJsonl(latest.path);
+  const rows = [];
+  for (const e of events) {
+    const ts = e.timestamp || null;
+    if (e.type === "user" && typeof e.message?.content === "string") {
+      rows.push({ timestamp: ts, role: "user", type: "text", content: e.message.content });
+      continue;
+    }
+    if (e.type === "assistant" && Array.isArray(e.message?.content)) {
+      for (const block of e.message.content) {
+        if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
+          rows.push({ timestamp: ts, role: "assistant", type: "text", content: block.text.trim() });
+        } else if (block.type === "tool_use") {
+          rows.push({ timestamp: ts, role: "assistant", type: "tool", content: formatJsonlToolCall(block) });
+        }
+      }
+    }
+  }
+  return rows;
+}
+
+/** Compute the cwd for a given pane of an agent (matches agent.mjs:paneDir). */
+export function panePathFor(agent, paneIdx) {
+  return join(agent.dir, ".agents", String(paneIdx));
+}
+
+/**
+ * Read every pane's jsonl, merge-sort by timestamp, filter, and limit.
+ *
+ * @param {object} opts
+ * @param {Array<object>} opts.agents  - agents from listAgents(): { name, dir, panes }
+ * @param {Date|null}     [opts.since] - only rows at or after this time
+ * @param {string|null}   [opts.agent] - filter to one agent by name
+ * @param {number|null}   [opts.pane]  - filter to one pane index (pairs with agent)
+ * @param {RegExp|null}   [opts.grep]  - filter rows by content regex
+ * @param {number|null}   [opts.limit] - cap to the most recent N after filtering
+ * @returns {Array<{timestamp:string, agent:string, pane:number, role:string, type:string, content:string}>}
+ */
+export function readAllTurnsAcrossPanes(opts = {}) {
+  const { agents = [], since = null, agent: agentFilter = null, pane: paneFilter = null, grep = null, limit = null } = opts;
+  const out = [];
+
+  for (const a of agents) {
+    if (agentFilter && a.name !== agentFilter) continue;
+    const panes = Array.isArray(a.panes) ? a.panes : [];
+    for (let paneIdx = 0; paneIdx < panes.length; paneIdx++) {
+      if (paneFilter != null && paneIdx !== paneFilter) continue;
+      const paneDir = panePathFor(a, paneIdx);
+      const rows = eventsFromProjectDir(projectDirFor(paneDir));
+      for (const r of rows) {
+        out.push({ ...r, agent: a.name, pane: paneIdx });
+      }
+    }
+  }
+
+  // Merge-sort by timestamp (null timestamps sink to the end).
+  out.sort((x, y) => {
+    const tx = x.timestamp ? Date.parse(x.timestamp) : Number.POSITIVE_INFINITY;
+    const ty = y.timestamp ? Date.parse(y.timestamp) : Number.POSITIVE_INFINITY;
+    return tx - ty;
+  });
+
+  let filtered = out;
+  if (since) {
+    filtered = filtered.filter((r) => {
+      if (!r.timestamp) return false;
+      const d = Date.parse(r.timestamp);
+      return !Number.isNaN(d) && d >= since.getTime();
+    });
+  }
+  if (grep) {
+    filtered = filtered.filter((r) => grep.test(r.content));
+  }
+  if (typeof limit === "number" && limit > 0 && filtered.length > limit) {
+    filtered = filtered.slice(-limit);
+  }
+  return filtered;
+}
