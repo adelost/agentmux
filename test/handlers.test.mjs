@@ -551,3 +551,136 @@ feature("formatCatchupTime", () => {
     then: ["returns input", (r) => expect(r).toBe("not-a-date")],
   });
 });
+
+// --- Loop guard integration (onMessage) -----------------------------------
+// Ensures the circuit breaker actually prevents agent.sendOnly calls and
+// posts the warning on the 3rd identical short message.
+
+feature("onMessage: loop guard", () => {
+  // Stateful in-memory state so loop_guard accumulates across msg turns
+  function makeStatefulState() {
+    const store = {};
+    return {
+      _store: store,
+      get: (key, fallback) => (key in store ? store[key] : fallback),
+      set: (key, value) => { store[key] = value; },
+      toggle: () => true,
+    };
+  }
+
+  function setupGuard({ loopGuardConfig } = {}) {
+    const state = makeStatefulState();
+    const channelMapData = new Map([["ch1", { name: "_ai", dir: "/tmp/p", pane: 0 }]]);
+
+    // Each message gets a fresh busy→idle transition so streamResponse
+    // can exit: busy for the first 2 polls, then idle (matches the pattern
+    // used elsewhere in this file).
+    const busyCounters = { global: 0 };
+    const agent = {
+      getResponse: vi.fn(async () => "resp"),
+      getResponseSegments: vi.fn(async () => ["resp"]),
+      getResponseStreamWithRaw: vi.fn(async () => ({ raw: "", turn: "", items: [{ type: "text", content: "resp" }] })),
+      getResponseStream: vi.fn(async () => [{ type: "text", content: "resp" }]),
+      hasResponseForPrompt: vi.fn(async () => true),
+      isBusy: vi.fn(async () => { busyCounters.global++; return busyCounters.global <= 2; }),
+      capturePane: vi.fn(async () => ""),
+      getContextPercent: vi.fn(() => null),
+      dismissBlockingPrompt: vi.fn(async () => ""),
+      sendEscape: vi.fn(async () => {}),
+      sendAndWait: vi.fn(async () => "resp"),
+      sendOnly: vi.fn(async () => {}),
+      waitForPromptEcho: vi.fn(async () => true),
+      startProgressTimer: vi.fn(() => ({ timer: null, sentCount: () => 0 })),
+    };
+
+    // Ensure buildPrompt reads from the same field the real path uses:
+    // normalize.mjs sets msg.text, not msg.content.
+    const attachments = { buildPrompt: vi.fn(async (msg) => msg.text) };
+    const tts = { isEnabled: vi.fn(() => false), toggle: vi.fn(() => true), sendFollowup: vi.fn(async () => {}) };
+
+    const { onMessage } = createHandlers({
+      agent, attachments, tts, state,
+      getMapping: (chId) => channelMapData.get(chId),
+      overrides: new Map(),
+      channelMap: () => channelMapData,
+      reloadConfig: vi.fn(),
+      pollInterval: 1,
+      loopGuardConfig: loopGuardConfig || {
+        enabled: true, threshold: 3, windowMs: 30_000, shortLen: 10,
+      },
+    });
+
+    function fakeMsg(text) {
+      return {
+        channelId: "ch1", isBot: false,
+        text, content: text, // both, since normalize uses text
+        reply: vi.fn(async () => {}),
+        send: vi.fn(async () => {}),
+        startTyping: vi.fn(() => () => {}),
+      };
+    }
+    return { onMessage, state, agent, attachments, fakeMsg };
+  }
+
+  component("3 identical '0's → 3rd blocks + warns, agent.sendOnly NOT called for it", {
+    given: ["stateful setup", () => setupGuard()],
+    when: ["sending 0, 0, 0", async (ctx) => {
+      const m1 = ctx.fakeMsg("0");
+      const m2 = ctx.fakeMsg("0");
+      const m3 = ctx.fakeMsg("0");
+      await ctx.onMessage(m1);
+      await ctx.onMessage(m2);
+      await ctx.onMessage(m3);
+      return { m3, attachments: ctx.attachments };
+    }],
+    then: ["m3.reply got the warning, m3 didn't reach attachments", ({ m3, attachments }) => {
+      const warningCalls = m3.reply.mock.calls.filter((c) => typeof c[0] === "string" && c[0].startsWith("⚠ Loop detected"));
+      expect(warningCalls.length).toBe(1);
+      // The 3rd message should not reach buildPrompt (guard is before attachments)
+      // attachments.buildPrompt was called for m1 + m2 only → 2 times
+      expect(attachments.buildPrompt).toHaveBeenCalledTimes(2);
+    }],
+  });
+
+  component("3 different short msgs → none blocks, agent gets all three", {
+    given: ["stateful setup", () => setupGuard()],
+    when: ["sending a, b, c", async (ctx) => {
+      await ctx.onMessage(ctx.fakeMsg("a"));
+      await ctx.onMessage(ctx.fakeMsg("b"));
+      await ctx.onMessage(ctx.fakeMsg("c"));
+      return ctx.attachments;
+    }],
+    then: ["attachments.buildPrompt fired for all 3", (attachments) => {
+      expect(attachments.buildPrompt).toHaveBeenCalledTimes(3);
+    }],
+  });
+
+  component("4th identical (in same block period) is blocked but warning is silent", {
+    given: ["setup", () => setupGuard()],
+    when: ["4x '0'", async (ctx) => {
+      const msgs = [ctx.fakeMsg("0"), ctx.fakeMsg("0"), ctx.fakeMsg("0"), ctx.fakeMsg("0")];
+      for (const m of msgs) await ctx.onMessage(m);
+      return msgs;
+    }],
+    then: ["only 3rd posted a warning, 4th silently blocked", (msgs) => {
+      const warnOn3 = msgs[2].reply.mock.calls.some((c) => typeof c[0] === "string" && c[0].startsWith("⚠"));
+      const warnOn4 = msgs[3].reply.mock.calls.some((c) => typeof c[0] === "string" && c[0].startsWith("⚠"));
+      expect(warnOn3).toBe(true);
+      expect(warnOn4).toBe(false);
+    }],
+  });
+
+  component("loop guard disabled → no blocks even for N identicals", {
+    given: ["disabled config", () => setupGuard({
+      loopGuardConfig: { enabled: false, threshold: 3, windowMs: 30_000, shortLen: 10 },
+    })],
+    when: ["5x '0'", async (ctx) => {
+      for (let i = 0; i < 5; i++) await ctx.onMessage(ctx.fakeMsg("0"));
+      return ctx.attachments;
+    }],
+    then: ["attachments.buildPrompt ran for all 5, no warnings", (attachments) => {
+      expect(attachments.buildPrompt).toHaveBeenCalledTimes(5);
+    }],
+  });
+
+});

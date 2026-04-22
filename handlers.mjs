@@ -5,6 +5,7 @@ import { splitMessage, parsePane, parseCommand, parseUseArg, extractImageMarkers
 import { readFileSync, unlinkSync, statSync } from "fs";
 import { executeSync } from "./core/sync-discord.mjs";
 import { countTurnsSince, panePathFor } from "./core/jsonl-reader.mjs";
+import { checkLoopGuard, loopGuardKey, formatLoopGuardWarning, readLoopGuardConfig } from "./core/loop-guard.mjs";
 
 function cleanupTmpFiles(files) {
   for (const f of files) {
@@ -97,7 +98,7 @@ export function renderCatchupLine(countResult) {
  * Create message handler with all dependencies injected.
  * @param {{ agent, attachments, tts, getMapping, overrides, channelMap, reloadConfig, discordChannel?, agentmuxYamlPath?, agentsYamlPath? }} deps
  */
-export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentmuxYamlPath, agentsYamlPath, recorder, pollInterval = 2000 }) {
+export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentmuxYamlPath, agentsYamlPath, recorder, pollInterval = 2000, loopGuardConfig = readLoopGuardConfig() }) {
   const noopRecorder = { save: () => {}, enabled: false };
   const rec = recorder || noopRecorder;
   const queues = new Map();
@@ -545,6 +546,50 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
   }
 
   /**
+   * Circuit breaker: if this Discord channel has sent N identical short
+   * messages within the window, drop the incoming message and (on the
+   * first block of the period) post a warning back to the channel.
+   *
+   * Uses the pane's own target (mapping.pane if no inline .N prefix) for
+   * the guard key. Inline `.N` overrides aren't parsed yet at this stage
+   * — we'd need the raw text for that, and parsePane runs after
+   * attachment processing. For a 0-spam scenario (the case we care about)
+   * inline prefixes are not a realistic concern. If we ever need to key
+   * on the parsed-pane we can move the guard after parsePane.
+   *
+   * @returns {boolean} true if the message should NOT be forwarded.
+   */
+  function handleLoopGuard(msg, mapping) {
+    if (!loopGuardConfig.enabled) return false;
+    const pane = mapping.pane || 0;
+    const key = loopGuardKey(mapping.name, pane);
+
+    const all = state.get("loop_guard", {}) || {};
+    const entry = all[key] || { last_msgs: [], last_warning_ts: null };
+
+    // Use the raw msg.text — attachments haven't been expanded yet, but
+    // that's fine: short-msg loops are about text like "0", not audio
+    // attachments.
+    const result = checkLoopGuard(entry, msg.text || "", Date.now(), loopGuardConfig);
+
+    // Persist entry (checkLoopGuard mutated it in place)
+    all[key] = entry;
+    state.set("loop_guard", all);
+
+    if (!result.block) return false;
+
+    if (result.warn) {
+      const line = formatLoopGuardWarning(result);
+      msg.reply(line).catch((err) =>
+        console.warn(`loop-guard warning reply failed: ${err.message}`));
+      console.warn(
+        `[${ts()}] ⛔ loop-guard ${key}: blocked '${result.text}' × ${result.count} in ${result.ageSec}s`,
+      );
+    }
+    return true; // block
+  }
+
+  /**
    * Post "ℹ N turns since your last Discord sync" if the pane saw
    * activity since the last outbound Discord message for this channel.
    * Silent when count is 0 or when jsonl is unavailable (e.g. post-/clear).
@@ -568,6 +613,12 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     if (msg.isBot) return;
     const mapping = getMapping(msg.channelId);
     if (!mapping) return;
+
+    // Loop guard: check BEFORE any expensive work (attachment download,
+    // transcription, state reads, pane writes). A runaway loop would
+    // otherwise still bill Whisper + pane tokens on every turn even if
+    // we later block forwarding. Gate at the door.
+    if (handleLoopGuard(msg, mapping)) return;
 
     const tmpFiles = [];
     const prompt = await attachments.buildPrompt(msg, tmpFiles);

@@ -294,6 +294,35 @@ full version of a specific turn.
 unreliable on WSL and macOS). Use it in a split pane while you work in the
 other.
 
+## Loop Guard — Bridge protects against runaway loops
+
+Sometimes a feedback loop forms: a modal prompt fires in Claude Code, the user
+accidentally presses a button 40 times, or a Discord client bug replays the
+same keystroke. Each repeat bills tokens; worse, a short bot reply can itself
+become input to the next loop iteration.
+
+The bridge watches incoming Discord messages per pane. If the same short
+message arrives 3 times inside a 30-second window, forwarding to the pane is
+paused and a one-time warning posts in the channel:
+
+> ⚠ Loop detected: '0' × 3 in 2s. Forwarding paused. Reply something different to resume, or run `amux esc` to clear pane state.
+
+Subsequent identical messages inside the same block-period are silently dropped
+(no warning spam). Send **any different message** to reset and resume normally.
+
+**Tunable via `.env`:**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `LOOP_GUARD_ENABLED` | `true` | Set `false` to disable entirely |
+| `LOOP_GUARD_THRESHOLD` | `3` | Identical messages before blocking |
+| `LOOP_GUARD_WINDOW_MS` | `30000` | Sliding window in milliseconds |
+| `LOOP_GUARD_SHORT_LEN` | `10` | Messages longer than this aren't loop candidates |
+
+The guard only watches the user → pane direction. Long messages (real prompts)
+always pass through unchanged — the filter triggers only on short, repeated
+text that's almost always a loop signature.
+
 ## Voice PWA support
 
 Set `VOICE_PWA_TOKEN` to enable the HTTP endpoint for the in-car PWA:
