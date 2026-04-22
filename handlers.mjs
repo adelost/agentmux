@@ -4,6 +4,7 @@
 import { splitMessage, parsePane, parseCommand, parseUseArg, extractImageMarkers, validateImagePath } from "./lib.mjs";
 import { readFileSync, unlinkSync, statSync } from "fs";
 import { executeSync } from "./core/sync-discord.mjs";
+import { countTurnsSince, panePathFor } from "./core/jsonl-reader.mjs";
 
 function cleanupTmpFiles(files) {
   for (const f of files) {
@@ -54,6 +55,42 @@ function sendTextReply(msg, text, context) {
 
 function formatAgentError(err) {
   return err?.killed ? "Timeout" : `${err?.stderr || err?.message || err}`;
+}
+
+/** Render a catch-up notice timestamp. HH:MM when the turn is same-day,
+ *  otherwise YYYY-MM-DD HH:MM so the user doesn't misread a days-old
+ *  turn as recent. */
+export function formatCatchupTime(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const hhmm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const sameDay = d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  if (sameDay) return hhmm;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hhmm}`;
+}
+
+/**
+ * Decide whether to post a catch-up notice, and return the line to post.
+ * Pure function: takes the count result + last-timestamp, returns a string
+ * or null. Extracted so unit tests can verify the rendering without
+ * wiring up the full handlers module.
+ *
+ * @param {{count: number, latest: string|null, capped: boolean}|null} countResult
+ * @returns {string|null}  line to post, or null for no-notice (count=0 or null)
+ */
+export function renderCatchupLine(countResult) {
+  if (!countResult || countResult.count <= 0) return null;
+  const label = countResult.capped ? "50+" : String(countResult.count);
+  if (countResult.capped) {
+    return `ℹ ${label} turns since last Discord sync — you've been busy!`;
+  }
+  const latest = countResult.latest ? formatCatchupTime(countResult.latest) : null;
+  return latest
+    ? `ℹ ${label} turns since your last Discord sync (latest: ${latest})`
+    : `ℹ ${label} turns since your last Discord sync`;
 }
 
 /**
@@ -507,6 +544,26 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     }
   }
 
+  /**
+   * Post "ℹ N turns since your last Discord sync" if the pane saw
+   * activity since the last outbound Discord message for this channel.
+   * Silent when count is 0 or when jsonl is unavailable (e.g. post-/clear).
+   */
+  async function postCatchupNoticeIfNeeded(msg, mapping, pane) {
+    try {
+      if (!mapping?.dir) return; // mapping is synthetic/unknown, skip
+      const mirrorTimes = state.get("channel_last_mirror_ts", {}) || {};
+      const lastTs = mirrorTimes[msg.channelId] || null;
+      const paneDir = panePathFor({ dir: mapping.dir }, pane);
+      const result = countTurnsSince(paneDir, lastTs);
+      const line = renderCatchupLine(result);
+      if (!line) return;
+      await msg.send(line); // msg.send stamps via onSent → count resets for next msg
+    } catch (err) {
+      console.warn(`catchup notice failed: ${err.message}`);
+    }
+  }
+
   async function onMessage(msg) {
     if (msg.isBot) return;
     const mapping = getMapping(msg.channelId);
@@ -519,6 +576,14 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     const { pane: parsedPane, prompt: cleanPrompt } = parsePane(prompt);
     const pane = parsedPane || mapping.pane || 0;
     const parsed = parseCommand(cleanPrompt);
+
+    // Catch-up notice: user returning to a stale Discord channel after
+    // activity in the pane (e.g. Mattias typed directly into tmux or
+    // another agent drove the pane). Posting the count BEFORE we forward
+    // the user's message avoids the confusion of "wait, what just
+    // happened in this channel?" The notice itself stamps via onSent so
+    // subsequent messages in the same channel won't re-notify.
+    await postCatchupNoticeIfNeeded(msg, mapping, pane);
 
     if (parsed?.cmd === "/use") {
       await handleUse(msg, parsed.args).catch((err) =>

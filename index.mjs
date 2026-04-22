@@ -90,7 +90,16 @@ if (recorder.enabled) console.log(`recorder | enabled → ${resolve(__dir, "test
 
 // --- Channels ---
 
-const discord = createDiscordChannel({ token: TOKEN });
+// Stamp last-mirror ts per channel on every outbound Discord message.
+// Used by handlers.postCatchupNoticeIfNeeded to detect stale channels
+// (activity in pane that didn't go via Discord — e.g. typed in tmux).
+function stampChannelMirror(channelId) {
+  const prev = appState.get("channel_last_mirror_ts", {}) || {};
+  prev[channelId] = new Date().toISOString();
+  appState.set("channel_last_mirror_ts", prev);
+}
+
+const discord = createDiscordChannel({ token: TOKEN, onSent: stampChannelMirror });
 
 // --- Wire up ---
 

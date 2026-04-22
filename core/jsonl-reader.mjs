@@ -634,3 +634,54 @@ export function readAllTurnsAcrossPanes(opts = {}) {
   }
   return filtered;
 }
+
+/**
+ * Count turns written to the pane's jsonl after a given cutoff timestamp.
+ *
+ * Used for the Discord catch-up notice: when the user returns to a channel
+ * and posts a message, the bridge checks how much activity happened in the
+ * pane since the last time the channel saw a message. If count > 0 we post
+ * a short info line before forwarding.
+ *
+ * Reverse-walks the newest jsonl file for the pane and stops at the first
+ * user-event with timestamp ≤ cutoff. Caps at 51 (caller renders "50+").
+ *
+ * @param {string} paneDir - The pane's cwd (e.g. panePathFor(agent, 1))
+ * @param {string|Date|null} sinceTs - ISO string or Date; null = no cutoff (count all)
+ * @returns {{ count: number, latest: string|null, capped: boolean } | null}
+ *   null when no jsonl exists for the pane (fail silent — caller skips notice)
+ */
+export function countTurnsSince(paneDir, sinceTs) {
+  const projectDir = projectDirFor(paneDir);
+  if (!existsSync(projectDir)) return null;
+  const files = listJsonlFiles(projectDir);
+  if (files.length === 0) return null;
+
+  let cutoffMs = null;
+  if (sinceTs) {
+    const d = typeof sinceTs === "string" ? new Date(sinceTs) : sinceTs;
+    if (d instanceof Date && !Number.isNaN(d.getTime())) cutoffMs = d.getTime();
+  }
+
+  // Forward-read the file (jsonl is small enough in practice), then
+  // reverse-iterate to short-circuit once we pass the cutoff. Malformed
+  // lines are already filtered by parseJsonl.
+  const events = parseJsonl(files[0].path);
+  let count = 0;
+  let latest = null;
+  let capped = false;
+
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (!(e?.type === "user" && typeof e.message?.content === "string")) continue;
+    if (!e.timestamp) continue;
+    const t = Date.parse(e.timestamp);
+    if (Number.isNaN(t)) continue;
+    if (cutoffMs !== null && t <= cutoffMs) break; // hit the cutoff, stop
+    count++;
+    if (!latest) latest = e.timestamp; // first hit in reverse = newest
+    if (count >= 51) { capped = true; break; }
+  }
+
+  return { count, latest, capped };
+}

@@ -1,6 +1,6 @@
-import { feature, component, expect } from "bdd-vitest";
+import { feature, component, unit, expect } from "bdd-vitest";
 import { vi } from "vitest";
-import { createHandlers } from "../handlers.mjs";
+import { createHandlers, renderCatchupLine, formatCatchupTime } from "../handlers.mjs";
 
 // --- Test helpers ---
 
@@ -472,5 +472,82 @@ feature("processMessage pipeline (streaming)", () => {
       expect(second.send.mock.calls.some((c) => c[0]?.includes("reply for second prompt"))).toBe(true);
       expect(agent.hasResponseForPrompt).toHaveBeenCalledWith("_ai", 0, "second prompt");
     }],
+  });
+});
+
+// --- Catch-up notice rendering -------------------------------------------
+
+feature("renderCatchupLine: how the catch-up banner looks", () => {
+  unit("count = 0 → null (no notice)", {
+    when: ["rendering", () => renderCatchupLine({ count: 0, latest: null, capped: false })],
+    then: ["null", (r) => expect(r).toBeNull()],
+  });
+
+  unit("null input → null (silent skip when jsonl missing)", {
+    when: ["rendering null", () => renderCatchupLine(null)],
+    then: ["null", (r) => expect(r).toBeNull()],
+  });
+
+  unit("count = 3 → standard notice with latest timestamp", {
+    when: ["rendering", () => renderCatchupLine({
+      count: 3,
+      latest: new Date().toISOString(),
+      capped: false,
+    })],
+    then: ["contains 3 turns + latest", (r) => {
+      expect(r).toContain("ℹ 3 turns since your last Discord sync");
+      expect(r).toContain("latest:");
+    }],
+  });
+
+  unit("capped = true → 50+ notice, no 'latest:' field", {
+    when: ["rendering cap", () => renderCatchupLine({
+      count: 51, latest: "2026-04-22T10:00:00Z", capped: true,
+    })],
+    then: ["'50+' phrase, busy tone, no timestamp", (r) => {
+      expect(r).toContain("50+");
+      expect(r).toContain("you've been busy");
+      expect(r).not.toContain("latest:");
+    }],
+  });
+
+  unit("count = 1 → singular-friendly phrasing (uses same template, fine)", {
+    when: ["rendering 1", () => renderCatchupLine({
+      count: 1, latest: "2026-04-22T14:32:00Z", capped: false,
+    })],
+    then: ["1 turns (template consistent)", (r) => {
+      expect(r).toContain("1 turns");
+    }],
+  });
+});
+
+feature("formatCatchupTime", () => {
+  unit("same-day timestamp → HH:MM", {
+    when: ["rendering today 14:32", () => {
+      const d = new Date();
+      d.setHours(14, 32, 15, 0);
+      return formatCatchupTime(d.toISOString());
+    }],
+    then: ["HH:MM (no date)", (r) => {
+      expect(r).toBe("14:32");
+    }],
+  });
+
+  unit("previous-day timestamp → YYYY-MM-DD HH:MM", {
+    when: ["rendering yesterday", () => {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      d.setHours(9, 15, 0, 0);
+      return formatCatchupTime(d.toISOString());
+    }],
+    then: ["includes date + time", (r) => {
+      expect(r).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+      expect(r).toContain("09:15");
+    }],
+  });
+
+  unit("invalid ISO falls through to input", {
+    when: ["rendering garbage", () => formatCatchupTime("not-a-date")],
+    then: ["returns input", (r) => expect(r).toBe("not-a-date")],
   });
 });
