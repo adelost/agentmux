@@ -193,7 +193,8 @@ amux                         # list all agents
 amux myproject               # attach to tmux session
 amux myproject "fix the bug" # send prompt from terminal
 amux wait myproject          # wait until agent is idle
-amux log myproject           # show last response
+amux log myproject           # show last 3 turns from session jsonl (structured)
+amux log myproject --tmux    # raw tmux capture (use --since / --grep to filter jsonl)
 amux ps                      # show all pane statuses
 amux esc myproject           # interrupt an agent
 ```
@@ -231,6 +232,28 @@ wait
 ```
 
 This makes it possible to build workflows where one agent coordinates others, similar to a lead developer delegating tasks to a team.
+
+### `amux log` changed in 1.1.0
+
+`amux log <agent>` now defaults to **last 3 turns from the session jsonl**,
+structured as user-prompt + agent-response + tool calls. This is more reliable
+than the previous filtered tmux extract (which could return empty) and gives
+orchestrators structured history instead of terminal-rendered text.
+
+| Flag | Behavior |
+|---|---|
+| _(default)_ | jsonl, last 3 turns |
+| `-n N` | last N turns (or lines with `--tmux`) |
+| `--since T` | jsonl: only turns at/after T (ISO or `30min`/`2h`/`1d`) |
+| `--grep PAT` | jsonl: only turns matching regex (case-insensitive) |
+| `--tmux [-s N]` | raw tmux capture, scrollback N (default 200) |
+| `--full` | jsonl history + current tmux state |
+| `--text` | legacy filtered extract (pre-1.1.0 default) |
+
+If you scripted against the old default, add `--text` to keep the previous
+behavior. Pane/agent validation is also stricter: out-of-bounds panes and
+names like `claw:0` now error with a helpful message instead of silently
+doing something wrong.
 
 ## Environment Variables
 

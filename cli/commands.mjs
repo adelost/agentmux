@@ -4,12 +4,13 @@
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 import { readFileSync, existsSync, unlinkSync } from "fs";
-import { loadConfig, listAgents, getAgent, addAgent, removeAgent, resolveAgent, saveLast, getLast, getPaneCount } from "./config.mjs";
+import { loadConfig, listAgents, getAgent, addAgent, removeAgent, resolveAgent, saveLast, getLast, getPaneCount, findChannelForPane } from "./config.mjs";
 import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens } from "./format.mjs";
 import { hasSession, ensureAndAttach, attachSession, killSession, listPanes, getPaneStatus, sendKeys, selectOption, createTmuxContext, sendToPane } from "./tmux.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
 import { stripAnsi, esc, extractActivity, formatDuration } from "../lib.mjs";
 import { getContextFromPane } from "../core/context.mjs";
+import { readLastTurns, parseSinceArg } from "../core/jsonl-reader.mjs";
 import { runOneshot, showRunLog } from "./run.mjs";
 import { executePlan, showPlanLog } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
@@ -202,31 +203,139 @@ async function cmdWait(name, flags, ctx) {
   process.exit(1);
 }
 
+/**
+ * Validate an agent name + pane index before we do any work. Rejects
+ * shapes like "claw:0" (which look like tmux targets but aren't valid
+ * amux agent names) and out-of-bounds panes. Throws user-facing
+ * messages so the caller can print them and exit.
+ */
+export function validateAgentAndPane(ctx, name, pane) {
+  if (name.includes(":")) {
+    throw new Error(
+      `invalid agent name '${name}' — agent names don't contain ':'. ` +
+      `Did you mean 'amux ${name.split(":")[0]} -p ${name.split(":")[1] || 0}'?`,
+    );
+  }
+  const config = loadConfig(ctx.configPath);
+  if (!config[name]) {
+    const known = Object.keys(config).filter((k) => config[k]?.dir).sort();
+    throw new Error(
+      `unknown agent '${name}'. Known agents: ${known.join(", ") || "(none)"}`,
+    );
+  }
+  const paneCount = getPaneCount(ctx.configPath, name);
+  if (pane < 0 || pane >= paneCount) {
+    throw new Error(
+      `pane ${pane} does not exist. '${name}' has ${paneCount} pane${paneCount === 1 ? "" : "s"} (0-${paneCount - 1}).`,
+    );
+  }
+}
+
+/** Format a set of turns for terminal display. Emoji + separator lines. */
+function formatTurnsForDisplay(turns) {
+  const out = [];
+  for (let i = 0; i < turns.length; i++) {
+    const t = turns[i];
+    const sep = "─".repeat(60);
+    const ts = t.timestamp ? ` (${t.timestamp})` : "";
+    out.push(sep);
+    out.push(`Turn ${i + 1} of ${turns.length}${ts}`);
+    out.push(sep);
+    out.push(`> ${t.userPrompt.split("\n")[0]}${t.userPrompt.includes("\n") ? " …" : ""}`);
+    for (const item of t.items) {
+      out.push("");
+      if (item.type === "tool") out.push(`  [tool] ${item.content}`);
+      else out.push(item.content);
+    }
+    out.push("");
+  }
+  return out.join("\n");
+}
+
 async function cmdLog(name, flags, ctx) {
   const pane = flags.p || 0;
-  const lines = flags.n || null;
-  const full = flags.full || flags.f || false;
-  const textOnly = flags.text || flags.t || false;
+
+  try { validateAgentAndPane(ctx, name, pane); }
+  catch (err) { console.error(err.message); process.exit(1); }
 
   if (!(await hasSession(ctx, name))) {
-    console.error(`No tmux session for '${name}'.`);
+    console.error(`No tmux session for '${name}'. Run 'amux ${name}' to start it.`);
     process.exit(1);
   }
 
-  if (textOnly) {
+  // --- legacy mode: --text / -t (old default behavior, kept for compat) ---
+  if (flags.text || flags.t) {
     const raw = await ctx.agent.capturePane(name, pane, 5000);
     const text = extractText(raw);
     console.log(text || "(empty)");
-  } else if (full) {
-    const raw = await ctx.agent.capturePane(name, pane, 5000);
-    console.log(raw);
-  } else if (lines) {
+    return;
+  }
+
+  // --- raw tmux capture: --tmux (no filtering, configurable scrollback) ---
+  if (flags.tmux && !flags.full && !flags.f) {
+    const lines = flags.s || flags.n || 200;
     const raw = await ctx.agent.capturePane(name, pane, lines);
     console.log(raw);
-  } else {
-    const text = await ctx.agent.getResponse(name, pane);
-    console.log(text);
+    return;
   }
+
+  // Resolve paneDir for jsonl lookup. Agent-level dir is good enough:
+  // Claude Code keys its session store off the cwd it was started in,
+  // which for all our panes equals the agent dir.
+  const agent = getAgent(ctx.configPath, name);
+
+  // --- full: jsonl history + current tmux state ---
+  if (flags.full || flags.f) {
+    const since = parseSinceArg(flags.since);
+    const grep = flags.grep ? new RegExp(flags.grep, "i") : null;
+    const limit = flags.n || 3;
+    const jsonl = readLastTurns(agent.dir, { limit, since, grep });
+    if (jsonl && jsonl.turns.length) {
+      console.log(`═══ jsonl (${jsonl.jsonlFile}) ═══`);
+      console.log(formatTurnsForDisplay(jsonl.turns));
+    } else {
+      console.log(`═══ jsonl: no turns found ═══`);
+    }
+    const lines = flags.s || 200;
+    const raw = await ctx.agent.capturePane(name, pane, lines);
+    console.log(`\n═══ tmux (last ${lines} lines) ═══`);
+    console.log(raw);
+    return;
+  }
+
+  // --- default: structured jsonl, last N turns ---
+  const since = parseSinceArg(flags.since);
+  if (flags.since && !since) {
+    console.error(`invalid --since '${flags.since}'. Use ISO or relative ("30min", "2h", "1d").`);
+    process.exit(1);
+  }
+  let grep = null;
+  if (flags.grep) {
+    try { grep = new RegExp(flags.grep, "i"); }
+    catch (err) {
+      console.error(`invalid --grep regex: ${err.message}`);
+      process.exit(1);
+    }
+  }
+  const limit = flags.n || 3;
+  const jsonl = readLastTurns(agent.dir, { limit, since, grep });
+  if (!jsonl) {
+    console.error(
+      `no jsonl found for '${agent.dir}'. ` +
+      `Pane may not have run claude yet, or session is in a different cwd. ` +
+      `Try --tmux for raw capture.`,
+    );
+    process.exit(1);
+  }
+  if (!jsonl.turns.length) {
+    const filters = [];
+    if (flags.since) filters.push(`--since ${flags.since}`);
+    if (flags.grep) filters.push(`--grep '${flags.grep}'`);
+    const filterMsg = filters.length ? ` matching ${filters.join(" ")}` : "";
+    console.log(`(no turns${filterMsg} in ${jsonl.jsonlFile})`);
+    return;
+  }
+  console.log(formatTurnsForDisplay(jsonl.turns));
 }
 
 // Pane commands that correspond to a dialect we can read context for.
@@ -456,10 +565,14 @@ Usage:
   agent serve [-f]                Start Discord bridge (daemon). -f = foreground
   agent stop                      Stop Discord bridge (no arg = bridge)
   agent stop --all                Stop bridge + all agent sessions
-  agent log <name|:nr> [-n N]     Show agent output
-    --text                        All text blocks, no tool calls
-    --full                        Full tmux buffer
+  agent log <name|:nr> [-n N]     Show agent output (default: last 3 turns from jsonl)
+    -n N                          Number of turns (jsonl) or lines (--tmux)
     -p <pane>                     Target pane
+    --since T                     jsonl: only turns at/after T (ISO or '30min')
+    --grep PAT                    jsonl: only turns matching regex PAT (case-insensitive)
+    --tmux [-s N]                 Raw tmux capture, scrollback depth N (default 200)
+    --full                        Both jsonl history AND current tmux state
+    --text                        [legacy] Filtered tmux extract (pre-jsonl default)
   agent wait <name|:nr> [-t S]    Wait until agent is ready
   agent select <name|:nr> <N>     Select menu option N
   agent esc <name|:nr>            Send Escape (cancel/interrupt)
@@ -481,7 +594,15 @@ Socket: /tmp/openclaw-claude.sock`);
 const FLAG_SPECS = {
   send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean" },
   wait: { p: "number", t: "number", a: "boolean" },
-  log: { n: "number", p: "number", full: "boolean", f: "boolean", text: "boolean", t: "boolean" },
+  log: {
+    n: "number", p: "number",
+    full: "boolean", f: "boolean",        // full = jsonl + tmux combined
+    text: "boolean", t: "boolean",        // text = legacy filtered tmux extract
+    tmux: "boolean",                      // tmux = raw capture, opt-in
+    s: "number",                          // scrollback depth for --tmux (default 200)
+    since: "string",                      // jsonl: filter by ISO or relative ("30min")
+    grep: "string",                       // jsonl: regex filter over prompt + items
+  },
   ps: { n: "number" },
   top: { n: "number", sort: "string" },
   compact: { dry: "boolean", force: "boolean", "min-tokens": "number" },
