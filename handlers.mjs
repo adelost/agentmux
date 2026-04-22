@@ -4,8 +4,9 @@
 import { splitMessage, parsePane, parseCommand, parseUseArg, extractImageMarkers, validateImagePath } from "./lib.mjs";
 import { readFileSync, unlinkSync, statSync } from "fs";
 import { executeSync } from "./core/sync-discord.mjs";
-import { countTurnsSince, panePathFor } from "./core/jsonl-reader.mjs";
+import { countTurnsSince, panePathFor, readLastTurns } from "./core/jsonl-reader.mjs";
 import { checkLoopGuard, loopGuardKey, formatLoopGuardWarning, readLoopGuardConfig } from "./core/loop-guard.mjs";
+import { formatCatchupPreview } from "./core/catchup-format.mjs";
 
 function cleanupTmpFiles(files) {
   for (const f of files) {
@@ -601,11 +602,37 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       const lastTs = mirrorTimes[msg.channelId] || null;
       const paneDir = panePathFor({ dir: mapping.dir }, pane);
       const result = countTurnsSince(paneDir, lastTs);
-      const line = renderCatchupLine(result);
-      if (!line) return;
-      await msg.send(line); // msg.send stamps via onSent → count resets for next msg
+      const countLine = renderCatchupLine(result);
+      if (!countLine) return;
+
+      // Append up to 3 preview lines so the reader sees what they missed
+      // without having to run amux log. Previews are best-effort — if the
+      // jsonl read fails for any reason, we still post the count line.
+      const previewLines = collectCatchupPreviewLines(paneDir, lastTs, mapping.name);
+      const body = previewLines.length ? `${countLine}\n${previewLines.join("\n")}` : countLine;
+
+      await msg.send(body); // msg.send stamps via onSent → count resets for next msg
     } catch (err) {
       console.warn(`catchup notice failed: ${err.message}`);
+    }
+  }
+
+  /** Read recent turns and format them into preview lines. Wrapped in its
+   *  own try so a preview failure never prevents the count-line from being
+   *  posted — the count is more valuable than the preview. */
+  function collectCatchupPreviewLines(paneDir, lastTs, agentName) {
+    try {
+      const since = lastTs ? new Date(lastTs) : null;
+      const validSince = since && !Number.isNaN(since.getTime()) ? since : null;
+      // Limit is generous (10) because previews are drawn from "turns since
+      // lastTs" and we want at least 3 readable turns post-filter. The
+      // formatter itself caps output at 3 lines.
+      const result = readLastTurns(paneDir, { since: validSince, limit: 10 });
+      if (!result || !result.turns.length) return [];
+      return formatCatchupPreview(result.turns, { agentName: agentName || "agent" });
+    } catch (err) {
+      console.warn(`catchup preview failed: ${err.message}`);
+      return [];
     }
   }
 
