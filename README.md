@@ -367,6 +367,24 @@ line of each turn (code fences collapsed to `[code]`, long text trimmed
 to ~80 chars). Tool-only turns are skipped so intermediate tool chatter
 doesn't crowd the preview.
 
+### Sender auto-metadata (orchestrator → pane)
+
+When you invoke `amux <agent> -p N "brief"` from inside a tmux session,
+the receiver pane sees a `[from <session>:<window>]` header prepended
+automatically, so it knows who briefed it:
+
+```
+[from claw:0]
+
+run the full test suite
+```
+
+Detected via `$TMUX` + `tmux display -p '#S'` / `#I`. Invisible when the
+caller is a raw terminal, Discord bot, or cron job (no TMUX env). Opt
+out per-call with `--no-meta` when the header would be noise (e.g.
+plain ack pings). Discord mirror carries the same header so channel
+watchers see which pane originated each brief.
+
 Binds to `127.0.0.1` by default to avoid exposure before you're ready.
 Flip to your Tailscale IP (e.g. `100.x.y.z`) when you want the phone to
 reach it. For public access later, put it behind a Cloudflare Tunnel
