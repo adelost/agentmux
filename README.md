@@ -350,6 +350,23 @@ used for Discord attachments, and mirrored to the Discord channel bound
 to the pane (if any) with a `[voice-pwa]` source tag — so anyone watching
 the channel sees what came in from the phone.
 
+### Catch-up notice (stale channels)
+
+When you return to a Discord channel that's bound to a pane and the pane
+has seen activity since you last saw the channel, the bridge prepends a
+short notice to your incoming message with the count plus the 3 most
+recent turns:
+
+> ℹ 10 turns since your last Discord sync (latest: 16:58)
+> • 17:02 you: kör testen igen
+> • 17:15 claw: All 560 tests passed
+> • 18:30 you: commit och push
+
+Count is capped at 50+ for very stale channels. Previews show the first
+line of each turn (code fences collapsed to `[code]`, long text trimmed
+to ~80 chars). Tool-only turns are skipped so intermediate tool chatter
+doesn't crowd the preview.
+
 Binds to `127.0.0.1` by default to avoid exposure before you're ready.
 Flip to your Tailscale IP (e.g. `100.x.y.z`) when you want the phone to
 reach it. For public access later, put it behind a Cloudflare Tunnel
