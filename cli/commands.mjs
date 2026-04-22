@@ -12,9 +12,10 @@ import { extractText, extractLastTurn, classifyLines, extractSegments } from "..
 import { stripAnsi, esc, extractActivity, formatDuration } from "../lib.mjs";
 import { getContextFromPane } from "../core/context.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor } from "../core/jsonl-reader.mjs";
+import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
 import { regenerateAgentsYaml } from "../sync.mjs";
 import yaml from "js-yaml";
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import { runOneshot, showRunLog } from "./run.mjs";
 import { executePlan, showPlanLog } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
@@ -163,10 +164,17 @@ async function cmdStopAll(ctx) {
 async function cmdSend(name, prompt, flags, ctx) {
   saveLast(ctx.lastFile, name);
   const pane = flags.p || 0;
-  // Goes through sendToPane so Discord-bound panes mirror automatically.
-  // The CLI-initiated send has no source tag — it should look indistinguishable
-  // from what the user would've typed in the panel directly.
-  await sendToPane(ctx, name, pane, prompt);
+
+  // Auto-prepend [from <session>:<window>] when invoker is inside tmux,
+  // so receiver panes know which orchestrator briefed them. Invisible
+  // when called from raw terminal, Discord bot, or cron (no TMUX env).
+  // Opt-out with --no-meta for cases where header is noise (e.g. plain
+  // ack pings between panes).
+  const exec = (cmd) => execSync(cmd, { encoding: "utf8", timeout: 2000 });
+  const sender = flags["no-meta"] ? null : detectSenderFromEnv(process.env, exec);
+  const finalPrompt = prependSenderHeader(prompt, sender);
+
+  await sendToPane(ctx, name, pane, finalPrompt);
   if (!flags.q) console.log(`Sent to '${name}' (pane ${pane}): ${truncate(prompt)}`);
 }
 
@@ -918,7 +926,7 @@ Socket: /tmp/openclaw-claude.sock`);
 // --- Dispatch ---
 
 const FLAG_SPECS = {
-  send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean" },
+  send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "no-meta": "boolean" },
   wait: { p: "number", t: "number", a: "boolean" },
   log: {
     n: "number", p: "number",
