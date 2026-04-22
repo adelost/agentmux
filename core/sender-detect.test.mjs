@@ -8,17 +8,46 @@ feature("detectSenderFromEnv", () => {
     then: ["returns null", (result) => expect(result).toBeNull()],
   });
 
-  unit("returns session:windowIdx when in tmux", {
-    given: ["TMUX set + tmux returns claw session + window 2", () => ({
+  unit("returns session:paneIdx when in tmux with base-index 0", {
+    given: ["TMUX set + base-index 0 + window 2", () => ({
       env: { TMUX: "/tmp/sock,1234,0" },
       exec: (cmd) => {
         if (cmd.includes("#S")) return "claw\n";
         if (cmd.includes("#I")) return "2\n";
+        if (cmd.includes("base-index")) return "base-index 0\n";
         return "";
       },
     })],
     when: ["detecting sender", ({ env, exec }) => detectSenderFromEnv(env, exec)],
-    then: ["returns claw:2", (result) => expect(result).toBe("claw:2")],
+    then: ["returns claw:2 (window 2 - base 0)", (result) => expect(result).toBe("claw:2")],
+  });
+
+  unit("normalizes window index using base-index 1 → 0-based agentmux pane", {
+    given: ["tmux base-index 1, I'm in window 1 (= agentmux p0)", () => ({
+      env: { TMUX: "/tmp/sock,1234,0" },
+      exec: (cmd) => {
+        if (cmd.includes("#S")) return "claw\n";
+        if (cmd.includes("#I")) return "1\n";
+        if (cmd.includes("base-index")) return "base-index 1\n";
+        return "";
+      },
+    })],
+    when: ["detecting sender", ({ env, exec }) => detectSenderFromEnv(env, exec)],
+    then: ["returns claw:0 (matches amux ps addressing)", (result) => expect(result).toBe("claw:0")],
+  });
+
+  unit("defaults base-index to 0 when tmux show fails", {
+    given: ["base-index lookup throws; window 3", () => ({
+      env: { TMUX: "/tmp/sock,1234,0" },
+      exec: (cmd) => {
+        if (cmd.includes("#S")) return "claw\n";
+        if (cmd.includes("#I")) return "3\n";
+        if (cmd.includes("base-index")) throw new Error("no such option");
+        return "";
+      },
+    })],
+    when: ["detecting sender", ({ env, exec }) => detectSenderFromEnv(env, exec)],
+    then: ["returns claw:3 (safe fallback, no adjustment)", (result) => expect(result).toBe("claw:3")],
   });
 
   unit("returns null when tmux command throws", {
@@ -39,10 +68,15 @@ feature("detectSenderFromEnv", () => {
     then: ["returns null", (result) => expect(result).toBeNull()],
   });
 
-  unit("handles pane index 0", {
-    given: ["orchestrator in pane 0", () => ({
+  unit("handles pane index 0 with base-index 0", {
+    given: ["orchestrator in window 0, base-index 0", () => ({
       env: { TMUX: "/tmp/sock,1234,0" },
-      exec: (cmd) => cmd.includes("#S") ? "claw\n" : "0\n",
+      exec: (cmd) => {
+        if (cmd.includes("#S")) return "claw\n";
+        if (cmd.includes("#I")) return "0\n";
+        if (cmd.includes("base-index")) return "base-index 0\n";
+        return "";
+      },
     })],
     when: ["detecting sender", ({ env, exec }) => detectSenderFromEnv(env, exec)],
     then: ["returns claw:0", (result) => expect(result).toBe("claw:0")],
@@ -51,10 +85,28 @@ feature("detectSenderFromEnv", () => {
   unit("trims whitespace from tmux output", {
     given: ["exec returns padded strings", () => ({
       env: { TMUX: "/tmp/sock,1234,0" },
-      exec: (cmd) => cmd.includes("#S") ? "  api  \n" : "  3  \n",
+      exec: (cmd) => {
+        if (cmd.includes("#S")) return "  api  \n";
+        if (cmd.includes("#I")) return "  4  \n";
+        if (cmd.includes("base-index")) return "base-index 1\n";
+        return "";
+      },
     })],
     when: ["detecting sender", ({ env, exec }) => detectSenderFromEnv(env, exec)],
-    then: ["returns api:3 with no whitespace", (result) => expect(result).toBe("api:3")],
+    then: ["returns api:3 (4 - base 1, whitespace trimmed)", (result) => expect(result).toBe("api:3")],
+  });
+
+  unit("returns null when window index is non-numeric", {
+    given: ["exec returns garbage for window index", () => ({
+      env: { TMUX: "/tmp/sock,1234,0" },
+      exec: (cmd) => {
+        if (cmd.includes("#S")) return "claw\n";
+        if (cmd.includes("#I")) return "not-a-number\n";
+        return "";
+      },
+    })],
+    when: ["detecting sender", ({ env, exec }) => detectSenderFromEnv(env, exec)],
+    then: ["returns null (safe fallback)", (result) => expect(result).toBeNull()],
   });
 });
 
