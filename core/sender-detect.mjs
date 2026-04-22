@@ -4,10 +4,14 @@
 // as pure functions so tests don't need a live tmux.
 
 /**
- * Detect sender from tmux env. Returns "session:paneIndex" or null, where
- * paneIndex is normalized to 0-based agentmux addressing (tmux's window
- * index minus its base-index, since agentmux surfaces panes 0..N-1 in ps
- * while tmux defaults to base-index 1 on most configs).
+ * Detect sender from tmux env. Returns "session:paneIndex" or null, matching
+ * agentmux's addressing in `amux ps` (p0..pN). Agentmux lays each agent out
+ * as a single tmux window with N panes, so we read the pane index via `#P`
+ * (aka pane_index), not `#I` (window index which is always 1 in this model).
+ *
+ * Pane indices are 0-based by default in tmux and agentmux alike — no
+ * base-index adjustment needed for panes. (Window base-index matters for
+ * multi-window setups, but agentmux doesn't use those.)
  *
  * execFn is injected so tests can mock. In production, pass a function
  * that runs shell commands synchronously and returns stdout.
@@ -16,24 +20,12 @@ export function detectSenderFromEnv(env, execFn) {
   if (!env.TMUX) return null;
   try {
     const session = execFn("tmux display -p '#S'").trim();
-    const windowIdxRaw = execFn("tmux display -p '#I'").trim();
-    if (!session || !windowIdxRaw) return null;
-    const windowIdx = parseInt(windowIdxRaw, 10);
-    if (!Number.isFinite(windowIdx)) return null;
+    const paneIdxRaw = execFn("tmux display -p '#P'").trim();
+    if (!session || paneIdxRaw === "") return null;
+    const paneIdx = parseInt(paneIdxRaw, 10);
+    if (!Number.isFinite(paneIdx)) return null;
 
-    // base-index may be set globally or per-session; prefer server-global
-    // since agentmux panes all share the same tmux server.
-    let baseIdx = 0;
-    try {
-      const out = execFn("tmux show -g base-index").trim();
-      const parts = out.split(/\s+/);
-      const parsed = parseInt(parts[parts.length - 1], 10);
-      if (Number.isFinite(parsed)) baseIdx = parsed;
-    } catch {
-      // base-index lookup optional; default 0 matches tmux factory default
-    }
-
-    return `${session}:${windowIdx - baseIdx}`;
+    return `${session}:${paneIdx}`;
   } catch {
     return null;
   }
