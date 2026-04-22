@@ -9,6 +9,9 @@ import { createTmuxContext } from "../cli/tmux.mjs";
 import { dispatch } from "../cli/commands.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
+// BRIDGE_DIR = agentmux package root. agentmux.yaml (the user-editable
+// source config) lives here. Tests may override via AGENTMUX_BRIDGE_DIR.
+const BRIDGE_DIR = process.env.AGENTMUX_BRIDGE_DIR || resolve(__dir, "..");
 
 const SOCKET = process.env.TMUX_SOCKET || "/tmp/openclaw-claude.sock";
 const CONFIG_PATH = process.env.AGENT_CONFIG || resolve(process.env.HOME, ".config/agent/agents.yaml");
@@ -21,6 +24,7 @@ const ctx = {
   ...tmuxCtx,
   configPath: CONFIG_PATH,
   lastFile: LAST_FILE,
+  bridgeDir: BRIDGE_DIR,
 };
 
 try {
