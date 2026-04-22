@@ -528,7 +528,7 @@ agents:
     }],
   });
 
-  component("missing labels section = empty labels map", {
+  component("missing labels section = null (signals legacy fallback OK)", {
     given: ["source without labels", () => `
 guild: "12345"
 agents:
@@ -537,7 +537,22 @@ agents:
     panes: 1
 `],
     when: ["parsing", (src) => parseConfig(src)],
-    then: ["labels is empty object", (result) => {
+    then: ["labels is null (distinct from empty {} which is authoritative)", (result) => {
+      expect(result.agents.get("claw").labels).toBeNull();
+    }],
+  });
+
+  component("empty labels block = authoritative empty {}", {
+    given: ["source with empty labels", () => `
+guild: "12345"
+agents:
+  claw:
+    dir: /tmp/claw
+    panes: 1
+    labels: {}
+`],
+    when: ["parsing", (src) => parseConfig(src)],
+    then: ["labels is {} (not null)", (result) => {
       expect(result.agents.get("claw").labels).toEqual({});
     }],
   });

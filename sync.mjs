@@ -24,11 +24,20 @@ export function parseConfig(yamlContent) {
   const agents = new Map();
   for (const [name, config] of Object.entries(doc.agents)) {
     if (!config?.dir) throw new Error(`agentmux.yaml: agent '${name}' needs a 'dir'`);
-    // `labels` is keyed by absolute pane index (0 = first claude, then
-    // service panes after the claude count, then shells). Coerce keys to
-    // numbers so writers can use either numeric or string keys in yaml.
-    const labels = {};
+    // `labels` keyed by absolute pane index (0 = first claude, then
+    // service panes, then shells). Coerce keys to numbers so writers
+    // can use either numeric or string keys in yaml.
+    //
+    // Returns `null` when the source has no labels block at all, so
+    // downstream can distinguish "user hasn't opted into label management
+    // for this agent" (null = fall back to existing agents.yaml) from
+    // "user has opted in but cleared all labels" (empty {} = authoritative
+    // empty). Without this distinction, clearing a label via `amux label
+    // --clear` would resurrect it from the previously-regenerated
+    // agents.yaml on the next regen.
+    let labels = null;
     if (config.labels && typeof config.labels === "object") {
+      labels = {};
       for (const [k, v] of Object.entries(config.labels)) {
         const idx = Number(k);
         if (Number.isInteger(idx) && typeof v === "string" && v.trim()) {
@@ -238,12 +247,19 @@ export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = 
     if (config.layout) entry.layout = config.layout;
 
     // Panes: coding agents first, then services, then shells.
-    // Label resolution: source (agentmux.yaml config.labels) wins. Fallback
-    // to existingYaml's agents.yaml preservation for agents whose source
-    // config predates labels (zero-friction upgrade path).
+    // Label resolution:
+    //   - config.labels === null  → source has no labels block; fall back
+    //                                to existingYaml preservation (legacy
+    //                                upgrade path)
+    //   - config.labels === {...} → source has opted in; authoritative.
+    //                                Missing indices = no label (do NOT
+    //                                resurrect old labels from generated
+    //                                agents.yaml — that would defeat --clear)
     const existingPanes = existingYaml?.[name]?.panes || [];
-    const sourceLabels = config.labels || {};
-    const labelFor = (idx) => sourceLabels[idx] ?? existingPanes[idx]?.label;
+    const sourceLabels = config.labels;
+    const labelFor = sourceLabels !== null && sourceLabels !== undefined
+      ? (idx) => sourceLabels[idx]
+      : (idx) => existingPanes[idx]?.label;
 
     const panes = [];
     let paneIdx = 0;
