@@ -26,6 +26,7 @@ import { createTTS } from "./tts.mjs";
 import { createHandlers } from "./handlers.mjs";
 import { startBot } from "./bot.mjs";
 import { createDiscordChannel } from "./channels/discord.mjs";
+import { createVoicePWA } from "./channels/voice.mjs";
 
 // --- Config ---
 
@@ -51,6 +52,12 @@ const SHELL_PATH = process.env.SHELL_PATH || `${process.env.HOME}/bin:${process.
 const TMUX_SOCKET = process.env.TMUX_SOCKET || "/tmp/agentmux.sock";
 const TTS_VOICE = process.env.TTS_VOICE || "sv-SE-MattiasNeural";
 const STATE_FILE = process.env.STATE_FILE || "/tmp/agentmux-state.json";
+
+// Voice PWA: only starts if VOICE_PWA_TOKEN is set. Default binds to
+// 127.0.0.1 — user opts into tailnet exposure via VOICE_PWA_HOST.
+const VOICE_PWA_TOKEN = process.env.VOICE_PWA_TOKEN;
+const VOICE_PWA_PORT = parseInt(process.env.VOICE_PWA_PORT || "8080");
+const VOICE_PWA_HOST = process.env.VOICE_PWA_HOST || "127.0.0.1";
 
 if (!TOKEN) {
   console.error("Set DISCORD_TOKEN in .env");
@@ -112,3 +119,23 @@ const handlers = createHandlers({
   agentsYamlPath: AGENTS_YAML,
   recorder,
 });
+
+// Voice PWA HTTP endpoint (optional). Mirror sends voice input to the
+// discord channel bound to the pane so channel watchers see what came
+// in via the phone — same source-of-truth principle as sendToPane.
+if (VOICE_PWA_TOKEN) {
+  const voicePwa = createVoicePWA({
+    port: VOICE_PWA_PORT,
+    host: VOICE_PWA_HOST,
+    token: VOICE_PWA_TOKEN,
+    agent,
+    agentsYamlPath: AGENTS_YAML,
+    transcribeScript: process.env.TRANSCRIBE_SCRIPT || resolve(__dir, "bin/transcribe-whisper.sh"),
+    run,
+    ttsVoice: TTS_VOICE,
+    mirror: { send: (channelId, text) => discord.send(channelId, text) },
+  });
+  voicePwa.start()
+    .then(({ url }) => console.log(`voice-pwa | listening at ${url}`))
+    .catch((err) => console.error(`voice-pwa | failed to start: ${err.message}`));
+}

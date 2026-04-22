@@ -255,6 +255,38 @@ behavior. Pane/agent validation is also stricter: out-of-bounds panes and
 names like `claw:0` now error with a helpful message instead of silently
 doing something wrong.
 
+## Voice PWA support
+
+Set `VOICE_PWA_TOKEN` to enable the HTTP endpoint for the in-car PWA:
+
+```bash
+# .env
+VOICE_PWA_TOKEN=$(openssl rand -hex 32)
+# optional: override defaults
+VOICE_PWA_PORT=8080
+VOICE_PWA_HOST=127.0.0.1   # default — local only. Set to your Tailscale IP
+                           # to let your phone in via tailnet.
+```
+
+Endpoints (all authenticate with `Authorization: Bearer <token>`):
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/agents` | list agents + panes + labels |
+| POST | `/api/send/:agent/:pane` | `{text}` or `{audio: base64, lang}` → pane |
+| GET | `/api/events/:agent/:pane` | SSE: status + response when pane goes idle |
+| POST | `/api/tts` | `{text}` → MP3 audio blob (edge-tts) |
+
+Voice input is prefixed with the same `[transcribed voice, …]` disclaimer
+used for Discord attachments, and mirrored to the Discord channel bound
+to the pane (if any) with a `[voice-pwa]` source tag — so anyone watching
+the channel sees what came in from the phone.
+
+Binds to `127.0.0.1` by default to avoid exposure before you're ready.
+Flip to your Tailscale IP (e.g. `100.x.y.z`) when you want the phone to
+reach it. For public access later, put it behind a Cloudflare Tunnel
+without code changes.
+
 ## Environment Variables
 
 All optional (set in `.env`):
