@@ -114,4 +114,49 @@ feature("normalizeDiscordMessage", () => {
       expect(msg.channel.sendTyping).toHaveBeenCalled();
     }],
   });
+
+  unit("onSent fires after reply, with channelId", {
+    given: ["message + onSent spy", () => ({
+      msg: fakeDiscordMsg(),
+      onSent: vi.fn(),
+    })],
+    when: ["replying via normalized msg", async ({ msg, onSent }) => {
+      const norm = normalizeDiscordMessage(msg, { onSent });
+      await norm.reply("hi");
+      return { msg, onSent };
+    }],
+    then: ["onSent called with the channelId", ({ onSent }) => {
+      expect(onSent).toHaveBeenCalledWith("ch-123");
+      expect(onSent).toHaveBeenCalledTimes(1);
+    }],
+  });
+
+  unit("onSent fires after send, with channelId", {
+    given: ["message + onSent spy", () => ({
+      msg: fakeDiscordMsg(),
+      onSent: vi.fn(),
+    })],
+    when: ["sending via normalized msg", async ({ msg, onSent }) => {
+      await normalizeDiscordMessage(msg, { onSent }).send("progress");
+      return onSent;
+    }],
+    then: ["onSent called with the channelId", (onSent) => {
+      expect(onSent).toHaveBeenCalledWith("ch-123");
+    }],
+  });
+
+  unit("onSent failure doesn't break delivery", {
+    given: ["message + onSent that throws", () => ({
+      msg: fakeDiscordMsg(),
+      onSent: vi.fn(() => { throw new Error("boom"); }),
+    })],
+    when: ["replying", async ({ msg, onSent }) => {
+      const norm = normalizeDiscordMessage(msg, { onSent });
+      await norm.reply("still goes through");
+      return msg;
+    }],
+    then: ["original msg.reply still called, no throw propagates", (msg) => {
+      expect(msg.reply).toHaveBeenCalledWith("still goes through");
+    }],
+  });
 });

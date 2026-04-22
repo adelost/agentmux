@@ -6,11 +6,16 @@ import { normalizeDiscordMessage } from "./normalize.mjs";
 
 /**
  * Create a Discord channel.
- * @param {{ token: string }} config
+ * @param {{ token: string, onSent?: (channelId: string) => void }} config
+ *   onSent fires after any successful outbound message (both from normalized
+ *   msg.reply/send and from direct send(channelId, text)). The bridge uses
+ *   this to stamp channel_last_mirror_ts in state, enabling the catch-up
+ *   notice for stale channels.
  * @returns {import('./channel.mjs').Channel}
  */
-export function createDiscordChannel({ token }) {
+export function createDiscordChannel({ token, onSent }) {
   let handler = null;
+  const stamp = (channelId) => { if (onSent) { try { onSent(channelId); } catch {} } };
   const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
   });
@@ -24,7 +29,7 @@ export function createDiscordChannel({ token }) {
 
     start() {
       client.on(Events.MessageCreate, (msg) => {
-        if (handler) handler(normalizeDiscordMessage(msg));
+        if (handler) handler(normalizeDiscordMessage(msg, { onSent }));
       });
       return new Promise((resolve) => {
         client.once(Events.ClientReady, (c) => {
@@ -36,7 +41,10 @@ export function createDiscordChannel({ token }) {
 
     async send(channelId, text) {
       const ch = await client.channels.fetch(channelId);
-      if (ch) await ch.send(text);
+      if (ch) {
+        await ch.send(text);
+        stamp(channelId);
+      }
     },
 
     async getGuild(guildId) {

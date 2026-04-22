@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, copyFileSync, rmSync, writeFileSync, utimesSync
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
-import { extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl, isPromptInJsonl, readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor } from "../core/jsonl-reader.mjs";
+import { extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl, isPromptInJsonl, readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, countTurnsSince } from "../core/jsonl-reader.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const fixtureFile = (name) => join(__dir, "fixtures/jsonl", name);
@@ -684,6 +684,161 @@ feature("readAllTurnsAcrossPanes: merges events from multiple panes in timestamp
     then: ["only pane 0 rows returned", (rows, { cleanup }) => {
       expect(rows.length).toBe(4);
       expect(rows.every((r) => r.pane === 0)).toBe(true);
+      cleanup();
+    }],
+  });
+});
+
+// --- countTurnsSince (Discord catch-up notice) ---------------------------
+
+feature("countTurnsSince: counts user turns after a cutoff", () => {
+  // Build a jsonl fixture programmatically with N user turns at known times.
+  function buildTurnsFixture(turns) {
+    const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-catchup-test-"));
+    const origHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+    const paneDir = "/fake/catchup/dir";
+    const encoded = paneDir.replace(/[\/\.]/g, "-");
+    const projectDir = join(fakeHome, ".claude", "projects", encoded);
+    mkdirSync(projectDir, { recursive: true });
+    const lines = turns.map((t, i) => JSON.stringify({
+      type: "user",
+      timestamp: t.timestamp,
+      message: { role: "user", content: t.content || `turn ${i}` },
+    }));
+    writeFileSync(join(projectDir, "session.jsonl"), lines.join("\n") + "\n");
+    return {
+      paneDir,
+      cleanup: () => {
+        process.env.HOME = origHome;
+        rmSync(fakeHome, { recursive: true, force: true });
+      },
+    };
+  }
+
+  unit("cutoff in the middle: only turns after cutoff counted", {
+    given: ["5 turns at 10:00..10:04, cutoff at 10:02", () => buildTurnsFixture([
+      { timestamp: "2026-04-22T10:00:00Z" },
+      { timestamp: "2026-04-22T10:01:00Z" },
+      { timestamp: "2026-04-22T10:02:00Z" },
+      { timestamp: "2026-04-22T10:03:00Z" },
+      { timestamp: "2026-04-22T10:04:00Z" },
+    ])],
+    when: ["counting since 10:02", ({ paneDir }) =>
+      countTurnsSince(paneDir, "2026-04-22T10:02:00Z")],
+    then: ["2 turns after cutoff, latest is 10:04", (r, { cleanup }) => {
+      expect(r).not.toBeNull();
+      expect(r.count).toBe(2);
+      expect(r.latest).toBe("2026-04-22T10:04:00Z");
+      expect(r.capped).toBe(false);
+      cleanup();
+    }],
+  });
+
+  unit("null cutoff: counts all turns", {
+    given: ["3 turns", () => buildTurnsFixture([
+      { timestamp: "2026-04-22T10:00:00Z" },
+      { timestamp: "2026-04-22T10:01:00Z" },
+      { timestamp: "2026-04-22T10:02:00Z" },
+    ])],
+    when: ["counting with null cutoff", ({ paneDir }) => countTurnsSince(paneDir, null)],
+    then: ["3 turns", (r, { cleanup }) => {
+      expect(r.count).toBe(3);
+      cleanup();
+    }],
+  });
+
+  unit("count = 0 when nothing after cutoff", {
+    given: ["2 turns, cutoff after latest", () => buildTurnsFixture([
+      { timestamp: "2026-04-22T10:00:00Z" },
+      { timestamp: "2026-04-22T10:01:00Z" },
+    ])],
+    when: ["counting since 11:00", ({ paneDir }) =>
+      countTurnsSince(paneDir, "2026-04-22T11:00:00Z")],
+    then: ["count is 0 (no notice should fire)", (r, { cleanup }) => {
+      expect(r.count).toBe(0);
+      expect(r.capped).toBe(false);
+      cleanup();
+    }],
+  });
+
+  unit("cap at 51 when lots of new turns", {
+    given: ["60 turns, cutoff before all", () => buildTurnsFixture(
+      Array.from({ length: 60 }, (_, i) => ({
+        timestamp: new Date(Date.parse("2026-04-22T10:00:00Z") + i * 60_000).toISOString(),
+      })),
+    )],
+    when: ["counting since 09:00 (before all)", ({ paneDir }) =>
+      countTurnsSince(paneDir, "2026-04-22T09:00:00Z")],
+    then: ["count capped at 51 with capped=true flag", (r, { cleanup }) => {
+      expect(r.count).toBe(51);
+      expect(r.capped).toBe(true);
+      cleanup();
+    }],
+  });
+
+  unit("no jsonl dir: returns null (silent skip)", {
+    when: ["counting a paneDir with no project store", () => countTurnsSince("/not/a/real/path", null)],
+    then: ["null", (r) => expect(r).toBeNull()],
+  });
+
+  unit("malformed lines mixed in don't break counting", {
+    given: ["fixture with 3 user turns + a malformed line in the middle", () => {
+      const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-catchup-mal-"));
+      const origHome = process.env.HOME;
+      process.env.HOME = fakeHome;
+      const paneDir = "/fake/mal/dir";
+      const encoded = paneDir.replace(/[\/\.]/g, "-");
+      const projectDir = join(fakeHome, ".claude", "projects", encoded);
+      mkdirSync(projectDir, { recursive: true });
+      const lines = [
+        JSON.stringify({ type: "user", timestamp: "2026-04-22T10:00:00Z", message: { role: "user", content: "a" } }),
+        "{ this is broken }",
+        JSON.stringify({ type: "user", timestamp: "2026-04-22T10:01:00Z", message: { role: "user", content: "b" } }),
+        JSON.stringify({ type: "user", timestamp: "2026-04-22T10:02:00Z", message: { role: "user", content: "c" } }),
+      ];
+      writeFileSync(join(projectDir, "session.jsonl"), lines.join("\n") + "\n");
+      return {
+        paneDir,
+        cleanup: () => {
+          process.env.HOME = origHome;
+          rmSync(fakeHome, { recursive: true, force: true });
+        },
+      };
+    }],
+    when: ["counting with null cutoff", ({ paneDir }) => countTurnsSince(paneDir, null)],
+    then: ["3 valid turns counted, malformed silently skipped", (r, { cleanup }) => {
+      expect(r.count).toBe(3);
+      cleanup();
+    }],
+  });
+
+  unit("tool_result user events are NOT counted as turns", {
+    given: ["fixture with user-prompt + tool_result (array content) + user-prompt", () => {
+      const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-catchup-tr-"));
+      const origHome = process.env.HOME;
+      process.env.HOME = fakeHome;
+      const paneDir = "/fake/tr/dir";
+      const encoded = paneDir.replace(/[\/\.]/g, "-");
+      const projectDir = join(fakeHome, ".claude", "projects", encoded);
+      mkdirSync(projectDir, { recursive: true });
+      const lines = [
+        JSON.stringify({ type: "user", timestamp: "2026-04-22T10:00:00Z", message: { role: "user", content: "hi" } }),
+        JSON.stringify({ type: "user", timestamp: "2026-04-22T10:00:01Z", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "x" }] } }),
+        JSON.stringify({ type: "user", timestamp: "2026-04-22T10:01:00Z", message: { role: "user", content: "hello again" } }),
+      ];
+      writeFileSync(join(projectDir, "session.jsonl"), lines.join("\n") + "\n");
+      return {
+        paneDir,
+        cleanup: () => {
+          process.env.HOME = origHome;
+          rmSync(fakeHome, { recursive: true, force: true });
+        },
+      };
+    }],
+    when: ["counting", ({ paneDir }) => countTurnsSince(paneDir, null)],
+    then: ["2 real turns, tool_result skipped", (r, { cleanup }) => {
+      expect(r.count).toBe(2);
       cleanup();
     }],
   });
