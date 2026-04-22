@@ -148,7 +148,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     try {
       const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_in_mode}'`);
       if (stdout.trim() === "1") {
-        await tmux(`send-keys -t '${esc(target)}' q`);
+        // -X dispatches a tmux in-mode command; `cancel` exits copy/view/choose
+        // mode without forwarding any keystroke to the underlying process. A
+        // raw `q` keystroke would leak to Claude if the pane exited copy-mode
+        // in the race window between the check and the send (then literal "q"
+        // ends up typed into Claude's input box). -X cancel is race-free and
+        // doesn't depend on tmux mode-keys (vi vs emacs) bindings.
+        await tmux(`send-keys -X -t '${esc(target)}' cancel`);
         await wait(300);
       }
     } catch (err) {
