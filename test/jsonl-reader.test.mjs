@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, copyFileSync, rmSync, writeFileSync, utimesSync
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
-import { extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl, isPromptInJsonl } from "../core/jsonl-reader.mjs";
+import { extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl, isPromptInJsonl, readLastTurns, parseSinceArg } from "../core/jsonl-reader.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const fixtureFile = (name) => join(__dir, "fixtures/jsonl", name);
@@ -431,5 +431,112 @@ feature("formatJsonlToolCall", () => {
       expect(r).toContain("Custom");
       expect(r).toContain("foo=bar");
     }],
+  });
+});
+
+// --- readLastTurns (multi-turn history reader) ----------------------------
+
+feature("readLastTurns: groups events into turns", () => {
+  unit("multi-turn fixture yields both turns with user prompt + assistant text", {
+    given: ["multi-turn fixture", () => setupFakeProject("multi-turn.jsonl")],
+    when: ["reading", ({ paneDir }) => readLastTurns(paneDir, { limit: 10 })],
+    then: ["2 turns in chronological order", (r, { cleanup }) => {
+      expect(r).not.toBeNull();
+      expect(r.turns.length).toBe(2);
+      expect(r.turns[0].userPrompt).toBe("hello");
+      expect(r.turns[0].items).toEqual([{ type: "text", content: "Hi there." }]);
+      expect(r.turns[1].userPrompt).toBe("what time is it?");
+      expect(r.turns[1].items).toEqual([{ type: "text", content: "I don't know the time." }]);
+      expect(r.turns[0].timestamp).toBe("2026-04-08T20:00:00Z");
+      cleanup();
+    }],
+  });
+
+  unit("limit: only last N turns kept", {
+    given: ["multi-turn fixture", () => setupFakeProject("multi-turn.jsonl")],
+    when: ["reading with limit=1", ({ paneDir }) => readLastTurns(paneDir, { limit: 1 })],
+    then: ["only the most recent turn returned", (r, { cleanup }) => {
+      expect(r.turns.length).toBe(1);
+      expect(r.turns[0].userPrompt).toBe("what time is it?");
+      cleanup();
+    }],
+  });
+
+  unit("since filter: drops turns before threshold", {
+    given: ["multi-turn fixture", () => setupFakeProject("multi-turn.jsonl")],
+    when: ["reading with since=20:00:02Z", ({ paneDir }) =>
+      readLastTurns(paneDir, { limit: 10, since: new Date("2026-04-08T20:00:02Z") })],
+    then: ["only turn >= threshold", (r, { cleanup }) => {
+      expect(r.turns.length).toBe(1);
+      expect(r.turns[0].userPrompt).toBe("what time is it?");
+      cleanup();
+    }],
+  });
+
+  unit("grep filter: keeps only turns where pattern matches prompt or content", {
+    given: ["multi-turn fixture", () => setupFakeProject("multi-turn.jsonl")],
+    when: ["grepping /time/i", ({ paneDir }) =>
+      readLastTurns(paneDir, { limit: 10, grep: /time/i })],
+    then: ["only turn containing 'time'", (r, { cleanup }) => {
+      expect(r.turns.length).toBe(1);
+      expect(r.turns[0].userPrompt).toBe("what time is it?");
+      cleanup();
+    }],
+  });
+
+  unit("tools captured as turn items", {
+    given: ["with-tools fixture", () => setupFakeProject("with-tools.jsonl")],
+    when: ["reading", ({ paneDir }) => readLastTurns(paneDir, { limit: 10 })],
+    then: ["turn has text + tool items", (r, { cleanup }) => {
+      expect(r).not.toBeNull();
+      expect(r.turns.length).toBeGreaterThanOrEqual(1);
+      const hasToolItem = r.turns.some((t) => t.items.some((i) => i.type === "tool"));
+      expect(hasToolItem).toBe(true);
+      cleanup();
+    }],
+  });
+
+  unit("no jsonl: returns null (caller falls back)", {
+    when: ["reading a paneDir with no project store", () => readLastTurns("/definitely/not/a/real/dir")],
+    then: ["null", (r) => expect(r).toBeNull()],
+  });
+});
+
+feature("parseSinceArg: ISO and relative forms", () => {
+  unit("ISO timestamp parses", {
+    when: ["parsing ISO", () => parseSinceArg("2026-04-22T10:00:00Z")],
+    then: ["returns a Date equal to 2026-04-22T10:00:00Z", (r) => {
+      expect(r).toBeInstanceOf(Date);
+      expect(r.toISOString()).toBe("2026-04-22T10:00:00.000Z");
+    }],
+  });
+
+  unit("relative '30min' gives a Date 30 min ago", {
+    when: ["parsing 30min", () => parseSinceArg("30min")],
+    then: ["close to now - 30min", (r) => {
+      expect(r).toBeInstanceOf(Date);
+      const diffMs = Date.now() - r.getTime();
+      expect(diffMs).toBeGreaterThan(29 * 60_000);
+      expect(diffMs).toBeLessThan(31 * 60_000);
+    }],
+  });
+
+  unit("relative '2h' works", {
+    when: ["parsing 2h", () => parseSinceArg("2h")],
+    then: ["2 hours ago", (r) => {
+      const diffMs = Date.now() - r.getTime();
+      expect(diffMs).toBeGreaterThan(119 * 60_000);
+      expect(diffMs).toBeLessThan(121 * 60_000);
+    }],
+  });
+
+  unit("invalid string returns null", {
+    when: ["parsing garbage", () => parseSinceArg("not-a-time")],
+    then: ["null", (r) => expect(r).toBeNull()],
+  });
+
+  unit("empty string returns null", {
+    when: ["parsing empty", () => parseSinceArg("")],
+    then: ["null", (r) => expect(r).toBeNull()],
   });
 });
