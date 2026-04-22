@@ -416,3 +416,119 @@ export function extractFromJsonl(paneDir, promptText = null) {
 
   return { items: merged, raw, turn: raw, source: "jsonl", jsonlFile: jsonl };
 }
+
+// ---------------------------------------------------------------------------
+// Multi-turn reader for `amux log` and similar history-display commands.
+// Unlike extractFromJsonl (single last turn, optionally matched to a prompt),
+// this walks all turns in the latest jsonl file and returns structured turns.
+
+/** Parse a --since argument. Accepts ISO ("2026-04-22T10:00:00Z") or
+ *  relative forms ("30min", "2h", "1d"). Returns a Date, or null on parse
+ *  failure (caller treats null as "no filter"). */
+export function parseSinceArg(arg) {
+  if (!arg || typeof arg !== "string") return null;
+  // Try ISO first
+  const iso = new Date(arg);
+  if (!Number.isNaN(iso.getTime())) return iso;
+  // Relative: number + unit
+  const m = arg.match(/^(\d+(?:\.\d+)?)\s*(s|sec|m|min|h|hr|d|day)s?$/i);
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  const unit = m[2].toLowerCase();
+  const ms = unit.startsWith("s") ? n * 1000
+    : unit.startsWith("m") && unit !== "h" ? n * 60_000
+    : unit.startsWith("h") ? n * 3_600_000
+    : unit.startsWith("d") ? n * 86_400_000
+    : 0;
+  if (ms === 0) return null;
+  return new Date(Date.now() - ms);
+}
+
+/**
+ * Group events into turns. A turn starts at a type:"user" event with string
+ * content (not a tool_result) and ends at the next such event. Assistant
+ * and tool_result events between go into the turn.
+ */
+function groupIntoTurns(events) {
+  const turns = [];
+  let current = null;
+  for (const e of events) {
+    if (e.type === "user" && typeof e.message?.content === "string") {
+      if (current) turns.push(current);
+      current = {
+        timestamp: e.timestamp || null,
+        userPrompt: e.message.content,
+        items: [],
+      };
+      continue;
+    }
+    if (!current) continue;
+    if (e.type === "assistant" && Array.isArray(e.message?.content)) {
+      for (const block of e.message.content) {
+        if (block.type === "text" && typeof block.text === "string") {
+          const text = block.text.trim();
+          if (text) current.items.push({ type: "text", content: text });
+        } else if (block.type === "tool_use") {
+          current.items.push({ type: "tool", content: formatJsonlToolCall(block) });
+        }
+      }
+    }
+  }
+  if (current) turns.push(current);
+
+  // Merge adjacent text items within each turn (same reason as extractFromJsonl)
+  for (const turn of turns) {
+    const merged = [];
+    for (const item of turn.items) {
+      const last = merged[merged.length - 1];
+      if (last && last.type === "text" && item.type === "text") {
+        last.content = last.content + "\n\n" + item.content;
+      } else {
+        merged.push({ ...item });
+      }
+    }
+    turn.items = merged;
+  }
+  return turns;
+}
+
+/**
+ * Read the last N turns from the most-recent jsonl in a paneDir.
+ *
+ * @param {string} paneDir - The pane's cwd
+ * @param {object} [opts]
+ * @param {number} [opts.limit=3]  - Max turns to return (most recent first-in-order)
+ * @param {Date|null} [opts.since] - Only turns at or after this time
+ * @param {RegExp|null} [opts.grep] - Only turns whose userPrompt OR any item matches
+ * @returns {{ turns: Array<object>, jsonlFile: string } | null}
+ *   null when paneDir has no jsonl store (caller should fall back to tmux).
+ */
+export function readLastTurns(paneDir, opts = {}) {
+  const { limit = 3, since = null, grep = null } = opts;
+  const projectDir = join(CLAUDE_PROJECTS_DIR(), encodePath(paneDir));
+  if (!existsSync(projectDir)) return null;
+  const files = listJsonlFiles(projectDir);
+  if (files.length === 0) return null;
+
+  const events = parseJsonl(files[0].path);
+  let turns = groupIntoTurns(events);
+
+  if (since) {
+    turns = turns.filter((t) => {
+      if (!t.timestamp) return true; // keep if no timestamp (shouldn't happen but be lenient)
+      const d = new Date(t.timestamp);
+      return !Number.isNaN(d.getTime()) && d >= since;
+    });
+  }
+
+  if (grep) {
+    turns = turns.filter((t) => {
+      if (grep.test(t.userPrompt)) return true;
+      return t.items.some((i) => grep.test(i.content));
+    });
+  }
+
+  if (turns.length > limit) turns = turns.slice(-limit);
+
+  return { turns, jsonlFile: files[0].path };
+}
