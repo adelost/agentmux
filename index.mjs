@@ -27,6 +27,8 @@ import { createHandlers } from "./handlers.mjs";
 import { startBot } from "./bot.mjs";
 import { createDiscordChannel } from "./channels/discord.mjs";
 import { createVoicePWA } from "./channels/voice.mjs";
+import { createAutoCompact } from "./channels/auto-compact.mjs";
+import { parseAutoCompactConfig } from "./core/auto-compact.mjs";
 
 // --- Config ---
 
@@ -132,6 +134,19 @@ const handlers = createHandlers({
 // Voice PWA HTTP endpoint (optional). Mirror sends voice input to the
 // discord channel bound to the pane so channel watchers see what came
 // in via the phone — same source-of-truth principle as sendToPane.
+// Auto-compact: background poll that warns + fires /compact on idle
+// high-context panes. Defaults are tuned for "user left, agent idling" —
+// see core/auto-compact.mjs for rationale.
+const autoCompactConfig = parseAutoCompactConfig();
+const autoCompact = createAutoCompact({
+  agent,
+  agentsYamlPath: AGENTS_YAML,
+  discord,
+  tmux: (cmd) => tmuxExec(`tmux -S '${TMUX_SOCKET}' ${cmd}`),
+  config: autoCompactConfig,
+});
+autoCompact.start();
+
 if (VOICE_PWA_TOKEN) {
   const voicePwa = createVoicePWA({
     port: VOICE_PWA_PORT,

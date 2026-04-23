@@ -428,6 +428,29 @@ amux timeline --since 2h --by-pane
 amux timeline --since 1h --by-pane --agent claw --grep "commit"
 ```
 
+## Auto-compact
+
+Background poll in the bridge warns + fires `/compact` on idle, high-context
+panes so conversations don't drift into panic-compact at 95%. Runs once per
+pollMs, warns once per threshold-crossing, fires after graceMs if the pane
+is still idle. Any activity (new turn, copy-mode entered, context drops)
+cancels the pending warning.
+
+```
+⚠ Auto-compact in 60s: claw:3 is at 78% context and idle. Type anything to cancel.
+... (60s of silence) ...
+🗜 Auto-compacting claw:3 (was 78%). Summary preserves recent context.
+```
+
+Env vars (all optional):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUTO_COMPACT_ENABLED` | `true` | Set to `false` to disable the loop |
+| `AUTO_COMPACT_WARN_THRESHOLD` | `70` | Context % that triggers a warning |
+| `AUTO_COMPACT_GRACE_MS` | `60000` | Ms between warning and fire |
+| `AUTO_COMPACT_POLL_MS` | `60000` | Ms between poll ticks (matched to grace by default) |
+
 ## Environment Variables
 
 All optional (set in `.env`):
