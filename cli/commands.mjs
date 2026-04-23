@@ -90,6 +90,26 @@ async function cmdStop(name, ctx) {
   console.log(`Stopped '${name}'.`);
 }
 
+async function cmdReconcile(name, ctx) {
+  const result = await ctx.agent.reconcileSession(name);
+  if (result.skipped) {
+    console.log(`Reconcile '${name}' skipped: ${result.reason}.`);
+    return;
+  }
+  const parts = [];
+  if (result.added) parts.push(`${result.added} added`);
+  if (result.respawned?.length) parts.push(`${result.respawned.length} respawned`);
+  if (result.unchanged) parts.push(`${result.unchanged} unchanged`);
+  if (result.extras) parts.push(`${result.extras} extras`);
+  console.log(`Reconciled '${name}': ${parts.join(", ") || "nothing to do"}.`);
+  for (const r of result.respawned || []) {
+    console.log(`  pane ${r.pane}: ${r.was} → ${r.expected}`);
+  }
+  for (const m of result.mismatches || []) {
+    console.log(`  pane ${m.pane}: has ${m.has}, expected ${m.expected} (left alone)`);
+  }
+}
+
 async function cmdServe(flags, ctx) {
   // Single-instance guard: the tmux session can outlive the bot (clean exit 0
   // breaks start.sh's loop without tearing the session down). So trust the PID
@@ -1040,6 +1060,9 @@ Usage:
   agent add <name> <dir>          Add new agent
   agent rm <name|:nr>             Remove agent
   agent stop <name|:nr>           Stop tmux session (keep config)
+  agent reconcile <name|:nr>      Respawn dead service/shell panes to match config
+                                  (preserves live claude panes — use instead of stop+start
+                                   when only services died)
   agent serve [-f]                Start Discord bridge (daemon). -f = foreground
   agent stop                      Stop Discord bridge (no arg = bridge)
   agent stop --all                Stop bridge + all agent sessions
@@ -1156,6 +1179,12 @@ export async function dispatch(argv, ctx) {
       if (!positional[0] || positional[0] === "serve" || positional[0] === "bridge") return cmdUnserve(ctx);
       const name = resolveAgent(positional[0], ctx.configPath);
       return cmdStop(name, ctx);
+    }
+
+    case "reconcile": {
+      if (!rest[0]) { console.error("Usage: agent reconcile <name|:nr>"); process.exit(1); }
+      const name = resolveAgent(rest[0], ctx.configPath);
+      return cmdReconcile(name, ctx);
     }
 
     case "serve": {
