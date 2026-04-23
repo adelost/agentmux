@@ -12,6 +12,7 @@ import { extractFromCodexJsonl, isBusyFromCodexJsonl, isPromptInCodexJsonl } fro
 import { getContextPercent as getContextPercentByDialect } from "./core/context.mjs";
 import { findBlockingPrompt } from "./core/dismiss.mjs";
 import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
+import { buildResumeHint } from "./core/resume-hint.mjs";
 
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
 
@@ -811,15 +812,40 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
   }
 
+  /**
+   * Prepend a resume-hint block to a user brief if claude is being spawned
+   * fresh (wasStarting=true) AND a previous jsonl exists. Keeps partial-
+   * resumed or empty-state panes from being stranded after WSL/amux/claude
+   * restarts — the hint points at their prior session jsonl and anchors on
+   * the last user turn so agents with full context can self-verify and
+   * ignore it. Returns prompt unchanged when no hint applies.
+   */
+  function maybePrependResumeHint(agentName, prompt, pane, wasStarting) {
+    if (!wasStarting) return prompt;
+    try {
+      const config = agentConfig(agentName);
+      const dir = paneDir(config.dir, pane);
+      const hint = buildResumeHint(dir);
+      if (!hint) return prompt;
+      return `${hint}\n\n${prompt}`;
+    } catch (err) {
+      console.warn(`resume-hint skipped: ${err.message}`);
+      return prompt;
+    }
+  }
+
   async function sendOnly(agentName, prompt, pane) {
+    const wasStarting = !(await isAlreadyRunning(`${agentName}:.${pane}`));
     await ensureReady(agentName, pane);
-    await sendPrompt(agentName, prompt, pane);
+    const finalPrompt = maybePrependResumeHint(agentName, prompt, pane, wasStarting);
+    await sendPrompt(agentName, finalPrompt, pane);
   }
 
   async function sendAndWait(agentName, prompt, pane) {
     const wasStarting = !(await isAlreadyRunning(`${agentName}:.${pane}`));
     await ensureReady(agentName, pane);
-    await sendPrompt(agentName, prompt, pane);
+    const finalPrompt = maybePrependResumeHint(agentName, prompt, pane, wasStarting);
+    await sendPrompt(agentName, finalPrompt, pane);
 
     await wait(wasStarting ? 8000 : 3000);
 

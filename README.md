@@ -159,6 +159,7 @@ Both connect to the same Discord server but create channels under different cate
 - Auto-dismiss surveys and blocking prompts
 - Auto-restart on crash (`bin/start.sh`)
 - Context tracking (model-aware, supports 1M-context Opus/Sonnet)
+- Resume-hint on fresh spawn: when a pane lost state (WSL/amux/claude restart), the first brief is prefixed with a pointer to the prior jsonl + the last user turn. Agents with full context recognize it and ignore; empty-state agents see the snippet as unfamiliar and can tail the jsonl for earlier history. See `core/resume-hint.mjs`.
 
 **Media**
 - Voice messages (transcribed via Whisper)
