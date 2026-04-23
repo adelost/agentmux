@@ -34,7 +34,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.10.1";
+const HINTS_VERSION = "1.10.2";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -185,6 +185,24 @@ Quick workaround is OK when deliberate (time pressure, experiment) — but
 Don't claim "done/exists/complete" until you've verified with 2+ methods.
 Especially on WSL 9p mounts where \`Path.exists()\` can lie. Combine e.g.
 \`ls | grep\` + \`Path.exists()\` + \`stat\`. If answers diverge: investigate.
+
+## Before reporting state-anomalies
+
+When you observe unexpected state change (count drop, missing data, broken
+behavior), check \`git log --since=<timestamp>\` FIRST before hypothesizing
+"bug/race/data-loss". Intentional commits often explain the anomaly. A
+2-second check beats a 10-minute wild-goose investigation — and prevents
+false "data risk" reports to the user.
+
+Template:
+1. \`git log --since="<timestamp>" --oneline\` — finns commits som förklarar?
+2. \`grep\` commit-messages för nyckelord från observed change
+3. Om commit förklarar: INGEN bug, bara ny feature → stäng case
+4. Om ingen commit: fortsätt till race/data-loss-hypoteser
+
+Concrete pattern: 2 signals (timing + magnitude) does NOT prove causation.
+Test against git-timeline first. A dedup commit landing between deploys
+explains a "video count drop" without any race condition.
 
 ${HINTS_END_MARKER}
 `;
