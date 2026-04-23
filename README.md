@@ -390,6 +390,44 @@ Flip to your Tailscale IP (e.g. `100.x.y.z`) when you want the phone to
 reach it. For public access later, put it behind a Cloudflare Tunnel
 without code changes.
 
+## Orchestrator primitives
+
+When a Claude pane drives several other panes (`amux <agent> -p N "..."`),
+two commands answer the two questions that come up most:
+
+### `amux done` — "what's been resolved since I last checked?"
+
+```bash
+amux done                    # defaults to last-checkpoint anchor (1h fallback)
+amux done --since last       # explicit: use checkpoint
+amux done --since 30min      # override anchor
+amux done --reset            # peek without advancing the checkpoint
+```
+
+Output groups panes into four buckets:
+
+```
+✅ 2 finished                          committed work / idle with turns
+🔴 2 waiting your input                last assistant msg ends with a question
+🟡 1 still working                     live status = working/resume
+💤 30 idle                             no activity since cutoff
+```
+
+State lives in `/tmp/agentmux-orchestrator-check.json` as a single
+`last_check_ts_ms` field. Every successful `amux done` advances it (pass
+`--reset` to peek). Override path via `AMUX_CHECKPOINT_PATH` env var.
+
+### `amux timeline --by-pane` — "what happened, chronologically, grouped?"
+
+Complement to plain `amux timeline` (flat chronological stream). `--by-pane`
+groups rows under `agent:pane` headers, sorted by newest activity first.
+Use for post-mortem analysis; use `amux done` for daily orchestration.
+
+```bash
+amux timeline --since 2h --by-pane
+amux timeline --since 1h --by-pane --agent claw --grep "commit"
+```
+
 ## Environment Variables
 
 All optional (set in `.env`):

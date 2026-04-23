@@ -13,6 +13,10 @@ import { stripAnsi, esc, extractActivity, formatDuration } from "../lib.mjs";
 import { getContextFromPane } from "../core/context.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor } from "../core/jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
+import {
+  loadCheckpoint, saveCheckpoint, CHECKPOINT_PATH,
+  groupByPane, classifyPane, previewText,
+} from "../core/orchestrator-checkpoint.mjs";
 import { regenerateAgentsYaml } from "../sync.mjs";
 import yaml from "js-yaml";
 import { spawn, execSync } from "child_process";
@@ -491,11 +495,165 @@ async function cmdTimeline(ctx, flags) {
     console.log("(no events match)");
     return;
   }
+  if (flags["by-pane"]) {
+    renderTimelineByPane(rows);
+    return;
+  }
   for (const r of rows) console.log(formatTimelineRow(r));
+}
+
+/**
+ * Group already-sorted timeline rows under per-pane headers. Each header
+ * shows event count + last activity; body retains the standard single-row
+ * format so analysis-oriented readers still get chronology within a pane.
+ */
+function renderTimelineByPane(rows) {
+  const groups = new Map();
+  for (const r of rows) {
+    const key = `${r.agent}:${r.pane}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+
+  // Sort panes by their latest event ts desc — freshest activity on top.
+  const ordered = [...groups.entries()].sort((a, b) => {
+    const la = lastTsMs(a[1]);
+    const lb = lastTsMs(b[1]);
+    return lb - la;
+  });
+
+  for (const [key, groupRows] of ordered) {
+    const lastTs = lastTsMs(groupRows);
+    const lastLabel = lastTs ? new Date(lastTs).toISOString().slice(11, 16) : "??";
+    console.log(`\n${key}  (${groupRows.length} event${groupRows.length === 1 ? "" : "s"}, last ${lastLabel})`);
+    for (const r of groupRows) console.log("  " + formatTimelineRow(r));
+  }
+}
+
+function lastTsMs(rows) {
+  let max = 0;
+  for (const r of rows) {
+    if (!r.timestamp) continue;
+    const t = Date.parse(r.timestamp);
+    if (Number.isFinite(t) && t > max) max = t;
+  }
+  return max;
 }
 
 async function cmdWatch(ctx, flags) {
   return followTimeline(ctx, flags);
+}
+
+/**
+ * "Since last check" view of what panes have done, what's waiting on me,
+ * and what's still working. Purpose-built for orchestrator check-ins —
+ * answers "who delivered? who needs me? who's still running?" in one call.
+ *
+ * Anchor resolution: --since <val> overrides; else load checkpoint; else
+ * default to 1h ago. Checkpoint is updated to now after a successful read
+ * unless --reset is passed (peek mode).
+ */
+async function cmdDone(ctx, flags) {
+  const nowMs = Date.now();
+  let sinceMs = null;
+  let sinceSource = "";
+
+  if (flags.since) {
+    if (flags.since === "last") {
+      sinceMs = loadCheckpoint();
+      sinceSource = sinceMs ? "last checkpoint" : "1h fallback (no checkpoint)";
+    } else {
+      const parsed = parseSinceArg(flags.since);
+      if (!parsed) {
+        console.error(`invalid --since '${flags.since}'. Use "last", ISO, or relative ("30min", "2h").`);
+        process.exit(1);
+      }
+      sinceMs = parsed.getTime();
+      sinceSource = `--since ${flags.since}`;
+    }
+  } else {
+    sinceMs = loadCheckpoint();
+    sinceSource = sinceMs ? "last checkpoint" : "1h fallback (no checkpoint)";
+  }
+  if (!sinceMs) sinceMs = nowMs - 60 * 60 * 1000;
+
+  const agents = listAgents(ctx.configPath);
+  const rows = readAllTurnsAcrossPanes({ agents, since: new Date(sinceMs) });
+  const buckets = groupByPane(rows);
+
+  // Also enumerate panes with ZERO turns so "idle" count stays honest.
+  // Each agent in config has a known pane list regardless of jsonl state.
+  const allPaneKeys = new Set();
+  for (const a of agents) {
+    const panes = Array.isArray(a.panes) ? a.panes : [];
+    for (let i = 0; i < panes.length; i++) allPaneKeys.add(`${a.name}:${i}`);
+  }
+
+  const finished = [];
+  const waiting = [];
+  const working = [];
+  let idleCount = 0;
+
+  for (const key of allPaneKeys) {
+    const [agentName, paneStr] = key.split(":");
+    const paneIdx = parseInt(paneStr, 10);
+    const bucket = buckets.get(key) || {
+      agent: agentName, pane: paneIdx, turns: 0,
+      latestTurnTs: null, lastUserText: null, lastAssistantText: null,
+    };
+    const status = await getPaneStatus(ctx, agentName, paneIdx).catch(() => "unknown");
+    const cls = classifyPane(bucket, status);
+
+    const entry = { key, bucket, status };
+    if (cls === "finished") finished.push(entry);
+    else if (cls === "waiting") waiting.push(entry);
+    else if (cls === "still-working") working.push(entry);
+    else idleCount++;
+  }
+
+  // Freshest events first per bucket (within each category).
+  const byTsDesc = (a, b) => (b.bucket.latestTurnTs || 0) - (a.bucket.latestTurnTs || 0);
+  finished.sort(byTsDesc);
+  waiting.sort(byTsDesc);
+  working.sort(byTsDesc);
+
+  const sinceIso = new Date(sinceMs).toISOString().slice(0, 16).replace("T", " ");
+  const ageMin = Math.round((nowMs - sinceMs) / 60000);
+  console.log(`\nSince ${sinceIso} UTC (${ageMin} min ago, source: ${sinceSource})`);
+
+  if (finished.length) {
+    console.log(`\n✅ ${finished.length} finished`);
+    for (const e of finished) console.log("  " + formatDoneRow(e));
+  }
+  if (waiting.length) {
+    console.log(`\n🔴 ${waiting.length} waiting your input`);
+    for (const e of waiting) console.log("  " + formatDoneRow(e));
+  }
+  if (working.length) {
+    console.log(`\n🟡 ${working.length} still working`);
+    for (const e of working) console.log("  " + formatDoneRow(e));
+  }
+  if (!finished.length && !waiting.length && !working.length) {
+    console.log(`\n(no activity since cutoff, ${idleCount} panes idle)`);
+  } else {
+    console.log(`\n💤 ${idleCount} idle (no activity since cutoff)`);
+  }
+
+  if (!flags.reset) {
+    saveCheckpoint(nowMs);
+  } else {
+    console.log(`\n(--reset: checkpoint NOT advanced, next 'amux done' will see the same cutoff)`);
+  }
+}
+
+function formatDoneRow({ key, bucket }) {
+  const keyPad = key.padEnd(10);
+  const tsLabel = bucket.latestTurnTs
+    ? new Date(bucket.latestTurnTs).toISOString().slice(11, 16)
+    : "--:--";
+  const turnStr = `(+${bucket.turns} turn${bucket.turns === 1 ? "" : "s"})`.padEnd(11);
+  const preview = previewText(bucket.lastAssistantText || bucket.lastUserText, 70);
+  return `${keyPad}  ${tsLabel}  ${turnStr}  ${preview ? `"${preview}"` : ""}`;
 }
 
 // Pane commands that correspond to a dialect we can read context for.
@@ -946,6 +1104,11 @@ const FLAG_SPECS = {
     since: "string",
     grep: "string",
     follow: "boolean", f: "boolean",
+    "by-pane": "boolean",
+  },
+  done: {
+    since: "string",
+    reset: "boolean",
   },
   watch: {
     agent: "string",
@@ -1030,6 +1193,11 @@ export async function dispatch(argv, ctx) {
     case "watch": {
       const { flags } = parseFlags(rest, FLAG_SPECS.watch);
       return cmdWatch(ctx, flags);
+    }
+
+    case "done": {
+      const { flags } = parseFlags(rest, FLAG_SPECS.done);
+      return cmdDone(ctx, flags);
     }
 
     case "compact": {
