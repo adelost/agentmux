@@ -34,7 +34,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.10.0";
+const HINTS_VERSION = "1.10.1";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -101,9 +101,11 @@ Bulk-compact affects idle panes. Skips working/permission/menu states.
 
 ### Auto-compact (background, bridge-driven)
 Idle panes >=70% context get warned (Discord channel), then /compact:ed
-after 60s grace unless activity cancels. Poll runs every 60s. Disable via
-\`AUTO_COMPACT_ENABLED=false\`. Tune via \`AUTO_COMPACT_WARN_THRESHOLD\`,
-\`AUTO_COMPACT_GRACE_MS\`, \`AUTO_COMPACT_POLL_MS\`.
+after 60s grace unless activity cancels. Requires 5 min conversation
+silence before warning (AUTO_COMPACT_MIN_IDLE_MS) so between-turns pauses
+don't trigger. Poll every 60s. Disable via \`AUTO_COMPACT_ENABLED=false\`.
+Tune via \`AUTO_COMPACT_WARN_THRESHOLD\`, \`AUTO_COMPACT_GRACE_MS\`,
+\`AUTO_COMPACT_POLL_MS\`, \`AUTO_COMPACT_MIN_IDLE_MS\`.
 
 ### Configure panes (labels for orchestrator clarity)
 \`\`\`bash
