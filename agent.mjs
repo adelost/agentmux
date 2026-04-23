@@ -29,32 +29,124 @@ export function paneDir(rootDir, pane) {
 // Placed in .agents/CLAUDE.md so Claude Code auto-reads it from any pane
 // (panes run in .agents/N/, Claude searches upward for CLAUDE.md).
 // Survives /compact because CLAUDE.md is system context, not conversation.
-const AGENT_HINTS = `# agentmux
+//
+// The HINTS_VERSION marker lets ensureAgentHints detect stale copies on
+// disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
+// content changes materially. User-appended content BELOW the end marker
+// is preserved across upgrades.
+const HINTS_VERSION = "1.9.0";
+const HINTS_END_MARKER = "<!-- amux-hints-end -->";
+
+const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
+# agentmux
 
 You are running inside agentmux. You can orchestrate other agents from your terminal.
 
-## Available commands
+**Never use raw \`tmux ... capture-pane\`.** Everything is exposed via \`amux\` —
+shorter, validated, mirrors to Discord so the user sees what you do.
 
+## Cheat sheet (intent-first)
+
+### Send a task to another pane
 \`\`\`bash
-amux ps                          # show all agents and their status
-amux log <agent>                 # see another agent's last response
-amux <agent> "do something"      # send a task to another agent
-amux wait <agent>                # wait until an agent finishes
-amux esc <agent>                 # interrupt an agent
+amux <agent> -p <pane> "prompt"      # -p default 0
+amux claw -p 1 "run the full test suite"
+amux claw -p 1 "ping" --no-meta      # suppress auto-header
+\`\`\`
+Mirrors to Discord channel automatically (user sees your briefs). Auto-prepends
+\`[from <sender-session>:<window>]\` when invoker is in tmux — receiver pane +
+Discord mirror both see who briefed. Opt out with \`--no-meta\` for low-signal
+pings.
+
+### See what a pane has done
+\`\`\`bash
+amux log <agent> -p <pane>           # default: last 3 turns from jsonl
+  -n 5                               # more turns
+  --since 30min                      # only recent
+  --grep "deploy"                    # filter content
+  --tmux -s 200                      # raw terminal, scrollback depth
+  --full                             # jsonl + tmux combined
+\`\`\`
+\`amux log\` defaults to jsonl (structured history). Use \`--tmux\` only when you
+need to see live terminal state (progress bars, modal prompts, etc).
+
+### Understand state across panes
+\`\`\`bash
+amux ps                              # status + context% + tokens per pane
+amux top                             # leaderboard sorted by % desc
+amux timeline                        # all events across panes, chronological
+amux timeline --agent claw --since 1h --grep "commit"
+amux timeline --since 2h --by-pane   # grouped under pane headers (analysis view)
+amux watch                           # live-follow (like tail -f)
 \`\`\`
 
-## Examples
-
+### Know what's been resolved since last check (orchestrator inbox)
 \`\`\`bash
-# Ask the api agent to run tests, wait for result, read the output
-amux api "run all tests" && amux wait api && amux log api
-
-# Check what all agents are doing
-amux ps
-
-# Fan-out: send tasks to multiple agents in parallel
-amux frontend "update dashboard" & amux backend "add endpoint" & wait
+amux done                            # finished/waiting/working since last check
+amux done --since 30min              # explicit anchor
+amux done --reset                    # peek without advancing checkpoint
 \`\`\`
+\`amux done\` is the orchestrator primitive: one command that buckets every pane
+into ✅ finished / 🔴 waiting-your-input / 🟡 still-working / 💤 idle. The
+anchor auto-tracks last-check. Use it at every decision point instead of 5×
+\`amux ps\` + per-pane \`amux log\`.
+
+### Shrink context before hitting limit
+\`\`\`bash
+amux compact                         # /compact panes >=20% and >=200k tokens
+amux compact --dry                   # preview, no action
+amux compact --force                 # include working panes (dangerous)
+\`\`\`
+Bulk-compact affects idle panes. Skips working/permission/menu states.
+
+### Configure panes (labels for orchestrator clarity)
+\`\`\`bash
+amux edit                            # open agentmux.yaml in \$EDITOR
+amux label <agent> <pane> "purpose"
+amux label <agent> <pane> --clear
+amux labels                          # show all labels, tabulated
+\`\`\`
+Labels render in \`amux ps\` and \`amux top\` so an orchestrator can pick the right
+pane without guessing.
+
+### Wait for a pane to finish
+\`\`\`bash
+amux wait <agent> -p <pane>          # block until idle
+amux wait <agent> -p 0 -t 600        # custom timeout (sec)
+\`\`\`
+
+### Pane is stuck or shows a modal
+\`\`\`bash
+amux esc <agent> -p <pane>           # send Escape (cancel/dismiss)
+amux select <agent> -p <pane> <N>    # select menu option N
+\`\`\`
+
+### Bridge lifecycle
+\`\`\`bash
+amux serve                           # start Discord bridge
+amux stop                            # stop bridge
+amux stop --all                      # stop bridge + every agent session
+\`\`\`
+
+## Source layers
+
+| Layer | What it sees | Use when |
+|-------|--------------|----------|
+| **jsonl** (\`amux log\`) | Structured turn history from \`~/.claude/projects/\` | "What did the agent say?" (default, reliable) |
+| **tmux** (\`amux log --tmux\`) | Live terminal content | "Is the pane hung? Showing a modal?" |
+| **ps/top** | Status indicator + context% | Quick overview |
+| **timeline** | Merge of all jsonl, chronological | Cross-pane post-mortem |
+| **done** | Classified since-last-check | Daily orchestration |
+
+## Discord integration (when bridge is running)
+
+- Every \`amux\` send to a pane **mirrors automatically** to the bound Discord
+  channel. User sees your briefs live.
+- Catch-up notice: when you post in Discord after a pause, the bridge shows
+  how many turns happened in the pane without you, plus the 3 most-recent
+  turn previews.
+- Loop guard: if the user sends the same short message 3+ times in 30s, the
+  bridge pauses forwarding and warns. Prevents runaway loops.
 
 ## Image replies
 
@@ -72,22 +164,51 @@ Always fix the cause, not the symptom. Before patching, ask *why* it's happening
 
 - ❌ Test fails → skip the test
 - ✅ Test fails → is the test wrong, or the code?
-- ❌ Hook blocks commit → --no-verify
+- ❌ Hook blocks commit → \`--no-verify\`
 - ✅ Hook blocks → why? fix the underlying issue
 - ❌ Error in prod → wrap in try/catch and swallow
 - ✅ Error in prod → trace the path, fix the source
 
-Quick workaround is OK when deliberate (time pressure, experiment) — but **call it out**: "patching surface, root cause is X, fix later."
+Quick workaround is OK when deliberate (time pressure, experiment) — but
+**call it out**: "patching surface, root cause is X, fix later."
+
+## Verify before reporting
+
+Don't claim "done/exists/complete" until you've verified with 2+ methods.
+Especially on WSL 9p mounts where \`Path.exists()\` can lie. Combine e.g.
+\`ls | grep\` + \`Path.exists()\` + \`stat\`. If answers diverge: investigate.
+
+${HINTS_END_MARKER}
 `;
 
 // Write hints as both CLAUDE.md (for Claude Code) and AGENTS.md (for Codex).
 // Both tools auto-read their respective file from cwd upward.
-function ensureAgentHints(rootDir) {
+//
+// Sync strategy:
+//   - New files → write AGENT_HINTS as-is
+//   - Existing files with matching HINTS_VERSION → leave alone (fresh)
+//   - Existing files with older/missing version → replace everything up to
+//     HINTS_END_MARKER, preserve any user-appended content below the marker
+//
+// This way upgrades propagate automatically on next spawn without clobbering
+// workspace-specific notes that operators tacked on.
+export function ensureAgentHints(rootDir) {
   const agentsDir = join(rootDir, ".agents");
   for (const name of ["CLAUDE.md", "AGENTS.md"]) {
     const path = join(agentsDir, name);
     try {
-      if (!existsSync(path)) writeFileSync(path, AGENT_HINTS);
+      if (!existsSync(path)) {
+        writeFileSync(path, AGENT_HINTS);
+        continue;
+      }
+      const current = readFileSync(path, "utf-8");
+      const versionMatch = current.match(/<!-- amux-hints-version: ([^ ]+) -->/);
+      if (versionMatch && versionMatch[1] === HINTS_VERSION) continue;
+
+      // Preserve anything operators added after HINTS_END_MARKER.
+      const endIdx = current.indexOf(HINTS_END_MARKER);
+      const tail = endIdx >= 0 ? current.slice(endIdx + HINTS_END_MARKER.length) : "";
+      writeFileSync(path, AGENT_HINTS + tail.replace(/^\s*\n/, "\n"));
     } catch (err) {
       console.warn(`agent hints write failed (${name}): ${err.message}`);
     }
