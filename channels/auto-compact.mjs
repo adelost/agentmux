@@ -11,6 +11,8 @@ import {
 } from "../core/auto-compact.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { getContextFromPane } from "../core/context.mjs";
+import { detectPaneStatus } from "../cli/format.mjs";
+import { readLastTurns, panePathFor } from "../core/jsonl-reader.mjs";
 
 // Panes that have warnings pending (paneKey → { warned_at: ms }).
 // Panes currently mid-compact (paneKey string).
@@ -29,52 +31,47 @@ export function createAutoCompact({
   const compacting = new Set();
   let intervalId = null;
 
-  async function inspect(agentName, paneIdx) {
+  async function inspect(agentConfig, paneIdx) {
     // Mirrors cli/commands.mjs inspectPane just enough for our decision.
     // Wrapped in try/catch because any pane quirk (just-spawned, dead
     // session) should degrade to "no data" rather than crash the poller.
     let status = "unknown";
     let content = "";
     let paneInMode = "0";
+    let lastActivityMs = null;
 
     try {
-      status = await getPaneStatus(agentName, paneIdx);
+      content = await agent.capturePane(agentConfig.name, paneIdx, 100);
     } catch {}
 
     try {
-      content = await agent.capturePane(agentName, paneIdx, 100);
-    } catch {}
+      status = detectPaneStatus(content);
+    } catch {
+      status = "unknown";
+    }
 
     try {
-      const { stdout } = await tmux(`display-message -t '${agentName}:.${paneIdx}' -p '#{pane_in_mode}'`);
+      const { stdout } = await tmux(`display-message -t '${agentConfig.name}:.${paneIdx}' -p '#{pane_in_mode}'`);
       paneInMode = (stdout || "").trim() || "0";
     } catch {}
 
-    const ctxInfo = getContextFromPane(content, "");
+    const ctxInfo = getContextFromPane(content, agentConfig.dir || "");
     const contextPercent = ctxInfo?.percent ?? null;
 
-    return { status, contextPercent, paneInMode };
-  }
-
-  // getPaneStatus isn't directly exported; we shim via tmux for our limited
-  // use (we only need the active/idle distinction + copy-mode detection,
-  // so detectPaneStatus output is overkill).
-  async function getPaneStatus(agentName, paneIdx) {
+    // Last conversation turn timestamp from jsonl. Used by min-idle gate
+    // to distinguish "idle prompt char visible" from "conversation truly
+    // stalled". Missing jsonl (just-spawned pane, /clear, etc) → null,
+    // which lets the gate fall through.
     try {
-      const { stdout } = await tmux(`display-message -t '${agentName}:.${paneIdx}' -p '#{pane_current_command}'`);
-      const cmd = (stdout || "").trim();
-      if (cmd === "claude" || cmd === "codex") {
-        const activity = await agent.capturePane(agentName, paneIdx, 10).catch(() => "");
-        // Crude: if "tokens" tail + "ESC to" line isn't showing an idle prompt,
-        // assume working. Conservative — false "working" just means we skip
-        // compact that tick, which is fine.
-        if (/\besc to interrupt\b|thinking|running|crunching/i.test(activity)) return "working";
-        return "idle";
+      const paneDir = panePathFor(agentConfig, paneIdx);
+      const turns = readLastTurns(paneDir, 1);
+      if (turns.length && turns[0].timestamp) {
+        const t = Date.parse(turns[0].timestamp);
+        if (Number.isFinite(t)) lastActivityMs = t;
       }
-      return "unknown";
-    } catch {
-      return "unknown";
-    }
+    } catch {}
+
+    return { status, contextPercent, paneInMode, lastActivityMs };
   }
 
   async function fireCompact(agentName, paneIdx, paneKey, contextPercent) {
@@ -134,12 +131,13 @@ export function createAutoCompact({
         const paneKey = `${a.name}:${i}`;
         if (compacting.has(paneKey)) continue;
 
-        const { status, contextPercent, paneInMode } = await inspect(a.name, i);
+        const { status, contextPercent, paneInMode, lastActivityMs } = await inspect(a, i);
         const decision = decideAutoCompactAction({
           paneKey,
           status,
           contextPercent,
           paneInMode,
+          lastActivityMs,
           warnings,
           config,
           now,
@@ -166,7 +164,7 @@ export function createAutoCompact({
       return;
     }
     if (intervalId) return;
-    log(`enabled | threshold=${config.threshold}% grace=${Math.round(config.graceMs / 1000)}s poll=${Math.round(config.pollMs / 1000)}s`);
+    log(`enabled | threshold=${config.threshold}% grace=${Math.round(config.graceMs / 1000)}s poll=${Math.round(config.pollMs / 1000)}s min-idle=${Math.round(config.minIdleMs / 1000)}s`);
     intervalId = setInterval(() => {
       tick().catch((err) => log(`tick failed: ${err.message}`));
     }, config.pollMs);

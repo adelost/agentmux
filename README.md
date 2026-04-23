@@ -450,6 +450,7 @@ Env vars (all optional):
 | `AUTO_COMPACT_WARN_THRESHOLD` | `70` | Context % that triggers a warning |
 | `AUTO_COMPACT_GRACE_MS` | `60000` | Ms between warning and fire |
 | `AUTO_COMPACT_POLL_MS` | `60000` | Ms between poll ticks (matched to grace by default) |
+| `AUTO_COMPACT_MIN_IDLE_MS` | `300000` | Ms of conversation silence required before warning. Protects against firing between turns when the operator is mid-thought (5 min default). |
 
 ## Environment Variables
 

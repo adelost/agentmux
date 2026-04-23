@@ -140,6 +140,70 @@ feature("decideAutoCompactAction — working panes never warned", () => {
   });
 });
 
+feature("decideAutoCompactAction — min-idle gate (conversation freshness)", () => {
+  unit("recent turn (30s ago) blocks warning at 80% idle", {
+    given: ["idle 80% but last turn 30s ago, min-idle=5min", () => ({
+      ...base,
+      lastActivityMs: base.now - 30_000,
+    })],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=none, reason explains need for silence", (r) => {
+      expect(r.action).toBe("none");
+      expect(r.reason).toMatch(/recent turn 30s ago/);
+    }],
+  });
+
+  unit("turn exactly at min-idle threshold passes gate → warn", {
+    given: ["last turn exactly 5min ago", () => ({
+      ...base,
+      lastActivityMs: base.now - 300_000,
+    })],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=warn", (r) => expect(r.action).toBe("warn")],
+  });
+
+  unit("turn 10min ago passes gate → warn", {
+    given: ["last turn 10 min ago", () => ({
+      ...base,
+      lastActivityMs: base.now - 600_000,
+    })],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=warn", (r) => expect(r.action).toBe("warn")],
+  });
+
+  unit("null lastActivityMs skips gate (can't prove freshness)", {
+    given: ["no jsonl data", () => ({ ...base, lastActivityMs: null })],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=warn (fall through)", (r) => expect(r.action).toBe("warn")],
+  });
+
+  unit("fresh turn cancels existing warning", {
+    given: ["pending warning but recent turn", () => {
+      const warnings = new Map([[key, { warned_at: base.now - 30_000 }]]);
+      return { ...base, warnings, lastActivityMs: base.now - 5_000 };
+    }],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=cancel, reason=recent activity", (r) => {
+      expect(r.action).toBe("cancel");
+      expect(r.reason).toMatch(/recent activity/);
+    }],
+  });
+});
+
+feature("parseAutoCompactConfig — minIdleMs", () => {
+  unit("minIdleMs from env AUTO_COMPACT_MIN_IDLE_MS", {
+    given: ["env override", () => ({ env: { AUTO_COMPACT_MIN_IDLE_MS: "120000" } })],
+    when: ["parsing", ({ env }) => parseAutoCompactConfig(env)],
+    then: ["parsed to 2 min", (r) => expect(r.minIdleMs).toBe(120_000)],
+  });
+
+  unit("minIdleMs defaults to 5 min when unset", {
+    given: ["no env", () => ({ env: {} })],
+    when: ["parsing", ({ env }) => parseAutoCompactConfig(env)],
+    then: ["default 300_000 ms", (r) => expect(r.minIdleMs).toBe(300_000)],
+  });
+});
+
 feature("decideAutoCompactAction — missing context data", () => {
   unit("null contextPercent → none", {
     given: ["no context readable", () => ({ ...base, contextPercent: null })],
