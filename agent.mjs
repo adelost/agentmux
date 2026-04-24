@@ -35,7 +35,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.10.3";
+const HINTS_VERSION = "1.11.0";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -83,14 +83,22 @@ amux watch                           # live-follow (like tail -f)
 
 ### Know what's been resolved since last check (orchestrator inbox)
 \`\`\`bash
-amux done                            # finished/waiting/working since last check
+amux done                            # since-last-check view: commits + pane buckets
 amux done --since 30min              # explicit anchor
 amux done --reset                    # peek without advancing checkpoint
 \`\`\`
-\`amux done\` is the orchestrator primitive: one command that buckets every pane
-into ✅ finished / 🔴 waiting-your-input / 🟡 still-working / 💤 idle. The
-anchor auto-tracks last-check. Use it at every decision point instead of 5×
-\`amux ps\` + per-pane \`amux log\`.
+\`amux done\` is the orchestrator primitive. One command gives:
+
+- 📝 **Commits** across all agent repos (strongest work-happened signal)
+- 🟡 **Still working** — panes active right now (jsonl <30s overrides tmux)
+- ✅ **Finished** — turns written + last msg is a statement
+- 🔴 **New waiters** — assistant's last text was after the checkpoint
+- ⏸ **Stale waiters** — assistant's last text was before the checkpoint (old asks)
+- 💤 **Idle** — no activity
+
+Use it at every orchestrator decision point instead of 5× \`amux ps\` +
+per-pane \`amux log\`. Commits section first because "what got committed?"
+answers "what actually happened?" faster than scrolling turns.
 
 ### Shrink context before hitting limit
 \`\`\`bash

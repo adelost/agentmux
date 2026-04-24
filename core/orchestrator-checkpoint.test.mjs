@@ -9,6 +9,8 @@ import {
   classifyPane,
   isWaitingLikeText,
   previewText,
+  isStaleWaiter,
+  isRunningNow,
 } from "./orchestrator-checkpoint.mjs";
 
 const tmpPath = () =>
@@ -261,5 +263,103 @@ feature("previewText", () => {
       expect(r.length).toBe(80);
       expect(r.endsWith("…")).toBe(true);
     }],
+  });
+});
+
+feature("groupByPane tracks lastAssistantTextTs", () => {
+  unit("captures timestamp of latest assistant text row", {
+    given: ["multiple text rows", () => ({
+      rows: [
+        row("claw", 0, "assistant", "early", "2026-04-23T10:00:00Z"),
+        row("claw", 0, "assistant", "late", "2026-04-23T11:00:00Z"),
+      ],
+    })],
+    when: ["grouping", ({ rows }) => groupByPane(rows)],
+    then: ["lastAssistantTextTs = late row", (result) => {
+      const b = result.get("claw:0");
+      expect(b.lastAssistantTextTs).toBe(Date.parse("2026-04-23T11:00:00Z"));
+    }],
+  });
+
+  unit("lastAssistantTextTs stays null when only tool rows", {
+    given: ["tool-only rows", () => ({
+      rows: [row("claw", 0, "assistant", null, "2026-04-23T10:00:00Z", "tool")],
+    })],
+    when: ["grouping", ({ rows }) => groupByPane(rows)],
+    then: ["null", (result) => {
+      const b = result.get("claw:0");
+      expect(b.lastAssistantTextTs).toBeNull();
+    }],
+  });
+
+  unit("latestTurnTs can exceed lastAssistantTextTs (tool activity after text)", {
+    given: ["text then tool activity after", () => ({
+      rows: [
+        row("claw", 0, "assistant", "said something", "2026-04-23T10:00:00Z", "text"),
+        row("claw", 0, "assistant", null, "2026-04-23T10:05:00Z", "tool"),
+      ],
+    })],
+    when: ["grouping", ({ rows }) => groupByPane(rows)],
+    then: ["text ts frozen, latest ts advanced", (result) => {
+      const b = result.get("claw:0");
+      expect(b.lastAssistantTextTs).toBe(Date.parse("2026-04-23T10:00:00Z"));
+      expect(b.latestTurnTs).toBe(Date.parse("2026-04-23T10:05:00Z"));
+    }],
+  });
+});
+
+feature("isStaleWaiter", () => {
+  const bucket = (ts) => ({ lastAssistantTextTs: ts });
+
+  unit("returns true when no timestamp", {
+    given: ["bucket without ts", () => ({ b: bucket(null), since: 1000 })],
+    when: ["checking", ({ b, since }) => isStaleWaiter(b, since)],
+    then: ["stale", (r) => expect(r).toBe(true)],
+  });
+
+  unit("returns true when text older than checkpoint", {
+    given: ["old text", () => ({ b: bucket(500), since: 1000 })],
+    when: ["checking", ({ b, since }) => isStaleWaiter(b, since)],
+    then: ["stale", (r) => expect(r).toBe(true)],
+  });
+
+  unit("returns false when text at or after checkpoint", {
+    given: ["fresh text", () => ({ b: bucket(2000), since: 1000 })],
+    when: ["checking", ({ b, since }) => isStaleWaiter(b, since)],
+    then: ["not stale", (r) => expect(r).toBe(false)],
+  });
+
+  unit("returns false for missing bucket + infinite since", {
+    given: ["no bucket", () => ({ b: null, since: NaN })],
+    when: ["checking", ({ b, since }) => isStaleWaiter(b, since)],
+    then: ["safe false", (r) => expect(r).toBe(false)],
+  });
+});
+
+feature("isRunningNow", () => {
+  const bucket = (ts) => ({ latestTurnTs: ts });
+
+  unit("returns true when last event within threshold", {
+    given: ["event 10s ago", () => ({ now: 100_000, b: bucket(90_000), within: 30_000 })],
+    when: ["checking", ({ b, now, within }) => isRunningNow(b, now, within)],
+    then: ["running", (r) => expect(r).toBe(true)],
+  });
+
+  unit("returns false when last event outside threshold", {
+    given: ["event 60s ago", () => ({ now: 100_000, b: bucket(40_000), within: 30_000 })],
+    when: ["checking", ({ b, now, within }) => isRunningNow(b, now, within)],
+    then: ["not running", (r) => expect(r).toBe(false)],
+  });
+
+  unit("returns false when no timestamp", {
+    given: ["bucket without ts", () => ({ b: bucket(null), now: 100_000 })],
+    when: ["checking", ({ b, now }) => isRunningNow(b, now)],
+    then: ["not running", (r) => expect(r).toBe(false)],
+  });
+
+  unit("default threshold is 30s", {
+    given: ["event 25s ago", () => ({ now: 100_000, b: bucket(75_000) })],
+    when: ["checking without explicit threshold", ({ b, now }) => isRunningNow(b, now)],
+    then: ["running", (r) => expect(r).toBe(true)],
   });
 });
