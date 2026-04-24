@@ -886,7 +886,9 @@ async function cmdRemind(ctx, flags = {}, positional = []) {
     for (const a of agents) {
       const panes = Array.isArray(a.panes) ? a.panes : [];
       for (let i = 0; i < panes.length; i++) {
-        if (panes[i]?.name !== "claude") continue;
+        // Claude panes have cmd starting with "claude" (name can be
+        // claude / claude-2 / claude-3 etc per config convention).
+        if (!String(panes[i]?.cmd || "").startsWith("claude")) continue;
         targets.push({ agent: a, paneIdx: i });
       }
     }
