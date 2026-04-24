@@ -1,4 +1,4 @@
-import { unit, feature, expect } from "bdd-vitest";
+import { unit, component, feature, expect } from "bdd-vitest";
 import { execFileSync } from "child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -89,7 +89,7 @@ feature("commitsFromRepo", () => {
 });
 
 feature("collectCommitsSince", () => {
-  unit("merges and sorts across repos descending by ts", {
+  component("merges and sorts across repos descending by ts", {
     given: ["two repos with commits", () => {
       const a = makeRepo();
       const b = makeRepo();
@@ -136,7 +136,7 @@ feature("collectCommitsSince", () => {
     }],
   });
 
-  unit("max caps total rows across repos", {
+  component("max caps total rows across repos", {
     given: ["repo with 5 commits", () => {
       const a = makeRepo();
       for (let i = 0; i < 5; i++) commit(a, `msg-${i}`);

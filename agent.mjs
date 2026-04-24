@@ -35,7 +35,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.11.0";
+const HINTS_VERSION = "1.12.0";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -175,6 +175,23 @@ To attach an image to your Discord reply, write on its own line:
 \`\`\`
 
 Supported formats: .png, .jpg, .jpeg, .gif, .webp (max 25MB).
+
+## Always lead with a recommendation
+
+When presenting options or asking "what should we do?":
+
+- **Don't** defer with "let me know which you prefer" / "up to you" / "whichever"
+- **Do** pick one and give a one-line reason tied to the user's history/goals
+- Template: \`→ Rekommenderar B. Varför: [specific tie-in]\`
+- In doubt: still pick, then add "— säg till om du vill ha sanity check"
+
+Drift-prone: the rule sits in system-context but attention weights tunnas
+after many turns. The bridge's drift-guard sends you a \`[drift-guard]\`
+reminder roughly every 40 turns (or after a /compact). When you get one,
+re-read this section before responding.
+
+Manual refresh: \`amux remind <agent> -p <pane>\` (or \`--all\` / \`--stale\`)
+if you catch another pane drifting from this rule.
 
 ## Root cause > symptoms
 

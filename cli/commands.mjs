@@ -856,6 +856,94 @@ async function cmdCompact(ctx, flags = {}, positional = []) {
 }
 
 /**
+ * Manual drift-guard trigger. Sends a short "re-read your CLAUDE.md"
+ * reminder to a pane (or all panes). Complements the bridge's auto poll.
+ *
+ * Modes:
+ *   amux remind <agent> -p N        — one pane, unconditional
+ *   amux remind --all               — every claude pane, unconditional
+ *   amux remind --stale             — only panes past the turn threshold
+ *
+ * Updates the shared reminder-state file so the bridge's auto poll sees
+ * the new timestamp and won't re-fire for another full threshold-worth
+ * of turns.
+ */
+async function cmdRemind(ctx, flags = {}, positional = []) {
+  const { loadReminderState, saveReminderState, parseReminderConfig, formatReminderMessage, cutoffFor } =
+    await import("../core/reminder-state.mjs");
+  const { countTurnsSince, panePathFor } = await import("../core/jsonl-reader.mjs");
+
+  const config = parseReminderConfig();
+  const threshold = Number.isFinite(flags.threshold) ? flags.threshold : config.turnThreshold;
+  const state = loadReminderState(config.statePath);
+  const nowMs = Date.now();
+
+  const agents = listAgents(ctx.configPath);
+
+  // Resolve target set from flags/positionals.
+  const targets = [];
+  if (flags.all || flags.stale) {
+    for (const a of agents) {
+      const panes = Array.isArray(a.panes) ? a.panes : [];
+      for (let i = 0; i < panes.length; i++) {
+        if (panes[i]?.name !== "claude") continue;
+        targets.push({ agent: a, paneIdx: i });
+      }
+    }
+  } else {
+    if (!positional[0]) {
+      console.error(`Usage:
+  amux remind <agent> -p <pane>    # one pane
+  amux remind --all                # every claude pane
+  amux remind --stale              # only panes past threshold (${threshold} turns)`);
+      process.exit(1);
+    }
+    const name = resolveAgent(positional[0], ctx.configPath);
+    const a = getAgent(name, ctx.configPath);
+    if (!a) { console.error(`Unknown agent '${name}'.`); process.exit(1); }
+    const paneIdx = Number.isFinite(flags.p) ? flags.p : 0;
+    targets.push({ agent: a, paneIdx });
+  }
+
+  let sent = 0;
+  let skipped = 0;
+
+  for (const { agent: a, paneIdx } of targets) {
+    const paneKey = `${a.name}:${paneIdx}`;
+    const paneState = state[paneKey] || { lastReminderTsMs: null, lastCompactTsMs: null };
+
+    let turnCount = 0;
+    try {
+      const paneDir = panePathFor(a, paneIdx);
+      const cutoffMs = cutoffFor(paneState);
+      const res = countTurnsSince(paneDir, cutoffMs != null ? new Date(cutoffMs) : null);
+      turnCount = res?.count ?? 0;
+    } catch {}
+
+    // --stale mode: require turnCount above threshold. Single-pane and
+    // --all modes send regardless (explicit user intent).
+    if (flags.stale && turnCount < threshold) {
+      skipped++;
+      continue;
+    }
+
+    try {
+      await ctx.agent.sendOnly(a.name, formatReminderMessage(turnCount), paneIdx);
+      state[paneKey] = { ...paneState, lastReminderTsMs: nowMs };
+      sent++;
+      console.log(`reminded ${paneKey} (${turnCount} turns)`);
+    } catch (err) {
+      console.error(`failed ${paneKey}: ${err.message}`);
+    }
+  }
+
+  try { saveReminderState(state, config.statePath); } catch {}
+
+  const mode = flags.all ? "all" : flags.stale ? "stale" : "one";
+  console.log(`\nDone. mode=${mode} sent=${sent} skipped=${skipped}`);
+}
+
+/**
  * Cross-session context leaderboard. Sorts all claude/codex panes by
  * percent descending (tokens as tie-breaker). Helps answer "which pane
  * is closest to the context ceiling right now?" without manual digging.
@@ -1178,6 +1266,12 @@ const FLAG_SPECS = {
     grep: "string",
   },
   compact: { dry: "boolean", force: "boolean", "min-tokens": "number" },
+  remind: {
+    p: "number",                      // pane index (only when single agent given)
+    all: "boolean",                   // broadcast to every claude pane
+    stale: "boolean",                 // only panes currently over threshold
+    threshold: "number",              // override turn threshold for this run
+  },
   label: { clear: "boolean" },
   labels: {},
   edit: {},
@@ -1271,6 +1365,11 @@ export async function dispatch(argv, ctx) {
     case "compact": {
       const { flags, positional } = parseFlags(rest, FLAG_SPECS.compact);
       return cmdCompact(ctx, flags, positional);
+    }
+
+    case "remind": {
+      const { flags, positional } = parseFlags(rest, FLAG_SPECS.remind);
+      return cmdRemind(ctx, flags, positional);
     }
 
     case "edit": {
