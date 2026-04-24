@@ -901,7 +901,7 @@ async function cmdRemind(ctx, flags = {}, positional = []) {
       process.exit(1);
     }
     const name = resolveAgent(positional[0], ctx.configPath);
-    const a = getAgent(name, ctx.configPath);
+    const a = getAgent(ctx.configPath, name);
     if (!a) { console.error(`Unknown agent '${name}'.`); process.exit(1); }
     const paneIdx = Number.isFinite(flags.p) ? flags.p : 0;
     targets.push({ agent: a, paneIdx });
