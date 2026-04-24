@@ -157,6 +157,7 @@ const driftGuardConfig = parseReminderConfig();
 const driftGuard = createDriftGuard({
   agent,
   agentsYamlPath: AGENTS_YAML,
+  discord,
   config: driftGuardConfig,
 });
 driftGuard.start();

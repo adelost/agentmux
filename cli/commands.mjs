@@ -928,7 +928,10 @@ async function cmdRemind(ctx, flags = {}, positional = []) {
     }
 
     try {
-      await ctx.agent.sendOnly(a.name, formatReminderMessage(turnCount), paneIdx);
+      // sendToPane mirrors to the pane's bound Discord channel automatically
+      // via the standard mirror path — same as any other `amux` send. No
+      // source tag so the reminder reads the same in Discord as in the pane.
+      await sendToPane(ctx, a.name, paneIdx, formatReminderMessage(turnCount));
       state[paneKey] = { ...paneState, lastReminderTsMs: nowMs };
       sent++;
       console.log(`reminded ${paneKey} (${turnCount} turns)`);
