@@ -7,7 +7,7 @@
 // is idle. Compact events auto-reset the counter because /compact
 // reloads system-context with fresh prominence.
 
-import { listAgents } from "../cli/config.mjs";
+import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { detectPaneStatus } from "../cli/format.mjs";
 import { panePathFor, countTurnsSince, findLatestCompactTs } from "../core/jsonl-reader.mjs";
 import {
@@ -21,6 +21,7 @@ import {
 export function createDriftGuard({
   agent,
   agentsYamlPath,
+  discord,
   config,
   log = (msg) => console.log(`drift-guard | ${msg}`),
 }) {
@@ -46,11 +47,24 @@ export function createDriftGuard({
   }
 
   async function sendReminder(agentName, paneIdx, paneKey, turnCount) {
+    const text = formatReminderMessage(turnCount);
     try {
-      await agent.sendOnly(agentName, formatReminderMessage(turnCount), paneIdx);
+      await agent.sendOnly(agentName, text, paneIdx);
       log(`reminded ${paneKey} at ${turnCount} turns past refresh`);
     } catch (err) {
       log(`send failed for ${paneKey}: ${err.message}`);
+      return;
+    }
+    // Mirror to bound Discord channel so the user sees drift-guard activity
+    // in the same timeline as briefs and /compact notices. Mirror failure
+    // is a transparency degradation, not a correctness issue.
+    const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
+    if (channelId && discord) {
+      try {
+        await discord.send(channelId, text);
+      } catch (err) {
+        log(`mirror failed for ${paneKey}: ${err.message}`);
+      }
     }
   }
 
