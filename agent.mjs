@@ -153,7 +153,8 @@ amux stop --all                      # stop bridge + every agent session
 | **tmux** (\`amux log --tmux\`) | Live terminal content | "Is the pane hung? Showing a modal?" |
 | **ps/top** | Status indicator + context% | Quick overview |
 | **timeline** | Merge of all jsonl, chronological | Cross-pane post-mortem |
-| **done** | Classified since-last-check | Daily orchestration |
+| **done** | Commits + classified panes since last check | Daily orchestration (use first) |
+| **git log** | Via \`amux done\` — strongest work signal | Cross-repo "what shipped?" |
 
 ## Discord integration (when bridge is running)
 
