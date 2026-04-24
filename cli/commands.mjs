@@ -16,7 +16,9 @@ import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.
 import {
   loadCheckpoint, saveCheckpoint, CHECKPOINT_PATH,
   groupByPane, classifyPane, previewText,
+  isStaleWaiter, isRunningNow,
 } from "../core/orchestrator-checkpoint.mjs";
+import { collectCommitsSince, reposFromAgents } from "../core/commit-log.mjs";
 import { regenerateAgentsYaml } from "../sync.mjs";
 import yaml from "js-yaml";
 import { spawn, execSync } from "child_process";
@@ -610,7 +612,8 @@ async function cmdDone(ctx, flags) {
   }
 
   const finished = [];
-  const waiting = [];
+  const waitingNew = [];
+  const waitingStale = [];
   const working = [];
   let idleCount = 0;
 
@@ -619,14 +622,26 @@ async function cmdDone(ctx, flags) {
     const paneIdx = parseInt(paneStr, 10);
     const bucket = buckets.get(key) || {
       agent: agentName, pane: paneIdx, turns: 0,
-      latestTurnTs: null, lastUserText: null, lastAssistantText: null,
+      latestTurnTs: null,
+      lastUserText: null, lastUserTextTs: null,
+      lastAssistantText: null, lastAssistantTextTs: null,
     };
     const status = await getPaneStatus(ctx, agentName, paneIdx).catch(() => "unknown");
-    const cls = classifyPane(bucket, status);
+    let cls = classifyPane(bucket, status);
+
+    // jsonl <30s old overrides classifier: tmux pane status can lag behind
+    // the agent's actual streaming state. If Claude is writing events right
+    // now, that is the strongest possible "working" signal.
+    if (isRunningNow(bucket, nowMs)) cls = "still-working";
 
     const entry = { key, bucket, status };
     if (cls === "finished") finished.push(entry);
-    else if (cls === "waiting") waiting.push(entry);
+    else if (cls === "waiting") {
+      // Split into "new since check" vs "from before". Stale waiters are
+      // old asks the orchestrator saw last time — not actionable news.
+      if (isStaleWaiter(bucket, sinceMs)) waitingStale.push(entry);
+      else waitingNew.push(entry);
+    }
     else if (cls === "still-working") working.push(entry);
     else idleCount++;
   }
@@ -634,26 +649,42 @@ async function cmdDone(ctx, flags) {
   // Freshest events first per bucket (within each category).
   const byTsDesc = (a, b) => (b.bucket.latestTurnTs || 0) - (a.bucket.latestTurnTs || 0);
   finished.sort(byTsDesc);
-  waiting.sort(byTsDesc);
+  waitingNew.sort(byTsDesc);
+  waitingStale.sort(byTsDesc);
   working.sort(byTsDesc);
 
   const sinceIso = new Date(sinceMs).toISOString().slice(0, 16).replace("T", " ");
   const ageMin = Math.round((nowMs - sinceMs) / 60000);
   console.log(`\nSince ${sinceIso} UTC (${ageMin} min ago, source: ${sinceSource})`);
 
-  if (finished.length) {
-    console.log(`\n✅ ${finished.length} finished`);
-    for (const e of finished) console.log("  " + formatDoneRow(e));
+  // Commits are the strongest "work happened" signal — code was written,
+  // reviewed, and kept. Render first so it anchors the orchestrator's
+  // situational awareness before the classifier-based sections.
+  const commits = collectCommitsSince(reposFromAgents(agents), sinceMs, 20);
+  if (commits.length) {
+    console.log(`\n📝 ${commits.length} commit${commits.length === 1 ? "" : "s"}`);
+    for (const c of commits) console.log("  " + formatCommitRow(c));
   }
-  if (waiting.length) {
-    console.log(`\n🔴 ${waiting.length} waiting your input`);
-    for (const e of waiting) console.log("  " + formatDoneRow(e));
-  }
+
   if (working.length) {
     console.log(`\n🟡 ${working.length} still working`);
     for (const e of working) console.log("  " + formatDoneRow(e));
   }
-  if (!finished.length && !waiting.length && !working.length) {
+  if (finished.length) {
+    console.log(`\n✅ ${finished.length} finished`);
+    for (const e of finished) console.log("  " + formatDoneRow(e));
+  }
+  if (waitingNew.length) {
+    console.log(`\n🔴 ${waitingNew.length} new waiter${waitingNew.length === 1 ? "" : "s"} (since last check)`);
+    for (const e of waitingNew) console.log("  " + formatDoneRow(e));
+  }
+  if (waitingStale.length) {
+    console.log(`\n⏸ ${waitingStale.length} stale waiter${waitingStale.length === 1 ? "" : "s"} (from before check)`);
+    for (const e of waitingStale) console.log("  " + formatDoneRow(e));
+  }
+
+  const anySection = commits.length || finished.length || waitingNew.length || waitingStale.length || working.length;
+  if (!anySection) {
     console.log(`\n(no activity since cutoff, ${idleCount} panes idle)`);
   } else {
     console.log(`\n💤 ${idleCount} idle (no activity since cutoff)`);
@@ -664,6 +695,14 @@ async function cmdDone(ctx, flags) {
   } else {
     console.log(`\n(--reset: checkpoint NOT advanced, next 'amux done' will see the same cutoff)`);
   }
+}
+
+function formatCommitRow(c) {
+  const tsLabel = new Date(c.ts).toISOString().slice(11, 16);
+  const labelPad = c.label.padEnd(10).slice(0, 10);
+  const hash = c.hash.slice(0, 7);
+  const subject = c.subject.length > 70 ? c.subject.slice(0, 69) + "…" : c.subject;
+  return `${tsLabel}  ${labelPad}  ${hash}  ${subject}`;
 }
 
 function formatDoneRow({ key, bucket }) {

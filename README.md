@@ -405,14 +405,24 @@ amux done --since 30min      # override anchor
 amux done --reset            # peek without advancing the checkpoint
 ```
 
-Output groups panes into four buckets:
+Output layers cross-repo commits and pane state:
 
 ```
-✅ 2 finished                          committed work / idle with turns
-🔴 2 waiting your input                last assistant msg ends with a question
-🟡 1 still working                     live status = working/resume
-💤 30 idle                             no activity since cutoff
+📝 3 commits                           cross-repo git log since checkpoint
+🟡 2 still working                     live (jsonl <30s) or pane status=working
+✅ 5 finished                          turns written, last msg reads statement-like
+🔴 2 new waiters (since last check)    ask timestamp is after checkpoint
+⏸ 4 stale waiters (from before check)  ask existed last check too — not news
+💤 20 idle                             no activity since cutoff
 ```
+
+Why commits lead: a fresh commit means code was written and kept — the
+strongest "work happened" signal. Jsonl-only activity can be inflated by
+compact boundaries, file snapshots, and tool-use bumps without real work.
+
+Why split waiters: a stale ask ("waiting for you since 12h ago") isn't
+actionable news — you already saw it last time. New asks are the ones you
+need to respond to.
 
 State lives in `/tmp/agentmux-orchestrator-check.json` as a single
 `last_check_ts_ms` field. Every successful `amux done` advances it (pass

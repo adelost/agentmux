@@ -48,23 +48,57 @@ export function groupByPane(rows) {
         turns: 0,
         latestTurnTs: null,
         lastUserText: null,
+        lastUserTextTs: null,
         lastAssistantText: null,
+        lastAssistantTextTs: null,
       });
     }
     const b = buckets.get(key);
     b.turns++;
-    if (r.timestamp) {
-      const t = Date.parse(r.timestamp);
-      if (Number.isFinite(t) && (b.latestTurnTs == null || t > b.latestTurnTs)) {
-        b.latestTurnTs = t;
-      }
+    const t = r.timestamp ? Date.parse(r.timestamp) : NaN;
+    const tValid = Number.isFinite(t);
+    if (tValid && (b.latestTurnTs == null || t > b.latestTurnTs)) {
+      b.latestTurnTs = t;
     }
     if (r.type === "text" || r.type == null) {
-      if (r.role === "user" && r.content) b.lastUserText = r.content;
-      if (r.role === "assistant" && r.content) b.lastAssistantText = r.content;
+      if (r.role === "user" && r.content) {
+        b.lastUserText = r.content;
+        if (tValid) b.lastUserTextTs = t;
+      }
+      if (r.role === "assistant" && r.content) {
+        b.lastAssistantText = r.content;
+        if (tValid) b.lastAssistantTextTs = t;
+      }
     }
   }
   return buckets;
+}
+
+/**
+ * A waiter is "stale" when the assistant last produced text BEFORE the
+ * orchestrator's last checkpoint. That means the ask existed in the
+ * previous check-in too — it shouldn't show up as new actionable work.
+ * Missing timestamp → treat as stale (no evidence it's fresh).
+ */
+export function isStaleWaiter(bucket, sinceMs) {
+  if (!bucket || !Number.isFinite(sinceMs)) return false;
+  const ts = bucket.lastAssistantTextTs;
+  if (!Number.isFinite(ts)) return true;
+  return ts < sinceMs;
+}
+
+/**
+ * Live-running detection: the pane's most recent jsonl event happened
+ * within `withinMs` of now. jsonl is written as events stream, so a
+ * <30s-old event means something is actively producing output. This is
+ * strictly stronger than tmux-pane-status which can report "working"
+ * minutes after the agent stopped.
+ */
+export function isRunningNow(bucket, nowMs, withinMs = 30_000) {
+  if (!bucket || !Number.isFinite(nowMs)) return false;
+  const ts = bucket.latestTurnTs;
+  if (!Number.isFinite(ts)) return false;
+  return nowMs - ts <= withinMs;
 }
 
 /**
