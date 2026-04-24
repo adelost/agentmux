@@ -85,8 +85,9 @@ export function createDriftGuard({
       const panes = Array.isArray(a.panes) ? a.panes : [];
       for (let i = 0; i < panes.length; i++) {
         // Only Claude panes have CLAUDE.md baseline rules; skip shells/make/etc.
-        // listAgents yields panes with `{name, cmd}` — `.name` is the pane type.
-        if (panes[i]?.name !== "claude") continue;
+        // Claude panes are named `claude`, `claude-2`, `claude-3`... in config,
+        // but all share `cmd` starting with "claude". Use cmd for robustness.
+        if (!String(panes[i]?.cmd || "").startsWith("claude")) continue;
 
         const paneKey = `${a.name}:${i}`;
         if (!state[paneKey]) state[paneKey] = { lastReminderTsMs: null, lastCompactTsMs: null };
