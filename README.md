@@ -463,6 +463,45 @@ Env vars (all optional):
 | `AUTO_COMPACT_POLL_MS` | `60000` | Ms between poll ticks (matched to grace by default) |
 | `AUTO_COMPACT_MIN_IDLE_MS` | `300000` | Ms of conversation silence required before warning. Protects against firing between turns when the operator is mid-thought (5 min default). |
 
+## Drift-guard — periodic "re-read your CLAUDE.md" reminders
+
+Long-running Claude panes drift from their CLAUDE.md rules as conversation
+accumulates — attention weights tunnas so rules from earlier in context
+lose effective prominence. `/compact` naturally resets this because the
+rules are re-loaded with fresh weight. Between compacts, a periodic
+reminder closes the gap.
+
+The bridge polls each claude pane. When **turns since last reminder OR
+last /compact** exceeds the threshold (40 by default) AND the pane is
+idle, a short reminder lands in the pane:
+
+```
+[drift-guard] Re-read .agents/CLAUDE.md — especially "Always lead with a
+recommendation". You are 42+ turns past your last refresh; attention
+weights decay.
+```
+
+Manual trigger via `amux remind`:
+
+```bash
+amux remind <agent> -p <pane>    # single pane, unconditional
+amux remind --all                # every claude pane, unconditional
+amux remind --stale              # only panes past the threshold right now
+amux remind --all --threshold 30 # override threshold for this run
+```
+
+`remind` updates the shared state file so the auto-poll won't re-fire
+the same panes for another threshold-worth of turns.
+
+Env vars (all optional):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AMUX_REMIND_ENABLED` | `true` | Set to `false` to disable the poll |
+| `AMUX_REMIND_TURN_THRESHOLD` | `40` | Turns since refresh before reminder fires |
+| `AMUX_REMIND_POLL_MS` | `60000` | Ms between poll ticks (min 10s enforced) |
+| `AMUX_REMINDER_STATE_PATH` | `/tmp/agentmux-reminder-state.json` | Per-pane state |
+
 ## Environment Variables
 
 All optional (set in `.env`):

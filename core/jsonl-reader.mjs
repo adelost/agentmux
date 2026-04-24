@@ -685,3 +685,35 @@ export function countTurnsSince(paneDir, sinceTs) {
 
   return { count, latest, capped };
 }
+
+/**
+ * Find the timestamp of the most recent compact summary in the pane's
+ * newest jsonl file. Returns null if no compact event exists (pane never
+ * /compact'ed since session start) or jsonl is missing.
+ *
+ * Compact events are user-role rows with `isCompactSummary: true`. Reverse
+ * scan the newest file and return first match.
+ *
+ * Used by the drift-guard poll: when we see a compact newer than our
+ * stored `lastCompactTsMs`, reset the turn counter because /compact
+ * reloads CLAUDE.md as system context with full prominence again.
+ *
+ * @param {string} paneDir - The pane's cwd
+ * @returns {number|null} epoch ms of latest compact, or null
+ */
+export function findLatestCompactTs(paneDir) {
+  const projectDir = projectDirFor(paneDir);
+  if (!existsSync(projectDir)) return null;
+  const files = listJsonlFiles(projectDir);
+  if (files.length === 0) return null;
+
+  const events = parseJsonl(files[0].path);
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (!e || e.isCompactSummary !== true) continue;
+    if (!e.timestamp) continue;
+    const t = Date.parse(e.timestamp);
+    if (Number.isFinite(t)) return t;
+  }
+  return null;
+}

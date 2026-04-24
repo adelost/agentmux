@@ -29,6 +29,8 @@ import { createDiscordChannel } from "./channels/discord.mjs";
 import { createVoicePWA } from "./channels/voice.mjs";
 import { createAutoCompact } from "./channels/auto-compact.mjs";
 import { parseAutoCompactConfig } from "./core/auto-compact.mjs";
+import { createDriftGuard } from "./channels/drift-guard.mjs";
+import { parseReminderConfig } from "./core/reminder-state.mjs";
 
 // --- Config ---
 
@@ -146,6 +148,18 @@ const autoCompact = createAutoCompact({
   config: autoCompactConfig,
 });
 autoCompact.start();
+
+// Drift-guard: periodic reminder to panes that have accumulated many turns
+// without a /compact or prior reminder. Counteracts attention-weight decay
+// on long CLAUDE.md-driven rules. See core/reminder-state.mjs for the
+// decision logic; threshold/enabled are env-tunable (AMUX_REMIND_*).
+const driftGuardConfig = parseReminderConfig();
+const driftGuard = createDriftGuard({
+  agent,
+  agentsYamlPath: AGENTS_YAML,
+  config: driftGuardConfig,
+});
+driftGuard.start();
 
 if (VOICE_PWA_TOKEN) {
   const voicePwa = createVoicePWA({
