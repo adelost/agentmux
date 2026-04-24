@@ -114,6 +114,8 @@ export function cutoffFor(paneState) {
  * the rule lives and is always system-context-loaded.
  */
 export function formatReminderMessage(turnCount) {
-  return `[drift-guard] Re-read .agents/CLAUDE.md — especially "Always lead with a recommendation". ` +
-    `You are ${turnCount}+ turns past your last refresh; attention weights decay.`;
+  return `[drift-guard] Silently re-read .agents/CLAUDE.md — especially the ` +
+    `"Always lead with a recommendation" section. You are ${turnCount}+ turns past ` +
+    `your last refresh; attention weights decay. ` +
+    `No reply needed — absorb and continue with your current task.`;
 }
