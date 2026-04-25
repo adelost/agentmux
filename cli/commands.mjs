@@ -705,7 +705,7 @@ async function cmdDone(ctx, flags) {
     recentItems.push({ kind: "commit", ts: c.ts, commit: c });
   }
   recentItems.sort((a, b) => b.ts - a.ts);
-  const top = recentItems.slice(0, 5);
+  const top = recentItems.slice(0, 20);
   if (top.length) {
     console.log(`\nRecent activity (top ${top.length}):`);
     for (const item of top) {
@@ -762,27 +762,33 @@ async function cmdDone(ctx, flags) {
   // Lines are contextual: only include hints relevant to what the user
   // is likely to want next given the current output state.
   console.log(`\nℹ More:`);
-  console.log(`  amux done --week                # full week of activity, peek-only`);
+  console.log(`  amux done --week                              # full week, peek-only`);
   if (commits.length) {
     const c0 = commits[0];
-    // Use the actual repo path from the commit, not the agent label —
-    // labels can mismatch (e.g. agent name "claw" but repo at ~/.openclaw/...).
-    console.log(`  cd ${c0.repo} && git log -20  # full commit history for ${c0.label}`);
+    // Use actual repo path from the commit, not the agent label — labels
+    // can mismatch (e.g. agent "claw" but repo at ~/.openclaw/workspace).
+    console.log(`  cd ${c0.repo} && git show ${c0.hash.slice(0, 7)}  # full commit body for ${c0.label}`);
+    console.log(`  cd ${c0.repo} && git log -20                  # commit history for ${c0.label}`);
   }
   if (waitingNew.length || waitingStale.length) {
     const w = (waitingNew[0] || waitingStale[0]);
     const [aname, pidx] = w.key.split(":");
-    console.log(`  amux log ${aname} -p ${pidx} -n 5    # full text from this waiter pane`);
+    console.log(`  amux log ${aname} -p ${pidx} -n 5            # FULL text from this waiter pane`);
   }
   if (working.length) {
     const w = working[0];
     const [aname, pidx] = w.key.split(":");
-    console.log(`  amux log ${aname} -p ${pidx} -n 3    # what this pane is working on`);
+    console.log(`  amux log ${aname} -p ${pidx} -n 3            # what this pane is working on`);
+  }
+  if (top.length) {
+    // Generic "see full" hint for the top-20 recent activity feed — preview
+    // text is truncated to ~50 chars, full message lives in jsonl/git.
+    console.log(`  amux log <agent> -p <N> -n 1                 # full text of any pane in 'Recent activity'`);
   }
   if (!anySection) {
-    console.log(`  amux done --all                 # widen to 30d (max safety cap)`);
+    console.log(`  amux done --all                              # widen to 30d (max safety cap)`);
   }
-  console.log(`  amux timeline --grep "<keyword>" # cross-pane content search`);
+  console.log(`  amux timeline --grep "<keyword>"              # cross-pane content search`);
 
   if (!peekOnly) {
     saveCheckpoint(nowMs, checkpointPath);
