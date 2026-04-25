@@ -3,7 +3,7 @@
 
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
-import { load as loadYaml } from "js-yaml";
+import { load as loadYaml, dump as dumpYaml } from "js-yaml";
 import { esc, stripAnsi } from "./lib.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
 import { detectDialect } from "./core/dialects.mjs";
@@ -15,6 +15,9 @@ import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
 import { buildResumeHint } from "./core/resume-hint.mjs";
 
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
+const CLAUDE_CMD = `claude --continue ${CLAUDE_FLAGS}`;
+const CODEX_FLAGS = "--no-alt-screen --dangerously-bypass-approvals-and-sandbox";
+const CODEX_CMD = `codex ${CODEX_FLAGS} resume --last`;
 
 // --- Session isolation ---
 
@@ -330,6 +333,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     catch { return {}; }
   }
 
+  function saveConfig(config) {
+    writeFileSync(configPath, dumpYaml(config, { lineWidth: -1, quotingType: '"' }));
+  }
+
   function agentConfig(name) {
     const config = loadConfig();
     if (!config[name]?.dir) throw new Error(`Agent '${name}' not found in ${configPath}`);
@@ -398,8 +405,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const target = `${name}:.${i}`;
       if (await isAlreadyRunning(target)) continue;
 
-      if (isClaudeCmd(panes[i].cmd)) {
-        // Claude panes: skip entirely. startClaude (via ensureReady) does cd + start + dismiss.
+      if (isAgentCmd(panes[i].cmd)) {
+        // Agent panes: skip entirely. ensureReady does cd + start + dismiss.
         continue;
       } else if (panes[i].defer) {
         await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)}' Enter`);
@@ -424,23 +431,40 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   async function isAlreadyRunning(target) {
     try {
-      const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`);
+      const stdout = await currentPaneCommand(target);
       // Pane is "free" only if a shell is at the prompt. Anything else
       // (claude, rclone, ssh, vim, tail, ...) means a process owns the
       // pane — don't send-keys into it, they'd land as stdin to that process.
-      return !/^(bash|zsh|fish|sh|dash)$/.test(stdout.trim());
+      return !isShellProc(stdout.trim());
     } catch {
       // Target doesn't exist → not running
       return false;
     }
   }
 
+  async function currentPaneCommand(target) {
+    const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`);
+    return stdout.trim();
+  }
+
   function isClaudeCmd(cmd) {
     return cmd?.includes("claude") || false;
   }
 
+  function isCodexCmd(cmd) {
+    return cmd?.includes("codex") || false;
+  }
+
+  function isAgentCmd(cmd) {
+    return isClaudeCmd(cmd) || isCodexCmd(cmd);
+  }
+
   function isShellProc(cmd) {
     return /^(bash|zsh|fish|sh|dash)$/.test(cmd);
+  }
+
+  function shellQuote(s) {
+    return `'${esc(String(s))}'`;
   }
 
   // True when a pane's current process matches the type expected by config.
@@ -448,6 +472,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   // to be the configured service (npm/make/etc spawn varied binaries).
   function paneTypeMatches(currCmd, wantCmd) {
     if (isClaudeCmd(wantCmd)) return /^(claude|node)$/.test(currCmd);
+    if (isCodexCmd(wantCmd)) return /^(codex|node)$/.test(currCmd);
     if (wantCmd === "bash") return isShellProc(currCmd);
     return !isShellProc(currCmd) && !/^(claude|node)$/.test(currCmd);
   }
@@ -459,8 +484,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
    * whose current process doesn't match the configured command type. Leaves
    * correctly-matching panes untouched (preserves running claude/service state).
    *
-   * Claude panes that get respawned are left as idle shells; startClaude runs
-   * on demand next time the pane is used.
+   * Agent panes that get respawned are left as idle shells; ensureReady starts
+   * the configured runtime on demand next time the pane is used.
    */
   async function reconcileSession(name) {
     const config = loadConfig();
@@ -510,8 +535,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // clearly non-interactive process (tail, rclone, etc). This is what
       // fixes the original bug: pane has `tail` but config wants claude.
       try {
-        if (isClaudeCmd(want.cmd) || want.cmd === "bash") {
-          // Leave as shell; startClaude runs on demand when pane is used.
+        if (isAgentCmd(want.cmd) || want.cmd === "bash") {
+          // Leave as shell; ensureReady starts the agent when pane is used.
           await tmux(`respawn-pane -k -t '${esc(target)}' -c '${esc(cfg.dir)}'`);
         } else {
           await tmux(`respawn-pane -k -t '${esc(target)}' -c '${esc(cfg.dir)}' '${esc(want.cmd)}'`);
@@ -529,12 +554,84 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   async function startClaude(name, target, rootDir, pane = 0) {
     if (await isPaneDead(target)) await respawnPane(target);
-    if (await isAlreadyRunning(target)) return;
+    if (await isAlreadyRunning(target)) return true;
 
     const dir = paneDir(rootDir, pane);
     const sessionFlag = resolveSessionFlag(dir);
-    await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)} && ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_FLAGS} ${sessionFlag}' Enter`);
+    const command = `cd ${shellQuote(dir)} && ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_FLAGS} ${sessionFlag}`.trim();
+
+    // A previously-interrupted TUI can leave readline in a partial/multiline
+    // prompt. Clear it first so the launch command cannot be spliced into
+    // stale input and accidentally executed by the shell.
+    await tmux(`send-keys -t '${esc(target)}' C-c`);
+    await wait(100);
+    await tmux(`send-keys -t '${esc(target)}' -l -- '${esc(command)}'`);
+    await tmux(`send-keys -t '${esc(target)}' Enter`);
     await wait(2000);
+    return await isAlreadyRunning(target);
+  }
+
+  async function startCodex(name, target, rootDir, pane = 0) {
+    if (await isPaneDead(target)) await respawnPane(target);
+    if (await isAlreadyRunning(target)) return true;
+
+    const dir = paneDir(rootDir, pane);
+    const codex = `codex ${CODEX_FLAGS}`;
+    const command = `cd ${shellQuote(dir)} && ${codex} resume --last || ${codex}`.trim();
+
+    await tmux(`send-keys -t '${esc(target)}' C-c`);
+    await wait(100);
+    await tmux(`send-keys -t '${esc(target)}' -l -- '${esc(command)}'`);
+    await tmux(`send-keys -t '${esc(target)}' Enter`);
+    await wait(2000);
+    return await isAlreadyRunning(target);
+  }
+
+  async function switchRuntime(agentName, pane, runtime, opts = {}) {
+    if (!["claude", "codex"].includes(runtime)) throw new Error(`Unsupported runtime: ${runtime}`);
+
+    const config = loadConfig();
+    const cfg = config[agentName];
+    if (!cfg?.dir) throw new Error(`Agent '${agentName}' not found in ${configPath}`);
+    if (!Array.isArray(cfg.panes) || !cfg.panes[pane]) throw new Error(`No pane ${pane} in ${agentName}`);
+
+    const isNew = !(await hasSession(agentName));
+    await ensureSession(agentName);
+    if (isNew) {
+      await setupPanes(agentName, cfg.dir);
+      await wait(2000);
+    }
+    const target = `${agentName}:.${pane}`;
+    const running = await isAlreadyRunning(target);
+    if (running && !opts.force) {
+      let busy = true;
+      try { busy = await isBusy(agentName, pane); } catch {}
+      if (busy) throw new Error(`${agentName}:${pane} is busy; use --force to switch anyway`);
+    }
+
+    const paneCfg = cfg.panes[pane] || {};
+    cfg.panes[pane] = {
+      ...paneCfg,
+      name: pane === 0 ? runtime : `${runtime}-${pane + 1}`,
+      cmd: runtime === "codex" ? CODEX_CMD : CLAUDE_CMD,
+    };
+    saveConfig(config);
+
+    const dir = paneDir(cfg.dir, pane);
+    await tmux(`respawn-pane -k -t '${esc(target)}' -c '${esc(dir)}'`);
+    await wait(300);
+
+    const started = runtime === "codex"
+      ? await startCodex(agentName, target, cfg.dir, pane)
+      : await startClaude(agentName, target, cfg.dir, pane);
+    if (!started) throw new Error(`${runtime} failed to start in ${target}`);
+
+    if (runtime === "claude") {
+      await waitForClaudeReady(target, agentName, pane);
+      if (!(await isAlreadyRunning(target))) throw new Error(`Claude exited during startup in ${target}`);
+    }
+
+    return { agentName, pane, runtime, command: cfg.panes[pane].cmd };
   }
 
   async function isPaneDead(target) {
@@ -873,9 +970,14 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // and types into themselves never see the hint — the hint only ever
       // fired through sendOnly/sendAndWait briefs prior to 1.14.0.
       const wasStarting = !(await isAlreadyRunning(target));
-      await startClaude(agentName, target, config.dir, pane);
+      const started = await startClaude(agentName, target, config.dir, pane);
+      if (!started) throw new Error(`Claude failed to start in ${target}`);
       await waitForClaudeReady(target, agentName, pane);
+      if (!(await isAlreadyRunning(target))) throw new Error(`Claude exited during startup in ${target}`);
       if (wasStarting) await injectResumeHint(agentName, pane, config.dir);
+    } else if (isCodexCmd(paneCmd)) {
+      const started = await startCodex(agentName, target, config.dir, pane);
+      if (!started) throw new Error(`Codex failed to start in ${target}`);
     }
   }
 
@@ -995,6 +1097,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     ensureReady, sendAndWait, sendOnly,
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
     capturePane, sendEscape, dismissBlockingPrompt, waitForPromptEcho,
-    startProgressTimer, getContextPercent, checkAgent, reconcileSession,
+    startProgressTimer, getContextPercent, checkAgent, reconcileSession, switchRuntime,
   };
 }
