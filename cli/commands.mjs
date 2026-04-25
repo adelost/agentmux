@@ -757,6 +757,33 @@ async function cmdDone(ctx, flags) {
     console.log(`\n💤 ${idleCount} idle (no activity since cutoff)`);
   }
 
+  // Next-step hints. Agents start fresh each session and don't remember
+  // flag semantics — explicit command + comment beats compact one-liner.
+  // Lines are contextual: only include hints relevant to what the user
+  // is likely to want next given the current output state.
+  console.log(`\nℹ More:`);
+  console.log(`  amux done --week                # full week of activity, peek-only`);
+  if (commits.length) {
+    const c0 = commits[0];
+    // Use the actual repo path from the commit, not the agent label —
+    // labels can mismatch (e.g. agent name "claw" but repo at ~/.openclaw/...).
+    console.log(`  cd ${c0.repo} && git log -20  # full commit history for ${c0.label}`);
+  }
+  if (waitingNew.length || waitingStale.length) {
+    const w = (waitingNew[0] || waitingStale[0]);
+    const [aname, pidx] = w.key.split(":");
+    console.log(`  amux log ${aname} -p ${pidx} -n 5    # full text from this waiter pane`);
+  }
+  if (working.length) {
+    const w = working[0];
+    const [aname, pidx] = w.key.split(":");
+    console.log(`  amux log ${aname} -p ${pidx} -n 3    # what this pane is working on`);
+  }
+  if (!anySection) {
+    console.log(`  amux done --all                 # widen to 30d (max safety cap)`);
+  }
+  console.log(`  amux timeline --grep "<keyword>" # cross-pane content search`);
+
   if (!peekOnly) {
     saveCheckpoint(nowMs, checkpointPath);
   } else if (flags.reset) {
