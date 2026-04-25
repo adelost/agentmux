@@ -1,54 +1,11 @@
-// Orchestrator-facing primitives for "what's been done since last check?"
-// Pure functions — state read/write lives at the edges so callers can inject
-// fake paths in tests. Complements jsonl-reader (raw event stream) and
-// getPaneStatus (current snapshot) by answering a different question:
-// "which panes finished, which are waiting on me, what did they last say?"
-
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
-import { dirname } from "path";
-
-export const CHECKPOINT_PATH =
-  process.env.AMUX_CHECKPOINT_PATH ||
-  "/tmp/agentmux-orchestrator-check.json";
-
-/**
- * Per-sender checkpoint path. Multiple orchestrator panes (claw:0,
- * claw:1, ai:2, …) all running `amux done` would otherwise clobber the
- * single global file — last-writer-wins, so each pane's checkpoint
- * gets eaten by the next sibling that runs done. Derive a path from
- * the sender so each orchestrator owns its own cutoff state.
- *
- * sender shape: { session, window } from detectSenderFromEnv. When
- * called from outside tmux (cron, CI, raw shell) sender is null —
- * return the legacy global path so the env-override + ad-hoc usage
- * keeps working.
- */
-export function checkpointPathForSender(sender) {
-  if (process.env.AMUX_CHECKPOINT_PATH) return process.env.AMUX_CHECKPOINT_PATH;
-  if (!sender || !sender.session) return CHECKPOINT_PATH;
-  const safe = `${sender.session}-${sender.window ?? 0}`.replace(/[^a-zA-Z0-9_-]/g, "_");
-  return `/tmp/agentmux-orchestrator-check-${safe}.json`;
-}
-
-/**
- * Load last-check timestamp from a JSON file. Returns null if file missing
- * or malformed — caller picks a fallback anchor (e.g. 1h ago).
- */
-export function loadCheckpoint(path = CHECKPOINT_PATH) {
-  try {
-    const raw = readFileSync(path, "utf-8");
-    const parsed = JSON.parse(raw);
-    const ts = parsed?.last_check_ts_ms;
-    return Number.isFinite(ts) ? ts : null;
-  } catch {
-    return null;
-  }
-}
-
-export function saveCheckpoint(tsMs, path = CHECKPOINT_PATH) {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify({ last_check_ts_ms: tsMs }, null, 2) + "\n");
-}
+// Orchestrator-facing pure primitives for `amux done`.
+//
+// The "checkpoint / since-last-check" mechanism that used to live here was
+// removed in 1.16.19 — agents read full output deterministically and humans
+// glance at the recent-activity feed, so neither audience used a stateful
+// inbox. `amux done` is now pure time-window + idempotent.
+//
+// What remains: bucket-and-classify helpers used by cmdDone to render rows.
 
 /**
  * Bucket timeline rows by `agent:pane` key. Each bucket captures the turn

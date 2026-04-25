@@ -1,10 +1,5 @@
 import { unit, feature, expect } from "bdd-vitest";
-import { unlinkSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
 import {
-  loadCheckpoint,
-  saveCheckpoint,
   groupByPane,
   classifyPane,
   isWaitingLikeText,
@@ -13,61 +8,8 @@ import {
   isRunningNow,
 } from "./orchestrator-checkpoint.mjs";
 
-const tmpPath = () =>
-  join(tmpdir(), `amux-checkpoint-test-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
-const cleanup = (path) => { try { unlinkSync(path); } catch {} };
-
 const row = (agent, pane, role, content, timestamp, type = "text") => ({
   agent, pane, role, content, timestamp, type,
-});
-
-feature("loadCheckpoint / saveCheckpoint", () => {
-  unit("loadCheckpoint returns null when file missing", {
-    given: ["a fresh path", () => ({ path: tmpPath() })],
-    when: ["loading", ({ path }) => loadCheckpoint(path)],
-    then: ["returns null", (result) => expect(result).toBeNull()],
-  });
-
-  unit("saveCheckpoint + loadCheckpoint roundtrip", {
-    given: ["a path and timestamp", () => ({ path: tmpPath(), ts: 1_700_000_000_000 })],
-    when: ["save then load", ({ path, ts }) => {
-      saveCheckpoint(ts, path);
-      const loaded = loadCheckpoint(path);
-      cleanup(path);
-      return loaded;
-    }],
-    then: ["loaded value matches saved", (result) => expect(result).toBe(1_700_000_000_000)],
-  });
-
-  unit("loadCheckpoint returns null for malformed file", {
-    given: ["a path with garbage", () => {
-      const path = tmpPath();
-      saveCheckpoint(42, path);
-      // corrupt it
-      const { writeFileSync } = require("fs");
-      writeFileSync(path, "not json");
-      return { path };
-    }],
-    when: ["loading", ({ path }) => loadCheckpoint(path)],
-    then: ["returns null (safe fallback)", (result, { path }) => {
-      cleanup(path);
-      expect(result).toBeNull();
-    }],
-  });
-
-  unit("loadCheckpoint returns null when field missing", {
-    given: ["a path with wrong shape", () => {
-      const path = tmpPath();
-      const { writeFileSync } = require("fs");
-      writeFileSync(path, JSON.stringify({ other: "field" }));
-      return { path };
-    }],
-    when: ["loading", ({ path }) => loadCheckpoint(path)],
-    then: ["returns null", (result, { path }) => {
-      cleanup(path);
-      expect(result).toBeNull();
-    }],
-  });
 });
 
 feature("groupByPane", () => {
