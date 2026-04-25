@@ -90,11 +90,16 @@ export function isStaleWaiter(bucket, sinceMs) {
 /**
  * Live-running detection: the pane's most recent jsonl event happened
  * within `withinMs` of now. jsonl is written as events stream, so a
- * <30s-old event means something is actively producing output. This is
+ * <60s-old event means something is actively producing output. This is
  * strictly stronger than tmux-pane-status which can report "working"
  * minutes after the agent stopped.
+ *
+ * 60s default chosen so deep-thinking pauses (Claude can pause 30-50s
+ * between tool calls during hard reasoning) don't flicker to 💤. Same
+ * window as `amux ps`'s jsonl-mtime overlay (cmdPs.inspectPane) for
+ * cross-command consistency.
  */
-export function isRunningNow(bucket, nowMs, withinMs = 30_000) {
+export function isRunningNow(bucket, nowMs, withinMs = 60_000) {
   if (!bucket || !Number.isFinite(nowMs)) return false;
   const ts = bucket.latestTurnTs;
   if (!Number.isFinite(ts)) return false;
