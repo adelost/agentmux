@@ -12,22 +12,30 @@ feature("detectPaneStatus", () => {
     given: ["pane mid-stream with token-count footer", () =>
       "✻ Sautéed for 2m 30s\n  (2m 30s · ↓ 7.2k tokens)\n"],
     when: ["detecting", detectPaneStatus],
-    then: ["returns working — '↓ Xk tokens' only appears during live streaming",
+    then: ["returns working — spinner footer with middot is live",
       (s) => expect(s).toBe("working")],
   });
 
-  unit("detects upstream token footer as working", {
-    given: ["pane mid-input with up-arrow token count", () =>
-      "✶ Crystallizing… (15s · ↑ 1.4k tokens)\n"],
+  unit("detects pre-token thinking footer as working", {
+    given: ["pane mid-thought, no tokens emitted yet", () =>
+      "✢ Finagling… (17s · still thinking with xhigh effort)\n"],
+    when: ["detecting", detectPaneStatus],
+    then: ["returns working — thinking phase shows footer without tokens",
+      (s) => expect(s).toBe("working")],
+  });
+
+  unit("detects 'thought for X' footer as working", {
+    given: ["pane mid-stream after thinking", () =>
+      "✻ Cogitated for 46s\n  (10m 27s · thought for 2s)\n"],
     when: ["detecting", detectPaneStatus],
     then: ["returns working", (s) => expect(s).toBe("working")],
   });
 
-  unit("token-count without arrow does NOT classify working (idle pane mentions tokens)", {
-    given: ["pane with idle prompt where text just mentions tokens", () =>
-      "context summary: ~7k tokens used last turn\n────\n❯ \n  bypass permissions on\n"],
+  unit("idle pane with bare-time mention does NOT classify working", {
+    given: ["pane where natural content includes (15s) without middot", () =>
+      "after waiting (15s), the response landed\n────\n❯ \n  bypass permissions on\n"],
     when: ["detecting", detectPaneStatus],
-    then: ["returns idle — bare 'tokens' string without arrow prefix is content, not stream-footer",
+    then: ["returns idle — bare '(Ns)' without middot is content, not spinner footer",
       (s) => expect(s).toBe("idle")],
   });
 
