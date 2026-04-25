@@ -13,17 +13,22 @@ export function detectPaneStatus(paneContent) {
   // false-positive on scrollback residue from completed turns.
   //
   // 1. "esc to interrupt" — Claude's classic inline interrupt hint
-  // 2. Token-stream footer "↓ X.Yk tokens" or "↑ X.Yk tokens"
-  //    → "(2m 30s · ↓ 7.2k tokens)" only appears during live streaming;
-  //    the count + arrow disappears the moment the turn settles.
+  // 2. Spinner footer "(Xs · ...)" or "(Xm Ys · ...)" — appears live and
+  //    updates every second while the turn is in flight. Empirically
+  //    confirmed across recordings: covers token-stream phases ("↓ 7.2k
+  //    tokens"), thinking phases ("still thinking with xhigh effort",
+  //    "thought for 2s"), and mixed forms. The bare "(Ns)" form (no
+  //    middot) appears in the very first ~1-2s before any sub-info — we
+  //    DON'T match that because tmux scrollback has lots of natural
+  //    "(15s)"-shaped content. The middot anchor + tail-15 keeps false
+  //    positives to ~zero.
   //
-  // Generic spinner glyphs ("✻ Sautéed for X", "✢ Undulating…") are
-  // intentionally NOT matched here — they linger in scrollback after the
-  // turn ends and look identical when frozen. The jsonl-mtime overlay in
-  // inspectPane (cmdPs) handles those by cross-checking actual file
-  // activity within the last 30s.
+  // Generic spinner glyphs ("✻ Sautéed for X", "✢ Undulating…") alone
+  // are intentionally NOT matched — they linger in scrollback after the
+  // turn ends and look identical when frozen. The jsonl-mtime overlay
+  // in inspectPane (cmdPs) handles those edge cases.
   if (/esc to interrupt/.test(tailRaw)) return "working";
-  if (/[↓↑]\s*\d+(?:\.\d+)?[kKmM]?\s*tokens/.test(tailRaw)) return "working";
+  if (/\((?:\d+m\s+)?\d+s\s*·/.test(tailRaw)) return "working";
 
   // Prompt-first ordering: a live modal (Allow once / 0: Dismiss / Enter to
   // select / Resume from summary) REPLACES the input box, so the `❯` prompt
