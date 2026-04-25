@@ -43,6 +43,19 @@ feature("detectPaneStatus", () => {
     then: ["returns idle (spinner pattern requires verb)", (s) => expect(s).toBe("idle")],
   });
 
+  unit("idle pane with old spinner in scrollback returns idle", {
+    given: ["pane where spinner is in scrollback above prompt", () =>
+      // Lots of scrollback with completed spinners + a fresh prompt at the
+      // very bottom. The spinner finished — agent is now idle.
+      "✻ Sautéed for 3m 46s\n  ⎿  Running… (7m 38s · timeout 10m)\n" +
+      "✻ Cooked for 38s\n" +
+      "result text from previous turn\n".repeat(20) +
+      "\n────\n❯ \n────\n  Opus 4.7 (1M context) │ 0\n  ⏵⏵ bypass permissions on\n"],
+    when: ["detecting", detectPaneStatus],
+    then: ["returns idle (old spinners in scrollback don't count)",
+      (s) => expect(s).toBe("idle")],
+  });
+
   unit("detects permission state", {
     given: ["pane with Allow once", () => "Allow once  Allow always\n"],
     when: ["detecting", detectPaneStatus],
