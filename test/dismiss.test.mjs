@@ -60,6 +60,88 @@ feature("dismissBlockingPrompt", () => {
       },
     ],
   });
+
+  // --- Regression for 1.16.2: stale scrollback false positive --------------
+  // Bug: dismissBlockingPrompt fired whenever "0: Dismiss" appeared anywhere
+  // in the last 20 lines of scrollback — even after the survey was already
+  // dismissed and the user was back at the input prompt. Each false fire
+  // sent `'0' Enter` into a pane with no menu, so the "0" landed as literal
+  // text. Combined with 4 dismiss call sites + a 3-attempt retry loop in
+  // processMessage, users saw `❯ 0` injected 3-4× per Discord message.
+  // Fix: matchers now check only the BOTTOM of the captured text and
+  // require the rating row "1: ... 2: ... 3: ..." next to "0: Dismiss".
+
+  unit("does NOT dismiss when survey only lingers in scrollback", {
+    given: [
+      "tmux pane where the feedback survey appeared earlier but user is now back at the input",
+      () => setup({
+        paneOutput:
+          "● Earlier turn output\n" +
+          "1: Bad  2: Fine  3: Good\n" +
+          "0: Dismiss\n" +                 // ← stale survey in scrollback
+          "● Survey dismissed, here's another response\n" +
+          "● More output\n" +
+          "❯ \n",                          // ← actual current screen state
+      }),
+    ],
+    when: [
+      "checking for blocking prompt",
+      ({ dismissBlockingPrompt }) => dismissBlockingPrompt("_api:.0"),
+    ],
+    then: [
+      "returns null and DOES NOT inject '0' Enter into the live input",
+      (result, { tmuxExec }) => {
+        expect(result).toBeNull();
+        expect(tmuxExec).toHaveBeenCalledTimes(1); // only the capture, no send-keys
+      },
+    ],
+  });
+
+  unit("does NOT dismiss when chat content mentions '0: Dismiss' literally", {
+    given: [
+      "tmux pane where a previous response quoted the dismiss option in code",
+      () => setup({
+        paneOutput:
+          '● To dismiss the survey, press "0: Dismiss" — but this is just docs\n' +
+          "❯ \n",
+      }),
+    ],
+    when: [
+      "checking for blocking prompt",
+      ({ dismissBlockingPrompt }) => dismissBlockingPrompt("_api:.0"),
+    ],
+    then: [
+      "returns null because the rating row is absent",
+      (result, { tmuxExec }) => {
+        expect(result).toBeNull();
+        expect(tmuxExec).toHaveBeenCalledTimes(1);
+      },
+    ],
+  });
+
+  unit("does NOT trigger resume when both phrases linger in scrollback", {
+    given: [
+      "tmux pane where the resume dialog was already confirmed earlier",
+      () => setup({
+        paneOutput:
+          "Resume from summary? Press Enter to confirm\n" + // ← old dialog
+          "● Resumed. Working on next task.\n" +
+          "● Done.\n" +
+          "❯ \n",
+      }),
+    ],
+    when: [
+      "checking for blocking prompt",
+      ({ dismissBlockingPrompt }) => dismissBlockingPrompt("_api:.0"),
+    ],
+    then: [
+      "returns null and does not send Enter into the live input",
+      (result, { tmuxExec }) => {
+        expect(result).toBeNull();
+        expect(tmuxExec).toHaveBeenCalledTimes(1);
+      },
+    ],
+  });
 });
 
 feature("getResponse", () => {
