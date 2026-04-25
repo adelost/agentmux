@@ -177,6 +177,7 @@ export function createVoicePWA(deps) {
     catch (err) { return json(res, 400, { error: err.message }); }
 
     let text = null;
+    let transcript = null;
     if (typeof body.text === "string" && body.text.trim()) {
       text = body.text;
     } else if (typeof body.audio === "string" && body.audio.length > 0) {
@@ -195,6 +196,7 @@ export function createVoicePWA(deps) {
         if (!raw) {
           return json(res, 422, { error: "transcription empty — audio may have been silent or unintelligible" });
         }
+        transcript = raw;
         text = `${TRANSCRIPT_PREFIX} ${raw}`;
       } catch (err) {
         return json(res, 500, { error: `transcription failed: ${err.message}` });
@@ -220,17 +222,45 @@ export function createVoicePWA(deps) {
       }
     }
 
-    json(res, 200, { sent: text });
+    json(res, 200, { sent: text, transcript });
+  }
+
+  /**
+   * Last-line-of-defence pane-chrome stripper. Mirrors the frontend
+   * cleanForTts so even a stale-cached PWA can't make edge-tts read
+   * "Opus 4.7 (1M context) │ 0 █░░░ 14%" out loud.
+   */
+  function stripPaneChrome(input) {
+    const lines = String(input).split("\n");
+    const kept = [];
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) { kept.push(""); continue; }
+      if (/^[│|]?\s*(opus|sonnet|haiku|gpt-?\d|claude|codex)[\s\d.()xMK,a-zA-Z-]*(\(.*context\).*|│.*\d+%?\s*$)?$/i.test(line)) continue;
+      if (/(opus|sonnet|haiku|gpt-?\d|claude|codex).*\(.*context\).*/i.test(line)) continue;
+      if (/^[█▓▒░\s│|·▏▎▍▌▋▊▉]+(\d+\s*%)?$/.test(line)) continue;
+      if (/[█▓▒░]{2,}/.test(line) && line.length < 80) continue;
+      if (/^[✻✢⏵⎿⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/u.test(line)) continue;
+      if (/(esc to interrupt|tokens?\s*[\)·]|still thinking|thought for)/i.test(line)) continue;
+      if (/bypass permissions on/i.test(line)) continue;
+      if (/shift\+tab to cycle/i.test(line)) continue;
+      if (/^[❯>$]\s*$/.test(line)) continue;
+      if (/^[─━═-]+$/.test(line)) continue;
+      kept.push(raw);
+    }
+    return kept.join("\n").trim();
   }
 
   async function handleTts(req, res) {
     let body;
     try { body = await parseJsonBody(req); }
     catch (err) { return json(res, 400, { error: err.message }); }
-    const text = String(body.text || "").trim();
-    if (!text) return json(res, 400, { error: "'text' required" });
+    const rawText = String(body.text || "").trim();
+    if (!rawText) return json(res, 400, { error: "'text' required" });
 
-    const clean = text.replace(/[`*_~|]/g, "").slice(0, 4000);
+    const stripped = stripPaneChrome(rawText);
+    if (!stripped) return json(res, 400, { error: "nothing to speak after stripping pane chrome" });
+    const clean = stripped.replace(/[`*_~|]/g, "").slice(0, 4000);
     const voice = body.voice || ttsVoice;
     // edge-tts --rate takes a percentage offset from the native pace.
     // speed=1.0 → +0%, speed=1.5 → +50%, speed=0.75 → -25%. Clamp to a
