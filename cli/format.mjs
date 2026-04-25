@@ -6,26 +6,36 @@ import { ALL_DIALECTS } from "../core/dialects.mjs";
 /** Detect pane status from captured content. */
 export function detectPaneStatus(paneContent) {
   const text = stripAnsi(paneContent);
-  // "esc to interrupt" is the historical marker but Claude Code also
-  // renders thinking spinners (✻/✽/✢/✶/✺/◐) followed by a verb + duration
-  // ("Cogitated for 46s", "Sautéed for 1m 48s", "Undulating…") and tool-call
-  // status lines ("Running… (6m 25s · timeout 10m)" + "ctrl+b ctrl+b" hint).
-  // Any of these indicates the agent is generating — without them we fall
-  // through to the prompt-line check and false-positive into idle.
-  if (/esc to interrupt/.test(text)) return "working";
-  // Spinner glyph + verb-word + ("for X" | ellipsis "…"). Catches:
-  //   "✻ Sautéed for 1m 48s", "✻ Cogitated for 46s", "✢ Undulating…"
-  //   "✶ Crystallizing… (7s · thinking)", "✻ Crunched for 55s"
-  // Requires a "for" or "…" immediately after the verb so a stray spinner
-  // glyph in user prose ("✻ is a fancy char") doesn't false-positive.
-  if (/[✻✽✢✶✺◐◑◒◓]\s+\S+(?:\s+for\b|…)/.test(text)) return "working";
-  if (/Running…[\s\S]*ctrl\+b ctrl\+b/.test(text)) return "working";
+  // Tail-only scan for liveness markers. Old spinners from completed turns
+  // linger in scrollback indefinitely, so a full-text match would false-
+  // positive into "working" long after the agent finished. The active
+  // spinner / Running… line is always rendered above the prompt within
+  // the visible region — the last ~15 raw lines covers it across both
+  // 200-line and 50-line capture sizes used by ps and the bridge.
+  const rawLines = text.split("\n");
+  const tailRaw = rawLines.slice(-15).join("\n");
+
+  // "esc to interrupt" is Claude's historical inline interrupt hint.
+  // Newer streams render thinking spinners (✻/✽/✢/✶/✺/◐) followed by a
+  // verb + duration ("Cogitated for 46s", "Sautéed for 1m 48s",
+  // "Undulating…") and tool-call status lines ("Running… (6m 25s ·
+  // timeout 10m)" + "ctrl+b ctrl+b" background-hint). Any of these in
+  // the tail indicates the agent is generating right now.
+  if (/esc to interrupt/.test(tailRaw)) return "working";
+  // Spinner glyph + verb-word + ("for X" | ellipsis "…"). The "for" or "…"
+  // suffix prevents a stray spinner glyph in user prose from triggering.
+  if (/[✻✽✢✶✺◐◑◒◓]\s+\S+(?:\s+for\b|…)/.test(tailRaw)) return "working";
+  if (/Running…[\s\S]*ctrl\+b ctrl\+b/.test(tailRaw)) return "working";
+
+  // Modal / prompt states: full-text is fine because these don't linger
+  // in scrollback after dismissal — when "Allow once" is gone, it's gone.
   if (/Allow once|Allow always|Do you want to proceed/.test(text)) return "permission";
   if (/Enter to select|Esc to cancel/.test(text)) return "menu";
   if (/Resume from summary/.test(text)) return "resume";
   if (/0: Dismiss/.test(text)) return "dismiss";
-  // Search last 10 lines for any dialect's prompt marker
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  // Search last 10 trimmed lines for any dialect's prompt marker
+  const lines = rawLines.map((l) => l.trim()).filter(Boolean);
   const tail = lines.slice(-10);
   const hasPrompt = tail.findLast((l) => ALL_DIALECTS.some((d) => l.startsWith(d.promptChar)));
   if (hasPrompt) return "idle";
