@@ -130,9 +130,22 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
   if (!channelId) return;
 
   try {
-    const { sendToChannelId } = await import("./send-notify.mjs");
+    const { sendToChannelId, setChannelTopicThrottled } = await import("./send-notify.mjs");
     const mirrored = opts.source ? `[${opts.source}] ${text}` : text;
     await sendToChannelId(channelId, mirrored);
+
+    // Update channel topic with one-line "last prompt" snapshot. Throttled
+    // (60s/channel) to stay well under Discord's 2-edits-per-10-min cap.
+    // Best-effort: a 403 (no Manage Channels perm) is logged once, never thrown.
+    const snippet = text.replace(/\s+/g, " ").trim().slice(0, 140);
+    const stamp = new Date().toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+    const sourceTag = opts.source ? `[${opts.source}] ` : "";
+    const topic = `[${name}:p${pane}] ${sourceTag}"${snippet}" · ${stamp}`;
+    setChannelTopicThrottled(channelId, topic).then((r) => {
+      if (!r.updated && r.reason && !r.reason.startsWith("throttled") && !r.reason.startsWith("unchanged")) {
+        console.warn(`topic ${name}:${pane} → ${channelId}: ${r.reason}`);
+      }
+    }).catch(() => {});
   } catch (err) {
     console.warn(`mirror ${name}:${pane} → ${channelId}: ${err.message}`);
   }
