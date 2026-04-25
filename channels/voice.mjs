@@ -232,9 +232,16 @@ export function createVoicePWA(deps) {
 
     const clean = text.replace(/[`*_~|]/g, "").slice(0, 4000);
     const voice = body.voice || ttsVoice;
+    // edge-tts --rate takes a percentage offset from the native pace.
+    // speed=1.0 → +0%, speed=1.5 → +50%, speed=0.75 → -25%. Clamp to a
+    // sensible range so a bad input can't break the synth call.
+    const speedRaw = typeof body.speed === "number" ? body.speed : 1.0;
+    const speed = Math.max(0.5, Math.min(2.5, speedRaw));
+    const offset = Math.round((speed - 1) * 100);
+    const rateFlag = `${offset >= 0 ? "+" : ""}${offset}%`;
     const tmpPath = join("/tmp", `voice-pwa-tts-${randomBytes(8).toString("hex")}.mp3`);
     try {
-      await run(`edge-tts --voice '${esc(voice)}' --text '${esc(clean)}' --write-media '${esc(tmpPath)}'`, 30000);
+      await run(`edge-tts --voice '${esc(voice)}' --rate='${esc(rateFlag)}' --text '${esc(clean)}' --write-media '${esc(tmpPath)}'`, 30000);
     } catch (err) {
       return json(res, 500, { error: `tts failed: ${err.message}` });
     }
