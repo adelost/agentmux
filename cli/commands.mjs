@@ -784,7 +784,7 @@ async function cmdPs(ctx) {
   }
 
   if (count === 0) console.log("No running agents.");
-  console.log("\nStatus: 🟢 working  🔴 needs input  💤 idle/done  ⚪ unknown");
+  console.log("\nStatus: 🟢 working  🔴 needs input  🟡 resume/dismiss  💤 idle/done  ⚪ unknown");
 }
 
 /**
