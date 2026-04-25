@@ -47,10 +47,19 @@ function formatContext(ctx) {
 function sendTextReply(msg, text, context) {
   const chunks = splitMessage(text);
   const ctxSuffix = formatContext(context);
+  // See processMessage's pace rationale: Discord can drop rapid-fire chunks.
+  const pacePerChunk = chunks.length >= 2 ? (chunks.length > 3 ? 400 : 250) : 0;
   return (async () => {
     for (let i = 0; i < chunks.length; i++) {
       const isLast = i === chunks.length - 1;
-      await msg.reply(isLast ? chunks[i] + ctxSuffix : chunks[i]);
+      try {
+        await msg.reply(isLast ? chunks[i] + ctxSuffix : chunks[i]);
+      } catch (err) {
+        console.warn(`reply chunk ${i + 1}/${chunks.length} failed: ${err.message}`);
+      }
+      if (pacePerChunk > 0 && !isLast) {
+        await new Promise((r) => setTimeout(r, pacePerChunk));
+      }
     }
   })();
 }
@@ -446,15 +455,28 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     const fullText = [cleanedText, ...failedMarkers].filter(Boolean).join("\n\n") || "(no text)";
 
     const chunks = splitMessage(fullText);
-    const pacePerChunk = chunks.length > 3 ? 400 : 0;
+    // Pace ANY multi-chunk send: Discord's bot rate limit can drop chunks
+    // when sent in tight succession, even at 2-3 messages. The dropped
+    // chunk fails silently because we .catch console.warn — looks like
+    // truncation to the user. 250ms gap is enough; bumps to 400 on >3
+    // because long replies are more likely to hit the 5/5s sliding window.
+    const pacePerChunk = chunks.length >= 2 ? (chunks.length > 3 ? 400 : 250) : 0;
     for (let i = 0; i < chunks.length; i++) {
       sent.push(chunks[i]);
       // Attach image files to the first chunk only
       const payload = (i === 0 && validFiles.length)
         ? { content: chunks[i], files: validFiles }
         : chunks[i];
-      await msg.send(payload)
-        .catch((err) => console.warn(`send failed for ${mapping.name}:${pane}: ${err.message}`));
+      try {
+        await msg.send(payload);
+      } catch (err) {
+        // Surface the failure visibly so dropped chunks don't masquerade
+        // as truncated responses.
+        console.warn(`send chunk ${i + 1}/${chunks.length} failed for ${mapping.name}:${pane}: ${err.message}`);
+        try {
+          await msg.send(`⚠️ chunk ${i + 1}/${chunks.length} failed (${err.message.slice(0, 80)})`);
+        } catch { /* even the error-notice failed; give up */ }
+      }
       if (pacePerChunk > 0 && i < chunks.length - 1) {
         await new Promise((r) => setTimeout(r, pacePerChunk));
       }
