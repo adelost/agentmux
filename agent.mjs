@@ -35,7 +35,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.16.12";
+const HINTS_VERSION = "1.16.16";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -85,22 +85,35 @@ amux watch                           # live-follow (like tail -f)
 
 ### Know what's been resolved since last check (orchestrator inbox)
 \`\`\`bash
-amux done                            # since-last-check view: commits + pane buckets
+amux done                            # since-last-check view (or 1h fallback)
 amux done --since 30min              # explicit anchor
-amux done --reset                    # peek without advancing checkpoint
+amux done --day                      # last 24h, peek-only (no checkpoint advance)
+amux done --week                     # last 7 days, peek-only
+amux done --all                      # last 30d (max safety cap), peek-only
+amux done --reset                    # peek current cutoff without advancing
 \`\`\`
-\`amux done\` is the orchestrator primitive. One command gives:
+\`amux done\` is the orchestrator primitive. Output anatomy:
 
-- 📝 **Commits** across all agent repos (strongest work-happened signal)
-- 🟡 **Still working** — panes active right now (jsonl <30s overrides tmux)
-- ✅ **Finished** — turns written + last msg is a statement
-- 🔴 **New waiters** — assistant's last text was after the checkpoint
-- ⏸ **Stale waiters** — assistant's last text was before the checkpoint (old asks)
-- 💤 **Idle** — no activity
+1. **\`Recent activity (top 20)\`** at the top — last 20 events across the
+   whole system from a 7d window, independent of cutoff. Mix of 📝 commits
+   and 🔸 pane activity sorted by time desc. Always shows "where were we"
+   even when the chosen window is short.
+2. **Bucket sections** (per cutoff window):
+   - 📝 **Commits** — work shipped (strongest signal)
+   - 🟡 **Still working** — panes active right now (jsonl <60s overlay)
+   - ✅ **Finished** — turns written + last msg is a statement
+   - 🔴 **New waiters** — assistant's last text was after the checkpoint
+   - ⏸ **Stale waiters** — assistant's last text was before the checkpoint
+   - 💤 **Idle** — no activity
+3. **\`ℹ More:\`** footer with contextual next-step hints (specific
+   commands + comments — copy-paste ready).
 
-Use it at every orchestrator decision point instead of 5× \`amux ps\` +
-per-pane \`amux log\`. Commits section first because "what got committed?"
-answers "what actually happened?" faster than scrolling turns.
+Per-sender checkpoint (since 1.16.9): your pane's "last check" timestamp
+won't get clobbered by other orchestrator panes running done in parallel.
+
+Use \`amux done\` at every orchestrator decision point instead of 5× \`amux ps\`
++ per-pane \`amux log\`. The recent-activity feed gives "where was I" before
+you even read the buckets.
 
 ### Shrink context before hitting limit
 \`\`\`bash
