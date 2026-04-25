@@ -732,7 +732,11 @@ async function inspectPane(ctx, agent, pane) {
   // so the preview looks readable when rendered into a left-aligned column.
   const preview = (lines[lines.length - 1] || "").trim();
   const dialect = CONTEXT_DIALECT[pane.command] || null;
-  const context = dialect === "claude" ? getContextFromPane(content, agent.dir) : null;
+  // Use the worktree pane dir, not agent.dir — same fix as cmdLog (399915f).
+  // Claude Code stores its session jsonl per-cwd; each pane runs in
+  // .agents/N, so getContextFromPane's max-tokens fallback must read from
+  // the worktree slug, not the parent project slug.
+  const context = dialect === "claude" ? getContextFromPane(content, panePathFor(agent, pane.index)) : null;
   return { status, preview, context };
 }
 
