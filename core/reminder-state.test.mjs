@@ -235,4 +235,15 @@ feature("formatReminderMessage", () => {
     when: ["formatting", ({ n }) => formatReminderMessage(n)],
     then: ["has prefix", (r) => expect(r.startsWith("[drift-guard]")).toBe(true)],
   });
+
+  unit("requires a one-sentence summary reply (1.16.10 behavior)", {
+    given: ["any count", () => ({ n: 50 })],
+    when: ["formatting", ({ n }) => formatReminderMessage(n)],
+    then: ["asks for ONE sentence summary so the rule lands as latest assistant text", (r) => {
+      expect(r).toMatch(/ONE sentence/);
+      expect(r).toMatch(/summarizing/i);
+      expect(r).not.toMatch(/silently/i);
+      expect(r).not.toMatch(/no reply needed/i);
+    }],
+  });
 });

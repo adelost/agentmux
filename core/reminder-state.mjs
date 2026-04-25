@@ -116,10 +116,20 @@ export function cutoffFor(paneState) {
  * The reminder text sent to the pane. Short by design — long reminders
  * get ignored. Refers to the .agents/CLAUDE.md file because that's where
  * the rule lives and is always system-context-loaded.
+ *
+ * Behavior change in 1.16.10: previously asked the agent to "absorb
+ * silently" (588d421 in 1.12.x). That kept the channel quiet but the
+ * rule never re-entered active context — agents drifted right back into
+ * the same anti-pattern within 1-2 turns. The new prompt requires a
+ * one-sentence summary so the rule lands as the latest assistant text;
+ * the next turn now has the directive hot in working memory instead of
+ * fading into system-context.
  */
 export function formatReminderMessage(turnCount) {
-  return `[drift-guard] Silently re-read .agents/CLAUDE.md — especially the ` +
+  return `[drift-guard] Re-read .agents/CLAUDE.md — especially the ` +
     `"Always lead with a recommendation" section. You are ${turnCount}+ turns past ` +
     `your last refresh; attention weights decay. ` +
-    `No reply needed — absorb and continue with your current task.`;
+    `Reply with ONE sentence summarizing the rule's core directive, then ` +
+    `continue your current task. The summary keeps the rule hot in context ` +
+    `for the next turns — that's the point, not boilerplate ack.`;
 }
