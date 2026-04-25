@@ -9,9 +9,9 @@
 //   GET  /api/events/:agent/:pane         SSE stream: status + response text
 //   POST /api/tts                         text → MP3 audio (edge-tts)
 //
-// Auth: Bearer token matching VOICE_PWA_TOKEN. Default binding is 127.0.0.1
-// so by default nothing is exposed to the LAN — caller chooses the tailnet
-// IP via VOICE_PWA_HOST when they're ready to let the phone in.
+// Auth: none. Backend binds 127.0.0.1 by default; tailnet exposure goes via
+// Tailscale Serve so the network IS the auth boundary. Same-origin static
+// PWA bundle ships from this server too.
 
 import http from "http";
 import { writeFileSync, unlinkSync, readFileSync, existsSync, statSync } from "fs";
@@ -52,7 +52,6 @@ const TRANSCRIPT_PREFIX = "[transcribed voice, may contain speech-to-text errors
  * @param {object} deps
  * @param {number} deps.port                      TCP port to bind
  * @param {string} deps.host                      interface to bind (default 127.0.0.1)
- * @param {string} deps.token                     shared secret for Bearer auth
  * @param {object} deps.agent                     createAgent() instance
  * @param {string} deps.agentsYamlPath            path to agents.yaml (generated)
  * @param {string} deps.transcribeScript          abs path to whisper wrapper
@@ -68,7 +67,6 @@ export function createVoicePWA(deps) {
   const {
     port = 8080,
     host = "127.0.0.1",
-    token,
     agent,
     agentsYamlPath,
     transcribeScript,
@@ -79,7 +77,6 @@ export function createVoicePWA(deps) {
     staticDir = null,
   } = deps;
 
-  if (!token) throw new Error("VOICE_PWA_TOKEN required — generate with `openssl rand -hex 32`");
   if (!agent) throw new Error("voice pwa: agent dep missing");
   if (!agentsYamlPath) throw new Error("voice pwa: agentsYamlPath missing");
 
@@ -136,12 +133,6 @@ export function createVoicePWA(deps) {
   }
 
   // ---------- HTTP plumbing ---------------------------------------------
-
-  function isAuthed(req) {
-    const h = req.headers.authorization || "";
-    const [scheme, val] = h.split(" ");
-    return scheme === "Bearer" && val === token;
-  }
 
   function json(res, status, body) {
     res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
@@ -374,18 +365,15 @@ export function createVoicePWA(deps) {
     // CORS for PWA served from different origin (legacy — same-origin deploy
     // doesn't need this, but keep it permissive so external clients still work).
     res.setHeader("access-control-allow-origin", "*");
-    res.setHeader("access-control-allow-headers", "authorization, content-type");
+    res.setHeader("access-control-allow-headers", "content-type");
     res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
     if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
-    // Static PWA bundle: serve everything that isn't /api/* without auth.
-    // The bundle is just JS/HTML — no secrets — so token-gating it would
-    // only break loading and force users to inject the header in the browser.
+    // Static PWA bundle: any non-/api GET serves a file (or index.html via
+    // SPA fallback). API routes follow below.
     if (staticRoot && req.method === "GET" && !path.startsWith("/api/")) {
       if (serveStatic(req, res, path)) return;
     }
-
-    if (!isAuthed(req)) return json(res, 401, { error: "unauthorized" });
 
     try {
       if (req.method === "GET" && path === "/api/agents") {

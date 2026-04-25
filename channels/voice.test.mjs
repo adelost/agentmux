@@ -82,39 +82,6 @@ async function request(url, opts = {}) {
   return { status: res.status, body, headers: Object.fromEntries(res.headers) };
 }
 
-// --- Auth ------------------------------------------------------------------
-
-feature("Voice PWA: auth gate", () => {
-  component("missing Authorization header → 401", {
-    given: ["server up", async () => {
-      const s = setupServer();
-      const { url } = await s.pwa.start();
-      return { s, url };
-    }],
-    when: ["GET /api/agents without header", async ({ url }) =>
-      request(`${url}/api/agents`)],
-    then: ["401 unauthorized", async (r, { s }) => {
-      expect(r.status).toBe(401);
-      expect(r.body).toEqual({ error: "unauthorized" });
-      await s.pwa.stop(); s.cleanup();
-    }],
-  });
-
-  component("wrong token → 401", {
-    given: ["server up", async () => {
-      const s = setupServer();
-      const { url } = await s.pwa.start();
-      return { s, url };
-    }],
-    when: ["GET with bogus token", async ({ url }) =>
-      request(`${url}/api/agents`, { headers: { authorization: "Bearer not-the-token" } })],
-    then: ["401", async (r, { s }) => {
-      expect(r.status).toBe(401);
-      await s.pwa.stop(); s.cleanup();
-    }],
-  });
-});
-
 // --- /api/agents -----------------------------------------------------------
 
 feature("GET /api/agents", () => {
@@ -409,18 +376,3 @@ feature("GET /api/events: SSE stream", () => {
   });
 });
 
-// --- Misc ------------------------------------------------------------------
-
-feature("Voice PWA: construction guards", () => {
-  component("missing token throws at construction", {
-    when: ["constructing without token", () => {
-      try {
-        createVoicePWA({ agent: {}, agentsYamlPath: "/tmp/x", transcribeScript: "/x", run: async () => ({}) });
-        return null;
-      } catch (e) { return e.message; }
-    }],
-    then: ["explicit token error", (msg) => {
-      expect(msg).toContain("VOICE_PWA_TOKEN");
-    }],
-  });
-});
