@@ -502,6 +502,53 @@ feature("readLastTurns: groups events into turns", () => {
   });
 });
 
+// --- Regression: worktree-aware jsonl resolution for `amux log` -----------
+//
+// Bug 1.16.0: cmdLog called readLastTurns(agent.dir, ...) which encoded the
+// parent project root (e.g. /home/x/proj) and missed the per-pane worktree
+// dir (/home/x/proj/.agents/0) that claude actually writes to. Result: stale
+// jsonl from the parent project showed up for every pane. Fix: cmdLog must
+// resolve via panePathFor(agent, pane), matching readAllTurnsAcrossPanes.
+feature("readLastTurns: worktree-aware path resolution (regression for #1.16.1)", () => {
+  unit("panePathFor + readLastTurns picks the pane's worktree jsonl, not the parent project's", {
+    given: ["a fake $HOME with both parent-project and .agents/0 worktree jsonls", () => {
+      const fakeHome = mkdtempSync(join(tmpdir(), "amux-worktree-regression-"));
+      const origHome = process.env.HOME;
+      process.env.HOME = fakeHome;
+
+      const agentDir = "/fake/lsrc/demo";
+      const agent = { name: "demo", dir: agentDir, panes: [{ name: "claude" }] };
+
+      // Stale jsonl in the parent project dir (the buggy code would read this).
+      const parentEncoded = agentDir.replace(/[\/\.]/g, "-");
+      const parentProjectDir = join(fakeHome, ".claude", "projects", parentEncoded);
+      mkdirSync(parentProjectDir, { recursive: true });
+      copyFileSync(fixtureFile("simple-text.jsonl"), join(parentProjectDir, "stale-parent.jsonl"));
+
+      // Fresh jsonl in the worktree pane dir (the correct target).
+      const paneDir = panePathFor(agent, 0);
+      const paneEncoded = paneDir.replace(/[\/\.]/g, "-");
+      const paneProjectDir = join(fakeHome, ".claude", "projects", paneEncoded);
+      mkdirSync(paneProjectDir, { recursive: true });
+      copyFileSync(fixtureFile("multi-turn.jsonl"), join(paneProjectDir, "fresh-worktree.jsonl"));
+
+      return { agent, paneDir, cleanup: () => { process.env.HOME = origHome; rmSync(fakeHome, { recursive: true, force: true }); } };
+    }],
+    when: ["reading via panePathFor (the fixed chain)", ({ agent }) => readLastTurns(panePathFor(agent, 0), { limit: 10 })],
+    then: ["found the worktree jsonl, not the parent's", (r, { cleanup }) => {
+      expect(r).not.toBeNull();
+      expect(r.jsonlFile).toContain("fresh-worktree.jsonl");
+      expect(r.jsonlFile).not.toContain("stale-parent.jsonl");
+      cleanup();
+    }],
+  });
+
+  unit("panePathFor returns ${agent.dir}/.agents/${pane}", {
+    when: ["computing pane 2 path for an agent at /tmp/proj", () => panePathFor({ dir: "/tmp/proj" }, 2)],
+    then: ["matches the worktree convention used by `claude` cwd", (r) => expect(r).toBe("/tmp/proj/.agents/2")],
+  });
+});
+
 feature("parseSinceArg: ISO and relative forms", () => {
   unit("ISO timestamp parses", {
     when: ["parsing ISO", () => parseSinceArg("2026-04-22T10:00:00Z")],
