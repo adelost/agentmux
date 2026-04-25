@@ -5,6 +5,7 @@ import yaml from "js-yaml";
 import { randomUUID } from "crypto";
 
 const DEFAULT_AGENT_CMD = "claude --continue --dangerously-skip-permissions";
+const DEFAULT_CODEX_CMD = "codex --no-alt-screen --dangerously-bypass-approvals-and-sandbox resume --last";
 
 /** Expand ~ to $HOME in paths */
 export function expandTilde(p) {
@@ -218,10 +219,10 @@ export function buildSyncPlan(desired, existing) {
  * @param {Map<string, string>} channelMap - channelName → channelId
  * @param {Map<string, string>} agentIds - agentName → UUID
  * @param {object} [existingYaml] - previous agents.yaml parsed, for
- *   preserving user-set per-pane fields (label) across regenerations.
- *   agentmux.yaml (the sync source) has no slot for labels, so they
- *   only live in agents.yaml itself; without this merge they'd be
- *   wiped every /sync.
+ *   preserving user-set per-pane fields (label, runtime cmd) across
+ *   regenerations. agentmux.yaml (the sync source) has no slot for labels
+ *   or temporary runtime switches, so they only live in agents.yaml itself;
+ *   without this merge they'd be wiped every /sync.
  */
 export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = null) {
   const result = {};
@@ -260,11 +261,18 @@ export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = 
     const labelFor = sourceLabels !== null && sourceLabels !== undefined
       ? (idx) => sourceLabels[idx]
       : (idx) => existingPanes[idx]?.label;
+    const codingPaneFor = (idx) => {
+      const existing = existingPanes[idx];
+      if (existing?.cmd?.includes("codex")) {
+        return { name: existing.name?.includes("codex") ? existing.name : (idx === 0 ? "codex" : `codex-${idx + 1}`), cmd: existing.cmd || DEFAULT_CODEX_CMD };
+      }
+      return { name: idx === 0 ? "claude" : `claude-${idx + 1}`, cmd: DEFAULT_AGENT_CMD };
+    };
 
     const panes = [];
     let paneIdx = 0;
     for (let i = 0; i < config.panes; i++) {
-      const pane = { name: i === 0 ? "claude" : `claude-${i + 1}`, cmd: DEFAULT_AGENT_CMD };
+      const pane = codingPaneFor(paneIdx);
       const label = labelFor(paneIdx);
       if (label) pane.label = label;
       panes.push(pane);

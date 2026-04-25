@@ -49,6 +49,7 @@ function setup({ mappingOverride, channelMapEntries } = {}) {
     sendEscape: vi.fn(async () => {}),
     sendAndWait: vi.fn(async () => "agent reply"),
     sendOnly: vi.fn(async () => {}),
+    switchRuntime: vi.fn(async (agentName, pane, runtime) => ({ agentName, pane, runtime })),
     waitForPromptEcho: vi.fn(async () => true),
     startProgressTimer: vi.fn(() => ({ timer: setInterval(() => {}, 99999), sentCount: () => 0 })),
   };
@@ -194,6 +195,33 @@ feature("command routing", () => {
     then: ["calls reloadConfig and replies with count", (_, { msg, reloadConfig }) => {
       expect(reloadConfig).toHaveBeenCalled();
       expect(msg.reply.mock.calls[0][0]).toContain("reloaded");
+    }],
+  });
+
+  component("//codex switches runtime instead of forwarding slash command", {
+    given: ["a //codex message", () => ({ ...setup(), msg: mockMsg({ content: "//codex" }) })],
+    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["switchRuntime is called and prompt is not forwarded", (_, { msg, agent }) => {
+      expect(agent.switchRuntime).toHaveBeenCalledWith("_ai", 0, "codex", { force: false });
+      expect(agent.sendOnly).not.toHaveBeenCalled();
+      expect(msg.reply.mock.calls[0][0]).toContain("Codex");
+    }],
+  });
+
+  component("//codex --force passes force flag", {
+    given: ["a //codex --force message", () => ({ ...setup(), msg: mockMsg({ content: "//codex --force" }) })],
+    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["force is true", (_, { agent }) => {
+      expect(agent.switchRuntime).toHaveBeenCalledWith("_ai", 0, "codex", { force: true });
+    }],
+  });
+
+  component("//claude switches back to Claude", {
+    given: ["a //claude message", () => ({ ...setup(), msg: mockMsg({ content: "//claude" }) })],
+    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["switchRuntime targets claude", (_, { msg, agent }) => {
+      expect(agent.switchRuntime).toHaveBeenCalledWith("_ai", 0, "claude", { force: false });
+      expect(msg.reply.mock.calls[0][0]).toContain("Claude Code");
     }],
   });
 });
@@ -430,7 +458,7 @@ feature("processMessage pipeline (streaming)", () => {
     }],
   });
 
-  component("queued follow-up prompt gets its own response stream", {
+  component("follow-up prompt does not wait for the previous Discord turn to finish", {
     given: ["two messages to the same busy pane", () => {
       const s = setup();
       const first = mockMsg({ content: "first prompt" });
@@ -465,11 +493,13 @@ feature("processMessage pipeline (streaming)", () => {
       releaseFirstBusy(true);
       await Promise.all([firstRun, secondRun]);
     }],
-    then: ["the queued message is also streamed back to Discord", (_, { first, second, agent }) => {
+    then: ["the follow-up message is streamed as soon as its own response is ready", (_, { first, second, agent }) => {
       expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "first prompt", 0);
       expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "second prompt", 0);
       expect(first.send.mock.calls.some((c) => c[0]?.includes("reply for first prompt"))).toBe(true);
+      expect(agent.sendOnly.mock.invocationCallOrder[1]).toBeLessThan(first.send.mock.invocationCallOrder[0]);
       expect(second.send.mock.calls.some((c) => c[0]?.includes("reply for second prompt"))).toBe(true);
+      expect(second.send.mock.invocationCallOrder[0]).toBeLessThan(first.send.mock.invocationCallOrder[0]);
       expect(agent.hasResponseForPrompt).toHaveBeenCalledWith("_ai", 0, "second prompt");
     }],
   });
@@ -590,6 +620,7 @@ feature("onMessage: loop guard", () => {
       sendAndWait: vi.fn(async () => "resp"),
       sendOnly: vi.fn(async () => {}),
       waitForPromptEcho: vi.fn(async () => true),
+      switchRuntime: vi.fn(async (agentName, pane, runtime) => ({ agentName, pane, runtime })),
       startProgressTimer: vi.fn(() => ({ timer: null, sentCount: () => 0 })),
     };
 

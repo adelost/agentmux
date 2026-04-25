@@ -28,6 +28,8 @@ const HELP_TEXT = [
   "`/esc` — interrupt (send Escape)",
   "`/use <agent>[.pane]` — switch channel target",
   "`/use reset` — back to yaml default",
+  "`/codex [--force]` — switch this pane to Codex",
+  "`/claude [--force]` — switch this pane to Claude Code",
   "`/thinking` — toggle real-time text streaming (default: on)",
   "`/follow` — toggle: stream output even when typing in tmux",
   "`/tts` — toggle text-to-speech for this channel",
@@ -66,6 +68,10 @@ function sendTextReply(msg, text, context) {
 
 function formatAgentError(err) {
   return err?.killed ? "Timeout" : `${err?.stderr || err?.message || err}`;
+}
+
+function hasForceFlag(args = "") {
+  return args.split(/\s+/).some((arg) => arg === "--force" || arg === "-f" || arg === "force");
 }
 
 /** Render a catch-up notice timestamp. HH:MM when the turn is same-day,
@@ -111,17 +117,17 @@ export function renderCatchupLine(countResult) {
 export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentmuxYamlPath, agentsYamlPath, recorder, pollInterval = 2000, loopGuardConfig = readLoopGuardConfig() }) {
   const noopRecorder = { save: () => {}, enabled: false };
   const rec = recorder || noopRecorder;
-  const queues = new Map();
+  const sendLocks = new Map();
   const followers = new Map(); // channelId → { timer, sentCount, lastHash }
 
-  function enqueuePaneJob(queueKey, work) {
-    const prev = queues.get(queueKey) || Promise.resolve();
+  function withPaneSendLock(queueKey, work) {
+    const prev = sendLocks.get(queueKey) || Promise.resolve();
     const next = prev.catch(() => {}).then(work);
     let tracked;
     tracked = next.finally(() => {
-      if (queues.get(queueKey) === tracked) queues.delete(queueKey);
+      if (sendLocks.get(queueKey) === tracked) sendLocks.delete(queueKey);
     });
-    queues.set(queueKey, tracked);
+    sendLocks.set(queueKey, tracked);
     return tracked;
   }
 
@@ -273,6 +279,16 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       await startFollow(msg, mapping, pane);
     },
 
+    "/codex": async (msg, mapping, pane, args = "") => {
+      const result = await agent.switchRuntime(mapping.name, pane, "codex", { force: hasForceFlag(args) });
+      await msg.reply(`switched **${result.agentName}** pane ${result.pane} to **Codex**`);
+    },
+
+    "/claude": async (msg, mapping, pane, args = "") => {
+      const result = await agent.switchRuntime(mapping.name, pane, "claude", { force: hasForceFlag(args) });
+      await msg.reply(`switched **${result.agentName}** pane ${result.pane} to **Claude Code**`);
+    },
+
     "/sync": async (msg) => {
       if (!discordChannel || !agentmuxYamlPath) {
         await msg.reply("sync not configured (missing agentmux.yaml path or discord channel)");
@@ -381,6 +397,11 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       console.warn(`hasReadyResponse failed for ${mapping.name}:${pane}: ${err.message}`);
       return false;
     }
+  }
+
+  function promptForAgent(cleanPrompt) {
+    const ttsHint = tts.isEnabled?.() ? "\n[tts on — keep it speakable, skip formatting]" : "";
+    return ttsHint ? cleanPrompt + ttsHint : cleanPrompt;
   }
 
   /**
@@ -518,13 +539,11 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     }
   }
 
-  async function processMessage(msg, mapping, cleanPrompt, pane, tmpFiles, { queued = false } = {}) {
-    console.log(`[${ts()}] ← ${mapping.name}:${pane}${queued ? " [queued]" : ""} "${cleanPrompt.slice(0, 80)}"`);
+  async function processMessage(msg, mapping, cleanPrompt, pane, tmpFiles) {
+    console.log(`[${ts()}] ← ${mapping.name}:${pane} "${cleanPrompt.slice(0, 80)}"`);
     const stopTyping = msg.startTyping();
 
-    // Hint the agent to produce speech-friendly output when TTS is active
-    const ttsHint = tts.isEnabled?.() ? "\n[tts on — keep it speakable, skip formatting]" : "";
-    const promptToSend = ttsHint ? cleanPrompt + ttsHint : cleanPrompt;
+    const promptToSend = promptForAgent(cleanPrompt);
 
     try {
       // Retry loop: dismiss → send → verify echo. If a survey ate the
@@ -534,21 +553,23 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       const echoTimeout = Math.max(50, Math.min(15_000, pollInterval * 500));
       let delivered = false;
 
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        await agent.dismissBlockingPrompt(target)
-          .catch((err) => console.warn(`dismiss attempt ${attempt} failed: ${err.message}`));
-        await agent.sendOnly(mapping.name, promptToSend, pane);
+      await withPaneSendLock(`${mapping.name}:${pane}`, async () => {
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          await agent.dismissBlockingPrompt(target)
+            .catch((err) => console.warn(`dismiss attempt ${attempt} failed: ${err.message}`));
+          await agent.sendOnly(mapping.name, promptToSend, pane);
 
-        const echoed = await agent.waitForPromptEcho(mapping.name, pane, cleanPrompt, echoTimeout);
-        if (echoed) { delivered = true; break; }
+          const echoed = await agent.waitForPromptEcho(mapping.name, pane, cleanPrompt, echoTimeout);
+          if (echoed) { delivered = true; break; }
 
-        const busy = await agent.isBusy(mapping.name, pane, cleanPrompt);
-        if (busy) { delivered = true; break; } // prompt received, echo just slow
+          const busy = await agent.isBusy(mapping.name, pane, cleanPrompt);
+          if (busy) { delivered = true; break; } // prompt received, echo just slow
 
-        if (attempt < 3) {
-          console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not echoed (attempt ${attempt}/3), retrying`);
+          if (attempt < 3) {
+            console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not echoed (attempt ${attempt}/3), retrying`);
+          }
         }
-      }
+      });
 
       if (!delivered) {
         console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not delivered after 3 attempts`);
@@ -571,9 +592,9 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       }
 
       await streamResponse(msg, mapping, pane, cleanPrompt, tmpFiles);
-      console.log(`[${ts()}] → ${mapping.name}:${pane}${queued ? " [queued]" : ""} done`);
+      console.log(`[${ts()}] → ${mapping.name}:${pane} done`);
     } catch (err) {
-      console.log(`[${ts()}] ✗ ${mapping.name}:${pane}${queued ? " [queued]" : ""} ${err.message}`);
+      console.log(`[${ts()}] ✗ ${mapping.name}:${pane} ${err.message}`);
       await msg.reply(formatAgentError(err))
         .catch((replyErr) => console.warn(`error reply failed: ${replyErr.message}`));
     } finally {
@@ -709,7 +730,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     if (parsed && commands[parsed.cmd]) {
       try {
-        await commands[parsed.cmd](msg, mapping, pane);
+        await commands[parsed.cmd](msg, mapping, pane, parsed.args);
       } catch (err) {
         await msg.reply(`${parsed.cmd} failed: ${err.message}`).catch((replyErr) =>
           console.warn(`${parsed.cmd} error reply failed: ${replyErr.message}`));
@@ -718,8 +739,8 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       return;
     }
 
-    // Unknown // command → pass through to claude as a slash command.
-    // Claude Code internal commands (/compact, /clear, /new, /model etc.)
+    // Unknown // command → pass through to the current agent as a slash command.
+    // Agent internal commands (/compact, /clear, /new, /model etc.)
     // produce no assistant response in jsonl. Sending them through the
     // normal processMessage pipeline would timeout on waitForPromptEcho.
     // agentmux commands (matched above) always take priority.
@@ -743,17 +764,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       return;
     }
 
-    const queueKey = `${mapping.name}:${pane}`;
-    if (queues.has(queueKey)) {
-      // Don't sendOnly now. The prompt would sit in tmux's input buffer
-      // and get eaten by a survey that pops up before the agent processes it.
-      // Instead, let processMessage send after dismiss when it's our turn.
-      return enqueuePaneJob(queueKey, () =>
-        processMessage(msg, mapping, cleanPrompt, pane, tmpFiles, { queued: true }));
-    }
-
-    return enqueuePaneJob(queueKey, () =>
-      processMessage(msg, mapping, cleanPrompt, pane, tmpFiles));
+    return processMessage(msg, mapping, cleanPrompt, pane, tmpFiles);
   }
 
   return { onMessage };
