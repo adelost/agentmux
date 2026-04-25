@@ -9,7 +9,7 @@
 
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { detectPaneStatus } from "../cli/format.mjs";
-import { panePathFor, countTurnsSince, findLatestCompactTs } from "../core/jsonl-reader.mjs";
+import { panePathFor, countTurnsSince, findLatestCompactTs, readLastTurns } from "../core/jsonl-reader.mjs";
 import {
   loadReminderState,
   saveReminderState,
@@ -17,6 +17,44 @@ import {
   cutoffFor,
   formatReminderMessage,
 } from "../core/reminder-state.mjs";
+
+// Replies that don't carry signal worth mirroring. Match case-insensitively
+// against the reply text trimmed. If everything in the reply is boilerplate,
+// skip the forward — the channel already shows the reminder, repeating
+// "Acknowledged." adds noise. Real recommendations or context-dependent
+// answers go through.
+const BOILERPLATE_PATTERNS = [
+  /^no response requested\.?$/i,
+  /^acknowledged\.?$/i,
+  /^re-?l(ä|a)st\.?$/i,
+  /^l(ä|a)st\.?\s*standby\.?$/i,
+  /^standby\.?$/i,
+  /^(ok|okej|ok\.?|okay)\.?$/i,
+];
+
+export function isBoilerplateReply(text) {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return true;
+  return BOILERPLATE_PATTERNS.some((re) => re.test(trimmed));
+}
+
+/** Extract assistant text reply to the most recent reminder turn after sinceMs. */
+function extractAssistantReply(paneDir, sinceMs, reminderMarker = "[drift-guard]") {
+  // Look back a small slack window so we definitely catch the reminder turn
+  // (jsonl write may lag slightly behind sendOnly's timestamp).
+  const since = new Date(sinceMs - 2000);
+  const result = readLastTurns(paneDir, { since, limit: 5 });
+  if (!result || !result.turns.length) return null;
+  // Find the most recent turn whose userPrompt is the reminder we sent.
+  // (Channels are per-pane so any [drift-guard] turn after sinceMs is ours.)
+  const reminderTurn = [...result.turns].reverse().find(
+    (t) => t.userPrompt && t.userPrompt.includes(reminderMarker),
+  );
+  if (!reminderTurn) return null;
+  const textItems = reminderTurn.items.filter((it) => it.type === "text");
+  if (!textItems.length) return null;
+  return textItems.map((it) => it.content).join("\n\n").trim();
+}
 
 export function createDriftGuard({
   agent,
@@ -46,8 +84,10 @@ export function createDriftGuard({
     return res?.count ?? 0;
   }
 
-  async function sendReminder(agentName, paneIdx, paneKey, turnCount) {
+  async function sendReminder(agentConfig, paneIdx, paneKey, turnCount) {
+    const agentName = agentConfig.name;
     const text = formatReminderMessage(turnCount);
+    const reminderSentAt = Date.now();
     try {
       await agent.sendOnly(agentName, text, paneIdx);
       log(`reminded ${paneKey} at ${turnCount} turns past refresh`);
@@ -66,6 +106,51 @@ export function createDriftGuard({
         log(`mirror failed for ${paneKey}: ${err.message}`);
       }
     }
+    // Detached: forward the agent's reply (if any) to the same channel so
+    // the user sees not just the reminder but also any organic recap or
+    // recommendation the agent emits in response. Reminder text invites
+    // a no-op so most reminders forward nothing — that's expected.
+    if (config.forwardReply && channelId && discord) {
+      forwardReplyAsync(agentConfig, paneIdx, paneKey, channelId, reminderSentAt);
+    }
+  }
+
+  function forwardReplyAsync(agentConfig, paneIdx, paneKey, channelId, reminderSentAt) {
+    (async () => {
+      const paneDir = panePathFor(agentConfig, paneIdx);
+      const deadline = reminderSentAt + config.replyTimeoutMs;
+      // Poll until pane idle or timeout. Keep polls cheap (2s) — we only
+      // care about the turn boundary, not real-time updates.
+      while (Date.now() < deadline) {
+        await sleep(2000);
+        let busy = true;
+        try { busy = await agent.isBusy(agentConfig.name, paneIdx); }
+        catch { /* treat as busy, retry */ }
+        if (!busy) break;
+      }
+      const reply = extractAssistantReply(paneDir, reminderSentAt);
+      if (!reply) {
+        log(`${paneKey}: no reply to forward (silent re-read or timeout)`);
+        return;
+      }
+      if (isBoilerplateReply(reply)) {
+        log(`${paneKey}: boilerplate reply skipped (${reply.slice(0, 40).replace(/\n/g, " ")})`);
+        return;
+      }
+      // Discord caps at 2000 chars per message. Single-message safety;
+      // tighter than the 2k limit to leave room for rendering quirks.
+      const safe = reply.length > 1900 ? reply.slice(0, 1900) + "\n…[truncated]" : reply;
+      try {
+        await discord.send(channelId, safe);
+        log(`${paneKey}: forwarded reply (${reply.length}b)`);
+      } catch (err) {
+        log(`${paneKey}: forward send failed: ${err.message}`);
+      }
+    })().catch((err) => log(`${paneKey}: forwarder crashed: ${err.message}`));
+  }
+
+  function sleep(ms) {
+    return new Promise((res) => setTimeout(res, ms));
   }
 
   async function tick() {
@@ -120,7 +205,7 @@ export function createDriftGuard({
         });
 
         if (decision.action === "send") {
-          await sendReminder(a.name, i, paneKey, turnsSinceCutoff);
+          await sendReminder(a, i, paneKey, turnsSinceCutoff);
           paneState.lastReminderTsMs = now;
           stateChanged = true;
         }
