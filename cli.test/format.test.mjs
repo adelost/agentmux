@@ -8,6 +8,29 @@ feature("detectPaneStatus", () => {
     then: ["returns working", (s) => expect(s).toBe("working")],
   });
 
+  unit("detects token-stream footer as working", {
+    given: ["pane mid-stream with token-count footer", () =>
+      "✻ Sautéed for 2m 30s\n  (2m 30s · ↓ 7.2k tokens)\n"],
+    when: ["detecting", detectPaneStatus],
+    then: ["returns working — '↓ Xk tokens' only appears during live streaming",
+      (s) => expect(s).toBe("working")],
+  });
+
+  unit("detects upstream token footer as working", {
+    given: ["pane mid-input with up-arrow token count", () =>
+      "✶ Crystallizing… (15s · ↑ 1.4k tokens)\n"],
+    when: ["detecting", detectPaneStatus],
+    then: ["returns working", (s) => expect(s).toBe("working")],
+  });
+
+  unit("token-count without arrow does NOT classify working (idle pane mentions tokens)", {
+    given: ["pane with idle prompt where text just mentions tokens", () =>
+      "context summary: ~7k tokens used last turn\n────\n❯ \n  bypass permissions on\n"],
+    when: ["detecting", detectPaneStatus],
+    then: ["returns idle — bare 'tokens' string without arrow prefix is content, not stream-footer",
+      (s) => expect(s).toBe("idle")],
+  });
+
   unit("ambiguous spinner ('Sautéed for X') alone does not classify working", {
     given: ["pane with past-participle spinner + idle prompt", () =>
       "✻ Sautéed for 1m 48s\n────\n❯ \n  bypass permissions on\n"],

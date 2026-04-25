@@ -742,13 +742,18 @@ async function inspectPane(ctx, agent, pane) {
   // Live-activity overlay: tmux-only detection can't tell an active spinner
   // ("✻ Sautéed for X" still counting up) from a frozen one (post-turn
   // residue) — same shape, same regex match. Cross-check jsonl mtime: a
-  // jsonl event written within the last 10s means the agent is generating
-  // right now, regardless of what the prompt-line looks like. Only override
-  // when the tmux-detection said idle/unknown so we don't shadow real
-  // permission/menu/resume modals.
+  // jsonl event written recently means the agent is generating right now,
+  // regardless of what the prompt-line looks like. Only override when the
+  // tmux-detection said idle/unknown so we don't shadow real permission/
+  // menu/resume modals.
+  //
+  // Window: 30s (matches `amux done`'s isRunningNow). 10s caused
+  // visible "pendling" between 💤/🟢 in `amux ps` because Claude often
+  // pauses 10-25s between assistant text + tool calls + thinking; the
+  // pane is still working but jsonl mtime falls outside the window.
   if (dialect === "claude" && (status === "idle" || status === "unknown")) {
     const mtimeMs = latestJsonlMtime(paneDir);
-    if (mtimeMs && Date.now() - mtimeMs < 10_000) {
+    if (mtimeMs && Date.now() - mtimeMs < 30_000) {
       status = "working";
     }
   }
