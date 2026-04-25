@@ -8,7 +8,7 @@ import { stripBullet } from "./core/dialects.mjs";
 export const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
 
 /**
- * Split text into Discord-safe chunks (max 1900 chars, Discord limit is 2000).
+ * Split text into Discord-safe chunks (max 1990 chars, Discord limit is 2000).
  * Breaks at newlines when possible, hard-cut otherwise.
  *
  * Code-fence aware: if a chunk ends inside an open ```lang block, the chunk
@@ -17,7 +17,7 @@ export const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
  * and `__dunder__` becomes **bold**, which eats the underscores. This is
  * exactly what broke the Python Matrix class snippet.
  */
-export function splitMessage(text, max = 1900) {
+export function splitMessage(text, max = 1990) {
   if (text.length <= max) return [text];
 
   // Reserve ~20 chars per chunk for injected fence markers (but not on tiny maxes used in tests)
