@@ -6,7 +6,20 @@ import { ALL_DIALECTS } from "../core/dialects.mjs";
 /** Detect pane status from captured content. */
 export function detectPaneStatus(paneContent) {
   const text = stripAnsi(paneContent);
+  // "esc to interrupt" is the historical marker but Claude Code also
+  // renders thinking spinners (✻/✽/✢/✶/✺/◐) followed by a verb + duration
+  // ("Cogitated for 46s", "Sautéed for 1m 48s", "Undulating…") and tool-call
+  // status lines ("Running… (6m 25s · timeout 10m)" + "ctrl+b ctrl+b" hint).
+  // Any of these indicates the agent is generating — without them we fall
+  // through to the prompt-line check and false-positive into idle.
   if (/esc to interrupt/.test(text)) return "working";
+  // Spinner glyph + verb-word + ("for X" | ellipsis "…"). Catches:
+  //   "✻ Sautéed for 1m 48s", "✻ Cogitated for 46s", "✢ Undulating…"
+  //   "✶ Crystallizing… (7s · thinking)", "✻ Crunched for 55s"
+  // Requires a "for" or "…" immediately after the verb so a stray spinner
+  // glyph in user prose ("✻ is a fancy char") doesn't false-positive.
+  if (/[✻✽✢✶✺◐◑◒◓]\s+\S+(?:\s+for\b|…)/.test(text)) return "working";
+  if (/Running…[\s\S]*ctrl\+b ctrl\+b/.test(text)) return "working";
   if (/Allow once|Allow always|Do you want to proceed/.test(text)) return "permission";
   if (/Enter to select|Esc to cancel/.test(text)) return "menu";
   if (/Resume from summary/.test(text)) return "resume";

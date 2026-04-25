@@ -8,6 +8,41 @@ feature("detectPaneStatus", () => {
     then: ["returns working", (s) => expect(s).toBe("working")],
   });
 
+  unit("detects working via thinking spinner (Sautéed for)", {
+    given: ["pane with ✻ Sautéed for spinner + idle prompt", () =>
+      "  Säg till om du vill att jag pushar.\n\n✻ Sautéed for 1m 48s\n\n────\n❯ \n  bypass permissions on\n"],
+    when: ["detecting", detectPaneStatus],
+    then: ["returns working (spinner beats prompt)", (s) => expect(s).toBe("working")],
+  });
+
+  unit("detects working via thinking spinner (Cogitated for)", {
+    given: ["pane with ✻ Cogitated for + idle prompt", () =>
+      "Vill du att jag reverterar?\n\n✻ Cogitated for 46s\n\n────\n❯ \n"],
+    when: ["detecting", detectPaneStatus],
+    then: ["returns working", (s) => expect(s).toBe("working")],
+  });
+
+  unit("detects working via Undulating spinner (✢)", {
+    given: ["pane with ✢ Undulating active", () =>
+      "✢ Undulating… (6m 31s · ↓ 284 tokens · thought for 1s)\n  ⎿  Tip: Use /btw\n────\n❯ ja p\n"],
+    when: ["detecting", detectPaneStatus],
+    then: ["returns working", (s) => expect(s).toBe("working")],
+  });
+
+  unit("detects working via long-running tool-call (Running… + ctrl+b)", {
+    given: ["pane with Running… and background-hint", () =>
+      "  ⎿  Running… (6m 25s · timeout 10m)\n     (ctrl+b ctrl+b (twice) to run in background)\n\n❯ \n"],
+    when: ["detecting", detectPaneStatus],
+    then: ["returns working", (s) => expect(s).toBe("working")],
+  });
+
+  unit("does not false-positive working from a stray ✻ in user message", {
+    given: ["pane where ✻ appears alone with no spinner verb", () =>
+      "user said: ✻ is a fancy character\n❯ \n  bypass permissions on\n"],
+    when: ["detecting", detectPaneStatus],
+    then: ["returns idle (spinner pattern requires verb)", (s) => expect(s).toBe("idle")],
+  });
+
   unit("detects permission state", {
     given: ["pane with Allow once", () => "Allow once  Allow always\n"],
     when: ["detecting", detectPaneStatus],
