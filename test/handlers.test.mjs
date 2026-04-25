@@ -49,7 +49,6 @@ function setup({ mappingOverride, channelMapEntries } = {}) {
     sendEscape: vi.fn(async () => {}),
     sendAndWait: vi.fn(async () => "agent reply"),
     sendOnly: vi.fn(async () => {}),
-    switchRuntime: vi.fn(async (agentName, pane, runtime) => ({ agentName, pane, runtime })),
     waitForPromptEcho: vi.fn(async () => true),
     startProgressTimer: vi.fn(() => ({ timer: setInterval(() => {}, 99999), sentCount: () => 0 })),
   };
@@ -195,33 +194,6 @@ feature("command routing", () => {
     then: ["calls reloadConfig and replies with count", (_, { msg, reloadConfig }) => {
       expect(reloadConfig).toHaveBeenCalled();
       expect(msg.reply.mock.calls[0][0]).toContain("reloaded");
-    }],
-  });
-
-  component("//codex switches runtime instead of forwarding slash command", {
-    given: ["a //codex message", () => ({ ...setup(), msg: mockMsg({ content: "//codex" }) })],
-    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["switchRuntime is called and prompt is not forwarded", (_, { msg, agent }) => {
-      expect(agent.switchRuntime).toHaveBeenCalledWith("_ai", 0, "codex", { force: false });
-      expect(agent.sendOnly).not.toHaveBeenCalled();
-      expect(msg.reply.mock.calls[0][0]).toContain("Codex");
-    }],
-  });
-
-  component("//codex --force passes force flag", {
-    given: ["a //codex --force message", () => ({ ...setup(), msg: mockMsg({ content: "//codex --force" }) })],
-    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["force is true", (_, { agent }) => {
-      expect(agent.switchRuntime).toHaveBeenCalledWith("_ai", 0, "codex", { force: true });
-    }],
-  });
-
-  component("//claude switches back to Claude", {
-    given: ["a //claude message", () => ({ ...setup(), msg: mockMsg({ content: "//claude" }) })],
-    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["switchRuntime targets claude", (_, { msg, agent }) => {
-      expect(agent.switchRuntime).toHaveBeenCalledWith("_ai", 0, "claude", { force: false });
-      expect(msg.reply.mock.calls[0][0]).toContain("Claude Code");
     }],
   });
 });
@@ -620,7 +592,6 @@ feature("onMessage: loop guard", () => {
       sendAndWait: vi.fn(async () => "resp"),
       sendOnly: vi.fn(async () => {}),
       waitForPromptEcho: vi.fn(async () => true),
-      switchRuntime: vi.fn(async (agentName, pane, runtime) => ({ agentName, pane, runtime })),
       startProgressTimer: vi.fn(() => ({ timer: null, sentCount: () => 0 })),
     };
 

@@ -28,8 +28,6 @@ const HELP_TEXT = [
   "`/esc` — interrupt (send Escape)",
   "`/use <agent>[.pane]` — switch channel target",
   "`/use reset` — back to yaml default",
-  "`/codex [--force]` — switch this pane to Codex",
-  "`/claude [--force]` — switch this pane to Claude Code",
   "`/thinking` — toggle real-time text streaming (default: on)",
   "`/follow` — toggle: stream output even when typing in tmux",
   "`/tts` — toggle text-to-speech for this channel",
@@ -68,10 +66,6 @@ function sendTextReply(msg, text, context) {
 
 function formatAgentError(err) {
   return err?.killed ? "Timeout" : `${err?.stderr || err?.message || err}`;
-}
-
-function hasForceFlag(args = "") {
-  return args.split(/\s+/).some((arg) => arg === "--force" || arg === "-f" || arg === "force");
 }
 
 /** Render a catch-up notice timestamp. HH:MM when the turn is same-day,
@@ -277,16 +271,6 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     "/follow": async (msg, mapping, pane) => {
       await startFollow(msg, mapping, pane);
-    },
-
-    "/codex": async (msg, mapping, pane, args = "") => {
-      const result = await agent.switchRuntime(mapping.name, pane, "codex", { force: hasForceFlag(args) });
-      await msg.reply(`switched **${result.agentName}** pane ${result.pane} to **Codex**`);
-    },
-
-    "/claude": async (msg, mapping, pane, args = "") => {
-      const result = await agent.switchRuntime(mapping.name, pane, "claude", { force: hasForceFlag(args) });
-      await msg.reply(`switched **${result.agentName}** pane ${result.pane} to **Claude Code**`);
     },
 
     "/sync": async (msg) => {

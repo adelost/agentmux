@@ -477,31 +477,6 @@ feature("generateAgentsYaml", () => {
     }],
   });
 
-  component("preserves codex runtime switches from existing yaml", {
-    given: ["config + existing yaml with a codex coding pane", () => {
-      const agents = new Map([
-        ["ai", { dir: "/tmp", panes: 2, services: [], shells: 0, layout: "main-vertical" }],
-      ]);
-      const existingYaml = {
-        ai: {
-          panes: [
-            { name: "claude", cmd: "claude --continue --dangerously-skip-permissions" },
-            { name: "codex-2", cmd: "codex --no-alt-screen --dangerously-bypass-approvals-and-sandbox resume --last" },
-          ],
-        },
-      };
-      return { agents, channelMap: new Map(), agentIds: new Map([["ai", "uuid"]]), existingYaml };
-    }],
-    when: ["regenerating yaml", ({ agents, channelMap, agentIds, existingYaml }) =>
-      generateAgentsYaml(agents, channelMap, agentIds, existingYaml)],
-    then: ["codex pane survives while claude pane stays default", (yamlStr) => {
-      expect(yamlStr).toContain("name: codex-2");
-      expect(yamlStr).toContain("cmd: codex --no-alt-screen --dangerously-bypass-approvals-and-sandbox resume --last");
-      expect(yamlStr).toContain("name: claude");
-      expect(yamlStr).toContain("cmd: claude --continue --dangerously-skip-permissions");
-    }],
-  });
-
   component("no existingYaml = no label fields (backward-compat)", {
     given: ["config but no prior yaml", () => ({
       agents: new Map([["ai", { dir: "/tmp", panes: 1, services: [], shells: 0 }]]),
