@@ -285,7 +285,7 @@ function ensureGitignored(rootDir, entry) {
 
 // --- Agent factory ---
 
-export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxExec }) {
+export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxExec, onResumeHint }) {
   const wait = delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
   const tmux = (cmd) => tmuxExec(`tmux -S '${esc(tmuxSocket)}' ${cmd}`);
 
@@ -860,6 +860,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const hint = buildResumeHint(dir);
       if (!hint) return;
       await sendPrompt(agentName, hint, pane);
+      // Optional Discord-mirror callback: lets the bridge post the hint to
+      // the bound channel so observers see the same context the pane just
+      // got. agent.mjs stays Discord-agnostic; bridge wires up the callback.
+      if (onResumeHint) {
+        try { await onResumeHint({ agentName, pane, hint, paneDir: dir }); }
+        catch (err) { console.warn(`resume-hint mirror skipped: ${err.message}`); }
+      }
     } catch (err) {
       console.warn(`resume-hint inject skipped: ${err.message}`);
     }

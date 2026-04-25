@@ -80,7 +80,18 @@ const appState = createState(STATE_FILE);
 if (appState.get("tts") === undefined) appState.set("tts", process.env.TTS === "1");
 if (appState.get("thinking") === undefined) appState.set("thinking", true);
 
-const agent = createAgent({ tmuxSocket: TMUX_SOCKET, configPath: AGENTS_YAML, timeout: TIMEOUT, run, tmuxExec });
+// Mutable hook so the agent can fire a resume-hint Discord-mirror without
+// importing the discord channel directly. Wired up below once `discord`
+// exists (createAgent runs before discord init due to dependency order).
+let resumeHintMirror = null;
+const agent = createAgent({
+  tmuxSocket: TMUX_SOCKET,
+  configPath: AGENTS_YAML,
+  timeout: TIMEOUT,
+  run,
+  tmuxExec,
+  onResumeHint: (info) => resumeHintMirror?.(info),
+});
 const attachments = createAttachmentHandler({
   run,
   transcribeScript: process.env.TRANSCRIBE_SCRIPT || resolve(__dir, "bin/transcribe-whisper.sh"),
@@ -104,6 +115,36 @@ function stampChannelMirror(channelId) {
 }
 
 const discord = createDiscordChannel({ token: TOKEN, onSent: stampChannelMirror });
+
+// Now that discord exists, wire the agent's resume-hint hook so spawn-time
+// hint injections (1.14.0) get mirrored to the bound Discord channel
+// (1.16.0). Idempotent: safe to skip when no channel is bound.
+import { findChannelForPane } from "./cli/config.mjs";
+import { forwardReplyAsync as forwardHintReplyAsync } from "./core/reply-forwarder.mjs";
+resumeHintMirror = async ({ agentName, pane, hint, paneDir }) => {
+  const channelId = findChannelForPane(AGENTS_YAML, agentName, pane);
+  if (!channelId) return;
+  try {
+    await discord.send(channelId, hint);
+  } catch (err) {
+    console.warn(`resume-hint mirror failed for ${agentName}:${pane}: ${err.message}`);
+    return;
+  }
+  // Forward whatever the agent emits in response (filtered by boilerplate).
+  forwardHintReplyAsync({
+    agent,
+    discord,
+    agentName,
+    pane,
+    channelId,
+    paneDir,
+    sentAtMs: Date.now(),
+    matcher: (userPrompt) => userPrompt.includes("[amux resume hint]"),
+    timeoutMs: 60_000,
+    log: (msg) => console.log(`resume-hint | ${msg}`),
+    label: "resume-hint",
+  });
+};
 
 // --- Wire up ---
 
