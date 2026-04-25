@@ -50,6 +50,36 @@ feature("detectPaneStatus", () => {
     then: ["returns dismiss", (s) => expect(s).toBe("dismiss")],
   });
 
+  unit("'0: Dismiss' as scrollback content (not modal) does not classify dismiss", {
+    given: ["pane discussing dismiss-bug in its turn output, with idle prompt at tail",
+      () => "agent diagnosing a substring-match bug:\n" +
+            "the regex /0: Dismiss/.test(text) matches anywhere — false positive\n" +
+            "fix: anchor to tail or require menu-box markers\n".repeat(20) +
+            "✢ Unravelling…\n────\n❯ \n  ⏵⏵ bypass permissions on\n"],
+    when: ["detecting", detectPaneStatus],
+    then: ["returns idle (modal text appears as content far from tail, not as live modal)",
+      (s) => expect(s).toBe("idle")],
+  });
+
+  unit("'Resume from summary' in scrollback does not classify resume", {
+    given: ["pane discussing /resume in its turn output, with idle prompt",
+      () => "agent explained:\n" +
+            "if the user runs /resume from summary, claude reloads the prior turn\n".repeat(20) +
+            "\n────\n❯ \n  ⏵⏵ bypass permissions on\n"],
+    when: ["detecting", detectPaneStatus],
+    then: ["returns idle (text is content, not active modal)",
+      (s) => expect(s).toBe("idle")],
+  });
+
+  unit("'Enter to select' in scrollback does not classify menu", {
+    given: ["pane explaining menu-keybindings in turn output",
+      () => "documenting:\n" +
+            "press Enter to select an option from the list\n".repeat(20) +
+            "\n────\n❯ \n  ⏵⏵ bypass permissions on\n"],
+    when: ["detecting", detectPaneStatus],
+    then: ["returns idle", (s) => expect(s).toBe("idle")],
+  });
+
   unit("detects idle state", {
     given: ["pane with prompt", () => "some output\n❯ \nbypass permissions on\n"],
     when: ["detecting", detectPaneStatus],
