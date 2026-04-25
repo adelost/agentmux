@@ -187,7 +187,8 @@ agentmux auto-generates `.agents/CLAUDE.md` and `.agents/AGENTS.md` with CLI com
 
 ## CLI (`amux`)
 
-After `npm link` (or global install), the `amux` command manages agent sessions:
+After `npm link` (or global install), the `amux` command manages agent sessions.
+Tip: `ax` is a shorter alias for `amux` (same binary, both names work).
 
 ```bash
 amux                         # list all agents
