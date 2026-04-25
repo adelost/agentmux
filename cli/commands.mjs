@@ -193,10 +193,9 @@ async function cmdSend(name, prompt, flags, ctx) {
   // Auto-prepend [from <session>:<window>] when invoker is inside tmux,
   // so receiver panes know which orchestrator briefed them. Invisible
   // when called from raw terminal, Discord bot, or cron (no TMUX env).
-  // Opt-out with --no-meta for cases where header is noise (e.g. plain
-  // ack pings between panes).
+  // Sender is invariant — provenance must never be silently erased.
   const exec = (cmd) => execSync(cmd, { encoding: "utf8", timeout: 2000 });
-  const sender = flags["no-meta"] ? null : detectSenderFromEnv(process.env, exec);
+  const sender = detectSenderFromEnv(process.env, exec);
   const finalPrompt = prependSenderHeader(prompt, sender);
 
   await sendToPane(ctx, name, pane, finalPrompt);
@@ -1422,7 +1421,7 @@ Socket: /tmp/openclaw-claude.sock`);
 // --- Dispatch ---
 
 const FLAG_SPECS = {
-  send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "no-meta": "boolean" },
+  send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean" },
   wait: { p: "number", t: "number", a: "boolean" },
   log: {
     n: "number", p: "number",
