@@ -138,14 +138,12 @@ Both connect to the same Discord server but create channels under different cate
 | `/esc` | Send Escape to interrupt agent |
 | `/use <agent>[.pane]` | Switch channel target |
 | `/use reset` | Back to yaml default |
-| `/codex [--force]` | Switch the current pane to Codex |
-| `/claude [--force]` | Switch the current pane back to Claude Code |
 | `/reload` | Reload config |
 | `/restart` | Restart agentmux |
 
 **Pane targeting:** prefix with `.N` to target a specific pane: `.2 fix the bug` sends to pane 2.
 
-**Agent commands:** any `//command` that isn't an agentmux command is forwarded to the current agent as a slash command. `//compact`, `//clear`, `//new`, `//model sonnet` etc. all work. `//codex` and `//claude` are agentmux runtime switches, not forwarded slash commands.
+**Agent commands:** any `//command` that isn't an agentmux command is forwarded to the current agent as a slash command. `//compact`, `//clear`, `//new`, `//model sonnet` etc. all work.
 
 ## Features
 
