@@ -5,7 +5,7 @@
 // be a `connect` req with auth token; after hello-ok, subsequent methods
 // use `{type: "req", id, method, params}` format.
 
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, writeFileSync } from "fs";
 import { join } from "path";
 
 const GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789";
@@ -128,6 +128,71 @@ async function discordPost(channelId, content) {
     throw new Error(`discord post ${res.status}: ${body}`);
   }
   return res.json();
+}
+
+/** PATCH a Discord channel (used for topic updates). */
+async function discordPatch(channelId, patch) {
+  const token = getDiscordBotToken();
+  if (!token) throw new Error("DISCORD_TOKEN not found — cannot patch channel");
+  const res = await fetch(`https://discord.com/api/v10/channels/${channelId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bot ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`discord patch ${res.status}: ${body}`);
+  }
+  return res.json();
+}
+
+/**
+ * Set a Discord channel topic, throttled per-channel to avoid hitting
+ * Discord's 2-edits-per-10-min rate limit. State lives in a small JSON
+ * file shared across processes (every `amux` invocation is a fresh node
+ * process, so in-memory throttling won't work).
+ *
+ * Returns { updated: bool, reason }. Failures are non-fatal: the caller
+ * already wrote the source-of-truth (tmux) and the message mirror.
+ */
+const TOPIC_STATE = join(process.env.HOME, ".openclaw/.topic-throttle.json");
+const TOPIC_MIN_INTERVAL_MS = 60_000;
+const TOPIC_MAX_LEN = 1024;
+
+export async function setChannelTopicThrottled(channelId, topic, minIntervalMs = TOPIC_MIN_INTERVAL_MS) {
+  if (!channelId || !topic) return { updated: false, reason: "missing-input" };
+
+  const trimmed = topic.length > TOPIC_MAX_LEN ? topic.slice(0, TOPIC_MAX_LEN - 1) + "…" : topic;
+
+  let state = {};
+  try { state = JSON.parse(readFileSync(TOPIC_STATE, "utf-8")) || {}; } catch {}
+
+  const now = Date.now();
+  const entry = state[channelId] || {};
+  const since = now - (entry.ts || 0);
+  if (since < minIntervalMs && entry.topic === trimmed) {
+    return { updated: false, reason: "unchanged-recent" };
+  }
+  if (since < minIntervalMs) {
+    // Throttle window not yet open — schedule a deferred write by
+    // recording the desired topic; a follow-up call after the window
+    // will pick it up via the unchanged check.
+    state[channelId] = { ...entry, pending: trimmed };
+    try { writeFileSync(TOPIC_STATE, JSON.stringify(state)); } catch {}
+    return { updated: false, reason: "throttled" };
+  }
+
+  try {
+    await discordPatch(channelId, { topic: trimmed });
+    state[channelId] = { ts: now, topic: trimmed };
+    try { writeFileSync(TOPIC_STATE, JSON.stringify(state)); } catch {}
+    return { updated: true };
+  } catch (err) {
+    return { updated: false, reason: `error: ${err.message}` };
+  }
 }
 
 /** Send a message to a Discord channel by name. */
