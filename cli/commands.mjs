@@ -317,17 +317,19 @@ async function cmdLog(name, flags, ctx) {
     return;
   }
 
-  // Resolve paneDir for jsonl lookup. Agent-level dir is good enough:
-  // Claude Code keys its session store off the cwd it was started in,
-  // which for all our panes equals the agent dir.
+  // Resolve paneDir for jsonl lookup. Each pane runs claude from its own
+  // worktree (`${agent.dir}/.agents/${paneIdx}`), so claude's session store
+  // is keyed off that subdir, not the agent root. Use panePathFor to match
+  // the convention used by readAllTurnsAcrossPanes / cmdDone.
   const agent = getAgent(ctx.configPath, name);
+  const paneDir = panePathFor(agent, pane);
 
   // --- full: jsonl history + current tmux state ---
   if (flags.full || flags.f) {
     const since = parseSinceArg(flags.since);
     const grep = flags.grep ? new RegExp(flags.grep, "i") : null;
     const limit = flags.n || 3;
-    const jsonl = readLastTurns(agent.dir, { limit, since, grep });
+    const jsonl = readLastTurns(paneDir, { limit, since, grep });
     if (jsonl && jsonl.turns.length) {
       console.log(`═══ jsonl (${jsonl.jsonlFile}) ═══`);
       console.log(formatTurnsForDisplay(jsonl.turns));
@@ -356,10 +358,10 @@ async function cmdLog(name, flags, ctx) {
     }
   }
   const limit = flags.n || 3;
-  const jsonl = readLastTurns(agent.dir, { limit, since, grep });
+  const jsonl = readLastTurns(paneDir, { limit, since, grep });
   if (!jsonl) {
     console.error(
-      `no jsonl found for '${agent.dir}'. ` +
+      `no jsonl found for '${paneDir}'. ` +
       `Pane may not have run claude yet, or session is in a different cwd. ` +
       `Try --tmux for raw capture.`,
     );
