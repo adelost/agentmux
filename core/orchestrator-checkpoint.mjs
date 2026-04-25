@@ -12,6 +12,25 @@ export const CHECKPOINT_PATH =
   "/tmp/agentmux-orchestrator-check.json";
 
 /**
+ * Per-sender checkpoint path. Multiple orchestrator panes (claw:0,
+ * claw:1, ai:2, …) all running `amux done` would otherwise clobber the
+ * single global file — last-writer-wins, so each pane's checkpoint
+ * gets eaten by the next sibling that runs done. Derive a path from
+ * the sender so each orchestrator owns its own cutoff state.
+ *
+ * sender shape: { session, window } from detectSenderFromEnv. When
+ * called from outside tmux (cron, CI, raw shell) sender is null —
+ * return the legacy global path so the env-override + ad-hoc usage
+ * keeps working.
+ */
+export function checkpointPathForSender(sender) {
+  if (process.env.AMUX_CHECKPOINT_PATH) return process.env.AMUX_CHECKPOINT_PATH;
+  if (!sender || !sender.session) return CHECKPOINT_PATH;
+  const safe = `${sender.session}-${sender.window ?? 0}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `/tmp/agentmux-orchestrator-check-${safe}.json`;
+}
+
+/**
  * Load last-check timestamp from a JSON file. Returns null if file missing
  * or malformed — caller picks a fallback anchor (e.g. 1h ago).
  */
