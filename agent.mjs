@@ -35,7 +35,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.16.16";
+const HINTS_VERSION = "1.16.18";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -83,33 +83,37 @@ amux timeline --since 2h --by-pane   # grouped under pane headers (analysis view
 amux watch                           # live-follow (like tail -f)
 \`\`\`
 
-### Know what's been resolved since last check (orchestrator inbox)
+### Know what's happening (orchestrator overview)
 \`\`\`bash
-amux done                            # since-last-check view (or 1h fallback)
-amux done --since 30min              # explicit anchor
-amux done --day                      # last 24h, peek-only (no checkpoint advance)
-amux done --week                     # last 7 days, peek-only
-amux done --all                      # last 30d (max safety cap), peek-only
-amux done --reset                    # peek current cutoff without advancing
+amux done                            # default: last 1h, idempotent (peek-only)
+amux done --day                      # last 24h
+amux done --week                     # last 7 days
+amux done --all                      # last 30d (max safety cap)
+amux done --since 30min              # explicit window: ISO or relative ("2h", "1d")
+amux done --inbox                    # opt-in: 'since last check', advances checkpoint
 \`\`\`
-\`amux done\` is the orchestrator primitive. Output anatomy:
 
-1. **\`Recent activity (top 20)\`** at the top — last 20 events across the
-   whole system from a 7d window, independent of cutoff. Mix of 📝 commits
-   and 🔸 pane activity sorted by time desc. Always shows "where were we"
-   even when the chosen window is short.
-2. **Bucket sections** (per cutoff window):
+Default is a **stable 1h window** — call it as many times as you want, output is
+idempotent and doesn't advance any state. \`--inbox\` is the only mode that
+reads + advances the per-sender checkpoint, for personal "what's new since I
+last looked" tracking. Each pane has its own checkpoint file so multiple
+orchestrators can use \`--inbox\` in parallel without races.
+
+Output anatomy (same for all modes):
+
+1. **\`Recent activity (top 20)\`** — last 20 events across the whole system
+   from a 7d window, independent of cutoff. Mix of 📝 commits and 🔸 pane
+   activity sorted by time desc. Always shows "where were we" even when the
+   chosen window is short.
+2. **Bucket sections** (filtered to current window):
    - 📝 **Commits** — work shipped (strongest signal)
    - 🟡 **Still working** — panes active right now (jsonl <60s overlay)
    - ✅ **Finished** — turns written + last msg is a statement
-   - 🔴 **New waiters** — assistant's last text was after the checkpoint
-   - ⏸ **Stale waiters** — assistant's last text was before the checkpoint
+   - 🔴 **New waiters** — assistant's last text needs attention
+   - ⏸ **Stale waiters** — old asks (only in --inbox mode)
    - 💤 **Idle** — no activity
 3. **\`ℹ More:\`** footer with contextual next-step hints (specific
    commands + comments — copy-paste ready).
-
-Per-sender checkpoint (since 1.16.9): your pane's "last check" timestamp
-won't get clobbered by other orchestrator panes running done in parallel.
 
 Use \`amux done\` at every orchestrator decision point instead of 5× \`amux ps\`
 + per-pane \`amux log\`. The recent-activity feed gives "where was I" before

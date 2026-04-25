@@ -582,49 +582,56 @@ async function cmdDone(ctx, flags) {
   let sinceMs = null;
   let sinceSource = "";
 
-  // Per-sender checkpoint — multiple orchestrator panes (claw:0, ai:2, ...)
-  // would otherwise clobber each other's "last check" state. detectSender
-  // returns null outside tmux (cron, raw shell, CI), in which case the
-  // legacy global path is used.
+  // Per-sender checkpoint path — only used by --inbox mode (opt-in). Each
+  // orchestrator pane gets its own file so multiple agents using --inbox
+  // don't clobber each other.
   const exec = (cmd) => execSync(cmd, { encoding: "utf8", timeout: 2000 });
   const sender = detectSenderFromEnv(process.env, exec);
   const checkpointPath = checkpointPathForSender(sender);
 
-  // Convenience shortcuts → fixed windows. All three skip checkpoint
-  // advance because they're explicit "show me this range" intents, not
-  // "since I last checked".
-  let peekOnly = flags.reset;
-  if (flags.day || flags.week || flags.all) {
-    if (flags.day)   { sinceMs = nowMs - 24 * 60 * 60 * 1000; sinceSource = "--day (24h)"; }
-    if (flags.week)  { sinceMs = nowMs - 7 * 24 * 60 * 60 * 1000; sinceSource = "--week (7d)"; }
-    if (flags.all)   { sinceMs = nowMs - 30 * 24 * 60 * 60 * 1000; sinceSource = "--all (30d max)"; }
-    peekOnly = true;
-  } else if (flags.since) {
-    if (flags.since === "last") {
-      sinceMs = loadCheckpoint(checkpointPath);
-      sinceSource = sinceMs ? "last checkpoint" : "1h fallback (no checkpoint)";
-    } else {
-      const parsed = parseSinceArg(flags.since);
-      if (!parsed) {
-        console.error(`invalid --since '${flags.since}'. Use "last", ISO, or relative ("30min", "2h", "1d").`);
-        process.exit(1);
-      }
-      sinceMs = parsed.getTime();
-      sinceSource = `--since ${flags.since}`;
-    }
-  } else {
+  // Default behavior is a stable 1h time-window — `amux done` is idempotent,
+  // can be called any number of times without changing what it shows.
+  // No state read, no state write. This is the "look at recent activity"
+  // mental model that 90% of usage wants.
+  //
+  // Opt-in inbox mode (`--inbox`) restores the old "since last check"
+  // semantics for the rare case where you actually want a personal
+  // unread-tracker — reads the checkpoint, advances it after.
+  //
+  // Mode resolution (mutually exclusive, first match wins):
+  //   --inbox          → load checkpoint (or 1h fallback), ADVANCE on exit
+  //   --day            → 24h window, peek-only
+  //   --week           → 7d window, peek-only
+  //   --all            → 30d window, peek-only
+  //   --since <expr>   → explicit window, peek-only
+  //   (no flags)       → 1h window, peek-only (the default)
+  let inboxMode = false;
+  if (flags.inbox) {
     sinceMs = loadCheckpoint(checkpointPath);
-    sinceSource = sinceMs ? "last checkpoint" : "1h fallback (no checkpoint)";
-    // UX: a checkpoint advanced moments ago (back-to-back `amux done`) is
-    // useless — the cutoff is "0 min ago" so almost no rows match. Treat
-    // anything <5 min old as if there's no checkpoint at all and fall back
-    // to a 1h window. The user clearly wants context, not an empty report.
-    if (sinceMs && nowMs - sinceMs < 5 * 60 * 1000) {
-      sinceMs = nowMs - 60 * 60 * 1000;
-      sinceSource = "1h fallback (checkpoint <5min old)";
+    sinceSource = sinceMs ? "--inbox (last check)" : "--inbox (1h, first run)";
+    if (!sinceMs) sinceMs = nowMs - 60 * 60 * 1000;
+    inboxMode = true;
+  } else if (flags.day) {
+    sinceMs = nowMs - 24 * 60 * 60 * 1000;
+    sinceSource = "--day (24h)";
+  } else if (flags.week) {
+    sinceMs = nowMs - 7 * 24 * 60 * 60 * 1000;
+    sinceSource = "--week (7d)";
+  } else if (flags.all) {
+    sinceMs = nowMs - 30 * 24 * 60 * 60 * 1000;
+    sinceSource = "--all (30d max)";
+  } else if (flags.since) {
+    const parsed = parseSinceArg(flags.since);
+    if (!parsed) {
+      console.error(`invalid --since '${flags.since}'. Use ISO or relative ("30min", "2h", "1d").`);
+      process.exit(1);
     }
+    sinceMs = parsed.getTime();
+    sinceSource = `--since ${flags.since}`;
+  } else {
+    sinceMs = nowMs - 60 * 60 * 1000;
+    sinceSource = "default (1h)";
   }
-  if (!sinceMs) sinceMs = nowMs - 60 * 60 * 1000;
 
   const agents = listAgents(ctx.configPath);
   const rows = readAllTurnsAcrossPanes({ agents, since: new Date(sinceMs) });
@@ -790,14 +797,10 @@ async function cmdDone(ctx, flags) {
   }
   console.log(`  amux timeline --grep "<keyword>"              # cross-pane content search`);
 
-  if (!peekOnly) {
-    saveCheckpoint(nowMs, checkpointPath);
-  } else if (flags.reset) {
-    console.log(`\n(--reset: checkpoint NOT advanced, next 'amux done' will see the same cutoff)`);
-  }
-  // --day/--week/--all are explicit range queries that intentionally don't
-  // advance the checkpoint (peekOnly=true). No notice — that would be noise
-  // since the user explicitly asked for the range.
+  // Only --inbox mode advances the checkpoint. Default + all explicit
+  // windows (--day/--week/--since) are idempotent peeks — no state write,
+  // no surprise. Multiple agents can run them in parallel without races.
+  if (inboxMode) saveCheckpoint(nowMs, checkpointPath);
 }
 
 /** Compress an "age in minutes" into "Xm" / "Xh" / "Xd" for header chrome. */
@@ -1468,10 +1471,10 @@ const FLAG_SPECS = {
   },
   done: {
     since: "string",
-    reset: "boolean",
     day: "boolean",
     week: "boolean",
     all: "boolean",
+    inbox: "boolean",
   },
   watch: {
     agent: "string",
