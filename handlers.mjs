@@ -554,6 +554,20 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not delivered after 3 attempts`);
         await msg.send("⚠️ Agent did not acknowledge prompt after 3 attempts. Pane may be dead, try `/raw` to inspect.")
           .catch((err) => console.warn(`send warning failed: ${err.message}`));
+      } else if (msg.channelId) {
+        // Inline channel-topic update mirrors the CLI sendToPane path so
+        // Discord-originated prompts land in the topic too. Throttled per
+        // channel; failures are non-fatal (tmux already has the prompt).
+        import("./cli/send-notify.mjs").then(({ setChannelTopicThrottled }) => {
+          const snippet = cleanPrompt.replace(/\s+/g, " ").trim().slice(0, 140);
+          const stamp = new Date().toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+          const topic = `[${mapping.name}:p${pane}] "${snippet}" · ${stamp}`;
+          return setChannelTopicThrottled(msg.channelId, topic);
+        }).then((r) => {
+          if (r && !r.updated && r.reason && !r.reason.startsWith("throttled") && !r.reason.startsWith("unchanged")) {
+            console.warn(`topic ${mapping.name}:${pane} → ${msg.channelId}: ${r.reason}`);
+          }
+        }).catch(() => {});
       }
 
       await streamResponse(msg, mapping, pane, cleanPrompt, tmpFiles);
