@@ -35,7 +35,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.12.0";
+const HINTS_VERSION = "1.16.5";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -233,6 +233,25 @@ explains it → then consider race / data-loss hypotheses.
 Concrete pattern: a dedup commit landing between two deploys explains
 a "video count drop" without any race condition. Skipped git log +
 investigation spun up = noise to the user, wasted agent time.
+
+## Multi-agent edit protocol
+
+You and other agents may be editing the same repo in parallel. Three
+rules to prevent silent regressions and version-bump collisions:
+
+1. **Before editing a shared file:** \`git status\`. If there's WIP you
+   didn't make → STOP. Run \`amux done\` + \`amux log <agent> -p N\` to
+   identify the owner. Don't overwrite mid-flight refactors.
+2. **Announce ownership for >5min edits:** \`amux <peer> -p N "claim
+   handlers.mjs for X"\` so other panes see it in their channel. Cheap
+   signal, prevents merge conflicts.
+3. **Version bumps must be unique:** before \`package.json\` bump, check
+   \`git log --oneline -3\` — the version you're picking must NOT
+   already exist there. Same minor twice (e.g. two 1.16.2 commits)
+   confuses downstream tooling.
+
+Commit + push within 30 min of starting an edit. Long-running WIP that
+isn't in git is invisible to other agents.
 
 ${HINTS_END_MARKER}
 `;
