@@ -382,10 +382,10 @@ run the full test suite
 ```
 
 Detected via `$TMUX` + `tmux display -p '#S'` / `#I`. Invisible when the
-caller is a raw terminal, Discord bot, or cron job (no TMUX env). Opt
-out per-call with `--no-meta` when the header would be noise (e.g.
-plain ack pings). Discord mirror carries the same header so channel
-watchers see which pane originated each brief.
+caller is a raw terminal, Discord bot, or cron job (no TMUX env). The
+header is invariant — provenance is never silently erased. Discord mirror
+carries the same header so channel watchers see which pane originated
+each brief.
 
 Binds to `127.0.0.1` by default to avoid exposure before you're ready.
 Flip to your Tailscale IP (e.g. `100.x.y.z`) when you want the phone to

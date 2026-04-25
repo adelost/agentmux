@@ -35,7 +35,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.16.19";
+const HINTS_VERSION = "1.16.26";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -54,12 +54,11 @@ shorter, validated, mirrors to Discord so the user sees what you do.
 \`\`\`bash
 amux <agent> -p <pane> "prompt"      # -p default 0
 amux claw -p 1 "run the full test suite"
-amux claw -p 1 "ping" --no-meta      # suppress auto-header
 \`\`\`
 Mirrors to Discord channel automatically (user sees your briefs). Auto-prepends
 \`[from <sender-session>:<window>]\` when invoker is in tmux — receiver pane +
-Discord mirror both see who briefed. Opt out with \`--no-meta\` for low-signal
-pings.
+Discord mirror both see who briefed. Sender is invariant: provenance is never
+silently erased.
 
 ### See what a pane has done
 \`\`\`bash
