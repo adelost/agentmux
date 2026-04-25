@@ -590,14 +590,23 @@ async function cmdDone(ctx, flags) {
   const sender = detectSenderFromEnv(process.env, exec);
   const checkpointPath = checkpointPathForSender(sender);
 
-  if (flags.since) {
+  // Convenience shortcuts → fixed windows. All three skip checkpoint
+  // advance because they're explicit "show me this range" intents, not
+  // "since I last checked".
+  let peekOnly = flags.reset;
+  if (flags.day || flags.week || flags.all) {
+    if (flags.day)   { sinceMs = nowMs - 24 * 60 * 60 * 1000; sinceSource = "--day (24h)"; }
+    if (flags.week)  { sinceMs = nowMs - 7 * 24 * 60 * 60 * 1000; sinceSource = "--week (7d)"; }
+    if (flags.all)   { sinceMs = nowMs - 30 * 24 * 60 * 60 * 1000; sinceSource = "--all (30d max)"; }
+    peekOnly = true;
+  } else if (flags.since) {
     if (flags.since === "last") {
       sinceMs = loadCheckpoint(checkpointPath);
       sinceSource = sinceMs ? "last checkpoint" : "1h fallback (no checkpoint)";
     } else {
       const parsed = parseSinceArg(flags.since);
       if (!parsed) {
-        console.error(`invalid --since '${flags.since}'. Use "last", ISO, or relative ("30min", "2h").`);
+        console.error(`invalid --since '${flags.since}'. Use "last", ISO, or relative ("30min", "2h", "1d").`);
         process.exit(1);
       }
       sinceMs = parsed.getTime();
@@ -675,6 +684,25 @@ async function cmdDone(ctx, flags) {
   const ageMin = Math.round((nowMs - sinceMs) / 60000);
   console.log(`\nSince ${sinceIso} UTC (${ageMin} min ago, source: ${sinceSource})`);
 
+  // System-wide "where were we" header. Reads outside the current cutoff
+  // so it stays informative even when --day/--week aren't passed: tells
+  // you whether 1h is the right window or you've missed a longer pause.
+  // Cheap because both inputs are already cached or O(panes).
+  const allBuckets = [...buckets.values()];
+  const newest = allBuckets.reduce((m, b) => (b.latestTurnTs > (m?.latestTurnTs || 0) ? b : m), null);
+  const widerCommits = collectCommitsSince(reposFromAgents(agents), nowMs - 7 * 24 * 3600 * 1000, 1);
+  const headerParts = [];
+  if (newest?.latestTurnTs) {
+    const min = Math.round((nowMs - newest.latestTurnTs) / 60000);
+    headerParts.push(`last activity: ${newest.agent}:${newest.pane} (${formatRelMin(min)})`);
+  }
+  if (widerCommits.length) {
+    const c = widerCommits[0];
+    const min = Math.round((nowMs - c.ts) / 60000);
+    headerParts.push(`last commit: ${c.label} (${formatRelMin(min)})`);
+  }
+  if (headerParts.length) console.log(headerParts.join(" · "));
+
   // Commits are the strongest "work happened" signal — code was written,
   // reviewed, and kept. Render first so it anchors the orchestrator's
   // situational awareness before the classifier-based sections.
@@ -708,11 +736,24 @@ async function cmdDone(ctx, flags) {
     console.log(`\n💤 ${idleCount} idle (no activity since cutoff)`);
   }
 
-  if (!flags.reset) {
+  if (!peekOnly) {
     saveCheckpoint(nowMs, checkpointPath);
-  } else {
+  } else if (flags.reset) {
     console.log(`\n(--reset: checkpoint NOT advanced, next 'amux done' will see the same cutoff)`);
   }
+  // --day/--week/--all are explicit range queries that intentionally don't
+  // advance the checkpoint (peekOnly=true). No notice — that would be noise
+  // since the user explicitly asked for the range.
+}
+
+/** Compress an "age in minutes" into "Xm" / "Xh" / "Xd" for header chrome. */
+function formatRelMin(min) {
+  if (!Number.isFinite(min) || min < 0) return "?";
+  if (min < 60) return `${min}m ago`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 function formatCommitRow(c) {
@@ -1374,6 +1415,9 @@ const FLAG_SPECS = {
   done: {
     since: "string",
     reset: "boolean",
+    day: "boolean",
+    week: "boolean",
+    all: "boolean",
   },
   watch: {
     agent: "string",
