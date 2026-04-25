@@ -91,6 +91,30 @@ feature("parseReminderConfig", () => {
     when: ["parsing", ({ env }) => parseReminderConfig(env)],
     then: ["pollMs=60000 (default)", (result) => expect(result.pollMs).toBe(60_000)],
   });
+
+  unit("forwardReply defaults true", {
+    given: ["empty env", () => ({ env: {} })],
+    when: ["parsing", ({ env }) => parseReminderConfig(env)],
+    then: ["forwardReply=true", (result) => expect(result.forwardReply).toBe(true)],
+  });
+
+  unit("FORWARD_REPLY=false disables forwarder", {
+    given: ["forward off", () => ({ env: { AMUX_REMIND_FORWARD_REPLY: "false" } })],
+    when: ["parsing", ({ env }) => parseReminderConfig(env)],
+    then: ["forwardReply=false", (result) => expect(result.forwardReply).toBe(false)],
+  });
+
+  unit("replyTimeoutMs defaults to 60s", {
+    given: ["empty env", () => ({ env: {} })],
+    when: ["parsing", ({ env }) => parseReminderConfig(env)],
+    then: ["replyTimeoutMs=60000", (result) => expect(result.replyTimeoutMs).toBe(60_000)],
+  });
+
+  unit("too-low reply timeout clamped to default", {
+    given: ["1s timeout (too short)", () => ({ env: { AMUX_REMIND_REPLY_TIMEOUT_MS: "1000" } })],
+    when: ["parsing", ({ env }) => parseReminderConfig(env)],
+    then: ["replyTimeoutMs=60000 (default)", (result) => expect(result.replyTimeoutMs).toBe(60_000)],
+  });
 });
 
 feature("decideReminderAction", () => {
