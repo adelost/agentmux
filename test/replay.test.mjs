@@ -68,13 +68,15 @@ feature("replay: sanity checks on recorded data", () => {
   for (const r of recordings) {
     unit(`${r.file}: prompt was echoed in raw buffer`, {
       given: ["recording", () => r],
-      when: ["checking raw contains prompt start", (rec) => ({
-        rec,
-        // Only check first 20 chars - narrow panes wordwrap longer prompts,
-        // breaking them across lines. The first 20 chars always fit on one
-        // line even on a 42-col pane.
-        hasPrompt: rec.raw.includes(rec.prompt.slice(0, Math.min(20, rec.prompt.length))),
-      })],
+      when: ["checking raw contains prompt start", (rec) => {
+        // Collapse whitespace on both sides so terminal wordwrap (lines
+        // broken at any column) doesn't hide the match. A 26-col pane
+        // splits "[image attached: /tmp/..." across multiple lines; the
+        // characters are all there, just with newlines/spaces between.
+        const collapse = (s) => s.replace(/\s+/g, "");
+        const head = rec.prompt.slice(0, Math.min(20, rec.prompt.length));
+        return { rec, hasPrompt: collapse(rec.raw).includes(collapse(head)) };
+      }],
       then: ["raw should contain the prompt start", ({ rec, hasPrompt }) => {
         expect(hasPrompt, `prompt "${rec.prompt.slice(0, 40)}" not found in raw buffer`).toBe(true);
       }],
