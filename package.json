@@ -1,6 +1,6 @@
 {
   "name": "agentmux",
-  "version": "1.16.26",
+  "version": "1.16.28",
   "description": "Discord bridge for tmux-based coding agents (Claude Code, Codex)",
   "type": "module",
   "bin": {
