@@ -2,7 +2,7 @@ import { feature, unit, expect } from "bdd-vitest";
 import { mkdtempSync, rmSync, readdirSync, writeFileSync, statSync, utimesSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { createRecorder } from "../core/recorder.mjs";
+import { createRecorder, isUsableRecording } from "../core/recorder.mjs";
 
 // --- Test helpers ---
 
@@ -116,6 +116,40 @@ feature("createRecorder: rotation (keep max N)", () => {
     }],
     then: ["all 4 files remain, nothing pruned", (_, { dir }) => {
       expect(listJsons(dir)).toHaveLength(4);
+      rmSync(dir, { recursive: true, force: true });
+    }],
+  });
+
+  unit("skips save when prompt is missing from raw (hidden pane / overflowed buffer)", {
+    given: ["a fresh dir", () => ({ dir: freshDir() })],
+    when: ["saving a tmux recording where raw doesn't echo the prompt", ({ dir }) => {
+      createRecorder({ dir }).save({
+        agent: "claw",
+        pane: 0,
+        source: "tmux",
+        prompt: "Ok kan du planera i detalj",
+        raw: " \n \n \n \n \n", // hidden-pane case
+      });
+    }],
+    then: ["nothing was written", (_, { dir }) => {
+      expect(listJsons(dir)).toHaveLength(0);
+      rmSync(dir, { recursive: true, force: true });
+    }],
+  });
+
+  unit("accepts wordwrapped prompt across newlines", {
+    given: ["a fresh dir", () => ({ dir: freshDir() })],
+    when: ["saving a recording where prompt is split across lines", ({ dir }) => {
+      createRecorder({ dir }).save({
+        agent: "lsrc",
+        pane: 2,
+        source: "tmux",
+        prompt: "[image attached: /tmp/file.jpg]",
+        raw: "❯ [image\n  attached:\n  /tmp/file.jpg]\n",
+      });
+    }],
+    then: ["the recording is saved", (_, { dir }) => {
+      expect(listJsons(dir)).toHaveLength(1);
       rmSync(dir, { recursive: true, force: true });
     }],
   });
