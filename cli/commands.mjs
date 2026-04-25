@@ -14,7 +14,6 @@ import { getContextFromPane } from "../core/context.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
 import {
-  loadCheckpoint, saveCheckpoint, CHECKPOINT_PATH, checkpointPathForSender,
   groupByPane, classifyPane, previewText,
   isStaleWaiter, isRunningNow,
 } from "../core/orchestrator-checkpoint.mjs";
@@ -582,36 +581,17 @@ async function cmdDone(ctx, flags) {
   let sinceMs = null;
   let sinceSource = "";
 
-  // Per-sender checkpoint path — only used by --inbox mode (opt-in). Each
-  // orchestrator pane gets its own file so multiple agents using --inbox
-  // don't clobber each other.
-  const exec = (cmd) => execSync(cmd, { encoding: "utf8", timeout: 2000 });
-  const sender = detectSenderFromEnv(process.env, exec);
-  const checkpointPath = checkpointPathForSender(sender);
-
-  // Default behavior is a stable 1h time-window — `amux done` is idempotent,
-  // can be called any number of times without changing what it shows.
-  // No state read, no state write. This is the "look at recent activity"
-  // mental model that 90% of usage wants.
-  //
-  // Opt-in inbox mode (`--inbox`) restores the old "since last check"
-  // semantics for the rare case where you actually want a personal
-  // unread-tracker — reads the checkpoint, advances it after.
+  // Pure time-window resolution. No state, no checkpoint, fully idempotent.
+  // Multiple agents can run done in parallel without races; humans can call
+  // it back-to-back and get consistent output.
   //
   // Mode resolution (mutually exclusive, first match wins):
-  //   --inbox          → load checkpoint (or 1h fallback), ADVANCE on exit
-  //   --day            → 24h window, peek-only
-  //   --week           → 7d window, peek-only
-  //   --all            → 30d window, peek-only
-  //   --since <expr>   → explicit window, peek-only
-  //   (no flags)       → 1h window, peek-only (the default)
-  let inboxMode = false;
-  if (flags.inbox) {
-    sinceMs = loadCheckpoint(checkpointPath);
-    sinceSource = sinceMs ? "--inbox (last check)" : "--inbox (1h, first run)";
-    if (!sinceMs) sinceMs = nowMs - 60 * 60 * 1000;
-    inboxMode = true;
-  } else if (flags.day) {
+  //   --day            → 24h window
+  //   --week           → 7d window
+  //   --all            → 30d window
+  //   --since <expr>   → explicit window
+  //   (no flags)       → 1h window (default)
+  if (flags.day) {
     sinceMs = nowMs - 24 * 60 * 60 * 1000;
     sinceSource = "--day (24h)";
   } else if (flags.week) {
@@ -796,11 +776,6 @@ async function cmdDone(ctx, flags) {
     console.log(`  amux done --all                              # widen to 30d (max safety cap)`);
   }
   console.log(`  amux timeline --grep "<keyword>"              # cross-pane content search`);
-
-  // Only --inbox mode advances the checkpoint. Default + all explicit
-  // windows (--day/--week/--since) are idempotent peeks — no state write,
-  // no surprise. Multiple agents can run them in parallel without races.
-  if (inboxMode) saveCheckpoint(nowMs, checkpointPath);
 }
 
 /** Compress an "age in minutes" into "Xm" / "Xh" / "Xd" for header chrome. */
@@ -1474,7 +1449,6 @@ const FLAG_SPECS = {
     day: "boolean",
     week: "boolean",
     all: "boolean",
-    inbox: "boolean",
   },
   watch: {
     agent: "string",

@@ -35,7 +35,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.16.18";
+const HINTS_VERSION = "1.16.19";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -85,19 +85,16 @@ amux watch                           # live-follow (like tail -f)
 
 ### Know what's happening (orchestrator overview)
 \`\`\`bash
-amux done                            # default: last 1h, idempotent (peek-only)
+amux done                            # default: last 1h
 amux done --day                      # last 24h
 amux done --week                     # last 7 days
 amux done --all                      # last 30d (max safety cap)
 amux done --since 30min              # explicit window: ISO or relative ("2h", "1d")
-amux done --inbox                    # opt-in: 'since last check', advances checkpoint
 \`\`\`
 
-Default is a **stable 1h window** — call it as many times as you want, output is
-idempotent and doesn't advance any state. \`--inbox\` is the only mode that
-reads + advances the per-sender checkpoint, for personal "what's new since I
-last looked" tracking. Each pane has its own checkpoint file so multiple
-orchestrators can use \`--inbox\` in parallel without races.
+\`amux done\` is **pure time-window** — no state, no checkpoint, fully
+idempotent. Call it as many times as you want; output is consistent.
+Multiple agents can run it in parallel without races.
 
 Output anatomy (same for all modes):
 
@@ -110,7 +107,6 @@ Output anatomy (same for all modes):
    - 🟡 **Still working** — panes active right now (jsonl <60s overlay)
    - ✅ **Finished** — turns written + last msg is a statement
    - 🔴 **New waiters** — assistant's last text needs attention
-   - ⏸ **Stale waiters** — old asks (only in --inbox mode)
    - 💤 **Idle** — no activity
 3. **\`ℹ More:\`** footer with contextual next-step hints (specific
    commands + comments — copy-paste ready).
