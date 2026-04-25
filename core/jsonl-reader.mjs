@@ -545,6 +545,20 @@ function projectDirFor(paneDir) {
 }
 
 /**
+ * Latest jsonl file mtime for a pane in epoch ms, or null when no jsonl
+ * exists. Cheap (single fs.stat per file in the project dir) — used by
+ * ps to layer a "fresh activity" overlay on top of tmux-snapshot status,
+ * since spinner-line patterns alone can't reliably distinguish active
+ * thinking from post-turn residue.
+ */
+export function latestJsonlMtime(paneDir) {
+  const projectDir = projectDirFor(paneDir);
+  if (!existsSync(projectDir)) return null;
+  const files = listJsonlFiles(projectDir);
+  return files.length ? files[0].mtime : null;
+}
+
+/**
  * Flatten every jsonl event in a project dir to timeline rows.
  * Returns [{ timestamp, role, type, content, raw }] sorted by timestamp
  * ascending. Rows with missing timestamps get the file's mtime as fallback.
