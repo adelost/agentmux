@@ -833,45 +833,52 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const paneCmd = config.panes?.[pane]?.cmd || "bash";
 
     if (isClaudeCmd(paneCmd)) {
+      // Track whether we're spawning claude on this call so we can inject
+      // the resume-hint after-spawn (instead of waiting for first amux brief).
+      // Without this, panes that user opens directly via `amux <agent>` attach
+      // and types into themselves never see the hint — the hint only ever
+      // fired through sendOnly/sendAndWait briefs prior to 1.14.0.
+      const wasStarting = !(await isAlreadyRunning(target));
       await startClaude(agentName, target, config.dir, pane);
       await waitForClaudeReady(target, agentName, pane);
+      if (wasStarting) await injectResumeHint(agentName, pane, config.dir);
     }
   }
 
   /**
-   * Prepend a resume-hint block to a user brief if claude is being spawned
-   * fresh (wasStarting=true) AND a previous jsonl exists. Keeps partial-
-   * resumed or empty-state panes from being stranded after WSL/amux/claude
-   * restarts — the hint points at their prior session jsonl and anchors on
-   * the last user turn so agents with full context can self-verify and
-   * ignore it. Returns prompt unchanged when no hint applies.
+   * Send the resume-hint as the first user-prompt to a freshly-spawned
+   * claude pane. Lets empty-state panes find their previous jsonl without
+   * needing an orchestrator brief to trigger the prepend path. Idempotent
+   * for full-context panes (they recognize the snippet and absorb it).
+   *
+   * Failure here is not a correctness issue — agents can still operate
+   * without the hint, just less self-aware about prior session state.
    */
-  function maybePrependResumeHint(agentName, prompt, pane, wasStarting) {
-    if (!wasStarting) return prompt;
+  async function injectResumeHint(agentName, pane, rootDir) {
     try {
-      const config = agentConfig(agentName);
-      const dir = paneDir(config.dir, pane);
+      const dir = paneDir(rootDir, pane);
       const hint = buildResumeHint(dir);
-      if (!hint) return prompt;
-      return `${hint}\n\n${prompt}`;
+      if (!hint) return;
+      await sendPrompt(agentName, hint, pane);
     } catch (err) {
-      console.warn(`resume-hint skipped: ${err.message}`);
-      return prompt;
+      console.warn(`resume-hint inject skipped: ${err.message}`);
     }
   }
 
   async function sendOnly(agentName, prompt, pane) {
-    const wasStarting = !(await isAlreadyRunning(`${agentName}:.${pane}`));
+    // ensureReady injects the resume-hint at spawn (1.14.0), so no brief-
+    // level prepend is needed. Idempotent for full-context panes.
     await ensureReady(agentName, pane);
-    const finalPrompt = maybePrependResumeHint(agentName, prompt, pane, wasStarting);
-    await sendPrompt(agentName, finalPrompt, pane);
+    await sendPrompt(agentName, prompt, pane);
   }
 
   async function sendAndWait(agentName, prompt, pane) {
     const wasStarting = !(await isAlreadyRunning(`${agentName}:.${pane}`));
+    // ensureReady injects the resume-hint at spawn (1.14.0); no brief-level
+    // prepend needed. wasStarting still drives the post-send wait below
+    // (claude takes longer to first-turn after fresh spawn).
     await ensureReady(agentName, pane);
-    const finalPrompt = maybePrependResumeHint(agentName, prompt, pane, wasStarting);
-    await sendPrompt(agentName, finalPrompt, pane);
+    await sendPrompt(agentName, prompt, pane);
 
     await wait(wasStarting ? 8000 : 3000);
 
