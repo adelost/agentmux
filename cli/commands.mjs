@@ -777,36 +777,103 @@ async function inspectPane(ctx, agent, pane) {
   return { status, preview, context };
 }
 
-async function cmdPs(ctx) {
-  const agents = listAgents(ctx.configPath);
-  let count = 0;
+// Status priorities for sorting agents — agents with active panes first,
+// then panes with claude session state, then plain shells last.
+const STATUS_TIER = { working: 3, permission: 3, menu: 3, resume: 2, dismiss: 2, idle: 1, unknown: 0 };
+const SHELL_CMDS = /^(bash|zsh|fish|sh|dash)$/;
+const ACTIVE_STATUS = (s) => s === "working" || s === "permission" || s === "menu" || s === "resume" || s === "dismiss";
 
+async function cmdPs(ctx, flags = {}) {
+  const showAll = flags.full || flags.f;
+  const agents = listAgents(ctx.configPath);
+
+  // Step 1: gather all data first so we can sort agents by importance.
+  const agentData = [];
   for (const a of agents) {
     if (!(await hasSession(ctx, a.name))) continue;
-    count++;
     const panes = await listPanes(ctx, a.name);
-
-    console.log(`\n● ${a.name.padEnd(12)} ${a.dir}`);
-    console.log(`  Panes: ${panes.length}`);
-
+    const enriched = [];
     for (const p of panes) {
-      const { status, preview, context } = await inspectPane(ctx, a, p);
-      const icon = statusIcon(status);
-      const ctxCell = formatContextCell(context);
-      const cmd = p.command.padEnd(6);
-      // Per-pane `label:` in agents.yaml is a human-set purpose tag
-      // (e.g. "agentmux dev", "tandem-tagger deploy"). When present,
-      // it replaces the live preview (which is usually just claude's
-      // status line) because the label is the info an orchestrator
-      // actually needs to pick a pane. Falls back to preview when empty.
-      const label = a.panes[p.index]?.label;
-      const display = label ? `[${truncate(label, 40)}]` : truncate(preview, 60);
-      console.log(`  ${icon} p${p.index}  ${cmd} ${ctxCell}  ${display}`);
+      const info = await inspectPane(ctx, a, p);
+      enriched.push({ ...p, ...info });
+    }
+    agentData.push({ agent: a, panes: enriched });
+  }
+
+  if (agentData.length === 0) {
+    console.log("No running agents.");
+    return;
+  }
+
+  // Step 2: sort agents by max-importance pane (active > claude-with-context > shells).
+  // Stable on max so agents with same tier keep their config order.
+  const importance = (ad) => Math.max(0, ...ad.panes.map((p) =>
+    ACTIVE_STATUS(p.status) ? 3 :
+    (p.context?.percent ?? 0) > 0 ? 2 :
+    !SHELL_CMDS.test(p.command) ? 1 : 0,
+  ));
+  agentData.sort((a, b) => importance(b) - importance(a));
+
+  // Step 3: render with grouping. Idle/unknown panes of the same command
+  // collapse into a single line; active panes always shown in full.
+  for (const { agent: a, panes } of agentData) {
+    const claudeCount = panes.filter((p) => p.command === "claude").length;
+    const shellCount = panes.filter((p) => SHELL_CMDS.test(p.command)).length;
+    const otherCount = panes.length - claudeCount - shellCount;
+    const summary = [
+      claudeCount && `${claudeCount} claude`,
+      otherCount && `${otherCount} svc`,
+      shellCount && `${shellCount} shell`,
+    ].filter(Boolean).join(" · ");
+
+    console.log(`\n● ${a.name.padEnd(12)} ${a.dir}  [${summary}]`);
+
+    // Quick path: agent has zero claude panes AND none active → "all idle".
+    if (!showAll && claudeCount === 0 && !panes.some((p) => ACTIVE_STATUS(p.status))) {
+      console.log(`  ⚪ all idle (${panes.length})`);
+      continue;
+    }
+
+    let i = 0;
+    while (i < panes.length) {
+      const p = panes[i];
+      const expand = showAll
+        || ACTIVE_STATUS(p.status)
+        || (p.context?.percent ?? 0) > 0;
+
+      if (expand) {
+        const icon = statusIcon(p.status);
+        const ctxCell = formatContextCell(p.context);
+        const cmd = p.command.padEnd(6);
+        const label = a.panes[p.index]?.label;
+        const display = label ? `[${truncate(label, 40)}]` : truncate(p.preview, 60);
+        console.log(`  ${icon} p${p.index}  ${cmd} ${ctxCell}  ${display}`);
+        i++;
+        continue;
+      }
+
+      // Collapse consecutive same-command + same-status idle/unknown panes.
+      const groupCmd = p.command;
+      const groupStatus = p.status;
+      let j = i;
+      while (j < panes.length
+             && panes[j].command === groupCmd
+             && panes[j].status === groupStatus
+             && !ACTIVE_STATUS(panes[j].status)
+             && (panes[j].context?.percent ?? 0) === 0) {
+        j++;
+      }
+      const start = panes[i].index;
+      const end = panes[j - 1].index;
+      const range = j - i === 1 ? `p${start}` : `p${start}-p${end}`;
+      const icon = statusIcon(groupStatus);
+      console.log(`  ${icon} ${range.padEnd(7)} ${groupCmd.padEnd(6)} ${groupStatus} (${j - i})`);
+      i = j;
     }
   }
 
-  if (count === 0) console.log("No running agents.");
   console.log("\nStatus: 🟢 working  🔴 needs input  🟡 resume/dismiss  💤 idle/done  ⚪ unknown");
+  if (!showAll) console.log("(use --full / -f to expand all panes)");
 }
 
 /**
@@ -1387,8 +1454,10 @@ export async function dispatch(argv, ctx) {
       return cmdLog(name, flags, ctx);
     }
 
-    case "ps":
-      return cmdPs(ctx);
+    case "ps": {
+      const { flags } = parseFlags(rest, { full: "boolean", f: "boolean" });
+      return cmdPs(ctx, flags);
+    }
 
     case "top": {
       const { flags } = parseFlags(rest, FLAG_SPECS.top);
