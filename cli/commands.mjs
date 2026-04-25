@@ -684,24 +684,45 @@ async function cmdDone(ctx, flags) {
   const ageMin = Math.round((nowMs - sinceMs) / 60000);
   console.log(`\nSince ${sinceIso} UTC (${ageMin} min ago, source: ${sinceSource})`);
 
-  // System-wide "where were we" header. Reads outside the current cutoff
-  // so it stays informative even when --day/--week aren't passed: tells
-  // you whether 1h is the right window or you've missed a longer pause.
-  // Cheap because both inputs are already cached or O(panes).
-  const allBuckets = [...buckets.values()];
-  const newest = allBuckets.reduce((m, b) => (b.latestTurnTs > (m?.latestTurnTs || 0) ? b : m), null);
-  const widerCommits = collectCommitsSince(reposFromAgents(agents), nowMs - 7 * 24 * 3600 * 1000, 1);
-  const headerParts = [];
-  if (newest?.latestTurnTs) {
-    const min = Math.round((nowMs - newest.latestTurnTs) / 60000);
-    headerParts.push(`last activity: ${newest.agent}:${newest.pane} (${formatRelMin(min)})`);
+  // "Where were we" header: top 5 most recent items across the system,
+  // pulled from a 7d window — independent of the current cutoff so it
+  // stays informative even when --day/--week aren't passed. Helps a
+  // morning-after orchestrator see "last 5 things" at a glance, in
+  // chronological order, before scanning the bucket sections below.
+  const widerSinceMs = nowMs - 7 * 24 * 3600 * 1000;
+  const widerCommits = collectCommitsSince(reposFromAgents(agents), widerSinceMs, 20);
+  let widerBuckets = buckets;
+  if (sinceMs > widerSinceMs) {
+    // Current cutoff is narrower than 7d — re-read for the recent feed.
+    const widerRows = readAllTurnsAcrossPanes({ agents, since: new Date(widerSinceMs) });
+    widerBuckets = groupByPane(widerRows);
   }
-  if (widerCommits.length) {
-    const c = widerCommits[0];
-    const min = Math.round((nowMs - c.ts) / 60000);
-    headerParts.push(`last commit: ${c.label} (${formatRelMin(min)})`);
+  const recentItems = [];
+  for (const b of widerBuckets.values()) {
+    if (b.latestTurnTs) recentItems.push({ kind: "pane", ts: b.latestTurnTs, bucket: b });
   }
-  if (headerParts.length) console.log(headerParts.join(" · "));
+  for (const c of widerCommits) {
+    recentItems.push({ kind: "commit", ts: c.ts, commit: c });
+  }
+  recentItems.sort((a, b) => b.ts - a.ts);
+  const top = recentItems.slice(0, 5);
+  if (top.length) {
+    console.log(`\nRecent activity (top ${top.length}):`);
+    for (const item of top) {
+      const min = Math.round((nowMs - item.ts) / 60000);
+      const age = formatRelMin(min);
+      if (item.kind === "commit") {
+        const c = item.commit;
+        const subj = truncate(c.subject, 50);
+        console.log(`  📝 ${c.hash.slice(0, 7)}  ${c.label.padEnd(10).slice(0, 10)}  ${subj.padEnd(52)}  (${age})`);
+      } else {
+        const b = item.bucket;
+        const preview = truncate((b.lastAssistantText || b.lastUserText || "").replace(/\s+/g, " ").trim(), 50);
+        const key = `${b.agent}:${b.pane}`.padEnd(10);
+        console.log(`  🔸 ${key}            ${preview.padEnd(52)}  (${age})`);
+      }
+    }
+  }
 
   // Commits are the strongest "work happened" signal — code was written,
   // reviewed, and kept. Render first so it anchors the orchestrator's
