@@ -14,11 +14,33 @@
 // IP via VOICE_PWA_HOST when they're ready to let the phone in.
 
 import http from "http";
-import { writeFileSync, unlinkSync, readFileSync, existsSync } from "fs";
+import { writeFileSync, unlinkSync, readFileSync, existsSync, statSync } from "fs";
 import { randomBytes } from "crypto";
-import { join } from "path";
+import { join, resolve, extname } from "path";
 import yaml from "js-yaml";
 import { esc } from "../lib.mjs";
+
+// Minimal mime map for the static PWA bundle. Anything not listed gets
+// application/octet-stream (browsers handle it; this is only for the
+// types our SvelteKit build actually emits).
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".mjs": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".map": "application/json; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+};
 
 const DEFAULT_POLL_INTERVAL_MS = 1500;
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024; // 25 MB (matches OpenAI Whisper limit)
@@ -54,11 +76,15 @@ export function createVoicePWA(deps) {
     ttsVoice = "sv-SE-MattiasNeural",
     mirror = null,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
+    staticDir = null,
   } = deps;
 
   if (!token) throw new Error("VOICE_PWA_TOKEN required — generate with `openssl rand -hex 32`");
   if (!agent) throw new Error("voice pwa: agent dep missing");
   if (!agentsYamlPath) throw new Error("voice pwa: agentsYamlPath missing");
+
+  // Resolve staticDir once so path-traversal checks below compare absolutes.
+  const staticRoot = staticDir ? resolve(staticDir) : null;
 
   /** Read agents.yaml fresh on each call. Cheap (<1ms) and picks up label
    *  edits via `amux label` without restarting the bot. */
@@ -298,15 +324,66 @@ export function createVoicePWA(deps) {
 
   // ---------- Request dispatcher ----------------------------------------
 
+  // Resolve a request path against staticRoot, refusing anything that escapes
+  // the root (defense in depth — req.url paths are normalized but a hostile
+  // backend or proxy could still feed us "../" sequences).
+  function resolveStaticPath(reqPath) {
+    if (!staticRoot) return null;
+    const decoded = decodeURIComponent(reqPath);
+    const cleaned = decoded === "/" ? "/index.html" : decoded;
+    const abs = resolve(staticRoot, "." + cleaned);
+    if (abs !== staticRoot && !abs.startsWith(staticRoot + "/")) return null;
+    if (!existsSync(abs)) return null;
+    try {
+      if (!statSync(abs).isFile()) return null;
+    } catch { return null; }
+    return abs;
+  }
+
+  function serveStatic(req, res, path) {
+    const filePath = resolveStaticPath(path);
+    // SPA fallback: any unknown non-/api path → index.html (client router takes over)
+    const target = filePath || (staticRoot && !path.startsWith("/api/")
+      ? resolveStaticPath("/index.html")
+      : null);
+    if (!target) return false;
+
+    try {
+      const buf = readFileSync(target);
+      const mime = MIME[extname(target).toLowerCase()] || "application/octet-stream";
+      const isShell = target.endsWith("/index.html");
+      res.writeHead(200, {
+        "content-type": mime,
+        "content-length": buf.length,
+        // Hashed asset paths (_app/...) get long cache; the SPA shell stays no-cache
+        // so users see new builds immediately.
+        "cache-control": isShell ? "no-cache" : "public, max-age=31536000, immutable",
+      });
+      res.end(buf);
+      return true;
+    } catch (err) {
+      console.warn(`voice-pwa static ${path}: ${err.message}`);
+      return false;
+    }
+  }
+
   async function handler(req, res) {
     const url = new URL(req.url, `http://${req.headers.host || "x"}`);
     const path = url.pathname;
 
-    // CORS for PWA served from different origin (e.g. Cloudflare Tunnel)
+    // CORS for PWA served from different origin (legacy — same-origin deploy
+    // doesn't need this, but keep it permissive so external clients still work).
     res.setHeader("access-control-allow-origin", "*");
     res.setHeader("access-control-allow-headers", "authorization, content-type");
     res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
     if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
+
+    // Static PWA bundle: serve everything that isn't /api/* without auth.
+    // The bundle is just JS/HTML — no secrets — so token-gating it would
+    // only break loading and force users to inject the header in the browser.
+    if (staticRoot && req.method === "GET" && !path.startsWith("/api/")) {
+      if (serveStatic(req, res, path)) return;
+    }
 
     if (!isAuthed(req)) return json(res, 401, { error: "unauthorized" });
 
