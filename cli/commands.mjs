@@ -11,7 +11,7 @@ import { hasSession, ensureAndAttach, attachSession, killSession, listPanes, get
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
 import { stripAnsi, esc, extractActivity, formatDuration } from "../lib.mjs";
 import { getContextFromPane } from "../core/context.mjs";
-import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor } from "../core/jsonl-reader.mjs";
+import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
 import {
   loadCheckpoint, saveCheckpoint, CHECKPOINT_PATH,
@@ -723,7 +723,7 @@ const CONTEXT_DIALECT = { claude: "claude", codex: "codex" };
 
 /** Gather status + preview + context for one pane. Safe: never throws. */
 async function inspectPane(ctx, agent, pane) {
-  const status = await getPaneStatus(ctx, agent.name, pane.index).catch(() => "unknown");
+  let status = await getPaneStatus(ctx, agent.name, pane.index).catch(() => "unknown");
   let content = "";
   try { content = await ctx.agent.capturePane(agent.name, pane.index, 100); }
   catch {}
@@ -736,7 +736,22 @@ async function inspectPane(ctx, agent, pane) {
   // Claude Code stores its session jsonl per-cwd; each pane runs in
   // .agents/N, so getContextFromPane's max-tokens fallback must read from
   // the worktree slug, not the parent project slug.
-  const context = dialect === "claude" ? getContextFromPane(content, panePathFor(agent, pane.index)) : null;
+  const paneDir = panePathFor(agent, pane.index);
+  const context = dialect === "claude" ? getContextFromPane(content, paneDir) : null;
+
+  // Live-activity overlay: tmux-only detection can't tell an active spinner
+  // ("✻ Sautéed for X" still counting up) from a frozen one (post-turn
+  // residue) — same shape, same regex match. Cross-check jsonl mtime: a
+  // jsonl event written within the last 10s means the agent is generating
+  // right now, regardless of what the prompt-line looks like. Only override
+  // when the tmux-detection said idle/unknown so we don't shadow real
+  // permission/menu/resume modals.
+  if (dialect === "claude" && (status === "idle" || status === "unknown")) {
+    const mtimeMs = latestJsonlMtime(paneDir);
+    if (mtimeMs && Date.now() - mtimeMs < 10_000) {
+      status = "working";
+    }
+  }
   return { status, preview, context };
 }
 
