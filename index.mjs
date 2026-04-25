@@ -14,7 +14,7 @@ process.on("uncaughtException", (err) => {
 
 import { exec as execCb } from "child_process";
 import { promisify } from "util";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { parseEnv, downloadBuffer } from "./lib.mjs";
@@ -204,6 +204,14 @@ const driftGuard = createDriftGuard({
 driftGuard.start();
 
 if (VOICE_PWA_TOKEN) {
+  // Static PWA bundle is served from the same Node process so the whole
+  // app lives behind one Tailscale Serve tunnel — no Cloudflare Pages,
+  // no separate deploy. Override with VOICE_PWA_STATIC_DIR if the PWA
+  // lives somewhere other than ../voice-pwa/build relative to agentmux.
+  const defaultStaticDir = resolve(__dir, "../voice-pwa/build");
+  const voicePwaStaticDir = process.env.VOICE_PWA_STATIC_DIR
+    || (existsSync(defaultStaticDir) ? defaultStaticDir : null);
+
   const voicePwa = createVoicePWA({
     port: VOICE_PWA_PORT,
     host: VOICE_PWA_HOST,
@@ -214,8 +222,12 @@ if (VOICE_PWA_TOKEN) {
     run,
     ttsVoice: TTS_VOICE,
     mirror: { send: (channelId, text) => discord.send(channelId, text) },
+    staticDir: voicePwaStaticDir,
   });
   voicePwa.start()
-    .then(({ url }) => console.log(`voice-pwa | listening at ${url}`))
+    .then(({ url }) => {
+      const staticNote = voicePwaStaticDir ? ` (PWA: ${voicePwaStaticDir})` : " (api only — set VOICE_PWA_STATIC_DIR or build voice-pwa)";
+      console.log(`voice-pwa | listening at ${url}${staticNote}`);
+    })
     .catch((err) => console.error(`voice-pwa | failed to start: ${err.message}`));
 }
