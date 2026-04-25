@@ -6,7 +6,7 @@ import { promisify } from "util";
 import { createAgent } from "../agent.mjs";
 import { esc, stripAnsi } from "../lib.mjs";
 import { detectPaneStatus } from "./format.mjs";
-import { findChannelForPane } from "./config.mjs";
+import { findChannelForPane, loadConfig } from "./config.mjs";
 
 const exec = promisify(execCb);
 
@@ -117,6 +117,7 @@ export async function sendKeys(ctx, name, pane, keys) {
  */
 export async function sendToPane(ctx, name, pane, text, opts = {}) {
   const mirror = opts.mirror !== false;
+  const sentAtMs = Date.now();
 
   // 1. tmux is source of truth. Fail fast if this breaks.
   await ctx.agent.sendOnly(name, text, pane);
@@ -134,6 +135,49 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
     await sendToChannelId(channelId, mirrored);
   } catch (err) {
     console.warn(`mirror ${name}:${pane} → ${channelId}: ${err.message}`);
+  }
+
+  // 3. Detached forwarder for the agent's reply. Without this, orchestrator
+  //    sends (claw:0 → claw:1 etc) are one-way from Discord's perspective:
+  //    the brief is mirrored, the response is invisible. The worker polls
+  //    jsonl out-of-process so this CLI invocation exits immediately.
+  //    Suppress with opts.forwardReply === false (used by handlers etc).
+  if (opts.forwardReply === false) return;
+  spawnReplyForwarder({
+    channelId,
+    name,
+    pane,
+    paneDir: agentPaneDir(ctx.configPath, name, pane),
+    briefSnippet: text.slice(0, 80),
+    sentAtMs,
+  });
+}
+
+function agentPaneDir(configPath, name, pane) {
+  // Match agent.mjs:paneDir(rootDir, pane) → join(rootDir, '.agents', N)
+  try {
+    const cfg = loadConfig(configPath);
+    const dir = cfg?.[name]?.dir;
+    if (!dir) return null;
+    return `${dir}/.agents/${pane}`;
+  } catch {
+    return null;
+  }
+}
+
+async function spawnReplyForwarder(opts) {
+  if (!opts.paneDir) return;
+  try {
+    const { fork } = await import("child_process");
+    const workerPath = new URL("./reply-forwarder-worker.mjs", import.meta.url).pathname;
+    const worker = fork(workerPath, [], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, REPLY_FWD_OPTS: JSON.stringify(opts) },
+    });
+    worker.unref();
+  } catch (err) {
+    console.warn(`reply-fwd spawn failed: ${err.message}`);
   }
 }
 
