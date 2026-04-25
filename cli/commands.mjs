@@ -14,7 +14,7 @@ import { getContextFromPane } from "../core/context.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
 import {
-  loadCheckpoint, saveCheckpoint, CHECKPOINT_PATH,
+  loadCheckpoint, saveCheckpoint, CHECKPOINT_PATH, checkpointPathForSender,
   groupByPane, classifyPane, previewText,
   isStaleWaiter, isRunningNow,
 } from "../core/orchestrator-checkpoint.mjs";
@@ -582,9 +582,17 @@ async function cmdDone(ctx, flags) {
   let sinceMs = null;
   let sinceSource = "";
 
+  // Per-sender checkpoint — multiple orchestrator panes (claw:0, ai:2, ...)
+  // would otherwise clobber each other's "last check" state. detectSender
+  // returns null outside tmux (cron, raw shell, CI), in which case the
+  // legacy global path is used.
+  const exec = (cmd) => execSync(cmd, { encoding: "utf8", timeout: 2000 });
+  const sender = detectSenderFromEnv(process.env, exec);
+  const checkpointPath = checkpointPathForSender(sender);
+
   if (flags.since) {
     if (flags.since === "last") {
-      sinceMs = loadCheckpoint();
+      sinceMs = loadCheckpoint(checkpointPath);
       sinceSource = sinceMs ? "last checkpoint" : "1h fallback (no checkpoint)";
     } else {
       const parsed = parseSinceArg(flags.since);
@@ -596,8 +604,16 @@ async function cmdDone(ctx, flags) {
       sinceSource = `--since ${flags.since}`;
     }
   } else {
-    sinceMs = loadCheckpoint();
+    sinceMs = loadCheckpoint(checkpointPath);
     sinceSource = sinceMs ? "last checkpoint" : "1h fallback (no checkpoint)";
+    // UX: a checkpoint advanced moments ago (back-to-back `amux done`) is
+    // useless — the cutoff is "0 min ago" so almost no rows match. Treat
+    // anything <5 min old as if there's no checkpoint at all and fall back
+    // to a 1h window. The user clearly wants context, not an empty report.
+    if (sinceMs && nowMs - sinceMs < 5 * 60 * 1000) {
+      sinceMs = nowMs - 60 * 60 * 1000;
+      sinceSource = "1h fallback (checkpoint <5min old)";
+    }
   }
   if (!sinceMs) sinceMs = nowMs - 60 * 60 * 1000;
 
@@ -693,7 +709,7 @@ async function cmdDone(ctx, flags) {
   }
 
   if (!flags.reset) {
-    saveCheckpoint(nowMs);
+    saveCheckpoint(nowMs, checkpointPath);
   } else {
     console.log(`\n(--reset: checkpoint NOT advanced, next 'amux done' will see the same cutoff)`);
   }
