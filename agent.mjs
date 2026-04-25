@@ -35,7 +35,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.16.5";
+const HINTS_VERSION = "1.16.12";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -45,6 +45,8 @@ You are running inside agentmux. You can orchestrate other agents from your term
 
 **Never use raw \`tmux ... capture-pane\`.** Everything is exposed via \`amux\` —
 shorter, validated, mirrors to Discord so the user sees what you do.
+
+> Tip: \`ax\` is a shorter alias for \`amux\` (same script, both work). Use either.
 
 ## Cheat sheet (intent-first)
 
