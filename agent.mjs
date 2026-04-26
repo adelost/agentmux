@@ -745,11 +745,52 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       if (claude && claude.items.length > 0) return claude;
     }
 
-    // Last-resort fallback: tmux parsing
+    // Last-resort fallback: tmux parsing.
     const raw = await capturePane(agentName, pane, 5000);
     const turn = promptText ? extractTurnByPrompt(raw, promptText) : extractLastTurn(raw);
     const items = extractMixedStream(classifyLines(turn));
-    return { raw, turn, items, source: "tmux" };
+
+    // Quality gate: when the last turn is mostly pane-chrome (input box,
+    // spinner glyphs, progress bars, model+context footer) the extractor
+    // happily returns it as "text". Discord ends up showing block characters
+    // and Claude UI elements as if they were the agent's reply. Strip those
+    // first; if nothing meaningful survives, return empty rather than ship
+    // junk. Better silence than gibberish.
+    const cleaned = items.map((it) =>
+      it.type === "text" ? { ...it, content: stripPaneChromeForFallback(it.content) } : it,
+    ).filter((it) => it.type !== "text" || it.content.trim().length > 0);
+
+    if (items.length > 0 && cleaned.length === 0) {
+      console.warn(`[${agentName}:${pane}] tmux fallback rejected — all items were pane-chrome`);
+      return { raw, turn, items: [], source: "tmux-rejected" };
+    }
+    return { raw, turn, items: cleaned, source: "tmux" };
+  }
+
+  /**
+   * Drop lines that look like pane-chrome rather than agent speech.
+   * Mirrors voice.mjs stripPaneChrome and voice-pwa cleanForTts so all
+   * three downstream-text paths apply the same filter.
+   */
+  function stripPaneChromeForFallback(text) {
+    const lines = String(text).split("\n");
+    const kept = [];
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) { kept.push(""); continue; }
+      if (/^[│|]?\s*(opus|sonnet|haiku|gpt-?\d|claude|codex)[\s\d.()xMK,a-zA-Z-]*(\(.*context\).*|│.*\d+%?\s*$)?$/i.test(line)) continue;
+      if (/(opus|sonnet|haiku|gpt-?\d|claude|codex).*\(.*context\).*/i.test(line)) continue;
+      if (/^[█▓▒░\s│|·▏▎▍▌▋▊▉]+(\d+\s*%)?$/.test(line)) continue;
+      if (/[█▓▒░]{2,}/.test(line) && line.length < 80) continue;
+      if (/^[✻✢⏵⎿⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/u.test(line)) continue;
+      if (/(esc to interrupt|tokens?\s*[\)·]|still thinking|thought for)/i.test(line)) continue;
+      if (/bypass permissions on/i.test(line)) continue;
+      if (/shift\+tab to cycle/i.test(line)) continue;
+      if (/^[❯>$]\s*$/.test(line)) continue;
+      if (/^[─━═-]+$/.test(line)) continue;
+      kept.push(raw);
+    }
+    return kept.join("\n").trim();
   }
 
   /**

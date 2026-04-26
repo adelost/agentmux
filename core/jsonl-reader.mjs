@@ -172,9 +172,20 @@ export function isPromptInJsonl(paneDir, promptText) {
 function findUserPromptIndex(events, promptText) {
   const needle = promptText?.trim();
   if (needle) {
+    // Pass 1: exact match (cheap, covers the common case).
     for (let i = events.length - 1; i >= 0; i--) {
       const text = userPromptText(events[i]);
       if (text && text.trim() === needle) return i;
+    }
+    // Pass 2: normalised match — strips ax-meta/voice/TTS wrappers from
+    // both sides. Stops handlers from falling through to tmux just because
+    // one side gained a "[from claw:0]" prefix and the other didn't.
+    const fuzzyNeedle = normalizePrompt(needle);
+    if (fuzzyNeedle) {
+      for (let i = events.length - 1; i >= 0; i--) {
+        const text = userPromptText(events[i]);
+        if (text && normalizePrompt(text.trim()) === fuzzyNeedle) return i;
+      }
     }
     return -1;
   }
@@ -185,15 +196,48 @@ function findUserPromptIndex(events, promptText) {
 }
 
 /**
+ * Normalise a prompt for comparison: strip wrappers that differ between
+ * "what handlers know" and "what's stored in jsonl" so equivalent prompts
+ * match even when one side has decoration the other doesn't.
+ *
+ * Stripped:
+ *   - leading "[from <agent>:<pane>] " ax-meta header
+ *   - leading "[transcribed voice ...] " voice-PWA disclaimer
+ *   - trailing "\n[tts on — ...]" hint suffix
+ *   - leading/trailing whitespace
+ *
+ * Without this, an exact-match search misses turns where one path added a
+ * prefix the other didn't, falling all the way through to tmux extraction
+ * which then ships pane-chrome to Discord. See getResponseStreamWithRaw
+ * fallback path for the downstream effect.
+ */
+function normalizePrompt(text) {
+  if (!text) return "";
+  let s = text.trim();
+  // ax-meta: "[from claw:0] actual prompt"
+  s = s.replace(/^\[from\s+[^:]+:\d+\]\s*/i, "");
+  // voice-PWA disclaimer
+  s = s.replace(/^\[transcribed voice[^\]]*\]\s*/i, "");
+  // TTS hint suffix
+  s = s.replace(/\s*\n\s*\[tts on[^\]]*\]\s*$/i, "");
+  return s.trim();
+}
+
+/**
  * True if the prompt appears anywhere in events (user, queue-operation,
- * attachment). Uses extractPromptFromEvent so all three shapes match.
+ * attachment). Tries exact match first, then a normalised-both-sides match
+ * so wrapper-decoration doesn't cause a false miss.
  */
 function promptAppearsInEvents(events, promptText) {
   const needle = promptText?.trim();
   if (!needle) return false;
+  const fuzzyNeedle = normalizePrompt(needle);
   for (const e of events) {
     const text = extractPromptFromEvent(e);
-    if (text && text.trim() === needle) return true;
+    if (!text) continue;
+    const trimmed = text.trim();
+    if (trimmed === needle) return true;
+    if (fuzzyNeedle && normalizePrompt(trimmed) === fuzzyNeedle) return true;
   }
   return false;
 }
