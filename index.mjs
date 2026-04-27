@@ -31,6 +31,7 @@ import { createAutoCompact } from "./channels/auto-compact.mjs";
 import { parseAutoCompactConfig } from "./core/auto-compact.mjs";
 import { createDriftGuard } from "./channels/drift-guard.mjs";
 import { parseReminderConfig } from "./core/reminder-state.mjs";
+import { createMirrorLoop } from "./channels/mirror-loop.mjs";
 
 // --- Config ---
 
@@ -201,6 +202,18 @@ const driftGuard = createDriftGuard({
   config: driftGuardConfig,
 });
 driftGuard.start();
+
+// Mirror-loop: safety-net forwarder. Polls every claude/codex pane and posts
+// any assistant turn that hasn't been mirrored to its bound Discord channel
+// after a grace period. Catches the cases where drift-guard / resume-hint /
+// voice-PWA's per-call forwarders timeout or fail to match — same lego
+// block, all sources covered.
+const mirrorLoop = createMirrorLoop({
+  agentsYamlPath: AGENTS_YAML,
+  discord,
+  state: appState,
+});
+mirrorLoop.start();
 
 // Static PWA bundle is served from the same Node process so the whole
 // app lives behind one Tailscale Serve tunnel. Override with
