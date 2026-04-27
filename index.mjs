@@ -31,7 +31,6 @@ import { createAutoCompact } from "./channels/auto-compact.mjs";
 import { parseAutoCompactConfig } from "./core/auto-compact.mjs";
 import { createDriftGuard } from "./channels/drift-guard.mjs";
 import { parseReminderConfig } from "./core/reminder-state.mjs";
-import { createMirrorLoop } from "./channels/mirror-loop.mjs";
 import { createJsonlWatcher } from "./channels/jsonl-watcher.mjs";
 
 // --- Config ---
@@ -120,31 +119,19 @@ const discord = createDiscordChannel({ token: TOKEN, onSent: stampChannelMirror 
 // Now that discord exists, wire the agent's resume-hint hook so spawn-time
 // hint injections (1.14.0) get mirrored to the bound Discord channel
 // (1.16.0). Idempotent: safe to skip when no channel is bound.
+//
+// The agent's reply to the resume-hint is forwarded by jsonl-watcher
+// automatically — used to be a bespoke forwardReplyAsync with a
+// "[amux resume hint]" matcher and 60s timeout, retired in 1.16.33.
 import { findChannelForPane } from "./cli/config.mjs";
-import { forwardReplyAsync as forwardHintReplyAsync } from "./core/reply-forwarder.mjs";
-resumeHintMirror = async ({ agentName, pane, hint, paneDir }) => {
+resumeHintMirror = async ({ agentName, pane, hint }) => {
   const channelId = findChannelForPane(AGENTS_YAML, agentName, pane);
   if (!channelId) return;
   try {
     await discord.send(channelId, hint);
   } catch (err) {
     console.warn(`resume-hint mirror failed for ${agentName}:${pane}: ${err.message}`);
-    return;
   }
-  // Forward whatever the agent emits in response (filtered by boilerplate).
-  forwardHintReplyAsync({
-    agent,
-    discord,
-    agentName,
-    pane,
-    channelId,
-    paneDir,
-    sentAtMs: Date.now(),
-    matcher: (userPrompt) => userPrompt.includes("[amux resume hint]"),
-    timeoutMs: 60_000,
-    log: (msg) => console.log(`resume-hint | ${msg}`),
-    label: "resume-hint",
-  });
 };
 
 // --- Wire up ---
@@ -204,26 +191,11 @@ const driftGuard = createDriftGuard({
 });
 driftGuard.start();
 
-// Mirror-loop: safety-net forwarder. Polls every claude/codex pane and posts
-// any assistant turn that hasn't been mirrored to its bound Discord channel
-// after a grace period. Catches the cases where drift-guard / resume-hint /
-// voice-PWA's per-call forwarders timeout or fail to match — same lego
-// block, all sources covered.
-const mirrorLoop = createMirrorLoop({
-  agentsYamlPath: AGENTS_YAML,
-  discord,
-  state: appState,
-});
-mirrorLoop.start();
-
-// jsonl-watcher: event-driven mirror — fs.watch on each pane's project
+// jsonl-watcher: the single mirror path. fs.watch on each pane's project
 // dir, posts every complete turn to the bound Discord channel, persistent
-// state so bridge-restart resumes exactly where it left off. Designed to
-// replace handlers.streamResponse + drift-guard.forwardReplyAsync +
-// resume-hint forwarder + mirror-loop in subsequent phases. For now it
-// runs ADDITIVE alongside them — dedupes via channel_last_mirror_ts so
-// nothing double-posts. Once stable in observation, the legacy paths
-// will be torn out.
+// state so bridge-restart resumes exactly where it left off. Replaced
+// streamResponse (1.16.32), drift-guard.forwardReplyAsync (1.16.33),
+// resume-hint forwarder (1.16.33), and mirror-loop (1.16.33).
 const jsonlWatcher = createJsonlWatcher({
   agent,
   agentsYamlPath: AGENTS_YAML,
@@ -231,7 +203,6 @@ const jsonlWatcher = createJsonlWatcher({
   state: appState,
   recorder,
   tts,
-  postPrefix: "[via jsonl-watch] ",  // visible in observation phase, removed once stable
 });
 jsonlWatcher.start();
 

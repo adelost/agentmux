@@ -17,7 +17,7 @@ import {
   cutoffFor,
   formatReminderMessage,
 } from "../core/reminder-state.mjs";
-import { forwardReplyAsync as genericForwardReplyAsync, isBoilerplateReply } from "../core/reply-forwarder.mjs";
+import { isBoilerplateReply } from "../core/reply-forwarder.mjs";
 
 // Re-exported for the existing drift-guard.test.mjs import.
 export { isBoilerplateReply };
@@ -53,7 +53,6 @@ export function createDriftGuard({
   async function sendReminder(agentConfig, paneIdx, paneKey, turnCount) {
     const agentName = agentConfig.name;
     const text = formatReminderMessage(turnCount);
-    const reminderSentAt = Date.now();
     try {
       await agent.sendOnly(agentName, text, paneIdx);
       log(`reminded ${paneKey} at ${turnCount} turns past refresh`);
@@ -61,9 +60,14 @@ export function createDriftGuard({
       log(`send failed for ${paneKey}: ${err.message}`);
       return;
     }
-    // Mirror to bound Discord channel so the user sees drift-guard activity
-    // in the same timeline as briefs and /compact notices. Mirror failure
-    // is a transparency degradation, not a correctness issue.
+    // Mirror the reminder text to the bound Discord channel so the user
+    // sees drift-guard activity in the timeline. Failure is a transparency
+    // degradation, not a correctness issue.
+    //
+    // Forwarding the agent's reply is the jsonl-watcher's job now —
+    // forwardReplyAsync used to live here with a "[drift-guard]" matcher
+    // and 60s timeout, but it lost replies whenever the agent took
+    // longer than the timeout. The watcher catches every turn regardless.
     const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
     if (channelId && discord) {
       try {
@@ -72,29 +76,6 @@ export function createDriftGuard({
         log(`mirror failed for ${paneKey}: ${err.message}`);
       }
     }
-    // Detached: forward the agent's reply (if any) to the same channel so
-    // the user sees not just the reminder but also any organic recap or
-    // recommendation the agent emits in response. Reminder text invites
-    // a no-op so most reminders forward nothing — that's expected.
-    if (config.forwardReply && channelId && discord) {
-      forwardReplyAsync(agentConfig, paneIdx, paneKey, channelId, reminderSentAt);
-    }
-  }
-
-  function forwardReplyAsync(agentConfig, paneIdx, paneKey, channelId, reminderSentAt) {
-    genericForwardReplyAsync({
-      agent,
-      discord,
-      agentName: agentConfig.name,
-      pane: paneIdx,
-      channelId,
-      paneDir: panePathFor(agentConfig, paneIdx),
-      sentAtMs: reminderSentAt,
-      matcher: (userPrompt) => userPrompt.includes("[drift-guard]"),
-      timeoutMs: config.replyTimeoutMs,
-      log,
-      label: "drift-guard",
-    });
   }
 
   async function tick() {
