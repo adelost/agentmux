@@ -32,6 +32,7 @@ import { parseAutoCompactConfig } from "./core/auto-compact.mjs";
 import { createDriftGuard } from "./channels/drift-guard.mjs";
 import { parseReminderConfig } from "./core/reminder-state.mjs";
 import { createMirrorLoop } from "./channels/mirror-loop.mjs";
+import { createJsonlWatcher } from "./channels/jsonl-watcher.mjs";
 
 // --- Config ---
 
@@ -214,6 +215,25 @@ const mirrorLoop = createMirrorLoop({
   state: appState,
 });
 mirrorLoop.start();
+
+// jsonl-watcher: event-driven mirror — fs.watch on each pane's project
+// dir, posts every complete turn to the bound Discord channel, persistent
+// state so bridge-restart resumes exactly where it left off. Designed to
+// replace handlers.streamResponse + drift-guard.forwardReplyAsync +
+// resume-hint forwarder + mirror-loop in subsequent phases. For now it
+// runs ADDITIVE alongside them — dedupes via channel_last_mirror_ts so
+// nothing double-posts. Once stable in observation, the legacy paths
+// will be torn out.
+const jsonlWatcher = createJsonlWatcher({
+  agent,
+  agentsYamlPath: AGENTS_YAML,
+  discord,
+  state: appState,
+  recorder,
+  tts,
+  postPrefix: "[via jsonl-watch] ",  // visible in observation phase, removed once stable
+});
+jsonlWatcher.start();
 
 // Static PWA bundle is served from the same Node process so the whole
 // app lives behind one Tailscale Serve tunnel. Override with
