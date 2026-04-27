@@ -234,6 +234,9 @@ export function createJsonlWatcher({
         await postTurn({ name, idx, channelId, turn });
         setLastPostedMs(channelId, endMs);
         lastMs = endMs;
+        const ageS = Math.round((now - endMs) / 1000);
+        const reason = completeByReason ? "stop_reason" : "grace";
+        log(`${name}:${idx} → ${channelId} (${reason}, age=${ageS}s, ${turn.items?.length || 0} items)`);
       }
     } catch (err) {
       log(`check ${key}: ${err.stack || err.message}`);
