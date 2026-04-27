@@ -503,6 +503,10 @@ function groupIntoTurns(events) {
         timestamp: e.timestamp || null,
         userPrompt: e.message.content,
         items: [],
+        // Watcher uses these to know when a turn is safe to post:
+        // endTimestamp = ISO of latest assistant event, isComplete = terminal stop_reason seen.
+        endTimestamp: null,
+        isComplete: false,
       };
       continue;
     }
@@ -516,6 +520,9 @@ function groupIntoTurns(events) {
           current.items.push({ type: "tool", content: formatJsonlToolCall(block) });
         }
       }
+      if (e.timestamp) current.endTimestamp = e.timestamp;
+      const reason = e.message?.stop_reason;
+      if (reason && TERMINAL_STOP_REASONS.has(reason)) current.isComplete = true;
     }
   }
   if (current) turns.push(current);
