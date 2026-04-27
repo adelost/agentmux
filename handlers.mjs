@@ -1,8 +1,8 @@
 // Message handling: commands, agent routing, reply pipeline.
 // Channel-agnostic. Works with any ChannelMessage from channels/*.mjs.
 
-import { splitMessage, parsePane, parseCommand, parseUseArg, extractImageMarkers, validateImagePath } from "./lib.mjs";
-import { readFileSync, unlinkSync, statSync } from "fs";
+import { splitMessage, parsePane, parseCommand, parseUseArg } from "./lib.mjs";
+import { readFileSync, unlinkSync } from "fs";
 import { executeSync } from "./core/sync-discord.mjs";
 import { countTurnsSince, panePathFor, readLastTurns } from "./core/jsonl-reader.mjs";
 import { checkLoopGuard, loopGuardKey, formatLoopGuardWarning, readLoopGuardConfig } from "./core/loop-guard.mjs";
@@ -373,155 +373,16 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
   const ts = () => new Date().toLocaleTimeString("sv");
 
-  async function hasReadyResponse(mapping, pane, promptText) {
-    if (!agent.hasResponseForPrompt) return false;
-    try {
-      return await agent.hasResponseForPrompt(mapping.name, pane, promptText);
-    } catch (err) {
-      console.warn(`hasReadyResponse failed for ${mapping.name}:${pane}: ${err.message}`);
-      return false;
-    }
-  }
-
   function promptForAgent(cleanPrompt) {
     const ttsHint = tts.isEnabled?.() ? "\n[tts on — keep it speakable, skip formatting]" : "";
     return ttsHint ? cleanPrompt + ttsHint : cleanPrompt;
   }
 
-  /**
-   * Wait for agent to fully complete (idle 2 polls in a row), then send the result.
-   * No streaming - just wait, then send. Avoids all timing/scrollback issues.
-   */
-  async function streamResponse(msg, mapping, pane, promptText, tmpFiles = []) {
-    const startTime = Date.now();
-    const maxDuration = 600_000;
-    const target = `${mapping.name}:.${pane}`;
-
-    // Wait for completion (idle 2 polls in a row after we saw busy).
-    // Echo verification is handled by the retry loop in processMessage.
-    let sawWorking = false;
-    let idleStreak = 0;
-    const workMaxMs = 60_000; // If echo but no busy signal within 60s, fail loud
-
-    while (Date.now() - startTime < maxDuration) {
-      const busy = await agent.isBusy(mapping.name, pane, promptText);
-      // Dismiss on every tick, not just idle. isBusy can return true
-      // indefinitely if prompt-matching fails, so a survey would never
-      // get dismissed if we only ran this during idle ticks.
-      await agent.dismissBlockingPrompt(target)
-        .catch((err) => console.warn(`poll-dismiss failed: ${err.message}`));
-
-      if (busy) { sawWorking = true; idleStreak = 0; }
-      else {
-        idleStreak += 1;
-        if (sawWorking && idleStreak >= 2) break;
-        if (!sawWorking && await hasReadyResponse(mapping, pane, promptText)) break;
-      }
-      if (!sawWorking && Date.now() - startTime > workMaxMs) {
-        console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not processed within ${workMaxMs}ms`);
-        break;
-      }
-      await new Promise((r) => setTimeout(r, pollInterval));
-    }
-
-    // Dismiss any blocking prompts
-    await agent.dismissBlockingPrompt(`${mapping.name}:.${pane}`)
-      .catch((err) => console.warn(`dismiss failed: ${err.message}`));
-
-    // Get final response - matched to our exact prompt.
-    // Use the raw-aware variant when recording so we can persist the exact
-    // input to the extract pipeline alongside its output.
-    const sent = [];
-    let raw = null, turn = null, items, source = null;
-    if (rec.enabled) {
-      ({ raw, turn, items, source } = await agent.getResponseStreamWithRaw(mapping.name, pane, promptText));
-    } else {
-      items = await agent.getResponseStream(mapping.name, pane, promptText);
-    }
-
-    // Merge all items (text + tool calls) into one message, then split
-    // only for Discord's max message size. Tool calls are shown as italic
-    // lines inline rather than as separate messages.
-    const rawText = items
-      .map((item) => item.type === "tool" ? `*${item.content}*` : item.content)
-      .join("\n\n");
-
-    // Extract [image: /path] markers. Attach valid paths to first chunk.
-    // Invalid markers (missing file, too big, wrong format) get replaced with
-    // an inline warning so the user knows the agent tried but failed.
-    const { text: cleanedText, paths: imagePaths } = extractImageMarkers(rawText);
-    const validFiles = [];
-    const failedMarkers = [];
-    for (const p of imagePaths) {
-      const result = validateImagePath(p, statSync);
-      if (result.ok) validFiles.push(result.path);
-      else failedMarkers.push(`⚠️ image skipped: \`${p}\` (${result.error})`);
-    }
-    const fullText = [cleanedText, ...failedMarkers].filter(Boolean).join("\n\n") || "(no text)";
-
-    const chunks = splitMessage(fullText);
-    // Pace ANY multi-chunk send: Discord's bot rate limit can drop chunks
-    // when sent in tight succession, even at 2-3 messages. The dropped
-    // chunk fails silently because we .catch console.warn — looks like
-    // truncation to the user. 250ms gap is enough; bumps to 400 on >3
-    // because long replies are more likely to hit the 5/5s sliding window.
-    const pacePerChunk = chunks.length >= 2 ? (chunks.length > 3 ? 400 : 250) : 0;
-    for (let i = 0; i < chunks.length; i++) {
-      sent.push(chunks[i]);
-      // Attach image files to the first chunk only
-      const payload = (i === 0 && validFiles.length)
-        ? { content: chunks[i], files: validFiles }
-        : chunks[i];
-      try {
-        await msg.send(payload);
-      } catch (err) {
-        // Surface the failure visibly so dropped chunks don't masquerade
-        // as truncated responses.
-        console.warn(`send chunk ${i + 1}/${chunks.length} failed for ${mapping.name}:${pane}: ${err.message}`);
-        try {
-          await msg.send(`⚠️ chunk ${i + 1}/${chunks.length} failed (${err.message.slice(0, 80)})`);
-        } catch { /* even the error-notice failed; give up */ }
-      }
-      if (pacePerChunk > 0 && i < chunks.length - 1) {
-        await new Promise((r) => setTimeout(r, pacePerChunk));
-      }
-    }
-
-    // Context% at the end
-    const context = agent.getContextPercent(mapping.name, pane);
-    if (context) {
-      const k = Math.round(context.tokens / 1000);
-      const contextMsg = `_context: ${context.percent}% (${k}k)_`;
-      sent.push(contextMsg);
-      await msg.send(contextMsg)
-        .catch((err) => console.warn(`send context failed: ${err.message}`));
-    }
-
-    // TTS: speak the text parts of the response (skips tool calls)
-    if (tts.isEnabled && tts.isEnabled()) {
-      const ttsText = items.filter((i) => i.type === "text").map((i) => i.content).join("\n\n");
-      if (ttsText) {
-        await tts.sendFollowup(msg.send, ttsText, tmpFiles)
-          .catch((err) => console.warn(`tts failed: ${err.message}`));
-      }
-    }
-
-    if (rec.enabled) {
-      rec.save({
-        ts: new Date().toISOString(),
-        agent: mapping.name,
-        pane,
-        prompt: promptText,
-        raw,
-        turn,
-        items,
-        context,
-        discordSent: sent,
-        durationMs: Date.now() - startTime,
-        source,
-      });
-    }
-  }
+  // streamResponse and hasReadyResponse were removed in 1.16.32 — agent
+  // replies are now mirrored to Discord by channels/jsonl-watcher.mjs,
+  // which observes every claude/codex pane's session jsonl directly.
+  // processMessage now returns as soon as the prompt is acknowledged
+  // (echo or busy-signal); the watcher handles posting the answer.
 
   async function processMessage(msg, mapping, cleanPrompt, pane, tmpFiles) {
     console.log(`[${ts()}] ← ${mapping.name}:${pane} "${cleanPrompt.slice(0, 80)}"`);
@@ -575,8 +436,8 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         }).catch(() => {});
       }
 
-      await streamResponse(msg, mapping, pane, cleanPrompt, tmpFiles);
-      console.log(`[${ts()}] → ${mapping.name}:${pane} done`);
+      // Reply forwarding handled by channels/jsonl-watcher.mjs.
+      console.log(`[${ts()}] → ${mapping.name}:${pane} delivered`);
     } catch (err) {
       console.log(`[${ts()}] ✗ ${mapping.name}:${pane} ${err.message}`);
       await msg.reply(formatAgentError(err))

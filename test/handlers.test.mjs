@@ -254,14 +254,19 @@ feature("pane targeting", () => {
   });
 });
 
-feature("processMessage pipeline (streaming)", () => {
-  component("sends prompt and streams response", {
+feature("processMessage pipeline (delivery)", () => {
+  // streamResponse was retired in 1.16.32 — replies now flow through
+  // channels/jsonl-watcher.mjs instead. These tests cover what's left
+  // in processMessage: prompt delivery via withPaneSendLock with retries,
+  // typing indicator, and error reply on sendOnly failure. Reply
+  // rendering / chunking / TTS / image markers are tested against
+  // jsonl-watcher in a follow-up commit.
+
+  component("calls sendOnly with the cleaned prompt", {
     given: ["a regular message", () => ({ ...setup(), msg: mockMsg({ content: "what is 2+2?" }) })],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["agent.sendOnly called and stream sent", (_, { msg, agent }) => {
+    then: ["agent.sendOnly was invoked with prompt + pane", (_, { agent }) => {
       expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "what is 2+2?", 0);
-      expect(msg.send).toHaveBeenCalled();
-      expect(msg.send.mock.calls.some((c) => c[0]?.includes("agent reply"))).toBe(true);
     }],
   });
 
@@ -287,105 +292,7 @@ feature("processMessage pipeline (streaming)", () => {
     }],
   });
 
-  component("dedupes already-sent items", {
-    given: ["stream that returns same item twice", () => {
-      const s = setup();
-      s.agent.getResponseStream.mockResolvedValue([
-        { type: "text", content: "hello world" },
-      ]);
-      return { ...s, msg: mockMsg({ content: "hi" }) };
-    }],
-    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["text sent only once across multiple polls", (_, { msg }) => {
-      const sends = msg.send.mock.calls.filter((c) => c[0]?.includes("hello world"));
-      expect(sends.length).toBe(1);
-    }],
-  });
-
-  component("formats tool calls with italics", {
-    given: ["stream with tool call", () => {
-      const s = setup();
-      s.agent.getResponseStream.mockResolvedValue([
-        { type: "tool", content: "Read file.ts" },
-      ]);
-      return { ...s, msg: mockMsg({ content: "hi" }) };
-    }],
-    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["tool wrapped in asterisks", (_, { msg }) => {
-      expect(msg.send.mock.calls.some((c) => c[0] === "*Read file.ts*")).toBe(true);
-    }],
-  });
-
-  component("splits long items into Discord-size chunks", {
-    given: ["stream with a 3000-char text item", () => {
-      const s = setup();
-      const longText = "x".repeat(3000);
-      s.agent.getResponseStream.mockResolvedValue([
-        { type: "text", content: longText },
-      ]);
-      return { ...s, msg: mockMsg({ content: "hi" }), longText };
-    }],
-    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["sent as multiple chunks, each under 2000 chars", (_, { msg, longText }) => {
-      const sendCalls = msg.send.mock.calls.map((c) => c[0]);
-      // Exclude the context line
-      const textChunks = sendCalls.filter((c) => !c.startsWith("_context"));
-      expect(textChunks.length).toBeGreaterThan(1);
-      for (const chunk of textChunks) {
-        expect(chunk.length).toBeLessThanOrEqual(2000);
-      }
-      // Reassembled content is the original text
-      expect(textChunks.join("")).toBe(longText);
-    }],
-  });
-
-  component("calls tts.sendFollowup when tts is enabled", {
-    given: ["a message with tts enabled", () => {
-      const s = setup();
-      s.tts.isEnabled.mockReturnValue(true);
-      s.agent.getResponseStream.mockResolvedValue([
-        { type: "tool", content: "Read file.ts" },
-        { type: "text", content: "here it is" },
-      ]);
-      return { ...s, msg: mockMsg({ content: "hi" }) };
-    }],
-    when: ["onMessage completes", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["sendFollowup called with text only (no tool calls)", (_, { tts }) => {
-      expect(tts.sendFollowup).toHaveBeenCalledTimes(1);
-      const spokenText = tts.sendFollowup.mock.calls[0][1];
-      expect(spokenText).toBe("here it is");
-      expect(spokenText).not.toContain("Read file.ts");
-    }],
-  });
-
-  component("does not call tts.sendFollowup when tts is disabled", {
-    given: ["a message with tts disabled", () => {
-      const s = setup();
-      s.tts.isEnabled.mockReturnValue(false);
-      return { ...s, msg: mockMsg({ content: "hi" }) };
-    }],
-    when: ["onMessage completes", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["sendFollowup never called", (_, { tts }) => {
-      expect(tts.sendFollowup).not.toHaveBeenCalled();
-    }],
-  });
-
-  component("does not call tts.sendFollowup when response has no text", {
-    given: ["tts enabled but tool-only response", () => {
-      const s = setup();
-      s.tts.isEnabled.mockReturnValue(true);
-      s.agent.getResponseStream.mockResolvedValue([
-        { type: "tool", content: "Bash ls" },
-      ]);
-      return { ...s, msg: mockMsg({ content: "hi" }) };
-    }],
-    when: ["onMessage completes", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["sendFollowup skipped since no text to speak", (_, { tts }) => {
-      expect(tts.sendFollowup).not.toHaveBeenCalled();
-    }],
-  });
-
-  component("waits for prompt echo before polling for busy", {
+  component("waits for prompt echo before considering delivered", {
     given: ["a regular message", () => ({ ...setup(), msg: mockMsg({ content: "what is 2+2?" }) })],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
     then: ["waitForPromptEcho called with the prompt text", (_, { agent }) => {
@@ -402,77 +309,36 @@ feature("processMessage pipeline (streaming)", () => {
       const s = setup();
       s.agent.waitForPromptEcho.mockResolvedValue(false);
       s.agent.isBusy.mockResolvedValue(false);
-      // hasResponseForPrompt returns true so polling loop exits quickly
-      s.agent.hasResponseForPrompt.mockResolvedValue(true);
       return { ...s, msg: mockMsg({ content: "probably lost" }) };
     }],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["retries send 3 times, warns user, still extracts", (_, { msg, agent }) => {
-      // sendOnly called 3 times (retry loop)
+    then: ["sendOnly retried 3x and warning sent", (_, { msg, agent }) => {
       expect(agent.sendOnly.mock.calls.length).toBe(3);
-      // Warning sent after 3 failed attempts
       const sends = msg.send.mock.calls.map((c) => c[0]);
       expect(sends.some((s) => typeof s === "string" && s.includes("3 attempts"))).toBe(true);
-      // Extract still runs
-      expect(agent.getResponseStream).toHaveBeenCalled();
-    }],
-  });
-
-  component("still polls isBusy when echo timeout fires", {
-    given: ["echo timeout", () => {
-      const s = setup();
-      s.agent.waitForPromptEcho.mockResolvedValue(false);
-      return { ...s, msg: mockMsg({ content: "timeout case" }) };
-    }],
-    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["isBusy is polled (continues after warning)", (_, { agent }) => {
-      expect(agent.isBusy).toHaveBeenCalled();
     }],
   });
 
   component("follow-up prompt does not wait for the previous Discord turn to finish", {
-    given: ["two messages to the same busy pane", () => {
+    given: ["two messages to the same pane", () => {
       const s = setup();
       const first = mockMsg({ content: "first prompt" });
       const second = mockMsg({ content: "second prompt" });
-
-      let releaseFirstBusy;
-      const firstBusy = new Promise((resolve) => { releaseFirstBusy = resolve; });
-      let firstBusyCalls = 0;
-
-      s.agent.isBusy.mockImplementation(async (_, __, promptText) => {
-        if (promptText === "first prompt") {
-          firstBusyCalls++;
-          if (firstBusyCalls === 1) return firstBusy;
-          return false;
-        }
-        if (promptText === "second prompt") return false;
-        return false;
-      });
-      s.agent.hasResponseForPrompt.mockImplementation(async (_, __, promptText) =>
-        promptText === "second prompt");
-      s.agent.getResponseStream.mockImplementation(async (_, __, promptText) => [{
-        type: "text",
-        content: `reply for ${promptText}`,
-      }]);
-
-      return { ...s, first, second, releaseFirstBusy };
+      return { ...s, first, second };
     }],
-    when: ["both messages are processed", async ({ onMessage, first, second, releaseFirstBusy }) => {
+    when: ["both messages are processed", async ({ onMessage, first, second }) => {
       const firstRun = onMessage(first);
       await new Promise((r) => setTimeout(r, 0));
       const secondRun = onMessage(second);
-      releaseFirstBusy(true);
       await Promise.all([firstRun, secondRun]);
     }],
-    then: ["the follow-up message is streamed as soon as its own response is ready", (_, { first, second, agent }) => {
+    then: ["second sendOnly happens without waiting for first reply", (_, { agent }) => {
+      // Both prompts delivered — sendLock serialises sendOnly+echo, but
+      // since reply rendering no longer blocks, the second prompt's
+      // sendOnly fires shortly after the first's echo confirmation.
       expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "first prompt", 0);
       expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "second prompt", 0);
-      expect(first.send.mock.calls.some((c) => c[0]?.includes("reply for first prompt"))).toBe(true);
-      expect(agent.sendOnly.mock.invocationCallOrder[1]).toBeLessThan(first.send.mock.invocationCallOrder[0]);
-      expect(second.send.mock.calls.some((c) => c[0]?.includes("reply for second prompt"))).toBe(true);
-      expect(second.send.mock.invocationCallOrder[0]).toBeLessThan(first.send.mock.invocationCallOrder[0]);
-      expect(agent.hasResponseForPrompt).toHaveBeenCalledWith("_ai", 0, "second prompt");
+      expect(agent.sendOnly.mock.calls.length).toBeGreaterThanOrEqual(2);
     }],
   });
 });
