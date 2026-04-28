@@ -47,6 +47,18 @@ export function createDiscordChannel({ token, onSent }) {
       }
     },
 
+    // Fire-and-forget. Discord shows the indicator for ~10s; the watcher
+    // re-fires every <10s while the bound pane is in "working" state.
+    // Errors are swallowed because typing is purely cosmetic.
+    async sendTyping(channelId) {
+      try {
+        const ch = await client.channels.fetch(channelId);
+        if (ch?.sendTyping) await ch.sendTyping();
+      } catch {
+        /* swallow — typing is cosmetic */
+      }
+    },
+
     async getGuild(guildId) {
       return client.guilds.fetch(guildId);
     },
