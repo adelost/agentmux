@@ -38,8 +38,20 @@ import { splitMessage, extractImageMarkers, validateImagePath } from "../lib.mjs
 import { loadConfig, findChannelForPane } from "../cli/config.mjs";
 import { paneDir } from "../agent.mjs";
 import { readLastTurns } from "../core/jsonl-reader.mjs";
+import { detectPaneStatus } from "../cli/format.mjs";
 
 const DEFAULT_POLL_MS = 15_000;
+// Discord clears the typing indicator ~10s after the last sendTyping
+// call. We re-fire every 8s while the pane is in "working" state so
+// the dot stays continuously lit through a long agent turn (the user
+// noticed the gap after the 1.16.32 refactor moved reply-posting out
+// of processMessage). Re-uses the same pane-status detector amux ps
+// uses, so working = exactly what the spinner-footer regex catches.
+const DEFAULT_TYPING_POLL_MS = 8_000;
+// Capture only the last ~30 lines for status detection — detectPaneStatus
+// only inspects the last 15 anyway, but capturing 30 covers minor
+// scrollback noise without blowing up the tmux capture-pane cost.
+const TYPING_CAPTURE_LINES = 30;
 // A turn whose endTimestamp is older than this counts as "done writing"
 // even if its stop_reason wasn't terminal (compacted sessions, crashed
 // claude). Belt-and-suspenders so we never sit on a stale partial turn.
@@ -58,6 +70,7 @@ export function createJsonlWatcher({
   recorder = null,
   tts = null,
   pollMs = DEFAULT_POLL_MS,
+  typingPollMs = DEFAULT_TYPING_POLL_MS,
   postPrefix = "",
   log = (msg) => console.log(`watcher | ${msg}`),
 } = {}) {
@@ -71,6 +84,7 @@ export function createJsonlWatcher({
   /** in-flight check guards so fs.watch + poll don't double-fire on the same pane. */
   const inFlight = new Set();
   let pollTimer = null;
+  let typingTimer = null;
   let stopped = false;
 
   const paneKey = (name, idx) => `${name}:${idx}`;
@@ -315,16 +329,50 @@ export function createJsonlWatcher({
     }
   }
 
+  // Discord typing-indicator loop. Replaces the typing-during-streamResponse
+  // behaviour that disappeared with the 1.16.32 watcher refactor. Pure
+  // best-effort: capture pane → detectPaneStatus → sendTyping if working.
+  // No state, idempotent, errors swallowed (typing is cosmetic).
+  async function typingTick() {
+    if (stopped) return;
+    if (typeof discord.sendTyping !== "function") return; // adapter without typing primitive
+    let config;
+    try { config = loadConfig(agentsYamlPath); }
+    catch { return; }
+
+    for (const [name, entry] of Object.entries(config || {})) {
+      if (!entry?.dir || !Array.isArray(entry.panes)) continue;
+      for (let i = 0; i < entry.panes.length; i++) {
+        const cmd = entry.panes[i]?.cmd || "";
+        if (!/^(claude|codex)/.test(cmd)) continue;
+
+        const channelId = findChannelForPane(agentsYamlPath, name, i);
+        if (!channelId) continue;
+
+        try {
+          const content = await agent.capturePane(name, i, TYPING_CAPTURE_LINES);
+          if (detectPaneStatus(content) === "working") {
+            await discord.sendTyping(channelId);
+          }
+        } catch {
+          /* swallow — typing is cosmetic */
+        }
+      }
+    }
+  }
+
   return {
     start() {
       stopped = false;
       tick().catch((err) => log(`initial tick failed: ${err.message}`));
       pollTimer = setInterval(() => tick().catch(() => {}), pollMs);
-      log(`enabled | poll=${pollMs}ms grace=${COMPLETION_GRACE_MS}ms (fs.watch + poll, persistent state)`);
+      typingTimer = setInterval(() => typingTick().catch(() => {}), typingPollMs);
+      log(`enabled | poll=${pollMs}ms grace=${COMPLETION_GRACE_MS}ms typing=${typingPollMs}ms (fs.watch + poll, persistent state)`);
     },
     stop() {
       stopped = true;
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      if (typingTimer) { clearInterval(typingTimer); typingTimer = null; }
       detachAllFsWatch();
     },
   };

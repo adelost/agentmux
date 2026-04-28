@@ -9,6 +9,8 @@
  * @property {(callback: (msg: ChannelMessage) => void) => void} onMessage - Register incoming message handler
  * @property {() => Promise<{user?: string}>} start - Connect. Resolves with connection info when ready.
  * @property {() => void} stop - Disconnect and cleanup
+ * @property {(channelId: string, text: string) => Promise<void>} send - Post text to channel
+ * @property {(channelId: string) => Promise<void>} [sendTyping] - Show typing indicator (~10s on Discord). Optional; channels that lack a typing primitive should omit.
  */
 
 /**
