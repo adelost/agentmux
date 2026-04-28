@@ -37,7 +37,7 @@ import { join } from "path";
 import { splitMessage, extractImageMarkers, validateImagePath } from "../lib.mjs";
 import { loadConfig, findChannelForPane } from "../cli/config.mjs";
 import { paneDir } from "../agent.mjs";
-import { readLastTurns } from "../core/jsonl-reader.mjs";
+import { readLastTurns, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { detectPaneStatus } from "../cli/format.mjs";
 
 const DEFAULT_POLL_MS = 15_000;
@@ -351,9 +351,16 @@ export function createJsonlWatcher({
 
         try {
           const content = await agent.capturePane(name, i, TYPING_CAPTURE_LINES);
-          if (detectPaneStatus(content) === "working") {
-            await discord.sendTyping(channelId);
-          }
+          if (detectPaneStatus(content) !== "working") continue;
+          // Frozen-spinner guard: detectPaneStatus matches the spinner
+          // footer regex even on stale residue ("(37s · ↓ 195 tokens)"
+          // left in scrollback after the turn ended). Cross-check the
+          // jsonl mtime — a live agent has writes within the last 60s.
+          // Same window cmdPs uses for its idle→working overlay.
+          const dir = paneDir(entry.dir, i);
+          const mtimeMs = latestJsonlMtime(dir);
+          if (mtimeMs && Date.now() - mtimeMs > 60_000) continue;
+          await discord.sendTyping(channelId);
         } catch {
           /* swallow — typing is cosmetic */
         }
