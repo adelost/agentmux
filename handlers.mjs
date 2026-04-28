@@ -444,7 +444,16 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         .catch((replyErr) => console.warn(`error reply failed: ${replyErr.message}`));
     } finally {
       stopTyping();
-      cleanupTmpFiles(tmpFiles);
+      // Defer attachment cleanup. Before the jsonl-watch refactor,
+      // processMessage waited for the agent's reply via streamResponse
+      // — that implicitly kept tmp files alive long enough for the
+      // agent to Bash-read PDFs / DOCX. processMessage now returns
+      // as soon as delivery is acknowledged (seconds), so without a
+      // grace the file is gone before the agent reads it.
+      // Caught by claw:p3 in 1.16.35 audit.
+      if (tmpFiles?.length) {
+        setTimeout(() => cleanupTmpFiles(tmpFiles), 5 * 60 * 1000);
+      }
     }
   }
 
