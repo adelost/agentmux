@@ -452,7 +452,11 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       // grace the file is gone before the agent reads it.
       // Caught by claw:p3 in 1.16.35 audit.
       if (tmpFiles?.length) {
-        setTimeout(() => cleanupTmpFiles(tmpFiles), 5 * 60 * 1000);
+        // 60 min grace: agents with long pipelines (read PDF → tools →
+        // think → respond) need way more than the original 5 min.
+        // /tmp is fine to hold a few MB for an hour; OS resets clean it
+        // up on reboot anyway.
+        setTimeout(() => cleanupTmpFiles(tmpFiles), 60 * 60 * 1000);
       }
     }
   }
