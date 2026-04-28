@@ -2,21 +2,18 @@
 // Channel-agnostic. Works with any ChannelMessage from channels/*.mjs.
 
 import { splitMessage, parsePane, parseCommand, parseUseArg } from "./lib.mjs";
-import { readFileSync, unlinkSync } from "fs";
+import { readFileSync } from "fs";
 import { executeSync } from "./core/sync-discord.mjs";
 import { countTurnsSince, panePathFor, readLastTurns } from "./core/jsonl-reader.mjs";
 import { checkLoopGuard, loopGuardKey, formatLoopGuardWarning, readLoopGuardConfig } from "./core/loop-guard.mjs";
 import { formatCatchupPreview } from "./core/catchup-format.mjs";
 
-function cleanupTmpFiles(files) {
-  for (const f of files) {
-    try { unlinkSync(f); }
-    catch (err) {
-      // File may have been cleaned up elsewhere; only surface unexpected errors
-      if (err.code !== "ENOENT") console.warn(`cleanupTmpFiles: ${f}: ${err.message}`);
-    }
-  }
-}
+// We used to unlink Discord-attachment tmp files after a grace period.
+// Removed in 1.16.37: the OS already cleans /tmp via systemd-tmpfiles
+// (10d default) and a reboot wipes it entirely. Aggressive cleanup
+// risked unlinking files the agent was still reading via Bash —
+// we'd rather leak a few MB to /tmp for a few days than lose a PDF
+// in the middle of a long agent turn.
 
 const HELP_TEXT = [
   "**Commands:**",
@@ -444,20 +441,6 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         .catch((replyErr) => console.warn(`error reply failed: ${replyErr.message}`));
     } finally {
       stopTyping();
-      // Defer attachment cleanup. Before the jsonl-watch refactor,
-      // processMessage waited for the agent's reply via streamResponse
-      // — that implicitly kept tmp files alive long enough for the
-      // agent to Bash-read PDFs / DOCX. processMessage now returns
-      // as soon as delivery is acknowledged (seconds), so without a
-      // grace the file is gone before the agent reads it.
-      // Caught by claw:p3 in 1.16.35 audit.
-      if (tmpFiles?.length) {
-        // 60 min grace: agents with long pipelines (read PDF → tools →
-        // think → respond) need way more than the original 5 min.
-        // /tmp is fine to hold a few MB for an hour; OS resets clean it
-        // up on reboot anyway.
-        setTimeout(() => cleanupTmpFiles(tmpFiles), 60 * 60 * 1000);
-      }
     }
   }
 
@@ -582,7 +565,6 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       await handleUse(msg, parsed.args).catch((err) =>
         msg.reply(`error: ${err.message}`).catch((replyErr) =>
           console.warn(`/use error reply failed: ${replyErr.message}`)));
-      cleanupTmpFiles(tmpFiles);
       return;
     }
 
@@ -593,7 +575,6 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         await msg.reply(`${parsed.cmd} failed: ${err.message}`).catch((replyErr) =>
           console.warn(`${parsed.cmd} error reply failed: ${replyErr.message}`));
       }
-      cleanupTmpFiles(tmpFiles);
       return;
     }
 
@@ -610,7 +591,6 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       } catch (err) {
         await msg.reply(`${parsed.cmd} failed: ${err.message}`).catch(() => {});
       }
-      cleanupTmpFiles(tmpFiles);
       return;
     }
 
@@ -618,7 +598,6 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     if (followers.has(msg.channelId)) {
       agent.sendOnly(mapping.name, cleanPrompt, pane).catch((err) =>
         console.warn(`follow inject sendOnly failed: ${err.message}`));
-      cleanupTmpFiles(tmpFiles);
       return;
     }
 
