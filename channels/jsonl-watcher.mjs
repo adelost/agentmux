@@ -39,6 +39,7 @@ import { loadConfig, findChannelForPane } from "../cli/config.mjs";
 import { paneDir } from "../agent.mjs";
 import { readLastTurns, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { detectPaneStatus } from "../cli/format.mjs";
+import { getContextFromPane } from "../core/context.mjs";
 
 const DEFAULT_POLL_MS = 15_000;
 // Discord clears the typing indicator ~10s after the last sendTyping
@@ -159,9 +160,26 @@ export function createJsonlWatcher({
       }
     }
 
-    // Context footer — same shape as streamResponse used to send.
+    // Context footer — prefer tmux UI percent so the number matches what
+    // auto-compact sees and what Claude Code itself displays. CC's bar is
+    // computed against its own effective window (~840k for the 1M beta,
+    // not raw 1M), so jsonl-derived percent (697k/1000k = 70%) and
+    // UI-derived percent (697k/840k = 84%) diverged. UI is the user-facing
+    // metric that actually predicts auto-compact firing — match it.
+    // Fall back to jsonl if the pane has no visible token line (idle
+    // narrow pane, just-spawned, etc).
     try {
-      const ctx = agent.getContextPercent?.(name, idx);
+      let ctx = null;
+      try {
+        const cfg = loadConfig(agentsYamlPath);
+        const entryDir = cfg?.[name]?.dir;
+        if (entryDir) {
+          const dir = paneDir(entryDir, idx);
+          const content = await agent.capturePane(name, idx, 100);
+          ctx = getContextFromPane(content, dir);
+        }
+      } catch { /* fall through to jsonl */ }
+      if (!ctx) ctx = agent.getContextPercent?.(name, idx);
       if (ctx) {
         const k = Math.round(ctx.tokens / 1000);
         await discord.send(channelId, `_context: ${ctx.percent}% (${k}k)_`)
