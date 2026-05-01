@@ -38,34 +38,29 @@ import { splitMessage, extractImageMarkers, validateImagePath } from "../lib.mjs
 import { loadConfig, findChannelForPane } from "../cli/config.mjs";
 import { paneDir } from "../agent.mjs";
 import { readLastTurns, latestJsonlMtime } from "../core/jsonl-reader.mjs";
-import { detectPaneStatus } from "../cli/format.mjs";
 import { getContextFromPane } from "../core/context.mjs";
 
 const DEFAULT_POLL_MS = 15_000;
-// Discord clears the typing indicator ~10s after the last sendTyping
-// call. We re-fire every 8s while the pane is in "working" state so
-// the dot stays continuously lit through a long agent turn (the user
-// noticed the gap after the 1.16.32 refactor moved reply-posting out
-// of processMessage). Re-uses the same pane-status detector amux ps
-// uses, so working = exactly what the spinner-footer regex catches.
+// Typing-indicator is event-driven via fs.watch (every jsonl write fires
+// sendTyping with throttle below). This polling cadence is the fallback
+// for environments where fs.watch silently drops events (WSL 9p mounts,
+// some network filesystems). Every 8s, sweep all panes and refresh the
+// bubble for any pane whose jsonl mtime is fresh.
 const DEFAULT_TYPING_POLL_MS = 8_000;
-// Capture only the last ~30 lines for status detection — detectPaneStatus
-// only inspects the last 15 anyway, but capturing 30 covers minor
-// scrollback noise without blowing up the tmux capture-pane cost.
-const TYPING_CAPTURE_LINES = 30;
+// Throttle per-channel typing-bubble refresh. Discord auto-clears the
+// bubble ~10s after the last sendTyping call, so refreshing every 5s
+// keeps it continuously lit during long streams without hammering the
+// API on every assistant-delta jsonl write (which can be 10×/sec).
+const TYPING_THROTTLE_MS = 5_000;
+// jsonl write within this window = pane is active. Polling fallback
+// uses this to refresh typing when fs.watch missed events. Tuned to
+// bridge normal thinking-pauses between assistant deltas without
+// keeping the bubble on for stale residue.
+const TYPING_FRESHNESS_MS = 15_000;
 // A turn whose endTimestamp is older than this counts as "done writing"
 // even if its stop_reason wasn't terminal (compacted sessions, crashed
 // claude). Belt-and-suspenders so we never sit on a stale partial turn.
 const COMPLETION_GRACE_MS = 5_000;
-// Typing activity-pulse window — typing indicator stays on only if jsonl
-// has been written within this window. Replaces the old "spinner-footer
-// regex says working" check which over-trusted tmux scrollback. Combined
-// with detectPaneStatus's modal/idle filtering, typing now reflects
-// actual jsonl writes (precise) while still skipping
-// permission/menu/resume states that mtime alone can't see. Tuned to
-// bridge normal thinking-pauses between assistant deltas without
-// keeping the bubble on for stale residue.
-const TYPING_ACTIVITY_WINDOW_MS = 15_000;
 // Cap turns considered per pane per tick. Watcher posts the latest few
 // missed turns at restart, not the entire history.
 const TURN_LOOKBACK = 20;
@@ -93,11 +88,27 @@ export function createJsonlWatcher({
   const fsWatchers = new Map();
   /** in-flight check guards so fs.watch + poll don't double-fire on the same pane. */
   const inFlight = new Set();
+  /** per-channel last-sendTyping ms, throttled via TYPING_THROTTLE_MS. */
+  const lastTypingAt = new Map();
   let pollTimer = null;
   let typingTimer = null;
   let stopped = false;
 
   const paneKey = (name, idx) => `${name}:${idx}`;
+
+  // Discord typing-indicator. Called by both fs.watch (event-driven, fires
+  // on every jsonl write) and typingTick (polling fallback for WSL 9p).
+  // Throttle keeps API calls sane during streaming bursts.
+  function maybeSendTyping(name, idx) {
+    if (typeof discord.sendTyping !== "function") return;
+    const channelId = findChannelForPane(agentsYamlPath, name, idx);
+    if (!channelId) return;
+    const now = Date.now();
+    const last = lastTypingAt.get(channelId) || 0;
+    if (now - last < TYPING_THROTTLE_MS) return;
+    lastTypingAt.set(channelId, now);
+    discord.sendTyping(channelId).catch(() => { /* cosmetic, swallow */ });
+  }
 
   // --- state helpers --------------------------------------------------------
 
@@ -311,6 +322,10 @@ export function createJsonlWatcher({
 
     let debounceTimer = null;
     const trigger = () => {
+      // Every fs.watch fire = jsonl write = pane is active. Refresh
+      // typing-bubble immediately (throttled per-channel). Sub-second
+      // latency from agent-write to Discord typing dot.
+      maybeSendTyping(name, idx);
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         debounceTimer = null;
@@ -356,45 +371,29 @@ export function createJsonlWatcher({
     }
   }
 
-  // Discord typing-indicator loop. Replaces the typing-during-streamResponse
-  // behaviour that disappeared with the 1.16.32 watcher refactor. Pure
-  // best-effort: capture pane → detectPaneStatus → sendTyping if working.
-  // No state, idempotent, errors swallowed (typing is cosmetic).
+  // Typing-indicator polling fallback. fs.watch is the primary driver
+  // (see attachFsWatch's trigger), but on filesystems that silently drop
+  // events (WSL 9p, some network mounts) we'd lose the indicator without
+  // this sweep. Pure mtime check — no tmux capture, no detectPaneStatus.
+  // If jsonl was written within the freshness window, the pane is active;
+  // if a modal/idle state is up, mtime stays stale and we skip naturally.
   async function typingTick() {
     if (stopped) return;
-    if (typeof discord.sendTyping !== "function") return; // adapter without typing primitive
+    if (typeof discord.sendTyping !== "function") return;
     let config;
     try { config = loadConfig(agentsYamlPath); }
     catch { return; }
 
+    const now = Date.now();
     for (const [name, entry] of Object.entries(config || {})) {
       if (!entry?.dir || !Array.isArray(entry.panes)) continue;
       for (let i = 0; i < entry.panes.length; i++) {
         const cmd = entry.panes[i]?.cmd || "";
         if (!/^(claude|codex)/.test(cmd)) continue;
-
-        const channelId = findChannelForPane(agentsYamlPath, name, i);
-        if (!channelId) continue;
-
-        try {
-          // Two-stage hybrid:
-          //   1. detectPaneStatus = "filter on legitimacy" — drops
-          //      permission/menu/resume/idle/unknown. mtime alone
-          //      can't tell those apart from a quiet active pane.
-          //   2. jsonl-mtime = "activity pulse" — primary signal that
-          //      the agent is actually writing right now. Tighter and
-          //      more honest than the old "spinner-footer regex says
-          //      working" path which depended on tmux scrollback
-          //      residue staying intact.
-          const content = await agent.capturePane(name, i, TYPING_CAPTURE_LINES);
-          if (detectPaneStatus(content) !== "working") continue;
-          const dir = paneDir(entry.dir, i);
-          const mtimeMs = latestJsonlMtime(dir);
-          if (!mtimeMs || Date.now() - mtimeMs > TYPING_ACTIVITY_WINDOW_MS) continue;
-          await discord.sendTyping(channelId);
-        } catch {
-          /* swallow — typing is cosmetic */
-        }
+        const dir = paneDir(entry.dir, i);
+        const mtimeMs = latestJsonlMtime(dir);
+        if (!mtimeMs || now - mtimeMs > TYPING_FRESHNESS_MS) continue;
+        maybeSendTyping(name, i);
       }
     }
   }
