@@ -57,6 +57,15 @@ const TYPING_CAPTURE_LINES = 30;
 // even if its stop_reason wasn't terminal (compacted sessions, crashed
 // claude). Belt-and-suspenders so we never sit on a stale partial turn.
 const COMPLETION_GRACE_MS = 5_000;
+// Typing activity-pulse window — typing indicator stays on only if jsonl
+// has been written within this window. Replaces the old "spinner-footer
+// regex says working" check which over-trusted tmux scrollback. Combined
+// with detectPaneStatus's modal/idle filtering, typing now reflects
+// actual jsonl writes (precise) while still skipping
+// permission/menu/resume states that mtime alone can't see. Tuned to
+// bridge normal thinking-pauses between assistant deltas without
+// keeping the bubble on for stale residue.
+const TYPING_ACTIVITY_WINDOW_MS = 15_000;
 // Cap turns considered per pane per tick. Watcher posts the latest few
 // missed turns at restart, not the entire history.
 const TURN_LOOKBACK = 20;
@@ -368,16 +377,20 @@ export function createJsonlWatcher({
         if (!channelId) continue;
 
         try {
+          // Two-stage hybrid:
+          //   1. detectPaneStatus = "filter on legitimacy" — drops
+          //      permission/menu/resume/idle/unknown. mtime alone
+          //      can't tell those apart from a quiet active pane.
+          //   2. jsonl-mtime = "activity pulse" — primary signal that
+          //      the agent is actually writing right now. Tighter and
+          //      more honest than the old "spinner-footer regex says
+          //      working" path which depended on tmux scrollback
+          //      residue staying intact.
           const content = await agent.capturePane(name, i, TYPING_CAPTURE_LINES);
           if (detectPaneStatus(content) !== "working") continue;
-          // Frozen-spinner guard: detectPaneStatus matches the spinner
-          // footer regex even on stale residue ("(37s · ↓ 195 tokens)"
-          // left in scrollback after the turn ended). Cross-check the
-          // jsonl mtime — a live agent has writes within the last 60s.
-          // Same window cmdPs uses for its idle→working overlay.
           const dir = paneDir(entry.dir, i);
           const mtimeMs = latestJsonlMtime(dir);
-          if (mtimeMs && Date.now() - mtimeMs > 60_000) continue;
+          if (!mtimeMs || Date.now() - mtimeMs > TYPING_ACTIVITY_WINDOW_MS) continue;
           await discord.sendTyping(channelId);
         } catch {
           /* swallow — typing is cosmetic */
