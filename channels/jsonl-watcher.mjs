@@ -66,6 +66,7 @@ const COMPLETION_GRACE_MS = 5_000;
 const TURN_LOOKBACK = 20;
 
 const STATE_KEY_LAST_POSTED = "watcher_last_posted_ts";
+const STATE_KEY_LAST_POSTED_TURN = "watcher_last_posted_turn_start_ts";
 
 export function createJsonlWatcher({
   agent,
@@ -125,14 +126,19 @@ export function createJsonlWatcher({
     state.set(STATE_KEY_LAST_POSTED, map);
   }
 
-  // ALSO honour stampChannelMirror's clock so when streamResponse-or-similar
-  // posts in the same process, we skip the same turn.
-  function channelMirrorMs(channelId) {
-    const map = state.get("channel_last_mirror_ts", {}) || {};
-    const iso = map[channelId];
-    if (!iso) return 0;
-    const ms = new Date(iso).getTime();
-    return Number.isFinite(ms) ? ms : 0;
+  // Track-once per turn: turn.timestamp (user-prompt time) is a stable
+  // identifier; once a turn is posted we never re-post it, even if more
+  // assistant events arrive in the same turn afterward. Belt-and-suspenders
+  // against any race that lets the loop revisit a posted turn.
+  function lastPostedTurnStartMs(channelId) {
+    const map = state.get(STATE_KEY_LAST_POSTED_TURN, {}) || {};
+    const v = map[channelId];
+    return typeof v === "number" && Number.isFinite(v) ? v : 0;
+  }
+  function setLastPostedTurnStartMs(channelId, ms) {
+    const map = state.get(STATE_KEY_LAST_POSTED_TURN, {}) || {};
+    map[channelId] = ms;
+    state.set(STATE_KEY_LAST_POSTED_TURN, map);
   }
 
   // --- rendering -----------------------------------------------------------
@@ -265,15 +271,15 @@ export function createJsonlWatcher({
         return;
       }
 
-      // Honour stampChannelMirror clock — if a parallel forwarder posted
-      // for this channel, treat that as our checkpoint too.
-      const stampMs = channelMirrorMs(channelId);
-      if (stampMs > lastMs) {
-        lastMs = stampMs;
-        setLastPostedMs(channelId, stampMs);
-      }
-
       const now = Date.now();
+      // mtime captures EVERY jsonl write — including tool_results that
+      // don't bump turn.endTimestamp. A fresh mtime means the session is
+      // alive and writing, so a stale endTimestamp is just "agent waiting
+      // for tool result", not "turn dead". Used by the grace check below.
+      const mtimeMs = latestJsonlMtime(dir);
+
+      const lastTurnStartMs = lastPostedTurnStartMs(channelId);
+
       // Walk turns oldest → newest among the lookback, post any that
       // are after the checkpoint AND deemed complete.
       for (const turn of result.turns) {
@@ -283,12 +289,27 @@ export function createJsonlWatcher({
         if (!Number.isFinite(endMs)) continue;
         if (endMs <= lastMs) continue;
 
+        // Track-once: if we already posted this turn (by start timestamp),
+        // never re-post. Protects against any path that lets the loop
+        // revisit a posted turn after later events bump endTimestamp.
+        const turnStartMs = turn.timestamp ? new Date(turn.timestamp).getTime() : 0;
+        if (turnStartMs && turnStartMs <= lastTurnStartMs) continue;
+
         const completeByReason = !!turn.isComplete;
-        const completeByGrace = now - endMs >= COMPLETION_GRACE_MS;
+        // Grace requires BOTH endTimestamp old AND file mtime old. Without
+        // the mtime check, grace fires the moment assistant goes quiet for
+        // tool execution — even though the session is actively writing
+        // tool_results to the same file. That's what caused the duplicate-
+        // post bug (intermediate post fires, then more events arrive,
+        // turn re-walked with cumulative items, second post overlaps).
+        const completeByGrace =
+          (now - endMs >= COMPLETION_GRACE_MS) &&
+          (!mtimeMs || now - mtimeMs >= COMPLETION_GRACE_MS);
         if (!completeByReason && !completeByGrace) continue;
 
         await postTurn({ name, idx, channelId, turn });
         setLastPostedMs(channelId, endMs);
+        if (turnStartMs) setLastPostedTurnStartMs(channelId, turnStartMs);
         lastMs = endMs;
         const ageS = Math.round((now - endMs) / 1000);
         const reason = completeByReason ? "stop_reason" : "grace";
@@ -412,5 +433,9 @@ export function createJsonlWatcher({
       if (typingTimer) { clearInterval(typingTimer); typingTimer = null; }
       detachAllFsWatch();
     },
+    // Exposed for tests so we can drive tick/checkPane directly without
+    // racing against the polling timer or fs.watch.
+    tick,
+    checkPane,
   };
 }
