@@ -295,3 +295,62 @@ feature("watcher: grace-fire is suppressed while jsonl is being actively written
     }],
   });
 });
+
+feature("watcher: continuation after intermediate post (the 1.16.46 regression)", () => {
+  unit("if a turn was partially posted, the FINAL items still land when stop_reason hits", {
+    given: ["a turn with 2 tool-uses already posted, then final text + end_turn appended", () => {
+      // Real-world scenario from skybar-0 22:22:
+      //   - User prompted, agent fired 3 Bash tool-uses
+      //   - Watcher posted those (intermediate, grace fired during quiet gap)
+      //   - 2m 19s later, agent wrote final summary text + stop_reason=end_turn
+      //   - Pre-fix: track-once blocked the final text, never posted.
+      //   - Post-fix (diff-posts): final text posts, no duplicate of the
+      //     2 already-posted Bash items.
+      const userTs = "2026-04-30T22:22:00.000Z";
+      const userMs = new Date(userTs).getTime();
+
+      const lines = [
+        userTurn("find my account", userTs),
+        assistantTool("Bash", { command: "grep -r account /memory" }, "2026-04-30T22:22:01.000Z"),
+        assistantTool("Bash", { command: "ls config" }, "2026-04-30T22:22:02.000Z"),
+        // First post happened — watcher recorded postedCount=2 for this turn.
+        // Now the agent comes back and finishes:
+        assistantText("Hittat — kontot ligger på pr@example.se.", "2026-04-30T22:24:30.000Z", "end_turn"),
+      ];
+
+      const ctx = setupWatcher({
+        jsonlLines: lines,
+        stateInitial: {
+          watcher_last_posted_ts: {
+            "ch-test": new Date("2026-04-30T22:22:02.000Z").getTime(),
+          },
+          // Watcher already posted 2 items (the 2 Bash tool-uses) for this turn.
+          watcher_posted_item_counts: {
+            "ch-test": { [String(userMs)]: 2 },
+          },
+        },
+      });
+      return ctx;
+    }],
+    when: ["watcher.checkPane runs after the final text + stop_reason landed", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["final text was posted (1 post), and it does NOT contain the already-posted Bash items", (ctx) => {
+      const contentSends = ctx.discord.sends.filter(
+        (s) => typeof s.payload === "string"
+          ? !/^_context:/.test(s.payload)
+          : !/^_context:/.test(s.payload?.content || ""),
+      );
+      expect(contentSends.length).toBe(1);
+      const text = typeof contentSends[0].payload === "string"
+        ? contentSends[0].payload
+        : contentSends[0].payload.content;
+      expect(text).toContain("Hittat — kontot");
+      // Diff-posts: must NOT contain the already-posted tool-uses
+      expect(text).not.toContain("grep -r account /memory");
+      expect(text).not.toContain("ls config");
+      ctx.cleanup();
+    }],
+  });
+});
