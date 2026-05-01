@@ -66,7 +66,7 @@ const COMPLETION_GRACE_MS = 5_000;
 const TURN_LOOKBACK = 20;
 
 const STATE_KEY_LAST_POSTED = "watcher_last_posted_ts";
-const STATE_KEY_LAST_POSTED_TURN = "watcher_last_posted_turn_start_ts";
+const STATE_KEY_POSTED_COUNTS = "watcher_posted_item_counts";
 
 export function createJsonlWatcher({
   agent,
@@ -126,19 +126,33 @@ export function createJsonlWatcher({
     state.set(STATE_KEY_LAST_POSTED, map);
   }
 
-  // Track-once per turn: turn.timestamp (user-prompt time) is a stable
-  // identifier; once a turn is posted we never re-post it, even if more
-  // assistant events arrive in the same turn afterward. Belt-and-suspenders
-  // against any race that lets the loop revisit a posted turn.
-  function lastPostedTurnStartMs(channelId) {
-    const map = state.get(STATE_KEY_LAST_POSTED_TURN, {}) || {};
-    const v = map[channelId];
+  // Diff-posts: track how many items we've posted per turn (keyed by
+  // user-prompt timestamp). When the same turn is re-walked after new
+  // assistant events arrive, we slice items[postedCount:] and post only
+  // the new ones. Replaces the 1.16.46 track-once approach which blocked
+  // legitimate continuation when grace fired prematurely during a long
+  // thinking phase. Diff-posts gives no duplicates AND no missed content.
+  function getPostedItemCount(channelId, turnStartMs) {
+    const map = state.get(STATE_KEY_POSTED_COUNTS, {}) || {};
+    const channelMap = map[channelId] || {};
+    const v = channelMap[String(turnStartMs)];
     return typeof v === "number" && Number.isFinite(v) ? v : 0;
   }
-  function setLastPostedTurnStartMs(channelId, ms) {
-    const map = state.get(STATE_KEY_LAST_POSTED_TURN, {}) || {};
-    map[channelId] = ms;
-    state.set(STATE_KEY_LAST_POSTED_TURN, map);
+  function setPostedItemCount(channelId, turnStartMs, count) {
+    const map = state.get(STATE_KEY_POSTED_COUNTS, {}) || {};
+    const channelMap = map[channelId] || {};
+    channelMap[String(turnStartMs)] = count;
+    // Cap at 20 most-recent turns per channel so the state file doesn't
+    // grow unboundedly across long-running bridge sessions.
+    const keys = Object.keys(channelMap)
+      .map((k) => parseInt(k, 10))
+      .filter((k) => Number.isFinite(k))
+      .sort((a, b) => b - a);
+    if (keys.length > 20) {
+      for (const old of keys.slice(20)) delete channelMap[String(old)];
+    }
+    map[channelId] = channelMap;
+    state.set(STATE_KEY_POSTED_COUNTS, map);
   }
 
   // --- rendering -----------------------------------------------------------
@@ -278,10 +292,10 @@ export function createJsonlWatcher({
       // for tool result", not "turn dead". Used by the grace check below.
       const mtimeMs = latestJsonlMtime(dir);
 
-      const lastTurnStartMs = lastPostedTurnStartMs(channelId);
-
       // Walk turns oldest → newest among the lookback, post any that
-      // are after the checkpoint AND deemed complete.
+      // are after the checkpoint AND deemed complete. Diff-posts: each
+      // turn's items are sliced by postedCount so re-walks never
+      // duplicate already-posted content but DO post anything new.
       for (const turn of result.turns) {
         const endIso = turn.endTimestamp || turn.timestamp;
         if (!endIso) continue;
@@ -289,31 +303,38 @@ export function createJsonlWatcher({
         if (!Number.isFinite(endMs)) continue;
         if (endMs <= lastMs) continue;
 
-        // Track-once: if we already posted this turn (by start timestamp),
-        // never re-post. Protects against any path that lets the loop
-        // revisit a posted turn after later events bump endTimestamp.
-        const turnStartMs = turn.timestamp ? new Date(turn.timestamp).getTime() : 0;
-        if (turnStartMs && turnStartMs <= lastTurnStartMs) continue;
-
         const completeByReason = !!turn.isComplete;
         // Grace requires BOTH endTimestamp old AND file mtime old. Without
         // the mtime check, grace fires the moment assistant goes quiet for
         // tool execution — even though the session is actively writing
-        // tool_results to the same file. That's what caused the duplicate-
-        // post bug (intermediate post fires, then more events arrive,
-        // turn re-walked with cumulative items, second post overlaps).
+        // tool_results to the same file. mtime is the "session alive"
+        // signal; endTimestamp is the "turn-content stable" signal.
         const completeByGrace =
           (now - endMs >= COMPLETION_GRACE_MS) &&
           (!mtimeMs || now - mtimeMs >= COMPLETION_GRACE_MS);
         if (!completeByReason && !completeByGrace) continue;
 
-        await postTurn({ name, idx, channelId, turn });
+        const turnStartMs = turn.timestamp ? new Date(turn.timestamp).getTime() : endMs;
+        const postedCount = getPostedItemCount(channelId, turnStartMs);
+        const totalItems = (turn.items || []).length;
+        const newItems = (turn.items || []).slice(postedCount);
+
+        if (newItems.length === 0) {
+          // Already posted everything we have for this turn — advance
+          // checkpoint so we don't re-iterate next pass, then move on.
+          setLastPostedMs(channelId, endMs);
+          lastMs = endMs;
+          continue;
+        }
+
+        const turnSlice = { ...turn, items: newItems };
+        await postTurn({ name, idx, channelId, turn: turnSlice });
         setLastPostedMs(channelId, endMs);
-        if (turnStartMs) setLastPostedTurnStartMs(channelId, turnStartMs);
+        setPostedItemCount(channelId, turnStartMs, totalItems);
         lastMs = endMs;
         const ageS = Math.round((now - endMs) / 1000);
         const reason = completeByReason ? "stop_reason" : "grace";
-        log(`${name}:${idx} → ${channelId} (${reason}, age=${ageS}s, ${turn.items?.length || 0} items)`);
+        log(`${name}:${idx} → ${channelId} (${reason}, age=${ageS}s, items ${postedCount}→${totalItems})`);
       }
     } catch (err) {
       log(`check ${key}: ${err.stack || err.message}`);
