@@ -130,6 +130,33 @@ async function discordPost(channelId, content) {
   return res.json();
 }
 
+/**
+ * Post a file (e.g. an mp3 from edge-tts) to a Discord channel.
+ * Uses multipart/form-data — JSON-only `discordPost` can't carry binaries.
+ * `text` is an optional message body that lands alongside the attachment.
+ */
+async function discordPostFile(channelId, filePath, text = "") {
+  const token = getDiscordBotToken();
+  if (!token) throw new Error("DISCORD_TOKEN not found — cannot post file");
+  const fileBuffer = readFileSync(filePath);
+  const fileName = filePath.split("/").pop() || "audio.mp3";
+
+  const formData = new FormData();
+  formData.append("payload_json", JSON.stringify({ content: text.slice(0, 2000) }));
+  formData.append("files[0]", new Blob([fileBuffer]), fileName);
+
+  const res = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bot ${token}` },
+    body: formData,
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`discord file-post ${res.status}: ${body}`);
+  }
+  return res.json();
+}
+
 /** PATCH a Discord channel (used for topic updates). */
 async function discordPatch(channelId, patch) {
   const token = getDiscordBotToken();
@@ -205,6 +232,11 @@ export async function sendToChannel(channelName, message) {
 /** Send a message directly to a Discord channel by raw channel ID. */
 export async function sendToChannelId(channelId, message) {
   return discordPost(channelId, message);
+}
+
+/** Send a file (e.g. tts mp3) to a Discord channel by raw ID, with optional text body. */
+export async function sendFileToChannelId(channelId, filePath, text = "") {
+  return discordPostFile(channelId, filePath, text);
 }
 
 /** Send a message to an OpenClaw session. */

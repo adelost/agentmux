@@ -1186,6 +1186,89 @@ async function cmdTts(arg) {
 }
 
 /**
+ * Speak a short string into the calling pane's bound Discord channel
+ * via edge-tts + REST file-upload. The CLI alternative to the auto-tts
+ * watcher, useful when an agent wants to fire a crafted spoken summary
+ * that's distinct from the full written reply.
+ *
+ * Usage:
+ *   amux say "Klart, deploy uppe."         # post to current pane's channel
+ *   amux say -c <channelId> "..."           # explicit channel
+ *   amux say -p claw:2 "..."                # explicit agent:pane
+ *   amux say --voice 'sv-SE-SofieNeural' "..."  # different voice
+ *
+ * Truncates at 1500 chars to keep the clip under ~90 sec — same cap as
+ * the auto-tts watcher, set per the in-car listener brief.
+ */
+async function cmdSay(args, ctx) {
+  const { execSync: execSyncFn } = await import("child_process");
+  const { sendFileToChannelId } = await import("./send-notify.mjs");
+
+  // Load .env so DISCORD_TOKEN/STATE_FILE/etc resolve like the bridge does.
+  const { parseEnv } = await import("../lib.mjs");
+  try {
+    const vars = parseEnv(readFileSync(resolve(BRIDGE_DIR, ".env"), "utf-8"));
+    for (const [k, v] of Object.entries(vars)) {
+      if (!process.env[k]) process.env[k] = v;
+    }
+  } catch {}
+
+  const { flags, positional } = parseFlags(args, {
+    c: "string", channel: "string",
+    p: "string", pane: "string",
+    voice: "string", v: "string",
+  });
+  const text = positional.join(" ").trim();
+  if (!text) {
+    console.error(`Usage: amux say "text" [-c <channelId>] [-p <agent>:<pane>] [--voice <name>]`);
+    process.exit(1);
+  }
+
+  // Resolve channel
+  let channelId = flags.c || flags.channel;
+  if (!channelId) {
+    const paneArg = flags.p || flags.pane;
+    if (paneArg) {
+      const m = paneArg.match(/^([^:]+):(\d+)$/);
+      if (!m) { console.error(`-p must be agent:pane, got '${paneArg}'`); process.exit(1); }
+      channelId = findChannelForPane(ctx.configPath, m[1], Number(m[2]));
+      if (!channelId) { console.error(`No Discord channel bound to ${paneArg}`); process.exit(1); }
+    } else {
+      // Use sender pane (the one whose tmux env we inherited)
+      const { detectSenderFromEnv } = await import("../core/sender-detect.mjs");
+      const sender = detectSenderFromEnv(process.env, (cmd) => execSyncFn(cmd, { encoding: "utf-8" }));
+      if (!sender) {
+        console.error(`No sender detected — pass -c <channelId> or -p <agent>:<pane>`);
+        process.exit(1);
+      }
+      const [agent, paneIdx] = sender.split(":");
+      channelId = findChannelForPane(ctx.configPath, agent, Number(paneIdx));
+      if (!channelId) { console.error(`No Discord channel bound to ${sender}`); process.exit(1); }
+    }
+  }
+
+  // Generate TTS — match the bridge's edge-tts call shape.
+  const voice = flags.voice || flags.v || process.env.TTS_VOICE || "sv-SE-MattiasNeural";
+  const clean = text.replace(/[`*_~|]/g, "").slice(0, 1500);
+  const ttsPath = `/tmp/amux-say-${Date.now()}.mp3`;
+  try {
+    execSyncFn(
+      `edge-tts --voice '${voice}' --text '${esc(clean)}' --write-media '${ttsPath}'`,
+      { timeout: 30000, stdio: ["ignore", "ignore", "pipe"] }
+    );
+  } catch (err) {
+    console.error(`edge-tts failed: ${err.message}`);
+    process.exit(1);
+  }
+
+  await sendFileToChannelId(channelId, ttsPath);
+  console.log(`spoken (${clean.length} chars) → ${channelId}`);
+
+  // Cleanup the local mp3 — Discord has it now.
+  try { (await import("fs")).unlinkSync(ttsPath); } catch {}
+}
+
+/**
  * Cross-session context leaderboard. Sorts all claude/codex panes by
  * percent descending (tokens as tie-breaker). Helps answer "which pane
  * is closest to the context ceiling right now?" without manual digging.
@@ -1620,6 +1703,10 @@ export async function dispatch(argv, ctx) {
 
     case "tts": {
       return cmdTts(rest[0]);
+    }
+
+    case "say": {
+      return cmdSay(rest, ctx);
     }
 
     case "edit": {
