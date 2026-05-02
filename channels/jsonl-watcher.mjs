@@ -178,7 +178,7 @@ export function createJsonlWatcher({
     return { fullText, validFiles };
   }
 
-  async function postTurn({ name, idx, channelId, turn }) {
+  async function postTurn({ name, idx, channelId, turn, fullTurn = null, isFinalSlice = true }) {
     const { fullText, validFiles } = renderTurn(turn);
     if (!fullText && validFiles.length === 0) return;
 
@@ -229,15 +229,20 @@ export function createJsonlWatcher({
       log(`context-footer skipped ${name}:${idx}: ${err.message}`);
     }
 
-    // TTS
-    if (tts?.isEnabled?.()) {
-      const ttsText = (turn.items || [])
+    // TTS — fire ONCE per turn, on the final slice that completes it.
+    // Without this gate, diff-posts (a single response delivered as
+    // multiple slices) would generate one audio file per slice, so the
+    // listener hears the same response chopped into 2-3 short clips.
+    // Use the FULL turn's text (not the slice) so the played audio
+    // contains the entire reply in one piece.
+    const completed = fullTurn?.isComplete && isFinalSlice;
+    if (completed && tts?.isEnabled?.()) {
+      const ttsText = (fullTurn.items || [])
         .filter((it) => it.type === "text")
         .map((it) => it.content)
         .join("\n\n");
       if (ttsText) {
         try {
-          // tts.sendFollowup expects (sendFn, text, tmpFiles).
           await tts.sendFollowup(
             (payload) => discord.send(channelId, payload),
             ttsText,
@@ -328,7 +333,8 @@ export function createJsonlWatcher({
         }
 
         const turnSlice = { ...turn, items: newItems };
-        await postTurn({ name, idx, channelId, turn: turnSlice });
+        const isFinalSlice = (postedCount + newItems.length) === totalItems;
+        await postTurn({ name, idx, channelId, turn: turnSlice, fullTurn: turn, isFinalSlice });
         setLastPostedMs(channelId, endMs);
         setPostedItemCount(channelId, turnStartMs, totalItems);
         lastMs = endMs;
