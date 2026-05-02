@@ -1139,9 +1139,22 @@ async function cmdRemind(ctx, flags = {}, positional = []) {
  * to speak by posting to Discord. This CLI command writes the same
  * persistent state file the bridge already uses, and state.mjs's mtime
  * watcher picks the change up on the bridge's next state.get("tts").
+ *
+ * STATE_FILE resolution mirrors index.mjs: read .env in the package dir
+ * if STATE_FILE isn't already exported. Without this, a `.env` override
+ * makes the CLI write to /tmp/ while the bridge reads from ~/.config/.
  */
 async function cmdTts(arg) {
   const { createState } = await import("../core/state.mjs");
+  const { parseEnv } = await import("../lib.mjs");
+  if (!process.env.STATE_FILE) {
+    try {
+      const vars = parseEnv(readFileSync(resolve(BRIDGE_DIR, ".env"), "utf-8"));
+      for (const [k, v] of Object.entries(vars)) {
+        if (!process.env[k]) process.env[k] = v;
+      }
+    } catch {}
+  }
   const STATE_FILE = process.env.STATE_FILE || "/tmp/agentmux-state.json";
   const state = createState(STATE_FILE);
 
