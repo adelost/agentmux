@@ -1131,6 +1131,48 @@ async function cmdRemind(ctx, flags = {}, positional = []) {
 }
 
 /**
+ * Toggle bridge text-to-speech on / off / status / explicit set.
+ *
+ * Why this exists: the `/tts` slash-command in Discord only fires for
+ * messages from the human user (the bridge filters out bot-authored
+ * messages — see handlers.mjs). Agents inside panes can't ask the bridge
+ * to speak by posting to Discord. This CLI command writes the same
+ * persistent state file the bridge already uses, and state.mjs's mtime
+ * watcher picks the change up on the bridge's next state.get("tts").
+ */
+async function cmdTts(arg) {
+  const { createState } = await import("../core/state.mjs");
+  const STATE_FILE = process.env.STATE_FILE || "/tmp/agentmux-state.json";
+  const state = createState(STATE_FILE);
+
+  const printStatus = () => {
+    const enabled = state.get("tts", false);
+    console.log(`tts: ${enabled ? "on" : "off"}`);
+  };
+
+  switch ((arg || "toggle").toLowerCase()) {
+    case "on":
+      state.set("tts", true);
+      printStatus();
+      return;
+    case "off":
+      state.set("tts", false);
+      printStatus();
+      return;
+    case "status":
+      printStatus();
+      return;
+    case "toggle":
+      state.set("tts", !state.get("tts", false));
+      printStatus();
+      return;
+    default:
+      console.error(`Usage: amux tts [on|off|toggle|status]`);
+      process.exit(1);
+  }
+}
+
+/**
  * Cross-session context leaderboard. Sorts all claude/codex panes by
  * percent descending (tokens as tie-breaker). Helps answer "which pane
  * is closest to the context ceiling right now?" without manual digging.
@@ -1561,6 +1603,10 @@ export async function dispatch(argv, ctx) {
     case "remind": {
       const { flags, positional } = parseFlags(rest, FLAG_SPECS.remind);
       return cmdRemind(ctx, flags, positional);
+    }
+
+    case "tts": {
+      return cmdTts(rest[0]);
     }
 
     case "edit": {
