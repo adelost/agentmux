@@ -229,28 +229,12 @@ export function createJsonlWatcher({
       log(`context-footer skipped ${name}:${idx}: ${err.message}`);
     }
 
-    // TTS — fire ONCE per turn, on the final slice that completes it.
-    // Without this gate, diff-posts (a single response delivered as
-    // multiple slices) would generate one audio file per slice, so the
-    // listener hears the same response chopped into 2-3 short clips.
-    // Use the FULL turn's text (not the slice) so the played audio
-    // contains the entire reply in one piece.
-    const completed = fullTurn?.isComplete && isFinalSlice;
-    if (completed && tts?.isEnabled?.()) {
-      const ttsText = (fullTurn.items || [])
-        .filter((it) => it.type === "text")
-        .map((it) => it.content)
-        .join("\n\n");
-      if (ttsText) {
-        try {
-          await tts.sendFollowup(
-            (payload) => discord.send(channelId, payload),
-            ttsText,
-            [],
-          );
-        } catch (err) { log(`tts ${name}:${idx}: ${err.message}`); }
-      }
-    }
+    // Auto-TTS removed. The watcher used to read every reply aloud, but
+    // that meant accidental long technical replies got broadcast to a
+    // car listener. The agent is now expected to call `amux say "..."`
+    // explicitly when it wants a spoken clip — a deliberate "yes" beats
+    // a default-on auto that occasionally misfires. The handlers.mjs
+    // ttsHint reminds the agent of this when state.tts is on.
 
     // Recorder (regression replay)
     if (recorder?.enabled && recorder.save) {
