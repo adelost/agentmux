@@ -372,7 +372,7 @@ export function createJsonlWatcher({
       debounceTimer = setTimeout(() => {
         debounceTimer = null;
         checkPane(name, idx, agentDir).catch(() => {});
-      }, 250); // small debounce — claude may write multiple events in a burst
+      }, 500); // debounce — claude often writes 5-50 events per burst within 100-300ms
     };
 
     try {
