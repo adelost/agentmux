@@ -1261,7 +1261,9 @@ async function cmdSay(args, ctx) {
     process.exit(1);
   }
 
-  await sendFileToChannelId(channelId, ttsPath);
+  // Post the text alongside the mp3 so Discord shows a readable summary
+  // — tool calls get truncated, but a plain message body doesn't.
+  await sendFileToChannelId(channelId, ttsPath, clean);
   console.log(`spoken (${clean.length} chars) → ${channelId}`);
 
   // Cleanup the local mp3 — Discord has it now.
