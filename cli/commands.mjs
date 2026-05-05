@@ -128,8 +128,32 @@ async function cmdServe(flags, ctx) {
     const child = spawn("bash", ["bin/start.sh"], { cwd: BRIDGE_DIR, stdio: "inherit" });
     return new Promise((res) => child.on("exit", res));
   }
+  // Clear stale pidfile so the poll below only sees a fresh write from the new node.
+  // Without this, a leftover /tmp/agentmux.pid (WSL /tmp survives reboots) would
+  // make isBridgeAlive flap based on PID recycling instead of actual readiness.
+  const pidfile = process.env.PIDFILE || "/tmp/agentmux.pid";
+  try { unlinkSync(pidfile); } catch {}
   await ctx.tmux(`new-session -d -s '${esc(BRIDGE_SESSION)}' -c '${esc(BRIDGE_DIR)}' 'bash bin/start.sh'`);
-  console.log(`Bridge started (session: ${BRIDGE_SESSION}). Attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
+  // Poll for actual readiness instead of trusting tmux session creation.
+  // start.sh is a 10s-restart supervisor — the first node attempt can crash
+  // (DNS/network not ready right after WSL shell open) and we'd otherwise
+  // print "Bridge started" while the user gets a dead bridge.
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (isBridgeAlive()) {
+      console.log(`Bridge started (session: ${BRIDGE_SESSION}). Attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  // Didn't come up in time — surface the supervisor's last output so the user
+  // can see why (DNS, auth, port collision, etc.) instead of a silent failure.
+  let tail = "";
+  try {
+    tail = await ctx.tmux(`capture-pane -t '${esc(BRIDGE_SESSION)}' -p -S -50`);
+  } catch {}
+  console.error(`Bridge did not become ready within 30s. Last supervisor output:\n${tail || "(no output captured)"}\n\nSession is still up — retry with 'amux stop && amux serve' or attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
+  process.exitCode = 1;
 }
 
 function isBridgeAlive() {
