@@ -20,6 +20,20 @@ if [ -z "$OPENAI_API_KEY" ]; then
   exit 1
 fi
 
+# Preflight: skip silent clips. Whisper-1 hallucinates training-set
+# artifacts ("Undertexter från Amara.org") on near-silent audio.
+# Threshold -75 dB rms = effectively digital silence; real Discord voice
+# sits at -53 to -60 dB rms. See memory/references/whisper-benchmark.md.
+RMS=$(ffmpeg -hide_banner -i "$AUDIO_FILE" -af volumedetect -f null /dev/null 2>&1 \
+  | awk '/mean_volume/{print $5}')
+if [ -n "$RMS" ]; then
+  TOO_QUIET=$(awk -v r="$RMS" 'BEGIN{print (r+0 < -75)}')
+  if [ "$TOO_QUIET" = "1" ]; then
+    echo "[preflight] silent clip (rms=${RMS}dB), skipping API call" >&2
+    exit 0
+  fi
+fi
+
 RESPONSE=$(curl -s "https://api.openai.com/v1/audio/transcriptions" \
   -H "Authorization: Bearer ${OPENAI_API_KEY}" \
   -F "file=@${AUDIO_FILE}" \
