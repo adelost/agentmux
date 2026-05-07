@@ -516,12 +516,18 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // Only respawn panes where the current process is a shell (idle) or a
       // clearly non-interactive process (tail, rclone, etc). This is what
       // fixes the original bug: pane has `tail` but config wants claude.
+      // -c uses paneDir(cfg.dir, i) so the respawned shell lands in the
+      // pane's own .agents/N — same fix-rationale as the split-window
+      // calls above; sourcing cwd from cfg.dir alone caused panes 4..N
+      // to share the agent root and write claude jsonl to the wrong
+      // project hash.
+      const respawnDir = paneDir(cfg.dir, i);
       try {
         if (isClaudeCmd(want.cmd) || want.cmd === "bash") {
           // Leave as shell; startClaude runs on demand when pane is used.
-          await tmux(`respawn-pane -k -t '${esc(target)}' -c '${esc(cfg.dir)}'`);
+          await tmux(`respawn-pane -k -t '${esc(target)}' -c '${esc(respawnDir)}'`);
         } else {
-          await tmux(`respawn-pane -k -t '${esc(target)}' -c '${esc(cfg.dir)}' '${esc(want.cmd)}'`);
+          await tmux(`respawn-pane -k -t '${esc(target)}' -c '${esc(respawnDir)}' '${esc(want.cmd)}'`);
         }
         summary.respawned.push({ pane: i, was: currCmd, expected: want.name });
       } catch (err) {
