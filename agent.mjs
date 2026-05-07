@@ -385,7 +385,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     const existing = await countPanes(name);
     for (let i = existing; i < panes.length; i++) {
-      await tmux(`split-window -t '${esc(name)}' -h`).catch((err) =>
+      // -c pins the new pane's cwd to its own .agents/N. Without it,
+      // tmux inherits cwd from whichever pane is active at split-time —
+      // unpredictable after select-layout, and the cause of the
+      // pane-N-writes-jsonl-to-agents-M bug that broke Discord channel
+      // mapping. paneDir mkdir:s the dir so -c can't fail on it missing.
+      const targetDir = paneDir(dir, i);
+      await tmux(`split-window -t '${esc(name)}' -h -c '${esc(targetDir)}'`).catch((err) =>
         console.warn(`setupPanes: split-window ${name} failed: ${err.message}`));
     }
 
@@ -473,7 +479,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const currentCount = await countPanes(name);
     for (let i = currentCount; i < wanted.length; i++) {
       try {
-        await tmux(`split-window -t '${esc(name)}' -h`);
+        // See setupPanes for why -c is mandatory. Same bug, same fix.
+        const targetDir = paneDir(cfg.dir, i);
+        await tmux(`split-window -t '${esc(name)}' -h -c '${esc(targetDir)}'`);
         summary.added++;
       } catch (err) {
         console.warn(`reconcile: split-window ${name} failed: ${err.message}`);
