@@ -610,5 +610,47 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     return processMessage(msg, mapping, cleanPrompt, pane, tmpFiles);
   }
 
-  return { onMessage };
+  /**
+   * CLI-triggerable sync. Mirrors the /sync Discord handler body but
+   * without msg.reply: logs progress to console instead so the trigger
+   * works without a Discord context. Used by the SIGUSR1 handler in
+   * bot.mjs which the `amux sync` CLI sends to the bridge pid.
+   *
+   * Returns a result object so the caller can format / forward it.
+   */
+  async function triggerSync() {
+    if (!discordChannel || !agentmuxYamlPath) {
+      console.error("sync: not configured (missing agentmux.yaml path or discord channel)");
+      return { ok: false, error: "not-configured" };
+    }
+    if (state.get("syncRunning")) {
+      console.warn("sync: already in progress, ignoring trigger");
+      return { ok: false, error: "in-progress" };
+    }
+    state.set("syncRunning", true);
+    try {
+      console.log("sync: starting (CLI-triggered)");
+      const configYaml = readFileSync(agentmuxYamlPath, "utf-8");
+      const { guild: guildId } = await import("./sync.mjs").then((m) => m.parseConfig(configYaml));
+      const guild = await discordChannel.getGuild(guildId);
+      const results = await executeSync({ guild, configYaml, state, agentsYamlPath });
+      reloadConfig();
+      const summary = [];
+      if (results.created.length) summary.push(`created: ${results.created.join(", ")}`);
+      if (results.renamed?.length) summary.push(`renamed: ${results.renamed.join(", ")}`);
+      if (results.existing.length) summary.push(`existing: ${results.existing.length} already-correct`);
+      if (results.orphaned.length) summary.push(`orphaned (not deleted): ${results.orphaned.join(", ")}`);
+      const total = results.created.length + (results.renamed?.length || 0) + results.existing.length;
+      summary.push(`${total} channel(s) synced`);
+      console.log(`sync done. ${summary.join(" | ")}`);
+      return { ok: true, results, summary };
+    } catch (err) {
+      console.error(`sync failed: ${err.message}`);
+      return { ok: false, error: err.message };
+    } finally {
+      state.set("syncRunning", false);
+    }
+  }
+
+  return { onMessage, triggerSync };
 }

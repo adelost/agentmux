@@ -49,30 +49,55 @@ export async function executeSync({ guild, configYaml, state, agentsYamlPath }) 
     if (a.agentName !== b.agentName) return a.agentName.localeCompare(b.agentName);
     return a.pane - b.pane;
   });
+  // Topic-rendering: each channel's Discord topic = pane label from
+  // agentmux.yaml when set, fallback to "<agent> pane N". Discord caps
+  // topics at 1024 chars; we stay well under via the label-first
+  // template. Helps users skim the channel sidebar without opening
+  // each one.
+  const topicFor = (agentName, pane) => {
+    const labels = config.agents.get(agentName)?.labels;
+    const label = labels?.[pane];
+    const base = label ? String(label).trim() : `${agentName} pane ${pane}`;
+    return base.slice(0, 1024);
+  };
+
   const renamed = [];
   for (const r of renamesSorted) {
     const ch = await guild.channels.fetch(r.id);
     const targetParent = categories.get(r.agentName).id;
-    await ch.edit({ name: r.to, parent: targetParent });
+    await ch.edit({
+      name: r.to,
+      parent: targetParent,
+      topic: topicFor(r.agentName, r.pane),
+    });
     renamed.push({ from: r.from, to: r.to });
   }
 
-  // Move channels already on correct name but wrong category.
+  // Move channels already on correct name + sync topic. Topic edit
+  // included even when parent is correct so a label change in
+  // agentmux.yaml propagates without forcing a rename.
   for (const k of plan.keep) {
     const targetParent = categories.get(k.agentName).id;
-    if (k.parentId !== targetParent) {
-      const ch = await guild.channels.fetch(k.id);
-      await ch.edit({ parent: targetParent });
+    const desiredTopic = topicFor(k.agentName, k.pane);
+    const ch = await guild.channels.fetch(k.id);
+    const needsParent = k.parentId !== targetParent;
+    const needsTopic = (ch.topic || "") !== desiredTopic;
+    if (needsParent || needsTopic) {
+      const edit = {};
+      if (needsParent) edit.parent = targetParent;
+      if (needsTopic) edit.topic = desiredTopic;
+      await ch.edit(edit);
     }
   }
 
-  // Create missing channels.
+  // Create missing channels with their topic in the same call.
   const created = [];
   for (const c of plan.creates) {
     const newCh = await guild.channels.create({
       name: c.channelName,
       type: ChannelType.GuildText,
       parent: categories.get(c.agentName).id,
+      topic: topicFor(c.agentName, c.pane),
     });
     created.push({ ...c, id: newCh.id });
   }

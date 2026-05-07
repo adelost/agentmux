@@ -47,6 +47,16 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
 
   process.on("SIGHUP", reloadConfig);
 
+  // SIGUSR2 = "restart yourself" signal from the CLI (`amux restart`).
+  // Mirrors the Discord /restart handler: clear restart-channel (no
+  // Discord notify since signal can come from anywhere), then exit
+  // with code 75 which start.sh's loop interprets as respawn.
+  process.on("SIGUSR2", () => {
+    console.log("SIGUSR2 received, restarting (exit 75)");
+    state.set("restartChannel", null);
+    setTimeout(() => process.exit(75), 200);
+  });
+
   // --- Preflight ---
 
   async function preflight() {

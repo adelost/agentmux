@@ -162,6 +162,18 @@ const handlers = createHandlers({
   recorder,
 });
 
+// SIGUSR1 = "run sync" trigger from the CLI (`amux sync`). Same body as
+// the /sync Discord handler but without a msg.reply, see handlers.mjs
+// triggerSync. Bridge has to be running (which it must be to receive a
+// signal anyway), so this is the no-disruption sync path. CLI tails
+// the bridge log if the user wants live progress; the result also goes
+// out via Discord channel deltas as channels are renamed / created.
+process.on("SIGUSR1", () => {
+  handlers.triggerSync().catch((err) =>
+    console.error(`SIGUSR1 sync failed: ${err.message}`),
+  );
+});
+
 // Voice PWA HTTP endpoint (optional). Mirror sends voice input to the
 // discord channel bound to the pane so channel watchers see what came
 // in via the phone — same source-of-truth principle as sendToPane.

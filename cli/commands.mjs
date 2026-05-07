@@ -1210,6 +1210,140 @@ async function cmdTts(arg) {
 }
 
 /**
+ * Toggle / set the thinking-stream flag on the bridge state. Identical
+ * shape to [cmdTts]: state lives in /tmp/agentmux-state.json, both
+ * bridge and CLI read/write the same file so the toggle propagates
+ * without IPC. Bridge re-reads `state.get("thinking")` on every
+ * incoming message so changes apply on the next interaction.
+ */
+async function cmdThinking(arg) {
+  const { createState } = await import("../core/state.mjs");
+  const { parseEnv } = await import("../lib.mjs");
+  if (!process.env.STATE_FILE) {
+    try {
+      const vars = parseEnv(readFileSync(resolve(BRIDGE_DIR, ".env"), "utf-8"));
+      for (const [k, v] of Object.entries(vars)) {
+        if (!process.env[k]) process.env[k] = v;
+      }
+    } catch {}
+  }
+  const STATE_FILE = process.env.STATE_FILE || "/tmp/agentmux-state.json";
+  const state = createState(STATE_FILE);
+  const printStatus = () => {
+    const enabled = state.get("thinking", true);
+    console.log(`thinking: ${enabled ? "on" : "off"}`);
+  };
+  switch ((arg || "toggle").toLowerCase()) {
+    case "on": state.set("thinking", true); printStatus(); return;
+    case "off": state.set("thinking", false); printStatus(); return;
+    case "status": printStatus(); return;
+    case "toggle": state.set("thinking", !state.get("thinking", true)); printStatus(); return;
+    default:
+      console.error(`Usage: amux thinking [on|off|toggle|status]`);
+      process.exit(1);
+  }
+}
+
+/** Tell the running bridge to reload agentmux.yaml. SIGHUP wired in
+ *  bot.mjs already calls reloadConfig(); CLI just shells the kill. */
+async function cmdReload() {
+  const { existsSync, readFileSync } = await import("fs");
+  const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
+  if (!existsSync(PIDFILE)) {
+    console.error("bridge not running (no pidfile at " + PIDFILE + ")");
+    process.exit(1);
+  }
+  const pid = Number(readFileSync(PIDFILE, "utf-8").trim());
+  try { process.kill(pid, "SIGHUP"); }
+  catch (err) {
+    console.error(`reload failed: ${err.message}`);
+    process.exit(1);
+  }
+  console.log(`reload signal sent to bridge (pid ${pid})`);
+}
+
+/** Restart the bridge. Sends SIGUSR2 (new handler in bot.mjs) which
+ *  exits with code 75; start.sh's loop catches that and respawns.
+ *  Falls back to SIGTERM if SIGUSR2 isn't wired (older bridge). */
+async function cmdRestart() {
+  const { existsSync, readFileSync } = await import("fs");
+  const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
+  if (!existsSync(PIDFILE)) {
+    console.error("bridge not running (no pidfile at " + PIDFILE + ")");
+    process.exit(1);
+  }
+  const pid = Number(readFileSync(PIDFILE, "utf-8").trim());
+  try { process.kill(pid, "SIGUSR2"); }
+  catch (err) {
+    console.error(`restart failed: ${err.message}`);
+    process.exit(1);
+  }
+  console.log(`restart signal sent to bridge (pid ${pid}); start.sh loop will respawn`);
+}
+
+/**
+ * Trigger a Discord channel sync. Default mode signals the running
+ * bridge (SIGUSR1 → handlers.triggerSync); the CLI returns immediately
+ * after sending. Result lands in Discord as channel deltas + the
+ * bridge log; tail it with `amux serve -f` if you want live output.
+ *
+ * `--offline` runs the standalone bin/sync.mjs which uses its own
+ * Discord client. The bridge MUST be stopped first or the two clients
+ * fight over the gateway connection. `--offline` does that bounce
+ * automatically: stops bridge, runs sync, restarts bridge. Use when
+ * the bridge is wedged or hasn't started yet (first install, etc).
+ */
+async function cmdSync(args) {
+  const { flags } = parseFlags(args, { offline: "boolean" });
+
+  if (flags.offline) return cmdSyncOffline();
+
+  const { existsSync, readFileSync } = await import("fs");
+  const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
+  if (!existsSync(PIDFILE)) {
+    console.error("bridge not running. start it with `amux serve`, or use `amux sync --offline`.");
+    process.exit(1);
+  }
+  const pid = Number(readFileSync(PIDFILE, "utf-8").trim());
+  try { process.kill(pid, "SIGUSR1"); }
+  catch (err) {
+    console.error(`sync trigger failed: ${err.message}`);
+    process.exit(1);
+  }
+  console.log(`sync triggered on bridge (pid ${pid}). Tail bridge log for progress, or watch Discord channel deltas.`);
+}
+
+/** Standalone-sync path. Stops the bridge, runs bin/sync.mjs, restarts
+ *  bridge. Slow (~5 s downtime) but works when bridge is broken. */
+async function cmdSyncOffline() {
+  const { existsSync } = await import("fs");
+  const { spawnSync } = await import("child_process");
+  const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
+  const SYNC_SCRIPT = resolve(BRIDGE_DIR, "bin/sync.mjs");
+
+  const wasRunning = existsSync(PIDFILE);
+  if (wasRunning) {
+    console.log("stopping bridge for offline sync...");
+    await cmdUnserve({ socket: process.env.TMUX_SOCKET || "/tmp/openclaw-claude.sock" }).catch(() => {});
+    // Give Discord gateway a beat to release the token before reconnecting.
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+
+  console.log("running standalone sync...");
+  const r = spawnSync("node", [SYNC_SCRIPT], { stdio: "inherit", env: process.env });
+  const syncOk = r.status === 0;
+
+  if (wasRunning) {
+    console.log("restarting bridge...");
+    await cmdServe({ }, { configPath: process.env.AGENT_CONFIG, lastFile: null, bridgeDir: BRIDGE_DIR }).catch((err) => {
+      console.error(`bridge restart failed: ${err.message}. Run \`amux serve\` manually.`);
+    });
+  }
+
+  if (!syncOk) process.exit(r.status || 1);
+}
+
+/**
  * Speak a short string into the calling pane's bound Discord channel
  * via edge-tts + REST file-upload. The CLI alternative to the auto-tts
  * watcher, useful when an agent wants to fire a crafted spoken summary
@@ -1578,6 +1712,17 @@ Usage:
   agent r                         Resume last agent
   agent help                      Show this message
 
+Bridge controls (talk to the running daemon):
+  agent sync                      Trigger Discord channel sync from agentmux.yaml
+    --offline                     Stop bridge, run standalone sync, restart
+                                  (slower; use when bridge is wedged or absent)
+  agent reload                    Reload agents.yaml without restarting (SIGHUP)
+  agent restart                   Restart bridge (SIGUSR2 → exit 75 → start.sh respawn)
+  agent thinking [on|off|toggle|status]
+                                  Real-time text streaming flag (default on)
+  agent tts [on|off|toggle|status]
+                                  Text-to-speech flag
+
 Config: ~/.config/agent/agents.yaml
 Socket: /tmp/openclaw-claude.sock`);
 }
@@ -1729,6 +1874,22 @@ export async function dispatch(argv, ctx) {
 
     case "tts": {
       return cmdTts(rest[0]);
+    }
+
+    case "thinking": {
+      return cmdThinking(rest[0]);
+    }
+
+    case "reload": {
+      return cmdReload();
+    }
+
+    case "restart": {
+      return cmdRestart();
+    }
+
+    case "sync": {
+      return cmdSync(rest);
     }
 
     case "say": {
