@@ -180,6 +180,7 @@ async function spawnReplyForwarder(opts) {
       stdio: "ignore",
       env: { ...process.env, REPLY_FWD_OPTS: JSON.stringify(opts) },
     });
+    worker.channel?.unref?.();
     worker.unref();
   } catch (err) {
     console.warn(`reply-fwd spawn failed: ${err.message}`);

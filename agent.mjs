@@ -902,7 +902,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     try { unlinkSync(tmpFile); } catch (err) {
       console.warn(`sendLongPrompt: cleanup ${tmpFile} failed: ${err.message}`);
     }
-    await wait(5000);
+    // paste-buffer returns after tmux has queued the paste. Keep this short:
+    // callers often wrap amux sends in a timeout, and a long pre-Enter sleep
+    // leaves the prompt pasted but not submitted if the wrapper kills us.
+    await wait(250);
   }
 
   // --- Orchestration ---
