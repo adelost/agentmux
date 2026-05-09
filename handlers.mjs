@@ -643,6 +643,20 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       const total = results.created.length + (results.renamed?.length || 0) + results.existing.length;
       summary.push(`${total} channel(s) synced`);
       console.log(`sync done. ${summary.join(" | ")}`);
+
+      // New channels = new panes added to agents.yaml. SIGHUP reloads
+      // the inbound channel map but jsonl-watcher initializes its
+      // fs.watchers at startup from agents.yaml, so without a restart
+      // the new panes' replies go silent on Discord. SIGUSR2 routes
+      // through bot.mjs's existing handler (clears restartChannel state
+      // → exit 75 → start.sh respawns). Persistent watcher state covers
+      // the ~3s downtime. Renaming an existing channel doesn't change
+      // pane structure → no restart needed for that path.
+      if (results.created.length > 0) {
+        console.log("sync: new panes added, restarting bridge (SIGUSR2)");
+        process.kill(process.pid, "SIGUSR2");
+      }
+
       return { ok: true, results, summary };
     } catch (err) {
       console.error(`sync failed: ${err.message}`);
