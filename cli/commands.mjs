@@ -913,19 +913,29 @@ async function cmdPs(ctx, flags = {}) {
   // Step 3: render with grouping. Idle/unknown panes of the same command
   // collapse into a single line; active panes always shown in full.
   for (const { agent: a, panes } of agentData) {
-    const claudeCount = panes.filter((p) => p.command === "claude").length;
-    const shellCount = panes.filter((p) => SHELL_CMDS.test(p.command)).length;
-    const otherCount = panes.length - claudeCount - shellCount;
+    // Per-pane dialect comes from the configured cmd (agents.yaml), not
+    // the live process name: codex runs as `node bin/codex.js` so tmux
+    // reports "node" — same as some transient claude states. Trust the
+    // config for classification; it's the authoritative source of truth
+    // for which pane is which dialect.
+    const isCodexPane = (p) => /codex/i.test(a.panes?.[p.index]?.cmd || "");
+    const isClaudePane = (p) => /claude/i.test(a.panes?.[p.index]?.cmd || "");
+    const claudeCount = panes.filter(isClaudePane).length;
+    const codexCount = panes.filter(isCodexPane).length;
+    const shellCount = panes.filter((p) => SHELL_CMDS.test(p.command) && !isClaudePane(p) && !isCodexPane(p)).length;
+    const otherCount = panes.length - claudeCount - codexCount - shellCount;
     const summary = [
       claudeCount && `${claudeCount} claude`,
+      codexCount && `${codexCount} codex`,
       otherCount && `${otherCount} svc`,
       shellCount && `${shellCount} shell`,
     ].filter(Boolean).join(" · ");
 
     console.log(`\n● ${a.name.padEnd(12)} ${a.dir}  [${summary}]`);
 
-    // Quick path: agent has zero claude panes AND none active → "all idle".
-    if (!showAll && claudeCount === 0 && !panes.some((p) => ACTIVE_STATUS(p.status))) {
+    // Quick path: agent has zero coding-agent panes (claude or codex)
+    // AND none active → "all idle".
+    if (!showAll && claudeCount === 0 && codexCount === 0 && !panes.some((p) => ACTIVE_STATUS(p.status))) {
       console.log(`  ⚪ all idle (${panes.length})`);
       continue;
     }
