@@ -957,20 +957,36 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const dialect = await livePaneDialectName(agentName, pane);
     if (dialect !== "codex") return;
 
-    // Codex occasionally accepts a tmux paste into the composer but misses the
-    // first submit Enter, especially for long pasted prompts sent through amux.
-    // Avoid a blind double-submit: if Codex's rollout already recorded the
-    // prompt, the first Enter worked and we leave it alone.
-    await wait(750);
-    try {
-      const dir = paneDir(agentConfig(agentName).dir, pane);
-      if (isPromptInCodexJsonl(dir, prompt) === true) return;
-    } catch {
-      // Fall through to the one-shot rescue Enter. If jsonl is unavailable,
-      // Codex is still the live pane and this is the least risky recovery.
-    }
+    // Codex's node CLI accepts a tmux paste into the composer but routinely
+    // misses the immediate Enter for long pasted prompts: the paste is still
+    // rendering when our `send-keys Enter` arrives, and the keystroke gets
+    // absorbed into the composer instead of submitting. A single rescue Enter
+    // 750ms later isn't always enough on slower systems / very long prompts —
+    // both the initial Enter and the rescue can be eaten.
+    //
+    // Strategy: poll the rollout jsonl (codex writes user_message there on
+    // submit). If the prompt isn't recorded after a wait, send another Enter
+    // and re-check. Cap retries so a stuck pane can't loop. jsonl is source
+    // of truth — message only lands once Codex has actually submitted.
+    let dir;
+    try { dir = paneDir(agentConfig(agentName).dir, pane); } catch { dir = null; }
 
-    await tmux(`send-keys -t '${esc(target)}' Enter`);
+    const submitted = async () => {
+      if (!dir) return null;            // unknown — caller falls back to retry
+      try { return isPromptInCodexJsonl(dir, prompt) === true; }
+      catch { return null; }
+    };
+
+    // First check: was the original Enter from sendPrompt enough?
+    await wait(750);
+    if (await submitted() === true) return;
+
+    // Up to 3 rescue attempts, spaced 750ms. Stops as soon as jsonl confirms.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await tmux(`send-keys -t '${esc(target)}' Enter`);
+      await wait(750);
+      if (await submitted() === true) return;
+    }
   }
 
   async function sendLongPrompt(target, prompt) {
