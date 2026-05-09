@@ -5,6 +5,7 @@ import yaml from "js-yaml";
 import { randomUUID } from "crypto";
 
 const DEFAULT_AGENT_CMD = "claude --continue --dangerously-skip-permissions";
+const DEFAULT_CODEX_CMD = "codex resume --last --dangerously-bypass-approvals-and-sandbox";
 
 /** Expand ~ to $HOME in paths */
 export function expandTilde(p) {
@@ -45,12 +46,23 @@ export function parseConfig(yamlContent) {
         }
       }
     }
+    // Pane count breakdown:
+    //   - claudeCount: claude-cli panes, indices [0, claudeCount)
+    //   - codexCount:  codex-cli panes, indices [claudeCount, panes)
+    //   - panes:       total agent panes (claude + codex), excluding services/shells
+    // Channels for codex panes get a `-codex` suffix to make them visually
+    // distinct in Discord (e.g. ai-3-codex). The dialect is detected from the
+    // pane's cmd at runtime by agent.mjs (cmd contains "codex" → codex).
+    const claudeCount = config.panes ?? config.claude ?? (config.codex ? 0 : 1);
+    const codexCount = config.codex ?? 0;
     agents.set(name, {
       dir: expandTilde(config.dir),
-      panes: config.panes ?? config.claude ?? 1,
+      panes: claudeCount + codexCount,
+      claudeCount,
+      codexCount,
       services: config.services ?? [],
       shells: config.shells ?? 0,
-      layout: config.layout ?? (config.services?.length || config.shells ? "main-vertical" : undefined),
+      layout: config.layout ?? (config.services?.length || config.shells || codexCount ? "main-vertical" : undefined),
       labels,
     });
   }
@@ -63,21 +75,32 @@ export function parseConfig(yamlContent) {
 }
 
 /**
+ * Build the desired channel name for a pane, applying the codex suffix
+ * when the pane index lands in the codex range.
+ */
+function paneChannelName(name, pane, claudeCount) {
+  return pane >= claudeCount ? `${name}-${pane}-codex` : `${name}-${pane}`;
+}
+
+/**
  * Generate Discord channel names from agent config.
  * Returns a flat, alphabetically sorted list of { agentName, channelName, pane }.
- * Naming: #agent-0 (pane 0), #agent-1 (pane 1), #agent-2 (pane 2)... matches tmux pane index.
+ * Naming: #agent-0 (pane 0), #agent-1 (pane 1)... for claude panes;
+ * #agent-{N}-codex for codex panes (visually distinct so orchestrators see
+ * which panes run which agent dialect at a glance).
  */
 export function generateChannelNames(agents) {
   const result = [];
   const sortedNames = [...agents.keys()].sort();
 
   for (const name of sortedNames) {
-    const { panes } = agents.get(name);
+    const { panes, claudeCount = panes } = agents.get(name);
     for (let i = 0; i < panes; i++) {
       result.push({
         agentName: name,
-        channelName: `${name}-${i}`,
+        channelName: paneChannelName(name, i, claudeCount),
         pane: i,
+        dialect: i >= claudeCount ? "codex" : "claude",
       });
     }
   }
@@ -99,18 +122,21 @@ export function classifyAgentChannel(channelName, agentNames, existingNamesLower
   for (const name of sorted) {
     const nameLower = name.toLowerCase();
     if (lower === nameLower) {
-      return { agentName: name, pane: 0, format: "legacy" };
+      return { agentName: name, pane: 0, format: "legacy", dialect: "claude" };
     }
     const prefix = nameLower + "-";
     if (!lower.startsWith(prefix)) continue;
     const rest = lower.slice(prefix.length);
-    if (!/^\d+$/.test(rest)) continue;
-    const n = parseInt(rest, 10);
+    // Match plain `{agent}-{N}` (claude) or `{agent}-{N}-codex` (codex).
+    const match = rest.match(/^(\d+)(-codex)?$/);
+    if (!match) continue;
+    const n = parseInt(match[1], 10);
+    const dialect = match[2] ? "codex" : "claude";
     const isLegacyAgent = existingNamesLower.has(nameLower);
-    if (isLegacyAgent && n >= 2) {
-      return { agentName: name, pane: n - 1, format: "legacy" };
+    if (isLegacyAgent && n >= 2 && dialect === "claude") {
+      return { agentName: name, pane: n - 1, format: "legacy", dialect };
     }
-    return { agentName: name, pane: n, format: "new" };
+    return { agentName: name, pane: n, format: "new", dialect };
   }
   return null;
 }
@@ -169,8 +195,9 @@ export function buildMigrationPlan(agents, existingChannels) {
       byPane.set(c.pane, c);
     }
 
+    const claudeCount = config.claudeCount ?? config.panes;
     for (let p = 0; p < config.panes; p++) {
-      const target = `${name}-${p}`;
+      const target = paneChannelName(name, p, claudeCount);
       const ch = byPane.get(p);
       if (!ch) {
         creates.push({ agentName: name, channelName: target, pane: p });
@@ -234,10 +261,12 @@ export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = 
       id: agentIds.get(name) || randomUUID(),
     };
 
-    // Discord channel mapping (only claude panes)
+    // Discord channel mapping (claude panes + codex panes; the codex
+    // suffix is part of the channel name, see paneChannelName).
+    const claudeCount = config.claudeCount ?? config.panes;
     const discord = {};
     for (let i = 0; i < config.panes; i++) {
-      const channelName = `${name}-${i}`;
+      const channelName = paneChannelName(name, i, claudeCount);
       const channelId = channelMap.get(channelName);
       if (channelId) discord[channelId] = i;
     }
@@ -263,8 +292,16 @@ export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = 
 
     const panes = [];
     let paneIdx = 0;
-    for (let i = 0; i < config.panes; i++) {
+    for (let i = 0; i < claudeCount; i++) {
       const pane = { name: i === 0 ? "claude" : `claude-${i + 1}`, cmd: DEFAULT_AGENT_CMD };
+      const label = labelFor(paneIdx);
+      if (label) pane.label = label;
+      panes.push(pane);
+      paneIdx++;
+    }
+    const codexCount = config.codexCount ?? Math.max(0, config.panes - claudeCount);
+    for (let i = 0; i < codexCount; i++) {
+      const pane = { name: i === 0 ? "codex" : `codex-${i + 1}`, cmd: DEFAULT_CODEX_CMD };
       const label = labelFor(paneIdx);
       if (label) pane.label = label;
       panes.push(pane);

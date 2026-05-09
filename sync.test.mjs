@@ -122,6 +122,41 @@ feature("parseConfig", () => {
     when: ["parsing", (y) => () => parseConfig(y)],
     then: ["throws", (fn) => expect(fn).toThrow("agents")],
   });
+
+  component("parses claude + codex panes side by side", {
+    given: ["yaml with both", () => `
+guild: "1"
+agents:
+  ai:
+    dir: /tmp/ai
+    claude: 3
+    codex: 2
+`],
+    when: ["parsing", (y) => parseConfig(y)],
+    then: ["panes=5, claudeCount=3, codexCount=2", (config) => {
+      const ai = config.agents.get("ai");
+      expect(ai.panes).toBe(5);
+      expect(ai.claudeCount).toBe(3);
+      expect(ai.codexCount).toBe(2);
+    }],
+  });
+
+  component("codex-only agent (no claude key) starts at index 0", {
+    given: ["yaml with only codex", () => `
+guild: "1"
+agents:
+  ai:
+    dir: /tmp/ai
+    codex: 2
+`],
+    when: ["parsing", (y) => parseConfig(y)],
+    then: ["panes=2, claudeCount=0, codexCount=2", (config) => {
+      const ai = config.agents.get("ai");
+      expect(ai.panes).toBe(2);
+      expect(ai.claudeCount).toBe(0);
+      expect(ai.codexCount).toBe(2);
+    }],
+  });
 });
 
 feature("generateChannelNames", () => {
@@ -130,9 +165,9 @@ feature("generateChannelNames", () => {
     when: ["generating names", (agents) => generateChannelNames(agents)],
     then: ["returns 3 channels, 0-indexed", (channels) => {
       expect(channels).toEqual([
-        { agentName: "skybar", channelName: "skybar-0", pane: 0 },
-        { agentName: "skybar", channelName: "skybar-1", pane: 1 },
-        { agentName: "skybar", channelName: "skybar-2", pane: 2 },
+        { agentName: "skybar", channelName: "skybar-0", pane: 0, dialect: "claude" },
+        { agentName: "skybar", channelName: "skybar-1", pane: 1, dialect: "claude" },
+        { agentName: "skybar", channelName: "skybar-2", pane: 2, dialect: "claude" },
       ]);
     }],
   });
@@ -157,6 +192,21 @@ feature("generateChannelNames", () => {
       expect(channels.map((c) => c.channelName)).toEqual(["ai-0", "claw-0", "skybar-0", "skybar-1"]);
     }],
   });
+
+  component("codex panes get -codex suffix after claude panes", {
+    given: ["agent with claude+codex split", () => new Map([
+      ["ai", { panes: 5, claudeCount: 3, codexCount: 2 }],
+    ])],
+    when: ["generating names", (agents) => generateChannelNames(agents)],
+    then: ["ai-0..2 are claude, ai-3-codex/ai-4-codex are codex", (channels) => {
+      expect(channels.map((c) => c.channelName)).toEqual([
+        "ai-0", "ai-1", "ai-2", "ai-3-codex", "ai-4-codex",
+      ]);
+      expect(channels.map((c) => c.dialect)).toEqual([
+        "claude", "claude", "claude", "codex", "codex",
+      ]);
+    }],
+  });
 });
 
 feature("classifyAgentChannel", () => {
@@ -164,7 +214,7 @@ feature("classifyAgentChannel", () => {
     given: ["channel ai-0 with agent ai", () => ({ ch: "ai-0", agents: ["ai"], existing: new Set(["ai-0"]) })],
     when: ["classifying", ({ ch, agents, existing }) => classifyAgentChannel(ch, agents, existing)],
     then: ["new format, pane 0", (r) => {
-      expect(r).toEqual({ agentName: "ai", pane: 0, format: "new" });
+      expect(r).toEqual({ agentName: "ai", pane: 0, format: "new", dialect: "claude" });
     }],
   });
 
@@ -172,7 +222,7 @@ feature("classifyAgentChannel", () => {
     given: ["channel claw (bare)", () => ({ ch: "claw", agents: ["claw"], existing: new Set(["claw", "claw-2"]) })],
     when: ["classifying", ({ ch, agents, existing }) => classifyAgentChannel(ch, agents, existing)],
     then: ["legacy pane 0", (r) => {
-      expect(r).toEqual({ agentName: "claw", pane: 0, format: "legacy" });
+      expect(r).toEqual({ agentName: "claw", pane: 0, format: "legacy", dialect: "claude" });
     }],
   });
 
@@ -180,7 +230,7 @@ feature("classifyAgentChannel", () => {
     given: ["channel claw-2 with legacy bare claw", () => ({ ch: "claw-2", agents: ["claw"], existing: new Set(["claw", "claw-2"]) })],
     when: ["classifying", ({ ch, agents, existing }) => classifyAgentChannel(ch, agents, existing)],
     then: ["legacy pane 1", (r) => {
-      expect(r).toEqual({ agentName: "claw", pane: 1, format: "legacy" });
+      expect(r).toEqual({ agentName: "claw", pane: 1, format: "legacy", dialect: "claude" });
     }],
   });
 
@@ -188,7 +238,7 @@ feature("classifyAgentChannel", () => {
     given: ["channel ai-2 with no bare ai", () => ({ ch: "ai-2", agents: ["ai"], existing: new Set(["ai-0", "ai-1", "ai-2"]) })],
     when: ["classifying", ({ ch, agents, existing }) => classifyAgentChannel(ch, agents, existing)],
     then: ["new pane 2", (r) => {
-      expect(r).toEqual({ agentName: "ai", pane: 2, format: "new" });
+      expect(r).toEqual({ agentName: "ai", pane: 2, format: "new", dialect: "claude" });
     }],
   });
 
@@ -206,6 +256,18 @@ feature("classifyAgentChannel", () => {
     })],
     when: ["classifying", ({ ch, agents, existing }) => classifyAgentChannel(ch, agents, existing)],
     then: ["matches api-proxy", (r) => expect(r.agentName).toBe("api-proxy")],
+  });
+
+  component("codex suffix maps to codex dialect", {
+    given: ["channel ai-3-codex", () => ({
+      ch: "ai-3-codex",
+      agents: ["ai"],
+      existing: new Set(["ai-0", "ai-3-codex"]),
+    })],
+    when: ["classifying", ({ ch, agents, existing }) => classifyAgentChannel(ch, agents, existing)],
+    then: ["pane 3, dialect codex", (r) => {
+      expect(r).toEqual({ agentName: "ai", pane: 3, format: "new", dialect: "codex" });
+    }],
   });
 });
 

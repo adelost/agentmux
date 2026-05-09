@@ -15,6 +15,7 @@ import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
 import { buildResumeHint } from "./core/resume-hint.mjs";
 
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
+const CODEX_FLAGS = "--dangerously-bypass-approvals-and-sandbox";
 
 // --- Session isolation ---
 
@@ -403,8 +404,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const target = `${name}:.${i}`;
       if (await isAlreadyRunning(target)) continue;
 
-      if (isClaudeCmd(panes[i].cmd)) {
-        // Claude panes: skip entirely. startClaude (via ensureReady) does cd + start + dismiss.
+      if (isAgentCmd(panes[i].cmd)) {
+        // Claude/codex panes: skip entirely. startClaude/startCodex (via
+        // ensureReady) does cd + start + dismiss when the pane is first
+        // used. This avoids burning the agent's first turn on startup
+        // before any user prompt arrives.
         continue;
       } else if (panes[i].defer) {
         await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)}' Enter`);
@@ -444,17 +448,27 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return cmd?.includes("claude") || false;
   }
 
+  function isCodexCmd(cmd) {
+    return cmd?.includes("codex") || false;
+  }
+
+  function isAgentCmd(cmd) {
+    return isClaudeCmd(cmd) || isCodexCmd(cmd);
+  }
+
   function isShellProc(cmd) {
     return /^(bash|zsh|fish|sh|dash)$/.test(cmd);
   }
 
   // True when a pane's current process matches the type expected by config.
-  // Services are matched loosely: any non-shell, non-claude process is assumed
-  // to be the configured service (npm/make/etc spawn varied binaries).
+  // Both claude and codex CLIs are node-based, so the live process name is
+  // typically the binary name or "node". Services are matched loosely: any
+  // non-shell, non-agent process is assumed to be the configured service.
   function paneTypeMatches(currCmd, wantCmd) {
     if (isClaudeCmd(wantCmd)) return /^(claude|node)$/.test(currCmd);
+    if (isCodexCmd(wantCmd)) return /^(codex|node)$/.test(currCmd);
     if (wantCmd === "bash") return isShellProc(currCmd);
-    return !isShellProc(currCmd) && !/^(claude|node)$/.test(currCmd);
+    return !isShellProc(currCmd) && !/^(claude|codex|node)$/.test(currCmd);
   }
 
   // --- Reconciliation ---
@@ -504,10 +518,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
       if (paneTypeMatches(currCmd, want.cmd)) { summary.unchanged++; continue; }
 
-      // Safety: never respawn a pane that's running claude, even if config
-      // says something else. User may have active work there; forcing a slot
-      // into a shell would destroy context. Report as a mismatch instead.
-      if (/^(claude|node)$/.test(currCmd)) {
+      // Safety: never respawn a pane that's running claude or codex, even
+      // if config says something else. User may have active work there;
+      // forcing a slot into a shell would destroy context. Report as a
+      // mismatch instead.
+      if (/^(claude|codex|node)$/.test(currCmd)) {
         summary.mismatches = summary.mismatches || [];
         summary.mismatches.push({ pane: i, has: currCmd, expected: want.name });
         continue;
@@ -523,8 +538,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // project hash.
       const respawnDir = paneDir(cfg.dir, i);
       try {
-        if (isClaudeCmd(want.cmd) || want.cmd === "bash") {
-          // Leave as shell; startClaude runs on demand when pane is used.
+        if (isAgentCmd(want.cmd) || want.cmd === "bash") {
+          // Leave as shell; startClaude/startCodex runs on demand when
+          // pane is used.
           await tmux(`respawn-pane -k -t '${esc(target)}' -c '${esc(respawnDir)}'`);
         } else {
           await tmux(`respawn-pane -k -t '${esc(target)}' -c '${esc(respawnDir)}' '${esc(want.cmd)}'`);
@@ -547,6 +563,20 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const dir = paneDir(rootDir, pane);
     const sessionFlag = resolveSessionFlag(dir);
     await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)} && ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_FLAGS} ${sessionFlag}' Enter`);
+    await wait(2000);
+  }
+
+  async function startCodex(name, target, rootDir, pane = 0) {
+    if (await isPaneDead(target)) await respawnPane(target);
+    if (await isAlreadyRunning(target)) return;
+
+    const dir = paneDir(rootDir, pane);
+    // Try `codex resume --last` first to pick up the most recent session
+    // for this pane's cwd; fall back to fresh `codex` when no prior
+    // session exists (first launch). Both inherit cwd from the cd above
+    // so codex jsonl lands in .agents/N/ — same isolation as claude.
+    const cmd = `codex resume --last ${CODEX_FLAGS} 2>/dev/null || codex ${CODEX_FLAGS}`;
+    await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)} && ${cmd}' Enter`);
     await wait(2000);
   }
 
@@ -983,6 +1013,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       await startClaude(agentName, target, config.dir, pane);
       await waitForClaudeReady(target, agentName, pane);
       if (wasStarting) await injectResumeHint(agentName, pane, config.dir);
+    } else if (isCodexCmd(paneCmd)) {
+      // Codex panes use the same wait-for-ready + dismiss pattern as
+      // claude (both are interactive node-based CLIs that may surface
+      // a resume-prompt on cold start). Resume-hint is skipped because
+      // codex auto-resumes via `codex resume --last` in startCodex.
+      await startCodex(agentName, target, config.dir, pane);
+      await waitForClaudeReady(target, agentName, pane);
     }
   }
 
