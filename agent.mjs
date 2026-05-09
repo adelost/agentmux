@@ -672,6 +672,35 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
   }
 
+  /**
+   * Derive dialect from the live pane when config is stale.
+   *
+   * Some long-running panes can be repurposed without agents.yaml changing
+   * first. Example: ai:p3 is configured as a service pane, but currently runs
+   * Codex (node). Config-only dialect detection then misses Codex-specific
+   * echo checks and send quirks. Keep this as a fallback so configured Claude
+   * panes remain fast and deterministic.
+   */
+  async function livePaneDialectName(agentName, pane) {
+    const configured = paneDialectName(agentName, pane);
+    if (configured) return configured;
+
+    const target = `${agentName}:.${pane}`;
+    try {
+      const { stdout: cmdOut } = await tmux(
+        `display-message -t '${esc(target)}' -p '#{pane_current_command}'`,
+      );
+      if (cmdOut.trim() !== "node") return null;
+
+      const raw = await capturePane(agentName, pane, 120);
+      const dialect = detectDialect(raw);
+      return dialect?.name || null;
+    } catch (err) {
+      console.warn(`livePaneDialectName(${agentName}:${pane}) failed: ${err.message}`);
+      return null;
+    }
+  }
+
   async function isBusy(agentName, pane, promptText = null) {
     // Source of truth: read the agent's own session file instead of parsing
     // tmux rendering. Dispatch on the pane's configured cmd so we don't
@@ -890,6 +919,27 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       await tmux(`send-keys -t '${esc(target)}' -l -- '${esc(prompt)}'`);
       await wait(1000);
     }
+    await tmux(`send-keys -t '${esc(target)}' Enter`);
+    await maybeSendCodexSubmitEnter(agentName, pane, target, prompt);
+  }
+
+  async function maybeSendCodexSubmitEnter(agentName, pane, target, prompt) {
+    const dialect = await livePaneDialectName(agentName, pane);
+    if (dialect !== "codex") return;
+
+    // Codex occasionally accepts a tmux paste into the composer but misses the
+    // first submit Enter, especially for long pasted prompts sent through amux.
+    // Avoid a blind double-submit: if Codex's rollout already recorded the
+    // prompt, the first Enter worked and we leave it alone.
+    await wait(750);
+    try {
+      const dir = paneDir(agentConfig(agentName).dir, pane);
+      if (isPromptInCodexJsonl(dir, prompt) === true) return;
+    } catch {
+      // Fall through to the one-shot rescue Enter. If jsonl is unavailable,
+      // Codex is still the live pane and this is the least risky recovery.
+    }
+
     await tmux(`send-keys -t '${esc(target)}' Enter`);
   }
 
