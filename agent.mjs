@@ -123,6 +123,15 @@ amux compact --force                 # include working panes (dangerous)
 \`\`\`
 Bulk-compact affects idle panes. Skips working/permission/menu states.
 
+### Nightly memory digest
+\`\`\`bash
+amux dream                           # write/update memory/YYYY-MM-DD.md pane digest
+amux dream --dry                     # preview, no action
+amux dream --since 24h --min-turns 10
+\`\`\`
+Meant for cron at 04:00. It summarizes recent pane activity and commits into
+the workspace daily memory file using a replaceable \`amux-dream\` section.
+
 ### Auto-compact (background, bridge-driven)
 Idle panes >=70% context get warned (Discord channel), then /compact:ed
 after 60s grace unless activity cancels. Requires 5 min conversation

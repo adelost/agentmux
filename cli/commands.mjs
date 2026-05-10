@@ -19,6 +19,7 @@ import {
   isStaleWaiter, isRunningNow,
 } from "../core/orchestrator-checkpoint.mjs";
 import { collectCommitsSince, reposFromAgents } from "../core/commit-log.mjs";
+import { runDreamDigest } from "../core/dream.mjs";
 import { regenerateAgentsYaml } from "../sync.mjs";
 import yaml from "js-yaml";
 import { spawn, execSync } from "child_process";
@@ -807,6 +808,30 @@ async function cmdDone(ctx, flags) {
     console.log(`  amux done --all                              # widen to 30d (max safety cap)`);
   }
   console.log(`  amux timeline --grep "<keyword>"              # cross-pane content search`);
+}
+
+async function cmdDream(ctx, flags = {}) {
+  const sinceArg = flags.since || "24h";
+  const minTurns = Number.isFinite(flags["min-turns"]) ? flags["min-turns"] : 10;
+  const agents = listAgents(ctx.configPath);
+  const result = runDreamDigest({
+    agents,
+    workspaceDir: flags.workspace,
+    sinceArg,
+    minTurns,
+    dryRun: !!flags.dry,
+  });
+  if (result.skipped) {
+    if (!flags.quiet && !flags.q) console.log(`Dream skipped: ${result.reason}`);
+    return;
+  }
+  if (flags.dry) {
+    console.log(result.section);
+    return;
+  }
+  if (!flags.quiet && !flags.q) {
+    console.log(`Dream wrote ${result.path} (${result.userTurns} turns, ${result.panes} panes)`);
+  }
 }
 
 /** Compress an "age in minutes" into "Xm" / "Xh" / "Xd" for header chrome. */
@@ -1762,6 +1787,10 @@ Usage:
                                   Also requires ≥200k tokens absolute (--min-tokens N to change)
     --dry                         Show what would compact, do nothing
     --force                       Include 'working' panes (default: skip)
+  agent dream                     Write/update nightly pane digest in workspace memory
+    --since T                     Window to summarize (default: 24h)
+    --min-turns N                 Skip if fewer user turns (default: 10)
+    --dry                         Print digest instead of writing
   agent r                         Resume last agent
   agent help                      Show this message
 
@@ -1817,6 +1846,7 @@ const FLAG_SPECS = {
     grep: "string",
   },
   compact: { dry: "boolean", force: "boolean", "min-tokens": "number" },
+  dream: { since: "string", "min-turns": "number", workspace: "string", dry: "boolean", q: "boolean", quiet: "boolean" },
   remind: {
     p: "number",                      // pane index (only when single agent given)
     all: "boolean",                   // broadcast to every claude pane
@@ -1918,6 +1948,11 @@ export async function dispatch(argv, ctx) {
     case "compact": {
       const { flags, positional } = parseFlags(rest, FLAG_SPECS.compact);
       return cmdCompact(ctx, flags, positional);
+    }
+
+    case "dream": {
+      const { flags } = parseFlags(rest, FLAG_SPECS.dream);
+      return cmdDream(ctx, flags);
     }
 
     case "remind": {
