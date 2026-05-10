@@ -5,6 +5,7 @@
 // remain: extractMatchingReply + isBoilerplateReply.
 
 import { readLastTurns } from "./jsonl-reader.mjs";
+import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 
 // Replies that don't carry signal worth mirroring. Match case-insensitively
 // against trimmed reply text. If everything is boilerplate, skip — channel
@@ -38,16 +39,30 @@ export function extractMatchingReply(paneDir, sinceMs, matcher) {
   // Slack window — jsonl write may post-date sendOnly's wall-clock by a
   // few hundred ms.
   const since = new Date(sinceMs - 2000);
-  const result = readLastTurns(paneDir, { since, limit: 5 });
-  if (!result || !result.turns.length) return null;
-  // Most recent matching turn first (reverse) — handles the case where
-  // multiple briefs fired and we want the latest one's reply.
-  const target = [...result.turns].reverse().find(
-    (t) => t.userPrompt && matcher(t.userPrompt),
-  );
+  const candidates = [];
+
+  for (const reader of [readLastTurns, readLastTurnsCodex]) {
+    const result = reader(paneDir, { since, limit: 5 });
+    if (!result || !result.turns.length) continue;
+
+    // Most recent matching turn first within each store — handles the case
+    // where multiple briefs fired and we want the latest one's reply.
+    const target = [...result.turns].reverse().find(
+      (t) => t.userPrompt && matcher(t.userPrompt),
+    );
+    if (target) candidates.push(target);
+  }
+
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => turnMs(b) - turnMs(a));
+  const target = candidates[0];
   if (!target) return null;
   const textItems = target.items.filter((it) => it.type === "text");
   if (!textItems.length) return null;
   return textItems.map((it) => it.content).join("\n\n").trim();
 }
 
+function turnMs(turn) {
+  const parsed = Date.parse(turn?.endTimestamp || turn?.timestamp || "");
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
