@@ -472,3 +472,44 @@ feature("latestCodexSessionFor", () => {
     }],
   });
 });
+
+// --- Race regression: task_complete before response_item ----------------
+
+feature("readLastTurnsCodex: task_complete-before-response_item race", () => {
+  unit("does NOT mark turn complete when task_complete arrives before items", {
+    given: ["jsonl with task_complete written but response_item not yet", () => setupFakeCodex([
+      { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+      { type: "event_msg", payload: { type: "task_started", turn_id: "R" } },
+      { type: "event_msg", payload: { type: "user_message", message: "ask something" } },
+      // Codex flush race: task_complete written first, response_item:message
+      // would normally come right before but lands later. This is the empty
+      // window where the watcher would otherwise read isComplete=true with
+      // items=0 and silently advance its checkpoint.
+      { type: "event_msg", payload: { type: "task_complete", turn_id: "R" } },
+    ])],
+    when: ["reading mid-race", ({ paneDir }) => readLastTurnsCodex(paneDir)],
+    then: ["isComplete stays false because items=0", (r, { cleanup }) => {
+      expect(r.turns).toHaveLength(1);
+      expect(r.turns[0].isComplete).toBe(false);
+      expect(r.turns[0].items).toHaveLength(0);
+      cleanup();
+    }],
+  });
+
+  unit("DOES mark turn complete once response_item lands after task_complete", {
+    given: ["same race resolved with response_item appended", () => setupFakeCodex([
+      { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+      { type: "event_msg", payload: { type: "task_started", turn_id: "R" } },
+      { type: "event_msg", payload: { type: "user_message", message: "ask something" } },
+      { type: "event_msg", payload: { type: "task_complete", turn_id: "R" } },
+      // The delayed flush eventually catches up
+      { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "delayed reply" }] } },
+    ])],
+    when: ["reading after race resolved", ({ paneDir }) => readLastTurnsCodex(paneDir)],
+    then: ["isComplete=true with the delayed item", (r, { cleanup }) => {
+      expect(r.turns[0].isComplete).toBe(true);
+      expect(r.turns[0].items).toEqual([{ type: "text", content: "delayed reply" }]);
+      cleanup();
+    }],
+  });
+});

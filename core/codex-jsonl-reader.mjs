@@ -388,7 +388,14 @@ function groupCodexIntoTurns(events) {
     if (e.type === "event_msg" && e.payload?.type === "task_complete") {
       const target = byTurnId.get(e.payload.turn_id) || current;
       if (target) {
-        target.isComplete = true;
+        // Race: codex sometimes flushes task_complete to jsonl before the
+        // response_item:message that carries the assistant's text. If we
+        // set isComplete=true with an empty items array, the watcher's
+        // "items=0 + isComplete=true" branch reads it as "fully posted,
+        // advance checkpoint" and silently swallows the reply. Defer the
+        // complete signal until items have actually landed; flag it for
+        // the final pass to apply once we know whether items materialized.
+        target._sawTaskComplete = true;
         if (e.timestamp) target.endTimestamp = e.timestamp;
       }
       continue;
@@ -412,6 +419,20 @@ function groupCodexIntoTurns(events) {
     // p.type === "reasoning" → intentionally skipped (mirrors Claude thinking blocks)
   }
   if (current) turns.push(current);
+
+  // Final pass: apply task_complete signal only when items actually
+  // landed. Strips the internal `_sawTaskComplete` flag so the public
+  // turn shape stays clean. Turns that saw task_complete but no items
+  // are left as isComplete=false — the watcher's grace path will pick
+  // them up later if items eventually arrive (or correctly post nothing
+  // if the turn truly had empty assistant output, e.g. tool-only with
+  // function_call but no text — handled by items.length > 0 below).
+  for (const turn of turns) {
+    if (turn._sawTaskComplete && turn.items.length > 0) {
+      turn.isComplete = true;
+    }
+    delete turn._sawTaskComplete;
+  }
 
   // Merge adjacent text items per turn
   for (const turn of turns) {
