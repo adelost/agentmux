@@ -55,10 +55,20 @@ function parseJsonl(filePath) {
   }
 }
 
+// Session_meta lives on line 1 of every rollout. In real codex sessions it
+// includes payload.instructions which can run 21-34KB. Read in 64KB chunks
+// until we hit a newline, capping at 256KB as a sanity ceiling — anything
+// larger would mean the file isn't a codex rollout. With cache hits dominating
+// after the first sweep, the worst-case "scan all 186 sessions" cost is ~12MB
+// of disk reads once, vs the old 290MB per poll-tick.
+const SESSION_META_CHUNK = 64 * 1024;
+const SESSION_META_CAP = 256 * 1024;
+
 /**
  * Read just the session_meta event from a file. session_meta is always the
- * FIRST line in a codex rollout, so we only read 4KB from disk instead of
- * mapping the entire (potentially 23MB) file just to inspect line 1.
+ * FIRST line in a codex rollout, but its payload.instructions field can push
+ * line 1 past 30KB. Read incrementally until we find the newline (or hit cap)
+ * instead of mapping the entire (potentially 23MB) file.
  *
  * Cached by (path, mtime) so subsequent polls hit memory unless the file's
  * mtime changes — which the cwd field doesn't, since session_meta is written
@@ -76,18 +86,33 @@ function readSessionMeta(filePath) {
   let fd = null;
   try {
     fd = openSync(filePath, "r");
-    const buf = Buffer.alloc(4096);
-    const bytesRead = readSync(fd, buf, 0, 4096, 0);
-    if (bytesRead > 0) {
-      const head = buf.toString("utf-8", 0, bytesRead);
+    const chunks = [];
+    let totalRead = 0;
+    let firstLine = null;
+
+    while (totalRead < SESSION_META_CAP) {
+      const buf = Buffer.alloc(SESSION_META_CHUNK);
+      const bytesRead = readSync(fd, buf, 0, SESSION_META_CHUNK, totalRead);
+      if (bytesRead === 0) break; // EOF
+      chunks.push(buf.subarray(0, bytesRead));
+      totalRead += bytesRead;
+
+      // Concat-and-search is O(totalRead) per iteration but bounded by cap;
+      // simpler than tracking newline scan position across chunks.
+      const head = Buffer.concat(chunks).toString("utf-8");
       const newlineIdx = head.indexOf("\n");
-      const firstLine = newlineIdx === -1 ? head : head.slice(0, newlineIdx);
-      if (firstLine.trim()) {
-        try {
-          const event = JSON.parse(firstLine);
-          if (event.type === "session_meta") payload = event.payload;
-        } catch { /* malformed first line — leave payload null */ }
+      if (newlineIdx !== -1) {
+        firstLine = head.slice(0, newlineIdx);
+        break;
       }
+      if (bytesRead < SESSION_META_CHUNK) break; // partial chunk = EOF, no newline
+    }
+
+    if (firstLine && firstLine.trim()) {
+      try {
+        const event = JSON.parse(firstLine);
+        if (event.type === "session_meta") payload = event.payload;
+      } catch { /* malformed first line — leave payload null */ }
     }
   } catch { /* fd open failed, leave payload null */ }
   finally {
