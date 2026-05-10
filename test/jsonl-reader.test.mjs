@@ -621,6 +621,41 @@ function setupTwoPaneTimeline(fixtures) {
   };
 }
 
+function setupCodexTimeline() {
+  const fakeHome = mkdtempSync(join(tmpdir(), "amux-timeline-codex-test-"));
+  const origHome = process.env.HOME;
+  process.env.HOME = fakeHome;
+
+  const agentDir = "/fake/lsrc/codex-demo";
+  const agent = {
+    name: "codexdemo",
+    dir: agentDir,
+    panes: [{ name: "codex", cmd: "codex resume --last" }],
+  };
+  const paneDir = panePathFor(agent, 0);
+  const sessionDir = join(fakeHome, ".codex", "sessions", "2026", "05", "10");
+  mkdirSync(sessionDir, { recursive: true });
+  const events = [
+    { type: "session_meta", payload: { cwd: paneDir } },
+    { type: "event_msg", timestamp: "2026-05-10T10:00:00Z", payload: { type: "task_started", turn_id: "C1" } },
+    { type: "event_msg", timestamp: "2026-05-10T10:00:01Z", payload: { type: "user_message", message: "codex prompt" } },
+    { type: "response_item", timestamp: "2026-05-10T10:00:02Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "codex answer" }] } },
+    { type: "event_msg", timestamp: "2026-05-10T10:00:03Z", payload: { type: "task_complete", turn_id: "C1" } },
+  ];
+  writeFileSync(
+    join(sessionDir, "rollout-2026-05-10T10-00-00-codex.jsonl"),
+    events.map((e) => JSON.stringify(e)).join("\n") + "\n",
+  );
+
+  return {
+    agents: [agent],
+    cleanup: () => {
+      process.env.HOME = origHome;
+      rmSync(fakeHome, { recursive: true, force: true });
+    },
+  };
+}
+
 feature("readAllTurnsAcrossPanes: merges events from multiple panes in timestamp order", () => {
   unit("two panes with non-overlapping timestamps interleave correctly", {
     // pane 0 events run 20:00:00-20:00:03, pane 1 identical. Both use the
@@ -731,6 +766,19 @@ feature("readAllTurnsAcrossPanes: merges events from multiple panes in timestamp
     then: ["only pane 0 rows returned", (rows, { cleanup }) => {
       expect(rows.length).toBe(4);
       expect(rows.every((r) => r.pane === 0)).toBe(true);
+      cleanup();
+    }],
+  });
+
+  unit("codex panes contribute structured rows from ~/.codex sessions", {
+    given: ["one codex pane with a complete rollout", () => setupCodexTimeline()],
+    when: ["reading all rows", ({ agents }) => readAllTurnsAcrossPanes({ agents })],
+    then: ["user prompt and assistant answer are present", (rows, { cleanup }) => {
+      expect(rows.map((r) => [r.role, r.type, r.content])).toEqual([
+        ["user", "text", "codex prompt"],
+        ["assistant", "text", "codex answer"],
+      ]);
+      expect(rows.every((r) => r.agent === "codexdemo" && r.pane === 0)).toBe(true);
       cleanup();
     }],
   });

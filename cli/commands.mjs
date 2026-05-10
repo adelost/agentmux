@@ -12,7 +12,7 @@ import { extractText, extractLastTurn, classifyLines, extractSegments } from "..
 import { stripAnsi, esc, extractActivity, formatDuration } from "../lib.mjs";
 import { getContextFromPane, getContextPercent } from "../core/context.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
-import { latestCodexJsonlMtime } from "../core/codex-jsonl-reader.mjs";
+import { latestCodexJsonlMtime, readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
 import {
   groupByPane, classifyPane, previewText,
@@ -313,6 +313,13 @@ function formatTurnsForDisplay(turns) {
   return out.join("\n");
 }
 
+function readLastTurnsForPane(agent, paneIdx, paneDir, opts) {
+  const cmd = agent?.panes?.[paneIdx]?.cmd || "";
+  return /codex/i.test(cmd)
+    ? readLastTurnsCodex(paneDir, opts)
+    : readLastTurns(paneDir, opts);
+}
+
 async function cmdLog(name, flags, ctx) {
   const pane = flags.p || 0;
 
@@ -352,7 +359,7 @@ async function cmdLog(name, flags, ctx) {
     const since = parseSinceArg(flags.since);
     const grep = flags.grep ? new RegExp(flags.grep, "i") : null;
     const limit = flags.n || 3;
-    const jsonl = readLastTurns(paneDir, { limit, since, grep });
+    const jsonl = readLastTurnsForPane(agent, pane, paneDir, { limit, since, grep });
     if (jsonl && jsonl.turns.length) {
       console.log(`═══ jsonl (${jsonl.jsonlFile}) ═══`);
       console.log(formatTurnsForDisplay(jsonl.turns));
@@ -381,11 +388,11 @@ async function cmdLog(name, flags, ctx) {
     }
   }
   const limit = flags.n || 3;
-  const jsonl = readLastTurns(paneDir, { limit, since, grep });
+  const jsonl = readLastTurnsForPane(agent, pane, paneDir, { limit, since, grep });
   if (!jsonl) {
     console.error(
       `no jsonl found for '${paneDir}'. ` +
-      `Pane may not have run claude yet, or session is in a different cwd. ` +
+      `Pane may not have run claude/codex yet, or session is in a different cwd. ` +
       `Try --tmux for raw capture.`,
     );
     process.exit(1);
@@ -1015,9 +1022,9 @@ async function cmdPs(ctx, flags = {}) {
 }
 
 /**
- * Bulk-compact claude panes above a context-percent threshold.
+ * Bulk-compact coding-agent panes above a context-percent threshold.
  *
- * Rationale: a parked claude pane at 80% context costs a full re-read
+ * Rationale: a parked coding-agent pane at 80% context costs a full re-read
  * of ~800k tokens on every new turn. /compact summarizes history into
  * working memory and drops token count an order of magnitude, while
  * preserving session intent (unlike /clear which nukes it).
@@ -1705,7 +1712,7 @@ async function cmdResume(ctx) {
 }
 
 function cmdHelp() {
-  console.log(`agent - Manage Claude Code tmux sessions
+  console.log(`agent - Manage Claude Code/Codex tmux sessions
 
 Usage:
   agent                           List agents (● = running)
@@ -1719,7 +1726,7 @@ Usage:
   agent rm <name|:nr>             Remove agent
   agent stop <name|:nr>           Stop tmux session (keep config)
   agent reconcile <name|:nr>      Respawn dead service/shell panes to match config
-                                  (preserves live claude panes — use instead of stop+start
+                                  (preserves live coding-agent panes — use instead of stop+start
                                    when only services died)
   agent serve [-f]                Start Discord bridge (daemon). -f = foreground
   agent stop                      Stop Discord bridge (no arg = bridge)
@@ -1733,7 +1740,7 @@ Usage:
     --full                        Both jsonl history AND current tmux state
     --text                        [legacy] Filtered tmux extract (pre-jsonl default)
   agent wait <name|:nr> [-t S]    Wait until agent is ready
-  agent select <name|:nr> <N>     Select menu option N
+  agent select <name|:nr> [-p N] <N> Select menu option N
   agent esc <name|:nr>            Send Escape (cancel/interrupt)
   agent ps                        Show all running agents + status + context%
   agent top [--sort tokens] [-n N] Cross-session context leaderboard
@@ -1751,7 +1758,7 @@ Usage:
                                   (note: rewriting agentmux.yaml via label
                                    may drop comments; use 'amux edit' to preserve)
   agent labels [agent]            Show labels table, optionally filtered to one agent
-  agent compact [threshold=20]    Send /compact to claude panes ≥ threshold%
+  agent compact [threshold=20]    Send /compact to claude/codex panes ≥ threshold%
                                   Also requires ≥200k tokens absolute (--min-tokens N to change)
     --dry                         Show what would compact, do nothing
     --force                       Include 'working' panes (default: skip)
@@ -1958,10 +1965,11 @@ export async function dispatch(argv, ctx) {
     }
 
     case "select": {
-      if (rest.length < 2) { console.error("Usage: agent select <name|:nr> <N>"); process.exit(1); }
+      if (rest.length < 2) { console.error("Usage: agent select <name|:nr> [-p N] <N>"); process.exit(1); }
       const name = resolveAgent(rest[0], ctx.configPath);
-      const { flags } = parseFlags(rest.slice(2), FLAG_SPECS.select);
-      return cmdSelect(name, rest[1], flags, ctx);
+      const { flags, positional } = parseFlags(rest.slice(1), FLAG_SPECS.select);
+      if (!positional[0]) { console.error("Usage: agent select <name|:nr> [-p N] <N>"); process.exit(1); }
+      return cmdSelect(name, positional[0], flags, ctx);
     }
 
     case "esc": {

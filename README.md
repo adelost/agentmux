@@ -3,7 +3,7 @@
 Control Claude Code and Codex agents from your phone via Discord.
 
 ```
-Discord message → agentmux → Claude Code (tmux) → response → Discord reply
+Discord message → agentmux → Claude Code/Codex (tmux) → response → Discord reply
 ```
 
 - **Voice in, text out** - send voice messages, get them transcribed and processed
@@ -12,7 +12,7 @@ Discord message → agentmux → Claude Code (tmux) → response → Discord rep
 - **Multi-agent orchestration** - agents delegate tasks to each other via `amux` CLI
 - **Works from anywhere** - phone, tablet, another machine. Just open Discord.
 
-Works on Linux, macOS, and WSL. Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+Works on Linux, macOS, and WSL. Requires at least one supported coding agent: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or Codex CLI.
 
 ## Quick Start
 
@@ -22,7 +22,7 @@ cd agentmux
 bash bin/setup.sh
 ```
 
-Setup checks prerequisites (Node.js 20+, tmux, Claude Code), installs npm deps, and creates config files. Then follow these steps:
+Setup checks prerequisites (Node.js 20+, tmux, coding-agent CLI), installs npm deps, and creates config files. Then follow these steps:
 
 ### 1. Create a Discord Bot
 
@@ -92,7 +92,7 @@ Send a message in any created channel (e.g. `#myproject`):
 fix the bug in auth.ts
 ```
 
-agentmux sends it to Claude Code, streams progress, and replies with the result.
+agentmux sends it to the pane's configured agent, streams progress, and replies with the result.
 
 ## Multi-machine setup
 
@@ -149,12 +149,12 @@ Both connect to the same Discord server but create channels under different cate
 
 **Core**
 - Multi-agent routing (different Discord channels to different projects)
-- Multi-pane (multiple Claude Code instances per project)
+- Multi-pane (multiple Claude Code/Codex instances per project)
 - `/sync` auto-creates Discord channels from config
-- Session isolation (each pane gets its own Claude session in `.agents/N/`)
+- Session isolation (each pane gets its own agent session in `.agents/N/`)
 
 **Reliability**
-- jsonl source of truth for response extraction (no tmux parsing bugs)
+- jsonl source of truth for Claude and Codex response extraction (no tmux parsing bugs)
 - Retry loop with echo verification for prompt delivery
 - Auto-dismiss surveys and blocking prompts
 - Auto-restart on crash (`bin/start.sh`)
@@ -175,13 +175,13 @@ Both connect to the same Discord server but create channels under different cate
 
 ## Session Isolation
 
-Claude Code ties session history to the working directory. When multiple panes share the same dir, `--continue` picks up the wrong session.
+Claude Code and Codex tie session history to the working directory. When multiple panes share the same dir, resume/continue commands can pick up the wrong session.
 
 agentmux solves this automatically:
 - **Pane 0** runs in the project root
 - **Pane 1+** runs in `root/.agents/N/`
 
-Each pane gets isolated session history. `--continue` is safe on all panes. `.agents/` is auto-added to `.gitignore`. Claude Code searches upward for `CLAUDE.md`, so all panes read the project config.
+Each pane gets isolated session history. Resume/continue is safe on all panes. `.agents/` is auto-added to `.gitignore`. Claude Code searches upward for `CLAUDE.md`, so all Claude panes read the project config.
 
 agentmux auto-generates `.agents/CLAUDE.md` and `.agents/AGENTS.md` with CLI commands and orchestration hints. Claude Code reads `CLAUDE.md` and Codex reads `AGENTS.md`, both searching upward from the pane's working directory. These files survive `/compact` because they are loaded as system context, not conversation history.
 
@@ -242,7 +242,8 @@ This makes it possible to build workflows where one agent coordinates others, si
 `amux log <agent>` now defaults to **last 3 turns from the session jsonl**,
 structured as user-prompt + agent-response + tool calls. This is more reliable
 than the previous filtered tmux extract (which could return empty) and gives
-orchestrators structured history instead of terminal-rendered text.
+orchestrators structured history instead of terminal-rendered text. Claude
+panes read `~/.claude/projects/...`; Codex panes read `~/.codex/sessions/...`.
 
 | Flag | Behavior |
 |---|---|
@@ -263,7 +264,7 @@ doing something wrong.
 
 `amux ps` is a snapshot, `amux log` is per-pane. For orchestrators that want
 to *see every pane at once, kronologiskt*, 1.4.0 adds a unified cross-pane
-stream reading directly from the session jsonl files.
+stream reading directly from the session jsonl files for Claude and Codex panes.
 
 ```bash
 amux timeline                       # last 30 events across every pane
@@ -523,8 +524,8 @@ All optional (set in `.env`):
 - If the agent is stuck, type `/esc` to interrupt and try again
 - Surveys are suppressed automatically (`ANTHROPIC_DISABLE_SURVEY=1`) and auto-dismissed by the retry loop. If you still see one (e.g. from a session started before agentmux), type `/dismiss`
 
-**Restarting a stuck Claude session**
-- Send `//new` in the Discord channel to start a fresh Claude session
+**Restarting a stuck agent session**
+- Send `//new` in a Claude channel to start a fresh Claude session; for Codex, resume from the session id shown in the pane if the CLI exits
 - Or attach directly: `tmux -S /tmp/agentmux.sock attach -t myproject` and fix manually
 
 ## Tests

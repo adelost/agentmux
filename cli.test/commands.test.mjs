@@ -44,6 +44,15 @@ feature("parseFlags", () => {
     }],
   });
 
+  unit("keeps trailing menu choice positional when -p comes first", {
+    given: ["select-style args", () => ["-p", "3", "2"]],
+    when: ["parsing", (args) => parseFlags(args, { p: "number" })],
+    then: ["pane flag and choice are separated", ({ flags, positional }) => {
+      expect(flags.p).toBe(3);
+      expect(positional).toEqual(["2"]);
+    }],
+  });
+
   unit("handles --long flags", {
     given: ["args with --full", () => ["--full", "test"]],
     when: ["parsing", (args) => parseFlags(args, { full: "boolean" })],

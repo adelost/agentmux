@@ -13,6 +13,7 @@
 
 import { readdirSync, readFileSync, statSync, existsSync } from "fs";
 import { join } from "path";
+import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 
 const CLAUDE_PROJECTS_DIR = () => join(process.env.HOME, ".claude", "projects");
 
@@ -642,6 +643,33 @@ function eventsFromProjectDir(projectDir) {
   return rows;
 }
 
+function rowsFromTurns(turns) {
+  const rows = [];
+  for (const turn of turns || []) {
+    if (turn.userPrompt) {
+      rows.push({
+        timestamp: turn.timestamp || null,
+        role: "user",
+        type: "text",
+        content: turn.userPrompt,
+      });
+    }
+    for (const item of turn.items || []) {
+      rows.push({
+        timestamp: turn.endTimestamp || turn.timestamp || null,
+        role: "assistant",
+        type: item.type === "tool" ? "tool" : "text",
+        content: item.content,
+      });
+    }
+  }
+  return rows;
+}
+
+function isCodexPaneConfig(pane) {
+  return /codex/i.test(String(pane?.cmd || ""));
+}
+
 /** Compute the cwd for a given pane of an agent (matches agent.mjs:paneDir). */
 export function panePathFor(agent, paneIdx) {
   return join(agent.dir, ".agents", String(paneIdx));
@@ -669,7 +697,10 @@ export function readAllTurnsAcrossPanes(opts = {}) {
     for (let paneIdx = 0; paneIdx < panes.length; paneIdx++) {
       if (paneFilter != null && paneIdx !== paneFilter) continue;
       const paneDir = panePathFor(a, paneIdx);
-      const rows = eventsFromProjectDir(projectDirFor(paneDir));
+      const paneCfg = panes[paneIdx];
+      const rows = isCodexPaneConfig(paneCfg)
+        ? rowsFromTurns(readLastTurnsCodex(paneDir, { limit: Number.MAX_SAFE_INTEGER })?.turns || [])
+        : eventsFromProjectDir(projectDirFor(paneDir));
       for (const r of rows) {
         out.push({ ...r, agent: a.name, pane: paneIdx });
       }
