@@ -355,8 +355,18 @@ export function regenerateAgentsYaml(sourceYaml, existingAgentsYaml) {
     for (const [name, entry] of Object.entries(existing)) {
       if (entry?.id) agentIds.set(name, entry.id);
       if (entry?.discord && typeof entry.discord === "object") {
+        // Determine claudeCount from the existing yaml's pane list so the
+        // channel key reconstructs with the same -codex suffix that
+        // paneChannelName() will look up. Without this, a regen triggered
+        // by `amux label` (which doesn't re-run /sync) would drop the
+        // discord mapping for codex panes — channelMap key "ai-3" would
+        // miss when generateAgentsYaml searches for "ai-3-codex".
+        const paneList = Array.isArray(entry?.panes) ? entry.panes : [];
+        let claudeCount = paneList.findIndex((p) => /codex/i.test(p?.cmd || ""));
+        if (claudeCount < 0) claudeCount = paneList.length;
         for (const [channelId, paneIdx] of Object.entries(entry.discord)) {
-          channelMap.set(`${name}-${paneIdx}`, String(channelId));
+          const idx = Number(paneIdx);
+          channelMap.set(paneChannelName(name, idx, claudeCount), String(channelId));
         }
       }
     }
