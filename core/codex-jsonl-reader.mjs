@@ -354,26 +354,35 @@ export function latestCodexJsonlMtime(paneDir) {
 function groupCodexIntoTurns(events) {
   const turns = [];
   let current = null;
+  let pendingTurnId = null;
   // Map turn_id → turn so task_complete events that arrive late (or out
   // of order across an unrelated user_message) still close the right turn.
   const byTurnId = new Map();
 
   for (const e of events) {
+    if (e.type === "event_msg" && e.payload?.type === "task_started") {
+      const turnId = e.payload.turn_id || null;
+      if (turnId && current && !current.turnId && !current.isComplete && current.items.length === 0) {
+        current.turnId = turnId;
+        byTurnId.set(turnId, current);
+      } else {
+        pendingTurnId = turnId;
+      }
+      continue;
+    }
     if (e.type === "event_msg" && e.payload?.type === "user_message") {
       if (current) turns.push(current);
+      const turnId = pendingTurnId;
       current = {
         timestamp: e.timestamp || null,
         userPrompt: e.payload.message ?? "",
         items: [],
         endTimestamp: null,
         isComplete: false,
-        turnId: null,
+        turnId,
       };
-      continue;
-    }
-    if (e.type === "event_msg" && e.payload?.type === "task_started" && current && !current.turnId) {
-      current.turnId = e.payload.turn_id || null;
-      if (current.turnId) byTurnId.set(current.turnId, current);
+      if (turnId) byTurnId.set(turnId, current);
+      pendingTurnId = null;
       continue;
     }
     if (e.type === "event_msg" && e.payload?.type === "task_complete") {

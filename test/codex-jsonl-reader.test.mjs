@@ -320,6 +320,37 @@ feature("readLastTurnsCodex: multi-turn limit", () => {
   });
 });
 
+feature("readLastTurnsCodex: codex event ordering", () => {
+  unit("binds task_started before user_message to the following turn", {
+    given: ["two completed turns in real codex order", () => setupFakeCodex([
+      { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+      { type: "event_msg", timestamp: "2026-04-09T10:00:00Z", payload: { type: "task_started", turn_id: "A" } },
+      { type: "turn_context", timestamp: "2026-04-09T10:00:00Z", payload: { turn_id: "A" } },
+      { type: "response_item", timestamp: "2026-04-09T10:00:01Z", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "prompt A" }] } },
+      { type: "event_msg", timestamp: "2026-04-09T10:00:01Z", payload: { type: "user_message", message: "prompt A" } },
+      { type: "response_item", timestamp: "2026-04-09T10:00:02Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "response A" }] } },
+      { type: "event_msg", timestamp: "2026-04-09T10:00:03Z", payload: { type: "task_complete", turn_id: "A" } },
+      { type: "event_msg", timestamp: "2026-04-09T10:01:00Z", payload: { type: "task_started", turn_id: "B" } },
+      { type: "turn_context", timestamp: "2026-04-09T10:01:00Z", payload: { turn_id: "B" } },
+      { type: "response_item", timestamp: "2026-04-09T10:01:01Z", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "prompt B" }] } },
+      { type: "event_msg", timestamp: "2026-04-09T10:01:01Z", payload: { type: "user_message", message: "prompt B" } },
+      { type: "response_item", timestamp: "2026-04-09T10:01:02Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "response B" }] } },
+      { type: "event_msg", timestamp: "2026-04-09T10:01:03Z", payload: { type: "task_complete", turn_id: "B" } },
+    ])],
+    when: ["reading", ({ paneDir }) => readLastTurnsCodex(paneDir, { limit: 2 })],
+    then: ["both turns are complete with their own task_complete timestamps", (r, { cleanup }) => {
+      expect(r.turns.map((t) => t.userPrompt)).toEqual(["prompt A", "prompt B"]);
+      expect(r.turns.map((t) => t.turnId)).toEqual(["A", "B"]);
+      expect(r.turns.map((t) => t.isComplete)).toEqual([true, true]);
+      expect(r.turns.map((t) => t.endTimestamp)).toEqual([
+        "2026-04-09T10:00:03Z",
+        "2026-04-09T10:01:03Z",
+      ]);
+      cleanup();
+    }],
+  });
+});
+
 feature("readLastTurnsCodex: unfinished turn", () => {
   unit("returns turn with isComplete=false when task_complete is missing", {
     given: ["rollout where last task_started has no task_complete", () => setupFakeCodex([
