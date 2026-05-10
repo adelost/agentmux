@@ -10,8 +10,9 @@ import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens }
 import { hasSession, ensureAndAttach, attachSession, killSession, listPanes, getPaneStatus, sendKeys, selectOption, createTmuxContext, sendToPane } from "./tmux.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
 import { stripAnsi, esc, extractActivity, formatDuration } from "../lib.mjs";
-import { getContextFromPane } from "../core/context.mjs";
+import { getContextFromPane, getContextPercent } from "../core/context.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
+import { latestCodexJsonlMtime } from "../core/codex-jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
 import {
   groupByPane, classifyPane, previewText,
@@ -830,8 +831,30 @@ function formatDoneRow({ key, bucket }) {
 }
 
 // Pane commands that correspond to a dialect we can read context for.
-// Bash/other commands get a blank context cell.
+// Bash/other commands get a blank context cell. Codex CLI shows up as
+// "node" in tmux pane_current_command (binary is `node bin/codex.js`),
+// so we resolve its dialect via agents.yaml cmd field instead — see
+// dialectFor().
 const CONTEXT_DIALECT = { claude: "claude", codex: "codex" };
+
+/**
+ * Resolve a pane's coding-agent dialect.
+ *
+ * Direct match via tmux process name catches `claude`. Codex shows up
+ * as `node` (because its binary is node-based), so we cross-reference
+ * the configured cmd from agents.yaml when the process is generic node
+ * or matches no dialect.
+ *
+ * Returns "claude", "codex", or null for non-agent panes (bash/services).
+ */
+function dialectFor(agent, pane) {
+  const direct = CONTEXT_DIALECT[pane.command];
+  if (direct) return direct;
+  const cmd = agent?.panes?.[pane.index]?.cmd || "";
+  if (/codex/i.test(cmd)) return "codex";
+  if (/claude/i.test(cmd)) return "claude";
+  return null;
+}
 
 /** Gather status + preview + context for one pane. Safe: never throws. */
 async function inspectPane(ctx, agent, pane) {
@@ -843,13 +866,20 @@ async function inspectPane(ctx, agent, pane) {
   // Claude right-aligns its tail rows with tons of whitespace; collapse it
   // so the preview looks readable when rendered into a left-aligned column.
   const preview = (lines[lines.length - 1] || "").trim();
-  const dialect = CONTEXT_DIALECT[pane.command] || null;
+  const dialect = dialectFor(agent, pane);
   // Use the worktree pane dir, not agent.dir — same fix as cmdLog (399915f).
   // Claude Code stores its session jsonl per-cwd; each pane runs in
   // .agents/N, so getContextFromPane's max-tokens fallback must read from
   // the worktree slug, not the parent project slug.
   const paneDir = panePathFor(agent, pane.index);
-  const context = dialect === "claude" ? getContextFromPane(content, paneDir) : null;
+  // Claude: status-bar parser (capture-pane already in `content`).
+  // Codex: read directly from codex jsonl (no status-bar equivalent).
+  let context = null;
+  if (dialect === "claude") {
+    context = getContextFromPane(content, paneDir);
+  } else if (dialect === "codex") {
+    context = getContextPercent(paneDir, "codex");
+  }
 
   // Live-activity overlay: tmux-only detection can't tell an active spinner
   // ("✻ Sautéed for X" still counting up) from a frozen one (post-turn
@@ -864,8 +894,10 @@ async function inspectPane(ctx, agent, pane) {
   // `amux ps` because Claude regularly pauses 30-50s between assistant
   // text + tool calls + deep thinking; the pane is still working but
   // jsonl mtime falls outside the window.
-  if (dialect === "claude" && (status === "idle" || status === "unknown")) {
-    const mtimeMs = latestJsonlMtime(paneDir);
+  if ((dialect === "claude" || dialect === "codex") && (status === "idle" || status === "unknown")) {
+    const mtimeMs = dialect === "codex"
+      ? latestCodexJsonlMtime(paneDir)
+      : latestJsonlMtime(paneDir);
     if (mtimeMs && Date.now() - mtimeMs < 60_000) {
       status = "working";
     }
@@ -1021,17 +1053,21 @@ async function cmdCompact(ctx, flags = {}, positional = []) {
     if (!(await hasSession(ctx, a.name))) continue;
     const panes = await listPanes(ctx, a.name);
     for (const p of panes) {
-      if (p.command !== "claude") continue;
+      // Coding-agent panes only. Claude shows up as `claude` in tmux;
+      // codex shows up as `node` (binary is node-based) so we resolve
+      // dialect via dialectFor which cross-references agents.yaml cmd.
+      const dialect = dialectFor(a, p);
+      if (dialect !== "claude" && dialect !== "codex") continue;
       const { status, context } = await inspectPane(ctx, a, p);
       if (!context) continue;
       if (context.percent < threshold) continue;
       if (context.tokens < minTokens) continue;
       const unsafe = COMPACT_UNSAFE_STATUSES.has(status);
       if (unsafe && !force) {
-        skipped.push({ agent: a.name, pane: p.index, context, status });
+        skipped.push({ agent: a.name, pane: p.index, dialect, context, status });
         continue;
       }
-      targets.push({ agent: a.name, pane: p.index, context, status });
+      targets.push({ agent: a.name, pane: p.index, dialect, context, status });
     }
   }
 
@@ -1050,7 +1086,7 @@ async function cmdCompact(ctx, flags = {}, positional = []) {
     }
   }
   if (!targets.length && !skipped.length) {
-    console.log(`\nNo claude panes above ${threshold}%. Nothing to do.`);
+    console.log(`\nNo claude/codex panes above ${threshold}%. Nothing to do.`);
     return;
   }
 
