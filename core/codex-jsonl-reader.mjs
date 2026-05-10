@@ -12,10 +12,18 @@
 // extraction uses response_item 'message' events with role=assistant plus
 // function_call events.
 
-import { readdirSync, readFileSync, statSync, existsSync } from "fs";
+import { readdirSync, readFileSync, statSync, existsSync, openSync, readSync, closeSync } from "fs";
 import { join } from "path";
 
 const CODEX_SESSIONS_DIR = () => join(process.env.HOME, ".codex", "sessions");
+
+// Cache session_meta payload by file path. session_meta is the first event
+// in a rollout file and is immutable for the lifetime of the session, so we
+// only re-parse when mtime changes (which it won't for cwd, but invalidates
+// cleanly if the user edits the file e.g. to fix a wrong cwd). Without
+// this, latestSessionFor() reads every jsonl file (potentially 23MB each,
+// hundreds of them) on every poll tick — saturating the bridge at 90% CPU.
+const sessionMetaCache = new Map(); // filePath → { mtimeMs, payload }
 
 /** Walk a directory tree (bounded depth) and return all .jsonl file paths. */
 function findJsonlFiles(dir, depth = 0, acc = []) {
@@ -47,20 +55,47 @@ function parseJsonl(filePath) {
   }
 }
 
-/** Read just the session_meta event (first line, usually) from a file. */
+/**
+ * Read just the session_meta event from a file. session_meta is always the
+ * FIRST line in a codex rollout, so we only read 4KB from disk instead of
+ * mapping the entire (potentially 23MB) file just to inspect line 1.
+ *
+ * Cached by (path, mtime) so subsequent polls hit memory unless the file's
+ * mtime changes — which the cwd field doesn't, since session_meta is written
+ * once at session start and never rewritten.
+ */
 function readSessionMeta(filePath) {
+  let mtimeMs;
+  try { mtimeMs = statSync(filePath).mtimeMs; }
+  catch { return null; }
+
+  const cached = sessionMetaCache.get(filePath);
+  if (cached && cached.mtimeMs === mtimeMs) return cached.payload;
+
+  let payload = null;
+  let fd = null;
   try {
-    const content = readFileSync(filePath, "utf-8");
-    for (const line of content.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line);
-        if (event.type === "session_meta") return event.payload;
-      } catch { /* skip */ }
-      break; // only check first few lines
+    fd = openSync(filePath, "r");
+    const buf = Buffer.alloc(4096);
+    const bytesRead = readSync(fd, buf, 0, 4096, 0);
+    if (bytesRead > 0) {
+      const head = buf.toString("utf-8", 0, bytesRead);
+      const newlineIdx = head.indexOf("\n");
+      const firstLine = newlineIdx === -1 ? head : head.slice(0, newlineIdx);
+      if (firstLine.trim()) {
+        try {
+          const event = JSON.parse(firstLine);
+          if (event.type === "session_meta") payload = event.payload;
+        } catch { /* malformed first line — leave payload null */ }
+      }
     }
-  } catch {}
-  return null;
+  } catch { /* fd open failed, leave payload null */ }
+  finally {
+    if (fd !== null) { try { closeSync(fd); } catch { /* swallow */ } }
+  }
+
+  sessionMetaCache.set(filePath, { mtimeMs, payload });
+  return payload;
 }
 
 /**
