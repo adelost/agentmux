@@ -8,6 +8,36 @@ import { countTurnsSince, panePathFor, readLastTurns } from "./core/jsonl-reader
 import { checkLoopGuard, loopGuardKey, formatLoopGuardWarning, readLoopGuardConfig } from "./core/loop-guard.mjs";
 import { formatCatchupPreview } from "./core/catchup-format.mjs";
 
+/**
+ * Reconcile every configured agent's live tmux session against the
+ * regenerated config. Per-agent failures are isolated: one broken agent
+ * must not stop the others. Only summaries with actual deltas (added
+ * panes, respawns, mismatches) are returned so callers' summary lines
+ * stay focused on what changed.
+ *
+ * Exported so the same flow can be tested in isolation and shared
+ * between the /sync Discord handler and the CLI-triggered triggerSync.
+ *
+ * @param {object} agent - agent module with reconcileSession(name)
+ * @param {Iterable<string>} agentNames - agents to reconcile, in order
+ * @param {(msg: string) => void} [log=console.warn] - per-agent error logger
+ * @returns {Promise<object[]>} summaries with at least one delta field set
+ */
+export async function reconcileAllSessions(agent, agentNames, log = (msg) => console.warn(msg)) {
+  const summaries = [];
+  for (const name of agentNames) {
+    try {
+      const summary = await agent.reconcileSession(name);
+      if (summary && !summary.skipped && (summary.added || summary.respawned?.length || summary.mismatches?.length || summary.extras)) {
+        summaries.push(summary);
+      }
+    } catch (err) {
+      log(`sync: reconcile ${name} failed: ${err.message}`);
+    }
+  }
+  return summaries;
+}
+
 // We used to unlink Discord-attachment tmp files after a grace period.
 // Removed in 1.16.37: the OS already cleans /tmp via systemd-tmpfiles
 // (10d default) and a reboot wipes it entirely. Aggressive cleanup
@@ -291,21 +321,12 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         // Reconcile live tmux sessions against the freshly-regenerated config.
         // Fixes the case where agentmux.yaml `panes` changed but the running
         // session still has old panes with wrong commands (bash where claude
-        // is expected, etc).
-        const reconcileSummaries = [];
+        // is expected, etc). Shared with the CLI-triggered triggerSync path.
+        let reconcileSummaries = [];
         try {
           const { parseConfig } = await import("./sync.mjs");
           const cfg = parseConfig(configYaml);
-          for (const agentName of cfg.agents.keys()) {
-            try {
-              const summary = await agent.reconcileSession(agentName);
-              if (summary && !summary.skipped && (summary.added || summary.respawned.length || summary.mismatches?.length || summary.extras)) {
-                reconcileSummaries.push(summary);
-              }
-            } catch (err) {
-              console.warn(`/sync: reconcile ${agentName} failed: ${err.message}`);
-            }
-          }
+          reconcileSummaries = await reconcileAllSessions(agent, cfg.agents.keys(), (msg) => console.warn(msg));
         } catch (err) {
           console.warn(`/sync: reconcile skipped: ${err.message}`);
         }
@@ -631,10 +652,19 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     try {
       console.log("sync: starting (CLI-triggered)");
       const configYaml = readFileSync(agentmuxYamlPath, "utf-8");
-      const { guild: guildId } = await import("./sync.mjs").then((m) => m.parseConfig(configYaml));
+      const { parseConfig } = await import("./sync.mjs");
+      const { guild: guildId } = parseConfig(configYaml);
       const guild = await discordChannel.getGuild(guildId);
       const results = await executeSync({ guild, configYaml, state, agentsYamlPath });
       reloadConfig();
+
+      // Reconcile live tmux sessions against the freshly-regenerated config.
+      // Mirrors /sync Discord handler: changes to agentmux.yaml `panes` (e.g.
+      // adding `codex: 2`) need split-window calls to materialize the new
+      // tmux panes; without this, agents.yaml lists them but tmux is empty
+      // until the next ensureReady call (which only fires on first message).
+      const reconcileSummaries = await reconcileAllSessions(agent, parseConfig(configYaml).agents.keys());
+
       const summary = [];
       if (results.created.length) summary.push(`created: ${results.created.join(", ")}`);
       if (results.renamed?.length) summary.push(`renamed: ${results.renamed.join(", ")}`);
@@ -642,6 +672,13 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       if (results.orphaned.length) summary.push(`orphaned (not deleted): ${results.orphaned.join(", ")}`);
       const total = results.created.length + (results.renamed?.length || 0) + results.existing.length;
       summary.push(`${total} channel(s) synced`);
+      for (const s of reconcileSummaries) {
+        const parts = [];
+        if (s.added) parts.push(`+${s.added} pane(s)`);
+        if (s.respawned.length) parts.push(`respawned ${s.respawned.length}`);
+        if (s.mismatches?.length) parts.push(`${s.mismatches.length} mismatch(es)`);
+        if (parts.length) summary.push(`${s.name}: ${parts.join(", ")}`);
+      }
       console.log(`sync done. ${summary.join(" | ")}`);
 
       // New channels = new panes added to agents.yaml. SIGHUP reloads
@@ -657,7 +694,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         process.kill(process.pid, "SIGUSR2");
       }
 
-      return { ok: true, results, summary };
+      return { ok: true, results, summary, reconcileSummaries };
     } catch (err) {
       console.error(`sync failed: ${err.message}`);
       return { ok: false, error: err.message };
@@ -665,6 +702,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       state.set("syncRunning", false);
     }
   }
+
 
   return { onMessage, triggerSync };
 }

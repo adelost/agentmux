@@ -79,6 +79,11 @@ const tmuxExec = (cmd) =>
 const appState = createState(STATE_FILE);
 if (appState.get("tts") === undefined) appState.set("tts", process.env.TTS === "1");
 if (appState.get("thinking") === undefined) appState.set("thinking", true);
+// Clear transient flags that should never survive a bridge restart.
+// `syncRunning` is in-flight only during executeSync; if a prior bridge
+// crashed mid-sync the persisted true blocks every subsequent trigger
+// until manually cleared. Same lock-file-on-boot reasoning as init scripts.
+appState.set("syncRunning", false);
 
 // Mutable hook so the agent can fire a resume-hint Discord-mirror without
 // importing the discord channel directly. Wired up below once `discord`
