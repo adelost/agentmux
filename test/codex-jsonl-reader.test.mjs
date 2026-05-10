@@ -6,6 +6,9 @@ import {
   extractFromCodexJsonl,
   isBusyFromCodexJsonl,
   isPromptInCodexJsonl,
+  readLastTurnsCodex,
+  latestCodexJsonlMtime,
+  latestCodexSessionFor,
 } from "../core/codex-jsonl-reader.mjs";
 
 /**
@@ -259,6 +262,181 @@ feature("isPromptInCodexJsonl", () => {
     when: ["checking", ({ paneDir }) => isPromptInCodexJsonl(paneDir, "never sent")],
     then: ["not found", (r, { cleanup }) => {
       expect(r).toBe(false);
+      cleanup();
+    }],
+  });
+});
+
+// --- readLastTurnsCodex -------------------------------------------------
+
+feature("readLastTurnsCodex: single-turn complete rollout", () => {
+  unit("returns one complete turn with text + tool items", {
+    given: ["rollout with assistant text and function_call", () => setupFakeCodex([
+      { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+      { type: "event_msg", timestamp: "2026-04-09T10:00:00Z", payload: { type: "task_started", turn_id: "T1" } },
+      { type: "event_msg", timestamp: "2026-04-09T10:00:01Z", payload: { type: "user_message", message: "do the thing" } },
+      { type: "response_item", timestamp: "2026-04-09T10:00:05Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "starting work" }] } },
+      { type: "response_item", timestamp: "2026-04-09T10:00:06Z", payload: { type: "function_call", name: "exec_command", arguments: '{"cmd":"ls -la"}' } },
+      { type: "event_msg", timestamp: "2026-04-09T10:00:10Z", payload: { type: "task_complete", turn_id: "T1" } },
+    ])],
+    when: ["reading", ({ paneDir }) => readLastTurnsCodex(paneDir)],
+    then: ["one complete turn with both items", (r, { cleanup }) => {
+      expect(r.turns).toHaveLength(1);
+      const t = r.turns[0];
+      expect(t.userPrompt).toBe("do the thing");
+      expect(t.timestamp).toBe("2026-04-09T10:00:01Z");
+      expect(t.isComplete).toBe(true);
+      expect(t.endTimestamp).toBe("2026-04-09T10:00:10Z");
+      expect(t.items).toHaveLength(2);
+      expect(t.items[0]).toEqual({ type: "text", content: "starting work" });
+      expect(t.items[1].type).toBe("tool");
+      expect(t.items[1].content).toContain("ls -la");
+      cleanup();
+    }],
+  });
+});
+
+feature("readLastTurnsCodex: multi-turn limit", () => {
+  unit("returns latest N turns when limit < total", {
+    given: ["3-turn rollout", () => {
+      const events = [
+        { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+      ];
+      for (const id of ["A", "B", "C"]) {
+        events.push(
+          { type: "event_msg", payload: { type: "task_started", turn_id: id } },
+          { type: "event_msg", payload: { type: "user_message", message: `prompt ${id}` } },
+          { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: `response ${id}` }] } },
+          { type: "event_msg", payload: { type: "task_complete", turn_id: id } },
+        );
+      }
+      return setupFakeCodex(events);
+    }],
+    when: ["reading with limit=2", ({ paneDir }) => readLastTurnsCodex(paneDir, { limit: 2 })],
+    then: ["last 2 turns: B, C", (r, { cleanup }) => {
+      expect(r.turns.map((t) => t.userPrompt)).toEqual(["prompt B", "prompt C"]);
+      cleanup();
+    }],
+  });
+});
+
+feature("readLastTurnsCodex: unfinished turn", () => {
+  unit("returns turn with isComplete=false when task_complete is missing", {
+    given: ["rollout where last task_started has no task_complete", () => setupFakeCodex([
+      { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+      { type: "event_msg", payload: { type: "task_started", turn_id: "X" } },
+      { type: "event_msg", payload: { type: "user_message", message: "in progress" } },
+      { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "still thinking..." }] } },
+    ])],
+    when: ["reading", ({ paneDir }) => readLastTurnsCodex(paneDir)],
+    then: ["one turn marked incomplete", (r, { cleanup }) => {
+      expect(r.turns).toHaveLength(1);
+      expect(r.turns[0].isComplete).toBe(false);
+      expect(r.turns[0].userPrompt).toBe("in progress");
+      cleanup();
+    }],
+  });
+});
+
+feature("readLastTurnsCodex: reasoning events skipped", () => {
+  unit("does not include reasoning blocks in items", {
+    given: ["rollout with reasoning + assistant text", () => setupFakeCodex([
+      { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+      { type: "event_msg", payload: { type: "task_started", turn_id: "R" } },
+      { type: "event_msg", payload: { type: "user_message", message: "think" } },
+      { type: "response_item", payload: { type: "reasoning", summary: [{ type: "summary_text", text: "internal reasoning" }] } },
+      { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "the answer" }] } },
+      { type: "event_msg", payload: { type: "task_complete", turn_id: "R" } },
+    ])],
+    when: ["reading", ({ paneDir }) => readLastTurnsCodex(paneDir)],
+    then: ["only the assistant text appears, reasoning skipped", (r, { cleanup }) => {
+      expect(r.turns[0].items).toHaveLength(1);
+      expect(r.turns[0].items[0]).toEqual({ type: "text", content: "the answer" });
+      cleanup();
+    }],
+  });
+});
+
+feature("readLastTurnsCodex: no matching session", () => {
+  unit("returns null when paneDir has no session", {
+    given: ["fake home with no codex sessions", () => {
+      const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-codex-empty-"));
+      const origHome = process.env.HOME;
+      process.env.HOME = fakeHome;
+      return {
+        cleanup: () => {
+          process.env.HOME = origHome;
+          rmSync(fakeHome, { recursive: true, force: true });
+        },
+      };
+    }],
+    when: ["reading", () => readLastTurnsCodex("/some/empty/dir")],
+    then: ["returns null", (r, { cleanup }) => {
+      expect(r).toBe(null);
+      cleanup();
+    }],
+  });
+});
+
+feature("readLastTurnsCodex: tool-only turn", () => {
+  unit("returns turn with only function_call items, no text", {
+    given: ["rollout where assistant only calls a tool, no text", () => setupFakeCodex([
+      { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+      { type: "event_msg", payload: { type: "task_started", turn_id: "T" } },
+      { type: "event_msg", payload: { type: "user_message", message: "run ls" } },
+      { type: "response_item", payload: { type: "function_call", name: "exec_command", arguments: '{"cmd":"ls"}' } },
+      { type: "event_msg", payload: { type: "task_complete", turn_id: "T" } },
+    ])],
+    when: ["reading", ({ paneDir }) => readLastTurnsCodex(paneDir)],
+    then: ["turn has one tool item, no text items", (r, { cleanup }) => {
+      expect(r.turns[0].items).toHaveLength(1);
+      expect(r.turns[0].items[0].type).toBe("tool");
+      cleanup();
+    }],
+  });
+});
+
+feature("latestCodexJsonlMtime", () => {
+  unit("returns mtime of the matched session in epoch ms", {
+    given: ["a single rollout", () => setupFakeCodex([
+      { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+    ])],
+    when: ["reading mtime", ({ paneDir }) => latestCodexJsonlMtime(paneDir)],
+    then: ["positive number", (r, { cleanup }) => {
+      expect(typeof r).toBe("number");
+      expect(r).toBeGreaterThan(0);
+      cleanup();
+    }],
+  });
+
+  unit("returns null when no session matches", {
+    given: ["empty fake home", () => {
+      const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-codex-mtime-"));
+      const origHome = process.env.HOME;
+      process.env.HOME = fakeHome;
+      return {
+        cleanup: () => {
+          process.env.HOME = origHome;
+          rmSync(fakeHome, { recursive: true, force: true });
+        },
+      };
+    }],
+    when: ["reading mtime", () => latestCodexJsonlMtime("/some/empty/dir")],
+    then: ["null", (r, { cleanup }) => {
+      expect(r).toBe(null);
+      cleanup();
+    }],
+  });
+});
+
+feature("latestCodexSessionFor", () => {
+  unit("exposes the same matching as the internal lookup", {
+    given: ["a single rollout in fake home", () => setupFakeCodex([
+      { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+    ])],
+    when: ["looking up", ({ paneDir }) => latestCodexSessionFor(paneDir)],
+    then: ["returns a path containing rollout-", (r, { cleanup }) => {
+      expect(r).toMatch(/rollout-/);
       cleanup();
     }],
   });

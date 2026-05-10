@@ -32,6 +32,71 @@ function mkDiscord({ paceMs = 0 } = {}) {
   };
 }
 
+/**
+ * Codex variant of setupWatcher. Writes a rollout file under
+ * ~/.codex/sessions/YYYY/MM/DD/ with session_meta.cwd === paneDir, so
+ * the Codex reader's latestSessionFor() picks it up. Mirrors the Claude
+ * helper's contract so tests stay parallel-readable.
+ */
+function setupCodexWatcher({ codexEvents = [], stateInitial = {} } = {}) {
+  const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-watcher-codex-test-"));
+  const origHome = process.env.HOME;
+  process.env.HOME = fakeHome;
+
+  const agentRootDir = join(fakeHome, "workspace");
+  mkdirSync(agentRootDir, { recursive: true });
+  writeFileSync(join(agentRootDir, ".gitignore"), ".agents/\n");
+  const paneDirPath = join(agentRootDir, ".agents", "0");
+  mkdirSync(paneDirPath, { recursive: true });
+
+  const sessionDir = join(fakeHome, ".codex", "sessions", "2026", "05", "10");
+  mkdirSync(sessionDir, { recursive: true });
+  const rolloutPath = join(sessionDir, "rollout-2026-05-10T00-00-00-test.jsonl");
+  // Inject session_meta with cwd matching paneDir so latestSessionFor matches.
+  const events = [{ type: "session_meta", payload: { cwd: paneDirPath } }, ...codexEvents];
+  writeFileSync(rolloutPath, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+
+  const agentsYamlPath = join(fakeHome, "agents.yaml");
+  writeFileSync(agentsYamlPath, [
+    "testagent:",
+    `  dir: ${agentRootDir}`,
+    "  panes:",
+    "    - cmd: codex resume --last --dangerously-bypass-approvals-and-sandbox",
+    "  discord:",
+    "    \"ch-codex\": 0",
+    "",
+  ].join("\n"));
+
+  const agent = {
+    capturePane: vi.fn(async () => ""),
+    getContextPercent: vi.fn(() => null),
+  };
+  const discord = mkDiscord();
+  const state = mkState(stateInitial);
+
+  const watcher = createJsonlWatcher({
+    agent,
+    agentsYamlPath,
+    discord,
+    state,
+    log: () => {},
+  });
+
+  return {
+    watcher,
+    discord,
+    state,
+    agent,
+    rolloutPath,
+    agentRootDir,
+    cleanup: () => {
+      watcher.stop();
+      process.env.HOME = origHome;
+      rmSync(fakeHome, { recursive: true, force: true });
+    },
+  };
+}
+
 function setupWatcher({ jsonlLines = [], stateInitial = {} } = {}) {
   const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-watcher-test-"));
   const origHome = process.env.HOME;
@@ -350,6 +415,79 @@ feature("watcher: continuation after intermediate post (the 1.16.46 regression)"
       // Diff-posts: must NOT contain the already-posted tool-uses
       expect(text).not.toContain("grep -r account /memory");
       expect(text).not.toContain("ls config");
+      ctx.cleanup();
+    }],
+  });
+});
+
+// --- Codex pane dispatch -------------------------------------------------
+
+feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/projects", () => {
+  unit("posts assistant text from a complete codex turn", {
+    given: ["agents.yaml has cmd: codex and a complete turn rollout exists", () => {
+      const oldStamp = Date.now() - 60_000; // older than COMPLETION_GRACE_MS so post fires
+      const oldIso = new Date(oldStamp).toISOString();
+      const ctx = setupCodexWatcher({
+        codexEvents: [
+          { type: "event_msg", timestamp: oldIso, payload: { type: "task_started", turn_id: "X" } },
+          { type: "event_msg", timestamp: oldIso, payload: { type: "user_message", message: "test prompt" } },
+          { type: "response_item", timestamp: oldIso, payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "codex reply text" }] } },
+          { type: "event_msg", timestamp: oldIso, payload: { type: "task_complete", turn_id: "X" } },
+        ],
+        // Seed lastPosted so the watcher considers this turn fresh enough
+        // to post (otherwise first-time channels just stamp + skip).
+        stateInitial: {
+          watcher_last_posted_ts: { "ch-codex": oldStamp - 10_000 },
+        },
+      });
+      return ctx;
+    }],
+    when: ["watcher.checkPane runs", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["codex assistant text was posted to Discord", (ctx) => {
+      const contentSends = ctx.discord.sends.filter(
+        (s) => typeof s.payload === "string"
+          ? !/^_context:/.test(s.payload)
+          : !/^_context:/.test(s.payload?.content || ""),
+      );
+      expect(contentSends.length).toBeGreaterThan(0);
+      const text = typeof contentSends[0].payload === "string"
+        ? contentSends[0].payload
+        : contentSends[0].payload.content;
+      expect(text).toContain("codex reply text");
+      ctx.cleanup();
+    }],
+  });
+
+  unit("does not post anything when codex turn is still streaming (no task_complete)", {
+    given: ["a fresh in-progress turn with no task_complete event", () => {
+      const nowIso = new Date().toISOString();
+      const ctx = setupCodexWatcher({
+        codexEvents: [
+          { type: "event_msg", timestamp: nowIso, payload: { type: "task_started", turn_id: "Y" } },
+          { type: "event_msg", timestamp: nowIso, payload: { type: "user_message", message: "still going" } },
+          { type: "response_item", timestamp: nowIso, payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "partial..." }] } },
+          // No task_complete on purpose
+        ],
+        stateInitial: {
+          watcher_last_posted_ts: { "ch-codex": Date.now() - 60_000 },
+        },
+      });
+      return ctx;
+    }],
+    when: ["watcher.checkPane runs immediately", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["nothing posted (turn still in flight, grace not elapsed)", (ctx) => {
+      const contentSends = ctx.discord.sends.filter(
+        (s) => typeof s.payload === "string"
+          ? !/^_context:/.test(s.payload)
+          : !/^_context:/.test(s.payload?.content || ""),
+      );
+      expect(contentSends.length).toBe(0);
       ctx.cleanup();
     }],
   });

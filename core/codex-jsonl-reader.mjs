@@ -306,3 +306,158 @@ export function extractFromCodexJsonl(paneDir, promptText = null) {
   const raw = merged.map((i) => (i.type === "tool" ? `[tool] ${i.content}` : i.content)).join("\n\n");
   return { items: merged, raw, turn: raw, source: "codex-jsonl", jsonlFile: file };
 }
+
+/**
+ * Latest codex session jsonl file matching a paneDir, or null when none.
+ * Public wrapper around the internal latestSessionFor() so the watcher can
+ * dispatch fs.watch + freshness checks against the right file.
+ */
+export function latestCodexSessionFor(paneDir) {
+  return latestSessionFor(paneDir);
+}
+
+/**
+ * Latest codex jsonl mtime for a pane in epoch ms, or null when no
+ * matching session exists. Cheap, single fs.stat. Mirrors the claude
+ * latestJsonlMtime() helper so the watcher's freshness/grace logic can be
+ * dialect-dispatched without if-claude/else-codex sprinkled everywhere.
+ */
+export function latestCodexJsonlMtime(paneDir) {
+  const file = latestSessionFor(paneDir);
+  if (!file) return null;
+  try { return statSync(file).mtimeMs; }
+  catch { return null; }
+}
+
+/**
+ * Group codex events into the same turn-shape readLastTurns() returns for
+ * Claude, so the jsonl-watcher can drive the post pipeline dialect-agnostic.
+ *
+ * Turn boundaries:
+ *   - event_msg:user_message starts a new turn (carries timestamp + prompt)
+ *   - response_item:message (role=assistant) text blocks → text items
+ *   - response_item:function_call → tool items (Discord sees tool-only progress)
+ *   - event_msg:task_complete → isComplete=true + endTimestamp captured
+ *   - reasoning events skipped (same as Claude thinking blocks)
+ *
+ * Adjacent text items merged with double-newline separator (same as Claude).
+ *
+ * @returns {Array<{
+ *   timestamp: string|null,
+ *   userPrompt: string,
+ *   items: Array<{type:"text"|"tool", content:string}>,
+ *   endTimestamp: string|null,
+ *   isComplete: boolean,
+ *   turnId: string|null,
+ * }>}
+ */
+function groupCodexIntoTurns(events) {
+  const turns = [];
+  let current = null;
+  // Map turn_id → turn so task_complete events that arrive late (or out
+  // of order across an unrelated user_message) still close the right turn.
+  const byTurnId = new Map();
+
+  for (const e of events) {
+    if (e.type === "event_msg" && e.payload?.type === "user_message") {
+      if (current) turns.push(current);
+      current = {
+        timestamp: e.timestamp || null,
+        userPrompt: e.payload.message ?? "",
+        items: [],
+        endTimestamp: null,
+        isComplete: false,
+        turnId: null,
+      };
+      continue;
+    }
+    if (e.type === "event_msg" && e.payload?.type === "task_started" && current && !current.turnId) {
+      current.turnId = e.payload.turn_id || null;
+      if (current.turnId) byTurnId.set(current.turnId, current);
+      continue;
+    }
+    if (e.type === "event_msg" && e.payload?.type === "task_complete") {
+      const target = byTurnId.get(e.payload.turn_id) || current;
+      if (target) {
+        target.isComplete = true;
+        if (e.timestamp) target.endTimestamp = e.timestamp;
+      }
+      continue;
+    }
+    if (e.type !== "response_item" || !current) continue;
+    const p = e.payload;
+    if (!p) continue;
+
+    if (p.type === "message" && p.role === "assistant" && Array.isArray(p.content)) {
+      for (const block of p.content) {
+        if (block.type === "output_text" && typeof block.text === "string") {
+          const text = block.text.trim();
+          if (text) current.items.push({ type: "text", content: text });
+        }
+      }
+      if (e.timestamp) current.endTimestamp = e.timestamp;
+    } else if (p.type === "function_call") {
+      current.items.push({ type: "tool", content: formatCodexToolCall(p) });
+      if (e.timestamp) current.endTimestamp = e.timestamp;
+    }
+    // p.type === "reasoning" → intentionally skipped (mirrors Claude thinking blocks)
+  }
+  if (current) turns.push(current);
+
+  // Merge adjacent text items per turn
+  for (const turn of turns) {
+    const merged = [];
+    for (const item of turn.items) {
+      const last = merged[merged.length - 1];
+      if (last && last.type === "text" && item.type === "text") {
+        last.content = last.content + "\n\n" + item.content;
+      } else {
+        merged.push({ ...item });
+      }
+    }
+    turn.items = merged;
+  }
+  return turns;
+}
+
+/**
+ * Read the last N turns from the most-recent codex session matching paneDir.
+ * Same shape + semantics as readLastTurns() in jsonl-reader.mjs so the
+ * watcher can dispatch on dialect without branching the post pipeline.
+ *
+ * @param {string} paneDir - The pane's cwd
+ * @param {object} [opts]
+ * @param {number} [opts.limit=3]
+ * @param {Date|null} [opts.since]
+ * @param {RegExp|null} [opts.grep]
+ * @returns {{ turns: Array<object>, jsonlFile: string } | null}
+ */
+export function readLastTurnsCodex(paneDir, opts = {}) {
+  const { limit = 3, since = null, grep = null } = opts;
+  const file = latestSessionFor(paneDir);
+  if (!file) return null;
+
+  const events = parseJsonl(file);
+  if (events.length === 0) return { turns: [], jsonlFile: file };
+
+  let turns = groupCodexIntoTurns(events);
+
+  if (since) {
+    turns = turns.filter((t) => {
+      if (!t.timestamp) return true;
+      const d = new Date(t.timestamp);
+      return !Number.isNaN(d.getTime()) && d >= since;
+    });
+  }
+
+  if (grep) {
+    turns = turns.filter((t) => {
+      if (grep.test(t.userPrompt)) return true;
+      return t.items.some((i) => grep.test(i.content));
+    });
+  }
+
+  if (turns.length > limit) turns = turns.slice(-limit);
+
+  return { turns, jsonlFile: file };
+}

@@ -38,6 +38,7 @@ import { splitMessage, extractImageMarkers, validateImagePath } from "../lib.mjs
 import { loadConfig, findChannelForPane } from "../cli/config.mjs";
 import { paneDir } from "../agent.mjs";
 import { readLastTurns, latestJsonlMtime } from "../core/jsonl-reader.mjs";
+import { readLastTurnsCodex, latestCodexJsonlMtime } from "../core/codex-jsonl-reader.mjs";
 import { getContextFromPane } from "../core/context.mjs";
 
 const DEFAULT_POLL_MS = 15_000;
@@ -251,6 +252,23 @@ export function createJsonlWatcher({
 
   // --- core check ----------------------------------------------------------
 
+  /**
+   * Determine which jsonl reader to use for a pane.
+   * Codex panes have cmd containing "codex" in agents.yaml. Anything else
+   * (claude, claude-2, …) falls through to the Claude reader. Unknown
+   * panes default to Claude — same behavior as before this dispatch.
+   */
+  function readerFor(name, idx) {
+    try {
+      const cfg = loadConfig(agentsYamlPath);
+      const cmd = cfg?.[name]?.panes?.[idx]?.cmd || "";
+      if (/codex/i.test(cmd)) {
+        return { readTurns: readLastTurnsCodex, latestMtime: latestCodexJsonlMtime };
+      }
+    } catch { /* fall through to claude default */ }
+    return { readTurns: readLastTurns, latestMtime: latestJsonlMtime };
+  }
+
   async function checkPane(name, idx, agentDir) {
     const key = paneKey(name, idx);
     if (inFlight.has(key)) return; // coalesce overlapping fs.watch + poll triggers
@@ -260,7 +278,8 @@ export function createJsonlWatcher({
       if (!channelId) return;
 
       const dir = paneDir(agentDir, idx);
-      const result = readLastTurns(dir, { limit: TURN_LOOKBACK });
+      const { readTurns, latestMtime } = readerFor(name, idx);
+      const result = readTurns(dir, { limit: TURN_LOOKBACK });
       if (!result?.turns?.length) return;
 
       // First-time channel — stamp now, don't backpost history.
@@ -279,7 +298,9 @@ export function createJsonlWatcher({
       // don't bump turn.endTimestamp. A fresh mtime means the session is
       // alive and writing, so a stale endTimestamp is just "agent waiting
       // for tool result", not "turn dead". Used by the grace check below.
-      const mtimeMs = latestJsonlMtime(dir);
+      // Dialect-dispatched: codex sessions live under ~/.codex/sessions,
+      // claude sessions under ~/.claude/projects.
+      const mtimeMs = latestMtime(dir);
 
       // Walk turns oldest → newest among the lookback, post any that
       // are after the checkpoint AND deemed complete. Diff-posts: each
@@ -423,7 +444,10 @@ export function createJsonlWatcher({
         const cmd = entry.panes[i]?.cmd || "";
         if (!/^(claude|codex)/.test(cmd)) continue;
         const dir = paneDir(entry.dir, i);
-        const mtimeMs = latestJsonlMtime(dir);
+        // Dialect-dispatched mtime: codex sessions live under
+        // ~/.codex/sessions, not ~/.claude/projects. Without this, codex
+        // pane fs writes never show as fresh and typing-indicator stays off.
+        const mtimeMs = /codex/i.test(cmd) ? latestCodexJsonlMtime(dir) : latestJsonlMtime(dir);
         if (!mtimeMs || now - mtimeMs > TYPING_FRESHNESS_MS) continue;
         maybeSendTyping(name, i);
       }
