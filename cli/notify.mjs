@@ -3,7 +3,7 @@
 
 import { createEventLogger } from "./events.mjs";
 import { detectPaneStatus } from "./format.mjs";
-import { sendToChannel, sendToSession } from "./send-notify.mjs";
+import { sendToChannel, sendToSession, notifyUser as sendToUser } from "./send-notify.mjs";
 import { stripAnsi } from "../lib.mjs";
 
 const PROGRESS_MILESTONES = [60, 300, 600]; // seconds
@@ -12,8 +12,8 @@ const PROGRESS_MILESTONES = [60, 300, 600]; // seconds
  * Poll agent until done, then notify via Discord/session.
  * Designed to run as a detached background process.
  */
-export async function notifyWorker({ name, pane, timeout, notifyChannel, msgSession, prompt, agent }) {
-  const notify = buildNotifier(notifyChannel, msgSession);
+export async function notifyWorker({ name, pane, timeout, notifyChannel, msgSession, notifyUser = false, prompt, agent }) {
+  const notify = buildNotifier(notifyChannel, msgSession, notifyUser);
   const log = createEventLogger({ notify });
   const startTime = Date.now();
   const deadline = startTime + timeout * 1000;
@@ -109,13 +109,18 @@ export function spawnNotifyWorker(opts) {
 
 // --- Helpers ---
 
-function buildNotifier(channel, session) {
+function buildNotifier(channel, session, notifyUser) {
   return async (message) => {
     const promises = [];
     if (channel) promises.push(sendToChannel(channel, message).catch(() => {}));
     if (session) promises.push(sendToSession(session, message).catch(() => {}));
+    if (notifyUser) promises.push(sendToUser(message, { level: notifyLevel(message), title: "agentmux" }).catch(() => {}));
     await Promise.all(promises);
   };
+}
+
+function notifyLevel(message) {
+  return /ERROR|FAILED|STUCK|TIMEOUT|MENU|PERMISSION|CRASH|❌|⚠️|🔐|📋|⏰/.test(message) ? "warn" : "done";
 }
 
 async function safeGetStatus(agent, name, pane) {

@@ -5,7 +5,8 @@
 // be a `connect` req with auth token; after hello-ok, subsequent methods
 // use `{type: "req", id, method, params}` format.
 
-import { readFileSync, existsSync, writeFileSync } from "fs";
+import { createHash } from "crypto";
+import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
 const GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789";
@@ -17,6 +18,8 @@ const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || (() => {
 })();
 
 const CHANNEL_CACHE = join(process.env.HOME, ".openclaw/.channel-cache.json");
+const NOTIFY_USER_STATE = join(process.env.HOME, ".openclaw/.notifyuser-state.json");
+const DEFAULT_NOTIFY_USER_DEDUPE_MS = 10 * 60 * 1000;
 
 /** Resolve channel name to Discord channel ID. */
 export function resolveChannelId(channelName) {
@@ -130,6 +133,25 @@ async function discordPost(channelId, content) {
   return res.json();
 }
 
+/** Open or create a DM channel with a Discord user. */
+async function discordCreateDm(userId) {
+  const token = getDiscordBotToken();
+  if (!token) throw new Error("DISCORD_TOKEN not found — cannot DM user");
+  const res = await fetch("https://discord.com/api/v10/users/@me/channels", {
+    method: "POST",
+    headers: {
+      Authorization: `Bot ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ recipient_id: String(userId) }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`discord dm-open ${res.status}: ${body}`);
+  }
+  return res.json();
+}
+
 /**
  * Post a file (e.g. an mp3 from edge-tts) to a Discord channel.
  * Uses multipart/form-data — JSON-only `discordPost` can't carry binaries.
@@ -232,6 +254,100 @@ export async function sendToChannel(channelName, message) {
 /** Send a message directly to a Discord channel by raw channel ID. */
 export async function sendToChannelId(channelId, message) {
   return discordPost(channelId, message);
+}
+
+export function resolveNotifyUserId(explicitUserId) {
+  if (explicitUserId) return String(explicitUserId);
+  if (process.env.AMUX_NOTIFY_USER_ID) return process.env.AMUX_NOTIFY_USER_ID;
+  if (process.env.AMUX_NOTIFY_USER_DISCORD_ID) return process.env.AMUX_NOTIFY_USER_DISCORD_ID;
+
+  try {
+    const doc = JSON.parse(readFileSync(join(process.env.HOME, ".openclaw/credentials/discord-allowFrom.json"), "utf-8"));
+    const allowFrom = doc.allowFrom;
+    if (typeof allowFrom === "string") return allowFrom;
+    if (Array.isArray(allowFrom) && allowFrom.length === 1) return String(allowFrom[0]);
+  } catch {}
+  return "";
+}
+
+export function formatUserNotification(message, { level = "info", title = "" } = {}) {
+  const clean = String(message || "").replace(/\s+/g, " ").trim();
+  if (!clean) throw new Error("notifyuser message is empty");
+  const normalized = String(level || "info").toLowerCase();
+  const icon = {
+    info: "🔔",
+    done: "✅",
+    warn: "⚠️",
+    warning: "⚠️",
+    error: "🚨",
+    urgent: "🚨",
+  }[normalized] || "🔔";
+  const label = normalized === "warning" ? "warn" : normalized;
+  const heading = title ? `${icon} **${title}** (${label})` : `${icon} **amux** (${label})`;
+  return `${heading}\n${clean}`.slice(0, 1900);
+}
+
+function notifyKey(content, userId, channelName) {
+  return createHash("sha256").update(`${userId || ""}\0${channelName || ""}\0${content}`).digest("hex");
+}
+
+function readNotifyState() {
+  try { return JSON.parse(readFileSync(NOTIFY_USER_STATE, "utf-8")) || {}; } catch { return {}; }
+}
+
+function writeNotifyState(state) {
+  try { writeFileSync(NOTIFY_USER_STATE, JSON.stringify(state)); } catch {}
+}
+
+function isDuplicateNotification(key, dedupeMs) {
+  if (!dedupeMs) return false;
+  const state = readNotifyState();
+  const last = state[key] || 0;
+  return Date.now() - last < dedupeMs;
+}
+
+function rememberNotification(key) {
+  const state = readNotifyState();
+  state[key] = Date.now();
+  writeNotifyState(state);
+}
+
+/**
+ * Send a high-signal notification to the human. Prefers Discord DM for mobile
+ * push; falls back to the configured notify channel with a mention.
+ */
+export async function notifyUser(message, opts = {}) {
+  const userId = resolveNotifyUserId(opts.userId || opts.user);
+  const channelName = opts.channel || process.env.AMUX_NOTIFY_CHANNEL || "notify";
+  const content = formatUserNotification(message, opts);
+  const key = notifyKey(content, userId, channelName);
+  const dedupeMs = opts.force ? 0 : (opts.dedupeMs ?? DEFAULT_NOTIFY_USER_DEDUPE_MS);
+  if (isDuplicateNotification(key, dedupeMs)) {
+    return { sent: false, deduped: true, target: "dedupe" };
+  }
+
+  let dmError = null;
+  if (userId) {
+    try {
+      const dm = await discordCreateDm(userId);
+      if (!dm?.id) throw new Error("Discord DM response missing channel id");
+      await discordPost(dm.id, content);
+      rememberNotification(key);
+      return { sent: true, target: "dm", userId };
+    } catch (err) {
+      dmError = err;
+    }
+  }
+
+  const channelId = resolveChannelId(channelName);
+  if (!channelId) {
+    const suffix = dmError ? `; DM failed: ${dmError.message}` : "";
+    throw new Error(`notify channel '${channelName}' not found${suffix}`);
+  }
+  const fallback = userId ? `<@${userId}>\n${content}` : content;
+  await discordPost(channelId, fallback);
+  rememberNotification(key);
+  return { sent: true, target: channelName, channelId, fallback: !!dmError, dmError: dmError?.message };
 }
 
 /** Send a file (e.g. tts mp3) to a Discord channel by raw ID, with optional text body. */

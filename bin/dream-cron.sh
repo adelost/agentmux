@@ -12,6 +12,17 @@ OPENCLAW_WORKSPACE="${OPENCLAW_WORKSPACE:-$HOME/.openclaw/workspace}"
 AGENTMUX_DREAM_LOG="${AGENTMUX_DREAM_LOG:-$HOME/agentmux-dream.log}"
 AGENTMUX_DREAM_MIN_TURNS="${AGENTMUX_DREAM_MIN_TURNS:-0}"
 
+notify_failure() {
+  local status=$?
+  if [ "$status" -ne 0 ]; then
+    "$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" notifyuser \
+      --level error \
+      --title "amux dream" \
+      "Nightly dream failed with exit $status. Check $AGENTMUX_DREAM_LOG" || true
+  fi
+}
+trap notify_failure EXIT
+
 "$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" dream --quiet --min-turns "$AGENTMUX_DREAM_MIN_TURNS"
 
 date_key="$(TZ=Europe/Stockholm date +%F)"

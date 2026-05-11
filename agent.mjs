@@ -83,6 +83,14 @@ amux timeline --since 2h --by-pane   # grouped under pane headers (analysis view
 amux watch                           # live-follow (like tail -f)
 \`\`\`
 
+### Notify the human
+\`\`\`bash
+amux notifyuser "klart med deploy"           # mobile push via DM/#notify
+amux notifyuser --level error "Dream failed" # high-signal alert
+amux claw -p 2 --notify-user "run tests"     # ping human when pane is done/problem
+\`\`\`
+Use this sparingly for important outcomes that need Mattias' attention.
+
 ### Know what's happening (orchestrator overview)
 \`\`\`bash
 amux done                            # default: last 1h

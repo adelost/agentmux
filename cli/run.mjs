@@ -6,17 +6,17 @@ import { createReadStream } from "fs";
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "fs";
 import { join } from "path";
 import { createEventLogger } from "./events.mjs";
-import { sendToChannel, sendToSession } from "./send-notify.mjs";
+import { sendToChannel, sendToSession, notifyUser as sendToUser } from "./send-notify.mjs";
 
 const RUNS_DIR = "/tmp/agent-runs";
 const CLAUDE_FLAGS = ["--dangerously-skip-permissions", "--no-session-persistence", "--verbose"];
 
 /**
  * Run a single claude task via pipe mode.
- * @param {{ dir, prompt, timeout, notifyChannel, msgSession, model, fg }} opts
+ * @param {{ dir, prompt, timeout, notifyChannel, msgSession, notifyUser, model, fg }} opts
  */
-export async function runOneshot({ dir, prompt, timeout = 600, notifyChannel, msgSession, model, fg = false }) {
-  const notify = buildNotifier(notifyChannel, msgSession);
+export async function runOneshot({ dir, prompt, timeout = 600, notifyChannel, msgSession, notifyUser = false, model, fg = false }) {
+  const notify = buildNotifier(notifyChannel, msgSession, notifyUser);
   const log = createEventLogger({ notify });
   const sessionId = `run_${process.pid}_${Date.now()}`;
   const startTime = Date.now();
@@ -130,13 +130,18 @@ export function showRunLog(lines = 50, follow = false) {
 
 // --- Helpers ---
 
-function buildNotifier(channel, session) {
+function buildNotifier(channel, session, notifyUser) {
   return async (message) => {
     const promises = [];
     if (channel) promises.push(sendToChannel(channel, message).catch(() => {}));
     if (session) promises.push(sendToSession(session, message).catch(() => {}));
+    if (notifyUser) promises.push(sendToUser(message, { level: notifyLevel(message), title: "agentmux" }).catch(() => {}));
     await Promise.all(promises);
   };
+}
+
+function notifyLevel(message) {
+  return /ERROR|FAILED|STUCK|TIMEOUT|MENU|PERMISSION|CRASH|❌|⚠️|🔐|📋|⏰/.test(message) ? "warn" : "done";
 }
 
 function formatElapsed(secs) {

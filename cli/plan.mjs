@@ -7,7 +7,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { runOneshot } from "./run.mjs";
 import { createEventLogger } from "./events.mjs";
-import { sendToChannel, sendToSession } from "./send-notify.mjs";
+import { sendToChannel, sendToSession, notifyUser as sendToUser } from "./send-notify.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
@@ -135,9 +135,9 @@ export async function createPlan({ dir, goal, model, planPath }) {
 }
 
 /** Execute full plan: create plan, parse deps, dispatch in waves. */
-export async function executePlan({ dir, goal, timeout, notifyChannel, msgSession, model, planOnly, dispatchOnly, fg }) {
+export async function executePlan({ dir, goal, timeout, notifyChannel, msgSession, notifyUser = false, model, planOnly, dispatchOnly, fg }) {
   const planPath = join(dir, "AGENT_PLAN.md");
-  const notify = buildNotifier(notifyChannel, msgSession);
+  const notify = buildNotifier(notifyChannel, msgSession, notifyUser);
   const log = createEventLogger({ notify });
 
   // Phase 1: Create plan (unless dispatch-only)
@@ -172,6 +172,7 @@ export async function executePlan({ dir, goal, timeout, notifyChannel, msgSessio
           timeout,
           notifyChannel,
           msgSession,
+          notifyUser,
           model,
           fg: true,
         }).then((r) => ({ taskNum, ...r }));
@@ -214,11 +215,16 @@ export function showPlanLog(lines = 50) {
 
 // --- Helpers ---
 
-function buildNotifier(channel, session) {
+function buildNotifier(channel, session, notifyUser) {
   return async (message) => {
     const promises = [];
     if (channel) promises.push(sendToChannel(channel, message).catch(() => {}));
     if (session) promises.push(sendToSession(session, message).catch(() => {}));
+    if (notifyUser) promises.push(sendToUser(message, { level: notifyLevel(message), title: "agentmux" }).catch(() => {}));
     await Promise.all(promises);
   };
+}
+
+function notifyLevel(message) {
+  return /ERROR|FAILED|STUCK|TIMEOUT|MENU|PERMISSION|CRASH|❌|⚠️|🔐|📋|⏰/.test(message) ? "warn" : "done";
 }

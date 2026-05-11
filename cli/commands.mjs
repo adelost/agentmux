@@ -834,6 +834,42 @@ async function cmdDream(ctx, flags = {}) {
   }
 }
 
+async function cmdNotifyUser(args) {
+  const { notifyUser, formatUserNotification } = await import("./send-notify.mjs");
+  const { flags, positional } = parseFlags(args, {
+    level: "string", l: "string",
+    title: "string",
+    user: "string", u: "string",
+    channel: "string", c: "string",
+    force: "boolean", f: "boolean",
+    dry: "boolean",
+    test: "boolean",
+  });
+  const level = flags.level || flags.l || "info";
+  const title = flags.title || "amux";
+  const text = flags.test
+    ? "Test notification from amux notifyuser."
+    : positional.join(" ").trim();
+  if (!text) {
+    console.error(`Usage: amux notifyuser "message" [--level info|done|warn|error] [--force]`);
+    process.exit(1);
+  }
+  const opts = {
+    level,
+    title,
+    userId: flags.user || flags.u,
+    channel: flags.channel || flags.c,
+    force: !!(flags.force || flags.f || flags.test),
+  };
+  if (flags.dry) {
+    console.log(formatUserNotification(text, opts));
+    return;
+  }
+  const result = await notifyUser(text, opts);
+  if (result.deduped) console.log("notifyuser skipped duplicate");
+  else console.log(`notifyuser sent → ${result.target}${result.fallback ? " (fallback)" : ""}`);
+}
+
 /** Compress an "age in minutes" into "Xm" / "Xh" / "Xd" for header chrome. */
 function formatRelMin(min) {
   if (!Number.isFinite(min) || min < 0) return "?";
@@ -1745,6 +1781,7 @@ Usage:
   agent <name|:nr> "prompt"       Send prompt to agent
     -n <channel>                  Notify Discord channel when done
     -m <session>                  Message OpenClaw session when done
+    --notify-user                 Mobile-push the human when done/problem
     -p <pane>                     Target specific pane (default: 0)
     -q                            Quiet (no confirmation output)
   agent add <name> <dir>          Add new agent
@@ -1791,6 +1828,9 @@ Usage:
     --since T                     Window to summarize (default: 24h)
     --min-turns N                 Skip if fewer user turns (default: 10)
     --dry                         Print digest instead of writing
+  agent notifyuser "message"      High-signal mobile notification to the human
+    --level info|done|warn|error  Notification level (default: info)
+    --test                        Send a test notification
   agent r                         Resume last agent
   agent help                      Show this message
 
@@ -1812,7 +1852,7 @@ Socket: /tmp/openclaw-claude.sock`);
 // --- Dispatch ---
 
 const FLAG_SPECS = {
-  send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean" },
+  send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "notify-user": "boolean", "notify-me": "boolean" },
   wait: { p: "number", t: "number", a: "boolean" },
   log: {
     n: "number", p: "number",
@@ -1847,6 +1887,7 @@ const FLAG_SPECS = {
   },
   compact: { dry: "boolean", force: "boolean", "min-tokens": "number" },
   dream: { since: "string", "min-turns": "number", workspace: "string", dry: "boolean", q: "boolean", quiet: "boolean" },
+  notifyuser: { level: "string", l: "string", title: "string", user: "string", u: "string", channel: "string", c: "string", force: "boolean", f: "boolean", dry: "boolean", test: "boolean" },
   remind: {
     p: "number",                      // pane index (only when single agent given)
     all: "boolean",                   // broadcast to every claude pane
@@ -1955,6 +1996,10 @@ export async function dispatch(argv, ctx) {
       return cmdDream(ctx, flags);
     }
 
+    case "notifyuser":
+    case "notify-user":
+      return cmdNotifyUser(rest);
+
     case "remind": {
       const { flags, positional } = parseFlags(rest, FLAG_SPECS.remind);
       return cmdRemind(ctx, flags, positional);
@@ -2020,8 +2065,8 @@ export async function dispatch(argv, ctx) {
         return showRunLog(flags.n || 50, flags.f || false);
       }
       if (rest.length < 2) { console.error("Usage: agent run <dir> \"prompt\" [-n channel] [-m session] [-t timeout]"); process.exit(1); }
-      const { flags } = parseFlags(rest.slice(2), { n: "string", m: "string", t: "number", fg: "boolean", model: "string" });
-      return runOneshot({ dir: rest[0], prompt: rest[1], timeout: flags.t || 600, notifyChannel: flags.n, msgSession: flags.m, model: flags.model, fg: flags.fg ?? false });
+      const { flags } = parseFlags(rest.slice(2), { n: "string", m: "string", t: "number", fg: "boolean", model: "string", "notify-user": "boolean", "notify-me": "boolean" });
+      return runOneshot({ dir: rest[0], prompt: rest[1], timeout: flags.t || 600, notifyChannel: flags.n, msgSession: flags.m, notifyUser: !!(flags["notify-user"] || flags["notify-me"]), model: flags.model, fg: flags.fg ?? false });
     }
 
     case "plan": {
@@ -2029,10 +2074,10 @@ export async function dispatch(argv, ctx) {
       if (rest[0] === "status") { console.log("TODO: plan status"); return; }
       if (rest.length < 2 && !rest[0]?.startsWith("-")) { console.error("Usage: agent plan <dir> \"goal\" [-n channel]"); process.exit(1); }
       const dir = rest[0];
-      const { flags, positional } = parseFlags(rest.slice(1), { n: "string", m: "string", t: "number", p: "boolean", d: "boolean", fg: "boolean", model: "string" });
+      const { flags, positional } = parseFlags(rest.slice(1), { n: "string", m: "string", t: "number", p: "boolean", d: "boolean", fg: "boolean", model: "string", "notify-user": "boolean", "notify-me": "boolean" });
       const goal = positional[0] || "";
       if (!goal && !flags.d) { console.error("Usage: agent plan <dir> \"goal\" [-n channel]"); process.exit(1); }
-      return executePlan({ dir, goal, timeout: flags.t || 600, notifyChannel: flags.n, msgSession: flags.m, model: flags.model, planOnly: flags.p, dispatchOnly: flags.d, fg: flags.fg ?? false });
+      return executePlan({ dir, goal, timeout: flags.t || 600, notifyChannel: flags.n, msgSession: flags.m, notifyUser: !!(flags["notify-user"] || flags["notify-me"]), model: flags.model, planOnly: flags.p, dispatchOnly: flags.d, fg: flags.fg ?? false });
     }
 
     case "events": {
@@ -2055,12 +2100,13 @@ export async function dispatch(argv, ctx) {
         const prompt = positional.join(" ");
         await cmdSend(name, prompt, flags, ctx);
 
-        // Background notification worker (if -n or -m)
-        if (flags.n || flags.m) {
+        // Background notification worker (if -n, -m, or --notify-user)
+        const notifyUserFlag = !!(flags["notify-user"] || flags["notify-me"]);
+        if (flags.n || flags.m || notifyUserFlag) {
           const { notifyWorker } = await import("./notify.mjs");
           const pane = flags.p || 0;
           // Fire and forget - runs until agent is done
-          notifyWorker({ name, pane, timeout: flags.t || 600, notifyChannel: flags.n, msgSession: flags.m, prompt, agent: ctx.agent }).catch(() => {});
+          notifyWorker({ name, pane, timeout: flags.t || 600, notifyChannel: flags.n, msgSession: flags.m, notifyUser: notifyUserFlag, prompt, agent: ctx.agent }).catch(() => {});
           console.log(`🔔 Will notify when '${name}' is done.`);
         }
       } else {
