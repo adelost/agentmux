@@ -76,4 +76,13 @@ feature("amux dream digest", () => {
       expect(result.match(/amux-dream:2026-05-10/g)).toHaveLength(2);
     }],
   });
+
+  unit("creates lint-compliant daily file header", {
+    when: ["creating default daily content", () => defaultDailyContent("2026-05-10")],
+    then: ["template and summary header are present", (result) => {
+      expect(result).toContain("<!-- template: daily -->");
+      expect(result).toContain("> summary: Daily notes for 2026-05-10, auto-created by amux dream.");
+      expect(result).toContain("> why: Session continuity and nightly agent activity digest.");
+    }],
+  });
 });

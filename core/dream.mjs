@@ -6,8 +6,8 @@ import { collectCommitsSince, reposFromAgents } from "./commit-log.mjs";
 const DEFAULT_TZ = "Europe/Stockholm";
 const DEFAULT_SINCE = "24h";
 const DEFAULT_MIN_TURNS = 10;
-const MAX_PANES = 20;
-const MAX_COMMITS = 20;
+const MAX_PANES = 12;
+const MAX_COMMITS = 15;
 
 function localDate(date, timeZone = DEFAULT_TZ) {
   return new Intl.DateTimeFormat("sv-SE", {
@@ -145,7 +145,7 @@ export function upsertDreamSection(content, dateKey, section) {
 }
 
 export function defaultDailyContent(dateKey) {
-  return `<!-- template: daily -->\n> Daily notes for ${dateKey}, auto-created by amux dream.\n\n# ${dateKey}\n`;
+  return `<!-- template: daily -->\n> summary: Daily notes for ${dateKey}, auto-created by amux dream.\n> why: Session continuity and nightly agent activity digest.\n\n# ${dateKey}\n`;
 }
 
 export function resolveDreamWorkspace(workspaceDir) {
