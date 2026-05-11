@@ -418,7 +418,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await tmux(`select-layout -t '${esc(name)}' '${layout}'`).catch((err) =>
       console.warn(`setupPanes: select-layout ${layout} failed: ${err.message}`));
 
-    for (let i = 0; i < panes.length; i++) {
+    const actualPanes = await countPanes(name);
+    if (actualPanes < panes.length) {
+      console.warn(`setupPanes: ${name} has ${actualPanes}/${panes.length} panes after split; skipping missing panes`);
+    }
+
+    for (let i = 0; i < Math.min(panes.length, actualPanes); i++) {
       const target = `${name}:.${i}`;
       if (await isAlreadyRunning(target)) continue;
 
@@ -447,6 +452,14 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // Session may not exist yet, treat as 1 default pane
       return 1;
     }
+  }
+
+  async function paneCountAfterReconcile(name, wantedCount) {
+    const actual = await countPanes(name);
+    if (actual < wantedCount) {
+      console.warn(`reconcile: ${name} has ${actual}/${wantedCount} panes after split; skipping missing panes`);
+    }
+    return actual;
   }
 
   async function isAlreadyRunning(target) {
@@ -523,9 +536,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const layout = cfg.layout || "main-vertical";
       await tmux(`select-layout -t '${esc(name)}' '${layout}'`).catch(() => {});
     }
-    if (currentCount > wanted.length) summary.extras = currentCount - wanted.length;
+    const actualCount = await paneCountAfterReconcile(name, wanted.length);
+    if (actualCount > wanted.length) summary.extras = actualCount - wanted.length;
+    if (actualCount < wanted.length) summary.missing = wanted.length - actualCount;
 
-    for (let i = 0; i < wanted.length; i++) {
+    for (let i = 0; i < Math.min(wanted.length, actualCount); i++) {
       const target = `${name}:.${i}`;
       const want = wanted[i];
       let currCmd = "";
