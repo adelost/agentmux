@@ -128,6 +128,7 @@ Bulk-compact affects idle panes. Skips working/permission/menu states.
 amux dream                           # write/update memory/YYYY-MM-DD.md pane digest
 amux dream --dry                     # preview, no action
 amux dream --since 24h --min-turns 10
+bin/dream-cron.sh                    # cron wrapper: run + validate output
 \`\`\`
 Meant for cron at 04:00. It summarizes recent pane activity and commits into
 the workspace daily memory file using a replaceable \`amux-dream\` section.

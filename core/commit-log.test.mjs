@@ -44,7 +44,7 @@ feature("commitsFromRepo", () => {
     }],
   });
 
-  unit("returns one commit with parsed fields", {
+  component("returns one commit with parsed fields", {
     given: ["a repo with one commit", () => {
       const dir = makeRepo();
       commit(dir, "first commit");
@@ -61,7 +61,7 @@ feature("commitsFromRepo", () => {
     }],
   });
 
-  unit("honors --since cutoff", {
+  component("honors --since cutoff", {
     given: ["a repo with one commit", () => {
       const dir = makeRepo();
       commit(dir, "old");
@@ -74,7 +74,7 @@ feature("commitsFromRepo", () => {
     }],
   });
 
-  unit("uses custom label when provided", {
+  component("uses custom label when provided", {
     given: ["a repo with label", () => {
       const dir = makeRepo();
       commit(dir, "labeled");
@@ -119,7 +119,7 @@ feature("collectCommitsSince", () => {
     }],
   });
 
-  unit("de-duplicates repos with same path", {
+  component("de-duplicates repos with same path", {
     given: ["one repo referenced twice", () => {
       const a = makeRepo();
       commit(a, "once");
@@ -153,7 +153,7 @@ feature("collectCommitsSince", () => {
     }],
   });
 
-  unit("ignores missing or nullish repo entries", {
+  component("ignores missing or nullish repo entries", {
     given: ["mixed repo list", () => {
       const a = makeRepo();
       commit(a, "real");
