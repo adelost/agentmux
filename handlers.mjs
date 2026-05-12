@@ -581,7 +581,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     const parsed = parseCommand(cleanPrompt);
 
     // Catch-up notice: user returning to a stale Discord channel after
-    // activity in the pane (e.g. Mattias typed directly into tmux or
+    // activity in the pane (e.g. the user typed directly into tmux or
     // another agent drove the pane). Posting the count BEFORE we forward
     // the user's message avoids the confusion of "wait, what just
     // happened in this channel?" The notice itself stamps via onSent so

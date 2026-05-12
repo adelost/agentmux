@@ -36,7 +36,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.16.26";
+const HINTS_VERSION = "1.16.27";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -89,7 +89,11 @@ amux notifyuser "klart med deploy"           # mobile push via DM/#notify
 amux notifyuser --level error "Dream failed" # high-signal alert
 amux claw -p 2 --notify-user "run tests"     # ping human when pane is done/problem
 \`\`\`
-Use this sparingly for important outcomes that need Mattias' attention.
+Use this only when the user explicitly asks to be notified, or when something
+is genuinely important and needs the user's attention soon (failure, blocked
+permission, production risk, completed long-running task he asked to track).
+Do not use it for routine progress, minor status updates, or "nice to know"
+messages.
 
 ### Know what's happening (orchestrator overview)
 \`\`\`bash

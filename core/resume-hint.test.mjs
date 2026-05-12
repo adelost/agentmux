@@ -45,11 +45,11 @@ feature("extractLastUserTurn — meaningful turn extraction", () => {
 
   unit("handles array-form content with text blocks", {
     given: ["event with content as text-block array", () => jsonl(
-      { type: "user", message: { role: "user", content: [{ type: "text", text: "hej från mattias" }] }, timestamp: "2026-04-23T12:00:00Z" },
+      { type: "user", message: { role: "user", content: [{ type: "text", text: "hej från user" }] }, timestamp: "2026-04-23T12:00:00Z" },
     )],
     when: ["extracting", (j) => extractLastUserTurn(j)],
     then: ["joins the text content", (r) => {
-      expect(r.text).toBe("hej från mattias");
+      expect(r.text).toBe("hej från user");
     }],
   });
 

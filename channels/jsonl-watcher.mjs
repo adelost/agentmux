@@ -161,7 +161,7 @@ export function createJsonlWatcher({
   function renderTurn(turn) {
     // Tool calls render as inline code (`Bash cd ...`) — looks like a
     // command, kompakt, doesn't make whole bash strings italic the way
-    // the old *-wrap did. Pre-1.16.40 used asterisks; Mattias flagged
+    // the old *-wrap did. Pre-1.16.40 used asterisks; user feedback flagged
     // it as visually noisy.
     const rawText = (turn.items || [])
       .map((it) => (it.type === "tool" ? `\`${it.content}\`` : it.content))
