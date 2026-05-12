@@ -514,7 +514,7 @@ All optional (set in `.env`):
 | `AGENTMUX_YAML` | `./agentmux.yaml` | Path to config |
 | `TMUX_SOCKET` | `/tmp/agentmux.sock` | tmux socket path |
 | `TIMEOUT_S` | `600` | Max wait for response (seconds) |
-| `TTS_VOICE` | `sv-SE-SofieNeural` | edge-tts voice ([list](https://gist.github.com/BettyJJ/17cbaa1de96235a7f5773b8571c32980)) |
+| `TTS_VOICE` | `sv-SE-MattiasNeural` | edge-tts voice ([list](https://gist.github.com/BettyJJ/17cbaa1de96235a7f5773b8571c32980)) |
 | `AGENTMUX_RECORD` | `0` | Set to `1` to save request/response recordings |
 
 ## Troubleshooting

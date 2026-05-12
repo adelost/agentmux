@@ -71,7 +71,7 @@ export function createVoicePWA(deps) {
     agentsYamlPath,
     transcribeScript,
     run,
-    ttsVoice = "sv-SE-SofieNeural",
+    ttsVoice = "sv-SE-MattiasNeural",
     mirror = null,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     staticDir = null,

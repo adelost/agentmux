@@ -55,7 +55,7 @@ const TIMEOUT = parseInt(process.env.TIMEOUT_S || "600") * 1000;
 const WHISPER_URL = process.env.WHISPER_URL || "http://localhost:2022/v1/audio/transcriptions";
 const SHELL_PATH = process.env.SHELL_PATH || `${process.env.HOME}/bin:${process.env.PATH}`;
 const TMUX_SOCKET = process.env.TMUX_SOCKET || "/tmp/agentmux.sock";
-const TTS_VOICE = process.env.TTS_VOICE || "sv-SE-SofieNeural";
+const TTS_VOICE = process.env.TTS_VOICE || "sv-SE-MattiasNeural";
 const STATE_FILE = process.env.STATE_FILE || "/tmp/agentmux-state.json";
 
 // Voice PWA. Defaults to 127.0.0.1 — expose via Tailscale Serve when

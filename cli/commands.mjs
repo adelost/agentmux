@@ -1520,7 +1520,7 @@ async function cmdSay(args, ctx) {
   }
 
   // Generate TTS — match the bridge's edge-tts call shape.
-  const voice = flags.voice || flags.v || process.env.TTS_VOICE || "sv-SE-SofieNeural";
+  const voice = flags.voice || flags.v || process.env.TTS_VOICE || "sv-SE-MattiasNeural";
   const clean = text.replace(/[`*_~|]/g, "").slice(0, 1500);
   const ttsPath = `/tmp/amux-say-${Date.now()}.mp3`;
   try {
