@@ -41,14 +41,32 @@ export async function ensureAndAttach(ctx, name, configPath) {
   const { loadConfig } = await import("./config.mjs");
   const config = loadConfig(configPath);
   const panes = config[name]?.panes || [];
-  const claudePanes = panes.filter((p) => p?.cmd?.includes("claude")).map((_, i) => i);
+  const agentPanes = panes
+    .map((p, i) => (/claude|codex/.test(p?.cmd || "") ? i : -1))
+    .filter((i) => i >= 0);
 
   // Step 1: create session + panes (sequential, once)
-  await ctx.agent.ensureReady(name, claudePanes[0] ?? 0);
+  await ctx.agent.ensureReady(name, agentPanes[0] ?? 0);
 
-  // Step 2: start remaining claude panes in parallel (session already exists)
-  if (claudePanes.length > 1) {
-    await Promise.all(claudePanes.slice(1).map((i) => ctx.agent.ensureReady(name, i)));
+  const existingPanes = await listPanes(ctx, name);
+  const existingCount = existingPanes.length;
+  const runnableAgentPanes = existingCount
+    ? agentPanes.filter((i) => i < existingCount)
+    : agentPanes;
+  const missingAgentPanes = existingCount
+    ? agentPanes.filter((i) => i >= existingCount)
+    : [];
+  if (missingAgentPanes.length) {
+    console.warn(
+      `Only ${existingCount}/${panes.length} panes exist for '${name}'; skipping missing agent panes: ${
+        missingAgentPanes.map((i) => `p${i}`).join(", ")
+      }`,
+    );
+  }
+
+  // Step 2: start remaining coding-agent panes in parallel (session already exists)
+  if (runnableAgentPanes.length > 1) {
+    await Promise.all(runnableAgentPanes.slice(1).map((i) => ctx.agent.ensureReady(name, i)));
   }
 }
 

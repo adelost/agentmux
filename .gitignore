@@ -3,4 +3,4 @@ node_modules/
 agents.yaml
 agentmux.yaml
 *.pid
-test/recordings/*.json
+test/recordings/

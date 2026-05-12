@@ -19,7 +19,7 @@ const CLAUDE_PROJECTS_DIR = () => join(process.env.HOME, ".claude", "projects");
 
 /**
  * Claude Code's path encoding: every `/` and `.` becomes a `-`.
- * Example: /home/adelost/lsrc/.agents/1 → -home-adelost-lsrc--agents-1
+ * Example: /home/user/lsrc/.agents/1 → -home-user-lsrc--agents-1
  */
 function encodePath(dir) {
   return dir.replace(/[\/\.]/g, "-");

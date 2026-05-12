@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export HOME="${HOME:-/home/adelost}"
+if [ -z "${HOME:-}" ]; then
+  export HOME="$(getent passwd "$(id -un)" | cut -d: -f6)"
+fi
 export PATH="/usr/bin:/bin:${PATH:-}"
 export TMUX_SOCKET="${TMUX_SOCKET:-/tmp/openclaw-claude.sock}"
 export AGENT_CONFIG="${AGENT_CONFIG:-$HOME/.config/agent/agents.yaml}"

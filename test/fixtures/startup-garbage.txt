@@ -1,8 +1,8 @@
-cd /home/adelost/lsrc/ai-dsl
+cd /home/user/lsrc/demo
 conda: error: environment not found
-adelost@Abyss:~/lsrc/ai-dsl$
+user@host:~/lsrc/demo$
 ▐▛ Claude Code v1.0.23
-Opus 4.6 · /home/adelost/lsrc/ai-dsl
+Opus 4.6 · /home/user/lsrc/demo
 
 ❯ hello
 

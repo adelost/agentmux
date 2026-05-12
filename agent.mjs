@@ -406,6 +406,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const panes = config[name]?.panes || [];
     if (!panes.length) return;
 
+    const layout = config[name]?.layout || "main-vertical";
+    const applyLayout = async () => {
+      await tmux(`select-layout -t '${esc(name)}' '${layout}'`).catch((err) =>
+        console.warn(`setupPanes: select-layout ${layout} failed: ${err.message}`));
+    };
+
     const existing = await countPanes(name);
     for (let i = existing; i < panes.length; i++) {
       // -c pins the new pane's cwd to its own .agents/N. Without it,
@@ -414,13 +420,17 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // pane-N-writes-jsonl-to-agents-M bug that broke Discord channel
       // mapping. paneDir mkdir:s the dir so -c can't fail on it missing.
       const targetDir = paneDir(dir, i);
-      await tmux(`split-window -t '${esc(name)}' -h -c '${esc(targetDir)}'`).catch((err) =>
-        console.warn(`setupPanes: split-window ${name} failed: ${err.message}`));
+      const splitTarget = `${name}:.${i - 1}`;
+      try {
+        await tmux(`split-window -t '${esc(splitTarget)}' -h -c '${esc(targetDir)}'`);
+        await applyLayout();
+      } catch (err) {
+        console.warn(`setupPanes: split-window ${name} failed: ${err.message}`);
+        break;
+      }
     }
 
-    const layout = config[name]?.layout || "main-vertical";
-    await tmux(`select-layout -t '${esc(name)}' '${layout}'`).catch((err) =>
-      console.warn(`setupPanes: select-layout ${layout} failed: ${err.message}`));
+    await applyLayout();
 
     const actualPanes = await countPanes(name);
     if (actualPanes < panes.length) {
@@ -524,21 +534,28 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     const summary = { name, added: 0, respawned: [], unchanged: 0, extras: 0 };
     const wanted = cfg.panes;
+    const layout = cfg.layout || "main-vertical";
+    const applyLayout = async () => {
+      await tmux(`select-layout -t '${esc(name)}' '${layout}'`).catch((err) =>
+        console.warn(`reconcile: select-layout ${layout} failed: ${err.message}`));
+    };
 
     const currentCount = await countPanes(name);
     for (let i = currentCount; i < wanted.length; i++) {
       try {
         // See setupPanes for why -c is mandatory. Same bug, same fix.
         const targetDir = paneDir(cfg.dir, i);
-        await tmux(`split-window -t '${esc(name)}' -h -c '${esc(targetDir)}'`);
+        const splitTarget = `${name}:.${i - 1}`;
+        await tmux(`split-window -t '${esc(splitTarget)}' -h -c '${esc(targetDir)}'`);
         summary.added++;
+        await applyLayout();
       } catch (err) {
         console.warn(`reconcile: split-window ${name} failed: ${err.message}`);
+        break;
       }
     }
     if (summary.added > 0) {
-      const layout = cfg.layout || "main-vertical";
-      await tmux(`select-layout -t '${esc(name)}' '${layout}'`).catch(() => {});
+      await applyLayout();
     }
     const actualCount = await paneCountAfterReconcile(name, wanted.length);
     if (actualCount > wanted.length) summary.extras = actualCount - wanted.length;

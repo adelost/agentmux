@@ -10,10 +10,10 @@ const jsonl = (...events) => events.map((e) => JSON.stringify(e)).join("\n");
 
 feature("projectDirFor — cwd slug", () => {
   unit("slash and dot become dash, prefixed with base dir", {
-    given: ["pane dir under .agents/", () => "/home/adelost/.openclaw/workspace/.agents/0"],
-    when: ["resolving", (d) => projectDirFor(d, "/home/adelost")],
+    given: ["pane dir under .agents/", () => "/home/user/.openclaw/workspace/.agents/0"],
+    when: ["resolving", (d) => projectDirFor(d, "/home/user")],
     then: ["matches claude-code slug convention", (p) => {
-      expect(p).toBe("/home/adelost/.claude/projects/-home-adelost--openclaw-workspace--agents-0");
+      expect(p).toBe("/home/user/.claude/projects/-home-user--openclaw-workspace--agents-0");
     }],
   });
 });
