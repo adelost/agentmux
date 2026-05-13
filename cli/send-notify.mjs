@@ -208,7 +208,9 @@ async function discordPatch(channelId, patch) {
  * already wrote the source-of-truth (tmux) and the message mirror.
  */
 const TOPIC_STATE = join(process.env.HOME, ".openclaw/.topic-throttle.json");
-const TOPIC_MIN_INTERVAL_MS = 60_000;
+// Discord caps channel topic edits at 2/10min/channel. Throttle window
+// must match or exceed that ceiling or we burn the budget and hit 429.
+const TOPIC_MIN_INTERVAL_MS = 600_000;
 const TOPIC_MAX_LEN = 1024;
 
 export async function setChannelTopicThrottled(channelId, topic, minIntervalMs = TOPIC_MIN_INTERVAL_MS) {

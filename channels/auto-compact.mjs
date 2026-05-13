@@ -88,6 +88,20 @@ export function createAutoCompact({
         } catch (err) {
           log(`compacted-notice send failed for ${paneKey}: ${err.message}`);
         }
+        // Refresh channel topic on compact — the only trigger that hits
+        // Discord's topic-PATCH API. Auto-compact is rare per pane (hours
+        // between events), so 2-edits-per-10min limit stays comfortable.
+        try {
+          const { setChannelTopicThrottled } = await import("../cli/send-notify.mjs");
+          const stamp = new Date().toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+          const topic = `[${paneKey}] compacted · ${stamp}`;
+          const r = await setChannelTopicThrottled(channelId, topic);
+          if (r && !r.updated && r.reason && !r.reason.startsWith("throttled") && !r.reason.startsWith("unchanged")) {
+            log(`topic ${paneKey} → ${channelId}: ${r.reason}`);
+          }
+        } catch (err) {
+          log(`topic patch failed for ${paneKey}: ${err.message}`);
+        }
       }
     } catch (err) {
       log(`fire failed for ${paneKey}: ${err.message}`);
