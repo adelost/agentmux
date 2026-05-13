@@ -27,6 +27,12 @@ export function detectPaneStatus(paneContent) {
   // are intentionally NOT matched — they linger in scrollback after the
   // turn ends and look identical when frozen. The jsonl-mtime overlay
   // in inspectPane (cmdPs) handles those edge cases.
+  //
+  // `/compact` is special: Claude keeps the composer prompt visible and can
+  // queue follow-up messages while compacting. Treat that as working before
+  // the prompt-first idle check, or orchestration can send into the queue and
+  // falsely count the pane as done.
+  if (/Compacting conversation|queued messages/.test(tailRaw)) return "working";
   if (/esc to interrupt/.test(tailRaw)) return "working";
   if (/\((?:\d+m\s+)?\d+s\s*·/.test(tailRaw)) return "working";
 

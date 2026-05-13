@@ -912,6 +912,20 @@ function writeDreamRunSentinel(memPath, dateKey, timeStr, okCount, failedCount) 
   writeFileSync(memPath, content);
 }
 
+function dreamBlockMarkers(t, dateKey) {
+  return {
+    start: `<!-- amux-dream-${t.agent}-${t.pane}:${dateKey} -->`,
+    end: `<!-- /amux-dream-${t.agent}-${t.pane}:${dateKey} -->`,
+  };
+}
+
+export function hasDreamPaneBlock(content, t, dateKey) {
+  const { start, end } = dreamBlockMarkers(t, dateKey);
+  const startIdx = content.indexOf(start);
+  const endIdx = content.indexOf(end);
+  return startIdx >= 0 && endIdx > startIdx;
+}
+
 /**
  * Poll a pane's status until it has been idle for `idleStreak` consecutive
  * polls, or until maxMs elapses. Returns { idle: bool, status: last }.
@@ -931,6 +945,44 @@ async function waitForPaneIdle(ctx, agentName, paneIdx, maxMs = 300_000, idleStr
     await new Promise((r) => setTimeout(r, pollMs));
   }
   return { idle: false, status: last };
+}
+
+function isDreamClaudePane(cmd) {
+  return String(cmd || "").trim().startsWith("claude");
+}
+
+export function isDreamRunnableStatus(status) {
+  return status === "idle";
+}
+
+export async function collectDreamTargets(ctx, agents, sinceMs, opts = {}) {
+  const getStatus = opts.getStatus || getPaneStatus;
+  const getMtime = opts.getMtime || latestJsonlMtime;
+  const targets = [];
+  const skipped = [];
+
+  for (const a of agents) {
+    const panes = Array.isArray(a.panes) ? a.panes : [];
+    for (let i = 0; i < panes.length; i++) {
+      const cmd = String(panes[i]?.cmd || "");
+      if (!isDreamClaudePane(cmd)) continue; // Codex prompt-format differs; claude-only for MVP.
+      let lastMs = 0;
+      try {
+        lastMs = getMtime(panePathFor(a, i)) || 0;
+      } catch {}
+      if (lastMs < sinceMs) continue;
+
+      let status = "unknown";
+      try {
+        status = await getStatus(ctx, a.name, i);
+      } catch {}
+      const target = { agent: a.name, pane: i, lastMs, status };
+      if (isDreamRunnableStatus(status)) targets.push(target);
+      else skipped.push(target);
+    }
+  }
+
+  return { targets, skipped };
 }
 
 async function cmdDream(ctx, flags = {}) {
@@ -954,23 +1006,10 @@ async function cmdDream(ctx, flags = {}) {
   const since = parseSinceArg(sinceArg);
   const sinceMs = since instanceof Date ? since.getTime() : Date.now() - 24 * 3600 * 1000;
 
-  const targets = [];
-  for (const a of agents) {
-    const panes = Array.isArray(a.panes) ? a.panes : [];
-    for (let i = 0; i < panes.length; i++) {
-      const cmd = String(panes[i]?.cmd || "");
-      if (!cmd.startsWith("claude")) continue; // Codex prompt-format differs; claude-only for MVP.
-      let lastMs = 0;
-      try {
-        const paneDir = panePathFor(a, i);
-        // mtime of the jsonl is "last activity" — cheaper + more reliable
-        // than parsing turns, and we only need a coarse since-cutoff check.
-        const mt = latestJsonlMtime(paneDir);
-        if (mt) lastMs = mt;
-      } catch {}
-      if (lastMs >= sinceMs) targets.push({ agent: a.name, pane: i, lastMs });
-    }
-  }
+  // Window: panes with recent activity qualify, but only exact `idle` panes
+  // are safe to touch. Dream writes a shared memory file and should never send
+  // /compact or a follow-up prompt into a pane that is already working.
+  const { targets, skipped } = await collectDreamTargets(ctx, agents, sinceMs);
 
   const promptFor = (t) => [
     `[dream ${dateKey} ${timeStr}]`,
@@ -982,8 +1021,8 @@ async function cmdDream(ctx, flags = {}) {
     `Om blocket finns: ersätt bara innehållet mellan start- och slutmarkören.`,
     `Om blocket saknas: append:a blocket längst ned i filen.`,
     ``,
-    `Startmarkör: <!-- amux-dream-${t.agent}-${t.pane}:${dateKey} -->`,
-    `Slutmarkör:  <!-- /amux-dream-${t.agent}-${t.pane}:${dateKey} -->`,
+    `Startmarkör: ${dreamBlockMarkers(t, dateKey).start}`,
+    `Slutmarkör:  ${dreamBlockMarkers(t, dateKey).end}`,
     ``,
     `Blocket ska ha exakt denna struktur:`,
     `<!-- amux-dream-${t.agent}-${t.pane}:${dateKey} -->`,
@@ -995,16 +1034,24 @@ async function cmdDream(ctx, flags = {}) {
     ``,
     `Kör sen detta i shellet för att uppdatera Discord-topicen:`,
     `   amux topic ${t.agent} -p ${t.pane} "[${t.agent}:${t.pane}] dreamed ${timeStr} | <din 1-rads summary>"`,
+    ``,
+    `När allt är klart: svara med exakt en kort rad: DREAM_OK <din 1-rads summary>.`,
   ].join("\n");
 
   if (flags.dry) {
-    console.log(`Dream would process ${targets.length} pane(s) sequentially:\n`);
+    console.log(`Dream would process ${targets.length} idle pane(s) sequentially:\n`);
     for (const t of targets) {
       console.log(`--- ${t.agent}:${t.pane} (last activity ${new Date(t.lastMs).toISOString().slice(11, 16)} UTC) ---`);
       console.log(`  send: /compact`);
       console.log(`  wait: pane idle (≤180s)`);
       console.log(`  send: dream prompt (${promptFor(t).length} chars)`);
       console.log(`  wait: pane idle (≤300s)`);
+    }
+    if (skipped.length) {
+      console.log(`\nSkipped ${skipped.length} non-idle pane(s):`);
+      for (const t of skipped) {
+        console.log(`--- ${t.agent}:${t.pane} (${t.status}; last activity ${new Date(t.lastMs).toISOString().slice(11, 16)} UTC) ---`);
+      }
     }
     return;
   }
@@ -1020,19 +1067,29 @@ async function cmdDream(ctx, flags = {}) {
     ensureDreamDailyFile(memPath, dateKey);
 
     if (!targets.length) {
-      if (!flags.quiet && !flags.q) console.log(`Dream: no claude panes with activity since ${sinceArg}.`);
+      if (!flags.quiet && !flags.q) {
+        if (skipped.length) console.log(`Dream: no idle claude panes with activity since ${sinceArg}; skipped ${skipped.length} non-idle pane(s).`);
+        else console.log(`Dream: no claude panes with activity since ${sinceArg}.`);
+      }
       writeDreamRunSentinel(memPath, dateKey, timeStr, 0, 0);
       return;
     }
 
     if (!flags.quiet && !flags.q) {
       console.log(`Dream: processing ${targets.length} pane(s) sequentially…`);
+      if (skipped.length) console.log(`Dream: skipped ${skipped.length} non-idle pane(s).`);
     }
 
     for (let idx = 0; idx < targets.length; idx++) {
       const t = targets[idx];
       const key = `${t.agent}:${t.pane}`;
       const tag = `[dream ${idx + 1}/${targets.length}]`;
+
+      const preStatus = await getPaneStatus(ctx, t.agent, t.pane).catch(() => "unknown");
+      if (!isDreamRunnableStatus(preStatus)) {
+        if (!flags.quiet && !flags.q) console.log(`${tag} ${key} became ${preStatus} before send — skipping`);
+        continue;
+      }
 
       if (!flags.quiet && !flags.q) console.log(`${tag} ${key} → /compact`);
       try {
@@ -1052,7 +1109,9 @@ async function cmdDream(ctx, flags = {}) {
       const prompt = promptFor(t);
       if (!flags.quiet && !flags.q) console.log(`${tag} ${key} → dream prompt`);
       try {
-        await sendToPane(ctx, t.agent, t.pane, prompt, { source: "dream" });
+        // Background maintenance should not dump the full internal prompt into
+        // Discord. The agent still updates the memory file and channel topic.
+        await sendToPane(ctx, t.agent, t.pane, prompt, { source: "dream", mirror: false, forwardReply: false });
       } catch (err) {
         failedCount++;
         console.warn(`${tag} ${key} prompt failed: ${err.message}`);
@@ -1074,6 +1133,14 @@ async function cmdDream(ctx, flags = {}) {
         aborted = true;
         console.warn(`${tag} ${key} did not finish dream prompt within 5min (last=${pRes.status}) — Escape + aborting remaining panes`);
         await ctx.agent.sendEscape(t.agent, t.pane).catch(() => {});
+        break;
+      }
+
+      const wroteBlock = hasDreamPaneBlock(readFileSync(memPath, "utf-8"), t, dateKey);
+      if (!wroteBlock) {
+        failedCount++;
+        aborted = true;
+        console.warn(`${tag} ${key} finished but did not write its dream marker block — aborting remaining panes`);
         break;
       }
 
