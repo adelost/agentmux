@@ -832,6 +832,25 @@ async function cmdDream(ctx, flags = {}) {
   if (!flags.quiet && !flags.q) {
     console.log(`Dream wrote ${result.path} (${result.userTurns} turns, ${result.panes} panes)`);
   }
+
+  // Refresh Discord channel topic on each pane that has a bound channel.
+  // Dream is the second trigger (after auto-compact) that's rare enough
+  // per pane (1x/day) to stay under Discord's 2-edits-per-10min cap.
+  try {
+    const { setChannelTopicThrottled } = await import("./send-notify.mjs");
+    const stamp = new Date().toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+    for (const a of agents) {
+      const panes = Array.isArray(a.panes) ? a.panes : [];
+      for (let i = 0; i < panes.length; i++) {
+        const channelId = findChannelForPane(ctx.configPath, a.name, i);
+        if (!channelId) continue;
+        const topic = `[${a.name}:${i}] dreamed · ${stamp}`;
+        await setChannelTopicThrottled(channelId, topic).catch(() => {});
+      }
+    }
+  } catch (err) {
+    if (!flags.quiet && !flags.q) console.warn(`dream topic refresh failed: ${err.message}`);
+  }
 }
 
 async function cmdNotifyUser(args) {
