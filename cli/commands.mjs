@@ -1065,7 +1065,7 @@ async function cmdDream(ctx, flags = {}) {
       console.log(`  wait: pane idle (≤300s)`);
     }
     if (skipped.length) {
-      console.log(`\nSkipped ${skipped.length} non-idle pane(s):`);
+      console.log(`\nSkipped ${skipped.length} non-runnable pane(s):`);
       for (const t of skipped) {
         const live = t.liveCommand ? `; live=${t.liveCommand}` : "";
         console.log(`--- ${t.agent}:${t.pane} (${t.status}${live}; last activity ${new Date(t.lastMs).toISOString().slice(11, 16)} UTC) ---`);
