@@ -36,7 +36,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.16.27";
+const HINTS_VERSION = "1.16.28";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -139,11 +139,11 @@ Bulk-compact affects idle panes. Skips working/permission/menu states.
 \`\`\`bash
 amux dream                           # write/update memory/YYYY-MM-DD.md pane digest
 amux dream --dry                     # preview, no action
-amux dream --since 24h --min-turns 10
+amux dream --since 24h
 bin/dream-cron.sh                    # cron wrapper: run + validate output
 \`\`\`
-Meant for cron at 04:00. It summarizes recent pane activity and commits into
-the workspace daily memory file using a replaceable \`amux-dream\` section.
+Meant for cron at 04:00. It asks each active pane to update only its own
+marker block in the daily memory file, then writes a run sentinel.
 
 ### Auto-compact (background, bridge-driven)
 Idle panes >=70% context get warned (Discord channel), then /compact:ed

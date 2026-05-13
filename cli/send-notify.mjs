@@ -228,11 +228,8 @@ export async function setChannelTopicThrottled(channelId, topic, minIntervalMs =
     return { updated: false, reason: "unchanged-recent" };
   }
   if (since < minIntervalMs) {
-    // Throttle window not yet open — schedule a deferred write by
-    // recording the desired topic; a follow-up call after the window
-    // will pick it up via the unchanged check.
-    state[channelId] = { ...entry, pending: trimmed };
-    try { writeFileSync(TOPIC_STATE, JSON.stringify(state)); } catch {}
+    // Throttle window not yet open. Skip honestly; no background flusher
+    // exists for deferred topic writes.
     return { updated: false, reason: "throttled" };
   }
 

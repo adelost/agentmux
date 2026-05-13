@@ -3,7 +3,7 @@
 
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
-import { readFileSync, writeFileSync, existsSync, unlinkSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 import { loadConfig, listAgents, getAgent, addAgent, removeAgent, resolveAgent, saveLast, getLast, getPaneCount, findChannelForPane } from "./config.mjs";
 import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens } from "./format.mjs";
@@ -19,7 +19,6 @@ import {
   isStaleWaiter, isRunningNow,
 } from "../core/orchestrator-checkpoint.mjs";
 import { collectCommitsSince, reposFromAgents } from "../core/commit-log.mjs";
-import { runDreamDigest } from "../core/dream.mjs";
 import { regenerateAgentsYaml } from "../sync.mjs";
 import yaml from "js-yaml";
 import { spawn, execSync } from "child_process";
@@ -30,6 +29,10 @@ import { showEvents } from "./events.mjs";
 // Bridge = the Discord bot itself (not a Claude agent). Singleton infra.
 const BRIDGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BRIDGE_SESSION = "amux";
+const DREAM_LOCK_PATH = () => join(process.env.HOME, ".openclaw", ".dream.lock");
+const DREAM_BLOCKING_STATUSES = new Set([
+  "working", "permission", "menu", "resume", "dismiss", "unknown",
+]);
 
 // --- Flag parsing ---
 
@@ -810,46 +813,302 @@ async function cmdDone(ctx, flags) {
   console.log(`  amux timeline --grep "<keyword>"              # cross-pane content search`);
 }
 
-async function cmdDream(ctx, flags = {}) {
-  const sinceArg = flags.since || "24h";
-  const minTurns = Number.isFinite(flags["min-turns"]) ? flags["min-turns"] : 10;
-  const agents = listAgents(ctx.configPath);
-  const result = runDreamDigest({
-    agents,
-    workspaceDir: flags.workspace,
-    sinceArg,
-    minTurns,
-    dryRun: !!flags.dry,
-  });
-  if (result.skipped) {
-    if (!flags.quiet && !flags.q) console.log(`Dream skipped: ${result.reason}`);
-    return;
+function isPidAlive(pid) {
+  if (!Number.isFinite(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err?.code === "EPERM";
   }
-  if (flags.dry) {
-    console.log(result.section);
-    return;
-  }
-  if (!flags.quiet && !flags.q) {
-    console.log(`Dream wrote ${result.path} (${result.userTurns} turns, ${result.panes} panes)`);
+}
+
+function acquireDreamLock() {
+  const lockPath = DREAM_LOCK_PATH();
+  mkdirSync(dirname(lockPath), { recursive: true });
+  const startedAt = new Date().toISOString();
+  const token = `${process.pid}|${startedAt}`;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      writeFileSync(lockPath, token, { flag: "wx" });
+      return {
+        acquired: true,
+        release() {
+          try {
+            if (readFileSync(lockPath, "utf-8") === token) unlinkSync(lockPath);
+          } catch {}
+        },
+      };
+    } catch (err) {
+      if (err?.code !== "EEXIST") throw err;
+      let owner = "";
+      try { owner = readFileSync(lockPath, "utf-8").trim(); } catch {}
+      const [pidText, ownerStartedAt = "unknown"] = owner.split("|");
+      const ownerPid = Number(pidText);
+      if (isPidAlive(ownerPid)) {
+        console.log(`Dream skipped: lock-held pid=${ownerPid} started=${ownerStartedAt}`);
+        return { acquired: false, release() {} };
+      }
+      try { unlinkSync(lockPath); } catch {}
+    }
   }
 
-  // Refresh Discord channel topic on each pane that has a bound channel.
-  // Dream is the second trigger (after auto-compact) that's rare enough
-  // per pane (1x/day) to stay under Discord's 2-edits-per-10min cap.
-  try {
-    const { setChannelTopicThrottled } = await import("./send-notify.mjs");
-    const stamp = new Date().toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
-    for (const a of agents) {
-      const panes = Array.isArray(a.panes) ? a.panes : [];
-      for (let i = 0; i < panes.length; i++) {
-        const channelId = findChannelForPane(ctx.configPath, a.name, i);
-        if (!channelId) continue;
-        const topic = `[${a.name}:${i}] dreamed · ${stamp}`;
-        await setChannelTopicThrottled(channelId, topic).catch(() => {});
-      }
+  console.log("Dream skipped: lock-held pid=unknown started=unknown");
+  return { acquired: false, release() {} };
+}
+
+function dailyMemoryHeader(dateKey) {
+  return [
+    "<!-- template: daily -->",
+    `> summary: Daily notes for ${dateKey}, maintained by amux dream.`,
+    "> why: Session continuity and nightly pane activity digest.",
+    "",
+    `# ${dateKey}`,
+    "",
+  ].join("\n");
+}
+
+function ensureDreamDailyFile(memPath, dateKey) {
+  mkdirSync(dirname(memPath), { recursive: true });
+  if (!existsSync(memPath)) {
+    writeFileSync(memPath, dailyMemoryHeader(dateKey));
+    return;
+  }
+
+  const current = readFileSync(memPath, "utf-8");
+  if (
+    current.includes("<!-- template: daily -->") &&
+    /^> summary:/m.test(current) &&
+    /^> why:/m.test(current) &&
+    new RegExp(`^# ${escapeRegExp(dateKey)}$`, "m").test(current)
+  ) {
+    return;
+  }
+
+  const body = current.trimStart().replace(new RegExp(`^# ${escapeRegExp(dateKey)}\\s*\\n*`), "");
+  writeFileSync(memPath, dailyMemoryHeader(dateKey) + body);
+}
+
+function escapeRegExp(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function writeDreamRunSentinel(memPath, dateKey, timeStr, okCount, failedCount) {
+  ensureDreamDailyFile(memPath, dateKey);
+  const sentinel = `<!-- amux-dream-run:${dateKey} ${timeStr} (${okCount} panes ok / ${failedCount} failed) -->`;
+  const sentinelRe = new RegExp(`\\n?<!-- amux-dream-run:${escapeRegExp(dateKey)} [^\\n]*-->\\n?`, "g");
+  let content = readFileSync(memPath, "utf-8").replace(sentinelRe, "\n");
+
+  const heading = `# ${dateKey}`;
+  const headingIdx = content.indexOf(heading);
+  if (headingIdx >= 0) {
+    const lineEnd = content.indexOf("\n", headingIdx);
+    const insertAt = lineEnd >= 0 ? lineEnd + 1 : content.length;
+    content = `${content.slice(0, insertAt)}${sentinel}\n${content.slice(insertAt).replace(/^\n+/, "\n")}`;
+  } else {
+    content = `${dailyMemoryHeader(dateKey)}${sentinel}\n\n${content.trimStart()}`;
+  }
+  writeFileSync(memPath, content);
+}
+
+/**
+ * Poll a pane's status until it has been idle for `idleStreak` consecutive
+ * polls, or until maxMs elapses. Returns { idle: bool, status: last }.
+ * Only exact `idle` advances: modal/permission/resume/unknown states are
+ * blockers because dream sends follow-up prompts and writes shared memory.
+ */
+async function waitForPaneIdle(ctx, agentName, paneIdx, maxMs = 300_000, idleStreak = 3, pollMs = 5000) {
+  const start = Date.now();
+  let streak = 0;
+  let last = "unknown";
+  while (Date.now() - start < maxMs) {
+    last = await getPaneStatus(ctx, agentName, paneIdx).catch(() => "unknown");
+    if (last === "idle") streak++;
+    else if (DREAM_BLOCKING_STATUSES.has(last)) streak = 0;
+    else streak = 0;
+    if (streak >= idleStreak) return { idle: true, status: last };
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+  return { idle: false, status: last };
+}
+
+async function cmdDream(ctx, flags = {}) {
+  const sinceArg = flags.since || "24h";
+  const agents = listAgents(ctx.configPath);
+  const workspaceDir = flags.workspace || process.env.OPENCLAW_WORKSPACE
+    || join(process.env.HOME, ".openclaw", "workspace");
+
+  const now = new Date();
+  const dateKey = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Europe/Stockholm",
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(now);
+  const timeStr = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Europe/Stockholm",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  }).format(now);
+  const memPath = join(workspaceDir, "memory", `${dateKey}.md`);
+
+  // Window: panes with any jsonl activity in the last `sinceArg` qualify.
+  const since = parseSinceArg(sinceArg);
+  const sinceMs = since instanceof Date ? since.getTime() : Date.now() - 24 * 3600 * 1000;
+
+  const targets = [];
+  for (const a of agents) {
+    const panes = Array.isArray(a.panes) ? a.panes : [];
+    for (let i = 0; i < panes.length; i++) {
+      const cmd = String(panes[i]?.cmd || "");
+      if (!cmd.startsWith("claude")) continue; // Codex prompt-format differs; claude-only for MVP.
+      let lastMs = 0;
+      try {
+        const paneDir = panePathFor(a, i);
+        // mtime of the jsonl is "last activity" — cheaper + more reliable
+        // than parsing turns, and we only need a coarse since-cutoff check.
+        const mt = latestJsonlMtime(paneDir);
+        if (mt) lastMs = mt;
+      } catch {}
+      if (lastMs >= sinceMs) targets.push({ agent: a.name, pane: i, lastMs });
     }
-  } catch (err) {
-    if (!flags.quiet && !flags.q) console.warn(`dream topic refresh failed: ${err.message}`);
+  }
+
+  const promptFor = (t) => [
+    `[dream ${dateKey} ${timeStr}]`,
+    ``,
+    `Läs filen först:`,
+    `  ${memPath}`,
+    ``,
+    `Ändra ENDAST ditt markerade block. Alla andra rader i filen ska vara byte-identiska efter din edit.`,
+    `Om blocket finns: ersätt bara innehållet mellan start- och slutmarkören.`,
+    `Om blocket saknas: append:a blocket längst ned i filen.`,
+    ``,
+    `Startmarkör: <!-- amux-dream-${t.agent}-${t.pane}:${dateKey} -->`,
+    `Slutmarkör:  <!-- /amux-dream-${t.agent}-${t.pane}:${dateKey} -->`,
+    ``,
+    `Blocket ska ha exakt denna struktur:`,
+    `<!-- amux-dream-${t.agent}-${t.pane}:${dateKey} -->`,
+    `## ${t.agent}:${t.pane}`,
+    `- Sammanfatta vad vi jobbat med sen sist (senaste ~24h).`,
+    `- Inkludera viktiga beslut, gotchas och kodändringar.`,
+    `- Skanbart med bullets, max ~10 rader totalt.`,
+    `<!-- /amux-dream-${t.agent}-${t.pane}:${dateKey} -->`,
+    ``,
+    `Kör sen detta i shellet för att uppdatera Discord-topicen:`,
+    `   amux topic ${t.agent} -p ${t.pane} "[${t.agent}:${t.pane}] dreamed ${timeStr} | <din 1-rads summary>"`,
+  ].join("\n");
+
+  if (flags.dry) {
+    console.log(`Dream would process ${targets.length} pane(s) sequentially:\n`);
+    for (const t of targets) {
+      console.log(`--- ${t.agent}:${t.pane} (last activity ${new Date(t.lastMs).toISOString().slice(11, 16)} UTC) ---`);
+      console.log(`  send: /compact`);
+      console.log(`  wait: pane idle (≤180s)`);
+      console.log(`  send: dream prompt (${promptFor(t).length} chars)`);
+      console.log(`  wait: pane idle (≤300s)`);
+    }
+    return;
+  }
+
+  const lock = acquireDreamLock();
+  if (!lock.acquired) return;
+
+  let okCount = 0;
+  let failedCount = 0;
+  let aborted = false;
+
+  try {
+    ensureDreamDailyFile(memPath, dateKey);
+
+    if (!targets.length) {
+      if (!flags.quiet && !flags.q) console.log(`Dream: no claude panes with activity since ${sinceArg}.`);
+      writeDreamRunSentinel(memPath, dateKey, timeStr, 0, 0);
+      return;
+    }
+
+    if (!flags.quiet && !flags.q) {
+      console.log(`Dream: processing ${targets.length} pane(s) sequentially…`);
+    }
+
+    for (let idx = 0; idx < targets.length; idx++) {
+      const t = targets[idx];
+      const key = `${t.agent}:${t.pane}`;
+      const tag = `[dream ${idx + 1}/${targets.length}]`;
+
+      if (!flags.quiet && !flags.q) console.log(`${tag} ${key} → /compact`);
+      try {
+        await sendToPane(ctx, t.agent, t.pane, "/compact", { mirror: false });
+      } catch (err) {
+        failedCount++;
+        console.warn(`${tag} ${key} /compact failed: ${err.message}`);
+        continue;
+      }
+      const cRes = await waitForPaneIdle(ctx, t.agent, t.pane, 180_000, 3);
+      if (!cRes.idle) {
+        failedCount++;
+        console.warn(`${tag} ${key} did not idle after /compact (180s; last=${cRes.status}) — skipping`);
+        continue;
+      }
+
+      const prompt = promptFor(t);
+      if (!flags.quiet && !flags.q) console.log(`${tag} ${key} → dream prompt`);
+      try {
+        await sendToPane(ctx, t.agent, t.pane, prompt, { source: "dream" });
+      } catch (err) {
+        failedCount++;
+        console.warn(`${tag} ${key} prompt failed: ${err.message}`);
+        continue;
+      }
+
+      const accepted = await ctx.agent.waitForPromptEcho(t.agent, t.pane, prompt, 15_000).catch(() => false);
+      if (!accepted) {
+        failedCount++;
+        aborted = true;
+        console.warn(`${tag} ${key} did not record dream prompt within 15s — Escape + aborting remaining panes`);
+        await ctx.agent.sendEscape(t.agent, t.pane).catch(() => {});
+        break;
+      }
+
+      const pRes = await waitForPaneIdle(ctx, t.agent, t.pane, 300_000, 3);
+      if (!pRes.idle) {
+        failedCount++;
+        aborted = true;
+        console.warn(`${tag} ${key} did not finish dream prompt within 5min (last=${pRes.status}) — Escape + aborting remaining panes`);
+        await ctx.agent.sendEscape(t.agent, t.pane).catch(() => {});
+        break;
+      }
+
+      okCount++;
+      if (!flags.quiet && !flags.q) console.log(`${tag} ${key} done`);
+    }
+
+    writeDreamRunSentinel(memPath, dateKey, timeStr, okCount, failedCount);
+    if (!flags.quiet && !flags.q) {
+      console.log(`Dream complete: ${okCount} pane(s) ok, ${failedCount} failed.`);
+    }
+
+    if (failedCount > 0 || aborted) process.exitCode = 1;
+  } finally {
+    lock.release();
+  }
+}
+
+async function cmdTopic(ctx, agentName, paneIdx, text) {
+  const { setChannelTopicThrottled } = await import("./send-notify.mjs");
+  const channelId = findChannelForPane(ctx.configPath, agentName, paneIdx);
+  if (!channelId) {
+    console.log(`topic skipped on ${agentName}:${paneIdx} (no Discord channel bound)`);
+    return;
+  }
+  const r = await setChannelTopicThrottled(channelId, text);
+  if (r.updated) {
+    console.log(`topic set on ${agentName}:${paneIdx} → "${text.slice(0, 80)}"`);
+  } else if (r.reason?.startsWith("throttled")) {
+    console.log(`topic throttled on ${agentName}:${paneIdx} (skipped this call)`);
+  } else if (r.reason?.startsWith("unchanged")) {
+    console.log(`topic unchanged on ${agentName}:${paneIdx}`);
+  } else {
+    console.error(`topic failed: ${r.reason || "unknown"}`);
+    process.exit(1);
   }
 }
 
@@ -1845,8 +2104,7 @@ Usage:
     --force                       Include 'working' panes (default: skip)
   agent dream                     Write/update nightly pane digest in workspace memory
     --since T                     Window to summarize (default: 24h)
-    --min-turns N                 Skip if fewer user turns (default: 10)
-    --dry                         Print digest instead of writing
+    --dry                         Preview pane work, do nothing
   agent notifyuser "message"      High-signal mobile notification to the human
     --level info|done|warn|error  Notification level (default: info)
     --test                        Send a test notification
@@ -1905,7 +2163,7 @@ const FLAG_SPECS = {
     grep: "string",
   },
   compact: { dry: "boolean", force: "boolean", "min-tokens": "number" },
-  dream: { since: "string", "min-turns": "number", workspace: "string", dry: "boolean", q: "boolean", quiet: "boolean" },
+  dream: { since: "string", workspace: "string", dry: "boolean", q: "boolean", quiet: "boolean" },
   notifyuser: { level: "string", l: "string", title: "string", user: "string", u: "string", channel: "string", c: "string", force: "boolean", f: "boolean", dry: "boolean", test: "boolean" },
   remind: {
     p: "number",                      // pane index (only when single agent given)
@@ -1918,6 +2176,7 @@ const FLAG_SPECS = {
   edit: {},
   select: { p: "number" },
   esc: { p: "number" },
+  topic: { p: "number" },
 };
 
 /** Main command dispatch. */
@@ -2069,6 +2328,21 @@ export async function dispatch(argv, ctx) {
       const { flags, positional } = parseFlags(rest.slice(1), FLAG_SPECS.select);
       if (!positional[0]) { console.error("Usage: agent select <name|:nr> [-p N] <N>"); process.exit(1); }
       return cmdSelect(name, positional[0], flags, ctx);
+    }
+
+    case "topic": {
+      if (rest.length < 2) {
+        console.error(`Usage: amux topic <agent|:nr> [-p N] "text"`);
+        process.exit(1);
+      }
+      const name = resolveAgent(rest[0], ctx.configPath);
+      const { flags, positional } = parseFlags(rest.slice(1), FLAG_SPECS.topic);
+      const text = positional.join(" ").trim();
+      if (!text) {
+        console.error(`Usage: amux topic <agent|:nr> [-p N] "text"`);
+        process.exit(1);
+      }
+      return cmdTopic(ctx, name, flags.p ?? 0, text);
     }
 
     case "esc": {
