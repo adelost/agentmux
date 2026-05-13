@@ -2,6 +2,7 @@ import { feature, unit, expect } from "bdd-vitest";
 import {
   collectDreamTargets,
   hasDreamPaneBlock,
+  isDreamLiveClaudePane,
   isDreamRunnableStatus,
 } from "../cli/commands.mjs";
 
@@ -23,7 +24,22 @@ feature("amux dream command target selection", () => {
     }],
   });
 
-  unit("collects only recent idle Claude panes and reports skipped active panes", {
+  unit("only live claude processes are dream-sendable", {
+    when: ["checking live pane commands", () => ({
+      claude: isDreamLiveClaudePane({ command: "claude" }),
+      bash: isDreamLiveClaudePane({ command: "bash" }),
+      missing: isDreamLiveClaudePane(null),
+    })],
+    then: ["only live claude is accepted", (result) => {
+      expect(result).toEqual({
+        claude: true,
+        bash: false,
+        missing: false,
+      });
+    }],
+  });
+
+  unit("collects only recent idle live-Claude panes and reports skipped active/stale panes", {
     given: ["mixed panes with recent activity", () => {
       const agents = [
         {
@@ -34,6 +50,7 @@ feature("amux dream command target selection", () => {
             { cmd: "claude --dangerously-skip-permissions" },
             { cmd: "codex resume --last" },
             { cmd: "claude" },
+            { cmd: "claude --continue" },
           ],
         },
       ];
@@ -42,25 +59,36 @@ feature("amux dream command target selection", () => {
         ["/workspace/claw/.agents/1", 2_100],
         ["/workspace/claw/.agents/2", 2_200],
         ["/workspace/claw/.agents/3", 900],
+        ["/workspace/claw/.agents/4", 2_300],
       ]);
       const statuses = new Map([
         ["claw:0", "idle"],
         ["claw:1", "working"],
         ["claw:3", "idle"],
+        ["claw:4", "idle"],
       ]);
-      return { agents, mtimes, statuses };
+      const livePanes = [
+        { index: 0, command: "claude" },
+        { index: 1, command: "claude" },
+        { index: 2, command: "node" },
+        { index: 3, command: "claude" },
+        { index: 4, command: "bash" },
+      ];
+      return { agents, mtimes, statuses, livePanes };
     }],
-    when: ["collecting dream targets since t=1000", ({ agents, mtimes, statuses }) =>
+    when: ["collecting dream targets since t=1000", ({ agents, mtimes, statuses, livePanes }) =>
       collectDreamTargets({}, agents, 1_000, {
         getMtime: (dir) => mtimes.get(dir) || 0,
         getStatus: async (_ctx, agent, pane) => statuses.get(`${agent}:${pane}`) || "unknown",
+        getLivePanes: async () => livePanes,
       })],
     then: ["only the recent idle Claude pane is targeted", (result) => {
       expect(result.targets).toEqual([
-        { agent: "claw", pane: 0, lastMs: 2_000, status: "idle" },
+        { agent: "claw", pane: 0, lastMs: 2_000, status: "idle", liveCommand: "claude" },
       ]);
       expect(result.skipped).toEqual([
-        { agent: "claw", pane: 1, lastMs: 2_100, status: "working" },
+        { agent: "claw", pane: 1, lastMs: 2_100, status: "working", liveCommand: "claude" },
+        { agent: "claw", pane: 4, lastMs: 2_300, status: "not-live-claude", liveCommand: "bash" },
       ]);
     }],
   });

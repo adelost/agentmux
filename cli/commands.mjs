@@ -955,13 +955,23 @@ export function isDreamRunnableStatus(status) {
   return status === "idle";
 }
 
+export function isDreamLiveClaudePane(pane) {
+  return pane?.command === "claude";
+}
+
 export async function collectDreamTargets(ctx, agents, sinceMs, opts = {}) {
   const getStatus = opts.getStatus || getPaneStatus;
   const getMtime = opts.getMtime || latestJsonlMtime;
+  const getLivePanes = opts.getLivePanes || listPanes;
   const targets = [];
   const skipped = [];
 
   for (const a of agents) {
+    let livePanes = [];
+    try {
+      livePanes = await getLivePanes(ctx, a.name);
+    } catch {}
+    const liveByIndex = new Map((livePanes || []).map((p) => [p.index, p]));
     const panes = Array.isArray(a.panes) ? a.panes : [];
     for (let i = 0; i < panes.length; i++) {
       const cmd = String(panes[i]?.cmd || "");
@@ -972,11 +982,18 @@ export async function collectDreamTargets(ctx, agents, sinceMs, opts = {}) {
       } catch {}
       if (lastMs < sinceMs) continue;
 
+      const livePane = liveByIndex.get(i);
+      const liveCommand = livePane?.command || "missing";
+      if (!isDreamLiveClaudePane(livePane)) {
+        skipped.push({ agent: a.name, pane: i, lastMs, status: "not-live-claude", liveCommand });
+        continue;
+      }
+
       let status = "unknown";
       try {
         status = await getStatus(ctx, a.name, i);
       } catch {}
-      const target = { agent: a.name, pane: i, lastMs, status };
+      const target = { agent: a.name, pane: i, lastMs, status, liveCommand };
       if (isDreamRunnableStatus(status)) targets.push(target);
       else skipped.push(target);
     }
@@ -1050,7 +1067,8 @@ async function cmdDream(ctx, flags = {}) {
     if (skipped.length) {
       console.log(`\nSkipped ${skipped.length} non-idle pane(s):`);
       for (const t of skipped) {
-        console.log(`--- ${t.agent}:${t.pane} (${t.status}; last activity ${new Date(t.lastMs).toISOString().slice(11, 16)} UTC) ---`);
+        const live = t.liveCommand ? `; live=${t.liveCommand}` : "";
+        console.log(`--- ${t.agent}:${t.pane} (${t.status}${live}; last activity ${new Date(t.lastMs).toISOString().slice(11, 16)} UTC) ---`);
       }
     }
     return;
@@ -1068,7 +1086,7 @@ async function cmdDream(ctx, flags = {}) {
 
     if (!targets.length) {
       if (!flags.quiet && !flags.q) {
-        if (skipped.length) console.log(`Dream: no idle claude panes with activity since ${sinceArg}; skipped ${skipped.length} non-idle pane(s).`);
+        if (skipped.length) console.log(`Dream: no runnable claude panes with activity since ${sinceArg}; skipped ${skipped.length} non-runnable pane(s).`);
         else console.log(`Dream: no claude panes with activity since ${sinceArg}.`);
       }
       writeDreamRunSentinel(memPath, dateKey, timeStr, 0, 0);
@@ -1077,7 +1095,7 @@ async function cmdDream(ctx, flags = {}) {
 
     if (!flags.quiet && !flags.q) {
       console.log(`Dream: processing ${targets.length} pane(s) sequentially…`);
-      if (skipped.length) console.log(`Dream: skipped ${skipped.length} non-idle pane(s).`);
+      if (skipped.length) console.log(`Dream: skipped ${skipped.length} non-runnable pane(s).`);
     }
 
     for (let idx = 0; idx < targets.length; idx++) {
