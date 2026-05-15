@@ -36,7 +36,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.16.28";
+const HINTS_VERSION = "1.16.29";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -212,6 +212,43 @@ To attach an image to your Discord reply, write on its own line:
 \`\`\`
 
 Supported formats: .png, .jpg, .jpeg, .gif, .webp (max 25MB).
+
+Alternative for tool/script flows (Bash steps, automation that can't use
+the inline \`[image: ...]\` syntax): use the CLI directly.
+
+\`\`\`bash
+amux image /absolute/path/to/file.png
+\`\`\`
+
+Uploads the file to the bound Discord channel and prints the message ID.
+
+### When to post images — non-negotiable
+
+If the user asks for a screenshot, image, visual proof, "ge mig bilder",
+"show me", "kan du visa", or any synonym — **post the file via
+\`amux image <path>\` (or the inline \`[image: ...]\` syntax) immediately**.
+Do not just save the file to disk and describe what's in it. The user
+explicitly asked because they want to SEE.
+
+Common failure mode: agent takes a screenshot via playwright/MCP, the
+file lands in \`.playwright-mcp/\` or cwd, agent describes the contents
+in text. User can't see it. Wasted turn.
+
+Correct flow:
+
+\`\`\`
+playwright_take_screenshot → file at /path/to/foo.png
+                            ↓
+        amux image /path/to/foo.png   ← MUST happen
+                            ↓
+   Optional 1-line caption referencing the upload
+\`\`\`
+
+Even if the screenshot doesn't perfectly demonstrate what you wanted to
+prove (e.g. browser auto-state changed, race window closed) — POST IT
+ANYWAY. Let the user see what you saw and decide if it's enough. Saying
+"the screenshot didn't capture what I wanted" without posting it gives
+the user nothing to evaluate.
 
 ## Always lead with a recommendation
 
