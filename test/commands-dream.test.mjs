@@ -1,9 +1,13 @@
 import { feature, unit, expect } from "bdd-vitest";
+import { mkdtempSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import {
   collectDreamTargets,
   hasDreamPaneBlock,
   isDreamLiveClaudePane,
   isDreamRunnableStatus,
+  waitForDreamPaneBlock,
 } from "../cli/commands.mjs";
 
 feature("amux dream command target selection", () => {
@@ -112,6 +116,28 @@ feature("amux dream command target selection", () => {
         missingEnd: false,
         wrongPane: false,
       });
+    }],
+  });
+
+  unit("waits briefly for a delayed dream marker block to appear", {
+    when: ["polling a file that is initially empty", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-dream-"));
+      const memPath = join(dir, "2026-05-13.md");
+      writeFileSync(memPath, "# 2026-05-13\n");
+      setTimeout(() => {
+        writeFileSync(memPath, [
+          "# 2026-05-13",
+          "<!-- amux-dream-ai-0:2026-05-13 -->",
+          "## ai:0",
+          "- Summary",
+          "<!-- /amux-dream-ai-0:2026-05-13 -->",
+          "",
+        ].join("\n"));
+      }, 50);
+      return waitForDreamPaneBlock(memPath, { agent: "ai", pane: 0 }, "2026-05-13", 500, 25);
+    }],
+    then: ["the delayed block is accepted", (result) => {
+      expect(result).toBe(true);
     }],
   });
 });

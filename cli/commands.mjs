@@ -926,6 +926,15 @@ export function hasDreamPaneBlock(content, t, dateKey) {
   return startIdx >= 0 && endIdx > startIdx;
 }
 
+export async function waitForDreamPaneBlock(memPath, t, dateKey, maxMs = 15_000, pollMs = 1_000) {
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    if (hasDreamPaneBlock(readFileSync(memPath, "utf-8"), t, dateKey)) return true;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  return false;
+}
+
 /**
  * Poll a pane's status until it has been idle for `idleStreak` consecutive
  * polls, or until maxMs elapses. Returns { idle: bool, status: last }.
@@ -1154,11 +1163,11 @@ async function cmdDream(ctx, flags = {}) {
         break;
       }
 
-      const wroteBlock = hasDreamPaneBlock(readFileSync(memPath, "utf-8"), t, dateKey);
+      const wroteBlock = await waitForDreamPaneBlock(memPath, t, dateKey);
       if (!wroteBlock) {
         failedCount++;
         aborted = true;
-        console.warn(`${tag} ${key} finished but did not write its dream marker block — aborting remaining panes`);
+        console.warn(`${tag} ${key} finished but did not write its dream marker block within 15s — aborting remaining panes`);
         break;
       }
 
