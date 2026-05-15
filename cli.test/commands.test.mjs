@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import yaml from "js-yaml";
-import { parseFlags, validateAgentAndPane, loadSourceYaml, saveSourceAndRegenerate } from "../cli/commands.mjs";
+import { parseFlags, validateAgentAndPane, loadSourceYaml, saveSourceAndRegenerate, dispatch } from "../cli/commands.mjs";
 
 feature("parseFlags", () => {
   unit("extracts string flags", {
@@ -346,6 +346,52 @@ ai:
       expect(gen).toContain("chan-0");
       expect(gen).toContain("chan-1");
       expect(gen).toContain("tagged");
+      cleanup();
+    }],
+  });
+});
+
+// --- amux image -----------------------------------------------------------
+
+feature("amux image dry-run resolves bound Discord channel", () => {
+  let root;
+  const setup = () => {
+    root = mkdtempSync(join(tmpdir(), "amux-image-test-"));
+    const configPath = join(root, "agents.yaml");
+    const bridgeDir = root;
+    writeFileSync(configPath, `
+ai:
+  dir: /tmp/ai
+  panes:
+    - name: claude
+      cmd: claude
+  discord:
+    "123456789012345678": 1
+`);
+    const imagePath = join(root, "screenshot.png");
+    writeFileSync(imagePath, "not-a-real-png");
+    return { configPath, bridgeDir, imagePath };
+  };
+  const cleanup = () => rmSync(root, { recursive: true, force: true });
+
+  component("prints resolved channel without posting when --dry is set", {
+    given: ["temp agent config + image file", setup],
+    when: ["running amux image dry-run against ai p1", async ({ configPath, bridgeDir, imagePath }) => {
+      const ctx = { configPath, bridgeDir };
+      const logs = [];
+      const originalLog = console.log;
+      console.log = (...args) => { logs.push(args.join(" ")); };
+      try {
+        await dispatch(["image", "--dry", "-p", "ai:1", imagePath, "screen"], ctx);
+      } finally {
+        console.log = originalLog;
+      }
+      return logs.join("\n");
+    }],
+    then: ["resolved channel and caption are mentioned", (out) => {
+      expect(out).toContain("image:");
+      expect(out).toContain("123456789012345678");
+      expect(out).toContain("(screen)");
       cleanup();
     }],
   });

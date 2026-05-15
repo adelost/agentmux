@@ -1906,6 +1906,70 @@ async function cmdSay(args, ctx) {
 }
 
 /**
+ * Post a local image file to the calling pane's Discord channel.
+ * Mirrors the `amux say` channel-resolution rules so an agent can send
+ * screenshot proof or visual debug artifacts directly to the human.
+ */
+async function cmdImage(args, ctx) {
+  const { execSync: execSyncFn } = await import("child_process");
+  const { sendFileToChannelId } = await import("./send-notify.mjs");
+  const { parseEnv } = await import("../lib.mjs");
+  try {
+    const vars = parseEnv(readFileSync(resolve(BRIDGE_DIR, ".env"), "utf-8"));
+    for (const [k, v] of Object.entries(vars)) {
+      if (!process.env[k]) process.env[k] = v;
+    }
+  } catch {}
+
+  const { flags, positional } = parseFlags(args, {
+    c: "string", channel: "string",
+    p: "string", pane: "string",
+    dry: "boolean",
+  });
+
+  const filePath = positional[0];
+  const caption = positional.slice(1).join(" ").trim();
+  if (!filePath) {
+    console.error(`Usage: amux image <path> [caption] [-c <channelId>] [-p <agent>:<pane>] [--dry]`);
+    process.exit(1);
+  }
+  if (!existsSync(filePath)) {
+    console.error(`image file not found: ${filePath}`);
+    process.exit(1);
+  }
+
+  let channelId = flags.c || flags.channel;
+  if (!channelId) {
+    const paneArg = flags.p || flags.pane;
+    if (paneArg) {
+      const m = paneArg.match(/^([^:]+):(\d+)$/);
+      if (!m) { console.error(`-p must be agent:pane, got '${paneArg}'`); process.exit(1); }
+      channelId = findChannelForPane(ctx.configPath, m[1], Number(m[2]));
+      if (!channelId) { console.error(`No Discord channel bound to ${paneArg}`); process.exit(1); }
+    } else {
+      const sender = detectSenderFromEnv(process.env, (cmd) => execSyncFn(cmd, { encoding: "utf8", timeout: 2000 }));
+      if (!sender) {
+        console.error(`No sender detected — pass -c <channelId> or -p <agent>:<pane>`);
+        process.exit(1);
+      }
+      const [agent, paneIdx] = sender.split(":");
+      channelId = findChannelForPane(ctx.configPath, agent, Number(paneIdx));
+      if (!channelId) { console.error(`No Discord channel bound to ${sender}`); process.exit(1); }
+    }
+  }
+
+  if (flags.dry) {
+    const name = filePath.split("/").pop() || filePath;
+    console.log(`image: ${name} → ${channelId}${caption ? ` (${caption})` : ""}`);
+    return;
+  }
+
+  await sendFileToChannelId(channelId, filePath, caption);
+  const name = filePath.split("/").pop() || filePath;
+  console.log(`image (${name}) → ${channelId}${caption ? " with caption" : ""}`);
+}
+
+/**
  * Cross-session context leaderboard. Sorts all claude/codex panes by
  * percent descending (tokens as tie-breaker). Helps answer "which pane
  * is closest to the context ceiling right now?" without manual digging.
@@ -2193,6 +2257,10 @@ Usage:
   agent notifyuser "message"      High-signal mobile notification to the human
     --level info|done|warn|error  Notification level (default: info)
     --test                        Send a test notification
+  agent image <path> [caption]    Send a local image file to the bound Discord channel
+    -c <channelId>                Explicit Discord channel ID
+    -p <agent>:<pane>             Explicit agent:pane channel mapping
+    --dry                         Print target without posting
   agent r                         Resume last agent
   agent help                      Show this message
 
@@ -2390,6 +2458,10 @@ export async function dispatch(argv, ctx) {
 
     case "say": {
       return cmdSay(rest, ctx);
+    }
+
+    case "image": {
+      return cmdImage(rest, ctx);
     }
 
     case "edit": {
