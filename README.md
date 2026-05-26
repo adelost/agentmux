@@ -1,6 +1,7 @@
 # agentmux
 
-Control Claude Code and Codex agents from your phone via Discord.
+Developer tooling for orchestrating Claude Code and Codex agents across tmux
+panes, with Discord as a ChatOps control surface.
 
 ```
 Discord message → agentmux → Claude Code/Codex (tmux) → response → Discord reply
@@ -10,7 +11,7 @@ Discord message → agentmux → Claude Code/Codex (tmux) → response → Disco
 - **Text in, voice out** - TTS reads responses back to you
 - **Send files, get images** - screenshots, PDFs, code files in both directions
 - **Multi-agent orchestration** - agents delegate tasks to each other via `amux` CLI
-- **Works from anywhere** - phone, tablet, another machine. Just open Discord.
+- **Remote control surface** - coordinate local agent sessions through Discord
 
 Works on Linux, macOS, and WSL. Requires at least one supported coding agent: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or Codex CLI.
 
@@ -297,34 +298,15 @@ full version of a specific turn.
 unreliable on WSL and macOS). Use it in a split pane while you work in the
 other.
 
-## Loop Guard — Bridge protects against runaway loops
+## Loop Guard
 
-Sometimes a feedback loop forms: a modal prompt fires in Claude Code, the user
-accidentally presses a button 40 times, or a Discord client bug replays the
-same keystroke. Each repeat bills tokens; worse, a short bot reply can itself
-become input to the next loop iteration.
+Loop Guard protects pane sessions from repeated short-message loops. When the
+same short message is forwarded to the same pane repeatedly within a short
+window, agentmux pauses forwarding for that pane and posts a single recovery
+hint in the Discord channel.
 
-The bridge watches incoming Discord messages per pane. If the same short
-message arrives 3 times inside a 30-second window, forwarding to the pane is
-paused and a one-time warning posts in the channel:
-
-> ⚠ Loop detected: '0' × 3 in 2s. Forwarding paused. Reply something different to resume, or run `amux esc` to clear pane state.
-
-Subsequent identical messages inside the same block-period are silently dropped
-(no warning spam). Send **any different message** to reset and resume normally.
-
-**Tunable via `.env`:**
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `LOOP_GUARD_ENABLED` | `true` | Set `false` to disable entirely |
-| `LOOP_GUARD_THRESHOLD` | `3` | Identical messages before blocking |
-| `LOOP_GUARD_WINDOW_MS` | `30000` | Sliding window in milliseconds |
-| `LOOP_GUARD_SHORT_LEN` | `10` | Messages longer than this aren't loop candidates |
-
-The guard only watches the user → pane direction. Long messages (real prompts)
-always pass through unchanged — the filter triggers only on short, repeated
-text that's almost always a loop signature.
+See [docs/reliability.md](docs/reliability.md) for tuning, recovery behavior,
+and related safeguards for long-running agent sessions.
 
 ## Voice PWA support
 
@@ -336,7 +318,7 @@ VOICE_PWA_TOKEN=$(openssl rand -hex 32)
 # optional: override defaults
 VOICE_PWA_PORT=8080
 VOICE_PWA_HOST=127.0.0.1   # default — local only. Set to your Tailscale IP
-                           # to let your phone in via tailnet.
+                           # to allow a trusted remote client via tailnet.
 ```
 
 Endpoints (all authenticate with `Authorization: Bearer <token>`):
@@ -351,7 +333,7 @@ Endpoints (all authenticate with `Authorization: Bearer <token>`):
 Voice input is prefixed with the same `[transcribed voice, …]` disclaimer
 used for Discord attachments, and mirrored to the Discord channel bound
 to the pane (if any) with a `[voice-pwa]` source tag — so anyone watching
-the channel sees what came in from the phone.
+the channel sees what came in from the remote client.
 
 ### Catch-up notice (stale channels)
 
@@ -389,8 +371,8 @@ carries the same header so channel watchers see which pane originated
 each brief.
 
 Binds to `127.0.0.1` by default to avoid exposure before you're ready.
-Flip to your Tailscale IP (e.g. `100.x.y.z`) when you want the phone to
-reach it. For public access later, put it behind a Cloudflare Tunnel
+Flip to your Tailscale IP (e.g. `100.x.y.z`) when you want trusted devices
+to reach it. For public access later, put it behind a Cloudflare Tunnel
 without code changes.
 
 ## Orchestrator primitives
@@ -465,44 +447,15 @@ Env vars (all optional):
 | `AUTO_COMPACT_POLL_MS` | `60000` | Ms between poll ticks (matched to grace by default) |
 | `AUTO_COMPACT_MIN_IDLE_MS` | `300000` | Ms of conversation silence required before warning. Protects against firing between turns when the operator is mid-thought (5 min default). |
 
-## Drift-guard — periodic "re-read your CLAUDE.md" reminders
+## Drift Guard
 
-Long-running Claude panes drift from their CLAUDE.md rules as conversation
-accumulates — attention weights tunnas so rules from earlier in context
-lose effective prominence. `/compact` naturally resets this because the
-rules are re-loaded with fresh weight. Between compacts, a periodic
-reminder closes the gap.
+Drift Guard helps long-running Claude panes refresh project instructions after
+many turns. The bridge can remind idle panes to re-read their generated
+`.agents/CLAUDE.md` context, and `amux remind` can trigger the same refresh
+manually for one pane or many panes.
 
-The bridge polls each claude pane. When **turns since last reminder OR
-last /compact** exceeds the threshold (40 by default) AND the pane is
-idle, a short reminder lands in the pane:
-
-```
-[drift-guard] Re-read .agents/CLAUDE.md — especially "Always lead with a
-recommendation". You are 42+ turns past your last refresh; attention
-weights decay.
-```
-
-Manual trigger via `amux remind`:
-
-```bash
-amux remind <agent> -p <pane>    # single pane, unconditional
-amux remind --all                # every claude pane, unconditional
-amux remind --stale              # only panes past the threshold right now
-amux remind --all --threshold 30 # override threshold for this run
-```
-
-`remind` updates the shared state file so the auto-poll won't re-fire
-the same panes for another threshold-worth of turns.
-
-Env vars (all optional):
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AMUX_REMIND_ENABLED` | `true` | Set to `false` to disable the poll |
-| `AMUX_REMIND_TURN_THRESHOLD` | `40` | Turns since refresh before reminder fires |
-| `AMUX_REMIND_POLL_MS` | `60000` | Ms between poll ticks (min 10s enforced) |
-| `AMUX_REMINDER_STATE_PATH` | `/tmp/agentmux-reminder-state.json` | Per-pane state |
+See [docs/reliability.md](docs/reliability.md) for command examples and
+configuration.
 
 ## Environment Variables
 
