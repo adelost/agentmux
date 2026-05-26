@@ -1,0 +1,125 @@
+# CLI Reference
+
+`amux` is the command-line interface for controlling agentmux sessions. `ax` is
+installed as a shorter alias for the same binary.
+
+## Session Overview
+
+```bash
+amux ps
+amux top
+amux timeline
+amux done --since 2h
+```
+
+| Command | Purpose |
+|---|---|
+| `amux ps` | Show agents, panes, status, context use, and labels |
+| `amux top` | Sort panes by context usage |
+| `amux timeline` | Show recent events across panes |
+| `amux watch` | Follow the timeline live |
+| `amux done` | Summarize commits, active panes, finished panes, and waiters |
+
+## Sending Work
+
+```bash
+amux <agent> "prompt"
+amux <agent> -p <pane> "prompt"
+amux wait <agent> -p <pane>
+```
+
+Example:
+
+```bash
+amux api -p 1 "run backend tests and summarize failures"
+amux wait api -p 1
+amux log api -p 1
+```
+
+When `amux` is called from inside a tmux session, the receiver pane gets a
+small provenance header showing which pane sent the brief.
+
+## Reading Logs
+
+```bash
+amux log <agent>
+amux log <agent> -p <pane>
+amux log <agent> -p <pane> -n 10
+amux log <agent> -p <pane> --since 30min
+amux log <agent> -p <pane> --grep "deploy"
+amux log <agent> -p <pane> --tmux
+amux log <agent> -p <pane> --full
+```
+
+`amux log` defaults to structured jsonl history. Use `--tmux` only when you
+need live terminal state, copy-mode output, progress bars, or modal prompts.
+
+| Flag | Behavior |
+|---|---|
+| `-n N` | Last N structured turns, or lines with `--tmux` |
+| `--since T` | Only turns at or after an ISO time or relative time such as `30min` |
+| `--grep PAT` | Filter structured turns by case-insensitive regex |
+| `--tmux` | Raw tmux capture |
+| `--full` | Structured history plus current tmux state |
+| `--text` | Legacy filtered text extraction |
+
+## Timeline
+
+```bash
+amux timeline
+amux timeline -n 100
+amux timeline --since 30min
+amux timeline --agent claw
+amux timeline --agent claw --pane 2
+amux timeline --grep "commit"
+amux timeline --follow
+amux timeline --since 2h --by-pane
+```
+
+`amux watch` is a shortcut for `amux timeline --follow`.
+
+Use `--by-pane` when you want a post-mortem grouped by pane. Use plain
+`timeline` when chronological order matters more.
+
+## Orchestrator Summary
+
+`amux done` answers "what changed since I last checked?" by combining commit
+history and pane state:
+
+```bash
+amux done
+amux done --since 30min
+amux done --since 2h
+amux done --day
+amux done --week
+```
+
+Output groups include:
+
+- Commits across known repositories.
+- Panes still working.
+- Panes that finished.
+- New waiters that likely need input.
+- Idle panes.
+
+## Recovery
+
+```bash
+amux esc <agent> -p <pane>
+amux wait <agent> -p <pane>
+amux log <agent> -p <pane> --tmux
+```
+
+For Discord channels, the equivalent recovery commands are `/raw`, `/esc`,
+`/dismiss`, and `//new`.
+
+## Labels
+
+```bash
+amux label <agent> <pane> "purpose"
+amux label <agent> <pane> --clear
+amux labels
+```
+
+Labels make `amux ps` and `amux top` easier to scan when several panes are
+working at once.

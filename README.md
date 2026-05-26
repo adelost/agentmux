@@ -1,19 +1,81 @@
 # agentmux
 
-Developer tooling for orchestrating Claude Code and Codex agents across tmux
-panes, with Discord as a ChatOps control surface.
+agentmux is local developer tooling for coordinating Claude Code and Codex
+agents across tmux panes. It adds a Discord-based ChatOps interface, a terminal
+CLI, session isolation, structured logs, media handling, and operational
+safeguards for long-running AI-assisted development workflows.
 
+```text
+Discord / amux CLI
+        -> agentmux bridge
+        -> tmux panes
+        -> Claude Code / Codex
+        -> structured logs, status, files, and replies
 ```
-Discord message → agentmux → Claude Code/Codex (tmux) → response → Discord reply
-```
 
-- **Voice in, text out** - send voice messages, get them transcribed and processed
-- **Text in, voice out** - TTS reads responses back to you
-- **Send files, get images** - screenshots, PDFs, code files in both directions
-- **Multi-agent orchestration** - agents delegate tasks to each other via `amux` CLI
-- **Remote control surface** - coordinate local agent sessions through Discord
+agentmux runs on your machine. It does not host agents for you; it connects
+your local projects, tmux sessions, and coding-agent CLIs into one controllable
+workspace.
 
-Works on Linux, macOS, and WSL. Requires at least one supported coding agent: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or Codex CLI.
+## Why agentmux
+
+- Run multiple Claude Code and Codex sessions side by side.
+- Keep pane histories isolated so resume/continue does not cross wires.
+- Delegate work between agents through the `amux` CLI.
+- Inspect status, logs, timelines, and recent completed work from one place.
+- Send and receive files, screenshots, PDFs, voice messages, and TTS replies.
+- Recover stuck sessions with explicit operational commands.
+- Protect long-running sessions with loop detection, reminders, and
+  auto-compact support.
+
+## Core Concepts
+
+| Concept | Purpose |
+|---|---|
+| Agent | A named project workspace from `agentmux.yaml` |
+| Pane | One Claude Code or Codex session inside a tmux window |
+| Bridge | The Node.js process that connects Discord, tmux, and logs |
+| `amux` | CLI for sending prompts, reading logs, checking status, and coordinating panes |
+| `.agents/` | Generated per-pane working directories and instruction files |
+
+Pane 0 runs in the project root. Pane 1 and above run in `.agents/N/`, giving
+each coding agent its own session history while still letting Claude Code and
+Codex discover generated project instructions.
+
+## Features
+
+### Multi-agent orchestration
+
+- Route different Discord channels to different projects and panes.
+- Run several Claude Code and Codex sessions per project.
+- Delegate tasks from one agent to another with `amux <agent> -p <pane> "..."`.
+- Fan out tests, audits, screenshots, or implementation work in parallel.
+
+### Reliable session management
+
+- Structured jsonl history for Claude and Codex output extraction.
+- Retry loop with delivery verification.
+- Resume hints for panes that restart without prior context.
+- Model-aware context tracking.
+- Recovery commands for stuck panes and blocking prompts.
+
+### Media and operator workflows
+
+- Voice message transcription.
+- Text-to-speech replies.
+- File and image transfer in both directions.
+- Agent-generated image attachments through `[image: /absolute/path.png]`.
+- Optional Voice PWA endpoint for trusted local or tailnet clients.
+
+## Requirements
+
+- Linux, macOS, or WSL
+- Node.js 20+
+- tmux
+- At least one supported coding-agent CLI:
+  - Claude Code
+  - Codex CLI
+- A Discord bot token if you want the Discord bridge
 
 ## Quick Start
 
@@ -23,463 +85,141 @@ cd agentmux
 bash bin/setup.sh
 ```
 
-Setup checks prerequisites (Node.js 20+, tmux, coding-agent CLI), installs npm deps, and creates config files. Then follow these steps:
+The setup script checks prerequisites, installs npm dependencies, and creates
+starter config files.
 
-### 1. Create a Discord Bot
-
-1. Go to [discord.com/developers/applications](https://discord.com/developers/applications)
-2. Click **New Application**, name it (e.g. "agentmux")
-3. Go to **Bot** in the sidebar
-4. Click **Reset Token**, copy the token
-5. Paste it in `.env` as `DISCORD_TOKEN=your-token-here`
-6. Scroll down and enable **Message Content Intent**
-7. Go to **OAuth2 > URL Generator** in the sidebar
-8. Check **bot** under Scopes
-9. Check these Bot Permissions: **Send Messages**, **Read Message History**, **Attach Files**, **Manage Channels**
-10. Copy the generated URL at the bottom, open it in your browser
-11. Select your Discord server and authorize
-
-### 2. Get your Discord Server ID
-
-1. Open Discord Settings > App Settings > **Advanced** > enable **Developer Mode**
-2. Right-click your server name in the sidebar > **Copy Server ID**
-
-### 3. Configure agentmux.yaml
-
-Edit `agentmux.yaml` with your server ID and projects:
+Create or edit `agentmux.yaml`:
 
 ```yaml
-guild: "YOUR_SERVER_ID"
-category: "Agent Cave"       # Discord category for agent channels
+guild: "YOUR_DISCORD_SERVER_ID"
+category: "Agent Cave"
 
 agents:
-  myproject:
-    dir: ~/projects/myproject
-    panes: 3                 # 3 coding agent panes = 3 Discord channels
-    shells: 3                # 3 empty terminals for running commands
+  api:
+    dir: ~/projects/api
+    panes: 2
+    codex: 1
+    shells: 2
 
-  another-project:
-    dir: ~/projects/another
-    panes: 3
-    services:                # named service panes (no Discord channel)
-      - npm run dev
-      - npm run test
+  frontend:
+    dir: ~/projects/frontend
+    panes: 2
 ```
 
-Each agent gets:
-- `panes: N` coding agent panes (each gets a Discord channel)
-- `services:` for background commands (dev server, etc.)
-- `shells: N` empty terminals for manual use
-
-### 4. Start and Sync
+Start the bridge:
 
 ```bash
-npm run dev                  # start agentmux (with auto-restart)
+npm run dev
 ```
 
-Then in any existing Discord channel where the bot is present, type:
+In Discord, run:
 
-```
+```text
 /sync
 ```
 
-This creates all the Discord channels automatically under the configured category. You only need to run `/sync` once (or when you change `agentmux.yaml`).
+This creates or updates the project channels from `agentmux.yaml`.
 
-### 5. Start coding via Discord
+## Discord Setup
 
-Send a message in any created channel (e.g. `#myproject`):
+1. Create a bot in the Discord Developer Portal.
+2. Enable Message Content Intent for the bot.
+3. Invite the bot to your server with permissions to send messages, read
+   history, attach files, and manage channels.
+4. Put the token in `.env`:
 
-```
-fix the bug in auth.ts
-```
-
-agentmux sends it to the pane's configured agent, streams progress, and replies with the result.
-
-## Multi-machine setup
-
-Each machine runs its own agentmux instance. To avoid conflicts, use a separate Discord category per machine:
-
-```yaml
-# Machine A: agentmux.yaml
-guild: "YOUR_SERVER_ID"
-category: "Desktop"
-
-agents:
-  myproject:
-    dir: ~/projects/myproject
-    panes: 3
+```bash
+DISCORD_TOKEN=your-token-here
 ```
 
-```yaml
-# Machine B: agentmux.yaml
-guild: "YOUR_SERVER_ID"
-category: "Laptop"
+5. Put your Discord server ID in `agentmux.yaml`.
+6. Start agentmux and run `/sync`.
 
-agents:
-  myproject:
-    dir: ~/projects/myproject
-    panes: 3
-```
+## Everyday Commands
 
-Both connect to the same Discord server but create channels under different categories. No conflicts, same bot token works.
-
-## Commands
+Discord commands:
 
 | Command | Description |
-|---------|-------------|
-| `/help` | Show all commands |
-| `/sync` | Create/sync Discord channels from agentmux.yaml |
-| `/peek` | Last response from agent |
-| `/raw` | Last 50 lines of tmux pane (raw) |
-| `/status` | Current agent, pane, context% |
-| `/follow` | Toggle: stream output even when typing in tmux |
-| `/thinking` | Toggle real-time text streaming |
-| `/tts` | Toggle text-to-speech |
-| `/dismiss` | Dismiss blocking prompt (survey etc.) |
-| `/esc` | Send Escape to interrupt agent |
-| `/use <agent>[.pane]` | Switch channel target |
-| `/use reset` | Back to yaml default |
+|---|---|
+| `/sync` | Create or update Discord channels from config |
+| `/status` | Show current agent, pane, and context usage |
+| `/peek` | Show the last response from the target pane |
+| `/raw` | Show raw tmux pane output |
+| `/esc` | Send Escape to the target pane |
+| `/dismiss` | Dismiss a blocking prompt where supported |
+| `/use <agent>[.pane]` | Temporarily retarget the channel |
 | `/reload` | Reload config |
-| `/restart` | Restart agentmux |
+| `/restart` | Restart the bridge process |
 
-**Pane targeting:** prefix with `.N` to target a specific pane: `.2 fix the bug` sends to pane 2.
+Terminal commands:
 
-**Agent commands:** any `//command` that isn't an agentmux command is forwarded to the current agent as a slash command. `//compact`, `//clear`, `//new`, `//model sonnet` etc. all work.
-
-## Features
-
-**Core**
-- Multi-agent routing (different Discord channels to different projects)
-- Multi-pane (multiple Claude Code/Codex instances per project)
-- `/sync` auto-creates Discord channels from config
-- Session isolation (each pane gets its own agent session in `.agents/N/`)
-
-**Reliability**
-- jsonl source of truth for Claude and Codex response extraction (no tmux parsing bugs)
-- Retry loop with echo verification for prompt delivery
-- Auto-dismiss surveys and blocking prompts
-- Auto-restart on crash (`bin/start.sh`)
-- Context tracking (model-aware, supports 1M-context Opus/Sonnet)
-- Resume-hint on fresh spawn: when a pane lost state (WSL/amux/claude restart), the first brief is prefixed with a pointer to the prior jsonl + the last user turn. Agents with full context recognize it and ignore; empty-state agents see the snippet as unfamiliar and can tail the jsonl for earlier history. See `core/resume-hint.mjs`.
-
-**Media**
-- Voice messages (transcribed via Whisper)
-- Text-to-speech responses
-- Image/PDF/document attachments (both directions)
-- Agent can attach images via `[image: /path/to/file.png]`
-
-**Orchestration**
-- `amux` CLI for agent-to-agent communication
-- Auto-generated hints (`.agents/CLAUDE.md` + `.agents/AGENTS.md`)
-- Agents discover commands automatically, survives `/compact`
-- Fan-out parallel work across agents
-
-## Session Isolation
-
-Claude Code and Codex tie session history to the working directory. When multiple panes share the same dir, resume/continue commands can pick up the wrong session.
-
-agentmux solves this automatically:
-- **Pane 0** runs in the project root
-- **Pane 1+** runs in `root/.agents/N/`
-
-Each pane gets isolated session history. Resume/continue is safe on all panes. `.agents/` is auto-added to `.gitignore`. Claude Code searches upward for `CLAUDE.md`, so all Claude panes read the project config.
-
-agentmux auto-generates `.agents/CLAUDE.md` and `.agents/AGENTS.md` with CLI commands and orchestration hints. Claude Code reads `CLAUDE.md` and Codex reads `AGENTS.md`, both searching upward from the pane's working directory. These files survive `/compact` because they are loaded as system context, not conversation history.
-
-## CLI (`amux`)
-
-After `npm link` (or global install), the `amux` command manages agent sessions.
-Tip: `ax` is a shorter alias for `amux` (same binary, both names work).
-
-```bash
-amux                         # list all agents
-amux myproject               # attach to tmux session
-amux myproject "fix the bug" # send prompt from terminal
-amux wait myproject          # wait until agent is idle
-amux log myproject           # show last 3 turns from session jsonl (structured)
-amux log myproject --tmux    # raw tmux capture (use --since / --grep to filter jsonl)
-amux ps                      # show all pane statuses
-amux timeline                # cross-pane event stream (kronologisk)
-amux watch                   # live-tail every pane in one view
-amux esc myproject           # interrupt an agent
-```
-
-Or attach directly via tmux:
-
-```bash
-tmux -S /tmp/agentmux.sock attach -t myproject
-```
-
-## Agent orchestration
-
-Agents can orchestrate other agents from their terminal using `amux`. agentmux auto-generates `.agents/CLAUDE.md` and `.agents/AGENTS.md` so agents discover the commands automatically (Claude Code and Codex respectively).
-
-**Example: delegate tests to another agent**
-```bash
-# From agent A's terminal
-amux api "run all tests and report failures"
-amux wait api
-amux log api
-```
-
-**Example: check what all agents are doing**
 ```bash
 amux ps
+amux api -p 1 "run the test suite and summarize failures"
+amux wait api -p 1
+amux log api -p 1
+amux log api -p 1 --tmux
+amux timeline --since 30min
+amux done --since 2h
+amux esc api -p 1
 ```
 
-**Example: fan-out work**
-```bash
-# Send tasks to multiple agents in parallel
-amux frontend "update the dashboard component" &
-amux backend "add the new API endpoint" &
-wait
-# Both agents work simultaneously
-```
+`ax` is installed as a shorter alias for `amux`.
 
-This makes it possible to build workflows where one agent coordinates others, similar to a lead developer delegating tasks to a team.
+## Agent-to-Agent Delegation
 
-### `amux log` changed in 1.1.0
-
-`amux log <agent>` now defaults to **last 3 turns from the session jsonl**,
-structured as user-prompt + agent-response + tool calls. This is more reliable
-than the previous filtered tmux extract (which could return empty) and gives
-orchestrators structured history instead of terminal-rendered text. Claude
-panes read `~/.claude/projects/...`; Codex panes read `~/.codex/sessions/...`.
-
-| Flag | Behavior |
-|---|---|
-| _(default)_ | jsonl, last 3 turns |
-| `-n N` | last N turns (or lines with `--tmux`) |
-| `--since T` | jsonl: only turns at/after T (ISO or `30min`/`2h`/`1d`) |
-| `--grep PAT` | jsonl: only turns matching regex (case-insensitive) |
-| `--tmux [-s N]` | raw tmux capture, scrollback N (default 200) |
-| `--full` | jsonl history + current tmux state |
-| `--text` | legacy filtered extract (pre-1.1.0 default) |
-
-If you scripted against the old default, add `--text` to keep the previous
-behavior. Pane/agent validation is also stricter: out-of-bounds panes and
-names like `claw:0` now error with a helpful message instead of silently
-doing something wrong.
-
-### `amux timeline` / `amux watch` (1.4.0)
-
-`amux ps` is a snapshot, `amux log` is per-pane. For orchestrators that want
-to *see every pane at once, kronologiskt*, 1.4.0 adds a unified cross-pane
-stream reading directly from the session jsonl files for Claude and Codex panes.
+Agents can use `amux` from their own terminal, so one pane can coordinate
+others:
 
 ```bash
-amux timeline                       # last 30 events across every pane
-amux timeline -n 100                # last 100 events
-amux timeline --since 30min         # only events from the last 30 min
-amux timeline --agent claw          # filter to one agent
-amux timeline --agent claw --pane 2 # filter to one pane
-amux timeline --grep "deploy"       # regex filter on content
-amux timeline --follow              # live-tail (Ctrl+C to stop)
-
-amux watch                          # shortcut for 'timeline --follow'
-amux watch --agent claw --grep err  # tail one agent, only rows matching /err/i
+amux api -p 1 "run backend tests"
+amux frontend -p 1 "audit the dashboard layout"
+amux wait api -p 1
+amux wait frontend -p 1
+amux log api -p 1
+amux log frontend -p 1
 ```
 
-Each row is one event:
+Generated `.agents/CLAUDE.md` and `.agents/AGENTS.md` files teach Claude Code
+and Codex how to use these commands from inside project panes.
 
-```
-10:42  claw:1        🎤 user   "GO — kör hela planen..."
-10:43  claw:1        🤖 agent  "Kod-fix för pick-longest-duration..."
-10:44  claw:5        🎤 user   "Nytt projekt: voice PWA..."
-10:45  claw:1        🔧 tool   Bash git commit -m "..."
-10:50  claw:1        🤖 agent  "🎉 Deploy klar (7m 54s)..."
-```
+## Configuration
 
-Icons: 🎤 user prompt, 🤖 assistant text, 🔧 tool call, ⚠️ error. Content is
-capped at 80 chars per row; use `amux log <agent> -p N --grep PAT` for the
-full version of a specific turn.
+Common `.env` variables:
 
-`--follow` polls the jsonl files once per second (not `fs.watch`, which is
-unreliable on WSL and macOS). Use it in a split pane while you work in the
-other.
-
-## Loop Guard
-
-Loop Guard protects pane sessions from repeated short-message loops. When the
-same short message is forwarded to the same pane repeatedly within a short
-window, agentmux pauses forwarding for that pane and posts a single recovery
-hint in the Discord channel.
-
-See [docs/reliability.md](docs/reliability.md) for tuning, recovery behavior,
-and related safeguards for long-running agent sessions.
-
-## Voice PWA support
-
-Set `VOICE_PWA_TOKEN` to enable the HTTP endpoint for the in-car PWA:
-
-```bash
-# .env
-VOICE_PWA_TOKEN=$(openssl rand -hex 32)
-# optional: override defaults
-VOICE_PWA_PORT=8080
-VOICE_PWA_HOST=127.0.0.1   # default — local only. Set to your Tailscale IP
-                           # to allow a trusted remote client via tailnet.
-```
-
-Endpoints (all authenticate with `Authorization: Bearer <token>`):
-
-| Method | Path | Purpose |
+| Variable | Default | Description |
 |---|---|---|
-| GET | `/api/agents` | list agents + panes + labels |
-| POST | `/api/send/:agent/:pane` | `{text}` or `{audio: base64, lang}` → pane |
-| GET | `/api/events/:agent/:pane` | SSE: status + response when pane goes idle |
-| POST | `/api/tts` | `{text}` → MP3 audio blob (edge-tts) |
+| `DISCORD_TOKEN` | required | Discord bot token |
+| `AGENTMUX_YAML` | `./agentmux.yaml` | Config file path |
+| `TMUX_SOCKET` | `/tmp/agentmux.sock` | tmux socket used by agentmux |
+| `TIMEOUT_S` | `600` | Max wait for a pane response |
+| `TTS_VOICE` | `sv-SE-MattiasNeural` | edge-tts voice |
+| `AGENTMUX_RECORD` | `0` | Save request/response recordings when set to `1` |
 
-Voice input is prefixed with the same `[transcribed voice, …]` disclaimer
-used for Discord attachments, and mirrored to the Discord channel bound
-to the pane (if any) with a `[voice-pwa]` source tag — so anyone watching
-the channel sees what came in from the remote client.
+See `agentmux.yaml.example` for a fuller project config example.
 
-### Catch-up notice (stale channels)
+## Documentation
 
-When you return to a Discord channel that's bound to a pane and the pane
-has seen activity since you last saw the channel, the bridge prepends a
-short notice to your incoming message with the count plus the 3 most
-recent turns:
-
-> ℹ 10 turns since your last Discord sync (latest: 16:58)
-> • 17:02 you: kör testen igen
-> • 17:15 claw: All 560 tests passed
-> • 18:30 you: commit och push
-
-Count is capped at 50+ for very stale channels. Previews show the first
-line of each turn (code fences collapsed to `[code]`, long text trimmed
-to ~80 chars). Tool-only turns are skipped so intermediate tool chatter
-doesn't crowd the preview.
-
-### Sender auto-metadata (orchestrator → pane)
-
-When you invoke `amux <agent> -p N "brief"` from inside a tmux session,
-the receiver pane sees a `[from <session>:<window>]` header prepended
-automatically, so it knows who briefed it:
-
-```
-[from claw:0]
-
-run the full test suite
-```
-
-Detected via `$TMUX` + `tmux display -p '#S'` / `#I`. Invisible when the
-caller is a raw terminal, Discord bot, or cron job (no TMUX env). The
-header is invariant — provenance is never silently erased. Discord mirror
-carries the same header so channel watchers see which pane originated
-each brief.
-
-Binds to `127.0.0.1` by default to avoid exposure before you're ready.
-Flip to your Tailscale IP (e.g. `100.x.y.z`) when you want trusted devices
-to reach it. For public access later, put it behind a Cloudflare Tunnel
-without code changes.
-
-## Orchestrator primitives
-
-When a Claude pane drives several other panes (`amux <agent> -p N "..."`),
-two commands answer the two questions that come up most:
-
-### `amux done` — "what's been resolved since I last checked?"
-
-```bash
-amux done                    # defaults to last-checkpoint anchor (1h fallback)
-amux done --since last       # explicit: use checkpoint
-amux done --since 30min      # override anchor
-amux done --reset            # peek without advancing the checkpoint
-```
-
-Output layers cross-repo commits and pane state:
-
-```
-📝 3 commits                           cross-repo git log since checkpoint
-🟡 2 still working                     live (jsonl <30s) or pane status=working
-✅ 5 finished                          turns written, last msg reads statement-like
-🔴 2 new waiters (since last check)    ask timestamp is after checkpoint
-⏸ 4 stale waiters (from before check)  ask existed last check too — not news
-💤 20 idle                             no activity since cutoff
-```
-
-Why commits lead: a fresh commit means code was written and kept — the
-strongest "work happened" signal. Jsonl-only activity can be inflated by
-compact boundaries, file snapshots, and tool-use bumps without real work.
-
-Why split waiters: a stale ask ("waiting for you since 12h ago") isn't
-actionable news — you already saw it last time. New asks are the ones you
-need to respond to.
-
-State lives in `/tmp/agentmux-orchestrator-check.json` as a single
-`last_check_ts_ms` field. Every successful `amux done` advances it (pass
-`--reset` to peek). Override path via `AMUX_CHECKPOINT_PATH` env var.
-
-### `amux timeline --by-pane` — "what happened, chronologically, grouped?"
-
-Complement to plain `amux timeline` (flat chronological stream). `--by-pane`
-groups rows under `agent:pane` headers, sorted by newest activity first.
-Use for post-mortem analysis; use `amux done` for daily orchestration.
-
-```bash
-amux timeline --since 2h --by-pane
-amux timeline --since 1h --by-pane --agent claw --grep "commit"
-```
-
-## Auto-compact
-
-Background poll in the bridge warns + fires `/compact` on idle, high-context
-panes so conversations don't drift into panic-compact at 95%. Runs once per
-pollMs, warns once per threshold-crossing, fires after graceMs if the pane
-is still idle. Any activity (new turn, copy-mode entered, context drops)
-cancels the pending warning.
-
-```
-⚠ Auto-compact in 60s: claw:3 is at 78% context and idle. Type anything to cancel.
-... (60s of silence) ...
-🗜 Auto-compacting claw:3 (was 78%). Summary preserves recent context.
-```
-
-Env vars (all optional):
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AUTO_COMPACT_ENABLED` | `true` | Set to `false` to disable the loop |
-| `AUTO_COMPACT_WARN_THRESHOLD` | `70` | Context % that triggers a warning |
-| `AUTO_COMPACT_GRACE_MS` | `60000` | Ms between warning and fire |
-| `AUTO_COMPACT_POLL_MS` | `60000` | Ms between poll ticks (matched to grace by default) |
-| `AUTO_COMPACT_MIN_IDLE_MS` | `300000` | Ms of conversation silence required before warning. Protects against firing between turns when the operator is mid-thought (5 min default). |
-
-## Drift Guard
-
-Drift Guard helps long-running Claude panes refresh project instructions after
-many turns. The bridge can remind idle panes to re-read their generated
-`.agents/CLAUDE.md` context, and `amux remind` can trigger the same refresh
-manually for one pane or many panes.
-
-See [docs/reliability.md](docs/reliability.md) for command examples and
-configuration.
-
-## Environment Variables
-
-All optional (set in `.env`):
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DISCORD_TOKEN` | (required) | Discord bot token |
-| `AGENTMUX_YAML` | `./agentmux.yaml` | Path to config |
-| `TMUX_SOCKET` | `/tmp/agentmux.sock` | tmux socket path |
-| `TIMEOUT_S` | `600` | Max wait for response (seconds) |
-| `TTS_VOICE` | `sv-SE-MattiasNeural` | edge-tts voice ([list](https://gist.github.com/BettyJJ/17cbaa1de96235a7f5773b8571c32980)) |
-| `AGENTMUX_RECORD` | `0` | Set to `1` to save request/response recordings |
+- [Reliability](docs/reliability.md): Loop Guard, Drift Guard, Auto-Compact,
+  and recovery commands.
+- [CLI Reference](docs/cli.md): `amux` commands, log modes, timelines, and
+  orchestrator commands.
 
 ## Troubleshooting
 
-**Agent not responding / "did not acknowledge prompt"**
-- Type `/raw` in the Discord channel to see what the tmux pane looks like
-- If the agent is stuck, type `/esc` to interrupt and try again
-- Surveys are suppressed automatically (`ANTHROPIC_DISABLE_SURVEY=1`) and auto-dismissed by the retry loop. If you still see one (e.g. from a session started before agentmux), type `/dismiss`
+If a pane does not respond:
 
-**Restarting a stuck agent session**
-- Send `//new` in a Claude channel to start a fresh Claude session; for Codex, resume from the session id shown in the pane if the CLI exits
-- Or attach directly: `tmux -S /tmp/agentmux.sock attach -t myproject` and fix manually
+```bash
+amux log <agent> -p <pane> --tmux
+amux esc <agent> -p <pane>
+amux wait <agent> -p <pane>
+```
+
+From Discord, use `/raw`, `/esc`, `/dismiss`, or `//new` for the same recovery
+path.
+
+If Discord channels are missing or stale, run `/sync` again after checking
+`agentmux.yaml`.
 
 ## Tests
 
