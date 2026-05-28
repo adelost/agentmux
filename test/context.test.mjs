@@ -136,6 +136,24 @@ feature("getContextFromPane: reads from pane content (per-pane correct)", () => 
     "                                                                 70000 tokens",
   ].join("\n");
 
+  const STALE_PRE_COMPACT_SCROLLBACK = [
+    "  ⬆ /gsd-update │ Opus 4.7 │ 5 ███████░░░ 74%",
+    "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents",
+    "                                                                    0 tokens",
+    "                                                 current: 2.1.147 · latest:",
+    "──────────────────────────────────────────────────────────────────────────────",
+    "❯ ",
+    "──────────────────────────────────────────────────────────────────────────────",
+    "  ⬆ /gsd-update │ Opus 4.7 │ 5 ░░░░░░░░░░ 0%",
+    "  ⏵⏵ bypass permissions on (shift+tab to cycle)",
+    "                                                 current: 2.1.147 · latest:",
+    "❯ ",
+    "──────────────────────────────────────────────────────────────────────────────",
+    "  ⬆ /gsd-update │ Opus 4.7 │ 5 ░░░░░░░░░░ 0%",
+    "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents",
+    "                                                                    0 tokens",
+  ].join("\n");
+
   unit("wide active pane: reads progress bar 41% + counter 340360", {
     given: ["wide active pane content", () => WIDE_ACTIVE],
     when: ["parsing pane", (c) => getContextFromPane(c)],
@@ -183,6 +201,15 @@ feature("getContextFromPane: reads from pane content (per-pane correct)", () => 
     then: ["70000 tokens, 7% (not 40)", (r) => {
       expect(r.tokens).toBe(70_000);
       expect(r.percent).toBe(7);
+    }],
+  });
+
+  unit("stale pre-compact status bar in scrollback does not override current 0%", {
+    given: ["pane capture with old 74% bar above current 0% bar", () => STALE_PRE_COMPACT_SCROLLBACK],
+    when: ["parsing pane", (c) => getContextFromPane(c)],
+    then: ["uses newest progress bar", (r) => {
+      expect(r.tokens).toBe(0);
+      expect(r.percent).toBe(0);
     }],
   });
 

@@ -264,9 +264,12 @@ export function getContextFromPane(paneContent, paneDir = null) {
   }
   if (tokens === null) return null;
 
-  // Percent from the progress bar line. Block-char presence is the anchor.
+  // Percent from the most recent progress bar line. Block-char presence is
+  // the anchor. Scan backwards to avoid stale pre-/compact status bars that
+  // remain in tmux scrollback above the current prompt.
   let percent = null;
-  for (const line of tail) {
+  for (let i = tail.length - 1; i >= 0; i--) {
+    const line = tail[i];
     if (BLOCK_CHARS.test(line)) {
       const m = line.match(/(\d+)\s*%/);
       if (m) { percent = parseInt(m[1]); break; }
