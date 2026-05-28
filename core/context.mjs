@@ -255,24 +255,41 @@ export function getContextFromPane(paneContent, paneDir = null) {
   // else on it. Anchoring to a pure line avoids matching "✻ Musing… (↓ 40
   // tokens)" delta indicators or chat text that mentions tokens.
   let tokens = null;
+  let tokenLineIndex = -1;
+  let tokenSource = null;
   for (let i = tail.length - 1; i >= 0; i--) {
     const line = tail[i];
     let m = line.match(/^\s*(\d+)\s+tokens\s*$/);
-    if (m) { tokens = parseInt(m[1]); break; }
+    if (m) {
+      tokens = parseInt(m[1]);
+      tokenLineIndex = i;
+      tokenSource = "counter";
+      break;
+    }
     m = line.match(/save\s+(\d+(?:\.\d+)?)k\s+tokens/i);
-    if (m) { tokens = Math.round(parseFloat(m[1]) * 1000); break; }
+    if (m) {
+      tokens = Math.round(parseFloat(m[1]) * 1000);
+      tokenLineIndex = i;
+      tokenSource = "idle-save";
+      break;
+    }
   }
   if (tokens === null) return null;
 
-  // Percent from the most recent progress bar line. Block-char presence is
-  // the anchor. Scan backwards to avoid stale pre-/compact status bars that
-  // remain in tmux scrollback above the current prompt.
+  // Percent from the progress bar that belongs to the same visible status
+  // block as the token counter. Do not let an idle "save N tokens" hint
+  // inherit stale progress from scrollback, and do not cross a prompt
+  // boundary while looking upward from the token line.
   let percent = null;
-  for (let i = tail.length - 1; i >= 0; i--) {
-    const line = tail[i];
-    if (BLOCK_CHARS.test(line)) {
-      const m = line.match(/(\d+)\s*%/);
-      if (m) { percent = parseInt(m[1]); break; }
+  if (tokenSource === "counter") {
+    const firstCandidate = Math.max(0, tokenLineIndex - 8);
+    for (let i = tokenLineIndex; i >= firstCandidate; i--) {
+      const line = tail[i];
+      if (/^\s*❯/.test(line)) break;
+      if (BLOCK_CHARS.test(line)) {
+        const m = line.match(/(\d+)\s*%/);
+        if (m) { percent = parseInt(m[1]); break; }
+      }
     }
   }
 

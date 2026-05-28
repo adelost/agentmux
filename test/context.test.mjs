@@ -154,6 +154,16 @@ feature("getContextFromPane: reads from pane content (per-pane correct)", () => 
     "                                                                    0 tokens",
   ].join("\n");
 
+  const STALE_BAR_BEFORE_IDLE_SAVE = [
+    "  ⬆ /gsd-update │ Opus 4.7 (1M context) │ 5 ███████░░░ 74%",
+    "  ⏵⏵ bypass permissions on (shift+tab to cycle)",
+    "                                                                    740000 tokens",
+    "──────────────────────────────────────────────────────────────────────────────",
+    "❯ ",
+    "──────────────────────────────────────────────────────────────────────────────",
+    "                     new task? /clear to save 12.3k tokens",
+  ].join("\n");
+
   unit("wide active pane: reads progress bar 41% + counter 340360", {
     given: ["wide active pane content", () => WIDE_ACTIVE],
     when: ["parsing pane", (c) => getContextFromPane(c)],
@@ -210,6 +220,15 @@ feature("getContextFromPane: reads from pane content (per-pane correct)", () => 
     then: ["uses newest progress bar", (r) => {
       expect(r.tokens).toBe(0);
       expect(r.percent).toBe(0);
+    }],
+  });
+
+  unit("idle save hint does not inherit stale progress bar from scrollback", {
+    given: ["old 74% status bar above current idle save hint", () => STALE_BAR_BEFORE_IDLE_SAVE],
+    when: ["parsing pane", (c) => getContextFromPane(c)],
+    then: ["computes percent from save tokens instead", (r) => {
+      expect(r.tokens).toBe(12_300);
+      expect(r.percent).toBe(1);
     }],
   });
 
