@@ -11,7 +11,7 @@
 // as our tmux extract pipeline: [{ type: "text"|"tool", content: string }].
 // Downstream code (handlers, recorder, Discord send) doesn't know the difference.
 
-import { readdirSync, readFileSync, statSync, existsSync } from "fs";
+import { readdirSync, readFileSync, statSync, existsSync, openSync, fstatSync, readSync, closeSync } from "fs";
 import { join } from "path";
 import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 
@@ -74,9 +74,8 @@ function findJsonlAndEvents(projectDir, needle) {
   return null;
 }
 
-/** Parse every JSON line in a jsonl file, skipping malformed lines. */
-function parseJsonl(filePath) {
-  const content = readFileSync(filePath, "utf-8");
+/** Parse JSON lines from a string blob, skipping malformed lines. */
+function parseJsonlText(content) {
   const events = [];
   for (const line of content.split("\n")) {
     if (!line.trim()) continue;
@@ -87,6 +86,39 @@ function parseJsonl(filePath) {
     }
   }
   return events;
+}
+
+/** Parse every JSON line in a jsonl file, skipping malformed lines. */
+function parseJsonl(filePath) {
+  return parseJsonlText(readFileSync(filePath, "utf-8"));
+}
+
+/**
+ * Parse only the last `maxBytes` of a jsonl file. Claude session jsonl is
+ * append-only with newest events last, and these files grow to 100MB+ on
+ * long-running panes — reading the whole thing just to grab the last few
+ * turns (preview, last-assistant line) cost ~500ms PER pane and was the
+ * dominant latency in `amux ps`/`amux done`. We seek to the tail, drop the
+ * first (almost certainly partial) line, and parse the rest. Falls back to a
+ * full read when the file is already small or anything goes wrong.
+ */
+function parseJsonlTail(filePath, maxBytes) {
+  let fd;
+  try {
+    fd = openSync(filePath, "r");
+    const size = fstatSync(fd).size;
+    if (size <= maxBytes) return parseJsonl(filePath);
+    const buf = Buffer.alloc(maxBytes);
+    readSync(fd, buf, 0, maxBytes, size - maxBytes);
+    let text = buf.toString("utf-8");
+    const nl = text.indexOf("\n");
+    if (nl !== -1) text = text.slice(nl + 1); // discard partial leading line
+    return parseJsonlText(text);
+  } catch {
+    try { return parseJsonl(filePath); } catch { return []; }
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch {} }
+  }
 }
 
 /**
@@ -556,13 +588,18 @@ function groupIntoTurns(events) {
  *   null when paneDir has no jsonl store (caller should fall back to tmux).
  */
 export function readLastTurns(paneDir, opts = {}) {
-  const { limit = 3, since = null, grep = null } = opts;
+  const { limit = 3, since = null, grep = null, tailBytes = null } = opts;
   const projectDir = join(CLAUDE_PROJECTS_DIR(), encodePath(paneDir));
   if (!existsSync(projectDir)) return null;
   const files = listJsonlFiles(projectDir);
   if (files.length === 0) return null;
 
-  const events = parseJsonl(files[0].path);
+  // tailBytes: only the file's tail is needed when the caller just wants the
+  // last few turns (no since/grep that could match older history). Bounds
+  // cost on 100MB+ session files. since/grep force a full scan for correctness.
+  const events = (tailBytes && !since && !grep)
+    ? parseJsonlTail(files[0].path, tailBytes)
+    : parseJsonl(files[0].path);
   let turns = groupIntoTurns(events);
 
   if (since) {
@@ -617,12 +654,37 @@ export function latestJsonlMtime(paneDir) {
  * Only pulls from the newest jsonl in the project dir (the active session);
  * older files are from prior /clear or /compact rotations.
  */
-function eventsFromProjectDir(projectDir) {
+function eventsFromProjectDir(projectDir, opts = {}) {
   if (!existsSync(projectDir)) return [];
   const files = listJsonlFiles(projectDir);
   if (files.length === 0) return [];
   const latest = files[0];
-  const events = parseJsonl(latest.path);
+
+  // Tail read for size-bounded callers. These session files reach 100MB+, and
+  // walking the whole thing per pane dominated `amux done`. Two modes:
+  //   - tailFallback (default): if the tail's OLDEST event is still newer than
+  //     the cutoff we may have truncated in-window history, so fall back to a
+  //     full parse. Correct, but unbounded on hyperactive panes.
+  //   - tailFallback:false: tail only, never fall back. Bounds cost; the only
+  //     casualty is an exact turn COUNT on panes with >tailBytes of in-window
+  //     activity (the latest user/assistant text always lives in the tail, so
+  //     classification/preview stay correct). `amux done` opts into this.
+  // No tailBytes → full read.
+  const { tailBytes = null, sinceMs = null, tailFallback = true } = opts;
+  let events;
+  if (tailBytes) {
+    events = parseJsonlTail(latest.path, tailBytes);
+    if (tailFallback && sinceMs != null) {
+      const oldest = events.find((e) => e.timestamp)?.timestamp;
+      const oldestMs = oldest ? Date.parse(oldest) : NaN;
+      if (!Number.isFinite(oldestMs) || oldestMs > sinceMs) {
+        events = parseJsonl(latest.path); // tail didn't reach the cutoff
+      }
+    }
+  } else {
+    events = parseJsonl(latest.path);
+  }
+
   const rows = [];
   for (const e of events) {
     const ts = e.timestamp || null;
@@ -688,8 +750,9 @@ export function panePathFor(agent, paneIdx) {
  * @returns {Array<{timestamp:string, agent:string, pane:number, role:string, type:string, content:string}>}
  */
 export function readAllTurnsAcrossPanes(opts = {}) {
-  const { agents = [], since = null, agent: agentFilter = null, pane: paneFilter = null, grep = null, limit = null } = opts;
+  const { agents = [], since = null, agent: agentFilter = null, pane: paneFilter = null, grep = null, limit = null, tailBytes = null, tailFallback = true } = opts;
   const out = [];
+  const sinceMs = since ? since.getTime() : null;
 
   for (const a of agents) {
     if (agentFilter && a.name !== agentFilter) continue;
@@ -700,7 +763,7 @@ export function readAllTurnsAcrossPanes(opts = {}) {
       const paneCfg = panes[paneIdx];
       const rows = isCodexPaneConfig(paneCfg)
         ? rowsFromTurns(readLastTurnsCodex(paneDir, { limit: Number.MAX_SAFE_INTEGER })?.turns || [])
-        : eventsFromProjectDir(projectDirFor(paneDir));
+        : eventsFromProjectDir(projectDirFor(paneDir), { tailBytes, sinceMs, tailFallback });
       for (const r of rows) {
         out.push({ ...r, agent: a.name, pane: paneIdx });
       }

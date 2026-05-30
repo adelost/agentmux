@@ -6,7 +6,7 @@ import { dirname, resolve } from "path";
 import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 import { loadConfig, listAgents, getAgent, addAgent, removeAgent, resolveAgent, saveLast, getLast, getPaneCount, findChannelForPane } from "./config.mjs";
-import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens } from "./format.mjs";
+import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens, detectPaneStatus } from "./format.mjs";
 import { hasSession, ensureAndAttach, attachSession, killSession, listPanes, getPaneStatus, sendKeys, selectOption, createTmuxContext, sendToPane } from "./tmux.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
 import { stripAnsi, esc, extractActivity, formatDuration } from "../lib.mjs";
@@ -25,6 +25,11 @@ import { spawn, execSync } from "child_process";
 import { runOneshot, showRunLog } from "./run.mjs";
 import { executePlan, showPlanLog } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
+import {
+  loadTodos, saveTodos, addTodo, doneTodo, rmTodo, findItem,
+  listActive, listDone, formatActiveList, formatReminderSummary, formatItemLine,
+  DEFAULT_TODOS_PATH, SECTION_NOW, SECTION_PARKED, SECTION_BLOCKED,
+} from "../core/todos.mjs";
 
 // Bridge = the Discord bot itself (not a Claude agent). Singleton infra.
 const BRIDGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -649,8 +654,26 @@ async function cmdDone(ctx, flags) {
   }
 
   const agents = listAgents(ctx.configPath);
-  const rows = readAllTurnsAcrossPanes({ agents, since: new Date(sinceMs) });
-  const buckets = groupByPane(rows);
+
+  // Single jsonl read for both the current cutoff and the 7d recent-activity
+  // feed: read at the EARLIER of the two and slice in memory. Previously this
+  // read every pane's jsonl twice whenever the cutoff was narrower than 7d
+  // (the common default-1h case) — the dominant cost in `amux done`.
+  const widerSinceMs = nowMs - 7 * 24 * 3600 * 1000;
+  const readCutoffMs = Math.min(sinceMs, widerSinceMs);
+  // Bounded tail per pane (no full-read fallback): on a 100MB+ session a full
+  // parse per pane was the whole cost of `amux done`. 4MB holds plenty of
+  // recent turns for classification + the recent feed; the latest user/
+  // assistant text (what classify + preview need) always lives in the tail.
+  // The only casualty is an exact turn count on the most hyperactive panes,
+  // which is informational. See eventsFromProjectDir's tailFallback:false.
+  const allRows = readAllTurnsAcrossPanes({
+    agents, since: new Date(readCutoffMs), tailBytes: 4 * 1024 * 1024, tailFallback: false,
+  });
+  const sliceFrom = (cutoff) => cutoff <= readCutoffMs
+    ? allRows
+    : allRows.filter((r) => r.timestamp && Date.parse(r.timestamp) >= cutoff);
+  const buckets = groupByPane(sliceFrom(sinceMs));
 
   // Also enumerate panes with ZERO turns so "idle" count stays honest.
   // Each agent in config has a known pane list regardless of jsonl state.
@@ -666,6 +689,17 @@ async function cmdDone(ctx, flags) {
   const working = [];
   let idleCount = 0;
 
+  // Fetch every pane's live tmux status in parallel — each getPaneStatus is
+  // a capture-pane subprocess spawn, and doing ~40 of them sequentially was
+  // the second cost driver here. tmux handles concurrent capture fine.
+  const statuses = new Map(
+    await Promise.all([...allPaneKeys].map(async (key) => {
+      const [agentName, paneStr] = key.split(":");
+      const status = await getPaneStatus(ctx, agentName, parseInt(paneStr, 10)).catch(() => "unknown");
+      return [key, status];
+    })),
+  );
+
   for (const key of allPaneKeys) {
     const [agentName, paneStr] = key.split(":");
     const paneIdx = parseInt(paneStr, 10);
@@ -673,9 +707,10 @@ async function cmdDone(ctx, flags) {
       agent: agentName, pane: paneIdx, turns: 0,
       latestTurnTs: null,
       lastUserText: null, lastUserTextTs: null,
+      recentUserTexts: [],
       lastAssistantText: null, lastAssistantTextTs: null,
     };
-    const status = await getPaneStatus(ctx, agentName, paneIdx).catch(() => "unknown");
+    const status = statuses.get(key) || "unknown";
     let cls = classifyPane(bucket, status);
 
     // jsonl <30s old overrides classifier: tmux pane status can lag behind
@@ -710,15 +745,10 @@ async function cmdDone(ctx, flags) {
   // pulled from a 7d window — independent of the current cutoff so it
   // stays informative even when --day/--week aren't passed. Helps a
   // morning-after orchestrator see "last 5 things" at a glance, in
-  // chronological order, before scanning the bucket sections below.
-  const widerSinceMs = nowMs - 7 * 24 * 3600 * 1000;
+  // chronological order, before scanning the bucket sections below. The 7d
+  // slice reuses allRows (read once above) — no second jsonl pass.
   const widerCommits = collectCommitsSince(reposFromAgents(agents), widerSinceMs, 20);
-  let widerBuckets = buckets;
-  if (sinceMs > widerSinceMs) {
-    // Current cutoff is narrower than 7d — re-read for the recent feed.
-    const widerRows = readAllTurnsAcrossPanes({ agents, since: new Date(widerSinceMs) });
-    widerBuckets = groupByPane(widerRows);
-  }
+  const widerBuckets = sinceMs <= widerSinceMs ? buckets : groupByPane(sliceFrom(widerSinceMs));
   const recentItems = [];
   for (const b of widerBuckets.values()) {
     if (b.latestTurnTs) recentItems.push({ kind: "pane", ts: b.latestTurnTs, bucket: b });
@@ -753,6 +783,14 @@ async function cmdDone(ctx, flags) {
   if (commits.length) {
     console.log(`\n📝 ${commits.length} commit${commits.length === 1 ? "" : "s"}`);
     for (const c of commits) console.log("  " + formatCommitRow(c));
+  }
+
+  // Arrow legend: the pane rows below carry a 2-line thread block. Spelled
+  // out once so an agent reading this knows what it's looking at without a
+  // follow-up `amux log`.
+  const hasThreadRows = working.length || finished.length || waitingNew.length || waitingStale.length;
+  if (hasThreadRows) {
+    console.log(`\n  (per pane:  ← last directives it received   → its latest reply)`);
   }
 
   if (working.length) {
@@ -806,6 +844,13 @@ async function cmdDone(ctx, flags) {
     // Generic "see full" hint for the top-20 recent activity feed — preview
     // text is truncated to ~50 chars, full message lives in jsonl/git.
     console.log(`  amux log <agent> -p <N> -n 1                 # full text of any pane in 'Recent activity'`);
+  }
+  // Coordination primitive: how one agent replies to / directs another. The
+  // ← lines above show what a pane was told; this is how you add to them.
+  if (waitingNew.length || waitingStale.length || working.length) {
+    const w = (waitingNew[0] || waitingStale[0] || working[0]);
+    const [aname, pidx] = w.key.split(":");
+    console.log(`  amux ${aname} -p ${pidx} "<message>"${" ".repeat(Math.max(1, 22 - aname.length - String(pidx).length))}# send a directive/answer to this pane`);
   }
   if (!anySection) {
     console.log(`  amux done --all                              # widen to 30d (max safety cap)`);
@@ -1242,6 +1287,157 @@ async function cmdNotifyUser(args) {
   else console.log(`notifyuser sent → ${result.target}${result.fallback ? " (fallback)" : ""}`);
 }
 
+/** Persistent todo list backed by ~/.openclaw/workspace/memory/tasks.md. */
+async function cmdTodo(args) {
+  const { flags, positional } = parseFlags(args, {
+    all: "boolean",
+    parked: "boolean",
+    blocked: "boolean",
+    dry: "boolean",
+    path: "string",
+  });
+  const path = flags.path || DEFAULT_TODOS_PATH;
+  const sub = positional[0];
+
+  const printList = (parsed) => {
+    console.log(formatActiveList(parsed));
+    if (flags.all) {
+      const done = listDone(parsed, 20);
+      if (done.length) {
+        console.log("\n## Klart (senaste)");
+        for (const it of done) console.log("  " + formatItemLine(it, { includeCreated: true }));
+      }
+    }
+  };
+
+  // No subcommand → list active (+ done if --all)
+  if (!sub) {
+    printList(loadTodos(path));
+    return;
+  }
+
+  switch (sub) {
+    case "list":
+    case "ls": {
+      printList(loadTodos(path));
+      return;
+    }
+    case "add": {
+      const text = positional.slice(1).join(" ").trim();
+      if (!text) {
+        console.error('Usage: amux todo add "text" [--parked|--blocked]');
+        process.exit(1);
+      }
+      const parsed = loadTodos(path);
+      const section = flags.parked ? SECTION_PARKED
+        : flags.blocked ? SECTION_BLOCKED
+        : SECTION_NOW;
+      const { item } = addTodo(parsed, text, { section });
+      if (flags.dry) {
+        console.log(`(dry) would add: ${formatItemLine(item)} → ${section}`);
+        return;
+      }
+      saveTodos(parsed, path);
+      console.log(`added: ${formatItemLine(item)} → ${section}`);
+      return;
+    }
+    case "done":
+    case "do": {
+      const target = positional.slice(1).join(" ").trim();
+      if (!target) {
+        console.error("Usage: amux todo done <id|substring>");
+        process.exit(1);
+      }
+      const parsed = loadTodos(path);
+      const before = findItem(parsed, target);
+      if (!before) {
+        console.error(`No todo found matching "${target}"`);
+        process.exit(1);
+      }
+      const result = doneTodo(parsed, target);
+      if (flags.dry) {
+        console.log(`(dry) would close: ${formatItemLine(result.item)} (was in ${result.fromSection})`);
+        return;
+      }
+      saveTodos(parsed, path);
+      console.log(`closed: ${formatItemLine(result.item)} (was in ${result.fromSection})`);
+      return;
+    }
+    case "rm":
+    case "remove": {
+      const target = positional.slice(1).join(" ").trim();
+      if (!target) {
+        console.error("Usage: amux todo rm <id|substring>");
+        process.exit(1);
+      }
+      const parsed = loadTodos(path);
+      const result = rmTodo(parsed, target);
+      if (!result.found) {
+        console.error(`No todo found matching "${target}"`);
+        process.exit(1);
+      }
+      if (flags.dry) {
+        console.log(`(dry) would remove: ${formatItemLine(result.item)}`);
+        return;
+      }
+      saveTodos(parsed, path);
+      console.log(`removed: ${formatItemLine(result.item)}`);
+      return;
+    }
+    case "edit": {
+      const editor = process.env.EDITOR || "vi";
+      const { spawn } = await import("child_process");
+      const child = spawn(editor, [path], { stdio: "inherit" });
+      await new Promise((resolve) => child.on("close", resolve));
+      return;
+    }
+    case "path": {
+      console.log(path);
+      return;
+    }
+    default: {
+      console.error(`Unknown todo subcommand: ${sub}`);
+      console.error("Usage: amux todo [list|add|done|rm|edit|path] [--all|--parked|--blocked|--dry]");
+      process.exit(1);
+    }
+  }
+}
+
+/**
+ * Read todos and send a notifyuser push if any active items exist.
+ * Intended for cron at 08:00 daily. Idempotent; safe to run repeatedly.
+ */
+async function cmdTodoRemind(args) {
+  const { notifyUser } = await import("./send-notify.mjs");
+  const { flags } = parseFlags(args, {
+    dry: "boolean",
+    path: "string",
+    title: "string",
+    level: "string",
+    force: "boolean",
+  });
+  const path = flags.path || DEFAULT_TODOS_PATH;
+  const parsed = loadTodos(path);
+  const active = listActive(parsed);
+  if (active.length === 0) {
+    console.log("No active todos — nothing to remind.");
+    return;
+  }
+  const body = formatReminderSummary(parsed);
+  const opts = {
+    level: flags.level || "info",
+    title: flags.title || "amux todos",
+    force: !!flags.force,
+  };
+  if (flags.dry) {
+    console.log(`(dry) would notify: ${body}`);
+    return;
+  }
+  const result = await notifyUser(body, opts);
+  if (result.deduped) console.log("todo-remind skipped duplicate");
+  else console.log(`todo-remind sent → ${result.target}${result.fallback ? " (fallback)" : ""} (${active.length} active)`);
+}
+
 /** Compress an "age in minutes" into "Xm" / "Xh" / "Xd" for header chrome. */
 function formatRelMin(min) {
   if (!Number.isFinite(min) || min < 0) return "?";
@@ -1260,14 +1456,47 @@ function formatCommitRow(c) {
   return `${tsLabel}  ${labelPad}  ${hash}  ${subject}`;
 }
 
-function formatDoneRow({ key, bucket }) {
-  const keyPad = key.padEnd(10);
+/**
+ * Render a pane as a compact thread block for `amux done`:
+ *
+ *   claw:9   12:38  +164t
+ *     ← <dir 1> · <dir 2> · <dir 3>      (last ≤3 user directives, oldest→newest)
+ *     → <last assistant text>            (where the pane landed)
+ *
+ * The ← line is the coordination payload: another agent reads it to see what
+ * this pane was told to do without a follow-up `amux log`. The → line shows
+ * the latest reply. Both lines are omitted when empty so idle-ish rows stay
+ * one line. Pass { brief: true } to collapse to the old single-line preview.
+ */
+function formatDoneRow({ key, bucket }, opts = {}) {
   const tsLabel = bucket.latestTurnTs
     ? new Date(bucket.latestTurnTs).toISOString().slice(11, 16)
     : "--:--";
-  const turnStr = `(+${bucket.turns} turn${bucket.turns === 1 ? "" : "s"})`.padEnd(11);
-  const preview = previewText(bucket.lastAssistantText || bucket.lastUserText, 70);
-  return `${keyPad}  ${tsLabel}  ${turnStr}  ${preview ? `"${preview}"` : ""}`;
+  const head = `${key.padEnd(10)}  ${tsLabel}  +${bucket.turns}t`;
+
+  if (opts.brief) {
+    const preview = previewText(bucket.lastAssistantText || bucket.lastUserText, 70);
+    return preview ? `${head}  "${preview}"` : head;
+  }
+
+  // System-injected user-role events (slash-command echoes, resume/compact
+  // hints) aren't human directives — they're noise on the ← line. Drop them,
+  // but only while real directives remain, so a pane whose only recent input
+  // was a hint still shows something.
+  const isSystemNoise = (t) => /^\s*(<local-command-|<command-name>|\[amux (resume|compact) hint\]|<local-command-stdout>)/.test(t);
+  const rawDirs = bucket.recentUserTexts && bucket.recentUserTexts.length
+    ? bucket.recentUserTexts
+    : (bucket.lastUserText ? [bucket.lastUserText] : []);
+  const realDirs = rawDirs.filter((t) => !isSystemNoise(t));
+  const dirs = (realDirs.length ? realDirs : rawDirs)
+    .map((t) => previewText(stripAnsi(t), 48))
+    .filter(Boolean);
+  const reply = previewText(stripAnsi(bucket.lastAssistantText || ""), 90);
+
+  const lines = [head];
+  if (dirs.length) lines.push(`     ← ${dirs.join(" · ")}`);
+  if (reply) lines.push(`     → ${reply}`);
+  return lines.join("\n");
 }
 
 // Pane commands that correspond to a dialect we can read context for.
@@ -1297,21 +1526,56 @@ function dialectFor(agent, pane) {
 }
 
 /** Gather status + preview + context for one pane. Safe: never throws. */
+/**
+ * Last readable assistant text for a pane, pulled from jsonl. This is the
+ * meaningful "what is this pane saying" line — the tmux tail is usually
+ * status-bar residue (`)`, `⏵⏵ bypass permissions…`, a bare shell prompt),
+ * which told a reader nothing. Empty string when no jsonl/text is available
+ * (shells, fresh panes) so the caller can fall back to the tmux tail.
+ */
+function lastAssistantPreview(agent, paneIdx, paneDir) {
+  try {
+    // tailBytes caps the jsonl read at 256KB — more than enough to contain
+    // the last assistant turn, even with chunky tool output, on files that
+    // can otherwise be 100MB+. Without this the preview read dominates `ps`.
+    const res = readLastTurnsForPane(agent, paneIdx, paneDir, { limit: 4, tailBytes: 256 * 1024 });
+    const turns = res?.turns || [];
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const items = turns[i].items || [];
+      for (let j = items.length - 1; j >= 0; j--) {
+        if (items[j].type === "tool") continue;
+        const c = (items[j].content || "").trim();
+        if (c) return c;
+      }
+    }
+  } catch {}
+  return "";
+}
+
 async function inspectPane(ctx, agent, pane) {
-  let status = await getPaneStatus(ctx, agent.name, pane.index).catch(() => "unknown");
+  // Single capture per pane. We used to call getPaneStatus (a 30-line
+  // capture-pane) AND capturePane(100) — two round-trips to the SINGLE-
+  // THREADED tmux server, which serializes them server-side no matter how
+  // parallel the client is. detectPaneStatus only inspects the last ~15
+  // lines, so deriving status from the same 100-line capture is identical
+  // output for half the tmux calls — the actual lever for `amux ps` latency.
   let content = "";
   try { content = await ctx.agent.capturePane(agent.name, pane.index, 100); }
   catch {}
+  let status = content ? detectPaneStatus(stripAnsi(content)) : "unknown";
   const lines = stripAnsi(content).split("\n").filter((l) => l.trim());
-  // Claude right-aligns its tail rows with tons of whitespace; collapse it
-  // so the preview looks readable when rendered into a left-aligned column.
-  const preview = (lines[lines.length - 1] || "").trim();
   const dialect = dialectFor(agent, pane);
   // Use the worktree pane dir, not agent.dir — same fix as cmdLog (399915f).
   // Claude Code stores its session jsonl per-cwd; each pane runs in
   // .agents/N, so getContextFromPane's max-tokens fallback must read from
   // the worktree slug, not the parent project slug.
   const paneDir = panePathFor(agent, pane.index);
+  // Cheap tmux-tail preview as a fallback. The meaningful jsonl-based preview
+  // is read lazily in the render loop, but ONLY for panes that get expanded
+  // (active / has-context) — readLastTurns is a synchronous full-file parse,
+  // so reading it for all ~40 panes here would serialize and dwarf the
+  // parallel tmux probes. Reserve it for the handful that actually display.
+  const preview = (lines[lines.length - 1] || "").trim();
   // Claude: status-bar parser (capture-pane already in `content`).
   // Codex: read directly from codex jsonl (no status-bar equivalent).
   let context = null;
@@ -1356,17 +1620,20 @@ async function cmdPs(ctx, flags = {}) {
   const agents = listAgents(ctx.configPath);
 
   // Step 1: gather all data first so we can sort agents by importance.
-  const agentData = [];
-  for (const a of agents) {
-    if (!(await hasSession(ctx, a.name))) continue;
+  // Every pane is inspected in parallel — each inspectPane is 2+ tmux
+  // subprocess spawns (status + capture) plus a jsonl read, and doing all
+  // ~40 panes sequentially was the whole reason `amux ps` took ~8s. Agents
+  // are probed concurrently too; tmux handles parallel capture fine.
+  const live = (await Promise.all(agents.map(async (a) =>
+    (await hasSession(ctx, a.name)) ? a : null,
+  ))).filter(Boolean);
+  const agentData = await Promise.all(live.map(async (a) => {
     const panes = await listPanes(ctx, a.name);
-    const enriched = [];
-    for (const p of panes) {
-      const info = await inspectPane(ctx, a, p);
-      enriched.push({ ...p, ...info });
-    }
-    agentData.push({ agent: a, panes: enriched });
-  }
+    const enriched = await Promise.all(panes.map(async (p) => ({
+      ...p, ...(await inspectPane(ctx, a, p)),
+    })));
+    return { agent: a, panes: enriched };
+  }));
 
   if (agentData.length === 0) {
     console.log("No running agents.");
@@ -1424,7 +1691,15 @@ async function cmdPs(ctx, flags = {}) {
         const ctxCell = formatContextCell(p.context);
         const cmd = p.command.padEnd(6);
         const label = a.panes[p.index]?.label;
-        const display = label ? `[${truncate(label, 40)}]` : truncate(p.preview, 60);
+        // Label wins; otherwise pull the meaningful last-assistant line from
+        // jsonl (only now, for this expanded pane). Fall back to the tmux tail.
+        let display;
+        if (label) {
+          display = `[${truncate(label, 40)}]`;
+        } else {
+          const jsonl = lastAssistantPreview(a, p.index, panePathFor(a, p.index));
+          display = truncate(jsonl || p.preview, 70);
+        }
         console.log(`  ${icon} p${p.index}  ${cmd} ${ctxCell}  ${display}`);
         i++;
         continue;
@@ -2339,6 +2614,8 @@ const FLAG_SPECS = {
   select: { p: "number" },
   esc: { p: "number" },
   topic: { p: "number" },
+  todo: { all: "boolean", parked: "boolean", blocked: "boolean", dry: "boolean", path: "string" },
+  "todo-remind": { dry: "boolean", path: "string", title: "string", level: "string", force: "boolean" },
 };
 
 /** Main command dispatch. */
@@ -2439,6 +2716,14 @@ export async function dispatch(argv, ctx) {
     case "notifyuser":
     case "notify-user":
       return cmdNotifyUser(rest);
+
+    case "todo":
+    case "todos":
+      return cmdTodo(rest);
+
+    case "todo-remind":
+    case "todoremind":
+      return cmdTodoRemind(rest);
 
     case "remind": {
       const { flags, positional } = parseFlags(rest, FLAG_SPECS.remind);

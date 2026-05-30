@@ -7,8 +7,54 @@
 // ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl which already carries
 // total_token_usage + model_context_window.
 
-import { readFileSync, readdirSync, statSync, existsSync } from "fs";
+import { readFileSync, readdirSync, statSync, existsSync, openSync, fstatSync, readSync, closeSync } from "fs";
 import { join } from "path";
+
+/**
+ * Read only the last `maxBytes` of a file and return its complete trailing
+ * lines (the partial leading line is dropped). Claude session jsonl grows to
+ * 100MB+, and every consumer here only inspects the last ~30 lines for the
+ * newest usage/model block — reading the whole file just to look at the tail
+ * was a multi-hundred-ms-per-pane cost in `amux ps`. Falls back to a full
+ * read when the file is small or anything fails.
+ */
+/** Read only the first `maxBytes` of a file as a string. */
+function readHeadBytes(filePath, maxBytes = 64 * 1024) {
+  let fd;
+  try {
+    fd = openSync(filePath, "r");
+    const size = fstatSync(fd).size;
+    const n = Math.min(size, maxBytes);
+    const buf = Buffer.alloc(n);
+    readSync(fd, buf, 0, n, 0);
+    return buf.toString("utf-8");
+  } catch {
+    try { return readFileSync(filePath, "utf-8"); } catch { return ""; }
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch {} }
+  }
+}
+
+function readTailLines(filePath, maxBytes = 1024 * 1024) {
+  let fd;
+  try {
+    fd = openSync(filePath, "r");
+    const size = fstatSync(fd).size;
+    if (size <= maxBytes) {
+      return readFileSync(filePath, "utf-8").trimEnd().split("\n");
+    }
+    const buf = Buffer.alloc(maxBytes);
+    readSync(fd, buf, 0, maxBytes, size - maxBytes);
+    const text = buf.toString("utf-8");
+    const nl = text.indexOf("\n");
+    return (nl === -1 ? text : text.slice(nl + 1)).trimEnd().split("\n");
+  } catch {
+    try { return readFileSync(filePath, "utf-8").trimEnd().split("\n"); }
+    catch { return []; }
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch {} }
+  }
+}
 
 const CLAUDE_PROJECTS_DIR = () => join(process.env.HOME, ".claude", "projects");
 const CODEX_SESSIONS_DIR = () => join(process.env.HOME, ".codex", "sessions");
@@ -56,10 +102,8 @@ function readLatestClaudeModel(paneDir) {
       .sort((a, b) => b.mtime - a.mtime);
   } catch { return null; }
   if (!files.length) return null;
-  let content;
-  try { content = readFileSync(join(projectDir, files[0].name), "utf-8"); }
-  catch { return null; }
-  const lines = content.trimEnd().split("\n");
+  const lines = readTailLines(join(projectDir, files[0].name));
+  if (!lines.length) return null;
   for (let i = lines.length - 1; i >= Math.max(0, lines.length - 30); i--) {
     try {
       const entry = JSON.parse(lines[i]);
@@ -92,14 +136,8 @@ function getContextFromClaudeJsonl(paneDir) {
   }
   if (!files.length) return null;
 
-  let content;
-  try {
-    content = readFileSync(join(projectDir, files[0].name), "utf-8");
-  } catch (err) {
-    console.warn(`context(claude): read ${files[0].name} failed: ${err.message}`);
-    return null;
-  }
-  const lines = content.trimEnd().split("\n");
+  const lines = readTailLines(join(projectDir, files[0].name));
+  if (!lines.length) return null;
 
   // Walk the last ~30 lines backwards for the most recent usage block
   for (let i = lines.length - 1; i >= Math.max(0, lines.length - 30); i--) {
@@ -143,8 +181,13 @@ function findCodexJsonlFiles(dir, depth = 0, acc = []) {
 
 function readCodexMeta(filePath) {
   try {
-    const content = readFileSync(filePath, "utf-8");
-    for (const line of content.split("\n")) {
+    // session_meta is the FIRST event in a codex rollout. This is called for
+    // every session file while resolving which one belongs to a pane, so a
+    // full readFileSync here meant reading hundreds of multi-MB files just to
+    // inspect their first line — the dominant cost in `amux ps`/`done` with a
+    // large ~/.codex/sessions. Read only the head.
+    const head = readHeadBytes(filePath);
+    for (const line of head.split("\n")) {
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line);
@@ -156,14 +199,26 @@ function readCodexMeta(filePath) {
   return null;
 }
 
-function latestCodexSessionFor(paneDir) {
-  const files = findCodexJsonlFiles(CODEX_SESSIONS_DIR())
+// Process-lifetime cache of the codex session index: [{ path, mtime, cwd }]
+// newest-first. `amux ps`/`done` resolve a session per codex pane, and each
+// resolution used to re-walk + re-stat + re-head-read all of ~/.codex/sessions
+// (hundreds of files). Building it once per process collapses that N×
+// duplicate scan to a single pass. A CLI invocation lives ~1s, so staleness
+// is a non-issue; the cache dies with the process.
+let _codexIndex = null;
+function codexSessionIndex() {
+  if (_codexIndex) return _codexIndex;
+  _codexIndex = findCodexJsonlFiles(CODEX_SESSIONS_DIR())
     .map((path) => ({ path, mtime: statSync(path).mtimeMs }))
-    .sort((a, b) => b.mtime - a.mtime);
-  for (const { path } of files) {
-    const meta = readCodexMeta(path);
-    if (!meta?.cwd) continue;
-    if (paneDir === meta.cwd || paneDir.startsWith(meta.cwd + "/") || meta.cwd.startsWith(paneDir + "/")) {
+    .sort((a, b) => b.mtime - a.mtime)
+    .map(({ path, mtime }) => ({ path, mtime, cwd: readCodexMeta(path)?.cwd || null }));
+  return _codexIndex;
+}
+
+function latestCodexSessionFor(paneDir) {
+  for (const { path, cwd } of codexSessionIndex()) {
+    if (!cwd) continue;
+    if (paneDir === cwd || paneDir.startsWith(cwd + "/") || cwd.startsWith(paneDir + "/")) {
       return path;
     }
   }
@@ -174,13 +229,9 @@ function getContextFromCodexJsonl(paneDir) {
   const file = latestCodexSessionFor(paneDir);
   if (!file) return null;
 
-  let content;
-  try { content = readFileSync(file, "utf-8"); }
-  catch (err) {
-    console.warn(`context(codex): read ${file} failed: ${err.message}`);
-    return null;
-  }
-  const lines = content.split("\n");
+  // token_count events are emitted every turn, so the most recent one lives
+  // in the file's tail — no need to read the whole rollout (can be many MB).
+  const lines = readTailLines(file);
 
   // Walk backwards for the most recent token_count event. Use last_token_usage
   // (current turn's input+output), NOT total_token_usage (cumulative across

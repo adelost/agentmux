@@ -120,12 +120,24 @@ Output anatomy (same for all modes):
    - ✅ **Finished** — turns written + last msg is a statement
    - 🔴 **New waiters** — assistant's last text needs attention
    - 💤 **Idle** — no activity
+
+   Each pane in the bucket sections shows a 2-line **thread block**:
+   \`\`\`
+   claw:9   13:02  +164t
+      ← <last directives it received>     (≤3, oldest→newest; [from X] = inter-agent)
+      → <its latest reply>
+   \`\`\`
+   This is the coordination payload: you can see what a pane was told to do
+   and where it landed WITHOUT a follow-up \`amux log\`. To check whether
+   another pane is already on your task, read its ← line. To direct it,
+   \`amux <agent> -p <N> "<message>"\` (shown in the footer).
 3. **\`ℹ More:\`** footer with contextual next-step hints (specific
-   commands + comments — copy-paste ready).
+   commands + comments — copy-paste ready), including the send-to-pane line.
 
 Use \`amux done\` at every orchestrator decision point instead of 5× \`amux ps\`
 + per-pane \`amux log\`. The recent-activity feed gives "where was I" before
-you even read the buckets.
+you even read the buckets; the per-pane thread blocks give "what is everyone
+doing and what were they asked" — enough to coordinate from one call.
 
 ### Shrink context before hitting limit
 \`\`\`bash

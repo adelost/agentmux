@@ -25,6 +25,12 @@ export function groupByPane(rows) {
         latestTurnTs: null,
         lastUserText: null,
         lastUserTextTs: null,
+        // Ring of the most-recent user directives (oldest→newest, cap 3).
+        // Agents reading `amux done` use this to see what a pane was told
+        // to do, not just where it landed — the coordination context that
+        // a single last-line preview can't carry. lastUserText stays as the
+        // single-latest alias for back-compat with isStaleWaiter/classify.
+        recentUserTexts: [],
         lastAssistantText: null,
         lastAssistantTextTs: null,
       });
@@ -40,6 +46,8 @@ export function groupByPane(rows) {
       if (r.role === "user" && r.content) {
         b.lastUserText = r.content;
         if (tValid) b.lastUserTextTs = t;
+        b.recentUserTexts.push(r.content);
+        if (b.recentUserTexts.length > 3) b.recentUserTexts.shift();
       }
       if (r.role === "assistant" && r.content) {
         b.lastAssistantText = r.content;
