@@ -10,6 +10,7 @@ amux ps
 amux top
 amux timeline
 amux done --since 2h
+amux lint
 ```
 
 | Command | Purpose |
@@ -19,6 +20,7 @@ amux done --since 2h
 | `amux timeline` | Show recent events across panes |
 | `amux watch` | Follow the timeline live |
 | `amux done` | Summarize commits, active panes, finished panes, and waiters |
+| `amux lint` | Run default repo linters, starting with WHAT/WHY/DTO contracts |
 
 ## Sending Work
 
@@ -123,3 +125,18 @@ amux labels
 
 Labels make `amux ps` and `amux top` easier to scan when several panes are
 working at once.
+
+## Lint
+
+```bash
+amux lint
+amux lint ~/lsrc/skydive-altimeter
+amux lint ai
+amux lint --all-agents
+amux lint --changed --strict
+```
+
+`amux lint` scans the current repo by default. A target can be a file, a
+directory, or an agent name from the agentmux config. The first default check
+enforces short `WHAT:/WHY:` contracts and `DTO:` for pure transport shapes.
+See `docs/contract-lint.md` for the writing rules.

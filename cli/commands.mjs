@@ -31,6 +31,12 @@ import {
   listActive, listDone, formatActiveList, formatReminderSummary, formatItemLine,
   DEFAULT_TODOS_PATH, SECTION_NOW, SECTION_PARKED, SECTION_BLOCKED,
 } from "../core/todos.mjs";
+import {
+  CONTRACT_CHECK_ID,
+  formatLintReport,
+  lintRoots,
+  resolvePathTarget,
+} from "../core/contract-lint.mjs";
 
 // Bridge = the Discord bot itself (not a Claude agent). Singleton infra.
 const BRIDGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -2577,6 +2583,83 @@ async function cmdResume(ctx) {
   await cmdAttach(last, ctx);
 }
 
+async function cmdLint(args, ctx) {
+  const { flags, positional } = parseFlags(args, FLAG_SPECS.lint);
+  if (flags.help || flags.h) {
+    console.log(`Usage: amux lint [target] [--all-agents] [--changed] [--strict]
+
+Targets:
+  (none)                    Current working directory
+  . / path                  Explicit file or directory path
+  <agent>                   Agent name from agentmux config
+
+Options:
+  --all-agents              Lint every configured agent directory
+  --changed                 Only files changed relative to HEAD
+  --strict                  Exit non-zero when active findings exist
+  --baseline <path>         Suppress findings already recorded in baseline
+  --update-baseline         Write current findings to baseline
+  --only contract           Run only one check (currently: contract)
+  --skip contract           Skip one check
+  --limit N                 Findings per root to print (default: 80)`);
+    return;
+  }
+
+  const only = flags.only ? String(flags.only) : null;
+  const skip = flags.skip ? new Set(String(flags.skip).split(",").map((s) => s.trim()).filter(Boolean)) : new Set();
+  if ((only && only !== CONTRACT_CHECK_ID) || skip.has(CONTRACT_CHECK_ID)) {
+    console.log("amux lint\nNo checks enabled.");
+    return;
+  }
+
+  let roots;
+  if (flags["all-agents"]) {
+    roots = listAgents(ctx.configPath).map((agent) => agent.dir);
+  } else {
+    const target = positional[0];
+    if (!target) {
+      roots = [process.cwd()];
+    } else {
+      const pathTarget = resolvePathTarget(target, process.cwd());
+      if (existsSync(pathTarget)) {
+        roots = [pathTarget];
+      } else {
+        roots = [getAgent(ctx.configPath, target).dir];
+      }
+    }
+  }
+
+  if (!roots.length) {
+    console.log("amux lint\nNo roots to scan.");
+    return;
+  }
+
+  let baselinePath = flags.baseline ? resolvePathTarget(flags.baseline, process.cwd()) : null;
+  if (flags["update-baseline"] && !baselinePath) {
+    if (roots.length !== 1) {
+      console.error("Usage: amux lint --all-agents --update-baseline --baseline <path>");
+      process.exit(1);
+    }
+    baselinePath = join(roots[0], ".amux-lint-baseline.json");
+  }
+
+  const results = lintRoots(roots, {
+    changed: !!flags.changed,
+    baselinePath,
+    updateBaseline: !!flags["update-baseline"],
+  });
+  if (flags["update-baseline"] && baselinePath) {
+    console.log(`Updated baseline: ${baselinePath}\n`);
+  }
+  console.log(formatLintReport(results, {
+    baselinePath,
+    limit: flags.limit || 80,
+  }));
+
+  const active = results.reduce((n, result) => n + result.activeFindings.length, 0);
+  if (flags.strict && active > 0) process.exit(1);
+}
+
 function cmdHelp() {
   console.log(`agent - Manage Claude Code/Codex tmux sessions
 
@@ -2625,6 +2708,12 @@ Usage:
                                   (note: rewriting agentmux.yaml via label
                                    may drop comments; use 'amux edit' to preserve)
   agent labels [agent]            Show labels table, optionally filtered to one agent
+  agent lint [target]             Run default repo linters (WHAT/WHY/DTO contracts)
+    --all-agents                  Lint every configured agent directory
+    --changed                     Only changed files
+    --strict                      Exit non-zero on active findings
+    --baseline <path>             Suppress baseline findings
+    --update-baseline             Write current findings to baseline
   agent compact [threshold=20]    Send /compact to claude/codex panes ≥ threshold%
                                   Also requires ≥200k tokens absolute (--min-tokens N to change)
     --dry                         Show what would compact, do nothing
@@ -2708,6 +2797,18 @@ const FLAG_SPECS = {
   },
   label: { clear: "boolean" },
   labels: {},
+  lint: {
+    "all-agents": "boolean",
+    changed: "boolean",
+    strict: "boolean",
+    baseline: "string",
+    "update-baseline": "boolean",
+    only: "string",
+    skip: "string",
+    limit: "number",
+    help: "boolean",
+    h: "boolean",
+  },
   edit: {},
   select: { p: "number" },
   esc: { p: "number" },
@@ -2882,6 +2983,10 @@ export async function dispatch(argv, ctx) {
     case "labels": {
       const { flags, positional } = parseFlags(rest, FLAG_SPECS.labels);
       return cmdLabels(flags, positional, ctx);
+    }
+
+    case "lint": {
+      return cmdLint(rest, ctx);
     }
 
     case "select": {

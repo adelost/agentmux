@@ -3,6 +3,12 @@
  * WHY: Keeps the contract rules in one tested core, away from per-repo CLI wiring.
  */
 
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
+import { basename, extname, isAbsolute, join, relative, resolve } from "path";
+import { execFileSync } from "child_process";
+
+export const CONTRACT_CHECK_ID = "contract";
+
 // WHAT: Filler/meta phrases banned anywhere in a doc block, with a teaching hint.
 // WHY: Keeps unambiguous narration out while leaving position-sensitive words alone.
 const ALWAYS_BANNED = [
@@ -163,6 +169,8 @@ export function evaluateContract(doc, { name = "", kind = "symbol" } = {}) {
 const SKIP_DIRS = new Set([
   "node_modules", "build", "dist", ".git", ".gradle", ".venv", "venv",
   "__pycache__", ".svelte-kit", "target", "out", ".idea", "generated",
+  ".mypy_cache", ".pytest_cache", ".ruff_cache", "coverage", "fixtures",
+  "test", "tests", "__tests__",
 ]);
 
 const LANG_BY_EXT = {
@@ -299,8 +307,183 @@ export function lintSource(path, source, ext) {
     for (const f of evaluateContract(sym.doc, { name: sym.name, kind: sym.kind })) {
       findings.push({ ...f, path, line: sym.line });
     }
+    if (/\bDTO:/i.test(sym.doc) && requiresWhyName(sym.name)) {
+      findings.push({
+        code: "CONTRACT042",
+        sev: "error",
+        msg: `${sym.kind} ${sym.name}: DTO: used on domain/state symbol`,
+        path,
+        line: sym.line,
+      });
+    }
   }
   return findings;
+}
+
+const DOMAIN_SUFFIXES_REQUIRE_WHY = [
+  "Calculator",
+  "Coordinator",
+  "Engine",
+  "Policy",
+  "Repository",
+  "Settings",
+  "Snapshot",
+  "State",
+  "Status",
+  "Store",
+  "Track",
+  "Worker",
+];
+
+function requiresWhyName(name) {
+  return DOMAIN_SUFFIXES_REQUIRE_WHY.some((suffix) => name.endsWith(suffix));
+}
+
+const TEST_FILE_MARKERS = [".test.", ".spec."];
+
+export function expandHome(path, home = process.env.HOME || "") {
+  if (path === "~") return home;
+  if (path?.startsWith("~/")) return join(home, path.slice(2));
+  return path;
+}
+
+export function resolvePathTarget(target, cwd = process.cwd()) {
+  if (!target) return cwd;
+  const expanded = expandHome(target);
+  return isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
+}
+
+function supportedSourceFile(path) {
+  const name = basename(path);
+  if (!SOURCE_EXTS.includes(extname(path))) return false;
+  if (name.startsWith("test_")) return false;
+  return !TEST_FILE_MARKERS.some((marker) => name.includes(marker));
+}
+
+function isSkippedPath(path) {
+  return path.split(/[\\/]+/).some((part) => SKIP_DIRS.has(part));
+}
+
+function changedFiles(root) {
+  try {
+    const out = execFileSync(
+      "git",
+      ["-C", root, "diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD", "--"],
+      { encoding: "utf-8" },
+    );
+    return new Set(out.split(/\r?\n/).filter(Boolean).filter((p) => supportedSourceFile(p)));
+  } catch {
+    return new Set();
+  }
+}
+
+export function collectSourceFiles(root, options = {}) {
+  const resolvedRoot = resolve(expandHome(root));
+  if (!existsSync(resolvedRoot)) return [];
+  const files = [];
+  const changedSet = options.changed ? changedFiles(resolvedRoot) : null;
+
+  const visit = (path) => {
+    if (isSkippedPath(path)) return;
+    const st = statSync(path);
+    if (st.isDirectory()) {
+      for (const child of readdirSync(path)) visit(join(path, child));
+      return;
+    }
+    if (!st.isFile() || !supportedSourceFile(path)) return;
+    if (changedSet && !changedSet.has(relative(resolvedRoot, path))) return;
+    files.push(path);
+  };
+
+  visit(resolvedRoot);
+  return files.sort();
+}
+
+export function lintRoot(root, options = {}) {
+  const resolvedRoot = resolve(expandHome(root));
+  const files = collectSourceFiles(resolvedRoot, options);
+  const findings = [];
+  let symbols = 0;
+  for (const file of files) {
+    const source = readFileSync(file, "utf-8");
+    const fileFindings = lintSource(file, source, extname(file));
+    findings.push(...fileFindings);
+    symbols += extractSymbols(source, extname(file)).length;
+  }
+  return { root: resolvedRoot, files, symbols, findings };
+}
+
+export function findingFingerprint(finding, root) {
+  return `${relative(root, finding.path)}:${finding.line}:${finding.code}:${finding.msg}`;
+}
+
+export function loadBaseline(path) {
+  if (!path || !existsSync(path)) return new Set();
+  try {
+    const doc = JSON.parse(readFileSync(path, "utf-8"));
+    return new Set(doc.findings || []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function writeBaseline(path, results) {
+  const fingerprints = [];
+  for (const result of results) {
+    for (const finding of result.findings) {
+      fingerprints.push(findingFingerprint(finding, result.root));
+    }
+  }
+  writeFileSync(path, `${JSON.stringify({
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    findings: [...new Set(fingerprints)].sort(),
+  }, null, 2)}\n`);
+}
+
+export function lintRoots(roots, options = {}) {
+  const results = roots.map((root) => lintRoot(root, options));
+  if (options.updateBaseline && options.baselinePath) writeBaseline(options.baselinePath, results);
+  const baseline = loadBaseline(options.baselinePath);
+  return results.map((result) => ({
+    ...result,
+    activeFindings: result.findings.filter((finding) => !baseline.has(findingFingerprint(finding, result.root))),
+  }));
+}
+
+function formatFinding(finding, root) {
+  return `${relative(root, finding.path)}:${finding.line}: ${finding.code}: ${finding.msg}`;
+}
+
+export function formatLintReport(results, options = {}) {
+  const lines = [];
+  const findingsFor = (result) => result.activeFindings || result.findings;
+  const totalFiles = results.reduce((sum, result) => sum + result.files.length, 0);
+  const totalSymbols = results.reduce((sum, result) => sum + result.symbols, 0);
+  const totalFindings = results.reduce((sum, result) => sum + findingsFor(result).length, 0);
+  lines.push("amux lint");
+  lines.push(`roots: ${results.length}`);
+  lines.push(`files scanned: ${totalFiles}`);
+  lines.push(`symbols checked: ${totalSymbols}`);
+  lines.push(`findings: ${totalFindings}`);
+  if (options.baselinePath) lines.push(`baseline: ${options.baselinePath}`);
+  lines.push("");
+
+  for (const result of results) {
+    const findings = findingsFor(result);
+    if (!findings.length) continue;
+    lines.push(`${basename(result.root) || result.root}:`);
+    for (const finding of findings.slice(0, options.limit || 80)) {
+      lines.push(formatFinding(finding, result.root));
+    }
+    if (findings.length > (options.limit || 80)) {
+      lines.push(`... ${findings.length - (options.limit || 80)} more`);
+    }
+    lines.push("");
+  }
+
+  if (totalFindings === 0) lines.push("No lint findings.");
+  return lines.join("\n").trimEnd();
 }
 
 export { SKIP_DIRS, ALWAYS_BANNED, LEADING_BANNED, BOUNDARY_MARKERS, overlapRatio };

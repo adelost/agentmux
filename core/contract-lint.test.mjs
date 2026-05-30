@@ -1,5 +1,8 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { evaluateContract, extractSymbols, overlapRatio } from "./contract-lint.mjs";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import { evaluateContract, extractSymbols, lintRoot, lintRoots, overlapRatio, writeBaseline } from "./contract-lint.mjs";
 
 // Real WHAT/WHY rewrites from ai-dsl + skydive-altimeter. The linter must pass
 // every one with zero error-level findings — they are the gold voice.
@@ -80,6 +83,22 @@ feature("contract-lint contract floor", () => {
     then: ["no error findings", (codes) => expect(codes).toEqual([])],
   });
 
+  unit("DTO tag is rejected for domain state symbols", {
+    given: ["a state symbol using DTO", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-contract-lint-"));
+      writeFileSync(join(root, "AltimeterState.kt"), "/**\n * DTO: Live altitude values.\n */\ndata class AltimeterState(val relativeAltitudeM: Float = 0f)\n");
+      return root;
+    }],
+    when: ["linting", (root) => lintRoot(root)],
+    then: ["CONTRACT042 is reported", (result, root) => {
+      try {
+        expect(result.findings.map((f) => f.code)).toContain("CONTRACT042");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
   unit("empty doc flags CONTRACT001", {
     given: ["no doc at all", () => ""],
     when: ["evaluating", (doc) => errorCodes(doc, "Bare")],
@@ -146,6 +165,25 @@ feature("contract-lint helpers", () => {
       expect(syms.length).toBe(1);
       expect(syms[0].name).toBe("CompassEngine");
       expect(syms[0].doc.includes("WHY:")).toBe(true);
+    }],
+  });
+
+  unit("baseline filters existing located findings", {
+    given: ["one missing contract and a baseline", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-contract-baseline-"));
+      writeFileSync(join(root, "demo.py"), "class Demo:\n    pass\n");
+      const baselinePath = join(root, ".amux-lint-baseline.json");
+      writeBaseline(baselinePath, [lintRoot(root)]);
+      return { root, baselinePath };
+    }],
+    when: ["linting with baseline", ({ root, baselinePath }) => lintRoots([root], { baselinePath })[0]],
+    then: ["active findings are empty", (result, { root }) => {
+      try {
+        expect(result.findings.length).toBe(1);
+        expect(result.activeFindings).toEqual([]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     }],
   });
 });
