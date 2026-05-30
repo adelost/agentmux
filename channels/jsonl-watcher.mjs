@@ -139,6 +139,11 @@ export function createJsonlWatcher({
     const v = channelMap[String(turnStartMs)];
     return typeof v === "number" && Number.isFinite(v) ? v : 0;
   }
+  function hasPostedItemCount(channelId, turnStartMs) {
+    const map = state.get(STATE_KEY_POSTED_COUNTS, {}) || {};
+    const channelMap = map[channelId] || {};
+    return Object.hasOwn(channelMap, String(turnStartMs));
+  }
   function setPostedItemCount(channelId, turnStartMs, count) {
     const map = state.get(STATE_KEY_POSTED_COUNTS, {}) || {};
     const channelMap = map[channelId] || {};
@@ -181,10 +186,11 @@ export function createJsonlWatcher({
 
   async function postTurn({ name, idx, channelId, turn, fullTurn = null, isFinalSlice = true }) {
     const { fullText, validFiles } = renderTurn(turn);
-    if (!fullText && validFiles.length === 0) return;
+    if (!fullText && validFiles.length === 0) return true;
 
     const body = postPrefix && fullText ? `${postPrefix}${fullText}` : fullText || "(no text)";
     const chunks = splitMessage(body);
+    let mainPostOk = true;
     // Pacing: Discord rate limit drops chunks in tight bursts.
     const pacePerChunk = chunks.length >= 2 ? (chunks.length > 3 ? 400 : 250) : 0;
     for (let i = 0; i < chunks.length; i++) {
@@ -194,12 +200,14 @@ export function createJsonlWatcher({
       try {
         await discord.send(channelId, payload);
       } catch (err) {
+        mainPostOk = false;
         log(`chunk ${i + 1}/${chunks.length} failed for ${name}:${idx}: ${err.message}`);
       }
       if (pacePerChunk > 0 && i < chunks.length - 1) {
         await new Promise((r) => setTimeout(r, pacePerChunk));
       }
     }
+    if (!mainPostOk) return false;
 
     // Context footer — prefer tmux UI percent so the number matches what
     // auto-compact sees and what Claude Code itself displays. CC's bar is
@@ -248,6 +256,8 @@ export function createJsonlWatcher({
         });
       } catch { /* swallow — recorder is best-effort */ }
     }
+
+    return true;
   }
 
   // --- core check ----------------------------------------------------------
@@ -311,7 +321,12 @@ export function createJsonlWatcher({
         if (!endIso) continue;
         const endMs = new Date(endIso).getTime();
         if (!Number.isFinite(endMs)) continue;
-        if (endMs <= lastMs) continue;
+
+        const turnStartMs = turn.timestamp ? new Date(turn.timestamp).getTime() : endMs;
+        const postedCount = getPostedItemCount(channelId, turnStartMs);
+        const hasPostedCount = hasPostedItemCount(channelId, turnStartMs);
+        const totalItems = (turn.items || []).length;
+        if (endMs <= lastMs && (!hasPostedCount || postedCount >= totalItems)) continue;
 
         const completeByReason = !!turn.isComplete;
         // Grace requires BOTH endTimestamp old AND file mtime old. Without
@@ -324,25 +339,28 @@ export function createJsonlWatcher({
           (!mtimeMs || now - mtimeMs >= COMPLETION_GRACE_MS);
         if (!completeByReason && !completeByGrace) continue;
 
-        const turnStartMs = turn.timestamp ? new Date(turn.timestamp).getTime() : endMs;
-        const postedCount = getPostedItemCount(channelId, turnStartMs);
-        const totalItems = (turn.items || []).length;
         const newItems = (turn.items || []).slice(postedCount);
 
         if (newItems.length === 0) {
           // Already posted everything we have for this turn — advance
           // checkpoint so we don't re-iterate next pass, then move on.
-          setLastPostedMs(channelId, endMs);
-          lastMs = endMs;
+          if (endMs > lastMs) {
+            setLastPostedMs(channelId, endMs);
+            lastMs = endMs;
+          }
           continue;
         }
 
         const turnSlice = { ...turn, items: newItems };
         const isFinalSlice = (postedCount + newItems.length) === totalItems;
-        await postTurn({ name, idx, channelId, turn: turnSlice, fullTurn: turn, isFinalSlice });
-        setLastPostedMs(channelId, endMs);
+        const posted = await postTurn({ name, idx, channelId, turn: turnSlice, fullTurn: turn, isFinalSlice });
+        if (!posted) {
+          log(`${name}:${idx} → ${channelId} main post failed; checkpoint not advanced`);
+          break;
+        }
+        if (endMs > lastMs) setLastPostedMs(channelId, endMs);
         setPostedItemCount(channelId, turnStartMs, totalItems);
-        lastMs = endMs;
+        if (endMs > lastMs) lastMs = endMs;
         const ageS = Math.round((now - endMs) / 1000);
         const reason = completeByReason ? "stop_reason" : "grace";
         log(`${name}:${idx} → ${channelId} (${reason}, age=${ageS}s, items ${postedCount}→${totalItems})`);

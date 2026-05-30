@@ -19,11 +19,15 @@ function mkState(initial = {}) {
   };
 }
 
-function mkDiscord({ paceMs = 0 } = {}) {
+function mkDiscord({ paceMs = 0, failOnContent = null } = {}) {
   const sends = [];
   return {
     sends,
     send: vi.fn(async (channelId, payload) => {
+      const content = typeof payload === "string" ? payload : payload?.content || "";
+      if (failOnContent && content.includes(failOnContent)) {
+        throw new Error("simulated Discord send failure");
+      }
       sends.push({ channelId, payload, t: Date.now() });
       if (paceMs > 0) await new Promise((r) => setTimeout(r, paceMs));
       return true;
@@ -38,7 +42,7 @@ function mkDiscord({ paceMs = 0 } = {}) {
  * the Codex reader's latestSessionFor() picks it up. Mirrors the Claude
  * helper's contract so tests stay parallel-readable.
  */
-function setupCodexWatcher({ codexEvents = [], stateInitial = {} } = {}) {
+function setupCodexWatcher({ codexEvents = [], stateInitial = {}, discordOptions = {} } = {}) {
   const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-watcher-codex-test-"));
   const origHome = process.env.HOME;
   process.env.HOME = fakeHome;
@@ -71,7 +75,7 @@ function setupCodexWatcher({ codexEvents = [], stateInitial = {} } = {}) {
     capturePane: vi.fn(async () => ""),
     getContextPercent: vi.fn(() => null),
   };
-  const discord = mkDiscord();
+  const discord = mkDiscord(discordOptions);
   const state = mkState(stateInitial);
 
   const watcher = createJsonlWatcher({
@@ -97,7 +101,7 @@ function setupCodexWatcher({ codexEvents = [], stateInitial = {} } = {}) {
   };
 }
 
-function setupWatcher({ jsonlLines = [], stateInitial = {} } = {}) {
+function setupWatcher({ jsonlLines = [], stateInitial = {}, discordOptions = {} } = {}) {
   const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-watcher-test-"));
   const origHome = process.env.HOME;
   process.env.HOME = fakeHome;
@@ -133,7 +137,7 @@ function setupWatcher({ jsonlLines = [], stateInitial = {} } = {}) {
     capturePane: vi.fn(async () => ""),
     getContextPercent: vi.fn(() => null),
   };
-  const discord = mkDiscord();
+  const discord = mkDiscord(discordOptions);
   const state = mkState(stateInitial);
 
   const watcher = createJsonlWatcher({
@@ -420,6 +424,42 @@ feature("watcher: continuation after intermediate post (the 1.16.46 regression)"
   });
 });
 
+feature("watcher: Discord send failures do not advance checkpoints", () => {
+  unit("failed main post leaves checkpoint/count unchanged and does not post later turns", {
+    given: ["two complete turns where the first Discord send fails", () => {
+      const user1Ts = "2026-04-30T23:00:00.000Z";
+      const user2Ts = "2026-04-30T23:00:10.000Z";
+      const initialMs = new Date(user1Ts).getTime() - 1;
+
+      const ctx = setupWatcher({
+        jsonlLines: [
+          userTurn("first", user1Ts),
+          assistantText("first reply fails", "2026-04-30T23:00:01.000Z", "end_turn"),
+          userTurn("second", user2Ts),
+          assistantText("second reply must wait", "2026-04-30T23:00:11.000Z", "end_turn"),
+        ],
+        stateInitial: {
+          watcher_last_posted_ts: { "ch-test": initialMs },
+        },
+        discordOptions: {
+          failOnContent: "first reply fails",
+        },
+      });
+      return { ...ctx, initialMs };
+    }],
+    when: ["watcher.checkPane runs", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["checkpoint did not advance, count did not update, and turn2 was not sent", (ctx) => {
+      expect(ctx.discord.sends.length).toBe(0);
+      expect(ctx.state._data.watcher_last_posted_ts["ch-test"]).toBe(ctx.initialMs);
+      expect(ctx.state._data.watcher_posted_item_counts?.["ch-test"]).toBeUndefined();
+      ctx.cleanup();
+    }],
+  });
+});
+
 // --- Codex pane dispatch -------------------------------------------------
 
 feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/projects", () => {
@@ -488,6 +528,57 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
           : !/^_context:/.test(s.payload?.content || ""),
       );
       expect(contentSends.length).toBe(0);
+      ctx.cleanup();
+    }],
+  });
+
+  unit("posts unposted Codex subturn items even when channel checkpoint already reached the same end timestamp", {
+    given: ["Codex wrote two user_message entries inside one task; first subturn advanced the channel checkpoint", () => {
+      const base = Date.now() - 60_000;
+      const iso = (offsetMs) => new Date(base + offsetMs).toISOString();
+      const secondStartMs = base + 2_000;
+      const finalMs = base + 4_000;
+
+      const ctx = setupCodexWatcher({
+        codexEvents: [
+          { type: "event_msg", timestamp: iso(0), payload: { type: "task_started", turn_id: "shared-task" } },
+          { type: "event_msg", timestamp: iso(0), payload: { type: "user_message", message: "first prompt" } },
+          { type: "response_item", timestamp: iso(1_000), payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "first progress" }] } },
+          { type: "event_msg", timestamp: iso(2_000), payload: { type: "user_message", message: "followup while still working" } },
+          { type: "response_item", timestamp: iso(3_000), payload: { type: "function_call", name: "exec_command", arguments: JSON.stringify({ cmd: "node probe.js" }) } },
+          { type: "response_item", timestamp: iso(4_000), payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "final answer that used to be skipped" }] } },
+          { type: "event_msg", timestamp: iso(4_000), payload: { type: "task_complete", turn_id: "shared-task" } },
+        ],
+        stateInitial: {
+          // Repro: an earlier subturn with the same Codex task_complete
+          // advanced the per-channel timestamp to finalMs, while this
+          // later subturn still has one unposted item.
+          watcher_last_posted_ts: { "ch-codex": finalMs },
+          watcher_posted_item_counts: {
+            "ch-codex": { [String(secondStartMs)]: 1 },
+          },
+        },
+      });
+      const old = (Date.now() - 30_000) / 1000;
+      utimesSync(ctx.rolloutPath, old, old);
+      return ctx;
+    }],
+    when: ["watcher.checkPane runs", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["the missing final text is posted despite endMs <= lastPostedMs", (ctx) => {
+      const contentSends = ctx.discord.sends.filter(
+        (s) => typeof s.payload === "string"
+          ? !/^_context:/.test(s.payload)
+          : !/^_context:/.test(s.payload?.content || ""),
+      );
+      expect(contentSends.length).toBe(1);
+      const text = typeof contentSends[0].payload === "string"
+        ? contentSends[0].payload
+        : contentSends[0].payload.content;
+      expect(text).toContain("final answer that used to be skipped");
+      expect(text).not.toContain("node probe.js");
       ctx.cleanup();
     }],
   });
