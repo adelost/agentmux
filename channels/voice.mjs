@@ -86,11 +86,15 @@ export function createVoicePWA(deps) {
   // immediately instead of waiting for its poll. Debounced so a burst of
   // panes stopping together coalesces into a single sweep.
   let pokeTimer = null;
+  let pokeCount = 0;
   function schedulePoke() {
     if (typeof poke !== "function") return;
+    pokeCount += 1;
     if (pokeTimer) return;
     pokeTimer = setTimeout(() => {
       pokeTimer = null;
+      const n = pokeCount; pokeCount = 0;
+      console.log(`voice-pwa | poke → tick (coalesced ${n})`);
       try { Promise.resolve(poke()).catch(() => {}); } catch { /* swallow */ }
     }, 200);
   }
