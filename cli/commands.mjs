@@ -15,8 +15,8 @@ import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, lat
 import { latestCodexJsonlMtime, readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
 import {
-  groupByPane, classifyPane, previewText,
-  isStaleWaiter, isRunningNow,
+  groupByPane, previewText,
+  isRunningNow, isWaitingLikeText, looksDone,
 } from "../core/orchestrator-checkpoint.mjs";
 import { collectCommitsSince, reposFromAgents } from "../core/commit-log.mjs";
 import { pruneOldSessions, formatJanitorResult } from "../core/janitor.mjs";
@@ -617,6 +617,44 @@ async function cmdWatch(ctx, flags) {
  * default to 1h ago. Checkpoint is updated to now after a successful read
  * unless --reset is passed (peek mode).
  */
+/**
+ * Which pane is running this command, as an "agent:pane" key — or null when
+ * not invoked from inside a tmux pane. Lets `amux done`/`ps` self-orient ("you
+ * are claw:3") so an agent that lost its context (post-compact, fresh spawn)
+ * can find its own thread first. Best-effort; never throws.
+ */
+function detectSelfKey() {
+  try {
+    return detectSenderFromEnv(process.env, (cmd) => execSync(cmd, { encoding: "utf8", timeout: 2000 }));
+  } catch { return null; }
+}
+
+/** Render the "you are here" block at the top of `amux done`. */
+function renderSelfBlock(selfKey, widerBuckets, statuses, nowMs) {
+  if (!selfKey) return;
+  const [aname, pidx] = selfKey.split(":");
+  const log = `amux log ${aname} -p ${pidx} -n 30`;
+  console.log(`\n▸ DU = ${selfKey}  (denna panel / this pane)`);
+  const b = widerBuckets.get(selfKey);
+  if (!b || !b.turns) {
+    console.log(`   ingen aktivitet i fönstret.  📜 full historik: ${log}`);
+    return;
+  }
+  const lastUser = previewText(stripAnsi((b.recentUserTexts?.slice(-1)[0]) || b.lastUserText || ""), 80);
+  const lastAsst = previewText(stripAnsi(b.lastAssistantText || ""), 90);
+  const status = statuses.get(selfKey) || "unknown";
+  let state = "🟡 jobbar";
+  if (status === "menu" || status === "permission") state = "🔴 väntar på input (modal)";
+  else if (isWaitingLikeText(b.lastAssistantText)) state = "🔴 du väntar på svar (från Mattias)";
+  else if (status === "working" || status === "resume" || isRunningNow(b, nowMs)) state = "🟡 jobbar";
+  else if (looksDone(b.lastAssistantText)) state = "✅ klar";
+  else state = "⚠️ idle, ev. mer att göra (sa aldrig 'klart')";
+  if (lastUser) console.log(`   senast ombedd:  "${lastUser}"`);
+  if (lastAsst) console.log(`   du svarade:     "${lastAsst}"`);
+  console.log(`   läge: ${state}`);
+  console.log(`   📜 full historik: ${log}`);
+}
+
 async function cmdDone(ctx, flags) {
   const nowMs = Date.now();
   let sinceMs = null;
@@ -675,6 +713,11 @@ async function cmdDone(ctx, flags) {
     ? allRows
     : allRows.filter((r) => r.timestamp && Date.parse(r.timestamp) >= cutoff);
   const buckets = groupByPane(sliceFrom(sinceMs));
+  // Open-loop detection (needs-you / stalled) scans the WIDER of the two
+  // windows so a dropped ball from before the cutoff still surfaces — that's
+  // the whole point ("I asked something days ago, did it ever land?"). Reused
+  // for the recent-activity feed too, so it's computed once here.
+  const widerBuckets = sinceMs <= widerSinceMs ? buckets : groupByPane(sliceFrom(widerSinceMs));
 
   // Also enumerate panes with ZERO turns so "idle" count stays honest.
   // Each agent in config has a known pane list regardless of jsonl state.
@@ -684,10 +727,18 @@ async function cmdDone(ctx, flags) {
     for (let i = 0; i < panes.length; i++) allPaneKeys.add(`${a.name}:${i}`);
   }
 
-  const finished = [];
-  const waitingNew = [];
-  const waitingStale = [];
+  // Attention-first categories (replaces the old finished/waiting/working
+  // split). Detection runs over the WIDER window so old open loops surface:
+  //   🔴 needsYou  — blocked on the human (a question back, or a live modal)
+  //   ⚠️ stalled   — got a directive, went idle >30min, never signalled done
+  //   🟡 working   — live right now
+  //   ✅ doneRecent— finished with a completion signal, within the cutoff
+  //   💤 idle      — no turns, or old-and-done (just counted)
+  const STALL_MIN_MS = 30 * 60 * 1000;
+  const needsYou = [];
+  const stalled = [];
   const working = [];
+  const doneRecent = [];
   let idleCount = 0;
 
   // Fetch every pane's live tmux status in parallel — each getPaneStatus is
@@ -704,7 +755,7 @@ async function cmdDone(ctx, flags) {
   for (const key of allPaneKeys) {
     const [agentName, paneStr] = key.split(":");
     const paneIdx = parseInt(paneStr, 10);
-    const bucket = buckets.get(key) || {
+    const bucket = widerBuckets.get(key) || {
       agent: agentName, pane: paneIdx, turns: 0,
       latestTurnTs: null,
       lastUserText: null, lastUserTextTs: null,
@@ -712,44 +763,51 @@ async function cmdDone(ctx, flags) {
       lastAssistantText: null, lastAssistantTextTs: null,
     };
     const status = statuses.get(key) || "unknown";
-    let cls = classifyPane(bucket, status);
+    const ageMs = bucket.latestTurnTs ? nowMs - bucket.latestTurnTs : Infinity;
+    const inWindow = bucket.latestTurnTs != null && bucket.latestTurnTs >= sinceMs;
+    const live = status === "working" || status === "resume" || isRunningNow(bucket, nowMs);
+    // "Dropped ball": the human's directive is the most recent text and the
+    // agent never replied (and isn't live). This is the precise "I asked, it
+    // never got done" signal — far tighter than "didn't end with 'klart'".
+    // System banners (resume/continuation) don't count as the user speaking.
+    const userSpokeLast = bucket.lastUserTextTs
+      && bucket.lastUserTextTs > (bucket.lastAssistantTextTs || 0)
+      && !isSystemNoiseDirective(bucket.lastUserText);
+    const entry = { key, bucket, status, ageMs };
 
-    // jsonl <30s old overrides classifier: tmux pane status can lag behind
-    // the agent's actual streaming state. If Claude is writing events right
-    // now, that is the strongest possible "working" signal.
-    if (isRunningNow(bucket, nowMs)) cls = "still-working";
-
-    const entry = { key, bucket, status };
-    if (cls === "finished") finished.push(entry);
-    else if (cls === "waiting") {
-      // Split into "new since check" vs "from before". Stale waiters are
-      // old asks the orchestrator saw last time — not actionable news.
-      if (isStaleWaiter(bucket, sinceMs)) waitingStale.push(entry);
-      else waitingNew.push(entry);
-    }
-    else if (cls === "still-working") working.push(entry);
-    else idleCount++;
+    if (status === "menu" || status === "permission") needsYou.push(entry);          // live modal blocks on user
+    else if (live) working.push(entry);
+    else if (bucket.turns === 0) idleCount++;
+    else if (userSpokeLast && ageMs > STALL_MIN_MS) stalled.push(entry);             // directive unanswered → dropped
+    else if (isWaitingLikeText(bucket.lastAssistantText)) needsYou.push(entry);      // agent asked the human something
+    else if (inWindow) doneRecent.push(entry);                                       // replied within the window
+    else idleCount++;                                                                // old + already replied
   }
 
-  // Freshest events first per bucket (within each category).
+  // Freshest events first per category.
   const byTsDesc = (a, b) => (b.bucket.latestTurnTs || 0) - (a.bucket.latestTurnTs || 0);
-  finished.sort(byTsDesc);
-  waitingNew.sort(byTsDesc);
-  waitingStale.sort(byTsDesc);
+  needsYou.sort(byTsDesc);
+  stalled.sort(byTsDesc);
   working.sort(byTsDesc);
+  doneRecent.sort(byTsDesc);
+
+  const selfKey = detectSelfKey();
 
   const sinceIso = new Date(sinceMs).toISOString().slice(0, 16).replace("T", " ");
   const ageMin = Math.round((nowMs - sinceMs) / 60000);
   console.log(`\nSince ${sinceIso} UTC (${ageMin} min ago, source: ${sinceSource})`);
+
+  // Self-orientation: if run from inside a pane, show that pane's own state
+  // first so a context-less agent re-anchors before reading everyone else.
+  renderSelfBlock(selfKey, widerBuckets, statuses, nowMs);
 
   // "Where were we" header: top 5 most recent items across the system,
   // pulled from a 7d window — independent of the current cutoff so it
   // stays informative even when --day/--week aren't passed. Helps a
   // morning-after orchestrator see "last 5 things" at a glance, in
   // chronological order, before scanning the bucket sections below. The 7d
-  // slice reuses allRows (read once above) — no second jsonl pass.
+  // slice (widerBuckets) was computed once up top — no second jsonl pass.
   const widerCommits = collectCommitsSince(reposFromAgents(agents), widerSinceMs, 20);
-  const widerBuckets = sinceMs <= widerSinceMs ? buckets : groupByPane(sliceFrom(widerSinceMs));
   const recentItems = [];
   for (const b of widerBuckets.values()) {
     if (b.latestTurnTs) recentItems.push({ kind: "pane", ts: b.latestTurnTs, bucket: b });
@@ -789,29 +847,29 @@ async function cmdDone(ctx, flags) {
   // Arrow legend: the pane rows below carry a 2-line thread block. Spelled
   // out once so an agent reading this knows what it's looking at without a
   // follow-up `amux log`.
-  const hasThreadRows = working.length || finished.length || waitingNew.length || waitingStale.length;
+  const hasThreadRows = needsYou.length || stalled.length || working.length || doneRecent.length;
   if (hasThreadRows) {
-    console.log(`\n  (per pane:  ← last directives it received   → its latest reply)`);
+    console.log(`\n  (per panel:  ← senaste direktiv den fick   → dess senaste svar)`);
   }
 
-  if (working.length) {
-    console.log(`\n🟡 ${working.length} still working`);
-    for (const e of working) console.log("  " + formatDoneRow(e));
-  }
-  if (finished.length) {
-    console.log(`\n✅ ${finished.length} finished`);
-    for (const e of finished) console.log("  " + formatDoneRow(e));
-  }
-  if (waitingNew.length) {
-    console.log(`\n🔴 ${waitingNew.length} new waiter${waitingNew.length === 1 ? "" : "s"} (since last check)`);
-    for (const e of waitingNew) console.log("  " + formatDoneRow(e));
-  }
-  if (waitingStale.length) {
-    console.log(`\n⏸ ${waitingStale.length} stale waiter${waitingStale.length === 1 ? "" : "s"} (from before check)`);
-    for (const e of waitingStale) console.log("  " + formatDoneRow(e));
-  }
+  // Render a category with a cap so a busy system doesn't bury the actionable
+  // sections under a wall of rows. Drops are surfaced, never silent.
+  const CAP = 8;
+  const section = (rows, header, rowOpts = {}) => {
+    if (!rows.length) return;
+    console.log(`\n${header}`);
+    for (const e of rows.slice(0, CAP)) console.log("  " + formatDoneRow(e, rowOpts));
+    if (rows.length > CAP) console.log(`  … +${rows.length - CAP} till (amux done --week för alla)`);
+  };
 
-  const anySection = commits.length || finished.length || waitingNew.length || waitingStale.length || working.length;
+  // Attention-first ordering: what needs the human, then dropped balls, then
+  // live work, then recent completions.
+  section(needsYou, `🔴 ${needsYou.length} väntar på DITT svar (bollen hos dig / needs you)`, { showAge: true });
+  section(stalled, `⚠️ ${stalled.length} kanske tappad (idle >30min, sa aldrig "klart" / maybe dropped)`, { showAge: true });
+  section(working, `🟡 ${working.length} jobbar nu (working)`);
+  section(doneRecent, `✅ ${doneRecent.length} klar (done)`);
+
+  const anySection = commits.length || needsYou.length || stalled.length || working.length || doneRecent.length;
   if (!anySection) {
     console.log(`\n(no activity since cutoff, ${idleCount} panes idle)`);
   } else {
@@ -831,32 +889,25 @@ async function cmdDone(ctx, flags) {
     console.log(`  cd ${c0.repo} && git show ${c0.hash.slice(0, 7)}  # full commit body for ${c0.label}`);
     console.log(`  cd ${c0.repo} && git log -20                  # commit history for ${c0.label}`);
   }
-  if (waitingNew.length || waitingStale.length) {
-    const w = (waitingNew[0] || waitingStale[0]);
-    const [aname, pidx] = w.key.split(":");
-    console.log(`  amux log ${aname} -p ${pidx} -n 5            # FULL text from this waiter pane`);
-  }
-  if (working.length) {
-    const w = working[0];
-    const [aname, pidx] = w.key.split(":");
-    console.log(`  amux log ${aname} -p ${pidx} -n 3            # what this pane is working on`);
+  // Drill-down to the most actionable pane: a waiter first, else a dropped
+  // ball, else live work. Full text is one command away (rich-but-reachable).
+  const focus = needsYou[0] || stalled[0] || working[0];
+  if (focus) {
+    const [aname, pidx] = focus.key.split(":");
+    const why = needsYou[0] ? "this waiter" : stalled[0] ? "this maybe-dropped pane" : "this pane";
+    console.log(`  amux log ${aname} -p ${pidx} -n 5            # FULL text from ${why}`);
+    // Coordination primitive: how one agent answers / hands off to another.
+    console.log(`  amux ${aname} -p ${pidx} "<message>"${" ".repeat(Math.max(1, 22 - aname.length - String(pidx).length))}# answer it / hand the task to it`);
   }
   if (top.length) {
     // Generic "see full" hint for the top-20 recent activity feed — preview
     // text is truncated to ~50 chars, full message lives in jsonl/git.
     console.log(`  amux log <agent> -p <N> -n 1                 # full text of any pane in 'Recent activity'`);
   }
-  // Coordination primitive: how one agent replies to / directs another. The
-  // ← lines above show what a pane was told; this is how you add to them.
-  if (waitingNew.length || waitingStale.length || working.length) {
-    const w = (waitingNew[0] || waitingStale[0] || working[0]);
-    const [aname, pidx] = w.key.split(":");
-    console.log(`  amux ${aname} -p ${pidx} "<message>"${" ".repeat(Math.max(1, 22 - aname.length - String(pidx).length))}# send a directive/answer to this pane`);
-  }
+  console.log(`  amux timeline --grep "<keyword>"              # find which pane you asked about X`);
   if (!anySection) {
     console.log(`  amux done --all                              # widen to 30d (max safety cap)`);
   }
-  console.log(`  amux timeline --grep "<keyword>"              # cross-pane content search`);
 }
 
 function isPidAlive(pid) {
@@ -1481,6 +1532,15 @@ function formatCommitRow(c) {
   return `${tsLabel}  ${labelPad}  ${hash}  ${subject}`;
 }
 
+// User-role jsonl events that are NOT a human directive: slash-command echoes,
+// resume/compact hints, session-continuation banners, caveat preambles. These
+// must not count as "the user spoke last" (else every resumed pane looks like
+// a dropped ask) nor clutter the ← directive line.
+function isSystemNoiseDirective(text) {
+  if (!text) return true;
+  return /^\s*(<local-command|<command-name>|\[amux (resume|compact) hint\]|This session is being continued|Caveat:|<system-)/i.test(text);
+}
+
 /**
  * Render a pane as a compact thread block for `amux done`:
  *
@@ -1493,26 +1553,29 @@ function formatCommitRow(c) {
  * the latest reply. Both lines are omitted when empty so idle-ish rows stay
  * one line. Pass { brief: true } to collapse to the old single-line preview.
  */
-function formatDoneRow({ key, bucket }, opts = {}) {
+function formatDoneRow({ key, bucket, ageMs }, opts = {}) {
   const tsLabel = bucket.latestTurnTs
     ? new Date(bucket.latestTurnTs).toISOString().slice(11, 16)
     : "--:--";
-  const head = `${key.padEnd(10)}  ${tsLabel}  +${bucket.turns}t`;
+  // Age tag (e.g. "· 3h sen") helps the human spot how long a ball's been
+  // dropped / a question's gone unanswered. Only on the actionable sections.
+  const ageTag = (opts.showAge && Number.isFinite(ageMs))
+    ? `  · ${formatRelMin(Math.round(ageMs / 60000)).replace(" ago", " sen")}`
+    : "";
+  const head = `${key.padEnd(10)}  ${tsLabel}  +${bucket.turns}t${ageTag}`;
 
   if (opts.brief) {
     const preview = previewText(bucket.lastAssistantText || bucket.lastUserText, 70);
     return preview ? `${head}  "${preview}"` : head;
   }
 
-  // System-injected user-role events (slash-command echoes, resume/compact
-  // hints) aren't human directives — they're noise on the ← line. Drop them,
-  // but only while real directives remain, so a pane whose only recent input
-  // was a hint still shows something.
-  const isSystemNoise = (t) => /^\s*(<local-command-|<command-name>|\[amux (resume|compact) hint\]|<local-command-stdout>)/.test(t);
+  // System-injected user-role events aren't human directives — they're noise
+  // on the ← line. Drop them, but only while real directives remain, so a pane
+  // whose only recent input was a hint still shows something.
   const rawDirs = bucket.recentUserTexts && bucket.recentUserTexts.length
     ? bucket.recentUserTexts
     : (bucket.lastUserText ? [bucket.lastUserText] : []);
-  const realDirs = rawDirs.filter((t) => !isSystemNoise(t));
+  const realDirs = rawDirs.filter((t) => !isSystemNoiseDirective(t));
   const dirs = (realDirs.length ? realDirs : rawDirs)
     .map((t) => previewText(stripAnsi(t), 48))
     .filter(Boolean);
@@ -1569,7 +1632,9 @@ function lastAssistantPreview(agent, paneIdx, paneDir) {
       const items = turns[i].items || [];
       for (let j = items.length - 1; j >= 0; j--) {
         if (items[j].type === "tool") continue;
-        const c = (items[j].content || "").trim();
+        // Collapse whitespace: a multi-line assistant message would otherwise
+        // inject blank lines mid-row and shatter the ps grid.
+        const c = (items[j].content || "").replace(/\s+/g, " ").trim();
         if (c) return c;
       }
     }
@@ -1643,6 +1708,9 @@ const ACTIVE_STATUS = (s) => s === "working" || s === "permission" || s === "men
 async function cmdPs(ctx, flags = {}) {
   const showAll = flags.full || flags.f;
   const agents = listAgents(ctx.configPath);
+  // Mark the calling pane so an agent running `ps` from inside tmux can spot
+  // itself ("◀ du") — orientation for a context-less agent.
+  const selfKey = detectSelfKey();
 
   // Step 1: gather all data first so we can sort agents by importance.
   // Every pane is inspected in parallel — each inspectPane is 2+ tmux
@@ -1725,7 +1793,8 @@ async function cmdPs(ctx, flags = {}) {
           const jsonl = lastAssistantPreview(a, p.index, panePathFor(a, p.index));
           display = truncate(jsonl || p.preview, 70);
         }
-        console.log(`  ${icon} p${p.index}  ${cmd} ${ctxCell}  ${display}`);
+        const selfTag = selfKey === `${a.name}:${p.index}` ? "  ◀ du" : "";
+        console.log(`  ${icon} p${p.index}  ${cmd} ${ctxCell}  ${display}${selfTag}`);
         i++;
         continue;
       }

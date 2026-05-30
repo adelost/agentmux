@@ -110,34 +110,42 @@ Multiple agents can run it in parallel without races.
 
 Output anatomy (same for all modes):
 
-1. **\`Recent activity (top 20)\`** — last 20 events across the whole system
-   from a 7d window, independent of cutoff. Mix of 📝 commits and 🔸 pane
-   activity sorted by time desc. Always shows "where were we" even when the
-   chosen window is short.
-2. **Bucket sections** (filtered to current window):
+1. **\`▸ DU = <agent>:<pane>\`** — only when you run \`done\` from inside a pane.
+   Your own state first: what you were last asked, your last reply, your status,
+   and \`amux log\` for your full history. If you just lost context (compact /
+   fresh spawn), this re-anchors you before anything else.
+2. **\`Recent activity (top 20)\`** — last 20 events system-wide from a 7d
+   window, independent of cutoff. 📝 commits + 🔸 pane activity, newest first.
+   "Where were we" at a glance.
+3. **Attention-first sections** — open loops over a WIDER window (old dropped
+   balls surface), live state over the cutoff:
    - 📝 **Commits** — work shipped (strongest signal)
-   - 🟡 **Still working** — panes active right now (jsonl <60s overlay)
-   - ✅ **Finished** — turns written + last msg is a statement
-   - 🔴 **New waiters** — assistant's last text needs attention
-   - 💤 **Idle** — no activity
+   - 🔴 **väntar på DITT svar / needs you** — agent asked the human a question,
+     or a live modal. Ball is in the human's court.
+   - ⚠️ **kanske tappad / maybe dropped** — the human's directive is the most
+     recent message and the agent never replied + isn't live (idle >30min). This
+     is the "I asked X, it never got done" detector.
+   - 🟡 **jobbar / working** — live right now.
+   - ✅ **klar / done** — replied within the window.
+   - 💤 **idle** — counted.
 
-   Each pane in the bucket sections shows a 2-line **thread block**:
+   Each pane shows a 2-line **thread block** (age tag on actionable sections):
    \`\`\`
-   claw:9   13:02  +164t
+   claw:9   13:02  +164t  · 3h sen
       ← <last directives it received>     (≤3, oldest→newest; [from X] = inter-agent)
       → <its latest reply>
    \`\`\`
-   This is the coordination payload: you can see what a pane was told to do
-   and where it landed WITHOUT a follow-up \`amux log\`. To check whether
-   another pane is already on your task, read its ← line. To direct it,
-   \`amux <agent> -p <N> "<message>"\` (shown in the footer).
-3. **\`ℹ More:\`** footer with contextual next-step hints (specific
-   commands + comments — copy-paste ready), including the send-to-pane line.
+   The coordination payload: what a pane was told + where it landed, WITHOUT a
+   follow-up \`amux log\`. Read a pane's ← line to see if it's already on your
+   task. Sections cap at 8 rows (\`… +N\` → \`amux done --week\`).
+4. **\`ℹ More:\`** footer — drill-down + send-to-pane + \`timeline --grep\` to find
+   which pane you asked about something.
 
-Use \`amux done\` at every orchestrator decision point instead of 5× \`amux ps\`
-+ per-pane \`amux log\`. The recent-activity feed gives "where was I" before
-you even read the buckets; the per-pane thread blocks give "what is everyone
-doing and what were they asked" — enough to coordinate from one call.
+Use \`amux done\` at every decision point instead of 5× \`amux ps\` + per-pane
+\`amux log\`: the feed gives "where was I", the thread blocks give "what is
+everyone doing and what were they asked", 🔴/⚠️ give "what needs me / what got
+dropped" — enough to coordinate, or to recover a dropped ball by handing it to
+another pane, from one call.
 
 ### Shrink context before hitting limit
 \`\`\`bash

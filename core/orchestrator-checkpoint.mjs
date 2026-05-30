@@ -125,6 +125,28 @@ export function isWaitingLikeText(text) {
 }
 
 /**
+ * Heuristic: does this assistant message read like a COMPLETION ("klart",
+ * "fixat", "shipped", "vX.Y.Z ute", "✅")? Used to split the "finished" bucket
+ * into ✅ genuinely-done vs ⚠️ maybe-stalled (got a directive, went quiet, never
+ * signalled done). Conservative + tail-anchored like isWaitingLikeText; a
+ * miss just shows the pane in the wrong-but-adjacent bucket, never hides it.
+ */
+export function looksDone(text) {
+  if (!text) return false;
+  const tail = text.trim().slice(-300).toLowerCase();
+  if (!tail) return false;
+  // Negated completions ("inte klart", "inte fixat än") are NOT done.
+  if (/\b(inte|ej|inte riktigt|not)\s+(klar|klart|fixat|färdig|done|ready)/.test(tail)) return false;
+  const cues = [
+    /\bklar(t|a)?\b/, /\bfärdig(t|a)?\b/, /\bfixat\b/, /\blöst\b/, /\bklarade\b/,
+    /\bshippa(d|t)\b|\bshipped\b/, /\bcommit(ted|ta(t|d))\b/, /\bpusha(t|d)\b|\bpushed\b/, /\bmerg(ed|at|ad)\b/,
+    /\bdeploya(t|d|de)|deployed\b/, /\bute\b.*\bv?\d/, /\bv?\d+\.\d+\.\d+.*\bute\b/,
+    /\bdone\b/, /\bcomplete[d]?\b/, /\bfinished\b/, /✅/, /\bredo\b/,
+  ];
+  return cues.some((r) => r.test(tail));
+}
+
+/**
  * Classify a pane bucket + its current live status into one of four
  * orchestrator-facing categories. Order matters: "still-working" wins
  * over everything because an active run is the most time-sensitive

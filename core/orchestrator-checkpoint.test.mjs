@@ -3,6 +3,7 @@ import {
   groupByPane,
   classifyPane,
   isWaitingLikeText,
+  looksDone,
   previewText,
   isStaleWaiter,
   isRunningNow,
@@ -127,6 +128,64 @@ feature("isWaitingLikeText", () => {
     })],
     when: ["checking", ({ text }) => isWaitingLikeText(text)],
     then: ["not waiting", (result) => expect(result).toBe(false)],
+  });
+});
+
+feature("looksDone", () => {
+  unit("false for empty", {
+    given: ["empties", () => ({ texts: [null, "", "  "] })],
+    when: ["checking", ({ texts }) => texts.map(looksDone)],
+    then: ["all false", (r) => expect(r).toEqual([false, false, false])],
+  });
+
+  unit("Swedish completion cues trigger done", {
+    given: ["klart / fixat / ute", () => ({ texts: [
+      "Allt klart, committade.",
+      "Fixat, testerna är gröna.",
+      "v0.5.194 ute på origin/main.",
+    ] })],
+    when: ["checking", ({ texts }) => texts.map(looksDone)],
+    then: ["all done", (r) => expect(r).toEqual([true, true, true])],
+  });
+
+  unit("English completion cues trigger done", {
+    given: ["shipped / done / committed", () => ({ texts: [
+      "Shipped and merged.",
+      "All done, 737 tests pass.",
+      "Committed abc1234.",
+    ] })],
+    when: ["checking", ({ texts }) => texts.map(looksDone)],
+    then: ["all done", (r) => expect(r).toEqual([true, true, true])],
+  });
+
+  unit("negated completion is NOT done", {
+    given: ["not-done phrasing", () => ({ text: "Inte klart än, jobbar vidare." })],
+    when: ["checking", ({ text }) => looksDone(text)],
+    then: ["not done", (r) => expect(r).toBe(false)],
+  });
+
+  unit("mid-work message is NOT done", {
+    given: ["in-progress", () => ({ text: "Letar i commit-loggen efter ändringen..." })],
+    when: ["checking", ({ text }) => looksDone(text)],
+    then: ["not done", (r) => expect(r).toBe(false)],
+  });
+});
+
+feature("groupByPane recentUserTexts", () => {
+  unit("keeps the last 3 user directives oldest→newest", {
+    given: ["five user turns + assistant noise", () => ({ rows: [
+      row("claw", 1, "user", "first", "2026-05-30T10:00:00Z"),
+      row("claw", 1, "assistant", "ok", "2026-05-30T10:00:05Z"),
+      row("claw", 1, "user", "second", "2026-05-30T10:01:00Z"),
+      row("claw", 1, "user", "third", "2026-05-30T10:02:00Z"),
+      row("claw", 1, "user", "fourth", "2026-05-30T10:03:00Z"),
+      row("claw", 1, "user", "fifth", "2026-05-30T10:04:00Z"),
+    ] })],
+    when: ["grouping", ({ rows }) => groupByPane(rows).get("claw:1")],
+    then: ["last 3 in order, lastUserText is newest", (b) => {
+      expect(b.recentUserTexts).toEqual(["third", "fourth", "fifth"]);
+      expect(b.lastUserText).toBe("fifth");
+    }],
   });
 });
 
