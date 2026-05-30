@@ -41,13 +41,7 @@ import { readLastTurns, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { readLastTurnsCodex, latestCodexJsonlMtime } from "../core/codex-jsonl-reader.mjs";
 import { getContextFromPane } from "../core/context.mjs";
 
-// Safety-net poll. The primary outbound path is now push: the Stop hook
-// pokes the bridge (POST /api/poke → tick) the instant a turn completes, and
-// the grace path self-reschedules its own recheck (see checkPane). This poll
-// only catches the rare case where both the push and fs.watch are missed
-// (bridge started after a turn, hook disabled). 5s keeps worst-case latency
-// bounded without leaning on it for normal traffic.
-const DEFAULT_POLL_MS = 5_000;
+const DEFAULT_POLL_MS = 15_000;
 // Typing-indicator is event-driven via fs.watch (every jsonl write fires
 // sendTyping with throttle below). This polling cadence is the fallback
 // for environments where fs.watch silently drops events (WSL 9p mounts,
@@ -98,10 +92,6 @@ export function createJsonlWatcher({
   const inFlight = new Set();
   /** per-channel last-sendTyping ms, throttled via TYPING_THROTTLE_MS. */
   const lastTypingAt = new Map();
-  /** one-shot recheck timers per pane: when a turn's content is fresh but
-   *  grace hasn't elapsed yet, we schedule a single checkPane for the exact
-   *  moment grace WILL clear, instead of waiting for the next poll tick. */
-  const graceTimers = new Map();
   let pollTimer = null;
   let typingTimer = null;
   let stopped = false;
@@ -289,23 +279,6 @@ export function createJsonlWatcher({
     return { readTurns: readLastTurns, latestMtime: latestJsonlMtime };
   }
 
-  // Schedule a single recheck for a pane whose turn is in the grace window.
-  // Coalesces: a later call for the same pane replaces the pending timer
-  // (the newest write always pushes eligibility further out). Clamped so a
-  // stale/negative delay still fires promptly.
-  function scheduleGraceRecheck(name, idx, agentDir, delayMs) {
-    if (stopped) return;
-    const key = paneKey(name, idx);
-    const existing = graceTimers.get(key);
-    if (existing) clearTimeout(existing);
-    const delay = Math.min(Math.max(delayMs, 50), COMPLETION_GRACE_MS + 1_000);
-    const t = setTimeout(() => {
-      graceTimers.delete(key);
-      checkPane(name, idx, agentDir).catch(() => {});
-    }, delay);
-    graceTimers.set(key, t);
-  }
-
   async function checkPane(name, idx, agentDir) {
     const key = paneKey(name, idx);
     if (inFlight.has(key)) return; // coalesce overlapping fs.watch + poll triggers
@@ -364,15 +337,7 @@ export function createJsonlWatcher({
         const completeByGrace =
           (now - endMs >= COMPLETION_GRACE_MS) &&
           (!mtimeMs || now - mtimeMs >= COMPLETION_GRACE_MS);
-        if (!completeByReason && !completeByGrace) {
-          // Turn has fresh content but grace hasn't elapsed. Don't wait for
-          // the next poll tick — schedule a one-shot recheck for the moment
-          // grace will clear (newest of content-stable / file-quiet + grace).
-          // This is what makes the grace path reactive instead of poll-bound.
-          const eligibleAt = Math.max(endMs, mtimeMs || 0) + COMPLETION_GRACE_MS;
-          scheduleGraceRecheck(name, idx, agentDir, eligibleAt - now);
-          continue;
-        }
+        if (!completeByReason && !completeByGrace) continue;
 
         const newItems = (turn.items || []).slice(postedCount);
 
@@ -519,8 +484,6 @@ export function createJsonlWatcher({
       stopped = true;
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       if (typingTimer) { clearInterval(typingTimer); typingTimer = null; }
-      for (const t of graceTimers.values()) clearTimeout(t);
-      graceTimers.clear();
       detachAllFsWatch();
     },
     // Exposed for tests so we can drive tick/checkPane directly without
