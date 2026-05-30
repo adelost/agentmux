@@ -164,6 +164,20 @@ amux done --since 2h
 amux esc api -p 1
 ```
 
+Personal todos with daily 08:00 push:
+
+```bash
+amux todo                      # list active
+amux todo add "buy SSD"        # to Idag / snart
+amux todo add --parked "..."   # later
+amux todo done 5               # by id (or substring)
+amux todo rm 5
+amux todo-remind --dry         # preview push
+bin/install-todo-cron.sh       # enable daily reminder
+```
+
+Backed by `~/.openclaw/workspace/memory/tasks.md`. Full docs in [`docs/todo.md`](docs/todo.md).
+
 `ax` is installed as a shorter alias for `amux`.
 
 ## Agent-to-Agent Delegation
