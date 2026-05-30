@@ -187,3 +187,47 @@ feature("contract-lint helpers", () => {
     }],
   });
 });
+
+feature("contract-lint scope + guidance", () => {
+  // Kotlin extraction must mirror Python's top-level scope: methods, nested types,
+  // companion objects, and private/internal decls are NOT documented boundaries.
+  unit("extracts only the top-level public Kotlin class", {
+    given: ["a class with a nested enum, a method, a private fn, and a companion", () =>
+      "/**\n * WHAT: Turns pressure into altitude.\n * WHY: Keeps sensors and HUD on one pipeline.\n */\n"
+      + "class AltimeterEngine {\n    enum class Trend { UP, DOWN }\n    fun onPressure(p: Float) {}\n"
+      + "    private fun emit() {}\n    companion object {\n        fun pressureToAltitude(p: Float) = 0f\n    }\n}\n"],
+    when: ["extracting", (src) => extractSymbols(src, ".kt").map((s) => s.name)],
+    then: ["only the top-level class survives", (names) => expect(names).toEqual(["AltimeterEngine"])],
+  });
+
+  unit("skips a top-level private Kotlin function", {
+    given: ["a private and a public top-level fun", () => "private fun helper() {}\nfun publicOne() {}\n"],
+    when: ["extracting", (src) => extractSymbols(src, ".kt").map((s) => s.name)],
+    then: ["only the public function survives", (names) => expect(names).toEqual(["publicOne"])],
+  });
+
+  unit("missing WHY does not also flag CONTRACT030", {
+    given: ["a what-only doc", () => "WHAT: Filters samples."],
+    when: ["evaluating", (doc) => evaluateContract(doc, { name: "T" }).map((f) => f.code)],
+    then: ["CONTRACT011 yes, CONTRACT030 no (no double-flag)", (codes) => {
+      expect(codes).toContain("CONTRACT011");
+      expect(codes.includes("CONTRACT030")).toBe(false);
+    }],
+  });
+
+  unit("findings carry a Try suggestion an agent can act on", {
+    given: ["an undocumented class file", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-contract-tip-"));
+      writeFileSync(join(root, "x.kt"), "class Bare\n");
+      return root;
+    }],
+    when: ["linting", (root) => lintRoot(root)],
+    then: ["at least one finding has a suggestion", (result, root) => {
+      try {
+        expect(result.findings.some((f) => f.suggestion)).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+});

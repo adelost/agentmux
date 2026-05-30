@@ -57,6 +57,21 @@ const WHAT_MAX_WORDS = 16;
 const WHY_MAX_WORDS = 18;
 const ECHO_OVERLAP_THRESHOLD = 0.5;
 
+// WHAT: Maps each finding code to a one-line fix template.
+// WHY: Lets an agent running the linter see the target WHAT/WHY shape, not just the error.
+const SUGGESTIONS = {
+  CONTRACT001: "add  WHAT: <verb + responsibility>  and  WHY: Keeps <X> from <Y>",
+  CONTRACT010: "add  WHAT: <active verb + local responsibility>",
+  CONTRACT011: "add  WHY: Keeps <X> from <Y>  (name the coupling it prevents)",
+  CONTRACT020: "drop the phrase — name the boundary it prevents",
+  CONTRACT021: "open with a verb (Tracks/Keeps/Filters), not a meta-phrase",
+  CONTRACT030: "WHY must name a boundary: Keeps/Separates/Prevents/Avoids <X> from <Y>",
+  CONTRACT031: "replace the adjective with the boundary it preserves",
+  CONTRACT040: "WHY repeats WHAT — name a consumer, dependency, or failure mode instead",
+  CONTRACT041: "fill the DTO: line with the payload/schema shape",
+  CONTRACT042: "use WHAT:/WHY: — this symbol owns a domain boundary, not a pure shape",
+};
+
 // WHAT: Pulls the text of one WHAT:/WHY:/DTO: tag out of a doc block.
 // WHY: Keeps tag parsing identical across languages so rules stay language-agnostic.
 function extractTag(doc, tag) {
@@ -129,7 +144,6 @@ export function evaluateContract(doc, { name = "", kind = "symbol" } = {}) {
 
   // Voice checks run on whatever text exists (fallback to whole doc when untagged),
   // so prose-only files still surface fluff, not just missing-tag noise.
-  const whyText = why || doc;
   for (const [re, hint] of ALWAYS_BANNED) {
     const m = doc.match(re);
     if (m) findings.push({ code: "CONTRACT020", sev: "error", msg: `${label}: banned phrase "${m[0].trim()}" — ${hint}` });
@@ -143,11 +157,13 @@ export function evaluateContract(doc, { name = "", kind = "symbol" } = {}) {
     }
   }
 
-  const boundary = hasBoundaryMarker(whyText);
-  if (!boundary) {
+  // Boundary is only meaningful when a WHY exists. A missing WHY is already
+  // CONTRACT011 — re-flagging "WHY lacks a boundary" would just double the noise.
+  const boundary = why ? hasBoundaryMarker(why) : true;
+  if (why && !boundary) {
     findings.push({ code: "CONTRACT030", sev: "error", msg: `${label}: WHY lacks a boundary marker (keeps/separates/avoids/prevents/...)` });
     for (const adj of SOFT_ADJECTIVES) {
-      if (new RegExp(`\\b${adj}\\b`, "i").test(whyText)) {
+      if (new RegExp(`\\b${adj}\\b`, "i").test(why)) {
         findings.push({ code: "CONTRACT031", sev: "warn", msg: `${label}: vague adjective "${adj}" with no boundary` });
       }
     }
@@ -227,12 +243,20 @@ function extractCFamily(source) {
   const lines = source.split("\n");
   const symbols = [];
   for (let idx = 0; idx < lines.length; idx += 1) {
+    const line = lines[idx];
+    // Top-level only: an indented decl is a method or nested type whose parent
+    // already owns the boundary. Mirrors the Python extractor's column-0 scope
+    // and keeps the linter off every getter/override (the skydive 841-noise).
+    if (/^\s/.test(line)) continue;
+    // Non-public decls and companion holders do not own a documented boundary.
+    if (/^(?:export\s+)?(?:private|internal)\b/.test(line)) continue;
+    if (/^companion\s+object\b/.test(line)) continue;
     for (const re of CFAMILY_DECL) {
-      const m = lines[idx].match(re);
+      const m = line.match(re);
       if (!m) continue;
       const name = m[1] || "companion";
       if (name.startsWith("_")) break;
-      const kind = /class|object|interface|struct/.test(lines[idx]) ? "class" : "function";
+      const kind = /class|object|interface|struct/.test(line) ? "class" : "function";
       symbols.push({ line: idx + 1, name, kind, doc: leadingComment(lines, idx) });
       break;
     }
@@ -305,7 +329,7 @@ export function lintSource(path, source, ext) {
   const findings = [];
   for (const sym of extractSymbols(source, ext)) {
     for (const f of evaluateContract(sym.doc, { name: sym.name, kind: sym.kind })) {
-      findings.push({ ...f, path, line: sym.line });
+      findings.push({ ...f, path, line: sym.line, suggestion: SUGGESTIONS[f.code] });
     }
     if (/\bDTO:/i.test(sym.doc) && requiresWhyName(sym.name)) {
       findings.push({
@@ -314,6 +338,7 @@ export function lintSource(path, source, ext) {
         msg: `${sym.kind} ${sym.name}: DTO: used on domain/state symbol`,
         path,
         line: sym.line,
+        suggestion: SUGGESTIONS.CONTRACT042,
       });
     }
   }
@@ -452,7 +477,8 @@ export function lintRoots(roots, options = {}) {
 }
 
 function formatFinding(finding, root) {
-  return `${relative(root, finding.path)}:${finding.line}: ${finding.code}: ${finding.msg}`;
+  const base = `${relative(root, finding.path)}:${finding.line}: ${finding.code}: ${finding.msg}`;
+  return finding.suggestion ? `${base}\n    Try: ${finding.suggestion}` : base;
 }
 
 export function formatLintReport(results, options = {}) {
