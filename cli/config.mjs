@@ -52,8 +52,15 @@ export function getAgent(configPath, name) {
  * not a pattern we support today — the sync tool writes 1:1 bindings.
  */
 export function findChannelForPane(configPath, agentName, paneIndex) {
-  const config = loadConfig(configPath);
-  const disc = config[agentName]?.discord;
+  return channelForPane(loadConfig(configPath), agentName, paneIndex);
+}
+
+/**
+ * Pure variant of findChannelForPane for hot paths that already parsed config.
+ * Keeps YAML IO out of per-pane loops and fs.watch bursts.
+ */
+export function channelForPane(config, agentName, paneIndex) {
+  const disc = config?.[agentName]?.discord;
   if (!disc) return null;
   if (typeof disc === "string") return paneIndex === 0 ? disc : null;
   if (typeof disc === "object") {

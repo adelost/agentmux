@@ -62,6 +62,7 @@ const STATE_FILE = process.env.STATE_FILE || "/tmp/agentmux-state.json";
 // you want the phone in. Tailnet IS the auth; no token layer.
 const VOICE_PWA_PORT = parseInt(process.env.VOICE_PWA_PORT || "8080");
 const VOICE_PWA_HOST = process.env.VOICE_PWA_HOST || "127.0.0.1";
+const AMUX_REACTIVE_POKE = process.env.AMUX_REACTIVE_POKE === "1";
 
 if (!TOKEN) {
   console.error("Set DISCORD_TOKEN in .env");
@@ -240,6 +241,9 @@ const voicePwa = createVoicePWA({
   run,
   ttsVoice: TTS_VOICE,
   mirror: { send: (channelId, text) => discord.send(channelId, text) },
+  reactivePoke: AMUX_REACTIVE_POKE
+    ? ({ name, pane, dir }) => jsonlWatcher.enqueuePane(name, pane, dir)
+    : null,
   staticDir: voicePwaStaticDir,
 });
 voicePwa.start()

@@ -318,6 +318,30 @@ feature("readLastTurnsCodex: multi-turn limit", () => {
       cleanup();
     }],
   });
+
+  unit("tailBytes mode reads the latest turn without parsing old large history", {
+    given: ["large old turn followed by a small latest turn", () => {
+      const events = [
+        { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+        { type: "event_msg", timestamp: "2026-04-09T10:00:00Z", payload: { type: "task_started", turn_id: "OLD" } },
+        { type: "event_msg", timestamp: "2026-04-09T10:00:01Z", payload: { type: "user_message", message: "old prompt" } },
+        { type: "response_item", timestamp: "2026-04-09T10:00:02Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "x".repeat(50_000) }] } },
+        { type: "event_msg", timestamp: "2026-04-09T10:00:03Z", payload: { type: "task_complete", turn_id: "OLD" } },
+        { type: "event_msg", timestamp: "2026-04-09T10:01:00Z", payload: { type: "task_started", turn_id: "NEW" } },
+        { type: "event_msg", timestamp: "2026-04-09T10:01:01Z", payload: { type: "user_message", message: "new prompt" } },
+        { type: "response_item", timestamp: "2026-04-09T10:01:02Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "new response" }] } },
+        { type: "event_msg", timestamp: "2026-04-09T10:01:03Z", payload: { type: "task_complete", turn_id: "NEW" } },
+      ];
+      return setupFakeCodex(events);
+    }],
+    when: ["reading with a small tailBytes budget", ({ paneDir }) =>
+      readLastTurnsCodex(paneDir, { limit: 1, tailBytes: 4 * 1024 })],
+    then: ["latest turn is returned", (r, { cleanup }) => {
+      expect(r.turns.map((t) => t.userPrompt)).toEqual(["new prompt"]);
+      expect(r.turns[0].items[0].content).toBe("new response");
+      cleanup();
+    }],
+  });
 });
 
 feature("readLastTurnsCodex: codex event ordering", () => {

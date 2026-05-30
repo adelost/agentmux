@@ -12,7 +12,7 @@
 // extraction uses response_item 'message' events with role=assistant plus
 // function_call events.
 
-import { readdirSync, readFileSync, statSync, existsSync, openSync, readSync, closeSync } from "fs";
+import { readdirSync, readFileSync, statSync, existsSync, openSync, readSync, closeSync, fstatSync } from "fs";
 import { join } from "path";
 
 const CODEX_SESSIONS_DIR = () => join(process.env.HOME, ".codex", "sessions");
@@ -53,6 +53,41 @@ function parseJsonl(filePath) {
   } catch {
     return [];
   }
+}
+
+/**
+ * Parse only the last `maxBytes` of a Codex rollout. Watcher callers only
+ * need the newest few turns, and rollout files can grow large during long
+ * sessions. Like the Claude reader, this drops the partial leading line and
+ * parses complete trailing JSONL events.
+ */
+function parseJsonlTail(filePath, maxBytes) {
+  let fd;
+  try {
+    fd = openSync(filePath, "r");
+    const size = fstatSync(fd).size;
+    if (size <= maxBytes) return parseJsonl(filePath);
+    const buf = Buffer.alloc(maxBytes);
+    readSync(fd, buf, 0, maxBytes, size - maxBytes);
+    let text = buf.toString("utf-8");
+    const nl = text.indexOf("\n");
+    if (nl !== -1) text = text.slice(nl + 1);
+    return parseJsonlText(text);
+  } catch {
+    try { return parseJsonl(filePath); } catch { return []; }
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch {} }
+  }
+}
+
+function parseJsonlText(content) {
+  const events = [];
+  for (const line of String(content || "").split("\n")) {
+    if (!line.trim()) continue;
+    try { events.push(JSON.parse(line)); }
+    catch { /* skip */ }
+  }
+  return events;
 }
 
 // Session_meta lives on line 1 of every rollout. In real codex sessions it
@@ -523,11 +558,13 @@ function groupCodexIntoTurns(events) {
  * @returns {{ turns: Array<object>, jsonlFile: string } | null}
  */
 export function readLastTurnsCodex(paneDir, opts = {}) {
-  const { limit = 3, since = null, grep = null } = opts;
+  const { limit = 3, since = null, grep = null, tailBytes = null } = opts;
   const file = latestSessionFor(paneDir);
   if (!file) return null;
 
-  const events = parseJsonl(file);
+  const events = (tailBytes && !since && !grep)
+    ? parseJsonlTail(file, tailBytes)
+    : parseJsonl(file);
   if (events.length === 0) return { turns: [], jsonlFile: file };
 
   let turns = groupCodexIntoTurns(events);
