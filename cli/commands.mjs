@@ -19,7 +19,7 @@ import {
   isStaleWaiter, isRunningNow,
 } from "../core/orchestrator-checkpoint.mjs";
 import { collectCommitsSince, reposFromAgents } from "../core/commit-log.mjs";
-import { archiveOldSessions, formatJanitorResult } from "../core/janitor.mjs";
+import { pruneOldSessions, formatJanitorResult } from "../core/janitor.mjs";
 import { regenerateAgentsYaml } from "../sync.mjs";
 import yaml from "js-yaml";
 import { spawn, execSync } from "child_process";
@@ -1239,17 +1239,18 @@ async function cmdDream(ctx, flags = {}) {
 
 /**
  * Nightly session-file housekeeping, folded into `amux dream` so there's one
- * maintenance pass instead of a second cron. Gzips jsonl no agent has touched
- * in the retention window. Quiet unless something happened (or non-quiet).
- * Never throws — a janitor failure must not affect dream's outcome. Disable
- * with AMUX_JANITOR_ENABLED=false.
+ * maintenance pass instead of a second cron. Deletes jsonl no agent has
+ * touched in the retention window (default 14d) — dead sessions only; live
+ * files have fresh mtime and are never matched. Quiet unless something
+ * happened (or non-quiet). Never throws — a janitor failure must not affect
+ * dream's outcome. Disable with AMUX_JANITOR_ENABLED=false.
  */
 function runDreamJanitor(flags = {}) {
   if (process.env.AMUX_JANITOR_ENABLED === "false") return;
   try {
-    const jr = archiveOldSessions({ dryRun: !!flags.dry });
+    const jr = pruneOldSessions({ dryRun: !!flags.dry });
     const verbose = !flags.quiet && !flags.q;
-    if (verbose || jr.archived || jr.failed) console.log(formatJanitorResult(jr));
+    if (verbose || jr.deleted || jr.failed) console.log(formatJanitorResult(jr));
   } catch (err) {
     console.warn(`janitor skipped: ${err.message}`);
   }
@@ -2562,9 +2563,9 @@ Usage:
   agent dream                     Write/update nightly pane digest in workspace memory
     --since T                     Window to summarize (default: 24h)
     --dry                         Preview pane work, do nothing
-  agent janitor                   Gzip session jsonl older than 30d (also runs nightly in dream)
-    --dry                         List archive candidates, change nothing
-    --days N                      Retention window (default: 30)
+  agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)
+    --dry                         List deletion candidates, change nothing
+    --days N                      Retention window (default: 14)
   agent notifyuser "message"      High-signal mobile notification to the human
     --level info|done|warn|error  Notification level (default: info)
     --test                        Send a test notification
@@ -2745,7 +2746,7 @@ export async function dispatch(argv, ctx) {
       // Manual entry point for the housekeeping that also runs nightly inside
       // `amux dream`. Mainly useful for `--dry` inspection / one-off reclaim.
       const { flags } = parseFlags(rest, FLAG_SPECS.janitor);
-      const r = archiveOldSessions({
+      const r = pruneOldSessions({
         dryRun: !!flags.dry,
         ...(flags.days ? { retentionDays: flags.days } : {}),
       });

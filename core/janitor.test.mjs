@@ -1,13 +1,12 @@
 import { unit, component, feature, expect } from "bdd-vitest";
-import { mkdtempSync, writeFileSync, rmSync, existsSync, utimesSync, readFileSync, mkdirSync } from "fs";
-import { gunzipSync } from "zlib";
+import { mkdtempSync, writeFileSync, rmSync, existsSync, utimesSync, mkdirSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { archiveOldSessions, formatJanitorResult } from "./janitor.mjs";
+import { pruneOldSessions, formatJanitorResult } from "./janitor.mjs";
 
 const DAY = 24 * 3600 * 1000;
 
-// Build a roots dir with jsonl files at given ages (days). Returns { root, paths }.
+// Build a roots dir with jsonl files at given ages (days). Returns { root, nowMs, paths }.
 function makeRoot(specs) {
   const root = mkdtempSync(join(tmpdir(), "amux-janitor-"));
   const nowMs = Date.parse("2026-05-30T00:00:00Z");
@@ -22,77 +21,69 @@ function makeRoot(specs) {
   return { root, nowMs, paths };
 }
 
-feature("archiveOldSessions", () => {
-  unit("no candidates when everything is fresh", {
-    given: ["two recent jsonl files", () => makeRoot([
-      ["a.jsonl", 1], ["b.jsonl", 5],
-    ])],
-    when: ["scanning with 30d retention", ({ root, nowMs }) =>
-      archiveOldSessions({ roots: [root], retentionDays: 30, nowMs })],
-    then: ["nothing archived, both files intact", (r, { root }) => {
+feature("pruneOldSessions", () => {
+  unit("keeps everything when all files are fresh", {
+    given: ["two recent files (1d, 5d)", () => makeRoot([["a.jsonl", 1], ["b.jsonl", 5]])],
+    when: ["pruning with 14d retention", ({ root, nowMs }) =>
+      pruneOldSessions({ roots: [root], retentionDays: 14, nowMs })],
+    then: ["nothing deleted, both intact", (r, { root }) => {
       rmSync(root, { recursive: true, force: true });
       expect(r.scanned).toBe(2);
       expect(r.candidates).toBe(0);
-      expect(r.archived).toBe(0);
+      expect(r.deleted).toBe(0);
     }],
   });
 
-  component("gzips only files older than retention, leaves fresh ones", {
-    given: ["one old (40d) + one fresh (2d) file", () => makeRoot([
-      ["old.jsonl", 40], ["fresh.jsonl", 2],
-    ])],
-    when: ["scanning with 30d retention", ({ root, nowMs }) =>
-      archiveOldSessions({ roots: [root], retentionDays: 30, nowMs })],
-    then: ["old → .gz (original gone), fresh untouched, data recoverable", (r, { paths }) => {
-      const root = paths["old.jsonl"].replace(/\/old\.jsonl$/, "");
+  component("deletes only files older than retention, keeps fresh (live) ones", {
+    given: ["one old (20d) + one fresh (2d)", () => makeRoot([["old.jsonl", 20], ["live.jsonl", 2]])],
+    when: ["pruning with 14d retention", ({ root, nowMs }) =>
+      pruneOldSessions({ roots: [root], retentionDays: 14, nowMs })],
+    then: ["old gone, live kept, bytes freed, manifest written", (r, { root, paths }) => {
       try {
         expect(r.candidates).toBe(1);
-        expect(r.archived).toBe(1);
+        expect(r.deleted).toBe(1);
         expect(existsSync(paths["old.jsonl"])).toBe(false);
-        expect(existsSync(paths["old.jsonl"] + ".gz")).toBe(true);
-        expect(existsSync(paths["fresh.jsonl"])).toBe(true);
-        // Round-trips: gunzip restores the original bytes.
-        const restored = gunzipSync(readFileSync(paths["old.jsonl"] + ".gz")).toString();
-        expect(restored).toContain("old.jsonl");
-        expect(r.reclaimedBytes).toBeGreaterThan(0);
+        expect(existsSync(paths["live.jsonl"])).toBe(true); // live file never touched
+        expect(r.freedBytes).toBeGreaterThan(0);
+        const manifest = readFileSync(join(root, ".janitor-deleted.log"), "utf-8");
+        expect(manifest).toContain("old.jsonl");
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
     }],
   });
 
-  unit("dry run reports candidates but changes nothing", {
-    given: ["one old file", () => makeRoot([["old.jsonl", 40]])],
-    when: ["dry scanning", ({ root, nowMs }) =>
-      archiveOldSessions({ roots: [root], retentionDays: 30, nowMs, dryRun: true })],
-    then: ["candidate counted, file still present, no .gz", (r, { paths }) => {
-      const root = paths["old.jsonl"].replace(/\/old\.jsonl$/, "");
+  unit("dry run reports candidates but deletes nothing", {
+    given: ["one old file (30d)", () => makeRoot([["old.jsonl", 30]])],
+    when: ["dry pruning", ({ root, nowMs }) =>
+      pruneOldSessions({ roots: [root], retentionDays: 14, nowMs, dryRun: true })],
+    then: ["counted, file still present", (r, { root, paths }) => {
       try {
         expect(r.candidates).toBe(1);
-        expect(r.archived).toBe(0);
+        expect(r.deleted).toBe(0);
         expect(existsSync(paths["old.jsonl"])).toBe(true);
-        expect(existsSync(paths["old.jsonl"] + ".gz")).toBe(false);
-        expect(r.reclaimedBytes).toBeGreaterThan(0); // estimated
+        expect(r.freedBytes).toBeGreaterThan(0);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
     }],
   });
 
-  unit("ignores already-gzipped files", {
-    given: ["an old .jsonl.gz (not a .jsonl)", () => makeRoot([["old.jsonl.gz", 40]])],
-    when: ["scanning", ({ root, nowMs }) =>
-      archiveOldSessions({ roots: [root], retentionDays: 30, nowMs })],
-    then: ["not scanned as a candidate", (r, { paths }) => {
-      const root = paths["old.jsonl.gz"].replace(/\/old\.jsonl\.gz$/, "");
+  unit("ignores non-jsonl files", {
+    given: ["an old .md and an old .jsonl.bak", () => makeRoot([
+      ["notes.md", 40], ["x.jsonl.bak", 40],
+    ])],
+    when: ["pruning", ({ root, nowMs }) =>
+      pruneOldSessions({ roots: [root], retentionDays: 14, nowMs })],
+    then: ["nothing matched", (r, { root }) => {
       rmSync(root, { recursive: true, force: true });
       expect(r.scanned).toBe(0);
-      expect(r.candidates).toBe(0);
+      expect(r.deleted).toBe(0);
     }],
   });
 
   unit("recurses nested session dirs (codex YYYY/MM/DD layout)", {
-    given: ["a nested old rollout file", () => {
+    given: ["a nested old rollout", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-janitor-nest-"));
       const nowMs = Date.parse("2026-05-30T00:00:00Z");
       const deep = join(root, "2026", "01", "15");
@@ -103,31 +94,31 @@ feature("archiveOldSessions", () => {
       utimesSync(p, t, t);
       return { root, nowMs };
     }],
-    when: ["scanning", ({ root, nowMs }) =>
-      archiveOldSessions({ roots: [root], retentionDays: 30, nowMs })],
-    then: ["nested file found + archived", (r, { root }) => {
+    when: ["pruning", ({ root, nowMs }) =>
+      pruneOldSessions({ roots: [root], retentionDays: 14, nowMs })],
+    then: ["nested file found + deleted", (r, { root }) => {
       rmSync(root, { recursive: true, force: true });
       expect(r.candidates).toBe(1);
-      expect(r.archived).toBe(1);
+      expect(r.deleted).toBe(1);
     }],
   });
 });
 
 feature("formatJanitorResult", () => {
   unit("nothing-to-do message", {
-    given: ["a clean result", () => ({ scanned: 5, candidates: 0, archived: 0, failed: 0, reclaimedBytes: 0, retentionDays: 30, dryRun: false })],
+    given: ["a clean result", () => ({ scanned: 5, candidates: 0, deleted: 0, failed: 0, freedBytes: 0, retentionDays: 14, dryRun: false })],
     when: ["formatting", (r) => formatJanitorResult(r)],
     then: ["mentions retention + scan count", (s) => {
-      expect(s).toContain("30d");
+      expect(s).toContain("14d");
       expect(s).toContain("5 files scanned");
     }],
   });
 
-  unit("archived summary reports MB + counts", {
-    given: ["an archive result", () => ({ scanned: 10, candidates: 4, archived: 4, failed: 0, reclaimedBytes: 5 * 1024 * 1024, retentionDays: 30, dryRun: false })],
+  unit("deleted summary reports MB + counts", {
+    given: ["a delete result", () => ({ scanned: 10, candidates: 4, deleted: 4, failed: 0, freedBytes: 5 * 1024 * 1024, retentionDays: 14, dryRun: false })],
     when: ["formatting", (r) => formatJanitorResult(r)],
-    then: ["shows archived count + MB", (s) => {
-      expect(s).toContain("archived 4/4");
+    then: ["shows deleted count + MB", (s) => {
+      expect(s).toContain("deleted 4/4");
       expect(s).toContain("5.0MB");
     }],
   });
