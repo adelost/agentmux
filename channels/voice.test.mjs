@@ -55,6 +55,9 @@ function setupServer(opts = {}) {
   };
 
   const mirror = opts.mirror ? { send: async (channelId, text) => { opts.mirror.calls.push({ channelId, text }); } } : null;
+  const reactivePoke = opts.reactivePoke
+    ? async (info) => { opts.reactivePoke.calls.push(info); }
+    : null;
 
   const pwa = createVoicePWA({
     port: 0, // ephemeral
@@ -65,6 +68,7 @@ function setupServer(opts = {}) {
     transcribeScript: "/fake/transcribe.sh",
     run,
     mirror,
+    reactivePoke,
   });
 
   return {
@@ -207,6 +211,42 @@ feature("POST /api/send: text path", () => {
     then: ["mirror got the same text with source tag", async (r, { s, mirror }) => {
       expect(r.status).toBe(200);
       expect(mirror.calls).toEqual([{ channelId: "chan-0", text: "[voice-pwa] hej bilen" }]);
+      await s.pwa.stop(); s.cleanup();
+    }],
+  });
+});
+
+// --- /api/poke (reactive watcher trigger) ---------------------------------
+
+feature("POST /api/poke: reactive watcher trigger", () => {
+  component("disabled by default → 404 and no watcher trigger", {
+    given: ["server without reactivePoke wiring", async () => {
+      const s = setupServer();
+      const { url } = await s.pwa.start();
+      return { s, url };
+    }],
+    when: ["POST poke to claw/1", async ({ url }) =>
+      request(`${url}/api/poke/claw/1`, { method: "POST" })],
+    then: ["route is unavailable", async (r, { s }) => {
+      expect(r.status).toBe(404);
+      expect(r.body.error).toContain("disabled");
+      await s.pwa.stop(); s.cleanup();
+    }],
+  });
+
+  component("enabled wiring pokes exactly one pane with its configured dir", {
+    given: ["server with reactivePoke sink", async () => {
+      const reactivePoke = { calls: [] };
+      const s = setupServer({ reactivePoke });
+      const { url } = await s.pwa.start();
+      return { s, url, reactivePoke };
+    }],
+    when: ["POST poke to claw/1", async ({ url }) =>
+      request(`${url}/api/poke/claw/1`, { method: "POST" })],
+    then: ["only claw:1 is sent to the watcher adapter", async (r, { s, reactivePoke }) => {
+      expect(r.status).toBe(200);
+      expect(r.body).toMatchObject({ ok: true, agent: "claw", pane: 1 });
+      expect(reactivePoke.calls).toEqual([{ name: "claw", pane: 1, dir: "/tmp/claw" }]);
       await s.pwa.stop(); s.cleanup();
     }],
   });
@@ -375,4 +415,3 @@ feature("GET /api/events: SSE stream", () => {
     }],
   });
 });
-

@@ -19,17 +19,20 @@ function mkState(initial = {}) {
   };
 }
 
-function mkDiscord({ paceMs = 0 } = {}) {
+function mkDiscord({ paceMs = 0, failSends = false } = {}) {
   const sends = [];
-  return {
+  const discord = {
     sends,
+    failSends,
     send: vi.fn(async (channelId, payload) => {
+      if (discord.failSends) throw new Error("discord unavailable");
       sends.push({ channelId, payload, t: Date.now() });
       if (paceMs > 0) await new Promise((r) => setTimeout(r, paceMs));
       return true;
     }),
     sendTyping: vi.fn(async () => {}),
   };
+  return discord;
 }
 
 /**
@@ -97,7 +100,7 @@ function setupCodexWatcher({ codexEvents = [], stateInitial = {} } = {}) {
   };
 }
 
-function setupWatcher({ jsonlLines = [], stateInitial = {} } = {}) {
+function setupWatcher({ jsonlLines = [], stateInitial = {}, discordOptions = {} } = {}) {
   const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-watcher-test-"));
   const origHome = process.env.HOME;
   process.env.HOME = fakeHome;
@@ -133,7 +136,7 @@ function setupWatcher({ jsonlLines = [], stateInitial = {} } = {}) {
     capturePane: vi.fn(async () => ""),
     getContextPercent: vi.fn(() => null),
   };
-  const discord = mkDiscord();
+  const discord = mkDiscord(discordOptions);
   const state = mkState(stateInitial);
 
   const watcher = createJsonlWatcher({
@@ -415,6 +418,40 @@ feature("watcher: continuation after intermediate post (the 1.16.46 regression)"
       // Diff-posts: must NOT contain the already-posted tool-uses
       expect(text).not.toContain("grep -r account /memory");
       expect(text).not.toContain("ls config");
+      ctx.cleanup();
+    }],
+  });
+});
+
+feature("watcher: Discord failure is bounded by retry state", () => {
+  unit("failed main post keeps checkpoint unchanged and suppresses immediate retry", {
+    given: ["a complete turn and a Discord sink that fails sends", () => {
+      const userTs = "2026-04-30T23:00:00.000Z";
+      const initialCheckpoint = new Date(userTs).getTime() - 1;
+      const ctx = setupWatcher({
+        jsonlLines: [
+          userTurn("answer this", userTs),
+          assistantText("first answer", "2026-04-30T23:00:01.000Z", "end_turn"),
+        ],
+        stateInitial: {
+          watcher_last_posted_ts: { "ch-test": initialCheckpoint },
+        },
+        discordOptions: { failSends: true },
+      });
+      return { ...ctx, initialCheckpoint };
+    }],
+    when: ["checkPane runs once, then an immediate second signal arrives", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      const sendsAfterFailure = ctx.discord.send.mock.calls.length;
+      ctx.discord.failSends = false;
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return { ...ctx, sendsAfterFailure };
+    }],
+    then: ["checkpoint stays put, retryUntil is set, and the second signal does not resend", (ctx) => {
+      expect(ctx.sendsAfterFailure).toBe(1);
+      expect(ctx.discord.send.mock.calls.length).toBe(1);
+      expect(ctx.state._data.watcher_last_posted_ts["ch-test"]).toBe(ctx.initialCheckpoint);
+      expect(ctx.state._data.watcher_retry_until_ts["ch-test"]).toBeGreaterThan(Date.now());
       ctx.cleanup();
     }],
   });

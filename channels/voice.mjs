@@ -59,6 +59,8 @@ const TRANSCRIPT_PREFIX = "[transcribed voice, may contain speech-to-text errors
  * @param {string} [deps.ttsVoice]                edge-tts voice id
  * @param {object} [deps.mirror]                  { send(channelId, text) } to mirror voice input to Discord
  *                                                 (so channel watchers see what arrived via PWA)
+ * @param {Function|null} [deps.reactivePoke]      Optional per-pane watcher trigger.
+ *                                                 Receives { name, pane, dir } and MUST NOT fan out globally.
  *
  * @returns {{ start: () => Promise<{url}>, stop: () => Promise<void>, _handler: Function }}
  *   _handler is exposed for tests that wire their own http.Server.
@@ -73,6 +75,7 @@ export function createVoicePWA(deps) {
     run,
     ttsVoice = "sv-SE-MattiasNeural",
     mirror = null,
+    reactivePoke = null,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     staticDir = null,
   } = deps;
@@ -130,6 +133,10 @@ export function createVoicePWA(deps) {
       return { ok: false, error: `pane ${pane} does not exist. '${name}' has ${paneCount} pane${paneCount === 1 ? "" : "s"} (0-${paneCount - 1}).` };
     }
     return { ok: true };
+  }
+
+  function agentEntry(name) {
+    return loadAgents()[name] || null;
   }
 
   // ---------- HTTP plumbing ---------------------------------------------
@@ -223,6 +230,25 @@ export function createVoicePWA(deps) {
     }
 
     json(res, 200, { sent: text, transcript });
+  }
+
+  async function handlePoke(req, res, name, paneStr) {
+    if (typeof reactivePoke !== "function") return json(res, 404, { error: "reactive poke disabled" });
+
+    const pane = parseInt(paneStr, 10);
+    if (Number.isNaN(pane)) return json(res, 400, { error: "pane must be an integer" });
+    const v = validatePane(name, pane);
+    if (!v.ok) return json(res, 400, { error: v.error });
+
+    const entry = agentEntry(name);
+    if (!entry?.dir) return json(res, 400, { error: `agent '${name}' has no dir configured` });
+
+    try {
+      await reactivePoke({ name, pane, dir: entry.dir });
+    } catch (err) {
+      return json(res, 500, { error: `poke failed: ${err.message}` });
+    }
+    return json(res, 200, { ok: true, agent: name, pane });
   }
 
   /**
@@ -422,6 +448,10 @@ export function createVoicePWA(deps) {
       const mSend = path.match(/^\/api\/send\/([^/]+)\/(\d+)$/);
       if (mSend && req.method === "POST") {
         return await handleSend(req, res, decodeURIComponent(mSend[1]), mSend[2]);
+      }
+      const mPoke = path.match(/^\/api\/poke\/([^/]+)\/(\d+)$/);
+      if (mPoke && req.method === "POST") {
+        return await handlePoke(req, res, decodeURIComponent(mPoke[1]), mPoke[2]);
       }
       const mEvents = path.match(/^\/api\/events\/([^/]+)\/(\d+)$/);
       if (mEvents && req.method === "GET") {

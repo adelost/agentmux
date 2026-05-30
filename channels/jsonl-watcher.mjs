@@ -32,14 +32,16 @@
 // didn't see it". Watcher reads jsonl directly so it's by definition
 // covering all of them.
 
-import { watch, statSync, existsSync, readdirSync, readFileSync } from "fs";
+import { watch, statSync, existsSync } from "fs";
 import { join } from "path";
 import { splitMessage, extractImageMarkers, validateImagePath } from "../lib.mjs";
-import { loadConfig, findChannelForPane } from "../cli/config.mjs";
+import { loadConfig, findChannelForPane, channelForPane } from "../cli/config.mjs";
 import { paneDir } from "../agent.mjs";
 import { readLastTurns, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { readLastTurnsCodex, latestCodexJsonlMtime } from "../core/codex-jsonl-reader.mjs";
 import { getContextFromPane } from "../core/context.mjs";
+import { applyPostFailure, applyPostSuccess, planPaneMirrorStep } from "../core/watcher-engine.mjs";
+import { createPaneQueue } from "../core/pane-queue.mjs";
 
 const DEFAULT_POLL_MS = 15_000;
 // Typing-indicator is event-driven via fs.watch (every jsonl write fires
@@ -65,9 +67,14 @@ const COMPLETION_GRACE_MS = 5_000;
 // Cap turns considered per pane per tick. Watcher posts the latest few
 // missed turns at restart, not the entire history.
 const TURN_LOOKBACK = 20;
+const WATCHER_TAIL_BYTES = 4 * 1024 * 1024;
+const MAX_POST_ACTIONS = 3;
+const RETRY_BACKOFF_MS = 30_000;
+const MAX_CONCURRENT_PANES = 4;
 
 const STATE_KEY_LAST_POSTED = "watcher_last_posted_ts";
 const STATE_KEY_POSTED_COUNTS = "watcher_posted_item_counts";
+const STATE_KEY_RETRY_UNTIL = "watcher_retry_until_ts";
 
 export function createJsonlWatcher({
   agent,
@@ -88,8 +95,6 @@ export function createJsonlWatcher({
 
   /** active fs.watch handles per pane key (`name:idx`). */
   const fsWatchers = new Map();
-  /** in-flight check guards so fs.watch + poll don't double-fire on the same pane. */
-  const inFlight = new Set();
   /** per-channel last-sendTyping ms, throttled via TYPING_THROTTLE_MS. */
   const lastTypingAt = new Map();
   let pollTimer = null;
@@ -97,13 +102,21 @@ export function createJsonlWatcher({
   let stopped = false;
 
   const paneKey = (name, idx) => `${name}:${idx}`;
+  const queue = createPaneQueue({
+    worker: ({ name, idx, agentDir, sharedConfig }) => processPane(name, idx, agentDir, sharedConfig),
+    maxConcurrency: MAX_CONCURRENT_PANES,
+    backoffMs: RETRY_BACKOFF_MS,
+    log,
+  });
 
   // Discord typing-indicator. Called by both fs.watch (event-driven, fires
   // on every jsonl write) and typingTick (polling fallback for WSL 9p).
   // Throttle keeps API calls sane during streaming bursts.
-  function maybeSendTyping(name, idx) {
+  function maybeSendTyping(name, idx, sharedConfig = null) {
     if (typeof discord.sendTyping !== "function") return;
-    const channelId = findChannelForPane(agentsYamlPath, name, idx);
+    const channelId = sharedConfig
+      ? channelForPane(sharedConfig, name, idx)
+      : findChannelForPane(agentsYamlPath, name, idx);
     if (!channelId) return;
     const now = Date.now();
     const last = lastTypingAt.get(channelId) || 0;
@@ -127,33 +140,35 @@ export function createJsonlWatcher({
     state.set(STATE_KEY_LAST_POSTED, map);
   }
 
-  // Diff-posts: track how many items we've posted per turn (keyed by
-  // user-prompt timestamp). When the same turn is re-walked after new
-  // assistant events arrive, we slice items[postedCount:] and post only
-  // the new ones. Replaces the 1.16.46 track-once approach which blocked
-  // legitimate continuation when grace fired prematurely during a long
-  // thinking phase. Diff-posts gives no duplicates AND no missed content.
-  function getPostedItemCount(channelId, turnStartMs) {
+  function postedItemCounts(channelId) {
     const map = state.get(STATE_KEY_POSTED_COUNTS, {}) || {};
-    const channelMap = map[channelId] || {};
-    const v = channelMap[String(turnStartMs)];
-    return typeof v === "number" && Number.isFinite(v) ? v : 0;
+    return { ...(map[channelId] || {}) };
   }
-  function setPostedItemCount(channelId, turnStartMs, count) {
+
+  function setPostedItemCounts(channelId, counts) {
     const map = state.get(STATE_KEY_POSTED_COUNTS, {}) || {};
-    const channelMap = map[channelId] || {};
-    channelMap[String(turnStartMs)] = count;
-    // Cap at 20 most-recent turns per channel so the state file doesn't
-    // grow unboundedly across long-running bridge sessions.
-    const keys = Object.keys(channelMap)
-      .map((k) => parseInt(k, 10))
-      .filter((k) => Number.isFinite(k))
-      .sort((a, b) => b - a);
-    if (keys.length > 20) {
-      for (const old of keys.slice(20)) delete channelMap[String(old)];
-    }
-    map[channelId] = channelMap;
+    map[channelId] = counts || {};
     state.set(STATE_KEY_POSTED_COUNTS, map);
+  }
+
+  function retryUntilMs(channelId) {
+    const map = state.get(STATE_KEY_RETRY_UNTIL, {}) || {};
+    const v = map[channelId];
+    return Number.isFinite(v) ? v : null;
+  }
+
+  function setRetryUntilMs(channelId, ms) {
+    const map = state.get(STATE_KEY_RETRY_UNTIL, {}) || {};
+    if (Number.isFinite(ms) && ms > Date.now()) map[channelId] = ms;
+    else delete map[channelId];
+    state.set(STATE_KEY_RETRY_UNTIL, map);
+  }
+
+  function commitEngineState(channelId, nextState) {
+    if (!nextState) return;
+    if (Number.isFinite(nextState.lastPostedMs)) setLastPostedMs(channelId, nextState.lastPostedMs);
+    setPostedItemCounts(channelId, nextState.postedItemCounts || {});
+    setRetryUntilMs(channelId, nextState.retryUntilMs);
   }
 
   // --- rendering -----------------------------------------------------------
@@ -179,14 +194,15 @@ export function createJsonlWatcher({
     return { fullText, validFiles };
   }
 
-  async function postTurn({ name, idx, channelId, turn, fullTurn = null, isFinalSlice = true }) {
+  async function postTurn({ name, idx, channelId, turn, config = null }) {
     const { fullText, validFiles } = renderTurn(turn);
-    if (!fullText && validFiles.length === 0) return;
+    if (!fullText && validFiles.length === 0) return { ok: true };
 
     const body = postPrefix && fullText ? `${postPrefix}${fullText}` : fullText || "(no text)";
     const chunks = splitMessage(body);
     // Pacing: Discord rate limit drops chunks in tight bursts.
     const pacePerChunk = chunks.length >= 2 ? (chunks.length > 3 ? 400 : 250) : 0;
+    let ok = true;
     for (let i = 0; i < chunks.length; i++) {
       const payload = (i === 0 && validFiles.length)
         ? { content: chunks[i], files: validFiles }
@@ -194,12 +210,14 @@ export function createJsonlWatcher({
       try {
         await discord.send(channelId, payload);
       } catch (err) {
+        ok = false;
         log(`chunk ${i + 1}/${chunks.length} failed for ${name}:${idx}: ${err.message}`);
       }
       if (pacePerChunk > 0 && i < chunks.length - 1) {
         await new Promise((r) => setTimeout(r, pacePerChunk));
       }
     }
+    if (!ok) return { ok: false };
 
     // Context footer — prefer tmux UI percent so the number matches what
     // auto-compact sees and what Claude Code itself displays. CC's bar is
@@ -212,7 +230,7 @@ export function createJsonlWatcher({
     try {
       let ctx = null;
       try {
-        const cfg = loadConfig(agentsYamlPath);
+        const cfg = config || loadConfig(agentsYamlPath);
         const entryDir = cfg?.[name]?.dir;
         if (entryDir) {
           const dir = paneDir(entryDir, idx);
@@ -248,6 +266,8 @@ export function createJsonlWatcher({
         });
       } catch { /* swallow — recorder is best-effort */ }
     }
+
+    return { ok };
   }
 
   // --- core check ----------------------------------------------------------
@@ -258,10 +278,9 @@ export function createJsonlWatcher({
    * (claude, claude-2, …) falls through to the Claude reader. Unknown
    * panes default to Claude — same behavior as before this dispatch.
    */
-  function readerFor(name, idx) {
+  function readerFor(config, name, idx) {
     try {
-      const cfg = loadConfig(agentsYamlPath);
-      const cmd = cfg?.[name]?.panes?.[idx]?.cmd || "";
+      const cmd = config?.[name]?.panes?.[idx]?.cmd || "";
       if (/codex/i.test(cmd)) {
         return { readTurns: readLastTurnsCodex, latestMtime: latestCodexJsonlMtime };
       }
@@ -269,89 +288,71 @@ export function createJsonlWatcher({
     return { readTurns: readLastTurns, latestMtime: latestJsonlMtime };
   }
 
-  async function checkPane(name, idx, agentDir) {
-    const key = paneKey(name, idx);
-    if (inFlight.has(key)) return; // coalesce overlapping fs.watch + poll triggers
-    inFlight.add(key);
+  async function processPane(name, idx, agentDir, sharedConfig = null) {
     try {
-      const channelId = findChannelForPane(agentsYamlPath, name, idx);
+      const config = sharedConfig || loadConfig(agentsYamlPath);
+      const channelId = channelForPane(config, name, idx);
       if (!channelId) return;
 
       const dir = paneDir(agentDir, idx);
-      const { readTurns, latestMtime } = readerFor(name, idx);
-      const result = readTurns(dir, { limit: TURN_LOOKBACK });
+      const { readTurns, latestMtime } = readerFor(config, name, idx);
+      const result = readTurns(dir, { limit: TURN_LOOKBACK, tailBytes: WATCHER_TAIL_BYTES });
       if (!result?.turns?.length) return;
 
-      // First-time channel — stamp now, don't backpost history.
-      let lastMs = lastPostedMs(channelId);
-      if (lastMs === null) {
-        const newest = result.turns[result.turns.length - 1];
-        const ts = newest?.endTimestamp || newest?.timestamp;
-        const seedMs = ts ? new Date(ts).getTime() : Date.now();
-        setLastPostedMs(channelId, Number.isFinite(seedMs) ? seedMs : Date.now());
-        log(`seeded ${name}:${idx} → ${channelId} @ ${new Date(seedMs).toISOString()}`);
-        return;
-      }
-
       const now = Date.now();
-      // mtime captures EVERY jsonl write — including tool_results that
-      // don't bump turn.endTimestamp. A fresh mtime means the session is
-      // alive and writing, so a stale endTimestamp is just "agent waiting
-      // for tool result", not "turn dead". Used by the grace check below.
-      // Dialect-dispatched: codex sessions live under ~/.codex/sessions,
-      // claude sessions under ~/.claude/projects.
       const mtimeMs = latestMtime(dir);
 
-      // Walk turns oldest → newest among the lookback, post any that
-      // are after the checkpoint AND deemed complete. Diff-posts: each
-      // turn's items are sliced by postedCount so re-walks never
-      // duplicate already-posted content but DO post anything new.
-      for (const turn of result.turns) {
-        const endIso = turn.endTimestamp || turn.timestamp;
-        if (!endIso) continue;
-        const endMs = new Date(endIso).getTime();
-        if (!Number.isFinite(endMs)) continue;
-        if (endMs <= lastMs) continue;
+      const planned = planPaneMirrorStep({
+        turns: result.turns,
+        lastPostedMs: lastPostedMs(channelId),
+        postedItemCounts: postedItemCounts(channelId),
+        retryUntilMs: retryUntilMs(channelId),
+        nowMs: now,
+        latestMtimeMs: mtimeMs,
+        completionGraceMs: COMPLETION_GRACE_MS,
+        maxPostActions: MAX_POST_ACTIONS,
+      });
+      commitEngineState(channelId, planned.nextState);
 
-        const completeByReason = !!turn.isComplete;
-        // Grace requires BOTH endTimestamp old AND file mtime old. Without
-        // the mtime check, grace fires the moment assistant goes quiet for
-        // tool execution — even though the session is actively writing
-        // tool_results to the same file. mtime is the "session alive"
-        // signal; endTimestamp is the "turn-content stable" signal.
-        const completeByGrace =
-          (now - endMs >= COMPLETION_GRACE_MS) &&
-          (!mtimeMs || now - mtimeMs >= COMPLETION_GRACE_MS);
-        if (!completeByReason && !completeByGrace) continue;
+      for (const note of planned.notes || []) {
+        if (note.type === "seed") {
+          log(`seeded ${name}:${idx} → ${channelId} @ ${new Date(note.lastPostedMs).toISOString()}`);
+        }
+      }
 
-        const turnStartMs = turn.timestamp ? new Date(turn.timestamp).getTime() : endMs;
-        const postedCount = getPostedItemCount(channelId, turnStartMs);
-        const totalItems = (turn.items || []).length;
-        const newItems = (turn.items || []).slice(postedCount);
-
-        if (newItems.length === 0) {
-          // Already posted everything we have for this turn — advance
-          // checkpoint so we don't re-iterate next pass, then move on.
-          setLastPostedMs(channelId, endMs);
-          lastMs = endMs;
-          continue;
+      for (const action of planned.actions) {
+        const result = await postTurn({ name, idx, channelId, turn: action.turn, config });
+        if (!result?.ok) {
+          const nextState = applyPostFailure({
+            lastPostedMs: lastPostedMs(channelId),
+            postedItemCounts: postedItemCounts(channelId),
+            retryUntilMs: retryUntilMs(channelId),
+          }, action, { nowMs: now, retryBackoffMs: RETRY_BACKOFF_MS });
+          commitEngineState(channelId, nextState);
+          log(`${name}:${idx} → ${channelId} main post failed; retry after ${Math.round(RETRY_BACKOFF_MS / 1000)}s`);
+          return { retryAfterMs: RETRY_BACKOFF_MS };
         }
 
-        const turnSlice = { ...turn, items: newItems };
-        const isFinalSlice = (postedCount + newItems.length) === totalItems;
-        await postTurn({ name, idx, channelId, turn: turnSlice, fullTurn: turn, isFinalSlice });
-        setLastPostedMs(channelId, endMs);
-        setPostedItemCount(channelId, turnStartMs, totalItems);
-        lastMs = endMs;
-        const ageS = Math.round((now - endMs) / 1000);
-        const reason = completeByReason ? "stop_reason" : "grace";
-        log(`${name}:${idx} → ${channelId} (${reason}, age=${ageS}s, items ${postedCount}→${totalItems})`);
+        const nextState = applyPostSuccess({
+          lastPostedMs: lastPostedMs(channelId),
+          postedItemCounts: postedItemCounts(channelId),
+          retryUntilMs: retryUntilMs(channelId),
+        }, action);
+        commitEngineState(channelId, nextState);
+        const ageS = Math.round((now - action.endMs) / 1000);
+        log(`${name}:${idx} → ${channelId} (${action.reason}, age=${ageS}s, items ${action.postedCount}→${action.totalItems})`);
       }
     } catch (err) {
-      log(`check ${key}: ${err.stack || err.message}`);
-    } finally {
-      inFlight.delete(key);
+      log(`check ${paneKey(name, idx)}: ${err.stack || err.message}`);
     }
+  }
+
+  async function checkPane(name, idx, agentDir, sharedConfig = null) {
+    return processPane(name, idx, agentDir, sharedConfig);
+  }
+
+  function enqueuePane(name, idx, agentDir, sharedConfig = null) {
+    return queue.enqueue(paneKey(name, idx), { name, idx, agentDir, sharedConfig });
   }
 
   // --- fs.watch wiring -----------------------------------------------------
@@ -382,7 +383,7 @@ export function createJsonlWatcher({
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         debounceTimer = null;
-        checkPane(name, idx, agentDir).catch(() => {});
+        enqueuePane(name, idx, agentDir);
       }, 500); // debounce — claude often writes 5-50 events per burst within 100-300ms
     };
 
@@ -419,7 +420,7 @@ export function createJsonlWatcher({
         const cmd = entry.panes[i]?.cmd || "";
         if (!/^(claude|codex)/.test(cmd)) continue;
         attachFsWatch(name, i, entry.dir);
-        await checkPane(name, i, entry.dir);
+        enqueuePane(name, i, entry.dir, config);
       }
     }
   }
@@ -449,7 +450,7 @@ export function createJsonlWatcher({
         // pane fs writes never show as fresh and typing-indicator stays off.
         const mtimeMs = /codex/i.test(cmd) ? latestCodexJsonlMtime(dir) : latestJsonlMtime(dir);
         if (!mtimeMs || now - mtimeMs > TYPING_FRESHNESS_MS) continue;
-        maybeSendTyping(name, i);
+        maybeSendTyping(name, i, config);
       }
     }
   }
@@ -467,10 +468,12 @@ export function createJsonlWatcher({
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       if (typingTimer) { clearInterval(typingTimer); typingTimer = null; }
       detachAllFsWatch();
+      queue.stop();
     },
     // Exposed for tests so we can drive tick/checkPane directly without
     // racing against the polling timer or fs.watch.
     tick,
     checkPane,
+    enqueuePane,
   };
 }
