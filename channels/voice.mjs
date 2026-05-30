@@ -75,10 +75,25 @@ export function createVoicePWA(deps) {
     mirror = null,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     staticDir = null,
+    poke = null,
   } = deps;
 
   if (!agent) throw new Error("voice pwa: agent dep missing");
   if (!agentsYamlPath) throw new Error("voice pwa: agentsYamlPath missing");
+
+  // Reactive mirror trigger. The Stop hook (every claude pane) POSTs
+  // /api/poke the instant a turn completes; we run the watcher's tick
+  // immediately instead of waiting for its poll. Debounced so a burst of
+  // panes stopping together coalesces into a single sweep.
+  let pokeTimer = null;
+  function schedulePoke() {
+    if (typeof poke !== "function") return;
+    if (pokeTimer) return;
+    pokeTimer = setTimeout(() => {
+      pokeTimer = null;
+      try { Promise.resolve(poke()).catch(() => {}); } catch { /* swallow */ }
+    }, 200);
+  }
 
   // Resolve staticDir once so path-traversal checks below compare absolutes.
   const staticRoot = staticDir ? resolve(staticDir) : null;
@@ -418,6 +433,12 @@ export function createVoicePWA(deps) {
       }
       if (req.method === "POST" && path === "/api/tts") {
         return await handleTts(req, res);
+      }
+      if (req.method === "POST" && path === "/api/poke") {
+        // Fire-and-forget reactive mirror trigger from the Stop hook.
+        // Respond immediately; the debounced poke runs out of band.
+        schedulePoke();
+        return json(res, 200, { ok: true });
       }
       const mSend = path.match(/^\/api\/send\/([^/]+)\/(\d+)$/);
       if (mSend && req.method === "POST") {

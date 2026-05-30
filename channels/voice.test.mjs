@@ -65,6 +65,7 @@ function setupServer(opts = {}) {
     transcribeScript: "/fake/transcribe.sh",
     run,
     mirror,
+    poke: opts.poke,
   });
 
   return {
@@ -376,3 +377,45 @@ feature("GET /api/events: SSE stream", () => {
   });
 });
 
+
+// --- /api/poke -------------------------------------------------------------
+
+feature("POST /api/poke", () => {
+  component("triggers the debounced poke (reactive watcher tick)", {
+    given: ["server up with a poke fn", async () => {
+      let pokeCount = 0;
+      const s = setupServer({ poke: () => { pokeCount += 1; } });
+      const { url } = await s.pwa.start();
+      return { s, url, getCount: () => pokeCount };
+    }],
+    when: ["two rapid POSTs then wait for debounce", async ({ url }) => {
+      const a = await request(`${url}/api/poke`, { method: "POST" });
+      const b = await request(`${url}/api/poke`, { method: "POST" });
+      await new Promise((r) => setTimeout(r, 300));
+      return { a, b };
+    }],
+    then: ["both 200 and poke coalesced to a single call", async ({ a, b }, { s, getCount }) => {
+      expect(a.status).toBe(200);
+      expect(a.body.ok).toBe(true);
+      expect(b.status).toBe(200);
+      expect(getCount()).toBe(1);
+      await s.pwa.stop(); s.cleanup();
+    }],
+  });
+
+  component("no poke fn wired → still 200, never throws", {
+    given: ["server up without poke", async () => {
+      const s = setupServer();
+      const { url } = await s.pwa.start();
+      return { s, url };
+    }],
+    when: ["POST poke", async ({ url }) =>
+      request(`${url}/api/poke`, { method: "POST" })],
+    then: ["200 ok", async (r, { s }) => {
+      expect(r.status).toBe(200);
+      expect(r.body.ok).toBe(true);
+      await new Promise((res) => setTimeout(res, 250));
+      await s.pwa.stop(); s.cleanup();
+    }],
+  });
+});

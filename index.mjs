@@ -241,6 +241,10 @@ const voicePwa = createVoicePWA({
   ttsVoice: TTS_VOICE,
   mirror: { send: (channelId, text) => discord.send(channelId, text) },
   staticDir: voicePwaStaticDir,
+  // Reactive mirror: Stop hook POSTs /api/poke → run the watcher's tick
+  // immediately so a completed turn lands in Discord sub-second instead of
+  // waiting for the safety-net poll.
+  poke: () => jsonlWatcher.tick(),
 });
 voicePwa.start()
   .then(({ url }) => {
