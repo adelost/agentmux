@@ -19,6 +19,7 @@ import {
   isStaleWaiter, isRunningNow,
 } from "../core/orchestrator-checkpoint.mjs";
 import { collectCommitsSince, reposFromAgents } from "../core/commit-log.mjs";
+import { archiveOldSessions, formatJanitorResult } from "../core/janitor.mjs";
 import { regenerateAgentsYaml } from "../sync.mjs";
 import yaml from "js-yaml";
 import { spawn, execSync } from "child_process";
@@ -1125,6 +1126,7 @@ async function cmdDream(ctx, flags = {}) {
         console.log(`--- ${t.agent}:${t.pane} (${t.status}${live}; last activity ${new Date(t.lastMs).toISOString().slice(11, 16)} UTC) ---`);
       }
     }
+    runDreamJanitor(flags); // preview the housekeeping pass too (no lock needed for dry)
     return;
   }
 
@@ -1227,7 +1229,29 @@ async function cmdDream(ctx, flags = {}) {
 
     if (failedCount > 0 || aborted) process.exitCode = 1;
   } finally {
+    // Housekeeping runs under the dream lock (before release) so two racing
+    // dream runs can't gzip the same file concurrently. Reached on every
+    // non-dry path: normal completion, no-targets return, and aborts.
+    runDreamJanitor(flags);
     lock.release();
+  }
+}
+
+/**
+ * Nightly session-file housekeeping, folded into `amux dream` so there's one
+ * maintenance pass instead of a second cron. Gzips jsonl no agent has touched
+ * in the retention window. Quiet unless something happened (or non-quiet).
+ * Never throws — a janitor failure must not affect dream's outcome. Disable
+ * with AMUX_JANITOR_ENABLED=false.
+ */
+function runDreamJanitor(flags = {}) {
+  if (process.env.AMUX_JANITOR_ENABLED === "false") return;
+  try {
+    const jr = archiveOldSessions({ dryRun: !!flags.dry });
+    const verbose = !flags.quiet && !flags.q;
+    if (verbose || jr.archived || jr.failed) console.log(formatJanitorResult(jr));
+  } catch (err) {
+    console.warn(`janitor skipped: ${err.message}`);
   }
 }
 
@@ -2538,6 +2562,9 @@ Usage:
   agent dream                     Write/update nightly pane digest in workspace memory
     --since T                     Window to summarize (default: 24h)
     --dry                         Preview pane work, do nothing
+  agent janitor                   Gzip session jsonl older than 30d (also runs nightly in dream)
+    --dry                         List archive candidates, change nothing
+    --days N                      Retention window (default: 30)
   agent notifyuser "message"      High-signal mobile notification to the human
     --level info|done|warn|error  Notification level (default: info)
     --test                        Send a test notification
@@ -2601,6 +2628,7 @@ const FLAG_SPECS = {
   },
   compact: { dry: "boolean", force: "boolean", "min-tokens": "number" },
   dream: { since: "string", workspace: "string", dry: "boolean", q: "boolean", quiet: "boolean" },
+  janitor: { dry: "boolean", days: "number" },
   notifyuser: { level: "string", l: "string", title: "string", user: "string", u: "string", channel: "string", c: "string", force: "boolean", f: "boolean", dry: "boolean", test: "boolean" },
   remind: {
     p: "number",                      // pane index (only when single agent given)
@@ -2711,6 +2739,19 @@ export async function dispatch(argv, ctx) {
     case "dream": {
       const { flags } = parseFlags(rest, FLAG_SPECS.dream);
       return cmdDream(ctx, flags);
+    }
+
+    case "janitor": {
+      // Manual entry point for the housekeeping that also runs nightly inside
+      // `amux dream`. Mainly useful for `--dry` inspection / one-off reclaim.
+      const { flags } = parseFlags(rest, FLAG_SPECS.janitor);
+      const r = archiveOldSessions({
+        dryRun: !!flags.dry,
+        ...(flags.days ? { retentionDays: flags.days } : {}),
+      });
+      console.log(formatJanitorResult(r));
+      for (const e of r.errors) console.warn(`  ! ${e}`);
+      return;
     }
 
     case "notifyuser":

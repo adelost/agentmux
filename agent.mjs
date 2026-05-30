@@ -157,6 +157,19 @@ bin/dream-cron.sh                    # cron wrapper: run + validate output
 Meant for cron at 04:00. It asks each active pane to update only its own
 marker block in the daily memory file, then writes a run sentinel.
 
+Dream also runs **session-file housekeeping** at the end of each nightly run:
+session jsonl no agent has touched in 30d (Claude + Codex) get gzipped in
+place (~90% reclaimed, reversible via gunzip, invisible to readers since they
+glob \`*.jsonl\`). Active files are never touched — their mtime is fresh. Inspect
+or run on demand:
+\`\`\`bash
+amux janitor --dry                   # what would be archived (no changes)
+amux janitor --days 14               # custom retention window
+amux janitor                         # archive now
+\`\`\`
+Disable the nightly pass with \`AMUX_JANITOR_ENABLED=false\`; tune the window
+with \`AMUX_JANITOR_RETENTION_DAYS\`.
+
 ### Auto-compact (background, bridge-driven)
 Idle panes >=70% context get warned (Discord channel), then /compact:ed
 after 60s grace unless activity cancels. Requires 5 min conversation
