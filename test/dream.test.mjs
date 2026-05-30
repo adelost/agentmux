@@ -1,4 +1,4 @@
-import { feature, unit, expect } from "bdd-vitest";
+import { feature, unit, component, expect } from "bdd-vitest";
 import {
   buildDreamSection,
   defaultDailyContent,
@@ -29,7 +29,7 @@ feature("amux dream digest", () => {
     }],
   });
 
-  unit("builds a pane and commit summary", {
+  component("builds a pane and commit summary", {
     given: ["two panes and one commit", () => ({
       rows: [
         { timestamp: "2026-05-09T12:00:00.000Z", agent: "claw", pane: 0, role: "user", type: "text", content: "fix dream" },

@@ -56,7 +56,7 @@ export function pokePath({ name, pane }) {
   return `/api/poke/${encodeURIComponent(name)}/${encodeURIComponent(String(pane))}`;
 }
 
-export function sendReactivePoke({ host = "127.0.0.1", port, name, pane, timeoutMs = 800 }) {
+export function sendReactivePoke({ host = "127.0.0.1", port, name, pane, timeoutMs = 2000 }) {
   return new Promise((resolvePromise) => {
     if (!port || !name || !Number.isInteger(Number(pane))) {
       resolvePromise({ ok: false, statusCode: null, error: "missing poke target" });
