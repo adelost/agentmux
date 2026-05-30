@@ -16,7 +16,6 @@ const ALWAYS_BANNED = [
   [/\bit exists to\b/i, "existential filler — name the boundary instead"],
   [/\bthis class\b/i, "don't narrate that it's a class — say what it does"],
   [/\bthis helper\b/i, "don't narrate that it's a helper — say what it does"],
-  [/\bhelper for\b/i, "low-content — name the behavior, not 'helper'"],
   [/\bprovides a way to\b/i, "filler — state what it does directly"],
   [/\blightweight fallback\b/i, "vague — say what it falls back from"],
   [/\btruthful\b(?!\s+[a-z])/i, "vague predicate — say exactly what stays consistent"],
@@ -29,6 +28,7 @@ const LEADING_BANNED = [
   [/^(?:is )?responsible for\b/i, "meta opener — name the behavior"],
   [/^serves as\b/i, "meta opener — name the behavior"],
   [/^acts as\b/i, "meta opener — name the behavior"],
+  [/^(?:a |the )?helper for\b/i, "lazy opener — name the behavior, not 'helper for'"],
 ];
 
 // WHAT: Vague adjectives banned only when the WHY has no real boundary.

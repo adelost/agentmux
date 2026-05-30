@@ -133,6 +133,23 @@ feature("contract-lint contract floor", () => {
     when: ["evaluating", (doc) => errorCodes(doc, "T")],
     then: ["CONTRACT021 present", (codes) => expect(codes).toContain("CONTRACT021")],
   });
+
+  // Three.js 'createAxesHelper': "axes helper for X" uses helper as a domain noun,
+  // not lazy self-description. Only the "Helper for X" opener is filler.
+  unit("mid-sentence domain 'helper for' is not banned", {
+    given: ["a Three.js axes-helper doc", () => "WHAT: Creates an axes helper for debugging the scene.\nWHY: Keeps debug gizmos out of the production render."],
+    when: ["evaluating", (doc) => errorCodes(doc, "createAxesHelper")],
+    then: ["no banned-phrase finding", (codes) => {
+      expect(codes.includes("CONTRACT020")).toBe(false);
+      expect(codes.includes("CONTRACT021")).toBe(false);
+    }],
+  });
+
+  unit("leading 'Helper for' opener still fails", {
+    given: ["a lazy helper opener", () => "WHAT: Builds the parser.\nWHY: Helper for parsing config files."],
+    when: ["evaluating", (doc) => errorCodes(doc, "T")],
+    then: ["CONTRACT021 present", (codes) => expect(codes).toContain("CONTRACT021")],
+  });
 });
 
 feature("contract-lint helpers", () => {
