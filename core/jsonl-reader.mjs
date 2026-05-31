@@ -648,6 +648,28 @@ export function latestJsonlMtime(paneDir) {
 }
 
 /**
+ * Latest jsonl file identity for a pane, or null when no jsonl exists.
+ *
+ * WHAT: Cheap file stamp used by pollers before they parse the tail.
+ * WHY: If path, mtime, and size are unchanged, an append-only session file
+ *      cannot contain new mirrorable turns, so callers can skip the 4 MiB
+ *      tail read entirely.
+ */
+export function latestJsonlInfo(paneDir) {
+  const projectDir = projectDirFor(paneDir);
+  if (!existsSync(projectDir)) return null;
+  const files = listJsonlFiles(projectDir);
+  if (files.length === 0) return null;
+  const latest = files[0];
+  try {
+    const st = statSync(latest.path);
+    return { path: latest.path, mtimeMs: st.mtimeMs, size: st.size };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Flatten every jsonl event in a project dir to timeline rows.
  * Returns [{ timestamp, role, type, content, raw }] sorted by timestamp
  * ascending. Rows with missing timestamps get the file's mtime as fallback.

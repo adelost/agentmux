@@ -425,6 +425,26 @@ export function latestCodexJsonlMtime(paneDir) {
 }
 
 /**
+ * Latest matching Codex rollout identity for a pane, or null when none exists.
+ *
+ * WHAT: Cheap-enough file stamp used before parsing rollout tails.
+ * WHY: Watcher polls many panes; unchanged path, mtime, and size means the
+ *      append-only rollout has no new mirrorable events, so callers can avoid
+ *      the bounded tail read. latestSessionFor() still resolves the matching
+ *      rollout; caching that index is a separate optimization.
+ */
+export function latestCodexJsonlInfo(paneDir) {
+  const file = latestSessionFor(paneDir);
+  if (!file) return null;
+  try {
+    const st = statSync(file);
+    return { path: file, mtimeMs: st.mtimeMs, size: st.size };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Group codex events into the same turn-shape readLastTurns() returns for
  * Claude, so the jsonl-watcher can drive the post pipeline dialect-agnostic.
  *

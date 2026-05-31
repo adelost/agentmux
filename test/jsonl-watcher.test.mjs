@@ -364,6 +364,90 @@ feature("watcher: grace-fire is suppressed while jsonl is being actively written
   });
 });
 
+feature("watcher: unchanged jsonl is skipped before tail-read", () => {
+  unit("a second check of the same complete file does no mirror work", {
+    given: ["a complete jsonl turn that is ready to post", () => {
+      const userTs = "2026-04-30T20:10:00.000Z";
+      const ctx = setupWatcher({
+        jsonlLines: [
+          userTurn("answer once", userTs),
+          assistantText("one reply", "2026-04-30T20:10:01.000Z", "end_turn"),
+        ],
+        stateInitial: {
+          watcher_last_posted_ts: { "ch-test": new Date(userTs).getTime() - 1 },
+        },
+      });
+      return ctx;
+    }],
+    when: ["watcher.checkPane runs twice without any file append", async (ctx) => {
+      const first = await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      const second = await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return { ...ctx, first, second };
+    }],
+    then: ["the second check is skipped as unchanged", (ctx) => {
+      expect(ctx.first?.actions).toBe(1);
+      expect(ctx.second).toEqual({ skipped: "unchanged" });
+      const contentSends = ctx.discord.sends.filter(
+        (s) => typeof s.payload === "string"
+          ? !/^_context:/.test(s.payload)
+          : !/^_context:/.test(s.payload?.content || ""),
+      );
+      expect(contentSends.length).toBe(1);
+      ctx.cleanup();
+    }],
+  });
+
+  unit("an unchanged incomplete turn is read again when grace becomes due", {
+    given: ["a fresh incomplete turn with unposted content", () => {
+      vi.useFakeTimers();
+      const baseMs = new Date("2026-04-30T20:20:20.000Z").getTime();
+      vi.setSystemTime(baseMs);
+
+      const userTs = new Date(baseMs - 12_000).toISOString();
+      const assistantTs = new Date(baseMs - 10_000).toISOString();
+      const ctx = setupWatcher({
+        jsonlLines: [
+          userTurn("partial", userTs),
+          assistantTool("Bash", { command: "still-running" }, assistantTs),
+        ],
+        stateInitial: {
+          watcher_last_posted_ts: { "ch-test": new Date(userTs).getTime() - 1 },
+        },
+      });
+      utimesSync(ctx.jsonlPath, baseMs / 1000, baseMs / 1000);
+      return { ...ctx, baseMs };
+    }],
+    when: ["watcher.checkPane runs before and after the grace deadline", async (ctx) => {
+      const first = await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      const second = await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      vi.setSystemTime(ctx.baseMs + 6_000);
+      const third = await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return { ...ctx, first, second, third };
+    }],
+    then: ["it skips while fresh, then posts by grace from the same file stamp", (ctx) => {
+      try {
+        expect(ctx.first?.actions).toBe(0);
+        expect(ctx.second).toEqual({ skipped: "unchanged" });
+        expect(ctx.third?.actions).toBe(1);
+        const contentSends = ctx.discord.sends.filter(
+          (s) => typeof s.payload === "string"
+            ? !/^_context:/.test(s.payload)
+            : !/^_context:/.test(s.payload?.content || ""),
+        );
+        expect(contentSends.length).toBe(1);
+        expect(
+          typeof contentSends[0].payload === "string"
+            ? contentSends[0].payload
+            : contentSends[0].payload.content,
+        ).toContain("still-running");
+      } finally {
+        ctx.cleanup();
+        vi.useRealTimers();
+      }
+    }],
+  });
+});
+
 feature("watcher: continuation after intermediate post (the 1.16.46 regression)", () => {
   unit("if a turn was partially posted, the FINAL items still land when stop_reason hits", {
     given: ["a turn with 2 tool-uses already posted, then final text + end_turn appended", () => {

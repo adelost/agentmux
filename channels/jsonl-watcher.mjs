@@ -37,8 +37,8 @@ import { join } from "path";
 import { splitMessage, extractImageMarkers, validateImagePath } from "../lib.mjs";
 import { loadConfig, findChannelForPane, channelForPane } from "../cli/config.mjs";
 import { paneDir } from "../agent.mjs";
-import { readLastTurns, latestJsonlMtime } from "../core/jsonl-reader.mjs";
-import { readLastTurnsCodex, latestCodexJsonlMtime } from "../core/codex-jsonl-reader.mjs";
+import { readLastTurns, latestJsonlMtime, latestJsonlInfo } from "../core/jsonl-reader.mjs";
+import { readLastTurnsCodex, latestCodexJsonlMtime, latestCodexJsonlInfo } from "../core/codex-jsonl-reader.mjs";
 import { getContextFromPane } from "../core/context.mjs";
 import { applyPostFailure, applyPostSuccess, planPaneMirrorStep } from "../core/watcher-engine.mjs";
 import { createPaneQueue } from "../core/pane-queue.mjs";
@@ -97,6 +97,16 @@ export function createJsonlWatcher({
   const fsWatchers = new Map();
   /** per-channel last-sendTyping ms, throttled via TYPING_THROTTLE_MS. */
   const lastTypingAt = new Map();
+  /**
+   * Last parsed jsonl identity per pane.
+   *
+   * WHAT: path+mtime+size stamp plus the next grace deadline, all in memory.
+   * WHY: Safety-net polling should be cheap when a pane's append-only jsonl
+   *      did not change. The grace deadline keeps incomplete turns from being
+   *      skipped forever once they become old enough to mirror.
+   */
+  const readSnapshots = new Map();
+  const metricsEnabled = process.env.AMUX_WATCHER_METRICS === "1";
   let pollTimer = null;
   let typingTimer = null;
   let stopped = false;
@@ -282,10 +292,65 @@ export function createJsonlWatcher({
     try {
       const cmd = config?.[name]?.panes?.[idx]?.cmd || "";
       if (/codex/i.test(cmd)) {
-        return { readTurns: readLastTurnsCodex, latestMtime: latestCodexJsonlMtime };
+        return { readTurns: readLastTurnsCodex, latestMtime: latestCodexJsonlMtime, latestInfo: latestCodexJsonlInfo };
       }
     } catch { /* fall through to claude default */ }
-    return { readTurns: readLastTurns, latestMtime: latestJsonlMtime };
+    return { readTurns: readLastTurns, latestMtime: latestJsonlMtime, latestInfo: latestJsonlInfo };
+  }
+
+  function sameFileStamp(a, b) {
+    return !!a && !!b && a.path === b.path && a.mtimeMs === b.mtimeMs && a.size === b.size;
+  }
+
+  function estimatedReadBytes(info) {
+    if (!info?.size) return 0;
+    return Math.min(info.size, WATCHER_TAIL_BYTES);
+  }
+
+  function metric(msg) {
+    if (metricsEnabled) log(`metrics | ${msg}`);
+  }
+
+  function turnMs(iso) {
+    if (!iso) return NaN;
+    const ms = new Date(iso).getTime();
+    return Number.isFinite(ms) ? ms : NaN;
+  }
+
+  function pendingGraceDueAt(turns, channelId, latestMtimeMs) {
+    const cursorMs = lastPostedMs(channelId);
+    if (!Number.isFinite(cursorMs)) return null;
+    const counts = postedItemCounts(channelId);
+    let dueAt = null;
+
+    for (const turn of turns || []) {
+      if (turn?.isComplete) continue;
+      const endMs = turnMs(turn?.endTimestamp || turn?.timestamp);
+      if (!Number.isFinite(endMs) || endMs <= cursorMs) continue;
+      const items = Array.isArray(turn.items) ? turn.items : [];
+      if (items.length === 0) continue;
+
+      const startMs = turnMs(turn.timestamp) || endMs;
+      const posted = Math.max(0, Math.min(items.length, Math.trunc(counts[String(startMs)] || 0)));
+      if (posted >= items.length) continue;
+
+      const baseMs = Math.max(endMs, Number.isFinite(latestMtimeMs) ? latestMtimeMs : 0);
+      const candidate = baseMs + COMPLETION_GRACE_MS;
+      dueAt = dueAt === null ? candidate : Math.min(dueAt, candidate);
+    }
+
+    return dueAt;
+  }
+
+  function rememberReadSnapshot(key, info, turns, channelId, latestMtimeMs) {
+    if (!info) {
+      readSnapshots.delete(key);
+      return;
+    }
+    readSnapshots.set(key, {
+      ...info,
+      graceDueAtMs: pendingGraceDueAt(turns, channelId, latestMtimeMs),
+    });
   }
 
   async function processPane(name, idx, agentDir, sharedConfig = null) {
@@ -295,24 +360,44 @@ export function createJsonlWatcher({
       if (!channelId) return;
 
       const dir = paneDir(agentDir, idx);
-      const { readTurns, latestMtime } = readerFor(config, name, idx);
-      const result = readTurns(dir, { limit: TURN_LOOKBACK, tailBytes: WATCHER_TAIL_BYTES });
-      if (!result?.turns?.length) return;
-
+      const key = paneKey(name, idx);
+      const { readTurns, latestMtime, latestInfo } = readerFor(config, name, idx);
       const now = Date.now();
-      const mtimeMs = latestMtime(dir);
+      const fileInfo = latestInfo(dir);
+      const cached = readSnapshots.get(key);
+      const retryUntil = retryUntilMs(channelId);
+      const retryDue = Number.isFinite(retryUntil) && retryUntil <= now;
+      const graceDue = Number.isFinite(cached?.graceDueAtMs) && cached.graceDueAtMs <= now;
+
+      if (sameFileStamp(cached, fileInfo) && !retryDue && !graceDue) {
+        metric(`${key} skip unchanged bytes=0 nextGrace=${cached?.graceDueAtMs || "-"}`);
+        return { skipped: "unchanged" };
+      }
+
+      const readStarted = Date.now();
+      const result = readTurns(dir, { limit: TURN_LOOKBACK, tailBytes: WATCHER_TAIL_BYTES });
+      const readMs = Date.now() - readStarted;
+      const readBytes = estimatedReadBytes(fileInfo);
+      if (!result?.turns?.length) {
+        rememberReadSnapshot(key, fileInfo, [], channelId, fileInfo?.mtimeMs ?? null);
+        metric(`${key} read bytes=${readBytes} ms=${readMs} turns=0`);
+        return { readBytes, readMs };
+      }
+
+      const mtimeMs = fileInfo?.mtimeMs ?? latestMtime(dir);
 
       const planned = planPaneMirrorStep({
         turns: result.turns,
         lastPostedMs: lastPostedMs(channelId),
         postedItemCounts: postedItemCounts(channelId),
-        retryUntilMs: retryUntilMs(channelId),
+        retryUntilMs: retryUntil,
         nowMs: now,
         latestMtimeMs: mtimeMs,
         completionGraceMs: COMPLETION_GRACE_MS,
         maxPostActions: MAX_POST_ACTIONS,
       });
       commitEngineState(channelId, planned.nextState);
+      metric(`${key} read bytes=${readBytes} ms=${readMs} turns=${result.turns.length} actions=${planned.actions.length}`);
 
       for (const note of planned.notes || []) {
         if (note.type === "seed") {
@@ -330,6 +415,7 @@ export function createJsonlWatcher({
           }, action, { nowMs: now, retryBackoffMs: RETRY_BACKOFF_MS });
           commitEngineState(channelId, nextState);
           log(`${name}:${idx} → ${channelId} main post failed; retry after ${Math.round(RETRY_BACKOFF_MS / 1000)}s`);
+          rememberReadSnapshot(key, fileInfo, result.turns, channelId, mtimeMs);
           return { retryAfterMs: RETRY_BACKOFF_MS };
         }
 
@@ -342,6 +428,9 @@ export function createJsonlWatcher({
         const ageS = Math.round((now - action.endMs) / 1000);
         log(`${name}:${idx} → ${channelId} (${action.reason}, age=${ageS}s, items ${action.postedCount}→${action.totalItems})`);
       }
+
+      rememberReadSnapshot(key, fileInfo, result.turns, channelId, mtimeMs);
+      return { readBytes, readMs, actions: planned.actions.length };
     } catch (err) {
       log(`check ${paneKey(name, idx)}: ${err.stack || err.message}`);
     }
