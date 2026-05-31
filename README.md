@@ -161,6 +161,7 @@ amux log api -p 1
 amux log api -p 1 --tmux
 amux timeline --since 30min
 amux done --since 2h
+amux asks --open
 amux esc api -p 1
 ```
 

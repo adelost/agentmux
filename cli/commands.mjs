@@ -37,6 +37,7 @@ import {
   lintRoots,
   resolvePathTarget,
 } from "../core/contract-lint.mjs";
+import { buildAskEntries, filterAskEntries } from "../core/ask-history.mjs";
 
 // Bridge = the Discord bot itself (not a Claude agent). Singleton infra.
 const BRIDGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -614,6 +615,146 @@ async function cmdWatch(ctx, flags) {
   return followTimeline(ctx, flags);
 }
 
+// --- Asks: human directive ledger -----------------------------------------
+
+function shellQuote(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+
+function formatAskStatus(status) {
+  switch (status) {
+    case "open": return "⚠️ open";
+    case "working": return "🟡 working";
+    case "partial": return "⚠️ partial";
+    case "needs-you": return "🔴 needs-you";
+    case "done": return "✅ done";
+    case "answered": return "☑️ answered";
+    default: return status || "unknown";
+  }
+}
+
+function formatAskEntry(e) {
+  const ts = e.timestamp ? new Date(e.tsMs).toISOString().slice(5, 16).replace("T", " ") : "-- --:--";
+  const age = Number.isFinite(e.ageMs) ? formatRelMin(Math.round(e.ageMs / 60000)) : "?";
+  const status = formatAskStatus(e.status).padEnd(13);
+  const head = `${status}  ${ts}  ${e.key.padEnd(10)}  ${age}`;
+  const needle = oneLine(e.prompt).slice(0, 70);
+  const lines = [
+    head,
+    `    > ${e.promptPreview}`,
+  ];
+  if (e.replyPreview) lines.push(`    → ${e.replyPreview}`);
+  if (e.jsonlFile) lines.push(`    jsonl: ${e.jsonlFile}${e.timestamp ? ` @ ${e.timestamp}` : ""}`);
+  lines.push(`    log: amux log ${e.agent} -p ${e.pane} --grep ${shellQuote(needle)} -n 5`);
+  return lines.join("\n");
+}
+
+async function cmdAsks(ctx, flags, positional = []) {
+  const nowMs = Date.now();
+  const agentFilter = flags.agent || positional[0] || null;
+  const paneFilter = flags.pane ?? flags.p ?? null;
+  let resolvedAgent = null;
+
+  if (agentFilter) {
+    resolvedAgent = resolveAgent(agentFilter, ctx.configPath);
+    const known = listAgents(ctx.configPath).map((a) => a.name);
+    if (!known.includes(resolvedAgent)) {
+      console.error(`unknown agent '${agentFilter}'. Known: ${known.join(", ") || "(none)"}`);
+      process.exit(1);
+    }
+  }
+  if (paneFilter != null && !resolvedAgent) {
+    console.error("--pane requires an agent filter: amux asks <agent> --pane N");
+    process.exit(1);
+  }
+  if (resolvedAgent && paneFilter != null) {
+    try { validateAgentAndPane(ctx, resolvedAgent, paneFilter); }
+    catch (err) { console.error(err.message); process.exit(1); }
+  }
+
+  let since = null;
+  let sinceLabel = "--all";
+  if (!flags.all) {
+    const rawSince = flags.since || "7d";
+    since = parseSinceArg(rawSince);
+    if (!since) {
+      console.error(`invalid --since '${rawSince}'. Use ISO or relative ("30min", "2h", "1d").`);
+      process.exit(1);
+    }
+    sinceLabel = rawSince;
+  }
+
+  let grep = null;
+  if (flags.grep) {
+    try { grep = new RegExp(flags.grep, "i"); }
+    catch (err) {
+      console.error(`invalid --grep regex: ${err.message}`);
+      process.exit(1);
+    }
+  }
+
+  const agents = listAgents(ctx.configPath)
+    .filter((a) => !resolvedAgent || a.name === resolvedAgent);
+  const targets = [];
+  for (const a of agents) {
+    for (let paneIdx = 0; paneIdx < (a.panes || []).length; paneIdx++) {
+      if (paneFilter != null && paneIdx !== paneFilter) continue;
+      const cmd = a.panes[paneIdx]?.cmd || "";
+      if (!/^(claude|codex)/.test(cmd)) continue;
+      targets.push({ agent: a, pane: paneIdx });
+    }
+  }
+
+  const statuses = new Map(await Promise.all(targets.map(async ({ agent, pane }) => {
+    const status = await getPaneStatus(ctx, agent.name, pane).catch(() => "unknown");
+    return [`${agent.name}:${pane}`, status];
+  })));
+
+  const perPaneLimit = flags["per-pane"] || (flags.full ? 200 : 20);
+  const entries = [];
+  for (const { agent, pane } of targets) {
+    const paneDir = panePathFor(agent, pane);
+    const readOpts = flags.full
+      ? { limit: perPaneLimit, since, grep }
+      : { limit: perPaneLimit, tailBytes: 4 * 1024 * 1024 };
+    const res = readLastTurnsForPane(agent, pane, paneDir, readOpts);
+    if (!res?.turns?.length) continue;
+    entries.push(...buildAskEntries({
+      agent: agent.name,
+      pane,
+      turns: res.turns,
+      jsonlFile: res.jsonlFile,
+      paneStatus: statuses.get(`${agent.name}:${pane}`) || "unknown",
+      nowMs,
+    }));
+  }
+
+  const rows = filterAskEntries(entries, {
+    sinceMs: since ? since.getTime() : null,
+    grep,
+    openOnly: !!flags.open,
+    limit: flags.n || 40,
+  });
+
+  const mode = flags.full ? "full scan" : "bounded tail";
+  const filter = [
+    `since=${sinceLabel}`,
+    flags.open ? "open-only" : "all statuses",
+    resolvedAgent ? `agent=${resolvedAgent}` : null,
+    paneFilter != null ? `pane=${paneFilter}` : null,
+  ].filter(Boolean).join(", ");
+  console.log(`\nAsks (${mode}, ${filter})`);
+  if (!rows.length) {
+    console.log("(no asks match)");
+    if (!flags.full) console.log("Try: amux asks --full --since 30d");
+    return;
+  }
+  for (const e of rows) console.log("\n" + formatAskEntry(e));
+  if (!flags.full) {
+    console.log(`\nℹ bounded tail view. For exact older history: amux asks --full --since 30d`);
+  }
+}
+
 /**
  * "Since last check" view of what panes have done, what's waiting on me,
  * and what's still working. Purpose-built for orchestrator check-ins —
@@ -904,6 +1045,11 @@ async function cmdDone(ctx, flags) {
     console.log(`  amux log ${aname} -p ${pidx} -n 5            # FULL text from ${why}`);
     // Coordination primitive: how one agent answers / hands off to another.
     console.log(`  amux ${aname} -p ${pidx} "<message>"${" ".repeat(Math.max(1, 22 - aname.length - String(pidx).length))}# answer it / hand the task to it`);
+  }
+  if (needsYou.length || stalled.length) {
+    console.log(`  amux asks --open                            # all open asks with jsonl location`);
+  } else {
+    console.log(`  amux asks --since 2h                        # recent asks/directives with jsonl location`);
   }
   if (top.length) {
     // Generic "see full" hint for the top-20 recent activity feed — preview
@@ -2702,6 +2848,12 @@ Usage:
     --follow, -f                  Live-tail (like tail -f)
   agent watch [--agent] [--pane]  Shortcut for 'timeline --follow'
     [--grep PAT]
+  agent asks [-n N]               Recent human asks/directives with status + jsonl location
+    --open                        Only open-ish asks (open/working/partial/needs-you)
+    --since T                     Window (default 7d; ISO or '30min')
+    --agent NAME --pane N         Filter to one pane
+    --grep PAT                    Regex filter over ask/reply text
+    --full                        Exact older scan (slower); default is bounded tail
   agent edit                      Open agentmux.yaml in $EDITOR (source config)
   agent label <agent> <pane> <text> Set per-pane label (shown in amux ps/top)
     --clear                       Remove the label instead of setting one
@@ -2784,6 +2936,18 @@ const FLAG_SPECS = {
     agent: "string",
     pane: "number",
     grep: "string",
+  },
+  asks: {
+    n: "number",
+    agent: "string",
+    pane: "number",
+    p: "number",
+    since: "string",
+    grep: "string",
+    open: "boolean",
+    full: "boolean",
+    all: "boolean",
+    "per-pane": "number",
   },
   compact: { dry: "boolean", force: "boolean", "min-tokens": "number" },
   dream: { since: "string", workspace: "string", dry: "boolean", q: "boolean", quiet: "boolean" },
@@ -2895,6 +3059,13 @@ export async function dispatch(argv, ctx) {
     case "watch": {
       const { flags } = parseFlags(rest, FLAG_SPECS.watch);
       return cmdWatch(ctx, flags);
+    }
+
+    case "asks":
+    case "ask":
+    case "questions": {
+      const { flags, positional } = parseFlags(rest, FLAG_SPECS.asks);
+      return cmdAsks(ctx, flags, positional);
     }
 
     case "done": {
