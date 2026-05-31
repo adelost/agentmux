@@ -75,16 +75,39 @@ do not add `REFACTOR:` next to `WHAT:/WHY:` or stack `REMOVE:` with `MERGE:`.
 Good starts:
 
 - `Tracks`
-- `Filters`
 - `Builds`
-- `Normalizes`
-- `Stores`
-- `Routes`
 - `Carries`
-- `Names`
 - `Calculates`
+- `Dispatches`
+- `Fetches`
+- `Filters`
+- `Indexes`
+- `Normalizes`
+- `Parses`
+- `Routes`
+- `Schedules`
+- `Stores`
 
 Keep it short. Do not say `class`, `helper`, `object`, or `thing`.
+
+`WHAT:` should start with an approved active verb. Unknown verbs are warnings,
+not hard failures: a repo-domain verb such as `Stitches` or `Embeds` may be
+valid, but the warning forces an explicit choice instead of drifting into
+`Handles`/`Manages`/`Does`.
+
+To approve a recurring domain verb for one repo, add `.amux-lint.yml` at the repo
+root:
+
+```yaml
+contract:
+  allowedWhatVerbs:
+    - Stitches
+    - Embeds
+    - Quantizes
+```
+
+Add a verb when it is a real repeated domain action. Rewrite the contract when
+the verb is just vague (`Handles`, `Manages`, `Does`, `Supports`).
 
 ## WHY
 
@@ -272,6 +295,9 @@ Legacy code should not block all work. Use a baseline, then ratchet:
 amux lint --update-baseline
 amux lint --baseline .amux-lint-baseline.json --changed --strict
 ```
+
+`--strict` exits non-zero for active errors and debt. Warnings are printed but do
+not fail strict mode; they are guidance for style and local grammar.
 
 The baseline suppresses known findings. New or changed findings still show up.
 Debt findings can be baselined too, but that should be a temporary ratchet:

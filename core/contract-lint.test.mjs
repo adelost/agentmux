@@ -39,6 +39,17 @@ feature("contract-lint contract floor", () => {
     then: ["none has error findings", (failed) => expect(failed).toEqual([])],
   });
 
+  unit("gold-voice WHAT verbs are in the default grammar", {
+    given: ["the real WHAT/WHY rewrites", () => GOOD],
+    when: ["evaluating each", (good) => good
+      .map(([name, what, why]) => ({
+        name,
+        warnings: evaluateContract(`WHAT: ${what}\nWHY: ${why}`, { name, kind: "class" }).filter((f) => f.code === "CONTRACT060"),
+      }))
+      .filter((r) => r.warnings.length > 0)],
+    then: ["none has unknown-verb warnings", (failed) => expect(failed).toEqual([])],
+  });
+
   unit("bad contracts all fail", {
     given: ["the known-bad contracts", () => BAD],
     when: ["evaluating each", (bad) => bad
@@ -75,6 +86,33 @@ feature("contract-lint contract floor", () => {
     given: ["a real boundary using the word simple", () => "WHAT: Stores persisted user preferences.\nWHY: Keeps migrations simple and settings inspectable."],
     when: ["evaluating", (doc) => errorCodes(doc, "PowerSettings")],
     then: ["no error findings", (codes) => expect(codes).toEqual([])],
+  });
+
+  unit("unknown WHAT verb is a warning, not an error", {
+    given: ["a contract with a repo-domain verb", () => "WHAT: Stitches adjacent clips into one timeline.\nWHY: Keeps timeline assembly independent from worker outputs."],
+    when: ["evaluating", (doc) => evaluateContract(doc, { name: "ClipStitcher", kind: "class" })],
+    then: ["CONTRACT060 is warn-only", (findings) => {
+      expect(findings.map((f) => f.code)).toContain("CONTRACT060");
+      expect(findings.find((f) => f.code === "CONTRACT060")?.sev).toBe("warn");
+      expect(findings.filter((f) => f.sev === "error")).toEqual([]);
+    }],
+  });
+
+  unit("repo-local config can allow domain WHAT verbs", {
+    given: ["a temp repo with .amux-lint.yml", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-contract-verbs-"));
+      writeFileSync(join(root, ".amux-lint.yml"), "contract:\n  allowedWhatVerbs:\n    - Stitches\n");
+      writeFileSync(join(root, "clip.py"), 'class ClipStitcher:\n    """WHAT: Stitches adjacent clips into one timeline.\n\n    WHY: Keeps timeline assembly independent from worker outputs.\n    """\n    pass\n');
+      return root;
+    }],
+    when: ["linting", (root) => lintRoot(root)],
+    then: ["CONTRACT060 disappears", (result, root) => {
+      try {
+        expect(result.findings.map((f) => f.code)).not.toContain("CONTRACT060");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
   });
 
   unit("DTO tag satisfies the contract", {

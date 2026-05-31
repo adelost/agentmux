@@ -2795,7 +2795,7 @@ Targets:
 Options:
   --all-agents              Lint every configured agent directory
   --changed                 Only files changed relative to HEAD
-  --strict                  Exit non-zero when active findings exist
+  --strict                  Exit non-zero when active error/debt findings exist
   --baseline <path>         Suppress findings already recorded in baseline
   --update-baseline         Write current findings to baseline
   --only contract           Run only one check (currently: contract)
@@ -2853,8 +2853,11 @@ Options:
     limit: flags.limit || 80,
   }));
 
-  const active = results.reduce((n, result) => n + result.activeFindings.length, 0);
-  if (flags.strict && active > 0) process.exit(1);
+  const blocking = results.reduce(
+    (n, result) => n + result.activeFindings.filter((f) => f.sev !== "warn").length,
+    0,
+  );
+  if (flags.strict && blocking > 0) process.exit(1);
 }
 
 function cmdHelp() {
@@ -2914,7 +2917,7 @@ Usage:
   agent lint [target]             Run default repo linters (WHAT/WHY/DTO contracts)
     --all-agents                  Lint every configured agent directory
     --changed                     Only changed files
-    --strict                      Exit non-zero on active findings
+    --strict                      Exit non-zero on active error/debt findings
     --baseline <path>             Suppress baseline findings
     --update-baseline             Write current findings to baseline
   agent compact [threshold=20]    Send /compact to claude/codex panes ≥ threshold%

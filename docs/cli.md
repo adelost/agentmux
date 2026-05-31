@@ -160,4 +160,6 @@ directory, or an agent name from the agentmux config. The first default check
 enforces short `WHAT:/WHY:` contracts, `DTO:` for pure transport shapes, and
 explicit `REMOVE:/MERGE:/REFACTOR:/DEPRECATED:` debt tags for symbols that
 should not get a fake `WHY:` yet.
+With `--strict`, active errors and debt fail the command; style warnings are
+reported without failing.
 See `docs/contract-lint.md` for the writing rules.

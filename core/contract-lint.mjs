@@ -4,8 +4,9 @@
  */
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
-import { basename, extname, isAbsolute, join, relative, resolve } from "path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "path";
 import { execFileSync } from "child_process";
+import yaml from "js-yaml";
 
 export const CONTRACT_CHECK_ID = "contract";
 
@@ -59,6 +60,38 @@ const ECHO_OVERLAP_THRESHOLD = 0.5;
 const CONTRACT_TAGS = ["WHAT", "WHY", "DTO", "REMOVE", "REFACTOR", "MERGE", "DEPRECATED", "DEBT"];
 const DEBT_TAGS = ["REMOVE", "REFACTOR", "MERGE", "DEPRECATED", "DEBT"];
 
+export const DEFAULT_WHAT_VERBS = [
+  "Assigns",
+  "Builds",
+  "Calculates",
+  "Carries",
+  "Compares",
+  "Decodes",
+  "Defines",
+  "Describes",
+  "Dispatches",
+  "Encodes",
+  "Expands",
+  "Fetches",
+  "Filters",
+  "Formats",
+  "Indexes",
+  "Loads",
+  "Maps",
+  "Names",
+  "Normalizes",
+  "Parses",
+  "Resolves",
+  "Routes",
+  "Saves",
+  "Schedules",
+  "Stores",
+  "Stubs",
+  "Tracks",
+  "Turns",
+  "Wraps",
+];
+
 // WHAT: Maps each finding code to a one-line fix template.
 // WHY: Lets an agent running the linter see the target WHAT/WHY shape, not just the error.
 const SUGGESTIONS = {
@@ -77,6 +110,7 @@ const SUGGESTIONS = {
   CONTRACT051: "fill the debt tag with concrete evidence + next action",
   CONTRACT052: "prefer REMOVE:/REFACTOR:/MERGE:/DEPRECATED: over generic DEBT:",
   CONTRACT053: "use exactly one contract state: WHAT/WHY, DTO, one debt action, or delete",
+  CONTRACT060: "rewrite WHAT to start with an approved active verb, or add the repo-domain verb to .amux-lint.yml",
 };
 
 // WHAT: Pulls the text of one known contract tag out of a doc block.
@@ -153,12 +187,21 @@ function hasBoundaryMarker(text) {
   return BOUNDARY_MARKERS.some((re) => re.test(text));
 }
 
+function firstWord(text) {
+  return text.trim().match(/^[A-Za-z][A-Za-z0-9_-]*/)?.[0] || "";
+}
+
+function allowedWhatVerbs(options = {}) {
+  return new Set([...(options.allowedWhatVerbs || DEFAULT_WHAT_VERBS)]);
+}
+
 /**
  * WHAT: Checks one doc block against the WHAT:/WHY: contract and voice rules.
  * WHY: Keeps every language's findings flowing from one deterministic floor.
  */
-export function evaluateContract(doc, { name = "", kind = "symbol" } = {}) {
+export function evaluateContract(doc, { name = "", kind = "symbol", allowedWhatVerbs: verbs } = {}) {
   const label = `${kind} ${name}`.trim();
+  const grammarOptions = { allowedWhatVerbs: verbs || DEFAULT_WHAT_VERBS };
   if (!doc || !doc.trim()) {
     return [{ code: "CONTRACT001", sev: "error", msg: `${label}: no doc contract` }];
   }
@@ -204,6 +247,12 @@ export function evaluateContract(doc, { name = "", kind = "symbol" } = {}) {
   // Boundary is only meaningful when a WHY exists. A missing WHY is already
   // CONTRACT011 — re-flagging "WHY lacks a boundary" would just double the noise.
   const boundary = why ? hasBoundaryMarker(why) : true;
+  if (what) {
+    const verb = firstWord(what);
+    if (verb && !allowedWhatVerbs(grammarOptions).has(verb)) {
+      findings.push({ code: "CONTRACT060", sev: "warn", msg: `${label}: WHAT starts with unknown verb "${verb}"` });
+    }
+  }
   if (why && !boundary) {
     findings.push({ code: "CONTRACT030", sev: "error", msg: `${label}: WHY lacks a boundary marker (keeps/separates/avoids/prevents/...)` });
     for (const adj of SOFT_ADJECTIVES) {
@@ -369,10 +418,10 @@ export function extractSymbols(source, ext) {
  * WHAT: Lints every public symbol in one file and returns located findings.
  * WHY: Keeps file path and line on each finding so the reporter stays format-free.
  */
-export function lintSource(path, source, ext) {
+export function lintSource(path, source, ext, options = {}) {
   const findings = [];
   for (const sym of extractSymbols(source, ext)) {
-    for (const f of evaluateContract(sym.doc, { name: sym.name, kind: sym.kind })) {
+    for (const f of evaluateContract(sym.doc, { name: sym.name, kind: sym.kind, allowedWhatVerbs: options.allowedWhatVerbs })) {
       findings.push({ ...f, path, line: sym.line, suggestion: SUGGESTIONS[f.code] });
     }
     if (/\bDTO:/i.test(sym.doc) && requiresWhyName(sym.name)) {
@@ -387,6 +436,42 @@ export function lintSource(path, source, ext) {
     }
   }
   return findings;
+}
+
+function parseLintConfig(path) {
+  try {
+    const doc = yaml.load(readFileSync(path, "utf-8")) || {};
+    const verbs = doc?.contract?.allowedWhatVerbs;
+    return {
+      allowedWhatVerbs: Array.isArray(verbs)
+        ? [...new Set([...DEFAULT_WHAT_VERBS, ...verbs.map(String).filter(Boolean)])]
+        : DEFAULT_WHAT_VERBS,
+    };
+  } catch {
+    return { allowedWhatVerbs: DEFAULT_WHAT_VERBS };
+  }
+}
+
+function findLintConfigPath(root) {
+  let dir = root;
+  try {
+    if (existsSync(dir) && statSync(dir).isFile()) dir = dirname(dir);
+  } catch {}
+  let prev = "";
+  while (dir && dir !== prev) {
+    for (const name of [".amux-lint.yml", ".amux-lint.yaml"]) {
+      const candidate = join(dir, name);
+      if (existsSync(candidate)) return candidate;
+    }
+    prev = dir;
+    dir = dirname(dir);
+  }
+  return null;
+}
+
+export function loadLintConfig(root) {
+  const configPath = findLintConfigPath(resolve(expandHome(root)));
+  return configPath ? parseLintConfig(configPath) : { allowedWhatVerbs: DEFAULT_WHAT_VERBS };
 }
 
 const DOMAIN_SUFFIXES_REQUIRE_WHY = [
@@ -475,11 +560,12 @@ export function collectSourceFiles(root, options = {}) {
 export function lintRoot(root, options = {}) {
   const resolvedRoot = resolve(expandHome(root));
   const files = collectSourceFiles(resolvedRoot, options);
+  const lintConfig = options.lintConfig || loadLintConfig(resolvedRoot);
   const findings = [];
   let symbols = 0;
   for (const file of files) {
     const source = readFileSync(file, "utf-8");
-    const fileFindings = lintSource(file, source, extname(file));
+    const fileFindings = lintSource(file, source, extname(file), lintConfig);
     findings.push(...fileFindings);
     symbols += extractSymbols(source, extname(file)).length;
   }
