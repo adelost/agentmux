@@ -72,9 +72,11 @@ const SUGGESTIONS = {
   CONTRACT040: "WHY repeats WHAT — name a consumer, dependency, or failure mode instead",
   CONTRACT041: "fill the DTO: line with the payload/schema shape",
   CONTRACT042: "use WHAT:/WHY: — this symbol owns a domain boundary, not a pure shape",
+  CONTRACT043: "choose either DTO: for pure shape OR WHAT:/WHY: for domain boundary, not both",
   CONTRACT050: "resolve the debt, or keep the action tag baselined until that milestone",
   CONTRACT051: "fill the debt tag with concrete evidence + next action",
   CONTRACT052: "prefer REMOVE:/REFACTOR:/MERGE:/DEPRECATED: over generic DEBT:",
+  CONTRACT053: "use exactly one contract state: WHAT/WHY, DTO, one debt action, or delete",
 };
 
 // WHAT: Pulls the text of one known contract tag out of a doc block.
@@ -85,10 +87,17 @@ function extractTag(doc, tag) {
   return m ? m[1].replace(/[*/]+\s*$/g, "").replace(/\s+/g, " ").trim() : null;
 }
 
-function debtContracts(doc, label) {
+function hasTag(doc, tag) {
+  return new RegExp(`\\b${tag}:`, "i").test(doc);
+}
+
+function presentTags(doc, tags) {
+  return tags.filter((tag) => hasTag(doc, tag));
+}
+
+function debtContracts(doc, label, debtTags = presentTags(doc, DEBT_TAGS), structuralTags = []) {
   const findings = [];
-  for (const tag of DEBT_TAGS) {
-    if (!new RegExp(`\\b${tag}:`, "i").test(doc)) continue;
+  for (const tag of debtTags) {
     const value = extractTag(doc, tag);
     if (!value) {
       findings.push({ code: "CONTRACT051", sev: "error", msg: `${label}: ${tag}: tag is empty` });
@@ -98,6 +107,10 @@ function debtContracts(doc, label) {
     if (tag === "DEBT" && !/^(?:remove|refactor|merge|deprecat)/i.test(value)) {
       findings.push({ code: "CONTRACT052", sev: "warn", msg: `${label}: generic DEBT should start with remove/refactor/merge/deprecate` });
     }
+  }
+  if (debtTags.length > 1 || (debtTags.length && structuralTags.length)) {
+    const tags = [...structuralTags, ...debtTags].join("/");
+    findings.push({ code: "CONTRACT053", sev: "error", msg: `${label}: mixed contract states (${tags})` });
   }
   return findings;
 }
@@ -151,14 +164,20 @@ export function evaluateContract(doc, { name = "", kind = "symbol" } = {}) {
   }
 
   const findings = [];
-  const debtFindings = debtContracts(doc, label);
+  const debtTags = presentTags(doc, DEBT_TAGS);
+  const hasWhat = hasTag(doc, "WHAT");
+  const hasWhy = hasTag(doc, "WHY");
+  const isDto = hasTag(doc, "DTO");
+  const debtFindings = debtContracts(doc, label, debtTags, [
+    ...(hasWhat || hasWhy ? ["WHAT/WHY"] : []),
+    ...(isDto ? ["DTO"] : []),
+  ]);
   if (debtFindings.length) return debtFindings;
-
-  const isDto = /\bDTO:/i.test(doc);
 
   if (isDto) {
     const dto = extractTag(doc, "DTO");
     if (!dto) findings.push({ code: "CONTRACT041", sev: "error", msg: `${label}: DTO: tag is empty` });
+    if (hasWhat || hasWhy) findings.push({ code: "CONTRACT043", sev: "error", msg: `${label}: DTO: mixed with WHAT:/WHY:` });
     return findings; // pure transport shapes need only the DTO: line
   }
 

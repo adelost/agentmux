@@ -56,6 +56,18 @@ DEBT: <remove/refactor/merge/deprecate ...>
 Given/When/Then in tests: the tag reminds agents to fill the contract, not
 write prose.
 
+A symbol must choose exactly one state:
+
+1. `WHAT:/WHY:` for code that should stay and has a real boundary.
+2. `DTO:` for a pure transport/schema/data shape.
+3. One debt action (`REMOVE:`, `MERGE:`, `REFACTOR:`, `DEPRECATED:`) for code
+   that should not be rescued yet.
+4. Deleted.
+
+Do not combine states. `DTO:` plus `WHAT:/WHY:` is ambiguous; use `DTO:` only
+for pure shapes, otherwise write `WHAT:/WHY:`. Debt tags are also exclusive:
+do not add `REFACTOR:` next to `WHAT:/WHY:` or stack `REMOVE:` with `MERGE:`.
+
 ## WHAT
 
 `WHAT:` says what the symbol does or represents locally.
@@ -127,6 +139,8 @@ class Point(BaseModel):
 
 Do not use `DTO:` for domain state, settings, runtime state, stores, tracks,
 engines, policies, repositories, or calculators. Those need `WHAT:/WHY:`.
+Do not write both `DTO:` and `WHAT:/WHY:` on the same symbol; choose the
+stronger state.
 
 Good domain data:
 
@@ -180,6 +194,10 @@ class SearchState:
 Debt is still a finding. `amux lint` prints it in a `Debt:` section, and
 `--strict` fails on new debt unless it is intentionally baselined. That keeps
 old debt visible without letting new "temporary" debt arrive silently.
+
+Use only one debt action per symbol. If code is both duplicate and wrong-shape,
+choose the next action that should happen first (`MERGE:` or `REFACTOR:`) and
+explain the rest in that one line.
 
 Do not use generic tags such as `FLAG:`. A symbol must be one of these states:
 

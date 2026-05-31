@@ -99,6 +99,12 @@ feature("contract-lint contract floor", () => {
     }],
   });
 
+  unit("DTO cannot be mixed with WHAT/WHY", {
+    given: ["a double-tagged pure shape", () => "DTO: API request payload.\nWHAT: Carries request fields.\nWHY: Keeps routes from parsing raw JSON."],
+    when: ["evaluating", (doc) => evaluateContract(doc, { name: "RequestPayload", kind: "class" }).map((f) => f.code)],
+    then: ["CONTRACT043 is reported", (codes) => expect(codes).toContain("CONTRACT043")],
+  });
+
   unit("action debt tag satisfies missing WHAT/WHY but remains visible debt", {
     given: ["a remove-tagged legacy symbol", () => "REMOVE: Unused legacy SAM2 path; no registered caller after SAM3 migration."],
     when: ["evaluating", (doc) => evaluateContract(doc, { name: "LegacySam2", kind: "class" })],
@@ -107,6 +113,18 @@ feature("contract-lint contract floor", () => {
       expect(findings[0].sev).toBe("debt");
       expect(findings[0].msg).toContain("REMOVE:");
     }],
+  });
+
+  unit("debt cannot be mixed with a clean contract", {
+    given: ["a debt-tagged class that also has WHAT/WHY", () => "WHAT: Indexes videos.\nWHY: Keeps search independent from storage.\nREFACTOR: Split indexing from storage ownership."],
+    when: ["evaluating", (doc) => evaluateContract(doc, { name: "VideoIndex", kind: "class" }).map((f) => f.code)],
+    then: ["CONTRACT053 is reported", (codes) => expect(codes).toContain("CONTRACT053")],
+  });
+
+  unit("multiple debt actions are rejected", {
+    given: ["a class with two debt actions", () => "REMOVE: No registered caller remains.\nMERGE: Duplicate shape with video/types.py."],
+    when: ["evaluating", (doc) => evaluateContract(doc, { name: "DuplicateLegacy", kind: "class" }).map((f) => f.code)],
+    then: ["CONTRACT053 is reported", (codes) => expect(codes).toContain("CONTRACT053")],
   });
 
   unit("generic DEBT is allowed only when it names a concrete action", {
