@@ -391,9 +391,13 @@ function isSkippedPath(path) {
 
 function changedFiles(root) {
   try {
+    // --relative makes git emit paths relative to `root` AND restricts output to
+    // that subtree, so a scoped root (e.g. src/ai_tools) matches the root-relative
+    // lookup in collectSourceFiles. Without it git prints repo-root-relative paths
+    // and the --changed filter silently scans nothing for any non-repo-root target.
     const out = execFileSync(
       "git",
-      ["-C", root, "diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD", "--"],
+      ["-C", root, "diff", "--name-only", "--relative", "--diff-filter=ACMRTUXB", "HEAD", "--"],
       { encoding: "utf-8" },
     );
     return new Set(out.split(/\r?\n/).filter(Boolean).filter((p) => supportedSourceFile(p)));
