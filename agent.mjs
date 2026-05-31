@@ -1052,11 +1052,20 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       else if (dialect === "codex") found = isPromptInCodexJsonl(dir, promptText);
       if (found === true) return true;
 
-      // Fallback: tmux text match for unknown dialects or when jsonl is
-      // missing entirely. Use a short needle so narrow panes still match.
-      if (found === null) {
+      // jsonl hasn't positively confirmed — found === false means the agent
+      // hasn't written the prompt yet (it's QUEUED behind a running turn,
+      // which can take minutes); found === null means unknown dialect or no
+      // jsonl. In both cases the keystrokes may already sit in the composer:
+      // delivery is done, the agent just hasn't processed it. Check the
+      // capture TAIL (composer region) so we confirm a queued-but-delivered
+      // prompt in ~1s instead of holding the send-lock for the full timeout.
+      // Tail-only avoids matching an identical earlier prompt in scrollback;
+      // an actually-eaten prompt (swallowed by a modal) is in neither jsonl
+      // nor composer, so it still fails here and the caller retries.
+      if (found !== true) {
         const raw = await capturePane(agentName, pane, 100);
-        if (raw.includes(needle.slice(0, 20))) return true;
+        const tail = raw.split("\n").slice(-15).join("\n");
+        if (tail.includes(needle.slice(0, 20))) return true;
       }
 
       await wait(200);

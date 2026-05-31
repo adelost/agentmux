@@ -419,7 +419,12 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       // prompt (no echo + agent still idle), dismiss again and resend.
       // isBusy guard prevents double-send when echo detection is just slow.
       const target = `${mapping.name}:.${pane}`;
-      const echoTimeout = Math.max(50, Math.min(15_000, pollInterval * 500));
+      // Cap the per-attempt echo wait low: waitForPromptEcho now confirms a
+      // queued-but-delivered prompt via the composer tail in ~1s, so this
+      // timeout only bites for a genuinely-eaten prompt before we retry.
+      // (Was up to 15s, which held the per-pane send-lock that long and
+      // delayed the NEXT Discord message to the same pane by 15-26s.)
+      const echoTimeout = Math.max(50, Math.min(6_000, pollInterval * 500));
       let delivered = false;
 
       await withPaneSendLock(`${mapping.name}:${pane}`, async () => {
