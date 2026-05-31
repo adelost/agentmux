@@ -22,6 +22,17 @@ export const DEFAULT_CONFIG = {
   compactLockMs: 120_000, // After firing /compact, ignore the pane this long
                           // so an in-flight compact (30-90s) isn't re-fired
                           // while the pane still shows pre-summary context%.
+  minPaneHeight: 6,       // Panes shorter than this (rows) can't render a
+                          // coherent status block. A 100-line capture of a
+                          // 1-2 row WORKING pane is a soup of overlapping
+                          // redraw frames with conflicting context% — we saw a
+                          // 1-row pane read as 100% while actually at 28%, which
+                          // drove the /compact runaway. We can't decide on
+                          // unreadable data, so we skip such panes. Tune down
+                          // (e.g. 4) via AUTO_COMPACT_MIN_PANE_HEIGHT if you run
+                          // a tiled layout of small panes and want more of them
+                          // covered — the verify-before-refire guard still
+                          // bounds any misfire.
   minIdleMs: 300_000,     // 5 minutes. Conversation must have been silent
                           // (no jsonl turns) this long before we even
                           // consider warning. Protects against "between
@@ -37,6 +48,7 @@ export function parseAutoCompactConfig(env = process.env) {
     graceMs: parseInt(env.AUTO_COMPACT_GRACE_MS || DEFAULT_CONFIG.graceMs, 10),
     pollMs: parseInt(env.AUTO_COMPACT_POLL_MS || DEFAULT_CONFIG.pollMs, 10),
     compactLockMs: parseInt(env.AUTO_COMPACT_LOCK_MS || DEFAULT_CONFIG.compactLockMs, 10),
+    minPaneHeight: parseInt(env.AUTO_COMPACT_MIN_PANE_HEIGHT || DEFAULT_CONFIG.minPaneHeight, 10),
     minIdleMs: parseInt(env.AUTO_COMPACT_MIN_IDLE_MS || DEFAULT_CONFIG.minIdleMs, 10),
   };
 }

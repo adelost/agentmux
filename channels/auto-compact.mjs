@@ -36,14 +36,14 @@ export function createAutoCompact({
   const compactFloors = new Map();
   let intervalId = null;
 
-  // Panes shorter than this (rows) can't render a coherent status block, so a
-  // tmux capture of them is a soup of overlapping redraw frames — the context
-  // parser latches onto stale/transient frames (we saw a 1-row pane read as
-  // "100%" while actually at 28%, triggering endless /compact). We can't decide
-  // safely without trustworthy data, so we skip them entirely. The failure mode
-  // is one-directional and safe: worst case a tiny pane never auto-compacts
-  // (the user can still `amux compact` it by hand).
-  const MIN_PANE_HEIGHT = 6;
+  // Panes shorter than config.minPaneHeight (rows) can't render a coherent
+  // status block, so a tmux capture of them is a soup of overlapping redraw
+  // frames — the context parser latches onto stale/transient frames (we saw a
+  // 1-row pane read as "100%" while actually at 28%, triggering endless
+  // /compact). We can't decide safely without trustworthy data, so we skip
+  // them. The failure mode is one-directional and safe: worst case a tiny pane
+  // never auto-compacts (the user can still `amux compact` it by hand).
+  const MIN_PANE_HEIGHT = config.minPaneHeight ?? 6;
 
   async function inspect(agentConfig, paneIdx) {
     // Mirrors cli/commands.mjs inspectPane just enough for our decision.
