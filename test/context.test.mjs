@@ -55,6 +55,19 @@ feature("getContextPercent (claude): model-based max lookup", () => {
     }],
   });
 
+  unit("opus-4-8 at 288k uses 1M max → ~29% (not 100%)", {
+    // Regression: opus-4-8 was missing from the model table, so a 1M-context
+    // pane at 288k tokens read 288k/200k → capped 100%, firing false
+    // auto-compacts on a pane that was really ~29% full.
+    given: ["288k usage on claude-opus-4-8", () => setupFakeClaudeContext({ model: "claude-opus-4-8", cacheRead: 288_000 })],
+    when: ["getting context", ({ paneDir }) => getContextPercent(paneDir, "claude")],
+    then: ["~29% against 1M, not 100%", (r, { cleanup }) => {
+      expect(r.tokens).toBe(288_000);
+      expect(r.percent).toBe(29);
+      cleanup();
+    }],
+  });
+
   unit("sonnet-4-6 at 500k is 50% (1M max)", {
     given: ["500k usage on sonnet-4-6", () => setupFakeClaudeContext({ model: "claude-sonnet-4-6", cacheRead: 500_000 })],
     when: ["getting context", ({ paneDir }) => getContextPercent(paneDir, "claude")],

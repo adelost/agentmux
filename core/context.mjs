@@ -70,6 +70,7 @@ const CLAUDE_DEFAULT_MAX = 200_000;
 const CLAUDE_MODEL_MAX = {
   "claude-opus-4-6": 1_000_000,
   "claude-opus-4-7": 1_000_000,
+  "claude-opus-4-8": 1_000_000,
   "claude-sonnet-4-6": 1_000_000,
 };
 
