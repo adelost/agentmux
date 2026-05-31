@@ -35,6 +35,20 @@ export function detectPaneStatus(paneContent) {
   if (/Compacting conversation|queued messages/.test(tailRaw)) return "working";
   if (/esc to interrupt/.test(tailRaw)) return "working";
   if (/\((?:\d+m\s+)?\d+s\s*·/.test(tailRaw)) return "working";
+  // Narrow panes drop the "· tokens · esc to interrupt" sub-info, so the
+  // middot anchor above never matches — the footer renders as just
+  // "✢ Pondering… (42m 53s)". Two narrow-safe anchors that scrollback
+  // residue doesn't fake:
+  //   (a) multi-unit elapsed timer "(Xm Ys)" / "(Xh Ym Zs)" — a minutes-or-
+  //       longer turn timer; scrollback "(15s)"-shaped content is seconds-only.
+  //   (b) spinner-ellipsis "…" immediately before a "(…s)" timer — the live
+  //       footer's "Word… (Ns)" shape. The single-char ellipsis (U+2026) +
+  //       paren-timer combo doesn't occur in normal turn prose.
+  // Without these, a long-running turn in a split pane is mislabeled idle
+  // (its "❯" composer stays visible while working) and auto-compact fires
+  // /compact into it every cycle.
+  if (/\((?:\d+h\s+)?\d+m\s+\d+s\)/.test(tailRaw)) return "working";
+  if (/…\s*\((?:\d+m\s+)?\d+s\)/.test(tailRaw)) return "working";
 
   // Prompt-first ordering: a live modal (Allow once / 0: Dismiss / Enter to
   // select / Resume from summary) REPLACES the input box, so the `❯` prompt

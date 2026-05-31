@@ -20,6 +20,45 @@ feature("pane status detection", () => {
     }],
   });
 
+  unit("treats a narrow-pane spinner footer (no middot) as working", {
+    given: ["long-running turn in a split pane — footer dropped its '· tokens · esc' sub-info", () => [
+      "  Branch p7/routes pushad → commit 458cb4a.",
+      "",
+      "✢ Pondering… (42m 53s)",
+      "",
+      "  ❯ /compact",
+    ].join("\n")],
+    when: ["detecting pane status", (content) => detectPaneStatus(content)],
+    then: ["status is working, not idle (composer prompt is visible but the timer wins)", (status) => {
+      expect(status).toBe("working");
+    }],
+  });
+
+  unit("treats a seconds-only narrow footer (ellipsis + timer) as working", {
+    given: ["short turn, narrow pane, ellipsis-then-timer footer", () => [
+      "  some output",
+      "",
+      "✽ Beboppin'… (8s)",
+      "  ❯ ",
+    ].join("\n")],
+    when: ["detecting pane status", (content) => detectPaneStatus(content)],
+    then: ["status is working", (status) => {
+      expect(status).toBe("working");
+    }],
+  });
+
+  unit("does not false-positive seconds-shaped scrollback as working", {
+    given: ["idle pane whose scrollback mentions a duration but has no live spinner footer", () => [
+      "The request took (15s) to complete and returned 200.",
+      "",
+      "❯ ",
+    ].join("\n")],
+    when: ["detecting pane status", (content) => detectPaneStatus(content)],
+    then: ["status is idle", (status) => {
+      expect(status).toBe("idle");
+    }],
+  });
+
   unit("still treats a plain visible prompt as idle", {
     given: ["normal idle composer", () => [
       "Done with previous task.",
