@@ -19,6 +19,9 @@ export const DEFAULT_CONFIG = {
                           // pollMs + graceMs (~2 min). Each poll queries
                           // ~3 tmux execs per pane; trivial overhead even
                           // with 30 panes. Override via AUTO_COMPACT_POLL_MS.
+  compactLockMs: 120_000, // After firing /compact, ignore the pane this long
+                          // so an in-flight compact (30-90s) isn't re-fired
+                          // while the pane still shows pre-summary context%.
   minIdleMs: 300_000,     // 5 minutes. Conversation must have been silent
                           // (no jsonl turns) this long before we even
                           // consider warning. Protects against "between
@@ -33,6 +36,7 @@ export function parseAutoCompactConfig(env = process.env) {
     threshold: parseInt(env.AUTO_COMPACT_WARN_THRESHOLD || DEFAULT_CONFIG.threshold, 10),
     graceMs: parseInt(env.AUTO_COMPACT_GRACE_MS || DEFAULT_CONFIG.graceMs, 10),
     pollMs: parseInt(env.AUTO_COMPACT_POLL_MS || DEFAULT_CONFIG.pollMs, 10),
+    compactLockMs: parseInt(env.AUTO_COMPACT_LOCK_MS || DEFAULT_CONFIG.compactLockMs, 10),
     minIdleMs: parseInt(env.AUTO_COMPACT_MIN_IDLE_MS || DEFAULT_CONFIG.minIdleMs, 10),
   };
 }
@@ -54,9 +58,18 @@ const ACTIVE_STATUSES = new Set(["working", "resume"]);
  *   assistant turn, not just tool calls. Null skips the min-idle gate
  *   (can't prove freshness either way).
  * @param {Map} args.warnings — Map<paneKey, { warned_at: ms }>
+ * @param {Map} args.compactFloors — Map<paneKey, number>. The context% at which
+ *   we last FIRED /compact. Set by the caller after a fire. If a later tick
+ *   still reads context ≥ that level, the previous /compact failed to reduce
+ *   context (the pane reported "Not enough messages to compact", or genuinely
+ *   can't shrink) — re-firing is futile and just spams the pane's input queue.
+ *   Cleared by the caller on any "cancel" (context dropped below threshold,
+ *   pane went active). Defaults to an empty Map for callers that don't track it.
  * @param {object} args.config — { enabled, threshold, graceMs, minIdleMs }
  * @param {number} args.now — current ms timestamp
- * @returns {{ action: "none"|"warn"|"compact"|"cancel", reason?: string }}
+ * @returns {{ action: "none"|"warn"|"compact"|"cancel"|"suppress", reason?: string }}
+ *   "suppress" = clear any pending warning but KEEP the floor and do not fire;
+ *   used when a prior /compact proved ineffective.
  */
 export function decideAutoCompactAction({
   paneKey,
@@ -65,6 +78,7 @@ export function decideAutoCompactAction({
   paneInMode,
   lastActivityMs = null,
   warnings,
+  compactFloors = new Map(),
   config,
   now,
 }) {
@@ -77,7 +91,7 @@ export function decideAutoCompactAction({
   // Activity or scroll-mode → cancel any pending warning and do nothing.
   // User is doing something we shouldn't interrupt.
   if (isActive || inScrollMode) {
-    if (existing) return { action: "cancel", reason: isActive ? "pane active" : "in copy-mode" };
+    if (existing || compactFloors.has(paneKey)) return { action: "cancel", reason: isActive ? "pane active" : "in copy-mode" };
     return { action: "none" };
   }
 
@@ -88,8 +102,19 @@ export function decideAutoCompactAction({
 
   // Below threshold — pane doesn't need compacting; drop any stale warning.
   if (contextPercent < config.threshold) {
-    if (existing) return { action: "cancel", reason: "below threshold" };
+    if (existing || compactFloors.has(paneKey)) return { action: "cancel", reason: "below threshold" };
     return { action: "none" };
+  }
+
+  // Verify-before-refire: if we already fired /compact and context has NOT
+  // dropped below the level we fired at, the compact isn't reducing context.
+  // Firing again does nothing but queue another /compact into the pane (the
+  // observed runaway: dozens of fires, "Not enough messages to compact"). Hold
+  // off until context actually changes — a working compact, a finished turn,
+  // or /clear drops it below threshold, which clears the floor via "cancel".
+  const floor = compactFloors.get(paneKey);
+  if (floor != null && contextPercent >= floor) {
+    return { action: "suppress", reason: `prior /compact ineffective: still ${contextPercent}% ≥ ${floor}% — not re-firing` };
   }
 
   // Min-idle gate: the pane might show the idle prompt char in tmux, but

@@ -29,7 +29,21 @@ export function createAutoCompact({
 }) {
   const warnings = new Map();
   const compacting = new Set();
+  // paneKey → context% at last /compact fire. Drives verify-before-refire in
+  // decideAutoCompactAction: if context doesn't drop below this, the compact
+  // was a no-op and we stop re-firing. Cleared on "cancel" (context fell below
+  // threshold / pane went active).
+  const compactFloors = new Map();
   let intervalId = null;
+
+  // Panes shorter than this (rows) can't render a coherent status block, so a
+  // tmux capture of them is a soup of overlapping redraw frames — the context
+  // parser latches onto stale/transient frames (we saw a 1-row pane read as
+  // "100%" while actually at 28%, triggering endless /compact). We can't decide
+  // safely without trustworthy data, so we skip them entirely. The failure mode
+  // is one-directional and safe: worst case a tiny pane never auto-compacts
+  // (the user can still `amux compact` it by hand).
+  const MIN_PANE_HEIGHT = 6;
 
   async function inspect(agentConfig, paneIdx) {
     // Mirrors cli/commands.mjs inspectPane just enough for our decision.
@@ -38,6 +52,7 @@ export function createAutoCompact({
     let status = "unknown";
     let content = "";
     let paneInMode = "0";
+    let paneHeight = null;
     let lastActivityMs = null;
 
     try {
@@ -51,8 +66,11 @@ export function createAutoCompact({
     }
 
     try {
-      const { stdout } = await tmux(`display-message -t '${agentConfig.name}:.${paneIdx}' -p '#{pane_in_mode}'`);
-      paneInMode = (stdout || "").trim() || "0";
+      const { stdout } = await tmux(`display-message -t '${agentConfig.name}:.${paneIdx}' -p '#{pane_in_mode} #{pane_height}'`);
+      const parts = (stdout || "").trim().split(/\s+/);
+      paneInMode = parts[0] || "0";
+      const h = parseInt(parts[1], 10);
+      if (Number.isFinite(h)) paneHeight = h;
     } catch {}
 
     const ctxInfo = getContextFromPane(content, agentConfig.dir || "");
@@ -71,7 +89,7 @@ export function createAutoCompact({
       }
     } catch {}
 
-    return { status, contextPercent, paneInMode, lastActivityMs };
+    return { status, contextPercent, paneInMode, paneHeight, lastActivityMs };
   }
 
   async function fireCompact(agentName, paneIdx, paneKey, contextPercent) {
@@ -106,10 +124,10 @@ export function createAutoCompact({
     } catch (err) {
       log(`fire failed for ${paneKey}: ${err.message}`);
     } finally {
-      // Release lock after ~2 min. /compact takes 30-90s; we want to
-      // prevent a follow-up poll from re-firing while the pane still
+      // Release lock after the configured window. /compact takes 30-90s; we
+      // want to prevent a follow-up poll from re-firing while the pane still
       // shows old context% pre-summary.
-      setTimeout(() => compacting.delete(paneKey), 120_000);
+      setTimeout(() => compacting.delete(paneKey), config.compactLockMs ?? 120_000);
     }
   }
 
@@ -145,7 +163,17 @@ export function createAutoCompact({
         const paneKey = `${a.name}:${i}`;
         if (compacting.has(paneKey)) continue;
 
-        const { status, contextPercent, paneInMode, lastActivityMs } = await inspect(a, i);
+        const { status, contextPercent, paneInMode, paneHeight, lastActivityMs } = await inspect(a, i);
+
+        // Too small to read reliably — skip rather than act on redraw-soup.
+        if (paneHeight != null && paneHeight < MIN_PANE_HEIGHT) {
+          if (warnings.has(paneKey) || compactFloors.has(paneKey)) {
+            warnings.delete(paneKey);
+            compactFloors.delete(paneKey);
+          }
+          continue;
+        }
+
         const decision = decideAutoCompactAction({
           paneKey,
           status,
@@ -153,6 +181,7 @@ export function createAutoCompact({
           paneInMode,
           lastActivityMs,
           warnings,
+          compactFloors,
           config,
           now,
         });
@@ -162,9 +191,22 @@ export function createAutoCompact({
           await postWarning(a.name, i, paneKey, contextPercent);
         } else if (decision.action === "compact") {
           warnings.delete(paneKey);
+          // Record the level we fired at BEFORE the compact runs. Next tick
+          // (after the in-flight lock clears) compares against it: if context
+          // didn't drop below this, the compact was a no-op and decide returns
+          // "suppress" instead of firing again.
+          compactFloors.set(paneKey, contextPercent);
           await fireCompact(a.name, i, paneKey, contextPercent);
+        } else if (decision.action === "suppress") {
+          // Prior /compact didn't help. Clear the pending warning so it can't
+          // mature into another fire; keep the floor so we stay suppressed.
+          if (warnings.has(paneKey)) {
+            warnings.delete(paneKey);
+            log(`suppressing ${paneKey} (${decision.reason})`);
+          }
         } else if (decision.action === "cancel") {
           warnings.delete(paneKey);
+          compactFloors.delete(paneKey);
           log(`cancelled warning for ${paneKey} (${decision.reason})`);
         }
         // action === "none" → do nothing

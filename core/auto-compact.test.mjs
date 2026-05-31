@@ -190,6 +190,77 @@ feature("decideAutoCompactAction — min-idle gate (conversation freshness)", ()
   });
 });
 
+feature("decideAutoCompactAction — verify-before-refire (no-op /compact)", () => {
+  unit("fired at 100%, context still 100% → suppress, do not re-fire", {
+    given: ["compactFloor=100, context still 100% (the observed runaway)", () => ({
+      ...base,
+      contextPercent: 100,
+      compactFloors: new Map([[key, 100]]),
+    })],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=suppress", (r) => {
+      expect(r.action).toBe("suppress");
+      expect(r.reason).toMatch(/ineffective/);
+    }],
+  });
+
+  unit("fired at 81%, context climbed to 100% (working pane) → still suppress", {
+    given: ["compactFloor=81, context now 100%", () => ({
+      ...base,
+      contextPercent: 100,
+      compactFloors: new Map([[key, 81]]),
+    })],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=suppress (≥ floor)", (r) => expect(r.action).toBe("suppress")],
+  });
+
+  unit("compact worked: context dropped below floor but still over threshold → resume (warn)", {
+    given: ["compactFloor=100, context now 80% (>threshold)", () => ({
+      ...base,
+      contextPercent: 80,
+      compactFloors: new Map([[key, 100]]),
+    })],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=warn (floor no longer blocks; will re-record lower on fire)", (r) => expect(r.action).toBe("warn")],
+  });
+
+  unit("compact worked: context fell below threshold → cancel (clears floor)", {
+    given: ["compactFloor=100, context now 30%", () => ({
+      ...base,
+      contextPercent: 30,
+      compactFloors: new Map([[key, 100]]),
+    })],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=cancel", (r) => {
+      expect(r.action).toBe("cancel");
+      expect(r.reason).toBe("below threshold");
+    }],
+  });
+
+  unit("pane went active with a floor on file → cancel (resets suppression)", {
+    given: ["compactFloor=100, status now working", () => ({
+      ...base,
+      status: "working",
+      contextPercent: 100,
+      compactFloors: new Map([[key, 100]]),
+    })],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=cancel, reason=pane active", (r) => {
+      expect(r.action).toBe("cancel");
+      expect(r.reason).toBe("pane active");
+    }],
+  });
+
+  unit("no floor on file → normal warn (regression: default empty Map)", {
+    given: ["100% idle, no compactFloors passed at all", () => ({
+      ...base,
+      contextPercent: 100,
+    })],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=warn", (r) => expect(r.action).toBe("warn")],
+  });
+});
+
 feature("parseAutoCompactConfig — minIdleMs", () => {
   unit("minIdleMs from env AUTO_COMPACT_MIN_IDLE_MS", {
     given: ["env override", () => ({ env: { AUTO_COMPACT_MIN_IDLE_MS: "120000" } })],
