@@ -1,5 +1,7 @@
 import { feature, unit, expect } from "bdd-vitest";
 import {
+  askAnchorKey,
+  attachAskLineAnchors,
   buildAskEntries,
   classifyAskTurn,
   filterAskEntries,
@@ -41,6 +43,36 @@ feature("ask-history: classifyAskTurn", () => {
     when: ["classifying a complete done reply", () =>
       classifyAskTurn(turn({
         items: [tool("Bash npm test"), text("Fixat och pushat. Klart.")],
+        isComplete: true,
+      }))],
+    then: ["it is done", (status) => expect(status).toBe("done")],
+  });
+
+  unit("complete done-like reply wins over optional follow-up question", {
+    when: ["classifying a done reply with a trailing optional question", () =>
+      classifyAskTurn(turn({
+        items: [text("Klart, planen är skriven och pushad. Vill du att jag går vidare med nästa?")],
+        isComplete: true,
+      }))],
+    then: ["it is done, not needs-you", (status) => expect(status).toBe("done")],
+  });
+
+  unit("done-like reply is done even when stop_reason is missing", {
+    when: ["classifying an old incomplete jsonl turn whose text says it is done", () =>
+      classifyAskTurn(turn({
+        items: [text("Alla milestones är klara och pushade.")],
+        isComplete: false,
+      }), { isLatest: false, paneStatus: "idle" })],
+    then: ["it is done", (status) => expect(status).toBe("done")],
+  });
+
+  unit("done-like first block wins over a trailing optional question block", {
+    when: ["classifying split assistant text", () =>
+      classifyAskTurn(turn({
+        items: [
+          text("Ja, alla milestones är klara och pushade."),
+          text("Vill du att jag tar nästa polish också?"),
+        ],
         isComplete: true,
       }))],
     then: ["it is done", (status) => expect(status).toBe("done")],
@@ -88,6 +120,21 @@ feature("ask-history: build and filter entries", () => {
     })],
     then: ["only the matching open entry remains", (entries) => {
       expect(entries.map((e) => e.prompt)).toEqual(["gamma deploy"]);
+    }],
+  });
+
+  unit("attachAskLineAnchors adds jsonl line numbers by timestamp + prompt", {
+    given: ["one ask entry and a line map", () => {
+      const entry = {
+        timestamp: "2026-05-31T07:10:00.000Z",
+        prompt: "second task",
+      };
+      const anchors = new Map([[askAnchorKey(entry.timestamp, entry.prompt), 42]]);
+      return { entry, anchors };
+    }],
+    when: ["attaching anchors", ({ entry, anchors }) => attachAskLineAnchors([entry], anchors)],
+    then: ["the entry gets its jsonl line", (entries) => {
+      expect(entries[0].jsonlLine).toBe(42);
     }],
   });
 });

@@ -37,7 +37,12 @@ import {
   lintRoots,
   resolvePathTarget,
 } from "../core/contract-lint.mjs";
-import { buildAskEntries, filterAskEntries } from "../core/ask-history.mjs";
+import {
+  askAnchorKey,
+  attachAskLineAnchors,
+  buildAskEntries,
+  filterAskEntries,
+} from "../core/ask-history.mjs";
 
 // Bridge = the Discord bot itself (not a Claude agent). Singleton infra.
 const BRIDGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -621,6 +626,51 @@ function shellQuote(s) {
   return `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
 
+function escapeRegexLiteral(s) {
+  return String(s).replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+}
+
+function promptFromJsonlLine(event) {
+  if (event?.type === "user" && typeof event.message?.content === "string") {
+    return { timestamp: event.timestamp || null, prompt: event.message.content };
+  }
+  if (event?.type === "event_msg" && event.payload?.type === "user_message" && typeof event.payload.message === "string") {
+    return { timestamp: event.timestamp || null, prompt: event.payload.message };
+  }
+  return null;
+}
+
+function collectAskLineAnchors(jsonlFile) {
+  const out = new Map();
+  if (!jsonlFile) return out;
+  let text;
+  try { text = readFileSync(jsonlFile, "utf-8"); }
+  catch { return out; }
+
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    let event;
+    try { event = JSON.parse(lines[i]); } catch { continue; }
+    const anchor = promptFromJsonlLine(event);
+    if (!anchor?.prompt) continue;
+    const key = askAnchorKey(anchor.timestamp, anchor.prompt);
+    if (!out.has(key)) out.set(key, i + 1);
+  }
+  return out;
+}
+
+function attachDisplayedAskLineAnchors(rows) {
+  const cache = new Map();
+  return rows.map((row) => {
+    if (!row.jsonlFile) return row;
+    if (!cache.has(row.jsonlFile)) {
+      cache.set(row.jsonlFile, collectAskLineAnchors(row.jsonlFile));
+    }
+    return attachAskLineAnchors([row], cache.get(row.jsonlFile))[0];
+  });
+}
+
 function formatAskStatus(status) {
   switch (status) {
     case "open": return "⚠️ open";
@@ -644,8 +694,11 @@ function formatAskEntry(e) {
     `    > ${e.promptPreview}`,
   ];
   if (e.replyPreview) lines.push(`    → ${e.replyPreview}`);
-  if (e.jsonlFile) lines.push(`    jsonl: ${e.jsonlFile}${e.timestamp ? ` @ ${e.timestamp}` : ""}`);
-  lines.push(`    log: amux log ${e.agent} -p ${e.pane} --grep ${shellQuote(needle)} -n 5`);
+  if (e.jsonlFile) {
+    const loc = e.jsonlLine ? `${e.jsonlFile}:${e.jsonlLine}` : e.jsonlFile;
+    lines.push(`    jsonl: ${loc}${e.timestamp ? ` @ ${e.timestamp}` : ""}`);
+  }
+  lines.push(`    log: amux log ${e.agent} -p ${e.pane} --grep ${shellQuote(escapeRegexLiteral(needle))} -n 5`);
   return lines.join("\n");
 }
 
@@ -729,12 +782,12 @@ async function cmdAsks(ctx, flags, positional = []) {
     }));
   }
 
-  const rows = filterAskEntries(entries, {
+  const rows = attachDisplayedAskLineAnchors(filterAskEntries(entries, {
     sinceMs: since ? since.getTime() : null,
     grep,
     openOnly: !!flags.open,
     limit: flags.n || 40,
-  });
+  }));
 
   const mode = flags.full ? "full scan" : "bounded tail";
   const filter = [

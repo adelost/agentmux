@@ -16,13 +16,14 @@ export function classifyAskTurn(turn = {}, opts = {}) {
 
   const items = Array.isArray(turn.items) ? turn.items : [];
   const reply = latestTextItem(items);
+  const fullReply = allTextItems(items);
   const live = paneStatus === "working" || paneStatus === "resume";
 
   if (!reply) return isLatest && live ? "working" : "open";
   if (isLatest && live && !turn.isComplete) return "working";
+  if (looksDoneForAsk(reply) || looksDoneForAsk(fullReply)) return "done";
   if (isWaitingLikeText(reply)) return "needs-you";
   if (!turn.isComplete) return "partial";
-  if (looksDone(reply)) return "done";
   return "answered";
 }
 
@@ -67,6 +68,17 @@ export function buildAskEntries({
   return out;
 }
 
+export function askAnchorKey(timestamp, prompt) {
+  return `${timestamp || ""}\u0000${prompt || ""}`;
+}
+
+export function attachAskLineAnchors(entries = [], lineByAnchor = new Map()) {
+  return entries.map((entry) => ({
+    ...entry,
+    jsonlLine: lineByAnchor.get(askAnchorKey(entry.timestamp, entry.prompt)) || null,
+  }));
+}
+
 export function filterAskEntries(entries = [], opts = {}) {
   const {
     sinceMs = null,
@@ -99,6 +111,28 @@ function latestTextItem(items) {
     if (text) return text;
   }
   return "";
+}
+
+function allTextItems(items) {
+  return items
+    .filter((item) => item?.type !== "tool")
+    .map((item) => String(item?.content || "").trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function looksDoneForAsk(text) {
+  if (!text) return false;
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (!collapsed) return false;
+  const head = collapsed.slice(0, 600).toLowerCase();
+  if (/\b(inte|ej|not)\s+(klar|klart|klara|fixat|done|complete[d]?)/.test(head)) {
+    return looksDone(collapsed);
+  }
+  return looksDone(collapsed)
+    || looksDone(collapsed.slice(0, 240))
+    || [/\bklar(t|a)?\b/, /\bfixat\b/, /\bpushad?\b|\bpushed\b/, /\bshipped\b/, /\bcomplete[d]?\b/]
+      .some((r) => r.test(head));
 }
 
 function parseTs(ts) {

@@ -88,7 +88,7 @@ Use `--by-pane` when you want a post-mortem grouped by pane. Use plain
 
 `amux asks` answers "what did I ask, where did I ask it, and is it still
 open?" It reads structured jsonl, prints a compact prompt preview, the latest
-reply preview, and the jsonl file + timestamp anchor for drill-down.
+reply preview, and the jsonl file + line + timestamp anchor for drill-down.
 
 ```bash
 amux asks
