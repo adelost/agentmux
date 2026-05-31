@@ -21,7 +21,7 @@ amux lint
 | `amux watch` | Follow the timeline live |
 | `amux done` | Summarize commits, active panes, finished panes, and waiters |
 | `amux asks` | Show recent human asks/directives with status and jsonl location |
-| `amux lint` | Run default repo linters, starting with WHAT/WHY/DTO contracts |
+| `amux lint` | Run default repo linters, starting with WHAT/WHY/DTO/debt contracts |
 
 ## Sending Work
 
@@ -157,5 +157,7 @@ amux lint --changed --strict
 
 `amux lint` scans the current repo by default. A target can be a file, a
 directory, or an agent name from the agentmux config. The first default check
-enforces short `WHAT:/WHY:` contracts and `DTO:` for pure transport shapes.
+enforces short `WHAT:/WHY:` contracts, `DTO:` for pure transport shapes, and
+explicit `REMOVE:/MERGE:/REFACTOR:/DEPRECATED:` debt tags for symbols that
+should not get a fake `WHY:` yet.
 See `docs/contract-lint.md` for the writing rules.

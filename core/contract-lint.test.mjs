@@ -2,7 +2,7 @@ import { feature, unit, expect } from "bdd-vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { evaluateContract, extractSymbols, lintRoot, lintRoots, overlapRatio, writeBaseline } from "./contract-lint.mjs";
+import { evaluateContract, extractSymbols, formatLintReport, lintRoot, lintRoots, overlapRatio, writeBaseline } from "./contract-lint.mjs";
 
 // Real WHAT/WHY rewrites from ai-dsl + skydive-altimeter. The linter must pass
 // every one with zero error-level findings — they are the gold voice.
@@ -96,6 +96,51 @@ feature("contract-lint contract floor", () => {
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
+    }],
+  });
+
+  unit("action debt tag satisfies missing WHAT/WHY but remains visible debt", {
+    given: ["a remove-tagged legacy symbol", () => "REMOVE: Unused legacy SAM2 path; no registered caller after SAM3 migration."],
+    when: ["evaluating", (doc) => evaluateContract(doc, { name: "LegacySam2", kind: "class" })],
+    then: ["it reports debt, not missing WHAT/WHY", (findings) => {
+      expect(findings.map((f) => f.code)).toEqual(["CONTRACT050"]);
+      expect(findings[0].sev).toBe("debt");
+      expect(findings[0].msg).toContain("REMOVE:");
+    }],
+  });
+
+  unit("generic DEBT is allowed only when it names a concrete action", {
+    given: ["a refactor debt note", () => "DEBT: Refactor into VideoIndex; duplicate search state makes ownership unclear."],
+    when: ["evaluating", (doc) => evaluateContract(doc, { name: "SearchState", kind: "class" })],
+    then: ["it records debt without warning", (findings) => {
+      expect(findings.map((f) => f.code)).toEqual(["CONTRACT050"]);
+      expect(findings[0].sev).toBe("debt");
+    }],
+  });
+
+  unit("generic DEBT without an action is warned", {
+    given: ["a vague debt note", () => "DEBT: unclear old code."],
+    when: ["evaluating", (doc) => evaluateContract(doc, { name: "Mystery", kind: "class" })],
+    then: ["it records debt and asks for a real action", (findings) => {
+      expect(findings.map((f) => f.code)).toEqual(["CONTRACT050", "CONTRACT052"]);
+    }],
+  });
+
+  unit("empty debt tag is not enough", {
+    given: ["an empty merge tag", () => "MERGE:"],
+    when: ["evaluating", (doc) => evaluateContract(doc, { name: "DuplicateHit", kind: "class" })],
+    then: ["it reports the empty debt tag", (findings) => {
+      expect(findings.map((f) => f.code)).toEqual(["CONTRACT051"]);
+      expect(findings[0].sev).toBe("error");
+    }],
+  });
+
+  unit("FLAG is not a contract state", {
+    given: ["a vague flag tag", () => "FLAG: maybe delete later."],
+    when: ["evaluating", (doc) => errorCodes(doc, "MaybeDead")],
+    then: ["missing WHAT/WHY still fails", (codes) => {
+      expect(codes).toContain("CONTRACT010");
+      expect(codes).toContain("CONTRACT011");
     }],
   });
 
@@ -288,6 +333,26 @@ feature("contract-lint scope + guidance", () => {
     then: ["at least one finding has a suggestion", (result, root) => {
       try {
         expect(result.findings.some((f) => f.suggestion)).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
+  unit("report separates debt from ordinary findings", {
+    given: ["one debt class and one undocumented class", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-contract-debt-report-"));
+      writeFileSync(join(root, "x.py"), 'class Old:\n    """REFACTOR: Move into VideoIndex; duplicate ownership with search state."""\n    pass\n\nclass Bare:\n    pass\n');
+      return root;
+    }],
+    when: ["formatting the lint report", (root) => formatLintReport([lintRoot(root)])],
+    then: ["debt count and debt section are visible", (report, root) => {
+      try {
+        expect(report).toContain("debt: 1");
+        expect(report).toContain("Debt:");
+        expect(report).toContain("CONTRACT050");
+        expect(report).toContain("Findings:");
+        expect(report).toContain("CONTRACT001");
       } finally {
         rmSync(root, { recursive: true, force: true });
       }

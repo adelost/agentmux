@@ -2,8 +2,9 @@
 
 `amux lint` runs repo checks that keep coding agents from adding vague
 architecture comments. The first default check is the contract check:
-important symbols need short `WHAT:` and `WHY:` contracts, or `DTO:` for pure
-transport shapes.
+important symbols need short `WHAT:` and `WHY:` contracts, `DTO:` for pure
+transport shapes, or an explicit debt tag when the symbol should not be
+rescued yet.
 
 ## Commands
 
@@ -38,6 +39,17 @@ Pure transport shapes may use:
 
 ```text
 DTO: <payload or schema shape>
+```
+
+Known code that does not deserve a pretend `WHY:` yet may use an action-tagged
+debt state:
+
+```text
+REMOVE: <why this has no future + evidence>
+REFACTOR: <wrong boundary + target direction>
+MERGE: <duplicate overlap + canonical home>
+DEPRECATED: <replacement + compatibility reason>
+DEBT: <remove/refactor/merge/deprecate ...>
 ```
 
 `WHAT:` is explicit on purpose. It is the same kind of forced structure as
@@ -136,6 +148,46 @@ Good sealed state:
 sealed class UpdateState
 ```
 
+## Debt Tags
+
+Debt tags are for honesty, not cleanup theatre. Use them when the symbol has no
+clear contract yet and forcing a `WHY:` would create authoritative-looking
+fiction.
+
+Allowed actions:
+
+- `REMOVE:` — unused or obsolete code with no valid future.
+- `REFACTOR:` — useful behavior, wrong boundary or ownership.
+- `MERGE:` — duplicate/overlapping shape; name the canonical home.
+- `DEPRECATED:` — public or external API kept temporarily for compatibility.
+- `DEBT:` — allowed only when the value starts with the action
+  (`Refactor ...`, `Remove ...`, `Merge ...`, `Deprecate ...`). Prefer the
+  action tag directly.
+
+Good:
+
+```python
+class LegacySam2Path:
+    """REMOVE: Unused legacy SAM2 path; no registered caller after SAM3 migration."""
+
+class SearchHit:
+    """MERGE: Duplicate result shape; canonical type should live in video/types.py."""
+
+class SearchState:
+    """REFACTOR: Move into VideoIndex; duplicate search state makes ownership unclear."""
+```
+
+Debt is still a finding. `amux lint` prints it in a `Debt:` section, and
+`--strict` fails on new debt unless it is intentionally baselined. That keeps
+old debt visible without letting new "temporary" debt arrive silently.
+
+Do not use generic tags such as `FLAG:`. A symbol must be one of these states:
+
+1. `WHAT:/WHY:` — keep it; boundary is understood.
+2. `DTO:` — pure transport/schema/data shape.
+3. `REMOVE:/MERGE:/REFACTOR:/DEPRECATED:` — known debt with next action.
+4. Deleted.
+
 ## Banned Phrases
 
 The linter rejects AI-ish meta narration:
@@ -204,3 +256,6 @@ amux lint --baseline .amux-lint-baseline.json --changed --strict
 ```
 
 The baseline suppresses known findings. New or changed findings still show up.
+Debt findings can be baselined too, but that should be a temporary ratchet:
+each cleanup milestone should shrink both the normal finding count and the debt
+count.

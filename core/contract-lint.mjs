@@ -56,6 +56,8 @@ const STOPWORDS = new Set(
 const WHAT_MAX_WORDS = 16;
 const WHY_MAX_WORDS = 18;
 const ECHO_OVERLAP_THRESHOLD = 0.5;
+const CONTRACT_TAGS = ["WHAT", "WHY", "DTO", "REMOVE", "REFACTOR", "MERGE", "DEPRECATED", "DEBT"];
+const DEBT_TAGS = ["REMOVE", "REFACTOR", "MERGE", "DEPRECATED", "DEBT"];
 
 // WHAT: Maps each finding code to a one-line fix template.
 // WHY: Lets an agent running the linter see the target WHAT/WHY shape, not just the error.
@@ -70,14 +72,34 @@ const SUGGESTIONS = {
   CONTRACT040: "WHY repeats WHAT — name a consumer, dependency, or failure mode instead",
   CONTRACT041: "fill the DTO: line with the payload/schema shape",
   CONTRACT042: "use WHAT:/WHY: — this symbol owns a domain boundary, not a pure shape",
+  CONTRACT050: "resolve the debt, or keep the action tag baselined until that milestone",
+  CONTRACT051: "fill the debt tag with concrete evidence + next action",
+  CONTRACT052: "prefer REMOVE:/REFACTOR:/MERGE:/DEPRECATED: over generic DEBT:",
 };
 
-// WHAT: Pulls the text of one WHAT:/WHY:/DTO: tag out of a doc block.
+// WHAT: Pulls the text of one known contract tag out of a doc block.
 // WHY: Keeps tag parsing identical across languages so rules stay language-agnostic.
 function extractTag(doc, tag) {
-  const re = new RegExp(`\\b${tag}:\\s*([\\s\\S]*?)(?=\\b(?:WHAT|WHY|DTO):|$)`, "i");
+  const re = new RegExp(`\\b${tag}:\\s*([\\s\\S]*?)(?=\\b(?:${CONTRACT_TAGS.join("|")}):|$)`, "i");
   const m = doc.match(re);
   return m ? m[1].replace(/[*/]+\s*$/g, "").replace(/\s+/g, " ").trim() : null;
+}
+
+function debtContracts(doc, label) {
+  const findings = [];
+  for (const tag of DEBT_TAGS) {
+    if (!new RegExp(`\\b${tag}:`, "i").test(doc)) continue;
+    const value = extractTag(doc, tag);
+    if (!value) {
+      findings.push({ code: "CONTRACT051", sev: "error", msg: `${label}: ${tag}: tag is empty` });
+      continue;
+    }
+    findings.push({ code: "CONTRACT050", sev: "debt", msg: `${label}: ${tag}: ${value}` });
+    if (tag === "DEBT" && !/^(?:remove|refactor|merge|deprecat)/i.test(value)) {
+      findings.push({ code: "CONTRACT052", sev: "warn", msg: `${label}: generic DEBT should start with remove/refactor/merge/deprecate` });
+    }
+  }
+  return findings;
 }
 
 // WHAT: Reduces a word to a crude stem so "Assigns" and "assign" compare equal.
@@ -129,6 +151,9 @@ export function evaluateContract(doc, { name = "", kind = "symbol" } = {}) {
   }
 
   const findings = [];
+  const debtFindings = debtContracts(doc, label);
+  if (debtFindings.length) return debtFindings;
+
   const isDto = /\bDTO:/i.test(doc);
 
   if (isDto) {
@@ -494,23 +519,39 @@ export function formatLintReport(results, options = {}) {
   const totalFiles = results.reduce((sum, result) => sum + result.files.length, 0);
   const totalSymbols = results.reduce((sum, result) => sum + result.symbols, 0);
   const totalFindings = results.reduce((sum, result) => sum + findingsFor(result).length, 0);
+  const totalDebt = results.reduce((sum, result) => sum + findingsFor(result).filter((f) => f.sev === "debt").length, 0);
   lines.push("amux lint");
   lines.push(`roots: ${results.length}`);
   lines.push(`files scanned: ${totalFiles}`);
   lines.push(`symbols checked: ${totalSymbols}`);
   lines.push(`findings: ${totalFindings}`);
+  if (totalDebt) lines.push(`debt: ${totalDebt}`);
   if (options.baselinePath) lines.push(`baseline: ${options.baselinePath}`);
   lines.push("");
 
   for (const result of results) {
     const findings = findingsFor(result);
     if (!findings.length) continue;
+    const debt = findings.filter((f) => f.sev === "debt");
+    const regular = findings.filter((f) => f.sev !== "debt");
     lines.push(`${basename(result.root) || result.root}:`);
-    for (const finding of findings.slice(0, options.limit || 80)) {
-      lines.push(formatFinding(finding, result.root));
+    if (debt.length) {
+      lines.push("  Debt:");
+      for (const finding of debt.slice(0, options.limit || 80)) {
+        lines.push(`  ${formatFinding(finding, result.root)}`);
+      }
+      if (debt.length > (options.limit || 80)) {
+        lines.push(`  ... ${debt.length - (options.limit || 80)} more debt items`);
+      }
     }
-    if (findings.length > (options.limit || 80)) {
-      lines.push(`... ${findings.length - (options.limit || 80)} more`);
+    if (regular.length) {
+      if (debt.length) lines.push("  Findings:");
+      for (const finding of regular.slice(0, options.limit || 80)) {
+        lines.push(`${debt.length ? "  " : ""}${formatFinding(finding, result.root)}`);
+      }
+      if (regular.length > (options.limit || 80)) {
+        lines.push(`${debt.length ? "  " : ""}... ${regular.length - (options.limit || 80)} more`);
+      }
     }
     lines.push("");
   }
