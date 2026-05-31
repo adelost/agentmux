@@ -2785,11 +2785,11 @@ async function cmdResume(ctx) {
 async function cmdLint(args, ctx) {
   const { flags, positional } = parseFlags(args, FLAG_SPECS.lint);
   if (flags.help || flags.h) {
-    console.log(`Usage: amux lint [target] [--all-agents] [--changed] [--strict]
+    console.log(`Usage: amux lint [target...] [--all-agents] [--changed] [--strict]
 
 Targets:
   (none)                    Current working directory
-  . / path                  Explicit file or directory path
+  . / path [path...]        One or more file/dir paths (scoped multi-root scan)
   <agent>                   Agent name from agentmux config
 
 Options:
@@ -2814,18 +2814,16 @@ Options:
   let roots;
   if (flags["all-agents"]) {
     roots = listAgents(ctx.configPath).map((agent) => agent.dir);
+  } else if (positional.length === 0) {
+    roots = [process.cwd()];
   } else {
-    const target = positional[0];
-    if (!target) {
-      roots = [process.cwd()];
-    } else {
+    // Multiple targets lint as multiple roots under one combined baseline, so a
+    // repo can scope to its real source trees (e.g. `src/ai_tools ui/src`) instead
+    // of scanning the whole repo or keeping a separate baseline per directory.
+    roots = positional.map((target) => {
       const pathTarget = resolvePathTarget(target, process.cwd());
-      if (existsSync(pathTarget)) {
-        roots = [pathTarget];
-      } else {
-        roots = [getAgent(ctx.configPath, target).dir];
-      }
-    }
+      return existsSync(pathTarget) ? pathTarget : getAgent(ctx.configPath, target).dir;
+    });
   }
 
   if (!roots.length) {
@@ -2836,7 +2834,7 @@ Options:
   let baselinePath = flags.baseline ? resolvePathTarget(flags.baseline, process.cwd()) : null;
   if (flags["update-baseline"] && !baselinePath) {
     if (roots.length !== 1) {
-      console.error("Usage: amux lint --all-agents --update-baseline --baseline <path>");
+      console.error("amux lint: --update-baseline needs an explicit --baseline <path> when linting multiple roots (or --all-agents)");
       process.exit(1);
     }
     baselinePath = join(roots[0], ".amux-lint-baseline.json");

@@ -203,6 +203,52 @@ feature("contract-lint helpers", () => {
       }
     }],
   });
+
+  unit("baseline survives line shifts (fingerprint excludes line number)", {
+    given: ["a baselined 2-class file, then a new class inserted above both", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-contract-shift-"));
+      const f = join(root, "demo.py");
+      writeFileSync(f, "class Alpha:\n    pass\n\n\nclass Beta:\n    pass\n");
+      const baselinePath = join(root, ".amux-lint-baseline.json");
+      writeBaseline(baselinePath, [lintRoot(root)]);
+      writeFileSync(f, "class Gamma:\n    pass\n\n\nclass Alpha:\n    pass\n\n\nclass Beta:\n    pass\n");
+      return { root, baselinePath };
+    }],
+    when: ["linting with the pre-shift baseline", ({ root, baselinePath }) => lintRoots([root], { baselinePath })[0]],
+    then: ["only the new class is active; shifted Alpha/Beta stay suppressed", (result, { root }) => {
+      try {
+        const msgs = result.activeFindings.map((f) => f.msg);
+        expect(msgs.length > 0).toBe(true);
+        expect(msgs.every((m) => m.includes("Gamma"))).toBe(true);
+        expect(msgs.some((m) => m.includes("Alpha") || m.includes("Beta"))).toBe(false);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
+  unit("one baseline spans multiple roots", {
+    given: ["two roots each with an undocumented class under one combined baseline", () => {
+      const a = mkdtempSync(join(tmpdir(), "amux-contract-mr-a-"));
+      const b = mkdtempSync(join(tmpdir(), "amux-contract-mr-b-"));
+      writeFileSync(join(a, "x.py"), "class Ax:\n    pass\n");
+      writeFileSync(join(b, "y.py"), "class By:\n    pass\n");
+      const baselinePath = join(a, ".amux-lint-baseline.json");
+      writeBaseline(baselinePath, [lintRoot(a), lintRoot(b)]);
+      return { a, b, baselinePath };
+    }],
+    when: ["linting both roots with the combined baseline", ({ a, b, baselinePath }) => lintRoots([a, b], { baselinePath })],
+    then: ["both roots are fully suppressed by the one baseline", (results, { a, b }) => {
+      try {
+        expect(results.length).toBe(2);
+        expect(results[0].activeFindings).toEqual([]);
+        expect(results[1].activeFindings).toEqual([]);
+      } finally {
+        rmSync(a, { recursive: true, force: true });
+        rmSync(b, { recursive: true, force: true });
+      }
+    }],
+  });
 });
 
 feature("contract-lint scope + guidance", () => {

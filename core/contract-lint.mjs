@@ -439,7 +439,10 @@ export function lintRoot(root, options = {}) {
 }
 
 export function findingFingerprint(finding, root) {
-  return `${relative(root, finding.path)}:${finding.line}:${finding.code}:${finding.msg}`;
+  // Line number is deliberately excluded: the message already carries the symbol
+  // name + kind, so the fingerprint stays stable when unrelated edits shift lines.
+  // Otherwise inserting one symbol would re-flag every baselined symbol below it.
+  return `${relative(root, finding.path)}:${finding.code}:${finding.msg}`;
 }
 
 export function loadBaseline(path) {
