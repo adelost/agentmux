@@ -60,31 +60,44 @@ const CLAUDE_PROJECTS_DIR = () => join(process.env.HOME, ".claude", "projects");
 const CODEX_SESSIONS_DIR = () => join(process.env.HOME, ".codex", "sessions");
 const CLAUDE_DEFAULT_MAX = 200_000;
 
-// Context window by model. Claude Code on Opus/Sonnet 4.6 opts in to the
-// 1M-context beta via header; the jsonl records only the model ID, not the
-// beta flag, so we key off model name. Any model not listed here uses
-// CLAUDE_DEFAULT_MAX (200k).
-//
-// If you add a model that supports 1M context, put it here. The default
-// 200k is the conservative floor for anything we don't recognize.
+// Per-model overrides for context window. Claude Code on Opus/Sonnet opts in
+// to the 1M-context beta via header; the jsonl records only the model ID, not
+// the beta flag, so we key off model name. This table is now ONLY for
+// exceptions to the family heuristic below — you should rarely need to touch
+// it, because new dated Opus/Sonnet variants resolve to 1M automatically.
 const CLAUDE_MODEL_MAX = {
-  "claude-opus-4-6": 1_000_000,
-  "claude-opus-4-7": 1_000_000,
-  "claude-opus-4-8": 1_000_000,
-  "claude-sonnet-4-6": 1_000_000,
+  // (empty — opus/sonnet handled by family heuristic, haiku by family floor)
 };
+
+// Family → context window. Opus and Sonnet (4.x and forward) run the 1M-context
+// beta under Claude Code; Haiku tops out at 200k. Keying off the family rather
+// than an exact-version allowlist means future models (claude-opus-4-9,
+// claude-sonnet-5-0, …) get the right window with no code change — that
+// allowlist staleness is exactly what made an opus-4-8 pane misread 288k/200k
+// as 100% and fire false auto-compacts. The failure direction is now safe: an
+// unknown future Opus we wrongly assume is 1M only ever UNDER-reports % (a late
+// compact, harmless) rather than the false-100% that destroys live context, and
+// the self-correcting ceiling (max = max(declared, total)) still caps >100%.
+const CLAUDE_FAMILY_MAX = [
+  [/^claude-(opus|sonnet)-/, 1_000_000],
+  [/^claude-haiku-/, 200_000],
+];
 
 function claudeMaxForModel(model) {
   if (!model) return CLAUDE_DEFAULT_MAX;
   // "[1m]" suffix on the model ID is Claude Code's explicit 1M-context flag,
   // independent of which dated variant we're on — trust it when present.
   if (model.includes("[1m]")) return 1_000_000;
+  // Explicit per-model override wins over the family heuristic.
   if (CLAUDE_MODEL_MAX[model] != null) return CLAUDE_MODEL_MAX[model];
-  // Prefix match for future dated variants like "claude-opus-4-6-20260401"
   for (const prefix of Object.keys(CLAUDE_MODEL_MAX)) {
     if (model.startsWith(prefix + "-") || model.startsWith(prefix + "[")) {
       return CLAUDE_MODEL_MAX[prefix];
     }
+  }
+  // Family heuristic — the durable default that survives new model releases.
+  for (const [pattern, max] of CLAUDE_FAMILY_MAX) {
+    if (pattern.test(model)) return max;
   }
   return CLAUDE_DEFAULT_MAX;
 }

@@ -113,6 +113,26 @@ feature("getContextPercent (claude): model-based max lookup", () => {
       cleanup();
     }],
   });
+
+  unit("future-proof: unreleased opus/sonnet resolves to 1M via family heuristic", {
+    // The durable fix: no allowlist edit needed for new dated variants. A model
+    // we've never seen still gets the right window as long as it's opus/sonnet.
+    given: ["hypothetical claude-opus-5-0 at 250k usage", () => setupFakeClaudeContext({ model: "claude-opus-5-0", cacheRead: 250_000 })],
+    when: ["getting context", ({ paneDir }) => getContextPercent(paneDir, "claude")],
+    then: ["25% of 1M, not 100% against a stale 200k default", (r, { cleanup }) => {
+      expect(r.percent).toBe(25);
+      cleanup();
+    }],
+  });
+
+  unit("family floor: haiku stays 200k (not 1M)", {
+    given: ["future haiku variant at 100k usage", () => setupFakeClaudeContext({ model: "claude-haiku-5-0", cacheRead: 100_000 })],
+    when: ["getting context", ({ paneDir }) => getContextPercent(paneDir, "claude")],
+    then: ["50% of 200k", (r, { cleanup }) => {
+      expect(r.percent).toBe(50);
+      cleanup();
+    }],
+  });
 });
 
 feature("getContextFromPane: reads from pane content (per-pane correct)", () => {
