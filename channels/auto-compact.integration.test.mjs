@@ -6,7 +6,7 @@
 // firing dozens of /compact into a pane whose context never dropped.
 
 import { feature, unit, expect } from "bdd-vitest";
-import { writeFileSync, mkdtempSync } from "fs";
+import { writeFileSync, mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createAutoCompact } from "./auto-compact.mjs";
@@ -23,16 +23,36 @@ function writeYaml() {
   return { path, dir };
 }
 
+function encodeClaudePath(dir) {
+  return dir.replace(/[\/\.]/g, "-");
+}
+
+function writeClaudeModel(fakeHome, paneDir, model) {
+  const projectDir = join(fakeHome, ".claude", "projects", encodeClaudePath(paneDir));
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(join(projectDir, "session.jsonl"), JSON.stringify({
+    type: "assistant",
+    message: {
+      role: "assistant",
+      model,
+      content: [{ type: "text", text: "ok" }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 1 },
+    },
+  }) + "\n");
+}
+
 const CONTENT = {
   full100: ["work output", "  ⬆ test │ Opus 4.7 │ 4 ██████████ 100%", "  1000000 tokens", "❯ "].join("\n"),
   drop30: ["Compacted.", "  ⬆ test │ Opus 4.7 │ 4 ███░░░░░░░ 30%", "  300000 tokens", "❯ "].join("\n"),
+  narrow314k: ["done", "────", "❯ ", "  ⏵⏵ bypass permissions on", "   314000 tokens"].join("\n"),
 };
 
 // Build the injected deps. `state.content` is read fresh each capture so a
 // test can simulate a compact succeeding (context drops) mid-run.
 function harness({ height = 50, content = CONTENT.full100 } = {}) {
-  const { path } = writeYaml();
-  const state = { content, fires: 0 };
+  const { path, dir } = writeYaml();
+  const state = { content, fires: 0, rootDir: dir };
   const agent = {
     capturePane: async () => state.content,
     sendOnly: async (_name, cmd) => { if (cmd === "/compact") state.fires++; },
@@ -78,6 +98,27 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
     }],
     then: ["exactly one /compact", (state) => {
       expect(state.fires).toBe(1);
+    }],
+  });
+
+  unit("uses per-pane cwd for context fallback instead of shared agent root", {
+    given: ["narrow pane with 314k tokens + 1M model only in .agents/0 jsonl", () => {
+      const oldHome = process.env.HOME;
+      const fakeHome = mkdtempSync(join(tmpdir(), "amux-ac-home-"));
+      process.env.HOME = fakeHome;
+      const h = harness({ content: CONTENT.narrow314k });
+      writeClaudeModel(fakeHome, join(h.state.rootDir, ".agents", "0"), "claude-opus-4-8");
+      return { ...h, oldHome, fakeHome };
+    }],
+    when: ["running poll ticks", async ({ ac, state, oldHome, fakeHome }) => {
+      await ticks(ac, 3);
+      return { state, oldHome, fakeHome };
+    }],
+    then: ["no false /compact fires; 314k is ~31% of the pane's 1M context", ({ state, oldHome, fakeHome }) => {
+      const fires = state.fires;
+      process.env.HOME = oldHome;
+      rmSync(fakeHome, { recursive: true, force: true });
+      expect(fires).toBe(0);
     }],
   });
 });

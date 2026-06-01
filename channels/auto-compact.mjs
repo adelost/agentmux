@@ -10,7 +10,7 @@ import {
   formatCompactedMessage,
 } from "../core/auto-compact.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
-import { getContextFromPane } from "../core/context.mjs";
+import { getContextFromPane, getContextPercent } from "../core/context.mjs";
 import { detectPaneStatus } from "../cli/format.mjs";
 import { readLastTurns, panePathFor } from "../core/jsonl-reader.mjs";
 
@@ -45,6 +45,14 @@ export function createAutoCompact({
   // never auto-compacts (the user can still `amux compact` it by hand).
   const MIN_PANE_HEIGHT = config.minPaneHeight ?? 6;
 
+  function paneDialect(agentConfig, paneIdx) {
+    const pane = agentConfig.panes?.[paneIdx] || {};
+    const cmd = String(pane.cmd || pane.name || "");
+    if (/codex/i.test(cmd)) return "codex";
+    if (/claude/i.test(cmd)) return "claude";
+    return null;
+  }
+
   async function inspect(agentConfig, paneIdx) {
     // Mirrors cli/commands.mjs inspectPane just enough for our decision.
     // Wrapped in try/catch because any pane quirk (just-spawned, dead
@@ -73,7 +81,13 @@ export function createAutoCompact({
       if (Number.isFinite(h)) paneHeight = h;
     } catch {}
 
-    const ctxInfo = getContextFromPane(content, agentConfig.dir || "");
+    const paneDir = panePathFor(agentConfig, paneIdx);
+    const dialect = paneDialect(agentConfig, paneIdx);
+    const ctxInfo = dialect === "codex"
+      ? getContextPercent(paneDir, "codex")
+      : dialect === "claude"
+        ? getContextFromPane(content, paneDir) || getContextPercent(paneDir, "claude")
+        : null;
     const contextPercent = ctxInfo?.percent ?? null;
 
     // Last conversation turn timestamp from jsonl. Used by min-idle gate
@@ -81,7 +95,6 @@ export function createAutoCompact({
     // stalled". Missing jsonl (just-spawned pane, /clear, etc) → null,
     // which lets the gate fall through.
     try {
-      const paneDir = panePathFor(agentConfig, paneIdx);
       const turns = readLastTurns(paneDir, 1);
       if (turns.length && turns[0].timestamp) {
         const t = Date.parse(turns[0].timestamp);
