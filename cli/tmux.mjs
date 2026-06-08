@@ -1,7 +1,10 @@
 // Tmux facade for agent CLI. Bridges agent.mjs primitives with CLI-specific operations.
 // Stateless: all functions take socket + target explicitly.
 
-import { exec as execCb, execSync } from "child_process";
+import { exec as execCb, execSync, fork } from "child_process";
+import { mkdtempSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { promisify } from "util";
 import { createAgent } from "../agent.mjs";
 import { esc, stripAnsi } from "../lib.mjs";
@@ -147,18 +150,13 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
   const channelId = findChannelForPane(ctx.configPath, name, pane);
   if (!channelId) return;
 
-  try {
-    const { sendToChannelId } = await import("./send-notify.mjs");
-    const mirrored = opts.source ? `[${opts.source}] ${text}` : text;
-    await sendToChannelId(channelId, mirrored);
-    // Channel topic is intentionally NOT touched here. Topics are a stable
-    // per-pane summary set via agentmux.yaml `labels` and propagated by
-    // /sync (core/sync-discord.mjs:topicFor). Per-send overwrite was
-    // burning Discord's 2-edits-per-10-min cap and clobbering the
-    // user's manual focus topic on every brief.
-  } catch (err) {
-    console.warn(`mirror ${name}:${pane} → ${channelId}: ${err.message}`);
-  }
+  const mirrored = opts.source ? `[${opts.source}] ${text}` : text;
+  spawnMirrorWorker({ channelId, content: mirrored });
+  // Channel topic is intentionally NOT touched here. Topics are a stable
+  // per-pane summary set via agentmux.yaml `labels` and propagated by
+  // /sync (core/sync-discord.mjs:topicFor). Per-send overwrite was
+  // burning Discord's 2-edits-per-10-min cap and clobbering the
+  // user's manual focus topic on every brief.
 
   // 3. Detached forwarder for the agent's reply. Without this, orchestrator
   //    sends (claw:0 → claw:1 etc) are one-way from Discord's perspective:
@@ -188,10 +186,9 @@ function agentPaneDir(configPath, name, pane) {
   }
 }
 
-async function spawnReplyForwarder(opts) {
+function spawnReplyForwarder(opts) {
   if (!opts.paneDir) return;
   try {
-    const { fork } = await import("child_process");
     const workerPath = new URL("./reply-forwarder-worker.mjs", import.meta.url).pathname;
     const worker = fork(workerPath, [], {
       detached: true,
@@ -202,6 +199,25 @@ async function spawnReplyForwarder(opts) {
     worker.unref();
   } catch (err) {
     console.warn(`reply-fwd spawn failed: ${err.message}`);
+  }
+}
+
+function spawnMirrorWorker(opts) {
+  if (!opts.channelId || !opts.content) return;
+  try {
+    const payloadDir = mkdtempSync(join(tmpdir(), "amux-mirror-"));
+    const payloadPath = join(payloadDir, "payload.json");
+    writeFileSync(payloadPath, JSON.stringify(opts), "utf-8");
+    const workerPath = new URL("./mirror-worker.mjs", import.meta.url).pathname;
+    const worker = fork(workerPath, [], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, AMUX_MIRROR_OPTS_FILE: payloadPath },
+    });
+    worker.channel?.unref?.();
+    worker.unref();
+  } catch (err) {
+    console.warn(`mirror worker spawn failed: ${err.message}`);
   }
 }
 

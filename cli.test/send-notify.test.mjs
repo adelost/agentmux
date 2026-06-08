@@ -5,6 +5,7 @@ import { tmpdir } from "os";
 import {
   formatUserNotification,
   resolveNotifyUserId,
+  sendToChannelId,
 } from "../cli/send-notify.mjs";
 
 feature("notifyuser helpers", () => {
@@ -51,6 +52,33 @@ feature("notifyuser helpers", () => {
       if (ctx.oldNotifyDiscord === undefined) delete process.env.AMUX_NOTIFY_USER_DISCORD_ID;
       else process.env.AMUX_NOTIFY_USER_DISCORD_ID = ctx.oldNotifyDiscord;
       rmSync(ctx.home, { recursive: true, force: true });
+    }],
+  });
+});
+
+feature("Discord send helpers", () => {
+  unit("splits long messages instead of truncating at 2000 characters", {
+    given: ["mocked Discord token and fetch", () => {
+      const oldToken = process.env.DISCORD_TOKEN;
+      process.env.DISCORD_TOKEN = "test-token";
+      const calls = [];
+      const oldFetch = global.fetch;
+      global.fetch = async (_url, opts) => {
+        calls.push(JSON.parse(opts.body).content);
+        return { ok: true, json: async () => ({ id: String(calls.length) }) };
+      };
+      return { calls, oldFetch, oldToken };
+    }],
+    when: ["sending a long message", async (ctx) => {
+      await sendToChannelId("channel-1", "å".repeat(2500));
+      return ctx;
+    }],
+    then: ["all content is sent across chunks", ({ calls, oldFetch, oldToken }) => {
+      expect(calls.length).toBeGreaterThan(1);
+      expect(calls.join("")).toBe("å".repeat(2500));
+      global.fetch = oldFetch;
+      if (oldToken === undefined) delete process.env.DISCORD_TOKEN;
+      else process.env.DISCORD_TOKEN = oldToken;
     }],
   });
 });

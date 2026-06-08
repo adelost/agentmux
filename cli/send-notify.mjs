@@ -8,6 +8,7 @@
 import { createHash } from "crypto";
 import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import { splitMessage } from "../lib.mjs";
 
 const GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789";
 const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || (() => {
@@ -20,6 +21,7 @@ const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || (() => {
 const CHANNEL_CACHE = join(process.env.HOME, ".openclaw/.channel-cache.json");
 const NOTIFY_USER_STATE = join(process.env.HOME, ".openclaw/.notifyuser-state.json");
 const DEFAULT_NOTIFY_USER_DEDUPE_MS = 10 * 60 * 1000;
+const DISCORD_POST_TIMEOUT_MS = Number.parseInt(process.env.AMUX_DISCORD_POST_TIMEOUT_MS || "8000", 10);
 
 /** Resolve channel name to Discord channel ID. */
 export function resolveChannelId(channelName) {
@@ -118,14 +120,22 @@ function getDiscordBotToken() {
 async function discordPost(channelId, content) {
   const token = getDiscordBotToken();
   if (!token) throw new Error("DISCORD_TOKEN not found — cannot mirror");
-  const res = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bot ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ content: content.slice(0, 2000) }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DISCORD_POST_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bot ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ content: content.slice(0, 2000) }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`discord post ${res.status}: ${body}`);
@@ -247,12 +257,15 @@ export async function setChannelTopicThrottled(channelId, topic, minIntervalMs =
 export async function sendToChannel(channelName, message) {
   const channelId = resolveChannelId(channelName);
   if (!channelId) throw new Error(`Channel '${channelName}' not found in cache`);
-  return discordPost(channelId, message);
+  return sendToChannelId(channelId, message);
 }
 
 /** Send a message directly to a Discord channel by raw channel ID. */
 export async function sendToChannelId(channelId, message) {
-  return discordPost(channelId, message);
+  const chunks = splitMessage(String(message || ""));
+  const results = [];
+  for (const chunk of chunks) results.push(await discordPost(channelId, chunk));
+  return results;
 }
 
 export function resolveNotifyUserId(explicitUserId) {
