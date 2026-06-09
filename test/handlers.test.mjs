@@ -280,15 +280,42 @@ feature("processMessage pipeline (delivery)", () => {
     }],
   });
 
-  component("replies with error message on sendOnly failure", {
-    given: ["agent that throws", () => {
+  component("leaked tmux error on send does not fail delivery when echo confirms", {
+    // Regression (2026-06-09): a user scrolling the target pane fired conf
+    // bindings chaining `send-keys -X scroll-*`; copy-mode (-e) auto-exited
+    // at the bottom mid-chain and tmux attributed "not in a mode" errors to
+    // the bridge's one-shot send client. The old code let that throw skip
+    // echo verification entirely and mirrored raw stderr ("not in a mode"
+    // ×3) to Discord even though delivery could still succeed. Delivery is
+    // judged by the echo check, not by tmux's exit code.
+    given: ["sendOnly throws a foreign tmux error but the prompt echoes", () => {
+      const s = setup();
+      s.agent.sendOnly.mockRejectedValue(new Error("Command failed: tmux send-keys\nnot in a mode\nnot in a mode\nnot in a mode"));
+      s.agent.waitForPromptEcho.mockResolvedValue(true);
+      return { ...s, msg: mockMsg({ content: "ok.. kan du köra resten?" }) };
+    }],
+    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["no raw stderr reply, no failure warning", (_, { msg }) => {
+      expect(msg.reply).not.toHaveBeenCalled();
+      const sends = msg.send.mock.calls.map((c) => c[0]);
+      expect(sends.some((s) => typeof s === "string" && s.includes("not in a mode"))).toBe(false);
+    }],
+  });
+
+  component("persistent sendOnly failure exhausts retries and warns (no raw stderr)", {
+    given: ["sendOnly always throws, never echoes, pane idle", () => {
       const s = setup();
       s.agent.sendOnly.mockRejectedValue(new Error("connection lost"));
+      s.agent.waitForPromptEcho.mockResolvedValue(false);
+      s.agent.isBusy.mockResolvedValue(false);
       return { ...s, msg: mockMsg({ content: "broken" }) };
     }],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["replies with error", (_, { msg }) => {
-      expect(msg.reply).toHaveBeenCalledWith("connection lost");
+    then: ["3 attempts made, friendly warning sent instead of raw error reply", (_, { msg, agent }) => {
+      expect(agent.sendOnly.mock.calls.length).toBe(3);
+      const sends = msg.send.mock.calls.map((c) => c[0]);
+      expect(sends.some((s) => typeof s === "string" && s.includes("3 attempts"))).toBe(true);
+      expect(msg.reply).not.toHaveBeenCalledWith("connection lost");
     }],
   });
 

@@ -431,7 +431,17 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         for (let attempt = 1; attempt <= 3; attempt++) {
           await agent.dismissBlockingPrompt(target)
             .catch((err) => console.warn(`dismiss attempt ${attempt} failed: ${err.message}`));
-          await agent.sendOnly(mapping.name, promptToSend, pane);
+          // A thrown send must NOT abort the retry loop — delivery is judged
+          // by the echo check below, not by tmux's exit code. tmux can fail
+          // the bridge's one-shot client with errors that aren't ours: a user
+          // scrolling the pane fires conf bindings chaining
+          // `send-keys -X scroll-*`, and when copy-mode (-e) auto-exits at
+          // the bottom mid-chain the leftover -X commands error
+          // "not in a mode" — attributed to whichever command client is
+          // connected right then. The keys may have landed anyway, so fall
+          // through to echo/busy verification and let attempts 2-3 resend.
+          await agent.sendOnly(mapping.name, promptToSend, pane)
+            .catch((err) => console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} send attempt ${attempt} errored (verifying echo anyway): ${err.message.split("\n").slice(0, 2).join(" | ")}`));
 
           const echoed = await agent.waitForPromptEcho(mapping.name, pane, cleanPrompt, echoTimeout);
           if (echoed) { delivered = true; break; }
