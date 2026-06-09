@@ -133,6 +133,33 @@ feature("getContextPercent (claude): model-based max lookup", () => {
       cleanup();
     }],
   });
+
+  unit("fable-5 at 174k uses 1M max → 17% (not 87%)", {
+    // Regression: the jsonl records "claude-fable-5" (no [1m] suffix), which
+    // matched no family → 200k default → an idle fable pane at 174k read as
+    // 87% and was auto-compacted mid-task. Second occurrence of the
+    // new-name-falls-to-200k class (first was opus-4-8).
+    given: ["174k usage on claude-fable-5", () => setupFakeClaudeContext({ model: "claude-fable-5", cacheRead: 174_000 })],
+    when: ["getting context", ({ paneDir }) => getContextPercent(paneDir, "claude")],
+    then: ["17% of 1M, not 87% of 200k", (r, { cleanup }) => {
+      expect(r.tokens).toBe(174_000);
+      expect(r.percent).toBe(17);
+      cleanup();
+    }],
+  });
+
+  unit("unknown NEW claude family defaults to 1M (safe direction)", {
+    // The durable class-fix: a family name we've never seen must not fall to
+    // 200k (over-report → false compact destroys live context). Worst case of
+    // assuming 1M for a true-200k model is a late/never amux compact — Claude
+    // Code's own compaction still protects the pane.
+    given: ["hypothetical claude-zephyr-6 at 250k usage", () => setupFakeClaudeContext({ model: "claude-zephyr-6", cacheRead: 250_000 })],
+    when: ["getting context", ({ paneDir }) => getContextPercent(paneDir, "claude")],
+    then: ["25% of 1M", (r, { cleanup }) => {
+      expect(r.percent).toBe(25);
+      cleanup();
+    }],
+  });
 });
 
 feature("getContextFromPane: reads from pane content (per-pane correct)", () => {

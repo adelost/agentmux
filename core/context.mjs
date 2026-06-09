@@ -69,19 +69,31 @@ const CLAUDE_MODEL_MAX = {
   // (empty — opus/sonnet handled by family heuristic, haiku by family floor)
 };
 
-// Family → context window. Opus and Sonnet (4.x and forward) run the 1M-context
-// beta under Claude Code; Haiku tops out at 200k. Keying off the family rather
-// than an exact-version allowlist means future models (claude-opus-4-9,
-// claude-sonnet-5-0, …) get the right window with no code change — that
-// allowlist staleness is exactly what made an opus-4-8 pane misread 288k/200k
-// as 100% and fire false auto-compacts. The failure direction is now safe: an
-// unknown future Opus we wrongly assume is 1M only ever UNDER-reports % (a late
-// compact, harmless) rather than the false-100% that destroys live context, and
-// the self-correcting ceiling (max = max(declared, total)) still caps >100%.
+// Family → context window. Opus, Sonnet and Fable (4.x and forward) run the
+// 1M-context beta under Claude Code; Haiku tops out at 200k. Keying off the
+// family rather than an exact-version allowlist means future models
+// (claude-opus-4-9, claude-sonnet-5-0, …) get the right window with no code
+// change — that allowlist staleness is exactly what made an opus-4-8 pane
+// misread 288k/200k as 100% and fire false auto-compacts. The failure
+// direction is now safe: an unknown future Opus we wrongly assume is 1M only
+// ever UNDER-reports % (a late compact, harmless) rather than the false-100%
+// that destroys live context, and the self-correcting ceiling
+// (max = max(declared, total)) still caps >100%.
 const CLAUDE_FAMILY_MAX = [
-  [/^claude-(opus|sonnet)-/, 1_000_000],
+  [/^claude-(opus|sonnet|fable)-/, 1_000_000],
   [/^claude-haiku-/, 200_000],
 ];
+
+// Unknown claude-* FAMILY (a name not in the table above — fable was the
+// second burn after opus-4-8) defaults to 1M, not 200k. Rationale: every new
+// big model under Claude Code has shipped with the 1M window, and the failure
+// directions are asymmetric — assuming 1M for a true-200k model means amux
+// never auto-compacts it (Claude Code's own compaction still protects the
+// pane), while assuming 200k for a true-1M model fires a false /compact that
+// destroys live context (observed: fable pane at 174k read as 87% and got
+// force-compacted mid-task). Only haiku is known-small, and it is matched
+// explicitly above. Non-claude / missing model strings keep the 200k default.
+const CLAUDE_UNKNOWN_FAMILY_MAX = 1_000_000;
 
 function claudeMaxForModel(model) {
   if (!model) return CLAUDE_DEFAULT_MAX;
@@ -99,6 +111,9 @@ function claudeMaxForModel(model) {
   for (const [pattern, max] of CLAUDE_FAMILY_MAX) {
     if (pattern.test(model)) return max;
   }
+  // New claude family we've never seen → assume the big window (safe
+  // direction: worst case a late compact, never a false one).
+  if (/^claude-/.test(model)) return CLAUDE_UNKNOWN_FAMILY_MAX;
   return CLAUDE_DEFAULT_MAX;
 }
 
