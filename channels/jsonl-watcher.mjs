@@ -39,7 +39,7 @@ import { loadConfig, findChannelForPane, channelForPane } from "../cli/config.mj
 import { paneDir } from "../agent.mjs";
 import { readLastTurns, latestJsonlMtime, latestJsonlInfo } from "../core/jsonl-reader.mjs";
 import { readLastTurnsCodex, latestCodexJsonlMtime, latestCodexJsonlInfo } from "../core/codex-jsonl-reader.mjs";
-import { getContextFromPane } from "../core/context.mjs";
+import { getContextFromPane, shortModelName } from "../core/context.mjs";
 import { applyPostFailure, applyPostSuccess, planPaneMirrorStep } from "../core/watcher-engine.mjs";
 import { createPaneQueue } from "../core/pane-queue.mjs";
 
@@ -258,7 +258,9 @@ export function createJsonlWatcher({
       if (ctx) {
         // tokens can be null when percent came from a custom statusline row.
         const suffix = ctx.tokens != null ? ` (${Math.round(ctx.tokens / 1000)}k)` : "";
-        await discord.send(channelId, `_context: ${ctx.percent}%${suffix}_`)
+        const model = shortModelName(ctx.model);
+        const prefix = model ? `${model} · ` : "";
+        await discord.send(channelId, `_${prefix}context: ${ctx.percent}%${suffix}_`)
           .catch((err) => log(`context-footer ${name}:${idx}: ${err.message}`));
       }
     } catch (err) {
