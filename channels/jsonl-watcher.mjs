@@ -238,20 +238,27 @@ export function createJsonlWatcher({
     // Fall back to jsonl if the pane has no visible token line (idle
     // narrow pane, just-spawned, etc).
     try {
+      // One source of truth: agent.getContext is pane-first (CC's own
+      // percent, incl. custom-statusline rows) with jsonl fallback.
       let ctx = null;
-      try {
-        const cfg = config || loadConfig(agentsYamlPath);
-        const entryDir = cfg?.[name]?.dir;
-        if (entryDir) {
-          const dir = paneDir(entryDir, idx);
-          const content = await agent.capturePane(name, idx, 100);
-          ctx = getContextFromPane(content, dir);
-        }
-      } catch { /* fall through to jsonl */ }
-      if (!ctx) ctx = agent.getContextPercent?.(name, idx);
+      if (agent.getContext) {
+        ctx = await agent.getContext(name, idx);
+      } else {
+        try {
+          const cfg = config || loadConfig(agentsYamlPath);
+          const entryDir = cfg?.[name]?.dir;
+          if (entryDir) {
+            const dir = paneDir(entryDir, idx);
+            const content = await agent.capturePane(name, idx, 100);
+            ctx = getContextFromPane(content, dir);
+          }
+        } catch { /* fall through to jsonl */ }
+        if (!ctx) ctx = agent.getContextPercent?.(name, idx);
+      }
       if (ctx) {
-        const k = Math.round(ctx.tokens / 1000);
-        await discord.send(channelId, `_context: ${ctx.percent}% (${k}k)_`)
+        // tokens can be null when percent came from a custom statusline row.
+        const suffix = ctx.tokens != null ? ` (${Math.round(ctx.tokens / 1000)}k)` : "";
+        await discord.send(channelId, `_context: ${ctx.percent}%${suffix}_`)
           .catch((err) => log(`context-footer ${name}:${idx}: ${err.message}`));
       }
     } catch (err) {

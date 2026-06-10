@@ -9,7 +9,7 @@ import { extractText, extractLastTurn, classifyLines, extractSegments, extractMi
 import { detectDialect } from "./core/dialects.mjs";
 import { extractFromJsonl, isBusyFromJsonl, isPromptInJsonl } from "./core/jsonl-reader.mjs";
 import { extractFromCodexJsonl, isBusyFromCodexJsonl, isPromptInCodexJsonl } from "./core/codex-jsonl-reader.mjs";
-import { getContextPercent as getContextPercentByDialect } from "./core/context.mjs";
+import { getContextPercent as getContextPercentByDialect, getContextFromPane } from "./core/context.mjs";
 import { findBlockingPrompt } from "./core/dismiss.mjs";
 import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
 import { buildResumeHint } from "./core/resume-hint.mjs";
@@ -1276,6 +1276,28 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
   }
 
+  /**
+   * Pane-first context read: prefer the percent Claude Code itself renders
+   * (status block or custom statusline) over recomputed jsonl math. The two
+   * disagree near the limit — jsonl math divides by the RAW model window
+   * while Claude Code measures against usable-space-before-autocompact
+   * (2026-06-10 incident: 77% vs 92% on the same pane) — and Claude Code's
+   * number is the one its own compaction acts on. Falls back to the jsonl
+   * path when the pane shows no usable numbers (capture failed, tiny pane).
+   */
+  async function getContext(agentName, pane = 0) {
+    try {
+      if (paneDialectName(agentName, pane) === "claude") {
+        const config = agentConfig(agentName);
+        const dir = paneDir(config.dir, pane);
+        const content = await capturePane(agentName, pane, 100);
+        const fromPane = getContextFromPane(content, dir);
+        if (fromPane) return fromPane;
+      }
+    } catch { /* fall through to jsonl */ }
+    return getContextPercent(agentName, pane);
+  }
+
   // --- Low-level (exposed for CLI) ---
 
   async function sendEscape(agentName, pane) {
@@ -1291,6 +1313,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     ensureReady, sendAndWait, sendOnly,
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
     capturePane, sendEscape, dismissBlockingPrompt, waitForPromptEcho,
-    startProgressTimer, getContextPercent, checkAgent, reconcileSession,
+    startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession,
   };
 }

@@ -67,6 +67,9 @@ const HELP_TEXT = [
 
 function formatContext(ctx) {
   if (!ctx) return "";
+  // tokens can be null when percent came from a custom statusline row
+  // (Claude Code's own number) and the jsonl had no usage to display.
+  if (ctx.tokens == null) return `\n_context: ${ctx.percent}%_`;
   const k = Math.round(ctx.tokens / 1000);
   return `\n_context: ${ctx.percent}% (${k}k)_`;
 }
@@ -182,7 +185,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           const unsent = segments.slice(sentCount);
           if (unsent.length) {
             const text = unsent.join("\n\n").trim();
-            const context = agent.getContextPercent(mapping.name, pane);
+            const context = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
             for (const chunk of splitMessage(text + formatContext(context))) {
               await msg.send(chunk).catch((err) =>
                 console.warn(`follow: send chunk failed: ${err.message}`));
@@ -226,7 +229,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       const busy = await agent.isBusy(mapping.name, pane);
       if (!busy) {
         const text = await agent.getResponse(mapping.name, pane);
-        const context = agent.getContextPercent(mapping.name, pane);
+        const context = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
         await sendTextReply(msg, text, context);
         return;
       }
@@ -248,7 +251,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
             const segments = await agent.getResponseSegments(mapping.name, pane);
             const unsent = segments.slice(progress.sentCount());
             const text = unsent.join("\n\n").trim();
-            const context = agent.getContextPercent(mapping.name, pane);
+            const context = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
             if (text) await sendTextReply(msg, text, context);
             else if (context) await msg.reply(formatContext(context).trim());
             resolve();
@@ -264,14 +267,16 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     "/raw": async (msg, mapping, pane) => {
       const text = await agent.capturePane(mapping.name, pane);
-      const context = agent.getContextPercent(mapping.name, pane);
+      const context = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
       await sendTextReply(msg, text, context);
     },
 
     "/status": async (msg, mapping, pane) => {
       const override = overrides.has(msg.channelId) ? " (override)" : "";
-      const context = agent.getContextPercent(mapping.name, pane);
-      const ctxStr = context ? `${context.percent}% (${Math.round(context.tokens / 1000)}k)` : "unknown";
+      const context = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
+      const ctxStr = context
+        ? `${context.percent}%${context.tokens != null ? ` (${Math.round(context.tokens / 1000)}k)` : ""}`
+        : "unknown";
       await msg.reply(`**${mapping.name}** pane ${pane}${override} · context: ${ctxStr}`);
     },
 

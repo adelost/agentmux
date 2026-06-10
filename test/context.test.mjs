@@ -302,3 +302,52 @@ feature("getContextFromPane: reads from pane content (per-pane correct)", () => 
     then: ["null", (r) => { expect(r).toBeNull(); }],
   });
 });
+
+feature("getContextFromPane: custom statusline row is CC's own percent (2026-06-10 incident)", () => {
+  // The live shape: custom statusline shows model + bar + percent on ONE
+  // line, with NO "N tokens" counter anywhere. The old parser returned null
+  // → jsonl fallback divided by the RAW window (769k/1M = 77%) while Claude
+  // Code's own number (vs usable-before-autocompact) was 92%.
+  const CUSTOM_STATUSLINE = [
+    "❯ ",
+    "",
+    "↑ /gsd-update | claude-fable-5[1m] | 2 \u{1F480} | ▓▓▓▓▓▓▓▓░░ 92%",
+  ].join("\n");
+
+  unit("incident shape: statusline 92% wins over jsonl math (77%)", {
+    given: ["custom statusline pane + jsonl with 769k tokens", () => {
+      const ctx = setupFakeClaudeContext({ model: "claude-fable-5", cacheRead: 769_000 });
+      return { content: CUSTOM_STATUSLINE, paneDir: ctx.paneDir, cleanup: ctx.cleanup };
+    }],
+    when: ["parsing pane", ({ content, paneDir }) => getContextFromPane(content, paneDir)],
+    then: ["92% (CC's number), tokens 769k from jsonl for display", (r, { cleanup }) => {
+      expect(r).not.toBeNull();
+      expect(r.percent).toBe(92);
+      expect(r.tokens).toBe(769_000);
+      cleanup();
+    }],
+  });
+
+  unit("statusline without jsonl: percent stands alone, tokens null", {
+    when: ["parsing pane with no paneDir", () => getContextFromPane(CUSTOM_STATUSLINE)],
+    then: ["92%, tokens null", (r) => {
+      expect(r).not.toBeNull();
+      expect(r.percent).toBe(92);
+      expect(r.tokens).toBeNull();
+    }],
+  });
+
+  unit("chat text mentioning model + percent does NOT false-match (no bar/pipe)", {
+    when: ["parsing chat-like content", () => getContextFromPane(
+      "some output\nclaude-fable-5 uses 92% less memory than before\n❯ ",
+    )],
+    then: ["null", (r) => { expect(r).toBeNull(); }],
+  });
+
+  unit("progress bar with percent but no model id does NOT false-match", {
+    when: ["parsing a download-bar tail", () => getContextFromPane(
+      "Downloading weights\n▓▓▓▓▓░░░░░ 48%\n❯ ",
+    )],
+    then: ["null", (r) => { expect(r).toBeNull(); }],
+  });
+});

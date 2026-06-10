@@ -312,6 +312,49 @@ export function getContextPercent(paneDir, dialect) {
 const BLOCK_CHARS = /[█▓▒░]/;
 
 /**
+ * Read Claude Code's OWN context percent from a custom statusline row.
+ *
+ * Why this exists (2026-06-10 incident): a pane with a custom statusline
+ * ("/gsd-update | claude-fable-5[1m] | ▓▓░░ 92%") has NO "N tokens" counter
+ * line, so the token-anchored parse fails and callers fall back to jsonl
+ * math — which divides by the RAW model window (769k/1M = 77%) while Claude
+ * Code's number is measured against usable-space-before-autocompact (92%).
+ * The two can differ by 15+ points near the limit, exactly where it matters.
+ * Claude Code's own rendered percent is the truth users see and the number
+ * its compaction acts on, so when it is on screen, never recompute it.
+ *
+ * Anchors (all three required, bottom-15 lines only, to keep pasted chat
+ * logs / download bars from false-matching):
+ *   - a claude model id on the line ("claude-fable-5[1m]")
+ *   - a percent
+ *   - statusline shape: a progress bar OR pipe-separated segments
+ *
+ * Tokens are not on the statusline row; they come from the jsonl fallback
+ * purely for display ("(769k)") and may be null. Consumers must treat
+ * percent as the authoritative field.
+ */
+function getContextFromStatusline(tail, paneDir = null) {
+  const bottom = tail.slice(-15);
+  for (let i = bottom.length - 1; i >= 0; i--) {
+    const line = bottom[i];
+    if (!/claude-[a-z][\w.-]*/i.test(line)) continue;
+    if (!(BLOCK_CHARS.test(line) || line.includes("|"))) continue;
+    const matches = [...line.matchAll(/(\d{1,3})\s*%/g)];
+    if (!matches.length) continue;
+    const percent = parseInt(matches[matches.length - 1][1]);
+    if (percent < 0 || percent > 100) continue;
+    let tokens = null;
+    if (paneDir) {
+      try {
+        tokens = getContextFromClaudeJsonl(paneDir)?.tokens ?? null;
+      } catch { /* display-only — percent stands alone */ }
+    }
+    return { percent, tokens };
+  }
+  return null;
+}
+
+/**
  * Extract context usage from a tmux pane's captured content.
  *
  * Handles three visible states:
@@ -354,7 +397,7 @@ export function getContextFromPane(paneContent, paneDir = null) {
       break;
     }
   }
-  if (tokens === null) return null;
+  if (tokens === null) return getContextFromStatusline(tail, paneDir);
 
   // Percent from the progress bar that belongs to the same visible status
   // block as the token counter. Do not let an idle "save N tokens" hint
