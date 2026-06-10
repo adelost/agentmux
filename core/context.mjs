@@ -185,7 +185,11 @@ function getContextFromClaudeJsonl(paneDir) {
       // >100% nonsense.
       const declared = claudeMaxForModel(entry.message?.model);
       const max = Math.max(declared, total);
-      return { percent: Math.round((total / max) * 100), tokens: total };
+      return {
+        percent: Math.round((total / max) * 100),
+        tokens: total,
+        model: entry.message?.model ?? null,
+      };
     } catch {
       // malformed line, try the next
     }
@@ -337,7 +341,8 @@ function getContextFromStatusline(tail, paneDir = null) {
   const bottom = tail.slice(-15);
   for (let i = bottom.length - 1; i >= 0; i--) {
     const line = bottom[i];
-    if (!/claude-[a-z][\w.-]*/i.test(line)) continue;
+    const modelMatch = line.match(/claude-[a-z][\w.-]*(\[\d+m\])?/i);
+    if (!modelMatch) continue;
     if (!(BLOCK_CHARS.test(line) || line.includes("|"))) continue;
     const matches = [...line.matchAll(/(\d{1,3})\s*%/g)];
     if (!matches.length) continue;
@@ -349,9 +354,18 @@ function getContextFromStatusline(tail, paneDir = null) {
         tokens = getContextFromClaudeJsonl(paneDir)?.tokens ?? null;
       } catch { /* display-only — percent stands alone */ }
     }
-    return { percent, tokens };
+    return { percent, tokens, model: modelMatch[0] };
   }
   return null;
+}
+
+/**
+ * Display-short model name: "claude-fable-5[1m]" → "fable-5·1m",
+ * "claude-opus-4-8" → "opus-4-8". Null-safe for unknown/missing.
+ */
+export function shortModelName(model) {
+  if (!model) return null;
+  return model.replace(/^claude-/, "").replace(/\[1m\]$/i, "·1m");
 }
 
 /**
@@ -427,5 +441,9 @@ export function getContextFromPane(paneContent, paneDir = null) {
     percent = Math.min(100, Math.round((tokens / max) * 100));
   }
 
-  return { percent, tokens };
+  let model = null;
+  if (paneDir) {
+    try { model = readLatestClaudeModel(paneDir); } catch { /* display-only */ }
+  }
+  return { percent, tokens, model };
 }

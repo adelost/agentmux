@@ -7,6 +7,7 @@ import { executeSync } from "./core/sync-discord.mjs";
 import { countTurnsSince, panePathFor, readLastTurns } from "./core/jsonl-reader.mjs";
 import { checkLoopGuard, loopGuardKey, formatLoopGuardWarning, readLoopGuardConfig } from "./core/loop-guard.mjs";
 import { formatCatchupPreview } from "./core/catchup-format.mjs";
+import { shortModelName } from "./core/context.mjs";
 
 /**
  * Reconcile every configured agent's live tmux session against the
@@ -50,7 +51,8 @@ const HELP_TEXT = [
   "`/help` — show this message",
   "`/peek` — last response from agent",
   "`/raw` — last 50 lines of tmux pane (raw)",
-  "`/status` — current agent, pane, context%",
+  "`/status` — current agent, pane, model, context%",
+  "`/model` — show current model; `/model <name>` — switch (fable/opus/sonnet/haiku)",
   "`/dismiss` — dismiss blocking prompt (survey etc.)",
   "`/esc` — interrupt (send Escape)",
   "`/use <agent>[.pane]` — switch channel target",
@@ -67,11 +69,13 @@ const HELP_TEXT = [
 
 function formatContext(ctx) {
   if (!ctx) return "";
+  const model = shortModelName(ctx.model);
+  const prefix = model ? `${model} · ` : "";
   // tokens can be null when percent came from a custom statusline row
   // (Claude Code's own number) and the jsonl had no usage to display.
-  if (ctx.tokens == null) return `\n_context: ${ctx.percent}%_`;
+  if (ctx.tokens == null) return `\n_${prefix}context: ${ctx.percent}%_`;
   const k = Math.round(ctx.tokens / 1000);
-  return `\n_context: ${ctx.percent}% (${k}k)_`;
+  return `\n_${prefix}context: ${ctx.percent}% (${k}k)_`;
 }
 
 function sendTextReply(msg, text, context) {
@@ -277,7 +281,38 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       const ctxStr = context
         ? `${context.percent}%${context.tokens != null ? ` (${Math.round(context.tokens / 1000)}k)` : ""}`
         : "unknown";
-      await msg.reply(`**${mapping.name}** pane ${pane}${override} · context: ${ctxStr}`);
+      const modelStr = shortModelName(context?.model);
+      const modelPart = modelStr ? ` · model: ${modelStr}` : "";
+      await msg.reply(`**${mapping.name}** pane ${pane}${override}${modelPart} · context: ${ctxStr}`);
+    },
+
+    // Bare /model replies with the pane's current model (read from the
+    // statusline/jsonl — no pane interaction). With an argument it forwards
+    // "/model <name>" into the pane so Claude Code itself switches; the
+    // change shows on the NEXT assistant turn's footer (jsonl records the
+    // model per turn, so instant verification here would read the OLD one).
+    "/model": async (msg, mapping, pane, args) => {
+      const name = (args || "").trim();
+      if (!name) {
+        const ctx = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
+        const current = shortModelName(ctx?.model) || ctx?.model;
+        await msg.reply(current
+          ? `**${mapping.name}** pane ${pane} · model: ${current}\nSwitch with \`//model <name>\` (e.g. fable, opus, sonnet, haiku)`
+          : "model unknown (no jsonl/statusline data yet)");
+        return;
+      }
+      // Loose whitelist: model ids/aliases only — never arbitrary text into
+      // the pane from a typo'd Discord message.
+      if (!/^[a-z0-9._\[\]-]+$/i.test(name)) {
+        await msg.reply(`invalid model name: \`${name}\``);
+        return;
+      }
+      try {
+        await agent.sendOnly(mapping.name, `/model ${name}`, pane);
+        await msg.reply(`sent \`/model ${name}\` — verify on the next turn's footer (or \`//model\`)`);
+      } catch (err) {
+        await msg.reply(`/model failed: ${err.message}`).catch(() => {});
+      }
     },
 
     "/dismiss": async (msg, mapping, pane) => {

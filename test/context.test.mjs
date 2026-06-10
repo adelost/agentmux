@@ -2,7 +2,7 @@ import { feature, unit, expect } from "bdd-vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { getContextPercent, getContextFromPane } from "../core/context.mjs";
+import { getContextPercent, getContextFromPane, shortModelName } from "../core/context.mjs";
 
 /**
  * Build a claude project jsonl with a single assistant event carrying a
@@ -334,6 +334,26 @@ feature("getContextFromPane: custom statusline row is CC's own percent (2026-06-
       expect(r).not.toBeNull();
       expect(r.percent).toBe(92);
       expect(r.tokens).toBeNull();
+    }],
+  });
+
+  unit("statusline carries the model id (incl [1m] suffix)", {
+    when: ["parsing pane", () => getContextFromPane(CUSTOM_STATUSLINE)],
+    then: ["model claude-fable-5[1m]", (r) => {
+      expect(r.model).toBe("claude-fable-5[1m]");
+    }],
+  });
+
+  unit("shortModelName: display-short forms", {
+    when: ["mapping names", () => [
+      shortModelName("claude-fable-5[1m]"),
+      shortModelName("claude-opus-4-8"),
+      shortModelName(null),
+    ]],
+    then: ["fable-5·1m / opus-4-8 / null", (r) => {
+      expect(r[0]).toBe("fable-5·1m");
+      expect(r[1]).toBe("opus-4-8");
+      expect(r[2]).toBeNull();
     }],
   });
 
