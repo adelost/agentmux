@@ -437,7 +437,32 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     try { await tmux(`has-session -t '${esc(name)}'`); return true; } catch { return false; }
   }
 
+  // Strip Claude-session identity vars from tmux's global environment.
+  // If the tmux SERVER was started from inside a Claude Code session (e.g.
+  // `amux serve` run by an agent's Bash tool), every new pane inherits
+  // CLAUDECODE/CLAUDE_CODE_CHILD_SESSION/CLAUDE_CODE_SESSION_ID — and any
+  // claude launched there believes it's a child of that session and SILENTLY
+  // STOPS PERSISTING its transcript jsonl (2026-06-11 incident: no Discord
+  // mirroring, invisible replies across all agents after a reboot recovery).
+  async function sanitizeTmuxGlobalEnv() {
+    let names = [];
+    try {
+      const { stdout } = await tmux(`show-environment -g`);
+      names = stdout.split("\n")
+        .map((l) => l.split("=")[0])
+        .filter((n) => /^(CLAUDECODE$|CLAUDE_CODE_|CLAUDE_EFFORT$|AI_AGENT$)/.test(n));
+    } catch (err) {
+      console.warn(`sanitizeTmuxGlobalEnv: show-environment failed: ${err.message}`);
+      return;
+    }
+    for (const n of names) {
+      await tmux(`set-environment -g -u '${esc(n)}'`).catch((err) =>
+        console.warn(`sanitizeTmuxGlobalEnv: unset ${n} failed: ${err.message}`));
+    }
+  }
+
   async function ensureSession(name) {
+    await sanitizeTmuxGlobalEnv();
     if (await hasSession(name)) return;
     await tmux(`new-session -d -s '${esc(name)}'`);
     await tmux(`source-file ~/.tmux.conf`).catch((err) =>
@@ -1322,5 +1347,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
     capturePane, sendEscape, dismissBlockingPrompt, waitForPromptEcho,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession,
+    sanitizeTmuxGlobalEnv,
   };
 }
