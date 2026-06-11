@@ -670,7 +670,15 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
           // pane is used.
           await tmux(`respawn-pane -k -t '${esc(target)}' -c '${esc(respawnDir)}'`);
         } else {
-          await tmux(`respawn-pane -k -t '${esc(target)}' -c '${esc(respawnDir)}' '${esc(want.cmd)}'`);
+          // Services must mirror setupPanes: shell pane + send-keys
+          // 'cd <root> && cmd'. Services run from the repo root (that's
+          // where Makefile/package.json live), not .agents/N. And the
+          // command must run INSIDE a shell — with respawn-pane '<cmd>'
+          // the command IS the pane process, so a service that exits
+          // immediately closes the pane, renumbers the rest, and makes
+          // every later respawn target miss ("can't find pane: N").
+          await tmux(`respawn-pane -k -t '${esc(target)}' -c '${esc(cfg.dir)}'`);
+          await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(cfg.dir)} && ${want.cmd}' Enter`);
         }
         summary.respawned.push({ pane: i, was: currCmd, expected: want.name });
       } catch (err) {
