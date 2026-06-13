@@ -121,4 +121,43 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
       expect(fires).toBe(0);
     }],
   });
+
+  // Regression: a status-flickering pane (codex stream redraws read as idle on
+  // some polls, below-threshold/active on the next) made decide() oscillate
+  // warn↔cancel, re-posting "Auto-compact in 60s" EVERY poll — the skybar:4
+  // Discord flood. The warn-cooldown bounds the POST rate per pane without
+  // touching the state machine. Here we alternate over-threshold (→warn) /
+  // below-threshold (→cancel, clears the warning) so the pane re-enters "warn"
+  // every other tick.
+  unit("status-flickering pane posts at most ONE warning per cooldown (no flood)", {
+    given: ["a pane alternating 100% (warn) / 30% (cancel) each tick, channel mapped", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-ac-cd-"));
+      const path = join(dir, "agents.yaml");
+      // `discord: chan` maps pane 0 → a channel so postWarning actually sends.
+      writeFileSync(path, `test:\n  dir: ${dir}\n  id: 00000000-0000-0000-0000-000000000099\n  discord: "chan-1"\n  panes:\n    - name: claude\n      cmd: claude\n`);
+      const state = { content: CONTENT.full100, warns: 0, rootDir: dir };
+      const agent = {
+        capturePane: async () => state.content,
+        sendOnly: async () => {},
+      };
+      const tmux = async () => ({ stdout: `0 50` });
+      const discord = { send: async (_id, msg) => { if (/Auto-compact in/.test(msg)) state.warns++; } };
+      // graceMs 0 + the cancel tick between warns keeps it in warn churn (never
+      // matures to compact); minIdleMs 0 isolates the cooldown; default 10-min
+      // warnCooldownMs must collapse the repeated warns to one Discord post.
+      const config = { ...DEFAULT_CONFIG, threshold: 70, graceMs: 0, compactLockMs: 0, minIdleMs: 0 };
+      const ac = createAutoCompact({ agent, agentsYamlPath: path, discord, tmux, config, log: () => {} });
+      return { ac, state };
+    }],
+    when: ["10 ticks alternating high/low context (5 warn-eligible)", async ({ ac, state }) => {
+      for (let i = 0; i < 10; i++) {
+        state.content = i % 2 === 0 ? CONTENT.full100 : CONTENT.drop30;
+        await ac.tick(); await yield_();
+      }
+      return state;
+    }],
+    then: ["exactly one warning reached Discord despite 5 warn-eligible ticks", (state) => {
+      expect(state.warns).toBe(1);
+    }],
+  });
 });

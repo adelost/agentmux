@@ -39,6 +39,15 @@ export const DEFAULT_CONFIG = {
                           // turns" false-positives where the pane shows
                           // the idle prompt char but the operator is just
                           // thinking about the next message.
+  warnCooldownMs: 600_000, // 10 minutes. Minimum spacing between Discord
+                          // WARNING posts for the SAME pane (bridge-enforced).
+                          // The decision loop still runs every poll, so
+                          // warn→grace→compact is unaffected; this only stops a
+                          // status-flickering pane (e.g. codex stream redraws
+                          // making decide() oscillate warn↔cancel) from
+                          // re-posting "Auto-compact in 60s" every tick and
+                          // flooding the channel. Override via
+                          // AUTO_COMPACT_WARN_COOLDOWN_MS.
 };
 
 export function parseAutoCompactConfig(env = process.env) {
@@ -50,6 +59,7 @@ export function parseAutoCompactConfig(env = process.env) {
     compactLockMs: parseInt(env.AUTO_COMPACT_LOCK_MS || DEFAULT_CONFIG.compactLockMs, 10),
     minPaneHeight: parseInt(env.AUTO_COMPACT_MIN_PANE_HEIGHT || DEFAULT_CONFIG.minPaneHeight, 10),
     minIdleMs: parseInt(env.AUTO_COMPACT_MIN_IDLE_MS || DEFAULT_CONFIG.minIdleMs, 10),
+    warnCooldownMs: parseInt(env.AUTO_COMPACT_WARN_COOLDOWN_MS || DEFAULT_CONFIG.warnCooldownMs, 10),
   };
 }
 

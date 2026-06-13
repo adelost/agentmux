@@ -13,6 +13,8 @@ import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { getContextFromPane, getContextPercent } from "../core/context.mjs";
 import { detectPaneStatus } from "../cli/format.mjs";
 import { readLastTurns, panePathFor } from "../core/jsonl-reader.mjs";
+import { readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
+import { statSync } from "fs";
 
 // Panes that have warnings pending (paneKey → { warned_at: ms }).
 // Panes currently mid-compact (paneKey string).
@@ -34,6 +36,13 @@ export function createAutoCompact({
   // was a no-op and we stop re-firing. Cleared on "cancel" (context fell below
   // threshold / pane went active).
   const compactFloors = new Map();
+  // paneKey → ms of the last WARNING posted to Discord. Bounds the user-facing
+  // warning rate per pane: a pane that flickers status (codex stream redraws,
+  // a flapping capture) makes decide() oscillate warn↔cancel, which would re-post
+  // a fresh "Auto-compact in 60s" every poll (the observed skybar:4 flood). The
+  // decision/state machine still runs every tick (so warn→grace→compact is
+  // unaffected); we only rate-limit the Discord POST. Naturally expires.
+  const lastWarnPostAt = new Map();
   let intervalId = null;
 
   // Panes shorter than config.minPaneHeight (rows) can't render a coherent
@@ -90,15 +99,34 @@ export function createAutoCompact({
         : null;
     const contextPercent = ctxInfo?.percent ?? null;
 
-    // Last conversation turn timestamp from jsonl. Used by min-idle gate
-    // to distinguish "idle prompt char visible" from "conversation truly
-    // stalled". Missing jsonl (just-spawned pane, /clear, etc) → null,
-    // which lets the gate fall through.
+    // Most-recent activity timestamp, used by the min-idle gate to tell a
+    // truly-stalled pane apart from one that just paused between turns.
+    // Two bugs made this DEAD before:
+    //   1. readLastTurns returns { turns, jsonlFile } — the old code read
+    //      `.length`/`[0]` on that OBJECT, so the guard was always false and
+    //      lastActivityMs stayed null for EVERY pane. The min-idle gate (which
+    //      keys off lastActivityMs != null) therefore never ran at all, so
+    //      auto-compact decided on a single status snapshot alone — and a
+    //      codex pane mid-stream that the snapshot misreads as idle got warned.
+    //   2. readLastTurns only reads the CLAUDE store, so codex panes had no
+    //      activity source regardless.
+    // Now: read the right store per dialect and take the FRESHEST of (newest
+    // finalized turn timestamp, session-file mtime). The mtime catches an
+    // in-progress stream that hasn't flushed a finalized turn yet — exactly the
+    // busy codex pane that was being warned mid-generation.
     try {
-      const turns = readLastTurns(paneDir, 1);
-      if (turns.length && turns[0].timestamp) {
-        const t = Date.parse(turns[0].timestamp);
-        if (Number.isFinite(t)) lastActivityMs = t;
+      const reader = dialect === "codex" ? readLastTurnsCodex : readLastTurns;
+      const res = reader(paneDir, { limit: 1, tailBytes: 64 * 1024 });
+      if (res) {
+        const newest = res.turns?.[res.turns.length - 1];
+        const turnMs = newest?.timestamp ? Date.parse(newest.timestamp) : NaN;
+        let fileMs = NaN;
+        if (res.jsonlFile) { try { fileMs = statSync(res.jsonlFile).mtimeMs; } catch {} }
+        const best = Math.max(
+          Number.isFinite(turnMs) ? turnMs : -Infinity,
+          Number.isFinite(fileMs) ? fileMs : -Infinity,
+        );
+        if (Number.isFinite(best)) lastActivityMs = best;
       }
     } catch {}
 
@@ -201,7 +229,15 @@ export function createAutoCompact({
 
         if (decision.action === "warn") {
           warnings.set(paneKey, { warned_at: now });
-          await postWarning(a.name, i, paneKey, contextPercent);
+          // Rate-limit the Discord post (not the state machine): a status-
+          // flickering pane re-enters "warn" every poll, which would spam the
+          // channel. Post at most once per warnCooldownMs per pane.
+          const lastPost = lastWarnPostAt.get(paneKey);
+          const cooldown = config.warnCooldownMs ?? 0;
+          if (lastPost == null || now - lastPost >= cooldown) {
+            lastWarnPostAt.set(paneKey, now);
+            await postWarning(a.name, i, paneKey, contextPercent);
+          }
         } else if (decision.action === "compact") {
           warnings.delete(paneKey);
           // Record the level we fired at BEFORE the compact runs. Next tick
