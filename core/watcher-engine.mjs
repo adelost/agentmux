@@ -8,6 +8,7 @@ const DEFAULT_COMPLETION_GRACE_MS = 5_000;
 const DEFAULT_MAX_POST_ACTIONS = 3;
 const DEFAULT_RETRY_BACKOFF_MS = 30_000;
 const DEFAULT_POSTED_COUNT_KEEP = 20;
+const DEFAULT_PARTIAL_TEXT_GRACE_MS = 60_000;
 
 export function planPaneMirrorStep(input = {}) {
   const {
@@ -18,6 +19,7 @@ export function planPaneMirrorStep(input = {}) {
     latestMtimeMs = null,
     retryUntilMs = null,
     completionGraceMs = DEFAULT_COMPLETION_GRACE_MS,
+    partialTextGraceMs = DEFAULT_PARTIAL_TEXT_GRACE_MS,
     maxPostActions = DEFAULT_MAX_POST_ACTIONS,
     postedCountKeep = DEFAULT_POSTED_COUNT_KEEP,
   } = input;
@@ -62,14 +64,26 @@ export function planPaneMirrorStep(input = {}) {
 
     const turnStartMs = turnStartMsFor(turn, endMs);
     const items = Array.isArray(turn.items) ? turn.items : [];
-    const postedCount = clampPostedCount(nextState.postedItemCounts[String(turnStartMs)], items.length);
-    const newItems = items.slice(postedCount);
+    const postableItemCount = postableCountForTurn({
+      turn,
+      items,
+      complete,
+      nowMs,
+      endMs,
+      partialTextGraceMs,
+    });
+    const postedCount = clampPostedCount(nextState.postedItemCounts[String(turnStartMs)], postableItemCount);
+    const newItems = items.slice(postedCount, postableItemCount);
 
     if (newItems.length === 0) {
-      cursorMs = endMs;
-      nextState.lastPostedMs = cursorMs;
-      nextState.retryUntilMs = null;
-      notes.push({ type: "advance-empty", endMs, turnStartMs });
+      if (postableItemCount >= items.length) {
+        cursorMs = endMs;
+        nextState.lastPostedMs = cursorMs;
+        nextState.retryUntilMs = null;
+        notes.push({ type: "advance-empty", endMs, turnStartMs });
+      } else {
+        notes.push({ type: "hold-growing-tail", endMs, turnStartMs, postableItemCount, totalItems: items.length });
+      }
       continue;
     }
 
@@ -78,7 +92,7 @@ export function planPaneMirrorStep(input = {}) {
       endMs,
       turnStartMs,
       postedCount,
-      totalItems: items.length,
+      totalItems: postableItemCount,
       reason: complete.reason,
       turn: { ...turn, items: newItems },
     });
@@ -145,6 +159,20 @@ function classifyTurnCompleteness({ turn, nowMs, endMs, latestMtimeMs, completio
   const mtimeOldEnough = !latestMtimeMs || nowMs - latestMtimeMs >= completionGraceMs;
   if (oldEnough && mtimeOldEnough) return { done: true, reason: "grace" };
   return { done: false, reason: "incomplete" };
+}
+
+function postableCountForTurn({ turn, items, complete, nowMs, endMs, partialTextGraceMs }) {
+  if (!Array.isArray(items) || items.length === 0) return 0;
+  if (turn?.isComplete || complete.reason !== "grace") return items.length;
+
+  const last = items[items.length - 1];
+  const trailingTextMayStillGrow = last?.type !== "tool";
+  if (!trailingTextMayStillGrow) return items.length;
+
+  const staleMs = nowMs - endMs;
+  if (Number.isFinite(staleMs) && staleMs >= partialTextGraceMs) return items.length;
+
+  return Math.max(0, items.length - 1);
 }
 
 function clampPostedCount(v, totalItems) {

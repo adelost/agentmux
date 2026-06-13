@@ -132,13 +132,72 @@ feature("watcher engine: grace and retry policy", () => {
     when: ["planning", ({ turns, endMs }) => planPaneMirrorStep({
       turns,
       lastPostedMs: ms(ts("09")),
-      nowMs: endMs + 10_000,
+      nowMs: endMs + 70_000,
       latestMtimeMs: endMs + 5_000,
       completionGraceMs: 5_000,
     })],
     then: ["one grace action", (r) => {
       expect(r.actions).toHaveLength(1);
       expect(r.actions[0].reason).toBe("grace");
+    }],
+  });
+
+  unit("grace does not mark a growing trailing text item as fully posted", {
+    given: ["a codex-like turn whose tool prefix was posted while final text is still growing", () => {
+      const endMs = ms(ts("30"));
+      return {
+        endMs,
+        turns: [turn({
+          at: ts("10"),
+          end: ts("30"),
+          complete: false,
+          items: ["status", "tool 1", "tool 2", "partial final"],
+        })],
+        postedItemCounts: { [String(ms(ts("10")))]: 3 },
+      };
+    }],
+    when: ["planning before the long partial-text grace expires", ({ turns, postedItemCounts, endMs }) => planPaneMirrorStep({
+      turns,
+      lastPostedMs: ms(ts("20")),
+      postedItemCounts,
+      nowMs: endMs + 10_000,
+      latestMtimeMs: endMs,
+      completionGraceMs: 5_000,
+      partialTextGraceMs: 60_000,
+    })],
+    then: ["the trailing partial text is held and checkpoint does not advance", (r) => {
+      expect(r.actions).toEqual([]);
+      expect(r.nextState.lastPostedMs).toBe(ms(ts("20")));
+      expect(r.notes[0]).toMatchObject({
+        type: "hold-growing-tail",
+        postableItemCount: 3,
+        totalItems: 4,
+      });
+    }],
+  });
+
+  unit("complete turn posts the final text after a grace-held trailing item", {
+    given: ["the same turn after task_complete with a longer final item", () => ({
+      turns: [turn({
+        at: ts("10"),
+        end: ts("40"),
+        complete: true,
+        items: ["status", "tool 1", "tool 2", "full final answer"],
+      })],
+      postedItemCounts: { [String(ms(ts("10")))]: 3 },
+    })],
+    when: ["planning after completion", ({ turns, postedItemCounts }) => planPaneMirrorStep({
+      turns,
+      lastPostedMs: ms(ts("20")),
+      postedItemCounts,
+      nowMs: ms(ts("50")),
+      latestMtimeMs: ms(ts("40")),
+    })],
+    then: ["only the final text item is planned", (r) => {
+      expect(r.actions).toHaveLength(1);
+      expect(r.actions[0].postedCount).toBe(3);
+      expect(r.actions[0].totalItems).toBe(4);
+      expect(r.actions[0].turn.items.map((i) => i.content)).toEqual(["full final answer"]);
     }],
   });
 
