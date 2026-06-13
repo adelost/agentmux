@@ -160,4 +160,32 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
       expect(state.warns).toBe(1);
     }],
   });
+
+  // Codex panes run on AUTO — amux must not touch them (codex has a server-
+  // enforced cap + native auto-compaction; /compact is a Claude command). The
+  // skip happens BEFORE inspect(), so a codex pane is never even captured.
+  unit("codex panes are skipped entirely — never inspected, never compacted", {
+    given: ["an agent with a claude pane (0) and a codex pane (1), both reading 100%", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-ac-codex-"));
+      const path = join(dir, "agents.yaml");
+      writeFileSync(path, `test:\n  dir: ${dir}\n  id: 00000000-0000-0000-0000-000000000099\n  panes:\n    - name: claude\n      cmd: claude\n    - name: codex\n      cmd: codex\n`);
+      const state = { content: CONTENT.full100, captures: [], fires: 0 };
+      const agent = {
+        capturePane: async (name, idx) => { state.captures.push(`${name}:${idx}`); return state.content; },
+        sendOnly: async (_n, cmd) => { if (cmd === "/compact") state.fires++; },
+      };
+      const tmux = async () => ({ stdout: `0 50` });
+      const discord = { send: async () => {} };
+      // codexEnabled defaults to false in DEFAULT_CONFIG → codex is skipped.
+      const config = { ...DEFAULT_CONFIG, threshold: 70, graceMs: 0, compactLockMs: 0, minIdleMs: 0 };
+      const ac = createAutoCompact({ agent, agentsYamlPath: path, discord, tmux, config, log: () => {} });
+      return { ac, state };
+    }],
+    when: ["running 3 poll ticks", async ({ ac, state }) => { await ticks(ac, 3); return state; }],
+    then: ["only the claude pane (0) was ever inspected; the codex pane (1) never", (state) => {
+      expect(state.captures.length).toBeGreaterThan(0);
+      expect(state.captures.every((k) => k === "test:0")).toBe(true);
+      expect(state.captures).not.toContain("test:1");
+    }],
+  });
 });

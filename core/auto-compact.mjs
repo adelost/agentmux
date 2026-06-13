@@ -10,6 +10,13 @@
 
 export const DEFAULT_CONFIG = {
   enabled: true,
+  codexEnabled: false,    // Auto-compact is OFF for codex panes by default.
+                          // Codex enforces its own server-side context cap and
+                          // runs native auto-compaction, and amux's "/compact"
+                          // is a Claude command that doesn't drive codex — so
+                          // amux would only spam warnings at a pane it can't
+                          // actually shrink. Let codex run on auto. Flip with
+                          // AUTO_COMPACT_CODEX=true.
   threshold: 70,          // percent context
   graceMs: 60_000,        // 1 minute between warn and fire
   pollMs: 60_000,         // poll cadence in the bridge.
@@ -53,6 +60,7 @@ export const DEFAULT_CONFIG = {
 export function parseAutoCompactConfig(env = process.env) {
   return {
     enabled: env.AUTO_COMPACT_ENABLED !== "false",
+    codexEnabled: env.AUTO_COMPACT_CODEX === "true",
     threshold: parseInt(env.AUTO_COMPACT_WARN_THRESHOLD || DEFAULT_CONFIG.threshold, 10),
     graceMs: parseInt(env.AUTO_COMPACT_GRACE_MS || DEFAULT_CONFIG.graceMs, 10),
     pollMs: parseInt(env.AUTO_COMPACT_POLL_MS || DEFAULT_CONFIG.pollMs, 10),

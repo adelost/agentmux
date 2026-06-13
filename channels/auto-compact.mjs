@@ -204,6 +204,20 @@ export function createAutoCompact({
         const paneKey = `${a.name}:${i}`;
         if (compacting.has(paneKey)) continue;
 
+        // Codex panes run on AUTO (Mattias 2026-06-13): codex has its own
+        // server-enforced context cap + native auto-compaction, and amux's
+        // "/compact" is a Claude command that does not meaningfully drive it.
+        // amux must not touch codex panes — skip and clear any leftover state.
+        // Re-enable via AUTO_COMPACT_CODEX=true if that ever changes.
+        if (!config.codexEnabled && paneDialect(a, i) === "codex") {
+          if (warnings.has(paneKey) || compactFloors.has(paneKey) || lastWarnPostAt.has(paneKey)) {
+            warnings.delete(paneKey);
+            compactFloors.delete(paneKey);
+            lastWarnPostAt.delete(paneKey);
+          }
+          continue;
+        }
+
         const { status, contextPercent, paneInMode, paneHeight, lastActivityMs } = await inspect(a, i);
 
         // Too small to read reliably — skip rather than act on redraw-soup.
