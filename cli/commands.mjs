@@ -137,13 +137,22 @@ async function cmdReconcile(name, ctx) {
 async function cmdServe(flags, ctx) {
   // Single-instance guard: the tmux session can outlive the bot (clean exit 0
   // breaks start.sh's loop without tearing the session down). So trust the PID
-  // lock, not the session — verify node is alive before bailing out.
+  // lock, not the session. Readiness is stricter than "pid exists": bot.mjs
+  // writes PIDFILE before Discord connects, then READY_FILE after channel.start
+  // resolves. Waiting for READY_FILE avoids the "run serve twice" false start.
   if (await hasSession(ctx, BRIDGE_SESSION)) {
-    if (isBridgeAlive()) {
+    if (isBridgeReady()) {
       console.log(`Bridge already running. Stop with 'amux stop', or attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
       return;
     }
-    console.log("Stale bridge session detected (no live process). Cleaning up...");
+    if (isBridgeAlive()) {
+      console.log("Bridge process is running; waiting for readiness...");
+      if (await waitForBridgeReady(30_000)) {
+        console.log(`Bridge started (session: ${BRIDGE_SESSION}). Attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
+        return;
+      }
+    }
+    console.log("Stale or unready bridge session detected. Cleaning up...");
     await killSession(ctx, BRIDGE_SESSION);
   }
   if (flags.fg || flags.f) {
@@ -156,39 +165,70 @@ async function cmdServe(flags, ctx) {
   // make isBridgeAlive flap based on PID recycling instead of actual readiness.
   const pidfile = process.env.PIDFILE || "/tmp/agentmux.pid";
   try { unlinkSync(pidfile); } catch {}
+  clearBridgeReady();
   await ctx.tmux(`new-session -d -s '${esc(BRIDGE_SESSION)}' -c '${esc(BRIDGE_DIR)}' 'bash bin/start.sh'`);
   // Poll for actual readiness instead of trusting tmux session creation.
   // start.sh is a 10s-restart supervisor — the first node attempt can crash
   // (DNS/network not ready right after WSL shell open) and we'd otherwise
   // print "Bridge started" while the user gets a dead bridge.
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    if (isBridgeAlive()) {
-      console.log(`Bridge started (session: ${BRIDGE_SESSION}). Attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
-      return;
-    }
-    await new Promise((r) => setTimeout(r, 500));
+  if (await waitForBridgeReady(30_000)) {
+    console.log(`Bridge started (session: ${BRIDGE_SESSION}). Attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
+    return;
   }
   // Didn't come up in time — surface the supervisor's last output so the user
   // can see why (DNS, auth, port collision, etc.) instead of a silent failure.
   let tail = "";
   try {
-    tail = await ctx.tmux(`capture-pane -t '${esc(BRIDGE_SESSION)}' -p -S -50`);
-  } catch {}
+    const cap = await ctx.tmux(`capture-pane -t '${esc(BRIDGE_SESSION)}' -p -S -50`);
+    tail = (cap?.stdout ?? "").trim();
+  } catch (e) {
+    tail = `(capture-pane failed: ${e?.message || e})`;
+  }
   console.error(`Bridge did not become ready within 30s. Last supervisor output:\n${tail || "(no output captured)"}\n\nSession is still up — retry with 'amux stop && amux serve' or attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
   process.exitCode = 1;
 }
 
-function isBridgeAlive() {
+function bridgePid() {
   const pidfile = process.env.PIDFILE || "/tmp/agentmux.pid";
   try {
     const pid = parseInt(readFileSync(pidfile, "utf-8").trim());
-    if (!pid) return false;
+    if (!pid) return null;
     process.kill(pid, 0);
-    return true;
+    return pid;
+  } catch {
+    return null;
+  }
+}
+
+function isBridgeAlive() {
+  return bridgePid() !== null;
+}
+
+function bridgeReadyPath() {
+  return process.env.READY_FILE || "/tmp/agentmux.ready";
+}
+
+function clearBridgeReady() {
+  try { unlinkSync(bridgeReadyPath()); } catch {}
+}
+
+function isBridgeReady() {
+  const pid = bridgePid();
+  if (!pid) return false;
+  try {
+    return parseInt(readFileSync(bridgeReadyPath(), "utf-8").trim()) === pid;
   } catch {
     return false;
   }
+}
+
+async function waitForBridgeReady(timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (isBridgeReady()) return true;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
 }
 
 async function cmdUnserve(ctx) {
@@ -214,6 +254,7 @@ function killBridgeByPid() {
     }
   } catch {}
   try { unlinkSync(pidfile); } catch {}
+  clearBridgeReady();
 }
 
 async function cmdStopAll(ctx) {

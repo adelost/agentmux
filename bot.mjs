@@ -5,6 +5,11 @@ import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
 import { buildChannelMap } from "./lib.mjs";
 
 const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
+const READY_FILE = process.env.READY_FILE || "/tmp/agentmux.ready";
+
+function clearReadyFile() {
+  try { unlinkSync(READY_FILE); } catch {}
+}
 
 function ensureSingleInstance() {
   if (existsSync(PIDFILE)) {
@@ -15,7 +20,12 @@ function ensureSingleInstance() {
       process.exit(1);
     } catch {}
   }
+  clearReadyFile();
   writeFileSync(PIDFILE, String(process.pid));
+}
+
+function markReady() {
+  writeFileSync(READY_FILE, String(process.pid));
 }
 
 /**
@@ -90,6 +100,7 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
       console.log(`${channel.name} | ${channelMap.size} channel(s)${ttsLabel}${userLabel}`);
     }
     for (const [chId, { name }] of channelMap) console.log(`  ${name} -> #${chId}`);
+    markReady();
     await preflight();
 
     // Notify restart channel if we came back from /restart
@@ -126,6 +137,7 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
     console.warn(`[heartbeat] channel unhealthy (${failCount}/${MAX_FAILURES})`);
     if (failCount >= MAX_FAILURES) {
       console.error(`[heartbeat] ${MAX_FAILURES} consecutive failures, exiting for restart`);
+      clearReadyFile();
       try { unlinkSync(PIDFILE); } catch {}
       process.exit(1);
     }
@@ -137,6 +149,7 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
     shuttingDown = true;
     clearInterval(heartbeat);
     console.log("\nShutting down...");
+    clearReadyFile();
     try { unlinkSync(PIDFILE); } catch {}
     for (const channel of channels) channel.stop();
     process.exit(0);

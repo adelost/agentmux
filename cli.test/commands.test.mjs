@@ -167,6 +167,58 @@ ai:
   });
 });
 
+// --- serve readiness ------------------------------------------------------
+
+feature("serve readiness", () => {
+  component("waits for ready marker instead of pidfile alone", {
+    given: ["fake tmux session that writes pid before ready", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-serve-"));
+      const pidfile = join(root, "agentmux.pid");
+      const readyFile = join(root, "agentmux.ready");
+      const oldPidfile = process.env.PIDFILE;
+      const oldReadyFile = process.env.READY_FILE;
+      process.env.PIDFILE = pidfile;
+      process.env.READY_FILE = readyFile;
+      const cleanup = () => {
+        if (oldPidfile === undefined) delete process.env.PIDFILE;
+        else process.env.PIDFILE = oldPidfile;
+        if (oldReadyFile === undefined) delete process.env.READY_FILE;
+        else process.env.READY_FILE = oldReadyFile;
+        rmSync(root, { recursive: true, force: true });
+      };
+      const ctx = {
+        socket: "/tmp/fake.sock",
+        tmux: async (cmd) => {
+          if (cmd.startsWith("has-session")) throw new Error("no session");
+          if (cmd.startsWith("new-session")) {
+            writeFileSync(pidfile, String(process.pid));
+            setTimeout(() => writeFileSync(readyFile, String(process.pid)), 650);
+          }
+          return { stdout: "" };
+        },
+      };
+      return { ctx, cleanup };
+    }],
+    when: ["running serve", async ({ ctx, cleanup }) => {
+      const logs = [];
+      const originalLog = console.log;
+      console.log = (...args) => { logs.push(args.join(" ")); };
+      const start = Date.now();
+      try {
+        await dispatch(["serve"], ctx);
+        return { logs: logs.join("\n"), elapsed: Date.now() - start, cleanup };
+      } finally {
+        console.log = originalLog;
+      }
+    }],
+    then: ["serve does not return on pidfile-only startup", ({ logs, elapsed, cleanup }) => {
+      expect(logs).toContain("Bridge started");
+      expect(elapsed).toBeGreaterThanOrEqual(500);
+      cleanup();
+    }],
+  });
+});
+
 // --- amux edit: $EDITOR spawn --------------------------------------------
 
 feature("amux edit spawns $EDITOR on agentmux.yaml", () => {
