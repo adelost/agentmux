@@ -269,10 +269,8 @@ export function createJsonlWatcher({
 
     // Auto-TTS removed. The watcher used to read every reply aloud, but
     // that meant accidental long technical replies got broadcast to a
-    // car listener. The agent is now expected to call `amux say "..."`
-    // explicitly when it wants a spoken clip — a deliberate "yes" beats
-    // a default-on auto that occasionally misfires. The handlers.mjs
-    // ttsHint reminds the agent of this when state.tts is on.
+    // car listener. Spoken output is now explicit only: the user asks
+    // for voice, then the agent may call `amux say "..."`.
 
     // Recorder (regression replay)
     if (recorder?.enabled && recorder.save) {

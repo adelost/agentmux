@@ -270,6 +270,21 @@ feature("processMessage pipeline (delivery)", () => {
     }],
   });
 
+  component("TTS enabled does not inject an amux say hint into the prompt", {
+    given: ["a regular message while channel TTS is enabled", () => {
+      const s = setup();
+      s.tts.isEnabled.mockReturnValue(true);
+      return { ...s, msg: mockMsg({ content: "status please" }) };
+    }],
+    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["agent.sendOnly receives exactly the user's prompt", (_, { agent }) => {
+      expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "status please", 0);
+      const prompt = agent.sendOnly.mock.calls[0][1];
+      expect(prompt).not.toContain("tts on");
+      expect(prompt).not.toContain("amux say");
+    }],
+  });
+
   component("starts and stops typing indicator", {
     given: ["a regular message", () => ({ ...setup(), msg: mockMsg({ content: "hi" }) })],
     when: ["onMessage completes", ({ onMessage, msg }) => onMessage(msg)],

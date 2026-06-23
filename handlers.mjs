@@ -432,14 +432,10 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
   const ts = () => new Date().toLocaleTimeString("sv");
 
   function promptForAgent(cleanPrompt) {
-    // No auto-TTS anymore (removed in 1.16.53). The hint reminds the
-    // agent that it CAN send a crafted spoken clip via `amux say "..."`
-    // when a short summary suits the listener better than the full
-    // written reply. The agent decides per-turn whether to use it.
-    const ttsHint = tts.isEnabled?.()
-      ? `\n[tts on — end your turn with \`amux say "<short spoken summary>"\` if speech would help the listener; keep it under ~1500 chars and speakable. Skip if a written reply is enough.]`
-      : "";
-    return ttsHint ? cleanPrompt + ttsHint : cleanPrompt;
+    // TTS is explicit only. A channel's TTS state must not mutate the
+    // prompt sent to the agent; use `amux say "..."` only when the user
+    // explicitly asks for spoken output.
+    return cleanPrompt;
   }
 
   // streamResponse and hasReadyResponse were removed in 1.16.32 — agent
