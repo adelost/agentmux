@@ -6,6 +6,7 @@
 
 import {
   decideAutoCompactAction,
+  resolveActivityMs,
   formatWarningMessage,
   formatCompactedMessage,
 } from "../core/auto-compact.mjs";
@@ -101,32 +102,33 @@ export function createAutoCompact({
 
     // Most-recent activity timestamp, used by the min-idle gate to tell a
     // truly-stalled pane apart from one that just paused between turns.
-    // Two bugs made this DEAD before:
-    //   1. readLastTurns returns { turns, jsonlFile } — the old code read
-    //      `.length`/`[0]` on that OBJECT, so the guard was always false and
-    //      lastActivityMs stayed null for EVERY pane. The min-idle gate (which
-    //      keys off lastActivityMs != null) therefore never ran at all, so
-    //      auto-compact decided on a single status snapshot alone — and a
-    //      codex pane mid-stream that the snapshot misreads as idle got warned.
-    //   2. readLastTurns only reads the CLAUDE store, so codex panes had no
-    //      activity source regardless.
-    // Now: read the right store per dialect and take the FRESHEST of (newest
-    // finalized turn timestamp, session-file mtime). The mtime catches an
-    // in-progress stream that hasn't flushed a finalized turn yet — exactly the
-    // busy codex pane that was being warned mid-generation.
+    //
+    // "Activity" is a REAL conversational turn, NOT "the jsonl was written for
+    // any reason". Claude Code touches the session file for non-turn records
+    // (system/mode/attachment reminders, harness rewrites) without appending a
+    // newer-dated turn — we measured a file whose mtime was "now" while its
+    // newest turn was >24h old. The previous code did Math.max(turnMs, fileMs),
+    // which let that mtime noise pose as activity: idle panes read as "active
+    // 37s ago", so the min-idle gate cancelled the pending auto-compact warning
+    // every poll and the warn->grace->compact cycle never matured (the warning
+    // flood Mattias kept seeing). resolveActivityMs() trusts the turn timestamp
+    // and only falls back to mtime when no turn is readable (fresh session). A
+    // pane that is genuinely mid-stream reports status working/resume, which the
+    // isActive check cancels before this gate is even reached.
+    //
+    // (Earlier dead-code era: readLastTurns returns { turns, jsonlFile }; the
+    // original guard read `.length` on that OBJECT so lastActivityMs stayed null
+    // for every pane and the gate never ran. That part is fixed too — we read
+    // the right per-dialect store and parse the newest turn.)
     try {
       const reader = dialect === "codex" ? readLastTurnsCodex : readLastTurns;
       const res = reader(paneDir, { limit: 1, tailBytes: 64 * 1024 });
       if (res) {
         const newest = res.turns?.[res.turns.length - 1];
         const turnMs = newest?.timestamp ? Date.parse(newest.timestamp) : NaN;
-        let fileMs = NaN;
-        if (res.jsonlFile) { try { fileMs = statSync(res.jsonlFile).mtimeMs; } catch {} }
-        const best = Math.max(
-          Number.isFinite(turnMs) ? turnMs : -Infinity,
-          Number.isFinite(fileMs) ? fileMs : -Infinity,
-        );
-        if (Number.isFinite(best)) lastActivityMs = best;
+        let fileMtimeMs = NaN;
+        if (res.jsonlFile) { try { fileMtimeMs = statSync(res.jsonlFile).mtimeMs; } catch {} }
+        lastActivityMs = resolveActivityMs({ turnMs, fileMtimeMs });
       }
     } catch {}
 

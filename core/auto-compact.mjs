@@ -76,6 +76,44 @@ export function parseAutoCompactConfig(env = process.env) {
 const ACTIVE_STATUSES = new Set(["working", "resume"]);
 
 /**
+ * Pick the timestamp the min-idle gate should reason about for one pane.
+ *
+ * "Activity" means a REAL conversational turn — a user/assistant message — not
+ * "the session file was written for any reason". This distinction is the whole
+ * bug class behind the recurring auto-compact warning flood:
+ *
+ *   Claude Code touches the pane jsonl for non-turn records (system/mode/
+ *   attachment reminders, harness rewrites, periodic state) WITHOUT appending a
+ *   newer-dated turn. We observed a session file whose mtime was "now" while its
+ *   newest actual turn was >24h old. The old inspect() took
+ *   Math.max(turnMs, fileMtimeMs), so that mtime noise masqueraded as activity:
+ *   a genuinely-idle pane read as "active 37s ago", the min-idle gate cancelled
+ *   its pending auto-compact warning every poll, and the warn->grace->compact
+ *   state machine never matured (it only fired in the rare ~5min window where
+ *   the mtime happened to stay quiet). The user saw "Auto-compact in 60s"
+ *   re-posted for ~40min before a compact finally landed.
+ *
+ * So: the turn timestamp is the activity signal. File mtime is only a
+ * last-resort proxy when there is NO readable turn at all (a fresh session that
+ * hasn't flushed one yet). It must never override an existing (older) turn.
+ *
+ * A pane that is genuinely mid-generation already reports status working/resume,
+ * which the isActive check cancels earlier than this gate — so dropping mtime
+ * from the activity signal does not re-expose the "warned mid-stream" case the
+ * mtime fallback was originally (over-broadly) added to cover.
+ *
+ * @param {object} args
+ * @param {number|null} args.turnMs — ms timestamp of the newest finalized turn, or null/NaN
+ * @param {number|null} args.fileMtimeMs — session-file mtime in ms, or null/NaN
+ * @returns {number|null} the activity timestamp, or null if nothing is readable
+ */
+export function resolveActivityMs({ turnMs = null, fileMtimeMs = null } = {}) {
+  if (Number.isFinite(turnMs)) return turnMs;
+  if (Number.isFinite(fileMtimeMs)) return fileMtimeMs;
+  return null;
+}
+
+/**
  * Decide what the poll loop should do for one pane this tick.
  *
  * @param {object} args

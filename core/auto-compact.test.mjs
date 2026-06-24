@@ -1,6 +1,7 @@
 import { unit, feature, expect } from "bdd-vitest";
 import {
   decideAutoCompactAction,
+  resolveActivityMs,
   parseAutoCompactConfig,
   formatWarningMessage,
   formatCompactedMessage,
@@ -256,6 +257,80 @@ feature("decideAutoCompactAction — verify-before-refire (no-op /compact)", () 
       ...base,
       contextPercent: 100,
     })],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=warn", (r) => expect(r.action).toBe("warn")],
+  });
+});
+
+feature("resolveActivityMs — turn timestamp is the activity signal, not file mtime", () => {
+  // The recurring auto-compact warning flood: a fresh file mtime (the jsonl was
+  // touched for a non-turn record) posed as activity and cancelled the pending
+  // warning every poll. The activity signal must be the real turn timestamp.
+  const now = 1_700_000_000_000;
+
+  unit("fresh mtime must NOT override an older real turn (the bug)", {
+    given: ["newest turn 1h ago, file touched 37s ago", () => ({
+      turnMs: now - 3_600_000,
+      fileMtimeMs: now - 37_000,
+    })],
+    when: ["resolving", (args) => resolveActivityMs(args)],
+    then: ["returns the TURN ts (1h ago), not the mtime", (r) => {
+      expect(r).toBe(now - 3_600_000);
+    }],
+  });
+
+  unit("turn ts is used even when mtime is older too", {
+    given: ["turn 2min ago, mtime 5min ago", () => ({
+      turnMs: now - 120_000,
+      fileMtimeMs: now - 300_000,
+    })],
+    when: ["resolving", (args) => resolveActivityMs(args)],
+    then: ["returns turn ts", (r) => expect(r).toBe(now - 120_000)],
+  });
+
+  unit("no readable turn → fall back to file mtime (fresh session proxy)", {
+    given: ["no turn, mtime 10s ago", () => ({ turnMs: NaN, fileMtimeMs: now - 10_000 })],
+    when: ["resolving", (args) => resolveActivityMs(args)],
+    then: ["returns mtime", (r) => expect(r).toBe(now - 10_000)],
+  });
+
+  unit("neither turn nor mtime → null (skips the gate)", {
+    given: ["nothing readable", () => ({ turnMs: NaN, fileMtimeMs: NaN })],
+    when: ["resolving", (args) => resolveActivityMs(args)],
+    then: ["returns null", (r) => expect(r).toBe(null)],
+  });
+
+  unit("no args at all → null (defensive)", {
+    given: ["called with nothing", () => undefined],
+    when: ["resolving", () => resolveActivityMs()],
+    then: ["returns null", (r) => expect(r).toBe(null)],
+  });
+});
+
+feature("regression: idle pane with mtime noise matures to compact (not endless re-warn)", () => {
+  // End-to-end of the observed ai:2 flood: a 93% idle pane whose jsonl mtime is
+  // 37s old but whose newest real turn is 1h old. With the activity signal fixed
+  // to the turn ts, the min-idle gate passes, so a pending warning that has sat
+  // out the grace window FIRES /compact instead of being cancelled by phantom
+  // "recent activity".
+  const now = 1_700_000_000_000;
+  const cfgIdle = cfg();
+
+  unit("warn matures to compact: turn 1h old beats fresh 37s mtime", {
+    given: ["93% idle, warned 60s ago, turn 1h old, mtime 37s old", () => {
+      const lastActivityMs = resolveActivityMs({ turnMs: now - 3_600_000, fileMtimeMs: now - 37_000 });
+      const warnings = new Map([[key, { warned_at: now - 60_000 }]]);
+      return { ...base, contextPercent: 93, warnings, lastActivityMs, config: cfgIdle, now };
+    }],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=compact (NOT cancel)", (r) => expect(r.action).toBe("compact")],
+  });
+
+  unit("first crossing warns instead of being cancelled by mtime noise", {
+    given: ["93% idle, no warning, turn 1h old, mtime 37s old", () => {
+      const lastActivityMs = resolveActivityMs({ turnMs: now - 3_600_000, fileMtimeMs: now - 37_000 });
+      return { ...base, contextPercent: 93, lastActivityMs, config: cfgIdle, now };
+    }],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=warn", (r) => expect(r.action).toBe("warn")],
   });
