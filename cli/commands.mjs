@@ -20,6 +20,7 @@ import {
 } from "../core/orchestrator-checkpoint.mjs";
 import { collectCommitsSince, reposFromAgents } from "../core/commit-log.mjs";
 import { pruneOldSessions, formatJanitorResult } from "../core/janitor.mjs";
+import { reapStalePlaywrightProcesses, formatPlaywrightReapResult } from "../core/playwright-watchdog.mjs";
 import { regenerateAgentsYaml } from "../sync.mjs";
 import yaml from "js-yaml";
 import { spawn, execSync } from "child_process";
@@ -2971,6 +2972,9 @@ Usage:
   agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)
     --dry                         List deletion candidates, change nothing
     --days N                      Retention window (default: 14)
+  agent playwright-reap           Reap stale Playwright-MCP/browser processes
+    --dry                         List process candidates, change nothing
+    --minutes N                   Stale age threshold (default: 60)
   agent notifyuser "message"      High-signal mobile notification to the human
     --level info|done|warn|error  Notification level (default: info)
     --test                        Send a test notification
@@ -3047,6 +3051,7 @@ const FLAG_SPECS = {
   compact: { dry: "boolean", force: "boolean", "min-tokens": "number" },
   dream: { since: "string", workspace: "string", dry: "boolean", q: "boolean", quiet: "boolean" },
   janitor: { dry: "boolean", days: "number" },
+  "playwright-reap": { dry: "boolean", minutes: "number" },
   notifyuser: { level: "string", l: "string", title: "string", user: "string", u: "string", channel: "string", c: "string", force: "boolean", f: "boolean", dry: "boolean", test: "boolean" },
   remind: {
     p: "number",                      // pane index (only when single agent given)
@@ -3187,6 +3192,23 @@ export async function dispatch(argv, ctx) {
         ...(flags.days ? { retentionDays: flags.days } : {}),
       });
       console.log(formatJanitorResult(r));
+      for (const e of r.errors) console.warn(`  ! ${e}`);
+      return;
+    }
+
+    case "playwright-reap":
+    case "pw-reap": {
+      const { flags } = parseFlags(rest, FLAG_SPECS["playwright-reap"]);
+      const r = reapStalePlaywrightProcesses({
+        dryRun: !!flags.dry,
+        maxAgeMs: (flags.minutes || 60) * 60_000,
+      });
+      console.log(formatPlaywrightReapResult(r));
+      for (const p of r.processes.slice(0, 30)) {
+        const ageMin = Math.round(p.etimes / 60);
+        console.log(`  ${p.pid}\t${p.kind}\t${ageMin}m\t${p.cmd.slice(0, 160)}`);
+      }
+      if (r.processes.length > 30) console.log(`  ... ${r.processes.length - 30} more`);
       for (const e of r.errors) console.warn(`  ! ${e}`);
       return;
     }

@@ -32,6 +32,8 @@ import { parseAutoCompactConfig } from "./core/auto-compact.mjs";
 import { createDriftGuard } from "./channels/drift-guard.mjs";
 import { parseReminderConfig } from "./core/reminder-state.mjs";
 import { createJsonlWatcher } from "./channels/jsonl-watcher.mjs";
+import { createPlaywrightWatchdog } from "./channels/playwright-watchdog.mjs";
+import { parsePlaywrightWatchdogConfig } from "./core/playwright-watchdog.mjs";
 
 // --- Config ---
 
@@ -208,6 +210,19 @@ const driftGuard = createDriftGuard({
   config: driftGuardConfig,
 });
 driftGuard.start();
+
+// Playwright-MCP watchdog: keeps visual verification reliable by reaping stale
+// MCP/browser processes and sending Escape if a pane sits inside a Playwright
+// tool call for too long. This preserves the "take proof screenshots" workflow
+// while preventing old browser sessions from wedging future tool calls.
+const playwrightWatchdogConfig = parsePlaywrightWatchdogConfig();
+const playwrightWatchdog = createPlaywrightWatchdog({
+  agent,
+  agentsYamlPath: AGENTS_YAML,
+  discord,
+  config: playwrightWatchdogConfig,
+});
+playwrightWatchdog.start();
 
 // jsonl-watcher: the single mirror path. fs.watch on each pane's project
 // dir, posts every complete turn to the bound Discord channel, persistent

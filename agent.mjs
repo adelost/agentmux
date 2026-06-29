@@ -36,7 +36,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.16.29";
+const HINTS_VERSION = "1.16.30";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -209,7 +209,14 @@ amux wait <agent> -p 0 -t 600        # custom timeout (sec)
 \`\`\`bash
 amux esc <agent> -p <pane>           # send Escape (cancel/dismiss)
 amux select <agent> -p <pane> <N>    # select menu option N
+amux playwright-reap --dry           # inspect stale Playwright-MCP/browser processes
+amux playwright-reap                 # reap stale Playwright-MCP/browser processes
 \`\`\`
+
+Bridge watchdog: stale Playwright-MCP/browser processes older than 60 min are
+reaped automatically, and a pane stuck inside a Playwright MCP tool call for 10
+min gets Escape. Visual proof is still expected when the user asks for it; the
+watchdog exists so screenshots remain reliable, not so agents skip them.
 
 ### Bridge lifecycle
 \`\`\`bash
