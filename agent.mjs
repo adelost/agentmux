@@ -506,6 +506,20 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   // --- Pane setup ---
 
+  // Make room before split-window. Detached windows default to 80x24 and a
+  // partial tmux-resurrect restore can leave 1-column "sliver" panes; either
+  // makes `split-window` fail with "no space for new pane". Force a roomy
+  // manual size so splits always fit. Pair with restoreAutoSize() so an
+  // attaching client still drives the geometry afterwards.
+  async function ensureSplitRoom(name) {
+    await tmux(`set-window-option -t '${esc(name)}' window-size manual`).catch(() => {});
+    await tmux(`resize-window -t '${esc(name)}' -x 240 -y 60`).catch(() => {});
+  }
+
+  async function restoreAutoSize(name) {
+    await tmux(`set-window-option -t '${esc(name)}' window-size latest`).catch(() => {});
+  }
+
   async function setupPanes(name, dir) {
     const config = loadConfig();
     const panes = config[name]?.panes || [];
@@ -517,6 +531,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         console.warn(`setupPanes: select-layout ${layout} failed: ${err.message}`));
     };
 
+    // Guarantee room + reflow any sliver panes before the first split.
+    await ensureSplitRoom(name);
+    await applyLayout();
     const existing = await countPanes(name);
     for (let i = existing; i < panes.length; i++) {
       // -c pins the new pane's cwd to its own .agents/N. Without it,
@@ -561,6 +578,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
     await tmux(`select-pane -t '${esc(name)}:.0'`).catch((err) =>
       console.warn(`setupPanes: select-pane 0 failed: ${err.message}`));
+    await restoreAutoSize(name);
   }
 
   async function countPanes(name) {
@@ -645,6 +663,14 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         console.warn(`reconcile: select-layout ${layout} failed: ${err.message}`));
     };
 
+    // Guarantee room + reflow any sliver panes before the first split, else
+    // a bad restore (80x24 window / 1-col pane) fails with "no space".
+    const needsPanes = (await countPanes(name)) < wanted.length;
+    if (needsPanes) {
+      await ensureSplitRoom(name);
+      await applyLayout();
+    }
+
     const currentCount = await countPanes(name);
     for (let i = currentCount; i < wanted.length; i++) {
       try {
@@ -718,6 +744,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       }
     }
 
+    if (needsPanes) await restoreAutoSize(name);
     return summary;
   }
 
@@ -1190,6 +1217,14 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (isNew) {
       await setupPanes(agentName, config.dir);
       await wait(2000);
+    } else if ((await countPanes(agentName)) < (config.panes?.length || 0)) {
+      // Session exists but is under-provisioned — e.g. a partial
+      // tmux-resurrect restore left 2/8 panes. Rebuild the missing panes so a
+      // plain `amux <agent>` self-heals the layout instead of just warning and
+      // attaching. reconcileSession never respawns live claude/codex panes, so
+      // running work is safe.
+      await reconcileSession(agentName);
+      await wait(1000);
     }
 
     const target = `${agentName}:.${pane}`;
