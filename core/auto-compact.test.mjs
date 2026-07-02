@@ -307,6 +307,68 @@ feature("resolveActivityMs — turn timestamp is the activity signal, not file m
   });
 });
 
+feature("resolveActivityMs — partial tail must not fabricate freshness (the 8th-time hole)", () => {
+  // claw:1 2026-07-02: a 201MB session's newest turn sat >64KB from EOF, so the
+  // 64KB tail parsed ZERO turns. That is NOT a fresh session — but the old code
+  // treated "no turn" as one and fell back to the (constantly touched) mtime,
+  // so the genuinely-idle pane read as active and the warning was cancelled
+  // every poll. Selection bias: high-context panes have giant turns, so the
+  // fallback broke on exactly the population auto-compact targets.
+  const now = 1_700_000_000_000;
+
+  unit("no turn in a PARTIAL tail + fresh mtime → null, not mtime (the bug)", {
+    given: ["turns empty, mtime 10s ago, file NOT fully read", () => ({
+      turnMs: NaN,
+      fileMtimeMs: now - 10_000,
+      fileFullyRead: false,
+    })],
+    when: ["resolving", (args) => resolveActivityMs(args)],
+    then: ["returns null — unknown, min-idle gate skipped, grace still protects", (r) => {
+      expect(r).toBe(null);
+    }],
+  });
+
+  unit("no turn in a FULLY-read file + fresh mtime → mtime (fresh-session proxy stays)", {
+    given: ["turns empty, mtime 10s ago, whole file parsed", () => ({
+      turnMs: NaN,
+      fileMtimeMs: now - 10_000,
+      fileFullyRead: true,
+    })],
+    when: ["resolving", (args) => resolveActivityMs(args)],
+    then: ["returns mtime", (r) => expect(r).toBe(now - 10_000)],
+  });
+
+  unit("real turn wins regardless of fileFullyRead", {
+    given: ["turn 1h ago found in partial tail", () => ({
+      turnMs: now - 3_600_000,
+      fileMtimeMs: now - 10_000,
+      fileFullyRead: false,
+    })],
+    when: ["resolving", (args) => resolveActivityMs(args)],
+    then: ["returns turn ts", (r) => expect(r).toBe(now - 3_600_000)],
+  });
+});
+
+feature("regression: giant-turn pane (empty tail) matures to compact, not endless re-warn", () => {
+  // End-to-end of the claw:1 flood: 77% idle, warning posted, next poll's tail
+  // parse finds no turn (giant turn > tailBytes) while mtime is seconds old.
+  // With fileFullyRead:false the activity signal is null → min-idle gate is
+  // skipped → the aged warning FIRES instead of being cancelled by phantom
+  // freshness. (Observed: 3 warnings over 35 min, zero compacts.)
+  const now = 1_700_000_000_000;
+  const cfgIdle = cfg();
+
+  unit("warn matures to compact when tail has no turn and mtime is fresh", {
+    given: ["77% idle, warned 60s ago, no turn readable, mtime 8s old, partial tail", () => {
+      const lastActivityMs = resolveActivityMs({ turnMs: NaN, fileMtimeMs: now - 8_000, fileFullyRead: false });
+      const warnings = new Map([[key, { warned_at: now - 60_000 }]]);
+      return { ...base, contextPercent: 77, warnings, lastActivityMs, config: cfgIdle, now };
+    }],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=compact (NOT cancel)", (r) => expect(r.action).toBe("compact")],
+  });
+});
+
 feature("regression: idle pane with mtime noise matures to compact (not endless re-warn)", () => {
   // End-to-end of the observed ai:2 flood: a 93% idle pane whose jsonl mtime is
   // 37s old but whose newest real turn is 1h old. With the activity signal fixed

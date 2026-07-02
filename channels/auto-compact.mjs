@@ -120,15 +120,44 @@ export function createAutoCompact({
     // original guard read `.length` on that OBJECT so lastActivityMs stayed null
     // for every pane and the gate never ran. That part is fixed too — we read
     // the right per-dialect store and parse the newest turn.)
+    //
+    // Tail sizing (the 8th-time hole, claw:1 2026-07-02): a 64KB tail parses
+    // ZERO turns on high-context sessions — one giant turn's records (huge tool
+    // results, long assistant messages) span more than 64KB, and groupIntoTurns
+    // only opens a turn at a string-content user event. Zero turns made turnMs
+    // NaN, resolveActivityMs fell back to mtime (touched even while idle), and
+    // the genuinely-idle pane read as "active" — min-idle cancelled the warning
+    // every poll and /compact never fired. The panes over threshold are exactly
+    // the panes with giant turns, so the bug preferentially hit its own target
+    // population. Two-part fix: escalate the tail until a turn is found, and
+    // only let mtime stand in when the parse covered the WHOLE file.
     try {
       const reader = dialect === "codex" ? readLastTurnsCodex : readLastTurns;
-      const res = reader(paneDir, { limit: 1, tailBytes: 64 * 1024 });
+      let usedTailBytes = 64 * 1024;
+      let res = reader(paneDir, { limit: 1, tailBytes: usedTailBytes });
+      let newest = res?.turns?.[res.turns.length - 1];
+      // No turn in the small tail ≠ no turn in the file. Escalate before
+      // concluding anything (claw:1's 201MB session needed 256KB).
+      if (res && !newest) {
+        for (const tailBytes of [1024 * 1024, 8 * 1024 * 1024]) {
+          usedTailBytes = tailBytes;
+          res = reader(paneDir, { limit: 1, tailBytes });
+          newest = res?.turns?.[res.turns.length - 1];
+          if (newest) break;
+        }
+      }
       if (res) {
-        const newest = res.turns?.[res.turns.length - 1];
         const turnMs = newest?.timestamp ? Date.parse(newest.timestamp) : NaN;
         let fileMtimeMs = NaN;
-        if (res.jsonlFile) { try { fileMtimeMs = statSync(res.jsonlFile).mtimeMs; } catch {} }
-        lastActivityMs = resolveActivityMs({ turnMs, fileMtimeMs });
+        let fileFullyRead = false;
+        if (res.jsonlFile) {
+          try {
+            const st = statSync(res.jsonlFile);
+            fileMtimeMs = st.mtimeMs;
+            fileFullyRead = st.size <= usedTailBytes;
+          } catch {}
+        }
+        lastActivityMs = resolveActivityMs({ turnMs, fileMtimeMs, fileFullyRead });
       }
     } catch {}
 

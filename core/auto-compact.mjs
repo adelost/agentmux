@@ -94,8 +94,26 @@ const ACTIVE_STATUSES = new Set(["working", "resume"]);
  *   re-posted for ~40min before a compact finally landed.
  *
  * So: the turn timestamp is the activity signal. File mtime is only a
- * last-resort proxy when there is NO readable turn at all (a fresh session that
- * hasn't flushed one yet). It must never override an existing (older) turn.
+ * last-resort proxy when there is NO readable turn at all AND we actually read
+ * the whole file (a fresh session that hasn't flushed a turn yet). It must
+ * never override an existing (older) turn.
+ *
+ * THE 8TH-TIME HOLE (claw:1, 2026-07-02): "no readable turn" is NOT the same
+ * as "fresh session". The caller reads a bounded TAIL of the jsonl, and a
+ * high-context pane (the exact population auto-compact targets) has giant
+ * turns — claw:1's 201MB session needed a 256KB tail to reach its newest
+ * user prompt, so the 64KB tail parsed ZERO turns. turnMs came back NaN, the
+ * mtime fallback kicked in, and since Claude Code touches the jsonl while
+ * idle, the genuinely-idle pane read as "active seconds ago" — min-idle
+ * cancelled the pending warning every poll and the compact never fired
+ * (warnings re-posted every ~10-24 min via warn-cooldown, the observed
+ * flood). Selection bias made this hit precisely the panes over threshold.
+ *
+ * Fix: mtime is only trusted when `fileFullyRead` says the parse covered the
+ * ENTIRE file. A partial tail with no turn returns null — "unknown", which
+ * makes decide() skip the min-idle gate (grace still protects fires) instead
+ * of fabricating freshness. Callers should ALSO retry with a bigger tail
+ * before giving up (see channels/auto-compact.mjs inspect()).
  *
  * A pane that is genuinely mid-generation already reports status working/resume,
  * which the isActive check cancels earlier than this gate — so dropping mtime
@@ -105,11 +123,13 @@ const ACTIVE_STATUSES = new Set(["working", "resume"]);
  * @param {object} args
  * @param {number|null} args.turnMs — ms timestamp of the newest finalized turn, or null/NaN
  * @param {number|null} args.fileMtimeMs — session-file mtime in ms, or null/NaN
+ * @param {boolean} [args.fileFullyRead=true] — true only when the turn parse
+ *   covered the whole session file; a partial tail must not fall back to mtime
  * @returns {number|null} the activity timestamp, or null if nothing is readable
  */
-export function resolveActivityMs({ turnMs = null, fileMtimeMs = null } = {}) {
+export function resolveActivityMs({ turnMs = null, fileMtimeMs = null, fileFullyRead = true } = {}) {
   if (Number.isFinite(turnMs)) return turnMs;
-  if (Number.isFinite(fileMtimeMs)) return fileMtimeMs;
+  if (fileFullyRead && Number.isFinite(fileMtimeMs)) return fileMtimeMs;
   return null;
 }
 
