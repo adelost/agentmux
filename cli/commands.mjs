@@ -2092,6 +2092,21 @@ const COMPACT_UNSAFE_STATUSES = new Set(["working", "permission", "menu"]);
 const COMPACT_MIN_TOKENS = 200_000;
 
 async function cmdCompact(ctx, flags = {}, positional = []) {
+  // Focus instructions ride the slash command itself: `/compact <focus>` tells
+  // the pane WHAT to preserve in the summary (contracts, task-file pointers,
+  // current verify state) instead of letting it guess. Orchestrator-supplied,
+  // since panes cannot compact themselves.
+  const focus = flags.m ?? flags.message ?? "";
+  const compactText = focus ? `/compact ${focus}` : "/compact";
+
+  // Targeted mode: `amux compact <agent> [-p N] [-m "preserve ..."]`.
+  // A non-numeric first positional is an agent name. An explicit target skips
+  // the bulk thresholds (you chose the pane deliberately) but KEEPS the
+  // working-pane guard — compacting mid-turn drops in-flight work.
+  if (positional[0] != null && Number.isNaN(Number(positional[0]))) {
+    return compactOnePane(ctx, String(positional[0]), flags, compactText);
+  }
+
   const threshold = positional[0] != null ? parseInt(positional[0]) : 20;
   if (Number.isNaN(threshold) || threshold < 0 || threshold > 100) {
     console.error(`Invalid threshold '${positional[0]}'. Must be 0-100.`);
@@ -2154,13 +2169,69 @@ async function cmdCompact(ctx, flags = {}, positional = []) {
       // Mirror to Discord with an "amux:compact" source tag so channel
       // watchers can tell this was a bulk-compact action vs a manual
       // /compact somebody typed. Transparency without noise.
-      await sendToPane(ctx, t.agent, t.pane, "/compact", { source: "amux:compact" });
-      console.log(`✓ ${t.agent} p${t.pane}: /compact sent`);
+      await sendToPane(ctx, t.agent, t.pane, compactText, { source: "amux:compact" });
+      console.log(`✓ ${t.agent} p${t.pane}: ${compactText} sent`);
     } catch (err) {
       console.log(`✗ ${t.agent} p${t.pane}: ${err.message}`);
     }
   }
   console.log(`\nNote: /compact runs asynchronously in each pane. Run 'amux top' in a minute to see new values.`);
+}
+
+/**
+ * Compact ONE explicitly named pane: `amux compact <agent> [-p N] [-m "focus"]`.
+ *
+ * WHAT: Sends `/compact [focus]` to a single claude/codex pane, with the same
+ * Discord mirroring as bulk mode.
+ * WHY: Bulk mode is threshold-driven and touches EVERY qualifying pane — but
+ * before handing a pane a heavy new brief, the orchestrator wants to compact
+ * exactly that pane and steer what the summary preserves. Thresholds don't
+ * gate here (the human/orchestrator chose the pane); the working-pane guard
+ * still does, because compacting mid-turn drops in-flight work.
+ */
+async function compactOnePane(ctx, name, flags, compactText) {
+  const paneIdx = Number.isFinite(flags.p) ? flags.p : 0;
+  const agents = listAgents(ctx.configPath);
+  const a = agents.find((x) => x.name === name);
+  if (!a) {
+    console.error(`Unknown agent '${name}'. Known: ${agents.map((x) => x.name).join(", ")}`);
+    process.exit(1);
+  }
+  if (!(await hasSession(ctx, name))) {
+    console.error(`Agent '${name}' has no running session.`);
+    process.exit(1);
+  }
+  const panes = await listPanes(ctx, name);
+  const p = panes.find((x) => x.index === paneIdx);
+  if (!p) {
+    console.error(`No pane ${paneIdx} in '${name}' (panes: ${panes.map((x) => x.index).join(", ")}).`);
+    process.exit(1);
+  }
+  const dialect = dialectFor(a, p);
+  if (dialect !== "claude" && dialect !== "codex") {
+    console.error(`${name} p${paneIdx} is not a claude/codex pane — /compact would land in a shell.`);
+    process.exit(1);
+  }
+  const { status, context } = await inspectPane(ctx, a, p);
+  const ctxStr = context ? `${context.percent}% ${formatTokens(context.tokens)}` : "context unknown";
+  if (COMPACT_UNSAFE_STATUSES.has(status) && !flags.force) {
+    console.error(
+      `${name} p${paneIdx} is ${status} (${ctxStr}) — compacting mid-turn drops in-flight work. Use --force to override.`
+    );
+    process.exit(1);
+  }
+  if (context && context.tokens < COMPACT_MIN_TOKENS) {
+    console.log(
+      `Note: ${name} p${paneIdx} holds only ${formatTokens(context.tokens)} — little to gain, sending anyway (explicit target).`
+    );
+  }
+  if (flags.dry) {
+    console.log(`[dry] ${name} p${paneIdx} (${status}, ${ctxStr}) ← ${compactText}`);
+    return;
+  }
+  await sendToPane(ctx, name, paneIdx, compactText, { source: "amux:compact" });
+  console.log(`✓ ${name} p${paneIdx}: ${compactText} sent  (was ${status}, ${ctxStr})`);
+  console.log(`Note: /compact runs asynchronously. Run 'amux top' in a minute to see new values.`);
 }
 
 /**
@@ -2962,7 +3033,9 @@ Usage:
     --strict                      Exit non-zero on active error/debt findings
     --baseline <path>             Suppress baseline findings
     --update-baseline             Write current findings to baseline
-  agent compact [threshold=20]    Send /compact to claude/codex panes ≥ threshold%
+  agent compact [threshold=20]    Bulk: /compact to idle claude/codex panes ≥ threshold%
+  agent compact <agent> [-p N]    Target ONE pane (skips thresholds, keeps working-guard)
+    -m "focus"                    Steer the summary: sends '/compact <focus>' (what to preserve)
                                   Also requires ≥200k tokens absolute (--min-tokens N to change)
     --dry                         Show what would compact, do nothing
     --force                       Include 'working' panes (default: skip)
@@ -3048,7 +3121,7 @@ const FLAG_SPECS = {
     all: "boolean",
     "per-pane": "number",
   },
-  compact: { dry: "boolean", force: "boolean", "min-tokens": "number" },
+  compact: { dry: "boolean", force: "boolean", "min-tokens": "number", p: "number", m: "string", message: "string" },
   dream: { since: "string", workspace: "string", dry: "boolean", q: "boolean", quiet: "boolean" },
   janitor: { dry: "boolean", days: "number" },
   "playwright-reap": { dry: "boolean", minutes: "number" },
