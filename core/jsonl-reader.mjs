@@ -581,9 +581,49 @@ export function parseSinceArg(arg) {
  * content (not a tool_result) and ends at the next such event. Assistant
  * and tool_result events between go into the turn.
  */
-function groupIntoTurns(events) {
+// Stable per-item identity for the Discord watcher's posted-set dedupe.
+//
+// WHY positional keys are FORBIDDEN in watcher state: the watcher reads a
+// bounded tail WINDOW of the jsonl, and that window SLIDES forward as the file
+// grows. A turn's leading events (its user-prompt marker, big tool_results)
+// scroll out of the window, so both the turn-start timestamp and every
+// item-index shift between polls. Keying "already posted" on turnStartMs +
+// index therefore drifts, and the final text gets skipped or double-posted.
+// The uuid is content-addressed: a whole jsonl line (one uuid) is either fully
+// inside the window or fully dropped, never re-indexed, so `uuid:blockIndex`
+// is invariant under the slide. blockIndex is the position within the event's
+// content array, itself immutable.
+function itemIdFor(uuid, blockIndex) {
+  return uuid ? `${uuid}:${blockIndex}` : null;
+}
+
+/**
+ * Group events into turns. A turn starts at a type:"user" event with string
+ * content (not a tool_result) and ends at the next such event. Assistant and
+ * tool_result events between go into the turn.
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.headless=false] Reconstruct a synthetic turn for
+ *   leading assistant events that have no preceding user-prompt marker. This
+ *   happens when a tail WINDOW begins mid-turn (the prompt scrolled out behind
+ *   >window bytes of tool_results): without it those orphan events, which can
+ *   include the turn's FINAL text, are dropped and never mirrored. Opt-in so
+ *   only the watcher sees headless turns (userPrompt=null); other readers are
+ *   unchanged. Items still carry stable ids so the engine dedupes them exactly.
+ */
+function groupIntoTurns(events, { headless = false } = {}) {
   const turns = [];
   let current = null;
+  const startHeadless = (e) => {
+    current = {
+      timestamp: e.timestamp || null,
+      userPrompt: null,
+      headless: true,
+      items: [],
+      endTimestamp: null,
+      isComplete: false,
+    };
+  };
   for (const e of events) {
     if (e.type === "user" && typeof e.message?.content === "string") {
       if (current) turns.push(current);
@@ -598,16 +638,19 @@ function groupIntoTurns(events) {
       };
       continue;
     }
-    if (!current) continue;
     if (e.type === "assistant" && Array.isArray(e.message?.content)) {
-      for (const block of e.message.content) {
+      if (!current) {
+        if (!headless) continue;
+        startHeadless(e);
+      }
+      e.message.content.forEach((block, blockIndex) => {
         if (block.type === "text" && typeof block.text === "string") {
           const text = block.text.trim();
-          if (text) current.items.push({ type: "text", content: text });
+          if (text) current.items.push({ type: "text", content: text, id: itemIdFor(e.uuid, blockIndex) });
         } else if (block.type === "tool_use") {
-          current.items.push({ type: "tool", content: formatJsonlToolCall(block) });
+          current.items.push({ type: "tool", content: formatJsonlToolCall(block), id: itemIdFor(e.uuid, blockIndex) });
         }
-      }
+      });
       if (e.timestamp) current.endTimestamp = e.timestamp;
       const reason = e.message?.stop_reason;
       if (reason && TERMINAL_STOP_REASONS.has(reason)) current.isComplete = true;
@@ -615,13 +658,17 @@ function groupIntoTurns(events) {
   }
   if (current) turns.push(current);
 
-  // Merge adjacent text items within each turn (same reason as extractFromJsonl)
+  // Merge adjacent text items within each turn (same reason as extractFromJsonl).
+  // The merged item keeps the LAST constituent's id: the tail window only ever
+  // drops LEADING events, so the last member of a visible run is the last to
+  // scroll out — keying on it stays stable across the slide (no re-post).
   for (const turn of turns) {
     const merged = [];
     for (const item of turn.items) {
       const last = merged[merged.length - 1];
       if (last && last.type === "text" && item.type === "text") {
         last.content = last.content + "\n\n" + item.content;
+        last.id = item.id;
       } else {
         merged.push({ ...item });
       }
@@ -643,7 +690,7 @@ function groupIntoTurns(events) {
  *   null when paneDir has no jsonl store (caller should fall back to tmux).
  */
 export function readLastTurns(paneDir, opts = {}) {
-  const { limit = 3, since = null, grep = null, tailBytes = null } = opts;
+  const { limit = 3, since = null, grep = null, tailBytes = null, headless = false } = opts;
   const projectDir = join(CLAUDE_PROJECTS_DIR(), encodePath(paneDir));
   if (!existsSync(projectDir)) return null;
   const files = listJsonlFiles(projectDir);
@@ -655,7 +702,7 @@ export function readLastTurns(paneDir, opts = {}) {
   const events = (tailBytes && !since && !grep)
     ? parseJsonlTail(files[0].path, tailBytes)
     : parseJsonl(files[0].path);
-  let turns = groupIntoTurns(events);
+  let turns = groupIntoTurns(events, { headless });
 
   if (since) {
     turns = turns.filter((t) => {

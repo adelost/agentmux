@@ -288,7 +288,8 @@ feature("readLastTurnsCodex: single-turn complete rollout", () => {
       expect(t.isComplete).toBe(true);
       expect(t.endTimestamp).toBe("2026-04-09T10:00:10Z");
       expect(t.items).toHaveLength(2);
-      expect(t.items[0]).toEqual({ type: "text", content: "starting work" });
+      // items now carry a stable `id` (posted-set dedupe); assert type+content only.
+      expect(t.items[0]).toMatchObject({ type: "text", content: "starting work" });
       expect(t.items[1].type).toBe("tool");
       expect(t.items[1].content).toContain("ls -la");
       cleanup();
@@ -406,7 +407,7 @@ feature("readLastTurnsCodex: reasoning events skipped", () => {
     when: ["reading", ({ paneDir }) => readLastTurnsCodex(paneDir)],
     then: ["only the assistant text appears, reasoning skipped", (r, { cleanup }) => {
       expect(r.turns[0].items).toHaveLength(1);
-      expect(r.turns[0].items[0]).toEqual({ type: "text", content: "the answer" });
+      expect(r.turns[0].items[0]).toMatchObject({ type: "text", content: "the answer" });
       cleanup();
     }],
   });
@@ -532,7 +533,7 @@ feature("readLastTurnsCodex: task_complete-before-response_item race", () => {
     when: ["reading after race resolved", ({ paneDir }) => readLastTurnsCodex(paneDir)],
     then: ["isComplete=true with the delayed item", (r, { cleanup }) => {
       expect(r.turns[0].isComplete).toBe(true);
-      expect(r.turns[0].items).toEqual([{ type: "text", content: "delayed reply" }]);
+      expect(r.turns[0].items).toMatchObject([{ type: "text", content: "delayed reply" }]);
       cleanup();
     }],
   });

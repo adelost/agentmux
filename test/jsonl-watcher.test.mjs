@@ -459,7 +459,6 @@ feature("watcher: continuation after intermediate post (the 1.16.46 regression)"
       //   - Post-fix (diff-posts): final text posts, no duplicate of the
       //     2 already-posted Bash items.
       const userTs = "2026-04-30T22:22:00.000Z";
-      const userMs = new Date(userTs).getTime();
 
       const lines = [
         userTurn("find my account", userTs),
@@ -476,9 +475,14 @@ feature("watcher: continuation after intermediate post (the 1.16.46 regression)"
           watcher_last_posted_ts: {
             "ch-test": new Date("2026-04-30T22:22:02.000Z").getTime(),
           },
-          // Watcher already posted 2 items (the 2 Bash tool-uses) for this turn.
-          watcher_posted_item_counts: {
-            "ch-test": { [String(userMs)]: 2 },
+          // Watcher already posted the 2 Bash tool-uses for this turn. Dedupe is
+          // now keyed on stable item ids (`${uuid}:${blockIndex}`), not a count,
+          // so seed the two tool-use ids as already-posted.
+          watcher_posted_item_ids: {
+            "ch-test": [
+              "at-2026-04-30T22:22:01.000Z:0",
+              "at-2026-04-30T22:22:02.000Z:0",
+            ],
           },
         },
       });

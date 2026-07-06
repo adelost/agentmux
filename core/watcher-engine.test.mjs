@@ -8,15 +8,19 @@ import {
 const ts = (s) => `2026-05-30T12:00:${s}.000Z`;
 const ms = (iso) => new Date(iso).getTime();
 
+// Items carry stable ids (as the readers now stamp them): `${at}#${index}`.
+// The engine dedupes on these ids, not on a positional count.
 function turn({ user = "prompt", at = ts("00"), end = ts("01"), items = ["reply"], complete = true } = {}) {
   return {
     timestamp: at,
     endTimestamp: end,
     userPrompt: user,
     isComplete: complete,
-    items: items.map((content) => ({ type: "text", content })),
+    items: items.map((content, i) => ({ type: "text", content, id: `${at}#${i}` })),
   };
 }
+// The ids for the first `n` items of a turn (i.e. "these were already posted").
+const idsFor = (at, n) => Array.from({ length: n }, (_, i) => `${at}#${i}`);
 
 feature("watcher engine: checkpoint and post planning", () => {
   unit("first-time channel seeds to newest turn and does not backpost history", {
@@ -53,6 +57,7 @@ feature("watcher engine: checkpoint and post planning", () => {
         totalItems: 2,
         reason: "stop_reason",
       });
+      expect(r.actions[0].postedIds).toEqual([`${ts("10")}#0`, `${ts("10")}#1`]);
       expect(r.actions[0].turn.items.map((i) => i.content)).toEqual(["hello", "world"]);
     }],
   });
@@ -65,39 +70,60 @@ feature("watcher engine: checkpoint and post planning", () => {
     then: ["no actions", (r) => expect(r.actions).toEqual([])],
   });
 
-  unit("partial post plans only new items", {
-    given: ["a turn where one item was already posted", () => ({
+  unit("partial post plans only items with unseen ids", {
+    given: ["a turn where the first item's id is already in the posted set", () => ({
       turns: [turn({ at: ts("10"), end: ts("11"), items: ["old tool", "final text"] })],
-      postedItemCounts: { [String(ms(ts("10")))]: 1 },
+      postedItemIds: idsFor(ts("10"), 1),
     })],
-    when: ["planning", ({ turns, postedItemCounts }) => planPaneMirrorStep({
+    when: ["planning", ({ turns, postedItemIds }) => planPaneMirrorStep({
       turns,
       lastPostedMs: ms(ts("10")) - 1,
-      postedItemCounts,
+      postedItemIds,
       nowMs: ms(ts("20")),
     })],
     then: ["only the final item is planned", (r) => {
       expect(r.actions).toHaveLength(1);
       expect(r.actions[0].postedCount).toBe(1);
       expect(r.actions[0].turn.items.map((i) => i.content)).toEqual(["final text"]);
+      expect(r.actions[0].postedIds).toEqual([`${ts("10")}#1`]);
     }],
   });
 
-  unit("complete turn with no new items advances checkpoint without posting", {
-    given: ["a complete turn whose only item is already posted", () => ({
+  unit("complete turn with no unseen ids advances checkpoint without posting", {
+    given: ["a complete turn whose only item id is already posted", () => ({
       turns: [turn({ at: ts("10"), end: ts("11"), items: ["already"] })],
-      postedItemCounts: { [String(ms(ts("10")))]: 1 },
+      postedItemIds: idsFor(ts("10"), 1),
     })],
-    when: ["planning", ({ turns, postedItemCounts }) => planPaneMirrorStep({
+    when: ["planning", ({ turns, postedItemIds }) => planPaneMirrorStep({
       turns,
       lastPostedMs: ms(ts("10")) - 1,
-      postedItemCounts,
+      postedItemIds,
       nowMs: ms(ts("20")),
     })],
     then: ["checkpoint advances with no post action", (r) => {
       expect(r.actions).toEqual([]);
       expect(r.nextState.lastPostedMs).toBe(ms(ts("11")));
       expect(r.notes.some((n) => n.type === "advance-empty")).toBe(true);
+    }],
+  });
+
+  unit("truncated read holds the leading turn instead of advancing past it", {
+    given: ["a complete leading turn with all ids posted, but the read was truncated", () => ({
+      turns: [turn({ at: ts("10"), end: ts("11"), items: ["already"] })],
+      postedItemIds: idsFor(ts("10"), 1),
+    })],
+    when: ["planning with truncated=true", ({ turns, postedItemIds }) => planPaneMirrorStep({
+      turns,
+      lastPostedMs: ms(ts("10")) - 1,
+      postedItemIds,
+      truncated: true,
+      nowMs: ms(ts("20")),
+    })],
+    then: ["cursor is held (no advance-empty), a hold-truncated note is emitted", (r) => {
+      expect(r.actions).toEqual([]);
+      expect(r.nextState.lastPostedMs).toBe(ms(ts("10")) - 1);
+      expect(r.notes.some((n) => n.type === "hold-truncated")).toBe(true);
+      expect(r.notes.some((n) => n.type === "advance-empty")).toBe(false);
     }],
   });
 });
@@ -153,13 +179,13 @@ feature("watcher engine: grace and retry policy", () => {
           complete: false,
           items: ["status", "tool 1", "tool 2", "partial final"],
         })],
-        postedItemCounts: { [String(ms(ts("10")))]: 3 },
+        postedItemIds: idsFor(ts("10"), 3),
       };
     }],
-    when: ["planning before the long partial-text grace expires", ({ turns, postedItemCounts, endMs }) => planPaneMirrorStep({
+    when: ["planning before the long partial-text grace expires", ({ turns, postedItemIds, endMs }) => planPaneMirrorStep({
       turns,
       lastPostedMs: ms(ts("20")),
-      postedItemCounts,
+      postedItemIds,
       nowMs: endMs + 10_000,
       latestMtimeMs: endMs,
       completionGraceMs: 5_000,
@@ -184,12 +210,12 @@ feature("watcher engine: grace and retry policy", () => {
         complete: true,
         items: ["status", "tool 1", "tool 2", "full final answer"],
       })],
-      postedItemCounts: { [String(ms(ts("10")))]: 3 },
+      postedItemIds: idsFor(ts("10"), 3),
     })],
-    when: ["planning after completion", ({ turns, postedItemCounts }) => planPaneMirrorStep({
+    when: ["planning after completion", ({ turns, postedItemIds }) => planPaneMirrorStep({
       turns,
       lastPostedMs: ms(ts("20")),
-      postedItemCounts,
+      postedItemIds,
       nowMs: ms(ts("50")),
       latestMtimeMs: ms(ts("40")),
     })],
@@ -218,24 +244,26 @@ feature("watcher engine: grace and retry policy", () => {
     }],
   });
 
-  unit("post success advances checkpoint and clears retry", {
-    given: ["current state and a successful post action", () => ({
+  unit("post success advances checkpoint, clears retry, records posted ids", {
+    given: ["current state and a successful post action carrying posted ids", () => ({
       state: {
         lastPostedMs: ms(ts("09")),
-        postedItemCounts: {},
+        postedItemIds: ["old-id"],
         retryUntilMs: ms(ts("30")),
       },
       action: {
         endMs: ms(ts("11")),
         turnStartMs: ms(ts("10")),
-        totalItems: 2,
+        postedIds: [`${ts("10")}#0`, `${ts("10")}#1`],
       },
     })],
     when: ["applying success", ({ state, action }) => applyPostSuccess(state, action)],
-    then: ["checkpoint advances, retry clears, posted count records", (next) => {
+    then: ["checkpoint advances, retry clears, ids are merged into the set", (next) => {
       expect(next.lastPostedMs).toBe(ms(ts("11")));
       expect(next.retryUntilMs).toBe(null);
-      expect(next.postedItemCounts[String(ms(ts("10")))]).toBe(2);
+      expect(next.postedItemIds).toContain(`${ts("10")}#0`);
+      expect(next.postedItemIds).toContain(`${ts("10")}#1`);
+      expect(next.postedItemIds).toContain("old-id");
     }],
   });
 
@@ -243,12 +271,12 @@ feature("watcher engine: grace and retry policy", () => {
     given: ["current state and a failed post action", () => ({
       state: {
         lastPostedMs: ms(ts("09")),
-        postedItemCounts: {},
+        postedItemIds: [],
       },
       action: {
         endMs: ms(ts("11")),
         turnStartMs: ms(ts("10")),
-        totalItems: 2,
+        postedIds: [`${ts("10")}#0`],
       },
     })],
     when: ["applying failure", ({ state, action }) => applyPostFailure(

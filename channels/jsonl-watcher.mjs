@@ -40,7 +40,7 @@ import { paneDir } from "../agent.mjs";
 import { readLastTurns, latestJsonlMtime, latestJsonlInfo } from "../core/jsonl-reader.mjs";
 import { readLastTurnsCodex, latestCodexJsonlMtime, latestCodexJsonlInfo } from "../core/codex-jsonl-reader.mjs";
 import { getContextFromPane, shortModelName } from "../core/context.mjs";
-import { applyPostFailure, applyPostSuccess, planPaneMirrorStep } from "../core/watcher-engine.mjs";
+import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, itemKey } from "../core/watcher-engine.mjs";
 import { createPaneQueue } from "../core/pane-queue.mjs";
 
 const DEFAULT_POLL_MS = 15_000;
@@ -73,7 +73,13 @@ const RETRY_BACKOFF_MS = 30_000;
 const MAX_CONCURRENT_PANES = 4;
 
 const STATE_KEY_LAST_POSTED = "watcher_last_posted_ts";
-const STATE_KEY_POSTED_COUNTS = "watcher_posted_item_counts";
+// Posted-item dedupe keyed on stable content-addressed ids (see watcher-engine
+// itemKey / jsonl-reader itemIdFor). Replaces the old positional
+// watcher_posted_item_counts, whose turnStartMs+index keys drifted under the
+// sliding tail window and dropped final texts. Migration is graceful: the new
+// key starts empty; the separate last-posted cursor still gates by timestamp,
+// so at most the in-flight turn re-posts once on first deploy.
+const STATE_KEY_POSTED_IDS = "watcher_posted_item_ids";
 const STATE_KEY_RETRY_UNTIL = "watcher_retry_until_ts";
 
 export function createJsonlWatcher({
@@ -150,15 +156,16 @@ export function createJsonlWatcher({
     state.set(STATE_KEY_LAST_POSTED, map);
   }
 
-  function postedItemCounts(channelId) {
-    const map = state.get(STATE_KEY_POSTED_COUNTS, {}) || {};
-    return { ...(map[channelId] || {}) };
+  function postedItemIds(channelId) {
+    const map = state.get(STATE_KEY_POSTED_IDS, {}) || {};
+    const v = map[channelId];
+    return Array.isArray(v) ? [...v] : [];
   }
 
-  function setPostedItemCounts(channelId, counts) {
-    const map = state.get(STATE_KEY_POSTED_COUNTS, {}) || {};
-    map[channelId] = counts || {};
-    state.set(STATE_KEY_POSTED_COUNTS, map);
+  function setPostedItemIds(channelId, ids) {
+    const map = state.get(STATE_KEY_POSTED_IDS, {}) || {};
+    map[channelId] = Array.isArray(ids) ? ids : [];
+    state.set(STATE_KEY_POSTED_IDS, map);
   }
 
   function retryUntilMs(channelId) {
@@ -177,7 +184,7 @@ export function createJsonlWatcher({
   function commitEngineState(channelId, nextState) {
     if (!nextState) return;
     if (Number.isFinite(nextState.lastPostedMs)) setLastPostedMs(channelId, nextState.lastPostedMs);
-    setPostedItemCounts(channelId, nextState.postedItemCounts || {});
+    setPostedItemIds(channelId, nextState.postedItemIds || []);
     setRetryUntilMs(channelId, nextState.retryUntilMs);
   }
 
@@ -327,7 +334,7 @@ export function createJsonlWatcher({
   function pendingGraceDueAt(turns, channelId, latestMtimeMs) {
     const cursorMs = lastPostedMs(channelId);
     if (!Number.isFinite(cursorMs)) return null;
-    const counts = postedItemCounts(channelId);
+    const postedSet = new Set(postedItemIds(channelId));
     let dueAt = null;
 
     for (const turn of turns || []) {
@@ -337,9 +344,10 @@ export function createJsonlWatcher({
       const items = Array.isArray(turn.items) ? turn.items : [];
       if (items.length === 0) continue;
 
+      // Any item whose stable id is not yet in the posted set is still pending.
       const startMs = turnMs(turn.timestamp) || endMs;
-      const posted = Math.max(0, Math.min(items.length, Math.trunc(counts[String(startMs)] || 0)));
-      if (posted >= items.length) continue;
+      const hasUnposted = items.some((it, idx) => !postedSet.has(itemKey(it, startMs, idx)));
+      if (!hasUnposted) continue;
 
       const baseMs = Math.max(endMs, Number.isFinite(latestMtimeMs) ? latestMtimeMs : 0);
       const candidate = baseMs + COMPLETION_GRACE_MS;
@@ -382,7 +390,13 @@ export function createJsonlWatcher({
       }
 
       const readStarted = Date.now();
-      const result = readTurns(dir, { limit: TURN_LOOKBACK, tailBytes: WATCHER_TAIL_BYTES });
+      // headless: reconstruct a turn even when the tail window begins after its
+      // user-prompt marker (the >window-bytes tool_results case) so the final
+      // text is never orphaned. truncated: the file is larger than the window,
+      // so the leading turn may be head-cut — the engine holds it instead of
+      // advancing past it (belt-and-suspenders on top of id-based dedupe).
+      const result = readTurns(dir, { limit: TURN_LOOKBACK, tailBytes: WATCHER_TAIL_BYTES, headless: true });
+      const truncated = Number.isFinite(fileInfo?.size) && fileInfo.size > WATCHER_TAIL_BYTES;
       const readMs = Date.now() - readStarted;
       const readBytes = estimatedReadBytes(fileInfo);
       if (!result?.turns?.length) {
@@ -396,7 +410,8 @@ export function createJsonlWatcher({
       const planned = planPaneMirrorStep({
         turns: result.turns,
         lastPostedMs: lastPostedMs(channelId),
-        postedItemCounts: postedItemCounts(channelId),
+        postedItemIds: postedItemIds(channelId),
+        truncated,
         retryUntilMs: retryUntil,
         nowMs: now,
         latestMtimeMs: mtimeMs,
@@ -417,7 +432,7 @@ export function createJsonlWatcher({
         if (!result?.ok) {
           const nextState = applyPostFailure({
             lastPostedMs: lastPostedMs(channelId),
-            postedItemCounts: postedItemCounts(channelId),
+            postedItemIds: postedItemIds(channelId),
             retryUntilMs: retryUntilMs(channelId),
           }, action, { nowMs: now, retryBackoffMs: RETRY_BACKOFF_MS });
           commitEngineState(channelId, nextState);
@@ -428,7 +443,7 @@ export function createJsonlWatcher({
 
         const nextState = applyPostSuccess({
           lastPostedMs: lastPostedMs(channelId),
-          postedItemCounts: postedItemCounts(channelId),
+          postedItemIds: postedItemIds(channelId),
           retryUntilMs: retryUntilMs(channelId),
         }, action);
         commitEngineState(channelId, nextState);

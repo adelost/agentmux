@@ -444,9 +444,10 @@ feature("readLastTurns: groups events into turns", () => {
       expect(r).not.toBeNull();
       expect(r.turns.length).toBe(2);
       expect(r.turns[0].userPrompt).toBe("hello");
-      expect(r.turns[0].items).toEqual([{ type: "text", content: "Hi there." }]);
+      // items now carry a stable `id` (posted-set dedupe); assert type+content only.
+      expect(r.turns[0].items).toMatchObject([{ type: "text", content: "Hi there." }]);
       expect(r.turns[1].userPrompt).toBe("what time is it?");
-      expect(r.turns[1].items).toEqual([{ type: "text", content: "I don't know the time." }]);
+      expect(r.turns[1].items).toMatchObject([{ type: "text", content: "I don't know the time." }]);
       expect(r.turns[0].timestamp).toBe("2026-04-08T20:00:00Z");
       cleanup();
     }],

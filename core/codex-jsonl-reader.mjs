@@ -14,8 +14,28 @@
 
 import { readdirSync, readFileSync, statSync, existsSync, openSync, readSync, closeSync, fstatSync } from "fs";
 import { join } from "path";
+import { createHash } from "crypto";
 
 const CODEX_SESSIONS_DIR = () => join(process.env.HOME, ".codex", "sessions");
+
+// Content-addressed line identity for the watcher's posted-set dedupe. Codex
+// rollout events carry no stable id (no uuid, no payload.id), so we key on a
+// hash of the raw JSON line. Like the Claude reader's uuid, a whole line is
+// either fully inside the tail window or fully dropped, never re-indexed, so
+// the hash is invariant under the sliding window. Positional keys (turnStartMs
+// + item index) are FORBIDDEN in watcher state: both drift as the window slides
+// and cause the final text to be skipped or double-posted.
+function hashLine(line) {
+  return createHash("sha1").update(line).digest("hex").slice(0, 16);
+}
+function parseLineWithHash(line, out) {
+  if (!line.trim()) return;
+  try {
+    const e = JSON.parse(line);
+    e.__hash = hashLine(line);
+    out.push(e);
+  } catch { /* skip malformed */ }
+}
 
 // Cache session_meta payload by file path. session_meta is the first event
 // in a rollout file and is immutable for the lifetime of the session, so we
@@ -53,11 +73,7 @@ function parseJsonl(filePath) {
   try {
     const content = readFileSync(filePath, "utf-8");
     const events = [];
-    for (const line of content.split("\n")) {
-      if (!line.trim()) continue;
-      try { events.push(JSON.parse(line)); }
-      catch { /* skip */ }
-    }
+    for (const line of content.split("\n")) parseLineWithHash(line, events);
     return events;
   } catch {
     return [];
@@ -91,11 +107,7 @@ function parseJsonlTail(filePath, maxBytes) {
 
 function parseJsonlText(content) {
   const events = [];
-  for (const line of String(content || "").split("\n")) {
-    if (!line.trim()) continue;
-    try { events.push(JSON.parse(line)); }
-    catch { /* skip */ }
-  }
+  for (const line of String(content || "").split("\n")) parseLineWithHash(line, events);
   return events;
 }
 
@@ -529,15 +541,15 @@ function groupCodexIntoTurns(events) {
     if (!p) continue;
 
     if (p.type === "message" && p.role === "assistant" && Array.isArray(p.content)) {
-      for (const block of p.content) {
+      p.content.forEach((block, blockIndex) => {
         if (block.type === "output_text" && typeof block.text === "string") {
           const text = block.text.trim();
-          if (text) current.items.push({ type: "text", content: text });
+          if (text) current.items.push({ type: "text", content: text, id: codexItemId(e.__hash, blockIndex) });
         }
-      }
+      });
       if (e.timestamp) current.endTimestamp = e.timestamp;
     } else if (p.type === "function_call") {
-      current.items.push({ type: "tool", content: formatCodexToolCall(p) });
+      current.items.push({ type: "tool", content: formatCodexToolCall(p), id: codexItemId(e.__hash, 0) });
       if (e.timestamp) current.endTimestamp = e.timestamp;
     }
     // p.type === "reasoning" → intentionally skipped (mirrors Claude thinking blocks)
@@ -558,13 +570,16 @@ function groupCodexIntoTurns(events) {
     delete turn._sawTaskComplete;
   }
 
-  // Merge adjacent text items per turn
+  // Merge adjacent text items per turn. Keep the LAST constituent's id (see
+  // hashLine): the tail window drops only leading events, so the last member of
+  // a visible run is the last to scroll out — a stable dedupe key.
   for (const turn of turns) {
     const merged = [];
     for (const item of turn.items) {
       const last = merged[merged.length - 1];
       if (last && last.type === "text" && item.type === "text") {
         last.content = last.content + "\n\n" + item.content;
+        last.id = item.id;
       } else {
         merged.push({ ...item });
       }
@@ -572,6 +587,10 @@ function groupCodexIntoTurns(events) {
     turn.items = merged;
   }
   return turns;
+}
+
+function codexItemId(hash, blockIndex) {
+  return hash ? `${hash}:${blockIndex}` : null;
 }
 
 /**
