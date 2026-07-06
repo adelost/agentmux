@@ -39,8 +39,17 @@ function findJsonlFiles(dir, depth = 0, acc = []) {
   return acc;
 }
 
+// A rollout past Node's max string length (~0x1fffffe8 ≈ 512 MB) can't be read
+// whole (readFileSync throws "Cannot create a string longer than..."), so a file
+// larger than this is parsed from a bounded newline-aligned tail window instead
+// — same fix + cap as the Claude reader. No consumer needs the pre-window history.
+const MAX_JSONL_WINDOW_BYTES = 128 * 1024 * 1024;
+
 /** Parse all JSON events from a jsonl file, skipping malformed lines. */
 function parseJsonl(filePath) {
+  let size = 0;
+  try { size = statSync(filePath).size; } catch { /* fall through to direct read */ }
+  if (size > MAX_JSONL_WINDOW_BYTES) return parseJsonlTail(filePath, MAX_JSONL_WINDOW_BYTES);
   try {
     const content = readFileSync(filePath, "utf-8");
     const events = [];

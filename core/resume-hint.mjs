@@ -7,8 +7,17 @@
 // the snippet and ignore the hint. Empty-state agents see the snippet
 // as unfamiliar and know to tail the jsonl for earlier context.
 
-import { readFileSync, readdirSync, statSync } from "fs";
+import { readdirSync, statSync } from "fs";
 import { join } from "path";
+import { readTailWindow } from "./jsonl-reader.mjs";
+
+// The hint only needs the LAST user turn, which lives at the tail. Reading the
+// whole session jsonl throws once it passes Node's max string length (512MB+),
+// so the default reader is a bounded tail window (injectable for tests).
+const RESUME_HINT_WINDOW_BYTES = 4 * 1024 * 1024;
+function defaultResumeRead(jsonlPath) {
+  return readTailWindow(jsonlPath, RESUME_HINT_WINDOW_BYTES).text;
+}
 
 /** Claude Code encodes project dirs by replacing / and . with -. */
 export function projectDirFor(paneDir, homeDir = process.env.HOME) {
@@ -82,7 +91,7 @@ export function formatSnippet(text, maxLen = 250) {
  * Injectable fs dep makes it unit-testable without touching disk.
  */
 export function buildResumeHint(paneDir, deps = {}) {
-  const { readFile = readFileSync, homeDir = process.env.HOME } = deps;
+  const { readFile = defaultResumeRead, homeDir = process.env.HOME } = deps;
 
   const projectDir = projectDirFor(paneDir, homeDir);
   const jsonlPath = findLatestJsonl(projectDir);

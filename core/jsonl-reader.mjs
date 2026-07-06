@@ -17,6 +17,15 @@ import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 
 const CLAUDE_PROJECTS_DIR = () => join(process.env.HOME, ".claude", "projects");
 
+// Bounded tail-window reading for session jsonl. Long-running panes grow these
+// files past Node's max string length (~0x1fffffe8 ≈ 512 MB); reading one whole
+// as a string throws "Cannot create a string longer than...", which broke
+// `amux log`, ALL of `amux timeline`, and jsonl isBusy-dispatch for the whole
+// fleet. No consumer needs the whole file: recent turns, the needle, the
+// since-window and the last lines all live in the tail.
+const DEFAULT_JSONL_WINDOW_BYTES = 8 * 1024 * 1024; // 8 MiB tail: thousands of turns
+const MAX_JSONL_WINDOW_BYTES = 128 * 1024 * 1024; // hard cap, well under the string limit
+
 /**
  * Claude Code's path encoding: every `/` and `.` becomes a `-`.
  * Example: /home/user/lsrc/.agents/1 → -home-user-lsrc--agents-1
@@ -88,8 +97,69 @@ function parseJsonlText(content) {
   return events;
 }
 
-/** Parse every JSON line in a jsonl file, skipping malformed lines. */
+/**
+ * Read the last `maxBytes` of a file as UTF-8 text, aligned to a line boundary.
+ * Returns { text, reachedStart }. When the window does NOT span the whole file
+ * the first (partial) line is dropped and reachedStart is false; when it does,
+ * the full text is returned and reachedStart is true. UTF-8-safe: a multibyte
+ * char split at the window start lands inside the dropped partial line, so a
+ * kept line never begins mid-codepoint. Never materialises more than the window.
+ */
+export function readTailWindow(filePath, maxBytes) {
+  let fd;
+  try {
+    fd = openSync(filePath, "r");
+    const size = fstatSync(fd).size;
+    const reachedStart = size <= maxBytes;
+    const readBytes = reachedStart ? size : maxBytes;
+    const buf = Buffer.alloc(readBytes);
+    if (readBytes > 0) readSync(fd, buf, 0, readBytes, size - readBytes);
+    let text = buf.toString("utf-8");
+    if (!reachedStart) {
+      const nl = text.indexOf("\n");
+      text = nl === -1 ? "" : text.slice(nl + 1); // discard partial leading line
+    }
+    return { text, reachedStart };
+  } catch {
+    return { text: "", reachedStart: false };
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch {} }
+  }
+}
+
+/**
+ * Parse a GROWING tail window until `enough(events)` is satisfied, the window
+ * reaches the file start, or it hits `maxBytes`. Doubles the window each pass.
+ * Never materialises more than `maxBytes` as a string, so it is safe on files
+ * past Node's max string length. `enough` defaults to "the first window is
+ * enough" (single bounded tail read).
+ */
+export function parseJsonlWindow(filePath, {
+  initialBytes = DEFAULT_JSONL_WINDOW_BYTES,
+  maxBytes = MAX_JSONL_WINDOW_BYTES,
+  enough = () => true,
+} = {}) {
+  let bytes = Math.max(1, Math.min(initialBytes, maxBytes));
+  for (;;) {
+    const { text, reachedStart } = readTailWindow(filePath, bytes);
+    const events = parseJsonlText(text);
+    if (reachedStart || bytes >= maxBytes || enough(events)) return events;
+    bytes = Math.min(bytes * 2, maxBytes);
+  }
+}
+
+/**
+ * Parse every JSON line in a jsonl file, skipping malformed lines. Files past
+ * Node's max string length can't be read whole (readFileSync throws), so a file
+ * larger than [MAX_JSONL_WINDOW_BYTES] is parsed from a bounded newline-aligned
+ * tail window instead — no consumer needs the pre-window history.
+ */
 function parseJsonl(filePath) {
+  let size = 0;
+  try { size = statSync(filePath).size; } catch { /* fall through to direct read */ }
+  if (size > MAX_JSONL_WINDOW_BYTES) {
+    return parseJsonlText(readTailWindow(filePath, MAX_JSONL_WINDOW_BYTES).text);
+  }
   return parseJsonlText(readFileSync(filePath, "utf-8"));
 }
 
@@ -99,26 +169,11 @@ function parseJsonl(filePath) {
  * long-running panes — reading the whole thing just to grab the last few
  * turns (preview, last-assistant line) cost ~500ms PER pane and was the
  * dominant latency in `amux ps`/`amux done`. We seek to the tail, drop the
- * first (almost certainly partial) line, and parse the rest. Falls back to a
- * full read when the file is already small or anything goes wrong.
+ * first (almost certainly partial) line, and parse the rest. When the file is
+ * already smaller than the window the whole file is parsed (no line dropped).
  */
 function parseJsonlTail(filePath, maxBytes) {
-  let fd;
-  try {
-    fd = openSync(filePath, "r");
-    const size = fstatSync(fd).size;
-    if (size <= maxBytes) return parseJsonl(filePath);
-    const buf = Buffer.alloc(maxBytes);
-    readSync(fd, buf, 0, maxBytes, size - maxBytes);
-    let text = buf.toString("utf-8");
-    const nl = text.indexOf("\n");
-    if (nl !== -1) text = text.slice(nl + 1); // discard partial leading line
-    return parseJsonlText(text);
-  } catch {
-    try { return parseJsonl(filePath); } catch { return []; }
-  } finally {
-    if (fd !== undefined) { try { closeSync(fd); } catch {} }
-  }
+  return parseJsonlText(readTailWindow(filePath, maxBytes).text);
 }
 
 /**
@@ -697,10 +752,20 @@ function eventsFromProjectDir(projectDir, opts = {}) {
   if (tailBytes) {
     events = parseJsonlTail(latest.path, tailBytes);
     if (tailFallback && sinceMs != null) {
-      const oldest = events.find((e) => e.timestamp)?.timestamp;
-      const oldestMs = oldest ? Date.parse(oldest) : NaN;
-      if (!Number.isFinite(oldestMs) || oldestMs > sinceMs) {
-        events = parseJsonl(latest.path); // tail didn't reach the cutoff
+      const reachedCutoff = (evs) => {
+        const oldest = evs.find((e) => e.timestamp)?.timestamp;
+        const oldestMs = oldest ? Date.parse(oldest) : NaN;
+        return Number.isFinite(oldestMs) && oldestMs <= sinceMs;
+      };
+      if (!reachedCutoff(events)) {
+        // Tail didn't reach the cutoff: GROW the window until it does (bounded
+        // by MAX_JSONL_WINDOW_BYTES) instead of reading the whole file, which on
+        // a 512MB+ session jsonl throws the string-length error and took the
+        // whole `amux timeline` down.
+        events = parseJsonlWindow(latest.path, {
+          initialBytes: Math.max(tailBytes * 2, DEFAULT_JSONL_WINDOW_BYTES),
+          enough: reachedCutoff,
+        });
       }
     }
   } else {
