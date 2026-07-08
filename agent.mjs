@@ -1107,19 +1107,26 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       if (found === true) return true;
 
       // jsonl hasn't positively confirmed — found === false means the agent
-      // hasn't written the prompt yet (it's QUEUED behind a running turn,
-      // which can take minutes); found === null means unknown dialect or no
-      // jsonl. In both cases the keystrokes may already sit in the composer:
-      // delivery is done, the agent just hasn't processed it. Check the
-      // capture TAIL (composer region) so we confirm a queued-but-delivered
-      // prompt in ~1s instead of holding the send-lock for the full timeout.
-      // Tail-only avoids matching an identical earlier prompt in scrollback;
-      // an actually-eaten prompt (swallowed by a modal) is in neither jsonl
-      // nor composer, so it still fails here and the caller retries.
+      // hasn't written the prompt yet; found === null means unknown dialect
+      // or no jsonl. The keystrokes may sit in the composer, but that is
+      // only DELIVERY when a turn is running (a queued message auto-submits
+      // at turn end, which can take minutes — don't hold the send-lock for
+      // that). On an IDLE pane, text in the composer is UNSUBMITTED: calling
+      // it delivered here is exactly how a prompt got lost on 2026-07-08
+      // (claude restarted under a 547MB jsonl and dropped the composer)
+      // while the bridge logged 'delivered' and no ⚠️ ever reached Discord.
+      // Idle+in-composer keeps polling: the submit-rescue may land it in
+      // jsonl (→ true), else we time out (→ false) and the caller's retry/
+      // warning path finally tells the human the truth.
       if (found !== true) {
         const raw = await capturePane(agentName, pane, 100);
         const tail = raw.split("\n").slice(-15).join("\n");
-        if (tail.includes(needle.slice(0, 20))) return true;
+        if (tail.includes(needle.slice(0, 20))) {
+          const dialect2 = detectDialect(raw);
+          const busyHit = dialect2.busySignals?.some((sig) =>
+            typeof sig === "string" ? raw.includes(sig) : sig.test(raw));
+          if (busyHit) return true; // queued behind a live turn: delivered
+        }
       }
 
       await wait(200);
@@ -1133,15 +1140,37 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const target = `${agentName}:.${pane}`;
     await exitCopyMode(target);
 
-    if (prompt.length > 500) {
-      await sendLongPrompt(target, prompt);
-    } else {
-      await t.sendLiteral(target, prompt);
-      await wait(1000);
+    // Idempotent retries: if a previous attempt left this exact prompt
+    // sitting unsubmitted in the composer, typing it again would double the
+    // text. Skip straight to the submit path instead.
+    if (!(await promptAlreadyInComposer(agentName, pane, prompt))) {
+      if (prompt.length > 500) {
+        await sendLongPrompt(target, prompt);
+      } else {
+        await t.sendLiteral(target, prompt);
+        await wait(1000);
+      }
     }
     await t.sendEnter(target);
     await maybeSendCodexSubmitEnter(agentName, pane, target, prompt);
     await maybeRescueClaudeSubmit(agentName, pane, target, prompt);
+  }
+
+  async function promptAlreadyInComposer(agentName, pane, prompt) {
+    const head = prompt.trim().slice(0, 20);
+    if (!head) return false;
+    try {
+      const raw = await capturePane(agentName, pane, 15);
+      // Composer lines render as "❯ text" (claude) / "> text" (codex).
+      // Requiring the marker keeps a prompt-head quoted in SCROLLBACK from
+      // suppressing a legitimate first type-in.
+      return raw.split("\n").slice(-5).some((l) => {
+        const line = l.trim();
+        return /^[❯>]/.test(line) && line.includes(head);
+      });
+    } catch {
+      return false;
+    }
   }
 
   async function maybeSendCodexSubmitEnter(agentName, pane, target, prompt) {
