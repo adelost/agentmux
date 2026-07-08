@@ -3,6 +3,7 @@
 
 import { feature, unit, expect } from "bdd-vitest";
 import {
+  checkContextBridge,
   FAIL, OK, WARN,
   checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled,
   checkLedger, checkTmux, overallStatus,
@@ -134,5 +135,31 @@ feature("hooks + ledger + tmux checks", () => {
     ]],
     when: ["aggregating", (checks) => overallStatus(checks)],
     then: ["fail", (s) => expect(s).toBe(FAIL)],
+  });
+});
+
+feature("checkContextBridge", () => {
+  unit("no claude panes configured is fine", {
+    given: ["a codex-only setup", () => ({ claudePanes: 0, pushing: 0 })],
+    when: ["checking", (args) => checkContextBridge(args)],
+    then: ["ok", (r) => expect(r.status).toBe("ok")],
+  });
+
+  unit("zero pushing panes warns — the fallback family produced 0%/33%/100%", {
+    given: ["5 claude panes, none pushing", () => ({ claudePanes: 5, pushing: 0 })],
+    when: ["checking", (args) => checkContextBridge(args)],
+    then: ["warn with a fix hint", (r) => {
+      expect(r.status).toBe("warn");
+      expect(r.hint).toContain("claude-ctx");
+    }],
+  });
+
+  unit("partial coverage reports the ratio", {
+    given: ["5 claude panes, 3 pushing", () => ({ claudePanes: 5, pushing: 3 })],
+    when: ["checking", (args) => checkContextBridge(args)],
+    then: ["ok with 3/5", (r) => {
+      expect(r.status).toBe("ok");
+      expect(r.detail).toContain("3/5");
+    }],
   });
 });

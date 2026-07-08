@@ -268,6 +268,12 @@ function readCodexMeta(filePath) {
 // duplicate scan to a single pass. A CLI invocation lives ~1s, so staleness
 // is a non-issue; the cache dies with the process.
 let _codexIndex = null;
+
+/** Test seam: the index is process-lifetime cached, but tests swap HOME. */
+export function resetCodexSessionIndexForTests() {
+  _codexIndex = null;
+}
+
 function codexSessionIndex() {
   if (_codexIndex) return _codexIndex;
   _codexIndex = findCodexJsonlFiles(CODEX_SESSIONS_DIR())

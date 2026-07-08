@@ -10,7 +10,7 @@ import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens, 
 import { hasSession, ensureAndAttach, attachSession, killSession, listPanes, getPaneStatus, sendKeys, selectOption, createTmuxContext, sendToPane } from "./tmux.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
 import { stripAnsi, esc, extractActivity, formatDuration, validateImagePath } from "../lib.mjs";
-import { getContextFromPane, getContextPercent } from "../core/context.mjs";
+import { getContextFromPane, getContextPercent, getContextPushed } from "../core/context.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { latestCodexJsonlMtime, readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
@@ -19,7 +19,7 @@ import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../
 import { readHeartbeat } from "../core/heartbeat.mjs";
 import {
   checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkLedger,
-  checkTmux, checkConfig, overallStatus, formatDoctorReport, FAIL, WARN,
+  checkContextBridge, checkTmux, checkConfig, overallStatus, formatDoctorReport, FAIL, WARN,
 } from "../core/doctor.mjs";
 import {
   groupByPane, previewText,
@@ -179,7 +179,21 @@ async function cmdServe(flags, ctx) {
     await ctx.tmux(`new-session -d -s '${esc(BRIDGE_SESSION)}' -c '${esc(BRIDGE_DIR)}' 'bash bin/start.sh'`);
   };
 
-  await startBridgeSession();
+  try {
+    await startBridgeSession();
+  } catch (err) {
+    // The very first tmux command after a reboot can fail OUTRIGHT, not just
+    // time out (observed 2026-07-08 19:38: "Command failed: tmux ...
+    // new-session" on freshly booted WSL, success on rerun). Two known
+    // interleavings of the same boot race: tmux-continuum's restore creates
+    // the 'amux' session between our has-session check and new-session
+    // (duplicate-session error), or the server itself is mid-start on the
+    // stale socket file /tmp preserves across reboots. Either way the cure
+    // is the 1.20.45 cure: clean up and retry once on a now-warm server.
+    console.log(`new-session failed (${String(err?.message || err).split("\n")[0]}) — retrying once on a warm server...`);
+    await killSession(ctx, BRIDGE_SESSION).catch(() => {});
+    await startBridgeSession();
+  }
   // Poll for actual readiness instead of trusting tmux session creation.
   // start.sh is a 10s-restart supervisor — the first node attempt can crash
   // (DNS/network not ready right after WSL shell open) and we'd otherwise
@@ -513,6 +527,7 @@ const TIMELINE_ICONS = {
   tool: "🔧",
   error: "⚠️",
   event: "🔔",
+  delivery: "📨",
 };
 
 const TIMELINE_CONTENT_CAP = 80;
@@ -532,6 +547,7 @@ function oneLine(s) {
 
 /** Map a row's (role, type) to the icon category shown in the stream. */
 function timelineCategory(row) {
+  if (row.type === "delivery") return "delivery";
   if (row.type === "event") return "event";
   if (row.type === "tool") return "tool";
   if (row.type === "error") return "error";
@@ -642,16 +658,33 @@ function ledgerTimelineRows({ since, agentFilter, paneFilter, grep }) {
   }
   const rows = [];
   for (const evt of events) {
-    if (evt.event !== "notification" && evt.event !== "session_start") continue;
+    const known = evt.event === "notification" || evt.event === "session_start"
+      || evt.event === "delivery";
+    if (!known) continue;
     if (agentFilter && evt.session !== agentFilter) continue;
     if (paneFilter != null && evt.pane !== paneFilter) continue;
-    const content = evt.event === "session_start"
-      ? "session start"
-      : `${evt.needsYou ? "permission" : "notify"}: ${evt.detail || "(no detail)"}`;
+
+    let content;
+    let type = "event";
+    if (evt.event === "delivery") {
+      // Delivered prompts already appear as user turns from the pane's own
+      // jsonl — only receipts with NO jsonl trace add signal here: failed
+      // deliveries (THE row to find when "I sent it" meets "it never
+      // arrived") and slash commands (which never become turns).
+      if (evt.delivered && evt.kind === "prompt") continue;
+      type = "delivery";
+      content = evt.delivered
+        ? `delivered ${evt.kind}: ${evt.detail || ""}${evt.rescues ? ` (rescued x${evt.rescues})` : ""}`
+        : `NOT DELIVERED (${evt.kind}, ${evt.attempts ?? "?"} attempts): ${evt.detail || ""}`;
+    } else {
+      content = evt.event === "session_start"
+        ? "session start"
+        : `${evt.needsYou ? "permission" : "notify"}: ${evt.detail || "(no detail)"}`;
+    }
     if (grep && !grep.test(content)) continue;
     rows.push({
       timestamp: evt.ts, agent: evt.session, pane: evt.pane,
-      role: "system", type: "event", content,
+      role: "system", type, content,
     });
   }
   return rows;
@@ -2117,11 +2150,25 @@ async function cmdDoctor(ctx) {
   try { agents = listAgents(ctx.configPath); }
   catch (err) { cfgError = err.message; }
 
+  // context bridge coverage: how many configured claude panes have a fresh
+  // statusline push (core/context.mjs getContextPushed)
+  let claudePanes = 0, pushing = 0;
+  for (const a of agents) {
+    (a.panes || []).forEach((p, i) => {
+      if (!/claude/.test(String(p?.cmd || ""))) return;
+      claudePanes++;
+      try {
+        if (getContextPushed(panePathFor(a, i))) pushing++;
+      } catch { /* counted as not pushing */ }
+    });
+  }
+
   const checks = [
     checkBridgeProcess({ pids, supervised }),
     checkHeartbeatHealth({ beat, repoVersion, pidAlive: pids.length > 0 }),
     checkHooksInstalled({ settings, hookFileExists }),
     checkLedger({ stat: ledgerStat }),
+    checkContextBridge({ claudePanes, pushing }),
     checkTmux({ sessions, error: tmuxError }),
     checkConfig({ agents, error: cfgError }),
   ];
@@ -2248,7 +2295,7 @@ async function cmdPs(ctx, flags = {}) {
     }
   }
 
-  console.log("\nStatus: 🟢 working  🔴 needs input  🟡 resume/dismiss  💤 idle/done  ⚪ unknown");
+  console.log("\nStatus: 🟢 working  🔴 needs input/interrupted  🚫 limited  🟡 resume/dismiss  💤 idle/done  ⚪ unknown");
   if (!showAll) console.log("(use --full / -f to expand all panes)");
 }
 

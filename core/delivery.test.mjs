@@ -4,6 +4,7 @@
 
 import { feature, component, unit, expect } from "bdd-vitest";
 import { deliverToPane, isSlashCommand, sendPromptVerified } from "./delivery.mjs";
+import { readEvents } from "./events.mjs";
 
 // Fake agent with scriptable echo/busy behavior; records interaction order.
 function fakeAgent({ echoResults = [], busyResults = [] } = {}) {
@@ -93,6 +94,42 @@ feature("deliverToPane routing", () => {
       expect(result.delivered).toBe(true);
       expect(agent.calls).toContain("capture");
       expect(agent.calls).not.toContain("echo");
+    }],
+  });
+});
+
+feature("delivery receipts", () => {
+  // The global test setup points AMUX_EVENTS_PATH at a per-worker temp
+  // ledger, so these receipts never touch the real ~/.agentmux ledger.
+  const receiptsFor = (needle) =>
+    readEvents({}).filter((e) => e.event === "delivery" && e.detail.includes(needle));
+
+  component("a failed delivery leaves an honest ledger receipt", {
+    given: ["an agent that never echoes and never gets busy", () =>
+      fakeAgent({ echoResults: [false], busyResults: [false] })],
+    when: ["sending a uniquely tagged prompt that fails", async (agent) => {
+      const tag = `receipt-fail-${Math.random().toString(36).slice(2)}`;
+      await sendPromptVerified(agent, "claw", 1, tag, { attempts: 2 });
+      return receiptsFor(tag);
+    }],
+    then: ["one receipt: delivered=false with the attempt count", (receipts) => {
+      expect(receipts).toHaveLength(1);
+      expect(receipts[0].delivered).toBe(false);
+      expect(receipts[0].kind).toBe("prompt");
+      expect(receipts[0].attempts).toBe(2);
+    }],
+  });
+
+  component("a delivered slash command is receipted too", {
+    given: ["an agent whose composer consumes the command", () => fakeAgent()],
+    when: ["delivering /compact", async (agent) => {
+      await deliverToPane(agent, "claw", 2, "/compact", { settleMs: 0, sleep: async () => {} });
+      return readEvents({}).filter((e) =>
+        e.event === "delivery" && e.kind === "slash" && e.session === "claw" && e.pane === 2);
+    }],
+    then: ["receipt says delivered slash", (receipts) => {
+      expect(receipts.length).toBeGreaterThanOrEqual(1);
+      expect(receipts.at(-1).delivered).toBe(true);
     }],
   });
 });

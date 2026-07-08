@@ -16,6 +16,31 @@
 // in an idle composer while the bridge logged "delivered", and a /model
 // that could vanish into the command palette while Discord said "sent".
 
+import { appendEvent } from "./events.mjs";
+
+/**
+ * Delivery receipt: every verified send leaves a ledger row, so "did my
+ * message arrive?" is an `amux timeline --grep` instead of a forensic dig
+ * through pane jsonl (the ai:4 excavation, 2026-07-08). Best-effort by
+ * design: a failed receipt write must never fail the delivery itself.
+ */
+function recordReceipt(agentName, pane, kind, text, result) {
+  try {
+    appendEvent({
+      ts: new Date().toISOString(),
+      event: "delivery",
+      session: agentName,
+      pane: Number(pane) || 0,
+      kind, // "prompt" | "slash"
+      delivered: Boolean(result.delivered),
+      via: result.via ?? null,
+      attempts: result.attempts ?? null,
+      rescues: result.rescues ?? null,
+      detail: String(text).slice(0, 120),
+    });
+  } catch { /* receipts are diagnostics, not delivery */ }
+}
+
 /**
  * Route by payload shape: Claude-internal slash commands need composer
  * verification, prompts get jsonl echo verification.
@@ -37,7 +62,13 @@ export function isSlashCommand(text) {
  * verifyText is what the echo check looks for (the bare prompt).
  * Returns { delivered, attempts, via } — via: "echo" | "busy".
  */
-export async function sendPromptVerified(agent, agentName, pane, text, {
+export async function sendPromptVerified(agent, agentName, pane, text, opts = {}) {
+  const result = await promptDeliveryAttempts(agent, agentName, pane, text, opts);
+  recordReceipt(agentName, pane, "prompt", opts.verifyText ?? text, result);
+  return result;
+}
+
+async function promptDeliveryAttempts(agent, agentName, pane, text, {
   verifyText = null, attempts = 3, echoTimeoutMs = 6000, log = () => {},
 } = {}) {
   const target = `${agentName}:.${pane}`;
@@ -72,7 +103,13 @@ export async function sendPromptVerified(agent, agentName, pane, text, {
  * a no-op, so a false "stuck" read is harmless).
  * Returns { delivered, rescues }.
  */
-export async function sendSlashVerified(agent, agentName, pane, claudeCmd, {
+export async function sendSlashVerified(agent, agentName, pane, claudeCmd, opts = {}) {
+  const result = await slashDeliveryAttempts(agent, agentName, pane, claudeCmd, opts);
+  recordReceipt(agentName, pane, "slash", claudeCmd, result);
+  return result;
+}
+
+async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
   settleMs = 1200, maxRescues = 2,
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
 } = {}) {

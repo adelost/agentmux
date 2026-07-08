@@ -86,6 +86,24 @@ export function checkLedger({ stat, now = Date.now(), maxBytes = 8 * 1024 * 1024
   return check("event ledger", OK, `${Math.round(stat.size / 1024)}KB, last event ${ageMin} min ago`);
 }
 
+/**
+ * Context truth relies on Claude Code's statusline pushing its own percent
+ * to os.tmpdir()/claude-ctx-<session>.json (core/context.mjs). If that
+ * channel dies silently (statusline replaced/updated without the tee),
+ * every consumer falls back to scrape/jsonl reconstruction — the family
+ * that produced 0%/33%/100% disagreement about one pane (2026-07-08).
+ * Surface the coverage so the fallback is a visible state, not a silent one.
+ */
+export function checkContextBridge({ claudePanes, pushing }) {
+  if (!claudePanes) return check("context bridge", OK, "no claude panes configured");
+  if (pushing === 0) {
+    return check("context bridge", WARN,
+      `0/${claudePanes} claude panes push statusline context`,
+      "context %% falls back to scrape/jsonl; verify the statusline writes /tmp/claude-ctx-<session>.json");
+  }
+  return check("context bridge", OK, `${pushing}/${claudePanes} claude panes push fresh context`);
+}
+
 export function checkTmux({ sessions, error }) {
   if (error) {
     return check("tmux", FAIL, `socket not answering: ${error}`,

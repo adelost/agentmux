@@ -13,9 +13,10 @@
 
 import { feature, component, expect } from "bdd-vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, unlinkSync } from "fs";
+import * as fsExtra from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { getContextPercent, getContextFromPane, getContextPushed } from "./context.mjs";
+import { getContextPercent, getContextFromPane, getContextPushed, resetCodexSessionIndexForTests } from "./context.mjs";
 
 const usageEntry = (model, total) => JSON.stringify({
   timestamp: "2026-07-08T16:49:00.000Z",
@@ -148,5 +149,52 @@ feature("pushed statusline truth", () => {
       withSessionJsonl(lines, (paneDir) => getContextFromPane(pane, paneDir), { bridge })],
     then: ["41% — the pane image is fallback, not truth", (ctx) =>
       expect(ctx.percent).toBe(41)],
+  });
+});
+
+feature("golden fixtures — every context source", () => {
+  component("custom statusline row: Claude Code's rendered percent is never recomputed", {
+    given: ["the 2026-06-10 shape: statusline shows 92%, jsonl math would say 77%", () => ({
+      lines: [usageEntry("claude-fable-5[1m]", 769_000)],
+      pane: "  scrollback\n/gsd-update | claude-fable-5[1m] | ▓▓▓▓▓▓▓░░░ 92%\n",
+    })],
+    when: ["reading context from the pane content", ({ lines, pane }) =>
+      withSessionJsonl(lines, (paneDir) => getContextFromPane(pane, paneDir))],
+    then: ["92% — the on-screen number wins; tokens from jsonl for display", (ctx) => {
+      expect(ctx.percent).toBe(92);
+      expect(ctx.tokens).toBe(769_000);
+    }],
+  });
+
+  component("codex token_count: last_token_usage over model_context_window", {
+    given: ["a codex rollout for the pane's cwd", () => null],
+    when: ["reading context via the codex dialect", () => {
+      const { mkdtempSync, mkdirSync, writeFileSync } = fsExtra;
+      const home = mkdtempSync(join(tmpdir(), "amux-codex-"));
+      const paneDir = join(home, "work", "pane4");
+      const day = join(home, ".codex", "sessions", "2026", "07", "08");
+      mkdirSync(day, { recursive: true });
+      mkdirSync(paneDir, { recursive: true });
+      writeFileSync(join(day, "rollout-x.jsonl"), [
+        JSON.stringify({ type: "session_meta", payload: { cwd: paneDir } }),
+        JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: {
+          model_context_window: 256_000,
+          last_token_usage: { input_tokens: 60_000, cached_input_tokens: 50_000, output_tokens: 4_000 },
+        } } }),
+      ].join("\n") + "\n");
+      const prevHome = process.env.HOME;
+      process.env.HOME = home;
+      resetCodexSessionIndexForTests();
+      try {
+        return getContextPercent(paneDir, "codex");
+      } finally {
+        process.env.HOME = prevHome;
+        resetCodexSessionIndexForTests();
+      }
+    }],
+    then: ["25% — (60k input incl. cache + 4k output) / 256k window", (ctx) => {
+      expect(ctx.percent).toBe(25);
+      expect(ctx.tokens).toBe(64_000);
+    }],
   });
 });
