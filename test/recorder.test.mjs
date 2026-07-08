@@ -1,4 +1,4 @@
-import { feature, unit, expect } from "bdd-vitest";
+import { feature, unit, component, expect } from "bdd-vitest";
 import { mkdtempSync, rmSync, readdirSync, writeFileSync, statSync, utimesSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -154,7 +154,9 @@ feature("createRecorder: rotation (keep max N)", () => {
     }],
   });
 
-  unit("default max keeps the most recent 500", {
+  // Real-file I/O with 502 seeded files: component budget, not unit's
+  // 100ms — it sat at 110ms even before parallel-load growth pushed it over.
+  component("default max keeps the most recent 500", {
     given: ["dir with 502 seeded files", () => {
       const dir = freshDir();
       seedRecordings(dir, 502);

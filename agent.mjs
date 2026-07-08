@@ -5,6 +5,7 @@ import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, unlinkS
 import { join } from "path";
 import { load as loadYaml } from "js-yaml";
 import { esc, stripAnsi } from "./lib.mjs";
+import { createTmuxAdapter } from "./core/tmux.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
 import { detectDialect } from "./core/dialects.mjs";
 import { extractFromJsonl, isBusyFromJsonl, isPromptInJsonl } from "./core/jsonl-reader.mjs";
@@ -423,7 +424,9 @@ function ensureGitignored(rootDir, entry) {
 
 export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxExec, onResumeHint }) {
   const wait = delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
-  const tmux = (cmd) => tmuxExec(`tmux -S '${esc(tmuxSocket)}' ${cmd}`);
+  // All tmux syntax lives in the adapter (core/tmux.mjs). agent.mjs speaks
+  // intent-level primitives; escaping is the adapter's tested concern.
+  const t = createTmuxAdapter({ socket: tmuxSocket, exec: tmuxExec });
 
   // --- Config ---
 
@@ -441,7 +444,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   // --- tmux primitives ---
 
   async function hasSession(name) {
-    try { await tmux(`has-session -t '${esc(name)}'`); return true; } catch { return false; }
+    return t.hasSession(name);
   }
 
   // Strip Claude-session identity vars from tmux's global environment.
@@ -454,16 +457,14 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   async function sanitizeTmuxGlobalEnv() {
     let names = [];
     try {
-      const { stdout } = await tmux(`show-environment -g`);
-      names = stdout.split("\n")
-        .map((l) => l.split("=")[0])
+      names = (await t.globalEnvNames())
         .filter((n) => /^(CLAUDECODE$|CLAUDE_CODE_|CLAUDE_EFFORT$|AI_AGENT$)/.test(n));
     } catch (err) {
       console.warn(`sanitizeTmuxGlobalEnv: show-environment failed: ${err.message}`);
       return;
     }
     for (const n of names) {
-      await tmux(`set-environment -g -u '${esc(n)}'`).catch((err) =>
+      await t.unsetGlobalEnv(n).catch((err) =>
         console.warn(`sanitizeTmuxGlobalEnv: unset ${n} failed: ${err.message}`));
     }
   }
@@ -471,8 +472,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   async function ensureSession(name) {
     await sanitizeTmuxGlobalEnv();
     if (await hasSession(name)) return;
-    await tmux(`new-session -d -s '${esc(name)}'`);
-    await tmux(`source-file ~/.tmux.conf`).catch((err) =>
+    await t.newSession(name);
+    await t.sourceUserConf().catch((err) =>
       console.warn(`tmux: source-file .tmux.conf failed: ${err.message}`));
     // Let tmux handle window sizing naturally. We used to force a minimum
     // window width to prevent Claude's bottom bar from truncating
@@ -484,15 +485,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   async function exitCopyMode(target) {
     try {
-      const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_in_mode}'`);
-      if (stdout.trim() === "1") {
-        // -X dispatches a tmux in-mode command; `cancel` exits copy/view/choose
-        // mode without forwarding any keystroke to the underlying process. A
-        // raw `q` keystroke would leak to Claude if the pane exited copy-mode
-        // in the race window between the check and the send (then literal "q"
-        // ends up typed into Claude's input box). -X cancel is race-free and
-        // doesn't depend on tmux mode-keys (vi vs emacs) bindings.
-        await tmux(`send-keys -X -t '${esc(target)}' cancel`);
+      if (await t.paneInMode(target)) {
+        // -X cancel (inside the adapter) exits copy/view/choose mode without
+        // forwarding any keystroke: race-free vs a raw `q` that could leak
+        // into Claude's input box, and independent of mode-keys bindings.
+        await t.cancelCopyMode(target);
         await wait(300);
       }
     } catch (err) {
@@ -512,12 +509,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   // manual size so splits always fit. Pair with restoreAutoSize() so an
   // attaching client still drives the geometry afterwards.
   async function ensureSplitRoom(name) {
-    await tmux(`set-window-option -t '${esc(name)}' window-size manual`).catch(() => {});
-    await tmux(`resize-window -t '${esc(name)}' -x 240 -y 60`).catch(() => {});
+    await t.setWindowSizeManual(name).catch(() => {});
+    await t.resizeWindow(name, 240, 60).catch(() => {});
   }
 
   async function restoreAutoSize(name) {
-    await tmux(`set-window-option -t '${esc(name)}' window-size latest`).catch(() => {});
+    await t.setWindowSizeLatest(name).catch(() => {});
   }
 
   async function setupPanes(name, dir) {
@@ -527,7 +524,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     const layout = config[name]?.layout || "main-vertical";
     const applyLayout = async () => {
-      await tmux(`select-layout -t '${esc(name)}' '${layout}'`).catch((err) =>
+      await t.selectLayout(name, layout).catch((err) =>
         console.warn(`setupPanes: select-layout ${layout} failed: ${err.message}`));
     };
 
@@ -544,7 +541,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const targetDir = paneDir(dir, i);
       const splitTarget = `${name}:.${i - 1}`;
       try {
-        await tmux(`split-window -t '${esc(splitTarget)}' -h -c '${esc(targetDir)}'`);
+        await t.splitWindowRight(splitTarget, targetDir);
         await applyLayout();
       } catch (err) {
         console.warn(`setupPanes: split-window ${name} failed: ${err.message}`);
@@ -570,21 +567,20 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         // before any user prompt arrives.
         continue;
       } else if (panes[i].defer) {
-        await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)}' Enter`);
+        await t.runShell(target, `cd ${esc(dir)}`);
       } else {
-        await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)} && ${panes[i].cmd}' Enter`);
+        await t.runShell(target, `cd ${esc(dir)} && ${panes[i].cmd}`);
       }
       await wait(500);
     }
-    await tmux(`select-pane -t '${esc(name)}:.0'`).catch((err) =>
+    await t.selectPane(`${name}:.0`).catch((err) =>
       console.warn(`setupPanes: select-pane 0 failed: ${err.message}`));
     await restoreAutoSize(name);
   }
 
   async function countPanes(name) {
     try {
-      const { stdout } = await tmux(`list-panes -t '${esc(name)}'`);
-      return stdout.trim().split("\n").length;
+      return await t.paneCount(name);
     } catch (err) {
       // Session may not exist yet, treat as 1 default pane
       return 1;
@@ -601,11 +597,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   async function isAlreadyRunning(target) {
     try {
-      const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`);
+      const cmd = await t.currentCommand(target);
       // Pane is "free" only if a shell is at the prompt. Anything else
       // (claude, rclone, ssh, vim, tail, ...) means a process owns the
       // pane — don't send-keys into it, they'd land as stdin to that process.
-      return !/^(bash|zsh|fish|sh|dash)$/.test(stdout.trim());
+      return !/^(bash|zsh|fish|sh|dash)$/.test(cmd);
     } catch {
       // Target doesn't exist → not running
       return false;
@@ -659,7 +655,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const wanted = cfg.panes;
     const layout = cfg.layout || "main-vertical";
     const applyLayout = async () => {
-      await tmux(`select-layout -t '${esc(name)}' '${layout}'`).catch((err) =>
+      await t.selectLayout(name, layout).catch((err) =>
         console.warn(`reconcile: select-layout ${layout} failed: ${err.message}`));
     };
 
@@ -677,7 +673,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         // See setupPanes for why -c is mandatory. Same bug, same fix.
         const targetDir = paneDir(cfg.dir, i);
         const splitTarget = `${name}:.${i - 1}`;
-        await tmux(`split-window -t '${esc(splitTarget)}' -h -c '${esc(targetDir)}'`);
+        await t.splitWindowRight(splitTarget, targetDir);
         summary.added++;
         await applyLayout();
       } catch (err) {
@@ -697,8 +693,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const want = wanted[i];
       let currCmd = "";
       try {
-        const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`);
-        currCmd = stdout.trim();
+        currCmd = await t.currentCommand(target);
       } catch { continue; }
 
       if (paneTypeMatches(currCmd, want.cmd)) { summary.unchanged++; continue; }
@@ -726,7 +721,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         if (isAgentCmd(want.cmd) || want.cmd === "bash") {
           // Leave as shell; startClaude/startCodex runs on demand when
           // pane is used.
-          await tmux(`respawn-pane -k -t '${esc(target)}' -c '${esc(respawnDir)}'`);
+          await t.respawnPane(target, { kill: true, cwd: respawnDir });
         } else {
           // Services must mirror setupPanes: shell pane + send-keys
           // 'cd <root> && cmd'. Services run from the repo root (that's
@@ -735,8 +730,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
           // the command IS the pane process, so a service that exits
           // immediately closes the pane, renumbers the rest, and makes
           // every later respawn target miss ("can't find pane: N").
-          await tmux(`respawn-pane -k -t '${esc(target)}' -c '${esc(cfg.dir)}'`);
-          await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(cfg.dir)} && ${want.cmd}' Enter`);
+          await t.respawnPane(target, { kill: true, cwd: cfg.dir });
+          await t.runShell(target, `cd ${esc(cfg.dir)} && ${want.cmd}`);
         }
         summary.respawned.push({ pane: i, was: currCmd, expected: want.name });
       } catch (err) {
@@ -756,7 +751,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     const dir = paneDir(rootDir, pane);
     const sessionFlag = resolveSessionFlag(dir);
-    await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)} && ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_FLAGS} ${sessionFlag}' Enter`);
+    await t.runShell(target, `cd ${esc(dir)} && ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_FLAGS} ${sessionFlag}`);
     await wait(2000);
   }
 
@@ -770,14 +765,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     // session exists (first launch). Both inherit cwd from the cd above
     // so codex jsonl lands in .agents/N/ — same isolation as claude.
     const cmd = `codex resume --last ${CODEX_FLAGS} 2>/dev/null || codex ${CODEX_FLAGS}`;
-    await tmux(`send-keys -t '${esc(target)}' 'cd ${esc(dir)} && ${cmd}' Enter`);
+    await t.runShell(target, `cd ${esc(dir)} && ${cmd}`);
     await wait(2000);
   }
 
   async function isPaneDead(target) {
     try {
-      const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_dead}'`);
-      return stdout.trim() === "1";
+      return await t.paneDead(target);
     } catch {
       // Target doesn't exist → not dead (doesn't exist yet)
       return false;
@@ -792,14 +786,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     // been wired to a readline loop yet.
     let oldPid = "";
     try {
-      const { stdout } = await tmux(`display-message -t '${esc(target)}' -p '#{pane_pid}'`);
-      oldPid = stdout.trim();
+      oldPid = await t.panePid(target);
     } catch {
       // pane may not exist yet or be fully dead, treat as unknown pid
     }
 
     try {
-      await tmux(`respawn-pane -t '${esc(target)}' -k`);
+      await t.respawnPane(target, { kill: true });
     } catch (err) {
       console.warn(`respawnPane(${target}) failed: ${err.message}`);
       return;
@@ -812,12 +805,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline) {
       try {
-        const [pidRes, cmdRes] = await Promise.all([
-          tmux(`display-message -t '${esc(target)}' -p '#{pane_pid}'`),
-          tmux(`display-message -t '${esc(target)}' -p '#{pane_current_command}'`),
+        const [newPid, cmd] = await Promise.all([
+          t.panePid(target),
+          t.currentCommand(target),
         ]);
-        const newPid = pidRes.stdout.trim();
-        const cmd = cmdRes.stdout.trim();
         if (newPid && newPid !== oldPid && /^(bash|zsh|sh|fish|dash)$/.test(cmd)) return;
       } catch {
         // keep polling
@@ -860,8 +851,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   async function dismissBlockingPrompt(target) {
     let paneText;
     try {
-      const { stdout } = await tmux(`capture-pane -t '${esc(target)}' -J -p -S -20`);
-      paneText = stdout;
+      paneText = await t.capture(target, { lines: 20 });
     } catch (err) {
       console.warn(`dismiss: capture failed for ${target}: ${err.message}`);
       return null;
@@ -870,7 +860,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const prompt = findBlockingPrompt(paneText);
     if (!prompt) return null;
 
-    await tmux(`send-keys -t '${esc(target)}' ${prompt.keys}`);
+    await t.sendKeys(target, prompt.keys);
     await wait(prompt.waitMs);
     return prompt.name;
   }
@@ -911,10 +901,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     const target = `${agentName}:.${pane}`;
     try {
-      const { stdout: cmdOut } = await tmux(
-        `display-message -t '${esc(target)}' -p '#{pane_current_command}'`,
-      );
-      if (cmdOut.trim() !== "node") return null;
+      if ((await t.currentCommand(target)) !== "node") return null;
 
       const raw = await capturePane(agentName, pane, 120);
       const dialect = detectDialect(raw);
@@ -1085,11 +1072,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   }
 
   async function capturePane(agentName, pane, lines = 50) {
-    // -J joins wrapped lines into single logical lines. Without this, narrow
-    // panes (e.g. 42-col panes in main-vertical layouts) split the prompt and
-    // response across multiple lines, confusing extract which treats
-    // continuation lines as new text segments.
-    const { stdout } = await tmux(`capture-pane -t '${esc(agentName)}:.${pane}' -p -J -S -${lines}`);
+    // join=true (-J) merges wrapped lines into single logical lines. Without
+    // it, narrow panes (e.g. 42-col panes in main-vertical layouts) split the
+    // prompt and response across multiple lines, confusing extract which
+    // treats continuation lines as new text segments.
+    const stdout = await t.capture(`${agentName}:.${pane}`, { lines });
     return stripAnsi(stdout).trimEnd() || "(empty)";
   }
 
@@ -1149,10 +1136,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (prompt.length > 500) {
       await sendLongPrompt(target, prompt);
     } else {
-      await tmux(`send-keys -t '${esc(target)}' -l -- '${esc(prompt)}'`);
+      await t.sendLiteral(target, prompt);
       await wait(1000);
     }
-    await tmux(`send-keys -t '${esc(target)}' Enter`);
+    await t.sendEnter(target);
     await maybeSendCodexSubmitEnter(agentName, pane, target, prompt);
   }
 
@@ -1186,7 +1173,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     // Up to 3 rescue attempts, spaced 750ms. Stops as soon as jsonl confirms.
     for (let attempt = 0; attempt < 3; attempt++) {
-      await tmux(`send-keys -t '${esc(target)}' Enter`);
+      await t.sendEnter(target);
       await wait(750);
       if (await submitted() === true) return;
     }
@@ -1196,8 +1183,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const tmpFile = `/tmp/agentmux-prompt-${process.pid}.txt`;
     const bufName = `prompt_${process.pid}_${Date.now()}`;
     writeFileSync(tmpFile, prompt);
-    await tmux(`load-buffer -b '${bufName}' '${esc(tmpFile)}'`);
-    await tmux(`paste-buffer -b '${bufName}' -t '${esc(target)}'`);
+    await t.loadBuffer(bufName, tmpFile);
+    await t.pasteBuffer(bufName, target);
     try { unlinkSync(tmpFile); } catch (err) {
       console.warn(`sendLongPrompt: cleanup ${tmpFile} failed: ${err.message}`);
     }
@@ -1323,8 +1310,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       getSegments: () => getResponseSegments(agentName, pane),
       capturePane: async () => {
         try {
-          const { stdout } = await tmux(`capture-pane -t '${esc(agentName)}:.${pane}' -J -p -S -10`);
-          return stdout;
+          return await t.capture(`${agentName}:.${pane}`, { lines: 10 });
         } catch (err) {
           console.warn(`progress capturePane failed: ${err.message}`);
           return null;
@@ -1376,7 +1362,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   // --- Low-level (exposed for CLI) ---
 
   async function sendEscape(agentName, pane) {
-    await tmux(`send-keys -t '${esc(agentName)}:.${pane}' Escape`);
+    await t.sendEscape(`${agentName}:.${pane}`);
   }
 
   async function checkAgent(agentName) {
