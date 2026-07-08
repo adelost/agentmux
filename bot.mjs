@@ -88,8 +88,43 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
 
   // --- Start channels ---
 
+  // Inbound pointer: remember the newest Discord message id we have SEEN
+  // per channel (bot posts included — the pointer tracks the stream, the
+  // handler does its own bot-filtering). Powers catch-up replay below:
+  // messages that arrived while the bridge was down are re-fed through the
+  // same handler on next boot instead of silently vanishing (observed
+  // 2026-07-08: a prompt hit the bridge the same second as a restart kill
+  // and was lost with zero diagnostics).
+  const inboundKey = (channelId) => `last_inbound_${channelId}`;
+  const trackedOnMessage = async (msg) => {
+    try {
+      await onMessage(msg);
+    } finally {
+      if (msg?.channelId && msg?.id) state.set(inboundKey(msg.channelId), msg.id);
+    }
+  };
+
+  async function catchUpInbound(channel) {
+    if (typeof channel.fetchMissed !== "function") return;
+    for (const [channelId] of channelMap) {
+      try {
+        const afterId = state.get(inboundKey(channelId), null);
+        const { messages, newestId } = await channel.fetchMissed(channelId, afterId);
+        for (const m of messages) {
+          console.log(`[catch-up] replaying missed message in #${channelId}: "${(m.text || "").slice(0, 60)}"`);
+          await trackedOnMessage(m);
+        }
+        // Advance even when nothing human was replayed (bot posts moved the
+        // stream) and initialize on first boot so history is never replayed.
+        if (newestId) state.set(inboundKey(channelId), newestId);
+      } catch (err) {
+        console.warn(`catch-up failed for #${channelId}: ${err.message}`);
+      }
+    }
+  }
+
   for (const channel of channels) {
-    channel.onMessage(onMessage);
+    channel.onMessage(trackedOnMessage);
   }
 
   (async () => {
@@ -102,6 +137,9 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
     for (const [chId, { name }] of channelMap) console.log(`  ${name} -> #${chId}`);
     markReady();
     await preflight();
+    for (const channel of channels) {
+      await catchUpInbound(channel);
+    }
 
     // Notify restart channel if we came back from /restart
     const restartCh = state.get("restartChannel");

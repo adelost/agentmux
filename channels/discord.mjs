@@ -51,6 +51,29 @@ export function createDiscordChannel({ token, onSent }) {
       stamp(channelId);
     },
 
+    /**
+     * Messages that arrived while the bridge was DOWN (restart window,
+     * crash): everything after `afterId`, oldest first, human-only,
+     * age-capped. With no pointer (first boot) nothing is replayed —
+     * only the newest id is returned so the caller can initialize.
+     * Returns { messages: ChannelMessage[], newestId: string|null }.
+     */
+    async fetchMissed(channelId, afterId, { limit = 20, maxAgeMs = 60 * 60 * 1000 } = {}) {
+      const ch = await client.channels.fetch(channelId);
+      if (!ch?.messages) return { messages: [], newestId: afterId || null };
+      const coll = afterId
+        ? await ch.messages.fetch({ after: afterId, limit })
+        : await ch.messages.fetch({ limit: 1 });
+      const sorted = [...coll.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+      const newestId = sorted.length ? sorted[sorted.length - 1].id : (afterId || null);
+      if (!afterId) return { messages: [], newestId }; // init pointer only
+      const cutoff = Date.now() - maxAgeMs;
+      const messages = sorted
+        .filter((m) => !m.author.bot && m.createdTimestamp >= cutoff)
+        .map((m) => normalizeDiscordMessage(m, { onSent }));
+      return { messages, newestId };
+    },
+
     // Fire-and-forget. Discord shows the indicator for ~10s; the watcher
     // re-fires every <10s while the bound pane is in "working" state.
     // Errors are swallowed because typing is purely cosmetic.

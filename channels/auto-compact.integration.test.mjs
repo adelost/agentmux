@@ -56,10 +56,13 @@ function harness({ height = 50, content = CONTENT.full100 } = {}) {
   const agent = {
     capturePane: async () => state.content,
     sendOnly: async (_name, cmd) => { if (cmd === "/compact") state.fires++; },
+    // Delivery-contract surface (core/delivery.mjs sendSlashVerified):
+    dismissBlockingPrompt: async () => null,
+    sendEnter: async () => {},
   };
   const tmux = async () => ({ stdout: `0 ${height}` });
   const discord = { send: async () => {} };
-  const config = { ...DEFAULT_CONFIG, threshold: 70, graceMs: 0, compactLockMs: 0, minIdleMs: 0 };
+  const config = { ...DEFAULT_CONFIG, threshold: 70, graceMs: 0, compactLockMs: 0, minIdleMs: 0, slashSettleMs: 0 };
   const ac = createAutoCompact({
     agent, agentsYamlPath: path, discord, tmux, config, log: () => {},
   });
@@ -145,7 +148,7 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
       // graceMs 0 + the cancel tick between warns keeps it in warn churn (never
       // matures to compact); minIdleMs 0 isolates the cooldown; default 10-min
       // warnCooldownMs must collapse the repeated warns to one Discord post.
-      const config = { ...DEFAULT_CONFIG, threshold: 70, graceMs: 0, compactLockMs: 0, minIdleMs: 0 };
+      const config = { ...DEFAULT_CONFIG, threshold: 70, graceMs: 0, compactLockMs: 0, minIdleMs: 0, slashSettleMs: 0 };
       const ac = createAutoCompact({ agent, agentsYamlPath: path, discord, tmux, config, log: () => {} });
       return { ac, state };
     }],
@@ -173,11 +176,13 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
       const agent = {
         capturePane: async (name, idx) => { state.captures.push(`${name}:${idx}`); return state.content; },
         sendOnly: async (_n, cmd) => { if (cmd === "/compact") state.fires++; },
+        dismissBlockingPrompt: async () => null,
+        sendEnter: async () => {},
       };
       const tmux = async () => ({ stdout: `0 50` });
       const discord = { send: async () => {} };
       // codexEnabled defaults to false in DEFAULT_CONFIG → codex is skipped.
-      const config = { ...DEFAULT_CONFIG, threshold: 70, graceMs: 0, compactLockMs: 0, minIdleMs: 0 };
+      const config = { ...DEFAULT_CONFIG, threshold: 70, graceMs: 0, compactLockMs: 0, minIdleMs: 0, slashSettleMs: 0 };
       const ac = createAutoCompact({ agent, agentsYamlPath: path, discord, tmux, config, log: () => {} });
       return { ac, state };
     }],

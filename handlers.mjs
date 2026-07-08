@@ -8,6 +8,7 @@ import { countTurnsSince, panePathFor, readLastTurns } from "./core/jsonl-reader
 import { checkLoopGuard, loopGuardKey, formatLoopGuardWarning, readLoopGuardConfig } from "./core/loop-guard.mjs";
 import { formatCatchupPreview } from "./core/catchup-format.mjs";
 import { shortModelName } from "./core/context.mjs";
+import { sendPromptVerified, sendSlashVerified } from "./core/delivery.mjs";
 
 /**
  * Reconcile every configured agent's live tmux session against the
@@ -136,51 +137,6 @@ export function renderCatchupLine(countResult) {
   return latest
     ? `ℹ ${label} turns since your last Discord sync (latest: ${latest})`
     : `ℹ ${label} turns since your last Discord sync`;
-}
-
-/**
- * Deliver a Claude-internal slash command (/model, /compact, /clear, ...)
- * to a pane and VERIFY it was consumed. Slash commands never appear in the
- * session jsonl (no echo verification possible), and typing "/" opens
- * Claude's command palette, which can eat the submitting Enter mid-render —
- * the classic "wrote /model fable in Discord, nothing happened".
- *
- * Verification is terminal-side: if the composer region still shows the
- * command text after a settle, the Enter was eaten → rescue with another
- * Enter (a bare Enter on an empty composer is a no-op, so a false "stuck"
- * read is harmless). Returns { delivered, rescues }; delivered=false means
- * the text likely sits unsubmitted and the caller must NOT claim success.
- */
-export async function deliverSlashCommand(agent, agentName, pane, claudeCmd, {
-  settleMs = 1200, maxRescues = 2,
-  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
-} = {}) {
-  const target = `${agentName}:.${pane}`;
-  await agent.dismissBlockingPrompt(target).catch(() => {});
-  await agent.sendOnly(agentName, claudeCmd, pane);
-
-  for (let attempt = 0; attempt <= maxRescues; attempt++) {
-    await sleep(settleMs);
-    if (!(await stuckInComposer(agent, agentName, pane, claudeCmd))) {
-      return { delivered: true, rescues: attempt };
-    }
-    if (attempt < maxRescues) await agent.sendEnter(agentName, pane);
-  }
-  return { delivered: false, rescues: maxRescues };
-}
-
-/** The command text still sits in the composer region (last few lines). */
-async function stuckInComposer(agent, agentName, pane, claudeCmd) {
-  let text = "";
-  try {
-    text = await agent.capturePane(agentName, pane, 12);
-  } catch {
-    return false; // pane unreadable: nothing more a rescue-Enter could do
-  }
-  const needle = claudeCmd.slice(0, 30);
-  // Only the tail (composer region): scrollback legitimately echoes the
-  // command as transcript output after successful execution.
-  return text.split("\n").slice(-4).some((line) => line.includes(needle));
 }
 
 /**
@@ -354,7 +310,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       }
       try {
         const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
-          deliverSlashCommand(agent, mapping.name, pane, `/model ${name}`));
+          sendSlashVerified(agent, mapping.name, pane, `/model ${name}`));
         if (result.delivered) {
           const rescued = result.rescues ? ` (palette ate Enter, rescued x${result.rescues})` : "";
           await msg.reply(`sent \`/model ${name}\`${rescued} — verify on the next turn's footer (or \`//model\`)`);
@@ -514,33 +470,14 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       const echoTimeout = Math.max(50, Math.min(6_000, pollInterval * 500));
       let delivered = false;
 
-      await withPaneSendLock(`${mapping.name}:${pane}`, async () => {
-        for (let attempt = 1; attempt <= 3; attempt++) {
-          await agent.dismissBlockingPrompt(target)
-            .catch((err) => console.warn(`dismiss attempt ${attempt} failed: ${err.message}`));
-          // A thrown send must NOT abort the retry loop — delivery is judged
-          // by the echo check below, not by tmux's exit code. tmux can fail
-          // the bridge's one-shot client with errors that aren't ours: a user
-          // scrolling the pane fires conf bindings chaining
-          // `send-keys -X scroll-*`, and when copy-mode (-e) auto-exits at
-          // the bottom mid-chain the leftover -X commands error
-          // "not in a mode" — attributed to whichever command client is
-          // connected right then. The keys may have landed anyway, so fall
-          // through to echo/busy verification and let attempts 2-3 resend.
-          await agent.sendOnly(mapping.name, promptToSend, pane)
-            .catch((err) => console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} send attempt ${attempt} errored (verifying echo anyway): ${err.message.split("\n").slice(0, 2).join(" | ")}`));
-
-          const echoed = await agent.waitForPromptEcho(mapping.name, pane, cleanPrompt, echoTimeout);
-          if (echoed) { delivered = true; break; }
-
-          const busy = await agent.isBusy(mapping.name, pane, cleanPrompt);
-          if (busy) { delivered = true; break; } // prompt received, echo just slow
-
-          if (attempt < 3) {
-            console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not echoed (attempt ${attempt}/3), retrying`);
-          }
-        }
-      });
+      const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
+        sendPromptVerified(agent, mapping.name, pane, promptToSend, {
+          verifyText: cleanPrompt,
+          attempts: 3,
+          echoTimeoutMs: echoTimeout,
+          log: (m) => console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} ${m}`),
+        }));
+      delivered = result.delivered;
 
       if (!delivered) {
         console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not delivered after 3 attempts`);
@@ -709,7 +646,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         // keystroke interleaving with concurrent sends), dismiss first, and
         // rescue a palette-eaten Enter instead of blindly claiming success.
         const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
-          deliverSlashCommand(agent, mapping.name, pane, claudeCmd));
+          sendSlashVerified(agent, mapping.name, pane, claudeCmd));
         if (result.delivered) {
           const rescued = result.rescues ? ` (rescued x${result.rescues})` : "";
           await msg.reply(`sent \`${parsed.cmd}\`${rescued}`);

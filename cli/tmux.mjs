@@ -9,6 +9,7 @@ import { promisify } from "util";
 import { createAgent } from "../agent.mjs";
 import { esc, stripAnsi } from "../lib.mjs";
 import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
+import { deliverToPane } from "../core/delivery.mjs";
 import { detectPaneStatus } from "./format.mjs";
 import { findChannelForPane, loadConfig } from "./config.mjs";
 
@@ -153,8 +154,15 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
   const mirror = opts.mirror !== false;
   const sentAtMs = Date.now();
 
-  // 1. tmux is source of truth. Fail fast if this breaks.
-  await ctx.agent.sendOnly(name, text, pane);
+  // 1. Verified delivery through THE contract (core/delivery.mjs): CLI
+  //    briefs used to be fire-and-forget — an agent-to-agent brief could
+  //    sit unsubmitted in an idle composer while the sender moved on.
+  const result = await deliverToPane(ctx.agent, name, pane, text, {
+    log: (m) => console.warn(`send ${name}:${pane}: ${m}`),
+  });
+  if (!result.delivered) {
+    console.error(`⚠ ${name}:${pane} did not acknowledge the message (composer may be stuck — inspect: amux log ${name} -p ${pane} --tmux)`);
+  }
 
   // 2. Best-effort mirror. Failure here is a transparency degradation,
   //    not a correctness issue — the pane already got the text.

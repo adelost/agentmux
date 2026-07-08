@@ -101,7 +101,7 @@ feature("reconcileAllSessions", () => {
 
 // --- deliverSlashCommand: verified slash delivery ---------------------------
 
-import { deliverSlashCommand } from "./handlers.mjs";
+import { sendSlashVerified as deliverSlashCommand } from "./core/delivery.mjs";
 
 // Fake agent whose capturePane returns a scripted sequence of pane tails.
 // calls records the interaction order so tests pin dismiss-first + rescue.

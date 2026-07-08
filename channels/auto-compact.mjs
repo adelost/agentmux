@@ -14,6 +14,7 @@ import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { getContextFromPane, getContextPercent } from "../core/context.mjs";
 import { detectPaneStatus } from "../cli/format.mjs";
 import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
+import { sendSlashVerified } from "../core/delivery.mjs";
 import { readLastTurns, panePathFor } from "../core/jsonl-reader.mjs";
 import { readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { statSync } from "fs";
@@ -176,8 +177,15 @@ export function createAutoCompact({
     if (compacting.has(paneKey)) return;
     compacting.add(paneKey);
     try {
-      await agent.sendOnly(agentName, "/compact", paneIdx);
-      log(`fired /compact on ${paneKey} (was ${contextPercent}%)`);
+      const result = await sendSlashVerified(agent, agentName, paneIdx, "/compact",
+        { settleMs: config.slashSettleMs ?? 1200 });
+      if (!result.delivered) {
+        // Do NOT claim compaction: the command sits unsubmitted. The lock
+        // timeout below lets the next poll retry.
+        log(`/compact NOT acknowledged on ${paneKey} — will retry next poll`);
+        return;
+      }
+      log(`fired /compact on ${paneKey} (was ${contextPercent}%)${result.rescues ? ` (rescued x${result.rescues})` : ""}`);
 
       const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
       if (channelId && discord) {
