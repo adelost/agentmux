@@ -37,4 +37,25 @@ feature("stripPaneChrome", () => {
     then: ["untouched", (out) =>
       expect(out).toBe("Jag bytte till fable-modellen eftersom den är snabbare.")],
   });
+
+  unit("a FUTURE model family is chrome on day one (structural, no name list)", {
+    given: ["footers from a model that does not exist yet", () => [
+      "Svaret är 42.",
+      "muse-3 · context: 33% (128k)",
+      "claude-muse-3[1m] │ ▓▓░░ 33%",
+      "Muse 3 (1M context) │ 0 █░░░ 33%",
+      "claude-muse-3[1m] · 412k tokens",
+    ].join("\n")],
+    when: ["stripping", (text) => stripPaneChrome(text)],
+    then: ["all muse chrome gone despite muse being in no list", (out) =>
+      expect(out).toBe("Svaret är 42.")],
+  });
+
+  unit("prose containing '(in context)' without metrics survives", {
+    given: ["a sentence with parenthesized context", () =>
+      "Den detaljen är viktig (i rätt context) för helheten."],
+    when: ["stripping", (text) => stripPaneChrome(text)],
+    then: ["untouched", (out) =>
+      expect(out).toBe("Den detaljen är viktig (i rätt context) för helheten.")],
+  });
 });
