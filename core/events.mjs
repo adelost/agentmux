@@ -108,6 +108,34 @@ export function readEvents({ since = null, path = eventsPath() } = {}) {
  * killed, hooks uninstalled) must not pin a pane's state forever. Older
  * entries are omitted — callers fall back to the scraping path.
  */
+/**
+ * Merge a tmux-scraped status with a hook-pushed state. Deliberately
+ * monotone-safe: pushed events only ADD information where scraping saw
+ * nothing, they never contradict a live observation.
+ *
+ *   - Scraped modal states (permission/menu/resume/dismiss) always win:
+ *     they are a direct observation that input is blocked RIGHT NOW.
+ *   - Scraped "working" is never downgraded: auto-compact relies on it to
+ *     avoid sending /compact into an active pane (incl. ongoing compaction,
+ *     which pushes no events), so a pushed "idle" must not override it.
+ *   - Scraped idle/unknown + fresh pushed state -> pushed wins. This fixes
+ *     the misclassification class where a long-running turn in a narrow
+ *     pane renders no busy-regex match and gets mislabeled idle (-> false
+ *     "maybe dropped" in done, auto-compact firing into it).
+ *
+ * Returns { status, source } where source is "tmux" or "hook".
+ */
+export function mergeStatus(scraped, pushed, { now = Date.now(), freshMs = 15 * 60 * 1000 } = {}) {
+  const fromTmux = { status: scraped, source: "tmux" };
+  const blocking = ["permission", "menu", "resume", "dismiss"];
+  if (blocking.includes(scraped) || scraped === "working") return fromTmux;
+  if (!pushed || now - new Date(pushed.ts).getTime() > freshMs) return fromTmux;
+
+  const map = { working: "working", needs_you: "permission", idle: "idle" };
+  const status = map[pushed.state];
+  return status ? { status, source: "hook" } : fromTmux;
+}
+
 export function latestPaneStates({ since = null, path = eventsPath(),
                                    now = Date.now(), maxAgeMs = 6 * 3600 * 1000 } = {}) {
   const states = new Map();
@@ -120,4 +148,23 @@ export function latestPaneStates({ since = null, path = eventsPath(),
     states.set(`${evt.session}:${evt.pane}`, { state, ts: evt.ts, detail: evt.detail || "" });
   }
   return states;
+}
+
+// `amux done` resolves ~40 pane statuses in parallel; without a memo each
+// one would re-read and re-parse the same ledger file. 2s TTL: fresh enough
+// for interactive use, one read per CLI invocation in practice.
+let statesCache = { at: 0, states: null };
+
+export function latestPaneStatesCached({ ttlMs = 2000 } = {}) {
+  const now = Date.now();
+  if (!statesCache.states || now - statesCache.at > ttlMs) {
+    let states;
+    try {
+      states = latestPaneStates({ now });
+    } catch {
+      states = new Map(); // unreadable ledger must never break status reads
+    }
+    statesCache = { at: now, states };
+  }
+  return statesCache.states;
 }

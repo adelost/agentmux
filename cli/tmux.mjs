@@ -8,6 +8,7 @@ import { join } from "path";
 import { promisify } from "util";
 import { createAgent } from "../agent.mjs";
 import { esc, stripAnsi } from "../lib.mjs";
+import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
 import { detectPaneStatus } from "./format.mjs";
 import { findChannelForPane, loadConfig } from "./config.mjs";
 
@@ -94,16 +95,25 @@ export async function listPanes(ctx, name) {
   }
 }
 
-/** Get status of a specific pane. */
+/**
+ * Get status of a specific pane: tmux scraping refined by hook-pushed
+ * events (core/events.mjs). Single integration point — done, ps and
+ * auto-compact all resolve status through here. mergeStatus is monotone-
+ * safe: pushed events only upgrade idle/unknown, never contradict a live
+ * scraped observation (modals, working).
+ */
 export async function getPaneStatus(ctx, name, pane) {
+  let scraped = "unknown";
   try {
     const { stdout } = await ctx.tmux(
       `capture-pane -t '${esc(name)}:.${pane}' -J -p -S -30`,
     );
-    return detectPaneStatus(stripAnsi(stdout));
+    scraped = detectPaneStatus(stripAnsi(stdout));
   } catch {
-    return "unknown";
+    // fall through with "unknown" — a pushed event may still know better
   }
+  const pushed = latestPaneStatesCached().get(`${name}:${pane}`);
+  return mergeStatus(scraped, pushed).status;
 }
 
 /** Send keys to a pane. */

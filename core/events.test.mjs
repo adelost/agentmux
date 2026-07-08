@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
-  appendEvent, buildEvent, latestPaneStates, parseTmuxSocket, readEvents,
+  appendEvent, buildEvent, latestPaneStates, mergeStatus, parseTmuxSocket, readEvents,
 } from "./events.mjs";
 
 let path;
@@ -91,5 +91,42 @@ describe("latestPaneStates", () => {
     appendEvent({ ts: "2026-07-08T02:00:00Z", event: "prompt", session: "claw", pane: 0 }, path);
     const states = latestPaneStates({ path, now: NOW, maxAgeMs: 6 * 3600 * 1000 });
     expect(states.has("claw:0")).toBe(false);
+  });
+});
+
+describe("mergeStatus (monotone-safe merge rules)", () => {
+  const NOW = new Date("2026-07-08T12:00:00Z").getTime();
+  const fresh = (state) => ({ state, ts: "2026-07-08T11:55:00Z", detail: "" });
+  const stale = (state) => ({ state, ts: "2026-07-08T10:00:00Z", detail: "" });
+
+  it("scraped modal states always win over pushed", () => {
+    for (const modal of ["permission", "menu", "resume", "dismiss"]) {
+      expect(mergeStatus(modal, fresh("idle"), { now: NOW }))
+        .toEqual({ status: modal, source: "tmux" });
+    }
+  });
+
+  it("scraped working is never downgraded (auto-compact safety)", () => {
+    expect(mergeStatus("working", fresh("idle"), { now: NOW }))
+      .toEqual({ status: "working", source: "tmux" });
+  });
+
+  it("fresh pushed working upgrades idle/unknown (the narrow-pane fix)", () => {
+    expect(mergeStatus("idle", fresh("working"), { now: NOW }))
+      .toEqual({ status: "working", source: "hook" });
+    expect(mergeStatus("unknown", fresh("working"), { now: NOW }))
+      .toEqual({ status: "working", source: "hook" });
+  });
+
+  it("fresh pushed needs_you surfaces as permission", () => {
+    expect(mergeStatus("idle", fresh("needs_you"), { now: NOW }))
+      .toEqual({ status: "permission", source: "hook" });
+  });
+
+  it("stale or missing pushed state falls back to scraped", () => {
+    expect(mergeStatus("idle", stale("working"), { now: NOW }))
+      .toEqual({ status: "idle", source: "tmux" });
+    expect(mergeStatus("unknown", null, { now: NOW }))
+      .toEqual({ status: "unknown", source: "tmux" });
   });
 });
