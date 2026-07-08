@@ -95,6 +95,33 @@ const CLAUDE_FAMILY_MAX = [
 // explicitly above. Non-claude / missing model strings keep the 200k default.
 const CLAUDE_UNKNOWN_FAMILY_MAX = 1_000_000;
 
+const totalUsageTokens = (u) =>
+  (u.input_tokens || 0) +
+  (u.cache_creation_input_tokens || 0) +
+  (u.cache_read_input_tokens || 0) +
+  (u.output_tokens || 0);
+
+// Session-limit / API-error turns are recorded as assistant messages from
+// model "<synthetic>" with an all-zero usage block ("You've hit your session
+// limit…"). They are not real turns, and trusting them poisons the context
+// reading in BOTH directions at once (ai:1, 2026-07-08 18:50 — three
+// consumers reported 0%, 33% and 100% for the same pane):
+//   - zero usage read as "latest usage" → 0% false calm
+//   - "<synthetic>" read as "latest model" → default 200k window, so a real
+//     ~351k-token session clamps to a false 100% → false auto-compact warning
+// Context truth is the newest REAL model turn — skip synthetic entries.
+function isSyntheticUsageEntry(message) {
+  if (message?.model === "<synthetic>") return true;
+  const u = message?.usage;
+  return u ? totalUsageTokens(u) === 0 : false;
+}
+
+// Backward-scan bound while skipping synthetic spam. A rate-limited pane
+// appends synthetic entries for every delivered prompt (165 observed in one
+// session), so a 30-line window can be ALL synthetic. 500 lines bounds the
+// worst case; past it we return null (honest "no data") rather than fabricate.
+const USAGE_SCAN_MAX_LINES = 500;
+
 function claudeMaxForModel(model) {
   if (!model) return CLAUDE_DEFAULT_MAX;
   // "[1m]" suffix on the model ID is Claude Code's explicit 1M-context flag,
@@ -133,11 +160,11 @@ function readLatestClaudeModel(paneDir) {
   if (!files.length) return null;
   const lines = readTailLines(join(projectDir, files[0].name));
   if (!lines.length) return null;
-  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 30); i--) {
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - USAGE_SCAN_MAX_LINES); i--) {
     try {
       const entry = JSON.parse(lines[i]);
       const model = entry?.message?.model;
-      if (model) return model;
+      if (model && model !== "<synthetic>") return model;
     } catch {}
   }
   return null;
@@ -168,17 +195,15 @@ function getContextFromClaudeJsonl(paneDir) {
   const lines = readTailLines(join(projectDir, files[0].name));
   if (!lines.length) return null;
 
-  // Walk the last ~30 lines backwards for the most recent usage block
-  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 30); i--) {
+  // Walk backwards for the most recent REAL usage block (synthetic
+  // session-limit entries are skipped — see isSyntheticUsageEntry).
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - USAGE_SCAN_MAX_LINES); i--) {
     try {
       const entry = JSON.parse(lines[i]);
       const u = entry?.message?.usage;
       if (!u) continue;
-      const total =
-        (u.input_tokens || 0) +
-        (u.cache_creation_input_tokens || 0) +
-        (u.cache_read_input_tokens || 0) +
-        (u.output_tokens || 0);
+      if (isSyntheticUsageEntry(entry.message)) continue;
+      const total = totalUsageTokens(u);
       // Pick max from the model on this same entry. Self-correcting safety
       // net: if we ever observe a total that exceeds the declared max
       // (e.g. new model not yet in the table), bump up so we don't report
