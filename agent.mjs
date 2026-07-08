@@ -37,7 +37,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.16.30";
+const HINTS_VERSION = "1.20.38";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -225,6 +225,26 @@ amux serve                           # start Discord bridge
 amux stop                            # stop bridge
 amux stop --all                      # stop bridge + every agent session
 \`\`\`
+
+### Health check — FIRST stop when something seems silent or wrong
+\`\`\`bash
+amux doctor                          # bridge alive/hung/stale-code, hooks, ledger, tmux
+\`\`\`
+One table over every silent failure mode, each ⚠/❌ row comes with its fix.
+Key row: "bridge code" — the bridge is a long-lived process, so pushed amux
+fixes are NOT live until it restarts (\`/restart\` in Discord). doctor flags
+exactly that. A watchdog cron self-heals a hung/dead bridge every 5 min
+(log: \`~/.agentmux/watchdog.log\`, kill-switch \`~/.agentmux/watchdog-OFF\`).
+
+### Pane state is hook-pushed (event ledger)
+Panes report their own working/idle/needs-you transitions via Claude Code
+hooks to \`~/.agentmux/events.jsonl\`; \`ps\`/\`done\`/\`wait\`/auto-compact merge
+that with tmux scraping (pushed events only refine idle/unknown, never
+override a live modal). Permission asks + session starts show in
+\`amux timeline\` as 🔔 rows — check those when investigating "what blocked
+this pane while I was away". Slash commands sent from Discord (\`/model\` etc)
+are delivery-verified: the reply says honestly whether the command was
+consumed or still sits in the composer.
 
 ## Source layers
 
