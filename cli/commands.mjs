@@ -3,7 +3,7 @@
 
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
-import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, statSync, readlinkSync } from "fs";
 import { join } from "path";
 import { loadConfig, listAgents, getAgent, addAgent, removeAgent, resolveAgent, saveLast, getLast, getPaneCount, findChannelForPane } from "./config.mjs";
 import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens, detectPaneStatus } from "./format.mjs";
@@ -14,7 +14,12 @@ import { getContextFromPane, getContextPercent } from "../core/context.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { latestCodexJsonlMtime, readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
-import { latestPaneStatesCached, mergeStatus, readEvents } from "../core/events.mjs";
+import { latestPaneStatesCached, mergeStatus, readEvents, eventsPath } from "../core/events.mjs";
+import { readHeartbeat } from "../core/heartbeat.mjs";
+import {
+  checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkLedger,
+  checkTmux, checkConfig, overallStatus, formatDoctorReport, FAIL, WARN,
+} from "../core/doctor.mjs";
 import {
   groupByPane, previewText,
   isRunningNow, isWaitingLikeText, looksDone,
@@ -2026,6 +2031,85 @@ const STATUS_TIER = { working: 3, permission: 3, menu: 3, resume: 2, dismiss: 2,
 const SHELL_CMDS = /^(bash|zsh|fish|sh|dash)$/;
 const ACTIVE_STATUS = (s) => s === "working" || s === "permission" || s === "menu" || s === "resume" || s === "dismiss";
 
+
+/**
+ * amux doctor — one table over every silent failure mode: dead/hung/stale
+ * bridge, broken hooks, dead ledger, unreachable tmux, broken config.
+ * Exit code: 0 ok, 1 warnings, 2 failures (cron-friendly).
+ */
+async function cmdDoctor(ctx) {
+  const home = process.env.HOME;
+  const repoDir = dirname(dirname(fileURLToPath(import.meta.url)));
+
+  // bridge process + supervision
+  let pids = [], supervised = false;
+  try {
+    // [n]ode: the bracket keeps pgrep from matching its own sh wrapper.
+    // cwd filter: only count bridges running from THIS repo (other projects
+    // legitimately have their own `node index.mjs`).
+    const out = execSync("pgrep -f '[n]ode index.mjs' || true", { encoding: "utf-8" }).trim();
+    pids = (out ? out.split("\n").map((x) => parseInt(x, 10)).filter(Boolean) : [])
+      .filter((pid) => {
+        try { return readlinkSync(`/proc/${pid}/cwd`) === repoDir; }
+        catch { return false; }
+      });
+    if (pids.length) {
+      const ppid = execSync(`ps -o ppid= -p ${pids[0]}`, { encoding: "utf-8" }).trim();
+      const parent = execSync(`ps -o args= -p ${ppid} || true`, { encoding: "utf-8" }).trim();
+      supervised = /start\.sh/.test(parent);
+    }
+  } catch {}
+
+  // repo version + heartbeat
+  let repoVersion = null;
+  try { repoVersion = JSON.parse(readFileSync(join(repoDir, "package.json"), "utf-8")).version; }
+  catch {}
+  const beat = readHeartbeat();
+
+  // hooks
+  let settings = null, hookFileExists = false;
+  try { settings = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf-8")); }
+  catch {}
+  hookFileExists = existsSync(join(repoDir, "bin", "amux-hook.mjs"));
+
+  // ledger
+  let ledgerStat = null;
+  try {
+    const st = statSync(eventsPath());
+    ledgerStat = { size: st.size, mtimeMs: st.mtimeMs };
+  } catch {}
+
+  // tmux
+  let sessions = [], tmuxError = null;
+  try {
+    const { stdout } = await ctx.tmux("list-sessions -F '#{session_name}'");
+    sessions = stdout.trim().split("\n").filter(Boolean);
+  } catch (err) {
+    tmuxError = err.message.split("\n")[0];
+  }
+
+  // config
+  let agents = [], cfgError = null;
+  try { agents = listAgents(ctx.configPath); }
+  catch (err) { cfgError = err.message; }
+
+  const checks = [
+    checkBridgeProcess({ pids, supervised }),
+    checkHeartbeatHealth({ beat, repoVersion, pidAlive: pids.length > 0 }),
+    checkHooksInstalled({ settings, hookFileExists }),
+    checkLedger({ stat: ledgerStat }),
+    checkTmux({ sessions, error: tmuxError }),
+    checkConfig({ agents, error: cfgError }),
+  ];
+
+  console.log("\namux doctor\n");
+  console.log(formatDoctorReport(checks));
+  const overall = overallStatus(checks);
+  console.log("");
+  if (overall === FAIL) process.exit(2);
+  if (overall === WARN) process.exit(1);
+}
+
 async function cmdPs(ctx, flags = {}) {
   const showAll = flags.full || flags.f;
   const agents = listAgents(ctx.configPath);
@@ -3116,7 +3200,7 @@ Usage:
   agent dream                     Write/update nightly pane digest in workspace memory
     --since T                     Window to summarize (default: 24h)
     --dry                         Preview pane work, do nothing
-  agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)
+  agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)\n  agent doctor                    Health check: bridge alive/hung/stale-code, hooks, ledger, tmux (exit 0/1/2)
     --dry                         List deletion candidates, change nothing
     --days N                      Retention window (default: 14)
   agent playwright-reap           Reap stale Playwright-MCP/browser processes
@@ -3291,6 +3375,10 @@ export async function dispatch(argv, ctx) {
     case "ps": {
       const { flags } = parseFlags(rest, { full: "boolean", f: "boolean" });
       return cmdPs(ctx, flags);
+    }
+
+    case "doctor": {
+      return cmdDoctor(ctx);
     }
 
     case "top": {

@@ -34,6 +34,7 @@ import { parseReminderConfig } from "./core/reminder-state.mjs";
 import { createJsonlWatcher } from "./channels/jsonl-watcher.mjs";
 import { createPlaywrightWatchdog } from "./channels/playwright-watchdog.mjs";
 import { parsePlaywrightWatchdogConfig } from "./core/playwright-watchdog.mjs";
+import { startHeartbeat } from "./core/heartbeat.mjs";
 
 // --- Config ---
 
@@ -78,6 +79,15 @@ const run = (cmd, timeoutMs = TIMEOUT) =>
   exec(cmd, { timeout: timeoutMs, env: { ...process.env, PATH: SHELL_PATH }, maxBuffer: 1024 * 1024 });
 const tmuxExec = (cmd) =>
   exec(cmd, { timeout: 3000, env: { ...process.env, PATH: SHELL_PATH } });
+
+// Liveness contract for `amux doctor` + bin/bridge-watchdog-cron.sh: a 30s
+// heartbeat with pid + version. Catches what the supervisor cannot see —
+// hung event loop, and a bridge running older code than the repo.
+const pkgVersion = (() => {
+  try { return JSON.parse(readFileSync(resolve(__dir, "package.json"), "utf-8")).version; }
+  catch { return "unknown"; }
+})();
+startHeartbeat({ version: pkgVersion });
 
 const appState = createState(STATE_FILE);
 if (appState.get("tts") === undefined) appState.set("tts", process.env.TTS === "1");

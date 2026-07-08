@@ -80,6 +80,19 @@ node bin/install-hooks.mjs --remove
 Permission asks and session starts also surface in `amux timeline` as
 🔔 event rows.
 
+### Health: doctor + bridge watchdog
+
+`amux doctor` surfaces every silent failure mode in one table: bridge
+dead/hung/unsupervised, bridge running OLDER code than the repo (restart
+needed), hooks broken, ledger stale, tmux unreachable. Exit codes 0/1/2
+make it cron-friendly.
+
+The bridge writes a 30s heartbeat (`~/.agentmux/bridge-heartbeat.json`).
+`bin/bridge-watchdog-cron.sh` (install: `bash bin/install-bridge-watchdog.sh`,
+runs every 5 min) kills a hung bridge so the supervisor restarts it, and
+revives a fully dead stack. Rate-limited, logged to
+`~/.agentmux/watchdog.log`, kill-switch `touch ~/.agentmux/watchdog-OFF`.
+
 ### Media and operator workflows
 
 - Voice message transcription.
