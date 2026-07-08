@@ -1141,6 +1141,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
     await t.sendEnter(target);
     await maybeSendCodexSubmitEnter(agentName, pane, target, prompt);
+    await maybeRescueClaudeSubmit(agentName, pane, target, prompt);
   }
 
   async function maybeSendCodexSubmitEnter(agentName, pane, target, prompt) {
@@ -1176,6 +1177,38 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       await t.sendEnter(target);
       await wait(750);
       if (await submitted() === true) return;
+    }
+  }
+
+  /**
+   * Claude twin of the codex submit-rescue. A long paste + immediate Enter
+   * can leave the text SITTING in the composer of an idle pane (paste still
+   * rendering when Enter lands, or claude restarting under a huge session
+   * jsonl — observed 2026-07-08: prompt pasted, echo-verified via composer
+   * tail, then lost). Composer text on a BUSY pane is a legitimately queued
+   * message and is left alone; only idle+still-in-composer gets rescued.
+   * jsonl is the source of truth for "actually submitted".
+   */
+  async function maybeRescueClaudeSubmit(agentName, pane, target, prompt) {
+    if (paneDialectName(agentName, pane) !== "claude") return;
+    let dir;
+    try { dir = paneDir(agentConfig(agentName).dir, pane); } catch { return; }
+
+    const submitted = () => {
+      try { return isPromptInJsonl(dir, prompt) === true; } catch { return false; }
+    };
+
+    await wait(750);
+    if (submitted()) return;
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (await isBusy(agentName, pane)) return;       // queued behind a turn: fine
+      const raw = await capturePane(agentName, pane, 15).catch(() => "");
+      const tail = raw.split("\n").slice(-5).join("\n");
+      if (!tail.includes(prompt.trim().slice(0, 20))) return; // not in composer
+      await t.sendEnter(target);
+      await wait(750);
+      if (submitted()) return;
     }
   }
 
