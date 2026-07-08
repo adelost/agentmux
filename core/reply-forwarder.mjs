@@ -26,6 +26,21 @@ export function isBoilerplateReply(text) {
 }
 
 /**
+ * Claude Code's literal reply to harness-injected notification turns
+ * (a background task that died with the previous session, resume
+ * bookkeeping). This is the HARNESS speaking, not the agent — mirroring it
+ * to Discord reads as the agent refusing to answer (observed #api-1
+ * 2026-07-08, right after a WSL reboot: "kör..." → "No response
+ * requested." while the real reply followed a minute later).
+ *
+ * Deliberately narrower than isBoilerplateReply: "ok"/"läst"/"kvitterat"
+ * are REAL agent acks and must keep mirroring; only the exact placeholder
+ * is noise everywhere.
+ */
+export const isHarnessPlaceholder = (text) =>
+  /^no response requested\.?$/i.test((text || "").trim());
+
+/**
  * Pull the assistant's text response to the most recent matching user-turn
  * in paneDir's jsonl. matcher is a predicate over userPrompt strings; the
  * turn it picks is "our" turn, and we return that turn's joined text items.

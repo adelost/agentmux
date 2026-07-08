@@ -39,3 +39,25 @@ describe("isBoilerplateReply", () => {
     expect(isBoilerplateReply("Acknowledged. Switching to plan B because timeline shifted.")).toBe(false);
   });
 });
+
+// isHarnessPlaceholder: the watcher-mirror filter must be NARROWER than
+// isBoilerplateReply — short real acks keep mirroring, only Claude Code's
+// literal notification placeholder is suppressed (#api-1 2026-07-08).
+import { feature, unit, expect as bddExpect } from "bdd-vitest";
+import { isHarnessPlaceholder } from "../core/reply-forwarder.mjs";
+
+feature("isHarnessPlaceholder", () => {
+  unit("matches only Claude Code's literal placeholder", {
+    given: ["assorted replies", () => [
+      "No response requested.",
+      "no response requested",
+      "  No response requested.  ",
+      "Kvitterat.",
+      "ok",
+      "No response requested. Men jag har en fråga:",
+    ]],
+    when: ["classifying", (xs) => xs.map(isHarnessPlaceholder)],
+    then: ["exactly the three placeholder variants match", (r) =>
+      bddExpect(r).toEqual([true, true, true, false, false, false])],
+  });
+});

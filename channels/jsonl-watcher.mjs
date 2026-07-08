@@ -40,6 +40,7 @@ import { paneDir } from "../agent.mjs";
 import { readLastTurns, latestJsonlMtime, latestJsonlInfo } from "../core/jsonl-reader.mjs";
 import { readLastTurnsCodex, latestCodexJsonlMtime, latestCodexJsonlInfo } from "../core/codex-jsonl-reader.mjs";
 import { getContextFromPane, shortModelName } from "../core/context.mjs";
+import { isHarnessPlaceholder } from "../core/reply-forwarder.mjs";
 import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, itemKey } from "../core/watcher-engine.mjs";
 import { createPaneQueue } from "../core/pane-queue.mjs";
 
@@ -214,6 +215,11 @@ export function createJsonlWatcher({
   async function postTurn({ name, idx, channelId, turn, config = null }) {
     const { fullText, validFiles } = renderTurn(turn);
     if (!fullText && validFiles.length === 0) return { ok: true };
+    // "No response requested." is Claude Code answering a harness-injected
+    // notification (dead background task, resume bookkeeping) — not the
+    // agent talking. Mirroring it reads as a refusal to answer; the real
+    // reply arrives as its own turn right after. Skip text AND footer.
+    if (isHarnessPlaceholder(fullText) && validFiles.length === 0) return { ok: true };
 
     const body = postPrefix && fullText ? `${postPrefix}${fullText}` : fullText || "(no text)";
     const chunks = splitMessage(body);
