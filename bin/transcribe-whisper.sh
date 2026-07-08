@@ -1,5 +1,14 @@
 #!/bin/bash
-# Transcribe audio using OpenAI Whisper API
+# Compat wrapper for the bridge's voice transcription. Do not call elsewhere.
+# All transcription goes through `transcribe` (see ~/bin/transcribe) —
+# the workspace's single STT entry point. One prompt, one model, one place
+# to improve. Same pattern as workspace scripts/util/transcribe-whisper.sh.
+#
+# Backend: Gemini 2.5 Pro. Benchmark 2026-05-27: Whisper-1 misheard tech
+# terms ("Gemini"→"Yemeni", "diarization"→"deresation"); Gemini spells
+# Swedish + jargon correctly and is cheaper. Mattias 2026-07-08: accuracy
+# beats latency for voice — never downgrade to flash models.
+#
 # Usage: transcribe-whisper.sh <audio_file> [language]
 
 AUDIO_FILE="$1"
@@ -10,20 +19,11 @@ if [ -z "$AUDIO_FILE" ]; then
   exit 1
 fi
 
-# Load key from ~/.env if not set
-if [ -z "$OPENAI_API_KEY" ]; then
-  [ -f "$HOME/.env" ] && source <(grep OPENAI_API_KEY "$HOME/.env")
-fi
-
-if [ -z "$OPENAI_API_KEY" ]; then
-  echo "Error: OPENAI_API_KEY not set" >&2
-  exit 1
-fi
-
-# Preflight: skip silent clips. Whisper-1 hallucinates training-set
-# artifacts ("Undertexter från Amara.org") on near-silent audio.
-# Threshold -75 dB rms = effectively digital silence; real Discord voice
-# sits at -53 to -60 dB rms. See memory/references/whisper-benchmark.md.
+# Preflight: skip silent clips. STT models hallucinate training-set
+# artifacts ("Undertexter från Amara.org") on near-silent audio, and a
+# skipped call is a free call. Threshold -75 dB rms = effectively digital
+# silence; real Discord voice sits at -53 to -60 dB rms.
+# See memory/references/whisper-benchmark.md.
 RMS=$(ffmpeg -hide_banner -i "$AUDIO_FILE" -af volumedetect -f null /dev/null 2>&1 \
   | awk '/mean_volume/{print $5}')
 if [ -n "$RMS" ]; then
@@ -34,11 +34,5 @@ if [ -n "$RMS" ]; then
   fi
 fi
 
-RESPONSE=$(curl -s "https://api.openai.com/v1/audio/transcriptions" \
-  -H "Authorization: Bearer ${OPENAI_API_KEY}" \
-  -F "file=@${AUDIO_FILE}" \
-  -F "model=whisper-1" \
-  -F "language=${LANG}" \
-  -F "response_format=text")
-
-echo "$RESPONSE"
+# API keys auto-load from ~/.env inside transcribe.
+exec "$HOME/bin/transcribe" --backend gemini --stdout --lang "$LANG" "$AUDIO_FILE"
