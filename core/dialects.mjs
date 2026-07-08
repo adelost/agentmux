@@ -150,3 +150,39 @@ export const stripBullet = (line) => {
   }
   return line;
 };
+
+// Composer-line marker: matches a rendered input line of ANY dialect
+// ("❯ text" claude, "› text" codex, "> text" legacy). Built from dialect
+// data so a new dialect's promptChar is covered automatically — a
+// hardcoded /^[❯>]/ missed codex's "›", which made idempotent-retry
+// re-TYPE a brief already sitting in a codex composer (the "][…" garbage
+// class, ai:4 2026-07-08).
+export const COMPOSER_LINE_RE = new RegExp(
+  `^[>${ALL_DIALECTS.map((d) => d.promptChar).join("")}]`,
+);
+
+/**
+ * Text a previous (failed) delivery left in the composer that would corrupt
+ * the message we're about to type. Returns the stale text, or null when
+ * typing is safe. Pure — callers own the capture + clearing keystrokes.
+ *
+ * Guards, in order:
+ *   - only composer lines count (dialect prompt marker) — a prompt quoted
+ *     in scrollback must not trigger clearing
+ *   - our own prompt head → null (idempotent retry; caller skips typing)
+ *   - short unbracketed text → null: codex renders a short placeholder hint
+ *     on the idle composer line, and a human's half-typed draft should be
+ *     preserved. The garbage class this kills is LONG stale briefs (ai:4
+ *     2026-07-08: "][ai:2, BINDANDE …" submitted 13 minutes late as noise),
+ *     and every amux brief is bracket-prefixed ("[from x]", "[keeper …]").
+ */
+export function foreignComposerText(raw, promptHead) {
+  const lines = String(raw || "").split("\n").map((l) => l.trim());
+  const composer = lines.filter((l) => COMPOSER_LINE_RE.test(l)).pop();
+  if (!composer) return null;
+  const text = composer.replace(COMPOSER_LINE_RE, "").trim();
+  if (!text) return null;
+  if (promptHead && text.includes(promptHead)) return null;
+  if (!text.startsWith("[") && text.length < 80) return null;
+  return text;
+}

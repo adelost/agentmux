@@ -65,6 +65,9 @@ export async function notifyWorker({ name, pane, timeout, notifyChannel, msgSess
     } else if (status === "menu") {
       log("📋", name, pane, "MENU", "Waiting for menu selection");
       return;
+    } else if (status === "interrupted") {
+      log("⚠️", name, pane, "INTERRUPTED", "Turn died (Esc/stream error) — needs a new instruction");
+      return;
     } else if (status === "permission") {
       log("🔐", name, pane, "PERMISSION", "Waiting for permission");
       return;

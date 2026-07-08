@@ -3,6 +3,7 @@ import {
   CLAUDE, CODEX, ALL_DIALECTS, detectDialect,
   matchesAnyBullet, matchesAnyToolResult, matchesAnyToolCall,
   matchesAnyPromptPrefix, matchesAnyPromptWithText, stripBullet,
+  COMPOSER_LINE_RE, foreignComposerText,
 } from "./dialects.mjs";
 
 // --- Data integrity ------------------------------------------------------
@@ -193,5 +194,70 @@ feature("Claude busy regex: present vs past tense", () => {
   unit("PAST '✻ Brewed for 2s' is NOT busy", {
     when: ["checking", () => isBusyByRegex("✻ Brewed for 2s")],
     then: ["idle", (r) => expect(r).toBe(false)],
+  });
+});
+
+// --- Composer inspection ---------------------------------------------------
+// A hardcoded /^[❯>]/ missed codex's "›": retries re-typed briefs already
+// sitting in the composer, and the next send submitted the merged garbage
+// ("][ai:2, …", ai:4 2026-07-08). Markers come from dialect data now.
+
+feature("composer line marker", () => {
+  unit("matches every dialect's composer line, not bullets or prose", {
+    given: ["rendered lines", () => [
+      "❯ kör testerna",       // claude
+      "› [from ai:2] brief",  // codex
+      "> legacy prompt",       // legacy
+      "• Ran date",            // codex bullet — NOT a composer line
+      "vanlig prosa",
+    ]],
+    when: ["testing each", (lines) => lines.map((l) => COMPOSER_LINE_RE.test(l))],
+    then: ["only the three composer lines match", (r) =>
+      expect(r).toEqual([true, true, true, false, false])],
+  });
+});
+
+feature("foreignComposerText", () => {
+  const brief = "[from ai:2] [gate-grön-insatsen] Din klass: PYTEST-RÖDA på master.";
+
+  unit("a stale bracket-prefixed brief in a codex composer is foreign", {
+    given: ["capture with the 18:44 brief still unsubmitted", () =>
+      `• output ovan\n\n› ${brief}`],
+    when: ["inspecting before typing a NEW prompt", (raw) =>
+      foreignComposerText(raw, "[keeper, automatisk]")],
+    then: ["the stale text is returned for clearing", (text) =>
+      expect(text).toContain("[from ai:2]")],
+  });
+
+  unit("our own prompt head is NOT foreign (idempotent retry)", {
+    given: ["capture where our exact prompt already sits in the composer", () =>
+      `› ${brief}`],
+    when: ["inspecting with the same prompt head", (raw) =>
+      foreignComposerText(raw, brief.slice(0, 20))],
+    then: ["null — caller skips typing instead of clearing", (text) =>
+      expect(text).toBeNull()],
+  });
+
+  unit("codex's short placeholder hint is NOT foreign", {
+    given: ["idle codex composer with its placeholder", () =>
+      "› Find and fix a bug in @filename"],
+    when: ["inspecting", (raw) => foreignComposerText(raw, "något helt annat här")],
+    then: ["null — placeholders and short human drafts are preserved", (text) =>
+      expect(text).toBeNull()],
+  });
+
+  unit("a long unbracketed human draft IS cleared (documented trade-off)", {
+    given: ["80+ chars of stale text without a bracket prefix", () =>
+      `❯ ${"x".repeat(90)}`],
+    when: ["inspecting", (raw) => foreignComposerText(raw, "annat")],
+    then: ["returned for clearing — merging would corrupt both messages", (text) =>
+      expect(text?.length).toBe(90)],
+  });
+
+  unit("a prompt quoted in scrollback (no marker) never triggers clearing", {
+    given: ["scrollback quoting a brief, empty composer", () =>
+      `  agenten fick: "[from ai:2] gör X"\n\n❯ `],
+    when: ["inspecting", (raw) => foreignComposerText(raw, "min nya prompt")],
+    then: ["null", (text) => expect(text).toBeNull()],
   });
 });

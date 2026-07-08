@@ -2,6 +2,11 @@
 
 import { stripAnsi } from "../lib.mjs";
 import { ALL_DIALECTS } from "../core/dialects.mjs";
+import { statusIcon } from "../core/pane-status.mjs";
+
+// Re-exported so existing `import { statusIcon } from "./format.mjs"`
+// callers keep working; the truth lives in core/pane-status.mjs.
+export { statusIcon };
 
 /** Detect pane status from captured content. */
 export function detectPaneStatus(paneContent) {
@@ -50,6 +55,17 @@ export function detectPaneStatus(paneContent) {
   if (/\((?:\d+h\s+)?\d+m\s+\d+s\)/.test(tailRaw)) return "working";
   if (/…\s*\((?:\d+m\s+)?\d+s\)/.test(tailRaw)) return "working";
 
+  // Codex renders "■ Conversation interrupted - tell the model what to do
+  // differently" when a turn dies (Esc keypress, stream error). The composer
+  // usually returns below the banner, so the prompt-first check would read
+  // this as plain idle — but the pane is NOT idle: its last turn died
+  // mid-flight and whoever briefed it is waiting for a reply that will never
+  // come (ai:4 sat like this for 40 min on 2026-07-08 while ps said idle and
+  // its orchestrator assumed progress). Flag until new activity scrolls the
+  // banner out of the tail. Working signals above still win: a pane that
+  // already resumed is working, banner residue or not.
+  if (/Conversation interrupted/.test(tailRaw)) return "interrupted";
+
   // Prompt-first ordering: a live modal (Allow once / 0: Dismiss / Enter to
   // select / Resume from summary) REPLACES the input box, so the `❯` prompt
   // disappears while the modal is showing. If we still see the prompt at tail,
@@ -70,20 +86,6 @@ export function detectPaneStatus(paneContent) {
   if (/0: Dismiss/.test(tailRaw)) return "dismiss";
 
   return "unknown";
-}
-
-/** Status icon for a pane state. */
-export function statusIcon(status) {
-  const icons = {
-    working: "🟢",
-    permission: "🔴",
-    menu: "🔴",
-    resume: "🟡",
-    dismiss: "🟡",
-    idle: "💤",
-    unknown: "⚪",
-  };
-  return icons[status] || "⚪";
 }
 
 /** Format a row for agent ls. */

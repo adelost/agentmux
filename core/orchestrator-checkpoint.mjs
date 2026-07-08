@@ -7,6 +7,8 @@
 //
 // What remains: bucket-and-classify helpers used by cmdDone to render rows.
 
+import { isLiveStatus, needsHumanStatus } from "./pane-status.mjs";
+
 /**
  * Bucket timeline rows by `agent:pane` key. Each bucket captures the turn
  * count since cutoff plus the latest user prompt and assistant response
@@ -154,8 +156,8 @@ export function looksDone(text) {
  * second-most-actionable.
  */
 export function classifyPane(bucket, paneStatus) {
-  if (paneStatus === "working" || paneStatus === "resume") return "still-working";
-  if (paneStatus === "menu" || paneStatus === "permission") return "waiting";
+  if (isLiveStatus(paneStatus)) return "still-working";
+  if (needsHumanStatus(paneStatus)) return "waiting";
 
   if (bucket.turns === 0) return "idle";
 

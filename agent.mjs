@@ -8,7 +8,7 @@ import { esc, stripAnsi } from "./lib.mjs";
 import { createTmuxAdapter } from "./core/tmux.mjs";
 import { stripPaneChrome } from "./core/pane-chrome.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
-import { detectDialect } from "./core/dialects.mjs";
+import { detectDialect, COMPOSER_LINE_RE, foreignComposerText } from "./core/dialects.mjs";
 import { extractFromJsonl, isBusyFromJsonl, isPromptInJsonl } from "./core/jsonl-reader.mjs";
 import { extractFromCodexJsonl, isBusyFromCodexJsonl, isPromptInCodexJsonl } from "./core/codex-jsonl-reader.mjs";
 import { getContextPercent as getContextPercentByDialect, getContextFromPane } from "./core/context.mjs";
@@ -1144,6 +1144,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     // sitting unsubmitted in the composer, typing it again would double the
     // text. Skip straight to the submit path instead.
     if (!(await promptAlreadyInComposer(agentName, pane, prompt))) {
+      await clearForeignComposerText(agentName, pane, target, prompt);
       if (prompt.length > 500) {
         await sendLongPrompt(target, prompt);
       } else {
@@ -1161,15 +1162,47 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (!head) return false;
     try {
       const raw = await capturePane(agentName, pane, 15);
-      // Composer lines render as "❯ text" (claude) / "> text" (codex).
+      // Composer lines render as "❯ text" (claude) / "› text" (codex) /
+      // "> text" (legacy). COMPOSER_LINE_RE is built from dialect data —
+      // a hardcoded [❯>] here missed codex's "›", so retries re-typed a
+      // brief that was already sitting in the composer (ai:4 2026-07-08).
       // Requiring the marker keeps a prompt-head quoted in SCROLLBACK from
       // suppressing a legitimate first type-in.
       return raw.split("\n").slice(-5).some((l) => {
         const line = l.trim();
-        return /^[❯>]/.test(line) && line.includes(head);
+        return COMPOSER_LINE_RE.test(line) && line.includes(head);
       });
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * A previous failed delivery can leave ITS text sitting in the composer.
+   * Typing on top of it corrupts both messages, and the NEXT send then
+   * submits the merged garbage (ai:4 2026-07-08: a brief typed into an
+   * interrupted codex TUI never submitted; 13 minutes later it went out as
+   * "][ai:2, …"). Clear foreign text before typing — but only when the pane
+   * is not mid-turn: on a busy pane composer text is a legitimately QUEUED
+   * message (and Esc would interrupt the live turn), so we leave it alone
+   * and let our text queue behind it.
+   */
+  async function clearForeignComposerText(agentName, pane, target, prompt) {
+    let raw;
+    try { raw = await capturePane(agentName, pane, 15); } catch { return; }
+    const head = prompt.trim().slice(0, 20);
+    const stale = foreignComposerText(raw, head);
+    if (!stale) return;
+    if (await isBusy(agentName, pane)) return;
+    console.warn(
+      `send ${agentName}:${pane}: clearing stale composer text ("${stale.slice(0, 40)}…") — a previous delivery never submitted`,
+    );
+    await t.sendEscape(target); // Esc with text in the composer clears it (both TUIs)
+    await wait(300);
+    const after = await capturePane(agentName, pane, 15).catch(() => "");
+    if (foreignComposerText(after, head)) {
+      await t.sendKeys(target, "C-u"); // belt: kill-line for TUIs that keep text on Esc
+      await wait(200);
     }
   }
 

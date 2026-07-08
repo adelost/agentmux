@@ -5,6 +5,7 @@
 // DOES NOT: Read files, inspect tmux, parse config, or decide pane ownership.
 
 import { isWaitingLikeText, looksDone, previewText } from "./orchestrator-checkpoint.mjs";
+import { isLiveStatus } from "./pane-status.mjs";
 
 const OPEN_STATUSES = new Set(["open", "working", "partial", "needs-you"]);
 
@@ -17,7 +18,7 @@ export function classifyAskTurn(turn = {}, opts = {}) {
   const items = Array.isArray(turn.items) ? turn.items : [];
   const reply = latestTextItem(items);
   const fullReply = allTextItems(items);
-  const live = paneStatus === "working" || paneStatus === "resume";
+  const live = isLiveStatus(paneStatus);
 
   if (!reply) return isLatest && live ? "working" : "open";
   if (isLatest && live && !turn.isComplete) return "working";

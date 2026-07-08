@@ -15,6 +15,7 @@ import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, lat
 import { latestCodexJsonlMtime, readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
 import { latestPaneStatesCached, mergeStatus, readEvents, eventsPath } from "../core/events.mjs";
+import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../core/pane-status.mjs";
 import { readHeartbeat } from "../core/heartbeat.mjs";
 import {
   checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkLedger,
@@ -342,6 +343,10 @@ async function cmdWait(name, flags, ctx) {
       if (sawWorking || idleStreak >= 4) { console.log("menu"); process.exit(2); }
     } else if (status === "permission") {
       if (sawWorking || idleStreak >= 4) { console.log("permission"); process.exit(3); }
+    } else if (status === "interrupted") {
+      // The turn died (Esc/stream error) — nothing to wait for; a caller
+      // blocking here would hang until timeout (ai:4 sat 40 min like this).
+      if (sawWorking || idleStreak >= 4) { console.log("interrupted"); process.exit(4); }
     } else {
       idleStreak += 2;
       if (sawWorking && idleStreak >= 2) { console.log("ready"); return; }
@@ -979,9 +984,9 @@ function renderSelfBlock(selfKey, widerBuckets, statuses, nowMs) {
   const lastAsst = previewText(stripAnsi(b.lastAssistantText || ""), 90);
   const status = statuses.get(selfKey) || "unknown";
   let state = "🟡 jobbar";
-  if (status === "menu" || status === "permission") state = "🔴 väntar på input (modal)";
+  if (needsHumanStatus(status)) state = "🔴 väntar på input";
   else if (isWaitingLikeText(b.lastAssistantText)) state = "🔴 du väntar på svar (från Mattias)";
-  else if (status === "working" || status === "resume" || isRunningNow(b, nowMs)) state = "🟡 jobbar";
+  else if (isLiveStatus(status) || isRunningNow(b, nowMs)) state = "🟡 jobbar";
   else if (looksDone(b.lastAssistantText)) state = "✅ klar";
   else state = "⚠️ idle, ev. mer att göra (sa aldrig 'klart')";
   if (lastUser) console.log(`   senast ombedd:  "${lastUser}"`);
@@ -1100,7 +1105,7 @@ async function cmdDone(ctx, flags) {
     const status = statuses.get(key) || "unknown";
     const ageMs = bucket.latestTurnTs ? nowMs - bucket.latestTurnTs : Infinity;
     const inWindow = bucket.latestTurnTs != null && bucket.latestTurnTs >= sinceMs;
-    const live = status === "working" || status === "resume" || isRunningNow(bucket, nowMs);
+    const live = isLiveStatus(status) || isRunningNow(bucket, nowMs);
     // "Dropped ball": the human's directive is the most recent text and the
     // agent never replied (and isn't live). This is the precise "I asked, it
     // never got done" signal — far tighter than "didn't end with 'klart'".
@@ -1110,7 +1115,7 @@ async function cmdDone(ctx, flags) {
       && !isSystemNoiseDirective(bucket.lastUserText);
     const entry = { key, bucket, status, ageMs };
 
-    if (status === "menu" || status === "permission") needsYou.push(entry);          // live modal blocks on user
+    if (needsHumanStatus(status)) needsYou.push(entry);                              // modal/interrupted blocks on user
     else if (live) working.push(entry);
     else if (bucket.turns === 0) idleCount++;
     else if (userSpokeLast && ageMs > STALL_MIN_MS) stalled.push(entry);             // directive unanswered → dropped
@@ -2046,9 +2051,8 @@ async function inspectPane(ctx, agent, pane) {
 
 // Status priorities for sorting agents — agents with active panes first,
 // then panes with claude session state, then plain shells last.
-const STATUS_TIER = { working: 3, permission: 3, menu: 3, resume: 2, dismiss: 2, idle: 1, unknown: 0 };
 const SHELL_CMDS = /^(bash|zsh|fish|sh|dash)$/;
-const ACTIVE_STATUS = (s) => s === "working" || s === "permission" || s === "menu" || s === "resume" || s === "dismiss";
+const ACTIVE_STATUS = (s) => statusTier(s) >= 2;
 
 
 /**
@@ -2260,8 +2264,6 @@ async function cmdPs(ctx, flags = {}) {
  *
  * Statuses we compact by default: idle, unknown (mostly idle or just-spawned).
  */
-const COMPACT_UNSAFE_STATUSES = new Set(["working", "permission", "menu"]);
-
 // Don't bother compacting panes below this absolute token count. Rationale:
 // on a 200k-context pane, 20% is only 40k — compacting saves nothing
 // meaningful. On a 1M-context pane, 20% is 200k, worth compacting. This
@@ -2310,7 +2312,7 @@ async function cmdCompact(ctx, flags = {}, positional = []) {
       if (!context) continue;
       if (context.percent < threshold) continue;
       if (context.tokens < minTokens) continue;
-      const unsafe = COMPACT_UNSAFE_STATUSES.has(status);
+      const unsafe = isCompactUnsafe(status);
       if (unsafe && !force) {
         skipped.push({ agent: a.name, pane: p.index, dialect, context, status });
         continue;
@@ -2391,7 +2393,7 @@ async function compactOnePane(ctx, name, flags, compactText) {
   }
   const { status, context } = await inspectPane(ctx, a, p);
   const ctxStr = context ? `${context.percent}% ${formatTokens(context.tokens)}` : "context unknown";
-  if (COMPACT_UNSAFE_STATUSES.has(status) && !flags.force) {
+  if (isCompactUnsafe(status) && !flags.force) {
     console.error(
       `${name} p${paneIdx} is ${status} (${ctxStr}) — compacting mid-turn drops in-flight work. Use --force to override.`
     );

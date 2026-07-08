@@ -70,4 +70,43 @@ feature("pane status detection", () => {
       expect(status).toBe("idle");
     }],
   });
+
+  unit("flags a dead codex turn as interrupted, not idle (ai:4 2026-07-08)", {
+    given: ["codex after a stream error killed the turn — banner at tail", () => [
+      "• bdd-pytest finns som sibling under /home/adelost/lsrc, så /tmp-",
+      "",
+      "⚠",
+      "•",
+      "■ Conversation interrupted - tell the model what to do differently",
+    ].join("\n")],
+    when: ["detecting pane status", (content) => detectPaneStatus(content)],
+    then: ["status is interrupted — done/ps must show the ball is dropped", (status) => {
+      expect(status).toBe("interrupted");
+    }],
+  });
+
+  unit("interrupted banner + visible composer is still interrupted, not idle", {
+    given: ["codex interrupted with the composer re-rendered below", () => [
+      "■ Conversation interrupted - tell the model what to do differently",
+      "",
+      "› ",
+    ].join("\n")],
+    when: ["detecting pane status", (content) => detectPaneStatus(content)],
+    then: ["interrupted wins over the prompt-first idle check", (status) => {
+      expect(status).toBe("interrupted");
+    }],
+  });
+
+  unit("a pane that resumed working after an interruption is working", {
+    given: ["banner residue in tail but a live turn is running", () => [
+      "■ Conversation interrupted - tell the model what to do differently",
+      "",
+      "• Working (12s · esc to interrupt)",
+    ].join("\n")],
+    when: ["detecting pane status", (content) => detectPaneStatus(content)],
+    then: ["working wins — banner is scrollback residue", (status) => {
+      expect(status).toBe("working");
+    }],
+  });
 });
+

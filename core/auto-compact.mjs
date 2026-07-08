@@ -8,6 +8,8 @@
 // side-effect to apply (post a Discord warning, send /compact to the
 // pane, clear pending warning).
 
+import { isLiveStatus } from "./pane-status.mjs";
+
 export const DEFAULT_CONFIG = {
   enabled: true,
   codexEnabled: false,    // Auto-compact is OFF for codex panes by default.
@@ -70,10 +72,6 @@ export function parseAutoCompactConfig(env = process.env) {
     warnCooldownMs: parseInt(env.AUTO_COMPACT_WARN_COOLDOWN_MS || DEFAULT_CONFIG.warnCooldownMs, 10),
   };
 }
-
-// Statuses that count as "active". Everything else is treated as idle
-// enough to safely compact once the grace window elapses.
-const ACTIVE_STATUSES = new Set(["working", "resume"]);
 
 /**
  * Pick the timestamp the min-idle gate should reason about for one pane.
@@ -173,7 +171,7 @@ export function decideAutoCompactAction({
   if (!config.enabled) return { action: "none", reason: "disabled" };
 
   const existing = warnings.get(paneKey);
-  const isActive = ACTIVE_STATUSES.has(status);
+  const isActive = isLiveStatus(status);
   const inScrollMode = paneInMode === "1" || paneInMode === 1;
 
   // Activity or scroll-mode → cancel any pending warning and do nothing.
