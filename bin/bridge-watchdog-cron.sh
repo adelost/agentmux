@@ -60,9 +60,12 @@ AGE=$(heartbeat_age)
 if [ -n "$PIDS" ] && [ "$AGE" -gt "$STALE_SEC" ] && [ -f "$HEARTBEAT" ]; then
   # Hung: alive but not beating. Kill; the supervisor restarts with fresh code.
   if rate_limited; then log "HUNG bridge (beat ${AGE}s old) but rate-limited, skipping"; exit 0; fi
-  log "HUNG bridge pid(s) $PIDS (beat ${AGE}s old) -> kill (supervisor restarts)"
+  log "HUNG bridge pid(s) $PIDS (beat ${AGE}s old) -> kill -9 (supervisor restarts)"
   record_intervention
-  kill $PIDS 2>/dev/null
+  # SIGKILL is deliberate: TERM reads as clean stop (exit 143 -> supervisor
+  # BREAKS), INT makes bash kill the supervisor itself (child-died-of-SIGINT
+  # semantics, observed 2026-07-08). KILL -> exit 137 -> crash branch -> restart.
+  kill -9 $PIDS 2>/dev/null
   exit 0
 fi
 

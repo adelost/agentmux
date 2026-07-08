@@ -43,7 +43,7 @@ export function checkHeartbeatHealth({ beat, repoVersion, pidAlive, now = Date.n
         "restart to activate: /restart in Discord (or amux stop && amux serve)");
     case "hung":
       return check("bridge heartbeat", FAIL, `pid alive but last beat ${Math.round(hb.ageMs / 60000)} min ago`,
-        "event loop is stuck: kill the pid (supervisor restarts it)");
+        "event loop is stuck: kill -9 the pid (supervisor restarts it; TERM/INT would stop the whole stack)");
     case "dead":
       return check("bridge heartbeat", FAIL, "stale beat and no live pid",
         "start it: amux serve");
