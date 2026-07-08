@@ -1,16 +1,21 @@
-// Context reading must survive session-limit spam. When a pane is
-// rate-limited, Claude Code logs assistant messages from model "<synthetic>"
-// with all-zero usage. Trusting those poisoned two consumers at once
-// (ai:1, 2026-07-08 18:50): zero usage → "0%" false calm, and "<synthetic>"
-// as latest model → 200k default window → real 351k tokens clamped to a
-// false "100%" that fired an auto-compact warning at a merely rate-limited
-// pane. These tests pin the guard: context truth is the newest REAL turn.
+// Context reading must survive session-limit spam, and prefer pushed truth.
+//
+// Session-limit spam: a rate-limited pane logs assistant messages from model
+// "<synthetic>" with all-zero usage. Trusting those poisoned two consumers at
+// once (ai:1, 2026-07-08 18:50): zero usage → "0%" false calm, and
+// "<synthetic>" as latest model → 200k default window → real 351k tokens
+// clamped to a false "100%" that fired an auto-compact warning at a merely
+// rate-limited pane. The guard: context truth is the newest REAL turn.
+//
+// Pushed truth: Claude Code renders its own percent through the statusline,
+// which tees it to os.tmpdir()/claude-ctx-<session>.json. When fresh, that
+// beats every scrape/jsonl reconstruction.
 
 import { feature, component, expect } from "bdd-vitest";
-import { mkdtempSync, mkdirSync, writeFileSync } from "fs";
+import { mkdtempSync, mkdirSync, writeFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { getContextPercent, getContextFromPane } from "./context.mjs";
+import { getContextPercent, getContextFromPane, getContextPushed } from "./context.mjs";
 
 const usageEntry = (model, total) => JSON.stringify({
   timestamp: "2026-07-08T16:49:00.000Z",
@@ -40,18 +45,24 @@ const syntheticEntry = () => JSON.stringify({
 });
 
 // Build a fake HOME with one claude session jsonl for paneDir, restore after.
-function withSessionJsonl(lines, run) {
+// The session id is unique per call: getContextPushed keys the REAL
+// os.tmpdir() bridge file on it, so a fixed name would leak between tests.
+function withSessionJsonl(lines, run, { bridge = null } = {}) {
   const home = mkdtempSync(join(tmpdir(), "amux-ctx-"));
+  const sessionId = `amux-test-${Math.random().toString(36).slice(2)}`;
   const paneDir = join(home, "work", "pane");
   const projectDir = join(home, ".claude", "projects", paneDir.replace(/[\/\.]/g, "-"));
   mkdirSync(projectDir, { recursive: true });
-  writeFileSync(join(projectDir, "session.jsonl"), lines.join("\n") + "\n");
+  writeFileSync(join(projectDir, `${sessionId}.jsonl`), lines.join("\n") + "\n");
+  const bridgePath = join(tmpdir(), `claude-ctx-${sessionId}.json`);
+  if (bridge) writeFileSync(bridgePath, JSON.stringify(bridge));
   const prevHome = process.env.HOME;
   process.env.HOME = home;
   try {
     return run(paneDir);
   } finally {
     process.env.HOME = prevHome;
+    try { unlinkSync(bridgePath); } catch { /* no bridge written */ }
   }
 }
 
@@ -87,5 +98,55 @@ feature("context reading under session limit", () => {
       expect(ctx.percent).toBe(35);
       expect(ctx.model).toBe("claude-fable-5");
     }],
+  });
+});
+
+feature("pushed statusline truth", () => {
+  const nowS = () => Math.floor(Date.now() / 1000);
+
+  component("a fresh bridge file beats jsonl math", {
+    given: ["jsonl says 35% but Claude Code's own statusline pushed 92%", () => ({
+      lines: [usageEntry("claude-fable-5", 351_000)],
+      bridge: { used_pct: 92, timestamp: nowS() },
+    })],
+    when: ["reading context", ({ lines, bridge }) =>
+      withSessionJsonl(lines, (paneDir) => getContextPercent(paneDir, "claude"), { bridge })],
+    then: ["92% — Claude Code's rendered number wins; tokens/model still from jsonl", (ctx) => {
+      expect(ctx.percent).toBe(92);
+      expect(ctx.model).toBe("claude-fable-5");
+      expect(ctx.tokens).toBe(351_000);
+    }],
+  });
+
+  component("a stale bridge file is distrusted — jsonl math stands", {
+    given: ["a bridge file from a session 3 hours dead", () => ({
+      lines: [usageEntry("claude-fable-5", 351_000)],
+      bridge: { used_pct: 92, timestamp: nowS() - 3 * 3600 },
+    })],
+    when: ["reading context", ({ lines, bridge }) =>
+      withSessionJsonl(lines, (paneDir) => getContextPercent(paneDir, "claude"), { bridge })],
+    then: ["35% from jsonl", (ctx) => expect(ctx.percent).toBe(35)],
+  });
+
+  component("a garbage bridge file never poisons the reading", {
+    given: ["a bridge file with an out-of-range percent", () => ({
+      lines: [usageEntry("claude-fable-5", 351_000)],
+      bridge: { used_pct: 166, timestamp: nowS() },
+    })],
+    when: ["reading pushed context directly", ({ lines, bridge }) =>
+      withSessionJsonl(lines, (paneDir) => getContextPushed(paneDir), { bridge })],
+    then: ["null — callers fall through to jsonl", (ctx) => expect(ctx).toBeNull()],
+  });
+
+  component("pushed truth short-circuits the pane-content parse", {
+    given: ["pane shows a 100%-shaped idle-save hint but the bridge says 41%", () => ({
+      lines: [usageEntry("claude-fable-5", 351_000)],
+      bridge: { used_pct: 41, timestamp: nowS() },
+      pane: "  new task? /clear to save 351.2k tokens\n  ❯ \n",
+    })],
+    when: ["reading context from pane content", ({ lines, bridge, pane }) =>
+      withSessionJsonl(lines, (paneDir) => getContextFromPane(pane, paneDir), { bridge })],
+    then: ["41% — the pane image is fallback, not truth", (ctx) =>
+      expect(ctx.percent).toBe(41)],
   });
 });

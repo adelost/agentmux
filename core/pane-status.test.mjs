@@ -32,17 +32,17 @@ feature("pane status traits table", () => {
     when: ["querying the load-bearing statuses", () => ({
       live: ["working", "resume"].map(isLiveStatus),
       notLive: ["interrupted", "permission", "idle"].map(isLiveStatus),
-      needsHuman: ["permission", "menu", "interrupted"].map(needsHumanStatus),
+      needsHuman: ["permission", "menu", "interrupted", "limited"].map(needsHumanStatus),
       humanFree: ["working", "idle", "dismiss"].map(needsHumanStatus),
-      compactUnsafe: ["working", "permission", "menu", "interrupted"].map(isCompactUnsafe),
+      compactUnsafe: ["working", "permission", "menu", "interrupted", "limited"].map(isCompactUnsafe),
       compactable: ["idle", "unknown", "resume", "dismiss"].map(isCompactUnsafe),
     })],
     then: ["live/needsHuman/compactUnsafe partition as the callers assume", (r) => {
       expect(r.live).toEqual([true, true]);
       expect(r.notLive).toEqual([false, false, false]);
-      expect(r.needsHuman).toEqual([true, true, true]);
+      expect(r.needsHuman).toEqual([true, true, true, true]);
       expect(r.humanFree).toEqual([false, false, false]);
-      expect(r.compactUnsafe).toEqual([true, true, true, true]);
+      expect(r.compactUnsafe).toEqual([true, true, true, true, true]);
       expect(r.compactable).toEqual([false, false, false, false]);
     }],
   });

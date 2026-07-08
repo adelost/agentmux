@@ -108,5 +108,31 @@ feature("pane status detection", () => {
       expect(status).toBe("working");
     }],
   });
+
+  unit("flags a rate-limited pane as limited, not idle (ai:1 2026-07-08)", {
+    given: ["claude after hitting the session limit — composer visible", () => [
+      "  Jag fortsätter med refaktorn av handlers…",
+      "",
+      "You've hit your session limit · resets 6:50pm (Europe/Stockholm)",
+      "",
+      "❯ ",
+    ].join("\n")],
+    when: ["detecting pane status", (content) => detectPaneStatus(content)],
+    then: ["status is limited — auto-compact must not touch it", (status) => {
+      expect(status).toBe("limited");
+    }],
+  });
+
+  unit("a pane that resumed real turns after limit reset is working", {
+    given: ["limit banner residue but a live spinner footer", () => [
+      "You've hit your session limit · resets 6:50pm (Europe/Stockholm)",
+      "",
+      "✻ Musing… (12s · ↓ 2.1k tokens · esc to interrupt)",
+    ].join("\n")],
+    when: ["detecting pane status", (content) => detectPaneStatus(content)],
+    then: ["working wins over banner residue", (status) => {
+      expect(status).toBe("working");
+    }],
+  });
 });
 

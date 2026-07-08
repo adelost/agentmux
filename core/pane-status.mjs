@@ -19,6 +19,10 @@ export const PANE_STATUS = {
   permission:  { icon: "🔴", live: false, needsHuman: true,  compactUnsafe: true,  tier: 3 },
   menu:        { icon: "🔴", live: false, needsHuman: true,  compactUnsafe: true,  tier: 3 },
   interrupted: { icon: "🔴", live: false, needsHuman: true,  compactUnsafe: true,  tier: 3 },
+  // Rate-limited ("You've hit your session limit · resets HH:MM"): can't run
+  // turns AND can't run /compact (compaction needs model quota) — auto-compact
+  // must not touch it, and the human should see it to switch model or wait.
+  limited:     { icon: "🚫", live: false, needsHuman: true,  compactUnsafe: true,  tier: 3 },
   resume:      { icon: "🟡", live: true,  needsHuman: false, compactUnsafe: false, tier: 2 },
   dismiss:     { icon: "🟡", live: false, needsHuman: false, compactUnsafe: false, tier: 2 },
   idle:        { icon: "💤", live: false, needsHuman: false, compactUnsafe: false, tier: 1 },

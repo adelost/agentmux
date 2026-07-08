@@ -55,6 +55,15 @@ export function detectPaneStatus(paneContent) {
   if (/\((?:\d+h\s+)?\d+m\s+\d+s\)/.test(tailRaw)) return "working";
   if (/…\s*\((?:\d+m\s+)?\d+s\)/.test(tailRaw)) return "working";
 
+  // A rate-limited pane ("You've hit your session limit · resets 6:50pm")
+  // can't run turns until the limit resets — and can't run /compact either,
+  // so auto-compact must not touch it. The composer stays visible below the
+  // banner, so this must beat the prompt-first idle check (ai:1 2026-07-08:
+  // a limited pane read as idle and got a false auto-compact warning). The
+  // banner re-prints on every attempted prompt and scrolls out with the
+  // first real turn after reset.
+  if (/You've hit your session limit/.test(tailRaw)) return "limited";
+
   // Codex renders "■ Conversation interrupted - tell the model what to do
   // differently" when a turn dies (Esc keypress, stream error). The composer
   // usually returns below the banner, so the prompt-first check would read

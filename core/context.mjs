@@ -9,6 +9,7 @@
 
 import { readFileSync, readdirSync, statSync, existsSync, openSync, fstatSync, readSync, closeSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 
 /**
  * Read only the last `maxBytes` of a file and return its complete trailing
@@ -144,10 +145,11 @@ function claudeMaxForModel(model) {
   return CLAUDE_DEFAULT_MAX;
 }
 
-// Read the most recent claude model name from any jsonl in paneDir's project
-// store. Used by the pane-content path to infer max context window when the
-// pane itself is too narrow to show the "(1M context)" hint.
-function readLatestClaudeModel(paneDir) {
+// Newest claude session file for a pane dir: { path, sessionId } or null.
+// The session id doubles as the key for Claude Code's statusline bridge
+// file (getContextPushed). Single helper — the listing logic was duplicated
+// across three readers before.
+function newestSessionFile(paneDir) {
   const projectDir = join(CLAUDE_PROJECTS_DIR(), encodeClaudePath(paneDir));
   if (!existsSync(projectDir)) return null;
   let files;
@@ -156,9 +158,24 @@ function readLatestClaudeModel(paneDir) {
       .filter((f) => f.endsWith(".jsonl"))
       .map((f) => ({ name: f, mtime: statSync(join(projectDir, f)).mtimeMs }))
       .sort((a, b) => b.mtime - a.mtime);
-  } catch { return null; }
+  } catch (err) {
+    console.warn(`context(claude): list projectDir failed: ${err.message}`);
+    return null;
+  }
   if (!files.length) return null;
-  const lines = readTailLines(join(projectDir, files[0].name));
+  return {
+    path: join(projectDir, files[0].name),
+    sessionId: files[0].name.replace(/\.jsonl$/, ""),
+  };
+}
+
+// Read the most recent claude model name from any jsonl in paneDir's project
+// store. Used by the pane-content path to infer max context window when the
+// pane itself is too narrow to show the "(1M context)" hint.
+function readLatestClaudeModel(paneDir) {
+  const session = newestSessionFile(paneDir);
+  if (!session) return null;
+  const lines = readTailLines(session.path);
   if (!lines.length) return null;
   for (let i = lines.length - 1; i >= Math.max(0, lines.length - USAGE_SCAN_MAX_LINES); i--) {
     try {
@@ -177,22 +194,9 @@ function encodeClaudePath(dir) {
 }
 
 function getContextFromClaudeJsonl(paneDir) {
-  const projectDir = join(CLAUDE_PROJECTS_DIR(), encodeClaudePath(paneDir));
-  if (!existsSync(projectDir)) return null;
-
-  let files;
-  try {
-    files = readdirSync(projectDir)
-      .filter((f) => f.endsWith(".jsonl"))
-      .map((f) => ({ name: f, mtime: statSync(join(projectDir, f)).mtimeMs }))
-      .sort((a, b) => b.mtime - a.mtime);
-  } catch (err) {
-    console.warn(`context(claude): list projectDir failed: ${err.message}`);
-    return null;
-  }
-  if (!files.length) return null;
-
-  const lines = readTailLines(join(projectDir, files[0].name));
+  const session = newestSessionFile(paneDir);
+  if (!session) return null;
+  const lines = readTailLines(session.path);
   if (!lines.length) return null;
 
   // Walk backwards for the most recent REAL usage block (synthetic
@@ -316,18 +320,69 @@ function getContextFromCodexJsonl(paneDir) {
   return null;
 }
 
+// --- Pushed truth: Claude Code's statusline bridge ----------------------
+
+// How stale a statusline bridge file may be before we distrust it. The
+// statusline re-renders on every message/cost change, so a fresh file
+// tracks live work closely; a pane idle for hours has an old file but an
+// UNCHANGED context — the window is generous, it only exists to shed
+// files from dead sessions.
+const STATUSLINE_BRIDGE_FRESH_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * Claude Code's OWN context percent, pushed — not scraped.
+ *
+ * The user's statusline command receives exact context JSON from Claude
+ * Code on every render, and the installed GSD statusline tees it to
+ * os.tmpdir()/claude-ctx-<session>.json ({ used_pct, timestamp }). That
+ * percent is the number the user sees and the one Claude Code's own
+ * compaction acts on (measured against usable-before-autocompact space),
+ * so when the file is present and fresh it beats every reconstruction
+ * below — the scrape/jsonl paths disagreed 0%/33%/100% about the same
+ * pane on 2026-07-08. We only READ the file: no statusline modification,
+ * so /gsd-update can't break this, and a setup without that statusline
+ * simply falls through to the older paths.
+ *
+ * Tokens/model are not in the bridge file; they come from the jsonl
+ * reader for display only. Percent is the authoritative field.
+ */
+export function getContextPushed(paneDir) {
+  const session = newestSessionFile(paneDir);
+  if (!session) return null;
+  let data;
+  try {
+    data = JSON.parse(readFileSync(join(tmpdir(), `claude-ctx-${session.sessionId}.json`), "utf-8"));
+  } catch {
+    return null; // no bridge file — this pane's statusline doesn't push
+  }
+  const percent = Number(data?.used_pct);
+  const ageMs = Date.now() - Number(data?.timestamp) * 1000;
+  if (!Number.isFinite(percent) || percent < 0 || percent > 100) return null;
+  if (!Number.isFinite(ageMs) || ageMs > STATUSLINE_BRIDGE_FRESH_MS) return null;
+  let tokens = null;
+  let model = null;
+  try {
+    const jsonl = getContextFromClaudeJsonl(paneDir);
+    tokens = jsonl?.tokens ?? null;
+    model = jsonl?.model ?? null;
+  } catch { /* display-only — percent stands alone */ }
+  return { percent: Math.round(percent), tokens, model };
+}
+
 // --- Public dispatcher -------------------------------------------------
 
 /**
  * Get { percent, tokens } context usage for a pane, routed to the right
  * source by dialect name. Returns null if no data is available.
  *
+ * Claude precedence: pushed statusline truth → jsonl math.
+ *
  * @param {string} paneDir   - The pane's working dir
  * @param {"claude"|"codex"|null} dialect - Which session store to read
  */
 export function getContextPercent(paneDir, dialect) {
   if (dialect === "codex") return getContextFromCodexJsonl(paneDir);
-  if (dialect === "claude") return getContextFromClaudeJsonl(paneDir);
+  if (dialect === "claude") return getContextPushed(paneDir) || getContextFromClaudeJsonl(paneDir);
   return null;
 }
 
@@ -409,6 +464,13 @@ export function shortModelName(model) {
  * @returns {{ percent: number, tokens: number } | null}
  */
 export function getContextFromPane(paneContent, paneDir = null) {
+  // Pushed truth first: Claude Code's own rendered percent via the
+  // statusline bridge file. Parsing the pane image below is the fallback
+  // for panes whose statusline doesn't push.
+  if (paneDir) {
+    const pushed = getContextPushed(paneDir);
+    if (pushed) return pushed;
+  }
   if (!paneContent) return null;
   const lines = paneContent.split("\n");
   const tail = lines.slice(-80);

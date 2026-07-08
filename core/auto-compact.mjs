@@ -8,7 +8,7 @@
 // side-effect to apply (post a Discord warning, send /compact to the
 // pane, clear pending warning).
 
-import { isLiveStatus } from "./pane-status.mjs";
+import { isLiveStatus, isCompactUnsafe } from "./pane-status.mjs";
 
 export const DEFAULT_CONFIG = {
   enabled: true,
@@ -174,10 +174,19 @@ export function decideAutoCompactAction({
   const isActive = isLiveStatus(status);
   const inScrollMode = paneInMode === "1" || paneInMode === 1;
 
-  // Activity or scroll-mode → cancel any pending warning and do nothing.
-  // User is doing something we shouldn't interrupt.
-  if (isActive || inScrollMode) {
-    if (existing || compactFloors.has(paneKey)) return { action: "cancel", reason: isActive ? "pane active" : "in copy-mode" };
+  // Do-not-touch statuses → cancel any pending warning and do nothing.
+  // Live turns and copy-mode mean someone is working; compact-unsafe
+  // covers panes where /compact would misfire or is futile: a modal would
+  // eat it, an interrupted turn needs a human decision, and a rate-limited
+  // pane can't even run the compaction (it needs model quota) — ai:1 got a
+  // false "100% and idle" warning while merely rate-limited (2026-07-08).
+  if (isActive || inScrollMode || isCompactUnsafe(status)) {
+    if (existing || compactFloors.has(paneKey)) {
+      const reason = isActive ? "pane active"
+        : inScrollMode ? "in copy-mode"
+        : `status ${status} — /compact would misfire`;
+      return { action: "cancel", reason };
+    }
     return { action: "none" };
   }
 

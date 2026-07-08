@@ -480,3 +480,49 @@ feature("format helpers", () => {
     }],
   });
 });
+
+// --- Do-not-touch statuses ---------------------------------------------
+// /compact must never be aimed at a pane where it would misfire or is
+// futile: modals eat it, an interrupted turn needs a human decision, and a
+// rate-limited pane can't run compaction at all (ai:1 2026-07-08 got a
+// false "100% and idle" warning while merely rate-limited).
+
+feature("decideAutoCompactAction — do-not-touch statuses", () => {
+  unit("a rate-limited pane over threshold is left alone", {
+    given: ["limited pane at 100%", () =>
+      ({ ...base, status: "limited", contextPercent: 100 })],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=none — no warning, no fire", (r) => {
+      expect(r.action).toBe("none");
+    }],
+  });
+
+  unit("a pending warning is cancelled when the pane turns limited", {
+    given: ["limited pane with a warning on file", () => ({
+      ...base,
+      status: "limited",
+      contextPercent: 100,
+      warnings: new Map([[key, { warned_at: base.now - 30_000 }]]),
+    })],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=cancel with an explanatory reason", (r) => {
+      expect(r.action).toBe("cancel");
+      expect(r.reason).toContain("limited");
+    }],
+  });
+
+  unit("an interrupted pane over threshold is left alone", {
+    given: ["interrupted codex-style pane at 90%", () =>
+      ({ ...base, status: "interrupted", contextPercent: 90 })],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=none", (r) => expect(r.action).toBe("none")],
+  });
+
+  unit("a permission modal over threshold is left alone", {
+    given: ["permission pane at 85%", () =>
+      ({ ...base, status: "permission", contextPercent: 85 })],
+    when: ["deciding", (args) => decideAutoCompactAction(args)],
+    then: ["action=none — a /compact would be eaten by the modal", (r) =>
+      expect(r.action).toBe("none")],
+  });
+});

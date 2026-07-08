@@ -58,6 +58,7 @@ const BRIDGE_SESSION = "amux";
 const DREAM_LOCK_PATH = () => join(process.env.HOME, ".openclaw", ".dream.lock");
 const DREAM_BLOCKING_STATUSES = new Set([
   "working", "permission", "menu", "resume", "dismiss", "unknown",
+  "limited", // rate-limited: a dream prompt would only bounce off the limit
 ]);
 
 // --- Flag parsing ---
