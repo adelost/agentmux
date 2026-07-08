@@ -14,6 +14,7 @@
 // PWA bundle ships from this server too.
 
 import http from "http";
+import { stripPaneChrome } from "../core/pane-chrome.mjs";
 import { writeFileSync, unlinkSync, readFileSync, existsSync, statSync } from "fs";
 import { randomBytes } from "crypto";
 import { join, resolve, extname } from "path";
@@ -249,32 +250,6 @@ export function createVoicePWA(deps) {
       return json(res, 500, { error: `poke failed: ${err.message}` });
     }
     return json(res, 200, { ok: true, agent: name, pane });
-  }
-
-  /**
-   * Last-line-of-defence pane-chrome stripper. Mirrors the frontend
-   * cleanForTts so even a stale-cached PWA can't make edge-tts read
-   * "Opus 4.7 (1M context) │ 0 █░░░ 14%" out loud.
-   */
-  function stripPaneChrome(input) {
-    const lines = String(input).split("\n");
-    const kept = [];
-    for (const raw of lines) {
-      const line = raw.trim();
-      if (!line) { kept.push(""); continue; }
-      if (/^[│|]?\s*(opus|sonnet|haiku|gpt-?\d|claude|codex)[\s\d.()xMK,a-zA-Z-]*(\(.*context\).*|│.*\d+%?\s*$)?$/i.test(line)) continue;
-      if (/(opus|sonnet|haiku|gpt-?\d|claude|codex).*\(.*context\).*/i.test(line)) continue;
-      if (/^[█▓▒░\s│|·▏▎▍▌▋▊▉]+(\d+\s*%)?$/.test(line)) continue;
-      if (/[█▓▒░]{2,}/.test(line) && line.length < 80) continue;
-      if (/^[✻✢⏵⎿⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/u.test(line)) continue;
-      if (/(esc to interrupt|tokens?\s*[\)·]|still thinking|thought for)/i.test(line)) continue;
-      if (/bypass permissions on/i.test(line)) continue;
-      if (/shift\+tab to cycle/i.test(line)) continue;
-      if (/^[❯>$]\s*$/.test(line)) continue;
-      if (/^[─━═-]+$/.test(line)) continue;
-      kept.push(raw);
-    }
-    return kept.join("\n").trim();
   }
 
   async function handleTts(req, res) {

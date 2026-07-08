@@ -6,6 +6,7 @@ import { join } from "path";
 import { load as loadYaml } from "js-yaml";
 import { esc, stripAnsi } from "./lib.mjs";
 import { createTmuxAdapter } from "./core/tmux.mjs";
+import { stripPaneChrome } from "./core/pane-chrome.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
 import { detectDialect } from "./core/dialects.mjs";
 import { extractFromJsonl, isBusyFromJsonl, isPromptInJsonl } from "./core/jsonl-reader.mjs";
@@ -1041,31 +1042,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return { raw, turn, items: cleaned, source: "tmux" };
   }
 
-  /**
-   * Drop lines that look like pane-chrome rather than agent speech.
-   * Mirrors voice.mjs stripPaneChrome and voice-pwa cleanForTts so all
-   * three downstream-text paths apply the same filter.
-   */
-  function stripPaneChromeForFallback(text) {
-    const lines = String(text).split("\n");
-    const kept = [];
-    for (const raw of lines) {
-      const line = raw.trim();
-      if (!line) { kept.push(""); continue; }
-      if (/^[│|]?\s*(opus|sonnet|haiku|gpt-?\d|claude|codex)[\s\d.()xMK,a-zA-Z-]*(\(.*context\).*|│.*\d+%?\s*$)?$/i.test(line)) continue;
-      if (/(opus|sonnet|haiku|gpt-?\d|claude|codex).*\(.*context\).*/i.test(line)) continue;
-      if (/^[█▓▒░\s│|·▏▎▍▌▋▊▉]+(\d+\s*%)?$/.test(line)) continue;
-      if (/[█▓▒░]{2,}/.test(line) && line.length < 80) continue;
-      if (/^[✻✢⏵⎿⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/u.test(line)) continue;
-      if (/(esc to interrupt|tokens?\s*[\)·]|still thinking|thought for)/i.test(line)) continue;
-      if (/bypass permissions on/i.test(line)) continue;
-      if (/shift\+tab to cycle/i.test(line)) continue;
-      if (/^[❯>$]\s*$/.test(line)) continue;
-      if (/^[─━═-]+$/.test(line)) continue;
-      kept.push(raw);
-    }
-    return kept.join("\n").trim();
-  }
+  // Pane-chrome stripping is shared (core/pane-chrome.mjs) so a chrome
+  // pattern learned once (e.g. the fable footer) protects the tmux
+  // fallback, the voice route and any future consumer at the same time.
+  const stripPaneChromeForFallback = stripPaneChrome;
 
   /**
    * True when the source-of-truth session store already contains response

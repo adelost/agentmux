@@ -34,7 +34,7 @@
 
 import { watch, statSync, existsSync } from "fs";
 import { join } from "path";
-import { splitMessage, extractImageMarkers, validateImagePath } from "../lib.mjs";
+import { splitMessage, extractImageMarkers, validateImagePath, chunkAttachments } from "../lib.mjs";
 import { loadConfig, findChannelForPane, channelForPane } from "../cli/config.mjs";
 import { paneDir } from "../agent.mjs";
 import { readLastTurns, latestJsonlMtime, latestJsonlInfo } from "../core/jsonl-reader.mjs";
@@ -217,12 +217,19 @@ export function createJsonlWatcher({
 
     const body = postPrefix && fullText ? `${postPrefix}${fullText}` : fullText || "(no text)";
     const chunks = splitMessage(body);
+    // Discord hard-caps 10 attachments/message; 11+ screenshots on the
+    // first chunk used to 400 the whole message (text AND images lost).
+    // Group 0 rides the first text chunk, the rest go as file-only
+    // follow-ups below, all under the same pacing.
+    const fileGroups = chunkAttachments(validFiles);
     // Pacing: Discord rate limit drops chunks in tight bursts.
-    const pacePerChunk = chunks.length >= 2 ? (chunks.length > 3 ? 400 : 250) : 0;
+    const paceUnits = chunks.length + Math.max(0, fileGroups.length - 1);
+    const pacePerChunk = paceUnits >= 2 ? (paceUnits > 3 ? 400 : 250) : 0;
+    const pace = () => pacePerChunk > 0 && new Promise((r) => setTimeout(r, pacePerChunk));
     let ok = true;
     for (let i = 0; i < chunks.length; i++) {
-      const payload = (i === 0 && validFiles.length)
-        ? { content: chunks[i], files: validFiles }
+      const payload = (i === 0 && fileGroups.length)
+        ? { content: chunks[i], files: fileGroups[0] }
         : chunks[i];
       try {
         await discord.send(channelId, payload);
@@ -230,8 +237,15 @@ export function createJsonlWatcher({
         ok = false;
         log(`chunk ${i + 1}/${chunks.length} failed for ${name}:${idx}: ${err.message}`);
       }
-      if (pacePerChunk > 0 && i < chunks.length - 1) {
-        await new Promise((r) => setTimeout(r, pacePerChunk));
+      if (i < chunks.length - 1) await pace();
+    }
+    for (let g = 1; g < fileGroups.length; g++) {
+      await pace();
+      try {
+        await discord.send(channelId, { files: fileGroups[g] });
+      } catch (err) {
+        ok = false;
+        log(`file group ${g + 1}/${fileGroups.length} failed for ${name}:${idx}: ${err.message}`);
       }
     }
     if (!ok) return { ok: false };

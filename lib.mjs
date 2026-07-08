@@ -201,6 +201,23 @@ export const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
 /** Max file size for Discord upload (free tier is 25MB). */
 export const MAX_IMAGE_SIZE = 25 * 1024 * 1024;
 
+/** Discord hard-caps attachments per message. */
+export const MAX_FILES_PER_MESSAGE = 10;
+
+/**
+ * Split attachments into Discord-legal groups. 11+ files on one message is
+ * an API error that used to lose the WHOLE first chunk (text + all images);
+ * callers attach group 0 to the text message and send the rest as
+ * follow-up file-only messages.
+ */
+export function chunkAttachments(files, max = MAX_FILES_PER_MESSAGE) {
+  const groups = [];
+  for (let i = 0; i < files.length; i += max) {
+    groups.push(files.slice(i, i + max));
+  }
+  return groups;
+}
+
 /**
  * Extract image markers from response text. Agents include `[image: /path]`
  * on its own line to attach a file to the Discord reply.

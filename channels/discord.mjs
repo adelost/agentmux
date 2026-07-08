@@ -41,10 +41,14 @@ export function createDiscordChannel({ token, onSent }) {
 
     async send(channelId, text) {
       const ch = await client.channels.fetch(channelId);
-      if (ch) {
-        await ch.send(text);
-        stamp(channelId);
+      if (!ch) {
+        // Deleted/unbound channel must FAIL, not no-op: a silent drop here
+        // looks like "agent never replied" with zero diagnostics. Callers
+        // (watcher/handlers) already catch and log send errors.
+        throw new Error(`channel ${channelId} not found (deleted or not visible to the bot)`);
       }
+      await ch.send(text);
+      stamp(channelId);
     },
 
     // Fire-and-forget. Discord shows the indicator for ~10s; the watcher

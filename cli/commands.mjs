@@ -9,7 +9,7 @@ import { loadConfig, listAgents, getAgent, addAgent, removeAgent, resolveAgent, 
 import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens, detectPaneStatus } from "./format.mjs";
 import { hasSession, ensureAndAttach, attachSession, killSession, listPanes, getPaneStatus, sendKeys, selectOption, createTmuxContext, sendToPane } from "./tmux.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
-import { stripAnsi, esc, extractActivity, formatDuration } from "../lib.mjs";
+import { stripAnsi, esc, extractActivity, formatDuration, validateImagePath } from "../lib.mjs";
 import { getContextFromPane, getContextPercent } from "../core/context.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { latestCodexJsonlMtime, readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
@@ -2789,6 +2789,13 @@ async function cmdImage(args, ctx) {
   }
   if (!existsSync(filePath)) {
     console.error(`image file not found: ${filePath}`);
+    process.exit(1);
+  }
+  // Same contract as inline [image:] markers: fail HERE with a clear reason
+  // instead of a raw Discord 400 after the upload attempt.
+  const valid = validateImagePath(resolve(filePath), statSync);
+  if (!valid.ok) {
+    console.error(`image rejected: ${valid.error}`);
     process.exit(1);
   }
 

@@ -594,3 +594,26 @@ feature("validateImagePath", () => {
     then: ["ok: true", (r) => expect(r.ok).toBe(true)],
   });
 });
+
+// --- chunkAttachments: Discord's 10-files-per-message cap ------------------
+
+import { chunkAttachments } from "./lib.mjs";
+
+feature("chunkAttachments", () => {
+  unit("11 screenshots become a 10-group and a 1-group", {
+    given: ["11 file paths", () =>
+      Array.from({ length: 11 }, (_, i) => `/shot-${i}.png`)],
+    when: ["chunking", (files) => chunkAttachments(files)],
+    then: ["two Discord-legal groups", (groups) => {
+      expect(groups).toHaveLength(2);
+      expect(groups[0]).toHaveLength(10);
+      expect(groups[1]).toHaveLength(1);
+    }],
+  });
+
+  unit("no files means no groups (text-only message untouched)", {
+    given: ["no files", () => []],
+    when: ["chunking", (files) => chunkAttachments(files)],
+    then: ["empty", (groups) => expect(groups).toHaveLength(0)],
+  });
+});
