@@ -170,14 +170,33 @@ async function cmdServe(flags, ctx) {
   // Clear stale pidfile so the poll below only sees a fresh write from the new node.
   // Without this, a leftover /tmp/agentmux.pid (WSL /tmp survives reboots) would
   // make isBridgeAlive flap based on PID recycling instead of actual readiness.
-  const pidfile = process.env.PIDFILE || "/tmp/agentmux.pid";
-  try { unlinkSync(pidfile); } catch {}
-  clearBridgeReady();
-  await ctx.tmux(`new-session -d -s '${esc(BRIDGE_SESSION)}' -c '${esc(BRIDGE_DIR)}' 'bash bin/start.sh'`);
+  const startBridgeSession = async () => {
+    const pidfile = process.env.PIDFILE || "/tmp/agentmux.pid";
+    try { unlinkSync(pidfile); } catch {}
+    clearBridgeReady();
+    await ctx.tmux(`new-session -d -s '${esc(BRIDGE_SESSION)}' -c '${esc(BRIDGE_DIR)}' 'bash bin/start.sh'`);
+  };
+
+  await startBridgeSession();
   // Poll for actual readiness instead of trusting tmux session creation.
   // start.sh is a 10s-restart supervisor — the first node attempt can crash
   // (DNS/network not ready right after WSL shell open) and we'd otherwise
   // print "Bridge started" while the user gets a dead bridge.
+  if (await waitForBridgeReady(20_000)) {
+    console.log(`Bridge started (session: ${BRIDGE_SESSION}). Attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
+    return;
+  }
+
+  // First-boot restore race: when this new-session also started the tmux
+  // SERVER (first serve after a WSL boot), tmux-continuum's auto-restore
+  // (@continuum-restore on) fires as the server comes up and can clobber
+  // the fresh session with a restored STUB — a bare shell at the saved
+  // cwd, no supervisor. That was the chronic "you have to run amux serve
+  // twice". Self-heal: clean up and recreate ONCE — by now the server is
+  // warm and the restore has already run, so the retry is race-free.
+  console.log("Bridge not ready — recreating once (first-boot tmux restore race)...");
+  await killSession(ctx, BRIDGE_SESSION).catch(() => {});
+  await startBridgeSession();
   if (await waitForBridgeReady(30_000)) {
     console.log(`Bridge started (session: ${BRIDGE_SESSION}). Attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
     return;
