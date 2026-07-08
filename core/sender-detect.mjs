@@ -39,6 +39,18 @@ export function detectSenderFromEnv(env, execFn) {
 }
 
 /**
+ * Structured form of detectSenderFromEnv: { session, pane } or null.
+ * Used by the event-ledger hook (bin/amux-hook.mjs) so pane addressing has
+ * exactly one implementation carrying the %pane-id-not-active-pane fix.
+ */
+export function detectPaneAddress(env, execFn) {
+  const sender = detectSenderFromEnv(env, execFn);
+  if (!sender) return null;
+  const cut = sender.lastIndexOf(":");
+  return { session: sender.slice(0, cut), pane: parseInt(sender.slice(cut + 1), 10) };
+}
+
+/**
  * Prepend a "[from sender]" header to a brief. If sender is null (not in
  * tmux, or tmux unresponsive), returns the brief unchanged.
  *

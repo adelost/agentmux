@@ -59,6 +59,27 @@ Codex discover generated project instructions.
 - Model-aware context tracking.
 - Recovery commands for stuck panes and blocking prompts.
 
+### Hook-pushed pane state (event ledger)
+
+Panes report their own state transitions through Claude Code hooks instead
+of amux guessing from terminal scraping. `bin/install-hooks.mjs` registers
+a lightweight hook (Stop / Notification / UserPromptSubmit / SessionStart)
+that appends one JSON line per turn boundary to `~/.agentmux/events.jsonl`.
+Status readers (`ps`, `done`, `wait`, auto-compact) merge these pushed
+events with scraping via an allowlist: a pushed event may only refine a
+scraped `idle`/`unknown`, never contradict a live observation (modals,
+working). Scraping remains the fallback, so nothing breaks if hooks are
+missing.
+
+```bash
+node bin/install-hooks.mjs        # install (idempotent, backs up settings)
+node bin/install-hooks.mjs --dry  # preview
+node bin/install-hooks.mjs --remove
+```
+
+Permission asks and session starts also surface in `amux timeline` as
+🔔 event rows.
+
 ### Media and operator workflows
 
 - Voice message transcription.

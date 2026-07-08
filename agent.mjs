@@ -463,10 +463,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       console.warn(`sanitizeTmuxGlobalEnv: show-environment failed: ${err.message}`);
       return;
     }
-    for (const n of names) {
-      await t.unsetGlobalEnv(n).catch((err) =>
-        console.warn(`sanitizeTmuxGlobalEnv: unset ${n} failed: ${err.message}`));
-    }
+    // Independent unsets: run them concurrently (tmux serializes server-side).
+    await Promise.all(names.map((n) =>
+      t.unsetGlobalEnv(n).catch((err) =>
+        console.warn(`sanitizeTmuxGlobalEnv: unset ${n} failed: ${err.message}`))));
   }
 
   async function ensureSession(name) {

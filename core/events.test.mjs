@@ -1,132 +1,220 @@
 // Event ledger: the push-based state layer. Tests pin the derivation rules
-// (which event wins, staleness guard) and the file-format tolerances
-// (corrupt lines, rotation) that keep the hook path unbreakable.
+// (which event wins, staleness guards, notification classification) and the
+// file-format tolerances (corrupt lines, unparseable timestamps) that keep
+// the hook path unbreakable.
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { feature, unit, expect } from "bdd-vitest";
 import { mkdtempSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
-  appendEvent, buildEvent, latestPaneStates, mergeStatus, parseTmuxSocket, readEvents,
+  appendEvent, buildEvent, latestPaneStates, mergeStatus, readEvents,
 } from "./events.mjs";
+import { detectPaneAddress } from "./sender-detect.mjs";
 
-let path;
-beforeEach(() => {
-  path = join(mkdtempSync(join(tmpdir(), "amux-events-")), "events.jsonl");
-});
-
+const freshLedger = () => join(mkdtempSync(join(tmpdir(), "amux-events-")), "events.jsonl");
 const at = (iso) => new Date(iso);
 
-describe("buildEvent", () => {
-  it("maps hook names to ledger events", () => {
-    const evt = buildEvent(
+feature("buildEvent", () => {
+  unit("maps hook names to ledger events", {
+    given: ["a Stop hook payload + pane", () => buildEvent(
       { hook_event_name: "Stop", cwd: "/w/.agents/1", session_id: "abc" },
       { session: "claw", pane: "1" },
       at("2026-07-08T10:00:00Z"),
-    );
-    expect(evt).toEqual({
+    )],
+    when: ["inspecting the event", (evt) => evt],
+    then: ["a stop event for claw:1", (evt) => expect(evt).toEqual({
       ts: "2026-07-08T10:00:00.000Z", event: "stop", session: "claw",
       pane: 1, cwd: "/w/.agents/1", sessionId: "abc", detail: "",
-    });
+    })],
   });
 
-  it("drops unknown events and missing panes", () => {
-    expect(buildEvent({ hook_event_name: "PreToolUse" }, { session: "claw", pane: 0 })).toBe(null);
-    expect(buildEvent({ hook_event_name: "Stop" }, null)).toBe(null);
+  unit("drops unknown events and missing panes", {
+    given: ["unsupported payloads", () => [
+      buildEvent({ hook_event_name: "PreToolUse" }, { session: "claw", pane: 0 }),
+      buildEvent({ hook_event_name: "Stop" }, null),
+    ]],
+    when: ["building", (events) => events],
+    then: ["both null", (events) => expect(events).toEqual([null, null])],
   });
 
-  it("truncates notification detail to 200 chars", () => {
-    const evt = buildEvent(
+  unit("slash commands are not turns (the /compact pin-working bug)", {
+    given: ["a UserPromptSubmit for /compact", () => buildEvent(
+      { hook_event_name: "UserPromptSubmit", prompt: "/compact" },
+      { session: "claw", pane: 0 },
+    )],
+    when: ["building", (evt) => evt],
+    then: ["dropped: /compact often gets no Stop and would pin working",
+      (evt) => expect(evt).toBe(null)],
+  });
+
+  unit("permission notifications are flagged needsYou, idle pings are not", {
+    given: ["one permission ask + one idle ping", () => ({
+      perm: buildEvent(
+        { hook_event_name: "Notification", message: "Claude needs your permission to use Bash" },
+        { session: "claw", pane: 2 },
+      ),
+      idle: buildEvent(
+        { hook_event_name: "Notification", message: "Claude is waiting for your input" },
+        { session: "claw", pane: 2 },
+      ),
+    })],
+    when: ["classifying", (x) => x],
+    then: ["only the permission ask needs the human", ({ perm, idle }) => {
+      expect(perm.needsYou).toBe(true);
+      expect(idle.needsYou).toBe(false);
+    }],
+  });
+
+  unit("truncates notification detail to 200 chars", {
+    given: ["a 500-char message", () => buildEvent(
       { hook_event_name: "Notification", message: "x".repeat(500) },
       { session: "claw", pane: 2 },
-    );
-    expect(evt.detail.length).toBe(200);
+    )],
+    when: ["building", (evt) => evt],
+    then: ["detail capped", (evt) => expect(evt.detail.length).toBe(200)],
   });
 });
 
-describe("parseTmuxSocket", () => {
-  it("extracts the socket path from $TMUX", () => {
-    expect(parseTmuxSocket("/home/u/.tmux-amux-sock,1234,0")).toBe("/home/u/.tmux-amux-sock");
-    expect(parseTmuxSocket("")).toBe(null);
-    expect(parseTmuxSocket(undefined)).toBe(null);
+feature("detectPaneAddress", () => {
+  unit("structured pane address from tmux env", {
+    given: ["a tmux env + mock exec", () => detectPaneAddress(
+      { TMUX: "/sock,1,0", TMUX_PANE: "%17" },
+      (cmd) => (cmd.includes("#S") ? "claw\n" : "3\n"),
+    )],
+    when: ["resolving", (addr) => addr],
+    then: ["session + pane", (addr) =>
+      expect(addr).toEqual({ session: "claw", pane: 3 })],
   });
 });
 
-describe("append/read roundtrip", () => {
-  it("persists events and filters by since", () => {
-    appendEvent({ ts: "2026-07-08T09:00:00Z", event: "stop", session: "claw", pane: 0 }, path);
-    appendEvent({ ts: "2026-07-08T11:00:00Z", event: "prompt", session: "claw", pane: 0 }, path);
-    expect(readEvents({ path })).toHaveLength(2);
-    expect(readEvents({ path, since: "2026-07-08T10:00:00Z" })).toHaveLength(1);
+feature("append/read roundtrip", () => {
+  unit("persists events and filters by since", {
+    given: ["two events on disk", () => {
+      const path = freshLedger();
+      appendEvent({ ts: "2026-07-08T09:00:00Z", event: "stop", session: "claw", pane: 0 }, path);
+      appendEvent({ ts: "2026-07-08T11:00:00Z", event: "prompt", session: "claw", pane: 0 }, path);
+      return path;
+    }],
+    when: ["reading with and without since", (path) => ({
+      all: readEvents({ path }),
+      recent: readEvents({ path, since: "2026-07-08T10:00:00Z" }),
+    })],
+    then: ["2 total, 1 in window", (r) => {
+      expect(r.all).toHaveLength(2);
+      expect(r.recent).toHaveLength(1);
+    }],
   });
 
-  it("skips corrupt lines instead of failing", () => {
-    appendEvent({ ts: "2026-07-08T09:00:00Z", event: "stop", session: "claw", pane: 0 }, path);
-    writeFileSync(path, readFileSync(path, "utf-8") + "{half-written garbage\n");
-    appendEvent({ ts: "2026-07-08T10:00:00Z", event: "prompt", session: "claw", pane: 1 }, path);
-    expect(readEvents({ path })).toHaveLength(2);
-  });
-});
-
-describe("latestPaneStates", () => {
-  const NOW = new Date("2026-07-08T12:00:00Z").getTime();
-
-  it("newest event per pane wins", () => {
-    appendEvent({ ts: "2026-07-08T11:00:00Z", event: "prompt", session: "claw", pane: 0 }, path);
-    appendEvent({ ts: "2026-07-08T11:30:00Z", event: "stop", session: "claw", pane: 0 }, path);
-    appendEvent({ ts: "2026-07-08T11:45:00Z", event: "prompt", session: "ai", pane: 3 }, path);
-    const states = latestPaneStates({ path, now: NOW });
-    expect(states.get("claw:0").state).toBe("idle");
-    expect(states.get("ai:3").state).toBe("working");
-  });
-
-  it("notification maps to needs_you with detail", () => {
-    appendEvent({ ts: "2026-07-08T11:00:00Z", event: "notification", session: "claw",
-                  pane: 2, detail: "permission required" }, path);
-    const states = latestPaneStates({ path, now: NOW });
-    expect(states.get("claw:2")).toMatchObject({ state: "needs_you", detail: "permission required" });
-  });
-
-  it("stale events are omitted (fallback to scraping)", () => {
-    appendEvent({ ts: "2026-07-08T02:00:00Z", event: "prompt", session: "claw", pane: 0 }, path);
-    const states = latestPaneStates({ path, now: NOW, maxAgeMs: 6 * 3600 * 1000 });
-    expect(states.has("claw:0")).toBe(false);
+  unit("skips corrupt lines instead of failing", {
+    given: ["a ledger with a torn line in the middle", () => {
+      const path = freshLedger();
+      appendEvent({ ts: "2026-07-08T09:00:00Z", event: "stop", session: "claw", pane: 0 }, path);
+      writeFileSync(path, readFileSync(path, "utf-8") + "{half-written garbage\n");
+      appendEvent({ ts: "2026-07-08T10:00:00Z", event: "prompt", session: "claw", pane: 1 }, path);
+      return path;
+    }],
+    when: ["reading", (path) => readEvents({ path })],
+    then: ["both intact events survive", (events) => expect(events).toHaveLength(2)],
   });
 });
 
-describe("mergeStatus (monotone-safe merge rules)", () => {
-  const NOW = new Date("2026-07-08T12:00:00Z").getTime();
-  const fresh = (state) => ({ state, ts: "2026-07-08T11:55:00Z", detail: "" });
-  const stale = (state) => ({ state, ts: "2026-07-08T10:00:00Z", detail: "" });
+feature("latestPaneStates", () => {
+  const NOW = at("2026-07-08T12:00:00Z").getTime();
 
-  it("scraped modal states always win over pushed", () => {
-    for (const modal of ["permission", "menu", "resume", "dismiss"]) {
-      expect(mergeStatus(modal, fresh("idle"), { now: NOW }))
-        .toEqual({ status: modal, source: "tmux" });
-    }
+  unit("newest event per pane wins", {
+    given: ["prompt then stop for claw:0, prompt for ai:3", () => {
+      const path = freshLedger();
+      appendEvent({ ts: "2026-07-08T11:00:00Z", event: "prompt", session: "claw", pane: 0 }, path);
+      appendEvent({ ts: "2026-07-08T11:30:00Z", event: "stop", session: "claw", pane: 0 }, path);
+      appendEvent({ ts: "2026-07-08T11:45:00Z", event: "prompt", session: "ai", pane: 3 }, path);
+      return path;
+    }],
+    when: ["deriving states", (path) => latestPaneStates({ path, now: NOW })],
+    then: ["claw:0 idle, ai:3 working", (states) => {
+      expect(states.get("claw:0").state).toBe("idle");
+      expect(states.get("ai:3").state).toBe("working");
+    }],
   });
 
-  it("scraped working is never downgraded (auto-compact safety)", () => {
-    expect(mergeStatus("working", fresh("idle"), { now: NOW }))
-      .toEqual({ status: "working", source: "tmux" });
+  unit("permission notification maps to needs_you; idle ping carries no state", {
+    given: ["one of each notification kind", () => {
+      const path = freshLedger();
+      appendEvent({ ts: "2026-07-08T11:00:00Z", event: "notification", session: "claw",
+                    pane: 2, detail: "permission required", needsYou: true }, path);
+      appendEvent({ ts: "2026-07-08T11:00:00Z", event: "notification", session: "claw",
+                    pane: 4, detail: "waiting for your input", needsYou: false }, path);
+      return path;
+    }],
+    when: ["deriving states", (path) => latestPaneStates({ path, now: NOW })],
+    then: ["pane 2 needs_you, pane 4 absent", (states) => {
+      expect(states.get("claw:2")).toMatchObject({ state: "needs_you", detail: "permission required" });
+      expect(states.has("claw:4")).toBe(false);
+    }],
   });
 
-  it("fresh pushed working upgrades idle/unknown (the narrow-pane fix)", () => {
-    expect(mergeStatus("idle", fresh("working"), { now: NOW }))
-      .toEqual({ status: "working", source: "hook" });
-    expect(mergeStatus("unknown", fresh("working"), { now: NOW }))
-      .toEqual({ status: "working", source: "hook" });
+  unit("stale and unparseable-ts events are omitted (fallback to scraping)", {
+    given: ["an old event and a ts-less event", () => {
+      const path = freshLedger();
+      appendEvent({ ts: "2026-07-08T02:00:00Z", event: "prompt", session: "claw", pane: 0 }, path);
+      appendEvent({ event: "prompt", session: "claw", pane: 5 }, path);
+      return path;
+    }],
+    when: ["deriving states", (path) =>
+      latestPaneStates({ path, now: NOW, maxAgeMs: 6 * 3600 * 1000 })],
+    then: ["neither pane is pinned", (states) => {
+      expect(states.has("claw:0")).toBe(false);
+      expect(states.has("claw:5")).toBe(false);
+    }],
+  });
+});
+
+feature("mergeStatus (allowlist merge rules)", () => {
+  const NOW = at("2026-07-08T12:00:00Z").getTime();
+  const pushedAt = (state, iso) => ({ state, ts: iso, detail: "" });
+
+  unit("only idle/unknown may be refined: every other scrape wins", {
+    given: ["live scraped observations", () =>
+      ["permission", "menu", "resume", "dismiss", "working", "somefuturemodal"]],
+    when: ["merging each against a fresh pushed idle", (scrapes) =>
+      scrapes.map((s) => mergeStatus(s, pushedAt("idle", "2026-07-08T11:59:00Z"), { now: NOW }))],
+    then: ["all come back scraped-from-tmux", (results) =>
+      results.forEach((r) => expect(r.source).toBe("tmux"))],
   });
 
-  it("fresh pushed needs_you surfaces as permission", () => {
-    expect(mergeStatus("idle", fresh("needs_you"), { now: NOW }))
-      .toEqual({ status: "permission", source: "hook" });
+  unit("fresh pushed working upgrades idle/unknown (the narrow-pane fix)", {
+    given: ["a 2-minute-old prompt event", () => pushedAt("working", "2026-07-08T11:58:00Z")],
+    when: ["merging over idle and unknown", (pushed) => [
+      mergeStatus("idle", pushed, { now: NOW }),
+      mergeStatus("unknown", pushed, { now: NOW }),
+    ]],
+    then: ["both report working from hook", (results) =>
+      results.forEach((r) => expect(r).toEqual({ status: "working", source: "hook" }))],
   });
 
-  it("stale or missing pushed state falls back to scraped", () => {
-    expect(mergeStatus("idle", stale("working"), { now: NOW }))
-      .toEqual({ status: "idle", source: "tmux" });
-    expect(mergeStatus("unknown", null, { now: NOW }))
-      .toEqual({ status: "unknown", source: "tmux" });
+  unit("pushed working expires fast (Esc/crash never fire Stop)", {
+    given: ["a 6-minute-old prompt event", () => pushedAt("working", "2026-07-08T11:54:00Z")],
+    when: ["merging over idle", (pushed) => mergeStatus("idle", pushed, { now: NOW })],
+    then: ["scrape wins: bounded lie, not a 15-min hang for amux wait", (r) =>
+      expect(r).toEqual({ status: "idle", source: "tmux" })],
+  });
+
+  unit("fresh pushed needs_you surfaces as permission", {
+    given: ["a 10-minute-old permission notification", () => pushedAt("needs_you", "2026-07-08T11:50:00Z")],
+    when: ["merging over idle", (pushed) => mergeStatus("idle", pushed, { now: NOW })],
+    then: ["permission from hook", (r) =>
+      expect(r).toEqual({ status: "permission", source: "hook" })],
+  });
+
+  unit("stale, missing or ts-less pushed state falls back to scraped", {
+    given: ["three degenerate pushed states", () => [
+      pushedAt("idle", "2026-07-08T10:00:00Z"),   // stale
+      null,                                        // missing
+      pushedAt("working", undefined),              // unparseable ts
+    ]],
+    when: ["merging each over unknown", (cases) =>
+      cases.map((p) => mergeStatus("unknown", p, { now: NOW }))],
+    then: ["always the scrape", (results) =>
+      results.forEach((r) => expect(r).toEqual({ status: "unknown", source: "tmux" }))],
   });
 });

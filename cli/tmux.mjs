@@ -97,21 +97,24 @@ export async function listPanes(ctx, name) {
 
 /**
  * Get status of a specific pane: tmux scraping refined by hook-pushed
- * events (core/events.mjs). Single integration point — done, ps and
- * auto-compact all resolve status through here. mergeStatus is monotone-
- * safe: pushed events only upgrade idle/unknown, never contradict a live
- * scraped observation (modals, working).
+ * events (core/events.mjs). mergeStatus is monotone-safe: pushed events
+ * only upgrade idle/unknown, never contradict a live scraped observation
+ * (modals, working). ps and auto-compact apply the same merge on their own
+ * captures (they reuse a single capture per pane for latency).
  */
 export async function getPaneStatus(ctx, name, pane) {
-  let scraped = "unknown";
+  let stdout;
   try {
-    const { stdout } = await ctx.tmux(
+    ({ stdout } = await ctx.tmux(
       `capture-pane -t '${esc(name)}:.${pane}' -J -p -S -30`,
-    );
-    scraped = detectPaneStatus(stripAnsi(stdout));
+    ));
   } catch {
-    // fall through with "unknown" — a pushed event may still know better
+    // Pane/session is GONE. Do not consult pushed events: a dead pane's
+    // last event ("prompt" from a turn that will never Stop) would pin it
+    // "working" and make wait/dream poll a nonexistent pane to timeout.
+    return "unknown";
   }
+  const scraped = detectPaneStatus(stripAnsi(stdout));
   const pushed = latestPaneStatesCached().get(`${name}:${pane}`);
   return mergeStatus(scraped, pushed).status;
 }

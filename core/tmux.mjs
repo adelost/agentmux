@@ -21,6 +21,18 @@ export function createTmuxAdapter({ socket, exec }) {
   const raw = (cmd) => exec(`tmux -S '${esc(socket)}' ${cmd}`);
   const q = (s) => `'${esc(String(s))}'`;
 
+  // Local functions, not `this.`-methods: every primitive stays safe to
+  // destructure or pass as a bare callback (`panes.map(t.paneDead)`), which
+  // an object literal with `this` silently is not.
+  async function display(target, format) {
+    const { stdout } = await raw(`display-message -t ${q(target)} -p '${format}'`);
+    return stdout.trim();
+  }
+
+  async function sendKeys(target, keySpec) {
+    await raw(`send-keys -t ${q(target)} ${keySpec}`);
+  }
+
   return {
     /** Escape hatch for not-yet-migrated call sites. Prefer a primitive. */
     raw,
@@ -87,26 +99,22 @@ export function createTmuxAdapter({ socket, exec }) {
     },
 
     /** One #{...} format value for a pane, trimmed. */
-    async display(target, format) {
-      const { stdout } = await raw(`display-message -t ${q(target)} -p '${format}'`);
-      return stdout.trim();
-    },
+    display,
 
     async currentCommand(target) {
-      const { stdout } = await raw(`display-message -t ${q(target)} -p '#{pane_current_command}'`);
-      return stdout.trim();
+      return display(target, "#{pane_current_command}");
     },
 
     async paneInMode(target) {
-      return (await this.display(target, "#{pane_in_mode}")) === "1";
+      return (await display(target, "#{pane_in_mode}")) === "1";
     },
 
     async paneDead(target) {
-      return (await this.display(target, "#{pane_dead}")) === "1";
+      return (await display(target, "#{pane_dead}")) === "1";
     },
 
     async panePid(target) {
-      return this.display(target, "#{pane_pid}");
+      return display(target, "#{pane_pid}");
     },
 
     /** respawn-pane. kill=true forces; cwd pins the new shell's directory. */
@@ -137,16 +145,14 @@ export function createTmuxAdapter({ socket, exec }) {
     },
 
     /** Raw key tokens verbatim: "Enter", "Escape", "Down Enter", ... */
-    async sendKeys(target, keySpec) {
-      await raw(`send-keys -t ${q(target)} ${keySpec}`);
-    },
+    sendKeys,
 
     async sendEnter(target) {
-      await this.sendKeys(target, "Enter");
+      await sendKeys(target, "Enter");
     },
 
     async sendEscape(target) {
-      await this.sendKeys(target, "Escape");
+      await sendKeys(target, "Escape");
     },
 
     /** Exit copy/view/choose mode without leaking a keystroke (-X cancel). */

@@ -13,6 +13,7 @@ import {
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { getContextFromPane, getContextPercent } from "../core/context.mjs";
 import { detectPaneStatus } from "../cli/format.mjs";
+import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
 import { readLastTurns, panePathFor } from "../core/jsonl-reader.mjs";
 import { readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { statSync } from "fs";
@@ -78,7 +79,14 @@ export function createAutoCompact({
     } catch {}
 
     try {
-      status = detectPaneStatus(content);
+      // Scrape + hook-pushed merge (same rules as getPaneStatus). A fresh
+      // pushed "prompt" marks a working pane whose narrow rendering shows
+      // no busy-regex — exactly the pane auto-compact must NOT /compact.
+      // Capture failure (dead pane) stays "unknown" unmerged.
+      status = content
+        ? mergeStatus(detectPaneStatus(content),
+                      latestPaneStatesCached().get(`${agentConfig.name}:${paneIdx}`)).status
+        : "unknown";
     } catch {
       status = "unknown";
     }

@@ -17,7 +17,9 @@ import { homedir } from "os";
 
 const HOOK_EVENTS = ["Stop", "Notification", "UserPromptSubmit", "SessionStart"];
 const __dir = dirname(fileURLToPath(import.meta.url));
-const HOOK_CMD = `node ${join(__dir, "amux-hook.mjs")}`;
+// Shell-gated on $TMUX_PANE: non-tmux Claude sessions exit in ~1ms and never
+// pay a node startup per turn boundary. Path is quoted (spaces-safe).
+const HOOK_CMD = `[ -n "$TMUX_PANE" ] || exit 0; exec node "${join(__dir, "amux-hook.mjs")}"`;
 const SETTINGS = join(homedir(), ".claude", "settings.json");
 
 const isAmuxHook = (h) => h?.type === "command" && /amux-hook\.mjs/.test(h?.command || "");

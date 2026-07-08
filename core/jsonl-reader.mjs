@@ -84,7 +84,7 @@ function findJsonlAndEvents(projectDir, needle) {
 }
 
 /** Parse JSON lines from a string blob, skipping malformed lines. */
-function parseJsonlText(content) {
+export function parseJsonlText(content) {
   const events = [];
   for (const line of content.split("\n")) {
     if (!line.trim()) continue;
@@ -895,8 +895,12 @@ export function readAllTurnsAcrossPanes(opts = {}) {
       if (paneFilter != null && paneIdx !== paneFilter) continue;
       const paneDir = panePathFor(a, paneIdx);
       const paneCfg = panes[paneIdx];
+      // Codex sessions honor the same tail bound (readLastTurnsCodex tails
+      // when given tailBytes without since/grep; the since-filter here runs
+      // post-merge). Without it a 15MB codex session was full-parsed on
+      // every timeline/done invocation.
       const rows = isCodexPaneConfig(paneCfg)
-        ? rowsFromTurns(readLastTurnsCodex(paneDir, { limit: Number.MAX_SAFE_INTEGER })?.turns || [])
+        ? rowsFromTurns(readLastTurnsCodex(paneDir, { limit: Number.MAX_SAFE_INTEGER, tailBytes })?.turns || [])
         : eventsFromProjectDir(projectDirFor(paneDir), { tailBytes, sinceMs, tailFallback });
       for (const r of rows) {
         out.push({ ...r, agent: a.name, pane: paneIdx });

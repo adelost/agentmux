@@ -1,44 +1,36 @@
 #!/usr/bin/env node
 // Claude Code hook -> amux event ledger. Installed by bin/install-hooks.mjs
-// for Stop / Notification / UserPromptSubmit / SessionStart.
+// for Stop / Notification / UserPromptSubmit / SessionStart. The installed
+// command is gated on $TMUX_PANE in shell, so non-tmux Claude sessions never
+// pay the node startup.
 //
 // Contract: NEVER exit non-zero and NEVER hang. A non-zero Stop hook would
 // block Claude from stopping; a slow hook delays every turn. Everything is
 // wrapped, the tmux lookup has a hard timeout, and any failure means
-// "record nothing" — the ledger is a hint layer, not a dependency.
-//
-// Not in tmux (plain interactive claude) -> exit 0 silently.
+// "record nothing" — the ledger is a hint layer, not a dependency. Failures
+// still log to stderr (never silently: a dead ledger looks identical to
+// "hooks not installed" otherwise).
 
-import { execFileSync } from "child_process";
+import { execSync } from "child_process";
 import { readFileSync } from "fs";
-import { appendEvent, buildEvent, parseTmuxSocket } from "../core/events.mjs";
-
-function readStdin() {
-  try {
-    return readFileSync(0, "utf-8");
-  } catch {
-    return "";
-  }
-}
+import { appendEvent, buildEvent } from "../core/events.mjs";
+import { detectPaneAddress } from "../core/sender-detect.mjs";
 
 try {
-  const socket = parseTmuxSocket(process.env.TMUX);
-  const paneId = process.env.TMUX_PANE;
-  if (socket && paneId) {
+  const exec = (cmd) => execSync(cmd, { timeout: 3000, encoding: "utf-8" });
+  const pane = detectPaneAddress(process.env, exec);
+  if (pane) {
     let payload = {};
-    try { payload = JSON.parse(readStdin() || "{}"); } catch {}
-
-    const out = execFileSync(
-      "tmux",
-      ["-S", socket, "display-message", "-p", "-t", paneId, "#{session_name}\t#{pane_index}"],
-      { timeout: 3000, encoding: "utf-8" },
-    ).trim();
-    const [session, pane] = out.split("\t");
-
-    const evt = buildEvent(payload, { session, pane });
+    try {
+      payload = JSON.parse(readFileSync(0, "utf-8") || "{}");
+    } catch (err) {
+      console.error(`[amux-hook] stdin payload unparseable: ${err.message}`);
+    }
+    const evt = buildEvent(payload, pane);
     if (evt) appendEvent(evt);
   }
-} catch {
-  // swallow everything: hooks must never break the agent
+} catch (err) {
+  // never break the agent; do leave a trace
+  console.error(`[amux-hook] skipped: ${err.message}`);
 }
 process.exit(0);

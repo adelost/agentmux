@@ -14,6 +14,7 @@ import { getContextFromPane, getContextPercent } from "../core/context.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { latestCodexJsonlMtime, readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
+import { latestPaneStatesCached, mergeStatus, readEvents } from "../core/events.mjs";
 import {
   groupByPane, previewText,
   isRunningNow, isWaitingLikeText, looksDone,
@@ -481,6 +482,7 @@ const TIMELINE_ICONS = {
   agent: "🤖",
   tool: "🔧",
   error: "⚠️",
+  event: "🔔",
 };
 
 const TIMELINE_CONTENT_CAP = 80;
@@ -500,6 +502,7 @@ function oneLine(s) {
 
 /** Map a row's (role, type) to the icon category shown in the stream. */
 function timelineCategory(row) {
+  if (row.type === "event") return "event";
   if (row.type === "tool") return "tool";
   if (row.type === "error") return "error";
   if (row.role === "user") return "user";
@@ -519,11 +522,20 @@ function formatTimelineRow(row) {
   return `${time}  ${where}  ${icon} ${label}  ${capped}`;
 }
 
+// Bounded jsonl reads for the timeline: 4MB tail per pane holds far more
+// than any realistic display window, and tailFallback grows the window when
+// --since reaches further back. Without this, timeline full-parsed every
+// pane's session file (100MB+ sessions → 18s wall for `timeline --since 2h`).
+const TIMELINE_TAIL_BYTES = 4 * 1024 * 1024;
+
 /**
  * Pull a snapshot of rows from all configured panes, respecting filters.
  * Validates flags inline so both cmdTimeline and cmdWatch share the parsing.
+ * sinceOverride (Date) narrows the read window without touching flag parsing;
+ * followTimeline uses it to poll incrementally instead of re-reading the
+ * whole window every second.
  */
-function collectTimelineRows(ctx, flags, { applyLimit }) {
+function collectTimelineRows(ctx, flags, { applyLimit, sinceOverride = null }) {
   const agents = listAgents(ctx.configPath);
 
   let agentFilter = null;
@@ -567,8 +579,52 @@ function collectTimelineRows(ctx, flags, { applyLimit }) {
     }
   }
 
+  if (sinceOverride) since = sinceOverride;
+
   const limit = applyLimit ? (flags.n || 30) : null;
-  return readAllTurnsAcrossPanes({ agents, since, agent: agentFilter, pane: paneFilter, grep, limit });
+  const turns = readAllTurnsAcrossPanes({
+    agents, since, agent: agentFilter, pane: paneFilter, grep, limit: null,
+    tailBytes: TIMELINE_TAIL_BYTES,
+  });
+  const rows = turns.concat(
+    ledgerTimelineRows({ since, agentFilter, paneFilter, grep }),
+  );
+  rows.sort((x, y) => {
+    const tx = x.timestamp ? Date.parse(x.timestamp) : Number.POSITIVE_INFINITY;
+    const ty = y.timestamp ? Date.parse(y.timestamp) : Number.POSITIVE_INFINITY;
+    return tx - ty;
+  });
+  return (typeof limit === "number" && rows.length > limit) ? rows.slice(-limit) : rows;
+}
+
+/**
+ * Hook-ledger events as timeline rows: permission asks and session starts
+ * are exactly the "what happened while I was away" signals turns can't show
+ * (a blocked permission never reaches the jsonl). Turn boundaries
+ * (prompt/stop) are skipped — the turns themselves already show those.
+ */
+function ledgerTimelineRows({ since, agentFilter, paneFilter, grep }) {
+  let events;
+  try {
+    events = readEvents(since ? { since } : {});
+  } catch {
+    return []; // hint layer only: an unreadable ledger never breaks timeline
+  }
+  const rows = [];
+  for (const evt of events) {
+    if (evt.event !== "notification" && evt.event !== "session_start") continue;
+    if (agentFilter && evt.session !== agentFilter) continue;
+    if (paneFilter != null && evt.pane !== paneFilter) continue;
+    const content = evt.event === "session_start"
+      ? "session start"
+      : `${evt.needsYou ? "permission" : "notify"}: ${evt.detail || "(no detail)"}`;
+    if (grep && !grep.test(content)) continue;
+    rows.push({
+      timestamp: evt.ts, agent: evt.session, pane: evt.pane,
+      role: "system", type: "event", content,
+    });
+  }
+  return rows;
 }
 
 /**
@@ -593,15 +649,28 @@ async function followTimeline(ctx, flags) {
     emitted.add(rowKey(r));
   }
 
+  // Incremental polling: each tick only reads a short trailing window (the
+  // emitted-set dedups the overlap) instead of re-reading the full --since
+  // window every second — that made watch permanently lag behind on big
+  // sessions. The overlap absorbs clock skew and slow writers.
+  const POLL_OVERLAP_MS = 30 * 1000;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     await new Promise((r) => setTimeout(r, TIMELINE_POLL_MS));
-    const rows = collectTimelineRows(ctx, flags, { applyLimit: false });
+    const sinceOverride = new Date(Date.now() - POLL_OVERLAP_MS);
+    const rows = collectTimelineRows(ctx, flags, { applyLimit: false, sinceOverride });
     for (const r of rows) {
       const k = rowKey(r);
       if (emitted.has(k)) continue;
       emitted.add(k);
       console.log(formatTimelineRow(r));
+    }
+    // Bound the dedup set on long watches (Set iterates in insertion order).
+    if (emitted.size > 20000) {
+      for (const k of emitted) {
+        emitted.delete(k);
+        if (emitted.size <= 10000) break;
+      }
     }
   }
 }
@@ -1899,7 +1968,12 @@ async function inspectPane(ctx, agent, pane) {
   let content = "";
   try { content = await ctx.agent.capturePane(agent.name, pane.index, 100); }
   catch {}
-  let status = content ? detectPaneStatus(stripAnsi(content)) : "unknown";
+  // Same scrape+hook merge as getPaneStatus, applied to the one capture we
+  // already have. Capture failure (dead pane) stays "unknown" unmerged.
+  let status = content
+    ? mergeStatus(detectPaneStatus(stripAnsi(content)),
+                  latestPaneStatesCached().get(`${agent.name}:${pane.index}`)).status
+    : "unknown";
   const lines = stripAnsi(content).split("\n").filter((l) => l.trim());
   const dialect = dialectFor(agent, pane);
   // Use the worktree pane dir, not agent.dir — same fix as cmdLog (399915f).
