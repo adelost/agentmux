@@ -1365,6 +1365,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await t.sendEscape(`${agentName}:.${pane}`);
   }
 
+  /** Bare Enter into a pane: rescue path for palette-eaten submissions. */
+  async function sendEnter(agentName, pane) {
+    await t.sendEnter(`${agentName}:.${pane}`);
+  }
+
   async function checkAgent(agentName) {
     if (!(await hasSession(agentName))) throw new Error(`No session: ${agentName}`);
     if (!(await isAlreadyRunning(`${agentName}:.0`))) throw new Error(`Claude not running in ${agentName}`);
@@ -1373,7 +1378,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   return {
     ensureReady, sendAndWait, sendOnly,
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
-    capturePane, sendEscape, dismissBlockingPrompt, waitForPromptEcho,
+    capturePane, sendEscape, sendEnter, dismissBlockingPrompt, waitForPromptEcho,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession,
     sanitizeTmuxGlobalEnv,
   };

@@ -139,6 +139,51 @@ export function renderCatchupLine(countResult) {
 }
 
 /**
+ * Deliver a Claude-internal slash command (/model, /compact, /clear, ...)
+ * to a pane and VERIFY it was consumed. Slash commands never appear in the
+ * session jsonl (no echo verification possible), and typing "/" opens
+ * Claude's command palette, which can eat the submitting Enter mid-render —
+ * the classic "wrote /model fable in Discord, nothing happened".
+ *
+ * Verification is terminal-side: if the composer region still shows the
+ * command text after a settle, the Enter was eaten → rescue with another
+ * Enter (a bare Enter on an empty composer is a no-op, so a false "stuck"
+ * read is harmless). Returns { delivered, rescues }; delivered=false means
+ * the text likely sits unsubmitted and the caller must NOT claim success.
+ */
+export async function deliverSlashCommand(agent, agentName, pane, claudeCmd, {
+  settleMs = 1200, maxRescues = 2,
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+} = {}) {
+  const target = `${agentName}:.${pane}`;
+  await agent.dismissBlockingPrompt(target).catch(() => {});
+  await agent.sendOnly(agentName, claudeCmd, pane);
+
+  for (let attempt = 0; attempt <= maxRescues; attempt++) {
+    await sleep(settleMs);
+    if (!(await stuckInComposer(agent, agentName, pane, claudeCmd))) {
+      return { delivered: true, rescues: attempt };
+    }
+    if (attempt < maxRescues) await agent.sendEnter(agentName, pane);
+  }
+  return { delivered: false, rescues: maxRescues };
+}
+
+/** The command text still sits in the composer region (last few lines). */
+async function stuckInComposer(agent, agentName, pane, claudeCmd) {
+  let text = "";
+  try {
+    text = await agent.capturePane(agentName, pane, 12);
+  } catch {
+    return false; // pane unreadable: nothing more a rescue-Enter could do
+  }
+  const needle = claudeCmd.slice(0, 30);
+  // Only the tail (composer region): scrollback legitimately echoes the
+  // command as transcript output after successful execution.
+  return text.split("\n").slice(-4).some((line) => line.includes(needle));
+}
+
+/**
  * Create message handler with all dependencies injected.
  * @param {{ agent, attachments, tts, getMapping, overrides, channelMap, reloadConfig, discordChannel?, agentmuxYamlPath?, agentsYamlPath? }} deps
  */
@@ -308,8 +353,14 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         return;
       }
       try {
-        await agent.sendOnly(mapping.name, `/model ${name}`, pane);
-        await msg.reply(`sent \`/model ${name}\` — verify on the next turn's footer (or \`//model\`)`);
+        const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
+          deliverSlashCommand(agent, mapping.name, pane, `/model ${name}`));
+        if (result.delivered) {
+          const rescued = result.rescues ? ` (palette ate Enter, rescued x${result.rescues})` : "";
+          await msg.reply(`sent \`/model ${name}\`${rescued} — verify on the next turn's footer (or \`//model\`)`);
+        } else {
+          await msg.reply(`⚠️ \`/model ${name}\` still sits unsubmitted in the composer — check \`/raw\``);
+        }
       } catch (err) {
         await msg.reply(`/model failed: ${err.message}`).catch(() => {});
       }
@@ -654,8 +705,17 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     if (parsed && !commands[parsed.cmd] && parsed.cmd !== "/use") {
       const claudeCmd = parsed.args ? `${parsed.cmd} ${parsed.args}` : parsed.cmd;
       try {
-        await agent.sendOnly(mapping.name, claudeCmd, pane);
-        await msg.reply(`sent \`${parsed.cmd}\``);
+        // Same verified delivery as /model: under the pane's send-lock (no
+        // keystroke interleaving with concurrent sends), dismiss first, and
+        // rescue a palette-eaten Enter instead of blindly claiming success.
+        const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
+          deliverSlashCommand(agent, mapping.name, pane, claudeCmd));
+        if (result.delivered) {
+          const rescued = result.rescues ? ` (rescued x${result.rescues})` : "";
+          await msg.reply(`sent \`${parsed.cmd}\`${rescued}`);
+        } else {
+          await msg.reply(`⚠️ \`${parsed.cmd}\` still sits unsubmitted in the composer — check \`/raw\``);
+        }
       } catch (err) {
         await msg.reply(`${parsed.cmd} failed: ${err.message}`).catch(() => {});
       }

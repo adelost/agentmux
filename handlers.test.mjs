@@ -98,3 +98,79 @@ feature("reconcileAllSessions", () => {
     }],
   });
 });
+
+// --- deliverSlashCommand: verified slash delivery ---------------------------
+
+import { deliverSlashCommand } from "./handlers.mjs";
+
+// Fake agent whose capturePane returns a scripted sequence of pane tails.
+// calls records the interaction order so tests pin dismiss-first + rescue.
+function fakeSlashAgent(captures) {
+  const calls = [];
+  let captureIdx = 0;
+  return {
+    calls,
+    dismissBlockingPrompt: async () => { calls.push("dismiss"); return null; },
+    sendOnly: async (name, cmd, pane) => { calls.push(`send:${cmd}`); },
+    sendEnter: async () => { calls.push("enter"); },
+    capturePane: async () => {
+      calls.push("capture");
+      return captures[Math.min(captureIdx++, captures.length - 1)];
+    },
+  };
+}
+
+const IDLE_COMPOSER = "⏺ Set model to fable\n\n❯ \n";
+const STUCK_COMPOSER = "some scrollback\n\n❯ /model fable\n";
+const noSleep = { settleMs: 0, sleep: async () => {} };
+
+feature("deliverSlashCommand", () => {
+  component("delivers on first try when the composer is clean", {
+    given: ["a pane that consumed the command", () =>
+      fakeSlashAgent([IDLE_COMPOSER])],
+    when: ["delivering /model fable", async (agent) => ({
+      result: await deliverSlashCommand(agent, "claw", 0, "/model fable", noSleep),
+      agent,
+    })],
+    then: ["delivered without rescues, dismiss ran first", ({ result, agent }) => {
+      expect(result).toEqual({ delivered: true, rescues: 0 });
+      expect(agent.calls.slice(0, 2)).toEqual(["dismiss", "send:/model fable"]);
+      expect(agent.calls).not.toContain("enter");
+    }],
+  });
+
+  component("rescues a palette-eaten Enter (the /model fable bug)", {
+    given: ["a composer still holding the command, then clean", () =>
+      fakeSlashAgent([STUCK_COMPOSER, IDLE_COMPOSER])],
+    when: ["delivering", async (agent) => ({
+      result: await deliverSlashCommand(agent, "claw", 0, "/model fable", noSleep),
+      agent,
+    })],
+    then: ["one rescue Enter, then delivered", ({ result, agent }) => {
+      expect(result).toEqual({ delivered: true, rescues: 1 });
+      expect(agent.calls.filter((c) => c === "enter")).toHaveLength(1);
+    }],
+  });
+
+  component("reports failure instead of claiming success when never consumed", {
+    given: ["a composer that never clears", () =>
+      fakeSlashAgent([STUCK_COMPOSER])],
+    when: ["delivering", async (agent) => ({
+      result: await deliverSlashCommand(agent, "claw", 0, "/model fable", noSleep),
+      agent,
+    })],
+    then: ["delivered=false after max rescues", ({ result, agent }) => {
+      expect(result).toEqual({ delivered: false, rescues: 2 });
+      expect(agent.calls.filter((c) => c === "enter")).toHaveLength(2);
+    }],
+  });
+
+  component("scrollback echo of the command does not count as stuck", {
+    given: ["command echoed in transcript, composer empty", () =>
+      fakeSlashAgent(["> /model fable\nlots\nof\nlater\noutput\n\n❯ \n"])],
+    when: ["delivering", async (agent) =>
+      deliverSlashCommand(agent, "claw", 0, "/model fable", noSleep)],
+    then: ["delivered clean", (result) =>
+      expect(result).toEqual({ delivered: true, rescues: 0 })],
+  });
+});
