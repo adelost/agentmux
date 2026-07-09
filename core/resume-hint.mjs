@@ -12,6 +12,17 @@
 // typed hint observed in the wild (2026-07-07..09) hit a full-context pane
 // as pure noise.
 //
+// Reach, stated honestly (api:2 review of c3e0508): on amux-spawned panes
+// the hint almost never fires, and that is the design. resolveSessionFlag
+// passes --continue whenever a previous jsonl exists, claude then reports
+// source "resume" with context restored — nothing was lost, nothing fires.
+// What remains is the true-loss class: a FRESH session starting where
+// history exists. Human-typed bare `claude` in a pane dir, or amux itself
+// when resolveSessionFlag cannot see the project dir (fs flake) and spawns
+// bare. If that class turns out to be empty in practice, retire the hint
+// rather than widen the gate — firing on every respawn was the old
+// behavior and it was 100% observed noise.
+//
 // From 1.14.0 to 1.20.51 the hint was typed into the pane as a spawn prompt
 // and therefore lives as user turns in jsonl files from that era. That is
 // why stripResumeHint stays even though new hints never enter the jsonl:
