@@ -1,6 +1,11 @@
-// Resume-hint builder — prepended to the first user-brief after amux
-// spawns a new claude process so panes that lost state (WSL restart,
-// amux restart, crash) can find their previous jsonl.
+// Resume-hint builder — delivered to a freshly-spawned claude pane so panes
+// that lost state (WSL restart, amux restart, crash) can find their previous
+// jsonl.
+//
+// Delivery caveat: since 1.14.0 agent.mjs sends this as a standalone spawn
+// prompt, so it lands back in the jsonl as a user turn. extractLastUserTurn
+// must therefore strip it (see stripResumeHint) or each respawn quotes the
+// previous hint and nests one level deeper.
 //
 // The hint is intentionally minimal: a pointer + the last user-turn
 // snippet as a self-verification anchor. Full-context agents recognize
@@ -47,10 +52,37 @@ export function findLatestJsonl(projectDir) {
   return withMtime[0].path;
 }
 
+const HINT_HEAD = "[amux resume hint]";
+const HINT_TAIL = "If you don't recognize this";
+
+/**
+ * Remove leading resume-hint block(s) from a user turn's text.
+ *
+ * The hint is prepended to a user brief, so it lands back in the jsonl as
+ * part of a user turn. Without stripping it, the next spawn quotes the hint
+ * as "the last user turn" and each restart nests one level deeper until the
+ * real turn is clipped out of the snippet entirely.
+ *
+ * Returns "" when nothing but hint remains — caller should keep walking back.
+ */
+export function stripResumeHint(text) {
+  let out = (text || "").trim();
+  while (out.startsWith(HINT_HEAD)) {
+    const lines = out.split("\n");
+    // The tail is a whole line. A nested hint inside the quoted snippet is
+    // flattened to one line, so it can never match at a line start.
+    const tail = lines.findIndex((l) => l.startsWith(HINT_TAIL));
+    if (tail === -1) return ""; // truncated hint: no real turn survives here
+    out = lines.slice(tail + 1).join("\n").trim();
+  }
+  return out;
+}
+
 /**
  * Walk jsonl events from newest backward, return the first meaningful
  * user turn (not compact-summary, not tool_result, not local-command
- * wrapper, not empty). { ts, text } or null.
+ * wrapper, not a resume hint we injected ourselves, not empty).
+ * { ts, text } or null.
  */
 export function extractLastUserTurn(jsonlContent) {
   const lines = jsonlContent.split("\n").filter(Boolean);
@@ -74,9 +106,27 @@ export function extractLastUserTurn(jsonlContent) {
     if (!text) continue;
     if (/^<(local-command|command-message|command-name|command-stdout|command-stderr)/.test(text)) continue;
 
+    text = stripResumeHint(text);
+    if (!text) continue;
+
     return { ts: d.timestamp || null, text };
   }
   return null;
+}
+
+/**
+ * Render the hint block. Single source of truth for its shape: built from the
+ * same HINT_HEAD/HINT_TAIL that stripResumeHint matches on, so the two can
+ * never drift apart silently. The round-trip invariant
+ * `stripResumeHint(formatHint(...)) === ""` is asserted in the tests.
+ */
+export function formatHint(jsonlPath, { ts, snippet }) {
+  return [
+    HINT_HEAD,
+    `Previous session: ${jsonlPath}`,
+    `Last user turn${ts ? ` (${ts})` : ""}: "${snippet}"`,
+    `${HINT_TAIL}, your pane likely lost state — tail the jsonl for earlier context.`,
+  ].join("\n");
 }
 
 /** Clip text to snippet size; newlines collapse to spaces. */
@@ -103,11 +153,5 @@ export function buildResumeHint(paneDir, deps = {}) {
   const turn = extractLastUserTurn(content);
   if (!turn) return null;
 
-  const snippet = formatSnippet(turn.text);
-  return [
-    "[amux resume hint]",
-    `Previous session: ${jsonlPath}`,
-    `Last user turn${turn.ts ? ` (${turn.ts})` : ""}: "${snippet}"`,
-    "If you don't recognize this, your pane likely lost state — tail the jsonl for earlier context.",
-  ].join("\n");
+  return formatHint(jsonlPath, { ts: turn.ts, snippet: formatSnippet(turn.text) });
 }
