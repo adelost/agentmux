@@ -37,6 +37,7 @@ import { join } from "path";
 import { splitMessage, extractImageMarkers, validateImagePath, chunkAttachments } from "../lib.mjs";
 import { loadConfig, findChannelForPane, channelForPane } from "../cli/config.mjs";
 import { paneDir } from "../agent.mjs";
+import { claudeProjectDir } from "../core/claude-paths.mjs";
 import { readLastTurns, latestJsonlMtime, latestJsonlInfo } from "../core/jsonl-reader.mjs";
 import { readLastTurnsCodex, latestCodexJsonlMtime, latestCodexJsonlInfo } from "../core/codex-jsonl-reader.mjs";
 import { getContextFromPane, shortModelName } from "../core/context.mjs";
@@ -488,15 +489,8 @@ export function createJsonlWatcher({
 
   // --- fs.watch wiring -----------------------------------------------------
 
-  // Mirror Claude Code's path encoding (every `/` and `.` → `-`).
-  function encodeProjectPath(dir) {
-    return dir.replace(/[\/\.]/g, "-");
-  }
   function projectDirFor(agentDir, idx) {
-    return join(
-      process.env.HOME, ".claude", "projects",
-      encodeProjectPath(paneDir(agentDir, idx)),
-    );
+    return claudeProjectDir(paneDir(agentDir, idx));
   }
 
   function attachFsWatch(name, idx, agentDir) {

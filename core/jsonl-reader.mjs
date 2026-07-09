@@ -13,9 +13,9 @@
 
 import { readdirSync, readFileSync, statSync, existsSync, openSync, fstatSync, readSync, closeSync } from "fs";
 import { join } from "path";
+import { claudeProjectDir } from "./claude-paths.mjs";
 import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 
-const CLAUDE_PROJECTS_DIR = () => join(process.env.HOME, ".claude", "projects");
 
 // Bounded tail-window reading for session jsonl. Long-running panes grow these
 // files past Node's max string length (~0x1fffffe8 ≈ 512 MB); reading one whole
@@ -30,10 +30,6 @@ const MAX_JSONL_WINDOW_BYTES = 128 * 1024 * 1024; // hard cap, well under the st
  * Claude Code's path encoding: every `/` and `.` becomes a `-`.
  * Example: /home/user/lsrc/.agents/1 → -home-user-lsrc--agents-1
  */
-function encodePath(dir) {
-  return dir.replace(/[\/\.]/g, "-");
-}
-
 /** List jsonl files in a project dir, newest-first. */
 function listJsonlFiles(projectDir) {
   if (!existsSync(projectDir)) return [];
@@ -241,7 +237,7 @@ export function isPromptInJsonl(paneDir, promptText) {
   const needle = promptText?.trim();
   if (!needle) return null;
 
-  const projectDir = join(CLAUDE_PROJECTS_DIR(), encodePath(paneDir));
+  const projectDir = claudeProjectDir(paneDir);
   if (!existsSync(projectDir) || listJsonlFiles(projectDir).length === 0) return null;
 
   // findJsonlAndEvents scans all files newest-first for the needle, so it
@@ -386,7 +382,7 @@ export function formatJsonlToolCall(toolUse) {
  *   null  = can't tell (no jsonl, no matching prompt) → caller should fall back
  */
 export function isBusyFromJsonl(paneDir, promptText = null) {
-  const projectDir = join(CLAUDE_PROJECTS_DIR(), encodePath(paneDir));
+  const projectDir = claudeProjectDir(paneDir);
   const found = findJsonlAndEvents(projectDir, promptText);
   if (!found) {
     // No file contains the needle. Two subcases:
@@ -492,7 +488,7 @@ export function isBusyFromJsonl(paneDir, promptText = null) {
  * is found. Callers should fall back to tmux extract in that case.
  */
 export function extractFromJsonl(paneDir, promptText = null) {
-  const projectDir = join(CLAUDE_PROJECTS_DIR(), encodePath(paneDir));
+  const projectDir = claudeProjectDir(paneDir);
   const found = findJsonlAndEvents(projectDir, promptText);
   if (!found) return null;
 
@@ -691,7 +687,7 @@ function groupIntoTurns(events, { headless = false } = {}) {
  */
 export function readLastTurns(paneDir, opts = {}) {
   const { limit = 3, since = null, grep = null, tailBytes = null, headless = false } = opts;
-  const projectDir = join(CLAUDE_PROJECTS_DIR(), encodePath(paneDir));
+  const projectDir = claudeProjectDir(paneDir);
   if (!existsSync(projectDir)) return null;
   const files = listJsonlFiles(projectDir);
   if (files.length === 0) return null;
@@ -732,7 +728,7 @@ export function readLastTurns(paneDir, opts = {}) {
 
 /** Project dir for a pane (where Claude Code stores the session jsonl). */
 function projectDirFor(paneDir) {
-  return join(CLAUDE_PROJECTS_DIR(), encodePath(paneDir));
+  return claudeProjectDir(paneDir);
 }
 
 /**

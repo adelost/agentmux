@@ -10,6 +10,7 @@
 import { readFileSync, readdirSync, statSync, existsSync, openSync, fstatSync, readSync, closeSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { claudeProjectDir } from "./claude-paths.mjs";
 
 /**
  * Read only the last `maxBytes` of a file and return its complete trailing
@@ -57,7 +58,6 @@ function readTailLines(filePath, maxBytes = 1024 * 1024) {
   }
 }
 
-const CLAUDE_PROJECTS_DIR = () => join(process.env.HOME, ".claude", "projects");
 const CODEX_SESSIONS_DIR = () => join(process.env.HOME, ".codex", "sessions");
 const CLAUDE_DEFAULT_MAX = 200_000;
 
@@ -150,7 +150,7 @@ function claudeMaxForModel(model) {
 // file (getContextPushed). Single helper — the listing logic was duplicated
 // across three readers before.
 function newestSessionFile(paneDir) {
-  const projectDir = join(CLAUDE_PROJECTS_DIR(), encodeClaudePath(paneDir));
+  const projectDir = claudeProjectDir(paneDir);
   if (!existsSync(projectDir)) return null;
   let files;
   try {
@@ -187,11 +187,7 @@ function readLatestClaudeModel(paneDir) {
   return null;
 }
 
-// --- Claude path -------------------------------------------------------
-
-function encodeClaudePath(dir) {
-  return dir.replace(/[\/\.]/g, "-");
-}
+// --- Claude path: encoding truth lives in core/claude-paths.mjs ---------
 
 function getContextFromClaudeJsonl(paneDir) {
   const session = newestSessionFile(paneDir);

@@ -35,6 +35,7 @@
 
 import { readdirSync, statSync } from "fs";
 import { join } from "path";
+import { claudeProjectDir } from "./claude-paths.mjs";
 import { readTailWindow } from "./jsonl-reader.mjs";
 
 // The hint only needs the LAST user turn, which lives at the tail. Reading the
@@ -45,11 +46,8 @@ function defaultResumeRead(jsonlPath) {
   return readTailWindow(jsonlPath, RESUME_HINT_WINDOW_BYTES).text;
 }
 
-/** Claude Code encodes project dirs by replacing / and . with -. */
-export function projectDirFor(paneDir, homeDir = process.env.HOME) {
-  const slug = paneDir.replace(/[\/\.]/g, "-");
-  return join(homeDir, ".claude", "projects", slug);
-}
+/** Back-compat alias — the encoding truth lives in core/claude-paths.mjs. */
+export const projectDirFor = claudeProjectDir;
 
 /**
  * Newest jsonl in a project dir, or null if none. excludeJsonl drops the

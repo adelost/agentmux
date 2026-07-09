@@ -13,6 +13,8 @@ import { extractFromJsonl, isBusyFromJsonl, isPromptInJsonl } from "./core/jsonl
 import { extractFromCodexJsonl, isBusyFromCodexJsonl, isPromptInCodexJsonl } from "./core/codex-jsonl-reader.mjs";
 import { getContextPercent as getContextPercentByDialect, getContextFromPane } from "./core/context.mjs";
 import { findBlockingPrompt } from "./core/dismiss.mjs";
+import { claudeProjectDir, classifyHistoryRead } from "./core/claude-paths.mjs";
+import { appendEvent } from "./core/events.mjs";
 import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
 
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
@@ -770,7 +772,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (await isAlreadyRunning(target)) return;
 
     const dir = paneDir(rootDir, pane);
-    const sessionFlag = resolveSessionFlag(dir);
+    const sessionFlag = await resolveSessionFlag(dir, name, pane);
     await t.runShell(target, `cd ${esc(dir)} && ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_FLAGS} ${sessionFlag}`);
     await wait(2000);
   }
@@ -838,15 +840,38 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     console.warn(`respawnPane(${target}) timed out waiting for new shell`);
   }
 
-  /** --continue if session exists, otherwise no flag (new session). */
-  function resolveSessionFlag(dir) {
-    // Claude Code encodes project dirs by replacing both / and . with -
-    const encodedDir = dir.replace(/[\/\.]/g, "-");
-    const projectDir = join(process.env.HOME, ".claude", "projects", encodedDir);
-    try {
-      if (readdirSync(projectDir).some((f) => f.endsWith(".jsonl"))) return "--continue";
-    } catch {}
-    return "";
+  /**
+   * --continue exactly when this pane dir has session history. ENOENT means
+   * a legitimately new pane (silent). Any OTHER readdir failure gets one
+   * retry, then spawns bare — but loudly: a swallowed fs flake here used to
+   * downgrade a resume to a fresh session with zero trace, i.e. the pane
+   * lost its context and nothing recorded why (api:2 review, 1.20.54). The
+   * context_loss ledger row is what makes the resume-hint's residual class
+   * measurable; the SessionStart hint itself is the recovery pointer.
+   */
+  async function resolveSessionFlag(dir, agentName, pane) {
+    const projectDir = claudeProjectDir(dir);
+    let read = classifyHistoryRead(projectDir);
+    if (read.error) {
+      await wait(300);
+      read = classifyHistoryRead(projectDir);
+    }
+    if (read.error) {
+      const detail = `readdir ${read.error.code || read.error.message} on ${projectDir} — spawning WITHOUT --continue, pane loses its session`;
+      console.error(`resolveSessionFlag: ${detail}`);
+      try {
+        appendEvent({
+          ts: new Date().toISOString(),
+          event: "context_loss",
+          session: agentName,
+          pane: Number(pane) || 0,
+          detail,
+        });
+      } catch (err) {
+        console.error(`resolveSessionFlag: ledger row failed too: ${err.message}`);
+      }
+    }
+    return read.history ? "--continue" : "";
   }
 
   /** Wait for claude to load, dismiss any blocking prompts if they appear. */
