@@ -14,7 +14,6 @@ import { extractFromCodexJsonl, isBusyFromCodexJsonl, isPromptInCodexJsonl } fro
 import { getContextPercent as getContextPercentByDialect, getContextFromPane } from "./core/context.mjs";
 import { findBlockingPrompt } from "./core/dismiss.mjs";
 import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
-import { buildResumeHint } from "./core/resume-hint.mjs";
 
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
 const CODEX_FLAGS = "--dangerously-bypass-approvals-and-sandbox";
@@ -443,7 +442,7 @@ function ensureGitignored(rootDir, entry) {
 
 // --- Agent factory ---
 
-export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxExec, onResumeHint }) {
+export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxExec }) {
   const wait = delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
   // All tmux syntax lives in the adapter (core/tmux.mjs). agent.mjs speaks
   // intent-level primitives; escaping is the adapter's tested concern.
@@ -1313,15 +1312,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const paneCmd = config.panes?.[pane]?.cmd || "bash";
 
     if (isClaudeCmd(paneCmd)) {
-      // Track whether we're spawning claude on this call so we can inject
-      // the resume-hint after-spawn (instead of waiting for first amux brief).
-      // Without this, panes that user opens directly via `amux <agent>` attach
-      // and types into themselves never see the hint — the hint only ever
-      // fired through sendOnly/sendAndWait briefs prior to 1.14.0.
-      const wasStarting = !(await isAlreadyRunning(target));
+      // Resume-hint is emitted by bin/amux-hook.mjs on SessionStart
+      // (1.20.52) — hook-context instead of a typed spawn prompt, so it
+      // never wakes the pane with a false turn and never crosses panes.
       await startClaude(agentName, target, config.dir, pane);
       await waitForClaudeReady(target, agentName, pane);
-      if (wasStarting) await injectResumeHint(agentName, pane, config.dir);
     } else if (isCodexCmd(paneCmd)) {
       // Codex panes use the same wait-for-ready + dismiss pattern as
       // claude (both are interactive node-based CLIs that may surface
@@ -1332,45 +1327,15 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
   }
 
-  /**
-   * Send the resume-hint as the first user-prompt to a freshly-spawned
-   * claude pane. Lets empty-state panes find their previous jsonl without
-   * needing an orchestrator brief to trigger the prepend path. Idempotent
-   * for full-context panes (they recognize the snippet and absorb it).
-   *
-   * Failure here is not a correctness issue — agents can still operate
-   * without the hint, just less self-aware about prior session state.
-   */
-  async function injectResumeHint(agentName, pane, rootDir) {
-    try {
-      const dir = paneDir(rootDir, pane);
-      const hint = buildResumeHint(dir);
-      if (!hint) return;
-      await sendPrompt(agentName, hint, pane);
-      // Optional Discord-mirror callback: lets the bridge post the hint to
-      // the bound channel so observers see the same context the pane just
-      // got. agent.mjs stays Discord-agnostic; bridge wires up the callback.
-      if (onResumeHint) {
-        try { await onResumeHint({ agentName, pane, hint, paneDir: dir }); }
-        catch (err) { console.warn(`resume-hint mirror skipped: ${err.message}`); }
-      }
-    } catch (err) {
-      console.warn(`resume-hint inject skipped: ${err.message}`);
-    }
-  }
-
   async function sendOnly(agentName, prompt, pane) {
-    // ensureReady injects the resume-hint at spawn (1.14.0), so no brief-
-    // level prepend is needed. Idempotent for full-context panes.
     await ensureReady(agentName, pane);
     await sendPrompt(agentName, prompt, pane);
   }
 
   async function sendAndWait(agentName, prompt, pane) {
+    // wasStarting drives the post-send wait below (claude takes longer to
+    // first-turn after fresh spawn).
     const wasStarting = !(await isAlreadyRunning(`${agentName}:.${pane}`));
-    // ensureReady injects the resume-hint at spawn (1.14.0); no brief-level
-    // prepend needed. wasStarting still drives the post-send wait below
-    // (claude takes longer to first-turn after fresh spawn).
     await ensureReady(agentName, pane);
     await sendPrompt(agentName, prompt, pane);
 

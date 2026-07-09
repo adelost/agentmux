@@ -70,7 +70,13 @@ export function checkHooksInstalled({ settings, hookFileExists }) {
     return check("claude hooks", FAIL, `installed for ${entries.length} events but the script is MISSING`,
       "repo moved? re-run: node bin/install-hooks.mjs");
   }
-  return check("claude hooks", OK, `installed (${entries.join(", ")})`);
+  // SessionStart carries the resume-hint (1.20.52) — without it, panes that
+  // lose state silently get no pointer to their previous session.
+  if (!entries.includes("SessionStart")) {
+    return check("claude hooks", FAIL, `SessionStart not registered (only: ${entries.join(", ")}) — resume-hints are OFF`,
+      "re-run: node bin/install-hooks.mjs");
+  }
+  return check("claude hooks", OK, `installed (${entries.join(", ")}) — resume-hint via SessionStart`);
 }
 
 export function checkLedger({ stat, now = Date.now(), maxBytes = 8 * 1024 * 1024 }) {

@@ -1,4 +1,7 @@
 import { unit, feature, expect } from "bdd-vitest";
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import {
   projectDirFor,
   extractLastUserTurn,
@@ -6,6 +9,8 @@ import {
   formatHint,
   stripResumeHint,
   buildResumeHint,
+  findLatestJsonl,
+  shouldEmitResumeHint,
 } from "./resume-hint.mjs";
 
 const jsonl = (...events) => events.map((e) => JSON.stringify(e)).join("\n");
@@ -268,5 +273,136 @@ feature("buildResumeHint — full pipeline with injected fs", () => {
       expect(out).toContain("2026-04-23T12:00:00Z");
       expect(out).toContain("lost state");
     }],
+  });
+});
+
+/** Temp project dir with jsonl files at controlled mtimes (oldest first). */
+const projectDirWith = (...names) => {
+  const dir = mkdtempSync(join(tmpdir(), "amux-hint-test-"));
+  names.forEach((name, i) => {
+    const path = join(dir, name);
+    writeFileSync(path, "");
+    const t = new Date(2026, 0, 1 + i);
+    utimesSync(path, t, t);
+  });
+  return dir;
+};
+
+feature("findLatestJsonl — excludeJsonl drops the session we are inside", () => {
+  unit("excluding the newest file returns the next-newest", {
+    given: ["dir with old + new session files", () => projectDirWith("old.jsonl", "new.jsonl")],
+    when: ["finding latest excluding new", (dir) => {
+      const found = findLatestJsonl(dir, join(dir, "new.jsonl"));
+      rmSync(dir, { recursive: true, force: true });
+      return { found, dir };
+    }],
+    then: ["the previous session wins", ({ found, dir }) => {
+      expect(found).toBe(join(dir, "old.jsonl"));
+    }],
+  });
+
+  unit("returns null when the only file is the excluded one", {
+    given: ["dir with just the current session", () => projectDirWith("current.jsonl")],
+    when: ["finding latest excluding it", (dir) => {
+      const found = findLatestJsonl(dir, join(dir, "current.jsonl"));
+      rmSync(dir, { recursive: true, force: true });
+      return found;
+    }],
+    then: ["null — no previous session to point at", (r) => { expect(r).toBeNull(); }],
+  });
+
+  unit("without exclusion the newest file still wins (back-compat)", {
+    given: ["dir with old + new session files", () => projectDirWith("old.jsonl", "new.jsonl")],
+    when: ["finding latest", (dir) => {
+      const found = findLatestJsonl(dir);
+      rmSync(dir, { recursive: true, force: true });
+      return { found, dir };
+    }],
+    then: ["newest", ({ found, dir }) => {
+      expect(found).toBe(join(dir, "new.jsonl"));
+    }],
+  });
+});
+
+feature("shouldEmitResumeHint — hook-side gate", () => {
+  unit("SessionStart source startup emits (fresh session = state may be lost)", {
+    given: ["startup payload", () => ({ hook_event_name: "SessionStart", source: "startup" })],
+    when: ["gating", (p) => shouldEmitResumeHint(p)],
+    then: ["true", (r) => { expect(r).toBe(true); }],
+  });
+
+  unit("SessionStart source resume stays silent (--continue restored full context)", {
+    given: ["resume payload", () => ({ hook_event_name: "SessionStart", source: "resume" })],
+    when: ["gating", (p) => shouldEmitResumeHint(p)],
+    then: ["false", (r) => { expect(r).toBe(false); }],
+  });
+
+  unit("compact and clear stay silent (summary exists / deliberate wipe)", {
+    given: ["both payloads", () => ["compact", "clear"]],
+    when: ["gating each", (sources) => sources.map(
+      (source) => shouldEmitResumeHint({ hook_event_name: "SessionStart", source }),
+    )],
+    then: ["all false", (rs) => { expect(rs).toEqual([false, false]); }],
+  });
+
+  unit("other hook events never emit", {
+    given: ["a Stop payload", () => ({ hook_event_name: "Stop", source: "startup" })],
+    when: ["gating", (p) => shouldEmitResumeHint(p)],
+    then: ["false", (r) => { expect(r).toBe(false); }],
+  });
+
+  unit("garbage payloads degrade to silent, never throw", {
+    given: ["null / empty / missing fields", () => [null, {}, { hook_event_name: "SessionStart" }]],
+    when: ["gating each", (ps) => ps.map((p) => shouldEmitResumeHint(p))],
+    then: ["all false", (rs) => { expect(rs).toEqual([false, false, false]); }],
+  });
+});
+
+feature("buildResumeHint — excludeJsonl end-to-end (the self-pointing trap)", () => {
+  unit("hint anchors in the previous session, not the one just started", {
+    given: ["fake home with two sessions for one pane dir", () => {
+      const home = mkdtempSync(join(tmpdir(), "amux-hint-home-"));
+      const paneDir = "/ws/.agents/3";
+      const projectDir = projectDirFor(paneDir, home);
+      mkdirSync(projectDir, { recursive: true });
+      const turn = (text, ts) => JSON.stringify(
+        { type: "user", message: { role: "user", content: text }, timestamp: ts },
+      ) + "\n";
+      const prev = join(projectDir, "prev.jsonl");
+      const current = join(projectDir, "current.jsonl");
+      writeFileSync(prev, turn("fixa kartan", "2026-07-08T10:00:00Z"));
+      writeFileSync(current, turn("should never be quoted", "2026-07-09T10:00:00Z"));
+      utimesSync(prev, new Date(2026, 6, 8), new Date(2026, 6, 8));
+      utimesSync(current, new Date(2026, 6, 9), new Date(2026, 6, 9));
+      return { home, paneDir, prev, current };
+    }],
+    when: ["building with the current session excluded", ({ home, paneDir, prev, current }) => {
+      const hint = buildResumeHint(paneDir, { homeDir: home, excludeJsonl: current });
+      rmSync(home, { recursive: true, force: true });
+      return { hint, prev };
+    }],
+    then: ["points at prev.jsonl and quotes its turn", ({ hint, prev }) => {
+      expect(hint).toContain(prev);
+      expect(hint).toContain("fixa kartan");
+      expect(hint).not.toContain("should never be quoted");
+    }],
+  });
+
+  unit("returns null when the started session is the only one (nothing to rescue)", {
+    given: ["fake home with a single current session", () => {
+      const home = mkdtempSync(join(tmpdir(), "amux-hint-home-"));
+      const paneDir = "/ws/.agents/3";
+      const projectDir = projectDirFor(paneDir, home);
+      mkdirSync(projectDir, { recursive: true });
+      const current = join(projectDir, "current.jsonl");
+      writeFileSync(current, "");
+      return { home, paneDir, current };
+    }],
+    when: ["building with it excluded", ({ home, paneDir, current }) => {
+      const hint = buildResumeHint(paneDir, { homeDir: home, excludeJsonl: current });
+      rmSync(home, { recursive: true, force: true });
+      return hint;
+    }],
+    then: ["null — a first-ever session gets no hint", (r) => { expect(r).toBeNull(); }],
   });
 });

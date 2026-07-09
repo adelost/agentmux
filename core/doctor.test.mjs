@@ -103,15 +103,29 @@ feature("hooks + ledger + tmux checks", () => {
     }],
   });
 
-  unit("hooks installed with script present is ok", {
-    given: ["settings + file", () => checkHooksInstalled({
+  unit("hooks installed incl SessionStart is ok", {
+    given: ["settings + file with all carrier events", () => checkHooksInstalled({
+      settings: { hooks: { Stop: [amuxHook], Notification: [amuxHook], SessionStart: [amuxHook] } },
+      hookFileExists: true,
+    })],
+    when: ["checking", (c) => c],
+    then: ["ok listing events + hint carrier", (c) => {
+      expect(c.status).toBe(OK);
+      expect(c.detail).toContain("Stop");
+      expect(c.detail).toContain("resume-hint via SessionStart");
+    }],
+  });
+
+  unit("missing SessionStart registration fails loud (resume-hints would be silently off)", {
+    given: ["settings without SessionStart", () => checkHooksInstalled({
       settings: { hooks: { Stop: [amuxHook], Notification: [amuxHook] } },
       hookFileExists: true,
     })],
     when: ["checking", (c) => c],
-    then: ["ok listing events", (c) => {
-      expect(c.status).toBe(OK);
-      expect(c.detail).toContain("Stop");
+    then: ["fail + reinstall hint", (c) => {
+      expect(c.status).toBe(FAIL);
+      expect(c.detail).toContain("resume-hints are OFF");
+      expect(c.hint).toContain("install-hooks");
     }],
   });
 

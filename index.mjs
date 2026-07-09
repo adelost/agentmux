@@ -98,17 +98,12 @@ if (appState.get("thinking") === undefined) appState.set("thinking", true);
 // until manually cleared. Same lock-file-on-boot reasoning as init scripts.
 appState.set("syncRunning", false);
 
-// Mutable hook so the agent can fire a resume-hint Discord-mirror without
-// importing the discord channel directly. Wired up below once `discord`
-// exists (createAgent runs before discord init due to dependency order).
-let resumeHintMirror = null;
 const agent = createAgent({
   tmuxSocket: TMUX_SOCKET,
   configPath: AGENTS_YAML,
   timeout: TIMEOUT,
   run,
   tmuxExec,
-  onResumeHint: (info) => resumeHintMirror?.(info),
 });
 const attachments = createAttachmentHandler({
   run,
@@ -134,23 +129,10 @@ function stampChannelMirror(channelId) {
 
 const discord = createDiscordChannel({ token: TOKEN, onSent: stampChannelMirror });
 
-// Now that discord exists, wire the agent's resume-hint hook so spawn-time
-// hint injections (1.14.0) get mirrored to the bound Discord channel
-// (1.16.0). Idempotent: safe to skip when no channel is bound.
-//
-// The agent's reply to the resume-hint is forwarded by jsonl-watcher
-// automatically — used to be a bespoke forwardReplyAsync with a
-// "[amux resume hint]" matcher and 60s timeout, retired in 1.16.33.
-import { findChannelForPane } from "./cli/config.mjs";
-resumeHintMirror = async ({ agentName, pane, hint }) => {
-  const channelId = findChannelForPane(AGENTS_YAML, agentName, pane);
-  if (!channelId) return;
-  try {
-    await discord.send(channelId, hint);
-  } catch (err) {
-    console.warn(`resume-hint mirror failed for ${agentName}:${pane}: ${err.message}`);
-  }
-};
+// Resume-hints moved to bin/amux-hook.mjs SessionStart context in 1.20.52 —
+// they no longer pass through the bridge, so the Discord mirror that used
+// to live here fell away with the typed delivery path. The session-start
+// itself still shows in `amux timeline` via the hook's ledger row.
 
 // --- Wire up ---
 
