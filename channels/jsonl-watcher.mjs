@@ -446,7 +446,14 @@ export function createJsonlWatcher({
         });
         for (const action of audit.actions) {
           const posted = await postTurn({ name, idx, channelId, turn: action.turn, config });
-          if (!posted?.ok) { log(`${name}:${idx} audit post failed — normal retry path takes over`); break; }
+          if (!posted?.ok) {
+            // Cold Discord cache at startup is the common cause — un-mark so
+            // the NEXT poll retries the whole audit instead of losing it to
+            // the one-per-lifetime gate (observed api:1, first 1.20.61 boot).
+            auditedPanes.delete(key);
+            log(`${name}:${idx} audit post failed — retrying next poll`);
+            break;
+          }
           commitEngineState(channelId, applyPostSuccess({
             lastPostedMs: lastPostedMs(channelId),
             postedItemIds: postedItemIds(channelId),
