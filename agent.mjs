@@ -39,7 +39,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.20.38";
+const HINTS_VERSION = "1.20.59";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -75,6 +75,18 @@ amux log <agent> -p <pane>           # default: last 3 turns from jsonl
 \`\`\`
 \`amux log\` defaults to jsonl (structured history). Use \`--tmux\` only when you
 need to see live terminal state (progress bars, modal prompts, etc).
+
+### Search memory + history (use this BEFORE asking the human "what was X?")
+\`\`\`bash
+amux search "Tess"                   # ranked overview: memory, sessions, ledger
+amux search "vad bestämdes om X"     # semantic layer catches paraphrases
+amux search --show 3                 # expand hit #3 with context
+amux search "term" --fast            # lexical only (~1s, skips embedding load)
+\`\`\`
+One line per hit, best sources first (memory > digests > raw sessions).
+When the user references a person, project or decision you lack context on,
+search FIRST — the answer is usually already in memory. \`claw search\` is
+the same engine.
 
 ### Understand state across panes
 \`\`\`bash
