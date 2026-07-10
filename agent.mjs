@@ -421,21 +421,30 @@ ${HINTS_END_MARKER}
 // workspace-specific notes that operators tacked on.
 export function ensureAgentHints(rootDir) {
   const agentsDir = join(rootDir, ".agents");
+  const tailOf = (content) => {
+    const endIdx = content.indexOf(HINTS_END_MARKER);
+    return endIdx >= 0 ? content.slice(endIdx + HINTS_END_MARKER.length) : "";
+  };
+
+  // Operator additions below the end marker are workspace RULES, and rules
+  // apply to every agent regardless of harness. CLAUDE.md's tail is the
+  // canonical copy, mirrored verbatim into AGENTS.md — before this, the
+  // worktree ban lived only in CLAUDE.md and codex panes never saw it
+  // (2026-07-10). Edit the tail in CLAUDE.md; AGENTS.md edits get replaced.
+  let canonicalTail = "";
+  try {
+    const claudePath = join(agentsDir, "CLAUDE.md");
+    if (existsSync(claudePath)) canonicalTail = tailOf(readFileSync(claudePath, "utf-8"));
+  } catch { /* fresh dir: no tail yet */ }
+
   for (const name of ["CLAUDE.md", "AGENTS.md"]) {
     const path = join(agentsDir, name);
     try {
-      if (!existsSync(path)) {
-        writeFileSync(path, AGENT_HINTS);
-        continue;
-      }
-      const current = readFileSync(path, "utf-8");
-      const versionMatch = current.match(/<!-- amux-hints-version: ([^ ]+) -->/);
-      if (versionMatch && versionMatch[1] === HINTS_VERSION) continue;
-
-      // Preserve anything operators added after HINTS_END_MARKER.
-      const endIdx = current.indexOf(HINTS_END_MARKER);
-      const tail = endIdx >= 0 ? current.slice(endIdx + HINTS_END_MARKER.length) : "";
-      writeFileSync(path, AGENT_HINTS + tail.replace(/^\s*\n/, "\n"));
+      const current = existsSync(path) ? readFileSync(path, "utf-8") : null;
+      const tail = name === "CLAUDE.md" && current !== null ? tailOf(current) : canonicalTail;
+      const next = AGENT_HINTS + tail.replace(/^\s*\n/, "\n");
+      // Content-compare instead of version-compare: also converges tails.
+      if (current !== next) writeFileSync(path, next);
     } catch (err) {
       console.warn(`agent hints write failed (${name}): ${err.message}`);
     }
