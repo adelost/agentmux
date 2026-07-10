@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
-  loadSearchRoots, escapeRegex, snippetPattern, cleanSnippet, dateFromPath,
+  loadSearchRoots, escapeRegex, snippetPattern, cleanSnippet, dateFromPath, anchorGlobs,
   scoreHit, dedupeByFile, runRg, filesWithAllWords, lexicalSearch,
   renderJsonlLine, expandHit, formatHits, withScore,
 } from "./search.mjs";
@@ -29,6 +29,16 @@ feature("search config — roots from agents.yaml", () => {
     given: ["an agents-only config", () => ({ claw: { dir: "/x" } })],
     when: ["loading", (c) => loadSearchRoots(c)],
     then: ["empty", (roots) => { expect(roots).toEqual([]); }],
+  });
+});
+
+feature("anchorGlobs — rg anchors slashed globs to CWD, we re-anchor to any depth", () => {
+  unit("slash-containing patterns get **/ prefixed, anchored ones pass through", {
+    given: ["a mix of config globs", () => ["transcripts/**", "**/node_modules/**", "/abs/**", "*.tmp"]],
+    when: ["anchoring", (g) => anchorGlobs(g)],
+    then: ["only the naive one is rewritten", (out) => {
+      expect(out).toEqual(["**/transcripts/**", "**/node_modules/**", "/abs/**", "*.tmp"]);
+    }],
   });
 });
 

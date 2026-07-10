@@ -70,11 +70,20 @@ export function loadSearchRoots(config) {
       name: r.name || r.path,
       path: expandTilde(String(r.path)),
       glob: r.glob || null,
-      exclude: Array.isArray(r.exclude) ? r.exclude : [],
-      semanticExclude: Array.isArray(r.semanticExclude) ? r.semanticExclude : [],
+      exclude: anchorGlobs(r.exclude),
+      semanticExclude: anchorGlobs(r.semanticExclude),
       weight: Number(r.weight) || 1,
       semantic: Boolean(r.semantic),
     }));
+}
+
+// rg anchors slash-containing globs to the CWD, not the search root, so a
+// config exclude like "transcripts/**" silently matches nothing when amux
+// runs from elsewhere (observed 2026-07-10: 34 "excluded" transcripts got
+// embedded anyway). Prefix a globstar unless the author already anchored it.
+export function anchorGlobs(globs) {
+  if (!Array.isArray(globs)) return [];
+  return globs.map((g) => (g.includes("/") && !g.startsWith("**/") && !g.startsWith("/") ? `**/${g}` : g));
 }
 
 export function escapeRegex(s) {
