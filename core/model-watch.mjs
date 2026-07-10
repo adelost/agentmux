@@ -6,13 +6,13 @@
 // noticed by accident and had to hand-hold ("vi behövde tillfälligt byta
 // till en mindre smart modell.. tänk igenom planen en gång till").
 //
-// Policy (Mattias's call, 2026-07-10): a downgraded pane STOPS. Work built
-// on a weaker model creates bugs that cost more to find later than the
-// stillstand costs now ("man behöver fixa buggarna sen"). So: every change
-// gets a channel line + ledger row; a DOWNGRADE additionally interrupts the
-// pane if it is mid-turn, parks it with a stop-brief (which carries the
-// re-verify instruction for whenever the human resumes it), and pushes
-// mobile so the stop is never silent.
+// Policy (Mattias's calls, 2026-07-10): a MODEL downgrade stops the pane —
+// work built on a weaker model creates bugs that cost more to find later
+// ("man behöver fixa buggarna sen"). An EFFORT-only drop within the same
+// model ("max→xhigh är nästan okej") warns without stopping: the quality
+// delta is one notch, and crash-respawns routinely restore an older effort
+// setting, so stop-on-effort would add friction exactly when the fleet is
+// recovering. Every change still gets a channel line + ledger row.
 
 const EFFORT_TIERS = { max: 5, xhigh: 4, high: 3, medium: 2, low: 1, minimal: 0 };
 const CLAUDE_FAMILY = { fable: 5, mythos: 5, opus: 4, sonnet: 3, haiku: 2 };
@@ -52,7 +52,7 @@ export function classifyModelChange(prev, next) {
   const toLabel = label(next);
   if (!fromLabel || !toLabel || fromLabel === toLabel) return null;
 
-  const change = { direction: "lateral", from: fromLabel, to: toLabel };
+  const change = { direction: "lateral", kind: "model", from: fromLabel, to: toLabel };
   const a = modelRank(prev.model);
   const b = modelRank(next.model);
 
@@ -60,8 +60,9 @@ export function classifyModelChange(prev, next) {
     change.direction = b.score < a.score ? "downgrade" : "upgrade";
     return change;
   }
-  // Same model — the effort knob moved.
+  // Same model — the effort knob moved. Lesser severity by policy.
   if (prev.model === next.model && prev.effort !== next.effort) {
+    change.kind = "effort";
     const ea = EFFORT_TIERS[String(prev.effort || "").toLowerCase()];
     const eb = EFFORT_TIERS[String(next.effort || "").toLowerCase()];
     if (Number.isFinite(ea) && Number.isFinite(eb) && ea !== eb) {
@@ -69,6 +70,11 @@ export function classifyModelChange(prev, next) {
     }
   }
   return change;
+}
+
+/** Only model-kind downgrades park the pane; effort drops just warn. */
+export function shouldStopPane(change) {
+  return change?.direction === "downgrade" && change?.kind === "model";
 }
 
 export function label({ model, effort } = {}) {
@@ -80,10 +86,14 @@ export function label({ model, effort } = {}) {
 export function changeMessage(paneName, change, contextPct) {
   const icon = { downgrade: "⚠️🔀", upgrade: "🔀⬆", lateral: "🔀" }[change.direction];
   const ctx = Number.isFinite(contextPct) ? ` (context ${contextPct}%)` : "";
+  const stopped = change.direction === "downgrade" && change.kind === "model";
+  const effortDrop = change.direction === "downgrade" && change.kind === "effort";
   return `${icon} **${paneName} bytte modell: ${change.from} → ${change.to}**${ctx}` +
-    (change.direction === "downgrade"
+    (stopped
       ? "\n_Panelen är STOPPAD (kvot/limit eller context-fallback). Knuffa igång den när läget är rätt — /model byter tillbaka. Den re-verifierar sina senaste beslut vid återstart._"
-      : "");
+      : effortDrop
+        ? "\n_Effort sänkt (trolig orsak: respawn återställde sparad inställning). Panelen jobbar vidare — sätt tillbaka med /model när du vill._"
+        : "");
 }
 
 /**

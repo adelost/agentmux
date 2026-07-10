@@ -43,7 +43,7 @@ import { readLastTurnsCodex, latestCodexJsonlMtime, latestCodexJsonlInfo } from 
 import { getContextFromPane, shortModelName } from "../core/context.mjs";
 import { isHarnessPlaceholder } from "../core/reply-forwarder.mjs";
 import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, planStartupAudit, itemKey } from "../core/watcher-engine.mjs";
-import { classifyModelChange, changeMessage, stopBrief, label as modelLabel } from "../core/model-watch.mjs";
+import { classifyModelChange, changeMessage, stopBrief, shouldStopPane, label as modelLabel } from "../core/model-watch.mjs";
 import { appendEvent } from "../core/events.mjs";
 import { notifyUser } from "../cli/send-notify.mjs";
 import { createPaneQueue } from "../core/pane-queue.mjs";
@@ -230,7 +230,7 @@ export function createJsonlWatcher({
     await discord.send(channelId, changeMessage(paneName, change, ctx.percent))
       .catch((err) => log(`model-change warning failed for ${paneName}: ${err.message}`));
 
-    if (change.direction !== "downgrade") return;
+    if (!shouldStopPane(change)) return;
     notifyUser(`🔀 ${paneName} nedgraderad och STOPPAD: ${change.from} → ${change.to} — knuffa när läget är rätt`)
       .catch?.((err) => log(`model-change push failed: ${err.message}`));
     // Stop the harm first: a mid-turn pane keeps building on the weaker

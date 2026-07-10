@@ -1,5 +1,5 @@
 import { unit, feature, expect } from "bdd-vitest";
-import { modelRank, classifyModelChange, changeMessage, stopBrief, label } from "./model-watch.mjs";
+import { modelRank, classifyModelChange, changeMessage, stopBrief, shouldStopPane, label } from "./model-watch.mjs";
 
 feature("modelRank — comparable within a family", () => {
   unit("codex: version dominates, variant breaks ties", {
@@ -61,13 +61,29 @@ feature("classifyModelChange — the warn/act decision", () => {
     then: ["upgrade", (c) => { expect(c.direction).toBe("upgrade"); }],
   });
 
-  unit("same model, lower effort = downgrade", {
-    given: ["effort knob moved", () => classifyModelChange(
+  unit("same model, lower effort = downgrade of kind effort (warn, no stop)", {
+    given: ["the crash-respawn case: max→xhigh on sol", () => classifyModelChange(
       { model: "gpt-5.6-sol", effort: "max" },
-      { model: "gpt-5.6-sol", effort: "low" },
+      { model: "gpt-5.6-sol", effort: "xhigh" },
     )],
     when: ["classifying", (c) => c],
-    then: ["downgrade", (c) => { expect(c.direction).toBe("downgrade"); }],
+    then: ["downgrade + effort kind + shouldStopPane false", (c) => {
+      expect(c.direction).toBe("downgrade");
+      expect(c.kind).toBe("effort");
+      expect(shouldStopPane(c)).toBe(false);
+    }],
+  });
+
+  unit("a model downgrade is kind model and DOES stop", {
+    given: ["sol → mini", () => classifyModelChange(
+      { model: "gpt-5.6-sol", effort: "max" },
+      { model: "gpt-5.6-mini", effort: "max" },
+    )],
+    when: ["classifying", (c) => c],
+    then: ["stop", (c) => {
+      expect(c.kind).toBe("model");
+      expect(shouldStopPane(c)).toBe(true);
+    }],
   });
 
   unit("no change means null (no warning spam)", {
@@ -92,7 +108,7 @@ feature("classifyModelChange — the warn/act decision", () => {
 feature("messages — actionable, not just informative", () => {
   unit("downgrade warning carries cause hint and recovery action", {
     given: ["a downgrade", () => changeMessage("ai:3", {
-      direction: "downgrade", from: "gpt-5.6-sol max", to: "gpt-5.5 max",
+      direction: "downgrade", kind: "model", from: "gpt-5.6-sol max", to: "gpt-5.5 max",
     }, 72)],
     when: ["rendering", (m) => m],
     then: ["names pane, models, context, STOPPAD + /model hint", (m) => {
@@ -101,6 +117,18 @@ feature("messages — actionable, not just informative", () => {
       expect(m).toContain("context 72%");
       expect(m).toContain("STOPPAD");
       expect(m).toContain("/model");
+    }],
+  });
+
+  unit("effort-drop message says working continues, never STOPPAD", {
+    given: ["an effort downgrade", () => changeMessage("ai:3", {
+      direction: "downgrade", kind: "effort", from: "gpt-5.6-sol max", to: "gpt-5.6-sol xhigh",
+    }, 82)],
+    when: ["rendering", (m) => m],
+    then: ["jobbar vidare + /model hint, no stop wording", (m) => {
+      expect(m).toContain("jobbar vidare");
+      expect(m).toContain("/model");
+      expect(m).not.toContain("STOPPAD");
     }],
   });
 
