@@ -105,3 +105,36 @@ export function stopBrief(change) {
     "STANNA NU: parkera arbetet, committa inget, svara endast med en kort statusrad om exakt var du står. " +
     "När användaren återupptar dig: börja med att re-verifiera beslut och kod från precis före bytet — lita inte på dem overifierade.";
 }
+
+// --- Auto-recovery (one loop-guarded switch-back attempt per incident) ---
+//
+// The flap scenario makes unbounded retries dangerous: during quota
+// exhaustion a switch-back "succeeds" in the UI and bounces down again on
+// the next request, which would trigger recovery again, forever. The guard
+// is structural: the attempt is recorded BEFORE acting, and a downgrade
+// arriving inside the cooldown window (= a flap, or a crash-respawned
+// bridge) never attempts at all. Worst case is exactly the old behavior
+// plus one harmless extra /model command.
+
+export const RECOVERY_COOLDOWN_MS = 30 * 60_000;
+
+export function decideRecovery({ lastAttemptMs = null, nowMs = Date.now(), enabled = true, cooldownMs = RECOVERY_COOLDOWN_MS } = {}) {
+  if (!enabled) return { attempt: false, reason: "disabled (AMUX_MODEL_RECOVERY=false)" };
+  if (Number.isFinite(lastAttemptMs) && nowMs - lastAttemptMs < cooldownMs) {
+    return { attempt: false, reason: "inside cooldown (flap or recent attempt)" };
+  }
+  return { attempt: true, reason: "first attempt this incident" };
+}
+
+/** Wakes a successfully recovered pane; carries the re-verify duty. */
+export function resumeBrief(restoredLabel) {
+  return `[model-watch] Modell återställd till ${restoredLabel}. ` +
+    "Re-verifiera beslut och kod från nedgraderingsfönstret innan du bygger vidare, fortsätt sedan din uppgift.";
+}
+
+/** Channel line for the recovery outcome. */
+export function recoveryMessage(paneName, restored, detail) {
+  return restored
+    ? `🔁 **${paneName}: auto-recovery lyckades** — ${detail}. Panelen väckt med re-verify-brief.`
+    : `🅿 **${paneName}: auto-recovery misslyckades** (${detail}). Panelen kvar parkerad — \`/model\` när läget är rätt.`;
+}

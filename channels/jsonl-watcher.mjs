@@ -43,7 +43,12 @@ import { readLastTurnsCodex, latestCodexJsonlMtime, latestCodexJsonlInfo } from 
 import { getContextFromPane, shortModelName } from "../core/context.mjs";
 import { isHarnessPlaceholder } from "../core/reply-forwarder.mjs";
 import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, planStartupAudit, itemKey } from "../core/watcher-engine.mjs";
-import { classifyModelChange, changeMessage, stopBrief, shouldStopPane, label as modelLabel } from "../core/model-watch.mjs";
+import {
+  classifyModelChange, changeMessage, stopBrief, shouldStopPane, label as modelLabel,
+  decideRecovery, resumeBrief, recoveryMessage,
+} from "../core/model-watch.mjs";
+import { driveCodexModelPicker } from "../core/codex-model-picker.mjs";
+import { sendSlashVerified } from "../core/delivery.mjs";
 import { parkPane, unparkPane } from "../core/pane-park.mjs";
 import { appendEvent } from "../core/events.mjs";
 import { notifyUser } from "../cli/send-notify.mjs";
@@ -191,6 +196,72 @@ export function createJsonlWatcher({
   }
 
   const STATE_KEY_LAST_MODEL = "watcher_last_model";
+  const STATE_KEY_RECOVERY = "watcher_recovery";
+  const recoveryEnabled = process.env.AMUX_MODEL_RECOVERY !== "false";
+
+  /**
+   * One loop-guarded switch-back after a park. The attempt is recorded
+   * BEFORE any keystroke (crash-safety), and decideRecovery's cooldown
+   * makes a flap (quota bounce re-downgrading right after a "successful"
+   * switch) die after a single attempt instead of looping. Restored panes
+   * are unparked and woken with the re-verify brief; failures stay parked
+   * for the human, exactly like before auto-recovery existed.
+   */
+  async function attemptModelRecovery({ name, idx, paneName, channelId, prev, config }) {
+    const key = paneKey(name, idx);
+    const attempts = state.get(STATE_KEY_RECOVERY, {}) || {};
+    const decision = decideRecovery({ lastAttemptMs: attempts[key]?.attemptedAtMs, enabled: recoveryEnabled });
+    if (!decision.attempt) {
+      log(`${paneName} recovery skipped: ${decision.reason}`);
+      return;
+    }
+    attempts[key] = { attemptedAtMs: Date.now(), target: modelLabel(prev) };
+    state.set(STATE_KEY_RECOVERY, attempts);
+
+    const paneCmd = config?.[name]?.panes?.[idx]?.cmd || "";
+    let restored = false;
+    let detail = "";
+    try {
+      if (/codex/i.test(paneCmd)) {
+        const res = await driveCodexModelPicker({
+          agent, name, pane: idx, model: prev.model, effort: prev.effort || null, log,
+        });
+        restored = res.ok;
+        detail = res.ok
+          ? `${res.model}${res.effort ? ` ${res.effort}` : ""}`
+          : `${res.stage}: ${res.error}`;
+      } else {
+        const sent = await sendSlashVerified(agent, name, idx, `/model ${prev.model}`);
+        if (!sent.delivered) {
+          detail = "slash delivery failed";
+        } else {
+          // /model produces no jsonl turn, so verify against the live
+          // statusline instead of waiting for a reading that never comes.
+          await new Promise((r) => setTimeout(r, 3000));
+          const liveCtx = await agent.getContext?.(name, idx).catch(() => null);
+          restored = !!liveCtx?.model && liveCtx.model === prev.model;
+          detail = restored ? modelLabel(prev) : `statusline still shows ${liveCtx?.model || "unknown"}`;
+        }
+      }
+    } catch (err) {
+      detail = err.message;
+    }
+
+    if (restored) {
+      try { unparkPane({ session: name, pane: idx, detail: `auto-recovery: ${detail}` }); }
+      catch (err) { log(`${paneName} unpark after recovery failed: ${err.message}`); }
+      // Sync the last-model map so the recovery itself is not re-classified
+      // as yet another change on the next reading.
+      const models = state.get(STATE_KEY_LAST_MODEL, {}) || {};
+      models[key] = { model: prev.model, effort: prev.effort ?? null };
+      state.set(STATE_KEY_LAST_MODEL, models);
+      try { await agent.sendOnly(name, resumeBrief(modelLabel(prev)), idx); }
+      catch (err) { log(`${paneName} resume brief failed: ${err.message}`); }
+    }
+    log(`${paneName} recovery ${restored ? "ok" : "failed"}: ${detail}`);
+    await discord.send(channelId, recoveryMessage(paneName, restored, detail))
+      .catch((err) => log(`recovery channel line failed for ${paneName}: ${err.message}`));
+  }
 
   /**
    * Model-watch hook: runs where the footer ctx is computed (zero extra I/O).
@@ -198,7 +269,7 @@ export function createJsonlWatcher({
    * DOWNGRADE additionally pushes mobile and briefs the pane to re-verify
    * its plan (see core/model-watch.mjs for the policy rationale).
    */
-  async function watchModelChange({ name, idx, channelId, ctx }) {
+  async function watchModelChange({ name, idx, channelId, ctx, config = null }) {
     if (!ctx?.model) return;
     // Head-sourced readings are the session's ORIGINAL model — potentially
     // stale, good enough for a display label but NOT evidence of a switch.
@@ -260,6 +331,7 @@ export function createJsonlWatcher({
     } catch (err) {
       log(`model-change stop brief failed for ${paneName}: ${err.message}`);
     }
+    await attemptModelRecovery({ name, idx, paneName, channelId, prev, config });
   }
 
   function commitEngineState(channelId, nextState) {
@@ -363,7 +435,7 @@ export function createJsonlWatcher({
         if (!ctx) ctx = agent.getContextPercent?.(name, idx);
       }
       if (ctx) {
-        await watchModelChange({ name, idx, channelId, ctx })
+        await watchModelChange({ name, idx, channelId, ctx, config })
           .catch((err) => log(`model-watch failed for ${name}:${idx}: ${err.message}`));
         // tokens can be null when percent came from a custom statusline row.
         const suffix = ctx.tokens != null ? ` (${Math.round(ctx.tokens / 1000)}k)` : "";

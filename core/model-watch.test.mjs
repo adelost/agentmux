@@ -1,5 +1,5 @@
 import { unit, feature, expect } from "bdd-vitest";
-import { modelRank, classifyModelChange, changeMessage, stopBrief, shouldStopPane, label } from "./model-watch.mjs";
+import { modelRank, classifyModelChange, changeMessage, stopBrief, shouldStopPane, label, decideRecovery, resumeBrief, recoveryMessage, RECOVERY_COOLDOWN_MS } from "./model-watch.mjs";
 
 feature("modelRank — comparable within a family", () => {
   unit("codex: version dominates, variant breaks ties", {
@@ -149,6 +149,68 @@ feature("messages — actionable, not just informative", () => {
     then: ["effort suffixed or absent", ([a, b]) => {
       expect(a).toBe("gpt-5.6-sol max");
       expect(b).toBe("claude-fable-5");
+    }],
+  });
+});
+
+feature("auto-recovery decision (loop guard)", () => {
+  unit("first incident attempts", {
+    given: ["no prior attempt", () => ({ lastAttemptMs: null, nowMs: 1_000_000 })],
+    when: ["deciding", (args) => decideRecovery(args)],
+    then: ["attempt", (r) => expect(r.attempt).toBe(true)],
+  });
+
+  unit("a downgrade inside the cooldown never attempts (flap guard)", {
+    given: ["an attempt 5 min ago", () => ({
+      lastAttemptMs: 1_000_000, nowMs: 1_000_000 + 5 * 60_000,
+    })],
+    when: ["deciding", (args) => decideRecovery(args)],
+    then: ["no attempt, names the cooldown", (r) => {
+      expect(r.attempt).toBe(false);
+      expect(r.reason).toMatch(/cooldown/i);
+    }],
+  });
+
+  unit("after the cooldown a NEW incident may attempt again", {
+    given: ["an attempt 31 min ago", () => ({
+      lastAttemptMs: 1_000_000, nowMs: 1_000_000 + RECOVERY_COOLDOWN_MS + 60_000,
+    })],
+    when: ["deciding", (args) => decideRecovery(args)],
+    then: ["attempt", (r) => expect(r.attempt).toBe(true)],
+  });
+
+  unit("kill switch disables attempts entirely", {
+    given: ["recovery disabled", () => ({ lastAttemptMs: null, enabled: false })],
+    when: ["deciding", (args) => decideRecovery(args)],
+    then: ["no attempt", (r) => {
+      expect(r.attempt).toBe(false);
+      expect(r.reason).toMatch(/disabled/i);
+    }],
+  });
+});
+
+feature("recovery messaging", () => {
+  unit("resume brief wakes with the re-verify duty", {
+    given: ["a restored label", () => resumeBrief("gpt-5.6-sol xhigh")],
+    when: ["rendering", (b) => b],
+    then: ["names the model and demands re-verification", (b) => {
+      expect(b).toContain("[model-watch]");
+      expect(b).toContain("gpt-5.6-sol xhigh");
+      expect(b).toMatch(/re-verifiera/i);
+    }],
+  });
+
+  unit("channel line distinguishes restored from still-parked", {
+    given: ["both outcomes", () => ({
+      ok: recoveryMessage("api:3", true, "gpt-5.6-sol xhigh"),
+      fail: recoveryMessage("api:3", false, "model-missing: quota"),
+    })],
+    when: ["rendering", (m) => m],
+    then: ["🔁 vs 🅿 with detail", ({ ok, fail }) => {
+      expect(ok).toContain("🔁");
+      expect(ok).toContain("gpt-5.6-sol xhigh");
+      expect(fail).toContain("🅿");
+      expect(fail).toContain("kvar parkerad");
     }],
   });
 });
