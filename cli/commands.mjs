@@ -330,7 +330,11 @@ async function cmdSend(name, prompt, flags, ctx) {
   const sender = detectSenderFromEnv(process.env, exec);
   const finalPrompt = prependSenderHeader(prompt, sender);
 
-  await sendToPane(ctx, name, pane, finalPrompt);
+  const res = await sendToPane(ctx, name, pane, finalPrompt, { force: !!flags.force });
+  if (res?.blocked) {
+    process.exitCode = 1;
+    return;
+  }
   if (!flags.q) console.log(`Sent to '${name}' (pane ${pane}): ${truncate(prompt)}`);
 }
 
@@ -2619,6 +2623,7 @@ async function cmdRemind(ctx, flags = {}, positional = []) {
   const { loadReminderState, saveReminderState, parseReminderConfig, formatReminderMessage, cutoffFor } =
     await import("../core/reminder-state.mjs");
   const { countTurnsSince, panePathFor } = await import("../core/jsonl-reader.mjs");
+  const { readParkState } = await import("../core/pane-park.mjs");
 
   const config = parseReminderConfig();
   const threshold = Number.isFinite(flags.threshold) ? flags.threshold : config.turnThreshold;
@@ -2673,6 +2678,14 @@ async function cmdRemind(ctx, flags = {}, positional = []) {
     // --all modes send regardless (explicit user intent).
     if (flags.stale && turnCount < threshold) {
       skipped++;
+      continue;
+    }
+
+    // Parked panes (model downgrade) are never woken — even the one-sentence
+    // summary reply would run on the fallback model.
+    if (readParkState(a.name, paneIdx)) {
+      skipped++;
+      console.log(`⏭ ${paneKey}: parkerad (modell-nedgradering), väcks inte`);
       continue;
     }
 
@@ -3454,7 +3467,7 @@ Socket: /tmp/openclaw-claude.sock`);
 // --- Dispatch ---
 
 const FLAG_SPECS = {
-  send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "notify-user": "boolean", "notify-me": "boolean" },
+  send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "notify-user": "boolean", "notify-me": "boolean", force: "boolean" },
   wait: { p: "number", t: "number", a: "boolean" },
   log: {
     n: "number", p: "number",

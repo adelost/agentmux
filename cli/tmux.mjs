@@ -9,6 +9,7 @@ import { promisify } from "util";
 import { createAgent } from "../agent.mjs";
 import { esc, stripAnsi } from "../lib.mjs";
 import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
+import { readParkState, shouldBlockSend, blockedSendMessage } from "../core/pane-park.mjs";
 import { deliverToPane } from "../core/delivery.mjs";
 import { detectPaneStatus } from "./format.mjs";
 import { findChannelForPane, loadConfig } from "./config.mjs";
@@ -153,6 +154,23 @@ export async function sendKeys(ctx, name, pane, keys) {
 export async function sendToPane(ctx, name, pane, text, opts = {}) {
   const mirror = opts.mirror !== false;
   const sentAtMs = Date.now();
+
+  // 0. Park guard: a pane parked by model-watch (model downgrade) must not
+  //    be woken by a brief — the work would run on the fallback model
+  //    (api:3, 2026-07-10). Slash commands (administration, incl. the
+  //    /model recovery) pass; opts.force is the explicit override.
+  //    Fail-loud: the sender sees WHY, and the bound channel gets the same
+  //    line so dropped briefs are never invisible.
+  const park = opts.force ? null : readParkState(name, pane);
+  if (shouldBlockSend({ text, park, force: opts.force })) {
+    const notice = blockedSendMessage(`${name}:${pane}`, park);
+    console.error(notice);
+    if (mirror && ctx.configPath) {
+      const channelId = findChannelForPane(ctx.configPath, name, pane);
+      if (channelId) spawnMirrorWorker({ channelId, content: `[park-guard] ${notice}` });
+    }
+    return { delivered: false, blocked: true };
+  }
 
   // 1. Verified delivery through THE contract (core/delivery.mjs): CLI
   //    briefs used to be fire-and-forget — an agent-to-agent brief could

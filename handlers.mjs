@@ -9,6 +9,7 @@ import { checkLoopGuard, loopGuardKey, formatLoopGuardWarning, readLoopGuardConf
 import { formatCatchupPreview } from "./core/catchup-format.mjs";
 import { shortModelName } from "./core/context.mjs";
 import { loadConfig } from "./cli/config.mjs";
+import { readParkState, unparkPane } from "./core/pane-park.mjs";
 import { sendPromptVerified, sendSlashVerified } from "./core/delivery.mjs";
 
 /**
@@ -473,6 +474,17 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
   async function processMessage(msg, mapping, cleanPrompt, pane, tmpFiles) {
     console.log(`[${ts()}] ← ${mapping.name}:${pane} "${cleanPrompt.slice(0, 80)}"`);
     const stopTyping = msg.startTyping();
+
+    // A human message to a parked pane IS the wake decision ("knuffa igång
+    // den när läget är rätt"). Lift the park so agent briefs flow again;
+    // the guard only exists to keep AGENTS from waking it behind the
+    // human's back. Bookkeeping must never block the prompt itself.
+    try {
+      if (readParkState(mapping.name, pane)) {
+        unparkPane({ session: mapping.name, pane, detail: "human wake via Discord" });
+        console.log(`[${ts()}] ${mapping.name}:${pane} unparked (human wake)`);
+      }
+    } catch { /* ledger unavailable: proceed with the prompt regardless */ }
 
     const promptToSend = promptForAgent(cleanPrompt);
 

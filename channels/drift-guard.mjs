@@ -17,6 +17,7 @@ import {
   cutoffFor,
   formatReminderMessage,
 } from "../core/reminder-state.mjs";
+import { readParkState } from "../core/pane-park.mjs";
 import { isBoilerplateReply } from "../core/reply-forwarder.mjs";
 
 // Re-exported for the existing drift-guard.test.mjs import.
@@ -130,6 +131,12 @@ export function createDriftGuard({
         });
 
         if (decision.action === "send") {
+          // Parked panes (model downgrade) are never woken — even the
+          // one-sentence summary reply would run on the fallback model.
+          if (readParkState(a.name, i)) {
+            log(`skip ${paneKey}: parked (model downgrade)`);
+            continue;
+          }
           // reminderCount picks the DRIFT_SECTIONS rotation slot; legacy
           // state entries without it start at 0 (highest-priority rule).
           const reminderCount = paneState.reminderCount || 0;
