@@ -39,7 +39,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.20.59";
+const HINTS_VERSION = "1.20.64";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -404,6 +404,21 @@ rules to prevent silent regressions and version-bump collisions:
 
 Commit + push within 30 min of starting an edit. Long-running WIP that
 isn't in git is invisible to other agents.
+
+## Kommunikationsdisciplin (Mattias 2026-07-10 — efter ledger-mätt token-svinn)
+
+1. **Prata bara när (a) en STÖRRE uppgift är KLAR, (b) du genuint behöver
+   feedback/beslut, eller (c) något blockerar mottagaren.** Inga "klar med X,
+   fortsätter med Y"-status, inga kvittenser, inga artighetsfraser ("tack för
+   bra jobb"). Commits + ledger ÄR statuskommunikationen.
+2. **Kodreview av varandras arbete sker vid SLUTFÖRDA större uppgifter som
+   förplanerats ordentligt** — inte löpande smågranskning av pågående arbete.
+3. **Inget cross-projekt-arbete eller -review.** En panel tjänar SITT
+   tilldelade projekt. Förfrågan utanför lanen avböjs med EN rad ("utanför
+   min lane, fråga Mattias") utan att engagera i sakfrågan.
+4. **Delade träd fryses i KORTA brokerade gate-fönster** (en utsedd
+   koordinator äger fönstret) — aldrig dagar-långa blanket-fences av en
+   annan panels yta.
 
 ${HINTS_END_MARKER}
 `;
