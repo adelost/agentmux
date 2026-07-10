@@ -197,4 +197,78 @@ feature("golden fixtures — every context source", () => {
       expect(ctx.tokens).toBe(64_000);
     }],
   });
+
+  component("codex model + effort: newest turn_context wins", {
+    given: ["a rollout where /model switched mid-session", () => null],
+    when: ["reading context via the codex dialect", () => {
+      const { mkdtempSync, mkdirSync, writeFileSync } = fsExtra;
+      const home = mkdtempSync(join(tmpdir(), "amux-codex-"));
+      const paneDir = join(home, "work", "pane4");
+      const day = join(home, ".codex", "sessions", "2026", "07", "10");
+      mkdirSync(day, { recursive: true });
+      mkdirSync(paneDir, { recursive: true });
+      writeFileSync(join(day, "rollout-x.jsonl"), [
+        JSON.stringify({ type: "session_meta", payload: { cwd: paneDir } }),
+        JSON.stringify({ type: "turn_context", payload: { model: "gpt-5.5",
+          collaboration_mode: { settings: { reasoning_effort: "xhigh" } } } }),
+        JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: {
+          model_context_window: 256_000,
+          last_token_usage: { input_tokens: 10_000, output_tokens: 2_000 },
+        } } }),
+        JSON.stringify({ type: "turn_context", payload: { model: "gpt-5.6-sol",
+          collaboration_mode: { settings: { reasoning_effort: "max" } } } }),
+        JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: {
+          model_context_window: 256_000,
+          last_token_usage: { input_tokens: 60_000, output_tokens: 4_000 },
+        } } }),
+      ].join("\n") + "\n");
+      const prevHome = process.env.HOME;
+      process.env.HOME = home;
+      resetCodexSessionIndexForTests();
+      try {
+        return getContextPercent(paneDir, "codex");
+      } finally {
+        process.env.HOME = prevHome;
+        resetCodexSessionIndexForTests();
+      }
+    }],
+    then: ["newest model + effort ride along with newest usage", (ctx) => {
+      expect(ctx.percent).toBe(25);
+      expect(ctx.model).toBe("gpt-5.6-sol");
+      expect(ctx.effort).toBe("max");
+    }],
+  });
+
+  component("codex model absent from tail degrades to null model, usage intact", {
+    given: ["a rollout tail with only token_count", () => null],
+    when: ["reading context via the codex dialect", () => {
+      const { mkdtempSync, mkdirSync, writeFileSync } = fsExtra;
+      const home = mkdtempSync(join(tmpdir(), "amux-codex-"));
+      const paneDir = join(home, "work", "pane4");
+      const day = join(home, ".codex", "sessions", "2026", "07", "10");
+      mkdirSync(day, { recursive: true });
+      mkdirSync(paneDir, { recursive: true });
+      writeFileSync(join(day, "rollout-x.jsonl"), [
+        JSON.stringify({ type: "session_meta", payload: { cwd: paneDir } }),
+        JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: {
+          model_context_window: 256_000,
+          last_token_usage: { input_tokens: 60_000, output_tokens: 4_000 },
+        } } }),
+      ].join("\n") + "\n");
+      const prevHome = process.env.HOME;
+      process.env.HOME = home;
+      resetCodexSessionIndexForTests();
+      try {
+        return getContextPercent(paneDir, "codex");
+      } finally {
+        process.env.HOME = prevHome;
+        resetCodexSessionIndexForTests();
+      }
+    }],
+    then: ["usage still reported, model/effort null", (ctx) => {
+      expect(ctx.percent).toBe(25);
+      expect(ctx.model).toBeNull();
+      expect(ctx.effort).toBeNull();
+    }],
+  });
 });

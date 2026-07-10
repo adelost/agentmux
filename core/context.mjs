@@ -297,29 +297,41 @@ function getContextFromCodexJsonl(paneDir) {
   // in the file's tail — no need to read the whole rollout (can be many MB).
   const lines = readTailLines(file);
 
-  // Walk backwards for the most recent token_count event. Use last_token_usage
-  // (current turn's input+output), NOT total_token_usage (cumulative across
-  // the whole session, which can exceed the context window and isn't what
+  // Walk backwards for the most recent token_count event (usage truth) and
+  // the most recent turn_context (model truth — /model can switch it
+  // mid-session, so newest wins). Use last_token_usage (current turn's
+  // input+output), NOT total_token_usage (cumulative across the whole
+  // session, which can exceed the context window and isn't what
   // "context used" means).
-  for (let i = lines.length - 1; i >= 0; i--) {
+  let usage = null;
+  let turnCtx = null;
+  for (let i = lines.length - 1; i >= 0 && !(usage && turnCtx); i--) {
     if (!lines[i].trim()) continue;
-    try {
-      const entry = JSON.parse(lines[i]);
-      if (entry?.type !== "event_msg") continue;
-      if (entry.payload?.type !== "token_count") continue;
-      const info = entry.payload.info;
-      const last = info?.last_token_usage;
-      if (!last) continue;
-      // input_tokens already includes cached_input_tokens (they're a subset).
-      // Add output tokens that contribute to the current turn's context.
-      const tokens = (last.input_tokens || 0) + (last.output_tokens || 0);
-      const max = info.model_context_window || 256_000;
-      return { percent: Math.round((tokens / max) * 100), tokens };
-    } catch {
-      // malformed line
+    let entry;
+    try { entry = JSON.parse(lines[i]); } catch { continue; }
+
+    if (!turnCtx && entry?.type === "turn_context" && entry.payload?.model) {
+      turnCtx = {
+        model: entry.payload.model,
+        effort: entry.payload.collaboration_mode?.settings?.reasoning_effort
+          ?? entry.payload.effort ?? null,
+      };
+      continue;
     }
+
+    if (usage || entry?.type !== "event_msg") continue;
+    if (entry.payload?.type !== "token_count") continue;
+    const info = entry.payload.info;
+    const last = info?.last_token_usage;
+    if (!last) continue;
+    // input_tokens already includes cached_input_tokens (they're a subset).
+    // Add output tokens that contribute to the current turn's context.
+    const tokens = (last.input_tokens || 0) + (last.output_tokens || 0);
+    const max = info.model_context_window || 256_000;
+    usage = { percent: Math.round((tokens / max) * 100), tokens };
   }
-  return null;
+  if (!usage) return null;
+  return { ...usage, model: turnCtx?.model ?? null, effort: turnCtx?.effort ?? null };
 }
 
 // --- Pushed truth: Claude Code's statusline bridge ----------------------

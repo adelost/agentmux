@@ -10,7 +10,7 @@ import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens, 
 import { hasSession, ensureAndAttach, attachSession, killSession, listPanes, getPaneStatus, sendKeys, selectOption, createTmuxContext, sendToPane } from "./tmux.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
 import { stripAnsi, esc, extractActivity, formatDuration, validateImagePath } from "../lib.mjs";
-import { getContextFromPane, getContextPercent, getContextPushed } from "../core/context.mjs";
+import { getContextFromPane, getContextPercent, getContextPushed, shortModelName } from "../core/context.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { latestCodexJsonlMtime, readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
@@ -2282,7 +2282,12 @@ async function cmdPs(ctx, flags = {}) {
       if (expand) {
         const icon = statusIcon(p.status);
         const ctxCell = formatContextCell(p.context);
-        const cmd = p.command.padEnd(6);
+        // "vilken modell kör den?" — the model IS the interesting name of a
+        // coding pane; the generic cmd ("codex") only says the harness.
+        const modelLabel = p.context?.model
+          ? shortModelName(p.context.model) + (p.context.effort ? `·${p.context.effort}` : "")
+          : null;
+        const cmd = (modelLabel || p.command).padEnd(6);
         const label = a.panes[p.index]?.label;
         // Label wins; otherwise pull the meaningful last-assistant line from
         // jsonl (only now, for this expanded pane). Fall back to the tmux tail.

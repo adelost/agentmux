@@ -287,7 +287,10 @@ export function createJsonlWatcher({
         // tokens can be null when percent came from a custom statusline row.
         const suffix = ctx.tokens != null ? ` (${Math.round(ctx.tokens / 1000)}k)` : "";
         const model = shortModelName(ctx.model);
-        const prefix = model ? `${model} · ` : "";
+        // Codex carries a reasoning effort next to the model ("gpt-5.6-sol
+        // max"); claude has no equivalent, ctx.effort stays undefined there.
+        const modelLabel = model ? `${model}${ctx.effort ? ` ${ctx.effort}` : ""}` : null;
+        const prefix = modelLabel ? `${modelLabel} · ` : "";
         await discord.send(channelId, `_${prefix}context: ${ctx.percent}%${suffix}_`)
           .catch((err) => log(`context-footer ${name}:${idx}: ${err.message}`));
       }
