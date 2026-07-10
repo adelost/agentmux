@@ -199,6 +199,10 @@ export function createJsonlWatcher({
    */
   async function watchModelChange({ name, idx, channelId, ctx }) {
     if (!ctx?.model) return;
+    // Head-sourced readings are the session's ORIGINAL model — potentially
+    // stale, good enough for a display label but NOT evidence of a switch.
+    // Acting on one parked two healthy panes (false downgrade, 2026-07-10).
+    if (ctx.modelSource && ctx.modelSource !== "turn") return;
     const key = paneKey(name, idx);
     const map = state.get(STATE_KEY_LAST_MODEL, {}) || {};
     const prev = map[key];

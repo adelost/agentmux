@@ -333,12 +333,66 @@ function getContextFromCodexJsonl(paneDir) {
   if (!usage) return null;
   // A long-running turn (hundreds of tool events) pushes the newest
   // turn_context out of the 1MB tail — observed live on api:4 at 273k
-  // context: model label vanished mid-work. Fall back to the session HEAD
-  // (the first turn_context sits right after session_meta) — the initial
-  // model is right unless /model switched mid-session, which the tail scan
-  // catches whenever it IS visible.
-  if (!turnCtx) turnCtx = headTurnContext(file);
-  return { ...usage, model: turnCtx?.model ?? null, effort: turnCtx?.effort ?? null };
+  // context: model label vanished mid-work. Recovery order matters:
+  //   1. deeper BACKWARD scan (up to 8MB) — still the newest truth
+  //   2. session HEAD — the session's ORIGINAL model, which can be STALE.
+  // modelSource lets consumers separate truth grades: model-watch must act
+  // only on "turn"-sourced readings. The head fallback once reported the
+  // session's old gpt-5.5 on panes live on 5.6 and model-watch false-fired
+  // and PARKED two working panes (ai:3/ai:4, 2026-07-10 18:10).
+  let modelSource = turnCtx ? "turn" : null;
+  if (!turnCtx) {
+    turnCtx = backwardTurnContext(file);
+    if (turnCtx) modelSource = "turn";
+  }
+  if (!turnCtx) {
+    turnCtx = headTurnContext(file);
+    if (turnCtx) modelSource = "head";
+  }
+  return { ...usage, model: turnCtx?.model ?? null, effort: turnCtx?.effort ?? null, modelSource };
+}
+
+const BACKWARD_SCAN_MAX_BYTES = 8 * 1024 * 1024;
+const BACKWARD_SCAN_STEP = 1024 * 1024;
+
+/**
+ * Newest turn_context beyond the standard tail window: read 1MB windows
+ * backwards (up to 8MB) and keep the LAST parseable turn_context found.
+ * Only turn_context lines are parsed, so the scan stays cheap even when
+ * the windows are full of tool-event lines.
+ */
+function backwardTurnContext(filePath) {
+  let fd;
+  try {
+    fd = openSync(filePath, "r");
+    const size = fstatSync(fd).size;
+    const maxDepth = Math.min(size, BACKWARD_SCAN_MAX_BYTES);
+    // Doubling windows from the end: 2MB, 4MB, 8MB. The 1MB case is the
+    // standard tail the caller already scanned.
+    for (let depth = BACKWARD_SCAN_STEP * 2; ; depth *= 2) {
+      const window = Math.min(depth, maxDepth);
+      const buf = Buffer.alloc(window);
+      readSync(fd, buf, 0, window, size - window);
+      let found = null;
+      for (const line of buf.toString("utf-8").split("\n")) {
+        if (!line.includes('"turn_context"')) continue;
+        let entry;
+        try { entry = JSON.parse(line); } catch { continue; }
+        if (entry?.type !== "turn_context" || !entry.payload?.model) continue;
+        found = {
+          model: entry.payload.model,
+          effort: entry.payload.collaboration_mode?.settings?.reasoning_effort
+            ?? entry.payload.effort ?? null,
+        };
+      }
+      if (found) return found;
+      if (window >= maxDepth) return null;
+    }
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* closed */ } }
+  }
 }
 
 /**
