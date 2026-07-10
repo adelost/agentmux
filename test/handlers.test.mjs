@@ -1,5 +1,8 @@
 import { feature, component, unit, expect } from "bdd-vitest";
 import { vi } from "vitest";
+import { writeFileSync, unlinkSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { createHandlers, renderCatchupLine, formatCatchupTime } from "../handlers.mjs";
 
 // --- Test helpers ---
@@ -17,7 +20,7 @@ function mockMsg({ content = "hello", channelId = "ch1", isBot = false } = {}) {
   };
 }
 
-function setup({ mappingOverride, channelMapEntries } = {}) {
+function setup({ mappingOverride, channelMapEntries, agentsYamlPath } = {}) {
   const defaultMapping = { name: "_ai", dir: "/home/user/project", pane: 0 };
   const mapping = mappingOverride ?? defaultMapping;
   const channelMapData = channelMapEntries ?? new Map([["ch1", defaultMapping]]);
@@ -75,6 +78,7 @@ function setup({ mappingOverride, channelMapEntries } = {}) {
     overrides,
     channelMap: () => channelMapData,
     reloadConfig,
+    agentsYamlPath,
     pollInterval: 1,
   });
 
@@ -112,6 +116,63 @@ feature("onMessage routing", () => {
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
     then: ["agent is never called", (_, { agent }) => {
       expect(agent.sendAndWait).not.toHaveBeenCalled();
+    }],
+  });
+});
+
+// Temp agents.yaml with a codex pane 0 for the default "_ai" mapping.
+function writeCodexYaml() {
+  const path = join(tmpdir(), `amux-handlers-test-${Date.now()}-${Math.random().toString(36).slice(2)}.yaml`);
+  writeFileSync(path, `_ai:\n  dir: /home/user/project\n  panes:\n    - name: codex\n      cmd: codex resume --last\n`);
+  return path;
+}
+
+feature("/model dialect routing", () => {
+  component("codex pane with args gets picker guidance, nothing typed into the pane", {
+    given: ["a codex-backed channel and /model with model+effort", () => {
+      const path = writeCodexYaml();
+      const s = setup({ agentsYamlPath: path });
+      return { ...s, path, msg: mockMsg({ content: "/model gpt-5.6-sol xhigh" }) };
+    }],
+    when: ["onMessage is called", async ({ onMessage, msg, path }) => {
+      await onMessage(msg);
+      unlinkSync(path);
+    }],
+    then: ["replies with the attach+picker procedure and never sends to the pane", (_, { msg, agent }) => {
+      const reply = msg.reply.mock.calls[0][0];
+      expect(reply).toMatch(/picker/i);
+      expect(reply).toContain("amux _ai");
+      expect(agent.sendOnly).not.toHaveBeenCalled();
+    }],
+  });
+
+  component("bare /model on a codex pane hints the picker, not //model", {
+    given: ["a codex-backed channel and bare /model", () => {
+      const path = writeCodexYaml();
+      const s = setup({ agentsYamlPath: path });
+      s.agent.getContextPercent.mockReturnValue({ percent: 42, tokens: 84000, model: "gpt-5.6-sol" });
+      return { ...s, path, msg: mockMsg({ content: "/model" }) };
+    }],
+    when: ["onMessage is called", async ({ onMessage, msg, path }) => {
+      await onMessage(msg);
+      unlinkSync(path);
+    }],
+    then: ["reply carries the picker hint", (_, { msg }) => {
+      const reply = msg.reply.mock.calls[0][0];
+      expect(reply).toMatch(/picker/i);
+      expect(reply).not.toMatch(/\/\/model <name>/);
+    }],
+  });
+
+  component("claude pane (no yaml) keeps the forwarding path", {
+    given: ["default setup and /model with a claude alias", () => {
+      const s = setup();
+      return { ...s, msg: mockMsg({ content: "/model opus" }) };
+    }],
+    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["the command is typed into the pane and confirmed", (_, { msg, agent }) => {
+      expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "/model opus", 0);
+      expect(msg.reply.mock.calls[0][0]).toContain("sent `/model opus`");
     }],
   });
 });

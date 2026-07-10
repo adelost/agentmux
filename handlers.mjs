@@ -8,6 +8,7 @@ import { countTurnsSince, panePathFor, readLastTurns } from "./core/jsonl-reader
 import { checkLoopGuard, loopGuardKey, formatLoopGuardWarning, readLoopGuardConfig } from "./core/loop-guard.mjs";
 import { formatCatchupPreview } from "./core/catchup-format.mjs";
 import { shortModelName } from "./core/context.mjs";
+import { loadConfig } from "./cli/config.mjs";
 import { sendPromptVerified, sendSlashVerified } from "./core/delivery.mjs";
 
 /**
@@ -294,12 +295,30 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     // model per turn, so instant verification here would read the OLD one).
     "/model": async (msg, mapping, pane, args) => {
       const name = (args || "").trim();
+      // Codex's /model is picker-only: forwarded "/model <name>" text is
+      // NOT consumed as a command, it lands in the conversation as a chat
+      // message and switches nothing (verified live on a codex pane,
+      // 2026-07-10). Route codex panes to the procedure that works.
+      let paneCmd = "";
+      try {
+        paneCmd = loadConfig(agentsYamlPath)?.[mapping.name]?.panes?.[pane]?.cmd || "";
+      } catch { /* unknown pane cmd: fall through to the claude path */ }
+      const codexPicker = /codex/i.test(paneCmd)
+        ? `attach (\`amux ${mapping.name}\`, pane ${pane}), type \`/model\`, Enter, pick model + effort in the picker`
+        : null;
       if (!name) {
         const ctx = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
         const current = shortModelName(ctx?.model) || ctx?.model;
+        const switchHint = codexPicker
+          ? `Codex has no text switch: ${codexPicker}`
+          : `Switch with \`//model <name>\` (e.g. fable, opus, sonnet, haiku)`;
         await msg.reply(current
-          ? `**${mapping.name}** pane ${pane} · model: ${current}\nSwitch with \`//model <name>\` (e.g. fable, opus, sonnet, haiku)`
+          ? `**${mapping.name}** pane ${pane} · model: ${current}\n${switchHint}`
           : "model unknown (no jsonl/statusline data yet)");
+        return;
+      }
+      if (codexPicker) {
+        await msg.reply(`codex has no text form of \`/model\` (forwarded text would land as a chat message, not switch anything). Instead: ${codexPicker}.`);
         return;
       }
       // Loose whitelist: model ids/aliases only — never arbitrary text into
