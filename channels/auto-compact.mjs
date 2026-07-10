@@ -11,6 +11,8 @@ import {
   formatCompactedMessage,
 } from "../core/auto-compact.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
+import { appendEvent } from "../core/events.mjs";
+import { notifyUser } from "../cli/send-notify.mjs";
 import { getContextFromPane, getContextPercent } from "../core/context.mjs";
 import { detectPaneStatus } from "../cli/format.mjs";
 import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
@@ -219,6 +221,38 @@ export function createAutoCompact({
     }
   }
 
+  // paneKey → status from the previous tick. Drives the limited-transition
+  // alert: when a pane runs out of quota it just goes SILENT — the human
+  // discovered ai:4's stall by accident (2026-07-10). One alert per entry
+  // into "limited", re-armed when the pane leaves the state.
+  const prevStatus = new Map();
+
+  async function alertOnLimited(agentName, paneIdx, paneKey, status) {
+    const prev = prevStatus.get(paneKey);
+    prevStatus.set(paneKey, status);
+    if (status !== "limited" || prev === "limited" || prev === undefined) return;
+
+    log(`${paneKey} hit its quota/limit (was: ${prev})`);
+    try {
+      appendEvent({
+        ts: new Date().toISOString(),
+        event: "limited",
+        session: agentName,
+        pane: Number(paneIdx) || 0,
+        detail: `quota/limit hit (was: ${prev})`,
+      });
+    } catch (err) { log(`limited ledger row failed: ${err.message}`); }
+
+    const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
+    if (channelId && discord) {
+      await discord.send(channelId,
+        `🚫 **${paneKey} har slagit i kvot/limit — arbetet står stilla.** Återställningstiden syns i panelen (\`amux log ${agentName} -p ${paneIdx} --tmux\`). Knuffa igång den när kvoten är tillbaka.`)
+        .catch((err) => log(`limited warning send failed for ${paneKey}: ${err.message}`));
+    }
+    notifyUser(`🚫 ${paneKey} slut på kvot — står stilla tills du knuffar`)
+      .catch?.((err) => log(`limited push failed: ${err.message}`));
+  }
+
   async function postWarning(agentName, paneIdx, paneKey, contextPercent) {
     const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
     if (!channelId || !discord) {
@@ -256,6 +290,12 @@ export function createAutoCompact({
         // "/compact" is a Claude command that does not meaningfully drive it.
         // amux must not touch codex panes — skip and clear any leftover state.
         // Re-enable via AUTO_COMPACT_CODEX=true if that ever changes.
+        const { status, contextPercent, paneInMode, paneHeight, lastActivityMs } = await inspect(a, i);
+
+        // Quota-silence watch runs for EVERY pane (the classic producer is
+        // codex, which the compact logic below deliberately skips).
+        await alertOnLimited(a.name, i, paneKey, status);
+
         if (!config.codexEnabled && paneDialect(a, i) === "codex") {
           if (warnings.has(paneKey) || compactFloors.has(paneKey) || lastWarnPostAt.has(paneKey)) {
             warnings.delete(paneKey);
@@ -264,8 +304,6 @@ export function createAutoCompact({
           }
           continue;
         }
-
-        const { status, contextPercent, paneInMode, paneHeight, lastActivityMs } = await inspect(a, i);
 
         // Too small to read reliably — skip rather than act on redraw-soup.
         if (paneHeight != null && paneHeight < MIN_PANE_HEIGHT) {

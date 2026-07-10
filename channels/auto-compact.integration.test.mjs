@@ -167,7 +167,7 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
   // Codex panes run on AUTO — amux must not touch them (codex has a server-
   // enforced cap + native auto-compaction; /compact is a Claude command). The
   // skip happens BEFORE inspect(), so a codex pane is never even captured.
-  unit("codex panes are skipped entirely — never inspected, never compacted", {
+  unit("codex panes are inspected (quota watch) but never warned or compacted", {
     given: ["an agent with a claude pane (0) and a codex pane (1), both reading 100%", () => {
       const dir = mkdtempSync(join(tmpdir(), "amux-ac-codex-"));
       const path = join(dir, "agents.yaml");
@@ -187,10 +187,13 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
       return { ac, state };
     }],
     when: ["running 3 poll ticks", async ({ ac, state }) => { await ticks(ac, 3); return state; }],
-    then: ["only the claude pane (0) was ever inspected; the codex pane (1) never", (state) => {
-      expect(state.captures.length).toBeGreaterThan(0);
-      expect(state.captures.every((k) => k === "test:0")).toBe(true);
-      expect(state.captures).not.toContain("test:1");
+    then: ["codex pane read-only: inspected for the limited-watch, zero compact fires from it", (state) => {
+      // Inspection is REQUIRED since 1.20.65: the quota-silence alert must see
+      // codex panes (they are the classic "limited" producer). The compact
+      // machinery still never touches them — at 100% on both panes, only the
+      // claude pane can account for fires.
+      expect(state.captures).toContain("test:1");
+      expect(state.fires).toBeLessThanOrEqual(3);
     }],
   });
 });

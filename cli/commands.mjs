@@ -660,7 +660,8 @@ function ledgerTimelineRows({ since, agentFilter, paneFilter, grep }) {
   const rows = [];
   for (const evt of events) {
     const known = evt.event === "notification" || evt.event === "session_start"
-      || evt.event === "delivery" || evt.event === "context_loss";
+      || evt.event === "delivery" || evt.event === "context_loss"
+      || evt.event === "model_change";
     if (!known) continue;
     if (agentFilter && evt.session !== agentFilter) continue;
     if (paneFilter != null && evt.pane !== paneFilter) continue;
@@ -680,7 +681,9 @@ function ledgerTimelineRows({ since, agentFilter, paneFilter, grep }) {
     } else {
       content = evt.event === "session_start"
         ? `session start${evt.source ? ` (${evt.source})` : ""}`
-        : evt.event === "context_loss"
+        : evt.event === "model_change"
+          ? `MODEL ${evt.direction === "downgrade" ? "⬇" : evt.direction === "upgrade" ? "⬆" : "→"} ${evt.detail || ""}`
+          : evt.event === "context_loss"
           ? `CONTEXT LOSS: ${evt.detail || "(no detail)"}`
           : `${evt.needsYou ? "permission" : "notify"}: ${evt.detail || "(no detail)"}`;
     }

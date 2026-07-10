@@ -43,6 +43,9 @@ import { readLastTurnsCodex, latestCodexJsonlMtime, latestCodexJsonlInfo } from 
 import { getContextFromPane, shortModelName } from "../core/context.mjs";
 import { isHarnessPlaceholder } from "../core/reply-forwarder.mjs";
 import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, planStartupAudit, itemKey } from "../core/watcher-engine.mjs";
+import { classifyModelChange, changeMessage, stopBrief, label as modelLabel } from "../core/model-watch.mjs";
+import { appendEvent } from "../core/events.mjs";
+import { notifyUser } from "../cli/send-notify.mjs";
 import { createPaneQueue } from "../core/pane-queue.mjs";
 
 const DEFAULT_POLL_MS = 15_000;
@@ -186,6 +189,59 @@ export function createJsonlWatcher({
     state.set(STATE_KEY_RETRY_UNTIL, map);
   }
 
+  const STATE_KEY_LAST_MODEL = "watcher_last_model";
+
+  /**
+   * Model-watch hook: runs where the footer ctx is computed (zero extra I/O).
+   * First sighting only records; a change warns in-channel + ledger, and a
+   * DOWNGRADE additionally pushes mobile and briefs the pane to re-verify
+   * its plan (see core/model-watch.mjs for the policy rationale).
+   */
+  async function watchModelChange({ name, idx, channelId, ctx }) {
+    if (!ctx?.model) return;
+    const key = paneKey(name, idx);
+    const map = state.get(STATE_KEY_LAST_MODEL, {}) || {};
+    const prev = map[key];
+    const next = { model: ctx.model, effort: ctx.effort ?? null };
+    map[key] = next;
+    state.set(STATE_KEY_LAST_MODEL, map);
+    if (!prev) return;
+
+    const change = classifyModelChange(prev, next);
+    if (!change) return;
+
+    const paneName = `${name}:${idx}`;
+    log(`${paneName} model change: ${change.from} → ${change.to} (${change.direction})`);
+    try {
+      appendEvent({
+        ts: new Date().toISOString(),
+        event: "model_change",
+        session: name,
+        pane: Number(idx) || 0,
+        direction: change.direction,
+        detail: `${change.from} → ${change.to}`,
+      });
+    } catch (err) { log(`model-change ledger row failed: ${err.message}`); }
+
+    await discord.send(channelId, changeMessage(paneName, change, ctx.percent))
+      .catch((err) => log(`model-change warning failed for ${paneName}: ${err.message}`));
+
+    if (change.direction !== "downgrade") return;
+    notifyUser(`🔀 ${paneName} nedgraderad och STOPPAD: ${change.from} → ${change.to} — knuffa när läget är rätt`)
+      .catch?.((err) => log(`model-change push failed: ${err.message}`));
+    // Stop the harm first: a mid-turn pane keeps building on the weaker
+    // model until interrupted. Then park it with the stop-brief.
+    try {
+      const busy = await agent.isBusy?.(name, idx);
+      if (busy) await agent.sendEscape(name, idx);
+    } catch (err) { log(`model-change escape failed for ${paneName}: ${err.message}`); }
+    try {
+      await agent.sendOnly(name, stopBrief(change), idx);
+    } catch (err) {
+      log(`model-change stop brief failed for ${paneName}: ${err.message}`);
+    }
+  }
+
   function commitEngineState(channelId, nextState) {
     if (!nextState) return;
     if (Number.isFinite(nextState.lastPostedMs)) setLastPostedMs(channelId, nextState.lastPostedMs);
@@ -287,6 +343,8 @@ export function createJsonlWatcher({
         if (!ctx) ctx = agent.getContextPercent?.(name, idx);
       }
       if (ctx) {
+        await watchModelChange({ name, idx, channelId, ctx })
+          .catch((err) => log(`model-watch failed for ${name}:${idx}: ${err.message}`));
         // tokens can be null when percent came from a custom statusline row.
         const suffix = ctx.tokens != null ? ` (${Math.round(ctx.tokens / 1000)}k)` : "";
         const model = shortModelName(ctx.model);

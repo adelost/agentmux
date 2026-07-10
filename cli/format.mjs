@@ -62,7 +62,7 @@ export function detectPaneStatus(paneContent) {
   // a limited pane read as idle and got a false auto-compact warning). The
   // banner re-prints on every attempted prompt and scrolls out with the
   // first real turn after reset.
-  if (/You've hit your session limit/.test(tailRaw)) return "limited";
+  if (/You've hit your (session|usage) limit/.test(tailRaw)) return "limited";
 
   // Codex renders "■ Conversation interrupted - tell the model what to do
   // differently" when a turn dies (Esc keypress, stream error). The composer
