@@ -10,6 +10,7 @@ import { formatCatchupPreview } from "./core/catchup-format.mjs";
 import { shortModelName } from "./core/context.mjs";
 import { loadConfig } from "./cli/config.mjs";
 import { readParkState, unparkPane } from "./core/pane-park.mjs";
+import { driveCodexModelPicker } from "./core/codex-model-picker.mjs";
 import { sendPromptVerified, sendSlashVerified } from "./core/delivery.mjs";
 
 /**
@@ -311,7 +312,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         const ctx = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
         const current = shortModelName(ctx?.model) || ctx?.model;
         const switchHint = codexPicker
-          ? `Codex has no text switch: ${codexPicker}`
+          ? `Switch with \`//model <name> [low|medium|high|xhigh|max]\` (bridge drives the picker), or manually: ${codexPicker}`
           : `Switch with \`//model <name>\` (e.g. fable, opus, sonnet, haiku)`;
         await msg.reply(current
           ? `**${mapping.name}** pane ${pane} · model: ${current}\n${switchHint}`
@@ -319,7 +320,30 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         return;
       }
       if (codexPicker) {
-        await msg.reply(`codex has no text form of \`/model\` (forwarded text would land as a chat message, not switch anything). Instead: ${codexPicker}.`);
+        // Codex has no text form of /model, so the bridge drives the TUI
+        // picker itself (typed digits, capture-verified per stage). The
+        // manual procedure stays as the fallback when the drive fails.
+        const spec = name.match(/^([a-z0-9._-]+)(?:\s+(minimal|low|medium|high|xhigh|max))?$/i);
+        if (!spec) {
+          await msg.reply(`invalid codex model spec: \`${name}\` — expected \`<model> [low|medium|high|xhigh|max]\``);
+          return;
+        }
+        const [, targetModel, targetEffort] = spec;
+        const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
+          driveCodexModelPicker({
+            agent,
+            name: mapping.name,
+            pane,
+            model: targetModel,
+            effort: targetEffort ? targetEffort.toLowerCase() : null,
+            log: (m) => console.log(`[${ts()}] ${m}`),
+          }));
+        if (result.ok) {
+          await msg.reply(`✅ model changed to ${result.model}${result.effort ? ` ${result.effort}` : ""}`);
+        } else {
+          const avail = result.available ? `\navailable: ${result.available.join(", ")}` : "";
+          await msg.reply(`⚠️ picker drive failed (${result.stage}): ${result.error}${avail}\nManual fallback: ${codexPicker}.`);
+        }
         return;
       }
       // Loose whitelist: model ids/aliases only — never arbitrary text into

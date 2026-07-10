@@ -128,25 +128,30 @@ function writeCodexYaml() {
 }
 
 feature("/model dialect routing", () => {
-  component("codex pane with args gets picker guidance, nothing typed into the pane", {
-    given: ["a codex-backed channel and /model with model+effort", () => {
+  component("codex pane with args drives the picker; failure falls back to guidance", {
+    given: ["a codex-backed channel whose pane shows no picker UI", () => {
       const path = writeCodexYaml();
       const s = setup({ agentsYamlPath: path });
+      s.agent.isBusy.mockResolvedValue(false);
+      s.agent.typeLiteral = vi.fn(async () => {});
+      // capturePane keeps returning plain output → the drive dies at the
+      // compose stage and the handler must surface the manual fallback.
       return { ...s, path, msg: mockMsg({ content: "/model gpt-5.6-sol xhigh" }) };
     }],
     when: ["onMessage is called", async ({ onMessage, msg, path }) => {
       await onMessage(msg);
       unlinkSync(path);
     }],
-    then: ["replies with the attach+picker procedure and never sends to the pane", (_, { msg, agent }) => {
+    then: ["typed /model into the pane, failed loud with fallback, no prompt sent", (_, { msg, agent }) => {
       const reply = msg.reply.mock.calls[0][0];
-      expect(reply).toMatch(/picker/i);
+      expect(agent.typeLiteral).toHaveBeenCalledWith("_ai", "/model", 0);
+      expect(reply).toMatch(/picker drive failed/i);
       expect(reply).toContain("amux _ai");
       expect(agent.sendOnly).not.toHaveBeenCalled();
     }],
   });
 
-  component("bare /model on a codex pane hints the picker, not //model", {
+  component("bare /model on a codex pane hints the //model-with-effort form", {
     given: ["a codex-backed channel and bare /model", () => {
       const path = writeCodexYaml();
       const s = setup({ agentsYamlPath: path });
@@ -157,10 +162,10 @@ feature("/model dialect routing", () => {
       await onMessage(msg);
       unlinkSync(path);
     }],
-    then: ["reply carries the picker hint", (_, { msg }) => {
+    then: ["reply carries picker hint incl. effort tiers", (_, { msg }) => {
       const reply = msg.reply.mock.calls[0][0];
       expect(reply).toMatch(/picker/i);
-      expect(reply).not.toMatch(/\/\/model <name>/);
+      expect(reply).toMatch(/xhigh/);
     }],
   });
 

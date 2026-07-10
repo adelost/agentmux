@@ -1491,6 +1491,15 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await t.sendEnter(`${agentName}:.${pane}`);
   }
 
+  /**
+   * Literal keystrokes WITHOUT a trailing Enter. TUI-driving primitive for
+   * flows that interleave typing with capture-verify (codex model picker:
+   * digits select instantly, an unverified Enter confirms the wrong row).
+   */
+  async function typeLiteral(agentName, text, pane) {
+    await t.sendLiteral(`${agentName}:.${pane}`, text);
+  }
+
   async function checkAgent(agentName) {
     if (!(await hasSession(agentName))) throw new Error(`No session: ${agentName}`);
     if (!(await isAlreadyRunning(`${agentName}:.0`))) throw new Error(`Claude not running in ${agentName}`);
@@ -1499,7 +1508,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   return {
     ensureReady, sendAndWait, sendOnly,
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
-    capturePane, sendEscape, sendEnter, dismissBlockingPrompt, waitForPromptEcho,
+    capturePane, sendEscape, sendEnter, typeLiteral, dismissBlockingPrompt, waitForPromptEcho,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession,
     sanitizeTmuxGlobalEnv,
   };
