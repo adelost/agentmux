@@ -50,9 +50,9 @@ export function createDriftGuard({
     return res?.count ?? 0;
   }
 
-  async function sendReminder(agentConfig, paneIdx, paneKey, turnCount) {
+  async function sendReminder(agentConfig, paneIdx, paneKey, turnCount, reminderCount) {
     const agentName = agentConfig.name;
-    const text = formatReminderMessage(turnCount);
+    const text = formatReminderMessage(turnCount, reminderCount);
     try {
       await agent.sendOnly(agentName, text, paneIdx);
       log(`reminded ${paneKey} at ${turnCount} turns past refresh`);
@@ -130,8 +130,12 @@ export function createDriftGuard({
         });
 
         if (decision.action === "send") {
-          await sendReminder(a, i, paneKey, turnsSinceCutoff);
+          // reminderCount picks the DRIFT_SECTIONS rotation slot; legacy
+          // state entries without it start at 0 (highest-priority rule).
+          const reminderCount = paneState.reminderCount || 0;
+          await sendReminder(a, i, paneKey, turnsSinceCutoff, reminderCount);
           paneState.lastReminderTsMs = now;
+          paneState.reminderCount = reminderCount + 1;
           stateChanged = true;
         }
       }

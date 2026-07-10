@@ -2680,8 +2680,11 @@ async function cmdRemind(ctx, flags = {}, positional = []) {
       // sendToPane mirrors to the pane's bound Discord channel automatically
       // via the standard mirror path — same as any other `amux` send. No
       // source tag so the reminder reads the same in Discord as in the pane.
-      await sendToPane(ctx, a.name, paneIdx, formatReminderMessage(turnCount));
-      state[paneKey] = { ...paneState, lastReminderTsMs: nowMs };
+      // reminderCount rotates DRIFT_SECTIONS; the shared state file keeps
+      // the rotation continuous between manual remind and the bridge poll.
+      const reminderCount = paneState.reminderCount || 0;
+      await sendToPane(ctx, a.name, paneIdx, formatReminderMessage(turnCount, reminderCount));
+      state[paneKey] = { ...paneState, lastReminderTsMs: nowMs, reminderCount: reminderCount + 1 };
       sent++;
       console.log(`reminded ${paneKey} (${turnCount} turns)`);
     } catch (err) {

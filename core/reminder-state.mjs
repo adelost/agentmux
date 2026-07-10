@@ -113,9 +113,53 @@ export function cutoffFor(paneState) {
 }
 
 /**
+ * Drift-prone rules the reminder rotates over. Order matters: fresh panes
+ * and state resets start at index 0, so the first nudge always lands on
+ * the highest-priority rule. To weight a rule heavier, list it more than
+ * once — the list is the mechanism.
+ *
+ * `directive` must be self-contained: it travels inside the message, so
+ * the core of the rule reaches the pane even if a heading is later
+ * renamed. `section: null` means "re-read the whole file". CLAUDE.md
+ * section names must match the AGENT_HINTS headings in agent.mjs.
+ *
+ * Code standards also have event hooks (post-compact re-anchor,
+ * first-edit-per-session) that fire at the sharp moments; the rotation
+ * entry covers slow decay BETWEEN those moments in long coding sessions.
+ */
+export const DRIFT_SECTIONS = [
+  {
+    file: ".agents/CLAUDE.md",
+    section: "Kommunikationsdisciplin",
+    directive: "message other panes only when a major task is DONE, " +
+      "you genuinely need a decision, or something blocks the recipient. " +
+      "No status pings, no acks, no politeness; commits + ledger ARE the status.",
+  },
+  {
+    file: "~/.claude/coding-philosophy.md",
+    section: null,
+    directive: "declarative + data-driven, Result<T,E> for domain errors, " +
+      "bdd-vitest for every change, max ~500 lines/file, no silent fallbacks. " +
+      "Run tests + lint before claiming done.",
+  },
+  {
+    file: ".agents/CLAUDE.md",
+    section: "Always lead with a recommendation",
+    directive: "when presenting options, lead with one concrete pick plus " +
+      "a one-line why tied to the user's goals. Never 'up to you'.",
+  },
+  {
+    file: ".agents/CLAUDE.md",
+    section: "Root cause > symptoms",
+    directive: "fix the cause, not the symptom. " +
+      "No --no-verify, no swallowed errors, no skipped tests.",
+  },
+];
+
+/**
  * The reminder text sent to the pane. Short by design — long reminders
  * get ignored. Refers to the .agents/CLAUDE.md file because that's where
- * the rule lives and is always system-context-loaded.
+ * the rules live and are always system-context-loaded.
  *
  * Behavior change in 1.16.10: previously asked the agent to "absorb
  * silently" (588d421 in 1.12.x). That kept the channel quiet but the
@@ -124,12 +168,23 @@ export function cutoffFor(paneState) {
  * one-sentence summary so the rule lands as the latest assistant text;
  * the next turn now has the directive hot in working memory instead of
  * fading into system-context.
+ *
+ * Behavior change in 1.20.69: the highlighted section rotates through
+ * DRIFT_SECTIONS keyed on the pane's reminderCount, instead of always
+ * naming one hardcoded rule. Each message stays one-rule short (that's
+ * why reminders land at all) while every drift-prone rule gets its turn.
+ *
+ * @param {number} turnCount - user turns since the pane's last refresh
+ * @param {number} reminderCount - reminders already sent to this pane
  */
-export function formatReminderMessage(turnCount) {
-  return `[drift-guard] Re-read .agents/CLAUDE.md — especially the ` +
-    `"Always lead with a recommendation" section. You are ${turnCount}+ turns past ` +
-    `your last refresh; attention weights decay. ` +
-    `Reply with ONE sentence summarizing the rule's core directive, then ` +
+export function formatReminderMessage(turnCount, reminderCount = 0) {
+  const rule = DRIFT_SECTIONS[reminderCount % DRIFT_SECTIONS.length];
+  const where = rule.section
+    ? `the "${rule.section}" section of ${rule.file}`
+    : rule.file;
+  return `[drift-guard] Re-read ${where}: ${rule.directive} ` +
+    `You are ${turnCount}+ turns past your last refresh; attention weights decay. ` +
+    `Reply with ONE sentence summarizing this rule's core directive, then ` +
     `continue your current task. The summary keeps the rule hot in context ` +
-    `for the next turns — that's the point, not boilerplate ack.`;
+    `for the next turns; that's the point, not boilerplate ack.`;
 }
