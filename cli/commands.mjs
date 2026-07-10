@@ -11,6 +11,7 @@ import { hasSession, ensureAndAttach, attachSession, killSession, listPanes, get
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
 import { stripAnsi, esc, extractActivity, formatDuration, validateImagePath } from "../lib.mjs";
 import { getContextFromPane, getContextPercent, getContextPushed, shortModelName } from "../core/context.mjs";
+import { loadSearchRoots, lexicalSearch, formatHits, saveLastResults, loadLastResults, expandHit, withScore, dedupeByFile } from "../core/search.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { latestCodexJsonlMtime, readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
@@ -2096,6 +2097,60 @@ const ACTIVE_STATUS = (s) => statusTier(s) >= 2;
  * bridge, broken hooks, dead ledger, unreachable tmux, broken config.
  * Exit code: 0 ok, 1 warnings, 2 failures (cron-friendly).
  */
+/**
+ * amux search — overview-first search over the configured corpora
+ * (agents.yaml `search.roots`). One line per hit; `--show N` expands the
+ * Nth hit from the LAST search (results persisted to ~/.agentmux/).
+ * Semantic layer joins in when the optional embedding index exists.
+ */
+async function cmdSearch(ctx, query, flags) {
+  if (flags.show != null) {
+    const last = loadLastResults();
+    if (!last) { console.error("Ingen tidigare sökning att expandera."); process.exit(1); }
+    const picks = String(flags.show).split(",").map((n) => parseInt(n, 10)).filter(Boolean);
+    for (const n of picks) {
+      const hit = last.hits[n - 1];
+      if (!hit) { console.error(`#${n} finns inte (senaste sökningen gav ${last.hits.length} träffar).`); continue; }
+      console.log(`── #${n} ${hit.path}:${hit.line}  (sökning: "${last.query}")`);
+      console.log(expandHit(hit, { context: flags.context ?? 10 }));
+      console.log("");
+    }
+    return;
+  }
+
+  if (!query) { console.error('Usage: amux search "term" [--max N] [--source NAME] [--fast] | --show N [--context N] | --reindex'); process.exit(1); }
+  const config = loadConfig(ctx.configPath);
+  let roots = loadSearchRoots(config);
+  if (!roots.length) {
+    console.error("Inga sökrötter. Lägg till i agents.yaml:\n  search:\n    roots:\n      - { name: memory, path: ~/pathtill/memory, glob: \"*.md\", weight: 3, semantic: true }");
+    process.exit(1);
+  }
+  if (flags.source) roots = roots.filter((r) => r.name.includes(flags.source));
+
+  const t0 = Date.now();
+  let hits = lexicalSearch(query, roots);
+
+  // Semantic layer: optional. Missing dep/index = lexical-only + one hint.
+  if (!flags.fast) {
+    try {
+      const sem = await import("../core/search-semantic.mjs");
+      const semHits = await sem.semanticSearch(query, { k: 8 });
+      if (semHits?.length) {
+        hits = dedupeByFile([...hits, ...semHits.map((h) => withScore({ ...h, layer: "sem" }))]);
+      }
+    } catch (err) {
+      if (process.env.AMUX_DEBUG) console.error(`semantic layer off: ${err.message}`);
+    }
+  }
+
+  const max = flags.max ?? 12;
+  const top = hits.slice(0, max);
+  if (!top.length) { console.log(`0 träffar för "${query}" (${Date.now() - t0}ms)`); return; }
+  saveLastResults(query, top);
+  console.log(formatHits(top));
+  console.log(`\n${top.length}/${hits.length} träffar, ${Date.now() - t0}ms  ·  expandera: amux search --show N`);
+}
+
 async function cmdDoctor(ctx) {
   const home = process.env.HOME;
   const repoDir = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -3305,7 +3360,7 @@ Usage:
   agent dream                     Write/update nightly pane digest in workspace memory
     --since T                     Window to summarize (default: 24h)
     --dry                         Preview pane work, do nothing
-  agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)\n  agent doctor                    Health check: bridge alive/hung/stale-code, hooks, ledger, tmux (exit 0/1/2)
+  agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)\n  agent doctor                    Health check: bridge alive/hung/stale-code, hooks, ledger, tmux (exit 0/1/2)\n  agent search "term"             Search configured corpora (memory/sessions/ledger); --show N expands, --reindex rebuilds semantic index
     --dry                         List deletion candidates, change nothing
     --days N                      Retention window (default: 14)
   agent playwright-reap           Reap stale Playwright-MCP/browser processes
@@ -3484,6 +3539,18 @@ export async function dispatch(argv, ctx) {
 
     case "doctor": {
       return cmdDoctor(ctx);
+    }
+
+    case "search": {
+      const { flags, positional } = parseFlags(rest, {
+        max: "number", show: "string", context: "number",
+        source: "string", fast: "boolean", reindex: "boolean",
+      });
+      if (flags.reindex) {
+        const sem = await import("../core/search-semantic.mjs");
+        return sem.reindex(loadSearchRoots(loadConfig(ctx.configPath)), { log: console.log });
+      }
+      return cmdSearch(ctx, positional.join(" "), flags);
     }
 
     case "top": {

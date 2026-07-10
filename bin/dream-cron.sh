@@ -47,3 +47,10 @@ grep -q "^> why:" "$daily_file"
 grep -q "<!-- amux-dream-run:$date_key " "$daily_file"
 
 printf "%s OK amux dream %s\n" "$(date -Is)" "$daily_file" >> "$AGENTMUX_DREAM_LOG"
+
+# Search-index refresh: incremental (mtime), so the nightly cost is just the
+# day's changed memory files. Failure is non-fatal — search degrades to
+# lexical-only, and the next night catches up.
+"$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" search --reindex \
+  >> "$AGENTMUX_DREAM_LOG" 2>&1 \
+  || printf "%s WARN search reindex failed (lexical-only until next run)\n" "$(date -Is)" >> "$AGENTMUX_DREAM_LOG"
