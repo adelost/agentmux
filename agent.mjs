@@ -39,7 +39,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.20.64";
+const HINTS_VERSION = "1.20.74";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -419,6 +419,30 @@ isn't in git is invisible to other agents.
 4. **Delade träd fryses i KORTA brokerade gate-fönster** (en utsedd
    koordinator äger fönstret) — aldrig dagar-långa blanket-fences av en
    annan panels yta.
+
+## Bemanning & review-ekonomi (Mattias 2026-07-10)
+
+1. **En ägare per feature/projekt, end-to-end.** Den andra instansen engageras
+   vid TVÅ gates: design-review INNAN bygget, whole-wave-review vid KLART.
+   Ingen löpande mid-flight-koordinering.
+2. **Parallell-split är undantaget**, motiverat bara när filzonerna är
+   disjunkta, båda spåren har substantiellt arbete och wall-clock spelar roll.
+   En färdig panel är TYST: ingen vaktning, inga är-ni-klara-pingar
+   (ai:4-läxan 2026-07-10: färdiga-men-frysta paneler genererar bruset,
+   arbetande gör det inte). Vaktrollen är en cron, aldrig en levande agent.
+3. **Review efter risk, inte efter vana.** ALLTID dubbelreview: säkerhetskritiskt
+   (altimetern är liv), delade kontrakt/sömmar, release-gates, fysik/geometri,
+   allt som kan fabricera data vid null (dokumenterad avkastning: 2-6 äkta
+   buggar per våg). SKIPPA: UI-polish, docs, scripts, enradsfixar i egen lane
+   (dokumenterat facit: "godkänd utan villkor"). Vågnivå är default;
+   per-hash-review reserveras för säkerhetskritiskt.
+4. **Varje review-fynd ska gradera upp till en gate** (lint/test-regel) så
+   maskinen fångar klassen nästa gång gratis. En review som aldrig blir en
+   gate är en löpande kostnad; en gate är en engångskostnad.
+5. **Nattkörningar gör bara nödvändiga saker.** Inga spekulativa refactors,
+   inga deploys som kostar pengar utan stående GO, frågor batchas till EN
+   morgonrapport. Kvotdöd mitt i natten är fine: varje slice bankas vid
+   commit och återupptas där den stannade.
 
 ${HINTS_END_MARKER}
 `;
