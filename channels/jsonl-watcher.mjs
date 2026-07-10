@@ -42,7 +42,7 @@ import { readLastTurns, latestJsonlMtime, latestJsonlInfo } from "../core/jsonl-
 import { readLastTurnsCodex, latestCodexJsonlMtime, latestCodexJsonlInfo } from "../core/codex-jsonl-reader.mjs";
 import { getContextFromPane, shortModelName } from "../core/context.mjs";
 import { isHarnessPlaceholder } from "../core/reply-forwarder.mjs";
-import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, itemKey } from "../core/watcher-engine.mjs";
+import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, planStartupAudit, itemKey } from "../core/watcher-engine.mjs";
 import { createPaneQueue } from "../core/pane-queue.mjs";
 
 const DEFAULT_POLL_MS = 15_000;
@@ -94,7 +94,7 @@ export function createJsonlWatcher({
   pollMs = DEFAULT_POLL_MS,
   typingPollMs = DEFAULT_TYPING_POLL_MS,
   postPrefix = "",
-  log = (msg) => console.log(`watcher | ${msg}`),
+  log = (msg) => console.log(`${new Date().toISOString().slice(11, 19)} watcher | ${msg}`),
 } = {}) {
   if (!agent) throw new Error("watcher: agent required");
   if (!agentsYamlPath) throw new Error("watcher: agentsYamlPath required");
@@ -114,6 +114,9 @@ export function createJsonlWatcher({
    *      skipped forever once they become old enough to mirror.
    */
   const readSnapshots = new Map();
+  // Panes audited since THIS bridge started — the startup self-heal runs once
+  // per pane, then the normal cursor engine owns the stream again.
+  const auditedPanes = new Set();
   const metricsEnabled = process.env.AMUX_WATCHER_METRICS === "1";
   let pollTimer = null;
   let typingTimer = null;
@@ -430,6 +433,28 @@ export function createJsonlWatcher({
       }
 
       const mtimeMs = fileInfo?.mtimeMs ?? latestMtime(dir);
+
+      // Startup self-heal: post anything a previous bridge completed but never
+      // delivered (kill -9 mid-grace loses the item forever once the cursor
+      // moves — the lsrc:3 incident, 2026-07-10). Id-dedupe makes re-runs safe.
+      if (!auditedPanes.has(key)) {
+        auditedPanes.add(key);
+        const audit = planStartupAudit({
+          turns: result.turns,
+          postedItemIds: postedItemIds(channelId),
+          nowMs: now,
+        });
+        for (const action of audit.actions) {
+          const posted = await postTurn({ name, idx, channelId, turn: action.turn, config });
+          if (!posted?.ok) { log(`${name}:${idx} audit post failed — normal retry path takes over`); break; }
+          commitEngineState(channelId, applyPostSuccess({
+            lastPostedMs: lastPostedMs(channelId),
+            postedItemIds: postedItemIds(channelId),
+            retryUntilMs: retryUntilMs(channelId),
+          }, action));
+          log(`${name}:${idx} → ${channelId} (audit: recovered ${action.postedIds.length} missed item(s) from ${new Date(action.endMs).toISOString()})`);
+        }
+      }
 
       const planned = planPaneMirrorStep({
         turns: result.turns,

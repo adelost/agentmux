@@ -3,6 +3,7 @@ import {
   applyPostFailure,
   applyPostSuccess,
   planPaneMirrorStep,
+  planStartupAudit,
 } from "./watcher-engine.mjs";
 
 const ts = (s) => `2026-05-30T12:00:${s}.000Z`;
@@ -288,6 +289,75 @@ feature("watcher engine: grace and retry policy", () => {
       expect(next.lastPostedMs).toBe(ms(ts("09")));
       expect(next.retryUntilMs).toBe(ms(ts("20")) + 30_000);
       expect(next.lastFailedPost).toMatchObject({ endMs: ms(ts("11")), turnStartMs: ms(ts("10")) });
+    }],
+  });
+});
+
+feature("planStartupAudit — restart self-heal (the lsrc:3 loss, 2026-07-10)", () => {
+  const NOW = Date.parse("2026-07-10T12:06:00Z");
+  const lostTurn = () => ({
+    isComplete: true,
+    timestamp: "2026-07-10T11:38:00Z",
+    endTimestamp: "2026-07-10T11:44:04Z",
+    items: [
+      { id: "sha1:posted-mid", type: "text", content: "mellansteg" },
+      { id: "sha1:final-answer", type: "text", content: "Kort svar: planen..." },
+    ],
+  });
+
+  unit("a completed turn with an unposted item gets recovered, posted items excluded", {
+    given: ["the killed-mid-grace turn, mid item already posted", () => planStartupAudit({
+      turns: [lostTurn()],
+      postedItemIds: ["sha1:posted-mid"],
+      nowMs: NOW,
+    })],
+    when: ["planning", (p) => p],
+    then: ["one audit action with ONLY the missed item", (p) => {
+      expect(p.actions.length).toBe(1);
+      expect(p.actions[0].reason).toBe("audit");
+      expect(p.actions[0].turn.items.map((i) => i.id)).toEqual(["sha1:final-answer"]);
+    }],
+  });
+
+  unit("fully posted turns are silent (no duplicates from re-audits)", {
+    given: ["everything already in the posted set", () => planStartupAudit({
+      turns: [lostTurn()],
+      postedItemIds: ["sha1:posted-mid", "sha1:final-answer"],
+      nowMs: NOW,
+    })],
+    when: ["planning", (p) => p],
+    then: ["no actions", (p) => { expect(p.actions).toEqual([]); }],
+  });
+
+  unit("turns older than the window stay skipped (bounded recovery, no history flood)", {
+    given: ["the same turn seen two hours later", () => planStartupAudit({
+      turns: [lostTurn()],
+      postedItemIds: [],
+      nowMs: NOW + 2 * 60 * 60 * 1000,
+    })],
+    when: ["planning", (p) => p],
+    then: ["no actions", (p) => { expect(p.actions).toEqual([]); }],
+  });
+
+  unit("incomplete turns are left to the normal cursor engine", {
+    given: ["a live turn with unposted items", () => planStartupAudit({
+      turns: [{ ...lostTurn(), isComplete: false }],
+      postedItemIds: [],
+      nowMs: NOW,
+    })],
+    when: ["planning", (p) => p],
+    then: ["no actions", (p) => { expect(p.actions).toEqual([]); }],
+  });
+
+  unit("an audit re-post of an old turn never drags the cursor backwards", {
+    given: ["cursor already past the old turn", () => applyPostSuccess(
+      { lastPostedMs: Date.parse("2026-07-10T12:06:00Z"), postedItemIds: [], retryUntilMs: null },
+      { endMs: Date.parse("2026-07-10T11:44:04Z"), postedIds: ["sha1:final-answer"] },
+    )],
+    when: ["applying", (st) => st],
+    then: ["cursor stays at the newer position", (st) => {
+      expect(st.lastPostedMs).toBe(Date.parse("2026-07-10T12:06:00Z"));
+      expect(st.postedItemIds).toContain("sha1:final-answer");
     }],
   });
 });

@@ -139,12 +139,70 @@ export function applyPostSuccess(state = {}, action, opts = {}) {
   const prior = Array.isArray(state.postedItemIds) ? state.postedItemIds : [];
   const postedItemIds = trimIds([...prior, ...(action?.postedIds || [])], postedIdKeep);
 
+  const priorMs = Number.isFinite(state.lastPostedMs) ? state.lastPostedMs : -Infinity;
   return {
     ...state,
-    lastPostedMs: action.endMs,
+    // Monotonic: an audit re-post of an OLD turn must never drag the cursor
+    // backwards and reopen already-passed history.
+    lastPostedMs: Math.max(priorMs, action.endMs),
     postedItemIds,
     retryUntilMs: null,
   };
+}
+
+const DEFAULT_AUDIT_WINDOW_MS = 60 * 60 * 1000;
+
+/**
+ * Startup self-heal: the cursor is monotone, so an item that misses its post
+ * window is skipped FOREVER once a later turn posts. The observed producer
+ * (2026-07-10, lsrc:3): a turn completed 13:44:04, the bridge was kill -9:ed
+ * mid-grace at 13:45:35, and when the next turn posted at 14:06 the cursor
+ * jumped past the unposted final answer. Restart races also mint duplicates
+ * (posted but killed before the id was recorded) — the id-based dedupe makes
+ * this audit safe to run: it only ever emits items whose stable id is absent
+ * from the posted set, within a bounded recency window, ignoring the cursor.
+ */
+export function planStartupAudit(input = {}) {
+  const {
+    turns = [],
+    postedItemIds = [],
+    nowMs = Date.now(),
+    auditWindowMs = DEFAULT_AUDIT_WINDOW_MS,
+    maxPostActions = DEFAULT_MAX_POST_ACTIONS,
+  } = input;
+
+  const postedSet = new Set(Array.isArray(postedItemIds) ? postedItemIds : []);
+  const actions = [];
+
+  for (const turn of Array.isArray(turns) ? turns : []) {
+    if (actions.length >= maxPostActions) break;
+    if (!turn?.isComplete) continue; // only settled turns; live ones follow the normal path
+    const endMs = turnEndMs(turn);
+    if (!Number.isFinite(endMs)) continue;
+    if (nowMs - endMs > auditWindowMs) continue;
+
+    const turnStartMs = turnStartMsFor(turn, endMs);
+    const items = Array.isArray(turn.items) ? turn.items : [];
+    const newItems = [];
+    const newIds = [];
+    items.forEach((it, idx) => {
+      const key = itemKey(it, turnStartMs, idx);
+      if (!postedSet.has(key)) { newItems.push(it); newIds.push(key); }
+    });
+    if (!newItems.length) continue;
+
+    actions.push({
+      type: "postTurn",
+      endMs,
+      turnStartMs,
+      postedIds: newIds,
+      postedCount: items.length - newItems.length,
+      totalItems: items.length,
+      reason: "audit",
+      turn: { ...turn, items: newItems },
+    });
+  }
+  return { actions };
 }
 
 export function applyPostFailure(state = {}, action, opts = {}) {
