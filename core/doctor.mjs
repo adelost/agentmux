@@ -53,6 +53,26 @@ export function checkHeartbeatHealth({ beat, repoVersion, pidAlive, now = Date.n
   }
 }
 
+/**
+ * Exactly one supervisor should own the bridge. Two means an orphan — the
+ * observed case (2026-07-10): the watchdog cron nohup-spawned a start.sh
+ * without node in PATH and it crash-looped every 10s for 23h while doctor
+ * showed all green, because the healthy tmux-hosted stack masked it.
+ * crashLooping = bridge.log ends in a fresh "crashed (exit ...)" line —
+ * only orphans write there (the tmux supervisor logs to its pane).
+ */
+export function checkSupervisors({ pids, crashLooping = false }) {
+  if (crashLooping) {
+    return check("supervisor", FAIL, "bridge.log ends in a fresh crash line — a supervisor is crash-looping",
+      "find it: pgrep -af start.sh (kill the one OUTSIDE the amux tmux session)");
+  }
+  if (pids.length > 1) {
+    return check("supervisor", FAIL, `${pids.length} start.sh supervisors (${pids.join(", ")}) — an orphan is burning cycles`,
+      "keep the one inside the amux tmux session, kill the rest");
+  }
+  return null; // 0 or 1: checkBridgeProcess already covers supervision state
+}
+
 export function checkHooksInstalled({ settings, hookFileExists }) {
   const entries = [];
   for (const [event, list] of Object.entries(settings?.hooks || {})) {

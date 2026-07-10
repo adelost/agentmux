@@ -18,7 +18,7 @@ import { latestPaneStatesCached, mergeStatus, readEvents, eventsPath } from "../
 import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../core/pane-status.mjs";
 import { readHeartbeat } from "../core/heartbeat.mjs";
 import {
-  checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkLedger,
+  checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors, checkLedger,
   checkContextBridge, checkTmux, checkConfig, overallStatus, formatDoctorReport, FAIL, WARN,
 } from "../core/doctor.mjs";
 import {
@@ -678,7 +678,7 @@ function ledgerTimelineRows({ since, agentFilter, paneFilter, grep }) {
         : `NOT DELIVERED (${evt.kind}, ${evt.attempts ?? "?"} attempts): ${evt.detail || ""}`;
     } else {
       content = evt.event === "session_start"
-        ? "session start"
+        ? `session start${evt.source ? ` (${evt.source})` : ""}`
         : evt.event === "context_loss"
           ? `CONTEXT LOSS: ${evt.detail || "(no detail)"}`
           : `${evt.needsYou ? "permission" : "notify"}: ${evt.detail || "(no detail)"}`;
@@ -2165,8 +2165,29 @@ async function cmdDoctor(ctx) {
     });
   }
 
+  // supervisors: start.sh processes owning THIS repo. bridge.log only ever
+  // receives watchdog-spawned (nohup) supervisors' output — a fresh crash
+  // tail there means an orphan is looping right now.
+  let supervisorPids = [], crashLooping = false;
+  try {
+    const out = execSync("pgrep -f '[s]tart.sh' || true", { encoding: "utf-8" }).trim();
+    supervisorPids = (out ? out.split("\n").map((x) => parseInt(x, 10)).filter(Boolean) : [])
+      .filter((pid) => {
+        try { return readlinkSync(`/proc/${pid}/cwd`) === repoDir; }
+        catch { return false; }
+      });
+    const logPath = join(home, ".agentmux", "bridge.log");
+    const st = statSync(logPath);
+    if (Date.now() - st.mtimeMs < 5 * 60 * 1000) {
+      const tail = execSync(`tail -c 4096 '${logPath}'`, { encoding: "utf-8" });
+      const lines = tail.trim().split("\n");
+      crashLooping = /crashed \(exit \d+\)/.test(lines[lines.length - 1] || "");
+    }
+  } catch { /* no log / no procs: nothing to flag */ }
+
   const checks = [
     checkBridgeProcess({ pids, supervised }),
+    checkSupervisors({ pids: supervisorPids, crashLooping }),
     checkHeartbeatHealth({ beat, repoVersion, pidAlive: pids.length > 0 }),
     checkHooksInstalled({ settings, hookFileExists }),
     checkLedger({ stat: ledgerStat }),
@@ -2175,9 +2196,10 @@ async function cmdDoctor(ctx) {
     checkConfig({ agents, error: cfgError }),
   ];
 
+  const activeChecks = checks.filter(Boolean);
   console.log("\namux doctor\n");
-  console.log(formatDoctorReport(checks));
-  const overall = overallStatus(checks);
+  console.log(formatDoctorReport(activeChecks));
+  const overall = overallStatus(activeChecks);
   console.log("");
   if (overall === FAIL) process.exit(2);
   if (overall === WARN) process.exit(1);

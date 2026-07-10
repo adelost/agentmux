@@ -77,6 +77,11 @@ export function buildEvent(hookPayload, paneInfo, now = new Date()) {
     ...(event === "notification"
       ? { needsYou: PERMISSION_NOTIFICATION.test(message) }
       : {}),
+    // startup/resume/compact/clear — makes "why did this pane restart at
+    // 04:xx" a lookup instead of an inference (the 2026-07-10 forensics).
+    ...(event === "session_start" && hookPayload.source
+      ? { source: String(hookPayload.source) }
+      : {}),
   };
 }
 

@@ -5,7 +5,7 @@ import { feature, unit, expect } from "bdd-vitest";
 import {
   checkContextBridge,
   FAIL, OK, WARN,
-  checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled,
+  checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors,
   checkLedger, checkTmux, overallStatus,
 } from "./doctor.mjs";
 import { classifyHeartbeat, HEARTBEAT_STALE_MS } from "./heartbeat.mjs";
@@ -85,6 +85,33 @@ feature("heartbeat classification", () => {
     then: ["fail + kill hint", (c) => {
       expect(c.status).toBe(FAIL);
       expect(c.hint).toContain("kill");
+    }],
+  });
+});
+
+feature("supervisor duplicates + crash loops", () => {
+  unit("one supervisor is nothing to report (bridge check owns supervision)", {
+    given: ["a single start.sh pid", () => checkSupervisors({ pids: [5996] })],
+    when: ["checking", (c) => c],
+    then: ["null — no row", (c) => { expect(c).toBeNull(); }],
+  });
+
+  unit("two supervisors fail loud (the 23h orphan class)", {
+    given: ["two start.sh pids", () => checkSupervisors({ pids: [5996, 306341] })],
+    when: ["checking", (c) => c],
+    then: ["fail + kill hint", (c) => {
+      expect(c.status).toBe(FAIL);
+      expect(c.detail).toContain("orphan");
+      expect(c.hint).toContain("amux tmux session");
+    }],
+  });
+
+  unit("a fresh crash tail in bridge.log fails even with one visible pid", {
+    given: ["crashLooping signal", () => checkSupervisors({ pids: [5996], crashLooping: true })],
+    when: ["checking", (c) => c],
+    then: ["fail naming the loop", (c) => {
+      expect(c.status).toBe(FAIL);
+      expect(c.detail).toContain("crash-looping");
     }],
   });
 });

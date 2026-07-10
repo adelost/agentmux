@@ -16,6 +16,29 @@ const freshLedger = () => join(mkdtempSync(join(tmpdir(), "amux-events-")), "eve
 const at = (iso) => new Date(iso);
 
 feature("buildEvent", () => {
+  unit("session_start records the SessionStart source", {
+    given: ["a SessionStart payload with source startup", () => buildEvent(
+      { hook_event_name: "SessionStart", source: "startup", cwd: "/ws/.agents/1" },
+      { session: "claw", pane: 1 },
+    )],
+    when: ["inspecting", (e) => e],
+    then: ["event carries source for the restart forensics", (e) => {
+      expect(e.event).toBe("session_start");
+      expect(e.source).toBe("startup");
+    }],
+  });
+
+  unit("non-session events never grow a source field", {
+    given: ["a Stop payload that also has a source-ish field", () => buildEvent(
+      { hook_event_name: "Stop", source: "whatever" },
+      { session: "claw", pane: 1 },
+    )],
+    when: ["inspecting", (e) => e],
+    then: ["no source key", (e) => {
+      expect(e.source).toBeUndefined();
+    }],
+  });
+
   unit("maps hook names to ledger events", {
     given: ["a Stop hook payload + pane", () => buildEvent(
       { hook_event_name: "Stop", cwd: "/w/.agents/1", session_id: "abc" },
