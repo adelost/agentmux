@@ -331,7 +331,45 @@ function getContextFromCodexJsonl(paneDir) {
     usage = { percent: Math.round((tokens / max) * 100), tokens };
   }
   if (!usage) return null;
+  // A long-running turn (hundreds of tool events) pushes the newest
+  // turn_context out of the 1MB tail — observed live on api:4 at 273k
+  // context: model label vanished mid-work. Fall back to the session HEAD
+  // (the first turn_context sits right after session_meta) — the initial
+  // model is right unless /model switched mid-session, which the tail scan
+  // catches whenever it IS visible.
+  if (!turnCtx) turnCtx = headTurnContext(file);
   return { ...usage, model: turnCtx?.model ?? null, effort: turnCtx?.effort ?? null };
+}
+
+/**
+ * First turn_context in the file head. 256KB window: session_meta's
+ * base_instructions is one multi-KB line that precedes it (32KB proved too
+ * small on a live 24MB rollout). Per-line parse tolerance: the window cuts
+ * the final line mid-JSON.
+ */
+function headTurnContext(filePath) {
+  let fd;
+  try {
+    fd = openSync(filePath, "r");
+    const buf = Buffer.alloc(256 * 1024);
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    for (const line of buf.toString("utf-8", 0, n).split("\n")) {
+      if (!line.includes('"turn_context"')) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+      if (entry?.type !== "turn_context" || !entry.payload?.model) continue;
+      return {
+        model: entry.payload.model,
+        effort: entry.payload.collaboration_mode?.settings?.reasoning_effort
+          ?? entry.payload.effort ?? null,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* already closed */ } }
+  }
 }
 
 // --- Pushed truth: Claude Code's statusline bridge ----------------------

@@ -158,8 +158,19 @@ export async function reindex(roots, { log = () => {} } = {}) {
   return { files: meta.length, chunks: rows.length };
 }
 
+// Similarity filtering, calibrated 2026-07-10 against a known-answer corpus
+// (5 Lovecraft + Strindberg + Lagerlöf + the live memory index):
+//   EN→EN: correct clusters at 0.83-0.86, first wrong hit ~0.003-0.012 below
+//   SV→SV: correct 0.85-0.88, wrong right behind at 0.849
+//   SV→EN cross-lingual: correct answers do NOT rank with e5-small at all —
+//   no threshold fixes broken ranking, the floor just keeps that noise out.
+// Absolute cutoffs are useless inside the 0.82-0.88 band; distance-to-top is
+// the real signal. Upgrade path if cross-lingual matters: bge-m3.
+const SIM_FLOOR = 0.82;
+const SIM_GAP = 0.02;
+
 /** Top-k cosine over the index. Returns search.mjs-shaped hits. */
-export async function semanticSearch(query, { k = 8, minScore = 0.80 } = {}) {
+export async function semanticSearch(query, { k = 8, floor = SIM_FLOOR, gap = SIM_GAP, minScore = null } = {}) {
   const index = loadIndex();
   if (!index) throw new Error("inget semantiskt index — kör: amux search --reindex");
   const [q] = await embed([query], "query");
@@ -176,8 +187,10 @@ export async function semanticSearch(query, { k = 8, minScore = 0.80 } = {}) {
     return { ...entry, sim: dot };
   });
   scored.sort((a, b) => b.sim - a.sim);
+  const topSim = scored[0]?.sim ?? 0;
+  const cutoff = minScore !== null ? minScore : Math.max(floor, topSim - gap);
   return scored.slice(0, k)
-    .filter((e) => e.sim >= minScore)
+    .filter((e) => e.sim >= cutoff)
     .map((e) => ({
       path: e.file,
       line: e.chunk.line,

@@ -2135,8 +2135,13 @@ async function cmdSearch(ctx, query, flags) {
     try {
       const sem = await import("../core/search-semantic.mjs");
       const semHits = await sem.semanticSearch(query, { k: 8 });
-      if (semHits?.length) {
-        hits = dedupeByFile([...hits, ...semHits.map((h) => withScore({ ...h, layer: "sem" }))]);
+      // The index is global; honor --source here too or filtered searches
+      // leak hits from other roots (observed: bibliotek query answered by
+      // memory chunks).
+      const allowedRoots = new Set(roots.map((r) => r.name));
+      const scoped = (semHits || []).filter((h) => allowedRoots.has(h.root));
+      if (scoped.length) {
+        hits = dedupeByFile([...hits, ...scoped.map((h) => withScore({ ...h, layer: "sem" }))]);
       }
     } catch (err) {
       if (process.env.AMUX_DEBUG) console.error(`semantic layer off: ${err.message}`);

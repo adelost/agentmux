@@ -216,6 +216,23 @@ feature("end-to-end lexical over a real temp corpus (rg integration)", () => {
     }],
   });
 
+  component("CRLF corpora parse (JS dot excludes carriage return)", {
+    given: ["a Gutenberg-style CRLF file", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-search-"));
+      writeFileSync(join(dir, "book.txt"), "West of Arkham the hills rise wild.\r\nSecond line mentions Arkham too.\r\n");
+      return dir;
+    }],
+    when: ["searching", (dir) => {
+      const hits = lexicalSearch("Arkham", [{ name: "lib", path: dir, glob: "*.txt", exclude: [], weight: 1 }]);
+      rmSync(dir, { recursive: true, force: true });
+      return hits;
+    }],
+    then: ["hits survive the trailing \\r", (hits) => {
+      expect(hits.length).toBe(1);
+      expect(hits[0].snippet).toContain("Arkham");
+    }],
+  });
+
   component("expandHit marks the hit line in context", {
     given: ["a file and a hit on line 3", () => {
       const dir = mkdtempSync(join(tmpdir(), "amux-search-"));

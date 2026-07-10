@@ -46,11 +46,13 @@ export function resolveRg() {
  *  normal outcomes, not errors — their stdout is still the result. */
 export function execRg(args) {
   const rg = resolveRg();
+  if (process.env.AMUX_DEBUG) console.error(`[rg] ${rg.file} ${args.map((a) => JSON.stringify(a)).join(" ")}`);
   try {
     return execFileSync(rg.file, args, {
       encoding: "utf-8", maxBuffer: 16 * 1024 * 1024, argv0: rg.argv0,
     });
   } catch (err) {
+    if (process.env.AMUX_DEBUG) console.error(`[rg] catch status=${err.status} signal=${err.signal} stdout=${(err.stdout || "").length}B stderr=${JSON.stringify((err.stderr || "").slice(0, 200))}`);
     if (err.status === 1 || err.status === 2) return err.stdout || "";
     throw err;
   }
@@ -117,7 +119,11 @@ export function runRg(pattern, root, { maxCount = 2, files = null } = {}) {
   args.push(...(files?.length ? files : [root.path]));
   const out = execRg(args);
   const hits = [];
-  for (const line of out.split("\n")) {
+  for (const raw of out.split("\n")) {
+    // CRLF corpora (Gutenberg): the match ends in \r, and JS "." treats \r
+    // as a line terminator, so the $-anchored parse silently rejected EVERY
+    // hit from such files (found 2026-07-10: rg returned 6, parser kept 0).
+    const line = raw.replace(/\r+$/, "");
     if (!line) continue;
     // path:line:match — path may not contain ':' on this layout (abs paths)
     const m = line.match(/^(.*?):(\d+):(.*)$/);
