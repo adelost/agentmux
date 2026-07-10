@@ -12,6 +12,7 @@ import { extractText, extractLastTurn, classifyLines, extractSegments } from "..
 import { stripAnsi, esc, extractActivity, formatDuration, validateImagePath } from "../lib.mjs";
 import { getContextFromPane, getContextPercent, getContextPushed, shortModelName } from "../core/context.mjs";
 import { loadSearchRoots, lexicalSearch, formatHits, saveLastResults, loadLastResults, expandHit, withScore, dedupeByFile } from "../core/search.mjs";
+import { planRevive, reviveBrief, parseBootMs } from "../core/revive.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { latestCodexJsonlMtime, readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
@@ -2159,6 +2160,54 @@ async function cmdSearch(ctx, query, flags) {
   console.log(`\n${top.length}/${hits.length} träffar, ${Date.now() - t0}ms  ·  expandera: amux search --show N`);
 }
 
+/**
+ * amux revive — post-boot fleet recovery: respawn every configured coding
+ * pane (ensureReady is idempotent; running panes untouched) and send a
+ * resume-brief to panes whose ledger shows a prompt-without-stop from
+ * before boot (= interrupted mid-turn), unless they are already working.
+ * --dry prints the plan without acting.
+ */
+async function cmdRevive(ctx, flags) {
+  const bootMs = parseBootMs(readFileSync("/proc/stat", "utf-8"));
+  if (!bootMs) { console.error("Kunde inte läsa boot-tid ur /proc/stat."); process.exit(1); }
+  console.log(`Boot: ${new Date(bootMs).toLocaleString("sv-SE")}`);
+
+  const agents = listAgents(ctx.configPath);
+  const panes = [];
+  for (const a of agents) {
+    (a.panes || []).forEach((p, i) => {
+      if (/claude|codex/.test(String(p?.cmd || ""))) panes.push({ agent: a.name, pane: i, cmd: p.cmd });
+    });
+  }
+
+  const statuses = new Map();
+  for (const p of panes) {
+    try { statuses.set(`${p.agent}:${p.pane}`, await getPaneStatus(ctx, p.agent, p.pane)); }
+    catch { statuses.set(`${p.agent}:${p.pane}`, "unknown"); }
+  }
+
+  let events = [];
+  try { events = readEvents({}); } catch { /* empty ledger: respawn still runs */ }
+  const plan = planRevive({ events, bootMs, panes, statuses });
+
+  console.log(`Paneler: ${panes.length} konfigurerade coding-panes säkras (idempotent).`);
+  if (!plan.briefs.length) console.log("Avbrutna mitt i arbete: inga.");
+  for (const b of plan.briefs) {
+    console.log(`  ⚡ ${b.agent}:${b.pane}  avbruten ${new Date(b.interruptedAtMs).toTimeString().slice(0, 8)} → resume-brief${flags.dry ? " (dry)" : ""}`);
+  }
+  if (flags.dry) return;
+
+  for (const p of panes) {
+    try { await ctx.agent.ensureReady(p.agent, p.pane); }
+    catch (err) { console.error(`  ensureReady ${p.agent}:${p.pane} misslyckades: ${err.message.split("\n")[0]}`); }
+  }
+  for (const b of plan.briefs) {
+    await sendToPane(ctx, b.agent, b.pane, reviveBrief(b.interruptedAtMs, bootMs));
+    console.log(`  skickad: ${b.agent}:${b.pane}`);
+  }
+  console.log("Revive klar.");
+}
+
 async function cmdDoctor(ctx) {
   const home = process.env.HOME;
   const repoDir = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -3368,7 +3417,7 @@ Usage:
   agent dream                     Write/update nightly pane digest in workspace memory
     --since T                     Window to summarize (default: 24h)
     --dry                         Preview pane work, do nothing
-  agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)\n  agent doctor                    Health check: bridge alive/hung/stale-code, hooks, ledger, tmux (exit 0/1/2)\n  agent search "term"             Search configured corpora (memory/sessions/ledger); --show N expands, --reindex rebuilds semantic index
+  agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)\n  agent doctor                    Health check: bridge alive/hung/stale-code, hooks, ledger, tmux (exit 0/1/2)\n  agent revive                    Post-boot: respawn all panes + resume-brief those interrupted mid-turn (--dry to preview)\n  agent search "term"             Search configured corpora (memory/sessions/ledger); --show N expands, --reindex rebuilds semantic index
     --dry                         List deletion candidates, change nothing
     --days N                      Retention window (default: 14)
   agent playwright-reap           Reap stale Playwright-MCP/browser processes
@@ -3547,6 +3596,11 @@ export async function dispatch(argv, ctx) {
 
     case "doctor": {
       return cmdDoctor(ctx);
+    }
+
+    case "revive": {
+      const { flags } = parseFlags(rest, { dry: "boolean" });
+      return cmdRevive(ctx, flags);
     }
 
     case "search": {
