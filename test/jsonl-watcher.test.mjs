@@ -267,6 +267,48 @@ feature("watcher: long agent turn with tool calls posts ALL content", () => {
   });
 });
 
+feature("watcher: narrative with multiple images", () => {
+  unit("keeps text on the first post and splits attachments at Discord's limit", {
+    given: ["a final answer with 12 valid image markers", () => {
+      const userTs = "2026-04-30T20:10:00.000Z";
+      const ctx = setupWatcher({
+        stateInitial: {
+          watcher_last_posted_ts: { "ch-test": new Date(userTs).getTime() - 1 },
+        },
+      });
+      const paths = Array.from({ length: 12 }, (_, i) => {
+        const path = join(ctx.agentRootDir, `proof-${i}.png`);
+        writeFileSync(path, "not-empty");
+        return path;
+      });
+      ctx.appendJsonl([
+        userTurn("show proof", userTs),
+        assistantText([
+          "All checks passed. Here are the screenshots.",
+          ...paths.map((path) => `[image: ${path}]`),
+        ].join("\n"), "2026-04-30T20:10:01.000Z", "end_turn"),
+      ]);
+      return ctx;
+    }],
+    when: ["watcher.checkPane posts the completed turn", async (ctx) => {
+      vi.useFakeTimers({ toFake: ["setTimeout"] });
+      const pending = ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      await vi.runAllTimersAsync();
+      await pending;
+      vi.useRealTimers();
+      return ctx;
+    }],
+    then: ["the summary accompanies 10 images and the remaining 2 follow separately", (ctx) => {
+      expect(ctx.discord.sends).toHaveLength(2);
+      expect(ctx.discord.sends[0].payload.content).toContain("All checks passed");
+      expect(ctx.discord.sends[0].payload.files).toHaveLength(10);
+      expect(ctx.discord.sends[1].payload.content).toBeUndefined();
+      expect(ctx.discord.sends[1].payload.files).toHaveLength(2);
+      ctx.cleanup();
+    }],
+  });
+});
+
 feature("watcher: Codex background polling stays out of Discord", () => {
   unit("wait calls are suppressed while adjacent user-facing text is posted", {
     given: ["a Codex turn containing text and repeated wait function calls", () => {
@@ -694,6 +736,40 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
           : !/^_context:/.test(s.payload?.content || ""),
       );
       expect(contentSends.length).toBe(0);
+      ctx.cleanup();
+    }],
+  });
+
+  unit("posts the final text when several prompts and images occur in one codex task", {
+    given: ["api:3-shaped rollout with busy follow-ups, compaction, then final text", () => {
+      const oldStamp = Date.now() - 60_000;
+      const iso = (offsetMs) => new Date(oldStamp + offsetMs).toISOString();
+      return setupCodexWatcher({
+        codexEvents: [
+          { type: "event_msg", timestamp: iso(0), payload: { type: "task_started", turn_id: "X" } },
+          { type: "turn_context", timestamp: iso(0), payload: { turn_id: "X" } },
+          { type: "event_msg", timestamp: iso(1_000), payload: { type: "user_message", message: "initial task" } },
+          { type: "response_item", timestamp: iso(2_000), payload: { type: "function_call", name: "wait", arguments: JSON.stringify({ cell_id: 1 }) } },
+          { type: "event_msg", timestamp: iso(3_000), payload: { type: "user_message", message: "follow-up while busy" } },
+          { type: "response_item", timestamp: iso(4_000), payload: { type: "function_call", name: "wait", arguments: JSON.stringify({ cell_id: 2 }) } },
+          { type: "compacted", timestamp: iso(5_000), payload: {} },
+          { type: "turn_context", timestamp: iso(5_000), payload: { turn_id: "X" } },
+          { type: "response_item", timestamp: iso(6_000), payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "summary that must follow the uploaded images" }] } },
+          { type: "event_msg", timestamp: iso(7_000), payload: { type: "task_complete", turn_id: "X" } },
+        ],
+        stateInitial: {
+          watcher_last_posted_ts: { "ch-codex": oldStamp - 10_000 },
+        },
+      });
+    }],
+    when: ["watcher.checkPane runs while the rollout file itself is still fresh", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["the final narrative reaches Discord and wait polling stays hidden", (ctx) => {
+      const bodies = ctx.discord.sends.map((s) => typeof s.payload === "string" ? s.payload : s.payload?.content || "");
+      expect(bodies.some((body) => body.includes("summary that must follow the uploaded images"))).toBe(true);
+      expect(bodies.some((body) => body.includes("wait cell_id"))).toBe(false);
       ctx.cleanup();
     }],
   });

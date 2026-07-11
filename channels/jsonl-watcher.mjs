@@ -79,6 +79,10 @@ const COMPLETION_GRACE_MS = 5_000;
 // missed turns at restart, not the entire history.
 const TURN_LOOKBACK = 20;
 const WATCHER_TAIL_BYTES = 4 * 1024 * 1024;
+// Startup is the one chance to reconcile output written while the bridge was
+// down. Browser screenshots can add several MB of base64 tool output per line,
+// so the normal 4MB hot-path window is too small for this bounded audit.
+const STARTUP_AUDIT_TAIL_BYTES = 16 * 1024 * 1024;
 const MAX_POST_ACTIONS = 3;
 const RETRY_BACKOFF_MS = 30_000;
 const MAX_CONCURRENT_PANES = 4;
@@ -526,9 +530,9 @@ export function createJsonlWatcher({
     return !!a && !!b && a.path === b.path && a.mtimeMs === b.mtimeMs && a.size === b.size;
   }
 
-  function estimatedReadBytes(info) {
+  function estimatedReadBytes(info, tailBytes = WATCHER_TAIL_BYTES) {
     if (!info?.size) return 0;
-    return Math.min(info.size, WATCHER_TAIL_BYTES);
+    return Math.min(info.size, tailBytes);
   }
 
   function metric(msg) {
@@ -593,6 +597,7 @@ export function createJsonlWatcher({
       const retryUntil = retryUntilMs(channelId);
       const retryDue = Number.isFinite(retryUntil) && retryUntil <= now;
       const graceDue = Number.isFinite(cached?.graceDueAtMs) && cached.graceDueAtMs <= now;
+      const startupAudit = !auditedPanes.has(key);
 
       if (sameFileStamp(cached, fileInfo) && !retryDue && !graceDue) {
         metric(`${key} skip unchanged bytes=0 nextGrace=${cached?.graceDueAtMs || "-"}`);
@@ -605,11 +610,13 @@ export function createJsonlWatcher({
       // text is never orphaned. truncated: the file is larger than the window,
       // so the leading turn may be head-cut — the engine holds it instead of
       // advancing past it (belt-and-suspenders on top of id-based dedupe).
-      const result = readTurns(dir, { limit: TURN_LOOKBACK, tailBytes: WATCHER_TAIL_BYTES, headless: true });
-      const truncated = Number.isFinite(fileInfo?.size) && fileInfo.size > WATCHER_TAIL_BYTES;
+      const tailBytes = startupAudit ? STARTUP_AUDIT_TAIL_BYTES : WATCHER_TAIL_BYTES;
+      const result = readTurns(dir, { limit: TURN_LOOKBACK, tailBytes, headless: true });
+      const truncated = Number.isFinite(fileInfo?.size) && fileInfo.size > tailBytes;
       const readMs = Date.now() - readStarted;
-      const readBytes = estimatedReadBytes(fileInfo);
+      const readBytes = estimatedReadBytes(fileInfo, tailBytes);
       if (!result?.turns?.length) {
+        if (startupAudit) auditedPanes.add(key);
         rememberReadSnapshot(key, fileInfo, [], channelId, fileInfo?.mtimeMs ?? null);
         metric(`${key} read bytes=${readBytes} ms=${readMs} turns=0`);
         return { readBytes, readMs };
@@ -620,7 +627,7 @@ export function createJsonlWatcher({
       // Startup self-heal: post anything a previous bridge completed but never
       // delivered (kill -9 mid-grace loses the item forever once the cursor
       // moves — the lsrc:3 incident, 2026-07-10). Id-dedupe makes re-runs safe.
-      if (!auditedPanes.has(key)) {
+      if (startupAudit) {
         auditedPanes.add(key);
         const audit = planStartupAudit({
           turns: result.turns,

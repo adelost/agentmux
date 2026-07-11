@@ -343,6 +343,26 @@ feature("readLastTurnsCodex: multi-turn limit", () => {
       cleanup();
     }],
   });
+
+  unit("headless tail mode reconstructs a final answer after a huge tool result", {
+    given: ["the bounded tail starts inside a multi-megabyte tool output after the prompt", () => setupFakeCodex([
+      { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+      { type: "event_msg", timestamp: "2026-04-09T10:00:00Z", payload: { type: "task_started", turn_id: "A" } },
+      { type: "event_msg", timestamp: "2026-04-09T10:00:01Z", payload: { type: "user_message", message: "render several images" } },
+      { type: "response_item", timestamp: "2026-04-09T10:00:02Z", payload: { type: "custom_tool_call_output", output: "x".repeat(8_000) } },
+      { type: "response_item", timestamp: "2026-04-09T10:00:03Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "summary after the images" }] } },
+      { type: "event_msg", timestamp: "2026-04-09T10:00:04Z", payload: { type: "task_complete", turn_id: "A" } },
+    ])],
+    when: ["reading only the last 2KB with headless recovery enabled", ({ paneDir }) =>
+      readLastTurnsCodex(paneDir, { limit: 1, tailBytes: 2 * 1024, headless: true })],
+    then: ["the orphaned final text is recovered as a complete synthetic turn", (r, { cleanup }) => {
+      expect(r.turns).toHaveLength(1);
+      expect(r.turns[0].userPrompt).toBe("");
+      expect(r.turns[0].items[0].content).toBe("summary after the images");
+      expect(r.turns[0].isComplete).toBe(true);
+      cleanup();
+    }],
+  });
 });
 
 feature("readLastTurnsCodex: codex event ordering", () => {
@@ -371,6 +391,29 @@ feature("readLastTurnsCodex: codex event ordering", () => {
         "2026-04-09T10:00:03Z",
         "2026-04-09T10:01:03Z",
       ]);
+      cleanup();
+    }],
+  });
+
+  unit("keeps the active task id across busy-injected prompts and compaction", {
+    given: ["one codex task receives multiple prompts before its final answer", () => setupFakeCodex([
+      { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+      { type: "event_msg", timestamp: "2026-04-09T10:00:00Z", payload: { type: "task_started", turn_id: "A" } },
+      { type: "turn_context", timestamp: "2026-04-09T10:00:00Z", payload: { turn_id: "A" } },
+      { type: "event_msg", timestamp: "2026-04-09T10:00:01Z", payload: { type: "user_message", message: "initial brief" } },
+      { type: "response_item", timestamp: "2026-04-09T10:00:02Z", payload: { type: "function_call", name: "wait", arguments: JSON.stringify({ cell_id: 1 }) } },
+      { type: "event_msg", timestamp: "2026-04-09T10:00:03Z", payload: { type: "user_message", message: "follow-up while busy" } },
+      { type: "response_item", timestamp: "2026-04-09T10:00:04Z", payload: { type: "function_call", name: "wait", arguments: JSON.stringify({ cell_id: 2 }) } },
+      { type: "compacted", timestamp: "2026-04-09T10:00:05Z", payload: {} },
+      { type: "turn_context", timestamp: "2026-04-09T10:00:05Z", payload: { turn_id: "A" } },
+      { type: "response_item", timestamp: "2026-04-09T10:00:06Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "final answer after images" }] } },
+      { type: "event_msg", timestamp: "2026-04-09T10:00:07Z", payload: { type: "task_complete", turn_id: "A" } },
+    ])],
+    when: ["reading both logical prompt segments", ({ paneDir }) => readLastTurnsCodex(paneDir, { limit: 2 })],
+    then: ["the boundary settles the first segment and task_complete settles the latest", (r, { cleanup }) => {
+      expect(r.turns.map((t) => t.turnId)).toEqual(["A", "A"]);
+      expect(r.turns.map((t) => t.isComplete)).toEqual([true, true]);
+      expect(r.turns[1].items.at(-1).content).toBe("final answer after images");
       cleanup();
     }],
   });

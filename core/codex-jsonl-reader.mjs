@@ -487,12 +487,16 @@ export function latestCodexJsonlInfo(paneDir) {
  *   turnId: string|null,
  * }>}
  */
-function groupCodexIntoTurns(events) {
+function groupCodexIntoTurns(events, { headless = false } = {}) {
   const turns = [];
   let current = null;
-  let pendingTurnId = null;
-  // Map turn_id → turn so task_complete events that arrive late (or out
-  // of order across an unrelated user_message) still close the right turn.
+  // A busy Codex task can receive several user_message events before its one
+  // task_complete event. Keep that task identity active across every logical
+  // prompt segment; treating it as a one-shot "pending" id leaves the final
+  // segment incomplete and makes the watcher lose its narrative on restart.
+  let activeTaskId = null;
+  // Map turn_id → the latest logical segment. task_complete closes the segment
+  // that can still receive output, not the first prompt seen for that task.
   const byTurnId = new Map();
 
   for (const e of events) {
@@ -501,14 +505,30 @@ function groupCodexIntoTurns(events) {
       if (turnId && current && !current.turnId && !current.isComplete && current.items.length === 0) {
         current.turnId = turnId;
         byTurnId.set(turnId, current);
-      } else {
-        pendingTurnId = turnId;
+      }
+      activeTaskId = turnId;
+      continue;
+    }
+    if (e.type === "turn_context" && e.payload?.turn_id) {
+      // Codex repeats turn_context after an in-task /compact. It may also be
+      // the first lifecycle event inside a bounded tail read, so it is a valid
+      // source for restoring the active task identity.
+      activeTaskId = e.payload.turn_id;
+      if (current && !current.isComplete && !current.turnId) {
+        current.turnId = activeTaskId;
+        byTurnId.set(activeTaskId, current);
       }
       continue;
     }
     if (e.type === "event_msg" && e.payload?.type === "user_message") {
-      if (current) turns.push(current);
-      const turnId = pendingTurnId;
+      if (current) {
+        // The next prompt is a hard parser boundary: subsequent response items
+        // cannot be attributed to the prior segment. Mark a non-empty segment
+        // settled even though the enclosing Codex task remains active.
+        if (current.items.length > 0) current.isComplete = true;
+        turns.push(current);
+      }
+      const turnId = activeTaskId;
       current = {
         timestamp: e.timestamp || null,
         userPrompt: e.payload.message ?? "",
@@ -518,7 +538,6 @@ function groupCodexIntoTurns(events) {
         turnId,
       };
       if (turnId) byTurnId.set(turnId, current);
-      pendingTurnId = null;
       continue;
     }
     if (e.type === "event_msg" && e.payload?.type === "task_complete") {
@@ -534,7 +553,26 @@ function groupCodexIntoTurns(events) {
         target._sawTaskComplete = true;
         if (e.timestamp) target.endTimestamp = e.timestamp;
       }
+      if (activeTaskId === e.payload.turn_id) activeTaskId = null;
       continue;
+    }
+    if (e.type === "response_item" && !current && headless) {
+      const p = e.payload;
+      const isNarrative = p?.type === "message" && p.role === "assistant" && Array.isArray(p.content);
+      if (isNarrative || p?.type === "function_call") {
+        // A bounded tail can begin after the user_message marker when image or
+        // tool output lines are huge. Reconstruct the visible suffix instead
+        // of dropping a final answer merely because its prompt scrolled out.
+        current = {
+          timestamp: e.timestamp || null,
+          userPrompt: "",
+          items: [],
+          endTimestamp: null,
+          isComplete: false,
+          turnId: activeTaskId,
+        };
+        if (activeTaskId) byTurnId.set(activeTaskId, current);
+      }
     }
     if (e.type !== "response_item" || !current) continue;
     const p = e.payload;
@@ -606,7 +644,7 @@ function codexItemId(hash, blockIndex) {
  * @returns {{ turns: Array<object>, jsonlFile: string } | null}
  */
 export function readLastTurnsCodex(paneDir, opts = {}) {
-  const { limit = 3, since = null, grep = null, tailBytes = null } = opts;
+  const { limit = 3, since = null, grep = null, tailBytes = null, headless = false } = opts;
   const file = latestSessionFor(paneDir);
   if (!file) return null;
 
@@ -615,7 +653,7 @@ export function readLastTurnsCodex(paneDir, opts = {}) {
     : parseJsonl(file);
   if (events.length === 0) return { turns: [], jsonlFile: file };
 
-  let turns = groupCodexIntoTurns(events);
+  let turns = groupCodexIntoTurns(events, { headless });
 
   if (since) {
     turns = turns.filter((t) => {
