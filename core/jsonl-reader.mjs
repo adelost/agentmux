@@ -15,6 +15,7 @@ import { readdirSync, readFileSync, statSync, existsSync, openSync, fstatSync, r
 import { join } from "path";
 import { claudeProjectDir } from "./claude-paths.mjs";
 import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
+import { describeToolCall } from "./tool-display.mjs";
 
 
 // Bounded tail-window reading for session jsonl. Long-running panes grow these
@@ -328,39 +329,14 @@ function promptAppearsInEvents(events, promptText) {
 
 /**
  * Format a tool_use block into a compact one-line string suitable for Discord.
- * Claude: { name: "Bash", input: { command: "ls" } } → "Bash ls"
+ * Claude: { name: "Bash", input: { command: "ls" } } -> "Run ls"
  */
 export function formatJsonlToolCall(toolUse) {
-  const { name = "Tool", input = {} } = toolUse;
+  return describeJsonlToolCall(toolUse).content;
+}
 
-  if (name === "Bash") {
-    const cmd = String(input.command || "");
-    return `Bash ${cmd.length > 80 ? cmd.slice(0, 77) + "..." : cmd}`;
-  }
-
-  if (name === "Read" || name === "Write" || name === "Edit") {
-    const path = String(input.file_path || input.path || "");
-    const parts = path.split("/");
-    const short = parts.length > 3 ? ".../" + parts.slice(-2).join("/") : path;
-    return `${name} ${short}`;
-  }
-
-  if (name === "Glob" || name === "Grep") {
-    const pat = String(input.pattern || "");
-    return `${name} ${pat.length > 60 ? pat.slice(0, 57) + "..." : pat}`;
-  }
-
-  if (name === "Task" || name === "Agent") {
-    const sub = input.subagent_type || input.description || "";
-    return `${name} ${sub}`;
-  }
-
-  // Generic fallback: show first 1-2 args compactly
-  const entries = Object.entries(input).slice(0, 2);
-  const args = entries
-    .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
-    .join(" ");
-  return args ? `${name} ${args}` : name;
+function describeJsonlToolCall(toolUse) {
+  return describeToolCall(toolUse?.name || "Tool", toolUse?.input || {});
 }
 
 /**
@@ -519,7 +495,8 @@ export function extractFromJsonl(paneDir, promptText = null) {
         const text = block.text.trim();
         if (text) items.push({ type: "text", content: text });
       } else if (block.type === "tool_use") {
-        items.push({ type: "tool", content: formatJsonlToolCall(block) });
+        const display = describeJsonlToolCall(block);
+        items.push({ type: "tool", content: display.content, kind: display.kind, source: "claude" });
       }
       // thinking, reasoning, etc. Skipped on purpose
     }
@@ -644,7 +621,14 @@ function groupIntoTurns(events, { headless = false } = {}) {
           const text = block.text.trim();
           if (text) current.items.push({ type: "text", content: text, id: itemIdFor(e.uuid, blockIndex) });
         } else if (block.type === "tool_use") {
-          current.items.push({ type: "tool", content: formatJsonlToolCall(block), id: itemIdFor(e.uuid, blockIndex) });
+          const display = describeJsonlToolCall(block);
+          current.items.push({
+            type: "tool",
+            content: display.content,
+            kind: display.kind,
+            source: "claude",
+            id: itemIdFor(e.uuid, blockIndex),
+          });
         }
       });
       if (e.timestamp) current.endTimestamp = e.timestamp;

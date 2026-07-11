@@ -427,17 +427,14 @@ export function createJsonlWatcher({
   // --- rendering -----------------------------------------------------------
 
   function renderTurn(turn) {
-    // Tool calls render as inline code (`Bash cd ...`) — looks like a
-    // command, kompakt, doesn't make whole bash strings italic the way
-    // the old *-wrap did. Pre-1.16.40 used asterisks; user feedback flagged
-    // it as visually noisy.
+    // Tool calls render as compact semantic labels (`Run ...`, `Edit ...`).
+    // Provider wrapper names stay internal so Claude and Codex look alike.
     const items = turn.items || [];
     const hasNarrative = items.some((it) => it.type === "text" && (it.content || "").trim());
     const rawText = items
-      // Codex emits one `wait cell_id=...` function call for every poll of a
-      // background command. They carry no user information and produced a
-      // wall of Discord messages plus repeated context footers.
-      .filter((it) => !(it.type === "tool" && /^wait\s+cell_id=/i.test(it.content || "")))
+      // Codex emits write_stdin/wait calls for every background-process poll.
+      // The readers classify both legacy and current envelopes semantically.
+      .filter((it) => it.kind !== "wait")
       // Cross-agent sends have a stronger, delivery-verified owner in
       // cli/tmux.mjs: target gets the full brief and sender gets an immediate
       // `amux ... → delivered` receipt. Do not repeat the invocation later.

@@ -258,7 +258,7 @@ feature("watcher: long agent turn with tool calls posts ALL content", () => {
         ? contentSends[0].payload
         : contentSends[0].payload.content;
       expect(text).toContain("Innan jag skriver");
-      expect(text).toContain("Bash");
+      expect(text).toContain("Run");
       expect(text).toContain("cat wrangler.toml");
       expect(text).toContain("ls src/");
       expect(text).toContain("Sparat planen");
@@ -377,6 +377,36 @@ feature("watcher: Codex background polling stays out of Discord", () => {
           { type: "event_msg", timestamp: "2026-05-10T08:10:02.000Z", payload: { type: "task_complete", turn_id: "T2" } },
         ],
         stateInitial: { watcher_last_posted_ts: { "ch-codex": new Date(ts).getTime() - 1 } },
+      });
+    }],
+    when: ["the watcher mirrors the turn", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["Discord remains silent", (ctx) => {
+      expect(ctx.discord.sends).toHaveLength(0);
+      ctx.cleanup();
+    }],
+  });
+
+  unit("modern Codex write_stdin polling is also silent", {
+    given: ["a custom exec wrapper around write_stdin", () => {
+      const ts = "2026-05-10T08:20:00.000Z";
+      return setupCodexWatcher({
+        codexEvents: [
+          { type: "event_msg", timestamp: ts, payload: { type: "task_started", turn_id: "T2-modern" } },
+          { type: "event_msg", timestamp: ts, payload: { type: "user_message", message: "continue waiting" } },
+          { type: "response_item", timestamp: "2026-05-10T08:20:01.000Z", payload: {
+            type: "custom_tool_call",
+            name: "exec",
+            input: 'const r = await tools.write_stdin({"session_id":91516,"chars":""}); text(r.output);',
+          } },
+          { type: "event_msg", timestamp: "2026-05-10T08:20:02.000Z", payload: { type: "task_complete", turn_id: "T2-modern" } },
+        ],
+        stateInitial: {
+          watcher_last_posted_ts: { "ch-codex": new Date(ts).getTime() - 1 },
+          watcher_custom_tools_seeded: { "ch-codex": true },
+        },
       });
     }],
     when: ["the watcher mirrors the turn", async (ctx) => {
@@ -852,7 +882,7 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
     }],
     then: ["the immutable tool call is already visible", (ctx) => {
       const bodies = ctx.discord.sends.map((send) => typeof send.payload === "string" ? send.payload : send.payload?.content || "");
-      expect(bodies.some((body) => body.includes("Bash amux ps"))).toBe(true);
+      expect(bodies.some((body) => body.includes("Run amux ps"))).toBe(true);
       ctx.cleanup();
     }],
   });
@@ -892,7 +922,7 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
     then: ["the final narrative reaches Discord and wait polling stays hidden", (ctx) => {
       const bodies = ctx.discord.sends.map((s) => typeof s.payload === "string" ? s.payload : s.payload?.content || "");
       expect(bodies.some((body) => body.includes("summary that must follow the uploaded images"))).toBe(true);
-      expect(bodies.some((body) => body.includes("Bash amux ps"))).toBe(true);
+      expect(bodies.some((body) => body.includes("Run amux ps"))).toBe(true);
       expect(bodies.some((body) => body.includes("wait cell_id"))).toBe(false);
       ctx.cleanup();
     }],

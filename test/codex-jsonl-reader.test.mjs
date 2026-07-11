@@ -98,7 +98,7 @@ feature("extractFromCodexJsonl: single-turn rollout", () => {
       expect(result.items).toHaveLength(3);
       expect(result.items[0]).toEqual({ type: "text", content: "I'll list them." });
       expect(result.items[1].type).toBe("tool");
-      expect(result.items[1].content).toContain("Bash ls");
+      expect(result.items[1].content).toContain("Run ls");
       expect(result.items[2]).toEqual({ type: "text", content: "Done." });
       cleanup();
     }],
@@ -122,8 +122,8 @@ feature("extractFromCodexJsonl: single-turn rollout", () => {
       { type: "event_msg", payload: { type: "task_complete", turn_id: "T2" } },
     ])],
     when: ["reading the turn", ({ paneDir }) => readLastTurnsCodex(paneDir, { limit: 1 })],
-    then: ["the compact Bash call remains visible", (result, { cleanup }) => {
-      expect(result.turns[0].items[0]).toMatchObject({ type: "tool", content: "Bash amux ps", kind: "tool" });
+    then: ["the semantic Run call remains visible", (result, { cleanup }) => {
+      expect(result.turns[0].items[0]).toMatchObject({ type: "tool", content: "Run amux ps", kind: "tool" });
       expect(result.turns[0].items[1]).toMatchObject({ type: "tool", kind: "inter-agent-send" });
       cleanup();
     }],

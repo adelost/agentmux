@@ -389,9 +389,9 @@ feature("isBusyFromJsonl: missing jsonl file", () => {
 // --- formatJsonlToolCall ------------------------------------------------
 
 feature("formatJsonlToolCall", () => {
-  unit("Bash: short command", {
+  unit("Bash: short command is provider-neutral", {
     when: ["formatting", () => formatJsonlToolCall({ name: "Bash", input: { command: "ls -la" } })],
-    then: ["Bash + command", (r) => expect(r).toBe("Bash ls -la")],
+    then: ["Run + command", (r) => expect(r).toBe("Run ls -la")],
   });
 
   unit("Bash: long command is truncated", {
@@ -415,14 +415,14 @@ feature("formatJsonlToolCall", () => {
     }],
   });
 
-  unit("Glob: pattern shown", {
+  unit("Glob: pattern shown as Search", {
     when: ["formatting", () => formatJsonlToolCall({ name: "Glob", input: { pattern: "**/*.ts" } })],
-    then: ["Glob + pattern", (r) => expect(r).toBe("Glob **/*.ts")],
+    then: ["Search + pattern", (r) => expect(r).toBe("Search **/*.ts")],
   });
 
-  unit("Task: subagent type", {
+  unit("Task: subagent type shown as delegation", {
     when: ["formatting", () => formatJsonlToolCall({ name: "Task", input: { subagent_type: "Explore" } })],
-    then: ["Task + type", (r) => expect(r).toBe("Task Explore")],
+    then: ["Delegate + type", (r) => expect(r).toBe("Delegate to Explore")],
   });
 
   unit("unknown tool: generic fallback with args", {
