@@ -131,7 +131,7 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
     }
   }
 
-  (async () => {
+  const ready = (async () => {
     const ttsLabel = tts.isEnabled() ? ` | tts: ${tts.voice}` : "";
     for (const channel of channels) {
       const info = await channel.start();
@@ -204,7 +204,7 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  return { getMapping, overrides, channelMap: () => channelMap, reloadConfig };
+  return { getMapping, overrides, channelMap: () => channelMap, reloadConfig, ready };
 }
 
 /** WHAT: Loads Discord-to-pane bindings. WHY: Keeps malformed config from crashing bridge startup. */

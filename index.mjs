@@ -136,7 +136,7 @@ const discord = createDiscordChannel({ token: TOKEN, onSent: stampChannelMirror 
 
 // --- Wire up ---
 
-const { getMapping, overrides, channelMap, reloadConfig } = startBot({
+const { getMapping, overrides, channelMap, reloadConfig, ready: bridgeReady } = startBot({
   channels: [discord],
   agentsYaml: AGENTS_YAML,
   whisperUrl: WHISPER_URL,
@@ -229,6 +229,10 @@ const jsonlWatcher = createJsonlWatcher({
   recorder,
   tts,
 });
+// The watcher can post immediately during its startup audit. Wait until the
+// Discord client and inbound reconciliation are ready so the first post does
+// not fail against a cold channel cache and burn a retry cycle.
+await bridgeReady;
 jsonlWatcher.start();
 
 // Static PWA bundle is served from the same Node process so the whole
