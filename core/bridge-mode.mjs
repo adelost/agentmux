@@ -16,13 +16,13 @@ export function bridgeModePath(env = process.env) {
   return env.AMUX_BRIDGE_MODE_FILE || join(env.HOME, ".agentmux", "bridge-mode");
 }
 
-/** WHAT: Loads the requested bridge ownership mode. WHY: Keeps upgrades compatible with the former managed default. */
+/** WHAT: Loads the requested bridge ownership mode. WHY: Keeps absent state on the safe manual default. */
 export function readBridgeMode({ path = bridgeModePath(), read = readFileSync } = {}) {
   try {
     const mode = read(path, "utf-8").trim();
-    return VALID_MODES.has(mode) ? mode : BRIDGE_MODE_MANAGED;
+    return VALID_MODES.has(mode) ? mode : BRIDGE_MODE_MANUAL;
   } catch {
-    return BRIDGE_MODE_MANAGED;
+    return BRIDGE_MODE_MANUAL;
   }
 }
 

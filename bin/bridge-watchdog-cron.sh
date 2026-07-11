@@ -72,9 +72,9 @@ if [ -n "$PIDS" ] && [ "$AGE" -gt "$STALE_SEC" ] && [ -f "$HEARTBEAT" ]; then
 fi
 
 if [ -z "$PIDS" ] && ! supervisor_alive; then
-  # Missing mode means a pre-1.20.80 installation: preserve the former
-  # managed behavior. Manual/stopped are explicit user ownership policies.
-  MODE=$(cat "$MODE_FILE" 2>/dev/null || echo managed)
+  # Manual is the default even without a mode file. Dead-stack autostart is
+  # available only after an explicit `amux serve --detach` wrote managed.
+  MODE=$(cat "$MODE_FILE" 2>/dev/null || echo manual)
   [ "$MODE" = "managed" ] || exit 0
   # Whole stack dead. Start detached; start.sh supervises from here on.
   if rate_limited; then log "bridge+supervisor DEAD but rate-limited, skipping"; exit 0; fi

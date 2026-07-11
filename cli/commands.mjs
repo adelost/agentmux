@@ -25,12 +25,9 @@ import {
 } from "../core/doctor.mjs";
 import {
   BRIDGE_MODE_MANAGED,
-  BRIDGE_MODE_MANUAL,
-  BRIDGE_MODE_STOPPED,
   readBridgeMode,
-  resolveServeMode,
-  writeBridgeMode,
 } from "../core/bridge-mode.mjs";
+import { createBridgeLifecycle } from "./bridge.mjs";
 import {
   groupByPane, previewText,
   isRunningNow, isWaitingLikeText, looksDone,
@@ -64,7 +61,7 @@ import {
 
 // Bridge = the Discord bot itself (not a Claude agent). Singleton infra.
 const BRIDGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const BRIDGE_SESSION = "amux";
+const bridgeLifecycle = createBridgeLifecycle({ bridgeDir: BRIDGE_DIR });
 const DREAM_LOCK_PATH = () => join(process.env.HOME, ".openclaw", ".dream.lock");
 const DREAM_BLOCKING_STATUSES = new Set([
   "working", "permission", "menu", "resume", "dismiss", "unknown",
@@ -153,185 +150,14 @@ async function cmdReconcile(name, ctx) {
   }
 }
 
+/** WHAT: Starts the Discord bridge. WHY: Keeps command dispatch separate from bridge lifecycle policy. */
 async function cmdServe(flags, ctx) {
-  let mode;
-  try { mode = resolveServeMode(flags); }
-  catch (err) { console.error(err.message); process.exitCode = 1; return; }
-
-  const hadSession = await hasSession(ctx, BRIDGE_SESSION);
-  // Process truth comes before tmux truth: foreground mode deliberately has no
-  // bridge session, while a dead daemon can leave a stale session behind.
-  if (isBridgeReady()) {
-    const location = hadSession ? "background tmux session" : "another terminal";
-    console.log(`Bridge already running in ${location}. Run 'amux stop' before switching mode.`);
-    return;
-  }
-  if (isBridgeAlive()) {
-    console.log("Bridge process is running; waiting for readiness...");
-    if (await waitForBridgeReady(30_000)) {
-      console.log("Bridge started.");
-      return;
-    }
-    if (!hadSession) {
-      console.error("Bridge process is alive but unready. Run 'amux stop', then start it again.");
-      process.exitCode = 1;
-      return;
-    }
-  }
-  if (hadSession) {
-    console.log("Stale or unready bridge session detected. Cleaning up...");
-    await killSession(ctx, BRIDGE_SESSION);
-  }
-
-  // Clear stale pidfile so the poll below only sees a fresh write from the new node.
-  // Without this, a leftover /tmp/agentmux.pid (WSL /tmp survives reboots) would
-  // make isBridgeAlive flap based on PID recycling instead of actual readiness.
-  const clearRuntimeState = () => {
-    const pidfile = process.env.PIDFILE || "/tmp/agentmux.pid";
-    try { unlinkSync(pidfile); } catch {}
-    clearBridgeReady();
-  };
-
-  if (mode === BRIDGE_MODE_MANUAL) {
-    clearRuntimeState();
-    writeBridgeMode(BRIDGE_MODE_MANUAL);
-    console.log("Bridge running in this terminal. Ctrl+C stops it; use 'amux doctor' from another terminal to inspect it.\n");
-    const child = spawn("bash", ["bin/start.sh"], { cwd: ctx.bridgeDir || BRIDGE_DIR, stdio: "inherit" });
-    return new Promise((resolveChild, rejectChild) => {
-      child.once("error", rejectChild);
-      child.once("exit", (code) => {
-        if (code && code !== 130) process.exitCode = code;
-        resolveChild();
-      });
-    });
-  }
-
-  writeBridgeMode(BRIDGE_MODE_MANAGED);
-  const startBridgeSession = async () => {
-    clearRuntimeState();
-    await ctx.tmux(`new-session -d -s '${esc(BRIDGE_SESSION)}' -c '${esc(BRIDGE_DIR)}' 'bash bin/start.sh'`);
-  };
-
-  try {
-    await startBridgeSession();
-  } catch (err) {
-    // The very first tmux command after a reboot can fail OUTRIGHT, not just
-    // time out (observed 2026-07-08 19:38: "Command failed: tmux ...
-    // new-session" on freshly booted WSL, success on rerun). Two known
-    // interleavings of the same boot race: tmux-continuum's restore creates
-    // the 'amux' session between our has-session check and new-session
-    // (duplicate-session error), or the server itself is mid-start on the
-    // stale socket file /tmp preserves across reboots. Either way the cure
-    // is the 1.20.45 cure: clean up and retry once on a now-warm server.
-    console.log(`new-session failed (${String(err?.message || err).split("\n")[0]}) — retrying once on a warm server...`);
-    await killSession(ctx, BRIDGE_SESSION).catch(() => {});
-    await startBridgeSession();
-  }
-  // Poll for actual readiness instead of trusting tmux session creation.
-  // start.sh is a 10s-restart supervisor — the first node attempt can crash
-  // (DNS/network not ready right after WSL shell open) and we'd otherwise
-  // print "Bridge started" while the user gets a dead bridge.
-  if (await waitForBridgeReady(20_000)) {
-    console.log(`Bridge started (session: ${BRIDGE_SESSION}). Attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
-    return;
-  }
-
-  // First-boot restore race: when this new-session also started the tmux
-  // SERVER (first serve after a WSL boot), tmux-continuum's auto-restore
-  // (@continuum-restore on) fires as the server comes up and can clobber
-  // the fresh session with a restored STUB — a bare shell at the saved
-  // cwd, no supervisor. That was the chronic "you have to run amux serve
-  // twice". Self-heal: clean up and recreate ONCE — by now the server is
-  // warm and the restore has already run, so the retry is race-free.
-  console.log("Bridge not ready — recreating once (first-boot tmux restore race)...");
-  await killSession(ctx, BRIDGE_SESSION).catch(() => {});
-  await startBridgeSession();
-  if (await waitForBridgeReady(30_000)) {
-    console.log(`Bridge started (session: ${BRIDGE_SESSION}). Attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
-    return;
-  }
-  // Didn't come up in time — surface the supervisor's last output so the user
-  // can see why (DNS, auth, port collision, etc.) instead of a silent failure.
-  let tail = "";
-  try {
-    const cap = await ctx.tmux(`capture-pane -t '${esc(BRIDGE_SESSION)}' -p -S -50`);
-    tail = (cap?.stdout ?? "").trim();
-  } catch (e) {
-    tail = `(capture-pane failed: ${e?.message || e})`;
-  }
-  console.error(`Bridge did not become ready within 30s. Last supervisor output:\n${tail || "(no output captured)"}\n\nSession is still up — retry with 'amux stop && amux serve' or attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
-  process.exitCode = 1;
+  return bridgeLifecycle.serve(flags, ctx);
 }
 
-function bridgePid() {
-  const pidfile = process.env.PIDFILE || "/tmp/agentmux.pid";
-  try {
-    const pid = parseInt(readFileSync(pidfile, "utf-8").trim());
-    if (!pid) return null;
-    process.kill(pid, 0);
-    return pid;
-  } catch {
-    return null;
-  }
-}
-
-function isBridgeAlive() {
-  return bridgePid() !== null;
-}
-
-function bridgeReadyPath() {
-  return process.env.READY_FILE || "/tmp/agentmux.ready";
-}
-
-function clearBridgeReady() {
-  try { unlinkSync(bridgeReadyPath()); } catch {}
-}
-
-function isBridgeReady() {
-  const pid = bridgePid();
-  if (!pid) return false;
-  try {
-    return parseInt(readFileSync(bridgeReadyPath(), "utf-8").trim()) === pid;
-  } catch {
-    return false;
-  }
-}
-
-async function waitForBridgeReady(timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (isBridgeReady()) return true;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  return false;
-}
-
+/** WHAT: Stops the Discord bridge. WHY: Keeps intentional shutdown consistent across CLI callers. */
 async function cmdUnserve(ctx) {
-  writeBridgeMode(BRIDGE_MODE_STOPPED);
-  const hadSession = await hasSession(ctx, BRIDGE_SESSION);
-  const wasAlive = isBridgeAlive();
-  // Also kill the PID directly: under WSL tmux kill-session sometimes leaves
-  // node reparented to init, which then blocks the next `amux serve` via
-  // its pidfile lock. Belt + suspenders.
-  killBridgeByPid();
-  if (hadSession) await killSession(ctx, BRIDGE_SESSION);
-  if (!hadSession && !wasAlive) {
-    console.log("Bridge is not running.");
-    return;
-  }
-  console.log("Bridge stopped.");
-}
-
-function killBridgeByPid() {
-  const pidfile = process.env.PIDFILE || "/tmp/agentmux.pid";
-  try {
-    const pid = parseInt(readFileSync(pidfile, "utf-8").trim());
-    if (pid) {
-      try { process.kill(pid, "SIGTERM"); } catch {}
-    }
-  } catch {}
-  try { unlinkSync(pidfile); } catch {}
-  clearBridgeReady();
+  return bridgeLifecycle.stop(ctx);
 }
 
 async function cmdStopAll(ctx) {
@@ -343,12 +169,7 @@ async function cmdStopAll(ctx) {
       stopped.push(a.name);
     }
   }
-  if (isBridgeAlive() || await hasSession(ctx, BRIDGE_SESSION)) {
-    await cmdUnserve(ctx);
-    stopped.push("bridge");
-  } else {
-    writeBridgeMode(BRIDGE_MODE_STOPPED);
-  }
+  if (await cmdUnserve(ctx)) stopped.push("bridge");
   if (!stopped.length) console.log("Nothing to stop.");
   else console.log(`Stopped: ${stopped.join(", ")}.`);
 }

@@ -22,7 +22,7 @@ feature("bridge ownership mode", () => {
     then: ["the ambiguity is rejected", (run) => expect(run).toThrow("either foreground or --detach")],
   });
 
-  unit("mode persists and absent legacy state falls back to managed", {
+  unit("mode persists and absent state defaults to manual", {
     given: ["an in-memory file", () => {
       let value = null;
       return {
@@ -35,13 +35,13 @@ feature("bridge ownership mode", () => {
       };
     }],
     when: ["reading legacy state, writing stopped, then reading it", (io) => {
-      const legacy = readBridgeMode({ path: "x", read: io.read });
+      const initial = readBridgeMode({ path: "x", read: io.read });
       writeBridgeMode(BRIDGE_MODE_STOPPED, { path: "/tmp/x", write: io.write });
       const stopped = readBridgeMode({ path: "x", read: io.read });
-      return { legacy, stopped, raw: io.value() };
+      return { initial, stopped, raw: io.value() };
     }],
-    then: ["legacy remains managed and intentional stop is durable", (result) => {
-      expect(result).toEqual({ legacy: BRIDGE_MODE_MANAGED, stopped: BRIDGE_MODE_STOPPED, raw: "stopped\n" });
+    then: ["manual is the real default and intentional stop is durable", (result) => {
+      expect(result).toEqual({ initial: BRIDGE_MODE_MANUAL, stopped: BRIDGE_MODE_STOPPED, raw: "stopped\n" });
     }],
   });
 
