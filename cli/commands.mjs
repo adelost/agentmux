@@ -16,7 +16,7 @@ import { planRevive, reviveBrief, parseBootMs } from "../core/revive.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { latestCodexJsonlMtime, readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
-import { latestPaneStatesCached, mergeStatus, readEvents, eventsPath } from "../core/events.mjs";
+import { appendEvent, latestPaneStatesCached, mergeStatus, readEvents, eventsPath } from "../core/events.mjs";
 import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../core/pane-status.mjs";
 import { readHeartbeat } from "../core/heartbeat.mjs";
 import {
@@ -332,6 +332,10 @@ async function cmdSend(name, prompt, flags, ctx) {
 
   const res = await sendToPane(ctx, name, pane, finalPrompt, { force: !!flags.force });
   if (res?.blocked) {
+    process.exitCode = 1;
+    return;
+  }
+  if (!res?.delivered) {
     process.exitCode = 1;
     return;
   }
@@ -1607,7 +1611,8 @@ async function cmdDream(ctx, flags = {}) {
 
       if (!flags.quiet && !flags.q) console.log(`${tag} ${key} → /compact`);
       try {
-        await sendToPane(ctx, t.agent, t.pane, "/compact", { mirror: false });
+        const sent = await sendToPane(ctx, t.agent, t.pane, "/compact", { mirror: false });
+        if (!sent?.delivered) throw new Error(sent?.blocked ? "blocked by park-guard" : "delivery not acknowledged");
       } catch (err) {
         failedCount++;
         console.warn(`${tag} ${key} /compact failed: ${err.message}`);
@@ -1625,7 +1630,8 @@ async function cmdDream(ctx, flags = {}) {
       try {
         // Background maintenance should not dump the full internal prompt into
         // Discord. The agent still updates the memory file and channel topic.
-        await sendToPane(ctx, t.agent, t.pane, prompt, { source: "dream", mirror: false, forwardReply: false });
+        const sent = await sendToPane(ctx, t.agent, t.pane, prompt, { source: "dream", mirror: false });
+        if (!sent?.delivered) throw new Error(sent?.blocked ? "blocked by park-guard" : "delivery not acknowledged");
       } catch (err) {
         failedCount++;
         console.warn(`${tag} ${key} prompt failed: ${err.message}`);
@@ -2191,7 +2197,7 @@ async function cmdRevive(ctx, flags) {
   }
 
   let events = [];
-  try { events = readEvents({}); } catch { /* empty ledger: respawn still runs */ }
+  try { events = readEvents({ tailBytes: 0 }); } catch { /* empty ledger: respawn still runs */ }
   const plan = planRevive({ events, bootMs, panes, statuses });
 
   console.log(`Paneler: ${panes.length} konfigurerade coding-panes säkras (idempotent).`);
@@ -2206,7 +2212,23 @@ async function cmdRevive(ctx, flags) {
     catch (err) { console.error(`  ensureReady ${p.agent}:${p.pane} misslyckades: ${err.message.split("\n")[0]}`); }
   }
   for (const b of plan.briefs) {
-    await sendToPane(ctx, b.agent, b.pane, reviveBrief(b.interruptedAtMs, bootMs));
+    const sent = await sendToPane(ctx, b.agent, b.pane, reviveBrief(b.interruptedAtMs, bootMs));
+    if (!sent?.delivered) {
+      console.error(`  INTE skickad: ${b.agent}:${b.pane} (${sent?.blocked ? "parkerad" : "leverans ej verifierad"})`);
+      continue;
+    }
+    try {
+      appendEvent({
+        ts: new Date().toISOString(),
+        event: "revive_brief",
+        session: b.agent,
+        pane: b.pane,
+        interruptedAtMs: b.interruptedAtMs,
+        detail: `boot ${new Date(bootMs).toISOString()}`,
+      });
+    } catch (err) {
+      console.error(`  revive receipt ${b.agent}:${b.pane} misslyckades: ${err.message}`);
+    }
     console.log(`  skickad: ${b.agent}:${b.pane}`);
   }
   console.log("Revive klar.");
@@ -2541,8 +2563,9 @@ async function cmdCompact(ctx, flags = {}, positional = []) {
       // Mirror to Discord with an "amux:compact" source tag so channel
       // watchers can tell this was a bulk-compact action vs a manual
       // /compact somebody typed. Transparency without noise.
-      await sendToPane(ctx, t.agent, t.pane, compactText, { source: "amux:compact" });
-      console.log(`✓ ${t.agent} p${t.pane}: ${compactText} sent`);
+      const sent = await sendToPane(ctx, t.agent, t.pane, compactText, { source: "amux:compact" });
+      if (sent?.delivered) console.log(`✓ ${t.agent} p${t.pane}: ${compactText} sent`);
+      else console.log(`✗ ${t.agent} p${t.pane}: ${sent?.blocked ? "blocked by park-guard" : "delivery not acknowledged"}`);
     } catch (err) {
       console.log(`✗ ${t.agent} p${t.pane}: ${err.message}`);
     }
@@ -2601,7 +2624,12 @@ async function compactOnePane(ctx, name, flags, compactText) {
     console.log(`[dry] ${name} p${paneIdx} (${status}, ${ctxStr}) ← ${compactText}`);
     return;
   }
-  await sendToPane(ctx, name, paneIdx, compactText, { source: "amux:compact" });
+  const sent = await sendToPane(ctx, name, paneIdx, compactText, { source: "amux:compact" });
+  if (!sent?.delivered) {
+    console.error(`${name} p${paneIdx}: ${sent?.blocked ? "blocked by park-guard" : "delivery not acknowledged"}`);
+    process.exitCode = 1;
+    return;
+  }
   console.log(`✓ ${name} p${paneIdx}: ${compactText} sent  (was ${status}, ${ctxStr})`);
   console.log(`Note: /compact runs asynchronously. Run 'amux top' in a minute to see new values.`);
 }
@@ -2661,6 +2689,7 @@ async function cmdRemind(ctx, flags = {}, positional = []) {
 
   let sent = 0;
   let skipped = 0;
+  let failed = 0;
 
   for (const { agent: a, paneIdx } of targets) {
     const paneKey = `${a.name}:${paneIdx}`;
@@ -2696,19 +2725,25 @@ async function cmdRemind(ctx, flags = {}, positional = []) {
       // reminderCount rotates DRIFT_SECTIONS; the shared state file keeps
       // the rotation continuous between manual remind and the bridge poll.
       const reminderCount = paneState.reminderCount || 0;
-      await sendToPane(ctx, a.name, paneIdx, formatReminderMessage(turnCount, reminderCount));
+      const result = await sendToPane(ctx, a.name, paneIdx, formatReminderMessage(turnCount, reminderCount));
+      if (!result?.delivered) {
+        console.error(`failed ${paneKey}: ${result?.blocked ? "blocked by park-guard" : "delivery not acknowledged"}`);
+        failed++;
+        continue;
+      }
       state[paneKey] = { ...paneState, lastReminderTsMs: nowMs, reminderCount: reminderCount + 1 };
       sent++;
       console.log(`reminded ${paneKey} (${turnCount} turns)`);
     } catch (err) {
       console.error(`failed ${paneKey}: ${err.message}`);
+      failed++;
     }
   }
 
   try { saveReminderState(state, config.statePath); } catch {}
 
   const mode = flags.all ? "all" : flags.stale ? "stale" : "one";
-  console.log(`\nDone. mode=${mode} sent=${sent} skipped=${skipped}`);
+  console.log(`\nDone. mode=${mode} sent=${sent} skipped=${skipped} failed=${failed}`);
 }
 
 /**

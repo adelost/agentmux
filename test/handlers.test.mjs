@@ -142,9 +142,9 @@ feature("/model dialect routing", () => {
       await onMessage(msg);
       unlinkSync(path);
     }],
-    then: ["typed /model into the pane, failed loud with fallback, no prompt sent", (_, { msg, agent }) => {
+    then: ["failed closed before typing, with fallback guidance", (_, { msg, agent }) => {
       const reply = msg.reply.mock.calls[0][0];
-      expect(agent.typeLiteral).toHaveBeenCalledWith("_ai", "/model", 0);
+      expect(agent.typeLiteral).not.toHaveBeenCalled();
       expect(reply).toMatch(/picker drive failed/i);
       expect(reply).toContain("amux _ai");
       expect(agent.sendOnly).not.toHaveBeenCalled();

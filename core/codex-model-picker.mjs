@@ -75,6 +75,13 @@ function parseNumberedRows(text, headerRe) {
   return rows.length ? rows : null;
 }
 
+function composerText(text) {
+  const line = String(text || "").split("\n").reverse()
+    .find((candidate) => /^\s*[›❯>]\s*/.test(candidate));
+  if (!line) return null;
+  return line.replace(/^\s*[›❯>]\s*/, "").trim();
+}
+
 export function parseModelList(text) {
   return parseNumberedRows(text, MODEL_LIST_HEADER);
 }
@@ -97,6 +104,14 @@ export function findConfirmation(text, model) {
     if (m && m[1] === model) return { model: m[1], effort: m[2] || null };
   }
   return null;
+}
+
+function confirmationCount(text, model) {
+  return String(text || "").split("\n")
+    .filter((line) => {
+      const m = line.match(CONFIRMATION_RE);
+      return m && m[1] === model;
+    }).length;
 }
 
 const fail = (stage, error, extra = {}) => ({ ok: false, stage, error, ...extra });
@@ -136,14 +151,27 @@ export async function driveCodexModelPicker({
     if (await agent.isBusy(name, pane)) {
       return fail("busy", "pane is mid-turn; interrupt (esc) or wait for idle before switching model");
     }
-  } catch { /* busy probe failed: proceed, stage checks below still gate */ }
+  } catch (err) {
+    return fail("busy-check", `could not verify that pane is idle: ${err.message}`);
+  }
+
+  // Preserve a human draft or a previously queued message. Checking after
+  // typing would first merge "/model" into it and rely on Escape cleanup.
+  let snap = await capture(15);
+  const before = composerText(snap);
+  if (before === null) {
+    return fail("compose", "could not identify the codex composer before typing");
+  }
+  if (before) {
+    return fail("compose", `composer is not empty (starts with: ${before.slice(0, 60)})`);
+  }
 
   // Stage 1: type /model (no Enter) and verify it sits alone in the composer.
   // Real leftover text concatenates ("/usage" + "/model" → "/usage/model",
   // observed live) — abort rather than submit merged garbage.
   await agent.typeLiteral(name, "/model", pane);
   await sleep(700);
-  let snap = await capture(15);
+  snap = await capture(15);
   const composerLine = snap.split("\n").reverse().find((l) => /[›❯>]\s*\/\S*model/.test(l));
   if (!composerLine || !/[›❯>]\s*\/model\s*$/.test(composerLine.trim())) {
     await escapeOut();
@@ -181,6 +209,8 @@ export async function driveCodexModelPicker({
     return fail("effort-list", `effort view is for "${effortView.model}", expected "${model}"`);
   }
 
+  const confirmationsBefore = confirmationCount(snap, model);
+
   // Stage 4: effort digit (instant), or Enter to accept the default.
   if (effort) {
     const effortRow = effortView.rows.find((r) => r.effort === effort);
@@ -197,11 +227,11 @@ export async function driveCodexModelPicker({
   await sleep(1100);
 
   // Stage 5: the confirmation line is the proof — footer alone can lag.
-  snap = await capture(25);
+  snap = await capture();
   const confirmed = findConfirmation(snap, model);
-  if (!confirmed) {
+  if (!confirmed || confirmationCount(snap, model) <= confirmationsBefore) {
     await escapeOut();
-    return fail("confirm", `no "Model changed to ${model}" confirmation appeared`);
+    return fail("confirm", `no new "Model changed to ${model}" confirmation appeared`);
   }
   return { ok: true, model: confirmed.model, effort: confirmed.effort };
 }

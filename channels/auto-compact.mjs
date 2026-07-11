@@ -26,6 +26,10 @@ import { statSync } from "fs";
 // Both maps are in-memory — warnings are cheap to re-derive after a
 // bridge restart (next poll re-warns if still over threshold).
 
+export function enteredLimited(prev, status) {
+  return status === "limited" && prev !== "limited";
+}
+
 export function createAutoCompact({
   agent,
   agentsYamlPath,
@@ -230,7 +234,9 @@ export function createAutoCompact({
   async function alertOnLimited(agentName, paneIdx, paneKey, status) {
     const prev = prevStatus.get(paneKey);
     prevStatus.set(paneKey, status);
-    if (status !== "limited" || prev === "limited" || prev === undefined) return;
+    // A bridge that starts while a pane is already limited must still alert;
+    // suppressing prev===undefined made quota stalls invisible after reboot.
+    if (!enteredLimited(prev, status)) return;
 
     log(`${paneKey} hit its quota/limit (was: ${prev})`);
     try {

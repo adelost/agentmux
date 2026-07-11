@@ -30,11 +30,29 @@ export function planRevive({ events = [], bootMs, panes = [], statuses = new Map
 
   // Last prompt/stop per pane BEFORE boot: a trailing prompt = interrupted.
   const last = new Map();
+  const revived = new Map();
+  const activeAfterBoot = new Set();
   for (const e of events) {
-    if (e?.event !== "prompt" && e?.event !== "stop") continue;
     const ms = Date.parse(e.ts);
-    if (!Number.isFinite(ms) || ms >= bootMs) continue;
-    last.set(`${e.session}:${e.pane}`, { ev: e.event, ms });
+    if (!Number.isFinite(ms)) continue;
+    const key = `${e.session}:${e.pane}`;
+    if (e?.event === "revive_brief" && ms >= bootMs) {
+      const interruptedAtMs = Number(e.interruptedAtMs);
+      if (Number.isFinite(interruptedAtMs)) {
+        revived.set(key, Math.max(revived.get(key) || 0, interruptedAtMs));
+      }
+      continue;
+    }
+    if ((e?.event === "prompt" || e?.event === "stop") && ms >= bootMs) {
+      // The pane has already accepted or completed a post-boot turn. Injecting
+      // stale crash archaeology hours later interrupts current work and can
+      // reopen tasks the user already resolved manually.
+      activeAfterBoot.add(key);
+      continue;
+    }
+    if ((e?.event !== "prompt" && e?.event !== "stop") || ms >= bootMs) continue;
+    const current = last.get(key);
+    if (!current || ms >= current.ms) last.set(key, { ev: e.event, ms });
   }
 
   const briefs = [];
@@ -42,6 +60,8 @@ export function planRevive({ events = [], bootMs, panes = [], statuses = new Map
     const key = `${p.agent}:${p.pane}`;
     const pre = last.get(key);
     if (!pre || pre.ev !== "prompt") continue; // finished cleanly or untouched
+    if (activeAfterBoot.has(key)) continue; // already resumed or received newer work
+    if ((revived.get(key) || 0) >= pre.ms) continue; // already briefed for this interruption
     const status = statuses.get(key);
     if (status === "working" || status === "resume") continue; // already back at it
     briefs.push({ agent: p.agent, pane: p.pane, interruptedAtMs: pre.ms });

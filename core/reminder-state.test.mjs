@@ -9,6 +9,7 @@ import {
   decideReminderAction,
   cutoffFor,
   formatReminderMessage,
+  recordReminderDelivery,
   DRIFT_SECTIONS,
 } from "./reminder-state.mjs";
 
@@ -93,29 +94,6 @@ feature("parseReminderConfig", () => {
     then: ["pollMs=60000 (default)", (result) => expect(result.pollMs).toBe(60_000)],
   });
 
-  unit("forwardReply defaults true", {
-    given: ["empty env", () => ({ env: {} })],
-    when: ["parsing", ({ env }) => parseReminderConfig(env)],
-    then: ["forwardReply=true", (result) => expect(result.forwardReply).toBe(true)],
-  });
-
-  unit("FORWARD_REPLY=false disables forwarder", {
-    given: ["forward off", () => ({ env: { AMUX_REMIND_FORWARD_REPLY: "false" } })],
-    when: ["parsing", ({ env }) => parseReminderConfig(env)],
-    then: ["forwardReply=false", (result) => expect(result.forwardReply).toBe(false)],
-  });
-
-  unit("replyTimeoutMs defaults to 60s", {
-    given: ["empty env", () => ({ env: {} })],
-    when: ["parsing", ({ env }) => parseReminderConfig(env)],
-    then: ["replyTimeoutMs=60000", (result) => expect(result.replyTimeoutMs).toBe(60_000)],
-  });
-
-  unit("too-low reply timeout clamped to default", {
-    given: ["1s timeout (too short)", () => ({ env: { AMUX_REMIND_REPLY_TIMEOUT_MS: "1000" } })],
-    when: ["parsing", ({ env }) => parseReminderConfig(env)],
-    then: ["replyTimeoutMs=60000 (default)", (result) => expect(result.replyTimeoutMs).toBe(60_000)],
-  });
 });
 
 feature("decideReminderAction", () => {
@@ -218,6 +196,34 @@ feature("cutoffFor", () => {
     })],
     when: ["computing", ({ state }) => cutoffFor(state)],
     then: ["5000 (reminder)", (r) => expect(r).toBe(5000)],
+  });
+});
+
+feature("recordReminderDelivery", () => {
+  unit("failed delivery leaves timestamp and rotation untouched", {
+    given: ["an existing pane state", () => ({
+      paneState: { lastReminderTsMs: 100, reminderCount: 2 },
+    })],
+    when: ["recording a failed send", ({ paneState }) => ({
+      changed: recordReminderDelivery(paneState, { delivered: false, nowMs: 200, reminderCount: 2 }),
+      paneState,
+    })],
+    then: ["state is unchanged so the next tick retries", ({ changed, paneState }) => {
+      expect(changed).toBe(false);
+      expect(paneState).toEqual({ lastReminderTsMs: 100, reminderCount: 2 });
+    }],
+  });
+
+  unit("successful delivery advances timestamp and rotation once", {
+    given: ["a pane state", () => ({ paneState: { lastReminderTsMs: null, reminderCount: 0 } })],
+    when: ["recording success", ({ paneState }) => ({
+      changed: recordReminderDelivery(paneState, { delivered: true, nowMs: 200, reminderCount: 0 }),
+      paneState,
+    })],
+    then: ["state advances", ({ changed, paneState }) => {
+      expect(changed).toBe(true);
+      expect(paneState).toMatchObject({ lastReminderTsMs: 200, reminderCount: 1 });
+    }],
   });
 });
 

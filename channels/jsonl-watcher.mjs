@@ -213,7 +213,7 @@ export function createJsonlWatcher({
     const decision = decideRecovery({ lastAttemptMs: attempts[key]?.attemptedAtMs, enabled: recoveryEnabled });
     if (!decision.attempt) {
       log(`${paneName} recovery skipped: ${decision.reason}`);
-      return;
+      return { attempted: false, restored: false, detail: decision.reason };
     }
     attempts[key] = { attemptedAtMs: Date.now(), target: modelLabel(prev) };
     state.set(STATE_KEY_RECOVERY, attempts);
@@ -239,7 +239,8 @@ export function createJsonlWatcher({
           // statusline instead of waiting for a reading that never comes.
           await new Promise((r) => setTimeout(r, 3000));
           const liveCtx = await agent.getContext?.(name, idx).catch(() => null);
-          restored = !!liveCtx?.model && liveCtx.model === prev.model;
+          restored = !!liveCtx?.model &&
+            String(liveCtx.model).trim().toLowerCase() === String(prev.model).trim().toLowerCase();
           detail = restored ? modelLabel(prev) : `statusline still shows ${liveCtx?.model || "unknown"}`;
         }
       }
@@ -261,6 +262,20 @@ export function createJsonlWatcher({
     log(`${paneName} recovery ${restored ? "ok" : "failed"}: ${detail}`);
     await discord.send(channelId, recoveryMessage(paneName, restored, detail))
       .catch((err) => log(`recovery channel line failed for ${paneName}: ${err.message}`));
+    return { attempted: true, restored, detail };
+  }
+
+  async function waitForPaneIdle(name, idx, timeoutMs = 5000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        if (!(await agent.isBusy(name, idx))) return true;
+      } catch {
+        return false;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return false;
   }
 
   /**
@@ -316,7 +331,7 @@ export function createJsonlWatcher({
     notifyUser(`🔀 ${paneName} nedgraderad och STOPPAD: ${change.from} → ${change.to} — knuffa när läget är rätt`)
       .catch?.((err) => log(`model-change push failed: ${err.message}`));
     // Stop the harm first: a mid-turn pane keeps building on the weaker
-    // model until interrupted. Then park it with the stop-brief. The
+    // model until interrupted. Then park it. The
     // ledger park makes the state visible to every send path (the api:3
     // incident: briefs woke a parked pane, 45 min of work on luna low).
     try {
@@ -326,12 +341,20 @@ export function createJsonlWatcher({
       const busy = await agent.isBusy?.(name, idx);
       if (busy) await agent.sendEscape(name, idx);
     } catch (err) { log(`model-change escape failed for ${paneName}: ${err.message}`); }
-    try {
-      await agent.sendOnly(name, stopBrief(change), idx);
-    } catch (err) {
-      log(`model-change stop brief failed for ${paneName}: ${err.message}`);
+    await waitForPaneIdle(name, idx);
+
+    // Recover while the pane is neutral. The old order sent stopBrief first;
+    // that started a new turn, so the codex picker correctly refused the busy
+    // pane and auto-recovery defeated itself. Only brief the downgraded model
+    // when recovery was skipped or failed.
+    const recovery = await attemptModelRecovery({ name, idx, paneName, channelId, prev, config });
+    if (!recovery.restored) {
+      try {
+        await agent.sendOnly(name, stopBrief(change), idx);
+      } catch (err) {
+        log(`model-change stop brief failed for ${paneName}: ${err.message}`);
+      }
     }
-    await attemptModelRecovery({ name, idx, paneName, channelId, prev, config });
   }
 
   function commitEngineState(channelId, nextState) {

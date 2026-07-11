@@ -43,6 +43,13 @@ const COMPOSER_VIEW = `
   /model  choose what model and reasoning effort to use
 `;
 
+const IDLE_VIEW = `
+• Some earlier transcript line
+
+›
+  gpt-5.6-sol xhigh · ~/x
+`;
+
 const CONFIRMED = `
 • Model changed to gpt-5.6-luna low
 
@@ -121,7 +128,7 @@ const noSleep = () => Promise.resolve();
 feature("driveCodexModelPicker", () => {
   unit("happy path: /model → digit 3 → digit 1 → confirmed luna low", {
     given: ["a pane scripted through all five stages", () => ({
-      agent: fakeAgent({ frames: [COMPOSER_VIEW, MODEL_LIST, EFFORT_LIST, CONFIRMED] }),
+      agent: fakeAgent({ frames: [IDLE_VIEW, COMPOSER_VIEW, MODEL_LIST, EFFORT_LIST, CONFIRMED] }),
     })],
     when: ["driving", ({ agent }) => driveCodexModelPicker({
       agent, name: "api", pane: 3, model: "gpt-5.6-luna", effort: "low", sleep: noSleep,
@@ -148,7 +155,7 @@ feature("driveCodexModelPicker", () => {
 
   unit("requested model absent from picker fails with the available list", {
     given: ["a picker without the target model", () => ({
-      agent: fakeAgent({ frames: [COMPOSER_VIEW, MODEL_LIST, MODEL_LIST] }),
+      agent: fakeAgent({ frames: [IDLE_VIEW, COMPOSER_VIEW, MODEL_LIST, MODEL_LIST] }),
     })],
     when: ["driving toward a hidden model", ({ agent }) => driveCodexModelPicker({
       agent, name: "api", pane: 3, model: "gpt-9-plasma", sleep: noSleep,
@@ -162,20 +169,21 @@ feature("driveCodexModelPicker", () => {
 
   unit("dirty composer (merged residue) aborts instead of submitting garbage", {
     given: ["a composer showing /usage/model", () => ({
-      agent: fakeAgent({ frames: ["\n› /usage/model\n"] }),
+      agent: fakeAgent({ frames: ["\n› /usage\n"] }),
     })],
     when: ["driving", ({ agent }) => driveCodexModelPicker({
       agent, name: "api", pane: 3, model: "gpt-5.6-sol", sleep: noSleep,
     })],
-    then: ["fails at compose stage, no Enter ever sent", (r, { agent }) => {
+    then: ["fails before typing, so the existing draft is preserved", (r, { agent }) => {
       expect(r.stage).toBe("compose");
+      expect(agent.keys).not.toContain("/model");
       expect(agent.keys).not.toContain("<enter>");
     }],
   });
 
   unit("omitted effort accepts the picker default via Enter", {
     given: ["no effort requested", () => ({
-      agent: fakeAgent({ frames: [COMPOSER_VIEW, MODEL_LIST, EFFORT_LIST,
+      agent: fakeAgent({ frames: [IDLE_VIEW, COMPOSER_VIEW, MODEL_LIST, EFFORT_LIST,
         "• Model changed to gpt-5.6-luna medium\n"] }),
     })],
     when: ["driving", ({ agent }) => driveCodexModelPicker({
@@ -184,6 +192,37 @@ feature("driveCodexModelPicker", () => {
     then: ["confirms default effort with Enter as last key", (r, { agent }) => {
       expect(r).toMatchObject({ ok: true, effort: "medium" });
       expect(agent.keys[agent.keys.length - 1]).toBe("<enter>");
+    }],
+  });
+
+  unit("busy-probe failure is fail-closed before any keystroke", {
+    given: ["a pane whose busy state cannot be read", () => {
+      const agent = fakeAgent({ frames: [IDLE_VIEW] });
+      agent.isBusy = async () => { throw new Error("tmux unavailable"); };
+      return { agent };
+    }],
+    when: ["driving", ({ agent }) => driveCodexModelPicker({
+      agent, name: "api", pane: 3, model: "gpt-5.6-sol", sleep: noSleep,
+    })],
+    then: ["fails at busy-check with zero keys typed", (r, { agent }) => {
+      expect(r.stage).toBe("busy-check");
+      expect(agent.keys).toHaveLength(0);
+    }],
+  });
+
+  unit("a stale confirmation from an earlier switch is not accepted", {
+    given: ["the effort view and final capture contain only the same stale line", () => {
+      const stale = `• Model changed to gpt-5.6-luna low\n${EFFORT_LIST}`;
+      return {
+        agent: fakeAgent({ frames: [IDLE_VIEW, COMPOSER_VIEW, MODEL_LIST, stale, stale] }),
+      };
+    }],
+    when: ["driving", ({ agent }) => driveCodexModelPicker({
+      agent, name: "api", pane: 3, model: "gpt-5.6-luna", effort: "low", sleep: noSleep,
+    })],
+    then: ["fails confirmation instead of claiming success", (r) => {
+      expect(r.stage).toBe("confirm");
+      expect(r.ok).toBe(false);
     }],
   });
 });

@@ -9,7 +9,7 @@ import { feature, unit, expect } from "bdd-vitest";
 import { writeFileSync, mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { createAutoCompact } from "./auto-compact.mjs";
+import { createAutoCompact, enteredLimited } from "./auto-compact.mjs";
 import { DEFAULT_CONFIG } from "../core/auto-compact.mjs";
 
 const yield_ = () => new Promise((r) => setTimeout(r, 5));
@@ -74,6 +74,18 @@ async function ticks(ac, n) {
 }
 
 feature("auto-compact tick — runaway prevention (the real bug)", () => {
+  unit("limited status alerts on first observation and once per transition", {
+    given: ["startup, steady limited, and recovery states", () => [undefined, "limited", "idle"]],
+    when: ["checking entry into limited", ([startup, limited, idle]) => [
+      enteredLimited(startup, "limited"),
+      enteredLimited(limited, "limited"),
+      enteredLimited(idle, "limited"),
+    ]],
+    then: ["startup and a real re-entry alert; steady state does not", (r) => {
+      expect(r).toEqual([true, false, true]);
+    }],
+  });
+
   unit("pane stuck at 100% whose /compact never reduces context fires /compact AT MOST ONCE", {
     given: ["normal-height pane, context always reads 100%", () => harness({ content: CONTENT.full100 })],
     when: ["running 8 poll ticks", async ({ ac, state }) => { await ticks(ac, 8); return state; }],

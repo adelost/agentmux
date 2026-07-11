@@ -48,15 +48,11 @@ export function parseReminderConfig(env = process.env) {
   const isDisabled = env.AMUX_REMIND_ENABLED === "false";
   const threshold = parseInt(env.AMUX_REMIND_TURN_THRESHOLD || "40", 10);
   const pollMs = parseInt(env.AMUX_REMIND_POLL_MS || "60000", 10);
-  const forwardReplyOff = env.AMUX_REMIND_FORWARD_REPLY === "false";
-  const replyTimeoutMs = parseInt(env.AMUX_REMIND_REPLY_TIMEOUT_MS || "60000", 10);
   return {
     enabled: !isDisabled,
     turnThreshold: Number.isFinite(threshold) && threshold > 0 ? threshold : 40,
     pollMs: Number.isFinite(pollMs) && pollMs >= 10_000 ? pollMs : 60_000,
     statePath: env.AMUX_REMINDER_STATE_PATH || REMINDER_STATE_PATH,
-    forwardReply: !forwardReplyOff,
-    replyTimeoutMs: Number.isFinite(replyTimeoutMs) && replyTimeoutMs >= 5_000 ? replyTimeoutMs : 60_000,
   };
 }
 
@@ -110,6 +106,14 @@ export function cutoffFor(paneState) {
   if (rem == null) return comp;
   if (comp == null) return rem;
   return rem > comp ? rem : comp;
+}
+
+/** Advance rotation only after the pane accepted the reminder. */
+export function recordReminderDelivery(paneState, { delivered, nowMs, reminderCount }) {
+  if (!delivered) return false;
+  paneState.lastReminderTsMs = nowMs;
+  paneState.reminderCount = reminderCount + 1;
+  return true;
 }
 
 /**

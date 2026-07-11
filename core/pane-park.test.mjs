@@ -1,5 +1,5 @@
 import { unit, feature, expect } from "bdd-vitest";
-import { unlinkSync } from "fs";
+import { appendFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
@@ -82,6 +82,25 @@ feature("park/unpark ledger roundtrip", () => {
     then: ["null", (r, { path }) => {
       cleanup(path);
       expect(r).toBeNull();
+    }],
+  });
+
+  unit("busy-ledger churn cannot push an active park outside the read window", {
+    given: ["a park followed by more than the generic ledger's 256KB tail", () => {
+      const path = tmpPath();
+      parkPane({ session: "api", pane: 3, detail: "downgrade", path });
+      const row = JSON.stringify({
+        ts: new Date().toISOString(), event: "delivery", session: "other", pane: 0,
+        detail: "x".repeat(400),
+      }) + "\n";
+      appendFileSync(path, row.repeat(800));
+      return { path };
+    }],
+    when: ["reading park state", ({ path }) => readParkState("api", 3, { path })],
+    then: ["the safety interlock remains visible", (r, { path }) => {
+      cleanup(path);
+      expect(r).not.toBeNull();
+      expect(r.detail).toBe("downgrade");
     }],
   });
 });

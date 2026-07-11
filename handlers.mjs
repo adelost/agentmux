@@ -489,6 +489,16 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     return cleanPrompt;
   }
 
+  function unparkAfterHumanDelivery(mapping, pane) {
+    try {
+      if (!readParkState(mapping.name, pane)) return;
+      unparkPane({ session: mapping.name, pane, detail: "human wake via Discord" });
+      console.log(`[${ts()}] ${mapping.name}:${pane} unparked (human wake)`);
+    } catch (err) {
+      console.warn(`park-state update failed for ${mapping.name}:${pane}: ${err.message}`);
+    }
+  }
+
   // streamResponse and hasReadyResponse were removed in 1.16.32 — agent
   // replies are now mirrored to Discord by channels/jsonl-watcher.mjs,
   // which observes every claude/codex pane's session jsonl directly.
@@ -498,17 +508,6 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
   async function processMessage(msg, mapping, cleanPrompt, pane, tmpFiles) {
     console.log(`[${ts()}] ← ${mapping.name}:${pane} "${cleanPrompt.slice(0, 80)}"`);
     const stopTyping = msg.startTyping();
-
-    // A human message to a parked pane IS the wake decision ("knuffa igång
-    // den när läget är rätt"). Lift the park so agent briefs flow again;
-    // the guard only exists to keep AGENTS from waking it behind the
-    // human's back. Bookkeeping must never block the prompt itself.
-    try {
-      if (readParkState(mapping.name, pane)) {
-        unparkPane({ session: mapping.name, pane, detail: "human wake via Discord" });
-        console.log(`[${ts()}] ${mapping.name}:${pane} unparked (human wake)`);
-      }
-    } catch { /* ledger unavailable: proceed with the prompt regardless */ }
 
     const promptToSend = promptForAgent(cleanPrompt);
 
@@ -533,6 +532,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           log: (m) => console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} ${m}`),
         }));
       delivered = result.delivered;
+      if (delivered) unparkAfterHumanDelivery(mapping, pane);
 
       if (!delivered) {
         console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not delivered after 3 attempts`);
@@ -714,10 +714,19 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       return;
     }
 
-    // Follow mode: just inject prompt, follow-loop handles output
+    // Follow mode changes output handling, not delivery guarantees.
     if (followers.has(msg.channelId)) {
-      agent.sendOnly(mapping.name, cleanPrompt, pane).catch((err) =>
-        console.warn(`follow inject sendOnly failed: ${err.message}`));
+      const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
+        sendPromptVerified(agent, mapping.name, pane, cleanPrompt, {
+          attempts: 3,
+          echoTimeoutMs: Math.max(50, Math.min(6_000, pollInterval * 500)),
+          log: (m) => console.warn(`follow ${mapping.name}:${pane}: ${m}`),
+        }));
+      if (result.delivered) unparkAfterHumanDelivery(mapping, pane);
+      if (!result.delivered) {
+        await msg.send("⚠️ Agent did not acknowledge prompt after 3 attempts. Pane may be dead, try `/raw` to inspect.")
+          .catch((err) => console.warn(`follow delivery warning failed: ${err.message}`));
+      }
       return;
     }
 

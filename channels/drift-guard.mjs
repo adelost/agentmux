@@ -16,12 +16,9 @@ import {
   decideReminderAction,
   cutoffFor,
   formatReminderMessage,
+  recordReminderDelivery,
 } from "../core/reminder-state.mjs";
 import { readParkState } from "../core/pane-park.mjs";
-import { isBoilerplateReply } from "../core/reply-forwarder.mjs";
-
-// Re-exported for the existing drift-guard.test.mjs import.
-export { isBoilerplateReply };
 
 export function createDriftGuard({
   agent,
@@ -59,7 +56,7 @@ export function createDriftGuard({
       log(`reminded ${paneKey} at ${turnCount} turns past refresh`);
     } catch (err) {
       log(`send failed for ${paneKey}: ${err.message}`);
-      return;
+      return false;
     }
     // Mirror the reminder text to the bound Discord channel so the user
     // sees drift-guard activity in the timeline. Failure is a transparency
@@ -77,6 +74,7 @@ export function createDriftGuard({
         log(`mirror failed for ${paneKey}: ${err.message}`);
       }
     }
+    return true;
   }
 
   async function tick() {
@@ -140,10 +138,10 @@ export function createDriftGuard({
           // reminderCount picks the DRIFT_SECTIONS rotation slot; legacy
           // state entries without it start at 0 (highest-priority rule).
           const reminderCount = paneState.reminderCount || 0;
-          await sendReminder(a, i, paneKey, turnsSinceCutoff, reminderCount);
-          paneState.lastReminderTsMs = now;
-          paneState.reminderCount = reminderCount + 1;
-          stateChanged = true;
+          const sent = await sendReminder(a, i, paneKey, turnsSinceCutoff, reminderCount);
+          if (recordReminderDelivery(paneState, { delivered: sent, nowMs: now, reminderCount })) {
+            stateChanged = true;
+          }
         }
       }
     }

@@ -12,7 +12,7 @@ import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
 import { readParkState, shouldBlockSend, blockedSendMessage } from "../core/pane-park.mjs";
 import { deliverToPane } from "../core/delivery.mjs";
 import { detectPaneStatus } from "./format.mjs";
-import { findChannelForPane, loadConfig } from "./config.mjs";
+import { findChannelForPane } from "./config.mjs";
 
 const exec = promisify(execCb);
 
@@ -153,7 +153,6 @@ export async function sendKeys(ctx, name, pane, keys) {
  */
 export async function sendToPane(ctx, name, pane, text, opts = {}) {
   const mirror = opts.mirror !== false;
-  const sentAtMs = Date.now();
 
   // 0. Park guard: a pane parked by model-watch (model downgrade) must not
   //    be woken by a brief — the work would run on the fallback model
@@ -182,12 +181,14 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
     console.error(`⚠ ${name}:${pane} did not acknowledge the message (composer may be stuck — inspect: amux log ${name} -p ${pane} --tmux)`);
   }
 
+  const outcome = { ...result, blocked: false };
+
   // 2. Best-effort mirror. Failure here is a transparency degradation,
   //    not a correctness issue — the pane already got the text.
-  if (!mirror) return;
-  if (!ctx.configPath) return;
+  if (!mirror) return outcome;
+  if (!ctx.configPath) return outcome;
   const channelId = findChannelForPane(ctx.configPath, name, pane);
-  if (!channelId) return;
+  if (!channelId) return outcome;
 
   const mirrored = opts.source ? `[${opts.source}] ${text}` : text;
   spawnMirrorWorker({ channelId, content: mirrored });
@@ -197,48 +198,11 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
   // burning Discord's 2-edits-per-10-min cap and clobbering the
   // user's manual focus topic on every brief.
 
-  // 3. Detached forwarder for the agent's reply. Without this, orchestrator
-  //    sends (claw:0 → claw:1 etc) are one-way from Discord's perspective:
-  //    the brief is mirrored, the response is invisible. The worker polls
-  //    jsonl out-of-process so this CLI invocation exits immediately.
-  //    Suppress with opts.forwardReply === false (used by handlers etc).
-  if (opts.forwardReply === false) return;
-  spawnReplyForwarder({
-    channelId,
-    name,
-    pane,
-    paneDir: agentPaneDir(ctx.configPath, name, pane),
-    briefSnippet: text.slice(0, 80),
-    sentAtMs,
-  });
-}
-
-function agentPaneDir(configPath, name, pane) {
-  // Match agent.mjs:paneDir(rootDir, pane) → join(rootDir, '.agents', N)
-  try {
-    const cfg = loadConfig(configPath);
-    const dir = cfg?.[name]?.dir;
-    if (!dir) return null;
-    return `${dir}/.agents/${pane}`;
-  } catch {
-    return null;
-  }
-}
-
-function spawnReplyForwarder(opts) {
-  if (!opts.paneDir) return;
-  try {
-    const workerPath = new URL("./reply-forwarder-worker.mjs", import.meta.url).pathname;
-    const worker = fork(workerPath, [], {
-      detached: true,
-      stdio: "ignore",
-      env: { ...process.env, REPLY_FWD_OPTS: JSON.stringify(opts) },
-    });
-    worker.channel?.unref?.();
-    worker.unref();
-  } catch (err) {
-    console.warn(`reply-fwd spawn failed: ${err.message}`);
-  }
+  // Replies have one owner: channels/jsonl-watcher.mjs. A second detached
+  // forwarder raced that watcher and produced A,B,A,C,B,C duplicate posts
+  // for inter-agent briefs. The watcher already covers every bound pane and
+  // persists its dedupe state across bridge restarts.
+  return outcome;
 }
 
 function spawnMirrorWorker(opts) {

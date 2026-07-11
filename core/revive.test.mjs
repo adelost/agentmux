@@ -12,8 +12,6 @@ const EVENTS = [
   { ts: "2026-07-10T16:40:51Z", event: "prompt", session: "claw", pane: 0 },
   { ts: "2026-07-10T16:40:51Z", event: "stop", session: "claw", pane: 0 },
   { ts: "2026-07-10T16:25:57Z", event: "stop", session: "claw", pane: 8 },
-  // post-boot activity must not influence the pre-boot verdict
-  { ts: "2026-07-10T17:00:26Z", event: "stop", session: "api", pane: 1 },
 ];
 const PANES = [
   { agent: "ai", pane: 0 }, { agent: "ai", pane: 2 },
@@ -33,15 +31,53 @@ feature("planRevive — the 2026-07-10 crash as known-answer fixture", () => {
     }],
   });
 
-  unit("a post-boot stop does not clear a pre-boot interruption", {
-    given: ["api:1 answered something after restart but was interrupted before", () => planRevive({
-      events: EVENTS, bootMs: BOOT, panes: [{ agent: "api", pane: 1 }],
-      statuses: new Map([["api", "idle"]]),
+  unit("post-boot activity suppresses stale crash archaeology", {
+    given: ["api:1 completed a turn after restart", () => planRevive({
+      events: [
+        ...EVENTS,
+        { ts: "2026-07-10T17:00:26Z", event: "stop", session: "api", pane: 1 },
+      ],
+      bootMs: BOOT, panes: [{ agent: "api", pane: 1 }],
+      statuses: new Map([["api:1", "idle"]]),
     })],
     when: ["planning", (p) => p],
-    then: ["still briefed (the interrupted work may be half-done)", (p) => {
-      expect(p.briefs.length).toBe(1);
+    then: ["not briefed again", (p) => {
+      expect(p.briefs).toEqual([]);
     }],
+  });
+
+  unit("the same interrupted turn is briefed at most once per boot", {
+    given: ["a successful revive receipt after boot", () => planRevive({
+      events: [
+        ...EVENTS,
+        {
+          ts: "2026-07-10T17:08:00Z",
+          event: "revive_brief",
+          session: "api",
+          pane: 1,
+          interruptedAtMs: Date.parse("2026-07-10T16:41:56Z"),
+        },
+      ],
+      bootMs: BOOT,
+      panes: [{ agent: "api", pane: 1 }],
+      statuses: new Map([["api:1", "idle"]]),
+    })],
+    when: ["planning a second revive", (p) => p],
+    then: ["no duplicate brief", (p) => expect(p.briefs).toEqual([])],
+  });
+
+  unit("event append order cannot overwrite a newer pre-boot state", {
+    given: ["a delayed older prompt appended after a newer stop", () => planRevive({
+      events: [
+        { ts: "2026-07-10T16:50:00Z", event: "stop", session: "api", pane: 1 },
+        { ts: "2026-07-10T16:40:00Z", event: "prompt", session: "api", pane: 1 },
+      ],
+      bootMs: BOOT,
+      panes: [{ agent: "api", pane: 1 }],
+      statuses: new Map([["api:1", "idle"]]),
+    })],
+    when: ["planning", (p) => p],
+    then: ["the timestamp-newer stop wins", (p) => expect(p.briefs).toEqual([])],
   });
 
   unit("panes that finished cleanly pre-boot stay silent", {

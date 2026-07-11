@@ -13,6 +13,15 @@ feature("modelRank — comparable within a family", () => {
     }],
   });
 
+  unit("codex: current same-version product ladder is sol > terra > luna", {
+    given: ["the picker variants", () => ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]],
+    when: ["ranking", (models) => models.map((model) => modelRank(model).score)],
+    then: ["strictly descending", ([sol, terra, luna]) => {
+      expect(sol).toBeGreaterThan(terra);
+      expect(terra).toBeGreaterThan(luna);
+    }],
+  });
+
   unit("claude: fable outranks opus outranks sonnet", {
     given: ["family names as they appear in jsonl", () => ["claude-fable-5", "claude-opus-4-8", "claude-sonnet-5"]],
     when: ["ranking", (ms) => ms.map((m) => modelRank(m).score)],
@@ -93,6 +102,15 @@ feature("classifyModelChange — the warn/act decision", () => {
     )],
     when: ["classifying", (c) => c],
     then: ["null", (c) => { expect(c).toBeNull(); }],
+  });
+
+  unit("case and surrounding whitespace do not manufacture a model change", {
+    given: ["equivalent labels from two producers", () => classifyModelChange(
+      { model: "GPT-5.6-SOL", effort: "XHIGH" },
+      { model: " gpt-5.6-sol ", effort: "xhigh" },
+    )],
+    when: ["classifying", (c) => c],
+    then: ["null", (c) => expect(c).toBeNull()],
   });
 
   unit("cross-family or unknown stays lateral (warn only, no push)", {

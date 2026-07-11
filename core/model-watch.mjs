@@ -16,7 +16,10 @@
 
 const EFFORT_TIERS = { max: 5, xhigh: 4, high: 3, medium: 2, low: 1, minimal: 0 };
 const CLAUDE_FAMILY = { fable: 5, mythos: 5, opus: 4, sonnet: 3, haiku: 2 };
-const CODEX_VARIANT = { sol: 3, luna: 2, mini: 1 };
+const CODEX_VARIANT = { sol: 3, terra: 2, luna: 1, mini: 0 };
+
+const normalizeModel = (model) => String(model || "").trim().toLowerCase();
+const normalizeEffort = (effort) => String(effort || "").trim().toLowerCase();
 
 /**
  * Comparable rank within a model family, or null for unknown strings.
@@ -24,7 +27,7 @@ const CODEX_VARIANT = { sol: 3, luna: 2, mini: 1 };
  * callers treat cross-family or unknown as "lateral".
  */
 export function modelRank(model) {
-  const m = String(model || "").toLowerCase();
+  const m = normalizeModel(model);
   if (!m) return null;
 
   const claude = Object.keys(CLAUDE_FAMILY).find((f) => m.includes(f));
@@ -48,9 +51,14 @@ export function modelRank(model) {
  * { direction: "downgrade" | "upgrade" | "lateral", from, to }.
  */
 export function classifyModelChange(prev, next) {
+  const fromModel = normalizeModel(prev?.model);
+  const toModel = normalizeModel(next?.model);
+  const fromEffort = normalizeEffort(prev?.effort);
+  const toEffort = normalizeEffort(next?.effort);
+  if (!fromModel || !toModel || (fromModel === toModel && fromEffort === toEffort)) return null;
+
   const fromLabel = label(prev);
   const toLabel = label(next);
-  if (!fromLabel || !toLabel || fromLabel === toLabel) return null;
 
   const change = { direction: "lateral", kind: "model", from: fromLabel, to: toLabel };
   const a = modelRank(prev.model);
@@ -61,10 +69,10 @@ export function classifyModelChange(prev, next) {
     return change;
   }
   // Same model — the effort knob moved. Lesser severity by policy.
-  if (prev.model === next.model && prev.effort !== next.effort) {
+  if (fromModel === toModel && fromEffort !== toEffort) {
     change.kind = "effort";
-    const ea = EFFORT_TIERS[String(prev.effort || "").toLowerCase()];
-    const eb = EFFORT_TIERS[String(next.effort || "").toLowerCase()];
+    const ea = EFFORT_TIERS[fromEffort];
+    const eb = EFFORT_TIERS[toEffort];
     if (Number.isFinite(ea) && Number.isFinite(eb) && ea !== eb) {
       change.direction = eb < ea ? "downgrade" : "upgrade";
     }
