@@ -106,7 +106,9 @@ export function formatPlaywrightReapResult(result) {
 }
 
 export function detectActivePlaywrightTool(content, status = "unknown") {
-  if (!["working", "unknown"].includes(status)) return null;
+  // A completed turn can leave both tool rows and ordinary Playwright prose in
+  // scrollback. Only a live progress footer makes that residue actionable.
+  if (status !== "working") return null;
   const lines = String(content || "").split(/\r?\n/);
   const tail = lines.slice(-80);
   let lastPlaywright = null;
@@ -114,10 +116,10 @@ export function detectActivePlaywrightTool(content, status = "unknown") {
 
   for (let i = 0; i < tail.length; i++) {
     const line = tail[i].replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").trim();
-    if (/^[●○✻*·-]?\s*(Bash|Read|Edit|Write|Grep|Glob|Task|WebFetch|TodoWrite|amux|git|npm|pnpm|python)\b/i.test(line)) {
+    if (/^[●○]\s*(Bash|Read|Edit|Write|Grep|Glob|Task|WebFetch|TodoWrite|amux|git|npm|pnpm|python)\b/i.test(line)) {
       lastOtherTool = i;
     }
-    if (/playwright\s*-\s*.+\(MCP\)|playwright_(navigate|click|screenshot|evaluate|fill|press)|\bplaywright\b.+\b(MCP|Navigate|Screenshot|Click)\b/i.test(line)) {
+    if (/^[●○]\s*(?:playwright\s*-\s*.+\(MCP\)|playwright_(navigate|click|screenshot|evaluate|fill|press)\b)/i.test(line)) {
       lastPlaywright = { index: i, signature: line.replace(/\s+/g, " ").slice(0, 240) };
     }
   }

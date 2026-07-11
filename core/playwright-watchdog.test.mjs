@@ -75,6 +75,30 @@ feature("playwright watchdog pane detector", () => {
     }],
   });
 
+  unit("does not treat Playwright-MCP prose as a tool call", {
+    given: ["the exact completed response that triggered skybar:3", () =>
+      "Så: det här var ett riktigt infra-läckage runt Claude/Playwright-MCP, inte att\n" +
+      "vi ska sluta ta screenshots.\n" +
+      "✽ Crafting… (10m 12s · ↓ 12.9k tokens)\n"],
+    when: ["detecting while another live footer is visible", (content) =>
+      detectActivePlaywrightTool(content, "working")],
+    then: ["does not flag response prose", (signature) => {
+      expect(signature).toBeNull();
+    }],
+  });
+
+  unit("does not re-arm a historical tool row in an unknown pane", {
+    given: ["a completed tool row followed by the model resume warning", () =>
+      '● playwright - Take a screenshot (MCP)(filename: "proof.png")\n' +
+      "Screenshot saved.\n" +
+      "⚠ This session was recorded with model `gpt-5.5` but is resuming with `gpt-5.6`\n"],
+    when: ["detecting without a live progress footer", (content) =>
+      detectActivePlaywrightTool(content, "unknown")],
+    then: ["does not flag scrollback residue", (signature) => {
+      expect(signature).toBeNull();
+    }],
+  });
+
   unit("does not flag idle panes", {
     given: ["pane content", () =>
       '● playwright - Navigate to a URL (MCP)(url: "https://sfkbar.pages.dev/cafe")\n' +
@@ -85,4 +109,3 @@ feature("playwright watchdog pane detector", () => {
     }],
   });
 });
-
