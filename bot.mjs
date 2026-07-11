@@ -3,14 +3,17 @@
 
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
 import { buildChannelMap } from "./lib.mjs";
+import { createInboundReconciler } from "./core/inbound-reconciler.mjs";
 
 const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
 const READY_FILE = process.env.READY_FILE || "/tmp/agentmux.ready";
 
+/** WHAT: Tracks bridge shutdown by clearing its readiness sentinel. WHY: Keeps health checks from trusting a stopped process. */
 function clearReadyFile() {
   try { unlinkSync(READY_FILE); } catch {}
 }
 
+/** WHAT: Tracks the singleton bridge process with a pidfile. WHY: Keeps two Discord consumers from duplicating prompts. */
 function ensureSingleInstance() {
   if (existsSync(PIDFILE)) {
     const oldPid = readFileSync(PIDFILE, "utf-8").trim();
@@ -24,13 +27,15 @@ function ensureSingleInstance() {
   writeFileSync(PIDFILE, String(process.pid));
 }
 
+/** WHAT: Stores the ready process id in its health sentinel. WHY: Keeps supervisors from trusting incomplete startup. */
 function markReady() {
   writeFileSync(READY_FILE, String(process.pid));
 }
 
 /**
- * Start the bot with one or more channels.
  * @param {{ channels: import('./channels/channel.mjs').Channel[], agentsYaml, whisperUrl, agent, tts, state, onMessage }} config
+ * WHAT: Schedules channel startup, reconciliation, health checks, and shutdown.
+ * WHY: Keeps the bridge lifecycle under one owner.
  */
 export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, onMessage }) {
   ensureSingleInstance();
@@ -88,35 +93,19 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
 
   // --- Start channels ---
 
-  // Inbound pointer: remember the newest Discord message id we have SEEN
-  // per channel (bot posts included — the pointer tracks the stream, the
-  // handler does its own bot-filtering). Powers catch-up replay below:
-  // messages that arrived while the bridge was down are re-fed through the
-  // same handler on next boot instead of silently vanishing (observed
-  // 2026-07-08: a prompt hit the bridge the same second as a restart kill
-  // and was lost with zero diagnostics).
-  const inboundKey = (channelId) => `last_inbound_${channelId}`;
-  const trackedOnMessage = async (msg) => {
-    try {
-      await onMessage(msg);
-    } finally {
-      if (msg?.channelId && msg?.id) state.set(inboundKey(msg.channelId), msg.id);
-    }
-  };
+  // Gateway events are the low-latency path. A durable REST reconciliation
+  // pass repairs gaps from reconnect/restart windows. Crucially, live bot
+  // output never advances the scan cursor past an unseen human message.
+  const inbound = createInboundReconciler({ onMessage, state });
 
   async function catchUpInbound(channel) {
     if (typeof channel.fetchMissed !== "function") return;
     for (const [channelId] of channelMap) {
       try {
-        const afterId = state.get(inboundKey(channelId), null);
-        const { messages, newestId } = await channel.fetchMissed(channelId, afterId);
-        for (const m of messages) {
-          console.log(`[catch-up] replaying missed message in #${channelId}: "${(m.text || "").slice(0, 60)}"`);
-          await trackedOnMessage(m);
+        const result = await inbound.reconcile(channel, channelId);
+        if (result?.replayed) {
+          console.log(`[catch-up] replayed ${result.replayed} missed human message(s) in #${channelId}`);
         }
-        // Advance even when nothing human was replayed (bot posts moved the
-        // stream) and initialize on first boot so history is never replayed.
-        if (newestId) state.set(inboundKey(channelId), newestId);
       } catch (err) {
         console.warn(`catch-up failed for #${channelId}: ${err.message}`);
       }
@@ -124,7 +113,21 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
   }
 
   for (const channel of channels) {
-    channel.onMessage(trackedOnMessage);
+    channel.onMessage((msg) => inbound.enqueue(msg).catch((err) =>
+      console.warn(`inbound delivery failed for #${msg?.channelId || "unknown"}: ${err.message}`)));
+  }
+
+  let reconcileRunning = false;
+  let reconcileTimer = null;
+
+  async function reconcileAllInbound() {
+    if (reconcileRunning) return;
+    reconcileRunning = true;
+    try {
+      for (const channel of channels) await catchUpInbound(channel);
+    } finally {
+      reconcileRunning = false;
+    }
   }
 
   (async () => {
@@ -137,9 +140,13 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
     for (const [chId, { name }] of channelMap) console.log(`  ${name} -> #${chId}`);
     markReady();
     await preflight();
-    for (const channel of channels) {
-      await catchUpInbound(channel);
-    }
+    await reconcileAllInbound();
+    // Gateway delivery is normally immediate. This bounded repair loop is
+    // deliberately slow enough to stay cheap across many mapped channels.
+    reconcileTimer = setInterval(() => {
+      reconcileAllInbound().catch((err) =>
+        console.warn(`periodic inbound reconciliation failed: ${err.message}`));
+    }, 60_000);
 
     // Notify restart channel if we came back from /restart
     const restartCh = state.get("restartChannel");
@@ -186,6 +193,7 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
   const shutdown = () => {
     shuttingDown = true;
     clearInterval(heartbeat);
+    if (reconcileTimer) clearInterval(reconcileTimer);
     console.log("\nShutting down...");
     clearReadyFile();
     try { unlinkSync(PIDFILE); } catch {}
@@ -198,6 +206,7 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
   return { getMapping, overrides, channelMap: () => channelMap, reloadConfig };
 }
 
+/** WHAT: Loads Discord-to-pane bindings. WHY: Keeps malformed config from crashing bridge startup. */
 function loadChannelMap(agentsYaml) {
   try {
     return buildChannelMap(readFileSync(agentsYaml, "utf-8"));

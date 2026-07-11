@@ -267,6 +267,58 @@ feature("watcher: long agent turn with tool calls posts ALL content", () => {
   });
 });
 
+feature("watcher: Codex background polling stays out of Discord", () => {
+  unit("wait calls are suppressed while adjacent user-facing text is posted", {
+    given: ["a Codex turn containing text and repeated wait function calls", () => {
+      const ts = "2026-05-10T08:00:00.000Z";
+      return setupCodexWatcher({
+        codexEvents: [
+          { type: "event_msg", timestamp: ts, payload: { type: "task_started", turn_id: "T1" } },
+          { type: "event_msg", timestamp: ts, payload: { type: "user_message", message: "run tests" } },
+          { type: "response_item", timestamp: "2026-05-10T08:00:01.000Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Tests are running." }] } },
+          { type: "response_item", timestamp: "2026-05-10T08:00:02.000Z", payload: { type: "function_call", name: "wait", arguments: JSON.stringify({ cell_id: "264", yield_time_ms: 30000 }) } },
+          { type: "response_item", timestamp: "2026-05-10T08:00:03.000Z", payload: { type: "function_call", name: "wait", arguments: JSON.stringify({ cell_id: "299", yield_time_ms: 30000 }) } },
+          { type: "event_msg", timestamp: "2026-05-10T08:00:04.000Z", payload: { type: "task_complete", turn_id: "T1" } },
+        ],
+        stateInitial: { watcher_last_posted_ts: { "ch-codex": new Date(ts).getTime() - 1 } },
+      });
+    }],
+    when: ["the watcher mirrors the turn", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["only the user-facing text appears", (ctx) => {
+      const bodies = ctx.discord.sends.map((s) => typeof s.payload === "string" ? s.payload : s.payload?.content || "");
+      expect(bodies.some((body) => body.includes("Tests are running."))).toBe(true);
+      expect(bodies.some((body) => body.includes("wait cell_id="))).toBe(false);
+      ctx.cleanup();
+    }],
+  });
+
+  unit("a wait-only incremental update posts neither tool noise nor a context footer", {
+    given: ["a complete Codex turn containing only a wait call", () => {
+      const ts = "2026-05-10T08:10:00.000Z";
+      return setupCodexWatcher({
+        codexEvents: [
+          { type: "event_msg", timestamp: ts, payload: { type: "task_started", turn_id: "T2" } },
+          { type: "event_msg", timestamp: ts, payload: { type: "user_message", message: "continue waiting" } },
+          { type: "response_item", timestamp: "2026-05-10T08:10:01.000Z", payload: { type: "function_call", name: "wait", arguments: JSON.stringify({ cell_id: "521", yield_time_ms: 20000 }) } },
+          { type: "event_msg", timestamp: "2026-05-10T08:10:02.000Z", payload: { type: "task_complete", turn_id: "T2" } },
+        ],
+        stateInitial: { watcher_last_posted_ts: { "ch-codex": new Date(ts).getTime() - 1 } },
+      });
+    }],
+    when: ["the watcher mirrors the turn", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["Discord remains silent", (ctx) => {
+      expect(ctx.discord.sends).toHaveLength(0);
+      ctx.cleanup();
+    }],
+  });
+});
+
 feature("watcher: race-resilient against stampMs advancing past new endMs", () => {
   unit("new turn with endMs < channel_last_mirror_ts is still posted", {
     given: ["a jsonl with already-posted turn1 + new turn2; stampMs ahead", () => {

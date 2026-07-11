@@ -5,13 +5,14 @@ import { Client, GatewayIntentBits, Events } from "discord.js";
 import { normalizeDiscordMessage } from "./normalize.mjs";
 
 /**
- * Create a Discord channel.
  * @param {{ token: string, onSent?: (channelId: string) => void }} config
  *   onSent fires after any successful outbound message (both from normalized
  *   msg.reply/send and from direct send(channelId, text)). The bridge uses
  *   this to stamp channel_last_mirror_ts in state, enabling the catch-up
  *   notice for stale channels.
  * @returns {import('./channel.mjs').Channel}
+ * WHAT: Wraps discord.js events and REST operations in the channel contract.
+ * WHY: Keeps transport objects out of delivery and reconciliation logic.
  */
 export function createDiscordChannel({ token, onSent }) {
   let handler = null;
@@ -29,7 +30,10 @@ export function createDiscordChannel({ token, onSent }) {
 
     start() {
       client.on(Events.MessageCreate, (msg) => {
-        if (handler) handler(normalizeDiscordMessage(msg, { onSent }));
+        if (handler) {
+          Promise.resolve(handler(normalizeDiscordMessage(msg, { onSent }))).catch((err) =>
+            console.warn(`Discord MessageCreate handler failed: ${err.message}`));
+        }
       });
       return new Promise((resolve) => {
         client.once(Events.ClientReady, (c) => {
@@ -52,13 +56,13 @@ export function createDiscordChannel({ token, onSent }) {
     },
 
     /**
-     * Messages that arrived while the bridge was DOWN (restart window,
-     * crash): everything after `afterId`, oldest first, human-only,
-     * age-capped. With no pointer (first boot) nothing is replayed —
-     * only the newest id is returned so the caller can initialize.
+     * REST reconciliation for messages missed by the Gateway during a
+     * disconnect or restart: everything after `afterId`, oldest first,
+     * human-only, age-capped. With no pointer (first boot) nothing is
+     * replayed — only the newest id is returned for initialization.
      * Returns { messages: ChannelMessage[], newestId: string|null }.
      */
-    async fetchMissed(channelId, afterId, { limit = 20, maxAgeMs = 60 * 60 * 1000 } = {}) {
+    async fetchMissed(channelId, afterId, { limit = 100, maxAgeMs = 60 * 60 * 1000 } = {}) {
       const ch = await client.channels.fetch(channelId);
       if (!ch?.messages) return { messages: [], newestId: afterId || null };
       const coll = afterId

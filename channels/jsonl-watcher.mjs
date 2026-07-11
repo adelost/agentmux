@@ -93,6 +93,10 @@ const STATE_KEY_LAST_POSTED = "watcher_last_posted_ts";
 const STATE_KEY_POSTED_IDS = "watcher_posted_item_ids";
 const STATE_KEY_RETRY_UNTIL = "watcher_retry_until_ts";
 
+/**
+ * WHAT: Routes completed Claude and Codex JSONL items to their bound channels.
+ * WHY: Keeps response forwarding restart-safe and independent of terminal scrollback.
+ */
 export function createJsonlWatcher({
   agent,
   agentsYamlPath,
@@ -372,6 +376,10 @@ export function createJsonlWatcher({
     // the old *-wrap did. Pre-1.16.40 used asterisks; user feedback flagged
     // it as visually noisy.
     const rawText = (turn.items || [])
+      // Codex emits one `wait cell_id=...` function call for every poll of a
+      // background command. They carry no user information and produced a
+      // wall of Discord messages plus repeated context footers.
+      .filter((it) => !(it.type === "tool" && /^wait\s+cell_id=/i.test(it.content || "")))
       .map((it) => (it.type === "tool" ? `\`${it.content}\`` : it.content))
       .join("\n\n")
       .trim();
