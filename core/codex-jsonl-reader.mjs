@@ -287,6 +287,25 @@ export function isBusyFromCodexJsonl(paneDir) {
 /** Format a codex function_call into a compact one-liner. */
 export function formatCodexToolCall(payload) {
   const { name = "tool", arguments: rawArgs = "" } = payload;
+
+  if (payload?.type === "custom_tool_call") {
+    const source = String(payload.input || "");
+    if (name === "exec") {
+      const cmd = quotedField(source, "cmd");
+      if (cmd) return `Bash ${truncateTool(cmd)}`;
+
+      const imagePath = quotedField(source, "path");
+      if (/tools\.view_image\s*\(/.test(source) && imagePath) return `Read ${truncateTool(imagePath)}`;
+
+      const patchPath = source.match(/\*\*\* (?:Update|Add|Delete) File: ([^\\\r\n"]+)/)?.[1];
+      if (/tools\.apply_patch\s*\(/.test(source)) {
+        return patchPath ? `Edit ${truncateTool(patchPath)}` : "Edit files (patch)";
+      }
+      return "exec";
+    }
+    return name;
+  }
+
   let args = rawArgs;
 
   try {
@@ -301,6 +320,24 @@ export function formatCodexToolCall(payload) {
   } catch { /* fall through to raw args */ }
 
   return `${name}${args ? " " + args : ""}`;
+}
+
+function quotedField(source, field) {
+  const match = source.match(new RegExp(`\\b${field}\\s*:\\s*("(?:\\\\.|[^"\\\\])*")`));
+  if (!match) return null;
+  try { return JSON.parse(match[1]); }
+  catch { return null; }
+}
+
+function truncateTool(value, max = 80) {
+  const oneLine = String(value || "").replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max - 3)}...` : oneLine;
+}
+
+function codexToolKind(content) {
+  return /^Bash (?:amux|ax)\s+[a-zA-Z0-9_-]+\s+(?:-p\s*)?\d+\b/.test(content)
+    ? "inter-agent-send"
+    : "tool";
 }
 
 /**
@@ -401,8 +438,14 @@ export function extractFromCodexJsonl(paneDir, promptText = null) {
           if (text) items.push({ type: "text", content: text });
         }
       }
-    } else if (p.type === "function_call") {
-      items.push({ type: "tool", content: formatCodexToolCall(p) });
+    } else if (p.type === "function_call" || p.type === "custom_tool_call") {
+      const content = formatCodexToolCall(p);
+      items.push({
+        type: "tool",
+        content,
+        kind: codexToolKind(content),
+        source: p.type === "custom_tool_call" ? "custom" : "function",
+      });
     }
   }
 
@@ -586,8 +629,15 @@ function groupCodexIntoTurns(events, { headless = false } = {}) {
         }
       });
       if (e.timestamp) current.endTimestamp = e.timestamp;
-    } else if (p.type === "function_call") {
-      current.items.push({ type: "tool", content: formatCodexToolCall(p), id: codexItemId(e.__hash, 0) });
+    } else if (p.type === "function_call" || p.type === "custom_tool_call") {
+      const content = formatCodexToolCall(p);
+      current.items.push({
+        type: "tool",
+        content,
+        kind: codexToolKind(content),
+        source: p.type === "custom_tool_call" ? "custom" : "function",
+        id: codexItemId(e.__hash, 0),
+      });
       if (e.timestamp) current.endTimestamp = e.timestamp;
     }
     // p.type === "reasoning" → intentionally skipped (mirrors Claude thinking blocks)

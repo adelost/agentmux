@@ -723,6 +723,38 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
     }],
   });
 
+  unit("first custom-tool-aware startup seeds history without replaying old calls", {
+    given: ["a completed historical custom tool and no migration marker", () => {
+      const oldStamp = Date.now() - 60_000;
+      const oldIso = new Date(oldStamp).toISOString();
+      return setupCodexWatcher({
+        codexEvents: [
+          { type: "event_msg", timestamp: oldIso, payload: { type: "task_started", turn_id: "M" } },
+          { type: "event_msg", timestamp: oldIso, payload: { type: "user_message", message: "old work" } },
+          { type: "response_item", timestamp: oldIso, payload: {
+            type: "custom_tool_call",
+            name: "exec",
+            input: 'const r = await tools.exec_command({cmd:"amux ps",workdir:"/tmp"}); text(r.output);',
+          } },
+          { type: "event_msg", timestamp: oldIso, payload: { type: "task_complete", turn_id: "M" } },
+        ],
+        stateInitial: {
+          watcher_last_posted_ts: { "ch-codex": oldStamp - 10_000 },
+        },
+      });
+    }],
+    when: ["the upgraded watcher performs its first audit", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["no historical tool flood occurs and migration is persisted", (ctx) => {
+      expect(ctx.discord.sends).toHaveLength(0);
+      expect(ctx.state._data.watcher_custom_tools_seeded["ch-codex"]).toBe(true);
+      expect(ctx.state._data.watcher_posted_item_ids["ch-codex"]).toHaveLength(1);
+      ctx.cleanup();
+    }],
+  });
+
   unit("posts assistant text from a complete codex turn", {
     given: ["agents.yaml has cmd: codex and a complete turn rollout exists", () => {
       const oldStamp = Date.now() - 60_000; // older than COMPLETION_GRACE_MS so post fires
@@ -738,6 +770,7 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
         // to post (otherwise first-time channels just stamp + skip).
         stateInitial: {
           watcher_last_posted_ts: { "ch-codex": oldStamp - 10_000 },
+          watcher_custom_tools_seeded: { "ch-codex": true },
         },
       });
       return ctx;
@@ -806,11 +839,17 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
           { type: "response_item", timestamp: iso(4_000), payload: { type: "function_call", name: "wait", arguments: JSON.stringify({ cell_id: 2 }) } },
           { type: "compacted", timestamp: iso(5_000), payload: {} },
           { type: "turn_context", timestamp: iso(5_000), payload: { turn_id: "X" } },
+          { type: "response_item", timestamp: iso(5_500), payload: {
+            type: "custom_tool_call",
+            name: "exec",
+            input: 'const r = await tools.exec_command({cmd:"amux ps",workdir:"/tmp"}); text(r.output);',
+          } },
           { type: "response_item", timestamp: iso(6_000), payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "summary that must follow the uploaded images" }] } },
           { type: "event_msg", timestamp: iso(7_000), payload: { type: "task_complete", turn_id: "X" } },
         ],
         stateInitial: {
           watcher_last_posted_ts: { "ch-codex": oldStamp - 10_000 },
+          watcher_custom_tools_seeded: { "ch-codex": true },
         },
       });
     }],
@@ -821,6 +860,7 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
     then: ["the final narrative reaches Discord and wait polling stays hidden", (ctx) => {
       const bodies = ctx.discord.sends.map((s) => typeof s.payload === "string" ? s.payload : s.payload?.content || "");
       expect(bodies.some((body) => body.includes("summary that must follow the uploaded images"))).toBe(true);
+      expect(bodies.some((body) => body.includes("Bash amux ps"))).toBe(true);
       expect(bodies.some((body) => body.includes("wait cell_id"))).toBe(false);
       ctx.cleanup();
     }],

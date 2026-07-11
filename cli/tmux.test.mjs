@@ -60,4 +60,44 @@ feature("sendToPane delivery outcome", () => {
       expect(sent).toEqual([]);
     }],
   });
+
+  unit("cross-agent delivery mirrors the full brief to target and a receipt to sender", {
+    given: ["a verified lsrc:4 to lsrc:0 brief with both panes bound", () => {
+      const parkPath = tmpPath();
+      const configPath = tmpPath();
+      writeFileSync(parkPath, "");
+      writeFileSync(configPath, [
+        "lsrc:",
+        "  dir: /tmp/lsrc",
+        "  discord:",
+        "    sender-channel: 4",
+        "    target-channel: 0",
+        "",
+      ].join("\n"));
+      const oldPath = process.env.AMUX_PARK_STATE_PATH;
+      process.env.AMUX_PARK_STATE_PATH = parkPath;
+      return { parkPath, configPath, oldPath, agent: fakeAgent(), mirrors: [] };
+    }],
+    when: ["sending through the central delivery path", async (ctx) => {
+      const result = await sendToPane(
+        { agent: ctx.agent, configPath: ctx.configPath },
+        "lsrc",
+        0,
+        "[from lsrc:4]\n\nreview every image",
+        { mirrorDispatch: (payload) => ctx.mirrors.push(payload) },
+      );
+      if (ctx.oldPath === undefined) delete process.env.AMUX_PARK_STATE_PATH;
+      else process.env.AMUX_PARK_STATE_PATH = ctx.oldPath;
+      try { unlinkSync(ctx.parkPath); } catch {}
+      try { unlinkSync(ctx.configPath); } catch {}
+      return { result, mirrors: ctx.mirrors };
+    }],
+    then: ["target gets the brief and sender gets immediate delivery proof", ({ result, mirrors }) => {
+      expect(result.delivered).toBe(true);
+      expect(mirrors).toEqual([
+        { channelId: "target-channel", content: "[from lsrc:4]\n\nreview every image" },
+        { channelId: "sender-channel", content: "`amux lsrc -p 0 …` → delivered." },
+      ]);
+    }],
+  });
 });

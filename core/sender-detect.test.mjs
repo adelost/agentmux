@@ -1,5 +1,5 @@
 import { unit, feature, expect } from "bdd-vitest";
-import { detectSenderFromEnv, prependSenderHeader } from "./sender-detect.mjs";
+import { detectSenderFromEnv, parseSenderHeader, prependSenderHeader } from "./sender-detect.mjs";
 
 // Helper: build an exec mock that returns different values for #S / #P queries.
 // `paneById` lets tests assert the mock saw the calling pane id (%17, %18, ...)
@@ -162,5 +162,19 @@ feature("prependSenderHeader", () => {
     then: ["header with trailing blank line", (result) => {
       expect(result).toBe("[from claw:0]\n\n");
     }],
+  });
+});
+
+feature("parseSenderHeader", () => {
+  unit("parses the exact sender pane from a wrapped brief", {
+    given: ["a cross-agent brief", () => "[from lsrc:4]\n\nreview every image"],
+    when: ["parsing provenance", (text) => parseSenderHeader(text)],
+    then: ["structured sender", (sender) => expect(sender).toEqual({ session: "lsrc", pane: 4, key: "lsrc:4" })],
+  });
+
+  unit("does not infer provenance from ordinary prompt text", {
+    given: ["an unwrapped prompt", () => "tell lsrc:4 to review this"],
+    when: ["parsing provenance", (text) => parseSenderHeader(text)],
+    then: ["null", (sender) => expect(sender).toBeNull()],
   });
 });

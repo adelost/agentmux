@@ -61,3 +61,10 @@ export function prependSenderHeader(text, sender) {
   if (!sender) return text;
   return `[from ${sender}]\n\n${text}`;
 }
+
+/** Recover structured provenance from a prompt previously wrapped above. */
+export function parseSenderHeader(text) {
+  const match = String(text || "").match(/^\[from ([a-zA-Z0-9_-]+):(\d+)\](?:\r?\n|$)/);
+  if (!match) return null;
+  return { session: match[1], pane: Number(match[2]), key: `${match[1]}:${Number(match[2])}` };
+}

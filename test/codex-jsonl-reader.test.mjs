@@ -103,6 +103,31 @@ feature("extractFromCodexJsonl: single-turn rollout", () => {
       cleanup();
     }],
   });
+
+  unit("renders modern custom exec tool calls instead of dropping them", {
+    given: ["a codex custom_tool_call wrapping exec_command", () => setupFakeCodex([
+      { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+      { type: "event_msg", payload: { type: "task_started", turn_id: "T2" } },
+      { type: "event_msg", payload: { type: "user_message", message: "check status" } },
+      { type: "response_item", payload: {
+        type: "custom_tool_call",
+        name: "exec",
+        input: 'const r = await tools.exec_command({cmd:"amux ps",workdir:"/tmp"}); text(r.output);',
+      } },
+      { type: "response_item", payload: {
+        type: "custom_tool_call",
+        name: "exec",
+        input: 'const r = await tools.exec_command({cmd:"amux lsrc -p 0 \\\"review every image\\\"",workdir:"/tmp"}); text(r.output);',
+      } },
+      { type: "event_msg", payload: { type: "task_complete", turn_id: "T2" } },
+    ])],
+    when: ["reading the turn", ({ paneDir }) => readLastTurnsCodex(paneDir, { limit: 1 })],
+    then: ["the compact Bash call remains visible", (result, { cleanup }) => {
+      expect(result.turns[0].items[0]).toMatchObject({ type: "tool", content: "Bash amux ps", kind: "tool" });
+      expect(result.turns[0].items[1]).toMatchObject({ type: "tool", kind: "inter-agent-send" });
+      cleanup();
+    }],
+  });
 });
 
 feature("extractFromCodexJsonl: prompt-matching across multiple turns", () => {

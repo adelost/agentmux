@@ -11,6 +11,7 @@ import { esc, stripAnsi } from "../lib.mjs";
 import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
 import { readParkState, shouldBlockSend, blockedSendMessage } from "../core/pane-park.mjs";
 import { deliverToPane } from "../core/delivery.mjs";
+import { parseSenderHeader } from "../core/sender-detect.mjs";
 import { detectPaneStatus } from "./format.mjs";
 import { findChannelForPane } from "./config.mjs";
 
@@ -153,6 +154,16 @@ export async function sendKeys(ctx, name, pane, keys) {
  */
 export async function sendToPane(ctx, name, pane, text, opts = {}) {
   const mirror = opts.mirror !== false;
+  const mirrorDispatch = opts.mirrorDispatch || spawnMirrorWorker;
+  const sender = parseSenderHeader(text);
+
+  const mirrorSenderStatus = (delivered) => {
+    if (!mirror || !sender || sender.key === `${name}:${pane}` || !ctx.configPath) return;
+    const senderChannelId = findChannelForPane(ctx.configPath, sender.session, sender.pane);
+    if (!senderChannelId) return;
+    const status = delivered ? "delivered" : "NOT delivered";
+    mirrorDispatch({ channelId: senderChannelId, content: `\`amux ${name} -p ${pane} …\` → ${status}.` });
+  };
 
   // 0. Park guard: a pane parked by model-watch (model downgrade) must not
   //    be woken by a brief — the work would run on the fallback model
@@ -185,13 +196,18 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
 
   // 2. Best-effort mirror. Failure here is a transparency degradation,
   //    not a correctness issue — the pane already got the text.
+  if (!result.delivered) {
+    mirrorSenderStatus(false);
+    return outcome;
+  }
   if (!mirror) return outcome;
   if (!ctx.configPath) return outcome;
   const channelId = findChannelForPane(ctx.configPath, name, pane);
-  if (!channelId) return outcome;
-
-  const mirrored = opts.source ? `[${opts.source}] ${text}` : text;
-  spawnMirrorWorker({ channelId, content: mirrored });
+  if (channelId) {
+    const mirrored = opts.source ? `[${opts.source}] ${text}` : text;
+    mirrorDispatch({ channelId, content: mirrored });
+  }
+  mirrorSenderStatus(true);
   // Channel topic is intentionally NOT touched here. Topics are a stable
   // per-pane summary set via agentmux.yaml `labels` and propagated by
   // /sync (core/sync-discord.mjs:topicFor). Per-send overwrite was

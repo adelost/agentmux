@@ -97,6 +97,7 @@ const STATE_KEY_LAST_POSTED = "watcher_last_posted_ts";
 const STATE_KEY_POSTED_IDS = "watcher_posted_item_ids";
 const STATE_KEY_RETRY_UNTIL = "watcher_retry_until_ts";
 const STATE_KEY_COMPACTION_IDS = "watcher_compaction_ids";
+const STATE_KEY_CUSTOM_TOOLS_SEEDED = "watcher_custom_tools_seeded";
 
 /**
  * WHAT: Routes completed Claude and Codex JSONL items to their bound channels.
@@ -405,6 +406,24 @@ export function createJsonlWatcher({
     }
   }
 
+  function seedCustomToolMigration(channelId, turns = []) {
+    const seeded = state.get(STATE_KEY_CUSTOM_TOOLS_SEEDED, {}) || {};
+    if (seeded[channelId]) return;
+
+    // custom_tool_call support was added after stable item-id dedupe shipped.
+    // On the first upgraded read, those historical ids look "new" even though
+    // they may be hours old. Bank all currently visible custom calls once so
+    // restart audit cannot flood Discord; subsequent calls flow normally.
+    const historicalIds = turns.flatMap((turn) => (turn.items || []))
+      .filter((item) => item.source === "custom" && item.id)
+      .map((item) => item.id);
+    if (historicalIds.length) {
+      setPostedItemIds(channelId, [...new Set([...postedItemIds(channelId), ...historicalIds])].slice(-1000));
+    }
+    seeded[channelId] = true;
+    state.set(STATE_KEY_CUSTOM_TOOLS_SEEDED, seeded);
+  }
+
   // --- rendering -----------------------------------------------------------
 
   function renderTurn(turn) {
@@ -419,6 +438,10 @@ export function createJsonlWatcher({
       // background command. They carry no user information and produced a
       // wall of Discord messages plus repeated context footers.
       .filter((it) => !(it.type === "tool" && /^wait\s+cell_id=/i.test(it.content || "")))
+      // Cross-agent sends have a stronger, delivery-verified owner in
+      // cli/tmux.mjs: target gets the full brief and sender gets an immediate
+      // `amux ... → delivered` receipt. Do not repeat the invocation later.
+      .filter((it) => it.kind !== "inter-agent-send")
       .map((it) => (it.type === "tool" ? `\`${it.content}\`` : it.content))
       .join("\n\n")
       .trim();
@@ -649,6 +672,7 @@ export function createJsonlWatcher({
       const readMs = Date.now() - readStarted;
       const readBytes = estimatedReadBytes(fileInfo, tailBytes);
       await postCompactionNotice(name, idx, channelId, result?.compactions || []);
+      seedCustomToolMigration(channelId, result?.turns || []);
       if (!result?.turns?.length) {
         if (startupAudit) auditedPanes.add(key);
         rememberReadSnapshot(key, fileInfo, [], channelId, fileInfo?.mtimeMs ?? null);
