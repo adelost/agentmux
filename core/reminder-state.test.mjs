@@ -314,3 +314,28 @@ feature("formatReminderMessage rotation (1.20.69 behavior)", () => {
     }],
   });
 });
+
+feature("formatReminderMessage mention-all (1.20.90 behavior)", () => {
+  unit("every reminder mentions ALL drift rules, regardless of rotation slot", {
+    given: ["all rotation indices", () => ({ indices: DRIFT_SECTIONS.map((_, i) => i) })],
+    when: ["formatting each", ({ indices }) => indices.map((i) => formatReminderMessage(40, i))],
+    then: ["each message carries 'Also still in force' + alla fyra reglernas nyckelord", (msgs) => {
+      for (const msg of msgs) {
+        expect(msg).toMatch(/Also still in force/);
+        expect(msg).toMatch(/kommunikationsdisciplin|Kommunikationsdisciplin/);
+        expect(msg).toMatch(/coding-philosophy\.md/);
+        expect(msg).toMatch(/lead with a recommendation|Always lead with a recommendation/i);
+        expect(msg).toMatch(/root cause > symptoms/i);
+      }
+    }],
+  });
+
+  unit("only the highlighted rule carries the summary demand (no four-sentence recital)", {
+    given: ["slot 0", () => ({})],
+    when: ["formatting", () => formatReminderMessage(40, 0)],
+    then: ["ONE summary, om den markerade regeln", (msg) => {
+      expect(msg).toMatch(/ONE sentence summarizing the highlighted rule/);
+      expect((msg.match(/Reply with/g) || []).length).toBe(1);
+    }],
+  });
+});

@@ -135,6 +135,7 @@ export const DRIFT_SECTIONS = [
   {
     file: ".agents/CLAUDE.md",
     section: "Kommunikationsdisciplin",
+    label: "kommunikationsdisciplin (prata bara vid klart/beslut/blocker)",
     directive: "message other panes only when a major task is DONE, " +
       "you genuinely need a decision, or something blocks the recipient. " +
       "No status pings, no acks, no politeness; commits + ledger ARE the status.",
@@ -142,6 +143,7 @@ export const DRIFT_SECTIONS = [
   {
     file: "~/.claude/coding-philosophy.md",
     section: null,
+    label: "coding-philosophy.md (deklarativt, Result<T,E>, bdd-vitest, inga tysta fallbacks)",
     directive: "declarative + data-driven, Result<T,E> for domain errors, " +
       "bdd-vitest for every change, max ~500 lines/file, no silent fallbacks. " +
       "Run tests + lint before claiming done.",
@@ -149,12 +151,14 @@ export const DRIFT_SECTIONS = [
   {
     file: ".agents/CLAUDE.md",
     section: "Always lead with a recommendation",
+    label: "lead with a recommendation (aldrig 'up to you')",
     directive: "when presenting options, lead with one concrete pick plus " +
       "a one-line why tied to the user's goals. Never 'up to you'.",
   },
   {
     file: ".agents/CLAUDE.md",
     section: "Root cause > symptoms",
+    label: "root cause > symptoms (aldrig --no-verify)",
     directive: "fix the cause, not the symptom. " +
       "No --no-verify, no swallowed errors, no skipped tests.",
   },
@@ -178,17 +182,31 @@ export const DRIFT_SECTIONS = [
  * naming one hardcoded rule. Each message stays one-rule short (that's
  * why reminders land at all) while every drift-prone rule gets its turn.
  *
+ * Behavior change in 1.20.90 (Mattias 2026-07-11): mention-all,
+ * deep-dive-one. Rotation alone left a rule unmentioned for
+ * 40×N turns; now every reminder lists ALL drift-prone rules as
+ * one-liners while the rotating rule keeps the re-read + the
+ * one-sentence summary (the salience mechanism). A four-sentence
+ * recital would go boilerplate the same way "absorb silently" did,
+ * so the summary demand stays single-rule.
+ *
  * @param {number} turnCount - user turns since the pane's last refresh
  * @param {number} reminderCount - reminders already sent to this pane
  */
 export function formatReminderMessage(turnCount, reminderCount = 0) {
-  const rule = DRIFT_SECTIONS[reminderCount % DRIFT_SECTIONS.length];
+  const idx = reminderCount % DRIFT_SECTIONS.length;
+  const rule = DRIFT_SECTIONS[idx];
   const where = rule.section
     ? `the "${rule.section}" section of ${rule.file}`
     : rule.file;
+  const others = DRIFT_SECTIONS
+    .filter((_, i) => i !== idx)
+    .map((r) => r.label)
+    .join("; ");
   return `[drift-guard] Re-read ${where}: ${rule.directive} ` +
+    `Also still in force: ${others}. ` +
     `You are ${turnCount}+ turns past your last refresh; attention weights decay. ` +
-    `Reply with ONE sentence summarizing this rule's core directive, then ` +
+    `Reply with ONE sentence summarizing the highlighted rule's core directive, then ` +
     `continue your current task. The summary keeps the rule hot in context ` +
     `for the next turns; that's the point, not boilerplate ack.`;
 }
