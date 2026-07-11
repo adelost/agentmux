@@ -43,7 +43,7 @@ import { executePlan, showPlanLog } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
 import {
   loadTodos, saveTodos, addTodo, doneTodo, rmTodo, findItem,
-  listActive, listDone, formatActiveList, formatReminderSummary, formatItemLine,
+  listActive, listRemindable, listDone, formatActiveList, formatReminderSummary, formatItemLine,
   DEFAULT_TODOS_PATH, SECTION_NOW, SECTION_PARKED, SECTION_BLOCKED,
 } from "../core/todos.mjs";
 import {
@@ -1785,9 +1785,12 @@ async function cmdTodoRemind(args) {
   });
   const path = flags.path || DEFAULT_TODOS_PATH;
   const parsed = loadTodos(path);
-  const active = listActive(parsed);
+  // Remindable ≠ active: parked/blocked items without a DUE deadline are in
+  // the LIST but never in the morning ping — daily nags about "tar tag i
+  // senare" become wallpaper and kill the reminder's signal value.
+  const active = listRemindable(parsed);
   if (active.length === 0) {
-    console.log("No active todos — nothing to remind.");
+    console.log("No remindable todos — nothing to remind.");
     return;
   }
   const body = formatReminderSummary(parsed);

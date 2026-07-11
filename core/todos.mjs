@@ -304,6 +304,42 @@ export function listActive(parsed) {
   return out;
 }
 
+const DEADLINE_RE = /[—-]\s*deadline:\s*(\d{4}-\d{2}-\d{2})/;
+
+/** Deadline date (YYYY-MM-DD) parsed from an item's text, or null. */
+export function itemDeadline(item) {
+  const m = String(item?.text || "").match(DEADLINE_RE);
+  return m ? m[1] : null;
+}
+
+/**
+ * Items the MORNING REMINDER may mention. "Idag / snart" always earns its
+ * ping; parked/blocked items only when their deadline is due (<= today).
+ * A daily nudge about undated "tar tag i senare" is wallpaper, and
+ * wallpaper kills the reminder — same economics as the drift-guard:
+ * fire on signal, not on shelf contents. Sorted overdue → dated → undated.
+ */
+export function listRemindable(parsed, { today = new Date().toISOString().slice(0, 10) } = {}) {
+  const out = [];
+  for (const section of parsed.sections) {
+    if (!ACTIVE_SECTIONS.includes(section.name)) continue;
+    for (const item of section.items) {
+      const deadline = itemDeadline(item);
+      const due = deadline !== null && deadline <= today;
+      if (section.name !== SECTION_NOW && !due) continue;
+      out.push({
+        ...item,
+        section: section.name,
+        deadline,
+        overdue: deadline !== null && deadline < today,
+      });
+    }
+  }
+  return out.sort((a, b) =>
+    (Number(b.overdue) - Number(a.overdue)) ||
+    String(a.deadline || "9999").localeCompare(String(b.deadline || "9999")));
+}
+
 /**
  * List recently-completed items (newest first, default last 20).
  */
@@ -362,10 +398,10 @@ export function formatActiveList(parsed) {
  * Short summary suitable for a push notification body (≤200 chars).
  * "5 aktiva: bygg X, köp Y, fixa Z (+2 fler)"
  */
-export function formatReminderSummary(parsed, maxChars = 180) {
-  const items = listActive(parsed);
+export function formatReminderSummary(parsed, maxChars = 180, { today } = {}) {
+  const items = listRemindable(parsed, today ? { today } : {});
   if (items.length === 0) return "";
-  const titles = items.map((it) => it.text);
+  const titles = items.map((it) => (it.overdue ? "🔴 " : "") + it.text);
   let body = `${items.length} aktiva todo${items.length === 1 ? "" : "s"}: `;
   const remaining = maxChars - body.length;
   let included = 0;

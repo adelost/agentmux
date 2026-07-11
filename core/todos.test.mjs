@@ -11,6 +11,7 @@ import {
   rmTodo,
   findItem,
   listActive,
+  listRemindable,
   listDone,
   loadTodos,
   saveTodos,
@@ -274,11 +275,11 @@ feature("formatActiveList / formatReminderSummary", () => {
     then: ["fallback string", (out) => expect(out).toContain("inga aktiva")],
   });
 
-  unit("formatReminderSummary is brief and contains count", {
-    given: ["fixture", () => parseTodos(SAMPLE)],
+  unit("formatReminderSummary is brief and counts only REMINDABLE items", {
+    given: ["fixture (en av tre aktiva är odaterat parkerad)", () => parseTodos(SAMPLE)],
     when: ["format reminder", (p) => formatReminderSummary(p)],
-    then: ["short with count", (out) => {
-      expect(out).toContain("3 aktiva");
+    then: ["short; parked-undated excluded from the ping by design", (out) => {
+      expect(out).toContain("2 aktiva");
       expect(out.length).toBeLessThan(200);
     }],
   });
@@ -310,6 +311,57 @@ feature("loadTodos / saveTodos roundtrip", () => {
       const idag = parsed.sections.find((s) => s.name === SECTION_NOW);
       expect(idag).toBeTruthy();
       expect(idag.items.length).toBe(0);
+    }],
+  });
+});
+
+feature("listRemindable — morgonpingens urval (tjatighets-vakt)", () => {
+  const FILE = [
+    "# Tasks",
+    "",
+    "## Idag / snart",
+    "- [ ] ring banken",
+    "",
+    "## Parkerat (tar tag i senare)",
+    "- [ ] städa garaget",
+    "- [ ] deklarera — deadline: 2026-07-01",
+    "",
+    "## Väntar på",
+    "- [ ] svar från Sebbe — deadline: 2026-07-11",
+    "- [ ] svar från kommunen",
+    "",
+    "## Klart (senaste)",
+    "- [x] gammalt",
+  ].join("\n");
+
+  unit("odaterat parkerat/väntande pingas ALDRIG; Idag alltid; due-deadlines inkluderas", {
+    given: ["listan ovan, idag = 2026-07-11", () => ({ parsed: parseTodos(FILE) })],
+    when: ["selecting", ({ parsed }) => listRemindable(parsed, { today: "2026-07-11" })],
+    then: ["3 items: overdue först, sen dagens, sen odaterad Idag-rad", (items) => {
+      expect(items.map((i) => i.text.slice(0, 10))).toEqual([
+        "deklarera ", "svar från ", "ring banke",
+      ]);
+      expect(items[0].overdue).toBe(true);
+      expect(items[1].overdue).toBe(false);
+      expect(items.some((i) => i.text.includes("garaget"))).toBe(false);
+      expect(items.some((i) => i.text.includes("kommunen"))).toBe(false);
+    }],
+  });
+
+  unit("tom Idag-sektion + inga due deadlines = ingenting att pinga", {
+    given: ["bara odaterat parkerat", () => ({
+      parsed: parseTodos("# Tasks\n\n## Idag / snart\n\n## Parkerat (tar tag i senare)\n- [ ] nånting sen\n"),
+    })],
+    when: ["selecting", ({ parsed }) => listRemindable(parsed, { today: "2026-07-11" })],
+    then: ["tom lista → cron är tyst", (items) => expect(items).toHaveLength(0)],
+  });
+
+  unit("reminder-summary markerar overdue med 🔴 och är tom när inget är remindable", {
+    given: ["listan ovan", () => ({ parsed: parseTodos(FILE) })],
+    when: ["formatting", ({ parsed }) => formatReminderSummary(parsed, 180, { today: "2026-07-11" })],
+    then: ["🔴 på deklarera, garaget saknas", (body) => {
+      expect(body).toContain("🔴 deklarera");
+      expect(body).not.toContain("garaget");
     }],
   });
 });
