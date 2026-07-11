@@ -631,6 +631,13 @@ function codexItemId(hash, blockIndex) {
   return hash ? `${hash}:${blockIndex}` : null;
 }
 
+function codexCompactions(events) {
+  return events
+    .filter((e) => e.type === "compacted")
+    .map((e) => ({ id: e.__hash || e.timestamp || null, timestamp: e.timestamp || null }))
+    .filter((e) => e.id);
+}
+
 /**
  * Read the last N turns from the most-recent codex session matching paneDir.
  * Same shape + semantics as readLastTurns() in jsonl-reader.mjs so the
@@ -651,9 +658,10 @@ export function readLastTurnsCodex(paneDir, opts = {}) {
   const events = (tailBytes && !since && !grep)
     ? parseJsonlTail(file, tailBytes)
     : parseJsonl(file);
-  if (events.length === 0) return { turns: [], jsonlFile: file };
+  if (events.length === 0) return { turns: [], compactions: [], jsonlFile: file };
 
   let turns = groupCodexIntoTurns(events, { headless });
+  const compactions = codexCompactions(events);
 
   if (since) {
     turns = turns.filter((t) => {
@@ -672,5 +680,5 @@ export function readLastTurnsCodex(paneDir, opts = {}) {
 
   if (turns.length > limit) turns = turns.slice(-limit);
 
-  return { turns, jsonlFile: file };
+  return { turns, compactions, jsonlFile: file };
 }

@@ -96,6 +96,7 @@ const STATE_KEY_LAST_POSTED = "watcher_last_posted_ts";
 // so at most the in-flight turn re-posts once on first deploy.
 const STATE_KEY_POSTED_IDS = "watcher_posted_item_ids";
 const STATE_KEY_RETRY_UNTIL = "watcher_retry_until_ts";
+const STATE_KEY_COMPACTION_IDS = "watcher_compaction_ids";
 
 /**
  * WHAT: Routes completed Claude and Codex JSONL items to their bound channels.
@@ -372,6 +373,38 @@ export function createJsonlWatcher({
     setRetryUntilMs(channelId, nextState.retryUntilMs);
   }
 
+  async function postCompactionNotice(name, idx, channelId, events = []) {
+    if (!events.length) return;
+    const stateByChannel = state.get(STATE_KEY_COMPACTION_IDS, {}) || {};
+    const visibleIds = events.map((event) => event.id).filter(Boolean);
+
+    // Migration seed: an upgrade must not announce every historical compact
+    // still visible in the startup tail. Once seeded, any unseen id means the
+    // event happened while this bridge generation was running or offline.
+    if (!Object.hasOwn(stateByChannel, channelId)) {
+      stateByChannel[channelId] = visibleIds.slice(-100);
+      state.set(STATE_KEY_COMPACTION_IDS, stateByChannel);
+      return;
+    }
+
+    const seen = new Set(stateByChannel[channelId] || []);
+    const unseen = events.filter((event) => event.id && !seen.has(event.id));
+    if (!unseen.length) return;
+
+    const count = unseen.length;
+    const text = count === 1
+      ? `Context compacted for **${name}:${idx}**. Work continues from the summary.`
+      : `Context compacted ${count} times for **${name}:${idx}** while the bridge was offline. Work continues from the latest summary.`;
+    try {
+      await discord.send(channelId, text);
+      stateByChannel[channelId] = [...seen, ...visibleIds].slice(-100);
+      state.set(STATE_KEY_COMPACTION_IDS, stateByChannel);
+      log(`${name}:${idx} → ${channelId} (compaction notice x${count})`);
+    } catch (err) {
+      log(`compaction notice failed for ${name}:${idx}: ${err.message}`);
+    }
+  }
+
   // --- rendering -----------------------------------------------------------
 
   function renderTurn(turn) {
@@ -615,6 +648,7 @@ export function createJsonlWatcher({
       const truncated = Number.isFinite(fileInfo?.size) && fileInfo.size > tailBytes;
       const readMs = Date.now() - readStarted;
       const readBytes = estimatedReadBytes(fileInfo, tailBytes);
+      await postCompactionNotice(name, idx, channelId, result?.compactions || []);
       if (!result?.turns?.length) {
         if (startupAudit) auditedPanes.add(key);
         rememberReadSnapshot(key, fileInfo, [], channelId, fileInfo?.mtimeMs ?? null);

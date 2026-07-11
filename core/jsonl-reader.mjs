@@ -699,6 +699,10 @@ export function readLastTurns(paneDir, opts = {}) {
     ? parseJsonlTail(files[0].path, tailBytes)
     : parseJsonl(files[0].path);
   let turns = groupIntoTurns(events, { headless });
+  const compactions = events
+    .filter((e) => e?.isCompactSummary === true)
+    .map((e) => ({ id: e.uuid || e.timestamp || null, timestamp: e.timestamp || null }))
+    .filter((e) => e.id);
 
   if (since) {
     turns = turns.filter((t) => {
@@ -717,7 +721,7 @@ export function readLastTurns(paneDir, opts = {}) {
 
   if (turns.length > limit) turns = turns.slice(-limit);
 
-  return { turns, jsonlFile: files[0].path };
+  return { turns, compactions, jsonlFile: files[0].path };
 }
 
 // ---------------------------------------------------------------------------

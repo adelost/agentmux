@@ -414,6 +414,8 @@ feature("readLastTurnsCodex: codex event ordering", () => {
       expect(r.turns.map((t) => t.turnId)).toEqual(["A", "A"]);
       expect(r.turns.map((t) => t.isComplete)).toEqual([true, true]);
       expect(r.turns[1].items.at(-1).content).toBe("final answer after images");
+      expect(r.compactions).toHaveLength(1);
+      expect(r.compactions[0].timestamp).toBe("2026-04-09T10:00:05Z");
       cleanup();
     }],
   });

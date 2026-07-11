@@ -309,6 +309,35 @@ feature("watcher: narrative with multiple images", () => {
   });
 });
 
+feature("watcher: claude compaction visibility", () => {
+  unit("announces a new compact summary exactly once", {
+    given: ["a Claude compact-summary row on an initialized channel", () => setupWatcher({
+      jsonlLines: [{
+        type: "user",
+        uuid: "compact-summary-1",
+        timestamp: "2026-04-30T20:20:00.000Z",
+        isCompactSummary: true,
+        message: { role: "user", content: "This session is being continued from a compact summary." },
+      }],
+      stateInitial: {
+        watcher_compaction_ids: { "ch-test": [] },
+      },
+    })],
+    when: ["watcher.checkPane observes the unchanged session twice", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["one completion notice is posted", (ctx) => {
+      expect(ctx.discord.sends).toHaveLength(1);
+      expect(ctx.discord.sends[0].payload).toBe(
+        "Context compacted for **testagent:0**. Work continues from the summary.",
+      );
+      ctx.cleanup();
+    }],
+  });
+});
+
 feature("watcher: Codex background polling stays out of Discord", () => {
   unit("wait calls are suppressed while adjacent user-facing text is posted", {
     given: ["a Codex turn containing text and repeated wait function calls", () => {
@@ -671,6 +700,29 @@ feature("watcher: Discord failure is bounded by retry state", () => {
 // --- Codex pane dispatch -------------------------------------------------
 
 feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/projects", () => {
+  unit("announces native codex compaction once without requiring an assistant turn", {
+    given: ["an initialized channel sees a new compacted event", () => setupCodexWatcher({
+      codexEvents: [
+        { type: "compacted", timestamp: "2026-05-10T00:00:05.000Z", payload: {} },
+      ],
+      stateInitial: {
+        watcher_compaction_ids: { "ch-codex": [] },
+      },
+    })],
+    when: ["watcher.checkPane observes the same file twice", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["Discord receives one concise completion notice and no duplicate", (ctx) => {
+      expect(ctx.discord.sends).toHaveLength(1);
+      expect(ctx.discord.sends[0].payload).toBe(
+        "Context compacted for **testagent:0**. Work continues from the summary.",
+      );
+      ctx.cleanup();
+    }],
+  });
+
   unit("posts assistant text from a complete codex turn", {
     given: ["agents.yaml has cmd: codex and a complete turn rollout exists", () => {
       const oldStamp = Date.now() - 60_000; // older than COMPLETION_GRACE_MS so post fires
