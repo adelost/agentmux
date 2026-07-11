@@ -1576,7 +1576,6 @@ async function cmdDream(ctx, flags = {}) {
 
   let okCount = 0;
   let failedCount = 0;
-  let aborted = false;
 
   try {
     ensureDreamDailyFile(memPath, dateKey);
@@ -1633,30 +1632,31 @@ async function cmdDream(ctx, flags = {}) {
         continue;
       }
 
+      // Pane-local failures skip THIS pane and continue: an unresponsive or
+      // slow pane must not starve the rest of the fleet's digests. Observed
+      // cost of the old abort-on-first-failure: one 15s echo-timeout (ai:2)
+      // cancelled three healthy panes' blocks in the same night (2026-07-10).
       const accepted = await ctx.agent.waitForPromptEcho(t.agent, t.pane, prompt, 15_000).catch(() => false);
       if (!accepted) {
         failedCount++;
-        aborted = true;
-        console.warn(`${tag} ${key} did not record dream prompt within 15s — Escape + aborting remaining panes`);
+        console.warn(`${tag} ${key} did not record dream prompt within 15s — Escape + skipping this pane`);
         await ctx.agent.sendEscape(t.agent, t.pane).catch(() => {});
-        break;
+        continue;
       }
 
       const pRes = await waitForPaneIdle(ctx, t.agent, t.pane, 300_000, 3);
       if (!pRes.idle) {
         failedCount++;
-        aborted = true;
-        console.warn(`${tag} ${key} did not finish dream prompt within 5min (last=${pRes.status}) — Escape + aborting remaining panes`);
+        console.warn(`${tag} ${key} did not finish dream prompt within 5min (last=${pRes.status}) — Escape + skipping this pane`);
         await ctx.agent.sendEscape(t.agent, t.pane).catch(() => {});
-        break;
+        continue;
       }
 
       const wroteBlock = await waitForDreamPaneBlock(memPath, t, dateKey);
       if (!wroteBlock) {
         failedCount++;
-        aborted = true;
-        console.warn(`${tag} ${key} finished but did not write its dream marker block within 15s — aborting remaining panes`);
-        break;
+        console.warn(`${tag} ${key} finished but did not write its dream marker block within 15s — skipping this pane`);
+        continue;
       }
 
       okCount++;
@@ -1668,7 +1668,7 @@ async function cmdDream(ctx, flags = {}) {
       console.log(`Dream complete: ${okCount} pane(s) ok, ${failedCount} failed.`);
     }
 
-    if (failedCount > 0 || aborted) process.exitCode = 1;
+    if (failedCount > 0) process.exitCode = 1;
   } finally {
     // Housekeeping runs under the dream lock (before release) so two racing
     // dream runs can't gzip the same file concurrently. Reached on every
