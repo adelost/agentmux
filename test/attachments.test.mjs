@@ -100,6 +100,27 @@ feature("buildPrompt: audio attachment transcription", () => {
       }],
   });
 
+  unit("fallback-marked transcript surfaces the engine switch in the tag", {
+    given: ["wrapper output carrying the whisper1 fallback mark", () => ({
+      ctx: setup({ transcribeOutput: "[stt-fallback:whisper1] hej det är jag" }),
+      msg: fakeMsg({
+        id: "m9",
+        text: "",
+        attachments: [{ id: "a9", name: "voice.ogg", url: "https://cdn/voice9.ogg", contentType: "audio/ogg" }],
+      }),
+      tmpFiles: [],
+    })],
+    when: ["buildPrompt is called", async ({ ctx, msg, tmpFiles }) =>
+      ctx.handler.buildPrompt(msg, tmpFiles)],
+    then: ["mark stripped from text, FALLBACK visible in tag for pane AND reply",
+      async (result, { msg }) => {
+        expect(result).toContain("whisper1 FALLBACK");
+        expect(result).toContain("hej det är jag");
+        expect(result).not.toContain("[stt-fallback:whisper1]");
+        expect(msg.reply).toHaveBeenCalledWith(expect.stringContaining("FALLBACK"));
+      }],
+  });
+
   unit("merges user text with the transcription when both exist", {
     given: ["text + voice", () => ({
       ctx: setup({ transcribeOutput: "sätt på kaffe" }),

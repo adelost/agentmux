@@ -27,14 +27,23 @@ export function createAttachmentHandler({ run, transcribeScript, downloadBuffer,
       const isImage = att.contentType?.startsWith("image/");
 
       if (isAudio) {
-        const transcribed = await transcribeAudio(msg, att, tmpFiles);
+        let transcribed = await transcribeAudio(msg, att, tmpFiles);
         if (transcribed === null) return null;
+        // The wrapper marks fallback-engine transcripts (gemini failed →
+        // whisper1 took over). The mark must survive into BOTH destinations:
+        // whisper1 mishears technical terms, and a silent fallback would be
+        // a quality downgrade nobody knows to compensate for.
+        const FALLBACK_MARK = "[stt-fallback:whisper1] ";
+        const viaFallback = transcribed.startsWith(FALLBACK_MARK);
+        if (viaFallback) transcribed = transcribed.slice(FALLBACK_MARK.length).trim();
         // Same disclaimer in both destinations: the agent (via pane text)
         // and the Discord reply. The "interpret intent" hint is as useful
         // for the human reading the reply as it is for the agent reading
         // the prompt — anyone seeing it knows this is AI-transcribed and
         // may have word-level errors.
-        const tagged = `[transcribed voice, may contain speech-to-text errors — interpret intent] ${transcribed}`;
+        const tagged = viaFallback
+          ? `[transcribed voice via whisper1 FALLBACK (gemini failed) — extra error-prone on technical terms, interpret intent] ${transcribed}`
+          : `[transcribed voice, may contain speech-to-text errors — interpret intent] ${transcribed}`;
         await msg.reply(`*${tagged}*`).catch(() => {});
         if (!rawText) rawText = tagged;
         else rawText = `${rawText}\n${tagged}`;
@@ -59,7 +68,11 @@ export function createAttachmentHandler({ run, transcribeScript, downloadBuffer,
       const tmpPath = `/tmp/discord-voice-${msg.id}.${ext}`;
       writeTmp(tmpPath, buffer);
       tmpFiles.push(tmpPath);
-      const { stdout } = await run(`'${transcribeScript}' '${tmpPath}'`, 60000);
+      // 300s covers the wrapper's full chain (gemini 2×100s + whisper1 60s).
+      // The old 60s cap killed stalled-but-recoverable gemini calls and
+      // surfaced them as a bare "Command failed" (2026-07-11, api:3: the
+      // user's voice order was silently never delivered).
+      const { stdout } = await run(`'${transcribeScript}' '${tmpPath}'`, 300000);
       const text = stdout.trim();
       if (!text) {
         await msg.reply("*(could not transcribe voice message)*");
@@ -69,7 +82,11 @@ export function createAttachmentHandler({ run, transcribeScript, downloadBuffer,
       // so the Discord reply and pane-bound text share one source of truth.
       return text;
     } catch (err) {
-      await msg.reply(`Transcription failed: ${err.message}`).catch(() => {});
+      // exec's message is just "Command failed: <cmd>" — the actionable
+      // cause lives in stderr. Surface its tail so the user sees WHY.
+      const cause = String(err.stderr || "").trim().split("\n").slice(-2).join(" | ");
+      const timedOut = err.killed ? " (timeout)" : "";
+      await msg.reply(`Transcription failed${timedOut}: ${err.message}${cause ? `\n└ ${cause}` : ""}`).catch(() => {});
       return null;
     }
   }
