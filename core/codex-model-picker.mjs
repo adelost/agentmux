@@ -65,10 +65,12 @@ function parseNumberedRows(text, headerRe) {
     const m = line.match(/^\s*[›>]?\s*(\d+)\.\s+(.+?)(?:\s{2,}.*)?\s*$/);
     if (!m) continue;
     const rawName = m[2].trim();
+    const marker = rawName.match(/\s*\((current|default)\)\s*$/i)?.[1]?.toLowerCase() || null;
     rows.push({
       digit: m[1],
-      name: rawName.replace(/\s*\(current\)\s*$/i, "").trim(),
-      current: /\(current\)\s*$/i.test(rawName),
+      name: rawName.replace(/\s*\((?:current|default)\)\s*$/i, "").trim(),
+      current: marker === "current",
+      default: marker === "default",
       raw: rawName,
     });
   }
@@ -79,7 +81,12 @@ function composerText(text) {
   const line = String(text || "").split("\n").reverse()
     .find((candidate) => /^\s*[›❯>]\s*/.test(candidate));
   if (!line) return null;
-  return line.replace(/^\s*[›❯>]\s*/, "").trim();
+  const value = line.replace(/^\s*[›❯>]\s*/, "").trim();
+  // Codex renders this grey hint inside an empty composer. tmux capture
+  // strips the colour that distinguishes it from a human draft, so match
+  // the exact harness-owned placeholder and nothing broader.
+  if (value === "Find and fix a bug in @filename") return "";
+  return value;
 }
 
 export function parseModelList(text) {
@@ -134,7 +141,12 @@ export async function driveCodexModelPicker({
   agent, name, pane, model, effort = null,
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   log = () => {},
+  timeoutMs = 60_000,
 } = {}) {
+  const deadlineMs = Date.now() + timeoutMs;
+  const timedOut = (stage) => Date.now() >= deadlineMs
+    ? fail("timeout", `model restore exceeded ${timeoutMs}ms during ${stage}`)
+    : null;
   const capture = async (lines = 45) => {
     try { return await agent.capturePane(name, pane, lines); }
     catch (err) { return `__CAPTURE_FAILED__ ${err.message}`; }
@@ -154,6 +166,7 @@ export async function driveCodexModelPicker({
   } catch (err) {
     return fail("busy-check", `could not verify that pane is idle: ${err.message}`);
   }
+  if (timedOut("busy-check")) return timedOut("busy-check");
 
   // Preserve a human draft or a previously queued message. Checking after
   // typing would first merge "/model" into it and rely on Escape cleanup.
@@ -165,12 +178,14 @@ export async function driveCodexModelPicker({
   if (before) {
     return fail("compose", `composer is not empty (starts with: ${before.slice(0, 60)})`);
   }
+  if (timedOut("composer-check")) return timedOut("composer-check");
 
   // Stage 1: type /model (no Enter) and verify it sits alone in the composer.
   // Real leftover text concatenates ("/usage" + "/model" → "/usage/model",
   // observed live) — abort rather than submit merged garbage.
   await agent.typeLiteral(name, "/model", pane);
   await sleep(700);
+  if (timedOut("composer")) { await escapeOut(); return timedOut("composer"); }
   snap = await capture(15);
   const composerLine = snap.split("\n").reverse().find((l) => /[›❯>]\s*\/\S*model/.test(l));
   if (!composerLine || !/[›❯>]\s*\/model\s*$/.test(composerLine.trim())) {
@@ -181,6 +196,7 @@ export async function driveCodexModelPicker({
   // Stage 2: Enter opens the model list.
   await agent.sendEnter(name, pane);
   await sleep(1100);
+  if (timedOut("model-list")) { await escapeOut(); return timedOut("model-list"); }
   snap = await capture();
   const models = parseModelList(snap);
   if (!models) {
@@ -198,6 +214,7 @@ export async function driveCodexModelPicker({
   log(`picker: ${name}:${pane} model "${model}" = digit ${target.digit}`);
   await agent.typeLiteral(name, target.digit, pane);
   await sleep(900);
+  if (timedOut("effort-list")) { await escapeOut(); return timedOut("effort-list"); }
   snap = await capture();
   const effortView = parseEffortList(snap);
   if (!effortView) {
@@ -225,6 +242,7 @@ export async function driveCodexModelPicker({
     await agent.sendEnter(name, pane);
   }
   await sleep(1100);
+  if (timedOut("confirmation")) { await escapeOut(); return timedOut("confirmation"); }
 
   // Stage 5: the confirmation line is the proof — footer alone can lag.
   snap = await capture();

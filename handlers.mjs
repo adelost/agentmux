@@ -12,6 +12,9 @@ import { loadConfig } from "./cli/config.mjs";
 import { readParkState, unparkPane } from "./core/pane-park.mjs";
 import { driveCodexModelPicker } from "./core/codex-model-picker.mjs";
 import { sendPromptVerified, sendSlashVerified } from "./core/delivery.mjs";
+import {
+  MODEL_RECOVERY_STATE_KEY, MODEL_RECOVERY_SETTLE_MS, MODEL_RECOVERY_TIMEOUT_MS, resumeBrief,
+} from "./core/model-watch.mjs";
 
 /**
  * Reconcile every configured agent's live tmux session against the
@@ -57,6 +60,7 @@ const HELP_TEXT = [
   "`/raw` — last 50 lines of tmux pane (raw)",
   "`/status` — current agent, pane, model, context%",
   "`/model` — show current model; `/model <name>` — switch (fable/opus/sonnet/haiku)",
+  "`/restore` — restore the model that was active before the latest downgrade",
   "`/dismiss` — dismiss blocking prompt (survey etc.)",
   "`/esc` — interrupt (send Escape)",
   "`/use <agent>[.pane]` — switch channel target",
@@ -339,6 +343,9 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
             log: (m) => console.log(`[${ts()}] ${m}`),
           }));
         if (result.ok) {
+          if (readParkState(mapping.name, pane)) {
+            unparkPane({ session: mapping.name, pane, detail: `explicit model switch: ${result.model} ${result.effort || ""}`.trim() });
+          }
           await msg.reply(`✅ model changed to ${result.model}${result.effort ? ` ${result.effort}` : ""}`);
         } else {
           const avail = result.available ? `\navailable: ${result.available.join(", ")}` : "";
@@ -364,6 +371,48 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       } catch (err) {
         await msg.reply(`/model failed: ${err.message}`).catch(() => {});
       }
+    },
+
+    "/restore": async (msg, mapping, pane) => {
+      const park = readParkState(mapping.name, pane);
+      if (!park) {
+        await msg.reply(`${mapping.name}:${pane} är inte parkerad; ingen modell behöver återställas.`);
+        return;
+      }
+      const key = `${mapping.name}:${pane}`;
+      const target = (state.get(MODEL_RECOVERY_STATE_KEY, {}) || {})[key];
+      if (!target?.targetModel) {
+        await msg.reply(`⚠️ Återställningsmålet saknas för ${key}. Panelen förblir parkerad; använd \`//model <modell> <effort>\` explicit.`);
+        return;
+      }
+      const paneCmd = loadConfig(agentsYamlPath)?.[mapping.name]?.panes?.[pane]?.cmd || "";
+      if (!/codex/i.test(paneCmd)) {
+        await msg.reply(`⚠️ Automatisk \`/restore\` stöder ännu Codex-paneler. ${key} förblir parkerad; använd \`//model ${target.targetModel}\`.`);
+        return;
+      }
+      await msg.reply(`🔁 ${key}: väntar 10 s och försöker återställa ${target.targetModel}${target.targetEffort ? ` ${target.targetEffort}` : ""}. Timeout 60 s.`);
+      await new Promise((resolve) => setTimeout(resolve, MODEL_RECOVERY_SETTLE_MS));
+      if (await agent.isBusy(mapping.name, pane)) {
+        await msg.reply(`🅿 ${key} blev aktiv under väntan och förblir parkerad. Avbryt först och kör \`/restore\` igen.`);
+        return;
+      }
+      const result = await withPaneSendLock(key, () => driveCodexModelPicker({
+        agent,
+        name: mapping.name,
+        pane,
+        model: target.targetModel,
+        effort: target.targetEffort || null,
+        timeoutMs: MODEL_RECOVERY_TIMEOUT_MS,
+        log: (m) => console.log(`[${ts()}] ${m}`),
+      }));
+      if (!result.ok) {
+        await msg.reply(`🅿 Återställning misslyckades (${result.stage}: ${result.error}). ${key} förblir parkerad.`);
+        return;
+      }
+      const restored = `${result.model}${result.effort ? ` ${result.effort}` : ""}`;
+      unparkPane({ session: mapping.name, pane, detail: `restore verified: ${restored}` });
+      await agent.sendOnly(mapping.name, resumeBrief(restored), pane);
+      await msg.reply(`✅ ${key} återställd till ${restored}, avparkerad och återstartad med re-verify.`);
     },
 
     "/dismiss": async (msg, mapping, pane) => {
@@ -489,16 +538,6 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     return cleanPrompt;
   }
 
-  function unparkAfterHumanDelivery(mapping, pane) {
-    try {
-      if (!readParkState(mapping.name, pane)) return;
-      unparkPane({ session: mapping.name, pane, detail: "human wake via Discord" });
-      console.log(`[${ts()}] ${mapping.name}:${pane} unparked (human wake)`);
-    } catch (err) {
-      console.warn(`park-state update failed for ${mapping.name}:${pane}: ${err.message}`);
-    }
-  }
-
   // streamResponse and hasReadyResponse were removed in 1.16.32 — agent
   // replies are now mirrored to Discord by channels/jsonl-watcher.mjs,
   // which observes every claude/codex pane's session jsonl directly.
@@ -532,8 +571,6 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           log: (m) => console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} ${m}`),
         }));
       delivered = result.delivered;
-      if (delivered) unparkAfterHumanDelivery(mapping, pane);
-
       if (!delivered) {
         console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not delivered after 3 attempts`);
         await msg.send("⚠️ Agent did not acknowledge prompt after 3 attempts. Pane may be dead, try `/raw` to inspect.")
@@ -664,6 +701,17 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     const pane = parsedPane || mapping.pane || 0;
     const parsed = parseCommand(cleanPrompt);
 
+    // A normal message must not silently wake a pane on a downgraded model.
+    // Administrative commands remain available, especially /restore.
+    if (!parsed) {
+      const park = readParkState(mapping.name, pane);
+      if (park) {
+        await msg.reply(`⚠️ **${mapping.name}:${pane} är parkerad efter modellbyte** (${park.detail}). ` +
+          `Meddelandet skickades INTE. Kör \`/restore\` för att försöka återställa rätt modell, eller \`//model\` för ett explicit val.`);
+        return;
+      }
+    }
+
     // Catch-up notice: user returning to a stale Discord channel after
     // activity in the pane (e.g. the user typed directly into tmux or
     // another agent drove the pane). Posting the count BEFORE we forward
@@ -722,7 +770,6 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           echoTimeoutMs: Math.max(50, Math.min(6_000, pollInterval * 500)),
           log: (m) => console.warn(`follow ${mapping.name}:${pane}: ${m}`),
         }));
-      if (result.delivered) unparkAfterHumanDelivery(mapping, pane);
       if (!result.delivered) {
         await msg.send("⚠️ Agent did not acknowledge prompt after 3 attempts. Pane may be dead, try `/raw` to inspect.")
           .catch((err) => console.warn(`follow delivery warning failed: ${err.message}`));

@@ -69,6 +69,14 @@ feature("picker list parsing", () => {
     }],
   });
 
+  unit("the live default suffix is metadata, not part of the model id", {
+    given: ["a picker that marks Sol as default", () => ({ text: MODEL_LIST.replace("(current)", "(default)") })],
+    when: ["parsing", ({ text }) => parseModelList(text)],
+    then: ["Sol remains selectable by its canonical id", (rows) => {
+      expect(rows[0]).toMatchObject({ name: "gpt-5.6-sol", current: false, default: true });
+    }],
+  });
+
   unit("effort list rows normalize labels and carry the pending model", {
     given: ["the live effort list capture", () => ({ text: EFFORT_LIST })],
     when: ["parsing", ({ text }) => parseEffortList(text)],
@@ -139,6 +147,27 @@ feature("driveCodexModelPicker", () => {
     }],
   });
 
+  unit("the exact Codex composer placeholder is treated as empty", {
+    given: ["an idle live pane with the grey placeholder captured as text", () => ({
+      agent: fakeAgent({
+        frames: [
+          "\n› Find and fix a bug in @filename\n  gpt-5.6-luna low · ~/x\n",
+          COMPOSER_VIEW,
+          MODEL_LIST,
+          EFFORT_LIST,
+          CONFIRMED,
+        ],
+      }),
+    })],
+    when: ["driving the picker", ({ agent }) => driveCodexModelPicker({
+      agent, name: "claw", pane: 9, model: "gpt-5.6-luna", effort: "low", sleep: noSleep,
+    })],
+    then: ["the placeholder does not block a verified model switch", (r, { agent }) => {
+      expect(r).toMatchObject({ ok: true, model: "gpt-5.6-luna", effort: "low" });
+      expect(agent.keys).toEqual(["/model", "<enter>", "3", "1"]);
+    }],
+  });
+
   unit("busy pane is refused before any keystroke", {
     given: ["a mid-turn pane", () => ({
       agent: fakeAgent({ frames: [COMPOSER_VIEW], busy: true }),
@@ -149,6 +178,19 @@ feature("driveCodexModelPicker", () => {
     then: ["fails at busy, zero keys typed", (r, { agent }) => {
       expect(r.ok).toBe(false);
       expect(r.stage).toBe("busy");
+      expect(agent.keys).toHaveLength(0);
+    }],
+  });
+
+  unit("restore timeout fails closed before picker keystrokes", {
+    given: ["an already expired restore deadline", () => ({
+      agent: fakeAgent({ frames: [IDLE_VIEW] }),
+    })],
+    when: ["driving", ({ agent }) => driveCodexModelPicker({
+      agent, name: "api", pane: 3, model: "gpt-5.6-sol", timeoutMs: 0, sleep: noSleep,
+    })],
+    then: ["timeout is honest and the composer stays untouched", (r, { agent }) => {
+      expect(r).toMatchObject({ ok: false, stage: "timeout" });
       expect(agent.keys).toHaveLength(0);
     }],
   });

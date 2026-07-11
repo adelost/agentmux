@@ -158,6 +158,9 @@ export function stopBrief(change) {
 // plus one harmless extra /model command.
 
 export const RECOVERY_COOLDOWN_MS = 30 * 60_000;
+export const MODEL_RECOVERY_STATE_KEY = "watcher_recovery";
+export const MODEL_RECOVERY_SETTLE_MS = 10_000;
+export const MODEL_RECOVERY_TIMEOUT_MS = 60_000;
 
 export function decideRecovery({ lastAttemptMs = null, nowMs = Date.now(), enabled = true, cooldownMs = RECOVERY_COOLDOWN_MS } = {}) {
   if (!enabled) return { attempt: false, reason: "disabled (AMUX_MODEL_RECOVERY=false)" };

@@ -46,6 +46,7 @@ import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, planStartupAudi
 import {
   classifyModelChange, changeMessage, stopBrief, shouldStopPane, label as modelLabel,
   decideRecovery, resumeBrief, recoveryMessage, interruptUntilIdle,
+  MODEL_RECOVERY_STATE_KEY, MODEL_RECOVERY_SETTLE_MS, MODEL_RECOVERY_TIMEOUT_MS,
 } from "../core/model-watch.mjs";
 import { driveCodexModelPicker } from "../core/codex-model-picker.mjs";
 import { sendSlashVerified } from "../core/delivery.mjs";
@@ -206,7 +207,7 @@ export function createJsonlWatcher({
   }
 
   const STATE_KEY_LAST_MODEL = "watcher_last_model";
-  const STATE_KEY_RECOVERY = "watcher_recovery";
+  const STATE_KEY_RECOVERY = MODEL_RECOVERY_STATE_KEY;
   const recoveryEnabled = process.env.AMUX_MODEL_RECOVERY !== "false";
 
   /**
@@ -225,8 +226,29 @@ export function createJsonlWatcher({
       log(`${paneName} recovery skipped: ${decision.reason}`);
       return { attempted: false, restored: false, detail: decision.reason };
     }
-    attempts[key] = { attemptedAtMs: Date.now(), target: modelLabel(prev) };
+    attempts[key] = {
+      ...attempts[key],
+      attemptedAtMs: Date.now(),
+      target: modelLabel(prev),
+      targetModel: prev.model,
+      targetEffort: prev.effort ?? null,
+    };
     state.set(STATE_KEY_RECOVERY, attempts);
+
+    // Let the interrupted TUI settle before opening a modal picker. This also
+    // keeps a late task_complete/status redraw from overwriting picker keys.
+    await new Promise((resolve) => setTimeout(resolve, MODEL_RECOVERY_SETTLE_MS));
+    try {
+      if (await agent.isBusy(name, idx)) {
+        const detail = "pane became busy during 10s recovery settle";
+        await discord.send(channelId, recoveryMessage(paneName, false, detail));
+        return { attempted: true, restored: false, detail };
+      }
+    } catch (err) {
+      const detail = `idle re-check failed: ${err.message}`;
+      await discord.send(channelId, recoveryMessage(paneName, false, detail));
+      return { attempted: true, restored: false, detail };
+    }
 
     const paneCmd = config?.[name]?.panes?.[idx]?.cmd || "";
     let restored = false;
@@ -235,6 +257,7 @@ export function createJsonlWatcher({
       if (/codex/i.test(paneCmd)) {
         const res = await driveCodexModelPicker({
           agent, name, pane: idx, model: prev.model, effort: prev.effort || null, log,
+          timeoutMs: MODEL_RECOVERY_TIMEOUT_MS,
         });
         restored = res.ok;
         detail = res.ok
@@ -347,6 +370,16 @@ export function createJsonlWatcher({
       return;
     }
     log(`${paneName} stopped after ${interruption.escapes} Escape attempt(s)`);
+
+    const recoveryState = state.get(STATE_KEY_RECOVERY, {}) || {};
+    recoveryState[key] = {
+      ...recoveryState[key],
+      incidentAtMs: Date.now(),
+      target: modelLabel(prev),
+      targetModel: prev.model,
+      targetEffort: prev.effort ?? null,
+    };
+    state.set(STATE_KEY_RECOVERY, recoveryState);
 
     // Recover while the pane is neutral. The old order sent stopBrief first;
     // that started a new turn, so the codex picker correctly refused the busy
