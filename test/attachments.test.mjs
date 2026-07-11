@@ -15,6 +15,7 @@ function fakeMsg({ id = "msg1", text = "", attachments = [] } = {}) {
     text,
     attachments,
     reply: vi.fn(async (content) => { replies.push(content); }),
+    send: vi.fn(async (content) => { replies.push(content); }),
     _replies: replies,
   };
 }
@@ -96,7 +97,8 @@ feature("buildPrompt: audio attachment transcription", () => {
         expect(ctx.runCalls[0]).toContain("/fake/transcribe.sh");
         expect(ctx.runCalls[0]).toContain("/tmp/discord-voice-m1.ogg");
         expect(tmpFiles).toEqual(["/tmp/discord-voice-m1.ogg"]);
-        expect(msg.reply).toHaveBeenCalledWith(expect.stringContaining("transcribed voice"));
+        expect(msg.reply).toHaveBeenCalledWith(expect.stringContaining("**Transcript**"));
+        expect(msg.reply).toHaveBeenCalledWith(expect.stringContaining("Speech-to-text may contain errors"));
       }],
   });
 
@@ -117,8 +119,28 @@ feature("buildPrompt: audio attachment transcription", () => {
         expect(result).toContain("whisper1 FALLBACK");
         expect(result).toContain("hej det är jag");
         expect(result).not.toContain("[stt-fallback:whisper1]");
-        expect(msg.reply).toHaveBeenCalledWith(expect.stringContaining("FALLBACK"));
+        expect(msg.reply).toHaveBeenCalledWith(expect.stringContaining("Whisper fallback"));
       }],
+  });
+
+  unit("long transcripts are split into Discord-safe messages without repeating the reply quote", {
+    given: ["a transcript longer than Discord's message limit", () => ({
+      ctx: setup({ transcribeOutput: `start ${"word ".repeat(520)} end` }),
+      msg: fakeMsg({
+        id: "m-long",
+        attachments: [{ id: "a-long", name: "voice.ogg", url: "u", contentType: "audio/ogg" }],
+      }),
+      tmpFiles: [],
+    })],
+    when: ["buildPrompt", async ({ ctx, msg, tmpFiles }) => ctx.handler.buildPrompt(msg, tmpFiles)],
+    then: ["the first chunk replies and remaining chunks send normally", (result, { msg }) => {
+      expect(result).toContain("start word");
+      expect(msg.reply).toHaveBeenCalledTimes(1);
+      expect(msg.send.mock.calls.length).toBeGreaterThan(0);
+      const chunks = [...msg.reply.mock.calls, ...msg.send.mock.calls].map(([text]) => text);
+      expect(chunks.every((text) => text.length <= 1990)).toBe(true);
+      expect(chunks.join("\n")).toContain("end");
+    }],
   });
 
   unit("merges user text with the transcription when both exist", {

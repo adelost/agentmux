@@ -3,6 +3,12 @@
 
 const DEFAULT_SEEN_LIMIT = 100;
 
+/** WHAT: Formats one batch-level recovery notice. WHY: Keeps rare delivery repair visible without per-message spam. */
+export function formatRecoveredNotice(count) {
+  const n = Math.max(0, Number(count) || 0);
+  return `ℹ Recovered ${n} message${n === 1 ? "" : "s"} missed during reconnect.`;
+}
+
 /** WHAT: Loads the per-channel delivered-message index. WHY: Keeps replay dedupe on one persisted schema. */
 function seenState(state) {
   return state.get("inbound_seen_ids", {}) || {};

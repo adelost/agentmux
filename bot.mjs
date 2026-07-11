@@ -3,7 +3,7 @@
 
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
 import { buildChannelMap } from "./lib.mjs";
-import { createInboundReconciler } from "./core/inbound-reconciler.mjs";
+import { createInboundReconciler, formatRecoveredNotice } from "./core/inbound-reconciler.mjs";
 
 const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
 const READY_FILE = process.env.READY_FILE || "/tmp/agentmux.ready";
@@ -105,6 +105,7 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
         const result = await inbound.reconcile(channel, channelId);
         if (result?.replayed) {
           console.log(`[catch-up] replayed ${result.replayed} missed human message(s) in #${channelId}`);
+          await channel.send(channelId, formatRecoveredNotice(result.replayed));
         }
       } catch (err) {
         console.warn(`catch-up failed for #${channelId}: ${err.message}`);

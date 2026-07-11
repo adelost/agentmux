@@ -23,6 +23,19 @@ amux lint
 | `amux asks` | Show recent human asks/directives with status and jsonl location |
 | `amux lint` | Run default repo linters, starting with WHAT/WHY/DTO/debt contracts |
 
+## Bridge Lifecycle
+
+```bash
+amux serve            # visible foreground process; Ctrl+C stops it
+amux serve --detach   # managed background process in tmux
+amux doctor           # health, heartbeat, version, and ownership mode
+amux stop             # intentional stop; watchdog does not revive it
+```
+
+Foreground is the default so startup failures and restart loops remain visible.
+The bridge is still discoverable by PID and heartbeat, so agents use
+`amux doctor` rather than assuming it must exist inside tmux.
+
 ## Sending Work
 
 ```bash

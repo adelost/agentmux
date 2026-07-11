@@ -90,7 +90,8 @@ make it cron-friendly.
 The bridge writes a 30s heartbeat (`~/.agentmux/bridge-heartbeat.json`).
 `bin/bridge-watchdog-cron.sh` (install: `bash bin/install-bridge-watchdog.sh`,
 runs every 5 min) kills a hung bridge so the supervisor restarts it, and
-revives a fully dead stack. Rate-limited, logged to
+revives a fully dead stack only in explicit managed (`--detach`) mode.
+Manual and intentionally stopped bridges stay user-owned. Rate-limited, logged to
 `~/.agentmux/watchdog.log`, kill-switch `touch ~/.agentmux/watchdog-OFF`.
 
 ### Media and operator workflows
@@ -143,8 +144,12 @@ agents:
 Start the bridge:
 
 ```bash
-npm run dev
+amux serve
 ```
+
+This keeps logs visible in the current terminal; `Ctrl+C` stops the bridge.
+For an explicitly managed background bridge, run `amux serve --detach`.
+Both modes are observable with `amux doctor`.
 
 In Discord, run:
 

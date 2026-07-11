@@ -5,7 +5,7 @@ import { feature, unit, expect } from "bdd-vitest";
 import {
   checkContextBridge,
   FAIL, OK, WARN,
-  checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors,
+  checkBridgeMode, checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors,
   checkLedger, checkTmux, overallStatus,
 } from "./doctor.mjs";
 import { classifyHeartbeat, HEARTBEAT_STALE_MS } from "./heartbeat.mjs";
@@ -42,6 +42,26 @@ feature("bridge process check", () => {
     given: ["one supervised pid", () => checkBridgeProcess({ pids: [7], supervised: true })],
     when: ["checking", (c) => c],
     then: ["ok", (c) => expect(c.status).toBe(OK)],
+  });
+});
+
+feature("bridge ownership mode check", () => {
+  unit("manual running mode disables dead-stack autostart", {
+    when: ["checking", () => checkBridgeMode({ mode: "manual", running: true })],
+    then: ["manual policy", (c) => {
+      expect(c.status).toBe(OK);
+      expect(c.detail).toContain("no dead-stack autostart");
+    }],
+  });
+
+  unit("an intentionally stopped bridge is not mistaken for auto-recovery", {
+    when: ["checking", () => checkBridgeMode({ mode: "stopped", running: false })],
+    then: ["stopped policy", (c) => expect(c.detail).toContain("intentionally")],
+  });
+
+  unit("stopped policy with a live process warns", {
+    when: ["checking", () => checkBridgeMode({ mode: "stopped", running: true })],
+    then: ["policy mismatch", (c) => expect(c.status).toBe(WARN)],
   });
 });
 
@@ -102,7 +122,7 @@ feature("supervisor duplicates + crash loops", () => {
     then: ["fail + kill hint", (c) => {
       expect(c.status).toBe(FAIL);
       expect(c.detail).toContain("orphan");
-      expect(c.hint).toContain("amux tmux session");
+      expect(c.hint).toContain("live bridge pid");
     }],
   });
 

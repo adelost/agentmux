@@ -235,10 +235,16 @@ watchdog exists so screenshots remain reliable, not so agents skip them.
 
 ### Bridge lifecycle
 \`\`\`bash
-amux serve                           # start Discord bridge
+amux serve                           # run bridge visibly here; Ctrl+C stops it
+amux serve --detach                  # managed background bridge (tmux + watchdog)
 amux stop                            # stop bridge
 amux stop --all                      # stop bridge + every agent session
 \`\`\`
+
+\`amux doctor\` sees foreground and detached bridges through PID + heartbeat;
+the bridge does not need to live in tmux to be observable. Agents should not
+silently replace a manual bridge with a daemon: use \`--detach\` only when the
+user explicitly wants background ownership.
 
 ### Health check — FIRST stop when something seems silent or wrong
 \`\`\`bash
@@ -247,7 +253,8 @@ amux doctor                          # bridge alive/hung/stale-code, hooks, ledg
 One table over every silent failure mode, each ⚠/❌ row comes with its fix.
 Key row: "bridge code" — the bridge is a long-lived process, so pushed amux
 fixes are NOT live until it restarts (\`/restart\` in Discord). doctor flags
-exactly that. A watchdog cron self-heals a hung/dead bridge every 5 min
+exactly that. A watchdog cron self-heals a hung bridge every 5 min and revives
+a dead stack only in explicit \`--detach\` managed mode
 (log: \`~/.agentmux/watchdog.log\`, kill-switch \`~/.agentmux/watchdog-OFF\`).
 
 ### Pane state is hook-pushed (event ledger)

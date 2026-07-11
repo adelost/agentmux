@@ -175,15 +175,20 @@ feature("serve readiness", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-serve-"));
       const pidfile = join(root, "agentmux.pid");
       const readyFile = join(root, "agentmux.ready");
+      const modeFile = join(root, "bridge-mode");
       const oldPidfile = process.env.PIDFILE;
       const oldReadyFile = process.env.READY_FILE;
+      const oldModeFile = process.env.AMUX_BRIDGE_MODE_FILE;
       process.env.PIDFILE = pidfile;
       process.env.READY_FILE = readyFile;
+      process.env.AMUX_BRIDGE_MODE_FILE = modeFile;
       const cleanup = () => {
         if (oldPidfile === undefined) delete process.env.PIDFILE;
         else process.env.PIDFILE = oldPidfile;
         if (oldReadyFile === undefined) delete process.env.READY_FILE;
         else process.env.READY_FILE = oldReadyFile;
+        if (oldModeFile === undefined) delete process.env.AMUX_BRIDGE_MODE_FILE;
+        else process.env.AMUX_BRIDGE_MODE_FILE = oldModeFile;
         rmSync(root, { recursive: true, force: true });
       };
       const ctx = {
@@ -205,7 +210,7 @@ feature("serve readiness", () => {
       console.log = (...args) => { logs.push(args.join(" ")); };
       const start = Date.now();
       try {
-        await dispatch(["serve"], ctx);
+        await dispatch(["serve", "--detach"], ctx);
         return { logs: logs.join("\n"), elapsed: Date.now() - start, cleanup };
       } finally {
         console.log = originalLog;

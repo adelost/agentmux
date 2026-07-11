@@ -2,7 +2,8 @@
 # Bridge watchdog: free shell cron (survives bridge death by design) that
 # catches what the in-process supervisor (bin/start.sh) cannot:
 #   - HUNG bridge: pid alive, heartbeat stale -> kill it (supervisor restarts)
-#   - DEAD stack: no bridge AND no supervisor -> start amux serve detached
+#   - DEAD managed stack: no bridge AND no supervisor -> start detached
+# Manual/stopped mode never auto-starts; the visible terminal stays user-owned.
 # Rate-limited to 3 interventions/hour; every action is logged. The
 # heartbeat contract lives in core/heartbeat.mjs (30s beat, 5 min stale).
 #
@@ -12,6 +13,7 @@
 set -u
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 STATE_DIR="$HOME/.agentmux"
+MODE_FILE="${AMUX_BRIDGE_MODE_FILE:-$STATE_DIR/bridge-mode}"
 LOG="$STATE_DIR/watchdog.log"
 HEARTBEAT="$STATE_DIR/bridge-heartbeat.json"
 INTERVENTIONS="$STATE_DIR/watchdog-interventions"
@@ -70,6 +72,10 @@ if [ -n "$PIDS" ] && [ "$AGE" -gt "$STALE_SEC" ] && [ -f "$HEARTBEAT" ]; then
 fi
 
 if [ -z "$PIDS" ] && ! supervisor_alive; then
+  # Missing mode means a pre-1.20.80 installation: preserve the former
+  # managed behavior. Manual/stopped are explicit user ownership policies.
+  MODE=$(cat "$MODE_FILE" 2>/dev/null || echo managed)
+  [ "$MODE" = "managed" ] || exit 0
   # Whole stack dead. Start detached; start.sh supervises from here on.
   if rate_limited; then log "bridge+supervisor DEAD but rate-limited, skipping"; exit 0; fi
   log "bridge+supervisor dead -> starting bin/start.sh detached"

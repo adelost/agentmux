@@ -3,6 +3,7 @@
 
 import { writeFileSync } from "fs";
 import { extname } from "path";
+import { splitMessage } from "./lib.mjs";
 
 // No whitelist needed. All non-audio attachments are downloaded and passed
 // to Claude, which can read most file types (PDF, images, text, archives, etc).
@@ -16,8 +17,23 @@ import { extname } from "path";
  *                      the network; defaults live in index.mjs wiring)
  *   writeTmp         - optional override for writeFileSync, used only by tests
  *                      that don't want /tmp writes
+ * WHAT: Builds agent prompts from text, voice, images, and files.
+ * WHY: Keeps platform attachment handling outside the message delivery path.
  */
 export function createAttachmentHandler({ run, transcribeScript, downloadBuffer, writeTmp = writeFileSync }) {
+
+  /** WHAT: Posts a readable Discord transcript in bounded chunks. WHY: Keeps long voice notes visible without markdown noise or 2000-character failures. */
+  async function replyWithTranscript(msg, text, viaFallback) {
+    const heading = viaFallback ? "**Transcript · Whisper fallback**" : "**Transcript**";
+    const note = viaFallback
+      ? "-# Gemini was unavailable. Technical terms may be less accurate."
+      : "-# Speech-to-text may contain errors.";
+    const chunks = splitMessage(`${heading}\n${text}\n${note}`);
+    for (let i = 0; i < chunks.length; i++) {
+      const send = i === 0 ? msg.reply.bind(msg) : msg.send.bind(msg);
+      await send(chunks[i]).catch(() => {});
+    }
+  }
 
   async function buildPrompt(msg, tmpFiles) {
     let rawText = msg.text.trim();
@@ -44,7 +60,7 @@ export function createAttachmentHandler({ run, transcribeScript, downloadBuffer,
         const tagged = viaFallback
           ? `[transcribed voice via whisper1 FALLBACK (gemini failed) — extra error-prone on technical terms, interpret intent] ${transcribed}`
           : `[transcribed voice, may contain speech-to-text errors — interpret intent] ${transcribed}`;
-        await msg.reply(`*${tagged}*`).catch(() => {});
+        await replyWithTranscript(msg, transcribed, viaFallback);
         if (!rawText) rawText = tagged;
         else rawText = `${rawText}\n${tagged}`;
       } else {

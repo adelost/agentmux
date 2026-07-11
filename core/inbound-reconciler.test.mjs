@@ -1,6 +1,6 @@
 import { feature, unit, expect } from "bdd-vitest";
 import { vi } from "vitest";
-import { createInboundReconciler } from "./inbound-reconciler.mjs";
+import { createInboundReconciler, formatRecoveredNotice } from "./inbound-reconciler.mjs";
 
 function setup(initial = {}) {
   const data = structuredClone(initial);
@@ -18,6 +18,19 @@ function msg(id, { bot = false, channelId = "ch" } = {}) {
 }
 
 feature("Discord inbound reconciliation", () => {
+  unit("recovery notice is concise and plural-aware", {
+    when: ["formatting one and two recovered messages", () => [
+      formatRecoveredNotice(1),
+      formatRecoveredNotice(2),
+    ]],
+    then: ["one batch produces one plain status line", (lines) => {
+      expect(lines).toEqual([
+        "ℹ Recovered 1 message missed during reconnect.",
+        "ℹ Recovered 2 messages missed during reconnect.",
+      ]);
+    }],
+  });
+
   unit("a missed human correction is replayed before the cursor advances past later bot output", {
     given: ["cursor before a human correction and bot reply", () => {
       const ctx = setup({ last_inbound_ch: "100" });

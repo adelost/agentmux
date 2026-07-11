@@ -33,6 +33,21 @@ export function checkBridgeProcess({ pids, supervised }) {
         "a crash will not auto-restart; start via amux serve / bin/start.sh");
 }
 
+/** WHAT: Describes who owns bridge restart policy. WHY: Keeps manual stops distinguishable from silent daemon failure. */
+export function checkBridgeMode({ mode, running }) {
+  if (mode === "manual") {
+    return check("bridge mode", OK, running
+      ? "manual · no dead-stack autostart"
+      : "manual · waiting for `amux serve`");
+  }
+  if (mode === "stopped") {
+    return running
+      ? check("bridge mode", WARN, "stopped policy but process is still alive", "run `amux stop` again")
+      : check("bridge mode", OK, "stopped intentionally");
+  }
+  return check("bridge mode", OK, "managed · detached auto-recovery");
+}
+
 export function checkHeartbeatHealth({ beat, repoVersion, pidAlive, now = Date.now() }) {
   const hb = classifyHeartbeat(beat, { repoVersion, pidAlive, now });
   switch (hb.state) {
@@ -64,11 +79,11 @@ export function checkHeartbeatHealth({ beat, repoVersion, pidAlive, now = Date.n
 export function checkSupervisors({ pids, crashLooping = false }) {
   if (crashLooping) {
     return check("supervisor", FAIL, "bridge.log ends in a fresh crash line — a supervisor is crash-looping",
-      "find it: pgrep -af start.sh (kill the one OUTSIDE the amux tmux session)");
+      "find it: pgrep -af start.sh; keep the supervisor whose child owns the live bridge pid");
   }
   if (pids.length > 1) {
     return check("supervisor", FAIL, `${pids.length} start.sh supervisors (${pids.join(", ")}) — an orphan is burning cycles`,
-      "keep the one inside the amux tmux session, kill the rest");
+      "keep the supervisor whose child owns the live bridge pid, stop the rest");
   }
   return null; // 0 or 1: checkBridgeProcess already covers supervision state
 }

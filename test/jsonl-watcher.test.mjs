@@ -319,6 +319,35 @@ feature("watcher: Codex background polling stays out of Discord", () => {
   });
 });
 
+feature("watcher: context footer follows narrative output, not raw tools", () => {
+  unit("a tool-only update stays transparent without repeating model context", {
+    given: ["a complete Codex tool-only turn with available context", () => {
+      const ts = "2026-05-10T08:30:00.000Z";
+      const ctx = setupCodexWatcher({
+        codexEvents: [
+          { type: "event_msg", timestamp: ts, payload: { type: "task_started", turn_id: "T3" } },
+          { type: "event_msg", timestamp: ts, payload: { type: "user_message", message: "inspect" } },
+          { type: "response_item", timestamp: "2026-05-10T08:30:01.000Z", payload: { type: "function_call", name: "exec_command", arguments: JSON.stringify({ cmd: "git status --short" }) } },
+          { type: "event_msg", timestamp: "2026-05-10T08:30:02.000Z", payload: { type: "task_complete", turn_id: "T3" } },
+        ],
+        stateInitial: { watcher_last_posted_ts: { "ch-codex": new Date(ts).getTime() - 1 } },
+      });
+      ctx.agent.getContextPercent.mockReturnValue({ percent: 42, tokens: 120000, model: "test" });
+      return ctx;
+    }],
+    when: ["the watcher mirrors it", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["the command is visible but no context footer is posted", (ctx) => {
+      const bodies = ctx.discord.sends.map((s) => typeof s.payload === "string" ? s.payload : s.payload?.content || "");
+      expect(bodies.some((body) => body.includes("git status --short"))).toBe(true);
+      expect(bodies.some((body) => body.includes("context: 42%"))).toBe(false);
+      ctx.cleanup();
+    }],
+  });
+});
+
 feature("watcher: race-resilient against stampMs advancing past new endMs", () => {
   unit("new turn with endMs < channel_last_mirror_ts is still posted", {
     given: ["a jsonl with already-posted turn1 + new turn2; stampMs ahead", () => {

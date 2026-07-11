@@ -21,8 +21,16 @@ import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../
 import { readHeartbeat } from "../core/heartbeat.mjs";
 import {
   checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors, checkLedger,
-  checkContextBridge, checkTmux, checkConfig, overallStatus, formatDoctorReport, FAIL, WARN,
+  checkBridgeMode, checkContextBridge, checkTmux, checkConfig, overallStatus, formatDoctorReport, FAIL, WARN,
 } from "../core/doctor.mjs";
+import {
+  BRIDGE_MODE_MANAGED,
+  BRIDGE_MODE_MANUAL,
+  BRIDGE_MODE_STOPPED,
+  readBridgeMode,
+  resolveServeMode,
+  writeBridgeMode,
+} from "../core/bridge-mode.mjs";
 import {
   groupByPane, previewText,
   isRunningNow, isWaitingLikeText, looksDone,
@@ -146,38 +154,61 @@ async function cmdReconcile(name, ctx) {
 }
 
 async function cmdServe(flags, ctx) {
-  // Single-instance guard: the tmux session can outlive the bot (clean exit 0
-  // breaks start.sh's loop without tearing the session down). So trust the PID
-  // lock, not the session. Readiness is stricter than "pid exists": bot.mjs
-  // writes PIDFILE before Discord connects, then READY_FILE after channel.start
-  // resolves. Waiting for READY_FILE avoids the "run serve twice" false start.
-  if (await hasSession(ctx, BRIDGE_SESSION)) {
-    if (isBridgeReady()) {
-      console.log(`Bridge already running. Stop with 'amux stop', or attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
+  let mode;
+  try { mode = resolveServeMode(flags); }
+  catch (err) { console.error(err.message); process.exitCode = 1; return; }
+
+  const hadSession = await hasSession(ctx, BRIDGE_SESSION);
+  // Process truth comes before tmux truth: foreground mode deliberately has no
+  // bridge session, while a dead daemon can leave a stale session behind.
+  if (isBridgeReady()) {
+    const location = hadSession ? "background tmux session" : "another terminal";
+    console.log(`Bridge already running in ${location}. Run 'amux stop' before switching mode.`);
+    return;
+  }
+  if (isBridgeAlive()) {
+    console.log("Bridge process is running; waiting for readiness...");
+    if (await waitForBridgeReady(30_000)) {
+      console.log("Bridge started.");
       return;
     }
-    if (isBridgeAlive()) {
-      console.log("Bridge process is running; waiting for readiness...");
-      if (await waitForBridgeReady(30_000)) {
-        console.log(`Bridge started (session: ${BRIDGE_SESSION}). Attach: tmux -S ${ctx.socket} attach -t ${BRIDGE_SESSION}`);
-        return;
-      }
+    if (!hadSession) {
+      console.error("Bridge process is alive but unready. Run 'amux stop', then start it again.");
+      process.exitCode = 1;
+      return;
     }
+  }
+  if (hadSession) {
     console.log("Stale or unready bridge session detected. Cleaning up...");
     await killSession(ctx, BRIDGE_SESSION);
   }
-  if (flags.fg || flags.f) {
-    const { spawn } = await import("child_process");
-    const child = spawn("bash", ["bin/start.sh"], { cwd: BRIDGE_DIR, stdio: "inherit" });
-    return new Promise((res) => child.on("exit", res));
-  }
+
   // Clear stale pidfile so the poll below only sees a fresh write from the new node.
   // Without this, a leftover /tmp/agentmux.pid (WSL /tmp survives reboots) would
   // make isBridgeAlive flap based on PID recycling instead of actual readiness.
-  const startBridgeSession = async () => {
+  const clearRuntimeState = () => {
     const pidfile = process.env.PIDFILE || "/tmp/agentmux.pid";
     try { unlinkSync(pidfile); } catch {}
     clearBridgeReady();
+  };
+
+  if (mode === BRIDGE_MODE_MANUAL) {
+    clearRuntimeState();
+    writeBridgeMode(BRIDGE_MODE_MANUAL);
+    console.log("Bridge running in this terminal. Ctrl+C stops it; use 'amux doctor' from another terminal to inspect it.\n");
+    const child = spawn("bash", ["bin/start.sh"], { cwd: ctx.bridgeDir || BRIDGE_DIR, stdio: "inherit" });
+    return new Promise((resolveChild, rejectChild) => {
+      child.once("error", rejectChild);
+      child.once("exit", (code) => {
+        if (code && code !== 130) process.exitCode = code;
+        resolveChild();
+      });
+    });
+  }
+
+  writeBridgeMode(BRIDGE_MODE_MANAGED);
+  const startBridgeSession = async () => {
+    clearRuntimeState();
     await ctx.tmux(`new-session -d -s '${esc(BRIDGE_SESSION)}' -c '${esc(BRIDGE_DIR)}' 'bash bin/start.sh'`);
   };
 
@@ -276,13 +307,15 @@ async function waitForBridgeReady(timeoutMs) {
 }
 
 async function cmdUnserve(ctx) {
+  writeBridgeMode(BRIDGE_MODE_STOPPED);
   const hadSession = await hasSession(ctx, BRIDGE_SESSION);
+  const wasAlive = isBridgeAlive();
   // Also kill the PID directly: under WSL tmux kill-session sometimes leaves
   // node reparented to init, which then blocks the next `amux serve` via
   // its pidfile lock. Belt + suspenders.
   killBridgeByPid();
   if (hadSession) await killSession(ctx, BRIDGE_SESSION);
-  if (!hadSession && !existsSync("/tmp/agentmux.pid")) {
+  if (!hadSession && !wasAlive) {
     console.log("Bridge is not running.");
     return;
   }
@@ -310,9 +343,11 @@ async function cmdStopAll(ctx) {
       stopped.push(a.name);
     }
   }
-  if (await hasSession(ctx, BRIDGE_SESSION)) {
-    await killSession(ctx, BRIDGE_SESSION);
+  if (isBridgeAlive() || await hasSession(ctx, BRIDGE_SESSION)) {
+    await cmdUnserve(ctx);
     stopped.push("bridge");
+  } else {
+    writeBridgeMode(BRIDGE_MODE_STOPPED);
   }
   if (!stopped.length) console.log("Nothing to stop.");
   else console.log(`Stopped: ${stopped.join(", ")}.`);
@@ -2405,6 +2440,7 @@ async function cmdDoctor(ctx) {
 
   const checks = [
     checkBridgeProcess({ pids, supervised }),
+    checkBridgeMode({ mode: readBridgeMode(), running: pids.length > 0 }),
     checkSupervisors({ pids: supervisorPids, crashLooping }),
     checkHeartbeatHealth({ beat, repoVersion, pidAlive: pids.length > 0 }),
     checkHooksInstalled({ settings, hookFileExists }),
@@ -2957,7 +2993,7 @@ async function cmdRestart() {
  * Trigger a Discord channel sync. Default mode signals the running
  * bridge (SIGUSR1 → handlers.triggerSync); the CLI returns immediately
  * after sending. Result lands in Discord as channel deltas + the
- * bridge log; tail it with `amux serve -f` if you want live output.
+ * foreground terminal or the managed bridge log.
  *
  * `--offline` runs the standalone bin/sync.mjs which uses its own
  * Discord client. The bridge MUST be stopped first or the two clients
@@ -2992,11 +3028,15 @@ async function cmdSyncOffline() {
   const { spawnSync } = await import("child_process");
   const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
   const SYNC_SCRIPT = resolve(BRIDGE_DIR, "bin/sync.mjs");
+  const socket = process.env.TMUX_SOCKET || "/tmp/openclaw-claude.sock";
+  const configPath = process.env.AGENT_CONFIG || resolve(process.env.HOME, ".config/agent/agents.yaml");
+  const bridgeCtx = { ...createTmuxContext(socket, configPath), bridgeDir: BRIDGE_DIR };
 
   const wasRunning = existsSync(PIDFILE);
+  const previousMode = readBridgeMode();
   if (wasRunning) {
     console.log("stopping bridge for offline sync...");
-    await cmdUnserve({ socket: process.env.TMUX_SOCKET || "/tmp/openclaw-claude.sock" }).catch(() => {});
+    await cmdUnserve(bridgeCtx).catch(() => {});
     // Give Discord gateway a beat to release the token before reconnecting.
     await new Promise((r) => setTimeout(r, 1500));
   }
@@ -3005,11 +3045,13 @@ async function cmdSyncOffline() {
   const r = spawnSync("node", [SYNC_SCRIPT], { stdio: "inherit", env: process.env });
   const syncOk = r.status === 0;
 
-  if (wasRunning) {
+  if (wasRunning && previousMode === BRIDGE_MODE_MANAGED) {
     console.log("restarting bridge...");
-    await cmdServe({ }, { configPath: process.env.AGENT_CONFIG, lastFile: null, bridgeDir: BRIDGE_DIR }).catch((err) => {
+    await cmdServe({ detach: true }, bridgeCtx).catch((err) => {
       console.error(`bridge restart failed: ${err.message}. Run \`amux serve\` manually.`);
     });
+  } else if (wasRunning) {
+    console.log("Bridge was manually owned; run `amux serve` to bring it back in your terminal.");
   }
 
   if (!syncOk) process.exit(r.status || 1);
@@ -3497,7 +3539,8 @@ Usage:
   agent reconcile <name|:nr>      Respawn dead service/shell panes to match config
                                   (preserves live coding-agent panes — use instead of stop+start
                                    when only services died)
-  agent serve [-f]                Start Discord bridge (daemon). -f = foreground
+  agent serve                     Run Discord bridge here; Ctrl+C stops it
+    --detach, -d                  Run managed in a background tmux session
   agent stop                      Stop Discord bridge (no arg = bridge)
   agent stop --all                Stop bridge + all agent sessions
   agent log <name|:nr> [-n N]     Show agent output (default: last 3 turns from jsonl)
@@ -3567,7 +3610,7 @@ Usage:
   agent r                         Resume last agent
   agent help                      Show this message
 
-Bridge controls (talk to the running daemon):
+Bridge controls (talk to the running bridge):
   agent sync                      Trigger Discord channel sync from agentmux.yaml
     --offline                     Stop bridge, run standalone sync, restart
                                   (slower; use when bridge is wedged or absent)
@@ -3695,7 +3738,7 @@ export async function dispatch(argv, ctx) {
       const { flags, positional } = parseFlags(rest, { all: "boolean" });
       // --all → stop bridge + every agent session.
       if (flags.all) return cmdStopAll(ctx);
-      // No arg, or 'serve'/'bridge' → stop the bridge (infra daemon).
+      // No arg, or 'serve'/'bridge' → stop the bridge in either ownership mode.
       if (!positional[0] || positional[0] === "serve" || positional[0] === "bridge") return cmdUnserve(ctx);
       const name = resolveAgent(positional[0], ctx.configPath);
       return cmdStop(name, ctx);
@@ -3708,7 +3751,10 @@ export async function dispatch(argv, ctx) {
     }
 
     case "serve": {
-      const { flags } = parseFlags(rest, { fg: "boolean", f: "boolean" });
+      const { flags } = parseFlags(rest, {
+        fg: "boolean", f: "boolean", foreground: "boolean",
+        detach: "boolean", d: "boolean",
+      });
       return cmdServe(flags, ctx);
     }
 

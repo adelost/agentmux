@@ -375,7 +375,9 @@ export function createJsonlWatcher({
     // command, kompakt, doesn't make whole bash strings italic the way
     // the old *-wrap did. Pre-1.16.40 used asterisks; user feedback flagged
     // it as visually noisy.
-    const rawText = (turn.items || [])
+    const items = turn.items || [];
+    const hasNarrative = items.some((it) => it.type === "text" && (it.content || "").trim());
+    const rawText = items
       // Codex emits one `wait cell_id=...` function call for every poll of a
       // background command. They carry no user information and produced a
       // wall of Discord messages plus repeated context footers.
@@ -392,11 +394,11 @@ export function createJsonlWatcher({
       else failedMarkers.push(`⚠️ image skipped: \`${p}\` (${result.error})`);
     }
     const fullText = [cleanedText, ...failedMarkers].filter(Boolean).join("\n\n");
-    return { fullText, validFiles };
+    return { fullText, validFiles, hasNarrative };
   }
 
   async function postTurn({ name, idx, channelId, turn, config = null }) {
-    const { fullText, validFiles } = renderTurn(turn);
+    const { fullText, validFiles, hasNarrative } = renderTurn(turn);
     if (!fullText && validFiles.length === 0) return { ok: true };
     // "No response requested." is Claude Code answering a harness-injected
     // notification (dead background task, resume bookkeeping) — not the
@@ -447,7 +449,7 @@ export function createJsonlWatcher({
     // metric that actually predicts auto-compact firing — match it.
     // Fall back to jsonl if the pane has no visible token line (idle
     // narrow pane, just-spawned, etc).
-    try {
+    if (hasNarrative || validFiles.length > 0) try {
       // One source of truth: agent.getContext is pane-first (CC's own
       // percent, incl. custom-statusline rows) with jsonl fallback.
       let ctx = null;
