@@ -64,6 +64,12 @@ feature("tool display: provider-neutral vocabulary", () => {
     then: ["send output", (result) => expect(result).toEqual({ content: "Send -> lsrc:0", kind: "inter-agent-send" })],
   });
 
+  unit("a mixed batch leaves delivery reporting to the verified receipt", {
+    given: ["one local check plus one agent send", () => 'const rows = await Promise.all([tools.exec_command({"cmd":"amux doctor"}), tools.exec_command({"cmd":"amux claw -p 7 \\\"review\\\""})]); text(rows);'],
+    when: ["unwrapping", (source) => describeCustomExec(source)],
+    then: ["only the local operation remains", (result) => expect(result).toEqual({ content: "Run amux doctor", kind: "tool" })],
+  });
+
   unit("scanner ignores tool-looking text inside strings", {
     given: ["patch text plus real apply", () => 'const patch = "mention tools.exec_command({})"; text(await tools.apply_patch(patch));'],
     when: ["extracting", (source) => extractNestedToolCalls(source)],

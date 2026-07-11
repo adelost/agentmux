@@ -62,8 +62,12 @@ export function describeCustomExec(source) {
   });
   if (displays.length === 1) return displays[0];
 
-  const visible = displays.filter((display) => display.kind !== "wait");
-  if (!visible.length) return displays[0];
+  // Polling is noise, and inter-agent sends already have an immediate,
+  // delivery-verified receipt. Exclude both when they share an orchestration
+  // wrapper with other operations; preserve the semantic kind when alone so
+  // the watcher can suppress the duplicate invocation entirely.
+  const visible = displays.filter((display) => display.kind !== "wait" && display.kind !== "inter-agent-send");
+  if (!visible.length) return displays.find((display) => display.kind === "inter-agent-send") ?? displays[0];
   if (visible.length === 1) return visible[0];
 
   const preview = visible.slice(0, 3).map((display) => display.content).join(" | ");

@@ -1,4 +1,4 @@
-import { feature, unit, expect } from "bdd-vitest";
+import { feature, integration, expect } from "bdd-vitest";
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
@@ -35,7 +35,7 @@ function setupCli() {
 }
 
 feature("serve CLI ownership UX", () => {
-  unit("plain serve runs visibly and records manual ownership", {
+  integration("plain serve runs visibly and records manual ownership", {
     given: ["an isolated bridge launcher", setupCli],
     when: ["running amux serve", (ctx) => ({ ctx, result: ctx.run("serve") })],
     then: ["foreground output and manual mode", ({ ctx, result }) => {
@@ -48,7 +48,7 @@ feature("serve CLI ownership UX", () => {
     }],
   });
 
-  unit("stop persists intentional shutdown even when no process exists", {
+  integration("stop persists intentional shutdown even when no process exists", {
     given: ["an isolated bridge launcher", setupCli],
     when: ["running amux stop", (ctx) => ({ ctx, result: ctx.run("stop") })],
     then: ["stopped mode", ({ ctx, result }) => {
