@@ -130,6 +130,39 @@ feature("watcher engine: checkpoint and post planning", () => {
 });
 
 feature("watcher engine: grace and retry policy", () => {
+  unit("fresh immutable tool calls post immediately without advancing the narrative cursor", {
+    given: ["an active turn with commentary followed by a new tool call", () => ({
+      cursorMs: ms(ts("09")),
+      turns: [{
+        timestamp: ts("10"),
+        endTimestamp: ts("11"),
+        isComplete: false,
+        items: [
+          { type: "text", content: "I will verify it", id: "commentary" },
+          { type: "tool", content: "Bash amux ps", id: "tool-call" },
+        ],
+      }],
+    })],
+    when: ["planning against a still-fresh jsonl and applying success", ({ turns, cursorMs }) => {
+      const plan = planPaneMirrorStep({
+        turns,
+        lastPostedMs: cursorMs,
+        nowMs: ms(ts("11")) + 1_000,
+        latestMtimeMs: ms(ts("11")) + 900,
+      });
+      const next = applyPostSuccess({ lastPostedMs: cursorMs, postedItemIds: [] }, plan.actions[0]);
+      return { plan, next, cursorMs };
+    }],
+    then: ["only the tool is emitted and the older commentary remains eligible", ({ plan, next, cursorMs }) => {
+      expect(plan.actions).toHaveLength(1);
+      expect(plan.actions[0]).toMatchObject({ reason: "tool", advanceCursor: false });
+      expect(plan.actions[0].turn.items.map((item) => item.id)).toEqual(["tool-call"]);
+      expect(next.lastPostedMs).toBe(cursorMs);
+      expect(next.postedItemIds).toContain("tool-call");
+      expect(next.postedItemIds).not.toContain("commentary");
+    }],
+  });
+
   unit("incomplete turn is held while jsonl mtime is fresh", {
     given: ["an incomplete turn with fresh file mtime", () => {
       const endMs = ms(ts("11"));

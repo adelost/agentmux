@@ -471,8 +471,8 @@ feature("watcher: race-resilient against stampMs advancing past new endMs", () =
   });
 });
 
-feature("watcher: grace-fire is suppressed while jsonl is being actively written", () => {
-  unit("turn with stale endMs but FRESH file mtime (tool_results landing) does not post", {
+feature("watcher: immutable tools stay visible while jsonl is actively written", () => {
+  unit("tool call posts even when a fresh tool_result proves the turn is still active", {
     given: ["a jsonl: assistant→tool_use, then tool_result bumps mtime", () => {
       // Turn started, assistant fired tool_use 10s ago.
       // tool_result arrived just now → mtime is fresh.
@@ -504,13 +504,14 @@ feature("watcher: grace-fire is suppressed while jsonl is being actively written
       await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
       return ctx;
     }],
-    then: ["no post yet — turn still active because file mtime is fresh", (ctx) => {
+    then: ["the command is visible immediately without waiting for turn completion", (ctx) => {
       const contentSends = ctx.discord.sends.filter(
         (s) => typeof s.payload === "string"
           ? !/^_context:/.test(s.payload)
           : !/^_context:/.test(s.payload?.content || ""),
       );
-      expect(contentSends.length).toBe(0);
+      expect(contentSends.length).toBe(1);
+      expect(contentSends[0].payload).toContain("long-running-script");
       ctx.cleanup();
     }],
   });
@@ -549,7 +550,7 @@ feature("watcher: unchanged jsonl is skipped before tail-read", () => {
     }],
   });
 
-  unit("an unchanged incomplete turn is read again when grace becomes due", {
+  unit("an unchanged incomplete tool turn posts once, then stays deduped", {
     given: ["a fresh incomplete turn with unposted content", () => {
       vi.useFakeTimers();
       const baseMs = new Date("2026-04-30T20:20:20.000Z").getTime();
@@ -576,11 +577,11 @@ feature("watcher: unchanged jsonl is skipped before tail-read", () => {
       const third = await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
       return { ...ctx, first, second, third };
     }],
-    then: ["it skips while fresh, then posts by grace from the same file stamp", (ctx) => {
+    then: ["the first read posts immediately and later unchanged checks stay silent", (ctx) => {
       try {
-        expect(ctx.first?.actions).toBe(0);
+        expect(ctx.first?.actions).toBe(1);
         expect(ctx.second).toEqual({ skipped: "unchanged" });
-        expect(ctx.third?.actions).toBe(1);
+        expect(ctx.third).toEqual({ skipped: "unchanged" });
         const contentSends = ctx.discord.sends.filter(
           (s) => typeof s.payload === "string"
             ? !/^_context:/.test(s.payload)
@@ -821,6 +822,37 @@ feature("watcher: codex pane reads from ~/.codex/sessions, not ~/.claude/project
           : !/^_context:/.test(s.payload?.content || ""),
       );
       expect(contentSends.length).toBe(0);
+      ctx.cleanup();
+    }],
+  });
+
+  unit("posts a fresh custom tool call immediately while the codex turn keeps streaming", {
+    given: ["an active codex turn whose jsonl mtime is still fresh", () => {
+      const now = Date.now();
+      const nowIso = new Date(now).toISOString();
+      return setupCodexWatcher({
+        codexEvents: [
+          { type: "event_msg", timestamp: nowIso, payload: { type: "task_started", turn_id: "LIVE" } },
+          { type: "event_msg", timestamp: nowIso, payload: { type: "user_message", message: "keep working" } },
+          { type: "response_item", timestamp: nowIso, payload: {
+            type: "custom_tool_call",
+            name: "exec",
+            input: 'const r = await tools.exec_command({cmd:"amux ps",workdir:"/tmp"}); text(r.output);',
+          } },
+        ],
+        stateInitial: {
+          watcher_last_posted_ts: { "ch-codex": now - 10_000 },
+          watcher_custom_tools_seeded: { "ch-codex": true },
+        },
+      });
+    }],
+    when: ["watcher.checkPane runs before any grace period or task_complete", async (ctx) => {
+      await ctx.watcher.checkPane("testagent", 0, ctx.agentRootDir);
+      return ctx;
+    }],
+    then: ["the immutable tool call is already visible", (ctx) => {
+      const bodies = ctx.discord.sends.map((send) => typeof send.payload === "string" ? send.payload : send.payload?.content || "");
+      expect(bodies.some((body) => body.includes("Bash amux ps"))).toBe(true);
       ctx.cleanup();
     }],
   });

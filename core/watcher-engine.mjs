@@ -76,10 +76,40 @@ export function planPaneMirrorStep(input = {}) {
     if (endMs <= cursorMs) return;
 
     const complete = classifyTurnCompleteness({ turn, nowMs, endMs, latestMtimeMs, completionGraceMs });
-    if (!complete.done) return;
-
     const turnStartMs = turnStartMsFor(turn, endMs);
     const items = Array.isArray(turn.items) ? turn.items : [];
+
+    if (!complete.done) {
+      // Tool calls are immutable response items, unlike a trailing narrative
+      // that may still grow. Mirror newly observed tools immediately even
+      // while the pane keeps writing; do not advance the turn cursor, or an
+      // earlier commentary/final text in the same turn would be skipped.
+      const newTools = [];
+      const newToolIds = [];
+      items.forEach((item, idx) => {
+        if (item?.type !== "tool") return;
+        const key = itemKey(item, turnStartMs, idx);
+        if (!postedSet.has(key)) {
+          newTools.push(item);
+          newToolIds.push(key);
+        }
+      });
+      if (newTools.length) {
+        actions.push({
+          type: "postTurn",
+          endMs,
+          turnStartMs,
+          postedIds: newToolIds,
+          postedCount: items.length - newTools.length,
+          totalItems: items.length,
+          reason: "tool",
+          advanceCursor: false,
+          turn: { ...turn, items: newTools },
+        });
+      }
+      return;
+    }
+
     const postableItemCount = postableCountForTurn({
       turn,
       items,
@@ -144,7 +174,7 @@ export function applyPostSuccess(state = {}, action, opts = {}) {
     ...state,
     // Monotonic: an audit re-post of an OLD turn must never drag the cursor
     // backwards and reopen already-passed history.
-    lastPostedMs: Math.max(priorMs, action.endMs),
+    lastPostedMs: action?.advanceCursor === false ? priorMs : Math.max(priorMs, action.endMs),
     postedItemIds,
     retryUntilMs: null,
   };
