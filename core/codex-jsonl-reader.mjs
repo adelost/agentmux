@@ -267,22 +267,28 @@ export function isBusyFromCodexJsonl(paneDir) {
   const events = parseJsonl(file);
   if (events.length === 0) return null;
 
-  // Track which turns have started vs completed
-  const startedTurns = new Set();
-  const completedTurns = new Set();
-
-  for (const e of events) {
-    if (e.type !== "event_msg") continue;
-    const p = e.payload;
-    if (p?.type === "task_started" && p.turn_id) startedTurns.add(p.turn_id);
-    else if (p?.type === "task_complete" && p.turn_id) completedTurns.add(p.turn_id);
+  // Only the latest task can describe the live TUI. Older unmatched starts
+  // are interrupted history (Esc, crash, quota stop), not permanent busy
+  // state. Treating every historical start as live made model-watch believe
+  // a recovered pane was busy forever and prevented its model picker from
+  // restoring the requested model.
+  let latestStartIdx = -1;
+  let latestTurnId = null;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const p = events[i]?.type === "event_msg" ? events[i].payload : null;
+    if (p?.type === "task_started" && p.turn_id) {
+      latestStartIdx = i;
+      latestTurnId = p.turn_id;
+      break;
+    }
   }
+  if (!latestTurnId) return false;
 
-  // If any started turn is not yet completed → busy
-  for (const turnId of startedTurns) {
-    if (!completedTurns.has(turnId)) return true;
+  for (let i = latestStartIdx + 1; i < events.length; i++) {
+    const p = events[i]?.type === "event_msg" ? events[i].payload : null;
+    if (p?.type === "task_complete" && p.turn_id === latestTurnId) return false;
   }
-  return false;
+  return true;
 }
 
 /** Format a codex function_call into a compact one-liner. */

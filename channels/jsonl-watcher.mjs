@@ -45,7 +45,7 @@ import { isHarnessPlaceholder } from "../core/reply-forwarder.mjs";
 import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, planStartupAudit, itemKey } from "../core/watcher-engine.mjs";
 import {
   classifyModelChange, changeMessage, stopBrief, shouldStopPane, label as modelLabel,
-  decideRecovery, resumeBrief, recoveryMessage,
+  decideRecovery, resumeBrief, recoveryMessage, interruptUntilIdle,
 } from "../core/model-watch.mjs";
 import { driveCodexModelPicker } from "../core/codex-model-picker.mjs";
 import { sendSlashVerified } from "../core/delivery.mjs";
@@ -275,19 +275,6 @@ export function createJsonlWatcher({
     return { attempted: true, restored, detail };
   }
 
-  async function waitForPaneIdle(name, idx, timeoutMs = 5000) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      try {
-        if (!(await agent.isBusy(name, idx))) return true;
-      } catch {
-        return false;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-    return false;
-  }
-
   /**
    * Model-watch hook: runs where the footer ctx is computed (zero extra I/O).
    * First sighting only records; a change warns in-channel + ledger, and a
@@ -347,11 +334,19 @@ export function createJsonlWatcher({
     try {
       parkPane({ session: name, pane: idx, detail: `${change.from} → ${change.to}` });
     } catch (err) { log(`park ledger row failed for ${paneName}: ${err.message}`); }
-    try {
-      const busy = await agent.isBusy?.(name, idx);
-      if (busy) await agent.sendEscape(name, idx);
-    } catch (err) { log(`model-change escape failed for ${paneName}: ${err.message}`); }
-    await waitForPaneIdle(name, idx);
+    const interruption = await interruptUntilIdle({
+      isBusy: () => agent.isBusy(name, idx),
+      sendEscape: () => agent.sendEscape(name, idx),
+    });
+    if (!interruption.stopped) {
+      log(`model-change stop failed for ${paneName}: ${interruption.detail}`);
+      await discord.send(channelId,
+        `🚨 **${paneName}: stopp kunde inte verifieras** (${interruption.detail}). ` +
+        "Panelen är fortfarande parkerad och tar inga nya briefs; avbryt manuellt med `amux esc`.")
+        .catch((err) => log(`model-change stop failure line failed for ${paneName}: ${err.message}`));
+      return;
+    }
+    log(`${paneName} stopped after ${interruption.escapes} Escape attempt(s)`);
 
     // Recover while the pane is neutral. The old order sent stopBrief first;
     // that started a new turn, so the codex picker correctly refused the busy

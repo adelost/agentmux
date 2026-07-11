@@ -201,6 +201,25 @@ feature("isBusyFromCodexJsonl: task lifecycle", () => {
       cleanup();
     }],
   });
+
+  unit("ignores an older interrupted task after a newer task completed", {
+    given: ["an abandoned historical turn followed by a completed live turn", () => {
+      const paneDir = "/fake/workspace";
+      return setupFakeCodex([
+        { type: "session_meta", payload: { cwd: paneDir } },
+        { type: "event_msg", payload: { type: "task_started", turn_id: "OLD" } },
+        { type: "event_msg", payload: { type: "user_message", message: "interrupted" } },
+        { type: "event_msg", payload: { type: "task_started", turn_id: "NEW" } },
+        { type: "event_msg", payload: { type: "user_message", message: "completed" } },
+        { type: "event_msg", payload: { type: "task_complete", turn_id: "NEW" } },
+      ], paneDir);
+    }],
+    when: ["checking busy", ({ paneDir }) => isBusyFromCodexJsonl(paneDir)],
+    then: ["the live pane is idle", (r, { cleanup }) => {
+      expect(r).toBe(false);
+      cleanup();
+    }],
+  });
 });
 
 feature("latestSessionFor: cwd specificity", () => {

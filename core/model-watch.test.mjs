@@ -1,5 +1,5 @@
 import { unit, feature, expect } from "bdd-vitest";
-import { modelRank, classifyModelChange, changeMessage, stopBrief, shouldStopPane, label, decideRecovery, resumeBrief, recoveryMessage, RECOVERY_COOLDOWN_MS } from "./model-watch.mjs";
+import { modelRank, classifyModelChange, changeMessage, stopBrief, shouldStopPane, label, decideRecovery, resumeBrief, recoveryMessage, interruptUntilIdle, RECOVERY_COOLDOWN_MS } from "./model-watch.mjs";
 
 feature("modelRank — comparable within a family", () => {
   unit("codex: version dominates, variant breaks ties", {
@@ -129,11 +129,11 @@ feature("messages — actionable, not just informative", () => {
       direction: "downgrade", kind: "model", from: "gpt-5.6-sol max", to: "gpt-5.5 max",
     }, 72)],
     when: ["rendering", (m) => m],
-    then: ["names pane, models, context, STOPPAD + /model hint", (m) => {
+    then: ["names pane, models, context, stop action + /model hint", (m) => {
       expect(m).toContain("ai:3");
       expect(m).toContain("gpt-5.6-sol max → gpt-5.5 max");
       expect(m).toContain("context 72%");
-      expect(m).toContain("STOPPAD");
+      expect(m).toContain("STOPPAS");
       expect(m).toContain("/model");
     }],
   });
@@ -167,6 +167,40 @@ feature("messages — actionable, not just informative", () => {
     then: ["effort suffixed or absent", ([a, b]) => {
       expect(a).toBe("gpt-5.6-sol max");
       expect(b).toBe("claude-fable-5");
+    }],
+  });
+});
+
+feature("downgrade interruption", () => {
+  unit("retries Escape until the pane lifecycle becomes idle", {
+    given: ["two ignored Escapes before Codex stops", () => {
+      const busy = [true, true, false];
+      const escapes = [];
+      return { busy, escapes };
+    }],
+    when: ["interrupting", ({ busy, escapes }) => interruptUntilIdle({
+      isBusy: async () => busy.shift(),
+      sendEscape: async () => { escapes.push("esc"); },
+      sleep: async () => {},
+    })],
+    then: ["idle is verified after both Escapes", (result, { escapes }) => {
+      expect(result).toMatchObject({ stopped: true, escapes: 2, detail: "idle verified" });
+      expect(escapes).toHaveLength(2);
+    }],
+  });
+
+  unit("reports an honest failure when the pane never stops", {
+    given: ["a permanently busy pane", () => ({ escapes: [] })],
+    when: ["interrupting with a bounded retry budget", ({ escapes }) => interruptUntilIdle({
+      isBusy: async () => true,
+      sendEscape: async () => { escapes.push("esc"); },
+      sleep: async () => {},
+      maxAttempts: 3,
+    })],
+    then: ["the result never claims the pane stopped", (result, { escapes }) => {
+      expect(result.stopped).toBe(false);
+      expect(result.detail).toContain("still busy");
+      expect(escapes).toHaveLength(3);
     }],
   });
 });

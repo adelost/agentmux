@@ -98,10 +98,43 @@ export function changeMessage(paneName, change, contextPct) {
   const effortDrop = change.direction === "downgrade" && change.kind === "effort";
   return `${icon} **${paneName} bytte modell: ${change.from} → ${change.to}**${ctx}` +
     (stopped
-      ? "\n_Panelen är STOPPAD (kvot/limit eller context-fallback). Knuffa igång den när läget är rätt — /model byter tillbaka. Den re-verifierar sina senaste beslut vid återstart._"
+      ? "\n_Nedgraderingen upptäcktes. Panelen STOPPAS och parkeras nu; nytt arbete blockeras tills modellen är återställd. /model byter tillbaka._"
       : effortDrop
         ? "\n_Effort sänkt (trolig orsak: respawn återställde sparad inställning). Panelen jobbar vidare — sätt tillbaka med /model när du vill._"
         : "");
+}
+
+/**
+ * Repeatedly interrupt a downgraded pane until its own lifecycle says idle.
+ * One Escape can land inside a tool call and be discarded by Codex. Retrying
+ * catches the first neutral gap without guessing from terminal paint.
+ */
+export async function interruptUntilIdle({
+  isBusy,
+  sendEscape,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  maxAttempts = 40,
+  settleMs = 500,
+} = {}) {
+  let escapes = 0;
+  for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+    let busy;
+    try {
+      busy = await isBusy();
+    } catch (err) {
+      return { stopped: false, escapes, detail: `busy-check failed: ${err.message}` };
+    }
+    if (!busy) return { stopped: true, escapes, detail: "idle verified" };
+    if (attempt === maxAttempts) break;
+    try {
+      await sendEscape();
+      escapes++;
+    } catch (err) {
+      return { stopped: false, escapes, detail: `escape failed: ${err.message}` };
+    }
+    await sleep(settleMs);
+  }
+  return { stopped: false, escapes, detail: `still busy after ${escapes} Escape attempts` };
 }
 
 /**
