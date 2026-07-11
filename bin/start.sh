@@ -29,6 +29,15 @@ fi
 # will surface the failure rather than mask it.
 fast_crashes=0
 
+# `amux serve` is the explicit bring-the-stack-online action. After a WSL
+# reboot, restore configured coding panes and interrupted turns once in the
+# background while Discord becomes ready. A per-boot lock/marker makes bridge
+# restarts in the same boot no-ops.
+if [ "${AMUX_AUTO_REVIVE:-true}" != "false" ]; then
+  mkdir -p "$HOME/.agentmux"
+  bash "$DIR/bin/post-boot-revive.sh" >> "$HOME/.agentmux/revive.log" 2>&1 &
+fi
+
 while true; do
   started=$(date +%s)
   node index.mjs

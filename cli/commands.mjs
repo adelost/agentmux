@@ -12,7 +12,7 @@ import { extractText, extractLastTurn, classifyLines, extractSegments } from "..
 import { stripAnsi, esc, extractActivity, formatDuration, validateImagePath } from "../lib.mjs";
 import { getContextFromPane, getContextPercent, getContextPushed, shortModelName } from "../core/context.mjs";
 import { loadSearchRoots, lexicalSearch, formatHits, saveLastResults, loadLastResults, expandHit, withScore, dedupeByFile } from "../core/search.mjs";
-import { planRevive, reviveBrief, parseBootMs } from "../core/revive.mjs";
+import { codexInterruptionFromTurns, planRevive, reviveBrief, parseBootMs } from "../core/revive.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { latestCodexJsonlMtime, readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
@@ -2089,14 +2089,32 @@ async function cmdRevive(ctx, flags) {
   }
 
   const statuses = new Map();
+  const codexInterruptions = [];
   for (const p of panes) {
     try { statuses.set(`${p.agent}:${p.pane}`, await getPaneStatus(ctx, p.agent, p.pane)); }
     catch { statuses.set(`${p.agent}:${p.pane}`, "unknown"); }
+    if (/codex/.test(String(p.cmd || ""))) {
+      try {
+        const agent = agents.find((item) => item.name === p.agent);
+        const paneDir = join(agent.dir, ".agents", String(p.pane));
+        const result = readLastTurnsCodex(paneDir, {
+          limit: 4,
+          tailBytes: 16 * 1024 * 1024,
+          headless: true,
+        });
+        const interruptedAtMs = codexInterruptionFromTurns(result?.turns || [], bootMs);
+        if (interruptedAtMs) codexInterruptions.push({
+          agent: p.agent,
+          pane: p.pane,
+          interruptedAtMs,
+        });
+      } catch { /* missing/partial rollout: coding-pane recovery still runs */ }
+    }
   }
 
   let events = [];
   try { events = readEvents({ tailBytes: 0 }); } catch { /* empty ledger: respawn still runs */ }
-  const plan = planRevive({ events, bootMs, panes, statuses });
+  const plan = planRevive({ events, bootMs, panes, statuses, codexInterruptions });
 
   console.log(`Paneler: ${panes.length} konfigurerade coding-panes säkras (idempotent).`);
   if (!plan.briefs.length) console.log("Avbrutna mitt i arbete: inga.");

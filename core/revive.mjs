@@ -11,8 +11,23 @@
 // the real 2026-07-10 crash: it yields ai:0, ai:2, api:1 — the three panes
 // found by hand). Panes already working again are left alone (ai:2
 // self-recovered via --continue). Codex panes emit no hook events, so their
-// interruptions are invisible here — they auto-resume via `codex resume
-// --last` at respawn, which is the best available behavior anyway.
+// interrupted turn is derived from the latest structured rollout instead.
+// Reopening the session alone can leave Codex waiting at an interrupted
+// composer forever after a hard WSL stop.
+
+/** Return the timestamp of a Codex turn interrupted by boot, or null. */
+export function codexInterruptionFromTurns(turns = [], bootMs) {
+  if (!Number.isFinite(bootMs)) return null;
+  let latestPreBoot = null;
+  for (const turn of turns) {
+    const ms = Date.parse(turn?.timestamp || "");
+    if (!Number.isFinite(ms)) continue;
+    if (ms >= bootMs) return null;
+    if (!latestPreBoot || ms >= latestPreBoot.ms) latestPreBoot = { turn, ms };
+  }
+  if (!latestPreBoot || latestPreBoot.turn?.isComplete !== false) return null;
+  return latestPreBoot.ms;
+}
 
 /** Boot instant from /proc/stat's btime line (seconds → ms). */
 export function parseBootMs(procStat) {
@@ -25,7 +40,13 @@ export function parseBootMs(procStat) {
  * events: ledger rows ({ts, event, session, pane}); panes: configured coding
  * panes [{agent, pane}]; statuses: Map "agent:pane" → current status.
  */
-export function planRevive({ events = [], bootMs, panes = [], statuses = new Map() }) {
+export function planRevive({
+  events = [],
+  bootMs,
+  panes = [],
+  statuses = new Map(),
+  codexInterruptions = [],
+}) {
   if (!Number.isFinite(bootMs)) return { briefs: [], reason: "no boot time" };
 
   // Last prompt/stop per pane BEFORE boot: a trailing prompt = interrupted.
@@ -65,6 +86,14 @@ export function planRevive({ events = [], bootMs, panes = [], statuses = new Map
     const status = statuses.get(key);
     if (status === "working" || status === "resume") continue; // already back at it
     briefs.push({ agent: p.agent, pane: p.pane, interruptedAtMs: pre.ms });
+  }
+  for (const interruption of codexInterruptions) {
+    const key = `${interruption.agent}:${interruption.pane}`;
+    if (briefs.some((brief) => `${brief.agent}:${brief.pane}` === key)) continue;
+    if ((revived.get(key) || 0) >= interruption.interruptedAtMs) continue;
+    const status = statuses.get(key);
+    if (status === "working" || status === "resume") continue;
+    briefs.push({ ...interruption, source: "codex-jsonl" });
   }
   return { briefs };
 }

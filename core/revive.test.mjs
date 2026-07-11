@@ -1,5 +1,5 @@
 import { unit, feature, expect } from "bdd-vitest";
-import { planRevive, reviveBrief, parseBootMs } from "./revive.mjs";
+import { codexInterruptionFromTurns, planRevive, reviveBrief, parseBootMs } from "./revive.mjs";
 
 // The real 2026-07-10 18:58 WSL crash, straight from the ledger: three
 // panes had a trailing prompt (ai:0 18:36, ai:2 18:40, api:1 18:41), the
@@ -114,6 +114,57 @@ feature("boot time + brief text", () => {
       expect(b).toContain("[krasch-recovery]");
       expect(b).toContain("amux done");
       expect(b).toContain("återuppta");
+    }],
+  });
+});
+
+feature("Codex post-boot interruption detection", () => {
+  unit("an incomplete pre-boot turn needs recovery", {
+    given: ["ai:3-shaped interrupted rollout", () => [{
+      timestamp: "2026-07-10T16:55:00Z",
+      userPrompt: "run the full gate",
+      isComplete: false,
+    }]],
+    when: ["deriving interruption", (turns) => codexInterruptionFromTurns(turns, BOOT)],
+    then: ["returns the interrupted turn timestamp", (ms) => {
+      expect(ms).toBe(Date.parse("2026-07-10T16:55:00Z"));
+    }],
+  });
+
+  unit("a completed turn or any post-boot turn stays silent", {
+    given: ["completed pre-boot plus active post-boot shapes", () => ({
+      completed: [{ timestamp: "2026-07-10T16:55:00Z", isComplete: true }],
+      resumed: [
+        { timestamp: "2026-07-10T16:55:00Z", isComplete: false },
+        { timestamp: "2026-07-10T17:01:00Z", isComplete: false },
+      ],
+    })],
+    when: ["deriving both", ({ completed, resumed }) => [
+      codexInterruptionFromTurns(completed, BOOT),
+      codexInterruptionFromTurns(resumed, BOOT),
+    ]],
+    then: ["neither is re-briefed", (result) => expect(result).toEqual([null, null])],
+  });
+
+  unit("a Codex interruption joins the ledger-derived revive plan once", {
+    given: ["one Codex interruption", () => planRevive({
+      events: [],
+      bootMs: BOOT,
+      panes: [{ agent: "ai", pane: 3 }],
+      statuses: new Map([["ai:3", "interrupted"]]),
+      codexInterruptions: [{
+        agent: "ai",
+        pane: 3,
+        interruptedAtMs: Date.parse("2026-07-10T16:55:00Z"),
+      }],
+    })],
+    when: ["planning", (plan) => plan],
+    then: ["one recovery brief", (plan) => {
+      expect(plan.briefs).toMatchObject([{
+        agent: "ai",
+        pane: 3,
+        source: "codex-jsonl",
+      }]);
     }],
   });
 });
