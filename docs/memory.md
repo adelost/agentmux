@@ -1,5 +1,21 @@
 # amux memory — design (2026-07-11)
 
+## Implementationsverdict (kritisk review)
+
+**Riktningen godkänd, fyra detaljer ändrade före implementation:**
+
+1. Fullversioner bankas i en path-scopad batch-commit före någon LLM-körning.
+   Befintligt staged WIP stoppar körningen; orelaterat unstaged/untracked WIP
+   följer aldrig med. En innehållsjämförelse stoppar overwrite vid samtidig edit.
+2. LLM:n får inga verktyg (`claude --print --safe-mode --tools ""`), källan
+   skickas som data via stdin och output skrivs först efter schema- och
+   invariantsvalidering.
+3. `~5`/`~20` betyder semantiska innehållsrader. Dagfilens obligatoriska ram
+   ger upp till fem fysiska rader extra. Annars var 5-radersmålet oförenligt
+   med lintens obligatoriska metadata och sektionsrubriker.
+4. Bash-wrappern pensioneras inte. Den är en tunn, stabil heartbeat-entrypoint;
+   all logik och alla tester ägs av amux.
+
 ## Problem
 
 Minnesunderhållet är idag splittrat över tre halvor som inte pratar med varandra:
@@ -51,7 +67,9 @@ innehåll ska ändå graduera till references/people via routing-reglerna.
 2. LLM-komprimering (headless `claude -p`, strikt prompt): behåll
    `> summary:`/`> why:`, beslut, lärdomar, länkar; mål-radantal per policy.
 3. **Validering**: radantal inom mål, header intakt, template-tagg kvar.
-   Vid fail: `git restore`, fail-loud i loggen, filen lämnas orörd.
+   Olösta todos och befintliga `memory/*.md`-länkar får inte tappas. Vid
+   valideringsfel har produkten ännu inte skrivits; compact-commit-fel
+   återställer från bank-commiten när filen fortfarande matchar vår produkt.
 4. Compact-commit med tydligt meddelande (fullversion = föregående commit).
 
 Äldst först, max 3 filer/natt (bounded work) → mars–juni-backloggen dräneras
@@ -69,9 +87,9 @@ Lint-resultatet routas till en YTA SOM LÄSES: en rad i dagens dagfil,
 
 ## Följdförbättringar (ingår i paketet)
 
-- **Dream retry-pass**: paneler som var busy 04:00 (i natt 3/12) får ett andra
-  försök ~05:00 innan sentinel skrivs. Nattflottor jobbar kl 04; en miss ska
-  inte betyda ingen digest alls.
+- **Dream retry-pass**: 04-passet kör med deferred sentinel och släpper locken.
+  Cron-processen väntar till ~05, kör `dream --retry` bara för markerblock som
+  saknas och skriver därefter den kumulativa sentineln.
 - **Dream block-validering**: warn när ett panelblock överskrider
   ~10-radersbudgeten som prompten redan kräver.
 - **Loggnings-konvention i AGENT_HINTS**: bullets inte stycken, max ~10 rader
@@ -84,10 +102,9 @@ Lint-resultatet routas till en YTA SOM LÄSES: en rad i dagens dagfil,
    wrapper som anropar den (heartbeat-integrationen orörd).
 2. `amux memory compact` byggs + kedjas in i dream-cron.
 3. Backloggen dräneras automatiskt.
-4. Wrappern pensioneras när allt varit grönt en vecka.
+4. Wrappern ligger kvar som kompatibilitetsyta; den innehåller ingen policy.
 
 ## Status
 
-Design nedskriven 2026-07-11 efter morgonens granskning (Mattias + claw:7).
-Dream-abort-buggen (en trög panel avbröt resterande paneler) är redan fixad
-separat. Implementering av kommandofamiljen är nästa arbetspaket.
+Implementerad i 1.20.77 efter oberoende kritisk review. Dream-abort-buggen
+(en trög panel avbröt resterande paneler) var redan fixad separat.

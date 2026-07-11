@@ -39,7 +39,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.20.74";
+const HINTS_VERSION = "1.20.77";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -443,6 +443,15 @@ isn't in git is invisible to other agents.
    inga deploys som kostar pengar utan stående GO, frågor batchas till EN
    morgonrapport. Kvotdöd mitt i natten är fine: varje slice bankas vid
    commit och återupptas där den stannade.
+
+## Minnesloggning
+
+- Dagfilssektioner är digests: använd täta bullets, inte löpande stycken.
+- Max cirka 10 rader per manuell sektion. Flytta tekniska detaljer och
+  återanvändbara how-tos till \`memory/references/\`, persondetaljer till
+  \`memory/people/\`, och länka därifrån.
+- Skriv allt viktigt, men duplicera inte samma status i flera sektioner.
+  \`amux memory compact\` roterar gamla dagfiler; dagens rålogg får vara fri.
 
 ${HINTS_END_MARKER}
 `;

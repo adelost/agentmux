@@ -1417,6 +1417,18 @@ export function hasDreamPaneBlock(content, t, dateKey) {
   return startIdx >= 0 && endIdx > startIdx;
 }
 
+export function validateDreamPaneBlock(content, t, dateKey, maxLines = 10) {
+  const { start, end } = dreamBlockMarkers(t, dateKey);
+  const startIdx = content.indexOf(start);
+  const endIdx = content.indexOf(end, startIdx + start.length);
+  if (startIdx < 0 || endIdx < 0) return { ok: false, lines: 0, reason: "marker block missing" };
+  const body = content.slice(startIdx + start.length, endIdx);
+  const lines = body.split(/\r?\n/).filter((line) => line.trim()).length;
+  return lines <= maxLines
+    ? { ok: true, lines, reason: null }
+    : { ok: false, lines, reason: `${lines} non-empty lines exceeds budget ${maxLines}` };
+}
+
 export async function waitForDreamPaneBlock(memPath, t, dateKey, maxMs = 15_000, pollMs = 1_000) {
   const start = Date.now();
   while (Date.now() - start < maxMs) {
@@ -1526,7 +1538,7 @@ async function cmdDream(ctx, flags = {}) {
   // Window: panes with recent activity qualify, but only exact `idle` panes
   // are safe to touch. Dream writes a shared memory file and should never send
   // /compact or a follow-up prompt into a pane that is already working.
-  const { targets, skipped } = await collectDreamTargets(ctx, agents, sinceMs);
+  let { targets, skipped } = await collectDreamTargets(ctx, agents, sinceMs);
 
   const promptFor = (t) => [
     `[dream ${dateKey} ${timeStr}]`,
@@ -1554,6 +1566,24 @@ async function cmdDream(ctx, flags = {}) {
     ``,
     `När allt är klart: svara med exakt en kort rad: DREAM_OK <din 1-rads summary>.`,
   ].join("\n");
+
+  const existingContent = existsSync(memPath) ? readFileSync(memPath, "utf-8") : "";
+  const allRecent = [...targets, ...skipped];
+  const reportableRecent = allRecent.filter((target) =>
+    target.status !== "not-live-claude" && target.status !== "unknown");
+  if (flags.retry) {
+    targets = targets.filter((target) => !hasDreamPaneBlock(existingContent, target, dateKey));
+  }
+
+  const finalizeSentinel = (passOk, passFailed) => {
+    if (flags.deferSentinel || flags["defer-sentinel"]) return { ok: passOk, failed: passFailed };
+    const content = readFileSync(memPath, "utf-8");
+    const totalOk = reportableRecent.filter((target) => hasDreamPaneBlock(content, target, dateKey)).length;
+    const pending = reportableRecent.filter((target) => !hasDreamPaneBlock(content, target, dateKey)).length;
+    const totalFailed = Math.max(passFailed, pending);
+    writeDreamRunSentinel(memPath, dateKey, timeStr, totalOk, totalFailed);
+    return { ok: totalOk, failed: totalFailed };
+  };
 
   if (flags.dry) {
     console.log(`Dream would process ${targets.length} idle pane(s) sequentially:\n`);
@@ -1589,7 +1619,8 @@ async function cmdDream(ctx, flags = {}) {
         if (skipped.length) console.log(`Dream: no runnable claude panes with activity since ${sinceArg}; skipped ${skipped.length} non-runnable pane(s).`);
         else console.log(`Dream: no claude panes with activity since ${sinceArg}.`);
       }
-      writeDreamRunSentinel(memPath, dateKey, timeStr, 0, 0);
+      const totals = finalizeSentinel(0, 0);
+      if (totals.failed > 0) process.exitCode = 1;
       return;
     }
 
@@ -1665,16 +1696,24 @@ async function cmdDream(ctx, flags = {}) {
         continue;
       }
 
+      const block = validateDreamPaneBlock(
+        readFileSync(memPath, "utf-8"), t, dateKey,
+        Number(process.env.AMUX_DREAM_BLOCK_MAX_LINES) || 10,
+      );
+      if (!block.ok) {
+        console.warn(`${tag} ${key} wrote an oversized dream block: ${block.reason}`);
+      }
+
       okCount++;
       if (!flags.quiet && !flags.q) console.log(`${tag} ${key} done`);
     }
 
-    writeDreamRunSentinel(memPath, dateKey, timeStr, okCount, failedCount);
+    const totals = finalizeSentinel(okCount, failedCount);
     if (!flags.quiet && !flags.q) {
-      console.log(`Dream complete: ${okCount} pane(s) ok, ${failedCount} failed.`);
+      console.log(`Dream complete: ${totals.ok} pane block(s) present, ${totals.failed} pending/failed.`);
     }
 
-    if (failedCount > 0) process.exitCode = 1;
+    if (totals.failed > 0) process.exitCode = 1;
   } finally {
     // Housekeeping runs under the dream lock (before release) so two racing
     // dream runs can't gzip the same file concurrently. Reached on every
@@ -2232,6 +2271,47 @@ async function cmdRevive(ctx, flags) {
     console.log(`  skickad: ${b.agent}:${b.pane}`);
   }
   console.log("Revive klar.");
+}
+
+async function cmdMemory(_ctx, subcommand, flags = {}) {
+  const workspace = flags.workspace || process.env.OPENCLAW_WORKSPACE
+    || join(process.env.HOME, ".openclaw", "workspace");
+  const {
+    lintMemory, formatMemoryLint, formatMemoryStatus, readLatestMemoryCompact,
+    writeMemoryDailyReport,
+  } = await import("../core/memory-lint.mjs");
+
+  if (subcommand === "status") {
+    const result = lintMemory(workspace);
+    result.compact = readLatestMemoryCompact(workspace);
+    console.log(flags.json ? JSON.stringify(result, null, 2) : formatMemoryStatus(result));
+    return;
+  }
+  if (subcommand === "lint") {
+    const result = lintMemory(workspace);
+    if (flags.reportDaily) {
+      writeMemoryDailyReport(workspace, result, { compacted: Number(flags.compacted) || 0 });
+    }
+    console.log(flags.json ? JSON.stringify(result, null, 2) : formatMemoryLint(result));
+    if (result.summary.warnings > 0) process.exitCode = 1;
+    return;
+  }
+  if (subcommand === "compact") {
+    const { compactMemory, formatMemoryCompact } = await import("../core/memory-compact.mjs");
+    const result = await compactMemory(workspace, {
+      dryRun: !!flags.dry,
+      maxFiles: Number.isFinite(flags.max) ? flags.max : undefined,
+    });
+    console.log(flags.json ? JSON.stringify(result, null, 2) : formatMemoryCompact(result));
+    if (result.failed.length > 0) process.exitCode = 1;
+    return;
+  }
+
+  console.error(`Usage:
+  amux memory status [--json] [--workspace PATH]
+  amux memory lint [--json] [--report-daily] [--compacted N] [--workspace PATH]
+  amux memory compact [--dry] [--json] [--max N] [--workspace PATH]`);
+  process.exitCode = 1;
 }
 
 async function cmdDoctor(ctx) {
@@ -3468,7 +3548,10 @@ Usage:
   agent dream                     Write/update nightly pane digest in workspace memory
     --since T                     Window to summarize (default: 24h)
     --dry                         Preview pane work, do nothing
-  agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)\n  agent doctor                    Health check: bridge alive/hung/stale-code, hooks, ledger, tmux (exit 0/1/2)\n  agent revive                    Post-boot: respawn all panes + resume-brief those interrupted mid-turn (--dry to preview)\n  agent search "term"             Search configured corpora (memory/sessions/ledger); --show N expands, --reindex rebuilds semantic index
+  agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)\n  agent doctor                    Health check: bridge alive/hung/stale-code, hooks, ledger, tmux (exit 0/1/2)\n  agent revive                    Post-boot: respawn all panes + resume-brief those interrupted mid-turn (--dry to preview)\n  agent memory status             Memory warnings, compact backlog, latest dream
+  agent memory lint               Structured memory lint (--json, exit 1 on warnings)
+  agent memory compact            Bank + compact oldest daily files (--dry, --max N)
+  agent search "term"             Search configured corpora (memory/sessions/ledger); --show N expands, --reindex rebuilds semantic index
     --dry                         List deletion candidates, change nothing
     --days N                      Retention window (default: 14)
   agent playwright-reap           Reap stale Playwright-MCP/browser processes
@@ -3548,7 +3631,10 @@ const FLAG_SPECS = {
     "per-pane": "number",
   },
   compact: { dry: "boolean", force: "boolean", "min-tokens": "number", p: "number", m: "string", message: "string" },
-  dream: { since: "string", workspace: "string", dry: "boolean", q: "boolean", quiet: "boolean" },
+  dream: {
+    since: "string", workspace: "string", dry: "boolean", q: "boolean", quiet: "boolean",
+    retry: "boolean", "defer-sentinel": "boolean", deferSentinel: "boolean",
+  },
   janitor: { dry: "boolean", days: "number" },
   "playwright-reap": { dry: "boolean", minutes: "number" },
   notifyuser: { level: "string", l: "string", title: "string", user: "string", u: "string", channel: "string", c: "string", force: "boolean", f: "boolean", dry: "boolean", test: "boolean" },
@@ -3652,6 +3738,16 @@ export async function dispatch(argv, ctx) {
     case "revive": {
       const { flags } = parseFlags(rest, { dry: "boolean" });
       return cmdRevive(ctx, flags);
+    }
+
+    case "memory": {
+      const subcommand = rest[0] || "status";
+      const { flags } = parseFlags(rest.slice(1), {
+        dry: "boolean", json: "boolean", max: "number", workspace: "string",
+        reportDaily: "boolean", "report-daily": "boolean", compacted: "number",
+      });
+      if (flags["report-daily"]) flags.reportDaily = true;
+      return cmdMemory(ctx, subcommand, flags);
     }
 
     case "search": {

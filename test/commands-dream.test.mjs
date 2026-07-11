@@ -7,6 +7,7 @@ import {
   hasDreamPaneBlock,
   isDreamLiveClaudePane,
   isDreamRunnableStatus,
+  validateDreamPaneBlock,
   waitForDreamPaneBlock,
 } from "../cli/commands.mjs";
 
@@ -116,6 +117,21 @@ feature("amux dream command target selection", () => {
         missingEnd: false,
         wrongPane: false,
       });
+    }],
+  });
+
+  unit("dream blocks over the 10-line budget are visible but remain complete", {
+    given: ["a marker block with 11 non-empty body lines", () => [
+      "<!-- amux-dream-ai-0:2026-05-13 -->",
+      ...Array.from({ length: 11 }, (_, i) => `- line ${i}`),
+      "<!-- /amux-dream-ai-0:2026-05-13 -->",
+    ].join("\n")],
+    when: ["validating", (content) => validateDreamPaneBlock(
+      content, { agent: "ai", pane: 0 }, "2026-05-13", 10,
+    )],
+    then: ["validation warns with the measured line count", (result) => {
+      expect(result).toMatchObject({ ok: false, lines: 11 });
+      expect(result.reason).toContain("budget 10");
     }],
   });
 
