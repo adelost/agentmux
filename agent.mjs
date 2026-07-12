@@ -1693,19 +1693,28 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const target = `${agentName}:.${pane}`;
     const paneCmd = config.panes?.[pane]?.cmd || "bash";
 
+    // startClaude/startCodex are idempotent (they return early when the process
+    // is already up), but the wait-for-ready that follows is NOT: it sends a
+    // reveal-Escape to surface the composer. Running that on a LIVE, working
+    // pane re-Escaped a mid-thought Codex turn on EVERY delivery — the all-night
+    // "Conversation interrupted" (2026-07-12). Only wait-for-ready when we
+    // actually (re)start the process; a freshly started pane is idle, so its
+    // reveal-Escape can never interrupt a turn.
+    const wasRunning = await isAlreadyRunning(target);
+
     if (isClaudeCmd(paneCmd)) {
       // Resume-hint is emitted by bin/amux-hook.mjs on SessionStart
       // (1.20.52) — hook-context instead of a typed spawn prompt, so it
       // never wakes the pane with a false turn and never crosses panes.
       await startClaude(agentName, target, config.dir, pane);
-      await waitForClaudeReady(target, agentName, pane);
+      if (!wasRunning) await waitForClaudeReady(target, agentName, pane);
     } else if (isCodexCmd(paneCmd)) {
       // Codex panes use the same wait-for-ready + dismiss pattern as
       // claude (both are interactive node-based CLIs that may surface
       // a resume-prompt on cold start). Resume-hint is skipped because
       // codex auto-resumes via `codex resume --last` in startCodex.
       await startCodex(agentName, target, config.dir, pane);
-      await waitForCodexUiReady(target, agentName, pane);
+      if (!wasRunning) await waitForCodexUiReady(target, agentName, pane);
     }
   }
 
