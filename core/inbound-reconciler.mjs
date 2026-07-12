@@ -2,6 +2,14 @@
 // periodic channel scans repair gaps caused by reconnects or bridge restarts.
 
 const DEFAULT_SEEN_LIMIT = 100;
+// A message the pane rejects DETERMINISTICALLY (blocked composer, oversized
+// paste that never finishes painting) fails identically on every scan. Leaving
+// it unseen makes the periodic REST scan re-deliver it forever, hammering the
+// channel with the same warning. Cap total delivery attempts, then give up:
+// mark it seen and stop. Mattias 2026-07-12: "gör 1 max 2 försök, den ska inte
+// fortsätta." Transient failures (reconnect, a briefly busy pane) still get
+// their retry within the cap.
+const DEFAULT_MAX_DELIVERY_ATTEMPTS = 2;
 
 /** WHAT: Formats one batch-level recovery notice. WHY: Keeps rare delivery repair visible without per-message spam. */
 export function formatRecoveredNotice(count) {
@@ -31,6 +39,27 @@ function markSeen(state, channelId, messageId, limit) {
   state.set("inbound_seen_ids", all);
 }
 
+/** Per-message delivery-attempt counter, so a deterministic failure gives up
+ * instead of re-delivering forever. Cleared on success or give-up. */
+function bumpAttempt(state, channelId, messageId) {
+  const all = state.get("inbound_delivery_attempts", {}) || {};
+  const byChannel = all[channelId] || {};
+  const count = (byChannel[messageId] || 0) + 1;
+  byChannel[messageId] = count;
+  all[channelId] = byChannel;
+  state.set("inbound_delivery_attempts", all);
+  return count;
+}
+
+function clearAttempt(state, channelId, messageId) {
+  const all = state.get("inbound_delivery_attempts", {}) || {};
+  const byChannel = all[channelId];
+  if (!byChannel || !(messageId in byChannel)) return;
+  delete byChannel[messageId];
+  if (Object.keys(byChannel).length === 0) delete all[channelId];
+  state.set("inbound_delivery_attempts", all);
+}
+
 /**
  * A live event never advances the scan cursor. Only a completed REST scan may
  * do that, after every human message in the scanned range has been handled.
@@ -40,7 +69,7 @@ function markSeen(state, channelId, messageId, limit) {
  * WHAT: Dispatches live Discord messages and missed REST messages in channel order.
  * WHY: Prevents restart gaps and duplicate paths from losing or repeating human prompts.
  */
-export function createInboundReconciler({ onMessage, state, seenLimit = DEFAULT_SEEN_LIMIT }) {
+export function createInboundReconciler({ onMessage, state, seenLimit = DEFAULT_SEEN_LIMIT, maxDeliveryAttempts = DEFAULT_MAX_DELIVERY_ATTEMPTS }) {
   const queues = new Map();
   const scans = new Map();
 
@@ -60,8 +89,20 @@ export function createInboundReconciler({ onMessage, state, seenLimit = DEFAULT_
       // messages. Keeping the Discord id unseen lets the periodic REST scan
       // retry it; v1.21.2 warned the user but still marked these as delivered,
       // permanently dropping them from reconciliation.
-      if (outcome?.delivered === false) return { delivered: false, retryable: true };
+      if (outcome?.delivered === false) {
+        const attempts = bumpAttempt(state, channelId, msg.id);
+        // A deterministic failure fails identically every scan. After the cap,
+        // give up: mark it seen so it is never re-delivered, and stop the
+        // warning hammer. The scan treats gaveUp as non-retryable and advances.
+        if (attempts >= maxDeliveryAttempts) {
+          markSeen(state, channelId, msg.id, seenLimit);
+          clearAttempt(state, channelId, msg.id);
+          return { delivered: false, gaveUp: true, attempts };
+        }
+        return { delivered: false, retryable: true, attempts };
+      }
       markSeen(state, channelId, msg.id, seenLimit);
+      clearAttempt(state, channelId, msg.id);
       return { delivered: true };
     });
     const tracked = next.finally(() => {

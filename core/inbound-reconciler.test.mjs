@@ -121,6 +121,27 @@ feature("Discord inbound reconciliation", () => {
     }],
   });
 
+  unit("a deterministically failing message gives up after the cap (no infinite hammer)", {
+    given: ["a pane that rejects every delivery attempt", () => {
+      const ctx = setup();
+      ctx.onMessage.mockResolvedValue({ delivered: false });
+      ctx.reconciler = createInboundReconciler(ctx); // default cap = 2
+      return ctx;
+    }],
+    when: ["the same id is offered three times", async (ctx) => ({
+      a: await ctx.reconciler.enqueue(msg("160")),
+      b: await ctx.reconciler.enqueue(msg("160")),
+      c: await ctx.reconciler.enqueue(msg("160")),
+    })],
+    then: ["it retries up to the cap, then gives up and stops re-delivering", (r, ctx) => {
+      expect(r.a).toMatchObject({ delivered: false, retryable: true });
+      expect(r.b).toMatchObject({ delivered: false, gaveUp: true });
+      expect(r.c).toMatchObject({ duplicate: true });
+      expect(ctx.onMessage).toHaveBeenCalledTimes(2);
+      expect(ctx.data.inbound_seen_ids.ch).toEqual(["160"]);
+    }],
+  });
+
   unit("bot gateway events never enter the agent queue", {
     given: ["a bot message", () => {
       const ctx = setup();
