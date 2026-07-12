@@ -48,6 +48,10 @@ export function createTmuxAdapter({ socket, exec }) {
       await raw(`new-session -d -s ${q(name)}`);
     },
 
+    async killSession(name) {
+      await raw(`kill-session -t ${q(name)}`);
+    },
+
     async sourceUserConf() {
       await raw(`source-file ~/.tmux.conf`);
     },

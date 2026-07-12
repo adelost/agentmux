@@ -20,7 +20,7 @@ function mockMsg({ content = "hello", channelId = "ch1", isBot = false } = {}) {
   };
 }
 
-function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatusDriver } = {}) {
+function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatusDriver, queueFleetRestartRequest, scheduleBridgeRestart } = {}) {
   const defaultMapping = { name: "_ai", dir: "/home/user/project", pane: 0 };
   const mapping = mappingOverride ?? defaultMapping;
   const channelMapData = channelMapEntries ?? new Map([["ch1", defaultMapping]]);
@@ -90,6 +90,8 @@ function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatus
     agentsYamlPath,
     pollInterval: 1,
     codexStatusDriver,
+    queueFleetRestartRequest,
+    scheduleBridgeRestart,
   });
 
   return { onMessage, agent, attachments, tts, state, overrides, reloadConfig, channelMapData };
@@ -336,6 +338,52 @@ feature("Codex native /status and account switching", () => {
       expect(reply).toContain("Codex-profil **2**");
       delete process.env.AMUX_CODEX_PROFILE_2_HOME;
       rmSync(root, { recursive: true, force: true });
+    }],
+  });
+});
+
+feature("restart scope", () => {
+  component("bare /restart remains bridge-only", {
+    given: ["restart seams", () => {
+      const queue = vi.fn();
+      const schedule = vi.fn();
+      return { ...setup({ queueFleetRestartRequest: queue, scheduleBridgeRestart: schedule }), queue, schedule, msg: mockMsg({ content: "/restart" }) };
+    }],
+    when: ["the command is handled", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["no fleet request is queued", (_, { msg, queue, schedule, state }) => {
+      expect(queue).not.toHaveBeenCalled();
+      expect(schedule).toHaveBeenCalledWith(500);
+      expect(state.get("restartChannel")).toBe("ch1");
+      expect(msg.reply.mock.calls[0][0]).toMatch(/bridge/i);
+    }],
+  });
+
+  component("/restart all queues a one-shot fleet rebuild before bridge exit", {
+    given: ["restart seams", () => {
+      const queue = vi.fn();
+      const schedule = vi.fn();
+      return { ...setup({ queueFleetRestartRequest: queue, scheduleBridgeRestart: schedule }), queue, schedule, msg: mockMsg({ content: "/restart all" }) };
+    }],
+    when: ["the command is handled", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["the destructive scope is explicit and durable", (_, { msg, queue, schedule }) => {
+      expect(queue).toHaveBeenCalledWith({ source: "discord" });
+      expect(schedule).toHaveBeenCalledWith(500);
+      expect(msg.reply.mock.calls[0][0]).toMatch(/alla konfigurerade tmux-sessioner/i);
+      expect(msg.reply.mock.calls[0][0]).toMatch(/aktiva turns avbryts/i);
+    }],
+  });
+
+  component("unknown restart scope fails without scheduling an exit", {
+    given: ["restart seams", () => {
+      const queue = vi.fn();
+      const schedule = vi.fn();
+      return { ...setup({ queueFleetRestartRequest: queue, scheduleBridgeRestart: schedule }), queue, schedule, msg: mockMsg({ content: "/restart maybe" }) };
+    }],
+    when: ["the command is handled", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["usage is returned", (_, { msg, queue, schedule }) => {
+      expect(queue).not.toHaveBeenCalled();
+      expect(schedule).not.toHaveBeenCalled();
+      expect(msg.reply.mock.calls[0][0]).toContain("//restart all");
     }],
   });
 });

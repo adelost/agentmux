@@ -1559,6 +1559,97 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
   }
 
+  /**
+   * Rebuild every configured agent tmux session from agents.yaml.
+   *
+   * The bridge invokes this only after an explicit fleet-restart request.
+   * All configured sessions are killed first so no half-old/half-new fleet
+   * remains, then each agent is recreated independently. Coding panes resume
+   * their durable Claude/Codex history through the normal ensureReady path;
+   * shell and service panes are rebuilt by setupPanes.
+   */
+  async function restartFleet({ log = (message) => console.warn(message) } = {}) {
+    const config = loadConfig();
+    const fleet = Object.entries(config)
+      .filter(([, cfg]) => cfg?.dir && Array.isArray(cfg.panes) && cfg.panes.length > 0)
+      .map(([name, cfg]) => ({ name, cfg }));
+    const result = {
+      ok: true,
+      configured: fleet.map(({ name }) => name),
+      stopped: [],
+      recreated: [],
+      codingPanes: 0,
+      failures: [],
+    };
+    const stopFailed = new Set();
+
+    // A manually-run bridge can itself have been launched from one of the
+    // configured coding tmux sessions. Killing that parent would also kill
+    // this orchestrator halfway through the rebuild and strand the fleet.
+    // Managed mode runs in the separate `amux` session and passes this gate.
+    const ownerSocket = String(process.env.TMUX || "").split(",")[0];
+    if (process.env.TMUX_PANE && ownerSocket === tmuxSocket) {
+      const owner = await t.display(process.env.TMUX_PANE, "#{session_name}").catch(() => null);
+      if (owner && fleet.some(({ name }) => name === owner)) {
+        result.ok = false;
+        result.failures.push({
+          name: owner,
+          stage: "guard",
+          error: "bridge is hosted inside this configured session; start the bridge outside it or with amux serve --detach",
+        });
+        log(`fleet restart blocked: bridge is hosted inside ${owner}`);
+        return result;
+      }
+    }
+
+    // Finish the destructive phase before creating anything. If one kill
+    // fails, leave that session untouched and skip its rebuild rather than
+    // typing startup commands into a still-live layout.
+    for (const { name } of fleet) {
+      try {
+        if (await hasSession(name)) {
+          await t.killSession(name);
+          result.stopped.push(name);
+        }
+      } catch (err) {
+        stopFailed.add(name);
+        result.failures.push({ name, stage: "stop", error: err.message });
+        log(`fleet restart: could not stop ${name}: ${err.message}`);
+      }
+    }
+
+    // Different tmux sessions are independent, so recreate agents in
+    // parallel. Within one session the first ensureReady owns creation and
+    // layout; only after it succeeds may the remaining coding panes start.
+    const starts = await Promise.all(fleet.map(async ({ name, cfg }) => {
+      if (stopFailed.has(name)) return null;
+      const codingPanes = cfg.panes
+        .map((paneConfig, index) => isAgentCmd(paneConfig?.cmd) ? index : -1)
+        .filter((index) => index >= 0);
+      try {
+        await ensureReady(name, codingPanes[0] ?? 0);
+        if (codingPanes.length > 1) {
+          await Promise.all(codingPanes.slice(1).map((pane) => ensureReady(name, pane)));
+        }
+        return { name, codingPanes: codingPanes.length };
+      } catch (err) {
+        log(`fleet restart: could not recreate ${name}: ${err.message}`);
+        return { name, codingPanes: 0, error: err.message };
+      }
+    }));
+
+    for (const start of starts) {
+      if (!start) continue;
+      if (start.error) result.failures.push({ name: start.name, stage: "start", error: start.error });
+      else {
+        result.recreated.push(start.name);
+        result.codingPanes += start.codingPanes;
+      }
+    }
+    result.ok = result.failures.length === 0 && result.recreated.length === fleet.length;
+    return result;
+  }
+
   async function sendOnly(agentName, prompt, pane) {
     await ensureReady(agentName, pane);
     await sendPrompt(agentName, prompt, pane);
@@ -1709,6 +1800,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     capturePane, captureScreen, sendEscape, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
     dismissBlockingPrompt, waitForPromptEcho,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession,
-    sanitizeTmuxGlobalEnv, restartCodex,
+    sanitizeTmuxGlobalEnv, restartCodex, restartFleet,
   };
 }

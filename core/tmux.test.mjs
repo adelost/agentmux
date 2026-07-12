@@ -26,6 +26,16 @@ feature("tmux adapter: command strings", () => {
       expect(calls[0]).toBe(PREFIX + `send-keys -t 'o'\\''brien:.0' Enter`)],
   });
 
+  unit("killSession quotes the configured session name", {
+    given: ["an adapter", () => fakeTmux()],
+    when: ["killing one fleet session", async ({ t, calls }) => {
+      await t.killSession("o'brien");
+      return calls;
+    }],
+    then: ["only that session is targeted", (calls) =>
+      expect(calls[0]).toBe(PREFIX + `kill-session -t 'o'\\''brien'`)],
+  });
+
   unit("sendLiteral escapes text and uses -l -- so option parsing stops", {
     given: ["an adapter", () => fakeTmux()],
     when: ["sending literal text with quotes and dashes", async ({ t, calls }) => {

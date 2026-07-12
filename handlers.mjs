@@ -28,6 +28,7 @@ import { sendPromptVerified, sendSlashVerified } from "./core/delivery.mjs";
 import {
   MODEL_RECOVERY_STATE_KEY, MODEL_RECOVERY_SETTLE_MS, resumeBrief,
 } from "./core/model-watch.mjs";
+import { queueFleetRestart } from "./core/fleet-restart.mjs";
 
 /**
  * Reconcile every configured agent's live tmux session against the
@@ -84,7 +85,8 @@ const HELP_TEXT = [
   "`/tts` — toggle text-to-speech for this channel",
   "`/sync` — create/sync Discord channels from agentmux.yaml",
   "`/reload` — reload agents.yaml",
-  "`/restart` — restart agentmux",
+  "`/restart` — restart agentmux bridge",
+  "`/restart all` — recreate every configured tmux session + restart bridge (interrupts active work)",
   "",
   "Prefix with `.N` to target pane N (e.g. `.1 /raw`)",
 ].join("\n");
@@ -164,7 +166,7 @@ export function renderCatchupLine(countResult) {
  * Create message handler with all dependencies injected.
  * @param {{ agent, attachments, tts, getMapping, overrides, channelMap, reloadConfig, discordChannel?, agentmuxYamlPath?, agentsYamlPath? }} deps
  */
-export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentmuxYamlPath, agentsYamlPath, recorder, pollInterval = 2000, loopGuardConfig = readLoopGuardConfig(), codexStatusDriver = driveCodexStatus }) {
+export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentmuxYamlPath, agentsYamlPath, recorder, pollInterval = 2000, loopGuardConfig = readLoopGuardConfig(), codexStatusDriver = driveCodexStatus, queueFleetRestartRequest = queueFleetRestart, scheduleBridgeRestart = (delayMs) => setTimeout(() => process.exit(75), delayMs) }) {
   const noopRecorder = { save: () => {}, enabled: false };
   const rec = recorder || noopRecorder;
   const sendLocks = new Map();
@@ -681,11 +683,20 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       await msg.reply(`reloaded: ${channelMap().size} channel mapping(s)`);
     },
 
-    "/restart": async (msg) => {
-      await msg.reply("restarting...");
+    "/restart": async (msg, _mapping, _pane, args) => {
+      const mode = String(args || "").trim().toLowerCase();
+      const fleet = ["all", "tmux", "fleet"].includes(mode);
+      if (mode && !fleet) {
+        await msg.reply("använd `//restart` för bara bridgen eller `//restart all` för hela tmux-flottan");
+        return;
+      }
+      if (fleet) queueFleetRestartRequest({ source: "discord" });
+      await msg.reply(fleet
+        ? "helreset köad — alla konfigurerade tmux-sessioner återskapas; aktiva turns avbryts men sparad historik behålls..."
+        : "restarting bridge...");
       state.set("restartChannel", msg.channelId);
       // Exit code 75 = restart signal (caught by start script loop)
-      setTimeout(() => process.exit(75), 500);
+      scheduleBridgeRestart(500);
     },
   };
 

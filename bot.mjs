@@ -4,6 +4,7 @@
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
 import { buildChannelMap } from "./lib.mjs";
 import { createInboundReconciler, formatRecoveredNotice } from "./core/inbound-reconciler.mjs";
+import { FLEET_RESTART_RESULT_KEY, formatFleetRestartResult } from "./core/fleet-restart.mjs";
 
 const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
 const READY_FILE = process.env.READY_FILE || "/tmp/agentmux.ready";
@@ -149,8 +150,12 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
         console.warn(`periodic inbound reconciliation failed: ${err.message}`));
     }, 60_000);
 
-    // Notify restart channel if we came back from /restart
+    // Notify restart channel if we came back from /restart. Fleet results
+    // are one-shot too: a later ordinary restart must not repeat an old
+    // helreset receipt.
     const restartCh = state.get("restartChannel");
+    const fleetResult = state.get(FLEET_RESTART_RESULT_KEY);
+    if (fleetResult) state.remove(FLEET_RESTART_RESULT_KEY);
     console.log(`restart check: ${restartCh || "(none)"}`);
     if (restartCh) {
       state.set("restartChannel", null);
@@ -158,10 +163,12 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
       await new Promise((r) => setTimeout(r, 2000));
       for (const channel of channels) {
         try {
-          await channel.send(restartCh, "online");
+          await channel.send(restartCh, formatFleetRestartResult(fleetResult));
           console.log(`restart notify sent to ${restartCh}`);
         } catch (err) { console.error("restart notify failed:", err.message); }
       }
+    } else if (fleetResult) {
+      console.log(`fleet restart result: ${formatFleetRestartResult(fleetResult)}`);
     }
   })();
 

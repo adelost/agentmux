@@ -28,6 +28,7 @@ import {
   readBridgeMode,
 } from "../core/bridge-mode.mjs";
 import { createBridgeLifecycle } from "./bridge.mjs";
+import { consumeFleetRestart, queueFleetRestart } from "../core/fleet-restart.mjs";
 import {
   groupByPane, previewText,
   isRunningNow, isWaitingLikeText, looksDone,
@@ -2815,7 +2816,7 @@ async function cmdReload() {
 /** Restart the bridge. Sends SIGUSR2 (new handler in bot.mjs) which
  *  exits with code 75; start.sh's loop catches that and respawns.
  *  Falls back to SIGTERM if SIGUSR2 isn't wired (older bridge). */
-async function cmdRestart() {
+async function cmdRestart({ all = false } = {}) {
   const { existsSync, readFileSync } = await import("fs");
   const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
   if (!existsSync(PIDFILE)) {
@@ -2823,12 +2824,18 @@ async function cmdRestart() {
     process.exit(1);
   }
   const pid = Number(readFileSync(PIDFILE, "utf-8").trim());
+  if (all) queueFleetRestart({ source: "cli" });
   try { process.kill(pid, "SIGUSR2"); }
   catch (err) {
+    // Do not leave a delayed destructive request for some future bridge
+    // start when the intended bridge could not receive this restart signal.
+    if (all) consumeFleetRestart();
     console.error(`restart failed: ${err.message}`);
     process.exit(1);
   }
-  console.log(`restart signal sent to bridge (pid ${pid}); start.sh loop will respawn`);
+  console.log(all
+    ? `fleet restart queued via bridge pid ${pid}; all configured tmux sessions will be recreated`
+    : `restart signal sent to bridge (pid ${pid}); start.sh loop will respawn`);
 }
 
 /**
@@ -3458,6 +3465,7 @@ Bridge controls (talk to the running bridge):
                                   (slower; use when bridge is wedged or absent)
   agent reload                    Reload agents.yaml without restarting (SIGHUP)
   agent restart                   Restart bridge (SIGUSR2 → exit 75 → start.sh respawn)
+    --all                         Recreate every configured tmux session, then restart bridge
   agent thinking [on|off|toggle|status]
                                   Real-time text streaming flag (default on)
   agent tts [on|off|toggle|status]
@@ -3747,7 +3755,8 @@ export async function dispatch(argv, ctx) {
     }
 
     case "restart": {
-      return cmdRestart();
+      const { flags } = parseFlags(rest, { all: "boolean" });
+      return cmdRestart({ all: !!flags.all });
     }
 
     case "sync": {

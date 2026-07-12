@@ -190,10 +190,11 @@ Discord commands:
 | `/dismiss` | Dismiss a blocking prompt where supported |
 | `/use <agent>[.pane]` | Temporarily retarget the channel |
 | `/reload` | Reload config |
-| `/restart` | Restart the bridge process |
+| `/restart` | Restart only the bridge process |
+| `/restart all` | Recreate every configured tmux session, then restart the bridge (interrupts active turns) |
 
 Discord accepts the double-slash spelling too (`//status`, `//switch`,
-`//model ...`), which avoids Discord's own slash-command UI.
+`//model ...`, `//restart all`), which avoids Discord's own slash-command UI.
 
 ### Two Codex accounts
 
@@ -223,6 +224,7 @@ amux timeline --since 30min
 amux done --since 2h
 amux asks --open
 amux esc api -p 1
+amux restart --all       # rebuild the full configured tmux fleet, even when invoked inside tmux
 ```
 
 Personal todos with daily 08:00 push:

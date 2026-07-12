@@ -35,6 +35,7 @@ import { createJsonlWatcher } from "./channels/jsonl-watcher.mjs";
 import { createPlaywrightWatchdog } from "./channels/playwright-watchdog.mjs";
 import { parsePlaywrightWatchdogConfig } from "./core/playwright-watchdog.mjs";
 import { startHeartbeat } from "./core/heartbeat.mjs";
+import { runPendingFleetRestart } from "./core/fleet-restart.mjs";
 
 // --- Config ---
 
@@ -108,6 +109,16 @@ const agent = createAgent({
   run,
   tmuxExec,
   state: appState,
+});
+
+// A fleet restart is deliberately executed by the replacement bridge, not
+// by the requesting CLI/pane: the requester may live inside the very tmux
+// session being destroyed. Consume the one-shot request before channel
+// watchers start so they only ever observe the rebuilt fleet.
+await runPendingFleetRestart({
+  agent,
+  state: appState,
+  log: (message) => console.log(`[fleet-restart] ${message}`),
 });
 const attachments = createAttachmentHandler({
   run,
