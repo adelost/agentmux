@@ -43,6 +43,23 @@ feature("Codex composer truth", () => {
     then: ["all normalize to empty", (values) => expect(values).toEqual(Array(11).fill(""))],
   });
 
+  unit("cursor-painted cells in an exact rotating placeholder still count as empty", {
+    given: ["the live claw:11 capture that blocked v1.21.2 delivery", () =>
+      "\n› Impr─ve d─cumentation i──@filename\n  gpt-5.6-sol max · ~/x\n"],
+    when: ["reading the composer", (snapshot) => codexComposerText(snapshot)],
+    then: ["the four transient paint cells do not become a fake human draft", (value) =>
+      expect(value).toBe("")],
+  });
+
+  unit("ordinary edits and heavily corrupted text never impersonate a placeholder", {
+    when: ["reading non-Codex-owned drafts", () => [
+      codexComposerText("\n› Improve docs in @filename\n"),
+      codexComposerText("\n› ─────── documentation in @filename\n"),
+    ]],
+    then: ["both drafts are preserved", (values) =>
+      expect(values).toEqual(["Improve docs in @filename", "─────── documentation in @filename"])],
+  });
+
   unit("a human draft is preserved as non-empty", {
     when: ["reading a draft", () => verifiedEmptyCodexComposer("\n› please keep this draft\n")],
     then: ["the draft is returned", (value) => expect(value).toBe("please keep this draft")],

@@ -26,6 +26,29 @@ const EMPTY_COMPOSER_HINTS = new Set([
   "Will this algorithm scale well?",
 ]);
 
+// Codex paints its cursor by temporarily replacing cells with box/block
+// glyphs. A tmux capture can freeze those intermediate cells (observed live
+// as "Impr─ve d─cumentation i──@filename"). Treat that as an empty rotating
+// placeholder only when every non-artifact cell still matches one exact
+// Codex-owned hint and the number of painted cells stays tightly bounded.
+const TUI_PAINT_CELL = /^[\u2500-\u259f]$/u;
+const MAX_PLACEHOLDER_PAINT_CELLS = 6;
+
+function matchesPaintedPlaceholder(value, placeholder) {
+  const actual = [...String(value || "")];
+  const expected = [...String(placeholder || "")];
+  if (actual.length !== expected.length) return false;
+
+  let painted = 0;
+  for (let i = 0; i < expected.length; i++) {
+    if (actual[i] === expected[i]) continue;
+    if (!TUI_PAINT_CELL.test(actual[i])) return false;
+    painted++;
+    if (painted > MAX_PLACEHOLDER_PAINT_CELLS) return false;
+  }
+  return painted > 0;
+}
+
 export function isCodexTranscriptView(text) {
   const value = String(text || "");
   return /\/\s*T\s*R\s*A\s*N\s*S\s*C\s*R\s*I\s*P\s*T\s*\//i.test(value)
@@ -51,7 +74,10 @@ export function codexComposerText(text) {
   if (assistantAfter) return null;
   const line = lines[index];
   const value = line.replace(/^\s*[›❯>]\s*/, "").trim();
-  if (EMPTY_COMPOSER_HINTS.has(value)) return "";
+  if (EMPTY_COMPOSER_HINTS.has(value)
+      || [...EMPTY_COMPOSER_HINTS].some((hint) => matchesPaintedPlaceholder(value, hint))) {
+    return "";
+  }
   return value;
 }
 
