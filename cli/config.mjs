@@ -133,10 +133,12 @@ export function isDeferred(configPath, name, idx) {
   return config[name]?.panes?.[idx]?.defer === true;
 }
 
-/** Get tmux layout for an agent. */
+/** Get tmux layout for an agent. Even grid by default so every pane keeps
+ * enough width AND height (a cramped main-vertical column starved Codex panes
+ * of the rows their composer needs). Explicit `layout:` still wins. */
 export function getLayout(configPath, name) {
   const config = loadConfig(configPath);
-  return config[name]?.layout || "main-vertical";
+  return config[name]?.layout || "tiled";
 }
 
 /** Get pane count for an agent. */

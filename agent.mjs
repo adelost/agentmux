@@ -39,6 +39,12 @@ import {
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
 const CODEX_FLAGS = "--dangerously-bypass-approvals-and-sandbox";
 const CODEX_PROMPT_READY_TIMEOUT_MS = 8_000;
+// Even grid by default so every pane gets real width AND height. main-vertical
+// crammed a fleet's worth of panes into a tall thin column (~3 rows each), which
+// is below what a Codex TUI needs to even render its composer — delivery then
+// could not find an input to type into (claw:9/10/11, 2026-07-12). Sessions that
+// want a hero pane still set `layout:` explicitly (skybar: main-vertical).
+const DEFAULT_TMUX_LAYOUT = "tiled";
 
 function codexDeliveryBlocked(message) {
   const error = new Error(message);
@@ -664,7 +670,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const panes = config[name]?.panes || [];
     if (!panes.length) return;
 
-    const layout = config[name]?.layout || "main-vertical";
+    const layout = config[name]?.layout || DEFAULT_TMUX_LAYOUT;
     const applyLayout = async () => {
       await t.selectLayout(name, layout).catch((err) =>
         console.warn(`setupPanes: select-layout ${layout} failed: ${err.message}`));
@@ -795,7 +801,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     const summary = { name, added: 0, respawned: [], unchanged: 0, extras: 0 };
     const wanted = cfg.panes;
-    const layout = cfg.layout || "main-vertical";
+    const layout = cfg.layout || DEFAULT_TMUX_LAYOUT;
     const applyLayout = async () => {
       await t.selectLayout(name, layout).catch((err) =>
         console.warn(`reconcile: select-layout ${layout} failed: ${err.message}`));

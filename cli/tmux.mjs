@@ -45,7 +45,7 @@ export function attachSession(socket, name) {
 
 /** Ensure session exists with all panes set up and claude started. */
 export async function ensureAndAttach(ctx, name, configPath) {
-  const { loadConfig } = await import("./config.mjs");
+  const { loadConfig, getLayout } = await import("./config.mjs");
   const config = loadConfig(configPath);
   const panes = config[name]?.panes || [];
   const agentPanes = panes
@@ -74,6 +74,14 @@ export async function ensureAndAttach(ctx, name, configPath) {
   // Step 2: start remaining coding-agent panes in parallel (session already exists)
   if (runnableAgentPanes.length > 1) {
     await Promise.all(runnableAgentPanes.slice(1).map((i) => ctx.agent.ensureReady(name, i)));
+  }
+
+  // Step 3: re-apply the configured layout on EVERY `amux <agent>`, not only at
+  // creation. A session made before tiled was the default (or manually reshaped
+  // into a cramped column) lands back on an even grid where each pane — Codex
+  // especially — has the rows it needs to render its composer.
+  if (existingCount || runnableAgentPanes.length) {
+    await ctx.tmux(`select-layout -t '${esc(name)}' ${getLayout(configPath, name)}`).catch(() => {});
   }
 }
 
