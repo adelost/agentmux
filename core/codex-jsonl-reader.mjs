@@ -16,8 +16,7 @@ import { readdirSync, readFileSync, statSync, existsSync, openSync, readSync, cl
 import { join } from "path";
 import { createHash } from "crypto";
 import { describeCustomExec, describeToolCall } from "./tool-display.mjs";
-
-const CODEX_SESSIONS_DIR = () => join(process.env.HOME, ".codex", "sessions");
+import { codexSessionDirs } from "./codex-profiles.mjs";
 
 // Content-addressed line identity for the watcher's posted-set dedupe. Codex
 // rollout events carry no stable id (no uuid, no payload.id), so we key on a
@@ -201,8 +200,10 @@ function readSessionMeta(filePath) {
  * any codex running inside our workspace, not our pane's own codex.
  */
 function latestSessionFor(paneDir) {
-  const base = CODEX_SESSIONS_DIR();
-  const files = findJsonlFiles(base)
+  // Profile 1 remains ~/.codex; profile 2 has its own CODEX_HOME.  Search
+  // both so switching accounts does not make the watcher/context layer lose
+  // the pane's rollout just because its storage root changed.
+  const files = codexSessionDirs().flatMap((base) => findJsonlFiles(base, 0, []))
     .map((path) => ({ path, mtime: statSync(path).mtimeMs }));
 
   const candidates = [];
@@ -270,7 +271,7 @@ export function isBusyFromCodexJsonl(paneDir) {
   // Only the latest task can describe the live TUI. Older unmatched starts
   // are interrupted history (Esc, crash, quota stop), not permanent busy
   // state. Treating every historical start as live made model-watch believe
-  // a recovered pane was busy forever and prevented its model picker from
+  // a recovered pane was busy forever and prevented a verified restart from
   // restoring the requested model.
   let latestStartIdx = -1;
   let latestTurnId = null;

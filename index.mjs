@@ -107,6 +107,7 @@ const agent = createAgent({
   timeout: TIMEOUT,
   run,
   tmuxExec,
+  state: appState,
 });
 const attachments = createAttachmentHandler({
   run,

@@ -147,6 +147,13 @@ export function createTmuxAdapter({ socket, exec }) {
       return stdout;
     },
 
+    /** Current visible screen only; excludes stale scrollback after respawn. */
+    async captureScreen(target, { join = true } = {}) {
+      const joinFlag = join ? " -J" : "";
+      const { stdout } = await raw(`capture-pane -t ${q(target)}${joinFlag} -p`);
+      return stdout;
+    },
+
     // --- Keys ---
 
     /** Literal text into the composer (fully escaped, -l -- stops option parsing). */
@@ -163,6 +170,11 @@ export function createTmuxAdapter({ socket, exec }) {
 
     async sendEscape(target) {
       await sendKeys(target, "Escape");
+    },
+
+    /** Clear the current readline/TUI input without submitting it. */
+    async clearInputLine(target) {
+      await sendKeys(target, "C-u");
     },
 
     /** Exit copy/view/choose mode without leaking a keystroke (-X cancel). */

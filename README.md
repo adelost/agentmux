@@ -181,7 +181,9 @@ Discord commands:
 | Command | Description |
 |---|---|
 | `/sync` | Create or update Discord channels from config |
-| `/status` | Show current agent, pane, and context usage |
+| `/status` | Claude: pane/context; Codex: native account, effective model, context and rolling usage limits |
+| `/switch [1\|2]` | Codex: toggle or explicitly select this pane's ChatGPT account profile |
+| `/model <name> [effort]` | Codex: restart/resume this pane with process-local model settings |
 | `/peek` | Show the last response from the target pane |
 | `/raw` | Show raw tmux pane output |
 | `/esc` | Send Escape to the target pane |
@@ -189,6 +191,25 @@ Discord commands:
 | `/use <agent>[.pane]` | Temporarily retarget the channel |
 | `/reload` | Reload config |
 | `/restart` | Restart the bridge process |
+
+Discord accepts the double-slash spelling too (`//status`, `//switch`,
+`//model ...`), which avoids Discord's own slash-command UI.
+
+### Two Codex accounts
+
+Profile 1 is the existing `~/.codex` login. Profile 2 is isolated under
+`~/.config/agent/codex-profiles/2`; auth and session history never get copied
+between them. Set up the second account once:
+
+```bash
+CODEX_HOME="$HOME/.config/agent/codex-profiles/2" codex login --device-auth
+```
+
+After that, `//switch` toggles only the current Codex pane and native
+`//status` shows which account actually answered. `//model` uses `codex
+resume --last -m ... -c ...` instead of Codex's TUI picker because the picker
+persists its selection to the account-wide `config.toml`; process-local launch
+overrides prevent one pane's Max/XHigh choice from changing every other pane.
 
 Terminal commands:
 

@@ -1,6 +1,6 @@
 import { feature, component, unit, expect } from "bdd-vitest";
 import { vi } from "vitest";
-import { writeFileSync, unlinkSync } from "fs";
+import { mkdirSync, rmSync, writeFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createHandlers, renderCatchupLine, formatCatchupTime } from "../handlers.mjs";
@@ -20,16 +20,20 @@ function mockMsg({ content = "hello", channelId = "ch1", isBot = false } = {}) {
   };
 }
 
-function setup({ mappingOverride, channelMapEntries, agentsYamlPath } = {}) {
+function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatusDriver } = {}) {
   const defaultMapping = { name: "_ai", dir: "/home/user/project", pane: 0 };
   const mapping = mappingOverride ?? defaultMapping;
   const channelMapData = channelMapEntries ?? new Map([["ch1", defaultMapping]]);
 
   const overrides = new Map();
+  const stateStore = {};
   const state = {
-    get: vi.fn(() => ({})),
-    set: vi.fn(),
-    toggle: vi.fn(() => true),
+    get: vi.fn((key, fallback) => key in stateStore ? stateStore[key] : fallback),
+    set: vi.fn((key, value) => { stateStore[key] = value; return value; }),
+    toggle: vi.fn((key) => {
+      stateStore[key] = !stateStore[key];
+      return stateStore[key];
+    }),
   };
 
   // isBusy: first 2 calls = busy, then idle (so streaming loop can detect transition)
@@ -50,6 +54,11 @@ function setup({ mappingOverride, channelMapEntries, agentsYamlPath } = {}) {
     getContextPercent: vi.fn(() => ({ percent: 42, tokens: 84000 })),
     dismissBlockingPrompt: vi.fn(async () => "dismiss"),
     sendEscape: vi.fn(async () => {}),
+    sendEnter: vi.fn(async () => {}),
+    typeLiteral: vi.fn(async () => {}),
+    zoomPaneForPicker: vi.fn(async () => false),
+    restorePaneZoom: vi.fn(async () => {}),
+    restartCodex: vi.fn(async () => ({ ok: true })),
     sendAndWait: vi.fn(async () => "agent reply"),
     sendOnly: vi.fn(async () => {}),
     waitForPromptEcho: vi.fn(async () => true),
@@ -80,6 +89,7 @@ function setup({ mappingOverride, channelMapEntries, agentsYamlPath } = {}) {
     reloadConfig,
     agentsYamlPath,
     pollInterval: 1,
+    codexStatusDriver,
   });
 
   return { onMessage, agent, attachments, tts, state, overrides, reloadConfig, channelMapData };
@@ -127,26 +137,46 @@ function writeCodexYaml() {
   return path;
 }
 
+function nativeStatus({ account = "one@example.com (Pro)", model = "gpt-5.6-sol", effort = "xhigh" } = {}) {
+  return {
+    version: "0.144.1",
+    usageUrl: "https://chatgpt.com/codex/settings/usage",
+    model: { id: model, effort, summaries: "auto", raw: `${model} (reasoning ${effort}, summaries auto)` },
+    directory: "~/project/.agents/0",
+    permissions: "Full Access",
+    agentsMd: "<none>",
+    account,
+    collaborationMode: "Default",
+    session: "session-1",
+    context: { percentLeft: 60, used: "149K", total: "353K" },
+    limits: {
+      primary5h: { percentLeft: 82, resets: "17:13" },
+      weekly: { percentLeft: 65, resets: "17:02 on 18 Jul" },
+      spark5h: null,
+      sparkWeekly: null,
+    },
+    warning: null,
+  };
+}
+
 feature("/model dialect routing", () => {
-  component("codex pane with args drives the picker; failure falls back to guidance", {
-    given: ["a codex-backed channel whose pane shows no picker UI", () => {
+  component("codex pane with a draft refuses the pane-local restart", {
+    given: ["a Codex-backed channel whose pane has no identifiable composer", () => {
       const path = writeCodexYaml();
       const s = setup({ agentsYamlPath: path });
       s.agent.isBusy.mockResolvedValue(false);
-      s.agent.typeLiteral = vi.fn(async () => {});
-      // capturePane keeps returning plain output → the drive dies at the
-      // compose stage and the handler must surface the manual fallback.
+      // capturePane keeps returning plain output → the draft/idle gate dies
+      // before the Codex process can be restarted.
       return { ...s, path, msg: mockMsg({ content: "/model gpt-5.6-sol xhigh" }) };
     }],
     when: ["onMessage is called", async ({ onMessage, msg, path }) => {
       await onMessage(msg);
       unlinkSync(path);
     }],
-    then: ["failed closed before typing, with fallback guidance", (_, { msg, agent }) => {
+    then: ["failed closed before restarting", (_, { msg, agent }) => {
       const reply = msg.reply.mock.calls[0][0];
-      expect(agent.typeLiteral).not.toHaveBeenCalled();
-      expect(reply).toMatch(/picker drive failed/i);
-      expect(reply).toContain("amux _ai");
+      expect(agent.restartCodex).not.toHaveBeenCalled();
+      expect(reply).toMatch(/modelbyte avbrutet/i);
       expect(agent.sendOnly).not.toHaveBeenCalled();
     }],
   });
@@ -162,9 +192,9 @@ feature("/model dialect routing", () => {
       await onMessage(msg);
       unlinkSync(path);
     }],
-    then: ["reply carries picker hint incl. effort tiers", (_, { msg }) => {
+    then: ["reply carries pane-local restart hint incl. effort tiers", (_, { msg }) => {
       const reply = msg.reply.mock.calls[0][0];
-      expect(reply).toMatch(/picker/i);
+      expect(reply).toMatch(/pane-local/i);
       expect(reply).toMatch(/xhigh/);
     }],
   });
@@ -178,6 +208,134 @@ feature("/model dialect routing", () => {
     then: ["the command is typed into the pane and confirmed", (_, { msg, agent }) => {
       expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "/model opus", 0);
       expect(msg.reply.mock.calls[0][0]).toContain("sent `/model opus`");
+    }],
+  });
+
+  component("codex model switch restarts only that pane with process-local overrides", {
+    given: ["an idle Codex pane and a native status receipt", () => {
+      const path = writeCodexYaml();
+      const driver = vi.fn(async () => ({ ok: true, status: nativeStatus({ effort: "max" }) }));
+      const s = setup({ agentsYamlPath: path, codexStatusDriver: driver });
+      s.agent.isBusy.mockResolvedValue(false);
+      s.agent.capturePane.mockResolvedValue("\n› Explain this codebase\n");
+      s.agent.getContextPercent.mockReturnValue({
+        percent: 42, tokens: 84000, model: "gpt-5.6-sol", effort: "xhigh",
+      });
+      return { ...s, path, driver, msg: mockMsg({ content: "/model gpt-5.6-sol max" }) };
+    }],
+    when: ["onMessage is called", async ({ onMessage, msg, path }) => {
+      await onMessage(msg);
+      unlinkSync(path);
+    }],
+    then: ["restart carries Max and global-default guarantee", (_, { msg, agent }) => {
+      expect(agent.restartCodex).toHaveBeenCalledTimes(1);
+      expect(agent.restartCodex.mock.calls[0][2]).toMatchObject({ model: "gpt-5.6-sol", effort: "max" });
+      expect(msg.reply.mock.calls[0][0]).toContain("global default orörd");
+    }],
+  });
+
+  component("codex rollback preserves a draft that appears during verification", {
+    given: ["native verification fails after a local human starts typing", () => {
+      const path = writeCodexYaml();
+      const driver = vi.fn(async () => ({ ok: false, stage: "parse", error: "status redraw" }));
+      const s = setup({ agentsYamlPath: path, codexStatusDriver: driver });
+      s.agent.isBusy.mockResolvedValue(false);
+      s.agent.capturePane
+        .mockResolvedValueOnce("\n› Explain this codebase\n")
+        .mockResolvedValue("\n› keep my local draft\n");
+      s.agent.getContextPercent.mockReturnValue({
+        percent: 42, tokens: 84000, model: "gpt-5.6-sol", effort: "xhigh",
+      });
+      return { ...s, path, msg: mockMsg({ content: "/model gpt-5.6-sol max" }) };
+    }],
+    when: ["onMessage is called", async ({ onMessage, msg, path }) => {
+      await onMessage(msg);
+      unlinkSync(path);
+    }],
+    then: ["no second restart destroys the draft", (_, { msg, agent }) => {
+      expect(agent.restartCodex).toHaveBeenCalledTimes(1);
+      expect(msg.reply.mock.calls[0][0]).toMatch(/Återställningen misslyckades också/);
+      expect(msg.reply.mock.calls[0][0]).toMatch(/preserve pane input/);
+    }],
+  });
+});
+
+feature("Codex native /status and account switching", () => {
+  component("/status returns the account plus rolling limits from Codex itself", {
+    given: ["a Codex pane with a parsed native status", () => {
+      const path = writeCodexYaml();
+      const driver = vi.fn(async () => ({ ok: true, status: nativeStatus() }));
+      return { ...setup({ agentsYamlPath: path, codexStatusDriver: driver }), path, driver, msg: mockMsg({ content: "/status" }) };
+    }],
+    when: ["onMessage is called", async ({ onMessage, msg, path }) => {
+      await onMessage(msg);
+      unlinkSync(path);
+    }],
+    then: ["Discord sees account, profile and both reset windows", (_, { msg, driver }) => {
+      expect(driver).toHaveBeenCalledTimes(1);
+      const reply = msg.reply.mock.calls[0][0];
+      expect(reply).toContain("one@example.com (Pro)");
+      expect(reply).toContain("Codex-profil **1**");
+      expect(reply).toContain("82% kvar");
+      expect(reply).toContain("18 Jul");
+    }],
+  });
+
+  component("first bare /switch gives one scoped login command without killing the pane", {
+    given: ["profile 2 has not been authenticated", () => {
+      const root = join(tmpdir(), `amux-handler-profile-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      const path = writeCodexYaml();
+      process.env.AMUX_CODEX_PROFILE_2_HOME = join(root, "2");
+      return { ...setup({ agentsYamlPath: path }), root, path, msg: mockMsg({ content: "/switch" }) };
+    }],
+    when: ["onMessage is called", async ({ onMessage, msg, path }) => {
+      await onMessage(msg);
+      unlinkSync(path);
+    }],
+    then: ["one-time device login is shown and restart is untouched", (_, { msg, agent, root }) => {
+      const reply = msg.reply.mock.calls[0][0];
+      expect(reply).toContain("engångsinloggning");
+      expect(reply).toContain("CODEX_HOME=");
+      expect(reply).toContain("codex login --device-auth");
+      expect(agent.restartCodex).not.toHaveBeenCalled();
+      delete process.env.AMUX_CODEX_PROFILE_2_HOME;
+      rmSync(root, { recursive: true, force: true });
+    }],
+  });
+
+  component("bare /switch toggles an authenticated pane to profile 2 and verifies account", {
+    given: ["profile 2 is authenticated", () => {
+      const root = join(tmpdir(), `amux-handler-profile-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      const profileHome = join(root, "2");
+      mkdirSync(profileHome, { recursive: true });
+      writeFileSync(join(profileHome, "auth.json"), JSON.stringify({ tokens: { access_token: "test" } }));
+      process.env.AMUX_CODEX_PROFILE_2_HOME = profileHome;
+      const path = writeCodexYaml();
+      const driver = vi.fn()
+        .mockResolvedValueOnce({ ok: true, status: nativeStatus({ account: "one@example.com (Pro)" }) })
+        .mockResolvedValueOnce({ ok: true, status: nativeStatus({ account: "two@example.com (Pro)" }) });
+      const s = setup({ agentsYamlPath: path, codexStatusDriver: driver });
+      s.agent.isBusy.mockResolvedValue(false);
+      s.agent.capturePane.mockResolvedValue("\n› Explain this codebase\n");
+      s.agent.getContextPercent.mockReturnValue({
+        percent: 42, tokens: 84000, model: "gpt-5.6-sol", effort: "xhigh",
+      });
+      return { ...s, root, path, driver, msg: mockMsg({ content: "/switch" }) };
+    }],
+    when: ["onMessage is called", async ({ onMessage, msg, path }) => {
+      await onMessage(msg);
+      unlinkSync(path);
+    }],
+    then: ["only this pane restarts and profile 2 status is returned", (_, { msg, agent, state, root }) => {
+      expect(agent.restartCodex).toHaveBeenCalledTimes(1);
+      expect(agent.restartCodex.mock.calls[0][2].profile.id).toBe("2");
+      expect(state.get("codex_profile_by_pane", {})).toEqual({ "_ai:0": "2" });
+      const reply = msg.reply.mock.calls[0][0];
+      expect(reply).toContain("✅ Konto bytt");
+      expect(reply).toContain("two@example.com (Pro)");
+      expect(reply).toContain("Codex-profil **2**");
+      delete process.env.AMUX_CODEX_PROFILE_2_HOME;
+      rmSync(root, { recursive: true, force: true });
     }],
   });
 });

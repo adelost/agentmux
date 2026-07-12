@@ -11,6 +11,7 @@ import { readFileSync, readdirSync, statSync, existsSync, openSync, fstatSync, r
 import { join } from "path";
 import { tmpdir } from "os";
 import { claudeProjectDir } from "./claude-paths.mjs";
+import { codexSessionDirs } from "./codex-profiles.mjs";
 
 /**
  * Read only the last `maxBytes` of a file and return its complete trailing
@@ -58,7 +59,6 @@ function readTailLines(filePath, maxBytes = 1024 * 1024) {
   }
 }
 
-const CODEX_SESSIONS_DIR = () => join(process.env.HOME, ".codex", "sessions");
 const CLAUDE_DEFAULT_MAX = 200_000;
 
 // Per-model overrides for context window. Claude Code on Opus/Sonnet opts in
@@ -272,7 +272,7 @@ export function resetCodexSessionIndexForTests() {
 
 function codexSessionIndex() {
   if (_codexIndex) return _codexIndex;
-  _codexIndex = findCodexJsonlFiles(CODEX_SESSIONS_DIR())
+  _codexIndex = codexSessionDirs().flatMap((dir) => findCodexJsonlFiles(dir, 0, []))
     .map((path) => ({ path, mtime: statSync(path).mtimeMs }))
     .sort((a, b) => b.mtime - a.mtime)
     .map(({ path, mtime }) => ({ path, mtime, cwd: readCodexMeta(path)?.cwd || null }));

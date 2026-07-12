@@ -130,6 +130,39 @@ feature("extractFromCodexJsonl: single-turn rollout", () => {
   });
 });
 
+feature("Codex profile session roots", () => {
+  unit("profile 2 rollout remains visible after an account switch", {
+    given: ["a rollout under the isolated secondary CODEX_HOME", () => {
+      const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-codex-profile-test-"));
+      const originalHome = process.env.HOME;
+      process.env.HOME = fakeHome;
+      const paneDir = join(fakeHome, "work", ".agents", "11");
+      const day = join(fakeHome, ".config", "agent", "codex-profiles", "2", "sessions", "2026", "07", "12");
+      mkdirSync(day, { recursive: true });
+      const file = join(day, "rollout-profile-2.jsonl");
+      writeFileSync(file, [
+        { type: "session_meta", payload: { cwd: paneDir } },
+        { type: "event_msg", payload: { type: "task_started", turn_id: "P2" } },
+        { type: "event_msg", payload: { type: "user_message", message: "profile two prompt" } },
+        { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "profile two reply" }] } },
+        { type: "event_msg", payload: { type: "task_complete", turn_id: "P2" } },
+      ].map((event) => JSON.stringify(event)).join("\n") + "\n");
+      return {
+        paneDir,
+        cleanup: () => {
+          process.env.HOME = originalHome;
+          rmSync(fakeHome, { recursive: true, force: true });
+        },
+      };
+    }],
+    when: ["reading the pane", ({ paneDir }) => extractFromCodexJsonl(paneDir, "profile two prompt")],
+    then: ["the secondary reply is found", (result, { cleanup }) => {
+      expect(result.raw).toContain("profile two reply");
+      cleanup();
+    }],
+  });
+});
+
 feature("extractFromCodexJsonl: prompt-matching across multiple turns", () => {
   unit("returns turn A when A's prompt text is given, even though B is newer", {
     given: ["two-turn rollout", () => setupFakeCodex(twoTurnRollout("/fake/workspace"))],

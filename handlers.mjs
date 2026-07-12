@@ -10,10 +10,23 @@ import { formatCatchupPreview } from "./core/catchup-format.mjs";
 import { shortModelName } from "./core/context.mjs";
 import { loadConfig } from "./cli/config.mjs";
 import { readParkState, unparkPane } from "./core/pane-park.mjs";
-import { driveCodexModelPicker } from "./core/codex-model-picker.mjs";
+import { driveCodexStatus, formatCodexStatus } from "./core/codex-status.mjs";
+import { prepareCodexIdle } from "./core/codex-tui.mjs";
+import {
+  clearCodexModelOverride,
+  codexLoginCommand,
+  codexModelOverride,
+  codexProfileCatalog,
+  isCodexProfileAuthenticated,
+  prepareCodexProfile,
+  resolveCodexProfile,
+  selectedCodexProfile,
+  setCodexModelOverride,
+  setCodexProfile,
+} from "./core/codex-profiles.mjs";
 import { sendPromptVerified, sendSlashVerified } from "./core/delivery.mjs";
 import {
-  MODEL_RECOVERY_STATE_KEY, MODEL_RECOVERY_SETTLE_MS, MODEL_RECOVERY_TIMEOUT_MS, resumeBrief,
+  MODEL_RECOVERY_STATE_KEY, MODEL_RECOVERY_SETTLE_MS, resumeBrief,
 } from "./core/model-watch.mjs";
 
 /**
@@ -58,7 +71,8 @@ const HELP_TEXT = [
   "`/help` — show this message",
   "`/peek` — last response from agent",
   "`/raw` — last 50 lines of tmux pane (raw)",
-  "`/status` — current agent, pane, model, context%",
+  "`/status` — native Codex account, model, context and usage limits",
+  "`/switch` — toggle this Codex pane between account profiles 1 and 2",
   "`/model` — show current model; `/model <name>` — switch (fable/opus/sonnet/haiku)",
   "`/restore` — restore the model that was active before the latest downgrade",
   "`/dismiss` — dismiss blocking prompt (survey etc.)",
@@ -150,7 +164,7 @@ export function renderCatchupLine(countResult) {
  * Create message handler with all dependencies injected.
  * @param {{ agent, attachments, tts, getMapping, overrides, channelMap, reloadConfig, discordChannel?, agentmuxYamlPath?, agentsYamlPath? }} deps
  */
-export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentmuxYamlPath, agentsYamlPath, recorder, pollInterval = 2000, loopGuardConfig = readLoopGuardConfig() }) {
+export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentmuxYamlPath, agentsYamlPath, recorder, pollInterval = 2000, loopGuardConfig = readLoopGuardConfig(), codexStatusDriver = driveCodexStatus }) {
   const noopRecorder = { save: () => {}, enabled: false };
   const rec = recorder || noopRecorder;
   const sendLocks = new Map();
@@ -165,6 +179,45 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     });
     sendLocks.set(queueKey, tracked);
     return tracked;
+  }
+
+  function paneCommand(mapping, pane) {
+    try { return loadConfig(agentsYamlPath)?.[mapping.name]?.panes?.[pane]?.cmd || ""; }
+    catch { return ""; }
+  }
+
+  const isCodexPane = (mapping, pane) => /codex/i.test(paneCommand(mapping, pane));
+
+  async function nativeCodexStatus(mapping, pane) {
+    return codexStatusDriver({
+      agent,
+      name: mapping.name,
+      pane,
+      log: (message) => console.log(`[${ts()}] ${message}`),
+    });
+  }
+
+  function rememberNativeModel(mapping, pane, status) {
+    if (!status?.model?.id) return;
+    setCodexModelOverride(state, mapping.name, pane, status.model.id, status.model.effort);
+  }
+
+  async function rollbackCodexLaunch(mapping, pane, { profile, model }) {
+    // A local human can type while the bridge verifies native status. Never
+    // destroy that new draft merely to make rollback automatic; leave the
+    // pane on the attempted launch and report the blocked rollback instead.
+    const idle = await prepareCodexIdle({ agent, name: mapping.name, pane });
+    if (!idle.ok) {
+      throw new Error(`blocked to preserve pane input (${idle.stage}: ${idle.error})`);
+    }
+    setCodexProfile(state, mapping.name, pane, profile.id);
+    if (model?.model) setCodexModelOverride(state, mapping.name, pane, model.model, model.effort);
+    else clearCodexModelOverride(state, mapping.name, pane);
+    await agent.restartCodex(mapping.name, pane, {
+      profile,
+      model: model?.model || null,
+      effort: model?.effort || null,
+    });
   }
 
   function startFollow(msg, mapping, pane) {
@@ -285,6 +338,31 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     "/status": async (msg, mapping, pane) => {
       const override = overrides.has(msg.channelId) ? " (override)" : "";
+      if (isCodexPane(mapping, pane)) {
+        const profile = selectedCodexProfile(state, mapping.name, pane);
+        const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
+          nativeCodexStatus(mapping, pane));
+        if (result.ok) {
+          rememberNativeModel(mapping, pane, result.status);
+          await msg.reply(formatCodexStatus(result.status, {
+            agentName: mapping.name,
+            pane,
+            profile: profile.id,
+          }));
+          return;
+        }
+        // Preserve useful local context when Codex is mid-redraw or has a
+        // human draft.  Limits/account are deliberately omitted rather than
+        // fabricated from amux counters.
+        const context = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
+        const model = shortModelName(context?.model) || context?.model || "unknown";
+        const contextLabel = context
+          ? `${context.percent}%${context.tokens != null ? ` (${Math.round(context.tokens / 1000)}k)` : ""}`
+          : "unknown";
+        await msg.reply(`⚠️ Native Codex-status kunde inte läsas (${result.stage}: ${result.error}).\n` +
+          `**${mapping.name}** pane ${pane}${override} · profil ${profile.id} · model: ${model} · context: ${contextLabel}`);
+        return;
+      }
       const context = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
       const ctxStr = context
         ? `${context.percent}%${context.tokens != null ? ` (${Math.round(context.tokens / 1000)}k)` : ""}`
@@ -294,62 +372,151 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       await msg.reply(`**${mapping.name}** pane ${pane}${override}${modelPart} · context: ${ctxStr}`);
     },
 
-    // Bare /model replies with the pane's current model (read from the
-    // statusline/jsonl — no pane interaction). With an argument it forwards
-    // "/model <name>" into the pane so Claude Code itself switches; the
-    // change shows on the NEXT assistant turn's footer (jsonl records the
-    // model per turn, so instant verification here would read the OLD one).
+    "/switch": async (msg, mapping, pane, args) => {
+      if (!isCodexPane(mapping, pane)) {
+        await msg.reply(`**${mapping.name}:${pane}** är inte en Codex-panel; kontoprofiler gäller bara Codex.`);
+        return;
+      }
+      const catalog = codexProfileCatalog();
+      const current = selectedCodexProfile(state, mapping.name, pane, catalog);
+      const target = resolveCodexProfile(args, current, catalog);
+      if (!target) {
+        await msg.reply("okänd Codex-profil — använd `//switch`, `//switch 1` eller `//switch 2`");
+        return;
+      }
+
+      prepareCodexProfile(target, catalog[0]);
+      if (!isCodexProfileAuthenticated(target)) {
+        await msg.reply(`Codex-profil **${target.id}** behöver en engångsinloggning. Kör i WSL:\n` +
+          `\`${codexLoginCommand(target)}\`\n` +
+          "När den är klar fungerar bara `//switch` fram och tillbaka utan logout.");
+        return;
+      }
+
+      const result = await withPaneSendLock(`${mapping.name}:${pane}`, async () => {
+        if (target.id === current.id) {
+          const status = await nativeCodexStatus(mapping, pane);
+          return { kind: "same", status };
+        }
+
+        const idle = await prepareCodexIdle({ agent, name: mapping.name, pane });
+        if (!idle.ok) return { kind: "failed", error: `${idle.stage}: ${idle.error}` };
+
+        const previousOverride = codexModelOverride(state, mapping.name, pane);
+        const beforeStatus = await nativeCodexStatus(mapping, pane);
+        const context = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
+        const effective = beforeStatus.ok && beforeStatus.status.model?.id
+          ? { model: beforeStatus.status.model.id, effort: beforeStatus.status.model.effort }
+          : previousOverride || (context?.model ? { model: context.model, effort: context.effort ?? null } : null);
+
+        setCodexProfile(state, mapping.name, pane, target.id);
+        if (effective?.model) setCodexModelOverride(state, mapping.name, pane, effective.model, effective.effort);
+        try {
+          await agent.restartCodex(mapping.name, pane, {
+            profile: target,
+            model: effective?.model || null,
+            effort: effective?.effort || null,
+          });
+          const verified = await nativeCodexStatus(mapping, pane);
+          if (!verified.ok) throw new Error(`native status: ${verified.stage}: ${verified.error}`);
+          if (effective?.model && verified.status.model?.id !== effective.model) {
+            throw new Error(`expected ${effective.model}, status shows ${verified.status.model?.id || "unknown"}`);
+          }
+          rememberNativeModel(mapping, pane, verified.status);
+          return { kind: "switched", status: verified };
+        } catch (err) {
+          let rollbackError = null;
+          try {
+            await rollbackCodexLaunch(mapping, pane, { profile: current, model: previousOverride || effective });
+          } catch (rollback) {
+            rollbackError = rollback.message;
+          }
+          return { kind: "failed", error: err.message, rollbackError };
+        }
+      });
+
+      if (result.kind === "failed") {
+        await msg.reply(`⚠️ Kontobytet avbröts: ${result.error}.` +
+          (result.rollbackError ? ` Återställningen misslyckades också: ${result.rollbackError}` : " Föregående profil återställdes."));
+        return;
+      }
+      if (!result.status.ok) {
+        await msg.reply(`Profil **${current.id}** är redan aktiv, men native status kunde inte läsas (${result.status.stage}).`);
+        return;
+      }
+      await msg.reply((result.kind === "switched" ? "✅ Konto bytt.\n" : "") +
+        formatCodexStatus(result.status.status, {
+          agentName: mapping.name,
+          pane,
+          profile: result.kind === "switched" ? target.id : current.id,
+        }));
+    },
+
+    // Bare /model reads the pane's current model. Claude receives its native
+    // slash command; Codex is restarted+resumed with process-local overrides
+    // and then verified against native /status (see the global-config bug
+    // rationale below).
     "/model": async (msg, mapping, pane, args) => {
       const name = (args || "").trim();
-      // Codex's /model is picker-only: forwarded "/model <name>" text is
-      // NOT consumed as a command, it lands in the conversation as a chat
-      // message and switches nothing (verified live on a codex pane,
-      // 2026-07-10). Route codex panes to the procedure that works.
-      let paneCmd = "";
-      try {
-        paneCmd = loadConfig(agentsYamlPath)?.[mapping.name]?.panes?.[pane]?.cmd || "";
-      } catch { /* unknown pane cmd: fall through to the claude path */ }
-      const codexPicker = /codex/i.test(paneCmd)
-        ? `attach (\`amux ${mapping.name}\`, pane ${pane}), type \`/model\`, Enter, pick model + effort in the picker`
-        : null;
+      const codexPane = isCodexPane(mapping, pane);
       if (!name) {
         const ctx = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
         const current = shortModelName(ctx?.model) || ctx?.model;
-        const switchHint = codexPicker
-          ? `Switch with \`//model <name> [low|medium|high|xhigh|max]\` (bridge drives the picker), or manually: ${codexPicker}`
+        const switchHint = codexPane
+          ? "Switch with `//model <name> [low|medium|high|xhigh|max]` — pane-local restart; the global Codex default is untouched"
           : `Switch with \`//model <name>\` (e.g. fable, opus, sonnet, haiku)`;
         await msg.reply(current
           ? `**${mapping.name}** pane ${pane} · model: ${current}\n${switchHint}`
           : "model unknown (no jsonl/statusline data yet)");
         return;
       }
-      if (codexPicker) {
-        // Codex has no text form of /model, so the bridge drives the TUI
-        // picker itself (typed digits, capture-verified per stage). The
-        // manual procedure stays as the fallback when the drive fails.
-        const spec = name.match(/^([a-z0-9._-]+)(?:\s+(minimal|low|medium|high|xhigh|max))?$/i);
+      if (codexPane) {
+        // Restart+resume with CLI overrides instead of driving /model. Codex
+        // persists TUI selections to CODEX_HOME/config.toml; that old path
+        // silently changed every pane. -m/-c apply only to this process and
+        // resume the same session, making the Discord command genuinely local.
+        const spec = name.match(/^([a-z0-9._-]+)(?:\s+(minimal|low|medium|high|xhigh|max|ultra))?$/i);
         if (!spec) {
-          await msg.reply(`invalid codex model spec: \`${name}\` — expected \`<model> [low|medium|high|xhigh|max]\``);
+          await msg.reply(`invalid codex model spec: \`${name}\` — expected \`<model> [minimal|low|medium|high|xhigh|max|ultra]\``);
           return;
         }
         const [, targetModel, targetEffort] = spec;
-        const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
-          driveCodexModelPicker({
-            agent,
-            name: mapping.name,
-            pane,
-            model: targetModel,
-            effort: targetEffort ? targetEffort.toLowerCase() : null,
-            log: (m) => console.log(`[${ts()}] ${m}`),
-          }));
+        const result = await withPaneSendLock(`${mapping.name}:${pane}`, async () => {
+          const idle = await prepareCodexIdle({ agent, name: mapping.name, pane });
+          if (!idle.ok) return { ok: false, error: `${idle.stage}: ${idle.error}` };
+
+          const context = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
+          const previous = codexModelOverride(state, mapping.name, pane)
+            || (context?.model ? { model: context.model, effort: context.effort ?? null } : null);
+          const effort = targetEffort?.toLowerCase() || previous?.effort || null;
+          const profile = selectedCodexProfile(state, mapping.name, pane);
+          setCodexModelOverride(state, mapping.name, pane, targetModel, effort);
+
+          try {
+            await agent.restartCodex(mapping.name, pane, { profile, model: targetModel, effort });
+            const verified = await nativeCodexStatus(mapping, pane);
+            if (!verified.ok) throw new Error(`native status: ${verified.stage}: ${verified.error}`);
+            const actual = verified.status.model;
+            if (actual?.id !== targetModel || (effort && actual?.effort !== effort)) {
+              throw new Error(`expected ${targetModel}${effort ? ` ${effort}` : ""}, status shows ${actual?.id || "unknown"}${actual?.effort ? ` ${actual.effort}` : ""}`);
+            }
+            rememberNativeModel(mapping, pane, verified.status);
+            return { ok: true, model: actual.id, effort: actual.effort };
+          } catch (err) {
+            let rollbackError = null;
+            try { await rollbackCodexLaunch(mapping, pane, { profile, model: previous }); }
+            catch (rollback) { rollbackError = rollback.message; }
+            return { ok: false, error: err.message, rollbackError };
+          }
+        });
         if (result.ok) {
           if (readParkState(mapping.name, pane)) {
             unparkPane({ session: mapping.name, pane, detail: `explicit model switch: ${result.model} ${result.effort || ""}`.trim() });
           }
-          await msg.reply(`✅ model changed to ${result.model}${result.effort ? ` ${result.effort}` : ""}`);
+          await msg.reply(`✅ model changed to ${result.model}${result.effort ? ` ${result.effort}` : ""} — bara ${mapping.name}:${pane}; global default orörd`);
         } else {
-          const avail = result.available ? `\navailable: ${result.available.join(", ")}` : "";
-          await msg.reply(`⚠️ picker drive failed (${result.stage}): ${result.error}${avail}\nManual fallback: ${codexPicker}.`);
+          await msg.reply(`⚠️ modelbyte avbrutet: ${result.error}.` +
+            (result.rollbackError ? ` Återställningen misslyckades också: ${result.rollbackError}` : " Föregående modell återställdes."));
         }
         return;
       }
@@ -396,17 +563,32 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         await msg.reply(`🅿 ${key} blev aktiv under väntan och förblir parkerad. Avbryt först och kör \`/restore\` igen.`);
         return;
       }
-      const result = await withPaneSendLock(key, () => driveCodexModelPicker({
-        agent,
-        name: mapping.name,
-        pane,
-        model: target.targetModel,
-        effort: target.targetEffort || null,
-        timeoutMs: MODEL_RECOVERY_TIMEOUT_MS,
-        log: (m) => console.log(`[${ts()}] ${m}`),
-      }));
+      const result = await withPaneSendLock(key, async () => {
+        const profile = selectedCodexProfile(state, mapping.name, pane);
+        const previous = codexModelOverride(state, mapping.name, pane);
+        setCodexModelOverride(state, mapping.name, pane, target.targetModel, target.targetEffort || null);
+        try {
+          await agent.restartCodex(mapping.name, pane, {
+            profile,
+            model: target.targetModel,
+            effort: target.targetEffort || null,
+          });
+          const verified = await nativeCodexStatus(mapping, pane);
+          if (!verified.ok) throw new Error(`${verified.stage}: ${verified.error}`);
+          const actual = verified.status.model;
+          if (actual?.id !== target.targetModel || (target.targetEffort && actual?.effort !== target.targetEffort)) {
+            throw new Error(`status shows ${actual?.id || "unknown"}${actual?.effort ? ` ${actual.effort}` : ""}`);
+          }
+          rememberNativeModel(mapping, pane, verified.status);
+          return { ok: true, model: actual.id, effort: actual.effort };
+        } catch (err) {
+          try { await rollbackCodexLaunch(mapping, pane, { profile, model: previous }); }
+          catch (rollback) { return { ok: false, error: `${err.message}; rollback: ${rollback.message}` }; }
+          return { ok: false, error: err.message };
+        }
+      });
       if (!result.ok) {
-        await msg.reply(`🅿 Återställning misslyckades (${result.stage}: ${result.error}). ${key} förblir parkerad.`);
+        await msg.reply(`🅿 Återställning misslyckades (${result.error}). ${key} förblir parkerad.`);
         return;
       }
       const restored = `${result.model}${result.effort ? ` ${result.effort}` : ""}`;

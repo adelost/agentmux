@@ -16,9 +16,35 @@ import { findBlockingPrompt } from "./core/dismiss.mjs";
 import { claudeProjectDir, classifyHistoryRead } from "./core/claude-paths.mjs";
 import { appendEvent } from "./core/events.mjs";
 import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
+import { codexComposerText, isCodexTranscriptView } from "./core/codex-tui.mjs";
+import {
+  codexModelOverride,
+  codexProfileCatalog,
+  prepareCodexProfile,
+  selectedCodexProfile,
+  setCodexModelOverride,
+} from "./core/codex-profiles.mjs";
 
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
 const CODEX_FLAGS = "--dangerously-bypass-approvals-and-sandbox";
+
+const shellQuote = (value) => `'${esc(String(value))}'`;
+
+/** Build the exact pane command; exported so injection boundaries are gated. */
+export function buildCodexLaunchCommand({ profileHome, model = null, effort = null } = {}) {
+  if (!profileHome) throw new Error("Codex profile home is required");
+  if (model && !/^[a-z0-9._-]+$/i.test(model)) throw new Error(`invalid Codex model: ${model}`);
+  if (effort && !/^(minimal|low|medium|high|xhigh|max|ultra)$/i.test(effort)) {
+    throw new Error(`invalid Codex reasoning effort: ${effort}`);
+  }
+  const overrideFlags = [
+    model ? `-m ${shellQuote(model)}` : "",
+    effort ? `-c ${shellQuote(`model_reasoning_effort="${effort.toLowerCase()}"`)}` : "",
+  ].filter(Boolean).join(" ");
+  const flags = [CODEX_FLAGS, overrideFlags].filter(Boolean).join(" ");
+  const env = `CODEX_HOME=${shellQuote(profileHome)}`;
+  return `${env} codex resume --last ${flags} 2>/dev/null || ${env} codex ${flags}`;
+}
 
 // --- Session isolation ---
 
@@ -520,7 +546,7 @@ function ensureGitignored(rootDir, entry) {
 
 // --- Agent factory ---
 
-export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxExec }) {
+export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxExec, state = null }) {
   const wait = delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
   // All tmux syntax lives in the adapter (core/tmux.mjs). agent.mjs speaks
   // intent-level primitives; escaping is the adapter's tested concern.
@@ -853,18 +879,79 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await wait(2000);
   }
 
-  async function startCodex(name, target, rootDir, pane = 0) {
+  async function startCodex(name, target, rootDir, pane = 0, launch = null) {
     if (await isPaneDead(target)) await respawnPane(target);
     if (await isAlreadyRunning(target)) return;
 
     const dir = paneDir(rootDir, pane);
+    const catalog = codexProfileCatalog();
+    const profile = launch?.profile || selectedCodexProfile(state, name, pane, catalog);
+    prepareCodexProfile(profile, catalog[0]);
+
+    let override = launch?.model
+      ? { model: launch.model, effort: launch.effort ?? null }
+      : codexModelOverride(state, name, pane);
+    // First launch after upgrading agentmux has no pane-local state yet.  Pin
+    // the last effective turn before starting so a global config value (the
+    // historical /model bug) cannot silently overwrite every pane on reboot.
+    if (!override && state) {
+      const previous = getContextPercentByDialect(dir, "codex");
+      if (previous?.model) {
+        override = { model: previous.model, effort: previous.effort ?? null };
+        try { setCodexModelOverride(state, name, pane, override.model, override.effort); }
+        catch (err) { console.warn(`startCodex: could not pin ${name}:${pane} model: ${err.message}`); }
+      }
+    }
     // Try `codex resume --last` first to pick up the most recent session
     // for this pane's cwd; fall back to fresh `codex` when no prior
-    // session exists (first launch). Both inherit cwd from the cd above
-    // so codex jsonl lands in .agents/N/ — same isolation as claude.
-    const cmd = `codex resume --last ${CODEX_FLAGS} 2>/dev/null || codex ${CODEX_FLAGS}`;
+    // session exists (first launch). CODEX_HOME selects the ChatGPT account;
+    // -m/-c are process-local launch overrides, so pane A can use Max without
+    // mutating pane B's config.toml default.
+    const cmd = buildCodexLaunchCommand({
+      profileHome: profile.home,
+      model: override?.model || null,
+      effort: override?.effort || null,
+    });
     await t.runShell(target, `cd ${esc(dir)} && ${cmd}`);
     await wait(2000);
+  }
+
+  /**
+   * Restart one idle Codex pane under an explicit account/model selection.
+   * The caller performs the draft gate and native /status verification; this
+   * method owns only the process boundary and never touches another pane.
+   */
+  async function restartCodex(agentName, pane, launch) {
+    const config = agentConfig(agentName);
+    const paneCmd = config.panes?.[pane]?.cmd || "";
+    if (!isCodexCmd(paneCmd)) throw new Error(`${agentName}:${pane} is not a Codex pane`);
+    if (await isBusy(agentName, pane)) throw new Error(`${agentName}:${pane} is still working`);
+
+    const target = `${agentName}:.${pane}`;
+    const dir = paneDir(config.dir, pane);
+    await t.respawnPane(target, { kill: true, cwd: dir });
+
+    // Wait for the replacement shell before sending the launch command.
+    const shellDeadline = Date.now() + 5000;
+    while (Date.now() < shellDeadline) {
+      const command = await t.currentCommand(target).catch(() => "");
+      if (isShellProc(command)) break;
+      await wait(100);
+    }
+    await startCodex(agentName, target, config.dir, pane, launch);
+
+    const processDeadline = Date.now() + 12_000;
+    while (Date.now() < processDeadline) {
+      const command = await t.currentCommand(target).catch(() => "");
+      if (/^(codex|node)$/.test(command)) {
+        if (!(await waitForCodexUiReady(target, agentName, pane))) {
+          throw new Error(`Codex process started but its composer never became ready in ${agentName}:${pane}`);
+        }
+        return { ok: true, profile: launch.profile.id, model: launch.model || null, effort: launch.effort || null };
+      }
+      await wait(200);
+    }
+    throw new Error(`Codex did not start in ${agentName}:${pane}`);
   }
 
   async function isPaneDead(target) {
@@ -965,6 +1052,45 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       if (dismissed) return;
       if (!(await isBusy(agentName, pane))) return;
     }
+  }
+
+  /**
+   * Codex resume can replay a large transcript for several seconds while its
+   * process is already `node` and the old jsonl correctly says idle.  Process
+   * state alone is therefore not readiness. Poll for a real composer; when a
+   * completed turn omits it, one spaced Escape asks Codex to reveal its exact
+   * neutral-state receipt. Never double-Escape after the receipt appears (the
+   * second would edit the previous message).
+   */
+  async function waitForCodexUiReady(target, agentName, pane, timeoutMs = 20_000) {
+    const deadline = Date.now() + timeoutMs;
+    let nextRevealAt = Date.now() + 2500;
+    let reveals = 0;
+    while (Date.now() < deadline) {
+      const content = await t.captureScreen(target).catch(() => "");
+      if (isCodexTranscriptView(content)) {
+        await t.sendLiteral(target, "q").catch(() => {});
+        await wait(300);
+        continue;
+      }
+      // A neutral Escape receipt can precede the actual input widget during
+      // resume. Only the real composer proves that typed commands have a safe
+      // destination.
+      // A restart cannot legitimately preserve an unsent draft (the caller
+      // proved the old composer empty before respawn). During transcript
+      // replay, however, an old human prompt can briefly occupy the last ›
+      // row above the footer and look like a draft. Require Codex's exact
+      // empty/placeholder composer so replayed history cannot end the wait.
+      if (codexComposerText(content) === "") return true;
+      if (Date.now() >= nextRevealAt && reveals < 3) {
+        await t.sendEscape(target).catch(() => {});
+        reveals++;
+        nextRevealAt = Date.now() + 2500;
+      }
+      await wait(300);
+    }
+    console.warn(`waitForCodexUiReady(${agentName}:${pane}) timed out after ${timeoutMs}ms`);
+    return false;
   }
 
   // --- Dismiss ---
@@ -1177,6 +1303,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     // prompt and response across multiple lines, confusing extract which
     // treats continuation lines as new text segments.
     const stdout = await t.capture(`${agentName}:.${pane}`, { lines });
+    return stripAnsi(stdout).trimEnd() || "(empty)";
+  }
+
+  async function captureScreen(agentName, pane) {
+    const stdout = await t.captureScreen(`${agentName}:.${pane}`);
     return stripAnsi(stdout).trimEnd() || "(empty)";
   }
 
@@ -1424,7 +1555,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // a resume-prompt on cold start). Resume-hint is skipped because
       // codex auto-resumes via `codex resume --last` in startCodex.
       await startCodex(agentName, target, config.dir, pane);
-      await waitForClaudeReady(target, agentName, pane);
+      await waitForCodexUiReady(target, agentName, pane);
     }
   }
 
@@ -1526,22 +1657,25 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await t.sendEscape(`${agentName}:.${pane}`);
   }
 
-  /** Bare Enter into a pane: rescue path for palette-eaten submissions. */
+  async function clearInputLine(agentName, pane) {
+    await t.clearInputLine(`${agentName}:.${pane}`);
+  }
+
+  /** Bare Enter into a pane: verified slash-command submission primitive. */
   async function sendEnter(agentName, pane) {
     await t.sendEnter(`${agentName}:.${pane}`);
   }
 
   /**
    * Literal keystrokes WITHOUT a trailing Enter. TUI-driving primitive for
-   * flows that interleave typing with capture-verify (codex model picker:
-   * digits select instantly, an unverified Enter confirms the wrong row).
+   * flows that interleave typing with capture verification (/status).
    */
   async function typeLiteral(agentName, text, pane) {
     await t.sendLiteral(`${agentName}:.${pane}`, text);
   }
 
   /**
-   * Temporarily give a TUI enough rows to render complete picker menus.
+   * Temporarily give a TUI enough rows to render a complete status surface.
    * Returns true only when this call changed tmux state; restorePaneZoom uses
    * that receipt so an already-zoomed human layout is never toggled away.
    */
@@ -1558,6 +1692,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (await t.paneZoomed(target)) await t.togglePaneZoom(target);
   }
 
+  async function paneHistorySize(agentName, pane) {
+    const value = await t.display(`${agentName}:.${pane}`, "#{history_size}");
+    const size = Number(value);
+    return Number.isFinite(size) ? size : null;
+  }
+
   async function checkAgent(agentName) {
     if (!(await hasSession(agentName))) throw new Error(`No session: ${agentName}`);
     if (!(await isAlreadyRunning(`${agentName}:.0`))) throw new Error(`Claude not running in ${agentName}`);
@@ -1566,9 +1706,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   return {
     ensureReady, sendAndWait, sendOnly,
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
-    capturePane, sendEscape, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom,
+    capturePane, captureScreen, sendEscape, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
     dismissBlockingPrompt, waitForPromptEcho,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession,
-    sanitizeTmuxGlobalEnv,
+    sanitizeTmuxGlobalEnv, restartCodex,
   };
 }

@@ -48,7 +48,11 @@ import {
   decideRecovery, resumeBrief, recoveryMessage, interruptUntilIdle,
   MODEL_RECOVERY_STATE_KEY, MODEL_RECOVERY_SETTLE_MS, MODEL_RECOVERY_TIMEOUT_MS,
 } from "../core/model-watch.mjs";
-import { driveCodexModelPicker } from "../core/codex-model-picker.mjs";
+import { driveCodexStatus } from "../core/codex-status.mjs";
+import {
+  selectedCodexProfile,
+  setCodexModelOverride,
+} from "../core/codex-profiles.mjs";
 import { sendSlashVerified } from "../core/delivery.mjs";
 import { parkPane, unparkPane } from "../core/pane-park.mjs";
 import { appendEvent } from "../core/events.mjs";
@@ -235,8 +239,8 @@ export function createJsonlWatcher({
     };
     state.set(STATE_KEY_RECOVERY, attempts);
 
-    // Let the interrupted TUI settle before opening a modal picker. This also
-    // keeps a late task_complete/status redraw from overwriting picker keys.
+    // Let the interrupted TUI settle before replacing its process. This also
+    // keeps a late task_complete flush from racing the restart boundary.
     await new Promise((resolve) => setTimeout(resolve, MODEL_RECOVERY_SETTLE_MS));
     try {
       if (await agent.isBusy(name, idx)) {
@@ -255,14 +259,27 @@ export function createJsonlWatcher({
     let detail = "";
     try {
       if (/codex/i.test(paneCmd)) {
-        const res = await driveCodexModelPicker({
-          agent, name, pane: idx, model: prev.model, effort: prev.effort || null, log,
-          timeoutMs: MODEL_RECOVERY_TIMEOUT_MS,
+        // TUI /model persists to the account-wide config.toml and historically
+        // upgraded every other pane on reboot. Restart+resume with -m/-c is
+        // process-local, then native /status proves the effective result.
+        const profile = selectedCodexProfile(state, name, idx);
+        setCodexModelOverride(state, name, idx, prev.model, prev.effort || null);
+        await agent.restartCodex(name, idx, {
+          profile,
+          model: prev.model,
+          effort: prev.effort || null,
         });
-        restored = res.ok;
-        detail = res.ok
-          ? `${res.model}${res.effort ? ` ${res.effort}` : ""}`
-          : `${res.stage}: ${res.error}`;
+        const res = await driveCodexStatus({
+          agent, name, pane: idx, log, timeoutMs: MODEL_RECOVERY_TIMEOUT_MS,
+        });
+        const actual = res.ok ? res.status.model : null;
+        restored = Boolean(res.ok && actual?.id === prev.model &&
+          (!prev.effort || actual?.effort === prev.effort));
+        detail = restored
+          ? `${actual.id}${actual.effort ? ` ${actual.effort}` : ""}`
+          : res.ok
+            ? `status shows ${actual?.id || "unknown"}${actual?.effort ? ` ${actual.effort}` : ""}`
+            : `${res.stage}: ${res.error}`;
       } else {
         const sent = await sendSlashVerified(agent, name, idx, `/model ${prev.model}`);
         if (!sent.delivered) {
@@ -382,8 +399,8 @@ export function createJsonlWatcher({
     state.set(STATE_KEY_RECOVERY, recoveryState);
 
     // Recover while the pane is neutral. The old order sent stopBrief first;
-    // that started a new turn, so the codex picker correctly refused the busy
-    // pane and auto-recovery defeated itself. Only brief the downgraded model
+    // that started a new turn, so the Codex recovery correctly refused the
+    // busy pane and defeated itself. Only brief the downgraded model
     // when recovery was skipped or failed.
     const recovery = await attemptModelRecovery({ name, idx, paneName, channelId, prev, config });
     if (!recovery.restored) {

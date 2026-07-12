@@ -36,6 +36,16 @@ feature("tmux adapter: command strings", () => {
       expect(calls[0]).toBe(PREFIX + `send-keys -t 'claw:.1' -l -- 'don'\\''t --help me'`)],
   });
 
+  unit("clearInputLine sends Ctrl-U without submitting", {
+    given: ["adapter", () => fakeTmux()],
+    when: ["clearing the composer", async ({ t, calls }) => {
+      await t.clearInputLine("claw:.1");
+      return calls;
+    }],
+    then: ["uses the terminal clear-line key", (calls) =>
+      expect(calls[0]).toBe(PREFIX + `send-keys -t 'claw:.1' C-u`)],
+  });
+
   unit("runShell wraps the line verbatim (config cmds may hold quotes)", {
     given: ["an adapter", () => fakeTmux()],
     when: ["running a shell line with double quotes", async ({ t, calls }) => {
@@ -76,6 +86,16 @@ feature("tmux adapter: command strings", () => {
     }],
     then: ["no -J flag", (calls) =>
       expect(calls[0]).toBe(PREFIX + `capture-pane -t 'claw:.3' -p -S -10`)],
+  });
+
+  unit("captureScreen excludes scrollback so respawn readiness cannot use stale UI", {
+    given: ["an adapter", () => fakeTmux({ stdout: "screen" })],
+    when: ["capturing the visible screen", async ({ t, calls }) => {
+      await t.captureScreen("ai:.4");
+      return calls;
+    }],
+    then: ["no -S history range is present", (calls) =>
+      expect(calls[0]).toBe(PREFIX + `capture-pane -t 'ai:.4' -J -p`)],
   });
 
   unit("respawnPane composes kill and cwd flags", {

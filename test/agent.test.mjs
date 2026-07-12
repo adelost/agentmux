@@ -1,8 +1,35 @@
-import { feature, component, expect } from "bdd-vitest";
+import { feature, component, unit, expect } from "bdd-vitest";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { paneDir } from "../agent.mjs";
+import { buildCodexLaunchCommand, paneDir } from "../agent.mjs";
+
+feature("Codex pane launch isolation", () => {
+  unit("account home plus model/effort are process-local on resume and fresh fallback", {
+    when: ["building a profile-2 Max launch", () => buildCodexLaunchCommand({
+      profileHome: "/home/test/.config/agent/codex-profiles/2",
+      model: "gpt-5.6-sol",
+      effort: "max",
+    })],
+    then: ["both branches carry the same isolated settings", (command) => {
+      expect(command.match(/CODEX_HOME=/g)).toHaveLength(2);
+      expect(command.match(/gpt-5\.6-sol/g)).toHaveLength(2);
+      expect(command.match(/model_reasoning_effort="max"/g)).toHaveLength(2);
+      expect(command).toContain("codex resume --last");
+      expect(command).toContain("||");
+    }],
+  });
+
+  unit("unsafe model text is rejected before shell construction", {
+    when: ["building with shell syntax", () => {
+      try {
+        buildCodexLaunchCommand({ profileHome: "/home/test/.codex", model: "$(touch /tmp/no)" });
+        return null;
+      } catch (err) { return err; }
+    }],
+    then: ["validation fails", (error) => expect(error?.message).toMatch(/invalid Codex model/)],
+  });
+});
 
 feature("paneDir, session isolation per pane", () => {
   let root;
