@@ -382,6 +382,50 @@ feature("planStartupAudit — restart self-heal (the lsrc:3 loss, 2026-07-10)", 
     then: ["no actions", (p) => { expect(p.actions).toEqual([]); }],
   });
 
+  unit("an oversized turn is capped to its newest items (no restart flood)", {
+    given: ["a completed turn with 30 unposted items, budget 15", () => planStartupAudit({
+      turns: [{
+        isComplete: true,
+        timestamp: "2026-07-10T11:38:00Z",
+        endTimestamp: "2026-07-10T11:44:04Z",
+        items: Array.from({ length: 30 }, (_, i) => ({ id: `sha1:item-${i}`, type: "text", content: `#${i}` })),
+      }],
+      postedItemIds: [],
+      nowMs: NOW,
+      maxAuditItems: 15,
+    })],
+    when: ["planning", (p) => p],
+    then: ["only the newest 15 survive; the older 15 are reported skipped", (p) => {
+      expect(p.actions.length).toBe(1);
+      expect(p.actions[0].turn.items.length).toBe(15);
+      expect(p.actions[0].turn.items[0].id).toBe("sha1:item-15");
+      expect(p.actions[0].turn.items[14].id).toBe("sha1:item-29");
+      expect(p.skippedItems).toBe(15);
+    }],
+  });
+
+  unit("the item budget spans turns, newest-first, posted chronologically", {
+    given: ["two completed turns, 10 unposted items each, budget 15", () => planStartupAudit({
+      turns: [
+        { isComplete: true, timestamp: "2026-07-10T11:30:00Z", endTimestamp: "2026-07-10T11:35:00Z",
+          items: Array.from({ length: 10 }, (_, i) => ({ id: `sha1:old-${i}`, type: "text", content: `old#${i}` })) },
+        { isComplete: true, timestamp: "2026-07-10T11:40:00Z", endTimestamp: "2026-07-10T11:44:00Z",
+          items: Array.from({ length: 10 }, (_, i) => ({ id: `sha1:new-${i}`, type: "text", content: `new#${i}` })) },
+      ],
+      postedItemIds: [],
+      nowMs: NOW,
+      maxAuditItems: 15,
+    })],
+    when: ["planning", (p) => p],
+    then: ["newest turn intact, older turn trimmed, order chronological", (p) => {
+      expect(p.actions.length).toBe(2);
+      expect(p.actions[0].turn.items.length).toBe(5);
+      expect(p.actions[0].turn.items[4].id).toBe("sha1:old-9");
+      expect(p.actions[1].turn.items.length).toBe(10);
+      expect(p.skippedItems).toBe(5);
+    }],
+  });
+
   unit("an audit re-post of an old turn never drags the cursor backwards", {
     given: ["cursor already past the old turn", () => applyPostSuccess(
       { lastPostedMs: Date.parse("2026-07-10T12:06:00Z"), postedItemIds: [], retryUntilMs: null },

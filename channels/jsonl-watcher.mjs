@@ -751,6 +751,9 @@ export function createJsonlWatcher({
           }, action));
           log(`${name}:${idx} → ${channelId} (audit: recovered ${action.postedIds.length} missed item(s) from ${new Date(action.endMs).toISOString()})`);
         }
+        if (audit.skippedItems > 0) {
+          log(`${name}:${idx} audit capped: skipped ${audit.skippedItems} older missed item(s) across ${audit.skippedTurns} turn(s) to avoid a restart flood`);
+        }
       }
 
       const planned = planPaneMirrorStep({

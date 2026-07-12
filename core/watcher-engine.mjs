@@ -181,6 +181,12 @@ export function applyPostSuccess(state = {}, action, opts = {}) {
 }
 
 const DEFAULT_AUDIT_WINDOW_MS = 60 * 60 * 1000;
+// Hard ceiling on how many missed items one pane's startup self-heal may replay
+// to Discord. The audit exists to recover the single final turn a kill -9 lost
+// mid-grace, not to replay a whole downtime's backlog: a bridge that was down
+// 40 min while the pane kept working had 81 unposted items (api:4, 2026-07-12),
+// which flooded the channel on restart. Newest items survive the cap.
+const DEFAULT_MAX_AUDIT_ITEMS = 15;
 
 /**
  * Startup self-heal: the cursor is monotone, so an item that misses its post
@@ -199,13 +205,21 @@ export function planStartupAudit(input = {}) {
     nowMs = Date.now(),
     auditWindowMs = DEFAULT_AUDIT_WINDOW_MS,
     maxPostActions = DEFAULT_MAX_POST_ACTIONS,
+    maxAuditItems = DEFAULT_MAX_AUDIT_ITEMS,
   } = input;
 
   const postedSet = new Set(Array.isArray(postedItemIds) ? postedItemIds : []);
   const actions = [];
+  let itemBudget = Math.max(0, maxAuditItems);
+  let skippedItems = 0;
+  let skippedTurns = 0;
 
-  for (const turn of Array.isArray(turns) ? turns : []) {
-    if (actions.length >= maxPostActions) break;
+  const list = Array.isArray(turns) ? turns : [];
+  // Newest-first: a bounded budget must keep the most recently completed items
+  // (the genuinely lost final turn), not an hour-old backlog after a long
+  // downtime. Actions are reversed back to chronological order before posting.
+  for (let i = list.length - 1; i >= 0; i--) {
+    const turn = list[i];
     if (!turn?.isComplete) continue; // only settled turns; live ones follow the normal path
     const endMs = turnEndMs(turn);
     if (!Number.isFinite(endMs)) continue;
@@ -220,19 +234,35 @@ export function planStartupAudit(input = {}) {
       if (!postedSet.has(key)) { newItems.push(it); newIds.push(key); }
     });
     if (!newItems.length) continue;
+    const alreadyPosted = items.length - newItems.length;
+
+    if (actions.length >= maxPostActions || itemBudget <= 0) {
+      skippedTurns++;
+      skippedItems += newItems.length;
+      continue;
+    }
+    // Keep the newest items of an oversized turn; drop the oldest to fit budget.
+    if (newItems.length > itemBudget) {
+      const drop = newItems.length - itemBudget;
+      newItems.splice(0, drop);
+      newIds.splice(0, drop);
+      skippedItems += drop;
+    }
+    itemBudget -= newItems.length;
 
     actions.push({
       type: "postTurn",
       endMs,
       turnStartMs,
       postedIds: newIds,
-      postedCount: items.length - newItems.length,
+      postedCount: alreadyPosted,
       totalItems: items.length,
       reason: "audit",
       turn: { ...turn, items: newItems },
     });
   }
-  return { actions };
+  actions.reverse();
+  return { actions, skippedItems, skippedTurns };
 }
 
 export function applyPostFailure(state = {}, action, opts = {}) {
