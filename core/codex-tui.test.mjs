@@ -1,6 +1,7 @@
 import { feature, unit, expect } from "bdd-vitest";
 import {
   codexComposerContainsPrompt,
+  codexComposerHasPasteBlock,
   codexComposerText,
   isCodexBacktrackPager,
   isCodexFullscreenPager,
@@ -203,6 +204,19 @@ q to quit   esc/← to edit prev
     when: ["detecting a normal composer draft", () =>
       isCodexBacktrackPager("\n› remember to add a q to quit hint later\n• gpt-5.6-sol xhigh · ~/x\n")],
     then: ["no edit-nav footer means no pager", (value) => expect(value).toBe(false)],
+  });
+
+  unit("a collapsed large paste is recognised so delivery can submit it", {
+    // Live capture 2026-07-12: a >500-char paste renders only as the block, so
+    // the exact-text check never confirms and Enter is withheld forever.
+    when: ["detecting the paste block vs an ordinary draft", () => ({
+      block: codexComposerHasPasteBlock("\n› [Pasted Content 1024 chars]\n  gpt-5.6-sol xhigh · ~/x\n"),
+      blockWithPrefix: codexComposerHasPasteBlock("\n› f[Pasted Content 1415 chars]\n  gpt-5.6-sol xhigh · ~/x\n"),
+      ordinary: codexComposerHasPasteBlock("\n› just a normal typed message\n  gpt-5.6-sol xhigh · ~/x\n"),
+      empty: codexComposerHasPasteBlock("\n›\n"),
+    })],
+    then: ["only a real paste block matches", (r) =>
+      expect(r).toEqual({ block: true, blockWithPrefix: true, ordinary: false, empty: false })],
   });
 });
 

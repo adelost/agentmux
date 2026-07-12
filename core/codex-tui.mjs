@@ -74,6 +74,19 @@ export function isCodexFullscreenPager(text) {
   return isCodexTranscriptView(text) || isCodexBacktrackPager(text);
 }
 
+// A large paste collapses in the Codex composer to a placeholder like
+// "[Pasted Content 1024 chars]" — the literal text is never rendered, so the
+// exact-text draft check can never confirm it and delivery withholds Enter
+// forever (the message sticks unsubmitted; observed live 2026-07-12). The
+// reported char count does NOT equal the prompt length (Codex caps it), so it
+// cannot be validated by size. Delivery clears any foreign draft before it
+// pastes, so a block present right after our paste IS our prompt.
+const CODEX_PASTE_BLOCK = /\[Pasted Content\s+\d+\s*chars?\]/i;
+export function codexComposerHasPasteBlock(text) {
+  const composer = codexComposerText(text);
+  return typeof composer === "string" && CODEX_PASTE_BLOCK.test(composer);
+}
+
 export function codexComposerText(text) {
   if (isCodexTranscriptView(text)) return null;
   const lines = String(text || "").split("\n");

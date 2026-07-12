@@ -23,6 +23,7 @@ import { appendEvent } from "./core/events.mjs";
 import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
 import {
   codexComposerContainsPrompt,
+  codexComposerHasPasteBlock,
   codexComposerText,
   isCodexFullscreenPager,
   prepareCodexIdle,
@@ -1498,9 +1499,15 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   async function waitForExactCodexDraft(agentName, pane, prompt, timeoutMs = 2_500) {
     const deadline = Date.now() + timeoutMs;
+    // A prompt long enough to be pasted collapses to a "[Pasted Content N
+    // chars]" block whose literal text is never visible. Delivery clears any
+    // foreign draft before pasting, so once that block appears it is OUR
+    // prompt; accept it so Enter submits (Codex expands the block on send).
+    const mayCollapse = prompt.length > 500;
     while (true) {
       const snapshot = await captureScreen(agentName, pane).catch(() => "");
       if (codexComposerContainsPrompt(snapshot, prompt)) return true;
+      if (mayCollapse && codexComposerHasPasteBlock(snapshot)) return true;
       if (Date.now() >= deadline) return false;
       await wait(200);
     }
@@ -1888,6 +1895,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   // --- Low-level (exposed for CLI) ---
 
   async function sendEscape(agentName, pane) {
+    // TEMP diagnostic (2026-07-12): a stray Escape was interrupting live
+    // conversations mid-turn ("Conversation interrupted"), yet every send-path
+    // Escape reads as busy-guarded. Log the caller (cheap, sync) so a live send
+    // reveals the true source, then this trace is removed with the root fix.
+    const caller = new Error().stack?.split("\n")[2]?.trim().replace(/^at\s+/, "") || "?";
+    console.warn(`[esc-trace] ${agentName}:${pane} <- ${caller}`);
     await t.sendEscape(`${agentName}:.${pane}`);
   }
 
