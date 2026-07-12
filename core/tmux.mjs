@@ -173,18 +173,6 @@ export function createTmuxAdapter({ socket, exec }) {
     },
 
     async sendEscape(target) {
-      // TEMP diagnostic (2026-07-12): a stray Escape keeps interrupting live
-      // turns ("Conversation interrupted"). Every Escape — wrapper OR direct
-      // t.sendEscape — funnels through here, so log the full caller chain to a
-      // readable file (the bridge's console goes to a tty we cannot grep). One
-      // reproduce pins the true source; removed with the root fix.
-      try {
-        const { appendFileSync } = await import("node:fs");
-        const chain = new Error().stack?.split("\n").slice(2, 6)
-          .map((s) => s.trim().replace(/^at\s+/, "")).join(" <- ") || "?";
-        appendFileSync(`${process.env.HOME}/.agentmux/esc-trace.log`,
-          `${new Date().toISOString()} ESC -> ${target} :: ${chain}\n`);
-      } catch { /* diagnostics must never block the escape */ }
       await sendKeys(target, "Escape");
     },
 
