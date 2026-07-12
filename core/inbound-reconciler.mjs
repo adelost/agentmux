@@ -47,12 +47,20 @@ export function createInboundReconciler({ onMessage, state, seenLimit = DEFAULT_
   function enqueue(msg) {
     if (!msg || msg.isBot) return Promise.resolve({ ignored: "bot" });
     const channelId = msg.channelId;
-    if (!channelId) return Promise.resolve(onMessage(msg)).then(() => ({ delivered: true }));
+    if (!channelId) return Promise.resolve(onMessage(msg)).then((outcome) =>
+      outcome?.delivered === false
+        ? { delivered: false, retryable: true }
+        : { delivered: true });
 
     const previous = queues.get(channelId) || Promise.resolve();
     const next = previous.catch(() => {}).then(async () => {
       if (hasSeen(state, channelId, msg.id)) return { duplicate: true };
-      await onMessage(msg);
+      const outcome = await onMessage(msg);
+      // Handler-level transport failures are explicit outcomes, not handled
+      // messages. Keeping the Discord id unseen lets the periodic REST scan
+      // retry it; v1.21.2 warned the user but still marked these as delivered,
+      // permanently dropping them from reconciliation.
+      if (outcome?.delivered === false) return { delivered: false, retryable: true };
       markSeen(state, channelId, msg.id, seenLimit);
       return { delivered: true };
     });
@@ -81,6 +89,12 @@ export function createInboundReconciler({ onMessage, state, seenLimit = DEFAULT_
       for (const msg of messages) {
         const result = await enqueue(msg);
         if (result?.delivered) replayed++;
+        if (result?.retryable) {
+          // Preserve the scan cursor at the failed message. Earlier successes
+          // are already in the seen-id set, so the next pass is idempotent and
+          // retains channel order without losing later human messages.
+          return { replayed, blocked: true };
+        }
       }
       // newestId may be a bot message. Advancing to it is safe here because
       // this scan inspected the complete preceding range first.

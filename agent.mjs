@@ -10,7 +10,12 @@ import { stripPaneChrome } from "./core/pane-chrome.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
 import { detectDialect, COMPOSER_LINE_RE, foreignComposerText } from "./core/dialects.mjs";
 import { extractFromJsonl, isBusyFromJsonl, isPromptInJsonl } from "./core/jsonl-reader.mjs";
-import { extractFromCodexJsonl, isBusyFromCodexJsonl, isPromptInCodexJsonl } from "./core/codex-jsonl-reader.mjs";
+import {
+  extractFromCodexJsonl,
+  isBusyFromCodexJsonl,
+  isPromptInCodexJsonl,
+  isPromptPrefixInCodexJsonl,
+} from "./core/codex-jsonl-reader.mjs";
 import { getContextPercent as getContextPercentByDialect, getContextFromPane } from "./core/context.mjs";
 import { findBlockingPrompt } from "./core/dismiss.mjs";
 import { claudeProjectDir, classifyHistoryRead } from "./core/claude-paths.mjs";
@@ -19,7 +24,7 @@ import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
 import {
   codexComposerContainsPrompt,
   codexComposerText,
-  isCodexTranscriptView,
+  isCodexFullscreenPager,
   prepareCodexIdle,
   shouldRescueCodexSubmit,
 } from "./core/codex-tui.mjs";
@@ -33,6 +38,13 @@ import {
 
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
 const CODEX_FLAGS = "--dangerously-bypass-approvals-and-sandbox";
+const CODEX_PROMPT_READY_TIMEOUT_MS = 8_000;
+
+function codexDeliveryBlocked(message) {
+  const error = new Error(message);
+  error.code = "AMUX_DELIVERY_BLOCKED";
+  return error;
+}
 
 const shellQuote = (value) => `'${esc(String(value))}'`;
 
@@ -1074,7 +1086,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     let reveals = 0;
     while (Date.now() < deadline) {
       const content = await t.captureScreen(target).catch(() => "");
-      if (isCodexTranscriptView(content)) {
+      if (isCodexFullscreenPager(content)) {
         await t.sendLiteral(target, "q").catch(() => {});
         await wait(300);
         continue;
@@ -1337,14 +1349,18 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const dir = paneDir(agentConfig(agentName).dir, pane);
     const dialect = paneDialectName(agentName, pane);
 
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+    // Always inspect once. A zero-timeout check is used by durable Discord
+    // replay to prove that an earlier attempt eventually reached JSONL before
+    // it considers typing the same message again.
+    while (true) {
       // Try jsonl first (width-independent, reliable)
       let found = null;
       if (dialect === "claude") found = isPromptInJsonl(dir, promptText, { notBeforeMs });
       else if (dialect === "codex") found = isPromptInCodexJsonl(dir, promptText, { notBeforeMs });
       if (found === true) return true;
 
+      if (Date.now() >= deadline) break;
       await wait(200);
     }
     return false;
@@ -1356,12 +1372,16 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
    * Codex accepts typed input only when its real composer is visible. During
    * /status, transcript replay, or startup paint, tmux keystrokes can land in
    * a toast/overlay instead (claw:10 retained only the first "i" of an
-   * Instagram prompt on 2026-07-12). Normal prompts are serialized behind a
-   * running Codex turn instead of being typed into its live TUI; Discord
-   * inbound remains unacknowledged/durable until this function returns.
+   * Instagram prompt on 2026-07-12). A visible, empty composer is safe even
+   * during a running turn: Codex treats the new user prompt as steering and
+   * writes its exact receipt to JSONL. Unknown overlays still fail closed.
    */
   async function waitForCodexPromptReady(agentName, pane) {
-    const deadline = Date.now() + (timeout || 600_000);
+    // Prompt input is transport setup, not agent work. Reusing the generic
+    // ten-minute work timeout here made one stuck composer hold the Discord
+    // channel queue for minutes. Busy Codex panes may accept a steering turn;
+    // the exact JSONL echo remains the delivery proof.
+    const deadline = Date.now() + CODEX_PROMPT_READY_TIMEOUT_MS;
     let lastError = "composer is not ready";
     const driver = { isBusy, capturePane, captureScreen, sendEscape, typeLiteral };
 
@@ -1371,44 +1391,80 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         name: agentName,
         pane,
         sleep: wait,
-        allowBusy: false,
+        allowBusy: true,
         requireVisibleComposer: true,
       });
-      if (ready.ok) return;
+      if (ready.ok) return ready;
       lastError = ready.error || lastError;
       // Never overwrite a real draft. Retrying delivery would only type on
       // top of it, so fail immediately and let the caller warn the human.
       if (/composer is not empty/i.test(lastError)) {
-        throw new Error(`Codex prompt delivery blocked: ${lastError}`);
+        throw codexDeliveryBlocked(`Codex prompt delivery blocked: ${lastError}`);
       }
       await wait(250);
     }
-    throw new Error(`Codex prompt delivery timed out: ${lastError}`);
+    throw codexDeliveryBlocked(`Codex prompt delivery timed out: ${lastError}`);
   }
 
   async function sendPrompt(agentName, prompt, pane) {
     const target = `${agentName}:.${pane}`;
     const notBeforeMs = Date.now();
     await exitCopyMode(target);
+    const dialect = await livePaneDialectName(agentName, pane);
+    const alreadyComposed = await promptAlreadyInComposer(agentName, pane, prompt);
+    let busyAtSend = false;
+    let exactDraft = dialect === "codex" && alreadyComposed;
 
     // Idempotent retries: if a previous attempt left this exact prompt
     // sitting unsubmitted in the composer, typing it again would double the
     // text. Skip straight to the submit path instead.
-    if (!(await promptAlreadyInComposer(agentName, pane, prompt))) {
-      if ((await livePaneDialectName(agentName, pane)) === "codex") {
-        await waitForCodexPromptReady(agentName, pane);
+    if (!alreadyComposed) {
+      // Recovery must run before the empty-composer readiness gate. v1.21.2
+      // accidentally reversed these calls, so the gate rejected the stale
+      // text that this function was specifically built to clear.
+      await clearForeignComposerText(agentName, pane, target, prompt, dialect);
+      if (dialect === "codex") {
+        const ready = await waitForCodexPromptReady(agentName, pane);
+        busyAtSend = Boolean(ready?.busy);
       }
-      await clearForeignComposerText(agentName, pane, target, prompt);
       if (prompt.length > 500) {
         await sendLongPrompt(target, prompt);
       } else {
         await t.sendLiteral(target, prompt);
         await wait(1000);
       }
+    } else if (dialect === "codex") {
+      busyAtSend = Boolean(await isBusy(agentName, pane));
+    }
+
+    if (dialect === "codex" && !exactDraft) {
+      exactDraft = await waitForExactCodexDraft(agentName, pane, prompt);
+      if (!exactDraft) {
+        // We own these just-typed bytes, so clearing them cannot destroy a
+        // pre-existing local draft. Never press Enter on a partial paste.
+        await t.clearInputLine(target).catch(() => {});
+        throw codexDeliveryBlocked("Codex prompt delivery blocked: exact prompt did not finish painting in the composer");
+      }
+    }
+    // A previously queued turn can start during the paste/paint interval.
+    // Re-sample immediately before Enter so the delivery layer treats our
+    // prompt as one queued steering write instead of retrying it as idle.
+    if (dialect === "codex" && !busyAtSend) {
+      busyAtSend = Boolean(await isBusy(agentName, pane));
     }
     await t.sendEnter(target);
     await maybeSendCodexSubmitEnter(agentName, pane, target, prompt, { notBeforeMs });
     await maybeRescueClaudeSubmit(agentName, pane, target, prompt);
+
+    // Codex does not write a queued steering turn to JSONL until the current
+    // turn yields. This is still a strong transport receipt when (a) input was
+    // verified empty or already contained this exact prompt, (b) Enter was
+    // sent successfully, and (c) the exact prompt no longer remains in the
+    // composer. The delivery layer uses it to avoid retyping duplicates while
+    // it waits for the later JSONL echo.
+    const queued = dialect === "codex" && busyAtSend && exactDraft
+      && !(await promptAlreadyInComposer(agentName, pane, prompt));
+    return { busyAtSend, queued, exactDraft };
   }
 
   async function promptAlreadyInComposer(agentName, pane, prompt) {
@@ -1434,33 +1490,80 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
   }
 
+  async function waitForExactCodexDraft(agentName, pane, prompt, timeoutMs = 2_500) {
+    const deadline = Date.now() + timeoutMs;
+    while (true) {
+      const snapshot = await captureScreen(agentName, pane).catch(() => "");
+      if (codexComposerContainsPrompt(snapshot, prompt)) return true;
+      if (Date.now() >= deadline) return false;
+      await wait(200);
+    }
+  }
+
   /**
    * A previous failed delivery can leave ITS text sitting in the composer.
    * Typing on top of it corrupts both messages, and the NEXT send then
    * submits the merged garbage (ai:4 2026-07-08: a brief typed into an
    * interrupted codex TUI never submitted; 13 minutes later it went out as
-   * "][ai:2, …"). Clear foreign text before typing — but only when the pane
-   * is not mid-turn: on a busy pane composer text is a legitimately QUEUED
-   * message (and Esc would interrupt the live turn), so we leave it alone
-   * and let our text queue behind it.
+   * "][ai:2, …"). Codex text is cleared only when JSONL proves it was already
+   * submitted, or when an idle composer carries an agentmux-owned envelope;
+   * arbitrary local drafts remain untouched.
    */
-  async function clearForeignComposerText(agentName, pane, target, prompt) {
+  async function clearForeignComposerText(agentName, pane, target, prompt, knownDialect = null) {
+    const dialect = knownDialect || await livePaneDialectName(agentName, pane);
     let raw;
-    try { raw = await capturePane(agentName, pane, 15); } catch { return; }
+    try {
+      raw = dialect === "codex"
+        ? await captureScreen(agentName, pane)
+        : await capturePane(agentName, pane, 15);
+    } catch { return; }
     const head = prompt.trim().slice(0, 20);
-    const stale = foreignComposerText(raw, head);
+    // Codex recovery prompts often share the same first 20 characters. Its
+    // exact 160-character identity check owns idempotency; the old short-head
+    // shortcut otherwise preserved a different stale recovery prompt forever.
+    if (dialect === "codex" && codexComposerContainsPrompt(raw, prompt)) return;
+    const stale = foreignComposerText(raw, dialect === "codex" ? null : head);
     if (!stale) return;
-    if (await isBusy(agentName, pane)) return;
+    const busy = await isBusy(agentName, pane);
+    if (dialect === "codex") {
+      let dir;
+      try { dir = paneDir(agentConfig(agentName).dir, pane); } catch { return; }
+      const alreadySubmitted = isPromptPrefixInCodexJsonl(dir, stale);
+      const agentmuxEnvelope = /^\[(?:from\s+[^\]]+|krasch-recovery)\]/i.test(stale);
+      // Never erase a local draft. During work even an agentmux envelope can
+      // be a legitimate queued message; only an already-submitted duplicate
+      // is safe. When idle, a known agentmux envelope is failed-delivery
+      // residue and can be recovered without touching human-authored prose.
+      if (!alreadySubmitted && (busy || !agentmuxEnvelope)) return;
+    } else if (busy) {
+      return;
+    }
     console.warn(
-      `send ${agentName}:${pane}: clearing stale composer text ("${stale.slice(0, 40)}…") — a previous delivery never submitted`,
+      `send ${agentName}:${pane}: clearing stale/duplicate composer text ("${stale.slice(0, 40)}…")`,
     );
-    await t.sendEscape(target); // Esc with text in the composer clears it (both TUIs)
+    if (dialect === "codex") await t.clearInputLine(target);
+    else await t.sendEscape(target);
     await wait(300);
-    const after = await capturePane(agentName, pane, 15).catch(() => "");
-    if (foreignComposerText(after, head)) {
-      await t.sendKeys(target, "C-u"); // belt: kill-line for TUIs that keep text on Esc
+    let after = "";
+    try {
+      after = dialect === "codex"
+        ? await captureScreen(agentName, pane)
+        : await capturePane(agentName, pane, 15);
+    } catch { /* verification below will simply see no stale text */ }
+    if (foreignComposerText(after, dialect === "codex" ? null : head)) {
+      await t.clearInputLine(target); // belt: kill-line for TUIs that keep text on first clear
       await wait(200);
     }
+    try {
+      appendEvent({
+        ts: new Date().toISOString(),
+        event: "composer_recovery",
+        session: agentName,
+        pane: Number(pane) || 0,
+        busy,
+        detail: stale.slice(0, 120),
+      });
+    } catch { /* recovery itself must not fail on diagnostics */ }
   }
 
   async function maybeSendCodexSubmitEnter(agentName, pane, target, prompt, {
@@ -1686,7 +1789,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   async function sendOnly(agentName, prompt, pane) {
     await ensureReady(agentName, pane);
-    await sendPrompt(agentName, prompt, pane);
+    return sendPrompt(agentName, prompt, pane);
   }
 
   async function sendAndWait(agentName, prompt, pane) {

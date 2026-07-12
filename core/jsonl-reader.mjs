@@ -69,17 +69,15 @@ function findJsonlAndEvents(projectDir, needle, { notBeforeMs = 0 } = {}) {
     return { jsonl: files[0].path, events };
   }
 
-  const needleTrim = needle.trim();
   for (const { path } of files) {
     const events = parseJsonl(path);
-    for (const e of events) {
-      if (notBeforeMs) {
-        const eventMs = Date.parse(e?.timestamp || "");
-        if (!Number.isFinite(eventMs) || eventMs < notBeforeMs) continue;
-      }
-      const text = extractPromptFromEvent(e);
-      if (text && text.trim() === needleTrim) return { jsonl: path, events };
-    }
+    const eligible = notBeforeMs
+      ? events.filter((event) => {
+        const eventMs = Date.parse(event?.timestamp || "");
+        return Number.isFinite(eventMs) && eventMs >= notBeforeMs;
+      })
+      : events;
+    if (promptAppearsInEvents(eligible, needle)) return { jsonl: path, events };
   }
   return null;
 }
@@ -302,14 +300,15 @@ function findUserPromptIndex(events, promptText) {
  */
 function normalizePrompt(text) {
   if (!text) return "";
-  let s = text.trim();
-  // ax-meta: "[from claw:0] actual prompt"
-  s = s.replace(/^\[from\s+[^:]+:\d+\]\s*/i, "");
+  let s = String(text).replace(/\r\n?/g, "\n").trim();
+  // ax-meta: "[from claw:0] actual prompt". Strip repeated envelopes too:
+  // a caller may already include provenance and the CLI then adds its own.
+  s = s.replace(/^(?:\[from\s+[^:]+:\d+\]\s*)+/i, "");
   // voice-PWA disclaimer
   s = s.replace(/^\[transcribed voice[^\]]*\]\s*/i, "");
   // TTS hint suffix
   s = s.replace(/\s*\n\s*\[tts on[^\]]*\]\s*$/i, "");
-  return s.trim();
+  return s.replace(/\s+/g, " ").trim();
 }
 
 /**

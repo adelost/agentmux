@@ -93,6 +93,70 @@ feature("sendPromptVerified", () => {
       expect(cursor).toBeLessThanOrEqual(after);
     }],
   });
+
+  component("durable replay cursor acknowledges a late echo before retyping", {
+    given: ["an original Discord timestamp and an echo now visible", () =>
+      fakeAgent({ echoResults: [true] })],
+    when: ["reconciling the same transport message", async (agent) => ({
+      result: await sendPromptVerified(agent, "claw", 1, "late prompt", {
+        notBeforeMs: Date.now() - 5_000,
+      }),
+      agent,
+    })],
+    then: ["the prior attempt is accepted without another pane write", ({ result, agent }) => {
+      expect(result).toEqual({ delivered: true, attempts: 0, via: "echo" });
+      expect(agent.calls.filter((call) => call.startsWith("send:"))).toHaveLength(0);
+    }],
+  });
+
+  component("unsafe composer state stops after one terminal attempt", {
+    given: ["an agent that rejects before typing", () => {
+      const agent = fakeAgent({ echoResults: [false] });
+      agent.sendOnly = async () => {
+        agent.calls.push("blocked-send");
+        const error = new Error("Codex prompt delivery blocked: composer is not empty");
+        error.code = "AMUX_DELIVERY_BLOCKED";
+        throw error;
+      };
+      return agent;
+    }],
+    when: ["sending with the normal three-attempt budget", async (agent) => ({
+      result: await sendPromptVerified(agent, "claw", 1, "new prompt", { attempts: 3 }),
+      agent,
+    })],
+    then: ["it fails fast without echo waits or duplicate retries", ({ result, agent }) => {
+      expect(result).toMatchObject({ delivered: false, attempts: 1, blocked: true });
+      expect(agent.calls.filter((call) => call === "blocked-send")).toHaveLength(1);
+      expect(agent.calls).not.toContain("echo");
+    }],
+  });
+
+  component("exact Codex queue receipt prevents a duplicate retry", {
+    given: ["a busy send whose prompt left the verified composer before JSONL caught up", () => {
+      const agent = fakeAgent({ echoResults: [false] });
+      agent.sendOnly = async (_name, text) => {
+        agent.calls.push(`send:${text}`);
+        return { busyAtSend: true, queued: true };
+      };
+      return agent;
+    }],
+    when: ["sending with three attempts available", async (agent) => ({
+      result: await sendPromptVerified(agent, "claw", 1, "steer once", {
+        attempts: 3,
+        echoTimeoutMs: 0,
+      }),
+      agent,
+    })],
+    then: ["one queue transition is a pending delivered receipt", ({ result, agent }) => {
+      expect(result).toEqual({
+        delivered: true,
+        attempts: 1,
+        via: "queue",
+        pending: true,
+      });
+      expect(agent.calls.filter((call) => call.startsWith("send:"))).toHaveLength(1);
+    }],
+  });
 });
 
 feature("deliverToPane routing", () => {

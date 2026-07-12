@@ -5,7 +5,8 @@
 //
 //   1. Blocking prompts are dismissed before sending.
 //   2. Delivery is VERIFIED at the source of truth, never assumed:
-//      prompts against the session jsonl, slash commands against the
+//      prompts against the session jsonl, or an exact verified Codex queue
+//      transition while another turn owns JSONL; slash commands against the
 //      composer being consumed (they never reach the jsonl).
 //   3. Failures are rescued (submit-Enter) and retried idempotently.
 //   4. The verdict is HONEST: { delivered: false } means the human/caller
@@ -35,6 +36,9 @@ function recordReceipt(agentName, pane, kind, text, result) {
       via: result.via ?? null,
       attempts: result.attempts ?? null,
       rescues: result.rescues ?? null,
+      blocked: Boolean(result.blocked),
+      pending: Boolean(result.pending),
+      reason: result.reason ? String(result.reason).slice(0, 160) : null,
       detail: String(text).slice(0, 120),
     });
   } catch { /* receipts are diagnostics, not delivery */ }
@@ -60,8 +64,9 @@ export function isSlashCommand(text) {
  * sendText is what goes into the pane (may carry a "[from x]" prefix);
  * verifyText is what the echo check looks for (the bare prompt).
  * Returns { delivered, attempts, via } — prompt delivery is acknowledged
- * only by the exact session-jsonl echo. A generic "pane is busy" signal is
- * never proof that our keystrokes reached the composer.
+ * by the exact session-jsonl echo or by an exact prompt leaving a verified
+ * Codex composer during a busy turn. A generic "pane is busy" signal is never
+ * proof that our keystrokes reached the composer.
  */
 export async function sendPromptVerified(agent, agentName, pane, text, opts = {}) {
   const result = await promptDeliveryAttempts(agent, agentName, pane, text, opts);
@@ -71,13 +76,24 @@ export async function sendPromptVerified(agent, agentName, pane, text, opts = {}
 
 async function promptDeliveryAttempts(agent, agentName, pane, text, {
   verifyText = null, attempts = 3, echoTimeoutMs = 6000, log = () => {},
+  notBeforeMs: suppliedNotBeforeMs = null,
 } = {}) {
   const target = `${agentName}:.${pane}`;
   const needle = verifyText ?? text;
   // A repeated prompt must produce a NEW jsonl event. Without this cursor,
   // an identical historical "test" or recovery prompt makes a lost send look
   // acknowledged immediately.
-  const notBeforeMs = Date.now();
+  const parsedCursor = Number(suppliedNotBeforeMs);
+  const hasDurableCursor = suppliedNotBeforeMs != null && Number.isFinite(parsedCursor) && parsedCursor > 0;
+  const notBeforeMs = hasDurableCursor ? parsedCursor : Date.now();
+
+  // A Discord replay carries the original message timestamp. If an earlier
+  // attempt eventually reached the rollout after its bridge call returned,
+  // acknowledge that exact echo before touching the composer again.
+  if (hasDurableCursor) {
+    const alreadyEchoed = await agent.waitForPromptEcho(agentName, pane, needle, 0, { notBeforeMs });
+    if (alreadyEchoed) return { delivered: true, attempts: 0, via: "echo" };
+  }
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
     await agent.dismissBlockingPrompt(target)
@@ -85,11 +101,41 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
     // A thrown send must NOT abort the loop — delivery is judged by the
     // echo check, not tmux's exit code (a user scrolling the pane can make
     // tmux error a command that actually landed; see handlers history).
+    let sendError = null;
+    let sendReceipt = null;
     await agent.sendOnly(agentName, text, pane)
-      .catch((err) => log(`send attempt ${attempt} errored (verifying echo anyway): ${err.message.split("\n").slice(0, 2).join(" | ")}`));
+      .then((receipt) => { sendReceipt = receipt || null; })
+      .catch((err) => {
+        sendError = err;
+        log(`send attempt ${attempt} errored${err.code === "AMUX_DELIVERY_BLOCKED" ? " (terminal)" : " (verifying echo anyway)"}: ${err.message.split("\n").slice(0, 2).join(" | ")}`);
+      });
 
-    const echoed = await agent.waitForPromptEcho(agentName, pane, needle, echoTimeoutMs, { notBeforeMs });
+    // The agent raises this only before typing: a foreign draft, modal, or
+    // unready composer made input unsafe. Retrying the same state three times
+    // just blocks the pane lock and channel queue; durable inbound recovery
+    // will try again after state changes.
+    if (sendError?.code === "AMUX_DELIVERY_BLOCKED") {
+      return {
+        delivered: false,
+        attempts: attempt,
+        via: null,
+        blocked: true,
+        reason: sendError.message,
+      };
+    }
+
+    const echoWaitMs = sendReceipt?.queued ? Math.min(echoTimeoutMs, 1_000) : echoTimeoutMs;
+    const echoed = await agent.waitForPromptEcho(agentName, pane, needle, echoWaitMs, { notBeforeMs });
     if (echoed) return { delivered: true, attempts: attempt, via: "echo" };
+
+    // Busy Codex queues are written to rollout JSONL only after the active
+    // turn yields. sendOnly's receipt is exact (verified empty/exact composer
+    // → successful Enter → incoming prompt no longer composed), so one queued
+    // write is accepted without the duplicate-producing retry that regressed
+    // live delivery in v1.21.2.
+    if (sendReceipt?.queued) {
+      return { delivered: true, attempts: attempt, via: "queue", pending: true };
+    }
 
     if (attempt < attempts) log(`prompt not echoed (attempt ${attempt}/${attempts}), retrying`);
   }

@@ -2,6 +2,8 @@ import { feature, unit, expect } from "bdd-vitest";
 import {
   codexComposerContainsPrompt,
   codexComposerText,
+  isCodexBacktrackPager,
+  isCodexFullscreenPager,
   isCodexTranscriptView,
   prepareCodexIdle,
   shouldRescueCodexSubmit,
@@ -148,6 +150,60 @@ q to quit   esc/← to edit prev
     then: ["only the full identity matches", (result) =>
       expect(result).toEqual({ exact: true, stale: false })],
   });
+
+  unit("exact identity spans wrapped envelope paragraphs", {
+    given: ["a CLI sender envelope wrapped across physical rows", () => ({
+      prompt: "[from claw:9]\n\n[delivery-gate] This exact long transport prompt must be verified before Enter is sent to Codex.",
+      snapshot: `
+› [from claw:9]
+
+  [delivery-gate] This exact long transport prompt must be verified before Enter is sent to Codex.
+
+  gpt-5.6-sol max · ~/workspace/.agents/11
+`,
+    })],
+    when: ["checking the complete normalized draft", ({ prompt, snapshot }) => ({
+      text: codexComposerText(snapshot),
+      exact: codexComposerContainsPrompt(snapshot, prompt),
+    })],
+    then: ["wrapped content is preserved without swallowing the footer", (result) => {
+      expect(result.text).toBe("[from claw:9] [delivery-gate] This exact long transport prompt must be verified before Enter is sent to Codex.");
+      expect(result.exact).toBe(true);
+    }],
+  });
+
+  unit("placeholder glued to the post-Esc idle hint reads as empty, not a draft", {
+    // api:4 live (2026-07-12): one reveal-Escape left the composer showing its
+    // ghost placeholder plus "esc again to edit previous message" on the next
+    // row. tmux -J glued them into one value that matched no single hint, so
+    // delivery reported "composer is not empty" and Escaped again into the pager.
+    when: ["reading the neutral composer", () =>
+      codexComposerText("\n› Use /skills todlist available skills\n\n  esc again to edit previous message\n")],
+    then: ["the idle hint proves it is empty", (value) => expect(value).toBe("")],
+  });
+
+  unit("the backtrack / edit-previous pager is recognised and never a composer", {
+    // claw:9 live (2026-07-12): the reveal-Escape opened Codex's full-screen
+    // "edit a previous message" overlay. It has no › composer, so it must be
+    // closed with q like the transcript view, not Escaped deeper.
+    given: ["Codex's backtrack overlay chrome", () => [
+      " ↑/↓ to scroll   pgup/pgdn to page   home/end to jump",
+      " q to quit   esc/← to edit prev   → to edit next   enter to edit message──── 100% ─",
+    ].join("\n")],
+    when: ["detecting", (text) => ({
+      pager: isCodexBacktrackPager(text),
+      fullscreen: isCodexFullscreenPager(text),
+      composer: codexComposerText(text),
+    })],
+    then: ["it is a pager to quit, not a draft", (result) =>
+      expect(result).toEqual({ pager: true, fullscreen: true, composer: null })],
+  });
+
+  unit("a live composer that merely mentions quitting is not a pager", {
+    when: ["detecting a normal composer draft", () =>
+      isCodexBacktrackPager("\n› remember to add a q to quit hint later\n• gpt-5.6-sol xhigh · ~/x\n")],
+    then: ["no edit-nav footer means no pager", (value) => expect(value).toBe(false)],
+  });
 });
 
 feature("prepareCodexIdle", () => {
@@ -214,6 +270,23 @@ feature("prepareCodexIdle", () => {
     })],
     when: ["checking", ({ agent }) => prepareCodexIdle({ agent, name: "claw", pane: 9, sleep: noSleep })],
     then: ["q exits and no Escape is sent", (result, { agent }) => {
+      expect(result.ok).toBe(true);
+      expect(agent.keys).toEqual(["q"]);
+    }],
+  });
+
+  unit("a pane wedged in the backtrack pager recovers with q, not Escape", {
+    // The claw:9 fleet-breaker: a prior reveal-Escape parked the pane in the
+    // edit-previous overlay. Every send then reported "could not identify the
+    // Codex composer". prepareCodexIdle must q out of it and find the composer.
+    given: ["backtrack overlay followed by the recovered composer", () => ({
+      agent: fakeAgent({ frames: [
+        " ↑/↓ to scroll   pgup/pgdn to page   home/end to jump\n q to quit   esc/← to edit prev   → to edit next   enter to edit message──── 100% ─\n",
+        "\n› Explain this codebase\n",
+      ] }),
+    })],
+    when: ["checking", ({ agent }) => prepareCodexIdle({ agent, name: "claw", pane: 9, sleep: noSleep })],
+    then: ["q exits the pager and no Escape wedges it deeper", (result, { agent }) => {
       expect(result.ok).toBe(true);
       expect(agent.keys).toEqual(["q"]);
     }],

@@ -7,12 +7,13 @@ import { createHandlers, renderCatchupLine, formatCatchupTime } from "../handler
 
 // --- Test helpers ---
 
-function mockMsg({ content = "hello", channelId = "ch1", isBot = false } = {}) {
+function mockMsg({ content = "hello", channelId = "ch1", isBot = false, createdTimestamp } = {}) {
   const replies = [];
   return {
     channelId,
     isBot,
     content,
+    createdTimestamp,
     reply: vi.fn(async (text) => replies.push(text)),
     send: vi.fn(async () => {}),
     startTyping: vi.fn(() => vi.fn()),
@@ -630,6 +631,45 @@ feature("processMessage pipeline (delivery)", () => {
       expect(agent.sendOnly.mock.calls.length).toBe(3);
       const sends = msg.send.mock.calls.map((c) => c[0]);
       expect(sends.some((s) => typeof s === "string" && s.includes("3 attempts"))).toBe(true);
+    }],
+  });
+
+  component("terminal Codex composer block fails once and remains retryable", {
+    given: ["sendOnly refuses a foreign draft before typing", () => {
+      const s = setup();
+      const error = new Error("Codex prompt delivery blocked: composer is not empty");
+      error.code = "AMUX_DELIVERY_BLOCKED";
+      s.agent.sendOnly.mockRejectedValue(error);
+      return { ...s, msg: mockMsg({ content: "do not lose this" }) };
+    }],
+    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["one attempt warns and returns an explicit failed outcome", (outcome, { msg, agent }) => {
+      expect(outcome).toEqual({ delivered: false });
+      expect(agent.sendOnly).toHaveBeenCalledTimes(1);
+      const sends = msg.send.mock.calls.map((call) => call[0]);
+      expect(sends.some((line) => line.includes("after 1 attempt"))).toBe(true);
+    }],
+  });
+
+  component("Discord creation time is reused as the exact delivery cursor", {
+    given: ["a message whose first precheck misses and post-send echo succeeds", () => {
+      const s = setup();
+      s.agent.waitForPromptEcho
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true);
+      return {
+        ...s,
+        cursor: 1_784_000_000_000,
+        msg: mockMsg({ content: "cursor prompt", createdTimestamp: 1_784_000_000_000 }),
+      };
+    }],
+    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["precheck and confirmation share the transport timestamp", (_, { agent, cursor }) => {
+      expect(agent.sendOnly).toHaveBeenCalledTimes(1);
+      expect(agent.waitForPromptEcho).toHaveBeenCalledTimes(2);
+      for (const call of agent.waitForPromptEcho.mock.calls) {
+        expect(call[4]).toEqual({ notBeforeMs: cursor });
+      }
     }],
   });
 

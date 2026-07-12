@@ -341,6 +341,35 @@ feature("isPromptInJsonl: matches queue-operation and attachment events", () => 
       cleanup();
     }],
   });
+
+  unit("cursor matching tolerates CRLF and repeated sender envelopes", {
+    given: ["the live Claude delivery shape from claw:4", () => {
+      const ctx = setupFakeProject("simple-text.jsonl");
+      const event = {
+        timestamp: "2026-07-12T16:50:07.722Z",
+        type: "user",
+        message: {
+          content: "[from claw:9]\r\r[from claw:9]\r\rWHOLE-WAVE REVIEW ONLY, no edits.",
+        },
+      };
+      writeFileSync(join(ctx.projectDir, "session-abc123.jsonl"), `${JSON.stringify(event)}\n`);
+      return ctx;
+    }],
+    when: ["verifying the logically identical LF prompt", ({ paneDir }) => ({
+      current: isPromptInJsonl(paneDir,
+        "[from claw:9]\n\nWHOLE-WAVE REVIEW ONLY, no edits.", {
+          notBeforeMs: Date.parse("2026-07-12T16:50:00Z"),
+        }),
+      historical: isPromptInJsonl(paneDir,
+        "[from claw:9]\n\nWHOLE-WAVE REVIEW ONLY, no edits.", {
+          notBeforeMs: Date.parse("2026-07-12T16:51:00Z"),
+        }),
+    })],
+    then: ["only the cursor-eligible receipt matches without a retry", (result, { cleanup }) => {
+      expect(result).toEqual({ current: true, historical: false });
+      cleanup();
+    }],
+  });
 });
 
 feature("isBusyFromJsonl: compacted session with null stop_reason", () => {

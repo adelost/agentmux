@@ -55,6 +55,25 @@ export function isCodexTranscriptView(text) {
     && /q to quit/i.test(value);
 }
 
+// Codex's backtrack / "edit a previous message" overlay is a SECOND full-screen
+// pager that hides the › composer. Modern Codex maps Escape at an idle composer
+// to this view, so the delivery layer's own "reveal the composer" Escape can
+// push a pane into it. Its footer is the tell: "q to quit" plus edit-prev/next
+// navigation. Like the transcript view it must be closed with q; a further
+// Escape only navigates deeper, which is exactly how a pane wedged and every
+// send reported "could not identify the Codex composer".
+const CODEX_PAGER_QUIT = /q to quit/i;
+const CODEX_PAGER_NAV = /to edit (?:prev|next|message)/i;
+export function isCodexBacktrackPager(text) {
+  const value = String(text || "");
+  return CODEX_PAGER_QUIT.test(value) && CODEX_PAGER_NAV.test(value);
+}
+
+/** Either full-screen Codex pager (transcript or backtrack); both exit on q. */
+export function isCodexFullscreenPager(text) {
+  return isCodexTranscriptView(text) || isCodexBacktrackPager(text);
+}
+
 export function codexComposerText(text) {
   if (isCodexTranscriptView(text)) return null;
   const lines = String(text || "").split("\n");
@@ -72,8 +91,30 @@ export function codexComposerText(text) {
     return !/^\s*•\s+\S+\s+(?:minimal|low|medium|high|xhigh|max|ultra)\s+·\s+/.test(candidate);
   });
   if (assistantAfter) return null;
-  const line = lines[index];
-  const value = line.replace(/^\s*[›❯>]\s*/, "").trim();
+  const parts = [lines[index].replace(/^\s*[›❯>]\s*/, "").trim()];
+  // captureScreen uses tmux -J, so terminal hard-wraps (including mid-word)
+  // are already rejoined losslessly. These remaining indented rows are
+  // logical composer paragraphs/continuations; keep them so exact pre-submit
+  // verification does not degrade to the old short-prefix guess. Blank rows
+  // can be intentional prompt paragraphs (the [from pane] envelope uses one);
+  // status/bullet rows end input.
+  for (let i = index + 1; i < lines.length; i++) {
+    const candidate = lines[i];
+    if (!candidate.trim()) continue;
+    if (/^\s*(?:•\s+)?\S+\s+(?:minimal|low|medium|high|xhigh|max|ultra)\s+·\s+/.test(candidate)) break;
+    if (/^\s*[•›❯>]/.test(candidate)) break;
+    if (!/^\s{2,}\S/.test(candidate)) break;
+    parts.push(candidate.trim());
+  }
+  const value = parts.join(" ").trim();
+  // Codex shows "esc again to edit previous message" / "No previous message to
+  // edit." ONLY while the composer is neutral (no unsent draft). A narrow tmux
+  // capture can glue that hint onto the placeholder row, producing a joined
+  // value that matches no single placeholder. Treating it as a real draft made
+  // the readiness gate Escape to "reveal" a composer that was already there,
+  // which opened the backtrack pager and wedged delivery. The hint's presence
+  // alone proves the composer is empty.
+  if (IDLE_EDIT_HINT.test(value) || NO_PREVIOUS_MESSAGE_HINT.test(value)) return "";
   if (EMPTY_COMPOSER_HINTS.has(value)
       || [...EMPTY_COMPOSER_HINTS].some((hint) => matchesPaintedPlaceholder(value, hint))) {
     return "";
@@ -156,9 +197,9 @@ export async function prepareCodexIdle({
   };
 
   let snapshot = await capture();
-  if (isCodexTranscriptView(snapshot)) {
+  if (isCodexFullscreenPager(snapshot)) {
     try { await agent.typeLiteral(name, "q", pane); }
-    catch (err) { return fail("transcript", `could not close Codex transcript view: ${err.message}`); }
+    catch (err) { return fail("transcript", `could not close Codex full-screen pager: ${err.message}`); }
     await sleep(300);
     snapshot = await capture();
   }
@@ -172,6 +213,15 @@ export async function prepareCodexIdle({
     catch (err) { return fail("compose", `could not reveal the Codex composer: ${err.message}`); }
     await sleep(400);
     snapshot = await capture();
+    // Modern Codex maps Escape at an idle composer to the backtrack pager, so
+    // the reveal Escape can itself open one. Close it with q before concluding
+    // the composer is missing, or this call wedges into "could not identify".
+    if (isCodexFullscreenPager(snapshot)) {
+      try { await agent.typeLiteral(name, "q", pane); }
+      catch (err) { return fail("transcript", `could not close Codex full-screen pager: ${err.message}`); }
+      await sleep(300);
+      snapshot = await capture();
+    }
     composer = verifiedEmptyCodexComposer(snapshot);
   }
 
@@ -188,9 +238,9 @@ export async function prepareCodexIdle({
     for (let attempt = 0; attempt < 16; attempt++) {
       await sleep(250);
       snapshot = await capture();
-      if (isCodexTranscriptView(snapshot)) {
+      if (isCodexFullscreenPager(snapshot)) {
         try { await agent.typeLiteral(name, "q", pane); }
-        catch (err) { return fail("transcript", `could not close Codex transcript view: ${err.message}`); }
+        catch (err) { return fail("transcript", `could not close Codex full-screen pager: ${err.message}`); }
         continue;
       }
       const visible = codexComposerText(snapshot);

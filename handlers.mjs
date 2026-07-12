@@ -9,7 +9,7 @@ import { checkLoopGuard, loopGuardKey, formatLoopGuardWarning, readLoopGuardConf
 import { formatCatchupPreview } from "./core/catchup-format.mjs";
 import { shortModelName } from "./core/context.mjs";
 import { loadConfig } from "./cli/config.mjs";
-import { readParkState, unparkPane } from "./core/pane-park.mjs";
+import { decideParkedSend, readParkState, unparkPane } from "./core/pane-park.mjs";
 import { driveCodexStatus, formatCodexStatus } from "./core/codex-status.mjs";
 import { prepareCodexIdle } from "./core/codex-tui.mjs";
 import {
@@ -171,6 +171,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
   const rec = recorder || noopRecorder;
   const sendLocks = new Map();
   const followers = new Map(); // channelId → { timer, sentCount, lastHash }
+  const parkWarnedSince = new Map(); // "name:pane" → park.sinceMs already warned (two-strike confirm)
 
   function withPaneSendLock(queueKey, work) {
     const prev = sendLocks.get(queueKey) || Promise.resolve();
@@ -761,12 +762,15 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           verifyText: cleanPrompt,
           attempts: 3,
           echoTimeoutMs: echoTimeout,
+          notBeforeMs: msg.createdTimestamp,
           log: (m) => console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} ${m}`),
         }));
       delivered = result.delivered;
       if (!delivered) {
-        console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not delivered after 3 attempts`);
-        await msg.send("⚠️ Agent did not acknowledge prompt after 3 attempts. Pane may be dead, try `/raw` to inspect.")
+        const attempts = result.attempts || 1;
+        const reason = result.reason ? ` ${result.reason}` : " Pane may be dead or its composer may be stuck.";
+        console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not delivered after ${attempts} attempt(s)`);
+        await msg.send(`⚠️ Agent did not acknowledge prompt after ${attempts} attempt${attempts === 1 ? "" : "s"}.${reason} Try \`/raw\` to inspect.`)
           .catch((err) => console.warn(`send warning failed: ${err.message}`));
       }
       // Topic patching on Discord-inbound prompts was removed: Discord caps
@@ -775,11 +779,13 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       // /compact via drift-guard (rare event, safe rate).
 
       // Reply forwarding handled by channels/jsonl-watcher.mjs.
-      console.log(`[${ts()}] → ${mapping.name}:${pane} delivered`);
+      console.log(`[${ts()}] → ${mapping.name}:${pane} ${delivered ? "delivered" : "NOT delivered"}`);
+      return { delivered };
     } catch (err) {
       console.log(`[${ts()}] ✗ ${mapping.name}:${pane} ${err.message}`);
       await msg.reply(formatAgentError(err))
         .catch((replyErr) => console.warn(`error reply failed: ${replyErr.message}`));
+      return { delivered: false, reason: err.message };
     } finally {
       stopTyping();
     }
@@ -894,14 +900,23 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     const pane = parsedPane || mapping.pane || 0;
     const parsed = parseCommand(cleanPrompt);
 
-    // A normal message must not silently wake a pane on a downgraded model.
-    // Administrative commands remain available, especially /restore.
+    // A normal message must not silently wake a pane on a downgraded model, but
+    // the human may deliberately want the new model. Two-strike confirm: warn on
+    // the first brief, deliver + unpark on an explicit re-send.
     if (!parsed) {
       const park = readParkState(mapping.name, pane);
-      if (park) {
+      const key = `${mapping.name}:${pane}`;
+      const decision = decideParkedSend({ park, warnedSinceMs: parkWarnedSince.get(key) ?? null });
+      if (decision.action === "warn") {
+        parkWarnedSince.set(key, decision.sinceMs);
         await msg.reply(`⚠️ **${mapping.name}:${pane} är parkerad efter modellbyte** (${park.detail}). ` +
-          `Meddelandet skickades INTE. Kör \`/restore\` för att försöka återställa rätt modell, eller \`//model\` för ett explicit val.`);
+          `Meddelandet skickades INTE. Skicka igen för att bekräfta och leverera ändå, eller kör \`/restore\` / \`//model\`.`);
         return;
+      }
+      if (decision.action === "confirm") {
+        parkWarnedSince.delete(key);
+        unparkPane({ session: mapping.name, pane, detail: `confirmed by re-send on ${park.detail || "parked model"}` });
+        // fall through to normal delivery on the confirmed model
       }
     }
 
@@ -961,13 +976,14 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         sendPromptVerified(agent, mapping.name, pane, cleanPrompt, {
           attempts: 3,
           echoTimeoutMs: Math.max(50, Math.min(6_000, pollInterval * 500)),
+          notBeforeMs: msg.createdTimestamp,
           log: (m) => console.warn(`follow ${mapping.name}:${pane}: ${m}`),
         }));
       if (!result.delivered) {
-        await msg.send("⚠️ Agent did not acknowledge prompt after 3 attempts. Pane may be dead, try `/raw` to inspect.")
+        await msg.send(`⚠️ Agent did not acknowledge prompt after ${result.attempts || 1} attempt${result.attempts === 1 ? "" : "s"}. Try \`/raw\` to inspect.`)
           .catch((err) => console.warn(`follow delivery warning failed: ${err.message}`));
       }
-      return;
+      return { delivered: result.delivered };
     }
 
     return processMessage(msg, mapping, cleanPrompt, pane, tmpFiles);

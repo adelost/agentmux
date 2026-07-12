@@ -145,6 +145,17 @@ feature("prependSenderHeader", () => {
     }],
   });
 
+  unit("does not duplicate an identical existing sender envelope", {
+    given: ["an already-attributed brief from the same pane", () => ({
+      text: "[from claw:9]\n\nreview this",
+      sender: "claw:9",
+    })],
+    when: ["prepending", ({ text, sender }) => prependSenderHeader(text, sender)],
+    then: ["the invariant sender remains single", (result) => {
+      expect(result).toBe("[from claw:9]\n\nreview this");
+    }],
+  });
+
   unit("preserves multiline brief body", {
     given: ["multiline brief", () => ({
       text: "line 1\nline 2\nline 3",

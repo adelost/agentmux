@@ -83,6 +83,44 @@ feature("Discord inbound reconciliation", () => {
     }],
   });
 
+  unit("an explicit pane-delivery failure stays unseen and is retried", {
+    given: ["the handler reports NOT delivered once", () => {
+      const ctx = setup();
+      ctx.onMessage
+        .mockResolvedValueOnce({ delivered: false })
+        .mockResolvedValueOnce({ delivered: true });
+      ctx.reconciler = createInboundReconciler(ctx);
+      return ctx;
+    }],
+    when: ["the same Discord id is offered twice", async (ctx) => ({
+      first: await ctx.reconciler.enqueue(msg("130")),
+      second: await ctx.reconciler.enqueue(msg("130")),
+    })],
+    then: ["only the successful attempt is persisted as seen", (result, ctx) => {
+      expect(result.first).toMatchObject({ delivered: false, retryable: true });
+      expect(result.second).toMatchObject({ delivered: true });
+      expect(ctx.onMessage).toHaveBeenCalledTimes(2);
+      expect(ctx.data.inbound_seen_ids.ch).toEqual(["130"]);
+    }],
+  });
+
+  unit("REST reconciliation keeps its cursor on an explicit delivery failure", {
+    given: ["one fetched message whose pane rejects input", () => {
+      const ctx = setup({ last_inbound_ch: "100" });
+      ctx.onMessage.mockResolvedValue({ delivered: false });
+      ctx.channel = {
+        fetchMissed: vi.fn(async () => ({ messages: [msg("140")], newestId: "150" })),
+      };
+      ctx.reconciler = createInboundReconciler(ctx);
+      return ctx;
+    }],
+    when: ["running the scan", (ctx) => ctx.reconciler.reconcile(ctx.channel, "ch")],
+    then: ["the scan reports blocked and does not pass the human message", (result, ctx) => {
+      expect(result).toEqual({ replayed: 0, blocked: true });
+      expect(ctx.data.last_inbound_ch).toBe("100");
+    }],
+  });
+
   unit("bot gateway events never enter the agent queue", {
     given: ["a bot message", () => {
       const ctx = setup();

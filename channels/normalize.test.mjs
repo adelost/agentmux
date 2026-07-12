@@ -8,6 +8,7 @@ function fakeDiscordMsg(overrides = {}) {
     content: "fix the bug",
     author: { id: "user-456", bot: false },
     id: "msg-789",
+    createdTimestamp: 1_784_000_000_000,
     attachments: new Map(),
     channel: {
       send: vi.fn(() => Promise.resolve()),
@@ -28,6 +29,7 @@ feature("normalizeDiscordMessage", () => {
       expect(m.authorId).toBe("user-456");
       expect(m.isBot).toBe(false);
       expect(m.id).toBe("msg-789");
+      expect(m.createdTimestamp).toBe(1_784_000_000_000);
     }],
   });
 

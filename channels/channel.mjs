@@ -20,6 +20,8 @@
  * @property {string} authorId - Sender's platform ID
  * @property {boolean} isBot - Whether sender is a bot
  * @property {string} id - Message ID (for tmp file naming etc.)
+ * @property {number} [createdTimestamp] - Transport-authored creation time;
+ *   stable delivery cursor across reconnect retries.
  * @property {Array<{id: string, name: string, url: string, contentType: string}>} attachments
  * @property {(content: string|object) => Promise<void>} reply - Reply to this message
  * @property {(content: string|object) => Promise<void>} send - Send to the channel (not as reply)

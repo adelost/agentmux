@@ -3,9 +3,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
+  codexBusyStateFromEvents,
   extractFromCodexJsonl,
   isBusyFromCodexJsonl,
   isPromptInCodexJsonl,
+  isPromptPrefixInCodexJsonl,
   readLastTurnsCodex,
   latestCodexJsonlMtime,
   latestCodexSessionFor,
@@ -209,6 +211,23 @@ feature("extractFromCodexJsonl: prompt-matching across multiple turns", () => {
 // --- isBusyFromCodexJsonl + isPromptInCodexJsonl ------------------------
 
 feature("isBusyFromCodexJsonl: task lifecycle", () => {
+  unit("a truncated long-turn tail fails busy unless it contains a terminal event", {
+    when: ["classifying lifecycle-poor operational tails", () => ({
+      active: codexBusyStateFromEvents([
+        { type: "event_msg", payload: { type: "token_count" } },
+      ], { truncated: true }),
+      complete: codexBusyStateFromEvents([
+        { type: "event_msg", payload: { type: "task_complete", turn_id: "OLD" } },
+      ], { truncated: true }),
+      fullIdle: codexBusyStateFromEvents([
+        { type: "event_msg", payload: { type: "token_count" } },
+      ], { truncated: false }),
+    })],
+    then: ["only the ambiguous truncated tail is conservatively working", (result) => {
+      expect(result).toEqual({ active: true, complete: false, fullIdle: false });
+    }],
+  });
+
   unit("returns false when all tasks have task_complete", {
     given: ["two completed turns", () => setupFakeCodex(twoTurnRollout("/fake/workspace"))],
     when: ["checking busy", ({ paneDir }) => isBusyFromCodexJsonl(paneDir)],
@@ -249,6 +268,20 @@ feature("isBusyFromCodexJsonl: task lifecycle", () => {
     }],
     when: ["checking busy", ({ paneDir }) => isBusyFromCodexJsonl(paneDir)],
     then: ["the live pane is idle", (r, { cleanup }) => {
+      expect(r).toBe(false);
+      cleanup();
+    }],
+  });
+
+  unit("a turn_aborted event closes the latest task", {
+    given: ["a user-interrupted latest turn", () => setupFakeCodex([
+      { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+      { type: "event_msg", payload: { type: "task_started", turn_id: "ABORTED" } },
+      { type: "event_msg", payload: { type: "user_message", message: "stop this" } },
+      { type: "event_msg", payload: { type: "turn_aborted", turn_id: "ABORTED", reason: "interrupted" } },
+    ])],
+    when: ["checking the live task state", ({ paneDir }) => isBusyFromCodexJsonl(paneDir)],
+    then: ["the pane is idle instead of permanently busy", (r, { cleanup }) => {
       expect(r).toBe(false);
       cleanup();
     }],
@@ -359,6 +392,23 @@ feature("isPromptInCodexJsonl", () => {
     })],
     then: ["only the occurrence newer than the cursor acknowledges", (r, { cleanup }) => {
       expect(r).toEqual({ afterOld: true, afterBoth: false });
+      cleanup();
+    }],
+  });
+
+  unit("submitted long composer residue is recognizable but a short draft is not", {
+    given: ["one prior long user message", () => setupFakeCodex([
+      { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+      { type: "event_msg", payload: { type: "user_message", message:
+        "[krasch-recovery] Värden startade om mitt i din pågående turn och denna text är redan inskickad." } },
+    ])],
+    when: ["checking a wrapped prefix and an unrelated short draft", ({ paneDir }) => ({
+      residue: isPromptPrefixInCodexJsonl(paneDir,
+        "[krasch-recovery] Värden startade om mitt i din pågående turn"),
+      shortDraft: isPromptPrefixInCodexJsonl(paneDir, "ff"),
+    })],
+    then: ["only the JSONL-proven residue may be auto-cleared", (result, { cleanup }) => {
+      expect(result).toEqual({ residue: true, shortDraft: false });
       cleanup();
     }],
   });

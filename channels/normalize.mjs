@@ -25,6 +25,7 @@ export function normalizeDiscordMessage(msg, opts = {}) {
     authorId: msg.author.id,
     isBot: msg.author.bot,
     id: msg.id,
+    createdTimestamp: msg.createdTimestamp,
     attachments: [...msg.attachments.values()].map((att) => ({
       id: att.id,
       name: att.name,

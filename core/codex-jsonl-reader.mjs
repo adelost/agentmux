@@ -64,6 +64,13 @@ function findJsonlFiles(dir, depth = 0, acc = []) {
 // larger than this is parsed from a bounded newline-aligned tail window instead
 // — same fix + cap as the Claude reader. No consumer needs the pre-window history.
 const MAX_JSONL_WINDOW_BYTES = 128 * 1024 * 1024;
+// Delivery/busy checks only need the live tail. Reading a 128MB rollout on
+// every 200ms echo poll made the bridge itself CPU-bound when several large
+// Codex panes received messages together. Keep extraction's generous window,
+// but give transport checks a small cached operational view.
+const MAX_OPERATIONAL_WINDOW_BYTES = 8 * 1024 * 1024;
+const MAX_OPERATIONAL_CACHE_FILES = 8;
+const operationalEventsCache = new Map(); // filePath → { mtimeMs, size, events }
 
 /** Parse all JSON events from a jsonl file, skipping malformed lines. */
 function parseJsonl(filePath) {
@@ -78,6 +85,25 @@ function parseJsonl(filePath) {
   } catch {
     return [];
   }
+}
+
+function parseOperationalJsonl(filePath) {
+  let stat;
+  try { stat = statSync(filePath); } catch { return []; }
+  const cached = operationalEventsCache.get(filePath);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    operationalEventsCache.delete(filePath);
+    operationalEventsCache.set(filePath, cached);
+    return cached.events;
+  }
+  const events = stat.size > MAX_OPERATIONAL_WINDOW_BYTES
+    ? parseJsonlTail(filePath, MAX_OPERATIONAL_WINDOW_BYTES)
+    : parseJsonl(filePath);
+  operationalEventsCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, events });
+  while (operationalEventsCache.size > MAX_OPERATIONAL_CACHE_FILES) {
+    operationalEventsCache.delete(operationalEventsCache.keys().next().value);
+  }
+  return events;
 }
 
 /**
@@ -243,7 +269,7 @@ export function isPromptInCodexJsonl(paneDir, promptText, { notBeforeMs = 0 } = 
   const file = latestSessionFor(paneDir);
   if (!file) return null;
 
-  const events = parseJsonl(file);
+  const events = parseOperationalJsonl(file);
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
     if (e.type !== "event_msg") continue;
@@ -258,6 +284,70 @@ export function isPromptInCodexJsonl(paneDir, promptText, { notBeforeMs = 0 } = 
 }
 
 /**
+ * A visible Codex composer can contain text left behind by an older delivery
+ * even though that exact user message is already present in the rollout.
+ * Prove that relationship from JSONL before clearing a composer while a turn
+ * is active.  The minimum overlap keeps short local drafts (for example
+ * "ff") out of this automatic recovery path.
+ */
+export function isPromptPrefixInCodexJsonl(paneDir, composerText, { minOverlap = 48 } = {}) {
+  const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+  const composer = normalize(composerText);
+  if (composer.length < minOverlap) return false;
+
+  const file = latestSessionFor(paneDir);
+  if (!file) return false;
+
+  const events = parseOperationalJsonl(file);
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.type !== "event_msg" || event.payload?.type !== "user_message") continue;
+    const submitted = normalize(event.payload.message);
+    const overlap = Math.min(composer.length, submitted.length);
+    if (overlap >= minOverlap && composer.slice(0, overlap) === submitted.slice(0, overlap)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Derive live task state from an operational event window. */
+export function codexBusyStateFromEvents(events, { truncated = false } = {}) {
+  if (!Array.isArray(events) || events.length === 0) return truncated ? true : null;
+
+  let latestStartIdx = -1;
+  let latestTurnId = null;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const payload = events[i]?.type === "event_msg" ? events[i].payload : null;
+    if (payload?.type === "task_started" && payload.turn_id) {
+      latestStartIdx = i;
+      latestTurnId = payload.turn_id;
+      break;
+    }
+  }
+
+  if (!latestTurnId) {
+    if (!truncated) return false;
+    // A terminal event is emitted after all output, so it stays in a bounded
+    // tail when the latest turn completed. With no lifecycle event in a
+    // truncated growing tail, task_started was pushed out by a still-running
+    // long turn: fail busy, never falsely idle.
+    const terminal = events.some((event) => {
+      const payload = event?.type === "event_msg" ? event.payload : null;
+      return payload?.type === "task_complete" || payload?.type === "turn_aborted";
+    });
+    return !terminal;
+  }
+
+  for (let i = latestStartIdx + 1; i < events.length; i++) {
+    const payload = events[i]?.type === "event_msg" ? events[i].payload : null;
+    if ((payload?.type === "task_complete" || payload?.type === "turn_aborted")
+        && payload.turn_id === latestTurnId) return false;
+  }
+  return true;
+}
+
+/**
  * Check if Codex is busy for a given pane.
  *
  * @returns {boolean | null}
@@ -269,31 +359,12 @@ export function isBusyFromCodexJsonl(paneDir) {
   const file = latestSessionFor(paneDir);
   if (!file) return null;
 
-  const events = parseJsonl(file);
+  const events = parseOperationalJsonl(file);
   if (events.length === 0) return null;
-
-  // Only the latest task can describe the live TUI. Older unmatched starts
-  // are interrupted history (Esc, crash, quota stop), not permanent busy
-  // state. Treating every historical start as live made model-watch believe
-  // a recovered pane was busy forever and prevented a verified restart from
-  // restoring the requested model.
-  let latestStartIdx = -1;
-  let latestTurnId = null;
-  for (let i = events.length - 1; i >= 0; i--) {
-    const p = events[i]?.type === "event_msg" ? events[i].payload : null;
-    if (p?.type === "task_started" && p.turn_id) {
-      latestStartIdx = i;
-      latestTurnId = p.turn_id;
-      break;
-    }
-  }
-  if (!latestTurnId) return false;
-
-  for (let i = latestStartIdx + 1; i < events.length; i++) {
-    const p = events[i]?.type === "event_msg" ? events[i].payload : null;
-    if (p?.type === "task_complete" && p.turn_id === latestTurnId) return false;
-  }
-  return true;
+  let truncated = false;
+  try { truncated = statSync(file).size > MAX_OPERATIONAL_WINDOW_BYTES; }
+  catch { return null; }
+  return codexBusyStateFromEvents(events, { truncated });
 }
 
 /** Format a codex function_call into a compact one-liner. */

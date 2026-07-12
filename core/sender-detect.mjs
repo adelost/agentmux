@@ -59,6 +59,8 @@ export function detectPaneAddress(env, execFn) {
  */
 export function prependSenderHeader(text, sender) {
   if (!sender) return text;
+  const existing = parseSenderHeader(text);
+  if (existing?.key === sender) return text;
   return `[from ${sender}]\n\n${text}`;
 }
 

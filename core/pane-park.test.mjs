@@ -7,6 +7,7 @@ import {
   unparkPane,
   readParkState,
   shouldBlockSend,
+  decideParkedSend,
   blockedSendMessage,
   PARK_MAX_AGE_MS,
 } from "./pane-park.mjs";
@@ -136,6 +137,31 @@ feature("shouldBlockSend guard decision", () => {
     given: ["a message starting with a filesystem path", () => ({ text: "/home/x/notes.md läses fel", park })],
     when: ["deciding", (args) => shouldBlockSend(args)],
     then: ["blocked (paths are not commands)", (r) => expect(r).toBe(true)],
+  });
+});
+
+feature("decideParkedSend two-strike confirm", () => {
+  const park = { sinceMs: 1000, detail: "fable-5 → opus-4-8" };
+
+  unit("no park delivers straight through", {
+    when: ["deciding", () => decideParkedSend({ park: null })],
+    then: ["delivered", (r) => expect(r).toEqual({ action: "deliver" })],
+  });
+
+  unit("first brief after a park warns and remembers the timestamp", {
+    when: ["deciding with no prior warning", () => decideParkedSend({ park, warnedSinceMs: null })],
+    then: ["warns for this park", (r) => expect(r).toEqual({ action: "warn", sinceMs: 1000 })],
+  });
+
+  unit("a re-send of the same park is an explicit confirm", {
+    when: ["deciding after warning this park", () => decideParkedSend({ park, warnedSinceMs: 1000 })],
+    then: ["confirmed → deliver + unpark", (r) => expect(r).toEqual({ action: "confirm" })],
+  });
+
+  unit("a newer park re-warns instead of confirming a stale acknowledgement", {
+    when: ["deciding when a later park superseded the warned one", () =>
+      decideParkedSend({ park: { sinceMs: 5000, detail: "x" }, warnedSinceMs: 1000 })],
+    then: ["warns for the new park", (r) => expect(r).toEqual({ action: "warn", sinceMs: 5000 })],
   });
 });
 
