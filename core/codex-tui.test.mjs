@@ -1,8 +1,10 @@
 import { feature, unit, expect } from "bdd-vitest";
 import {
+  codexComposerContainsPrompt,
   codexComposerText,
   isCodexTranscriptView,
   prepareCodexIdle,
+  shouldRescueCodexSubmit,
   verifiedEmptyCodexComposer,
 } from "./codex-tui.mjs";
 
@@ -74,6 +76,21 @@ feature("Codex composer truth", () => {
     then: ["it is empty", (value) => expect(value).toBe("")],
   });
 
+  unit("an old neutral receipt in scrollback does not hide a missing live composer", {
+    when: ["reading a stale startup receipt followed by later output", () =>
+      verifiedEmptyCodexComposer(`
+• No previous message to edit.
+• Ran tests
+  └ green
+• Wrote summary
+  more output
+  final output
+  cursor debris
+`)],
+    then: ["composer state stays unknown so the idle reveal gate can act", (value) =>
+      expect(value).toBeNull()],
+  });
+
   unit("the full-screen transcript viewer is not mistaken for a historical draft", {
     given: ["Codex transcript chrome", () => `
 › old prompt
@@ -85,6 +102,34 @@ q to quit   esc/← to edit prev
     then: ["view is explicit and composer unknown", (result) => {
       expect(result).toEqual({ view: true, composer: null });
     }],
+  });
+
+  unit("submit rescue is allowed only for the exact idle draft", {
+    given: ["the same draft in idle, busy, and historical screens", () => ({
+      prompt: "[krasch-recovery] återuppta",
+      draft: "\n› [krasch-recovery] återuppta\n",
+      history: "\n› [krasch-recovery] återuppta\n• Working (2s)\n",
+    })],
+    when: ["evaluating rescue safety", ({ prompt, draft, history }) => [
+      shouldRescueCodexSubmit({ snapshot: draft, prompt, busy: false }),
+      shouldRescueCodexSubmit({ snapshot: draft, prompt, busy: true }),
+      shouldRescueCodexSubmit({ snapshot: history, prompt, busy: false }),
+    ]],
+    then: ["only the idle live composer may receive Enter", (result) =>
+      expect(result).toEqual([true, false, false])],
+  });
+
+  unit("composer identity rejects recovery prompts that share only a short prefix", {
+    given: ["two pane-specific recovery prompts", () => ({
+      current: "[krasch-recovery] Värden startade om 15:14 mitt i din pågående turn (din prompt 15:06 fick aldrig avslut).",
+      incoming: "[krasch-recovery] Värden startade om 15:14 mitt i din pågående turn (din prompt 15:09 fick aldrig avslut).",
+    })],
+    when: ["matching the incoming prompt against the stale composer", ({ current, incoming }) => ({
+      exact: codexComposerContainsPrompt(`\n› ${incoming}\n`, incoming),
+      stale: codexComposerContainsPrompt(`\n› ${current}\n`, incoming),
+    })],
+    then: ["only the full identity matches", (result) =>
+      expect(result).toEqual({ exact: true, stale: false })],
   });
 });
 

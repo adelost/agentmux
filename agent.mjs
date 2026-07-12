@@ -16,7 +16,13 @@ import { findBlockingPrompt } from "./core/dismiss.mjs";
 import { claudeProjectDir, classifyHistoryRead } from "./core/claude-paths.mjs";
 import { appendEvent } from "./core/events.mjs";
 import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
-import { codexComposerText, isCodexTranscriptView } from "./core/codex-tui.mjs";
+import {
+  codexComposerContainsPrompt,
+  codexComposerText,
+  isCodexTranscriptView,
+  prepareCodexIdle,
+  shouldRescueCodexSubmit,
+} from "./core/codex-tui.mjs";
 import {
   codexModelOverride,
   codexProfileCatalog,
@@ -1312,17 +1318,19 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   }
 
   /**
-   * Poll the pane until the user's prompt text appears in the buffer,
+   * Poll the pane until the user's prompt text appears in session jsonl,
    * confirming the agent has actually received the input.
    *
    * Source of truth: the agent's own session jsonl. When the user prompt
    * appears there, we know for certain the agent received it. No tmux
-   * pane width tricks, no wordwrap to fight. Falls back to tmux text
-   * matching when no jsonl is available.
+   * pane width tricks, no wordwrap to fight, and no generic busy signal
+   * pretending that unrelated keystrokes were accepted.
    *
    * @returns true if echo seen, false on timeout
    */
-  async function waitForPromptEcho(agentName, pane, promptText, timeoutMs = 15000) {
+  async function waitForPromptEcho(agentName, pane, promptText, timeoutMs = 15000, {
+    notBeforeMs = 0,
+  } = {}) {
     const needle = promptText?.trim();
     if (!needle) return true;
 
@@ -1333,32 +1341,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     while (Date.now() < deadline) {
       // Try jsonl first (width-independent, reliable)
       let found = null;
-      if (dialect === "claude") found = isPromptInJsonl(dir, promptText);
-      else if (dialect === "codex") found = isPromptInCodexJsonl(dir, promptText);
+      if (dialect === "claude") found = isPromptInJsonl(dir, promptText, { notBeforeMs });
+      else if (dialect === "codex") found = isPromptInCodexJsonl(dir, promptText, { notBeforeMs });
       if (found === true) return true;
-
-      // jsonl hasn't positively confirmed — found === false means the agent
-      // hasn't written the prompt yet; found === null means unknown dialect
-      // or no jsonl. The keystrokes may sit in the composer, but that is
-      // only DELIVERY when a turn is running (a queued message auto-submits
-      // at turn end, which can take minutes — don't hold the send-lock for
-      // that). On an IDLE pane, text in the composer is UNSUBMITTED: calling
-      // it delivered here is exactly how a prompt got lost on 2026-07-08
-      // (claude restarted under a 547MB jsonl and dropped the composer)
-      // while the bridge logged 'delivered' and no ⚠️ ever reached Discord.
-      // Idle+in-composer keeps polling: the submit-rescue may land it in
-      // jsonl (→ true), else we time out (→ false) and the caller's retry/
-      // warning path finally tells the human the truth.
-      if (found !== true) {
-        const raw = await capturePane(agentName, pane, 100);
-        const tail = raw.split("\n").slice(-15).join("\n");
-        if (tail.includes(needle.slice(0, 20))) {
-          const dialect2 = detectDialect(raw);
-          const busyHit = dialect2.busySignals?.some((sig) =>
-            typeof sig === "string" ? raw.includes(sig) : sig.test(raw));
-          if (busyHit) return true; // queued behind a live turn: delivered
-        }
-      }
 
       await wait(200);
     }
@@ -1367,14 +1352,52 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   // --- Send ---
 
+  /**
+   * Codex accepts typed input only when its real composer is visible. During
+   * /status, transcript replay, or startup paint, tmux keystrokes can land in
+   * a toast/overlay instead (claw:10 retained only the first "i" of an
+   * Instagram prompt on 2026-07-12). Normal prompts are serialized behind a
+   * running Codex turn instead of being typed into its live TUI; Discord
+   * inbound remains unacknowledged/durable until this function returns.
+   */
+  async function waitForCodexPromptReady(agentName, pane) {
+    const deadline = Date.now() + (timeout || 600_000);
+    let lastError = "composer is not ready";
+    const driver = { isBusy, capturePane, captureScreen, sendEscape, typeLiteral };
+
+    while (Date.now() < deadline) {
+      const ready = await prepareCodexIdle({
+        agent: driver,
+        name: agentName,
+        pane,
+        sleep: wait,
+        allowBusy: false,
+        requireVisibleComposer: true,
+      });
+      if (ready.ok) return;
+      lastError = ready.error || lastError;
+      // Never overwrite a real draft. Retrying delivery would only type on
+      // top of it, so fail immediately and let the caller warn the human.
+      if (/composer is not empty/i.test(lastError)) {
+        throw new Error(`Codex prompt delivery blocked: ${lastError}`);
+      }
+      await wait(250);
+    }
+    throw new Error(`Codex prompt delivery timed out: ${lastError}`);
+  }
+
   async function sendPrompt(agentName, prompt, pane) {
     const target = `${agentName}:.${pane}`;
+    const notBeforeMs = Date.now();
     await exitCopyMode(target);
 
     // Idempotent retries: if a previous attempt left this exact prompt
     // sitting unsubmitted in the composer, typing it again would double the
     // text. Skip straight to the submit path instead.
     if (!(await promptAlreadyInComposer(agentName, pane, prompt))) {
+      if ((await livePaneDialectName(agentName, pane)) === "codex") {
+        await waitForCodexPromptReady(agentName, pane);
+      }
       await clearForeignComposerText(agentName, pane, target, prompt);
       if (prompt.length > 500) {
         await sendLongPrompt(target, prompt);
@@ -1384,7 +1407,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       }
     }
     await t.sendEnter(target);
-    await maybeSendCodexSubmitEnter(agentName, pane, target, prompt);
+    await maybeSendCodexSubmitEnter(agentName, pane, target, prompt, { notBeforeMs });
     await maybeRescueClaudeSubmit(agentName, pane, target, prompt);
   }
 
@@ -1392,6 +1415,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const head = prompt.trim().slice(0, 20);
     if (!head) return false;
     try {
+      if ((await livePaneDialectName(agentName, pane)) === "codex") {
+        return codexComposerContainsPrompt(await captureScreen(agentName, pane), prompt);
+      }
       const raw = await capturePane(agentName, pane, 15);
       // Composer lines render as "❯ text" (claude) / "› text" (codex) /
       // "> text" (legacy). COMPOSER_LINE_RE is built from dialect data —
@@ -1437,7 +1463,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
   }
 
-  async function maybeSendCodexSubmitEnter(agentName, pane, target, prompt) {
+  async function maybeSendCodexSubmitEnter(agentName, pane, target, prompt, {
+    notBeforeMs = 0,
+  } = {}) {
     const dialect = await livePaneDialectName(agentName, pane);
     if (dialect !== "codex") return;
 
@@ -1457,7 +1485,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     const submitted = async () => {
       if (!dir) return null;            // unknown — caller falls back to retry
-      try { return isPromptInCodexJsonl(dir, prompt) === true; }
+      try { return isPromptInCodexJsonl(dir, prompt, { notBeforeMs }) === true; }
       catch { return null; }
     };
 
@@ -1465,8 +1493,14 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await wait(750);
     if (await submitted() === true) return;
 
-    // Up to 3 rescue attempts, spaced 750ms. Stops as soon as jsonl confirms.
+    // Up to 3 rescue attempts, spaced 750ms. Every Enter is independently
+    // gated by an idle live composer containing this exact draft. A busy
+    // signal alone is never permission: repeated Enter while a turn ran was
+    // the source of the duplicate recovery storm on 2026-07-12.
     for (let attempt = 0; attempt < 3; attempt++) {
+      const busy = await isBusy(agentName, pane).catch(() => true);
+      const snapshot = await captureScreen(agentName, pane).catch(() => "");
+      if (!shouldRescueCodexSubmit({ snapshot, prompt, busy })) return;
       await t.sendEnter(target);
       await wait(750);
       if (await submitted() === true) return;

@@ -55,11 +55,43 @@ export function codexComposerText(text) {
   return value;
 }
 
+/**
+ * Prove that the live Codex composer contains this prompt, using enough of a
+ * whitespace-normalized prefix to distinguish repeated recovery templates.
+ * The old 20-character check treated every "[krasch-recovery] ..." draft as
+ * identical and could submit an older pane's stale text.
+ */
+export function codexComposerContainsPrompt(snapshot, prompt) {
+  const composer = codexComposerText(snapshot);
+  if (typeof composer !== "string") return false;
+  const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+  const needle = normalize(prompt);
+  if (!needle) return false;
+  const identity = needle.slice(0, Math.min(160, needle.length));
+  return normalize(composer).includes(identity);
+}
+
+/**
+ * A rescue Enter is safe only while Codex is idle and the live composer still
+ * contains this exact prompt's head. Blind Enter retries during a running turn
+ * can enqueue the same stale draft repeatedly; that produced four to six
+ * duplicate crash-recovery turns from one delivery on 2026-07-12.
+ */
+export function shouldRescueCodexSubmit({ snapshot, prompt, busy }) {
+  if (busy) return false;
+  return codexComposerContainsPrompt(snapshot, prompt);
+}
+
 export function verifiedEmptyCodexComposer(text) {
   const value = codexComposerText(text);
   if (value !== null) return value;
   const raw = String(text || "");
-  return IDLE_EDIT_HINT.test(raw) || NO_PREVIOUS_MESSAGE_HINT.test(raw) ? "" : null;
+  // Neutral receipts are ephemeral footer state, not timeless scrollback.
+  // claw:10 kept an old "No previous message" near the top of its screen
+  // while the live composer had disappeared; matching the whole capture made
+  // delivery wait forever instead of using one safe idle Escape to reveal it.
+  const tail = raw.split("\n").slice(-6).join("\n");
+  return IDLE_EDIT_HINT.test(tail) || NO_PREVIOUS_MESSAGE_HINT.test(tail) ? "" : null;
 }
 
 const fail = (stage, error) => ({ ok: false, stage, error });

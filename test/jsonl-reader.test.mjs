@@ -317,6 +317,30 @@ feature("isPromptInJsonl: matches queue-operation and attachment events", () => 
       cleanup();
     }],
   });
+
+  unit("an identical historical prompt does not acknowledge a new delivery", {
+    given: ["a prompt written at 20:00:00", () => setupFakeProject("simple-text.jsonl")],
+    when: ["checking with a later delivery cursor", ({ paneDir }) =>
+      isPromptInJsonl(paneDir, "what is 2+2?", {
+        notBeforeMs: Date.parse("2026-04-08T20:00:01Z"),
+      })],
+    then: ["the old occurrence is ignored", (r, { cleanup }) => {
+      expect(r).toBe(false);
+      cleanup();
+    }],
+  });
+
+  unit("a queued prompt after the delivery cursor still acknowledges", {
+    given: ["a queue event written at 20:00:02", () => setupFakeProject("queued-prompt.jsonl")],
+    when: ["checking with an earlier delivery cursor", ({ paneDir }) =>
+      isPromptInJsonl(paneDir, "queued second prompt", {
+        notBeforeMs: Date.parse("2026-04-08T20:00:01Z"),
+      })],
+    then: ["the new queue receipt is found", (r, { cleanup }) => {
+      expect(r).toBe(true);
+      cleanup();
+    }],
+  });
 });
 
 feature("isBusyFromJsonl: compacted session with null stop_reason", () => {

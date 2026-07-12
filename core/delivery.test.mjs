@@ -10,14 +10,16 @@ import { readEvents } from "./events.mjs";
 function fakeAgent({ echoResults = [], busyResults = [] } = {}) {
   const calls = [];
   let echoIdx = 0, busyIdx = 0;
-  return {
+  const agent = {
     calls,
+    echoOptions: [],
     dismissBlockingPrompt: async () => { calls.push("dismiss"); return null; },
     sendOnly: async (name, text) => { calls.push(`send:${text.slice(0, 25)}`); },
     sendEnter: async () => { calls.push("enter"); },
     capturePane: async () => { calls.push("capture"); return "❯ \n"; },
-    waitForPromptEcho: async () => {
+    waitForPromptEcho: async (_name, _pane, _text, _timeout, options) => {
       calls.push("echo");
+      agent.echoOptions.push(options);
       return echoResults[Math.min(echoIdx++, echoResults.length - 1)] ?? false;
     },
     isBusy: async () => {
@@ -25,6 +27,7 @@ function fakeAgent({ echoResults = [], busyResults = [] } = {}) {
       return busyResults[Math.min(busyIdx++, busyResults.length - 1)] ?? false;
     },
   };
+  return agent;
 }
 
 feature("sendPromptVerified", () => {
@@ -41,12 +44,15 @@ feature("sendPromptVerified", () => {
     }],
   });
 
-  component("busy pane counts as delivered (queued message)", {
+  component("busy state without the exact prompt echo is not delivery proof", {
     given: ["no echo but a busy pane", () =>
       fakeAgent({ echoResults: [false], busyResults: [true] })],
-    when: ["sending", (agent) => sendPromptVerified(agent, "claw", 1, "x")],
-    then: ["delivered via busy on attempt 1", (result) =>
-      expect(result).toEqual({ delivered: true, attempts: 1, via: "busy" })],
+    when: ["sending once", (agent) => sendPromptVerified(agent, "claw", 1, "x", {
+      attempts: 1,
+      echoTimeoutMs: 0,
+    })],
+    then: ["delivery fails closed instead of issuing a false busy receipt", (result) =>
+      expect(result).toEqual({ delivered: false, attempts: 1, via: null })],
   });
 
   component("retries then reports honest failure", {
@@ -68,6 +74,24 @@ feature("sendPromptVerified", () => {
     when: ["sending", (agent) => sendPromptVerified(agent, "claw", 1, "x")],
     then: ["delivered on attempt 2", (result) =>
       expect(result).toEqual({ delivered: true, attempts: 2, via: "echo" })],
+  });
+
+  component("echo verification carries a monotonic delivery cursor", {
+    given: ["an agent that echoes immediately", () => ({
+      agent: fakeAgent({ echoResults: [true] }),
+      before: Date.now(),
+    })],
+    when: ["sending a repeated prompt", async ({ agent, before }) => ({
+      result: await sendPromptVerified(agent, "claw", 1, "test"),
+      cursor: agent.echoOptions[0]?.notBeforeMs,
+      before,
+      after: Date.now(),
+    })],
+    then: ["only an occurrence from this delivery can acknowledge", ({ result, cursor, before, after }) => {
+      expect(result.delivered).toBe(true);
+      expect(cursor).toBeGreaterThanOrEqual(before);
+      expect(cursor).toBeLessThanOrEqual(after);
+    }],
   });
 });
 

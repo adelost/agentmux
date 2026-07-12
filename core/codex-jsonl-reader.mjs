@@ -236,7 +236,7 @@ function latestSessionFor(paneDir) {
  *
  * @returns boolean (true = prompt found) or null (no session file)
  */
-export function isPromptInCodexJsonl(paneDir, promptText) {
+export function isPromptInCodexJsonl(paneDir, promptText, { notBeforeMs = 0 } = {}) {
   const needle = promptText?.trim();
   if (!needle) return null;
 
@@ -248,6 +248,10 @@ export function isPromptInCodexJsonl(paneDir, promptText) {
     const e = events[i];
     if (e.type !== "event_msg") continue;
     if (e.payload?.type !== "user_message") continue;
+    if (notBeforeMs) {
+      const eventMs = Date.parse(e.timestamp || "");
+      if (!Number.isFinite(eventMs) || eventMs < notBeforeMs) continue;
+    }
     if (e.payload.message === needle) return true;
   }
   return false;

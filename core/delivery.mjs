@@ -5,9 +5,8 @@
 //
 //   1. Blocking prompts are dismissed before sending.
 //   2. Delivery is VERIFIED at the source of truth, never assumed:
-//      prompts against the session jsonl (with busy-queue as the only
-//      structural exception), slash commands against the composer being
-//      consumed (they never reach the jsonl).
+//      prompts against the session jsonl, slash commands against the
+//      composer being consumed (they never reach the jsonl).
 //   3. Failures are rescued (submit-Enter) and retried idempotently.
 //   4. The verdict is HONEST: { delivered: false } means the human/caller
 //      must be told — no path may claim success it cannot prove.
@@ -60,7 +59,9 @@ export function isSlashCommand(text) {
  * Verified prompt delivery: dismiss -> send -> echo-verify -> retry.
  * sendText is what goes into the pane (may carry a "[from x]" prefix);
  * verifyText is what the echo check looks for (the bare prompt).
- * Returns { delivered, attempts, via } — via: "echo" | "busy".
+ * Returns { delivered, attempts, via } — prompt delivery is acknowledged
+ * only by the exact session-jsonl echo. A generic "pane is busy" signal is
+ * never proof that our keystrokes reached the composer.
  */
 export async function sendPromptVerified(agent, agentName, pane, text, opts = {}) {
   const result = await promptDeliveryAttempts(agent, agentName, pane, text, opts);
@@ -73,6 +74,10 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
 } = {}) {
   const target = `${agentName}:.${pane}`;
   const needle = verifyText ?? text;
+  // A repeated prompt must produce a NEW jsonl event. Without this cursor,
+  // an identical historical "test" or recovery prompt makes a lost send look
+  // acknowledged immediately.
+  const notBeforeMs = Date.now();
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
     await agent.dismissBlockingPrompt(target)
@@ -83,11 +88,8 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
     await agent.sendOnly(agentName, text, pane)
       .catch((err) => log(`send attempt ${attempt} errored (verifying echo anyway): ${err.message.split("\n").slice(0, 2).join(" | ")}`));
 
-    const echoed = await agent.waitForPromptEcho(agentName, pane, needle, echoTimeoutMs);
+    const echoed = await agent.waitForPromptEcho(agentName, pane, needle, echoTimeoutMs, { notBeforeMs });
     if (echoed) return { delivered: true, attempts: attempt, via: "echo" };
-
-    const busy = await agent.isBusy(agentName, pane, needle);
-    if (busy) return { delivered: true, attempts: attempt, via: "busy" };
 
     if (attempt < attempts) log(`prompt not echoed (attempt ${attempt}/${attempts}), retrying`);
   }

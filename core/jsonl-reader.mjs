@@ -60,7 +60,7 @@ function listJsonlFiles(projectDir) {
  *
  * @returns { jsonl, events } or null if nothing matches
  */
-function findJsonlAndEvents(projectDir, needle) {
+function findJsonlAndEvents(projectDir, needle, { notBeforeMs = 0 } = {}) {
   const files = listJsonlFiles(projectDir);
   if (files.length === 0) return null;
 
@@ -73,6 +73,10 @@ function findJsonlAndEvents(projectDir, needle) {
   for (const { path } of files) {
     const events = parseJsonl(path);
     for (const e of events) {
+      if (notBeforeMs) {
+        const eventMs = Date.parse(e?.timestamp || "");
+        if (!Number.isFinite(eventMs) || eventMs < notBeforeMs) continue;
+      }
       const text = extractPromptFromEvent(e);
       if (text && text.trim() === needleTrim) return { jsonl: path, events };
     }
@@ -234,7 +238,7 @@ function extractPromptFromEvent(event) {
  *
  * @returns boolean or null (no jsonl file → caller should fall back)
  */
-export function isPromptInJsonl(paneDir, promptText) {
+export function isPromptInJsonl(paneDir, promptText, { notBeforeMs = 0 } = {}) {
   const needle = promptText?.trim();
   if (!needle) return null;
 
@@ -243,7 +247,7 @@ export function isPromptInJsonl(paneDir, promptText) {
 
   // findJsonlAndEvents scans all files newest-first for the needle, so it
   // returns non-null iff some file contains the prompt.
-  return findJsonlAndEvents(projectDir, needle) !== null;
+  return findJsonlAndEvents(projectDir, needle, { notBeforeMs }) !== null;
 }
 
 /**

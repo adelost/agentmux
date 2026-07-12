@@ -342,6 +342,26 @@ feature("isPromptInCodexJsonl", () => {
       cleanup();
     }],
   });
+
+  unit("delivery cursors distinguish a new repeat from historical text", {
+    given: ["the same prompt before and after a cursor", () => setupFakeCodex([
+      { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+      { type: "event_msg", timestamp: "2026-04-09T10:00:00Z", payload: { type: "user_message", message: "test" } },
+      { type: "event_msg", timestamp: "2026-04-09T10:02:00Z", payload: { type: "user_message", message: "test" } },
+    ])],
+    when: ["checking cursors on either side of the new repeat", ({ paneDir }) => ({
+      afterOld: isPromptInCodexJsonl(paneDir, "test", {
+        notBeforeMs: Date.parse("2026-04-09T10:01:00Z"),
+      }),
+      afterBoth: isPromptInCodexJsonl(paneDir, "test", {
+        notBeforeMs: Date.parse("2026-04-09T10:03:00Z"),
+      }),
+    })],
+    then: ["only the occurrence newer than the cursor acknowledges", (r, { cleanup }) => {
+      expect(r).toEqual({ afterOld: true, afterBoth: false });
+      cleanup();
+    }],
+  });
 });
 
 // --- readLastTurnsCodex -------------------------------------------------
