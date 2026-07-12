@@ -121,6 +121,19 @@ feature("tmux adapter: command strings", () => {
       expect(calls[0]).toBe(PREFIX + `resize-window -t 'claw' -x 240 -y 60`)],
   });
 
+  unit("picker zoom uses the target pane and exposes its prior state", {
+    given: ["an unzoomed pane", () => fakeTmux({ stdout: "0\n" })],
+    when: ["reading and toggling zoom", async ({ t, calls }) => ({
+      zoomed: await t.paneZoomed("ai:.5"),
+      calls: (await t.togglePaneZoom("ai:.5"), calls),
+    })],
+    then: ["the flag read and toggle are exact", ({ zoomed, calls }) => {
+      expect(zoomed).toBe(false);
+      expect(calls[0]).toBe(PREFIX + `display-message -t 'ai:.5' -p '#{window_zoomed_flag}'`);
+      expect(calls[1]).toBe(PREFIX + `resize-pane -Z -t 'ai:.5'`);
+    }],
+  });
+
   unit("primitives survive destructuring (no this-binding)", {
     given: ["a destructured primitive", () => {
       const { t, calls } = fakeTmux({ stdout: "1\n" });

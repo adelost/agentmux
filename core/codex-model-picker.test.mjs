@@ -43,6 +43,14 @@ const COMPOSER_VIEW = `
   /model  choose what model and reasoning effort to use
 `;
 
+const PALETTE_ONLY_VIEW = `
+• Some earlier transcript line
+
+  /model
+
+  /model  choose what model and reasoning effort to use
+`;
+
 const IDLE_VIEW = `
 • Some earlier transcript line
 
@@ -147,6 +155,40 @@ feature("driveCodexModelPicker", () => {
     }],
   });
 
+  unit("temporarily zooms a short pane and restores layout after success", {
+    given: ["a picker-capable agent with zoom receipts", () => {
+      const agent = fakeAgent({ frames: [IDLE_VIEW, COMPOSER_VIEW, MODEL_LIST, EFFORT_LIST, CONFIRMED] });
+      const zoom = [];
+      agent.zoomPaneForPicker = async () => (zoom.push("zoom"), true);
+      agent.restorePaneZoom = async (_name, _pane, changed) => zoom.push(`restore:${changed}`);
+      return { agent, zoom };
+    }],
+    when: ["driving", ({ agent }) => driveCodexModelPicker({
+      agent, name: "ai", pane: 5, model: "gpt-5.6-luna", effort: "low", sleep: noSleep,
+    })],
+    then: ["zoom brackets the verified picker interaction", (r, { zoom }) => {
+      expect(r.ok).toBe(true);
+      expect(zoom).toEqual(["zoom", "restore:true"]);
+    }],
+  });
+
+  unit("restores temporary zoom when picker validation fails", {
+    given: ["a zoomed interaction with an unreadable composer", () => {
+      const agent = fakeAgent({ frames: ["\nunknown TUI\n", "\nstill unknown\n"] });
+      const zoom = [];
+      agent.zoomPaneForPicker = async () => (zoom.push("zoom"), true);
+      agent.restorePaneZoom = async (_name, _pane, changed) => zoom.push(`restore:${changed}`);
+      return { agent, zoom };
+    }],
+    when: ["driving", ({ agent }) => driveCodexModelPicker({
+      agent, name: "ai", pane: 5, model: "gpt-5.6-sol", effort: "max", sleep: noSleep,
+    })],
+    then: ["failure is honest and layout is restored", (r, { zoom }) => {
+      expect(r).toMatchObject({ ok: false, stage: "compose" });
+      expect(zoom).toEqual(["zoom", "restore:true"]);
+    }],
+  });
+
   unit("the exact Codex composer placeholder is treated as empty", {
     given: ["an idle live pane with the grey placeholder captured as text", () => ({
       agent: fakeAgent({
@@ -165,6 +207,63 @@ feature("driveCodexModelPicker", () => {
     then: ["the placeholder does not block a verified model switch", (r, { agent }) => {
       expect(r).toMatchObject({ ok: true, model: "gpt-5.6-luna", effort: "low" });
       expect(agent.keys).toEqual(["/model", "<enter>", "3", "1"]);
+    }],
+  });
+
+  unit("all observed rotating Codex composer hints are treated as empty", {
+    given: ["the two additional grey hints from live idle panes", () => [
+      "Summarize recent commits",
+      "Explain this codebase",
+    ]],
+    when: ["driving from each hint", async (hints) => Promise.all(hints.map((hint) => {
+      const agent = fakeAgent({ frames: [
+        `\n› ${hint}\n  gpt-5.6-sol max · ~/x\n`,
+        COMPOSER_VIEW,
+        MODEL_LIST,
+        EFFORT_LIST,
+        CONFIRMED,
+      ] });
+      return driveCodexModelPicker({
+        agent, name: "ai", pane: 5, model: "gpt-5.6-luna", effort: "low", sleep: noSleep,
+      });
+    }))],
+    then: ["both allow the verified picker path", (results) => {
+      expect(results.every((result) => result.ok)).toBe(true);
+    }],
+  });
+
+  unit("composerless completed turn is normalized through the exact idle receipt", {
+    given: ["an idle pane whose composer appears only after one Escape", () => ({
+      agent: fakeAgent({
+        frames: [
+          "\n• Ran git push\n\n  Akutläget är redan repar\n",
+          "\n  Akutläget är redan repar\n\n  esc again to edit previous message\n",
+          PALETTE_ONLY_VIEW,
+          MODEL_LIST,
+          EFFORT_LIST,
+          CONFIRMED,
+        ],
+      }),
+    })],
+    when: ["driving the picker", ({ agent }) => driveCodexModelPicker({
+      agent, name: "ai", pane: 5, model: "gpt-5.6-luna", effort: "low", sleep: noSleep,
+    })],
+    then: ["one safe reveal precedes the verified picker sequence", (r, { agent }) => {
+      expect(r).toMatchObject({ ok: true, model: "gpt-5.6-luna", effort: "low" });
+      expect(agent.keys).toEqual(["<esc>", "/model", "<enter>", "3", "1"]);
+    }],
+  });
+
+  unit("composerless unknown UI still fails closed after one reveal attempt", {
+    given: ["a pane with neither composer nor the exact idle receipt", () => ({
+      agent: fakeAgent({ frames: ["\ncompleted output\n", "\nstill unknown\n"] }),
+    })],
+    when: ["driving the picker", ({ agent }) => driveCodexModelPicker({
+      agent, name: "ai", pane: 5, model: "gpt-5.6-sol", effort: "max", sleep: noSleep,
+    })],
+    then: ["it does not type or submit anything", (r, { agent }) => {
+      expect(r).toMatchObject({ ok: false, stage: "compose" });
+      expect(agent.keys).toEqual(["<esc>"]);
     }],
   });
 

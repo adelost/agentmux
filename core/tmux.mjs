@@ -93,6 +93,16 @@ export function createTmuxAdapter({ socket, exec }) {
       await raw(`select-pane -t ${q(target)}`);
     },
 
+    /** Whether this pane's window is currently zoomed. */
+    async paneZoomed(target) {
+      return (await display(target, "#{window_zoomed_flag}")) === "1";
+    },
+
+    /** Toggle tmux zoom for the target pane. Callers must preserve prior state. */
+    async togglePaneZoom(target) {
+      await raw(`resize-pane -Z -t ${q(target)}`);
+    },
+
     async paneCount(name) {
       const { stdout } = await raw(`list-panes -t ${q(name)}`);
       return stdout.trim().split("\n").length;

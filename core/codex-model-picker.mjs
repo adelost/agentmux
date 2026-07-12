@@ -30,6 +30,13 @@
 const MODEL_LIST_HEADER = /Select Model and Effort/;
 const EFFORT_LIST_HEADER = /Select Reasoning Level for\s+(\S+)/;
 const CONFIRMATION_RE = /Model changed to\s+(\S+)(?:\s+(\S+))?/;
+const IDLE_EDIT_HINT = /esc again to edit previous message/i;
+const MODEL_COMMAND_PALETTE_ROW = /^\s*\/model\s+choose what model and reasoning effort to use\s*$/im;
+const EMPTY_COMPOSER_HINTS = new Set([
+  "Find and fix a bug in @filename",
+  "Summarize recent commits",
+  "Explain this codebase",
+]);
 
 // Order matters: "extra high" must match before plain "high".
 const EFFORT_NORMALIZE = [
@@ -84,9 +91,18 @@ function composerText(text) {
   const value = line.replace(/^\s*[›❯>]\s*/, "").trim();
   // Codex renders this grey hint inside an empty composer. tmux capture
   // strips the colour that distinguishes it from a human draft, so match
-  // the exact harness-owned placeholder and nothing broader.
-  if (value === "Find and fix a bug in @filename") return "";
+  // only exact placeholders observed from this Codex version.
+  if (EMPTY_COMPOSER_HINTS.has(value)) return "";
   return value;
+}
+
+function verifiedEmptyComposer(text) {
+  const value = composerText(text);
+  if (value !== null) return value;
+  // Codex 0.144.1 can leave a completed turn without rendering the composer.
+  // One idle Escape then prints this exact TUI-owned hint. It proves the pane
+  // is at the neutral post-turn boundary without guessing from scrollback.
+  return IDLE_EDIT_HINT.test(String(text || "")) ? "" : null;
 }
 
 export function parseModelList(text) {
@@ -137,7 +153,25 @@ const fail = (stage, error, extra = {}) => ({ ok: false, stage, error, ...extra 
  *          {{ok: false, stage, error, available?}} — never throws for UI
  *          mismatches; the pane is escaped back to neutral before returning.
  */
-export async function driveCodexModelPicker({
+export async function driveCodexModelPicker(options = {}) {
+  const { agent, name, pane } = options;
+  let zoomChanged = false;
+  try {
+    if (agent?.zoomPaneForPicker) {
+      zoomChanged = await agent.zoomPaneForPicker(name, pane);
+      if (zoomChanged) await (options.sleep || ((ms) => new Promise((r) => setTimeout(r, ms))))(300);
+    }
+    return await driveCodexModelPickerStages(options);
+  } finally {
+    if (agent?.restorePaneZoom) {
+      await agent.restorePaneZoom(name, pane, zoomChanged).catch((err) => {
+        options.log?.(`picker: failed to restore pane zoom for ${name}:${pane}: ${err.message}`);
+      });
+    }
+  }
+}
+
+async function driveCodexModelPickerStages({
   agent, name, pane, model, effort = null,
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   log = () => {},
@@ -171,7 +205,18 @@ export async function driveCodexModelPicker({
   // Preserve a human draft or a previously queued message. Checking after
   // typing would first merge "/model" into it and rely on Escape cleanup.
   let snap = await capture(15);
-  const before = composerText(snap);
+  let before = verifiedEmptyComposer(snap);
+  if (before === null) {
+    // A completed Codex turn sometimes omits the composer entirely. Normalize
+    // that known idle state with one Escape, then require either a real
+    // composer or Codex's exact "esc again" idle receipt before typing.
+    try { await agent.sendEscape(name, pane); }
+    catch (err) { return fail("compose", `could not reveal the codex composer: ${err.message}`); }
+    await sleep(400);
+    if (timedOut("composer-reveal")) return timedOut("composer-reveal");
+    snap = await capture(15);
+    before = verifiedEmptyComposer(snap);
+  }
   if (before === null) {
     return fail("compose", "could not identify the codex composer before typing");
   }
@@ -188,7 +233,12 @@ export async function driveCodexModelPicker({
   if (timedOut("composer")) { await escapeOut(); return timedOut("composer"); }
   snap = await capture(15);
   const composerLine = snap.split("\n").reverse().find((l) => /[›❯>]\s*\/\S*model/.test(l));
-  if (!composerLine || !/[›❯>]\s*\/model\s*$/.test(composerLine.trim())) {
+  const cleanComposer = composerLine && /[›❯>]\s*\/model\s*$/.test(composerLine.trim());
+  // Short panes can hide the composer behind the slash-command palette. The
+  // exact built-in /model row is an equally strong receipt that our clean
+  // command reached Codex; arbitrary prose mentioning /model is not accepted.
+  const cleanPalette = MODEL_COMMAND_PALETTE_ROW.test(snap);
+  if (!cleanComposer && !cleanPalette) {
     await escapeOut();
     return fail("compose", `composer did not show a clean /model (saw: ${(composerLine || "nothing").trim().slice(0, 60)})`);
   }

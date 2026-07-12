@@ -1540,6 +1540,24 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await t.sendLiteral(`${agentName}:.${pane}`, text);
   }
 
+  /**
+   * Temporarily give a TUI enough rows to render complete picker menus.
+   * Returns true only when this call changed tmux state; restorePaneZoom uses
+   * that receipt so an already-zoomed human layout is never toggled away.
+   */
+  async function zoomPaneForPicker(agentName, pane) {
+    const target = `${agentName}:.${pane}`;
+    if (await t.paneZoomed(target)) return false;
+    await t.togglePaneZoom(target);
+    return true;
+  }
+
+  async function restorePaneZoom(agentName, pane, changed) {
+    if (!changed) return;
+    const target = `${agentName}:.${pane}`;
+    if (await t.paneZoomed(target)) await t.togglePaneZoom(target);
+  }
+
   async function checkAgent(agentName) {
     if (!(await hasSession(agentName))) throw new Error(`No session: ${agentName}`);
     if (!(await isAlreadyRunning(`${agentName}:.0`))) throw new Error(`Claude not running in ${agentName}`);
@@ -1548,7 +1566,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   return {
     ensureReady, sendAndWait, sendOnly,
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
-    capturePane, sendEscape, sendEnter, typeLiteral, dismissBlockingPrompt, waitForPromptEcho,
+    capturePane, sendEscape, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom,
+    dismissBlockingPrompt, waitForPromptEcho,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession,
     sanitizeTmuxGlobalEnv,
   };
