@@ -52,13 +52,44 @@ feature("classifyModelChange — the warn/act decision", () => {
     }],
   });
 
-  unit("fable → opus is a downgrade (context fallback)", {
-    given: ["the claude case", () => classifyModelChange(
-      { model: "claude-fable-5", effort: null },
-      { model: "claude-opus-4-8", effort: null },
-    )],
+  unit("fable ↔ opus is a frontier sidegrade: notify, never stop (Mattias 2026-07-12)", {
+    given: ["a deliberate switch between two frontier models", () => ({
+      down: classifyModelChange(
+        { model: "claude-fable-5", effort: null },
+        { model: "claude-opus-4-8", effort: null },
+      ),
+      up: classifyModelChange(
+        { model: "claude-opus-4-8", effort: null },
+        { model: "claude-fable-5", effort: null },
+      ),
+    })],
+    when: ["classifying both directions", (c) => c],
+    then: ["lateral both ways, and neither stops the pane", ({ down, up }) => {
+      expect(down.direction).toBe("lateral");
+      expect(down.kind).toBe("model");
+      expect(up.direction).toBe("lateral");
+      expect(shouldStopPane(down)).toBe(false);
+      expect(shouldStopPane(up)).toBe(false);
+    }],
+  });
+
+  unit("frontier → weaker model still downgrades and stops (safety kept)", {
+    given: ["opus dropping to sonnet, and fable to haiku", () => ({
+      sonnet: classifyModelChange(
+        { model: "claude-opus-4-8", effort: null },
+        { model: "claude-sonnet-5", effort: null },
+      ),
+      haiku: classifyModelChange(
+        { model: "claude-fable-5", effort: null },
+        { model: "claude-haiku-4-5", effort: null },
+      ),
+    })],
     when: ["classifying", (c) => c],
-    then: ["downgrade", (c) => { expect(c.direction).toBe("downgrade"); }],
+    then: ["real downgrades that stop", ({ sonnet, haiku }) => {
+      expect(sonnet.direction).toBe("downgrade");
+      expect(shouldStopPane(sonnet)).toBe(true);
+      expect(shouldStopPane(haiku)).toBe(true);
+    }],
   });
 
   unit("switching back up is an upgrade, not noise", {

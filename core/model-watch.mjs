@@ -45,6 +45,17 @@ export function modelRank(model) {
   return null;
 }
 
+// The top Claude tier. A switch BETWEEN these (fable-5 <-> opus-4-8, whether a
+// deliberate /model or a context-pressure fallback) is a sidegrade among
+// frontier models, NOT a drop to a weaker quota/context fallback: notify the
+// human but never stop the pane or gate its briefs. Mattias 2026-07-12: "det är
+// okej nu att använda opus 4.8 ... jag vill veta ... men sen är det okej."
+const FRONTIER_MODELS = ["fable", "mythos", "opus"];
+export function isFrontierModel(model) {
+  const m = normalizeModel(model);
+  return FRONTIER_MODELS.some((name) => m.includes(name));
+}
+
 /**
  * Compare two {model, effort} sightings from the same pane.
  * Returns null when nothing changed, else
@@ -61,6 +72,14 @@ export function classifyModelChange(prev, next) {
   const toLabel = label(next);
 
   const change = { direction: "lateral", kind: "model", from: fromLabel, to: toLabel };
+
+  // Frontier-to-frontier (fable-5 <-> opus-4-8) is a sidegrade: the channel
+  // warning still fires so the human knows, but it stays "lateral" so it never
+  // parks, stops, or gates briefs. Only a drop to a genuinely weaker model does.
+  if (fromModel !== toModel && isFrontierModel(prev.model) && isFrontierModel(next.model)) {
+    return change;
+  }
+
   const a = modelRank(prev.model);
   const b = modelRank(next.model);
 
