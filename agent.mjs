@@ -1895,12 +1895,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   // --- Low-level (exposed for CLI) ---
 
   async function sendEscape(agentName, pane) {
-    // TEMP diagnostic (2026-07-12): a stray Escape was interrupting live
-    // conversations mid-turn ("Conversation interrupted"), yet every send-path
-    // Escape reads as busy-guarded. Log the caller (cheap, sync) so a live send
-    // reveals the true source, then this trace is removed with the root fix.
-    const caller = new Error().stack?.split("\n")[2]?.trim().replace(/^at\s+/, "") || "?";
-    console.warn(`[esc-trace] ${agentName}:${pane} <- ${caller}`);
     await t.sendEscape(`${agentName}:.${pane}`);
   }
 
