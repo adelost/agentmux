@@ -212,7 +212,12 @@ export function createJsonlWatcher({
 
   const STATE_KEY_LAST_MODEL = "watcher_last_model";
   const STATE_KEY_RECOVERY = MODEL_RECOVERY_STATE_KEY;
-  const recoveryEnabled = process.env.AMUX_MODEL_RECOVERY !== "false";
+  // Auto-recovery drives `/model <prev>` to switch a downgraded pane back to
+  // the model it held before. When that model is EXHAUSTED (Mattias 2026-07-12:
+  // out of Fable 5) the switch-back keeps re-selecting a quota-dead model and
+  // interrupts live turns to do it. Default OFF now — opt in with
+  // AMUX_MODEL_RECOVERY=true when the quota is back.
+  const recoveryEnabled = process.env.AMUX_MODEL_RECOVERY === "true";
 
   /**
    * One loop-guarded switch-back after a park. The attempt is recorded
