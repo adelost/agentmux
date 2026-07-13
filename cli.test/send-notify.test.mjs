@@ -1,6 +1,8 @@
 import { feature, component, e2e, unit, expect } from "bdd-vitest";
 import { spawn } from "child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "fs";
+import {
+  mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync, utimesSync,
+} from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
@@ -68,14 +70,20 @@ feature("notifyuser helpers", () => {
     },
   });
 
-  e2e("atomically merges concurrent explicit receipts and dedupes every reload", {
-    given: ["one empty HOME shared by concurrent notifyuser processes", () => {
+  e2e("recovers a stale reused-PID claim and atomically merges concurrent receipts", {
+    given: ["one stale live-PID claim and an empty HOME shared by concurrent processes", () => {
       const home = mkdtempSync(join(tmpdir(), "amux-notify-multiprocess-"));
       mkdirSync(join(home, ".openclaw"), { recursive: true });
       writeFileSync(join(home, ".openclaw/.channel-cache.json"), JSON.stringify({ notify: "channel-1" }));
+      const lockDir = join(home, ".openclaw/.notifyuser-state.json.lock.d");
+      mkdirSync(lockDir, { recursive: true });
+      const staleClaim = join(lockDir, "stale-reused-live-pid.claim");
+      writeFileSync(staleClaim, JSON.stringify({ pid: process.pid, createdAt: Date.now() - 60_000 }));
+      const staleTime = new Date(Date.now() - 60_000);
+      utimesSync(staleClaim, staleTime, staleTime);
       const moduleUrl = new URL("../cli/send-notify.mjs", import.meta.url).href;
       const identities = Array.from({ length: 12 }, (_, index) => `suggestions-comment-notify:test:T-${index}:1`);
-      return { home, identities, moduleUrl };
+      return { home, identities, lockDir, moduleUrl };
     }],
     when: ["all identities notify concurrently and then retry in fresh processes", async (ctx) => {
       const run = (identities, rejectFetch) => new Promise((resolvePromise, reject) => {
@@ -115,14 +123,18 @@ feature("notifyuser helpers", () => {
       const first = firstProcesses.flat();
       const state = JSON.parse(readFileSync(join(ctx.home, ".openclaw/.notifyuser-state.json"), "utf8"));
       const retries = await run(ctx.identities, true);
-      return { ...ctx, first, retries, state };
+      const remainingClaims = readdirSync(ctx.lockDir).filter((name) => name.endsWith(".claim"));
+      return { ...ctx, first, remainingClaims, retries, state };
     }],
-    then: ["all receipts survive and every fresh-process retry is local-only", ({ first, retries, state }) => {
+    then: ["stale recovery is bounded and all receipts survive for local-only reload", ({
+      first, remainingClaims, retries, state,
+    }) => {
       expect(first).toHaveLength(12);
       expect(first.every((result) => result.sent === true)).toBe(true);
       expect(Object.keys(state)).toHaveLength(12);
       expect(retries).toHaveLength(12);
       expect(retries.every((result) => result.sent === false && result.deduped === true)).toBe(true);
+      expect(remainingClaims).toEqual([]);
     }],
     cleanup: async ({ home }) => rmSync(home, { recursive: true, force: true }),
   });

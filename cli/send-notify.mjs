@@ -5,9 +5,9 @@
 // be a `connect` req with auth token; after hello-ok, subsequent methods
 // use `{type: "req", id, method, params}` format.
 
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import {
-  closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync,
+  mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync,
 } from "fs";
 import { dirname, join } from "path";
 import { splitMessage } from "../lib.mjs";
@@ -22,11 +22,12 @@ const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || (() => {
 
 const CHANNEL_CACHE = join(process.env.HOME, ".openclaw/.channel-cache.json");
 const NOTIFY_USER_STATE = join(process.env.HOME, ".openclaw/.notifyuser-state.json");
-const NOTIFY_USER_STATE_LOCK = `${NOTIFY_USER_STATE}.lock`;
+const NOTIFY_USER_STATE_LOCK_DIR = `${NOTIFY_USER_STATE}.lock.d`;
 const DEFAULT_NOTIFY_USER_DEDUPE_MS = 10 * 60 * 1000;
 const DISCORD_POST_TIMEOUT_MS = Number.parseInt(process.env.AMUX_DISCORD_POST_TIMEOUT_MS || "8000", 10);
 const NOTIFY_STATE_LOCK_TIMEOUT_MS = 10_000;
 const NOTIFY_STATE_STALE_LOCK_MS = 30_000;
+const NOTIFY_STATE_CLAIM_SETTLE_MS = 25;
 
 /** Resolve channel name to Discord channel ID. */
 export function resolveChannelId(channelName) {
@@ -357,51 +358,49 @@ function delay(ms) {
 
 async function withNotifyStateLock(action) {
   mkdirSync(dirname(NOTIFY_USER_STATE), { recursive: true, mode: 0o700 });
+  mkdirSync(NOTIFY_USER_STATE_LOCK_DIR, { recursive: true, mode: 0o700 });
+  const claimName = `${Date.now()}-${process.pid}-${randomUUID()}.claim`;
+  const claimPath = join(NOTIFY_USER_STATE_LOCK_DIR, claimName);
+  writeFileSync(claimPath, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), {
+    encoding: "utf8", mode: 0o600, flag: "wx",
+  });
   const deadline = Date.now() + NOTIFY_STATE_LOCK_TIMEOUT_MS;
-  let lockFd;
-  while (lockFd == null) {
-    try {
-      lockFd = openSync(NOTIFY_USER_STATE_LOCK, "wx", 0o600);
-      try {
-        writeFileSync(lockFd, String(process.pid));
-      } catch (err) {
-        closeSync(lockFd);
-        lockFd = undefined;
-        try { unlinkSync(NOTIFY_USER_STATE_LOCK); } catch {}
-        throw err;
-      }
-    } catch (err) {
-      if (err?.code !== "EEXIST") throw err;
-      try {
-        const lockAge = Date.now() - statSync(NOTIFY_USER_STATE_LOCK).mtimeMs;
-        const owner = Number.parseInt(readFileSync(NOTIFY_USER_STATE_LOCK, "utf8"), 10);
-        let ownerAlive = false;
-        if (Number.isSafeInteger(owner) && owner > 0) {
-          try {
-            process.kill(owner, 0);
-            ownerAlive = true;
-          } catch (ownerErr) {
-            ownerAlive = ownerErr?.code !== "ESRCH";
-          }
+
+  try {
+    // A short settle window means every contender that could predate this
+    // critical section is visible before deterministic election. Later claims
+    // always see this live claim and wait. Unique filenames make stale cleanup
+    // ABA-safe: a recoverer can never unlink a replacement owner's claim.
+    await delay(NOTIFY_STATE_CLAIM_SETTLE_MS);
+    while (true) {
+      const now = Date.now();
+      const contenders = [];
+      for (const name of readdirSync(NOTIFY_USER_STATE_LOCK_DIR)) {
+        if (!name.endsWith(".claim")) continue;
+        const path = join(NOTIFY_USER_STATE_LOCK_DIR, name);
+        let stat;
+        try {
+          stat = statSync(path, { bigint: true });
+        } catch (err) {
+          if (err?.code === "ENOENT") continue;
+          throw err;
         }
-        if (!ownerAlive && (Number.isSafeInteger(owner) || lockAge > NOTIFY_STATE_STALE_LOCK_MS)) {
-          unlinkSync(NOTIFY_USER_STATE_LOCK);
+        const ageMs = now - Number(stat.mtimeNs / 1_000_000n);
+        if (name !== claimName && ageMs > NOTIFY_STATE_STALE_LOCK_MS) {
+          try { unlinkSync(path); } catch (err) { if (err?.code !== "ENOENT") throw err; }
           continue;
         }
-      } catch (statErr) {
-        if (statErr?.code === "ENOENT") continue;
-        throw statErr;
+        contenders.push({ name, mtimeNs: stat.mtimeNs });
       }
+      contenders.sort((left, right) => left.mtimeNs < right.mtimeNs ? -1
+        : left.mtimeNs > right.mtimeNs ? 1 : left.name.localeCompare(right.name));
+      if (contenders[0]?.name === claimName) break;
       if (Date.now() >= deadline) throw new Error("timed out acquiring notify receipt state lock");
       await delay(5 + Math.floor(Math.random() * 11));
     }
-  }
-
-  try {
     return await action();
   } finally {
-    closeSync(lockFd);
-    try { unlinkSync(NOTIFY_USER_STATE_LOCK); } catch (err) { if (err?.code !== "ENOENT") throw err; }
+    try { unlinkSync(claimPath); } catch (err) { if (err?.code !== "ENOENT") throw err; }
   }
 }
 
