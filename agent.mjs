@@ -1118,6 +1118,16 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     let reveals = 0;
     while (Date.now() < deadline) {
       const content = await t.captureScreen(target).catch(() => "");
+      // Cold Codex panes can show the one-time directory-trust gate. The old
+      // loop mistook it for hidden composer chrome and sent Escape, which
+      // cancelled startup and dropped the pane back to bash. Handle every
+      // known active startup blocker before any reveal key is considered.
+      const blocker = findBlockingPrompt(content);
+      if (blocker) {
+        await t.sendKeys(target, blocker.keys);
+        await wait(blocker.waitMs);
+        continue;
+      }
       if (isCodexFullscreenPager(content)) {
         await t.sendLiteral(target, "q").catch(() => {});
         await wait(300);
@@ -1724,7 +1734,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // a resume-prompt on cold start). Resume-hint is skipped because
       // codex auto-resumes via `codex resume --last` in startCodex.
       await startCodex(agentName, target, config.dir, pane);
-      if (!wasRunning) await waitForCodexUiReady(target, agentName, pane);
+      if (!wasRunning) {
+        const ready = await waitForCodexUiReady(target, agentName, pane);
+        if (!ready) {
+          throw new Error(`Codex process started but its composer never became ready in ${agentName}:${pane}`);
+        }
+      }
     }
   }
 

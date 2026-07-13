@@ -21,6 +21,58 @@ function setup({ paneOutput = "" } = {}) {
 }
 
 feature("dismissBlockingPrompt", () => {
+  unit("accepts Codex's trust prompt for a configured pane directory", {
+    given: [
+      "a fresh Codex pane waiting for directory trust",
+      () => setup({
+        paneOutput:
+          "Do you trust the contents of this directory?\n" +
+          "Working with untrusted contents comes with higher risk.\n" +
+          "› 1. Yes, continue\n" +
+          "  2. No, quit\n" +
+          "Press enter to continue\n",
+      }),
+    ],
+    when: [
+      "checking the startup blocker",
+      ({ dismissBlockingPrompt }) => dismissBlockingPrompt("lsrc:.6"),
+    ],
+    then: [
+      "the preselected safe continuation is submitted once",
+      (result, { tmuxExec }) => {
+        expect(result).toBe("trust-directory");
+        expect(tmuxExec).toHaveBeenCalledTimes(2);
+        expect(tmuxExec.mock.calls[1][0]).toContain("send-keys");
+        expect(tmuxExec.mock.calls[1][0]).toContain("Enter");
+      },
+    ],
+  });
+
+  unit("does not accept a stale Codex trust prompt after the process returned to shell", {
+    given: [
+      "trust text in scrollback with a live shell prompt below it",
+      () => setup({
+        paneOutput:
+          "Do you trust the contents of this directory?\n" +
+          "› 1. Yes, continue\n" +
+          "  2. No, quit\n" +
+          "Press enter to continue\n" +
+          "adelost@host:~/repo/.agents/6$\n",
+      }),
+    ],
+    when: [
+      "checking after Codex already exited",
+      ({ dismissBlockingPrompt }) => dismissBlockingPrompt("lsrc:.6"),
+    ],
+    then: [
+      "no Enter leaks into the shell",
+      (result, { tmuxExec }) => {
+        expect(result).toBeNull();
+        expect(tmuxExec).toHaveBeenCalledTimes(1);
+      },
+    ],
+  });
+
   unit("dismisses when feedback prompt is visible", {
     given: [
       "tmux pane showing feedback prompt",

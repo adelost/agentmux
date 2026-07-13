@@ -26,6 +26,23 @@ function tailLines(text, n) {
 
 export const BLOCKING_PROMPTS = [
   {
+    name: "trust-directory",
+    // A configured coding pane always runs inside agentmux's own .agents/N
+    // directory and Codex starts with sandbox/approval bypass already explicit.
+    // The first option is preselected, so one Enter accepts this one-time gate.
+    // Keep the bottom-line requirement: stale trust text followed by a shell or
+    // composer must never receive an unsolicited Enter.
+    match: (text) => {
+      const last = tailLines(text, 1)[0] || "";
+      const last8 = tailLines(text, 8).join("\n");
+      return /press enter to continue/i.test(last)
+          && /do you trust the contents of this directory/i.test(last8)
+          && /1\.\s*yes,\s*continue/i.test(last8);
+    },
+    keys: "Enter",
+    waitMs: 2000,
+  },
+  {
     name: "resume",
     // The resume dialog renders as a single line that includes both phrases.
     // Require the LAST non-empty line to match — anything below it (typical:
