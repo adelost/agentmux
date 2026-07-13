@@ -1692,18 +1692,22 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const busy = Boolean(await isBusy(agentName, pane).catch(() => true));
     if (dialect !== "codex") {
       const drafted = await promptAlreadyInComposer(agentName, pane, prompt);
-      return { state: drafted ? "drafted" : (busy ? "hidden" : "empty-idle"), busy };
+      return {
+        state: drafted ? "drafted" : (busy ? "hidden" : "empty-idle"),
+        busy,
+        dialect,
+      };
     }
 
     const snapshot = await captureScreen(agentName, pane).catch(() => "");
     if (codexComposerContainsPrompt(snapshot, prompt)
         || (promptRequiresAtomicPaste(prompt) && codexComposerMatchesOwnedDraft(snapshot, prompt))) {
-      return { state: "drafted", busy };
+      return { state: "drafted", busy, dialect };
     }
     const composer = codexComposerText(snapshot);
-    if (composer === null) return { state: "hidden", busy };
-    if (composer === "") return { state: busy ? "empty-busy" : "empty-idle", busy };
-    return { state: "foreign", busy, detail: composer.slice(0, 60) };
+    if (composer === null) return { state: "hidden", busy, dialect };
+    if (composer === "") return { state: busy ? "empty-busy" : "empty-idle", busy, dialect };
+    return { state: "foreign", busy, dialect, detail: composer.slice(0, 60) };
   }
 
   async function waitForExactCodexDraft(agentName, pane, prompt, timeoutMs = 2_500) {

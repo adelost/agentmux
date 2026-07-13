@@ -295,7 +295,7 @@ feature("single-writer delivery broker", () => {
       });
       const agent = acceptingAgent();
       agent.waitForPromptEcho = async () => false;
-      agent.promptTransportState = async () => ({ state: "empty-idle", busy: false });
+      agent.promptTransportState = async () => ({ state: "empty-idle", busy: false, dialect: "codex" });
       const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
       return { rootDir, queue, job, agent, broker, advance: () => { clock += 10_000; } };
     }],
@@ -310,6 +310,116 @@ feature("single-writer delivery broker", () => {
         status: "submitted",
         draftOwned: false,
         lastReason: "submission has no JSONL receipt yet; refusing duplicate paste",
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("an idle Claude submission is retried after its JSONL grace period", {
+    given: ["a stale Claude job whose submitted prompt genuinely vanished", () => {
+      const rootDir = tempRoot();
+      let clock = 40_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "watch", pane: 0, text: "review everything", createdAt: 1_000,
+      });
+      queue.update(job, {
+        status: "submitted",
+        submittedAt: 1_000,
+        echoCursor: { kind: "test", positions: {} },
+        nextAttemptAt: 0,
+      });
+      const agent = acceptingAgent();
+      let echoed = false;
+      agent.waitForPromptEcho = async () => echoed;
+      agent.promptTransportState = async () => ({ state: "empty-idle", busy: false, dialect: "claude" });
+      const originalSend = agent.sendOnly;
+      agent.sendOnly = async (...args) => {
+        const result = await originalSend(...args);
+        echoed = true;
+        return result;
+      };
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
+      return { rootDir, queue, job, agent, broker, advance: () => { clock += 1; } };
+    }],
+    when: ["the broker proves loss and then drains the recovered head", async ({ broker, advance }) => {
+      await broker.kickTarget("watch", 0);
+      advance();
+      await broker.kickTarget("watch", 0);
+    }],
+    then: ["the exact prompt is re-sent once and acknowledged", (_, ctx) => {
+      expect(ctx.agent.sends.map((send) => send.text)).toEqual(["review everything"]);
+      expect(ctx.queue.read("watch", 0, ctx.job.id)).toMatchObject({
+        status: "acknowledged",
+        recoveryAttempts: 1,
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a fresh Claude submission keeps its no-retype grace period", {
+    given: ["an empty idle Claude composer before the grace period expires", () => {
+      const rootDir = tempRoot();
+      const clock = 20_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "watch", pane: 0, text: "do not race JSONL", createdAt: 1_000,
+      });
+      queue.update(job, {
+        status: "submitted",
+        submittedAt: 1_000,
+        echoCursor: { kind: "test", positions: {} },
+        nextAttemptAt: 0,
+      });
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      agent.promptTransportState = async () => ({ state: "empty-idle", busy: false, dialect: "claude" });
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
+      return { rootDir, queue, job, agent, broker };
+    }],
+    when: ["the broker checks before thirty seconds", ({ broker }) => broker.kickTarget("watch", 0)],
+    then: ["no duplicate paste permission is granted", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.queue.read("watch", 0, ctx.job.id).status).toBe("submitted");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("Claude stale recovery stops after two bounded retries", {
+    given: ["a Claude job that exhausted both recovery attempts", () => {
+      const rootDir = tempRoot();
+      const clock = 100_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "api", pane: 0, text: "broken JSONL", createdAt: 1_000,
+      });
+      queue.update(job, {
+        status: "submitted",
+        submittedAt: 1_000,
+        recoveryAttempts: 2,
+        echoCursor: { kind: "test", positions: {} },
+        nextAttemptAt: 0,
+      });
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      agent.promptTransportState = async () => ({ state: "empty-idle", busy: false, dialect: "claude" });
+      const broker = createDeliveryBroker({
+        agent,
+        queue,
+        now: () => clock,
+        notify: async (_job, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, agent, notices, broker };
+    }],
+    when: ["the broker reconciles the stale submission", ({ broker }) => broker.kickTarget("api", 0)],
+    then: ["it remains fenced and emits one blocked notice", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.notices).toEqual(["blocked"]);
+      expect(ctx.queue.read("api", 0, ctx.job.id)).toMatchObject({
+        status: "submitted",
+        recoveryAttempts: 2,
+        lastReason: "Claude delivery recovery exhausted after 2 retries; prompt still absent from JSONL",
       });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],

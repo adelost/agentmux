@@ -13,6 +13,8 @@ const ACTIVE_RETRY_MS = 1_000;
 const BLOCKED_RETRY_MS = 3_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
 const NOTICE_AFTER_MS = 10_000;
+const STALE_CLAUDE_SUBMITTED_MS = 30_000;
+const MAX_CLAUDE_RECOVERY_ATTEMPTS = 2;
 
 function blockedRetryMs(job, { drafted = false } = {}) {
   const base = drafted ? 5_000 : BLOCKED_RETRY_MS;
@@ -164,6 +166,33 @@ export function createDeliveryBroker({
           });
         }
         if (transport.state === "empty-idle") {
+          // Claude writes the user event synchronously when it accepts Enter;
+          // unlike Codex, it has no hidden queue whose receipt appears only
+          // after the active turn yields. An idle, empty Claude composer with
+          // no exact JSONL event after a generous grace period therefore
+          // proves that the prior Enter was lost. Permit two bounded retries.
+          // Codex deliberately keeps the permanent no-paste fence below.
+          const recoveryAttempts = Number(job.recoveryAttempts || 0);
+          if (transport.dialect === "claude"
+              && submittedAge >= STALE_CLAUDE_SUBMITTED_MS) {
+            if (recoveryAttempts < MAX_CLAUDE_RECOVERY_ATTEMPTS) {
+              return queue.update(job, {
+                status: "pending",
+                draftOwned: false,
+                submittedAt: null,
+                recoveryAttempts: recoveryAttempts + 1,
+                nextAttemptAt: now(),
+                lastReason: "Claude stale-submitted recovery: prompt absent from JSONL after idle",
+              });
+            }
+            job = queue.update(job, {
+              status: "submitted",
+              draftOwned: false,
+              nextAttemptAt: now() + MAX_BLOCKED_RETRY_MS,
+              lastReason: "Claude delivery recovery exhausted after 2 retries; prompt still absent from JSONL",
+            });
+            return maybeNotifyBlocked(job);
+          }
           // Empty composer + absent JSONL is ambiguous: Enter may have queued
           // the prompt while Codex is rotating/replaying its rollout. Retyping
           // here produced 22 copies of one long skydive prompt. Submitted is
