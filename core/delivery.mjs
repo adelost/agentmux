@@ -70,7 +70,7 @@ export function isSlashCommand(text) {
  */
 export async function sendPromptVerified(agent, agentName, pane, text, opts = {}) {
   const result = await promptDeliveryAttempts(agent, agentName, pane, text, opts);
-  recordReceipt(agentName, pane, "prompt", opts.verifyText ?? text, result);
+  if (!opts.suppressReceipt) recordReceipt(agentName, pane, "prompt", opts.verifyText ?? text, result);
   return result;
 }
 
@@ -79,6 +79,9 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
   echoCursor: suppliedEchoCursor = null,
   precheckEcho = false,
   notBeforeMs: suppliedNotBeforeMs = null,
+  knownDrafted = false,
+  onDrafted = null,
+  onSubmitted = null,
 } = {}) {
   const target = `${agentName}:.${pane}`;
   const needle = verifyText ?? text;
@@ -113,7 +116,11 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
     // tmux error a command that actually landed; see handlers history).
     let sendError = null;
     let sendReceipt = null;
-    await agent.sendOnly(agentName, text, pane)
+    await agent.sendOnly(agentName, text, pane, {
+      knownDrafted,
+      onDrafted,
+      onSubmitted,
+    })
       .then((receipt) => { sendReceipt = receipt || null; })
       .catch((err) => {
         sendError = err;
@@ -145,8 +152,13 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
     // → successful Enter → incoming prompt no longer composed), so one queued
     // write is accepted without the duplicate-producing retry that regressed
     // live delivery in v1.21.2.
-    if (sendReceipt?.queued) {
-      return { delivered: true, attempts: attempt, via: "queue", pending: true };
+    if (sendReceipt?.submitted || sendReceipt?.queued) {
+      return {
+        delivered: true,
+        attempts: attempt,
+        via: sendReceipt.queued ? "queue" : "submit",
+        pending: true,
+      };
     }
 
     if (attempt < attempts) log(`prompt not echoed (attempt ${attempt}/${attempts}), retrying`);
@@ -165,17 +177,20 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
  */
 export async function sendSlashVerified(agent, agentName, pane, claudeCmd, opts = {}) {
   const result = await slashDeliveryAttempts(agent, agentName, pane, claudeCmd, opts);
-  recordReceipt(agentName, pane, "slash", claudeCmd, result);
+  if (!opts.suppressReceipt) recordReceipt(agentName, pane, "slash", claudeCmd, result);
   return result;
 }
 
 async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
   settleMs = 1200, maxRescues = 2,
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  knownDrafted = false,
+  onDrafted = null,
+  onSubmitted = null,
 } = {}) {
   const target = `${agentName}:.${pane}`;
   await agent.dismissBlockingPrompt(target).catch(() => {});
-  await agent.sendOnly(agentName, claudeCmd, pane);
+  await agent.sendOnly(agentName, claudeCmd, pane, { knownDrafted, onDrafted, onSubmitted });
 
   for (let attempt = 0; attempt <= maxRescues; attempt++) {
     await sleep(settleMs);

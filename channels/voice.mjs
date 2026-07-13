@@ -54,6 +54,7 @@ const TRANSCRIPT_PREFIX = "[transcribed voice, may contain speech-to-text errors
  * @param {number} deps.port                      TCP port to bind
  * @param {string} deps.host                      interface to bind (default 127.0.0.1)
  * @param {object} deps.agent                     createAgent() instance
+ * @param {object} [deps.deliveryBroker]           durable single-writer broker
  * @param {string} deps.agentsYamlPath            path to agents.yaml (generated)
  * @param {string} deps.transcribeScript          abs path to whisper wrapper
  * @param {Function} deps.run                     promisified exec(cmd, ms)
@@ -71,6 +72,7 @@ export function createVoicePWA(deps) {
     port = 8080,
     host = "127.0.0.1",
     agent,
+    deliveryBroker = null,
     agentsYamlPath,
     transcribeScript,
     run,
@@ -215,9 +217,21 @@ export function createVoicePWA(deps) {
       return json(res, 400, { error: "body must contain either 'text' or 'audio' (base64)" });
     }
 
-    // Send to tmux pane
-    try { await agent.sendOnly(name, text, pane); }
-    catch (err) { return json(res, 500, { error: `send failed: ${err.message}` }); }
+    // Persist before acknowledging the HTTP request. Production uses the
+    // bridge broker; the direct path remains only for isolated tests.
+    try {
+      if (deliveryBroker) {
+        deliveryBroker.enqueue({
+          agentName: name,
+          pane,
+          text,
+          source: "voice-pwa",
+          idempotencyKey: body.idempotencyKey || null,
+        });
+      } else {
+        await agent.sendOnly(name, text, pane);
+      }
+    } catch (err) { return json(res, 500, { error: `send failed: ${err.message}` }); }
 
     // Best-effort mirror to Discord for channel parity (see 57b927b, b6c3107).
     // Failure here is a transparency degradation, not a correctness issue:
@@ -230,7 +244,7 @@ export function createVoicePWA(deps) {
       }
     }
 
-    json(res, 200, { sent: text, transcript });
+    json(res, 200, { sent: text, transcript, queued: Boolean(deliveryBroker) });
   }
 
   async function handlePoke(req, res, name, paneStr) {

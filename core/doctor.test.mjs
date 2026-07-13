@@ -4,6 +4,7 @@
 import { feature, unit, expect } from "bdd-vitest";
 import {
   checkContextBridge,
+  checkDeliveryQueue,
   FAIL, OK, WARN,
   checkBridgeMode, checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors,
   checkLedger, checkTmux, overallStatus,
@@ -222,5 +223,33 @@ feature("checkContextBridge", () => {
       expect(r.status).toBe("ok");
       expect(r.detail).toContain("3/5");
     }],
+  });
+});
+
+feature("durable delivery queue health", () => {
+  unit("an empty spool is healthy", {
+    when: ["checking", () => checkDeliveryQueue({ stats: { total: 0 }, bridgeRunning: true })],
+    then: ["ok", (r) => expect(r.status).toBe(OK)],
+  });
+
+  unit("queued work cannot disappear behind an intentional bridge stop", {
+    when: ["checking", () => checkDeliveryQueue({
+      stats: { total: 2, pending: 2, drafted: 0, submitted: 0, blocked: 0, oldestCreatedAt: NOW - 30_000 },
+      bridgeRunning: false,
+      now: NOW,
+    })],
+    then: ["warn with resume direction", (r) => {
+      expect(r.status).toBe(WARN);
+      expect(r.detail).toContain("2 pending");
+      expect(r.hint).toContain("start the bridge");
+    }],
+  });
+
+  unit("an owned draft is visible as a warning", {
+    when: ["checking", () => checkDeliveryQueue({
+      stats: { total: 1, pending: 0, drafted: 1, submitted: 0, blocked: 0 },
+      bridgeRunning: true,
+    })],
+    then: ["warn", (r) => expect(r.status).toBe(WARN)],
   });
 });

@@ -110,6 +110,7 @@ const STATE_KEY_CUSTOM_TOOLS_SEEDED = "watcher_custom_tools_seeded";
  */
 export function createJsonlWatcher({
   agent,
+  deliveryBroker = null,
   agentsYamlPath,
   discord,
   state,
@@ -286,7 +287,15 @@ export function createJsonlWatcher({
             ? `status shows ${actual?.id || "unknown"}${actual?.effort ? ` ${actual.effort}` : ""}`
             : `${res.stage}: ${res.error}`;
       } else {
-        const sent = await sendSlashVerified(agent, name, idx, `/model ${prev.model}`);
+        const sent = deliveryBroker
+          ? await deliveryBroker.enqueueAndWait({
+              agentName: name,
+              pane: idx,
+              text: `/model ${prev.model}`,
+              kind: "slash",
+              source: "model-watch",
+            })
+          : await sendSlashVerified(agent, name, idx, `/model ${prev.model}`);
         if (!sent.delivered) {
           detail = "slash delivery failed";
         } else {
@@ -311,7 +320,11 @@ export function createJsonlWatcher({
       const models = state.get(STATE_KEY_LAST_MODEL, {}) || {};
       models[key] = { model: prev.model, effort: prev.effort ?? null };
       state.set(STATE_KEY_LAST_MODEL, models);
-      try { await agent.sendOnly(name, resumeBrief(modelLabel(prev)), idx); }
+      try {
+        const text = resumeBrief(modelLabel(prev));
+        if (deliveryBroker) deliveryBroker.enqueue({ agentName: name, pane: idx, text, source: "model-watch" });
+        else await agent.sendOnly(name, text, idx);
+      }
       catch (err) { log(`${paneName} resume brief failed: ${err.message}`); }
     }
     log(`${paneName} recovery ${restored ? "ok" : "failed"}: ${detail}`);
@@ -410,7 +423,9 @@ export function createJsonlWatcher({
     const recovery = await attemptModelRecovery({ name, idx, paneName, channelId, prev, config });
     if (!recovery.restored) {
       try {
-        await agent.sendOnly(name, stopBrief(change), idx);
+        const text = stopBrief(change);
+        if (deliveryBroker) deliveryBroker.enqueue({ agentName: name, pane: idx, text, source: "model-watch" });
+        else await agent.sendOnly(name, text, idx);
       } catch (err) {
         log(`model-change stop brief failed for ${paneName}: ${err.message}`);
       }

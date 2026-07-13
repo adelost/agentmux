@@ -10,7 +10,7 @@ import { createAgent } from "../agent.mjs";
 import { esc, stripAnsi } from "../lib.mjs";
 import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
 import { readParkState, shouldBlockSend, blockedSendMessage } from "../core/pane-park.mjs";
-import { deliverToPane } from "../core/delivery.mjs";
+import { createDeliveryQueue, waitForDeliveryJob } from "../core/delivery-queue.mjs";
 import { parseSenderHeader } from "../core/sender-detect.mjs";
 import { detectPaneStatus } from "./format.mjs";
 import { findChannelForPane } from "./config.mjs";
@@ -25,7 +25,7 @@ export function createTmuxContext(socket, configPath) {
 
   const agent = createAgent({ tmuxSocket: socket, configPath, timeout: 600000, run, tmuxExec });
 
-  return { tmux, tmuxExec, run, agent, socket, configPath };
+  return { tmux, tmuxExec, run, agent, socket, configPath, deliveryQueue: createDeliveryQueue() };
 }
 
 /** Check if a tmux session exists. */
@@ -166,11 +166,13 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
   const mirrorDispatch = opts.mirrorDispatch || spawnMirrorWorker;
   const sender = parseSenderHeader(text);
 
-  const mirrorSenderStatus = (delivered) => {
+  const mirrorSenderStatus = (result) => {
     if (!mirror || !sender || sender.key === `${name}:${pane}` || !ctx.configPath) return;
     const senderChannelId = findChannelForPane(ctx.configPath, sender.session, sender.pane);
     if (!senderChannelId) return;
-    const status = delivered ? "delivered" : "NOT delivered";
+    const status = result?.delivered
+      ? (result.pending ? "durably queued" : "delivered")
+      : "NOT delivered";
     mirrorDispatch({ channelId: senderChannelId, content: `\`amux ${name} -p ${pane} …\` → ${status}.` });
   };
 
@@ -191,22 +193,38 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
     return { delivered: false, blocked: true };
   }
 
-  // 1. Verified delivery through THE contract (core/delivery.mjs): CLI
-  //    briefs used to be fire-and-forget — an agent-to-agent brief could
-  //    sit unsubmitted in an idle composer while the sender moved on.
-  const result = await deliverToPane(ctx.agent, name, pane, text, {
-    log: (m) => console.warn(`send ${name}:${pane}: ${m}`),
+  // 1. Persist first. The bridge broker is the sole normal tmux writer and
+  // drains this per-pane FIFO. Separate `amux` processes therefore cannot
+  // concatenate their paste blocks in one composer. If the bridge is stopped,
+  // the command remains safely queued for its next start.
+  const queue = ctx.deliveryQueue || createDeliveryQueue();
+  const job = queue.enqueue({
+    agentName: name,
+    pane,
+    text,
+    source: opts.source || "cli",
+    metadata: { sender: sender?.key || null },
   });
-  if (!result.delivered) {
-    console.error(`⚠ ${name}:${pane} did not acknowledge the message (composer may be stuck — inspect: amux log ${name} -p ${pane} --tmux)`);
-  }
-
-  const outcome = { ...result, blocked: Boolean(result.blocked) };
+  const settled = await waitForDeliveryJob(queue, job.id, {
+    timeoutMs: opts.waitMs ?? ctx.deliveryWaitMs ?? 12_000,
+  });
+  const acknowledged = settled?.status === "acknowledged";
+  const cancelled = settled?.status === "cancelled";
+  const outcome = cancelled
+    ? { delivered: false, blocked: true, pending: false, reason: settled.lastReason, jobId: job.id }
+    : {
+      delivered: true,
+      blocked: false,
+      pending: !acknowledged,
+      via: acknowledged ? "broker" : "broker-queue",
+      jobId: job.id,
+      queueState: settled?.status || job.status,
+    };
 
   // 2. Best-effort mirror. Failure here is a transparency degradation,
   //    not a correctness issue — the pane already got the text.
-  if (!result.delivered) {
-    mirrorSenderStatus(false);
+  if (!outcome.delivered) {
+    mirrorSenderStatus(outcome);
     return outcome;
   }
   if (!mirror) return outcome;
@@ -216,7 +234,7 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
     const mirrored = opts.source ? `[${opts.source}] ${text}` : text;
     mirrorDispatch({ channelId, content: mirrored });
   }
-  mirrorSenderStatus(true);
+  mirrorSenderStatus(outcome);
   // Channel topic is intentionally NOT touched here. Topics are a stable
   // per-pane summary set via agentmux.yaml `labels` and propagated by
   // /sync (core/sync-discord.mjs:topicFor). Per-send overwrite was

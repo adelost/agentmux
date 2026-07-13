@@ -121,11 +121,11 @@ feature("Discord inbound reconciliation", () => {
     }],
   });
 
-  unit("a deterministically failing message gives up after the cap (no infinite hammer)", {
-    given: ["a pane that rejects every delivery attempt", () => {
+  unit("a durable enqueue failure is never converted into seen/data loss", {
+    given: ["storage rejects every enqueue attempt", () => {
       const ctx = setup();
       ctx.onMessage.mockResolvedValue({ delivered: false });
-      ctx.reconciler = createInboundReconciler(ctx); // default cap = 2
+      ctx.reconciler = createInboundReconciler(ctx);
       return ctx;
     }],
     when: ["the same id is offered three times", async (ctx) => ({
@@ -133,12 +133,12 @@ feature("Discord inbound reconciliation", () => {
       b: await ctx.reconciler.enqueue(msg("160")),
       c: await ctx.reconciler.enqueue(msg("160")),
     })],
-    then: ["it retries up to the cap, then gives up and stops re-delivering", (r, ctx) => {
+    then: ["every observation remains retryable and the id is never marked seen", (r, ctx) => {
       expect(r.a).toMatchObject({ delivered: false, retryable: true });
-      expect(r.b).toMatchObject({ delivered: false, gaveUp: true });
-      expect(r.c).toMatchObject({ duplicate: true });
-      expect(ctx.onMessage).toHaveBeenCalledTimes(2);
-      expect(ctx.data.inbound_seen_ids.ch).toEqual(["160"]);
+      expect(r.b).toMatchObject({ delivered: false, retryable: true });
+      expect(r.c).toMatchObject({ delivered: false, retryable: true });
+      expect(ctx.onMessage).toHaveBeenCalledTimes(3);
+      expect(ctx.data.inbound_seen_ids?.ch).toBeUndefined();
     }],
   });
 

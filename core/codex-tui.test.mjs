@@ -24,6 +24,7 @@ function fakeAgent({ frames, busy = false, busyError = null }) {
     },
     capturePane: async () => frames[Math.min(index++, frames.length - 1)],
     sendEscape: async () => keys.push("<esc>"),
+    sendTab: async () => keys.push("<tab>"),
     typeLiteral: async (_name, value) => keys.push(value),
   };
 }
@@ -503,6 +504,27 @@ feature("prepareCodexIdle", () => {
     then: ["it fails without interrupting", (result, { agent }) => {
       expect(result).toMatchObject({ ok: false, stage: "compose" });
       expect(agent.keys).toEqual([]);
+    }],
+  });
+
+  unit("busy prompt opens Codex's advertised queue composer with Tab", {
+    given: ["a working pane showing the queue hint, followed by its empty queue editor", () => ({
+      agent: fakeAgent({
+        frames: ["\n• Working\n\n  tab to queue message\n", "\n› Write tests for @filename\n"],
+        busy: true,
+      }),
+    })],
+    when: ["preparing a safe busy prompt", ({ agent }) => prepareCodexIdle({
+      agent,
+      name: "lsrc",
+      pane: 3,
+      sleep: noSleep,
+      allowBusy: true,
+      requireVisibleComposer: true,
+    })],
+    then: ["Tab opens the queue without an interrupting Escape", (result, { agent }) => {
+      expect(result).toMatchObject({ ok: true, busy: true });
+      expect(agent.keys).toEqual(["<tab>"]);
     }],
   });
 

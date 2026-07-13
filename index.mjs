@@ -36,6 +36,8 @@ import { createPlaywrightWatchdog } from "./channels/playwright-watchdog.mjs";
 import { parsePlaywrightWatchdogConfig } from "./core/playwright-watchdog.mjs";
 import { startHeartbeat } from "./core/heartbeat.mjs";
 import { runPendingFleetRestart } from "./core/fleet-restart.mjs";
+import { createDeliveryQueue } from "./core/delivery-queue.mjs";
+import { createDeliveryBroker } from "./core/delivery-broker.mjs";
 
 // --- Config ---
 
@@ -143,6 +145,25 @@ function stampChannelMirror(channelId) {
 }
 
 const discord = createDiscordChannel({ token: TOKEN, onSent: stampChannelMirror });
+const deliveryQueue = createDeliveryQueue();
+const deliveryBroker = createDeliveryBroker({
+  agent,
+  queue: deliveryQueue,
+  notify: async (job, state) => {
+    const channelId = job.metadata?.channelId;
+    if (!channelId) return;
+    if (state === "blocked") {
+      await discord.send(
+        channelId,
+        "⚠️ Meddelandet är säkert köat men panelen kan inte ta emot det ännu. " +
+        "Det ligger kvar över omstarter och skickas i ordning när Codex-composern är tillgänglig.",
+      );
+    } else if (state === "recovered") {
+      await discord.send(channelId, "✅ Det tidigare blockerade kömeddelandet har nu levererats.");
+    }
+  },
+  log: (message) => console.warn(`[delivery-broker] ${message}`),
+});
 
 // Resume-hints moved to bin/amux-hook.mjs SessionStart context in 1.20.52 —
 // they no longer pass through the bridge, so the Discord mirror that used
@@ -175,6 +196,7 @@ const handlers = createHandlers({
   agentmuxYamlPath: AGENTMUX_YAML,
   agentsYamlPath: AGENTS_YAML,
   recorder,
+  deliveryBroker,
 });
 
 // SIGUSR1 = "run sync" trigger from the CLI (`amux sync`). Same body as
@@ -198,6 +220,7 @@ process.on("SIGUSR1", () => {
 const autoCompactConfig = parseAutoCompactConfig();
 const autoCompact = createAutoCompact({
   agent,
+  deliveryBroker,
   agentsYamlPath: AGENTS_YAML,
   discord,
   tmux: (cmd) => tmuxExec(`tmux -S '${TMUX_SOCKET}' ${cmd}`),
@@ -212,6 +235,7 @@ autoCompact.start();
 const driftGuardConfig = parseReminderConfig();
 const driftGuard = createDriftGuard({
   agent,
+  deliveryBroker,
   agentsYamlPath: AGENTS_YAML,
   discord,
   config: driftGuardConfig,
@@ -225,6 +249,7 @@ driftGuard.start();
 const playwrightWatchdogConfig = parsePlaywrightWatchdogConfig();
 const playwrightWatchdog = createPlaywrightWatchdog({
   agent,
+  deliveryBroker,
   agentsYamlPath: AGENTS_YAML,
   discord,
   config: playwrightWatchdogConfig,
@@ -238,6 +263,7 @@ playwrightWatchdog.start();
 // resume-hint forwarder (1.16.33), and mirror-loop (1.16.33).
 const jsonlWatcher = createJsonlWatcher({
   agent,
+  deliveryBroker,
   agentsYamlPath: AGENTS_YAML,
   discord,
   state: appState,
@@ -248,6 +274,11 @@ const jsonlWatcher = createJsonlWatcher({
 // Discord client and inbound reconciliation are ready so the first post does
 // not fail against a cold channel cache and burn a retry cycle.
 await bridgeReady;
+const legacyRecovery = await handlers.recoverLegacyDeliveries(discord);
+if (legacyRecovery.recovered || legacyRecovery.remaining) {
+  console.log(`[delivery-recovery] queued ${legacyRecovery.recovered}, remaining ${legacyRecovery.remaining}`);
+}
+deliveryBroker.start();
 jsonlWatcher.start();
 
 // Static PWA bundle is served from the same Node process so the whole
@@ -262,6 +293,7 @@ const voicePwa = createVoicePWA({
   port: VOICE_PWA_PORT,
   host: VOICE_PWA_HOST,
   agent,
+  deliveryBroker,
   agentsYamlPath: AGENTS_YAML,
   transcribeScript: process.env.TRANSCRIBE_SCRIPT || resolve(__dir, "bin/transcribe-whisper.sh"),
   run,

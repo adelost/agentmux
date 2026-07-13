@@ -161,6 +161,29 @@ export function checkConfig({ agents, error }) {
   return check("config", OK, `${agents.length} agents configured`);
 }
 
+/** Durable prompts must be visible even when the bridge is intentionally off. */
+export function checkDeliveryQueue({ stats, bridgeRunning, now = Date.now() }) {
+  if (!stats?.total) return check("delivery queue", OK, "empty");
+  const age = stats.oldestCreatedAt
+    ? `, oldest ${Math.max(0, Math.round((now - stats.oldestCreatedAt) / 1000))}s`
+    : "";
+  const parts = [
+    stats.pending ? `${stats.pending} pending` : null,
+    stats.drafted ? `${stats.drafted} drafted` : null,
+    stats.submitted ? `${stats.submitted} submitted` : null,
+    stats.blocked ? `${stats.blocked} blocked` : null,
+  ].filter(Boolean).join(", ");
+  if (!bridgeRunning) {
+    return check("delivery queue", WARN, `${parts}${age}; bridge is stopped`,
+      "start the bridge to resume the durable FIFO");
+  }
+  if (stats.blocked || stats.drafted) {
+    return check("delivery queue", WARN, `${parts}${age}`,
+      "inspect delivery_queue events; the broker preserves the FIFO head until the composer is safe");
+  }
+  return check("delivery queue", OK, `${parts}${age}; broker draining`);
+}
+
 /** Worst status wins for the exit code: fail > warn > ok. */
 export function overallStatus(checks) {
   if (checks.some((c) => c.status === FAIL)) return FAIL;

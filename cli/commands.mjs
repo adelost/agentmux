@@ -22,7 +22,9 @@ import { readHeartbeat } from "../core/heartbeat.mjs";
 import {
   checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors, checkLedger,
   checkBridgeMode, checkContextBridge, checkTmux, checkConfig, overallStatus, formatDoctorReport, FAIL, WARN,
+  checkDeliveryQueue,
 } from "../core/doctor.mjs";
+import { createDeliveryQueue, deliveryQueueStats } from "../core/delivery-queue.mjs";
 import {
   planOfflineSyncBridge,
   readBridgeMode,
@@ -197,7 +199,7 @@ async function cmdSend(name, prompt, flags, ctx) {
     process.exitCode = 1;
     return;
   }
-  if (!flags.q) console.log(`Sent to '${name}' (pane ${pane}): ${truncate(prompt)}`);
+  if (!flags.q) console.log(`${res.pending ? "Queued durably for" : "Sent to"} '${name}' (pane ${pane}): ${truncate(prompt)}`);
 }
 
 async function cmdWait(name, flags, ctx) {
@@ -2292,6 +2294,10 @@ async function cmdDoctor(ctx) {
     checkContextBridge({ claudePanes, pushing }),
     checkTmux({ sessions, error: tmuxError }),
     checkConfig({ agents, error: cfgError }),
+    checkDeliveryQueue({
+      stats: deliveryQueueStats(createDeliveryQueue()),
+      bridgeRunning: pids.length > 0,
+    }),
   ];
 
   const activeChecks = checks.filter(Boolean);

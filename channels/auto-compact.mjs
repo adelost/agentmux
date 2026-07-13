@@ -32,6 +32,7 @@ export function enteredLimited(prev, status) {
 
 export function createAutoCompact({
   agent,
+  deliveryBroker = null,
   agentsYamlPath,
   discord,
   tmux,      // tmux exec function, same signature as createTmuxContext provides
@@ -183,12 +184,21 @@ export function createAutoCompact({
     if (compacting.has(paneKey)) return;
     compacting.add(paneKey);
     try {
-      const result = await sendSlashVerified(agent, agentName, paneIdx, "/compact",
-        { settleMs: config.slashSettleMs ?? 1200 });
+      const result = deliveryBroker
+        ? await deliveryBroker.enqueueAndWait({
+            agentName,
+            pane: paneIdx,
+            text: "/compact",
+            kind: "slash",
+            source: "auto-compact",
+            idempotencyKey: `auto-compact:${paneKey}:${Date.now()}`,
+          })
+        : await sendSlashVerified(agent, agentName, paneIdx, "/compact",
+            { settleMs: config.slashSettleMs ?? 1200 });
       if (!result.delivered) {
-        // Do NOT claim compaction: the command sits unsubmitted. The lock
-        // timeout below lets the next poll retry.
-        log(`/compact NOT acknowledged on ${paneKey} — will retry next poll`);
+        // The broker owns the durable retry. Do not enqueue a competing
+        // compact command merely because the TUI acknowledgement is late.
+        log(`/compact ${result.pending ? "durably queued" : "NOT acknowledged"} on ${paneKey}`);
         return;
       }
       log(`fired /compact on ${paneKey} (was ${contextPercent}%)${result.rescues ? ` (rescued x${result.rescues})` : ""}`);

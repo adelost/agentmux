@@ -22,6 +22,7 @@ import { readParkState } from "../core/pane-park.mjs";
 
 export function createDriftGuard({
   agent,
+  deliveryBroker = null,
   agentsYamlPath,
   discord,
   config,
@@ -52,8 +53,19 @@ export function createDriftGuard({
     const agentName = agentConfig.name;
     const text = formatReminderMessage(turnCount, reminderCount);
     try {
-      await agent.sendOnly(agentName, text, paneIdx);
-      log(`reminded ${paneKey} at ${turnCount} turns past refresh`);
+      if (deliveryBroker) {
+        const result = await deliveryBroker.enqueueAndWait({
+          agentName,
+          pane: paneIdx,
+          text,
+          source: "drift-guard",
+          idempotencyKey: `drift-guard:${paneKey}:${reminderCount}`,
+        });
+        log(`${result.delivered ? "reminded" : "durably queued reminder for"} ${paneKey} at ${turnCount} turns past refresh`);
+      } else {
+        await agent.sendOnly(agentName, text, paneIdx);
+        log(`reminded ${paneKey} at ${turnCount} turns past refresh`);
+      }
     } catch (err) {
       log(`send failed for ${paneKey}: ${err.message}`);
       return false;

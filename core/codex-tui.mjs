@@ -64,6 +64,7 @@ export function isCodexTranscriptView(text) {
 // send reported "could not identify the Codex composer".
 const CODEX_PAGER_QUIT = /q to quit/i;
 const CODEX_PAGER_NAV = /to edit (?:prev|next|message)/i;
+const CODEX_QUEUE_HINT = /tab to queue message/i;
 export function isCodexBacktrackPager(text) {
   const value = String(text || "");
   return CODEX_PAGER_QUIT.test(value) && CODEX_PAGER_NAV.test(value);
@@ -72,6 +73,11 @@ export function isCodexBacktrackPager(text) {
 /** Either full-screen Codex pager (transcript or backtrack); both exit on q. */
 export function isCodexFullscreenPager(text) {
   return isCodexTranscriptView(text) || isCodexBacktrackPager(text);
+}
+
+/** Codex explicitly advertises a safe queue composer while a turn is busy. */
+export function codexOffersQueueComposer(text) {
+  return CODEX_QUEUE_HINT.test(String(text || ""));
 }
 
 // A large paste collapses in the Codex composer to a placeholder like
@@ -297,21 +303,42 @@ export async function prepareCodexIdle({
     // /status is an official during-task command, but Escape is still an
     // interrupt while a turn runs.  Only reveal a missing composer when the
     // pane is idle; busy callers fail closed instead.
-    if (busy) return fail("compose", "Codex is working and its composer is not visible");
-    try { await agent.sendEscape(name, pane); }
-    catch (err) { return fail("compose", `could not reveal the Codex composer: ${err.message}`); }
-    await sleep(400);
-    snapshot = await capture();
-    // Modern Codex maps Escape at an idle composer to the backtrack pager, so
-    // the reveal Escape can itself open one. Close it with q before concluding
-    // the composer is missing, or this call wedges into "could not identify".
-    if (isCodexFullscreenPager(snapshot)) {
-      try { await agent.typeLiteral(name, "q", pane); }
-      catch (err) { return fail("transcript", `could not close Codex full-screen pager: ${err.message}`); }
-      await sleep(300);
-      snapshot = await capture();
+    if (busy) {
+      // During tools/reasoning Codex intentionally hides the normal composer
+      // and advertises "tab to queue message". Tab opens a dedicated queue
+      // editor without interrupting the active turn; Escape would interrupt.
+      if (codexOffersQueueComposer(snapshot) && agent.sendTab) {
+        try { await agent.sendTab(name, pane); }
+        catch (err) { return fail("compose", `could not open the Codex queue composer: ${err.message}`); }
+        for (let attempt = 0; attempt < 16; attempt++) {
+          await sleep(125);
+          snapshot = await capture();
+          composer = verifiedEmptyCodexComposer(snapshot);
+          if (composer !== null) break;
+        }
+        if (composer === null) {
+          return fail("compose", "Codex is working and its queue composer did not open");
+        }
+      } else {
+        return fail("compose", "Codex is working and its composer is not visible");
+      }
     }
-    composer = verifiedEmptyCodexComposer(snapshot);
+    if (!busy) {
+      try { await agent.sendEscape(name, pane); }
+      catch (err) { return fail("compose", `could not reveal the Codex composer: ${err.message}`); }
+      await sleep(400);
+      snapshot = await capture();
+      // Modern Codex maps Escape at an idle composer to the backtrack pager, so
+      // the reveal Escape can itself open one. Close it with q before concluding
+      // the composer is missing, or this call wedges into "could not identify".
+      if (isCodexFullscreenPager(snapshot)) {
+        try { await agent.typeLiteral(name, "q", pane); }
+        catch (err) { return fail("transcript", `could not close Codex full-screen pager: ${err.message}`); }
+        await sleep(300);
+        snapshot = await capture();
+      }
+      composer = verifiedEmptyCodexComposer(snapshot);
+    }
   }
 
   if (composer === null) {

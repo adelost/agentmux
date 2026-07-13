@@ -169,50 +169,25 @@ export function renderCatchupLine(countResult) {
  * Create message handler with all dependencies injected.
  * @param {{ agent, attachments, tts, getMapping, overrides, channelMap, reloadConfig, discordChannel?, agentmuxYamlPath?, agentsYamlPath? }} deps
  */
-export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentmuxYamlPath, agentsYamlPath, recorder, pollInterval = 2000, loopGuardConfig = readLoopGuardConfig(), codexStatusDriver = driveCodexStatus, queueFleetRestartRequest = queueFleetRestart, scheduleBridgeRestart = (delayMs) => setTimeout(() => process.exit(75), delayMs) }) {
+export function createHandlers({ agent, attachments, tts, state, getMapping, overrides, channelMap, reloadConfig, discordChannel, agentmuxYamlPath, agentsYamlPath, recorder, deliveryBroker = null, pollInterval = 2000, loopGuardConfig = readLoopGuardConfig(), codexStatusDriver = driveCodexStatus, queueFleetRestartRequest = queueFleetRestart, scheduleBridgeRestart = (delayMs) => setTimeout(() => process.exit(75), delayMs) }) {
   const noopRecorder = { save: () => {}, enabled: false };
   const rec = recorder || noopRecorder;
   const sendLocks = new Map();
   const followers = new Map(); // channelId → { timer, sentCount, lastHash }
   const parkWarnedSince = new Map(); // "name:pane" → park.sinceMs already warned (two-strike confirm)
-  const promptCursorStateKey = "inbound_prompt_echo_cursors";
-  const promptCursorLimit = 200;
+  const legacyPromptCursorKey = "inbound_prompt_echo_cursors";
 
-  const promptCursorId = (msg) => msg?.channelId && msg?.id
-    ? `${msg.channelId}:${msg.id}`
-    : null;
-
-  async function promptCursorForMessage(msg, mapping, pane, prompt) {
-    const id = promptCursorId(msg);
-    const stored = state.get(promptCursorStateKey, {}) || {};
-    if (id && stored[id]?.cursor) return { cursor: stored[id].cursor, reused: true };
-
-    const cursor = typeof agent.capturePromptEchoCursor === "function"
-      ? await agent.capturePromptEchoCursor(mapping.name, pane, prompt).catch(() => null)
-      : null;
-    if (!id || !cursor) return { cursor, reused: false };
-
-    stored[id] = { cursor, createdAt: Date.now() };
-    const ordered = Object.entries(stored)
-      .sort((a, b) => Number(a[1]?.createdAt || 0) - Number(b[1]?.createdAt || 0));
-    while (ordered.length > promptCursorLimit) {
-      const [oldestId] = ordered.shift();
-      delete stored[oldestId];
-    }
-    state.set(promptCursorStateKey, stored);
-    return { cursor, reused: false };
+  function legacyPromptCursor(msg) {
+    if (!msg?.channelId || !msg?.id) return null;
+    return (state.get(legacyPromptCursorKey, {}) || {})[`${msg.channelId}:${msg.id}`]?.cursor || null;
   }
-
-  function clearPromptCursorForMessage(msg) {
-    const id = promptCursorId(msg);
-    if (!id) return;
-    const stored = state.get(promptCursorStateKey, {}) || {};
-    if (!(id in stored)) return;
-    delete stored[id];
-    state.set(promptCursorStateKey, stored);
-  }
-
   function withPaneSendLock(queueKey, work) {
+    if (deliveryBroker?.runExclusive) {
+      const split = queueKey.lastIndexOf(":");
+      const name = split >= 0 ? queueKey.slice(0, split) : queueKey;
+      const pane = split >= 0 ? Number(queueKey.slice(split + 1)) || 0 : 0;
+      return deliveryBroker.runExclusive(name, pane, work);
+    }
     const prev = sendLocks.get(queueKey) || Promise.resolve();
     const next = prev.catch(() => {}).then(work);
     let tracked;
@@ -569,13 +544,24 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         return;
       }
       try {
-        const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
-          sendSlashVerified(agent, mapping.name, pane, `/model ${name}`));
+        const result = deliveryBroker
+          ? await deliveryBroker.enqueueAndWait({
+              agentName: mapping.name,
+              pane,
+              text: `/model ${name}`,
+              kind: "slash",
+              source: "discord",
+              metadata: { channelId: msg.channelId, messageId: msg.id },
+            })
+          : await withPaneSendLock(`${mapping.name}:${pane}`, () =>
+              sendSlashVerified(agent, mapping.name, pane, `/model ${name}`));
         if (result.delivered) {
           const rescued = result.rescues ? ` (palette ate Enter, rescued x${result.rescues})` : "";
           await msg.reply(`sent \`/model ${name}\`${rescued} — verify on the next turn's footer (or \`//model\`)`);
         } else {
-          await msg.reply(`⚠️ \`/model ${name}\` still sits unsubmitted in the composer — check \`/raw\``);
+          await msg.reply(result.pending
+            ? `queued durably \`/model ${name}\``
+            : `⚠️ \`/model ${name}\` still sits unsubmitted in the composer — check \`/raw\``);
         }
       } catch (err) {
         await msg.reply(`/model failed: ${err.message}`).catch(() => {});
@@ -635,18 +621,30 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       }
       const restored = `${result.model}${result.effort ? ` ${result.effort}` : ""}`;
       unparkPane({ session: mapping.name, pane, detail: `restore verified: ${restored}` });
-      await agent.sendOnly(mapping.name, resumeBrief(restored), pane);
+      const brief = resumeBrief(restored);
+      if (deliveryBroker) {
+        deliveryBroker.enqueue({
+          agentName: mapping.name,
+          pane,
+          text: brief,
+          source: "model-restore",
+        });
+      } else {
+        await agent.sendOnly(mapping.name, brief, pane);
+      }
       await msg.reply(`✅ ${key} återställd till ${restored}, avparkerad och återstartad med re-verify.`);
     },
 
     "/dismiss": async (msg, mapping, pane) => {
       const target = `${mapping.name}:.${pane}`;
-      const dismissed = await agent.dismissBlockingPrompt(target);
+      const dismissed = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
+        agent.dismissBlockingPrompt(target));
       await msg.reply(dismissed ? "dismissed" : "nothing to dismiss");
     },
 
     "/esc": async (msg, mapping, pane) => {
-      await agent.sendEscape(mapping.name, pane);
+      await withPaneSendLock(`${mapping.name}:${pane}`, () =>
+        agent.sendEscape(mapping.name, pane));
       await msg.reply("sent Escape");
     },
 
@@ -785,38 +783,34 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     const promptToSend = promptForAgent(cleanPrompt);
 
     try {
-      // Retry loop: dismiss → send → verify echo. If a survey ate the
-      // prompt (no echo + agent still idle), dismiss again and resend.
-      // isBusy guard prevents double-send when echo detection is just slow.
-      const target = `${mapping.name}:.${pane}`;
-      // Cap the per-attempt echo wait low: waitForPromptEcho now confirms a
-      // queued-but-delivered prompt via the composer tail in ~1s, so this
-      // timeout only bites for a genuinely-eaten prompt before we retry.
-      // (Was up to 15s, which held the per-pane send-lock that long and
-      // delayed the NEXT Discord message to the same pane by 15-26s.)
-      const echoTimeout = Math.max(50, Math.min(6_000, pollInterval * 500));
       let delivered = false;
-
-      const result = await withPaneSendLock(`${mapping.name}:${pane}`, async () => {
-        const receipt = await promptCursorForMessage(msg, mapping, pane, cleanPrompt);
-        const outcome = await sendPromptVerified(agent, mapping.name, pane, promptToSend, {
+      if (deliveryBroker) {
+        const job = deliveryBroker.enqueue({
+          agentName: mapping.name,
+          pane,
+          text: promptToSend,
           verifyText: cleanPrompt,
-          attempts: 3,
-          echoTimeoutMs: echoTimeout,
-          echoCursor: receipt.cursor,
-          precheckEcho: receipt.reused,
-          log: (m) => console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} ${m}`),
+          source: "discord",
+          idempotencyKey: msg.channelId && msg.id
+            ? `discord:${msg.channelId}:${msg.id}`
+            : null,
+          createdAt: msg.createdTimestamp || Date.now(),
+          orderKey: msg.id
+            ? `${String(msg.createdTimestamp || Date.now()).padStart(16, "0")}:discord:${msg.id}`
+            : null,
+          metadata: { channelId: msg.channelId, messageId: msg.id },
+          echoCursor: legacyPromptCursor(msg),
         });
-        if (outcome.delivered) clearPromptCursorForMessage(msg);
-        return outcome;
-      });
-      delivered = result.delivered;
-      if (!delivered) {
-        const attempts = result.attempts || 1;
-        const reason = result.reason ? ` ${result.reason}` : " Pane may be dead or its composer may be stuck.";
-        console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} prompt not delivered after ${attempts} attempt(s)`);
-        await msg.send(`⚠️ Agent did not acknowledge prompt after ${attempts} attempt${attempts === 1 ? "" : "s"}.${reason} Try \`/raw\` to inspect.`)
-          .catch((err) => console.warn(`send warning failed: ${err.message}`));
+        delivered = Boolean(job);
+      } else {
+        // Test/embedded fallback. Production always injects the durable broker.
+        const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
+          sendPromptVerified(agent, mapping.name, pane, promptToSend, {
+            verifyText: cleanPrompt,
+            attempts: 1,
+            echoTimeoutMs: Math.max(50, Math.min(6_000, pollInterval * 500)),
+          }));
+        delivered = result.delivered;
       }
       // Topic patching on Discord-inbound prompts was removed: Discord caps
       // channel topic edits at 2/10min/channel, and patching on every prompt
@@ -824,8 +818,8 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       // /compact via drift-guard (rare event, safe rate).
 
       // Reply forwarding handled by channels/jsonl-watcher.mjs.
-      console.log(`[${ts()}] → ${mapping.name}:${pane} ${delivered ? "delivered" : "NOT delivered"}`);
-      return { delivered };
+      console.log(`[${ts()}] → ${mapping.name}:${pane} ${delivered ? "durably queued" : "NOT queued"}`);
+      return { delivered, pending: delivered };
     } catch (err) {
       console.log(`[${ts()}] ✗ ${mapping.name}:${pane} ${err.message}`);
       await msg.reply(formatAgentError(err))
@@ -998,16 +992,28 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     if (parsed && !commands[parsed.cmd] && parsed.cmd !== "/use") {
       const claudeCmd = parsed.args ? `${parsed.cmd} ${parsed.args}` : parsed.cmd;
       try {
-        // Same verified delivery as /model: under the pane's send-lock (no
-        // keystroke interleaving with concurrent sends), dismiss first, and
-        // rescue a palette-eaten Enter instead of blindly claiming success.
-        const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
-          sendSlashVerified(agent, mapping.name, pane, claudeCmd));
-        if (result.delivered) {
-          const rescued = result.rescues ? ` (rescued x${result.rescues})` : "";
-          await msg.reply(`sent \`${parsed.cmd}\`${rescued}`);
+        if (deliveryBroker) {
+          const result = await deliveryBroker.enqueueAndWait({
+            agentName: mapping.name,
+            pane,
+            text: claudeCmd,
+            kind: "slash",
+            source: "discord",
+            idempotencyKey: msg.channelId && msg.id ? `discord:${msg.channelId}:${msg.id}` : null,
+            createdAt: msg.createdTimestamp || Date.now(),
+            orderKey: msg.id
+              ? `${String(msg.createdTimestamp || Date.now()).padStart(16, "0")}:discord:${msg.id}`
+              : null,
+            metadata: { channelId: msg.channelId, messageId: msg.id },
+          });
+          await msg.reply(result.delivered
+            ? `sent \`${parsed.cmd}\``
+            : `queued durably \`${parsed.cmd}\``);
         } else {
-          await msg.reply(`⚠️ \`${parsed.cmd}\` still sits unsubmitted in the composer — check \`/raw\``);
+          const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
+            sendSlashVerified(agent, mapping.name, pane, claudeCmd));
+          if (result.delivered) await msg.reply(`sent \`${parsed.cmd}\``);
+          else await msg.reply(`⚠️ \`${parsed.cmd}\` still sits unsubmitted in the composer — check \`/raw\``);
         }
       } catch (err) {
         await msg.reply(`${parsed.cmd} failed: ${err.message}`).catch(() => {});
@@ -1017,26 +1023,45 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     // Follow mode changes output handling, not delivery guarantees.
     if (followers.has(msg.channelId)) {
-      const result = await withPaneSendLock(`${mapping.name}:${pane}`, async () => {
-        const receipt = await promptCursorForMessage(msg, mapping, pane, cleanPrompt);
-        const outcome = await sendPromptVerified(agent, mapping.name, pane, cleanPrompt, {
-          attempts: 3,
-          echoTimeoutMs: Math.max(50, Math.min(6_000, pollInterval * 500)),
-          echoCursor: receipt.cursor,
-          precheckEcho: receipt.reused,
-          log: (m) => console.warn(`follow ${mapping.name}:${pane}: ${m}`),
-        });
-        if (outcome.delivered) clearPromptCursorForMessage(msg);
-        return outcome;
-      });
-      if (!result.delivered) {
-        await msg.send(`⚠️ Agent did not acknowledge prompt after ${result.attempts || 1} attempt${result.attempts === 1 ? "" : "s"}. Try \`/raw\` to inspect.`)
-          .catch((err) => console.warn(`follow delivery warning failed: ${err.message}`));
-      }
-      return { delivered: result.delivered };
+      return processMessage(msg, mapping, cleanPrompt, pane, tmpFiles);
     }
 
     return processMessage(msg, mapping, cleanPrompt, pane, tmpFiles);
+  }
+
+  /**
+   * v1.21.22 and older could mark a Discord id seen after two composer
+   * failures while retaining its pre-send JSONL cursor. Re-fetch those exact
+   * messages at startup and turn them into durable jobs. The old cursor lets
+   * the broker acknowledge prompts that the human later submitted manually,
+   * while genuinely missing prompts remain queued in their original order.
+   */
+  async function recoverLegacyDeliveries(channel) {
+    if (!deliveryBroker || typeof channel?.fetchMessage !== "function") return { recovered: 0, remaining: 0 };
+    const stored = state.get(legacyPromptCursorKey, {}) || {};
+    let recovered = 0;
+    for (const key of Object.keys(stored)) {
+      const split = key.indexOf(":");
+      if (split < 1) continue;
+      const channelId = key.slice(0, split);
+      const messageId = key.slice(split + 1);
+      try {
+        const msg = await channel.fetchMessage(channelId, messageId);
+        if (!msg) continue;
+        const result = await onMessage(msg);
+        if (result?.delivered) {
+          delete stored[key];
+          recovered++;
+        }
+      } catch (error) {
+        console.warn(`legacy delivery recovery failed for ${key}: ${error.message}`);
+      }
+    }
+    state.set(legacyPromptCursorKey, stored);
+    // Obsolete retry counters must not resurrect the old give-up state
+    // machine after downgrade/upgrade cycles.
+    state.set("inbound_delivery_attempts", {});
+    return { recovered, remaining: Object.keys(stored).length };
   }
 
   /**
@@ -1114,5 +1139,5 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
   }
 
 
-  return { onMessage, triggerSync };
+  return { onMessage, recoverLegacyDeliveries, triggerSync };
 }

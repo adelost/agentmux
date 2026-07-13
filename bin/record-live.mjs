@@ -15,6 +15,7 @@ import { fileURLToPath } from "url";
 import { parseEnv } from "../lib.mjs";
 import { createAgent } from "../agent.mjs";
 import { createRecorder } from "../core/recorder.mjs";
+import { createDeliveryQueue, waitForDeliveryJob } from "../core/delivery-queue.mjs";
 import { load as loadYaml } from "js-yaml";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -73,7 +74,13 @@ async function main() {
   const agentDir = loadAgentDir(agentName);
   console.log(`→ ${agentName}:${pane} "${prompt.slice(0, 80)}${prompt.length > 80 ? "…" : ""}"`);
 
-  await agent.sendOnly(agentName, prompt, pane);
+  const queue = createDeliveryQueue();
+  const queued = queue.enqueue({ agentName, pane, text: prompt, source: "record-live" });
+  const delivery = await waitForDeliveryJob(queue, queued.id, { timeoutMs: 15_000 });
+  if (delivery?.status !== "acknowledged") {
+    console.error(`\nERROR: prompt remains durably queued (${delivery?.status || "unknown"}); is the bridge running?`);
+    process.exit(1);
+  }
   const startTime = Date.now();
 
   // Step 1: Wait for the prompt to be echoed back in the pane. Positive

@@ -8,6 +8,7 @@ import { detectPaneStatus } from "../cli/format.mjs";
 
 export function createPlaywrightWatchdog({
   agent,
+  deliveryBroker = null,
   agentsYamlPath,
   discord,
   config,
@@ -60,7 +61,12 @@ export function createPlaywrightWatchdog({
 
     escaped.set(paneKey, signature);
     try {
-      await agent.sendEscape(agentConfig.name, paneIdx);
+      if (deliveryBroker) {
+        await deliveryBroker.runExclusive(agentConfig.name, paneIdx, () =>
+          agent.sendEscape(agentConfig.name, paneIdx));
+      } else {
+        await agent.sendEscape(agentConfig.name, paneIdx);
+      }
       log(`sent Escape to ${paneKey}; Playwright tool stalled for ${Math.round(age / 1000)}s`);
       await post(
         agentConfig.name,
@@ -116,4 +122,3 @@ export function createPlaywrightWatchdog({
 
   return { start, stop, tick };
 }
-

@@ -1,4 +1,5 @@
 import { feature, unit, expect } from "bdd-vitest";
+import { vi } from "vitest";
 import { unlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -18,6 +19,17 @@ function fakeAgent() {
   };
 }
 
+function fakeDeliveryQueue(status = "acknowledged") {
+  let job = null;
+  return {
+    enqueue: vi.fn((request) => {
+      job = { id: "job-1", status: "pending", ...request };
+      return job;
+    }),
+    findById: vi.fn(() => job ? { ...job, status } : null),
+  };
+}
+
 feature("sendToPane delivery outcome", () => {
   unit("verified delivery is returned to the caller", {
     given: ["an unparked pane", () => {
@@ -25,18 +37,18 @@ feature("sendToPane delivery outcome", () => {
       writeFileSync(path, "");
       const oldPath = process.env.AMUX_PARK_STATE_PATH;
       process.env.AMUX_PARK_STATE_PATH = path;
-      return { path, oldPath, agent: fakeAgent() };
+      return { path, oldPath, agent: fakeAgent(), deliveryQueue: fakeDeliveryQueue() };
     }],
-    when: ["sending", async ({ path, oldPath, agent }) => {
-      const result = await sendToPane({ agent, configPath: null }, "claw", 1, "review this");
+    when: ["sending", async ({ path, oldPath, agent, deliveryQueue }) => {
+      const result = await sendToPane({ agent, configPath: null, deliveryQueue, deliveryWaitMs: 0 }, "claw", 1, "review this");
       if (oldPath === undefined) delete process.env.AMUX_PARK_STATE_PATH;
       else process.env.AMUX_PARK_STATE_PATH = oldPath;
       try { unlinkSync(path); } catch {}
       return { result, sent: agent.sent };
     }],
-    then: ["the result is explicit and the prompt was sent once", ({ result, sent }) => {
-      expect(result).toMatchObject({ delivered: true, blocked: false, via: "echo" });
-      expect(sent).toEqual(["review this"]);
+    then: ["the result is explicit and tmux is left to the broker", ({ result, sent }) => {
+      expect(result).toMatchObject({ delivered: true, blocked: false, via: "broker" });
+      expect(sent).toEqual([]);
     }],
   });
 
@@ -61,24 +73,18 @@ feature("sendToPane delivery outcome", () => {
     }],
   });
 
-  unit("preserves a terminal composer block in the delivery outcome", {
-    given: ["an unparked pane whose composer cannot safely accept the prompt", () => {
+  unit("returns a durable pending receipt while the broker has not acknowledged", {
+    given: ["an unparked pane whose queued job is still pending", () => {
       const path = tmpPath();
       writeFileSync(path, "");
       const oldPath = process.env.AMUX_PARK_STATE_PATH;
       process.env.AMUX_PARK_STATE_PATH = path;
       const agent = fakeAgent();
-      agent.sendOnly = async () => {
-        const error = new Error("composer is not empty");
-        error.code = "AMUX_DELIVERY_BLOCKED";
-        throw error;
-      };
-      agent.waitForPromptEcho = async () => false;
-      return { path, oldPath, agent };
+      return { path, oldPath, agent, deliveryQueue: fakeDeliveryQueue("drafted") };
     }],
-    when: ["sending through the CLI delivery contract", async ({ path, oldPath, agent }) => {
+    when: ["sending through the CLI delivery contract", async ({ path, oldPath, agent, deliveryQueue }) => {
       const result = await sendToPane(
-        { agent, configPath: null },
+        { agent, configPath: null, deliveryQueue, deliveryWaitMs: 0 },
         "claw",
         3,
         "[from claw:0]\n\nclaim respected",
@@ -89,8 +95,8 @@ feature("sendToPane delivery outcome", () => {
       try { unlinkSync(path); } catch {}
       return result;
     }],
-    then: ["the caller can distinguish the terminal block from an ordinary miss", (result) => {
-      expect(result).toMatchObject({ delivered: false, blocked: true });
+    then: ["the caller knows it is safely queued, not falsely failed", (result) => {
+      expect(result).toMatchObject({ delivered: true, blocked: false, pending: true, queueState: "drafted" });
     }],
   });
 
@@ -109,11 +115,11 @@ feature("sendToPane delivery outcome", () => {
       ].join("\n"));
       const oldPath = process.env.AMUX_PARK_STATE_PATH;
       process.env.AMUX_PARK_STATE_PATH = parkPath;
-      return { parkPath, configPath, oldPath, agent: fakeAgent(), mirrors: [] };
+      return { parkPath, configPath, oldPath, agent: fakeAgent(), deliveryQueue: fakeDeliveryQueue(), mirrors: [] };
     }],
     when: ["sending through the central delivery path", async (ctx) => {
       const result = await sendToPane(
-        { agent: ctx.agent, configPath: ctx.configPath },
+        { agent: ctx.agent, configPath: ctx.configPath, deliveryQueue: ctx.deliveryQueue, deliveryWaitMs: 0 },
         "lsrc",
         0,
         "[from lsrc:4]\n\nreview every image",

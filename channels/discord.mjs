@@ -78,6 +78,15 @@ export function createDiscordChannel({ token, onSent }) {
       return { messages, newestId };
     },
 
+    /** Fetch one historical human message for legacy delivery recovery. */
+    async fetchMessage(channelId, messageId) {
+      const ch = await client.channels.fetch(channelId);
+      if (!ch?.messages) return null;
+      const msg = await ch.messages.fetch(messageId);
+      if (!msg || msg.author.bot) return null;
+      return normalizeDiscordMessage(msg, { onSent });
+    },
+
     // Fire-and-forget. Discord shows the indicator for ~10s; the watcher
     // re-fires every <10s while the bound pane is in "working" state.
     // Errors are swallowed because typing is purely cosmetic.

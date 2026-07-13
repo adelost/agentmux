@@ -83,6 +83,14 @@ function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatus
 
   const getMapping = (chId) => overrides.get(chId) || channelMapData.get(chId);
   const reloadConfig = vi.fn();
+  const deliveryBroker = {
+    enqueue: vi.fn((request) => ({ id: `job-${request.metadata?.messageId || "test"}`, ...request })),
+    enqueueAndWait: vi.fn(async (request) => {
+      deliveryBroker.enqueue(request);
+      return { delivered: true, pending: false, job: request };
+    }),
+    runExclusive: vi.fn(async (_name, _pane, work) => work()),
+  };
 
   const { onMessage } = createHandlers({
     agent,
@@ -98,9 +106,10 @@ function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatus
     codexStatusDriver,
     queueFleetRestartRequest,
     scheduleBridgeRestart,
+    deliveryBroker,
   });
 
-  return { onMessage, agent, attachments, tts, state, overrides, reloadConfig, channelMapData };
+  return { onMessage, agent, attachments, tts, state, overrides, reloadConfig, channelMapData, deliveryBroker };
 }
 
 // --- Tests ---
@@ -213,8 +222,11 @@ feature("/model dialect routing", () => {
       return { ...s, msg: mockMsg({ content: "/model opus" }) };
     }],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["the command is typed into the pane and confirmed", (_, { msg, agent }) => {
-      expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "/model opus", 0);
+    then: ["the command is brokered and confirmed", (_, { msg, agent, deliveryBroker }) => {
+      expect(deliveryBroker.enqueueAndWait).toHaveBeenCalledWith(expect.objectContaining({
+        agentName: "_ai", pane: 0, text: "/model opus", kind: "slash",
+      }));
+      expect(agent.sendOnly).not.toHaveBeenCalled();
       expect(msg.reply.mock.calls[0][0]).toContain("sent `/model opus`");
     }],
   });
@@ -533,18 +545,18 @@ feature("pane targeting", () => {
 });
 
 feature("processMessage pipeline (delivery)", () => {
-  // streamResponse was retired in 1.16.32 — replies now flow through
-  // channels/jsonl-watcher.mjs instead. These tests cover what's left
-  // in processMessage: prompt delivery via withPaneSendLock with retries,
-  // typing indicator, and error reply on sendOnly failure. Reply
-  // rendering / chunking / TTS / image markers are tested against
-  // jsonl-watcher in a follow-up commit.
-
-  component("calls sendOnly with the cleaned prompt", {
+  component("durably enqueues the cleaned prompt", {
     given: ["a regular message", () => ({ ...setup(), msg: mockMsg({ content: "what is 2+2?" }) })],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["agent.sendOnly was invoked with prompt + pane", (_, { agent }) => {
-      expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "what is 2+2?", 0);
+    then: ["the broker receives one stable Discord identity", (result, { deliveryBroker }) => {
+      expect(result).toEqual({ delivered: true, pending: true });
+      expect(deliveryBroker.enqueue).toHaveBeenCalledWith(expect.objectContaining({
+        agentName: "_ai",
+        pane: 0,
+        text: "what is 2+2?",
+        verifyText: "what is 2+2?",
+        idempotencyKey: "discord:ch1:msg-1",
+      }));
     }],
   });
 
@@ -556,16 +568,12 @@ feature("processMessage pipeline (delivery)", () => {
       return { ...s, prompt, msg: mockMsg({ content: "granska bilden" }) };
     }],
     when: ["the Discord bridge delivers the message", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["the complete image prompt reaches the verified send contract unchanged", (_, { agent, prompt }) => {
-      expect(agent.sendOnly).toHaveBeenCalledTimes(1);
-      expect(agent.sendOnly).toHaveBeenCalledWith("_ai", prompt, 0);
-      expect(agent.waitForPromptEcho).toHaveBeenCalledWith(
-        "_ai",
-        0,
-        prompt,
-        expect.any(Number),
-        expect.objectContaining({ cursor: expect.any(Object) }),
-      );
+    then: ["the complete image prompt is one queue job, unchanged", (_, { deliveryBroker, prompt }) => {
+      expect(deliveryBroker.enqueue).toHaveBeenCalledTimes(1);
+      expect(deliveryBroker.enqueue).toHaveBeenCalledWith(expect.objectContaining({
+        text: prompt,
+        verifyText: prompt,
+      }));
     }],
   });
 
@@ -576,9 +584,9 @@ feature("processMessage pipeline (delivery)", () => {
       return { ...s, msg: mockMsg({ content: "status please" }) };
     }],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["agent.sendOnly receives exactly the user's prompt", (_, { agent }) => {
-      expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "status please", 0);
-      const prompt = agent.sendOnly.mock.calls[0][1];
+    then: ["the queue receives exactly the user's prompt", (_, { deliveryBroker }) => {
+      const prompt = deliveryBroker.enqueue.mock.calls[0][0].text;
+      expect(prompt).toBe("status please");
       expect(prompt).not.toContain("tts on");
       expect(prompt).not.toContain("amux say");
     }],
@@ -594,134 +602,32 @@ feature("processMessage pipeline (delivery)", () => {
     }],
   });
 
-  component("leaked tmux error on send does not fail delivery when echo confirms", {
-    // Regression (2026-06-09): a user scrolling the target pane fired conf
-    // bindings chaining `send-keys -X scroll-*`; copy-mode (-e) auto-exited
-    // at the bottom mid-chain and tmux attributed "not in a mode" errors to
-    // the bridge's one-shot send client. The old code let that throw skip
-    // echo verification entirely and mirrored raw stderr ("not in a mode"
-    // ×3) to Discord even though delivery could still succeed. Delivery is
-    // judged by the echo check, not by tmux's exit code.
-    given: ["sendOnly throws a foreign tmux error but the prompt echoes", () => {
+  component("a queue storage failure stays retryable without claiming delivery", {
+    given: ["the durable queue rejects the write", () => {
       const s = setup();
-      s.agent.sendOnly.mockRejectedValue(new Error("Command failed: tmux send-keys\nnot in a mode\nnot in a mode\nnot in a mode"));
-      s.agent.waitForPromptEcho.mockResolvedValue(true);
-      return { ...s, msg: mockMsg({ content: "ok.. kan du köra resten?" }) };
-    }],
-    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["no raw stderr reply, no failure warning", (_, { msg }) => {
-      expect(msg.reply).not.toHaveBeenCalled();
-      const sends = msg.send.mock.calls.map((c) => c[0]);
-      expect(sends.some((s) => typeof s === "string" && s.includes("not in a mode"))).toBe(false);
-    }],
-  });
-
-  component("persistent sendOnly failure exhausts retries and warns (no raw stderr)", {
-    given: ["sendOnly always throws, never echoes, pane idle", () => {
-      const s = setup();
-      s.agent.sendOnly.mockRejectedValue(new Error("connection lost"));
-      s.agent.waitForPromptEcho.mockResolvedValue(false);
-      s.agent.isBusy.mockResolvedValue(false);
-      return { ...s, msg: mockMsg({ content: "broken" }) };
-    }],
-    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["3 attempts made, friendly warning sent instead of raw error reply", (_, { msg, agent }) => {
-      expect(agent.sendOnly.mock.calls.length).toBe(3);
-      const sends = msg.send.mock.calls.map((c) => c[0]);
-      expect(sends.some((s) => typeof s === "string" && s.includes("3 attempts"))).toBe(true);
-      expect(msg.reply).not.toHaveBeenCalledWith("connection lost");
-    }],
-  });
-
-  component("waits for prompt echo before considering delivered", {
-    given: ["a regular message", () => ({ ...setup(), msg: mockMsg({ content: "what is 2+2?" }) })],
-    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["waitForPromptEcho called with the prompt text", (_, { agent }) => {
-      expect(agent.waitForPromptEcho).toHaveBeenCalled();
-      const [agentName, paneArg, promptArg] = agent.waitForPromptEcho.mock.calls[0];
-      expect(agentName).toBe("_ai");
-      expect(paneArg).toBe(0);
-      expect(promptArg).toBe("what is 2+2?");
-    }],
-  });
-
-  component("retries 3 times and warns when prompt is never delivered", {
-    given: ["an agent that never echoes and stays idle", () => {
-      const s = setup();
-      s.agent.waitForPromptEcho.mockResolvedValue(false);
-      s.agent.isBusy.mockResolvedValue(false);
-      return { ...s, msg: mockMsg({ content: "probably lost" }) };
-    }],
-    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["sendOnly retried 3x and warning sent", (_, { msg, agent }) => {
-      expect(agent.sendOnly.mock.calls.length).toBe(3);
-      const sends = msg.send.mock.calls.map((c) => c[0]);
-      expect(sends.some((s) => typeof s === "string" && s.includes("3 attempts"))).toBe(true);
-    }],
-  });
-
-  component("terminal Codex composer block fails once and remains retryable", {
-    given: ["sendOnly refuses a foreign draft before typing", () => {
-      const s = setup();
-      const error = new Error("Codex prompt delivery blocked: composer is not empty");
-      error.code = "AMUX_DELIVERY_BLOCKED";
-      s.agent.sendOnly.mockRejectedValue(error);
-      s.agent.waitForPromptEcho.mockResolvedValue(false);
+      s.deliveryBroker.enqueue.mockImplementation(() => { throw new Error("disk unavailable"); });
       return { ...s, msg: mockMsg({ content: "do not lose this" }) };
     }],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["one attempt warns and returns an explicit failed outcome", (outcome, { msg, agent }) => {
-      expect(outcome).toEqual({ delivered: false });
-      expect(agent.sendOnly).toHaveBeenCalledTimes(1);
-      const sends = msg.send.mock.calls.map((call) => call[0]);
-      expect(sends.some((line) => line.includes("after 1 attempt"))).toBe(true);
+    then: ["the handler returns an explicit failure and never touches tmux", (outcome, { agent }) => {
+      expect(outcome).toEqual({ delivered: false, reason: "disk unavailable" });
+      expect(agent.sendOnly).not.toHaveBeenCalled();
     }],
   });
 
-  component("Discord delivery uses a local event cursor instead of server time", {
-    given: ["a message whose post-send echo succeeds", () => {
+  component("a Discord replay reuses one deterministic durable job", {
+    given: ["the same Discord message is observed twice", () => {
       const s = setup();
-      s.agent.waitForPromptEcho.mockResolvedValue(true);
-      return {
-        ...s,
-        msg: mockMsg({ content: "cursor prompt", createdTimestamp: 1_784_000_000_000 }),
-      };
-    }],
-    when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["verification carries the captured JSONL cursor, not createdTimestamp", (_, { agent }) => {
-      expect(agent.sendOnly).toHaveBeenCalledTimes(1);
-      expect(agent.waitForPromptEcho).toHaveBeenCalledTimes(1);
-      for (const call of agent.waitForPromptEcho.mock.calls) {
-        expect(call[4]).toEqual({
-          cursor: { kind: "test-prompt-events-v1", seen: ["historical-event"] },
-        });
-      }
-    }],
-  });
-
-  component("a failed Discord delivery reuses its persisted cursor on reconciliation", {
-    given: ["one message that fails all first-pass checks, then reveals a late echo", () => {
-      const s = setup();
-      s.agent.waitForPromptEcho
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(true);
-      s.agent.isBusy.mockResolvedValue(false);
       return { ...s, msg: mockMsg({ id: "durable-1", content: "late durable echo" }) };
     }],
-    when: ["the live event fails and the same Discord id is reconciled", async ({ onMessage, msg }) => {
-      const first = await onMessage(msg);
-      const second = await onMessage(msg);
-      return { first, second };
+    when: ["both paths enqueue", async ({ onMessage, msg }) => {
+      await onMessage(msg);
+      await onMessage(msg);
     }],
-    then: ["replay prechecks the original cursor and never writes the prompt a fourth time", (result, { agent }) => {
-      expect(result).toEqual({ first: { delivered: false }, second: { delivered: true } });
-      expect(agent.capturePromptEchoCursor).toHaveBeenCalledTimes(1);
-      expect(agent.sendOnly).toHaveBeenCalledTimes(3);
-      expect(agent.waitForPromptEcho.mock.calls.at(-1)[4]).toEqual({
-        cursor: { kind: "test-prompt-events-v1", seen: ["historical-event"] },
-      });
+    then: ["both writes carry the same identity for storage-level dedupe", (_, { deliveryBroker }) => {
+      expect(deliveryBroker.enqueue).toHaveBeenCalledTimes(2);
+      expect(deliveryBroker.enqueue.mock.calls.map(([job]) => job.idempotencyKey))
+        .toEqual(["discord:ch1:durable-1", "discord:ch1:durable-1"]);
     }],
   });
 
@@ -738,13 +644,9 @@ feature("processMessage pipeline (delivery)", () => {
       const secondRun = onMessage(second);
       await Promise.all([firstRun, secondRun]);
     }],
-    then: ["second sendOnly happens without waiting for first reply", (_, { agent }) => {
-      // Both prompts delivered — sendLock serialises sendOnly+echo, but
-      // since reply rendering no longer blocks, the second prompt's
-      // sendOnly fires shortly after the first's echo confirmation.
-      expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "first prompt", 0);
-      expect(agent.sendOnly).toHaveBeenCalledWith("_ai", "second prompt", 0);
-      expect(agent.sendOnly.mock.calls.length).toBeGreaterThanOrEqual(2);
+    then: ["both prompts are persisted immediately; the broker owns later serialization", (_, { deliveryBroker }) => {
+      expect(deliveryBroker.enqueue.mock.calls.map(([job]) => job.text))
+        .toEqual(["first prompt", "second prompt"]);
     }],
   });
 });

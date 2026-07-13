@@ -35,6 +35,7 @@ import {
   codexComposerEndsWithPrompt,
   codexComposerHasPasteBlock,
   codexComposerText,
+  codexOffersQueueComposer,
   isCodexFullscreenPager,
   prepareCodexIdle,
   shouldRescueCodexSubmit,
@@ -1452,7 +1453,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     // the exact JSONL echo remains the delivery proof.
     const deadline = Date.now() + CODEX_PROMPT_READY_TIMEOUT_MS;
     let lastError = "composer is not ready";
-    const driver = { isBusy, capturePane, captureScreen, sendEscape, typeLiteral };
+    const driver = { isBusy, capturePane, captureScreen, sendEscape, sendTab, typeLiteral };
 
     while (Date.now() < deadline) {
       const ready = await prepareCodexIdle({
@@ -1475,14 +1476,69 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     throw codexDeliveryBlocked(`Codex prompt delivery timed out: ${lastError}`);
   }
 
-  async function sendPrompt(agentName, prompt, pane) {
+  async function recoverKnownCodexDraft(agentName, pane, prompt) {
+    const deadline = Date.now() + CODEX_PROMPT_READY_TIMEOUT_MS;
+    const target = `${agentName}:.${pane}`;
+    while (Date.now() < deadline) {
+      let snapshot = await captureScreen(agentName, pane).catch(() => "");
+      if (isCodexFullscreenPager(snapshot)) {
+        await t.sendLiteral(target, "q").catch(() => {});
+        await wait(250);
+        continue;
+      }
+      let composer = codexComposerText(snapshot);
+      if (composer !== null) {
+        if (codexComposerContainsPrompt(snapshot, prompt)
+            || (promptRequiresAtomicPaste(prompt) && codexComposerEndsWithPrompt(snapshot, prompt))
+            || (promptRequiresAtomicPaste(prompt) && codexComposerHasPasteBlock(snapshot))) {
+          return { hasDraft: true, busy: Boolean(await isBusy(agentName, pane).catch(() => false)) };
+        }
+        if (composer === "") {
+          return { hasDraft: false, busy: Boolean(await isBusy(agentName, pane).catch(() => false)) };
+        }
+        throw codexDeliveryBlocked(
+          `Codex prompt delivery blocked: composer contains a different draft (starts with: ${composer.slice(0, 60)})`,
+        );
+      }
+
+      const busy = Boolean(await isBusy(agentName, pane).catch(() => true));
+      if (busy && codexOffersQueueComposer(snapshot)) {
+        await t.sendKeys(target, "Tab");
+        await wait(250);
+        continue;
+      }
+      if (!busy) {
+        // An idle compositor may be between paints after the prior failed
+        // attempt. The ordinary readiness gate safely reveals it.
+        const ready = await waitForCodexPromptReady(agentName, pane);
+        snapshot = ready?.snapshot || "";
+        composer = codexComposerText(snapshot);
+        if (composer === "") return { hasDraft: false, busy: false };
+      }
+      await wait(250);
+    }
+    throw codexDeliveryBlocked("Codex prompt delivery blocked: owned draft is not currently recoverable");
+  }
+
+  async function sendPrompt(agentName, prompt, pane, {
+    knownDrafted = false,
+    onDrafted = null,
+    onSubmitted = null,
+  } = {}) {
     const target = `${agentName}:.${pane}`;
     const notBeforeMs = Date.now();
     await exitCopyMode(target);
     const dialect = await livePaneDialectName(agentName, pane);
-    const alreadyComposed = await promptAlreadyInComposer(agentName, pane, prompt);
+    let alreadyComposed = await promptAlreadyInComposer(agentName, pane, prompt);
     let busyAtSend = false;
     let exactDraft = dialect === "codex" && alreadyComposed;
+
+    if (dialect === "codex" && knownDrafted && !alreadyComposed) {
+      const recovered = await recoverKnownCodexDraft(agentName, pane, prompt);
+      alreadyComposed = recovered.hasDraft;
+      exactDraft = recovered.hasDraft;
+      busyAtSend = recovered.busy;
+    }
 
     // Idempotent retries: if a previous attempt left this exact prompt
     // sitting unsubmitted in the composer, typing it again would double the
@@ -1502,6 +1558,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         await t.sendLiteral(target, prompt);
         await wait(1000);
       }
+      if (onDrafted) await onDrafted();
     } else if (dialect === "codex") {
       busyAtSend = Boolean(await isBusy(agentName, pane));
     }
@@ -1509,15 +1566,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (dialect === "codex" && !exactDraft) {
       exactDraft = await waitForExactCodexDraft(agentName, pane, prompt);
       if (!exactDraft) {
-        // We own these just-typed bytes, so clearing them cannot destroy a
-        // pre-existing local draft. A tall Codex composer needs repeated
-        // verified kill-line passes; one fixed clear left the prompt head in
-        // lsrc:3 and made a retry capable of submitting truncated text.
-        await clearCodexComposerDraft({
-          capture: () => captureScreen(agentName, pane),
-          clear: () => t.clearInputLine(target),
-          sleep: wait,
-        }).catch(() => {});
+        // The durable broker owns this exact draft. If the composer disappears
+        // during a busy repaint, clearing is both unverifiable and destructive:
+        // it produced the 09:08 LSrc drop where the full prompt remained in the
+        // editor but its queue job was discarded. Leave it in place and let the
+        // same FIFO head recover/submit it when the composer becomes visible.
         throw codexDeliveryBlocked("Codex prompt delivery blocked: exact prompt did not finish painting in the composer");
       }
     }
@@ -1537,9 +1590,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     // sent successfully, and (c) the exact prompt no longer remains in the
     // composer. The delivery layer uses it to avoid retyping duplicates while
     // it waits for the later JSONL echo.
-    const queued = dialect === "codex" && busyAtSend && exactDraft
-      && !(await promptAlreadyInComposer(agentName, pane, prompt));
-    return { busyAtSend, queued, exactDraft };
+    const stillComposed = await promptAlreadyInComposer(agentName, pane, prompt);
+    const submitted = !stillComposed;
+    const queued = dialect === "codex" && busyAtSend && exactDraft && submitted;
+    if (submitted && onSubmitted) await onSubmitted();
+    return { busyAtSend, queued, exactDraft, submitted };
   }
 
   async function promptAlreadyInComposer(agentName, pane, prompt) {
@@ -1566,6 +1621,32 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Reconcile a durable `submitted` job whose JSONL echo is still absent.
+   * This never types. It lets the broker distinguish a hidden busy queue from
+   * an exact draft that resurfaced after an eaten Enter, or an idle empty
+   * composer where the prior submission was genuinely lost.
+   */
+  async function promptTransportState(agentName, pane, prompt) {
+    const dialect = await livePaneDialectName(agentName, pane);
+    const busy = Boolean(await isBusy(agentName, pane).catch(() => true));
+    if (dialect !== "codex") {
+      const drafted = await promptAlreadyInComposer(agentName, pane, prompt);
+      return { state: drafted ? "drafted" : (busy ? "hidden" : "empty-idle"), busy };
+    }
+
+    const snapshot = await captureScreen(agentName, pane).catch(() => "");
+    if (codexComposerContainsPrompt(snapshot, prompt)
+        || (promptRequiresAtomicPaste(prompt) && codexComposerEndsWithPrompt(snapshot, prompt))
+        || (promptRequiresAtomicPaste(prompt) && codexComposerHasPasteBlock(snapshot))) {
+      return { state: "drafted", busy };
+    }
+    const composer = codexComposerText(snapshot);
+    if (composer === null) return { state: "hidden", busy };
+    if (composer === "") return { state: busy ? "empty-busy" : "empty-idle", busy };
+    return { state: "foreign", busy, detail: composer.slice(0, 60) };
   }
 
   async function waitForExactCodexDraft(agentName, pane, prompt, timeoutMs = 2_500) {
@@ -1873,9 +1954,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return result;
   }
 
-  async function sendOnly(agentName, prompt, pane) {
+  async function sendOnly(agentName, prompt, pane, options = {}) {
     await ensureReady(agentName, pane);
-    return sendPrompt(agentName, prompt, pane);
+    return sendPrompt(agentName, prompt, pane, options);
   }
 
   async function sendAndWait(agentName, prompt, pane) {
@@ -1971,6 +2052,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await t.sendEscape(`${agentName}:.${pane}`);
   }
 
+  /** Open Codex's non-interrupting queue composer while a turn is working. */
+  async function sendTab(agentName, pane) {
+    await t.sendKeys(`${agentName}:.${pane}`, "Tab");
+  }
+
   async function clearInputLine(agentName, pane) {
     await t.clearInputLine(`${agentName}:.${pane}`);
   }
@@ -2020,7 +2106,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   return {
     ensureReady, sendAndWait, sendOnly,
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
-    capturePane, captureScreen, capturePromptEchoCursor, sendEscape, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
+    promptTransportState,
+    capturePane, captureScreen, capturePromptEchoCursor, sendEscape, sendTab, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
     dismissBlockingPrompt, waitForPromptEcho,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession,
     sanitizeTmuxGlobalEnv, restartCodex, restartFleet,
