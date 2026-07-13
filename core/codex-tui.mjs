@@ -6,6 +6,8 @@
 // one gate so a UI change cannot make one path type over a human draft while
 // another path still behaves safely.
 
+import { promptRequiresAtomicPaste } from "./prompt-paste.mjs";
+
 // Narrow tmux captures occasionally merge the cursor cell into the gap
 // (observed live as "editoprevious"). Keep the full Codex-owned sentence
 // exact while tolerating at most two non-space paint artefacts at that seam.
@@ -224,15 +226,22 @@ export function codexComposerMatchesOwnedDraft(snapshot, prompt) {
 }
 
 /**
- * A rescue Enter is safe only while Codex is idle and the live composer still
- * contains this exact prompt's head. Blind Enter retries during a running turn
- * can enqueue the same stale draft repeatedly; that produced four to six
- * duplicate crash-recovery turns from one delivery on 2026-07-12.
+ * A rescue Enter is safe only while the live composer still owns this exact
+ * draft. An idle composer may submit normally. A busy pane may submit only
+ * through Codex's explicit queue editor (`tab to queue message`): JSONL is
+ * intentionally late there, so rejecting every busy rescue leaves a missed
+ * first Enter sitting in the queue editor and the next delivery appends to it.
+ *
+ * The exact draft gate is what prevents duplicates. Once Enter is accepted the
+ * queue editor disappears, so a later rescue sees no matching composer and is
+ * a no-op even though the active turn remains busy.
  */
 export function shouldRescueCodexSubmit({ snapshot, prompt, busy }) {
-  if (busy) return false;
-  return codexComposerContainsPrompt(snapshot, prompt)
-    || codexComposerEndsWithPrompt(snapshot, prompt);
+  const exactDraft = codexComposerContainsPrompt(snapshot, prompt)
+    || codexComposerEndsWithPrompt(snapshot, prompt)
+    || (promptRequiresAtomicPaste(prompt) && codexComposerHasPasteBlock(snapshot));
+  if (!exactDraft) return false;
+  return !busy || codexOffersQueueComposer(snapshot);
 }
 
 /**

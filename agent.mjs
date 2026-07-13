@@ -1822,9 +1822,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (await submitted() === true) return;
 
     // Up to 3 rescue attempts, spaced 750ms. Every Enter is independently
-    // gated by an idle live composer containing this exact draft. A busy
-    // signal alone is never permission: repeated Enter while a turn ran was
-    // the source of the duplicate recovery storm on 2026-07-12.
+    // gated by the exact live draft. Busy is allowed only inside Codex's
+    // explicit queue editor: queued prompts do not reach JSONL until the
+    // active turn yields, and the first Enter is often eaten while a long
+    // paste is still painting. Once queue submission succeeds the composer
+    // disappears, so the next gated rescue is a no-op rather than a duplicate.
     for (let attempt = 0; attempt < 3; attempt++) {
       const busy = await isBusy(agentName, pane).catch(() => true);
       const snapshot = await captureScreen(agentName, pane).catch(() => "");

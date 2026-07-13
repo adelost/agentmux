@@ -128,19 +128,39 @@ q to quit   esc/← to edit prev
     }],
   });
 
-  unit("submit rescue is allowed only for the exact idle draft", {
-    given: ["the same draft in idle, busy, and historical screens", () => ({
+  unit("submit rescue accepts an exact idle draft or Codex's explicit busy queue editor", {
+    given: ["the same draft in idle, generic busy, queued, and historical screens", () => ({
       prompt: "[krasch-recovery] återuppta",
       draft: "\n› [krasch-recovery] återuppta\n",
+      queue: "\n› [krasch-recovery] återuppta\n\n  tab to queue message 42% context left\n",
       history: "\n› [krasch-recovery] återuppta\n• Working (2s)\n",
     })],
-    when: ["evaluating rescue safety", ({ prompt, draft, history }) => [
+    when: ["evaluating rescue safety", ({ prompt, draft, queue, history }) => [
       shouldRescueCodexSubmit({ snapshot: draft, prompt, busy: false }),
       shouldRescueCodexSubmit({ snapshot: draft, prompt, busy: true }),
+      shouldRescueCodexSubmit({ snapshot: queue, prompt, busy: true }),
+      shouldRescueCodexSubmit({ snapshot: queue, prompt: `${prompt} annan`, busy: true }),
       shouldRescueCodexSubmit({ snapshot: history, prompt, busy: false }),
     ]],
-    then: ["only the idle live composer may receive Enter", (result) =>
-      expect(result).toEqual([true, false, false])],
+    then: ["only an exact live submit surface may receive Enter", (result) =>
+      expect(result).toEqual([true, false, true, false, false])],
+  });
+
+  unit("a long paste block receives one busy queue rescue", {
+    given: ["Codex's collapsed atomic paste inside the queue editor", () => ({
+      prompt: "x".repeat(900),
+      snapshot: "\n› [Pasted Content 900 chars]\n\n  tab to queue message 38% context left\n",
+    })],
+    when: ["checking the busy submit gate", ({ prompt, snapshot }) => ({
+      queued: shouldRescueCodexSubmit({ snapshot, prompt, busy: true }),
+      genericBusy: shouldRescueCodexSubmit({
+        snapshot: "\n› [Pasted Content 900 chars]\n",
+        prompt,
+        busy: true,
+      }),
+    })],
+    then: ["only the explicit queue editor earns Enter", (result) =>
+      expect(result).toEqual({ queued: true, genericBusy: false })],
   });
 
   unit("composer identity rejects recovery prompts that share only a short prefix", {
