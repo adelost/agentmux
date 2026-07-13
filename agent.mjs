@@ -24,7 +24,9 @@ import { resolveTmuxLayout } from "./core/layout.mjs";
 import { pastePrompt, promptRequiresAtomicPaste } from "./core/prompt-paste.mjs";
 import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
 import {
+  clearCodexComposerDraft,
   codexComposerContainsPrompt,
+  codexComposerEndsWithPrompt,
   codexComposerHasPasteBlock,
   codexComposerText,
   isCodexFullscreenPager,
@@ -1486,8 +1488,14 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       exactDraft = await waitForExactCodexDraft(agentName, pane, prompt);
       if (!exactDraft) {
         // We own these just-typed bytes, so clearing them cannot destroy a
-        // pre-existing local draft. Never press Enter on a partial paste.
-        await t.clearInputLine(target).catch(() => {});
+        // pre-existing local draft. A tall Codex composer needs repeated
+        // verified kill-line passes; one fixed clear left the prompt head in
+        // lsrc:3 and made a retry capable of submitting truncated text.
+        await clearCodexComposerDraft({
+          capture: () => captureScreen(agentName, pane),
+          clear: () => t.clearInputLine(target),
+          sleep: wait,
+        }).catch(() => {});
         throw codexDeliveryBlocked("Codex prompt delivery blocked: exact prompt did not finish painting in the composer");
       }
     }
@@ -1517,7 +1525,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (!head) return false;
     try {
       if ((await livePaneDialectName(agentName, pane)) === "codex") {
-        return codexComposerContainsPrompt(await captureScreen(agentName, pane), prompt);
+        const snapshot = await captureScreen(agentName, pane);
+        return codexComposerContainsPrompt(snapshot, prompt)
+          || (promptRequiresAtomicPaste(prompt)
+            && codexComposerEndsWithPrompt(snapshot, prompt));
       }
       const raw = await capturePane(agentName, pane, 15);
       // Composer lines render as "❯ text" (claude) / "› text" (codex) /
@@ -1545,6 +1556,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     while (true) {
       const snapshot = await captureScreen(agentName, pane).catch(() => "");
       if (codexComposerContainsPrompt(snapshot, prompt)) return true;
+      if (mayCollapse && codexComposerEndsWithPrompt(snapshot, prompt)) return true;
       if (mayCollapse && codexComposerHasPasteBlock(snapshot)) return true;
       if (Date.now() >= deadline) return false;
       await wait(200);
@@ -1592,18 +1604,20 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     console.warn(
       `send ${agentName}:${pane}: clearing stale/duplicate composer text ("${stale.slice(0, 40)}…")`,
     );
-    if (dialect === "codex") await t.clearInputLine(target);
-    else await t.sendEscape(target);
-    await wait(300);
-    let after = "";
-    try {
-      after = dialect === "codex"
-        ? await captureScreen(agentName, pane)
-        : await capturePane(agentName, pane, 15);
-    } catch { /* verification below will simply see no stale text */ }
-    if (foreignComposerText(after, dialect === "codex" ? null : head)) {
-      await t.clearInputLine(target); // belt: kill-line for TUIs that keep text on first clear
-      await wait(200);
+    if (dialect === "codex") {
+      const cleared = await clearCodexComposerDraft({
+        capture: () => captureScreen(agentName, pane),
+        clear: () => t.clearInputLine(target),
+        sleep: wait,
+      });
+      if (!cleared.ok) {
+        throw codexDeliveryBlocked(
+          `Codex prompt delivery blocked: stale composer could not be cleared (${cleared.error})`,
+        );
+      }
+    } else {
+      await t.sendEscape(target);
+      await wait(300);
     }
     try {
       appendEvent({

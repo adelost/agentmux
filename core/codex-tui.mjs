@@ -135,11 +135,16 @@ export function codexComposerText(text) {
   return value;
 }
 
+const normalizeComposerIdentity = (value) => String(value || "").replace(/\s+/g, "");
+const SCROLLED_PROMPT_TAIL_CHARS = 160;
+
 /**
- * Prove that the live Codex composer contains this prompt, using enough of a
- * whitespace-normalized prefix to distinguish repeated recovery templates.
- * The old 20-character check treated every "[krasch-recovery] ..." draft as
- * identical and could submit an older pane's stale text.
+ * Prove that the complete prompt is visible in the live Codex composer.
+ *
+ * This deliberately compares the whole normalized prompt, not merely a
+ * prefix. A failed clear of a multiline draft can leave only its first rows
+ * behind; treating that residue as the complete prompt makes the next retry
+ * press Enter on truncated text.
  */
 export function codexComposerContainsPrompt(snapshot, prompt) {
   const composer = codexComposerText(snapshot);
@@ -149,14 +154,29 @@ export function codexComposerContainsPrompt(snapshot, prompt) {
   // because they are application-rendered rather than terminal hard-wraps;
   // codexComposerText therefore has a synthetic space in the middle of the
   // token. Compare the exact non-whitespace stream so visual layout cannot
-  // turn a fully painted draft into a false negative. The 160-character
-  // identity still distinguishes payloads by all meaningful bytes, including
-  // the unique Discord message/attachment ids in image paths.
-  const normalize = (value) => String(value || "").replace(/\s+/g, "");
-  const needle = normalize(prompt);
+  // turn a fully painted draft into a false negative.
+  const needle = normalizeComposerIdentity(prompt);
   if (!needle) return false;
-  const identity = needle.slice(0, Math.min(160, needle.length));
-  return normalize(composer).includes(identity);
+  return normalizeComposerIdentity(composer) === needle;
+}
+
+/**
+ * Prove that the visible composer ends with a long prompt's exact tail.
+ *
+ * Codex scrolls a tall draft inside its composer: once the cursor reaches the
+ * end, the prompt head is no longer present in capture-pane even though the
+ * atomic tmux paste arrived in full. Delivery may use this boundary receipt
+ * only for prompts that were sent through the atomic-paste path. Requiring a
+ * long, exact 160-character suffix avoids accepting a short or merely
+ * prefix-shaped residue as complete.
+ */
+export function codexComposerEndsWithPrompt(snapshot, prompt) {
+  const composer = codexComposerText(snapshot);
+  if (typeof composer !== "string") return false;
+  const needle = normalizeComposerIdentity(prompt);
+  if (needle.length <= SCROLLED_PROMPT_TAIL_CHARS) return false;
+  const tail = needle.slice(-SCROLLED_PROMPT_TAIL_CHARS);
+  return normalizeComposerIdentity(composer).endsWith(tail);
 }
 
 /**
@@ -167,7 +187,55 @@ export function codexComposerContainsPrompt(snapshot, prompt) {
  */
 export function shouldRescueCodexSubmit({ snapshot, prompt, busy }) {
   if (busy) return false;
-  return codexComposerContainsPrompt(snapshot, prompt);
+  return codexComposerContainsPrompt(snapshot, prompt)
+    || codexComposerEndsWithPrompt(snapshot, prompt);
+}
+
+/**
+ * Clear an agentmux-owned multiline Codex draft without assuming one
+ * kill-line sequence reaches every paragraph.
+ *
+ * Codex has no whole-buffer editing shortcut that is safe during a running
+ * turn. The tmux adapter therefore walks backwards across logical lines; a
+ * tall prompt can need several passes. Re-capturing between passes both
+ * proves progress and prevents a fixed line-count from leaving a truncated
+ * prompt behind for the next delivery to submit.
+ */
+export async function clearCodexComposerDraft({
+  capture,
+  clear,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  maxPasses = 64,
+} = {}) {
+  let passes = 0;
+  while (passes < maxPasses) {
+    let snapshot;
+    try { snapshot = await capture(); }
+    catch (error) { return { ok: false, passes, error: error.message }; }
+    const composer = codexComposerText(snapshot);
+    if (composer === "") return { ok: true, passes };
+    if (composer === null) {
+      return { ok: false, passes, error: "could not identify composer while clearing" };
+    }
+    try { await clear(); }
+    catch (error) { return { ok: false, passes, error: error.message }; }
+    passes++;
+    await sleep(50);
+  }
+
+  try {
+    const composer = codexComposerText(await capture());
+    if (composer === "") return { ok: true, passes };
+    return {
+      ok: false,
+      passes,
+      error: composer === null
+        ? "could not identify composer after bounded clear"
+        : "composer remained non-empty after bounded clear",
+    };
+  } catch (error) {
+    return { ok: false, passes, error: error.message };
+  }
 }
 
 export function verifiedEmptyCodexComposer(text) {

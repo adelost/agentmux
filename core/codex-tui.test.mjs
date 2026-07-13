@@ -1,6 +1,8 @@
 import { feature, unit, expect } from "bdd-vitest";
 import {
+  clearCodexComposerDraft,
   codexComposerContainsPrompt,
+  codexComposerEndsWithPrompt,
   codexComposerHasPasteBlock,
   codexComposerText,
   isCodexBacktrackPager,
@@ -203,6 +205,139 @@ q to quit   esc/← to edit prev
       codexComposerContainsPrompt(snapshot, incoming)],
     then: ["the different non-whitespace bytes do not match", (matches) =>
       expect(matches).toBe(false)],
+  });
+
+  unit("a truncated multiline head is not mistaken for the complete prompt", {
+    given: ["a failed clear that left only the beginning of a long draft", () => ({
+      prompt: "[from claw:3]\n\n" + "beginning ".repeat(30) + "COMPLETE_TAIL",
+      snapshot: "\n› [from claw:3]\n\n  " + "beginning ".repeat(8) + "\n  gpt-5.6-sol xhigh · ~/x\n",
+    })],
+    when: ["checking full-prompt identity", ({ prompt, snapshot }) =>
+      codexComposerContainsPrompt(snapshot, prompt)],
+    then: ["prefix residue stays unverified", (matches) => expect(matches).toBe(false)],
+  });
+
+  unit("extra composer bytes never count as the exact prompt", {
+    given: ["the requested prompt with stale text before and after it", () => ({
+      prompt: "deliver this exact text",
+      prefixed: "\n› stale prefix deliver this exact text\n",
+      suffixed: "\n› deliver this exact text stale suffix\n",
+    })],
+    when: ["checking exact identity", ({ prompt, prefixed, suffixed }) => [
+      codexComposerContainsPrompt(prefixed, prompt),
+      codexComposerContainsPrompt(suffixed, prompt),
+    ]],
+    then: ["neither corrupted draft can be submitted", (matches) =>
+      expect(matches).toEqual([false, false])],
+  });
+
+  unit("a tall atomic paste is verified by its exact visible tail", {
+    // Live lsrc:3 capture 2026-07-13: the 11-line prompt head scrolled out of
+    // Codex's internal composer viewport, which starts the visible draft at
+    // Rad 07. The old prefix-only verifier waited 2.5 seconds, withheld Enter,
+    // and then partially cleared the otherwise complete prompt.
+    given: ["the observed scrolled composer and its complete source prompt", () => ({
+      prompt: [
+        "AMUX_LONG_HEAD transportdiagnos.",
+        "Rad 02 verifierar den fullständiga atomiska nyttolasten.",
+        "Rad 03 alpha bravo charlie delta echo foxtrot.",
+        "Rad 04 juliet kilo lima mike november oscar.",
+        "Rad 05 sierra tango uniform victor whiskey xray.",
+        "Rad 06 början har nu rullat ut ur vyn.",
+        "Rad 07 testar att transporten fortfarande kan bevisa att hela den atomiska pasten kom fram.",
+        "Rad 08 får aldrig blandas med en gammal lokal draft och Enter får bara skickas efter verifiering.",
+        "Rad 09 gör nyttolasten tillräckligt lång för att reproducera det verkliga Discord-felet.",
+        "Rad 10 är näst sista raden och har kontrollorden citron granit midnatt kobolt sextant.",
+        "AMUX_LONG_TAIL fullständig atomisk nyttolast slutmarkör.",
+      ].join("\n"),
+      snapshot: `
+› Rad 07 testar att transporten fortfarande kan bevisa att hela den
+  atomiska pasten kom fram.
+  Rad 08 får aldrig blandas med en gammal lokal draft och Enter får
+  bara skickas efter verifiering.
+  Rad 09 gör nyttolasten tillräckligt lång för att reproducera det
+  verkliga Discord-felet.
+  Rad 10 är näst sista raden och har kontrollorden citron granit
+  midnatt kobolt sextant.
+  AMUX_LONG_TAIL fullständig atomisk nyttolast slutmarkör.
+
+  gpt-5.6-sol xhigh · ~/lsrc/.agents/3
+`,
+    })],
+    when: ["checking full visibility and the atomic tail receipt", ({ prompt, snapshot }) => ({
+      full: codexComposerContainsPrompt(snapshot, prompt),
+      tail: codexComposerEndsWithPrompt(snapshot, prompt),
+      wrong: codexComposerEndsWithPrompt(snapshot, `${prompt} CORRUPTED`),
+      rescue: shouldRescueCodexSubmit({ snapshot, prompt, busy: false }),
+      busyRescue: shouldRescueCodexSubmit({ snapshot, prompt, busy: true }),
+    })],
+    then: ["only the exact tail proves the scrolled paste", (result) =>
+      expect(result).toEqual({
+        full: false,
+        tail: true,
+        wrong: false,
+        rescue: true,
+        busyRescue: false,
+      })],
+  });
+
+  unit("multiline cleanup repeats until the composer is actually empty", {
+    given: ["a long draft whose first clear exposes an earlier prefix", () => {
+      const frames = [
+        "\n› late rows of our draft\n  gpt-5.6-sol xhigh · ~/x\n",
+        "\n› [from claw:3]\n  early rows of our draft\n  gpt-5.6-sol xhigh · ~/x\n",
+        "\n› Explain this codebase\n  gpt-5.6-sol xhigh · ~/x\n",
+      ];
+      let captureIndex = 0;
+      let clears = 0;
+      return {
+        get clears() { return clears; },
+        capture: async () => frames[Math.min(captureIndex++, frames.length - 1)],
+        clear: async () => { clears++; },
+      };
+    }],
+    when: ["clearing with capture verification after every pass", (ctx) =>
+      clearCodexComposerDraft({ ...ctx, sleep: noSleep })],
+    then: ["both visible portions are removed before success", (result, ctx) => {
+      expect(result).toEqual({ ok: true, passes: 2 });
+      expect(ctx.clears).toBe(2);
+    }],
+  });
+
+  unit("cleanup fails closed when composer state cannot be captured", {
+    given: ["a capture failure", () => {
+      let clears = 0;
+      return {
+        get clears() { return clears; },
+        capture: async () => { throw new Error("pane vanished"); },
+        clear: async () => { clears++; },
+      };
+    }],
+    when: ["attempting cleanup", (ctx) => clearCodexComposerDraft({ ...ctx, sleep: noSleep })],
+    then: ["no blind destructive key is sent", (result, ctx) => {
+      expect(result).toEqual({ ok: false, passes: 0, error: "pane vanished" });
+      expect(ctx.clears).toBe(0);
+    }],
+  });
+
+  unit("cleanup never treats a missing composer as proof of an empty one", {
+    given: ["a screen with no live composer marker", () => {
+      let clears = 0;
+      return {
+        get clears() { return clears; },
+        capture: async () => "assistant output without a composer",
+        clear: async () => { clears++; },
+      };
+    }],
+    when: ["attempting cleanup", (ctx) => clearCodexComposerDraft({ ...ctx, sleep: noSleep })],
+    then: ["cleanup stops without a blind key sequence", (result, ctx) => {
+      expect(result).toEqual({
+        ok: false,
+        passes: 0,
+        error: "could not identify composer while clearing",
+      });
+      expect(ctx.clears).toBe(0);
+    }],
   });
 
   unit("placeholder glued to the post-Esc idle hint reads as empty, not a draft", {
