@@ -543,6 +543,27 @@ feature("processMessage pipeline (delivery)", () => {
     }],
   });
 
+  component("forwards a downloaded Discord image as one exact multiline prompt", {
+    given: ["an attachment handler result with text and a retained local image", () => {
+      const s = setup();
+      const prompt = "granska bilden\n[image attached: /tmp/discord-media-proof.png]";
+      s.attachments.buildPrompt.mockResolvedValue(prompt);
+      return { ...s, prompt, msg: mockMsg({ content: "granska bilden" }) };
+    }],
+    when: ["the Discord bridge delivers the message", ({ onMessage, msg }) => onMessage(msg)],
+    then: ["the complete image prompt reaches the verified send contract unchanged", (_, { agent, prompt }) => {
+      expect(agent.sendOnly).toHaveBeenCalledTimes(1);
+      expect(agent.sendOnly).toHaveBeenCalledWith("_ai", prompt, 0);
+      expect(agent.waitForPromptEcho).toHaveBeenCalledWith(
+        "_ai",
+        0,
+        prompt,
+        expect.any(Number),
+        expect.objectContaining({ notBeforeMs: expect.any(Number) }),
+      );
+    }],
+  });
+
   component("TTS enabled does not inject an amux say hint into the prompt", {
     given: ["a regular message while channel TTS is enabled", () => {
       const s = setup();

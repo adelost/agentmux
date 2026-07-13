@@ -4,14 +4,15 @@ import { pastePrompt, promptRequiresAtomicPaste } from "./prompt-paste.mjs";
 
 feature("atomic prompt paste", () => {
   unit("uses paste for multiline provenance briefs and long prompts", {
-    given: ["short, multiline and long prompts", () => [
+    given: ["short, inter-agent, image and long prompts", () => [
       "short prompt",
       "[from claw:0]\n\nclaim respected",
+      "inspect this\n[image attached: /tmp/proof.png]",
       "x".repeat(501),
     ]],
     when: ["choosing the input transport", (prompts) => prompts.map(promptRequiresAtomicPaste)],
     then: ["only input vulnerable to partial painting requires atomic paste", (choices) => {
-      expect(choices).toEqual([false, true, true]);
+      expect(choices).toEqual([false, true, true, true]);
     }],
   });
 

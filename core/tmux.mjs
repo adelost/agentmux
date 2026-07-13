@@ -17,6 +17,8 @@
 
 import { esc } from "../lib.mjs";
 
+const CLEAR_COMPOSER_KEYS = `C-a C-k ${Array(8).fill("C-u BSpace").join(" ")} C-u`;
+
 export function createTmuxAdapter({ socket, exec }) {
   const raw = (cmd) => exec(`tmux -S '${esc(socket)}' ${cmd}`);
   const q = (s) => `'${esc(String(s))}'`;
@@ -182,7 +184,7 @@ export function createTmuxAdapter({ socket, exec }) {
 
     /** Clear the complete logical TUI input without submitting it. */
     async clearInputLine(target) {
-      await sendKeys(target, "C-a C-k");
+      await sendKeys(target, CLEAR_COMPOSER_KEYS);
     },
 
     /** Exit copy/view/choose mode without leaking a keystroke (-X cancel). */

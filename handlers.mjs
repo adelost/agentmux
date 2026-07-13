@@ -50,7 +50,10 @@ export async function reconcileAllSessions(agent, agentNames, log = (msg) => con
   for (const name of agentNames) {
     try {
       const summary = await agent.reconcileSession(name);
-      if (summary && !summary.skipped && (summary.added || summary.respawned?.length || summary.mismatches?.length || summary.extras)) {
+      if (summary && !summary.skipped && (
+        summary.added || summary.respawned?.length || summary.removedExtras?.length ||
+        summary.mismatches?.length || summary.extras
+      )) {
         summaries.push(summary);
       }
     } catch (err) {
@@ -665,8 +668,9 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           const parts = [];
           if (s.added) parts.push(`+${s.added} pane(s)`);
           if (s.respawned.length) parts.push(`respawned ${s.respawned.map((r) => `p${r.pane} (${r.was}→${r.expected})`).join(", ")}`);
+          if (s.removedExtras?.length) parts.push(`removed idle extras ${s.removedExtras.map((r) => `p${r.pane}`).join(", ")}`);
           if (s.mismatches?.length) parts.push(`mismatched (claude running, not touched): ${s.mismatches.map((m) => `p${m.pane} (${m.has} vs ${m.expected})`).join(", ")}`);
-          if (s.extras) parts.push(`${s.extras} extra pane(s) left untouched`);
+          if (s.extras) parts.push(`${s.extras} active extra pane(s) left untouched`);
           lines.push(`**${s.name} session:** ${parts.join("; ")}`);
         }
         const total = results.created.length + (results.renamed?.length || 0) + results.existing.length;
@@ -1034,7 +1038,9 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         const parts = [];
         if (s.added) parts.push(`+${s.added} pane(s)`);
         if (s.respawned.length) parts.push(`respawned ${s.respawned.length}`);
+        if (s.removedExtras?.length) parts.push(`removed ${s.removedExtras.length} idle extra(s)`);
         if (s.mismatches?.length) parts.push(`${s.mismatches.length} mismatch(es)`);
+        if (s.extras) parts.push(`${s.extras} active extra(s) left alone`);
         if (parts.length) summary.push(`${s.name}: ${parts.join(", ")}`);
       }
       console.log(`sync done. ${summary.join(" | ")}`);

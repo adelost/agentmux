@@ -41,3 +41,20 @@ export function resolveServeMode(flags = {}) {
   if (foreground && detached) throw new Error("choose either foreground or --detach, not both");
   return detached ? BRIDGE_MODE_MANAGED : BRIDGE_MODE_MANUAL;
 }
+
+/**
+ * Plan an offline sync without silently changing bridge ownership.
+ * A foreground owner's terminal cannot be recreated by a child CLI after it
+ * stops, so manual mode requires an explicit --detach takeover before any
+ * process is touched.
+ */
+export function planOfflineSyncBridge({ wasRunning, mode, allowManagedTakeover = false }) {
+  if (!wasRunning) return { stop: false, restartManaged: false };
+  if (mode === BRIDGE_MODE_MANAGED || allowManagedTakeover) {
+    return { stop: true, restartManaged: true };
+  }
+  throw new Error(
+    "offline sync would stop a manually owned bridge; use ordinary `amux sync`, " +
+    "or pass `amux sync --offline --detach` to explicitly transfer it to managed background ownership",
+  );
+}

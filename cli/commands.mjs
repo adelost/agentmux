@@ -24,7 +24,7 @@ import {
   checkBridgeMode, checkContextBridge, checkTmux, checkConfig, overallStatus, formatDoctorReport, FAIL, WARN,
 } from "../core/doctor.mjs";
 import {
-  BRIDGE_MODE_MANAGED,
+  planOfflineSyncBridge,
   readBridgeMode,
 } from "../core/bridge-mode.mjs";
 import { createBridgeLifecycle } from "./bridge.mjs";
@@ -2847,14 +2847,14 @@ async function cmdRestart({ all = false } = {}) {
  *
  * `--offline` runs the standalone bin/sync.mjs which uses its own
  * Discord client. The bridge MUST be stopped first or the two clients
- * fight over the gateway connection. `--offline` does that bounce
- * automatically: stops bridge, runs sync, restarts bridge. Use when
- * the bridge is wedged or hasn't started yet (first install, etc).
+ * fight over the gateway connection. Managed bridges bounce automatically.
+ * A manually owned bridge requires explicit `--detach`, because its original
+ * foreground terminal cannot be recreated after shutdown.
  */
 async function cmdSync(args) {
-  const { flags } = parseFlags(args, { offline: "boolean" });
+  const { flags } = parseFlags(args, { offline: "boolean", detach: "boolean", d: "boolean" });
 
-  if (flags.offline) return cmdSyncOffline();
+  if (flags.offline) return cmdSyncOffline({ allowManagedTakeover: Boolean(flags.detach || flags.d) });
 
   const { existsSync, readFileSync } = await import("fs");
   const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
@@ -2871,9 +2871,9 @@ async function cmdSync(args) {
   console.log(`sync triggered on bridge (pid ${pid}). Tail bridge log for progress, or watch Discord channel deltas.`);
 }
 
-/** Standalone-sync path. Stops the bridge, runs bin/sync.mjs, restarts
- *  bridge. Slow (~5 s downtime) but works when bridge is broken. */
-async function cmdSyncOffline() {
+/** Standalone-sync path. Managed ownership is preserved across the bounce;
+ *  manual ownership is never stopped without an explicit --detach takeover. */
+async function cmdSyncOffline({ allowManagedTakeover = false } = {}) {
   const { existsSync } = await import("fs");
   const { spawnSync } = await import("child_process");
   const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
@@ -2884,7 +2884,8 @@ async function cmdSyncOffline() {
 
   const wasRunning = existsSync(PIDFILE);
   const previousMode = readBridgeMode();
-  if (wasRunning) {
+  const bridgePlan = planOfflineSyncBridge({ wasRunning, mode: previousMode, allowManagedTakeover });
+  if (bridgePlan.stop) {
     console.log("stopping bridge for offline sync...");
     await cmdUnserve(bridgeCtx).catch(() => {});
     // Give Discord gateway a beat to release the token before reconnecting.
@@ -2895,13 +2896,11 @@ async function cmdSyncOffline() {
   const r = spawnSync("node", [SYNC_SCRIPT], { stdio: "inherit", env: process.env });
   const syncOk = r.status === 0;
 
-  if (wasRunning && previousMode === BRIDGE_MODE_MANAGED) {
+  if (bridgePlan.restartManaged) {
     console.log("restarting bridge...");
     await cmdServe({ detach: true }, bridgeCtx).catch((err) => {
       console.error(`bridge restart failed: ${err.message}. Run \`amux serve\` manually.`);
     });
-  } else if (wasRunning) {
-    console.log("Bridge was manually owned; run `amux serve` to bring it back in your terminal.");
   }
 
   if (!syncOk) process.exit(r.status || 1);
@@ -3462,7 +3461,7 @@ Usage:
 
 Bridge controls (talk to the running bridge):
   agent sync                      Trigger Discord channel sync from agentmux.yaml
-    --offline                     Stop bridge, run standalone sync, restart
+    --offline [--detach]          Standalone sync; managed bounce or explicit manual→managed takeover
                                   (slower; use when bridge is wedged or absent)
   agent reload                    Reload agents.yaml without restarting (SIGHUP)
   agent restart                   Restart bridge (SIGUSR2 → exit 75 → start.sh respawn)

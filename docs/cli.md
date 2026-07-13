@@ -30,11 +30,16 @@ amux serve            # visible foreground process; Ctrl+C stops it
 amux serve --detach   # managed background process in tmux
 amux doctor           # health, heartbeat, version, and ownership mode
 amux stop             # intentional stop; watchdog does not revive it
+amux sync             # sync through the running bridge without changing ownership
+amux sync --offline   # standalone sync; safely bounces managed bridges only
 ```
 
 Foreground is the default so startup failures and restart loops remain visible.
 The bridge is still discoverable by PID and heartbeat, so agents use
 `amux doctor` rather than assuming it must exist inside tmux.
+For a manually owned bridge, standalone sync refuses to stop the foreground
+process. Passing `amux sync --offline --detach` is the explicit instruction to
+transfer it to managed background ownership.
 
 ## Sending Work
 

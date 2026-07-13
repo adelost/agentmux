@@ -7,6 +7,7 @@ import {
   BRIDGE_MODE_MANUAL,
   BRIDGE_MODE_STOPPED,
   readBridgeMode,
+  planOfflineSyncBridge,
   resolveServeMode,
   writeBridgeMode,
 } from "./bridge-mode.mjs";
@@ -20,6 +21,29 @@ feature("bridge ownership mode", () => {
   unit("conflicting foreground and detach flags fail loud", {
     when: ["resolving both modes", () => () => resolveServeMode({ fg: true, detach: true })],
     then: ["the ambiguity is rejected", (run) => expect(run).toThrow("either foreground or --detach")],
+  });
+
+  unit("offline sync preserves managed ownership and permits explicit takeover", {
+    when: ["planning managed, explicit-manual, and stopped bridge states", () => [
+      planOfflineSyncBridge({ wasRunning: true, mode: BRIDGE_MODE_MANAGED }),
+      planOfflineSyncBridge({ wasRunning: true, mode: BRIDGE_MODE_MANUAL, allowManagedTakeover: true }),
+      planOfflineSyncBridge({ wasRunning: false, mode: BRIDGE_MODE_STOPPED }),
+    ]],
+    then: ["only running bridges stop and restart under explicit managed ownership", (plans) => {
+      expect(plans).toEqual([
+        { stop: true, restartManaged: true },
+        { stop: true, restartManaged: true },
+        { stop: false, restartManaged: false },
+      ]);
+    }],
+  });
+
+  unit("offline sync refuses to strand a manually owned bridge", {
+    when: ["planning without explicit managed takeover", () => () =>
+      planOfflineSyncBridge({ wasRunning: true, mode: BRIDGE_MODE_MANUAL })],
+    then: ["the unsafe ownership change fails before shutdown", (run) => {
+      expect(run).toThrow("--detach");
+    }],
   });
 
   unit("mode persists and absent state defaults to manual", {

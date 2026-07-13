@@ -76,14 +76,15 @@ feature("reconcileAllSessions", () => {
       respawned_only: { name: "respawned_only", added: 0, respawned: [{ pane: 0 }], mismatches: [], extras: 0 },
       mismatched_only: { name: "mismatched_only", added: 0, respawned: [], mismatches: [{ pane: 1 }], extras: 0 },
       extras_only: { name: "extras_only", added: 0, respawned: [], mismatches: [], extras: 1 },
+      removed_only: { name: "removed_only", added: 0, respawned: [], removedExtras: [{ pane: 7 }], mismatches: [], extras: 0 },
       no_deltas: { name: "no_deltas", added: 0, respawned: [], mismatches: [], extras: 0 },
     })],
     when: ["reconciling all", async (agent) => reconcileAllSessions(
       agent,
-      ["respawned_only", "mismatched_only", "extras_only", "no_deltas"],
+      ["respawned_only", "mismatched_only", "extras_only", "removed_only", "no_deltas"],
     )],
-    then: ["three with deltas pass, no-delta one is filtered", (summaries) => {
-      expect(summaries.map((s) => s.name)).toEqual(["respawned_only", "mismatched_only", "extras_only"]);
+    then: ["all four delta classes pass and the no-delta one is filtered", (summaries) => {
+      expect(summaries.map((s) => s.name)).toEqual(["respawned_only", "mismatched_only", "extras_only", "removed_only"]);
     }],
   });
 

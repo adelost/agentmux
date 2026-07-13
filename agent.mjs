@@ -811,8 +811,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
    * whose current process doesn't match the configured command type. Leaves
    * correctly-matching panes untouched (preserves running claude/service state).
    *
-   * Claude panes that get respawned are left as idle shells; startClaude runs
-   * on demand next time the pane is used.
+   * Coding panes that get respawned are left as idle shells; ensureReady (or
+   * the fleet-wide `amux revive`) starts them without disturbing live peers.
    */
   async function reconcileSession(name) {
     const config = loadConfig();
