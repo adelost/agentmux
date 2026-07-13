@@ -461,6 +461,28 @@ feature("buildSyncPlan", () => {
 });
 
 feature("generateAgentsYaml", () => {
+  component("all generated Codex panes use the supported yolo alias", {
+    given: ["an agent with two Codex panes", () => ({
+      agents: new Map([["claw", {
+        dir: "/tmp/claw",
+        panes: 3,
+        claudeCount: 1,
+        codexCount: 2,
+        services: [],
+        shells: 0,
+        layout: "tiled",
+      }]]),
+      channelMap: new Map(),
+      agentIds: new Map([["claw", "uuid"]]),
+    })],
+    when: ["generating the runtime config", ({ agents, channelMap, agentIds }) =>
+      generateAgentsYaml(agents, channelMap, agentIds)],
+    then: ["every Codex command has one --yolo and no duplicate long bypass flag", (yamlStr) => {
+      expect(yamlStr.match(/cmd: codex resume --last --yolo/g)).toHaveLength(2);
+      expect(yamlStr).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+    }],
+  });
+
   component("generates correct structure", {
     given: ["agents with channels and IDs", () => {
       const agents = new Map([

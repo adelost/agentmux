@@ -40,7 +40,10 @@ import {
 } from "./core/codex-profiles.mjs";
 
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
-const CODEX_FLAGS = "--dangerously-bypass-approvals-and-sandbox";
+// Codex 0.144 keeps --yolo as the concise compatibility alias for full
+// approval + sandbox bypass. Do not combine it with the long spelling:
+// clap treats the aliases as the same argument and rejects duplicate use.
+const CODEX_FLAGS = "--yolo";
 const CODEX_PROMPT_READY_TIMEOUT_MS = 8_000;
 function codexDeliveryBlocked(message) {
   const error = new Error(message);

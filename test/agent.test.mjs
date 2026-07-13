@@ -15,6 +15,8 @@ feature("Codex pane launch isolation", () => {
       expect(command.match(/CODEX_HOME=/g)).toHaveLength(2);
       expect(command.match(/gpt-5\.6-sol/g)).toHaveLength(2);
       expect(command.match(/model_reasoning_effort="max"/g)).toHaveLength(2);
+      expect(command.match(/--yolo/g)).toHaveLength(2);
+      expect(command).not.toContain("--dangerously-bypass-approvals-and-sandbox");
       expect(command).toContain("codex resume --last");
       expect(command).toContain("||");
     }],

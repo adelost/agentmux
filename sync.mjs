@@ -6,7 +6,7 @@ import { randomUUID } from "crypto";
 import { resolveTmuxLayout } from "./core/layout.mjs";
 
 const DEFAULT_AGENT_CMD = "claude --continue --dangerously-skip-permissions";
-const DEFAULT_CODEX_CMD = "codex resume --last --dangerously-bypass-approvals-and-sandbox";
+const DEFAULT_CODEX_CMD = "codex resume --last --yolo";
 
 /** Expand ~ to $HOME in paths */
 export function expandTilde(p) {
