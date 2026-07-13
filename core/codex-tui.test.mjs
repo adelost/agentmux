@@ -197,6 +197,21 @@ q to quit   esc/← to edit prev
     })],
   });
 
+  unit("tmux-joined queue chrome is excluded from the prompt row", {
+    given: ["the captureScreen -J shape seen during live recovery", () => ({
+      prompt: "kan jag ändå få testa..",
+      snapshot: "\n› kan jag ändå få testa.. tab to queue message                46% context left\n",
+    })],
+    when: ["reading and matching", ({ snapshot, prompt }) => ({
+      text: codexComposerText(snapshot),
+      exact: codexComposerContainsPrompt(snapshot, prompt),
+    })],
+    then: ["the suffix is not treated as human text", (result) => expect(result).toEqual({
+      text: "kan jag ändå få testa..",
+      exact: true,
+    })],
+  });
+
   unit("multiline queue footer cannot corrupt the prompt tail", {
     given: ["a wrapped long queued prompt", () => ({
       prompt: "first long instruction second exact tail",

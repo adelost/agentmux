@@ -129,7 +129,14 @@ export function codexComposerText(text) {
     if (!/^\s{2,}\S/.test(candidate)) break;
     parts.push(candidate.trim());
   }
-  const value = parts.join(" ").trim();
+  // tmux `-J` can join Ratatui's prompt row and the queue footer into one
+  // logical line even though a normal pane capture shows them separately.
+  // Strip only the exact terminal-owned suffix (anchored at the end), so a
+  // human sentence that happens to mention Tab is still preserved.
+  const value = parts.join(" ").trim().replace(
+    /\s+tab to queue message(?:\s+\d+%\s+context left)?\s*$/i,
+    "",
+  );
   // Codex shows "esc again to edit previous message" / "No previous message to
   // edit." ONLY while the composer is neutral (no unsent draft). A narrow tmux
   // capture can glue that hint onto the placeholder row, producing a joined
