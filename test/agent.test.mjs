@@ -2,7 +2,32 @@ import { feature, component, unit, expect } from "bdd-vitest";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { buildCodexLaunchCommand, createAgent, paneDir } from "../agent.mjs";
+import { buildClaudeLaunchCommand, buildCodexLaunchCommand, createAgent, paneDir } from "../agent.mjs";
+
+feature("Claude pane model pin", () => {
+  unit("fresh and resumed launches use exact Opus 4.6 instead of the moving alias", {
+    when: ["building both launch forms", () => ({
+      fresh: buildClaudeLaunchCommand(),
+      resumed: buildClaudeLaunchCommand({ resume: true }),
+    })],
+    then: ["both commands pin the full model id", ({ fresh, resumed }) => {
+      expect(fresh).toContain("--model 'claude-opus-4-6'");
+      expect(resumed).toContain("--model 'claude-opus-4-6'");
+      expect(fresh).not.toMatch(/--model ['\"]?opus['\"]?(?:\s|$)/);
+      expect(resumed).toContain("--continue");
+    }],
+  });
+
+  unit("unsafe model text is rejected before shell construction", {
+    when: ["building with shell syntax", () => {
+      try {
+        buildClaudeLaunchCommand({ model: "$(touch /tmp/no)" });
+        return null;
+      } catch (err) { return err; }
+    }],
+    then: ["validation fails", (error) => expect(error?.message).toMatch(/invalid Claude model/)],
+  });
+});
 
 feature("Codex pane launch isolation", () => {
   unit("account home plus model/effort are process-local on resume and fresh fallback", {

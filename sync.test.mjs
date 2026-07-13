@@ -499,7 +499,7 @@ feature("generateAgentsYaml", () => {
       expect(yamlStr).toContain("id: uuid-1");
       expect(yamlStr).toContain('"100": 0');
       expect(yamlStr).toContain('"101": 1');
-      expect(yamlStr).toContain("claude --continue --dangerously-skip-permissions");
+      expect(yamlStr).toContain("claude --continue --dangerously-skip-permissions --model claude-opus-4-6");
       expect(yamlStr).toContain("npm run dev");
     }],
   });

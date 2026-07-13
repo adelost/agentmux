@@ -27,6 +27,7 @@ import { findBlockingPrompt } from "./core/dismiss.mjs";
 import { claudeProjectDir, classifyHistoryRead } from "./core/claude-paths.mjs";
 import { appendEvent } from "./core/events.mjs";
 import { resolveTmuxLayout } from "./core/layout.mjs";
+import { resolveClaudeModel } from "./core/claude-model.mjs";
 import { pastePrompt, promptRequiresAtomicPaste } from "./core/prompt-paste.mjs";
 import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
 import {
@@ -62,6 +63,13 @@ function codexDeliveryBlocked(message, { zoomRecoverable = false } = {}) {
 }
 
 const shellQuote = (value) => `'${esc(String(value))}'`;
+
+/** Build a pinned Claude launch command so the moving `opus` alias cannot drift. */
+export function buildClaudeLaunchCommand({ resume = false, model = resolveClaudeModel() } = {}) {
+  const exactModel = resolveClaudeModel(model);
+  const sessionFlag = resume ? " --continue" : "";
+  return `ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_FLAGS} --model ${shellQuote(exactModel)}${sessionFlag}`;
+}
 
 /** Build the exact pane command; exported so injection boundaries are gated. */
 export function buildCodexLaunchCommand({ profileHome, model = null, effort = null } = {}) {
@@ -957,7 +965,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     const dir = paneDir(rootDir, pane);
     const sessionFlag = await resolveSessionFlag(dir, name, pane);
-    await t.runShell(target, `cd ${esc(dir)} && ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_FLAGS} ${sessionFlag}`);
+    const command = buildClaudeLaunchCommand({ resume: sessionFlag === "--continue" });
+    await t.runShell(target, `cd ${esc(dir)} && ${command}`);
     await wait(2000);
   }
 

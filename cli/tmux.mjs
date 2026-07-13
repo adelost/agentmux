@@ -269,12 +269,17 @@ function spawnMirrorWorker(opts) {
 
 /** Select a menu option (navigate with arrows + Enter). */
 export async function selectOption(ctx, name, pane, choice) {
+  if (!Number.isInteger(choice) || choice < 1) {
+    throw new Error(`menu option must be a 1-based positive integer (got ${choice})`);
+  }
   const target = `${name}:.${pane}`;
   // Move to top first (20 ups), then down to choice
   for (let i = 0; i < 20; i++) {
     await ctx.tmux(`send-keys -t '${esc(target)}' Up`);
   }
-  for (let i = 0; i < choice; i++) {
+  // The CLI and Claude menus label options from 1. Choice 1 is already at
+  // the top after the Up sweep, so only choice-1 Down presses are needed.
+  for (let i = 1; i < choice; i++) {
     await ctx.tmux(`send-keys -t '${esc(target)}' Down`);
   }
   await ctx.tmux(`send-keys -t '${esc(target)}' Enter`);

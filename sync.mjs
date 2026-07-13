@@ -4,8 +4,9 @@
 import yaml from "js-yaml";
 import { randomUUID } from "crypto";
 import { resolveTmuxLayout } from "./core/layout.mjs";
+import { resolveClaudeModel } from "./core/claude-model.mjs";
 
-const DEFAULT_AGENT_CMD = "claude --continue --dangerously-skip-permissions";
+const DEFAULT_AGENT_CMD = `claude --continue --dangerously-skip-permissions --model ${resolveClaudeModel()}`;
 const DEFAULT_CODEX_CMD = "codex resume --last --yolo";
 
 /** Expand ~ to $HOME in paths */
