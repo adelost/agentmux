@@ -4,6 +4,7 @@ import {
   codexComposerContainsPrompt,
   codexComposerEndsWithPrompt,
   codexComposerHasPasteBlock,
+  codexComposerMatchesOwnedDraft,
   codexComposerText,
   isCodexBacktrackPager,
   isCodexFullscreenPager,
@@ -331,6 +332,41 @@ q to quit   esc/← to edit prev
         rescue: true,
         busyRescue: false,
       })],
+  });
+
+  unit("a durable atomic draft can recover from one long interior viewport", {
+    given: ["an immutable source whose head and tail are both scrolled away", () => {
+      const head = "BEGIN " + "alpha ".repeat(80);
+      const middle = "OWNED_INTERIOR " + "bravo charlie delta ".repeat(18);
+      const tail = " omega".repeat(80) + " END";
+      return {
+        prompt: `${head}${middle}${tail}`,
+        snapshot: `\n› ${middle}\n\n  tab to queue message 38% context left\n`,
+      };
+    }],
+    when: ["matching only after durable ownership exists", ({ prompt, snapshot }) => ({
+      initialExact: codexComposerContainsPrompt(snapshot, prompt),
+      initialTail: codexComposerEndsWithPrompt(snapshot, prompt),
+      owned: codexComposerMatchesOwnedDraft(snapshot, prompt),
+    })],
+    then: ["the recovery-only identity accepts the exact interior window", (result) =>
+      expect(result).toEqual({ initialExact: false, initialTail: false, owned: true })],
+  });
+
+  unit("owned-draft recovery rejects residue and concatenated copies", {
+    given: ["one long source plus unsafe composer variants", () => {
+      const prompt = "BEGIN " + "safe payload ".repeat(90) + " END";
+      return {
+        prompt,
+        shortResidue: `\n› ${prompt.slice(0, 100)}\n`,
+        duplicated: `\n› ${prompt}${prompt}\n`,
+      };
+    }],
+    when: ["matching the unsafe variants", ({ prompt, shortResidue, duplicated }) => [
+      codexComposerMatchesOwnedDraft(shortResidue, prompt),
+      codexComposerMatchesOwnedDraft(duplicated, prompt),
+    ]],
+    then: ["neither may receive Enter", (result) => expect(result).toEqual([false, false])],
   });
 
   unit("multiline cleanup repeats until the composer is actually empty", {

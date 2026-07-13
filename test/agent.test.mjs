@@ -2,7 +2,19 @@ import { feature, component, unit, expect } from "bdd-vitest";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { buildClaudeLaunchCommand, buildCodexLaunchCommand, createAgent, paneDir } from "../agent.mjs";
+import { buildClaudeLaunchCommand, buildCodexLaunchCommand, createAgent, paneDir, shouldPastePrompt } from "../agent.mjs";
+
+feature("durable draft paste fence", () => {
+  unit("a vanished durable draft is never permission to type it again", {
+    when: ["checking fresh, visible, and vanished durable states", () => ({
+      fresh: shouldPastePrompt({ knownDrafted: false, alreadyComposed: false }),
+      visible: shouldPastePrompt({ knownDrafted: true, alreadyComposed: true }),
+      vanished: shouldPastePrompt({ knownDrafted: true, alreadyComposed: false }),
+    })],
+    then: ["only a never-written job may paste", (result) =>
+      expect(result).toEqual({ fresh: true, visible: false, vanished: false })],
+  });
+});
 
 feature("Claude pane model pin", () => {
   unit("fresh and resumed launches use exact Opus 4.6 instead of the moving alias", {

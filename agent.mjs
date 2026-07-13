@@ -35,6 +35,7 @@ import {
   codexComposerContainsPrompt,
   codexComposerEndsWithPrompt,
   codexComposerHasPasteBlock,
+  codexComposerMatchesOwnedDraft,
   codexComposerText,
   codexOffersQueueComposer,
   isCodexFullscreenPager,
@@ -63,6 +64,11 @@ function codexDeliveryBlocked(message, { zoomRecoverable = false } = {}) {
 }
 
 const shellQuote = (value) => `'${esc(String(value))}'`;
+
+/** A durable draft is an at-most-once paste fence, even when its TUI vanishes. */
+export function shouldPastePrompt({ knownDrafted = false, alreadyComposed = false } = {}) {
+  return !knownDrafted && !alreadyComposed;
+}
 
 /** Build a pinned Claude launch command so the moving `opus` alias cannot drift. */
 export function buildClaudeLaunchCommand({ resume = false, model = resolveClaudeModel() } = {}) {
@@ -1520,12 +1526,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       let composer = codexComposerText(snapshot);
       if (composer !== null) {
         if (codexComposerContainsPrompt(snapshot, prompt)
-            || (promptRequiresAtomicPaste(prompt) && codexComposerEndsWithPrompt(snapshot, prompt))
-            || (promptRequiresAtomicPaste(prompt) && codexComposerHasPasteBlock(snapshot))) {
+            || (promptRequiresAtomicPaste(prompt) && codexComposerMatchesOwnedDraft(snapshot, prompt))) {
           return { hasDraft: true, busy: Boolean(await isBusy(agentName, pane).catch(() => false)) };
         }
         if (composer === "") {
-          return { hasDraft: false, busy: Boolean(await isBusy(agentName, pane).catch(() => false)) };
+          throw codexDeliveryBlocked(
+            "Codex prompt delivery blocked: durable draft is not visible; refusing to paste it again",
+          );
         }
         throw codexDeliveryBlocked(
           `Codex prompt delivery blocked: composer contains a different draft (starts with: ${composer.slice(0, 60)})`,
@@ -1544,7 +1551,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         const ready = await waitForCodexPromptReady(agentName, pane);
         snapshot = ready?.snapshot || "";
         composer = codexComposerText(snapshot);
-        if (composer === "") return { hasDraft: false, busy: false };
+        if (composer === "") {
+          throw codexDeliveryBlocked(
+            "Codex prompt delivery blocked: durable draft is not visible; refusing to paste it again",
+          );
+        }
       }
       await wait(250);
     }
@@ -1562,7 +1573,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const notBeforeMs = Date.now();
     await exitCopyMode(target);
     const dialect = await livePaneDialectName(agentName, pane);
-    let alreadyComposed = await promptAlreadyInComposer(agentName, pane, prompt);
+    let alreadyComposed = await promptAlreadyInComposer(agentName, pane, prompt, {
+      ownedDraft: knownDrafted,
+    });
     let busyAtSend = false;
     let exactDraft = dialect === "codex" && alreadyComposed;
 
@@ -1573,10 +1586,16 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       busyAtSend = recovered.busy;
     }
 
+    if (!shouldPastePrompt({ knownDrafted, alreadyComposed }) && !alreadyComposed) {
+      throw codexDeliveryBlocked(
+        "Prompt delivery blocked: durable draft is not visible; refusing to paste it again",
+      );
+    }
+
     // Idempotent retries: if a previous attempt left this exact prompt
     // sitting unsubmitted in the composer, typing it again would double the
     // text. Skip straight to the submit path instead.
-    if (!alreadyComposed) {
+    if (shouldPastePrompt({ knownDrafted, alreadyComposed })) {
       // Recovery must run before the empty-composer readiness gate. v1.21.2
       // accidentally reversed these calls, so the gate rejected the stale
       // text that this function was specifically built to clear.
@@ -1625,14 +1644,16 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     // sent successfully, and (c) the exact prompt no longer remains in the
     // composer. The delivery layer uses it to avoid retyping duplicates while
     // it waits for the later JSONL echo.
-    const stillComposed = await promptAlreadyInComposer(agentName, pane, prompt);
+    const stillComposed = await promptAlreadyInComposer(agentName, pane, prompt, {
+      ownedDraft: knownDrafted || exactDraft,
+    });
     const submitted = !stillComposed;
     const queued = dialect === "codex" && busyAtSend && exactDraft && submitted;
     if (submitted && onSubmitted) await onSubmitted();
     return { busyAtSend, queued, exactDraft, submitted };
   }
 
-  async function promptAlreadyInComposer(agentName, pane, prompt) {
+  async function promptAlreadyInComposer(agentName, pane, prompt, { ownedDraft = false } = {}) {
     const head = prompt.trim().slice(0, 20);
     if (!head) return false;
     try {
@@ -1640,7 +1661,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         const snapshot = await captureScreen(agentName, pane);
         return codexComposerContainsPrompt(snapshot, prompt)
           || (promptRequiresAtomicPaste(prompt)
-            && codexComposerEndsWithPrompt(snapshot, prompt));
+            && (ownedDraft
+              ? codexComposerMatchesOwnedDraft(snapshot, prompt)
+              : codexComposerEndsWithPrompt(snapshot, prompt)));
       }
       const raw = await capturePane(agentName, pane, 15);
       // Composer lines render as "❯ text" (claude) / "› text" (codex) /
@@ -1674,8 +1697,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     const snapshot = await captureScreen(agentName, pane).catch(() => "");
     if (codexComposerContainsPrompt(snapshot, prompt)
-        || (promptRequiresAtomicPaste(prompt) && codexComposerEndsWithPrompt(snapshot, prompt))
-        || (promptRequiresAtomicPaste(prompt) && codexComposerHasPasteBlock(snapshot))) {
+        || (promptRequiresAtomicPaste(prompt) && codexComposerMatchesOwnedDraft(snapshot, prompt))) {
       return { state: "drafted", busy };
     }
     const composer = codexComposerText(snapshot);

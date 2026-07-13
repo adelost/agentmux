@@ -154,6 +154,7 @@ export function codexComposerText(text) {
 
 const normalizeComposerIdentity = (value) => String(value || "").replace(/\s+/g, "");
 const SCROLLED_PROMPT_TAIL_CHARS = 160;
+const OWNED_DRAFT_VISIBLE_CHARS = 160;
 
 /**
  * Prove that the complete prompt is visible in the live Codex composer.
@@ -194,6 +195,32 @@ export function codexComposerEndsWithPrompt(snapshot, prompt) {
   if (needle.length <= SCROLLED_PROMPT_TAIL_CHARS) return false;
   const tail = needle.slice(-SCROLLED_PROMPT_TAIL_CHARS);
   return normalizeComposerIdentity(composer).endsWith(tail);
+}
+
+/**
+ * Recover a durable, already-pasted atomic draft from a clipped viewport.
+ *
+ * This is intentionally weaker than initial paste verification and MUST only
+ * be used after the durable queue has recorded draft ownership. Codex can
+ * scroll both the head and tail of a tall composer out of view; a long exact
+ * interior window is then the only visible identity. A 160-character minimum
+ * rejects short prefix residue, while requiring the whole visible window to
+ * occur inside the immutable source rejects concatenated/edited drafts.
+ */
+export function codexComposerMatchesOwnedDraft(snapshot, prompt) {
+  if (codexComposerContainsPrompt(snapshot, prompt) || codexComposerHasPasteBlock(snapshot)) return true;
+
+  const composer = codexComposerText(snapshot);
+  if (typeof composer !== "string") return false;
+  const visible = normalizeComposerIdentity(composer);
+  const source = normalizeComposerIdentity(prompt);
+  // A complete source followed by another copy shares the same exact tail.
+  // Reject any non-exact viewport at least as long as the source before the
+  // tail shortcut, otherwise an already-amplified composer receives Enter.
+  if (visible.length >= source.length) return false;
+  if (codexComposerEndsWithPrompt(snapshot, prompt)) return true;
+  if (visible.length < OWNED_DRAFT_VISIBLE_CHARS) return false;
+  return source.includes(visible);
 }
 
 /**

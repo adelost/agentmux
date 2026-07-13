@@ -11,7 +11,14 @@ import { waitForDeliveryJob } from "./delivery-queue.mjs";
 
 const ACTIVE_RETRY_MS = 1_000;
 const BLOCKED_RETRY_MS = 3_000;
+const MAX_BLOCKED_RETRY_MS = 60_000;
 const NOTICE_AFTER_MS = 10_000;
+
+function blockedRetryMs(job, { drafted = false } = {}) {
+  const base = drafted ? 5_000 : BLOCKED_RETRY_MS;
+  const exponent = Math.min(5, Math.max(0, Number(job.attempts || 1) - 1));
+  return Math.min(MAX_BLOCKED_RETRY_MS, base * (2 ** exponent));
+}
 
 function needsZoomFallback(result, submitted) {
   return Boolean(result?.zoomRecoverable && !result.delivered && !submitted);
@@ -157,15 +164,15 @@ export function createDeliveryBroker({
           });
         }
         if (transport.state === "empty-idle") {
-          // No JSONL event and no surviving draft after the pane became idle:
-          // the Enter/paste was genuinely eaten. Recreate the same FIFO head;
-          // the cursor still prevents duplication if an echo appears first.
+          // Empty composer + absent JSONL is ambiguous: Enter may have queued
+          // the prompt while Codex is rotating/replaying its rollout. Retyping
+          // here produced 22 copies of one long skydive prompt. Submitted is
+          // therefore a permanent no-paste fence; only JSONL may advance it.
           return queue.update(job, {
-            status: "pending",
+            status: "submitted",
             draftOwned: false,
-            submittedAt: null,
-            nextAttemptAt: now(),
-            lastReason: "submission vanished before acknowledgement; retrying same durable job",
+            nextAttemptAt: now() + BLOCKED_RETRY_MS,
+            lastReason: "submission has no JSONL receipt yet; refusing duplicate paste",
           });
         }
         if (transport.state === "foreign") {
@@ -275,7 +282,7 @@ export function createDeliveryBroker({
       status: drafted ? "drafted" : "blocked",
       draftOwned: drafted,
       lastReason: reason,
-      nextAttemptAt: now() + (drafted ? ACTIVE_RETRY_MS : BLOCKED_RETRY_MS),
+      nextAttemptAt: now() + blockedRetryMs(job, { drafted }),
     });
     queueEvent(job, "blocked", { reason: String(reason).slice(0, 160) });
     return maybeNotifyBlocked(job);

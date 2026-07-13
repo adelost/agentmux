@@ -281,6 +281,83 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
+  component("an empty composer never turns submitted back into paste permission", {
+    given: ["an old submitted job with no JSONL receipt and an idle empty composer", () => {
+      const rootDir = tempRoot();
+      let clock = 20_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "api", pane: 5, text: "exactly once" });
+      queue.update(job, {
+        status: "submitted",
+        submittedAt: 1_000,
+        echoCursor: { kind: "test", positions: {} },
+        nextAttemptAt: 0,
+      });
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      agent.promptTransportState = async () => ({ state: "empty-idle", busy: false });
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
+      return { rootDir, queue, job, agent, broker, advance: () => { clock += 10_000; } };
+    }],
+    when: ["the broker reconciles the ambiguity twice", async ({ broker, advance }) => {
+      await broker.kickTarget("api", 5);
+      advance();
+      await broker.kickTarget("api", 5);
+    }],
+    then: ["it waits for JSONL without any second write", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.queue.read("api", 5, ctx.job.id)).toMatchObject({
+        status: "submitted",
+        draftOwned: false,
+        lastReason: "submission has no JSONL receipt yet; refusing duplicate paste",
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a drafted repaint may recover but never paste the payload twice", {
+    given: ["a first paste whose composer disappears before submit", () => {
+      const rootDir = tempRoot();
+      let clock = 1_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "skydive", pane: 5, text: "x".repeat(1_212) });
+      let physicalPastes = 0;
+      const calls = [];
+      const agent = {
+        capturePromptEchoCursor: async () => ({ kind: "test", positions: {} }),
+        waitForPromptEcho: async () => false,
+        dismissBlockingPrompt: async () => null,
+        sendOnly: async (_name, _text, _pane, options = {}) => {
+          calls.push({ knownDrafted: options.knownDrafted });
+          if (!options.knownDrafted) {
+            physicalPastes++;
+            await options.onDrafted?.();
+          }
+          const error = new Error("durable draft is not visible; refusing to paste it again");
+          error.code = "AMUX_DELIVERY_BLOCKED";
+          throw error;
+        },
+      };
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
+      return { rootDir, queue, job, broker, calls, physicalPastes: () => physicalPastes, advance: () => { clock += 10_000; } };
+    }],
+    when: ["the durable head is retried after its backoff", async ({ broker, advance }) => {
+      await broker.kickTarget("skydive", 5);
+      advance();
+      await broker.kickTarget("skydive", 5);
+    }],
+    then: ["only the first attempt may physically paste", (_, ctx) => {
+      expect(ctx.physicalPastes()).toBe(1);
+      expect(ctx.calls).toEqual([{ knownDrafted: false }, { knownDrafted: true }]);
+      expect(ctx.queue.read("skydive", 5, ctx.job.id)).toMatchObject({
+        status: "drafted",
+        draftOwned: true,
+        attempts: 2,
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("fresh panes fall back to a persisted local echo boundary", {
     given: ["cursor capture returns null before the first write", () => {
       const rootDir = tempRoot();
