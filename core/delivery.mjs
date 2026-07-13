@@ -110,10 +110,10 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
         log(`send attempt ${attempt} errored${err.code === "AMUX_DELIVERY_BLOCKED" ? " (terminal)" : " (verifying echo anyway)"}: ${err.message.split("\n").slice(0, 2).join(" | ")}`);
       });
 
-    // The agent raises this only before typing: a foreign draft, modal, or
-    // unready composer made input unsafe. Retrying the same state three times
-    // just blocks the pane lock and channel queue; durable inbound recovery
-    // will try again after state changes.
+    // The agent raises this when a foreign draft/modal made input unsafe, or
+    // when our just-typed draft could not be verified and was cleared. Retrying
+    // the same terminal state three times only blocks the pane lock and channel
+    // queue; durable inbound recovery will try again after state changes.
     if (sendError?.code === "AMUX_DELIVERY_BLOCKED") {
       return {
         delivered: false,

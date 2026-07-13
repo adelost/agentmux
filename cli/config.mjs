@@ -6,6 +6,7 @@ import { dirname } from "path";
 import { randomUUID } from "crypto";
 import yaml from "js-yaml";
 import { expandTilde } from "../sync.mjs";
+import { resolveTmuxLayout } from "../core/layout.mjs";
 
 const CLAUDE_CMD = "claude --continue --dangerously-skip-permissions";
 
@@ -138,7 +139,7 @@ export function isDeferred(configPath, name, idx) {
  * of the rows their composer needs). Explicit `layout:` still wins. */
 export function getLayout(configPath, name) {
   const config = loadConfig(configPath);
-  return config[name]?.layout || "tiled";
+  return resolveTmuxLayout(config[name]?.layout);
 }
 
 /** Get pane count for an agent. */

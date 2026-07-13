@@ -61,6 +61,39 @@ feature("sendToPane delivery outcome", () => {
     }],
   });
 
+  unit("preserves a terminal composer block in the delivery outcome", {
+    given: ["an unparked pane whose composer cannot safely accept the prompt", () => {
+      const path = tmpPath();
+      writeFileSync(path, "");
+      const oldPath = process.env.AMUX_PARK_STATE_PATH;
+      process.env.AMUX_PARK_STATE_PATH = path;
+      const agent = fakeAgent();
+      agent.sendOnly = async () => {
+        const error = new Error("composer is not empty");
+        error.code = "AMUX_DELIVERY_BLOCKED";
+        throw error;
+      };
+      agent.waitForPromptEcho = async () => false;
+      return { path, oldPath, agent };
+    }],
+    when: ["sending through the CLI delivery contract", async ({ path, oldPath, agent }) => {
+      const result = await sendToPane(
+        { agent, configPath: null },
+        "claw",
+        3,
+        "[from claw:0]\n\nclaim respected",
+        { mirror: false },
+      );
+      if (oldPath === undefined) delete process.env.AMUX_PARK_STATE_PATH;
+      else process.env.AMUX_PARK_STATE_PATH = oldPath;
+      try { unlinkSync(path); } catch {}
+      return result;
+    }],
+    then: ["the caller can distinguish the terminal block from an ordinary miss", (result) => {
+      expect(result).toMatchObject({ delivered: false, blocked: true });
+    }],
+  });
+
   unit("cross-agent delivery mirrors the full brief to target and a receipt to sender", {
     given: ["a verified lsrc:4 to lsrc:0 brief with both panes bound", () => {
       const parkPath = tmpPath();

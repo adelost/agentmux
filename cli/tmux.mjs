@@ -81,7 +81,8 @@ export async function ensureAndAttach(ctx, name, configPath) {
   // into a cramped column) lands back on an even grid where each pane — Codex
   // especially — has the rows it needs to render its composer.
   if (existingCount || runnableAgentPanes.length) {
-    await ctx.tmux(`select-layout -t '${esc(name)}' ${getLayout(configPath, name)}`).catch(() => {});
+    const layout = getLayout(configPath, name);
+    await ctx.tmux(`select-layout -t '${esc(name)}' '${esc(layout)}'`);
   }
 }
 
@@ -200,7 +201,7 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
     console.error(`⚠ ${name}:${pane} did not acknowledge the message (composer may be stuck — inspect: amux log ${name} -p ${pane} --tmux)`);
   }
 
-  const outcome = { ...result, blocked: false };
+  const outcome = { ...result, blocked: Boolean(result.blocked) };
 
   // 2. Best-effort mirror. Failure here is a transparency degradation,
   //    not a correctness issue — the pane already got the text.

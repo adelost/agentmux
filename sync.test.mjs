@@ -87,7 +87,8 @@ feature("parseConfig", () => {
       expect(ai.layout).toBe("main-vertical");
       const claw = config.agents.get("claw");
       expect(claw.shells).toBe(2);
-      expect(claw.layout).toBe("main-vertical"); // auto: has shells
+      expect(claw.layout).toBe("tiled");
+      expect(config.agents.get("skybar").layout).toBe("tiled");
     }],
   });
 
@@ -155,6 +156,22 @@ agents:
       expect(ai.panes).toBe(2);
       expect(ai.claudeCount).toBe(0);
       expect(ai.codexCount).toBe(2);
+    }],
+  });
+
+  component("preserves an explicit non-default layout", {
+    given: ["an agent that explicitly requests main-vertical", () => `
+guild: "1"
+agents:
+  ai:
+    dir: /tmp/ai
+    claude: 3
+    codex: 4
+    layout: main-vertical
+`],
+    when: ["parsing the source config", (source) => parseConfig(source).agents.get("ai")],
+    then: ["the explicit layout wins over the tiled default", (agent) => {
+      expect(agent.layout).toBe("main-vertical");
     }],
   });
 });

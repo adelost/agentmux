@@ -140,8 +140,9 @@ async function cmdReconcile(name, ctx) {
   const parts = [];
   if (result.added) parts.push(`${result.added} added`);
   if (result.respawned?.length) parts.push(`${result.respawned.length} respawned`);
+  if (result.removedExtras?.length) parts.push(`${result.removedExtras.length} idle extras removed`);
   if (result.unchanged) parts.push(`${result.unchanged} unchanged`);
-  if (result.extras) parts.push(`${result.extras} extras`);
+  if (result.extras) parts.push(`${result.extras} active extras left alone`);
   console.log(`Reconciled '${name}': ${parts.join(", ") || "nothing to do"}.`);
   for (const r of result.respawned || []) {
     console.log(`  pane ${r.pane}: ${r.was} → ${r.expected}`);

@@ -141,6 +141,10 @@ agents:
     panes: 2
 ```
 
+Sessions use tmux's `tiled` layout by default, including mixed Claude, Codex,
+service, and shell fleets. Set `layout:` on an agent only when that session
+deliberately needs another tmux layout.
+
 Start the bridge:
 
 ```bash

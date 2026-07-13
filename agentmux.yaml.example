@@ -6,6 +6,7 @@ agents:
     dir: ~/projects/myproject
     panes: 3                 # 3 coding agent panes = 3 Discord channels
     shells: 3                # 3 empty terminals for running commands
+    # layout: tiled          # default; set another tmux layout explicitly to override
 
   another-project:
     dir: ~/projects/another

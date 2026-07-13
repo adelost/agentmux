@@ -1,7 +1,7 @@
 // Agent interaction: send prompts, wait for responses, track progress.
 // Manages tmux sessions directly. Single source of truth for claude startup + dismiss.
 
-import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
+import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { load as loadYaml } from "js-yaml";
 import { esc, stripAnsi } from "./lib.mjs";
@@ -20,6 +20,8 @@ import { getContextPercent as getContextPercentByDialect, getContextFromPane } f
 import { findBlockingPrompt } from "./core/dismiss.mjs";
 import { claudeProjectDir, classifyHistoryRead } from "./core/claude-paths.mjs";
 import { appendEvent } from "./core/events.mjs";
+import { resolveTmuxLayout } from "./core/layout.mjs";
+import { pastePrompt, promptRequiresAtomicPaste } from "./core/prompt-paste.mjs";
 import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
 import {
   codexComposerContainsPrompt,
@@ -40,13 +42,6 @@ import {
 const CLAUDE_FLAGS = "--dangerously-skip-permissions";
 const CODEX_FLAGS = "--dangerously-bypass-approvals-and-sandbox";
 const CODEX_PROMPT_READY_TIMEOUT_MS = 8_000;
-// Even grid by default so every pane gets real width AND height. main-vertical
-// crammed a fleet's worth of panes into a tall thin column (~3 rows each), which
-// is below what a Codex TUI needs to even render its composer — delivery then
-// could not find an input to type into (claw:9/10/11, 2026-07-12). Sessions that
-// want a hero pane still set `layout:` explicitly (skybar: main-vertical).
-const DEFAULT_TMUX_LAYOUT = "tiled";
-
 function codexDeliveryBlocked(message) {
   const error = new Error(message);
   error.code = "AMUX_DELIVERY_BLOCKED";
@@ -671,7 +666,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const panes = config[name]?.panes || [];
     if (!panes.length) return;
 
-    const layout = config[name]?.layout || DEFAULT_TMUX_LAYOUT;
+    const layout = resolveTmuxLayout(config[name]?.layout);
     const applyLayout = async () => {
       await t.selectLayout(name, layout).catch((err) =>
         console.warn(`setupPanes: select-layout ${layout} failed: ${err.message}`));
@@ -784,6 +779,31 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return !isShellProc(currCmd) && !/^(claude|codex|node)$/.test(currCmd);
   }
 
+  async function removeIdleExtraPanes(name, wantedCount, actualCount) {
+    const removed = [];
+    // Highest first keeps all lower configured indices stable as tmux
+    // renumbers after each removal. A foreground process owns its pane even if
+    // the pane is outside current config, so only an idle shell is disposable.
+    for (let pane = actualCount - 1; pane >= wantedCount; pane--) {
+      const target = `${name}:.${pane}`;
+      let currentCommand;
+      try {
+        currentCommand = await t.currentCommand(target);
+      } catch (err) {
+        console.warn(`reconcile: inspect extra ${target} failed: ${err.message}`);
+        continue;
+      }
+      if (!isShellProc(currentCommand)) continue;
+      try {
+        await t.killPane(target);
+        removed.push({ pane, was: currentCommand });
+      } catch (err) {
+        console.warn(`reconcile: remove idle extra ${target} failed: ${err.message}`);
+      }
+    }
+    return removed.reverse();
+  }
+
   // --- Reconciliation ---
 
   /**
@@ -800,9 +820,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (!cfg?.panes?.length) return { skipped: true, reason: "no config" };
     if (!(await hasSession(name))) return { skipped: true, reason: "no session" };
 
-    const summary = { name, added: 0, respawned: [], unchanged: 0, extras: 0 };
+    const summary = { name, added: 0, respawned: [], removedExtras: [], unchanged: 0, extras: 0 };
     const wanted = cfg.panes;
-    const layout = cfg.layout || DEFAULT_TMUX_LAYOUT;
+    const layout = resolveTmuxLayout(cfg.layout);
     const applyLayout = async () => {
       await t.selectLayout(name, layout).catch((err) =>
         console.warn(`reconcile: select-layout ${layout} failed: ${err.message}`));
@@ -833,7 +853,14 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (summary.added > 0) {
       await applyLayout();
     }
-    const actualCount = await paneCountAfterReconcile(name, wanted.length);
+    let actualCount = await paneCountAfterReconcile(name, wanted.length);
+    if (actualCount > wanted.length) {
+      summary.removedExtras = await removeIdleExtraPanes(name, wanted.length, actualCount);
+      if (summary.removedExtras.length) {
+        await applyLayout();
+        actualCount = await paneCountAfterReconcile(name, wanted.length);
+      }
+    }
     if (actualCount > wanted.length) summary.extras = actualCount - wanted.length;
     if (actualCount < wanted.length) summary.missing = wanted.length - actualCount;
 
@@ -888,6 +915,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       }
     }
 
+    await applyLayout();
     if (needsPanes) await restoreAutoSize(name);
     return summary;
   }
@@ -1434,8 +1462,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         const ready = await waitForCodexPromptReady(agentName, pane);
         busyAtSend = Boolean(ready?.busy);
       }
-      if (prompt.length > 500) {
-        await sendLongPrompt(target, prompt);
+      if (promptRequiresAtomicPaste(prompt)) {
+        await pastePrompt({ tmux: t, target, prompt, sleep: wait });
       } else {
         await t.sendLiteral(target, prompt);
         await wait(1000);
@@ -1499,11 +1527,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   async function waitForExactCodexDraft(agentName, pane, prompt, timeoutMs = 2_500) {
     const deadline = Date.now() + timeoutMs;
-    // A prompt long enough to be pasted collapses to a "[Pasted Content N
-    // chars]" block whose literal text is never visible. Delivery clears any
-    // foreign draft before pasting, so once that block appears it is OUR
-    // prompt; accept it so Enter submits (Codex expands the block on send).
-    const mayCollapse = prompt.length > 500;
+    // An atomic paste can collapse to a "[Pasted Content N chars]" block whose
+    // literal text is never visible. Delivery clears any foreign draft before
+    // pasting, so once that block appears it is OUR prompt; accept it so Enter
+    // submits (Codex expands the block on send).
+    const mayCollapse = promptRequiresAtomicPaste(prompt);
     while (true) {
       const snapshot = await captureScreen(agentName, pane).catch(() => "");
       if (codexComposerContainsPrompt(snapshot, prompt)) return true;
@@ -1653,21 +1681,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       await wait(750);
       if (submitted()) return;
     }
-  }
-
-  async function sendLongPrompt(target, prompt) {
-    const tmpFile = `/tmp/agentmux-prompt-${process.pid}.txt`;
-    const bufName = `prompt_${process.pid}_${Date.now()}`;
-    writeFileSync(tmpFile, prompt);
-    await t.loadBuffer(bufName, tmpFile);
-    await t.pasteBuffer(bufName, target);
-    try { unlinkSync(tmpFile); } catch (err) {
-      console.warn(`sendLongPrompt: cleanup ${tmpFile} failed: ${err.message}`);
-    }
-    // paste-buffer returns after tmux has queued the paste. Keep this short:
-    // callers often wrap amux sends in a timeout, and a long pre-Enter sleep
-    // leaves the prompt pasted but not submitted if the wrapper kills us.
-    await wait(250);
   }
 
   // --- Orchestration ---

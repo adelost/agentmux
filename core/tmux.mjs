@@ -52,6 +52,10 @@ export function createTmuxAdapter({ socket, exec }) {
       await raw(`kill-session -t ${q(name)}`);
     },
 
+    async killPane(target) {
+      await raw(`kill-pane -t ${q(target)}`);
+    },
+
     async sourceUserConf() {
       await raw(`source-file ~/.tmux.conf`);
     },
@@ -176,9 +180,9 @@ export function createTmuxAdapter({ socket, exec }) {
       await sendKeys(target, "Escape");
     },
 
-    /** Clear the current readline/TUI input without submitting it. */
+    /** Clear the complete logical TUI input without submitting it. */
     async clearInputLine(target) {
-      await sendKeys(target, "C-u");
+      await sendKeys(target, "C-a C-k");
     },
 
     /** Exit copy/view/choose mode without leaking a keystroke (-X cancel). */
@@ -201,7 +205,7 @@ export function createTmuxAdapter({ socket, exec }) {
     },
 
     async pasteBuffer(bufName, target) {
-      await raw(`paste-buffer -b ${q(bufName)} -t ${q(target)}`);
+      await raw(`paste-buffer -d -b ${q(bufName)} -t ${q(target)}`);
     },
   };
 }

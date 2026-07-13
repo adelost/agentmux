@@ -3,6 +3,7 @@
 
 import yaml from "js-yaml";
 import { randomUUID } from "crypto";
+import { resolveTmuxLayout } from "./core/layout.mjs";
 
 const DEFAULT_AGENT_CMD = "claude --continue --dangerously-skip-permissions";
 const DEFAULT_CODEX_CMD = "codex resume --last --dangerously-bypass-approvals-and-sandbox";
@@ -62,7 +63,7 @@ export function parseConfig(yamlContent) {
       codexCount,
       services: config.services ?? [],
       shells: config.shells ?? 0,
-      layout: config.layout ?? (config.services?.length || config.shells || codexCount ? "main-vertical" : undefined),
+      layout: resolveTmuxLayout(config.layout),
       labels,
     });
   }

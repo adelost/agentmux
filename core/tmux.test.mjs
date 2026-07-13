@@ -36,6 +36,16 @@ feature("tmux adapter: command strings", () => {
       expect(calls[0]).toBe(PREFIX + `kill-session -t 'o'\\''brien'`)],
   });
 
+  unit("killPane targets only the configured pane", {
+    given: ["an adapter", () => fakeTmux()],
+    when: ["removing one idle extra pane", async ({ t, calls }) => {
+      await t.killPane("claw:.6");
+      return calls;
+    }],
+    then: ["the exact pane target is quoted", (calls) =>
+      expect(calls[0]).toBe(PREFIX + `kill-pane -t 'claw:.6'`)],
+  });
+
   unit("sendLiteral escapes text and uses -l -- so option parsing stops", {
     given: ["an adapter", () => fakeTmux()],
     when: ["sending literal text with quotes and dashes", async ({ t, calls }) => {
@@ -46,14 +56,14 @@ feature("tmux adapter: command strings", () => {
       expect(calls[0]).toBe(PREFIX + `send-keys -t 'claw:.1' -l -- 'don'\\''t --help me'`)],
   });
 
-  unit("clearInputLine sends Ctrl-U without submitting", {
+  unit("clearInputLine clears a multiline composer without submitting", {
     given: ["adapter", () => fakeTmux()],
     when: ["clearing the composer", async ({ t, calls }) => {
       await t.clearInputLine("claw:.1");
       return calls;
     }],
-    then: ["uses the terminal clear-line key", (calls) =>
-      expect(calls[0]).toBe(PREFIX + `send-keys -t 'claw:.1' C-u`)],
+    then: ["selects the whole logical input before killing it", (calls) =>
+      expect(calls[0]).toBe(PREFIX + `send-keys -t 'claw:.1' C-a C-k`)],
   });
 
   unit("runShell wraps the line verbatim (config cmds may hold quotes)", {
@@ -129,6 +139,16 @@ feature("tmux adapter: command strings", () => {
     }],
     then: ["-h -c with escaped cwd", (calls) =>
       expect(calls[0]).toBe(PREFIX + `split-window -t 'claw:.1' -h -c '/repo/.agents/2'`)],
+  });
+
+  unit("pasteBuffer deletes the one-shot tmux buffer after use", {
+    given: ["an adapter", () => fakeTmux()],
+    when: ["pasting an isolated prompt buffer", async ({ t, calls }) => {
+      await t.pasteBuffer("prompt_123", "claw:.3");
+      return calls;
+    }],
+    then: ["the payload is pasted once and removed from tmux", (calls) =>
+      expect(calls[0]).toBe(PREFIX + `paste-buffer -d -b 'prompt_123' -t 'claw:.3'`)],
   });
 
   unit("sendKeys passes key specs verbatim (dismiss sequences)", {
