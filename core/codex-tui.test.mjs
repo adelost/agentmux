@@ -1,6 +1,7 @@
 import { feature, unit, expect } from "bdd-vitest";
 import {
   clearCodexComposerDraft,
+  confirmCodexDraftReleased,
   codexComposerContainsPrompt,
   codexComposerEndsWithPrompt,
   codexComposerHasPasteBlock,
@@ -227,6 +228,80 @@ q to quit   esc/← to edit prev
     then: ["exactly one rescue Enter is allowed", (result, ctx) => {
       expect(result).toEqual({ rescued: true, via: "confirmed-stuck" });
       expect(ctx.rescues).toBe(1);
+    }],
+  });
+
+  unit("an idle atomic paste cannot become submitted from one torn empty frame", {
+    given: ["a long owned prompt whose collapsed paste block repaints after Enter", () => {
+      let observations = 0;
+      let waits = 0;
+      return {
+        prompt: "x".repeat(1_400),
+        initiallyComposed: false,
+        submitted: async () => false,
+        observeComposed: async () => { observations++; return true; },
+        sleep: async () => { waits++; },
+        counts: () => ({ observations, waits }),
+      };
+    }],
+    when: ["confirming the apparent submit before releasing the durable FIFO", (ctx) =>
+      confirmCodexDraftReleased(ctx)],
+    then: ["the resurfaced draft remains owned and receives no submitted receipt", (result, ctx) => {
+      expect(result).toEqual({ released: false, via: "resurfaced" });
+      expect(ctx.counts()).toEqual({ observations: 1, waits: 1 });
+    }],
+  });
+
+  unit("two empty atomic-paste observations or fresh JSONL can prove submit", {
+    given: ["one confirmed-empty path and one receipt that lands during settlement", () => {
+      let emptyLooks = 0;
+      let jsonlChecks = 0;
+      return {
+        prompt: "y".repeat(1_400),
+        empty: {
+          initiallyComposed: false,
+          submitted: async () => false,
+          observeComposed: async () => { emptyLooks++; return false; },
+          sleep: noSleep,
+        },
+        jsonl: {
+          initiallyComposed: false,
+          submitted: async () => ++jsonlChecks >= 2,
+          observeComposed: async () => { throw new Error("JSONL should avoid a second pane read"); },
+          sleep: noSleep,
+        },
+        counts: () => ({ emptyLooks, jsonlChecks }),
+      };
+    }],
+    when: ["confirming both authoritative submit paths", async ({ prompt, empty, jsonl }) => [
+      await confirmCodexDraftReleased({ prompt, ...empty }),
+      await confirmCodexDraftReleased({ prompt, ...jsonl }),
+    ]],
+    then: ["both release once and the ordinary short path is untouched", (result, ctx) => {
+      expect(result).toEqual([
+        { released: true, via: "confirmed-empty" },
+        { released: true, via: "jsonl" },
+      ]);
+      expect(ctx.counts()).toEqual({ emptyLooks: 1, jsonlChecks: 2 });
+    }],
+  });
+
+  unit("short prompts retain the zero-wait submit fast path", {
+    given: ["an ordinary one-line prompt", () => {
+      let touched = false;
+      return {
+        prompt: "quick message",
+        initiallyComposed: false,
+        observeComposed: async () => { touched = true; return false; },
+        submitted: async () => { touched = true; return false; },
+        sleep: async () => { touched = true; },
+        touched: () => touched,
+      };
+    }],
+    when: ["confirming its already-empty composer", (ctx) => confirmCodexDraftReleased(ctx)],
+    then: ["no recovery observation or wait is added", (result, ctx) => {
+      expect(result).toEqual({ released: true, via: "single-empty" });
+      expect(ctx.touched()).toBe(false);
     }],
   });
 

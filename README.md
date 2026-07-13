@@ -72,6 +72,8 @@ A prompt advances through `pending -> drafted -> submitted -> acknowledged`:
 - `drafted` means agentmux owns exact text still associated with the composer.
   It blocks later writes so payloads cannot merge.
 - `submitted` means the exact draft left the verified composer after Enter.
+  Large atomic pastes require two independent empty observations (or fresh
+  JSONL proof), so one torn Codex repaint cannot release the FIFO prematurely.
   The pane's write slot is released immediately, so the next prompt can be
   injected even while the agent is busy and the earlier JSONL receipt is late.
 - `acknowledged` means the authoritative Claude/Codex history contains the

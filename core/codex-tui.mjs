@@ -280,6 +280,33 @@ export async function rescueCodexSubmitIfConfirmed({
 }
 
 /**
+ * Confirm that a large Codex draft really left the composer before the
+ * durable broker records `submitted` and releases the pane's FIFO slot.
+ *
+ * Atomic paste blocks can disappear for one torn Ratatui frame after Enter
+ * and then repaint in the composer. One empty capture therefore is not proof
+ * for a long paste. Short prompts keep the single-look fast path; exact JSONL
+ * evidence always wins without waiting.
+ */
+export async function confirmCodexDraftReleased({
+  prompt,
+  initiallyComposed = false,
+  observeComposed,
+  submitted = async () => false,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  observationGapMs = 300,
+} = {}) {
+  if (initiallyComposed) return { released: false, via: "draft" };
+  if (!promptRequiresAtomicPaste(prompt)) return { released: true, via: "single-empty" };
+  if (await submitted() === true) return { released: true, via: "jsonl" };
+
+  await sleep(observationGapMs);
+  if (await submitted() === true) return { released: true, via: "jsonl" };
+  if (await observeComposed() === true) return { released: false, via: "resurfaced" };
+  return { released: true, via: "confirmed-empty" };
+}
+
+/**
  * Clear an agentmux-owned multiline Codex draft without assuming one
  * kill-line sequence reaches every paragraph.
  *

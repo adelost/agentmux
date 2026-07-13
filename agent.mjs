@@ -32,6 +32,7 @@ import { pastePrompt, promptRequiresAtomicPaste } from "./core/prompt-paste.mjs"
 import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
 import {
   clearCodexComposerDraft,
+  confirmCodexDraftReleased,
   codexComposerContainsPrompt,
   codexComposerEndsWithPrompt,
   codexComposerHasPasteBlock,
@@ -1653,9 +1654,27 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     // sent successfully, and (c) the exact prompt no longer remains in the
     // composer. The delivery layer uses it to avoid retyping duplicates while
     // it waits for the later JSONL echo.
-    const stillComposed = await promptAlreadyInComposer(agentName, pane, prompt, {
+    let stillComposed = await promptAlreadyInComposer(agentName, pane, prompt, {
       ownedDraft: knownDrafted || exactDraft,
     });
+    if (dialect === "codex" && !stillComposed) {
+      let dir = null;
+      try { dir = paneDir(agentConfig(agentName).dir, pane); } catch { /* JSONL unavailable */ }
+      const release = await confirmCodexDraftReleased({
+        prompt,
+        initiallyComposed: stillComposed,
+        observeComposed: () => promptAlreadyInComposer(agentName, pane, prompt, {
+          ownedDraft: knownDrafted || exactDraft,
+        }),
+        submitted: async () => {
+          if (!dir) return false;
+          try { return isPromptInCodexJsonl(dir, prompt, { notBeforeMs }) === true; }
+          catch { return false; }
+        },
+        sleep: wait,
+      });
+      stillComposed = !release.released;
+    }
     const submitted = !stillComposed;
     const queued = dialect === "codex" && busyAtSend && exactDraft && submitted;
     if (submitted && onSubmitted) await onSubmitted();
