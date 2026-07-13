@@ -173,6 +173,38 @@ q to quit   esc/← to edit prev
     }],
   });
 
+  unit("visual wrapping inside an image path does not block delivery", {
+    // Live lsrc:3 capture 2026-07-13: tiled width made Ratatui split the
+    // attachment id after a hyphen. The application-rendered continuation is
+    // not joined by tmux -J, so the old whitespace-collapsing comparison saw
+    // a different path, withheld Enter, and cleared a complete draft.
+    given: ["an image prompt whose unbroken path wraps across logical rows", () => ({
+      prompt: "Ser du denna bilden? =====\n[image attached: /tmp/discord-media-1526100616894742528-1526100616630374491.png]",
+      snapshot: `
+› Ser du denna bilden? =====
+  [image attached: /tmp/discord-media-1526100616894742528-
+  1526100616630374491.png]
+
+  gpt-5.6-sol xhigh · ~/lsrc/.agents/3
+`,
+    })],
+    when: ["checking the fully painted narrow-pane draft", ({ prompt, snapshot }) =>
+      codexComposerContainsPrompt(snapshot, prompt)],
+    then: ["visual whitespace inside the path is ignored", (matches) =>
+      expect(matches).toBe(true)],
+  });
+
+  unit("non-whitespace identity still rejects another attachment", {
+    given: ["two paths that differ only in the attachment id", () => ({
+      incoming: "[image attached: /tmp/discord-media-1526100616894742528-1526100616630374491.png]",
+      snapshot: "\n› [image attached: /tmp/discord-media-1526100616894742528-\n  9999999999999999999.png]\n",
+    })],
+    when: ["checking the wrong wrapped attachment", ({ incoming, snapshot }) =>
+      codexComposerContainsPrompt(snapshot, incoming)],
+    then: ["the different non-whitespace bytes do not match", (matches) =>
+      expect(matches).toBe(false)],
+  });
+
   unit("placeholder glued to the post-Esc idle hint reads as empty, not a draft", {
     // api:4 live (2026-07-12): one reveal-Escape left the composer showing its
     // ghost placeholder plus "esc again to edit previous message" on the next

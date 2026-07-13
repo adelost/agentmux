@@ -144,7 +144,15 @@ export function codexComposerText(text) {
 export function codexComposerContainsPrompt(snapshot, prompt) {
   const composer = codexComposerText(snapshot);
   if (typeof composer !== "string") return false;
-  const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+  // Ratatui wraps long unbroken tokens (notably /tmp/discord-media-*.png)
+  // into separate indented logical rows. tmux -J cannot rejoin those rows,
+  // because they are application-rendered rather than terminal hard-wraps;
+  // codexComposerText therefore has a synthetic space in the middle of the
+  // token. Compare the exact non-whitespace stream so visual layout cannot
+  // turn a fully painted draft into a false negative. The 160-character
+  // identity still distinguishes payloads by all meaningful bytes, including
+  // the unique Discord message/attachment ids in image paths.
+  const normalize = (value) => String(value || "").replace(/\s+/g, "");
   const needle = normalize(prompt);
   if (!needle) return false;
   const identity = needle.slice(0, Math.min(160, needle.length));
