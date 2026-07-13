@@ -66,6 +66,8 @@ one persistent queue before agentmux touches tmux. Delivery is FIFO per pane
 and single-writer per tmux session, including across bridge processes. The
 queue also keeps private copies of temporary image and file attachments so a
 bridge restart cannot turn a valid media prompt into a missing path.
+Long and multiline prompts use terminal bracketed-paste mode, so the TUI
+receives one input transaction rather than a slow stream of painted cells.
 
 A prompt advances through `pending -> drafted -> submitted -> acknowledged`:
 
@@ -142,7 +144,7 @@ untrusted-data fencing, and overlap locking are built in. See
 
 - Linux, macOS, or WSL
 - Node.js 20+
-- tmux
+- tmux 3.2+
 - At least one supported coding-agent CLI:
   - Claude Code
   - Codex CLI

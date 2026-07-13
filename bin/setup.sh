@@ -67,7 +67,15 @@ fi
 
 # tmux
 if command -v tmux &>/dev/null; then
-  ok "tmux $(tmux -V | awk '{print $2}')"
+  TMUX_V=$(tmux -V | awk '{print $2}')
+  TMUX_MAJOR=$(printf '%s' "$TMUX_V" | sed -E 's/^([0-9]+).*/\1/')
+  TMUX_MINOR=$(printf '%s' "$TMUX_V" | sed -E 's/^[0-9]+\.([0-9]+).*/\1/')
+  if [[ "$TMUX_MAJOR" -gt 3 || ( "$TMUX_MAJOR" -eq 3 && "$TMUX_MINOR" -ge 2 ) ]]; then
+    ok "tmux $TMUX_V"
+  else
+    fail "tmux $TMUX_V (need 3.2+ for safe bracketed paste)"
+    MISSING=1
+  fi
 else
   fail "tmux not found"
   install_pkg tmux || { dim "Install: apt install tmux / brew install tmux"; MISSING=1; }

@@ -219,7 +219,11 @@ export function createTmuxAdapter({ socket, exec }) {
     },
 
     async pasteBuffer(bufName, target) {
-      await raw(`paste-buffer -d -b ${q(bufName)} -t ${q(target)}`);
+      // `load-buffer` isolates the payload; `-p` is what makes the receiving
+      // TUI handle it as one bracketed paste instead of painting thousands of
+      // individual cells before Enter. tmux adds the markers only when the
+      // application has requested bracketed-paste mode.
+      await raw(`paste-buffer -d -p -b ${q(bufName)} -t ${q(target)}`);
     },
   };
 }

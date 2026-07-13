@@ -141,14 +141,14 @@ feature("tmux adapter: command strings", () => {
       expect(calls[0]).toBe(PREFIX + `split-window -t 'claw:.1' -h -c '/repo/.agents/2'`)],
   });
 
-  unit("pasteBuffer deletes the one-shot tmux buffer after use", {
+  unit("pasteBuffer brackets and deletes the one-shot tmux buffer after use", {
     given: ["an adapter", () => fakeTmux()],
     when: ["pasting an isolated prompt buffer", async ({ t, calls }) => {
       await t.pasteBuffer("prompt_123", "claw:.3");
       return calls;
     }],
-    then: ["the payload is pasted once and removed from tmux", (calls) =>
-      expect(calls[0]).toBe(PREFIX + `paste-buffer -d -b 'prompt_123' -t 'claw:.3'`)],
+    then: ["the application receives one bracketed paste and tmux removes its buffer", (calls) =>
+      expect(calls[0]).toBe(PREFIX + `paste-buffer -d -p -b 'prompt_123' -t 'claw:.3'`)],
   });
 
   unit("sendKeys passes key specs verbatim (dismiss sequences)", {

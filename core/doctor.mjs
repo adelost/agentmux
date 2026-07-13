@@ -154,6 +154,23 @@ export function checkTmux({ sessions, error }) {
   return check("tmux", OK, `${sessions.length} session${sessions.length === 1 ? "" : "s"} (${sessions.join(", ")})`);
 }
 
+/** tmux added paste-buffer -p (bracketed-paste framing) in 3.2. */
+export function checkTmuxVersion({ version, minimumMajor = 3, minimumMinor = 2 }) {
+  const label = String(version || "").trim();
+  const match = label.match(/(\d+)\.(\d+)/);
+  if (!match) {
+    return check("tmux version", FAIL, `${label || "unknown"}; need 3.2+ for safe long-prompt paste`,
+      "upgrade tmux before starting the bridge");
+  }
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  const supported = major > minimumMajor || (major === minimumMajor && minor >= minimumMinor);
+  return supported
+    ? check("tmux version", OK, `${label.replace(/^tmux\s+/i, "")} (bracketed paste supported)`)
+    : check("tmux version", FAIL, `${label.replace(/^tmux\s+/i, "")} is too old; need 3.2+ for safe long-prompt paste`,
+        "upgrade tmux before starting the bridge");
+}
+
 export function checkConfig({ agents, error }) {
   if (error) {
     return check("config", FAIL, `agentmux.yaml unparseable: ${error}`, "amux edit");

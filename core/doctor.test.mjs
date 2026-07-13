@@ -5,6 +5,7 @@ import { feature, unit, expect } from "bdd-vitest";
 import {
   checkContextBridge,
   checkDeliveryQueue,
+  checkTmuxVersion,
   FAIL, OK, WARN,
   checkBridgeMode, checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors,
   checkLedger, checkTmux, overallStatus,
@@ -43,6 +44,21 @@ feature("bridge process check", () => {
     given: ["one supervised pid", () => checkBridgeProcess({ pids: [7], supervised: true })],
     when: ["checking", (c) => c],
     then: ["ok", (c) => expect(c.status).toBe(OK)],
+  });
+});
+
+feature("tmux bracketed-paste requirement", () => {
+  unit("tmux older than 3.2 fails before long prompt delivery can silently degrade", {
+    when: ["checking tmux 3.1c", () => checkTmuxVersion({ version: "tmux 3.1c" })],
+    then: ["the minimum is explicit", (c) => {
+      expect(c.status).toBe(FAIL);
+      expect(c.detail).toContain("3.2+");
+    }],
+  });
+
+  unit("letter-suffixed tmux 3.2 releases support bracketed paste", {
+    when: ["checking tmux 3.2a", () => checkTmuxVersion({ version: "tmux 3.2a" })],
+    then: ["the host is accepted", (c) => expect(c.status).toBe(OK)],
   });
 });
 

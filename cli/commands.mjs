@@ -21,7 +21,7 @@ import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../
 import { readHeartbeat } from "../core/heartbeat.mjs";
 import {
   checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors, checkLedger,
-  checkBridgeMode, checkContextBridge, checkTmux, checkConfig, overallStatus, formatDoctorReport, FAIL, WARN,
+  checkBridgeMode, checkContextBridge, checkTmux, checkTmuxVersion, checkConfig, overallStatus, formatDoctorReport, FAIL, WARN,
   checkDeliveryQueue,
 } from "../core/doctor.mjs";
 import { createDeliveryQueue, deliveryQueueStats } from "../core/delivery-queue.mjs";
@@ -2269,7 +2269,9 @@ async function cmdDoctor(ctx) {
   } catch {}
 
   // tmux
-  let sessions = [], tmuxError = null;
+  let sessions = [], tmuxError = null, tmuxVersion = null;
+  try { tmuxVersion = execSync("tmux -V", { encoding: "utf-8" }).trim(); }
+  catch {}
   try {
     const { stdout } = await ctx.tmux("list-sessions -F '#{session_name}'");
     sessions = stdout.trim().split("\n").filter(Boolean);
@@ -2323,6 +2325,7 @@ async function cmdDoctor(ctx) {
     checkHooksInstalled({ settings, hookFileExists }),
     checkLedger({ stat: ledgerStat }),
     checkContextBridge({ claudePanes, pushing }),
+    checkTmuxVersion({ version: tmuxVersion }),
     checkTmux({ sessions, error: tmuxError }),
     checkConfig({ agents, error: cfgError }),
     checkDeliveryQueue({
