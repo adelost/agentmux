@@ -54,9 +54,10 @@ const CLAUDE_FLAGS = "--dangerously-skip-permissions";
 // clap treats the aliases as the same argument and rejects duplicate use.
 const CODEX_FLAGS = "--yolo";
 const CODEX_PROMPT_READY_TIMEOUT_MS = 8_000;
-function codexDeliveryBlocked(message) {
+function codexDeliveryBlocked(message, { zoomRecoverable = false } = {}) {
   const error = new Error(message);
   error.code = "AMUX_DELIVERY_BLOCKED";
+  if (zoomRecoverable) error.zoomRecoverable = true;
   return error;
 }
 
@@ -1473,7 +1474,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       }
       await wait(250);
     }
-    throw codexDeliveryBlocked(`Codex prompt delivery timed out: ${lastError}`);
+    throw codexDeliveryBlocked(`Codex prompt delivery timed out: ${lastError}`, {
+      zoomRecoverable: true,
+    });
   }
 
   async function recoverKnownCodexDraft(agentName, pane, prompt) {
@@ -1517,7 +1520,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       }
       await wait(250);
     }
-    throw codexDeliveryBlocked("Codex prompt delivery blocked: owned draft is not currently recoverable");
+    throw codexDeliveryBlocked("Codex prompt delivery blocked: owned draft is not currently recoverable", {
+      zoomRecoverable: true,
+    });
   }
 
   async function sendPrompt(agentName, prompt, pane, {
@@ -1571,7 +1576,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         // it produced the 09:08 LSrc drop where the full prompt remained in the
         // editor but its queue job was discarded. Leave it in place and let the
         // same FIFO head recover/submit it when the composer becomes visible.
-        throw codexDeliveryBlocked("Codex prompt delivery blocked: exact prompt did not finish painting in the composer");
+        throw codexDeliveryBlocked("Codex prompt delivery blocked: exact prompt did not finish painting in the composer", {
+          zoomRecoverable: true,
+        });
       }
     }
     // A previously queued turn can start during the paste/paint interval.

@@ -140,6 +140,7 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
         via: null,
         blocked: true,
         reason: sendError.message,
+        ...(sendError.zoomRecoverable ? { zoomRecoverable: true } : {}),
       };
     }
 

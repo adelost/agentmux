@@ -100,20 +100,101 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
-  component("transport zoom is always restored", {
-    given: ["a pane that needs temporary zoom", () => {
+  component("a successful tiled delivery never changes the visible zoom", {
+    given: ["a pane whose composer works in the tiled layout", () => {
       const rootDir = tempRoot();
       const queue = createDeliveryQueue({ rootDir });
-      queue.enqueue({ agentName: "api", pane: 3, text: "show composer" });
+      queue.enqueue({ agentName: "api", pane: 3, text: "stay tiled" });
       const agent = acceptingAgent();
-      agent.zoomPaneForPicker = async () => true;
-      agent.restorePaneZoom = async (_name, _pane, changed) => { agent.restored = changed; };
+      agent.zoomCalls = 0;
+      agent.restoreCalls = 0;
+      agent.zoomPaneForPicker = async () => { agent.zoomCalls++; return true; };
+      agent.restorePaneZoom = async () => { agent.restoreCalls++; };
       const broker = createDeliveryBroker({ agent, queue, notify: async () => {} });
       return { rootDir, broker, agent };
     }],
     when: ["delivery finishes", ({ broker }) => broker.kickTarget("api", 3)],
-    then: ["the tiled layout is restored", (_, ctx) => {
-      expect(ctx.agent.restored).toBe(true);
+    then: ["neither zoom nor restore touches the tmux window", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(1);
+      expect(ctx.agent.zoomCalls).toBe(0);
+      expect(ctx.agent.restoreCalls).toBe(0);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a tiled composer paint failure retries once with temporary zoom", {
+    given: ["a long draft that becomes recoverable after zoom", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir });
+      const job = queue.enqueue({ agentName: "api", pane: 3, text: "show composer" });
+      let echoed = false;
+      const sends = [];
+      const agent = {
+        sends,
+        zoomCalls: 0,
+        restoreCalls: 0,
+        restored: null,
+        capturePromptEchoCursor: async () => ({ kind: "test", positions: {} }),
+        waitForPromptEcho: async () => echoed,
+        dismissBlockingPrompt: async () => null,
+        sendOnly: async (_name, text, _pane, options = {}) => {
+          sends.push({ text, options });
+          if (sends.length === 1) {
+            await options.onDrafted?.();
+            const error = new Error("Codex prompt delivery blocked: exact prompt did not finish painting in the composer");
+            error.code = "AMUX_DELIVERY_BLOCKED";
+            error.zoomRecoverable = true;
+            throw error;
+          }
+          await options.onSubmitted?.();
+          echoed = true;
+          return { submitted: true };
+        },
+        zoomPaneForPicker: async () => {
+          agent.zoomCalls++;
+          return { changed: true, previousActivePaneId: "%1" };
+        },
+        restorePaneZoom: async (_name, _pane, receipt) => {
+          agent.restoreCalls++;
+          agent.restored = receipt;
+        },
+      };
+      const broker = createDeliveryBroker({ agent, queue, notify: async () => {} });
+      return { rootDir, queue, job, broker, agent };
+    }],
+    when: ["the ordinary tiled attempt cannot finish painting", ({ broker }) => broker.kickTarget("api", 3)],
+    then: ["the exact owned draft is recovered under zoom and the old view is restored", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(2);
+      expect(ctx.agent.sends[0].options.knownDrafted).toBe(false);
+      expect(ctx.agent.sends[1].options.knownDrafted).toBe(true);
+      expect(ctx.agent.zoomCalls).toBe(1);
+      expect(ctx.agent.restoreCalls).toBe(1);
+      expect(ctx.agent.restored).toMatchObject({ changed: true, previousActivePaneId: "%1" });
+      expect(ctx.queue.read("api", 3, ctx.job.id).status).toBe("acknowledged");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a foreign composer draft never triggers fullscreen fallback", {
+    given: ["a pane containing text owned by the human", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir });
+      const job = queue.enqueue({ agentName: "api", pane: 3, text: "do not overwrite" });
+      const agent = acceptingAgent();
+      agent.zoomCalls = 0;
+      agent.zoomPaneForPicker = async () => { agent.zoomCalls++; return true; };
+      agent.sendOnly = async () => {
+        const error = new Error("Codex prompt delivery blocked: composer contains a different draft");
+        error.code = "AMUX_DELIVERY_BLOCKED";
+        throw error;
+      };
+      const broker = createDeliveryBroker({ agent, queue, notify: async () => {} });
+      return { rootDir, queue, job, broker, agent };
+    }],
+    when: ["delivery fails closed on the foreign draft", ({ broker }) => broker.kickTarget("api", 3)],
+    then: ["the job remains blocked without changing zoom", (_, ctx) => {
+      expect(ctx.agent.zoomCalls).toBe(0);
+      expect(ctx.queue.read("api", 3, ctx.job.id).status).toBe("blocked");
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });

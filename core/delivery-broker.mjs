@@ -13,6 +13,10 @@ const ACTIVE_RETRY_MS = 1_000;
 const BLOCKED_RETRY_MS = 3_000;
 const NOTICE_AFTER_MS = 10_000;
 
+function needsZoomFallback(result, submitted) {
+  return Boolean(result?.zoomRecoverable && !result.delivered && !submitted);
+}
+
 function queueEvent(job, state, extra = {}) {
   try {
     appendEvent({
@@ -48,9 +52,10 @@ export function createDeliveryBroker({
   let started = false;
   let stopped = false;
 
-  // Panes share one tmux window. Transport temporarily zooms a target pane so
-  // Codex has enough rows to paint its composer; therefore the in-process
-  // critical section is session-wide even though FIFO ordering is per pane.
+  // Panes share one tmux window. A tiled delivery that cannot render its
+  // composer may temporarily zoom the target as a fallback; therefore the
+  // in-process critical section remains session-wide even though FIFO
+  // ordering is per pane.
   const laneKey = (agentName) => String(agentName);
 
   function runExclusive(agentName, pane, work) {
@@ -183,46 +188,70 @@ export function createDeliveryBroker({
     });
     queueEvent(job, "attempt", { attempt: job.attempts });
 
-    let zoomChanged = false;
-    let result;
-    try {
-      if (typeof agent.zoomPaneForPicker === "function") {
-        zoomChanged = await agent.zoomPaneForPicker(job.agentName, job.pane);
+    const attemptDelivery = async () => {
+      try {
+        return await deliverToPane(agent, job.agentName, job.pane, job.text, {
+          verifyText: job.verifyText,
+          attempts: 1,
+          echoTimeoutMs: 3_000,
+          echoCursor: job.echoCursor,
+          notBeforeMs: job.echoCursor ? null : job.echoNotBeforeMs,
+          precheckEcho: true,
+          knownDrafted: drafted,
+          suppressReceipt: true,
+          onDrafted: async () => {
+            drafted = true;
+            const current = queue.read(job.agentName, job.pane, job.id) || job;
+            job = queue.update(current, { status: "drafted", draftOwned: true });
+            queueEvent(job, "drafted");
+          },
+          onSubmitted: async () => {
+            submitted = true;
+            const current = queue.read(job.agentName, job.pane, job.id) || job;
+            job = queue.update(current, {
+              status: "submitted",
+              draftOwned: false,
+              submittedAt: now(),
+              nextAttemptAt: now() + ACTIVE_RETRY_MS,
+            });
+            queueEvent(job, "submitted");
+          },
+          log: (message) => log(`delivery ${job.agentName}:${job.pane} ${job.id}: ${message}`),
+        });
+      } catch (error) {
+        return {
+          delivered: false,
+          blocked: true,
+          reason: error.message,
+          ...(error.zoomRecoverable ? { zoomRecoverable: true } : {}),
+        };
       }
-      result = await deliverToPane(agent, job.agentName, job.pane, job.text, {
-        verifyText: job.verifyText,
-        attempts: 1,
-        echoTimeoutMs: 3_000,
-        echoCursor: job.echoCursor,
-        notBeforeMs: job.echoCursor ? null : job.echoNotBeforeMs,
-        precheckEcho: true,
-        knownDrafted: drafted,
-        suppressReceipt: true,
-        onDrafted: async () => {
-          drafted = true;
-          const current = queue.read(job.agentName, job.pane, job.id) || job;
-          job = queue.update(current, { status: "drafted", draftOwned: true });
-          queueEvent(job, "drafted");
-        },
-        onSubmitted: async () => {
-          submitted = true;
-          const current = queue.read(job.agentName, job.pane, job.id) || job;
-          job = queue.update(current, {
-            status: "submitted",
-            draftOwned: false,
-            submittedAt: now(),
-            nextAttemptAt: now() + ACTIVE_RETRY_MS,
-          });
-          queueEvent(job, "submitted");
-        },
-        log: (message) => log(`delivery ${job.agentName}:${job.pane} ${job.id}: ${message}`),
-      });
-    } catch (error) {
-      result = { delivered: false, blocked: true, reason: error.message };
-    } finally {
-      if (typeof agent.restorePaneZoom === "function") {
-        await agent.restorePaneZoom(job.agentName, job.pane, zoomChanged)
-          .catch((error) => log(`delivery zoom restore failed for ${job.agentName}:${job.pane}: ${error.message}`));
+    };
+
+    // Preserve the visible tiled layout on the normal path. Only a concrete
+    // layout-shaped composer failure earns one zoomed retry. If the first
+    // attempt already pasted the prompt, `drafted` is durable and the retry
+    // recovers that exact draft instead of typing it a second time.
+    let result = await attemptDelivery();
+    if (needsZoomFallback(result, submitted)
+        && typeof agent.zoomPaneForPicker === "function") {
+      let zoomReceipt = null;
+      try {
+        zoomReceipt = await agent.zoomPaneForPicker(job.agentName, job.pane);
+        queueEvent(job, "zoom_fallback", { reason: String(result.reason || "").slice(0, 160) });
+        result = await attemptDelivery();
+      } catch (error) {
+        result = {
+          delivered: false,
+          blocked: true,
+          reason: error.message,
+          ...(error.zoomRecoverable ? { zoomRecoverable: true } : {}),
+        };
+      } finally {
+        if (typeof agent.restorePaneZoom === "function") {
+          await agent.restorePaneZoom(job.agentName, job.pane, zoomReceipt)
+            .catch((error) => log(`delivery zoom restore failed for ${job.agentName}:${job.pane}: ${error.message}`));
+        }
       }
     }
 
