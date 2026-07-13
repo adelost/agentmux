@@ -308,7 +308,10 @@ amux log frontend -p 1
 ```
 
 Generated `.agents/CLAUDE.md` and `.agents/AGENTS.md` files teach Claude Code
-and Codex how to use these commands from inside project panes.
+and Codex how to use these commands from inside project panes. They also carry
+the shared ownership policy: one active ticket per agent, one end-to-end owner
+per feature, and at most one risk-appropriate review before the merge broker
+lands the PR and advances capacity to independent READY work.
 
 ## Configuration
 
