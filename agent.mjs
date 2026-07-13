@@ -85,7 +85,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.20.77";
+const HINTS_VERSION = "1.20.78";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -466,10 +466,7 @@ isn't in git is invisible to other agents.
    bra jobb"). Commits + ledger ÄR statuskommunikationen.
 2. **Kodreview av varandras arbete sker vid SLUTFÖRDA större uppgifter som
    förplanerats ordentligt** — inte löpande smågranskning av pågående arbete.
-3. **Inget cross-projekt-arbete eller -review.** En panel tjänar SITT
-   tilldelade projekt. Förfrågan utanför lanen avböjs med EN rad ("utanför
-   min lane, fråga Mattias") utan att engagera i sakfrågan.
-4. **Delade träd fryses i KORTA brokerade gate-fönster** (en utsedd
+3. **Delade träd fryses i KORTA brokerade gate-fönster** (en utsedd
    koordinator äger fönstret) — aldrig dagar-långa blanket-fences av en
    annan panels yta.
 

@@ -123,3 +123,19 @@ feature("paneDir, session isolation per pane", () => {
     ],
   });
 });
+
+feature("generated agent policy", () => {
+  unit("does not reject direct work solely because it crosses a project lane", {
+    when: ["generating fresh agent hints", () => {
+      const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
+      paneDir(root, 0);
+      const content = readFileSync(join(root, ".agents", "AGENTS.md"), "utf-8");
+      rmSync(root, { recursive: true, force: true });
+      return content;
+    }],
+    then: ["the obsolete cross-project refusal is absent", (content) => {
+      expect(content).not.toContain("Inget cross-projekt-arbete eller -review");
+      expect(content).not.toContain("utanför min lane, fråga Mattias");
+    }],
+  });
+});
