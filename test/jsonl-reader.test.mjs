@@ -219,6 +219,18 @@ feature("isBusyFromJsonl: user prompt with no assistant response yet", () => {
   });
 });
 
+feature("isBusyFromJsonl: local slash-command output needs no assistant", () => {
+  unit("returns idle when /model bookkeeping is the latest user-shaped event", {
+    given: ["a Claude session ending in local command wrappers", () =>
+      setupFakeProject("idle-local-command.jsonl")],
+    when: ["checking the pane without a prompt anchor", ({ paneDir }) => isBusyFromJsonl(paneDir)],
+    then: ["idle, because local command output is not an AI turn", (r, { cleanup }) => {
+      expect(r).toBe(false);
+      cleanup();
+    }],
+  });
+});
+
 feature("isBusyFromJsonl: tool_use followed by tool_result, no final assistant", () => {
   unit("returns true (busy), claude owes us an assistant message", {
     given: ["tool pending fixture", () => setupFakeProject("busy-tool-pending.jsonl")],

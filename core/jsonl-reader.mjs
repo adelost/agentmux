@@ -410,6 +410,13 @@ export function isBusyFromJsonl(paneDir, promptText = null) {
     return null;
   }
 
+  // Claude records local slash-command UI bookkeeping as type:user events,
+  // even though no assistant response will ever follow. Treating a trailing
+  // /model (or similar) stdout record as a real prompt leaves an otherwise
+  // idle pane "busy" forever and prevents stale delivery recovery. Only
+  // wrapper-only events qualify; ordinary user text remains a real turn.
+  if (isLocalCommandOnlyPrompt(userPromptText(events[userIdx]))) return false;
+
   // Walk forward from the user prompt, tracking the last assistant event.
   // Break when we hit a *new* user prompt (not a tool_result). That's the
   // start of the next turn.
@@ -475,6 +482,12 @@ export function isBusyFromJsonl(paneDir, promptText = null) {
 
   // null / "tool_use" / missing / unknown → still working
   return true;
+}
+
+function isLocalCommandOnlyPrompt(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  return /^(?:\s*(?:<local-command-stdout>[\s\S]*?<\/local-command-stdout>|<local-command-caveat>[\s\S]*?<\/local-command-caveat>|<command-name>[\s\S]*?<\/command-name>|<command-message>[\s\S]*?<\/command-message>|<command-args>[\s\S]*?<\/command-args>))+\s*$/.test(value);
 }
 
 /**
