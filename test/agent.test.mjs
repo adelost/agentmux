@@ -1,5 +1,5 @@
 import { feature, component, unit, expect } from "bdd-vitest";
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { buildCodexLaunchCommand, createAgent, paneDir } from "../agent.mjs";
@@ -161,6 +161,23 @@ feature("paneDir, session isolation per pane", () => {
         cleanup();
       },
     ],
+  });
+
+  component("a Git repo uses its local exclude without dirtying tracked files", {
+    given: ["a repository with a tracked .gitignore", () => {
+      const r = setup();
+      mkdirSync(join(r, ".git", "info"), { recursive: true });
+      writeFileSync(join(r, ".gitignore"), "node_modules/\n");
+      writeFileSync(join(r, ".git", "info", "exclude"), "# local only\n");
+      return r;
+    }],
+    when: ["paneDir creates agent runtime state", (root) => paneDir(root, 1)],
+    then: ["only .git/info/exclude gains the runtime path", (_, root) => {
+      expect(readFileSync(join(root, ".gitignore"), "utf-8")).toBe("node_modules/\n");
+      expect(readFileSync(join(root, ".git", "info", "exclude"), "utf-8"))
+        .toContain(".agents/");
+      cleanup();
+    }],
   });
 });
 

@@ -2,7 +2,7 @@
 // Manages tmux sessions directly. Single source of truth for claude startup + dismiss.
 
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync } from "fs";
-import { join } from "path";
+import { join, resolve } from "path";
 import { load as loadYaml } from "js-yaml";
 import { esc, stripAnsi } from "./lib.mjs";
 import { createTmuxAdapter } from "./core/tmux.mjs";
@@ -563,14 +563,33 @@ export function ensureAgentHints(rootDir) {
 }
 
 function ensureGitignored(rootDir, entry) {
-  const gitignore = join(rootDir, ".gitignore");
+  // Agent pane directories are machine-local runtime state. Prefer Git's
+  // local exclude so creating an AMUX session never dirties a shared repo's
+  // tracked .gitignore. Non-repo roots keep the historical .gitignore
+  // fallback so their generated .agents tree is still hidden when the root
+  // later becomes a repository.
+  let ignorePath = join(rootDir, ".gitignore");
   try {
-    const content = existsSync(gitignore) ? readFileSync(gitignore, "utf-8") : "";
+    const dotGit = join(rootDir, ".git");
+    const stat = statSync(dotGit);
+    let gitDir = dotGit;
+    if (!stat.isDirectory()) {
+      const match = readFileSync(dotGit, "utf-8").match(/^gitdir:\s*(.+)$/m);
+      if (!match) throw new Error("unsupported .git pointer");
+      gitDir = resolve(rootDir, match[1].trim());
+    }
+    const infoDir = join(gitDir, "info");
+    mkdirSync(infoDir, { recursive: true });
+    ignorePath = join(infoDir, "exclude");
+  } catch { /* not a Git root: use the .gitignore fallback */ }
+
+  try {
+    const content = existsSync(ignorePath) ? readFileSync(ignorePath, "utf-8") : "";
     if (!content.includes(entry)) {
-      writeFileSync(gitignore, content.trimEnd() + "\n" + entry + "\n");
+      writeFileSync(ignorePath, content.trimEnd() + "\n" + entry + "\n");
     }
   } catch (err) {
-    console.warn(`gitignore update failed: ${err.message}`);
+    console.warn(`git exclude update failed: ${err.message}`);
   }
 }
 
