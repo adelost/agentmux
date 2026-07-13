@@ -6,8 +6,10 @@
 // use `{type: "req", id, method, params}` format.
 
 import { createHash } from "crypto";
-import { readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import {
+  closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync,
+} from "fs";
+import { dirname, join } from "path";
 import { splitMessage } from "../lib.mjs";
 
 const GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789";
@@ -20,8 +22,11 @@ const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || (() => {
 
 const CHANNEL_CACHE = join(process.env.HOME, ".openclaw/.channel-cache.json");
 const NOTIFY_USER_STATE = join(process.env.HOME, ".openclaw/.notifyuser-state.json");
+const NOTIFY_USER_STATE_LOCK = `${NOTIFY_USER_STATE}.lock`;
 const DEFAULT_NOTIFY_USER_DEDUPE_MS = 10 * 60 * 1000;
 const DISCORD_POST_TIMEOUT_MS = Number.parseInt(process.env.AMUX_DISCORD_POST_TIMEOUT_MS || "8000", 10);
+const NOTIFY_STATE_LOCK_TIMEOUT_MS = 10_000;
+const NOTIFY_STATE_STALE_LOCK_MS = 30_000;
 
 /** Resolve channel name to Discord channel ID. */
 export function resolveChannelId(channelName) {
@@ -320,24 +325,101 @@ export function notificationNonce(idempotencyKey) {
 }
 
 function readNotifyState() {
-  try { return JSON.parse(readFileSync(NOTIFY_USER_STATE, "utf-8")) || {}; } catch { return {}; }
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(NOTIFY_USER_STATE, "utf-8"));
+  } catch (err) {
+    if (err?.code === "ENOENT") return {};
+    throw new Error(`notify receipt state is unreadable: ${err.message}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("notify receipt state must be a JSON object");
+  }
+  return parsed;
 }
 
-function writeNotifyState(state) {
-  try { writeFileSync(NOTIFY_USER_STATE, JSON.stringify(state)); } catch {}
+function writeNotifyStateAtomic(state) {
+  const stateDir = dirname(NOTIFY_USER_STATE);
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  const tempPath = join(stateDir,
+    `.notifyuser-state.json.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  try {
+    writeFileSync(tempPath, JSON.stringify(state), { encoding: "utf8", mode: 0o600 });
+    renameSync(tempPath, NOTIFY_USER_STATE);
+  } finally {
+    try { unlinkSync(tempPath); } catch (err) { if (err?.code !== "ENOENT") throw err; }
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+async function withNotifyStateLock(action) {
+  mkdirSync(dirname(NOTIFY_USER_STATE), { recursive: true, mode: 0o700 });
+  const deadline = Date.now() + NOTIFY_STATE_LOCK_TIMEOUT_MS;
+  let lockFd;
+  while (lockFd == null) {
+    try {
+      lockFd = openSync(NOTIFY_USER_STATE_LOCK, "wx", 0o600);
+      try {
+        writeFileSync(lockFd, String(process.pid));
+      } catch (err) {
+        closeSync(lockFd);
+        lockFd = undefined;
+        try { unlinkSync(NOTIFY_USER_STATE_LOCK); } catch {}
+        throw err;
+      }
+    } catch (err) {
+      if (err?.code !== "EEXIST") throw err;
+      try {
+        const lockAge = Date.now() - statSync(NOTIFY_USER_STATE_LOCK).mtimeMs;
+        const owner = Number.parseInt(readFileSync(NOTIFY_USER_STATE_LOCK, "utf8"), 10);
+        let ownerAlive = false;
+        if (Number.isSafeInteger(owner) && owner > 0) {
+          try {
+            process.kill(owner, 0);
+            ownerAlive = true;
+          } catch (ownerErr) {
+            ownerAlive = ownerErr?.code !== "ESRCH";
+          }
+        }
+        if (!ownerAlive && (Number.isSafeInteger(owner) || lockAge > NOTIFY_STATE_STALE_LOCK_MS)) {
+          unlinkSync(NOTIFY_USER_STATE_LOCK);
+          continue;
+        }
+      } catch (statErr) {
+        if (statErr?.code === "ENOENT") continue;
+        throw statErr;
+      }
+      if (Date.now() >= deadline) throw new Error("timed out acquiring notify receipt state lock");
+      await delay(5 + Math.floor(Math.random() * 11));
+    }
+  }
+
+  try {
+    return await action();
+  } finally {
+    closeSync(lockFd);
+    try { unlinkSync(NOTIFY_USER_STATE_LOCK); } catch (err) { if (err?.code !== "ENOENT") throw err; }
+  }
 }
 
 function isDuplicateNotification(key, dedupeMs) {
   if (!dedupeMs) return false;
   const state = readNotifyState();
-  const last = state[key] || 0;
+  if (!Object.prototype.hasOwnProperty.call(state, key)) return false;
+  const last = state[key];
+  if (!Number.isFinite(last)) return false;
   return Date.now() - last < dedupeMs;
 }
 
-function rememberNotification(key) {
-  const state = readNotifyState();
-  state[key] = Date.now();
-  writeNotifyState(state);
+async function rememberNotification(key) {
+  await withNotifyStateLock(() => {
+    const state = readNotifyState();
+    state[key] = Date.now();
+    writeNotifyStateAtomic(state);
+  });
 }
 
 /**
@@ -362,10 +444,14 @@ export async function notifyUser(message, opts = {}) {
       const dm = await discordCreateDm(userId);
       if (!dm?.id) throw new Error("Discord DM response missing channel id");
       await discordPost(dm.id, content, nonce);
-      rememberNotification(key);
-      return { sent: true, target: "dm", userId };
     } catch (err) {
       dmError = err;
+    }
+    if (!dmError) {
+      // Receipt failures must remain visible, but must not turn a successful DM
+      // into a second fallback-channel post.
+      await rememberNotification(key);
+      return { sent: true, target: "dm", userId };
     }
   }
 
@@ -376,7 +462,7 @@ export async function notifyUser(message, opts = {}) {
   }
   const fallback = userId ? `<@${userId}>\n${content}` : content;
   await discordPost(channelId, fallback, nonce);
-  rememberNotification(key);
+  await rememberNotification(key);
   return { sent: true, target: channelName, channelId, fallback: !!dmError, dmError: dmError?.message };
 }
 
