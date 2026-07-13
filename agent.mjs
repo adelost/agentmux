@@ -112,7 +112,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.20.78";
+const HINTS_VERSION = "1.23.5";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -497,29 +497,37 @@ isn't in git is invisible to other agents.
    koordinator äger fönstret) — aldrig dagar-långa blanket-fences av en
    annan panels yta.
 
-## Bemanning & review-ekonomi (Mattias 2026-07-10)
+## Staffing and review economics (Mattias 2026-07-13)
 
-1. **En ägare per feature/projekt, end-to-end.** Den andra instansen engageras
-   vid TVÅ gates: design-review INNAN bygget, whole-wave-review vid KLART.
-   Ingen löpande mid-flight-koordinering.
-2. **Parallell-split är undantaget**, motiverat bara när filzonerna är
-   disjunkta, båda spåren har substantiellt arbete och wall-clock spelar roll.
-   En färdig panel är TYST: ingen vaktning, inga är-ni-klara-pingar
-   (ai:4-läxan 2026-07-10: färdiga-men-frysta paneler genererar bruset,
-   arbetande gör det inte). Vaktrollen är en cron, aldrig en levande agent.
-3. **Review efter risk, inte efter vana.** ALLTID dubbelreview: säkerhetskritiskt
-   (altimetern är liv), delade kontrakt/sömmar, release-gates, fysik/geometri,
-   allt som kan fabricera data vid null (dokumenterad avkastning: 2-6 äkta
-   buggar per våg). SKIPPA: UI-polish, docs, scripts, enradsfixar i egen lane
-   (dokumenterat facit: "godkänd utan villkor"). Vågnivå är default;
-   per-hash-review reserveras för säkerhetskritiskt.
-4. **Varje review-fynd ska gradera upp till en gate** (lint/test-regel) så
-   maskinen fångar klassen nästa gång gratis. En review som aldrig blir en
-   gate är en löpande kostnad; en gate är en engångskostnad.
-5. **Nattkörningar gör bara nödvändiga saker.** Inga spekulativa refactors,
-   inga deploys som kostar pengar utan stående GO, frågor batchas till EN
-   morgonrapport. Kvotdöd mitt i natten är fine: varje slice bankas vid
-   commit och återupptas där den stannade.
+1. **One owner per feature or project, end to end.** The manager assigns a
+   clearly bounded task; its owner plans, implements, tests, pushes, and opens
+   the PR without mid-flight interruptions or ongoing peer coordination.
+2. **At most one active ticket per agent.** Give an idle agent the next
+   highest-priority READY ticket only when its file and product areas are
+   independent of active work. Once an owner has banked a PR, the broker may
+   assign that agent's next ticket without waiting for Mattias. Filling spare
+   capacity must never introduce file conflicts or peer-coordination overhead.
+3. **At most one review; never double-review by default.** Owners may
+   self-approve trivial changes (UI polish, docs, scripts, or a one-line fix in
+   their own lane) after the relevant gates pass. The manager/merge broker
+   reviews non-trivial work once. A separate reviewer is used only when the
+   broker explicitly delegates that single review, never as an additional
+   review on top of the broker's own review.
+4. **The manager owns the flow without human babysitting:** prioritize,
+   delegate, review non-trivial work, verify gates and the current PR, merge,
+   delete the remote branch, and update the ticket. Do not wait for routine
+   decisions or routine merges from the human. If review finds a defect, the
+   same feature owner fixes the root cause and adds permanent gates while
+   other agents continue their own work undisturbed.
+5. **A finished pane stays quiet:** no live sentry duty and no "are you done?"
+   pings. Monitoring belongs in cron, not in a waiting agent.
+6. **Every review finding must graduate into a gate** (a lint or test rule) so
+   the machine catches that defect class next time. A review that never
+   becomes a gate is a recurring cost; a gate is a one-time cost.
+7. **Night runs do only necessary work.** No speculative refactors and no
+   money-spending deploys without standing approval. Batch questions into one
+   morning report. Quota exhaustion overnight is acceptable: bank each slice
+   in a commit and resume from there.
 
 ## Minnesloggning
 
