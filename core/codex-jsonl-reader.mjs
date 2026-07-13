@@ -315,13 +315,13 @@ export function isPromptInCodexJsonl(paneDir, promptText, { notBeforeMs = 0, cur
  * is active.  The minimum overlap keeps short local drafts (for example
  * "ff") out of this automatic recovery path.
  */
-export function isPromptPrefixInCodexJsonl(paneDir, composerText, { minOverlap = 48 } = {}) {
+export function codexPromptPrefixIdentity(paneDir, composerText, { minOverlap = 48 } = {}) {
   const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
   const composer = normalize(composerText);
-  if (composer.length < minOverlap) return false;
+  if (composer.length < minOverlap) return null;
 
   const file = latestSessionFor(paneDir);
-  if (!file) return false;
+  if (!file) return null;
 
   const events = parseOperationalJsonl(file);
   for (let i = events.length - 1; i >= 0; i--) {
@@ -330,10 +330,14 @@ export function isPromptPrefixInCodexJsonl(paneDir, composerText, { minOverlap =
     const submitted = normalize(event.payload.message);
     const overlap = Math.min(composer.length, submitted.length);
     if (overlap >= minOverlap && composer.slice(0, overlap) === submitted.slice(0, overlap)) {
-      return true;
+      return event.__hash || null;
     }
   }
-  return false;
+  return null;
+}
+
+export function isPromptPrefixInCodexJsonl(paneDir, composerText, options = {}) {
+  return codexPromptPrefixIdentity(paneDir, composerText, options) !== null;
 }
 
 /** Derive live task state from an operational event window. */

@@ -17,10 +17,10 @@ import {
 } from "./core/jsonl-reader.mjs";
 import {
   captureCodexPromptEchoCursor,
+  codexPromptPrefixIdentity,
   extractFromCodexJsonl,
   isBusyFromCodexJsonl,
   isPromptInCodexJsonl,
-  isPromptPrefixInCodexJsonl,
 } from "./core/codex-jsonl-reader.mjs";
 import { getContextPercent as getContextPercentByDialect, getContextFromPane } from "./core/context.mjs";
 import { findBlockingPrompt } from "./core/dismiss.mjs";
@@ -40,7 +40,7 @@ import {
   codexOffersQueueComposer,
   isCodexFullscreenPager,
   prepareCodexIdle,
-  shouldRescueCodexSubmit,
+  rescueCodexSubmitIfConfirmed,
 } from "./core/codex-tui.mjs";
 import {
   codexModelOverride,
@@ -1756,7 +1756,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (dialect === "codex") {
       let dir;
       try { dir = paneDir(agentConfig(agentName).dir, pane); } catch { return; }
-      const alreadySubmitted = isPromptPrefixInCodexJsonl(dir, stale);
+      const submittedIdentity = codexPromptPrefixIdentity(dir, stale);
+      const alreadySubmitted = submittedIdentity !== null;
       const agentmuxEnvelope = /^\[(?:from\s+[^\]]+|krasch-recovery)\]/i.test(stale);
       // Never erase a local draft. During work even an agentmux envelope can
       // be a legitimate queued message; only an already-submitted duplicate
@@ -1773,6 +1774,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const cleared = await clearCodexComposerDraft({
         capture: () => captureScreen(agentName, pane),
         clear: () => t.clearInputLine(target),
+        ownsResurfacedDraft: submittedIdentity === null
+          ? null
+          : ({ composer }) => codexPromptPrefixIdentity(dir, composer) === submittedIdentity,
         sleep: wait,
       });
       if (!cleared.ok) {
@@ -1826,17 +1830,24 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await wait(750);
     if (await submitted() === true) return;
 
-    // Up to 3 rescue attempts, spaced 750ms. Every Enter is independently
-    // gated by the exact live draft. Busy is allowed only inside Codex's
-    // explicit queue editor: queued prompts do not reach JSONL until the
-    // active turn yields, and the first Enter is often eaten while a long
-    // paste is still painting. Once queue submission succeeds the composer
-    // disappears, so the next gated rescue is a no-op rather than a duplicate.
+    // Up to 3 rescue attempts, spaced 750ms. Recovery requires two consistent
+    // exact-draft observations and one final JSONL check immediately before
+    // Enter. Busy is allowed only inside Codex's explicit queue editor.
     for (let attempt = 0; attempt < 3; attempt++) {
-      const busy = await isBusy(agentName, pane).catch(() => true);
-      const snapshot = await captureScreen(agentName, pane).catch(() => "");
-      if (!shouldRescueCodexSubmit({ snapshot, prompt, busy })) return;
-      await t.sendEnter(target);
+      const outcome = await rescueCodexSubmitIfConfirmed({
+        prompt,
+        submitted,
+        observe: async () => {
+          const [busy, snapshot] = await Promise.all([
+            isBusy(agentName, pane).catch(() => true),
+            captureScreen(agentName, pane).catch(() => ""),
+          ]);
+          return { busy, snapshot };
+        },
+        rescue: () => t.sendEnter(target),
+        sleep: wait,
+      });
+      if (!outcome.rescued) return;
       await wait(750);
       if (await submitted() === true) return;
     }

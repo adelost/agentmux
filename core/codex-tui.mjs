@@ -245,6 +245,41 @@ export function shouldRescueCodexSubmit({ snapshot, prompt, busy }) {
 }
 
 /**
+ * Rescue Enter only after two consistent live observations.
+ *
+ * A successful submit can leave one torn tmux frame showing the old draft
+ * while Codex repaints. Fresh JSONL evidence is authoritative both before the
+ * observations and immediately before the rescue, closing the race where the
+ * event lands between a pane capture and Enter. This function is recovery
+ * only; the ordinary submit path pays no observation delay.
+ */
+export async function rescueCodexSubmitIfConfirmed({
+  prompt,
+  observe,
+  submitted = async () => false,
+  rescue,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  observationGapMs = 300,
+} = {}) {
+  if (await submitted() === true) return { rescued: false, via: "jsonl" };
+
+  const first = await observe();
+  if (!shouldRescueCodexSubmit({ ...first, prompt })) {
+    return { rescued: false, via: "not-stuck" };
+  }
+
+  await sleep(observationGapMs);
+  const second = await observe();
+  if (!shouldRescueCodexSubmit({ ...second, prompt })) {
+    return { rescued: false, via: "torn-repaint" };
+  }
+
+  if (await submitted() === true) return { rescued: false, via: "jsonl" };
+  await rescue();
+  return { rescued: true, via: "confirmed-stuck" };
+}
+
+/**
  * Clear an agentmux-owned multiline Codex draft without assuming one
  * kill-line sequence reaches every paragraph.
  *
@@ -257,37 +292,62 @@ export function shouldRescueCodexSubmit({ snapshot, prompt, busy }) {
 export async function clearCodexComposerDraft({
   capture,
   clear,
+  ownsResurfacedDraft = null,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   maxPasses = 64,
 } = {}) {
   let passes = 0;
-  while (passes < maxPasses) {
+  let emptyLooks = 0;
+  while (true) {
     let snapshot;
     try { snapshot = await capture(); }
     catch (error) { return { ok: false, passes, error: error.message }; }
     const composer = codexComposerText(snapshot);
-    if (composer === "") return { ok: true, passes };
+    if (composer === "") {
+      emptyLooks++;
+      if (emptyLooks >= 2) return { ok: true, passes };
+      // Keep the looks across separate repaint windows. Two back-to-back
+      // captures can sample the same torn frame and are not independent proof.
+      await sleep(300);
+      continue;
+    }
+    if (emptyLooks > 0) {
+      // A new human draft can appear during the confirmation gap. Once an
+      // empty composer has been observed, never treat later text as stale
+      // repaint residue unless the caller can tie it to the same submitted
+      // agentmux-owned JSONL event.
+      let stillOwned = false;
+      try {
+        stillOwned = typeof ownsResurfacedDraft === "function"
+          && await ownsResurfacedDraft({ snapshot, composer }) === true;
+      } catch (error) {
+        return { ok: false, passes, error: error.message };
+      }
+      if (!stillOwned) {
+        return {
+          ok: false,
+          passes,
+          error: "composer changed after an empty clear observation",
+        };
+      }
+    }
+    emptyLooks = 0;
     if (composer === null) {
-      return { ok: false, passes, error: "could not identify composer while clearing" };
+      return {
+        ok: false,
+        passes,
+        error: passes >= maxPasses
+          ? "could not identify composer after bounded clear"
+          : "could not identify composer while clearing",
+      };
+    }
+    if (passes >= maxPasses) {
+      return { ok: false, passes, error: "composer remained non-empty after bounded clear" };
     }
     try { await clear(); }
     catch (error) { return { ok: false, passes, error: error.message }; }
     passes++;
     await sleep(50);
-  }
-
-  try {
-    const composer = codexComposerText(await capture());
-    if (composer === "") return { ok: true, passes };
-    return {
-      ok: false,
-      passes,
-      error: composer === null
-        ? "could not identify composer after bounded clear"
-        : "composer remained non-empty after bounded clear",
-    };
-  } catch (error) {
-    return { ok: false, passes, error: error.message };
   }
 }
 

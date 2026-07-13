@@ -80,8 +80,10 @@ A prompt advances through `pending -> drafted -> submitted -> acknowledged`:
 Foreign human drafts, hidden composers, and ambiguous submit results fail
 closed instead of being overwritten or blindly re-pasted. Durable state and
 bounded dialect-aware recovery let a restarted bridge resume without losing a
-prompt or creating an unbounded duplicate loop. `amux doctor` reports queue
-health alongside bridge and tmux health.
+prompt or creating an unbounded duplicate loop. Rescue Enter and destructive
+composer cleanup require two consistent live observations, while a fresh exact
+JSONL event always wins over tmux repaint. `amux doctor` reports queue health
+alongside bridge and tmux health.
 
 ### Hook-pushed pane state (event ledger)
 

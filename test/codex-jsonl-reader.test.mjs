@@ -4,6 +4,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import {
   captureCodexPromptEchoCursor,
+  codexPromptPrefixIdentity,
   codexBusyStateFromEvents,
   extractFromCodexJsonl,
   isBusyFromCodexJsonl,
@@ -441,6 +442,28 @@ feature("isPromptInCodexJsonl", () => {
     })],
     then: ["only the JSONL-proven residue may be auto-cleared", (result, { cleanup }) => {
       expect(result).toEqual({ residue: true, shortDraft: false });
+      cleanup();
+    }],
+  });
+
+  unit("composer ownership identity distinguishes different submitted prompts", {
+    given: ["two prior long user messages", () => setupFakeCodex([
+      { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+      { type: "event_msg", payload: { type: "user_message", message:
+        "[from claw:1] First durable prompt with enough text to cross the ownership threshold safely." } },
+      { type: "event_msg", payload: { type: "user_message", message:
+        "[from claw:2] Second durable prompt with enough text to cross the ownership threshold safely." } },
+    ])],
+    when: ["resolving each visible residue", ({ paneDir }) => ({
+      first: codexPromptPrefixIdentity(paneDir,
+        "[from claw:1] First durable prompt with enough text to cross the ownership threshold"),
+      second: codexPromptPrefixIdentity(paneDir,
+        "[from claw:2] Second durable prompt with enough text to cross the ownership threshold"),
+    })],
+    then: ["each residue is tied to its own stable JSONL event", (result, { cleanup }) => {
+      expect(result.first).toBeTruthy();
+      expect(result.second).toBeTruthy();
+      expect(result.first).not.toBe(result.second);
       cleanup();
     }],
   });

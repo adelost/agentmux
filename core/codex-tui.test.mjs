@@ -10,6 +10,7 @@ import {
   isCodexFullscreenPager,
   isCodexTranscriptView,
   prepareCodexIdle,
+  rescueCodexSubmitIfConfirmed,
   shouldRescueCodexSubmit,
   verifiedEmptyCodexComposer,
 } from "./codex-tui.mjs";
@@ -161,6 +162,72 @@ q to quit   esc/← to edit prev
     })],
     then: ["only the explicit queue editor earns Enter", (result) =>
       expect(result).toEqual({ queued: true, genericBusy: false })],
+  });
+
+  unit("one stuck frame followed by a cleared composer never earns rescue Enter", {
+    given: ["a torn post-submit repaint", () => {
+      const prompt = "send this once";
+      const frames = [
+        { snapshot: `\n› ${prompt}\n`, busy: false },
+        { snapshot: "\n› Explain this codebase\n", busy: false },
+      ];
+      let index = 0;
+      let rescues = 0;
+      return {
+        prompt,
+        observe: async () => frames[Math.min(index++, frames.length - 1)],
+        submitted: async () => false,
+        rescue: async () => { rescues++; },
+        get rescues() { return rescues; },
+      };
+    }],
+    when: ["confirming the suspected stuck draft", (ctx) =>
+      rescueCodexSubmitIfConfirmed({ ...ctx, sleep: noSleep })],
+    then: ["the repaint clears without an extra Enter", (result, ctx) => {
+      expect(result).toEqual({ rescued: false, via: "torn-repaint" });
+      expect(ctx.rescues).toBe(0);
+    }],
+  });
+
+  unit("fresh JSONL wins after two stuck-looking frames", {
+    given: ["two matching frames while the user event becomes durable", () => {
+      const prompt = "already submitted";
+      let jsonlChecks = 0;
+      let rescues = 0;
+      return {
+        prompt,
+        observe: async () => ({ snapshot: `\n› ${prompt}\n`, busy: false }),
+        submitted: async () => ++jsonlChecks >= 2,
+        rescue: async () => { rescues++; },
+        get rescues() { return rescues; },
+      };
+    }],
+    when: ["checking durable evidence immediately before intervention", (ctx) =>
+      rescueCodexSubmitIfConfirmed({ ...ctx, sleep: noSleep })],
+    then: ["no rescue is sent through the torn pane", (result, ctx) => {
+      expect(result).toEqual({ rescued: false, via: "jsonl" });
+      expect(ctx.rescues).toBe(0);
+    }],
+  });
+
+  unit("two stable stuck frames with no JSONL evidence earn one rescue", {
+    given: ["a genuinely unsubmitted exact draft", () => {
+      const prompt = "press enter again";
+      let rescues = 0;
+      return {
+        prompt,
+        observe: async () => ({ snapshot: `\n› ${prompt}\n`, busy: false }),
+        submitted: async () => false,
+        rescue: async () => { rescues++; },
+        get rescues() { return rescues; },
+      };
+    }],
+    when: ["confirming twice before intervention", (ctx) =>
+      rescueCodexSubmitIfConfirmed({ ...ctx, sleep: noSleep })],
+    then: ["exactly one rescue Enter is allowed", (result, ctx) => {
+      expect(result).toEqual({ rescued: true, via: "confirmed-stuck" });
+      expect(ctx.rescues).toBe(1);
+    }],
   });
 
   unit("composer identity rejects recovery prompts that share only a short prefix", {
@@ -407,6 +474,81 @@ q to quit   esc/← to edit prev
     when: ["clearing with capture verification after every pass", (ctx) =>
       clearCodexComposerDraft({ ...ctx, sleep: noSleep })],
     then: ["both visible portions are removed before success", (result, ctx) => {
+      expect(result).toEqual({ ok: true, passes: 2 });
+      expect(ctx.clears).toBe(2);
+    }],
+  });
+
+  unit("cleanup never clears a human draft that appears after empty", {
+    given: ["a human types during the empty confirmation gap", () => {
+      const frames = [
+        "\n› stale agentmux draft\n",
+        "\n› Explain this codebase\n",
+        "\n› my private unsent human note\n",
+      ];
+      let captureIndex = 0;
+      let clears = 0;
+      return {
+        get clears() { return clears; },
+        capture: async () => frames[Math.min(captureIndex++, frames.length - 1)],
+        clear: async () => { clears++; },
+        ownsResurfacedDraft: async () => false,
+      };
+    }],
+    when: ["cleanup rechecks after the first empty frame", (ctx) =>
+      clearCodexComposerDraft({ ...ctx, sleep: noSleep })],
+    then: ["it fails closed without touching the foreign draft", (result, ctx) => {
+      expect(result).toEqual({
+        ok: false,
+        passes: 1,
+        error: "composer changed after an empty clear observation",
+      });
+      expect(ctx.clears).toBe(1);
+    }],
+  });
+
+  unit("cleanup remains bounded when an owned draft never clears", {
+    given: ["a composer that stays non-empty", () => {
+      let clears = 0;
+      return {
+        get clears() { return clears; },
+        capture: async () => "\n› persistent owned draft\n",
+        clear: async () => { clears++; },
+      };
+    }],
+    when: ["cleanup reaches its pass cap", (ctx) =>
+      clearCodexComposerDraft({ ...ctx, sleep: noSleep, maxPasses: 2 })],
+    then: ["it stops instead of looping or sending another destructive key", (result, ctx) => {
+      expect(result).toEqual({
+        ok: false,
+        passes: 2,
+        error: "composer remained non-empty after bounded clear",
+      });
+      expect(ctx.clears).toBe(2);
+    }],
+  });
+
+  unit("cleanup requires two empty frames across a torn repaint", {
+    given: ["an empty-looking frame followed by resurfaced draft text", () => {
+      const frames = [
+        "\n› stale tail\n",
+        "\n› Explain this codebase\n",
+        "\n› stale prefix resurfaced\n",
+        "\n› Explain this codebase\n",
+        "\n› Explain this codebase\n",
+      ];
+      let captureIndex = 0;
+      let clears = 0;
+      return {
+        get clears() { return clears; },
+        capture: async () => frames[Math.min(captureIndex++, frames.length - 1)],
+        clear: async () => { clears++; },
+        ownsResurfacedDraft: async ({ composer }) => composer === "stale prefix resurfaced",
+      };
+    }],
+    when: ["clearing through the repaint", (ctx) =>
+      clearCodexComposerDraft({ ...ctx, sleep: noSleep })],
+    then: ["the resurfaced prefix is cleared before two stable empty looks", (result, ctx) => {
       expect(result).toEqual({ ok: true, passes: 2 });
       expect(ctx.clears).toBe(2);
     }],

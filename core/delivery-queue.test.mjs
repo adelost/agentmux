@@ -52,6 +52,36 @@ feature("durable delivery queue", () => {
     }],
   });
 
+  component("message identity dedup survives a queue restart", {
+    given: ["one submitted Discord job on disk", () => {
+      const rootDir = tempRoot();
+      const firstQueue = createDeliveryQueue({ rootDir });
+      const first = firstQueue.enqueue({
+        agentName: "ai",
+        pane: 5,
+        text: "same Discord message",
+        idempotencyKey: "discord:channel:message-42",
+      });
+      firstQueue.update(first, { status: "submitted", submittedAt: 1_000 });
+      return { rootDir, first };
+    }],
+    when: ["a replacement bridge enqueues the same message identity", ({ rootDir }) => {
+      const reopened = createDeliveryQueue({ rootDir });
+      const replay = reopened.enqueue({
+        agentName: "ai",
+        pane: 5,
+        text: "same Discord message",
+        idempotencyKey: "discord:channel:message-42",
+      });
+      return { replay, jobs: reopened.list("ai", 5) };
+    }],
+    then: ["the durable submitted fence is reused instead of creating a second job", ({ replay, jobs }, ctx) => {
+      expect(replay).toMatchObject({ id: ctx.first.id, status: "submitted", submittedAt: 1_000 });
+      expect(jobs).toHaveLength(1);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("CLI polling distinguishes acknowledged from pending", {
     given: ["one queued job", () => {
       const rootDir = tempRoot();
