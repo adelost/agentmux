@@ -318,6 +318,7 @@ export async function prepareCodexIdle({
   captureLines = 15,
   allowBusy = false,
   requireVisibleComposer = false,
+  openBusyQueue = false,
 } = {}) {
   let busy = false;
   try {
@@ -354,7 +355,13 @@ export async function prepareCodexIdle({
       // During tools/reasoning Codex intentionally hides the normal composer
       // and advertises "tab to queue message". Tab opens a dedicated queue
       // editor without interrupting the active turn; Escape would interrupt.
-      if (codexOffersQueueComposer(snapshot) && agent.sendTab) {
+      // Prompt delivery explicitly opts into openBusyQueue. While Codex is
+      // busy, Tab is its non-interrupting queue key even during short repaints
+      // where the "tab to queue message" hint itself is absent. The old
+      // hint-only gate waited up to 8–12 seconds for that text to return.
+      // Other callers (for example /status) retain the advertised-hint rule.
+      const mayOpenPromptQueue = openBusyQueue || codexOffersQueueComposer(snapshot);
+      if (mayOpenPromptQueue && agent.sendTab) {
         try { await agent.sendTab(name, pane); }
         catch (err) { return fail("compose", `could not open the Codex queue composer: ${err.message}`); }
         for (let attempt = 0; attempt < 16; attempt++) {

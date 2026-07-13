@@ -1498,6 +1498,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         sleep: wait,
         allowBusy: true,
         requireVisibleComposer: true,
+        openBusyQueue: true,
       });
       if (ready.ok) return ready;
       lastError = ready.error || lastError;

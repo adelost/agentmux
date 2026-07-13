@@ -635,6 +635,28 @@ feature("prepareCodexIdle", () => {
     }],
   });
 
+  unit("busy prompt opens the queue while its hint is between paints", {
+    given: ["a working prompt pane whose queue hint is temporarily absent", () => ({
+      agent: fakeAgent({
+        frames: ["\n• Working\n\nstreaming tool output\n", "\n› Write tests for @filename\n"],
+        busy: true,
+      }),
+    })],
+    when: ["preparing actual prompt input", ({ agent }) => prepareCodexIdle({
+      agent,
+      name: "claw",
+      pane: 3,
+      sleep: noSleep,
+      allowBusy: true,
+      requireVisibleComposer: true,
+      openBusyQueue: true,
+    })],
+    then: ["Tab opens the non-interrupting queue immediately", (result, { agent }) => {
+      expect(result).toMatchObject({ ok: true, busy: true });
+      expect(agent.keys).toEqual(["<tab>"]);
+    }],
+  });
+
   unit("unknown UI fails closed after one reveal attempt", {
     given: ["no composer and no receipt", () => ({
       agent: fakeAgent({ frames: ["\nunknown\n", "\nstill unknown\n"] }),
