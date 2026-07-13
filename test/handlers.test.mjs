@@ -7,10 +7,11 @@ import { createHandlers, renderCatchupLine, formatCatchupTime } from "../handler
 
 // --- Test helpers ---
 
-function mockMsg({ content = "hello", channelId = "ch1", isBot = false, createdTimestamp } = {}) {
+function mockMsg({ content = "hello", channelId = "ch1", id = "msg-1", isBot = false, createdTimestamp } = {}) {
   const replies = [];
   return {
     channelId,
+    id,
     isBot,
     content,
     createdTimestamp,
@@ -63,6 +64,10 @@ function setup({ mappingOverride, channelMapEntries, agentsYamlPath, codexStatus
     sendAndWait: vi.fn(async () => "agent reply"),
     sendOnly: vi.fn(async () => {}),
     waitForPromptEcho: vi.fn(async () => true),
+    capturePromptEchoCursor: vi.fn(async () => ({
+      kind: "test-prompt-events-v1",
+      seen: ["historical-event"],
+    })),
     startProgressTimer: vi.fn(() => ({ timer: setInterval(() => {}, 99999), sentCount: () => 0 })),
   };
 
@@ -559,7 +564,7 @@ feature("processMessage pipeline (delivery)", () => {
         0,
         prompt,
         expect.any(Number),
-        expect.objectContaining({ notBeforeMs: expect.any(Number) }),
+        expect.objectContaining({ cursor: expect.any(Object) }),
       );
     }],
   });
@@ -661,6 +666,7 @@ feature("processMessage pipeline (delivery)", () => {
       const error = new Error("Codex prompt delivery blocked: composer is not empty");
       error.code = "AMUX_DELIVERY_BLOCKED";
       s.agent.sendOnly.mockRejectedValue(error);
+      s.agent.waitForPromptEcho.mockResolvedValue(false);
       return { ...s, msg: mockMsg({ content: "do not lose this" }) };
     }],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
@@ -672,25 +678,50 @@ feature("processMessage pipeline (delivery)", () => {
     }],
   });
 
-  component("Discord creation time is reused as the exact delivery cursor", {
-    given: ["a message whose first precheck misses and post-send echo succeeds", () => {
+  component("Discord delivery uses a local event cursor instead of server time", {
+    given: ["a message whose post-send echo succeeds", () => {
       const s = setup();
-      s.agent.waitForPromptEcho
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(true);
+      s.agent.waitForPromptEcho.mockResolvedValue(true);
       return {
         ...s,
-        cursor: 1_784_000_000_000,
         msg: mockMsg({ content: "cursor prompt", createdTimestamp: 1_784_000_000_000 }),
       };
     }],
     when: ["onMessage is called", ({ onMessage, msg }) => onMessage(msg)],
-    then: ["precheck and confirmation share the transport timestamp", (_, { agent, cursor }) => {
+    then: ["verification carries the captured JSONL cursor, not createdTimestamp", (_, { agent }) => {
       expect(agent.sendOnly).toHaveBeenCalledTimes(1);
-      expect(agent.waitForPromptEcho).toHaveBeenCalledTimes(2);
+      expect(agent.waitForPromptEcho).toHaveBeenCalledTimes(1);
       for (const call of agent.waitForPromptEcho.mock.calls) {
-        expect(call[4]).toEqual({ notBeforeMs: cursor });
+        expect(call[4]).toEqual({
+          cursor: { kind: "test-prompt-events-v1", seen: ["historical-event"] },
+        });
       }
+    }],
+  });
+
+  component("a failed Discord delivery reuses its persisted cursor on reconciliation", {
+    given: ["one message that fails all first-pass checks, then reveals a late echo", () => {
+      const s = setup();
+      s.agent.waitForPromptEcho
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true);
+      s.agent.isBusy.mockResolvedValue(false);
+      return { ...s, msg: mockMsg({ id: "durable-1", content: "late durable echo" }) };
+    }],
+    when: ["the live event fails and the same Discord id is reconciled", async ({ onMessage, msg }) => {
+      const first = await onMessage(msg);
+      const second = await onMessage(msg);
+      return { first, second };
+    }],
+    then: ["replay prechecks the original cursor and never writes the prompt a fourth time", (result, { agent }) => {
+      expect(result).toEqual({ first: { delivered: false }, second: { delivered: true } });
+      expect(agent.capturePromptEchoCursor).toHaveBeenCalledTimes(1);
+      expect(agent.sendOnly).toHaveBeenCalledTimes(3);
+      expect(agent.waitForPromptEcho.mock.calls.at(-1)[4]).toEqual({
+        cursor: { kind: "test-prompt-events-v1", seen: ["historical-event"] },
+      });
     }],
   });
 

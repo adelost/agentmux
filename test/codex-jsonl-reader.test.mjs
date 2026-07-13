@@ -1,8 +1,9 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "fs";
+import { appendFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
+  captureCodexPromptEchoCursor,
   codexBusyStateFromEvents,
   extractFromCodexJsonl,
   isBusyFromCodexJsonl,
@@ -34,6 +35,7 @@ function setupFakeCodex(events, paneDir = "/fake/workspace") {
   return {
     paneDir,
     fakeHome,
+    file,
     cleanup: () => {
       process.env.HOME = origHome;
       rmSync(fakeHome, { recursive: true, force: true });
@@ -392,6 +394,36 @@ feature("isPromptInCodexJsonl", () => {
     })],
     then: ["only the occurrence newer than the cursor acknowledges", (r, { cleanup }) => {
       expect(r).toEqual({ afterOld: true, afterBoth: false });
+      cleanup();
+    }],
+  });
+
+  unit("event cursors survive Discord and host clock skew", {
+    given: ["one historical occurrence captured before a new skewed event", () => {
+      const ctx = setupFakeCodex([
+        { type: "session_meta", payload: { cwd: "/fake/workspace" } },
+        { type: "event_msg", timestamp: "2026-07-13T06:30:00Z", payload: {
+          type: "user_message", message: "same prompt",
+        } },
+      ]);
+      ctx.cursor = captureCodexPromptEchoCursor(ctx.paneDir, "same prompt");
+      ctx.before = isPromptInCodexJsonl(ctx.paneDir, "same prompt", { cursor: ctx.cursor });
+      appendFileSync(ctx.file, `${JSON.stringify({
+        type: "event_msg",
+        timestamp: "2026-07-13T06:34:58Z",
+        payload: { type: "user_message", message: "same prompt" },
+      })}\n`);
+      return ctx;
+    }],
+    when: ["checking with both an event cursor and a later Discord timestamp", (ctx) => ({
+      before: ctx.before,
+      after: isPromptInCodexJsonl(ctx.paneDir, "same prompt", {
+        cursor: ctx.cursor,
+        notBeforeMs: Date.parse("2026-07-13T06:35:00Z"),
+      }),
+    })],
+    then: ["only the new event identity matters; the skewed timestamp is ignored", (result, { cleanup }) => {
+      expect(result).toEqual({ before: false, after: true });
       cleanup();
     }],
   });

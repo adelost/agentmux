@@ -76,6 +76,8 @@ export async function sendPromptVerified(agent, agentName, pane, text, opts = {}
 
 async function promptDeliveryAttempts(agent, agentName, pane, text, {
   verifyText = null, attempts = 3, echoTimeoutMs = 6000, log = () => {},
+  echoCursor: suppliedEchoCursor = null,
+  precheckEcho = false,
   notBeforeMs: suppliedNotBeforeMs = null,
 } = {}) {
   const target = `${agentName}:.${pane}`;
@@ -84,14 +86,22 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
   // an identical historical "test" or recovery prompt makes a lost send look
   // acknowledged immediately.
   const parsedCursor = Number(suppliedNotBeforeMs);
-  const hasDurableCursor = suppliedNotBeforeMs != null && Number.isFinite(parsedCursor) && parsedCursor > 0;
-  const notBeforeMs = hasDurableCursor ? parsedCursor : Date.now();
+  const hasTimestampCursor = suppliedNotBeforeMs != null
+    && Number.isFinite(parsedCursor) && parsedCursor > 0;
+  const notBeforeMs = hasTimestampCursor ? parsedCursor : Date.now();
+  let echoCursor = suppliedEchoCursor;
+  if (!echoCursor && typeof agent.capturePromptEchoCursor === "function") {
+    try { echoCursor = await agent.capturePromptEchoCursor(agentName, pane, needle); }
+    catch (error) { log(`prompt cursor capture failed; using local timestamp: ${error.message}`); }
+  }
+  const echoOptions = echoCursor ? { cursor: echoCursor } : { notBeforeMs };
 
-  // A Discord replay carries the original message timestamp. If an earlier
-  // attempt eventually reached the rollout after its bridge call returned,
-  // acknowledge that exact echo before touching the composer again.
-  if (hasDurableCursor) {
-    const alreadyEchoed = await agent.waitForPromptEcho(agentName, pane, needle, 0, { notBeforeMs });
+  // A durable Discord replay reuses the event-identity cursor captured before
+  // its FIRST pane write. If that earlier attempt eventually reached JSONL,
+  // acknowledge it before touching the composer again. Legacy timestamp
+  // callers keep their existing precheck until all integrations migrate.
+  if (precheckEcho || hasTimestampCursor) {
+    const alreadyEchoed = await agent.waitForPromptEcho(agentName, pane, needle, 0, echoOptions);
     if (alreadyEchoed) return { delivered: true, attempts: 0, via: "echo" };
   }
 
@@ -110,11 +120,13 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
         log(`send attempt ${attempt} errored${err.code === "AMUX_DELIVERY_BLOCKED" ? " (terminal)" : " (verifying echo anyway)"}: ${err.message.split("\n").slice(0, 2).join(" | ")}`);
       });
 
-    // The agent raises this when a foreign draft/modal made input unsafe, or
-    // when our just-typed draft could not be verified and was cleared. Retrying
-    // the same terminal state three times only blocks the pane lock and channel
-    // queue; durable inbound recovery will try again after state changes.
+    // A terminal composer error can be SECONDARY: the previous attempt may
+    // already have submitted and written JSONL while its receipt check lagged.
+    // Recheck the exact local event cursor before surfacing the terminal error;
+    // this is what prevents a successful turn from producing a false warning.
     if (sendError?.code === "AMUX_DELIVERY_BLOCKED") {
+      const echoed = await agent.waitForPromptEcho(agentName, pane, needle, 0, echoOptions);
+      if (echoed) return { delivered: true, attempts: attempt, via: "echo" };
       return {
         delivered: false,
         attempts: attempt,
@@ -125,7 +137,7 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
     }
 
     const echoWaitMs = sendReceipt?.queued ? Math.min(echoTimeoutMs, 1_000) : echoTimeoutMs;
-    const echoed = await agent.waitForPromptEcho(agentName, pane, needle, echoWaitMs, { notBeforeMs });
+    const echoed = await agent.waitForPromptEcho(agentName, pane, needle, echoWaitMs, echoOptions);
     if (echoed) return { delivered: true, attempts: attempt, via: "echo" };
 
     // Busy Codex queues are written to rollout JSONL only after the active

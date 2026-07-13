@@ -175,6 +175,42 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
   const sendLocks = new Map();
   const followers = new Map(); // channelId → { timer, sentCount, lastHash }
   const parkWarnedSince = new Map(); // "name:pane" → park.sinceMs already warned (two-strike confirm)
+  const promptCursorStateKey = "inbound_prompt_echo_cursors";
+  const promptCursorLimit = 200;
+
+  const promptCursorId = (msg) => msg?.channelId && msg?.id
+    ? `${msg.channelId}:${msg.id}`
+    : null;
+
+  async function promptCursorForMessage(msg, mapping, pane, prompt) {
+    const id = promptCursorId(msg);
+    const stored = state.get(promptCursorStateKey, {}) || {};
+    if (id && stored[id]?.cursor) return { cursor: stored[id].cursor, reused: true };
+
+    const cursor = typeof agent.capturePromptEchoCursor === "function"
+      ? await agent.capturePromptEchoCursor(mapping.name, pane, prompt).catch(() => null)
+      : null;
+    if (!id || !cursor) return { cursor, reused: false };
+
+    stored[id] = { cursor, createdAt: Date.now() };
+    const ordered = Object.entries(stored)
+      .sort((a, b) => Number(a[1]?.createdAt || 0) - Number(b[1]?.createdAt || 0));
+    while (ordered.length > promptCursorLimit) {
+      const [oldestId] = ordered.shift();
+      delete stored[oldestId];
+    }
+    state.set(promptCursorStateKey, stored);
+    return { cursor, reused: false };
+  }
+
+  function clearPromptCursorForMessage(msg) {
+    const id = promptCursorId(msg);
+    if (!id) return;
+    const stored = state.get(promptCursorStateKey, {}) || {};
+    if (!(id in stored)) return;
+    delete stored[id];
+    state.set(promptCursorStateKey, stored);
+  }
 
   function withPaneSendLock(queueKey, work) {
     const prev = sendLocks.get(queueKey) || Promise.resolve();
@@ -761,14 +797,19 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       const echoTimeout = Math.max(50, Math.min(6_000, pollInterval * 500));
       let delivered = false;
 
-      const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
-        sendPromptVerified(agent, mapping.name, pane, promptToSend, {
+      const result = await withPaneSendLock(`${mapping.name}:${pane}`, async () => {
+        const receipt = await promptCursorForMessage(msg, mapping, pane, cleanPrompt);
+        const outcome = await sendPromptVerified(agent, mapping.name, pane, promptToSend, {
           verifyText: cleanPrompt,
           attempts: 3,
           echoTimeoutMs: echoTimeout,
-          notBeforeMs: msg.createdTimestamp,
+          echoCursor: receipt.cursor,
+          precheckEcho: receipt.reused,
           log: (m) => console.warn(`[${ts()}] ⚠ ${mapping.name}:${pane} ${m}`),
-        }));
+        });
+        if (outcome.delivered) clearPromptCursorForMessage(msg);
+        return outcome;
+      });
       delivered = result.delivered;
       if (!delivered) {
         const attempts = result.attempts || 1;
@@ -976,13 +1017,18 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
     // Follow mode changes output handling, not delivery guarantees.
     if (followers.has(msg.channelId)) {
-      const result = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
-        sendPromptVerified(agent, mapping.name, pane, cleanPrompt, {
+      const result = await withPaneSendLock(`${mapping.name}:${pane}`, async () => {
+        const receipt = await promptCursorForMessage(msg, mapping, pane, cleanPrompt);
+        const outcome = await sendPromptVerified(agent, mapping.name, pane, cleanPrompt, {
           attempts: 3,
           echoTimeoutMs: Math.max(50, Math.min(6_000, pollInterval * 500)),
-          notBeforeMs: msg.createdTimestamp,
+          echoCursor: receipt.cursor,
+          precheckEcho: receipt.reused,
           log: (m) => console.warn(`follow ${mapping.name}:${pane}: ${m}`),
-        }));
+        });
+        if (outcome.delivered) clearPromptCursorForMessage(msg);
+        return outcome;
+      });
       if (!result.delivered) {
         await msg.send(`⚠️ Agent did not acknowledge prompt after ${result.attempts || 1} attempt${result.attempts === 1 ? "" : "s"}. Try \`/raw\` to inspect.`)
           .catch((err) => console.warn(`follow delivery warning failed: ${err.message}`));

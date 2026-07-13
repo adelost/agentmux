@@ -16,6 +16,7 @@ import { join } from "path";
 import { claudeProjectDir } from "./claude-paths.mjs";
 import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 import { describeToolCall } from "./tool-display.mjs";
+import { captureJsonlAppendCursor, jsonlEventsAfterCursor } from "./jsonl-append-cursor.mjs";
 
 
 // Bounded tail-window reading for session jsonl. Long-running panes grow these
@@ -236,12 +237,31 @@ function extractPromptFromEvent(event) {
  *
  * @returns boolean or null (no jsonl file → caller should fall back)
  */
-export function isPromptInJsonl(paneDir, promptText, { notBeforeMs = 0 } = {}) {
+const CLAUDE_PROMPT_CURSOR_KIND = "claude-prompt-events-v1";
+
+/** Local event-identity cursor; see the Codex twin for the clock-skew rationale. */
+export function captureClaudePromptEchoCursor(paneDir, promptText) {
+  const needle = promptText?.trim();
+  if (!needle) return null;
+  const projectDir = claudeProjectDir(paneDir);
+  const files = listJsonlFiles(projectDir);
+  return captureJsonlAppendCursor(CLAUDE_PROMPT_CURSOR_KIND, files.map(({ path }) => path));
+}
+
+export function isPromptInJsonl(paneDir, promptText, { notBeforeMs = 0, cursor = null } = {}) {
   const needle = promptText?.trim();
   if (!needle) return null;
 
   const projectDir = claudeProjectDir(paneDir);
-  if (!existsSync(projectDir) || listJsonlFiles(projectDir).length === 0) return null;
+  const files = listJsonlFiles(projectDir);
+  if (!existsSync(projectDir) || files.length === 0) {
+    return cursor?.kind === CLAUDE_PROMPT_CURSOR_KIND ? false : null;
+  }
+
+  if (cursor?.kind === CLAUDE_PROMPT_CURSOR_KIND) {
+    const events = jsonlEventsAfterCursor(files.map(({ path }) => path), cursor);
+    return events.some((event) => promptEventMatches(event, needle));
+  }
 
   // findJsonlAndEvents scans all files newest-first for the needle, so it
   // returns non-null iff some file contains the prompt.
@@ -316,19 +336,21 @@ function normalizePrompt(text) {
  * attachment). Tries exact match first, then a normalised-both-sides match
  * so wrapper-decoration doesn't cause a false miss.
  */
-function promptAppearsInEvents(events, promptText) {
+function promptEventMatches(event, promptText) {
   const needle = promptText?.trim();
   if (!needle) return false;
   const fuzzyNeedle = normalizePrompt(needle);
-  for (const e of events) {
-    const text = extractPromptFromEvent(e);
-    if (!text) continue;
-    const trimmed = text.trim();
-    if (trimmed === needle) return true;
-    if (fuzzyNeedle && normalizePrompt(trimmed) === fuzzyNeedle) return true;
-  }
-  return false;
+  const text = extractPromptFromEvent(event);
+  if (!text) return false;
+  const trimmed = text.trim();
+  return trimmed === needle
+    || Boolean(fuzzyNeedle && normalizePrompt(trimmed) === fuzzyNeedle);
 }
+
+function promptAppearsInEvents(events, promptText) {
+  return events.some((event) => promptEventMatches(event, promptText));
+}
+
 
 /**
  * Format a tool_use block into a compact one-line string suitable for Discord.

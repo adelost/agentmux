@@ -1,9 +1,9 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { mkdtempSync, mkdirSync, copyFileSync, rmSync, writeFileSync, utimesSync } from "fs";
+import { appendFileSync, mkdtempSync, mkdirSync, copyFileSync, rmSync, writeFileSync, utimesSync } from "fs";
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
-import { extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl, isPromptInJsonl, readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, countTurnsSince } from "../core/jsonl-reader.mjs";
+import { captureClaudePromptEchoCursor, extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl, isPromptInJsonl, readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, countTurnsSince } from "../core/jsonl-reader.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const fixtureFile = (name) => join(__dir, "fixtures/jsonl", name);
@@ -338,6 +338,32 @@ feature("isPromptInJsonl: matches queue-operation and attachment events", () => 
       })],
     then: ["the new queue receipt is found", (r, { cleanup }) => {
       expect(r).toBe(true);
+      cleanup();
+    }],
+  });
+
+  unit("local event cursors ignore cross-machine timestamp skew", {
+    given: ["a historical prompt plus a cursor captured before its repeat", () => {
+      const ctx = setupFakeProject("simple-text.jsonl");
+      ctx.cursor = captureClaudePromptEchoCursor(ctx.paneDir, "what is 2+2?");
+      ctx.before = isPromptInJsonl(ctx.paneDir, "what is 2+2?", { cursor: ctx.cursor });
+      appendFileSync(join(ctx.projectDir, "session-abc123.jsonl"), `${JSON.stringify({
+        uuid: "new-skewed-prompt",
+        timestamp: "2026-07-13T06:34:58Z",
+        type: "user",
+        message: { content: "what is 2+2?" },
+      })}\n`);
+      return ctx;
+    }],
+    when: ["checking despite a later external timestamp", (ctx) => ({
+      before: ctx.before,
+      after: isPromptInJsonl(ctx.paneDir, "what is 2+2?", {
+        cursor: ctx.cursor,
+        notBeforeMs: Date.parse("2026-07-13T06:35:00Z"),
+      }),
+    })],
+    then: ["the new JSONL identity acknowledges independently of wall-clock order", (result, { cleanup }) => {
+      expect(result).toEqual({ before: false, after: true });
       cleanup();
     }],
   });

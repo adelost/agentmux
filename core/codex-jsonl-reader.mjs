@@ -17,6 +17,7 @@ import { join } from "path";
 import { createHash } from "crypto";
 import { describeCustomExec, describeToolCall } from "./tool-display.mjs";
 import { codexSessionDirs } from "./codex-profiles.mjs";
+import { captureJsonlAppendCursor, jsonlEventsAfterCursor } from "./jsonl-append-cursor.mjs";
 
 // Content-addressed line identity for the watcher's posted-set dedupe. Codex
 // rollout events carry no stable id (no uuid, no payload.id), so we key on a
@@ -256,29 +257,53 @@ function latestSessionFor(paneDir) {
   return candidates[0].path;
 }
 
+const CODEX_PROMPT_CURSOR_KIND = "codex-prompt-events-v1";
+
+function codexPromptEventMatches(event, needle) {
+  return event?.type === "event_msg"
+    && event.payload?.type === "user_message"
+    && event.payload.message === needle;
+}
+
+/**
+ * Capture the identities of every currently visible occurrence of one exact
+ * prompt. A later receipt must contain a NEW event identity, so repeated
+ * prompts remain distinguishable without comparing Discord's server clock to
+ * the host clock used by Codex JSONL timestamps.
+ */
+export function captureCodexPromptEchoCursor(paneDir, promptText) {
+  const needle = promptText?.trim();
+  if (!needle) return null;
+  const file = latestSessionFor(paneDir);
+  return captureJsonlAppendCursor(CODEX_PROMPT_CURSOR_KIND, file ? [file] : []);
+}
+
 /**
  * Check if a given prompt has been written to Codex's rollout jsonl for
  * this pane. Echo confirmation via data, not tmux pane text.
  *
  * @returns boolean (true = prompt found) or null (no session file)
  */
-export function isPromptInCodexJsonl(paneDir, promptText, { notBeforeMs = 0 } = {}) {
+export function isPromptInCodexJsonl(paneDir, promptText, { notBeforeMs = 0, cursor = null } = {}) {
   const needle = promptText?.trim();
   if (!needle) return null;
 
   const file = latestSessionFor(paneDir);
   if (!file) return null;
 
-  const events = parseOperationalJsonl(file);
+  const eventCursor = cursor?.kind === CODEX_PROMPT_CURSOR_KIND;
+  const events = eventCursor
+    ? jsonlEventsAfterCursor([file], cursor)
+    : parseOperationalJsonl(file);
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
-    if (e.type !== "event_msg") continue;
-    if (e.payload?.type !== "user_message") continue;
+    if (!codexPromptEventMatches(e, needle)) continue;
+    if (eventCursor) return true;
     if (notBeforeMs) {
       const eventMs = Date.parse(e.timestamp || "");
       if (!Number.isFinite(eventMs) || eventMs < notBeforeMs) continue;
     }
-    if (e.payload.message === needle) return true;
+    return true;
   }
   return false;
 }

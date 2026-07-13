@@ -13,6 +13,10 @@ function fakeAgent({ echoResults = [], busyResults = [] } = {}) {
   const agent = {
     calls,
     echoOptions: [],
+    capturePromptEchoCursor: async () => {
+      calls.push("cursor");
+      return { kind: "test-prompt-events-v1", seen: [] };
+    },
     dismissBlockingPrompt: async () => { calls.push("dismiss"); return null; },
     sendOnly: async (name, text) => { calls.push(`send:${text.slice(0, 25)}`); },
     sendEnter: async () => { calls.push("enter"); },
@@ -40,7 +44,7 @@ feature("sendPromptVerified", () => {
     })],
     then: ["delivered via echo, dismiss ran before send", ({ result, agent }) => {
       expect(result).toEqual({ delivered: true, attempts: 1, via: "echo" });
-      expect(agent.calls.slice(0, 2)).toEqual(["dismiss", "send:kör testerna"]);
+      expect(agent.calls.slice(0, 3)).toEqual(["cursor", "dismiss", "send:kör testerna"]);
     }],
   });
 
@@ -76,30 +80,27 @@ feature("sendPromptVerified", () => {
       expect(result).toEqual({ delivered: true, attempts: 2, via: "echo" })],
   });
 
-  component("echo verification carries a monotonic delivery cursor", {
+  component("echo verification carries a local JSONL event cursor", {
     given: ["an agent that echoes immediately", () => ({
       agent: fakeAgent({ echoResults: [true] }),
-      before: Date.now(),
     })],
-    when: ["sending a repeated prompt", async ({ agent, before }) => ({
+    when: ["sending a repeated prompt", async ({ agent }) => ({
       result: await sendPromptVerified(agent, "claw", 1, "test"),
-      cursor: agent.echoOptions[0]?.notBeforeMs,
-      before,
-      after: Date.now(),
+      cursor: agent.echoOptions[0]?.cursor,
     })],
-    then: ["only an occurrence from this delivery can acknowledge", ({ result, cursor, before, after }) => {
+    then: ["only an event absent from the pre-send cursor can acknowledge", ({ result, cursor }) => {
       expect(result.delivered).toBe(true);
-      expect(cursor).toBeGreaterThanOrEqual(before);
-      expect(cursor).toBeLessThanOrEqual(after);
+      expect(cursor).toEqual({ kind: "test-prompt-events-v1", seen: [] });
     }],
   });
 
   component("durable replay cursor acknowledges a late echo before retyping", {
-    given: ["an original Discord timestamp and an echo now visible", () =>
+    given: ["a persisted event cursor and an echo now visible", () =>
       fakeAgent({ echoResults: [true] })],
     when: ["reconciling the same transport message", async (agent) => ({
       result: await sendPromptVerified(agent, "claw", 1, "late prompt", {
-        notBeforeMs: Date.now() - 5_000,
+        echoCursor: { kind: "test-prompt-events-v1", seen: ["old-event"] },
+        precheckEcho: true,
       }),
       agent,
     })],
@@ -124,10 +125,28 @@ feature("sendPromptVerified", () => {
       result: await sendPromptVerified(agent, "claw", 1, "new prompt", { attempts: 3 }),
       agent,
     })],
-    then: ["it fails fast without echo waits or duplicate retries", ({ result, agent }) => {
+    then: ["it fails fast after one final JSONL check and no duplicate retry", ({ result, agent }) => {
       expect(result).toMatchObject({ delivered: false, attempts: 1, blocked: true });
       expect(agent.calls.filter((call) => call === "blocked-send")).toHaveLength(1);
-      expect(agent.calls).not.toContain("echo");
+      expect(agent.calls.filter((call) => call === "echo")).toHaveLength(1);
+    }],
+  });
+
+  component("a terminal retry error cannot hide an echo that already landed", {
+    given: ["a send that reports a composer block after JSONL gained the prompt", () => {
+      const agent = fakeAgent({ echoResults: [true] });
+      agent.sendOnly = async () => {
+        agent.calls.push("blocked-send");
+        const error = new Error("Codex prompt delivery blocked: exact prompt did not finish painting");
+        error.code = "AMUX_DELIVERY_BLOCKED";
+        throw error;
+      };
+      return agent;
+    }],
+    when: ["verifying before returning the terminal failure", (agent) =>
+      sendPromptVerified(agent, "ai", 5, "already delivered")],
+    then: ["the exact JSONL echo wins and no false warning receipt is produced", (result) => {
+      expect(result).toEqual({ delivered: true, attempts: 1, via: "echo" });
     }],
   });
 

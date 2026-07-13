@@ -9,8 +9,14 @@ import { createTmuxAdapter } from "./core/tmux.mjs";
 import { stripPaneChrome } from "./core/pane-chrome.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
 import { detectDialect, COMPOSER_LINE_RE, foreignComposerText } from "./core/dialects.mjs";
-import { extractFromJsonl, isBusyFromJsonl, isPromptInJsonl } from "./core/jsonl-reader.mjs";
 import {
+  captureClaudePromptEchoCursor,
+  extractFromJsonl,
+  isBusyFromJsonl,
+  isPromptInJsonl,
+} from "./core/jsonl-reader.mjs";
+import {
+  captureCodexPromptEchoCursor,
   extractFromCodexJsonl,
   isBusyFromCodexJsonl,
   isPromptInCodexJsonl,
@@ -1389,6 +1395,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
    */
   async function waitForPromptEcho(agentName, pane, promptText, timeoutMs = 15000, {
     notBeforeMs = 0,
+    cursor = null,
   } = {}) {
     const needle = promptText?.trim();
     if (!needle) return true;
@@ -1403,14 +1410,29 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     while (true) {
       // Try jsonl first (width-independent, reliable)
       let found = null;
-      if (dialect === "claude") found = isPromptInJsonl(dir, promptText, { notBeforeMs });
-      else if (dialect === "codex") found = isPromptInCodexJsonl(dir, promptText, { notBeforeMs });
+      if (dialect === "claude") found = isPromptInJsonl(dir, promptText, { notBeforeMs, cursor });
+      else if (dialect === "codex") {
+        found = isPromptInCodexJsonl(dir, promptText, { notBeforeMs, cursor });
+      }
       if (found === true) return true;
 
       if (Date.now() >= deadline) break;
       await wait(200);
     }
     return false;
+  }
+
+  /**
+   * Snapshot exact prompt-event identities before a pane write. The returned
+   * serializable cursor can survive a bridge retry/restart and proves that a
+   * later identical JSONL event is new without using cross-machine clocks.
+   */
+  async function capturePromptEchoCursor(agentName, pane, promptText) {
+    const dir = paneDir(agentConfig(agentName).dir, pane);
+    const dialect = paneDialectName(agentName, pane);
+    if (dialect === "claude") return captureClaudePromptEchoCursor(dir, promptText);
+    if (dialect === "codex") return captureCodexPromptEchoCursor(dir, promptText);
+    return null;
   }
 
   // --- Send ---
@@ -1998,7 +2020,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   return {
     ensureReady, sendAndWait, sendOnly,
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
-    capturePane, captureScreen, sendEscape, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
+    capturePane, captureScreen, capturePromptEchoCursor, sendEscape, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
     dismissBlockingPrompt, waitForPromptEcho,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession,
     sanitizeTmuxGlobalEnv, restartCodex, restartFleet,
