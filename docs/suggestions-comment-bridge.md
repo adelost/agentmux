@@ -25,10 +25,12 @@ add its public project ID and responsible amux target. A configured ID that is
 not returned by `/api/config` is a visible error; public projects without a
 mapping are intentionally ignored.
 
-Every handoff includes the global implementation policy. The relay prefers a
-bounded `implementationPolicy` supplied by `/api/config` (globally or on the
-matching project). Current production does not expose it, so the checked-in
-fail-safe is:
+Every handoff includes the global implementation policy. The relay prefers the
+bounded canonical structured `implementationPolicy` supplied by `/api/config`
+(`title`, `summary`, `principles`, `boundary`, and the complete
+`commentIntent` object), serializes it deterministically, and also accepts the
+legacy string form. When the endpoint has no policy, the checked-in fail-safe
+is:
 
 > Rotorsak före plåster: förstå och åtgärda grundorsaken. Refaktorera den
 > berörda sömmen när en hållbar rotfix kräver det och lämna berörd kod bättre.
@@ -80,15 +82,21 @@ reply are all acknowledged by that reply. If no answer appears, the relay uses
 a bounded schedule: initial handoff, reminders after 15 minutes, 60 minutes,
 and 4 hours, followed by one explicit operator error notification. Each stage
 has a deterministic delivery-queue idempotency key, and state advances only
-after amux accepts the durable enqueue.
+after amux accepts the durable enqueue. One failed target remains pending and
+is reported as a non-zero aggregate poll error, but it does not prevent other
+mapped projects or comments from being durably enqueued and checkpointed.
+Tracked unanswered ticket IDs are polled directly when a reminder is due, so
+the schedule continues even after a busy board's bounded list no longer
+contains that ticket.
 
 Every prompt requires the responsible agent to re-read the raw suggestion,
 current ticket, entire chronological thread, and all attachments; form the
 likely intent; compare it with title/problem/expected/criteria; correct drift
 through the admin API; ask a focused clarification if ambiguity remains; and
-then answer in Suggestions. Comment bodies and attachment metadata are fenced
-as untrusted data and bounded before enqueue. Prompt text, media, tokens, and
-credentials are never written to relay state or logs.
+then answer in Suggestions. Title, author, comment body, and attachment
+metadata are normalized and encoded as bounded terminal-safe JSON inside a
+payload-dependent fence that the encoded payload cannot contain. Prompt text,
+media, tokens, and credentials are never written to relay state or logs.
 
 The public API contract is intentionally strict: `/api/config` must enumerate
 projects, `/api/tickets?project=...` must return `tickets[]`, and each ticket
