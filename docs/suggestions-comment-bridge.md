@@ -87,7 +87,10 @@ is reported as a non-zero aggregate poll error, but it does not prevent other
 mapped projects or comments from being durably enqueued and checkpointed.
 Tracked unanswered ticket IDs are polled directly when a reminder is due, so
 the schedule continues even after a busy board's bounded list no longer
-contains that ticket.
+contains that ticket. If that authoritative detail endpoint returns `404`
+because the tracked ticket was deleted or archived, the relay writes a durable
+`ticket-not-found` terminal tombstone, logs it once, stops retrying that ticket,
+and continues other mappings.
 
 Every prompt requires the responsible agent to re-read the raw suggestion,
 current ticket, entire chronological thread, and all attachments; form the

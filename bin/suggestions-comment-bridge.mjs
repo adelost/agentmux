@@ -42,9 +42,10 @@ function statusLine(config, state) {
     const project = state.projects[projectId];
     const comments = Object.values(project?.comments || {});
     const answered = comments.filter((comment) => comment.answeredAt != null).length;
-    const unanswered = comments.length - answered;
+    const terminal = comments.filter((comment) => comment.terminalAt != null).length;
+    const unanswered = comments.length - answered - terminal;
     return `${projectId}->${target.agent}:${target.pane} bootstrap=${Boolean(project?.bootstrapped)} `
-      + `answered=${answered} unanswered=${unanswered}`;
+      + `answered=${answered} unanswered=${unanswered} terminal=${terminal}`;
   });
   return rows.join("\n");
 }

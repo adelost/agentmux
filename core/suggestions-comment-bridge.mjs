@@ -169,6 +169,11 @@ export function loadSuggestionsBridgeState(path) {
             && (!Number.isFinite(comment.answeredAt) || comment.answeredAt < 0))
           || (comment.notifiedAt != null
             && (!Number.isFinite(comment.notifiedAt) || comment.notifiedAt < 0))
+          || (comment.terminalAt != null
+            && (!Number.isFinite(comment.terminalAt) || comment.terminalAt < 0))
+          || (comment.terminalAt == null && comment.terminalReason != null)
+          || (comment.terminalAt != null && comment.terminalReason !== "ticket-not-found")
+          || (comment.terminalAt != null && comment.answeredAt != null)
           || (comment.notifiedAt != null && comment.attempts.length !== REMINDER_STAGES.length)) {
         throw new Error(`state: malformed comment state for ${projectId}/${id}`);
       }
@@ -508,6 +513,14 @@ function validateTicketDetail(value, expected) {
   return { ticket, comments };
 }
 
+class HttpResponseError extends Error {
+  constructor(url, status) {
+    super(`http: GET ${new URL(url).pathname} returned ${status}`);
+    this.name = "HttpResponseError";
+    this.status = status;
+  }
+}
+
 async function fetchJson(url, { fetchImpl, timeoutMs, maxBytes = 8 * 1024 * 1024 }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -527,7 +540,7 @@ async function fetchJson(url, { fetchImpl, timeoutMs, maxBytes = 8 * 1024 * 1024
   }
   if (!response.ok) {
     clearTimeout(timer);
-    throw new Error(`http: GET ${new URL(url).pathname} returned ${response.status}`);
+    throw new HttpResponseError(url, response.status);
   }
   const type = response.headers.get("content-type") || "";
   if (!type.toLowerCase().includes("application/json")) {
@@ -585,7 +598,7 @@ function commentKey(ticketId, commentId) {
 }
 
 function trackedCommentNeedsAction(comment, nowMs) {
-  if (comment.answeredAt != null) return false;
+  if (comment.answeredAt != null || comment.terminalAt != null) return false;
   const stage = REMINDER_STAGES[comment.attempts.length];
   if (!stage) return comment.notifiedAt == null;
   if (stage.afterMs === 0) return true;
@@ -606,6 +619,18 @@ function dueTrackedTicketIds(project, nowMs) {
     if (separator > 0) ids.add(key.slice(0, separator));
   }
   return ids;
+}
+
+function terminalizeTrackedTicket(project, ticketId, nowMs) {
+  const prefix = `${ticketId}:`;
+  let changed = 0;
+  for (const [key, comment] of Object.entries(project.comments)) {
+    if (!key.startsWith(prefix) || comment.answeredAt != null || comment.terminalAt != null) continue;
+    comment.terminalAt = nowMs;
+    comment.terminalReason = "ticket-not-found";
+    changed++;
+  }
+  return changed;
 }
 
 /**
@@ -649,21 +674,40 @@ export async function pollSuggestionsComments({
     const pollNow = now();
     const ticketsNeedingDetail = tickets.filter((ticket) =>
       pState.ticketUpdatedAt[ticket.id] !== ticket.updatedAt
-      || ticketHasDueComment(pState, ticket.id, pollNow));
+      || ticketHasDueComment(pState, ticket.id, pollNow))
+      .map((ticket) => ({ ticket, trackedOnly: false }));
     const listedIds = new Set(tickets.map((ticket) => ticket.id));
     for (const ticketId of dueTrackedTicketIds(pState, pollNow)) {
-      if (!listedIds.has(ticketId)) ticketsNeedingDetail.push({ id: ticketId });
+      if (!listedIds.has(ticketId)) {
+        ticketsNeedingDetail.push({ ticket: { id: ticketId }, trackedOnly: true });
+      }
     }
-    const details = await mapLimit(ticketsNeedingDetail, config.detailConcurrency, async (ticket) => {
-      const detailUrl = new URL(`/api/tickets/${encodeURIComponent(ticket.id)}`, config.baseUrl);
+    const details = await mapLimit(ticketsNeedingDetail, config.detailConcurrency, async (candidate) => {
+      const detailUrl = new URL(`/api/tickets/${encodeURIComponent(candidate.ticket.id)}`, config.baseUrl);
       detailUrl.searchParams.set("project", projectId);
-      return validateTicketDetail(await fetchJson(detailUrl, {
-        fetchImpl, timeoutMs: config.requestTimeoutMs,
-      }), ticket);
+      try {
+        return validateTicketDetail(await fetchJson(detailUrl, {
+          fetchImpl, timeoutMs: config.requestTimeoutMs,
+        }), candidate.ticket);
+      } catch (error) {
+        if (candidate.trackedOnly && error instanceof HttpResponseError && error.status === 404) {
+          return { terminalTicketId: candidate.ticket.id };
+        }
+        throw error;
+      }
     });
     const policy = remotePolicy(remoteConfig, projectId, config.implementationPolicy);
 
     for (const detail of details) {
+      if (detail.terminalTicketId) {
+        const terminalized = terminalizeTrackedTicket(pState, detail.terminalTicketId, now());
+        if (terminalized > 0) {
+          persist(state);
+          logger.error?.(`TERMINAL ticket-not-found ${projectId}/${detail.terminalTicketId}; `
+            + `${terminalized} unanswered comment(s) tombstoned`);
+        }
+        continue;
+      }
       const comments = detail.comments;
       const laterAnswer = new Array(comments.length).fill(null);
       let answerSeen = null;
@@ -678,10 +722,11 @@ export async function pollSuggestionsComments({
         const key = commentKey(detail.ticket.id, comment.id);
         let tracked = pState.comments[key];
         if (!tracked) {
-          tracked = { firstSeenAt: now(), attempts: [], answeredAt: null, notifiedAt: null };
+          tracked = { firstSeenAt: now(), attempts: [], answeredAt: null, notifiedAt: null,
+            terminalAt: null, terminalReason: null };
           pState.comments[key] = tracked;
         }
-        if (tracked.answeredAt != null) continue;
+        if (tracked.answeredAt != null || tracked.terminalAt != null) continue;
         if (laterAnswer[index]) {
           tracked.answeredAt = laterAnswer[index].createdAt || now();
           persist(state);

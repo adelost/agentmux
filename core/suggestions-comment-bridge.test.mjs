@@ -155,8 +155,10 @@ if (existsSync(${JSON.stringify(fail)})) { unlinkSync(${JSON.stringify(fail)}); 
 }
 
 async function run({ fixture, config = bridgeConfig(fixture.baseUrl), state = emptyState(),
-  deliver, notify = async () => {}, persist = () => {}, now = () => 1_000_000 }) {
-  return pollSuggestionsComments({ config, state, deliver, notify, persist, now, logger });
+  deliver, notify = async () => {}, persist = () => {}, now = () => 1_000_000,
+  loggerImpl = logger }) {
+  return pollSuggestionsComments({ config, state, deliver, notify, persist, now,
+    logger: loggerImpl });
 }
 
 describe.sequential("Suggestions human-comment relay", () => {
@@ -483,6 +485,64 @@ describe.sequential("Suggestions human-comment relay", () => {
       expect(notifications).toHaveLength(1);
       expect(fixture.requests.filter((path) => path.startsWith("/api/tickets/SKY-OLD")))
         .toHaveLength(5);
+    } finally { await fixture.close(); }
+  });
+
+  it("tombstones a terminal tracked 404 without starving or duplicating another mapping", async () => {
+    const root = makeRoot();
+    const statePath = join(root, "state.json");
+    const clock = 30_000_000;
+    const state = { version: 1, projects: { alpha: {
+      bootstrapped: true,
+      comments: { "A-1:1": { firstSeenAt: clock - 20 * 60 * 1000,
+        attempts: [{ stage: "initial", enqueuedAt: clock - 15 * 60 * 1000 }],
+        answeredAt: null, notifiedAt: null } },
+      ticketUpdatedAt: { "A-1": 1_000 },
+    } } };
+    const fixture = await fixtureServer({ projectIds: ["alpha", "beta"], boards: {
+      alpha: [],
+      beta: [ticket("B-2", [comment(1, "user", "beta must not starve")])],
+    } });
+    const config = bridgeConfig(fixture.baseUrl, {
+      alpha: { agent: "alpha", pane: 1 }, beta: { agent: "beta", pane: 2 },
+    });
+    const deliveries = [];
+    const errors = [];
+    const loggerImpl = { info() {}, warn() {}, error(message) { errors.push(message); } };
+    try {
+      const first = await run({ fixture, config, state, now: () => clock,
+        deliver: async (item) => deliveries.push(item), loggerImpl,
+        persist: (next) => saveSuggestionsBridgeState(statePath, next) });
+      expect(first.delivered).toBe(1);
+      let persisted = loadSuggestionsBridgeState(statePath);
+      expect(persisted.projects.alpha.comments["A-1:1"]).toMatchObject({
+        attempts: [{ stage: "initial", enqueuedAt: clock - 15 * 60 * 1000 }],
+        answeredAt: null,
+        terminalAt: clock,
+        terminalReason: "ticket-not-found",
+      });
+      expect(persisted.projects.beta.comments["B-2:1"].attempts).toHaveLength(1);
+      expect(deliveries.map((item) => item.idempotencyKey)).toEqual([
+        "suggestions-comment:beta:B-2:1:initial",
+      ]);
+      expect(errors).toEqual([
+        "TERMINAL ticket-not-found alpha/A-1; 1 unanswered comment(s) tombstoned",
+      ]);
+
+      fixture.requests.length = 0;
+      const second = await run({ fixture, config, state: persisted, now: () => clock + 60_000,
+        deliver: async (item) => deliveries.push(item), loggerImpl,
+        persist: (next) => saveSuggestionsBridgeState(statePath, next) });
+      expect(second.delivered).toBe(0);
+      persisted = loadSuggestionsBridgeState(statePath);
+      expect(deliveries).toHaveLength(1);
+      expect(errors).toHaveLength(1);
+      expect(fixture.requests).toEqual([
+        "/api/config",
+        "/api/tickets?project=alpha",
+        "/api/tickets?project=beta",
+      ]);
+      expect(persisted.projects.alpha.comments["A-1:1"].terminalAt).toBe(clock);
     } finally { await fixture.close(); }
   });
 
