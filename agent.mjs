@@ -1826,8 +1826,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       catch { return null; }
     };
 
-    // First check: was the original Enter from sendPrompt enough?
-    await wait(750);
+    // Start the first confirmation look early enough that its 300ms repaint
+    // window does not move the earliest rescue beyond the established 750ms
+    // cadence. No key is sent before both observations complete.
+    const rescueCadenceMs = 750;
+    const observationGapMs = 300;
+    const preObservationWaitMs = rescueCadenceMs - observationGapMs;
+    await wait(preObservationWaitMs);
     if (await submitted() === true) return;
 
     // Up to 3 rescue attempts, spaced 750ms. Recovery requires two consistent
@@ -1846,9 +1851,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         },
         rescue: () => t.sendEnter(target),
         sleep: wait,
+        observationGapMs,
       });
       if (!outcome.rescued) return;
-      await wait(750);
+      await wait(preObservationWaitMs);
       if (await submitted() === true) return;
     }
   }
