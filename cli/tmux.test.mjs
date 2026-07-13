@@ -31,6 +31,30 @@ function fakeDeliveryQueue(status = "acknowledged") {
 }
 
 feature("sendToPane delivery outcome", () => {
+  unit("a caller-supplied idempotency identity reaches the durable queue", {
+    given: ["an unparked pane and deterministic relay identity", () => {
+      const path = tmpPath();
+      writeFileSync(path, "");
+      const oldPath = process.env.AMUX_PARK_STATE_PATH;
+      process.env.AMUX_PARK_STATE_PATH = path;
+      return { path, oldPath, deliveryQueue: fakeDeliveryQueue() };
+    }],
+    when: ["sending the same Suggestions stage", async ({ path, oldPath, deliveryQueue }) => {
+      await sendToPane({ configPath: null, deliveryQueue, deliveryWaitMs: 0 },
+        "skydive", 3, "bounded handoff", {
+          mirror: false,
+          idempotencyKey: "suggestions-comment:skydive:SKY-1:7:initial",
+        });
+      if (oldPath === undefined) delete process.env.AMUX_PARK_STATE_PATH;
+      else process.env.AMUX_PARK_STATE_PATH = oldPath;
+      try { unlinkSync(path); } catch {}
+      return deliveryQueue.enqueue.mock.calls[0][0];
+    }],
+    then: ["the queue owns the exact retry identity", (request) => {
+      expect(request.idempotencyKey).toBe("suggestions-comment:skydive:SKY-1:7:initial");
+    }],
+  });
+
   unit("verified delivery is returned to the caller", {
     given: ["an unparked pane", () => {
       const path = tmpPath();

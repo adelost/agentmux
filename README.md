@@ -102,6 +102,14 @@ Manual and intentionally stopped bridges stay user-owned. Rate-limited, logged t
 - Agent-generated image attachments through `[image: /absolute/path.png]`.
 - Optional Voice PWA endpoint for trusted local or tailnet clients.
 
+### Suggestions human-comment relay
+
+An optional one-minute poller routes unanswered human comments from public
+Suggestions boards to explicit amux panes. Idle polls use no agent prompts or
+model tokens; durable delivery, API-confirmed answers, bounded reminders,
+untrusted-data fencing, and overlap locking are built in. See
+[`docs/suggestions-comment-bridge.md`](docs/suggestions-comment-bridge.md).
+
 ## Requirements
 
 - Linux, macOS, or WSL
@@ -244,6 +252,18 @@ bin/install-todo-cron.sh       # enable daily reminder
 ```
 
 Backed by `~/.openclaw/workspace/memory/tasks.md`. Full docs in [`docs/todo.md`](docs/todo.md).
+
+Suggestions comment relay:
+
+```bash
+bin/install-suggestions-comment-bridge.sh install
+bin/install-suggestions-comment-bridge.sh status
+bin/install-suggestions-comment-bridge.sh run-once
+bin/install-suggestions-comment-bridge.sh remove
+```
+
+The default reusable mapping is `skydive -> skydive:3`. Full routing,
+answer/retry, and security contract: [`docs/suggestions-comment-bridge.md`](docs/suggestions-comment-bridge.md).
 
 `ax` is installed as a shorter alias for `amux`.
 

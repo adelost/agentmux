@@ -5,9 +5,11 @@
 // be a `connect` req with auth token; after hello-ok, subsequent methods
 // use `{type: "req", id, method, params}` format.
 
-import { createHash } from "crypto";
-import { readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { createHash, randomUUID } from "crypto";
+import {
+  mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync,
+} from "fs";
+import { dirname, join } from "path";
 import { splitMessage } from "../lib.mjs";
 
 const GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789";
@@ -20,8 +22,12 @@ const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || (() => {
 
 const CHANNEL_CACHE = join(process.env.HOME, ".openclaw/.channel-cache.json");
 const NOTIFY_USER_STATE = join(process.env.HOME, ".openclaw/.notifyuser-state.json");
+const NOTIFY_USER_STATE_LOCK_DIR = `${NOTIFY_USER_STATE}.lock.d`;
 const DEFAULT_NOTIFY_USER_DEDUPE_MS = 10 * 60 * 1000;
 const DISCORD_POST_TIMEOUT_MS = Number.parseInt(process.env.AMUX_DISCORD_POST_TIMEOUT_MS || "8000", 10);
+const NOTIFY_STATE_LOCK_TIMEOUT_MS = 10_000;
+const NOTIFY_STATE_STALE_LOCK_MS = 30_000;
+const NOTIFY_STATE_CLAIM_SETTLE_MS = 25;
 
 /** Resolve channel name to Discord channel ID. */
 export function resolveChannelId(channelName) {
@@ -116,8 +122,13 @@ function getDiscordBotToken() {
   return "";
 }
 
+export function discordMessagePayload(content, nonce = null) {
+  return { content: String(content).slice(0, 2000),
+    ...(nonce ? { nonce, enforce_nonce: true } : {}) };
+}
+
 /** Post to a Discord channel directly via REST API using agentmux's bot token. */
-async function discordPost(channelId, content) {
+async function discordPost(channelId, content, nonce = null) {
   const token = getDiscordBotToken();
   if (!token) throw new Error("DISCORD_TOKEN not found — cannot mirror");
   const controller = new AbortController();
@@ -130,7 +141,7 @@ async function discordPost(channelId, content) {
         Authorization: `Bot ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ content: content.slice(0, 2000) }),
+      body: JSON.stringify(discordMessagePayload(content, nonce)),
       signal: controller.signal,
     });
   } finally {
@@ -299,29 +310,115 @@ export function formatUserNotification(message, { level = "info", title = "" } =
   return `${heading}\n${clean}`.slice(0, 1900);
 }
 
-function notifyKey(content, userId, channelName) {
-  return createHash("sha256").update(`${userId || ""}\0${channelName || ""}\0${content}`).digest("hex");
+function notifyKey(content, userId, channelName, idempotencyKey = null) {
+  const identity = idempotencyKey == null ? content : `idempotency:${idempotencyKey}`;
+  return createHash("sha256")
+    .update(`${userId || ""}\0${channelName || ""}\0${identity}`).digest("hex");
+}
+
+export function notificationNonce(idempotencyKey) {
+  if (idempotencyKey == null) return null;
+  if (typeof idempotencyKey !== "string" || Buffer.byteLength(idempotencyKey, "utf8") > 256
+      || !/^[a-zA-Z0-9:._/-]+$/u.test(idempotencyKey)) {
+    throw new Error("idempotencyKey must be 1-256 safe identity characters");
+  }
+  return createHash("sha256").update(`notifyuser\0${idempotencyKey}`).digest("hex").slice(0, 25);
 }
 
 function readNotifyState() {
-  try { return JSON.parse(readFileSync(NOTIFY_USER_STATE, "utf-8")) || {}; } catch { return {}; }
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(NOTIFY_USER_STATE, "utf-8"));
+  } catch (err) {
+    if (err?.code === "ENOENT") return {};
+    throw new Error(`notify receipt state is unreadable: ${err.message}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("notify receipt state must be a JSON object");
+  }
+  return parsed;
 }
 
-function writeNotifyState(state) {
-  try { writeFileSync(NOTIFY_USER_STATE, JSON.stringify(state)); } catch {}
+function writeNotifyStateAtomic(state) {
+  const stateDir = dirname(NOTIFY_USER_STATE);
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  const tempPath = join(stateDir,
+    `.notifyuser-state.json.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  try {
+    writeFileSync(tempPath, JSON.stringify(state), { encoding: "utf8", mode: 0o600 });
+    renameSync(tempPath, NOTIFY_USER_STATE);
+  } finally {
+    try { unlinkSync(tempPath); } catch (err) { if (err?.code !== "ENOENT") throw err; }
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+async function withNotifyStateLock(action) {
+  mkdirSync(dirname(NOTIFY_USER_STATE), { recursive: true, mode: 0o700 });
+  mkdirSync(NOTIFY_USER_STATE_LOCK_DIR, { recursive: true, mode: 0o700 });
+  const claimName = `${Date.now()}-${process.pid}-${randomUUID()}.claim`;
+  const claimPath = join(NOTIFY_USER_STATE_LOCK_DIR, claimName);
+  writeFileSync(claimPath, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), {
+    encoding: "utf8", mode: 0o600, flag: "wx",
+  });
+  const deadline = Date.now() + NOTIFY_STATE_LOCK_TIMEOUT_MS;
+
+  try {
+    // A short settle window means every contender that could predate this
+    // critical section is visible before deterministic election. Later claims
+    // always see this live claim and wait. Unique filenames make stale cleanup
+    // ABA-safe: a recoverer can never unlink a replacement owner's claim.
+    await delay(NOTIFY_STATE_CLAIM_SETTLE_MS);
+    while (true) {
+      const now = Date.now();
+      const contenders = [];
+      for (const name of readdirSync(NOTIFY_USER_STATE_LOCK_DIR)) {
+        if (!name.endsWith(".claim")) continue;
+        const path = join(NOTIFY_USER_STATE_LOCK_DIR, name);
+        let stat;
+        try {
+          stat = statSync(path, { bigint: true });
+        } catch (err) {
+          if (err?.code === "ENOENT") continue;
+          throw err;
+        }
+        const ageMs = now - Number(stat.mtimeNs / 1_000_000n);
+        if (name !== claimName && ageMs > NOTIFY_STATE_STALE_LOCK_MS) {
+          try { unlinkSync(path); } catch (err) { if (err?.code !== "ENOENT") throw err; }
+          continue;
+        }
+        contenders.push({ name, mtimeNs: stat.mtimeNs });
+      }
+      contenders.sort((left, right) => left.mtimeNs < right.mtimeNs ? -1
+        : left.mtimeNs > right.mtimeNs ? 1 : left.name.localeCompare(right.name));
+      if (contenders[0]?.name === claimName) break;
+      if (Date.now() >= deadline) throw new Error("timed out acquiring notify receipt state lock");
+      await delay(5 + Math.floor(Math.random() * 11));
+    }
+    return await action();
+  } finally {
+    try { unlinkSync(claimPath); } catch (err) { if (err?.code !== "ENOENT") throw err; }
+  }
 }
 
 function isDuplicateNotification(key, dedupeMs) {
   if (!dedupeMs) return false;
   const state = readNotifyState();
-  const last = state[key] || 0;
+  if (!Object.prototype.hasOwnProperty.call(state, key)) return false;
+  const last = state[key];
+  if (!Number.isFinite(last)) return false;
   return Date.now() - last < dedupeMs;
 }
 
-function rememberNotification(key) {
-  const state = readNotifyState();
-  state[key] = Date.now();
-  writeNotifyState(state);
+async function rememberNotification(key) {
+  await withNotifyStateLock(() => {
+    const state = readNotifyState();
+    state[key] = Date.now();
+    writeNotifyStateAtomic(state);
+  });
 }
 
 /**
@@ -332,8 +429,10 @@ export async function notifyUser(message, opts = {}) {
   const userId = resolveNotifyUserId(opts.userId || opts.user);
   const channelName = opts.channel || process.env.AMUX_NOTIFY_CHANNEL || "notify";
   const content = formatUserNotification(message, opts);
-  const key = notifyKey(content, userId, channelName);
-  const dedupeMs = opts.force ? 0 : (opts.dedupeMs ?? DEFAULT_NOTIFY_USER_DEDUPE_MS);
+  const nonce = notificationNonce(opts.idempotencyKey);
+  const key = notifyKey(content, userId, channelName, opts.idempotencyKey);
+  const dedupeMs = nonce ? Number.POSITIVE_INFINITY
+    : opts.force ? 0 : (opts.dedupeMs ?? DEFAULT_NOTIFY_USER_DEDUPE_MS);
   if (isDuplicateNotification(key, dedupeMs)) {
     return { sent: false, deduped: true, target: "dedupe" };
   }
@@ -343,11 +442,15 @@ export async function notifyUser(message, opts = {}) {
     try {
       const dm = await discordCreateDm(userId);
       if (!dm?.id) throw new Error("Discord DM response missing channel id");
-      await discordPost(dm.id, content);
-      rememberNotification(key);
-      return { sent: true, target: "dm", userId };
+      await discordPost(dm.id, content, nonce);
     } catch (err) {
       dmError = err;
+    }
+    if (!dmError) {
+      // Receipt failures must remain visible, but must not turn a successful DM
+      // into a second fallback-channel post.
+      await rememberNotification(key);
+      return { sent: true, target: "dm", userId };
     }
   }
 
@@ -357,8 +460,8 @@ export async function notifyUser(message, opts = {}) {
     throw new Error(`notify channel '${channelName}' not found${suffix}`);
   }
   const fallback = userId ? `<@${userId}>\n${content}` : content;
-  await discordPost(channelId, fallback);
-  rememberNotification(key);
+  await discordPost(channelId, fallback, nonce);
+  await rememberNotification(key);
   return { sent: true, target: channelName, channelId, fallback: !!dmError, dmError: dmError?.message };
 }
 

@@ -17,14 +17,14 @@ feature("durable draft paste fence", () => {
 });
 
 feature("Claude pane model pin", () => {
-  unit("fresh and resumed launches use exact Opus 4.6 instead of the moving alias", {
+  unit("fresh and resumed launches use exact Opus 4.8 instead of the moving alias", {
     when: ["building both launch forms", () => ({
       fresh: buildClaudeLaunchCommand(),
       resumed: buildClaudeLaunchCommand({ resume: true }),
     })],
     then: ["both commands pin the full model id", ({ fresh, resumed }) => {
-      expect(fresh).toContain("--model 'claude-opus-4-6'");
-      expect(resumed).toContain("--model 'claude-opus-4-6'");
+      expect(fresh).toContain("--model 'claude-opus-4-8'");
+      expect(resumed).toContain("--model 'claude-opus-4-8'");
       expect(fresh).not.toMatch(/--model ['\"]?opus['\"]?(?:\s|$)/);
       expect(resumed).toContain("--continue");
     }],

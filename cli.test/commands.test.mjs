@@ -2,10 +2,26 @@ import { feature, unit, component, expect } from "bdd-vitest";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { Readable } from "stream";
 import yaml from "js-yaml";
-import { parseFlags, validateAgentAndPane, loadSourceYaml, saveSourceAndRegenerate, dispatch } from "../cli/commands.mjs";
+import { parseFlags, readPromptFromStdin, validateAgentAndPane, loadSourceYaml, saveSourceAndRegenerate, dispatch } from "../cli/commands.mjs";
 
 feature("parseFlags", () => {
+  unit("automation prompts are read from bounded stdin without entering argv", {
+    given: ["a multiline Suggestions handoff stream", () => Readable.from(["line one\n", "line two"])],
+    when: ["reading the prompt", (stream) => readPromptFromStdin(128, stream)],
+    then: ["the exact prompt is retained", (prompt) => expect(prompt).toBe("line one\nline two")],
+  });
+
+  unit("oversized automation stdin fails before enqueue", {
+    given: ["a stream above its route cap", () => Readable.from(["x".repeat(129)])],
+    when: ["reading with a 128-byte cap", async (stream) => {
+      try { await readPromptFromStdin(128, stream); return null; }
+      catch (error) { return error.message; }
+    }],
+    then: ["the cap is explicit", (message) => expect(message).toContain("exceeds 128 bytes")],
+  });
+
   unit("extracts string flags", {
     given: ["args with -n channel", () => ["-n", "notify", "hello"]],
     when: ["parsing with string spec", (args) => parseFlags(args, { n: "string" })],
