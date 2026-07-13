@@ -120,6 +120,10 @@ export function codexComposerText(text) {
   for (let i = index + 1; i < lines.length; i++) {
     const candidate = lines[i];
     if (!candidate.trim()) continue;
+    // Queue-mode chrome is painted directly beneath a busy draft. It is not
+    // composer content; retaining it made the durable broker classify its own
+    // exact recovered draft as a different human edit.
+    if (CODEX_QUEUE_HINT.test(candidate) || /\b\d+%\s+context left\b/i.test(candidate)) break;
     if (/^\s*(?:•\s+)?\S+\s+(?:minimal|low|medium|high|xhigh|max|ultra)\s+·\s+/.test(candidate)) break;
     if (/^\s*[•›❯>]/.test(candidate)) break;
     if (!/^\s{2,}\S/.test(candidate)) break;

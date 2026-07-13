@@ -176,6 +176,42 @@ q to quit   esc/← to edit prev
     }],
   });
 
+  unit("busy queue chrome is excluded from the exact draft identity", {
+    given: ["the live short queued-prompt shape", () => ({
+      prompt: "kan jag ändå få testa..",
+      snapshot: [
+        "• Working (4m 22s)",
+        "",
+        "› kan jag ändå få testa..",
+        "",
+        "  tab to queue message                                 46% context left",
+      ].join("\n"),
+    })],
+    when: ["reading and matching the composer", ({ snapshot, prompt }) => ({
+      text: codexComposerText(snapshot),
+      exact: codexComposerContainsPrompt(snapshot, prompt),
+    })],
+    then: ["only the user text remains", (result) => expect(result).toEqual({
+      text: "kan jag ändå få testa..",
+      exact: true,
+    })],
+  });
+
+  unit("multiline queue footer cannot corrupt the prompt tail", {
+    given: ["a wrapped long queued prompt", () => ({
+      prompt: "first long instruction second exact tail",
+      snapshot: [
+        "› first long instruction",
+        "  second exact tail",
+        "",
+        "  tab to queue message                               40% context left",
+      ].join("\n"),
+    })],
+    when: ["matching the full prompt", ({ snapshot, prompt }) =>
+      codexComposerContainsPrompt(snapshot, prompt)],
+    then: ["the draft is exact", (matched) => expect(matched).toBe(true)],
+  });
+
   unit("visual wrapping inside an image path does not block delivery", {
     // Live lsrc:3 capture 2026-07-13: tiled width made Ratatui split the
     // attachment id after a hyphen. The application-rendered continuation is
