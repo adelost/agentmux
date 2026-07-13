@@ -184,6 +184,22 @@ feature("tmux adapter: command strings", () => {
     }],
   });
 
+  unit("active pane lookup is window-scoped and returns the pane id", {
+    given: ["a window whose second pane is active", () => {
+      const calls = [];
+      const exec = async (cmd) => {
+        calls.push(cmd);
+        return { stdout: cmd.includes("list-panes") ? "%7 0\n%8 1\n" : "" };
+      };
+      return { t: createTmuxAdapter({ socket: "/tmp/amux.sock", exec }), calls };
+    }],
+    when: ["reading active pane", async ({ t, calls }) => ({ id: await t.activePaneId("api:.3"), calls })],
+    then: ["the active id and exact command are returned", ({ id, calls }) => {
+      expect(id).toBe("%8");
+      expect(calls[0]).toBe(PREFIX + `list-panes -t 'api:.3' -F '#{pane_id} #{pane_active}'`);
+    }],
+  });
+
   unit("primitives survive destructuring (no this-binding)", {
     given: ["a destructured primitive", () => {
       const { t, calls } = fakeTmux({ stdout: "1\n" });

@@ -2,7 +2,7 @@ import { feature, component, unit, expect } from "bdd-vitest";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { buildCodexLaunchCommand, paneDir } from "../agent.mjs";
+import { buildCodexLaunchCommand, createAgent, paneDir } from "../agent.mjs";
 
 feature("Codex pane launch isolation", () => {
   unit("account home plus model/effort are process-local on resume and fresh fallback", {
@@ -30,6 +30,44 @@ feature("Codex pane launch isolation", () => {
       } catch (err) { return err; }
     }],
     then: ["validation fails", (error) => expect(error?.message).toMatch(/invalid Codex model/)],
+  });
+});
+
+feature("transport zoom ownership", () => {
+  unit("a pane replaces and then restores another pane's existing zoom", {
+    given: ["api is zoomed to pane %5 while transport targets %3", () => {
+      const calls = [];
+      let zoomed = true;
+      let active = "%5";
+      const tmuxExec = async (cmd) => {
+        calls.push(cmd);
+        if (cmd.includes("display-message") && cmd.includes("window_zoomed_flag")) return { stdout: zoomed ? "1\n" : "0\n" };
+        if (cmd.includes("display-message") && cmd.includes("pane_id")) return { stdout: "%3\n" };
+        if (cmd.includes("list-panes")) return { stdout: `%3 ${active === "%3" ? 1 : 0}\n%5 ${active === "%5" ? 1 : 0}\n` };
+        if (cmd.includes("select-pane -t 'api:.3'")) active = "%3";
+        if (cmd.includes("select-pane -t '%5'")) active = "%5";
+        if (cmd.includes("resize-pane -Z")) zoomed = !zoomed;
+        return { stdout: "" };
+      };
+      const agent = createAgent({
+        tmuxExec,
+        run: async () => ({ stdout: "" }),
+        tmuxSocket: "/tmp/test.sock",
+        configPath: "/tmp/nonexistent-agents.yaml",
+      });
+      return { agent, calls, state: () => ({ active, zoomed }) };
+    }],
+    when: ["transport zooms api:3 and restores its receipt", async ({ agent, calls, state }) => {
+      const receipt = await agent.zoomPaneForPicker("api", 3);
+      const during = state();
+      await agent.restorePaneZoom("api", 3, receipt);
+      return { calls, during, after: state(), receipt };
+    }],
+    then: ["api:3 was visible during transport and %5 owns the final zoom", ({ during, after, receipt }) => {
+      expect(receipt).toMatchObject({ changed: true, wasZoomed: true, previousActivePaneId: "%5", targetPaneId: "%3" });
+      expect(during).toEqual({ active: "%3", zoomed: true });
+      expect(after).toEqual({ active: "%5", zoomed: true });
+    }],
   });
 });
 

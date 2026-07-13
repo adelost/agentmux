@@ -2081,15 +2081,34 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
    */
   async function zoomPaneForPicker(agentName, pane) {
     const target = `${agentName}:.${pane}`;
-    if (await t.paneZoomed(target)) return false;
+    const wasZoomed = await t.paneZoomed(target);
+    const previousActivePaneId = await t.activePaneId(target);
+    const targetPaneId = await t.paneId(target);
+    if (wasZoomed && previousActivePaneId === targetPaneId) {
+      return { changed: false, wasZoomed, previousActivePaneId, targetPaneId };
+    }
+    // A tmux window can already be zoomed to a DIFFERENT pane. `resize -Z`
+    // would otherwise merely unzoom it and leave our small target hidden.
+    if (wasZoomed) await t.togglePaneZoom(target);
+    await t.selectPane(target);
     await t.togglePaneZoom(target);
-    return true;
+    return { changed: true, wasZoomed, previousActivePaneId, targetPaneId };
   }
 
-  async function restorePaneZoom(agentName, pane, changed) {
-    if (!changed) return;
+  async function restorePaneZoom(agentName, pane, receipt) {
+    if (!receipt) return;
     const target = `${agentName}:.${pane}`;
+    // Backward-compatible boolean receipt for injected/older callers.
+    if (typeof receipt === "boolean") {
+      if (receipt && await t.paneZoomed(target)) await t.togglePaneZoom(target);
+      return;
+    }
+    if (!receipt.changed) return;
     if (await t.paneZoomed(target)) await t.togglePaneZoom(target);
+    if (receipt.previousActivePaneId) await t.selectPane(receipt.previousActivePaneId);
+    if (receipt.wasZoomed && receipt.previousActivePaneId) {
+      await t.togglePaneZoom(receipt.previousActivePaneId);
+    }
   }
 
   async function paneHistorySize(agentName, pane) {

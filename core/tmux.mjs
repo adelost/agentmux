@@ -103,7 +103,19 @@ export function createTmuxAdapter({ socket, exec }) {
       await raw(`select-pane -t ${q(target)}`);
     },
 
-    /** Whether this pane's window is currently zoomed. */
+    /** Pane id currently active in the target pane's window. */
+    async activePaneId(target) {
+      const { stdout } = await raw(`list-panes -t ${q(target)} -F '#{pane_id} #{pane_active}'`);
+      const active = stdout.split("\n").map((line) => line.trim().split(/\s+/))
+        .find(([, flag]) => flag === "1");
+      return active?.[0] || null;
+    },
+
+    async paneId(target) {
+      return display(target, "#{pane_id}");
+    },
+
+    /** Whether this pane's window is currently zoomed (possibly to another pane). */
     async paneZoomed(target) {
       return (await display(target, "#{window_zoomed_flag}")) === "1";
     },
