@@ -32,11 +32,12 @@ bounded canonical structured `implementationPolicy` supplied by `/api/config`
 legacy string form. When the endpoint has no policy, the checked-in fail-safe
 is:
 
-> Rotorsak före plåster: förstå och åtgärda grundorsaken. Refaktorera den
-> berörda sömmen när en hållbar rotfix kräver det och lämna berörd kod bättre.
-> Följ kodstandarden; gör lösningen datadriven, deklarativ och generisk där det
-> är lämpligt. Lägg en permanent regressionsgate för felklassen. Gör ingen
-> orelaterad eller spekulativ refaktorering.
+> Root cause before patches: understand and address the underlying cause.
+> Refactor the affected seam when a durable root fix requires it, and leave the
+> touched code better than you found it. Follow the codebase standards; make
+> the solution data-driven, declarative, and generic where appropriate. Add a
+> permanent regression gate for the defect class. Do not perform unrelated or
+> speculative refactoring.
 
 `implementationPolicy` in the local YAML may override that built-in fallback.
 A valid bounded API policy still takes precedence.

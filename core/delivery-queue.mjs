@@ -173,6 +173,19 @@ export function createDeliveryQueue({
     return list(agentName, pane).find((job) => !TERMINAL_DELIVERY_STATES.has(job.status)) || null;
   }
 
+  // A submitted prompt has already left the verified composer. Its JSONL
+  // receipt is still pending, but it no longer owns the pane's write slot.
+  // Every other non-terminal state remains ordered: in particular a drafted
+  // prompt must stay ahead of later work so two payloads can never merge.
+  function nextForWrite(agentName, pane) {
+    return list(agentName, pane).find((job) =>
+      !TERMINAL_DELIVERY_STATES.has(job.status) && job.status !== "submitted") || null;
+  }
+
+  function submitted(agentName, pane) {
+    return list(agentName, pane).filter((job) => job.status === "submitted");
+  }
+
   function targets() {
     let names;
     try { names = readdirSync(rootDir, { withFileTypes: true }); }
@@ -292,7 +305,7 @@ export function createDeliveryQueue({
   }
 
   return {
-    rootDir, enqueue, read, update, list, next, targets, findById,
+    rootDir, enqueue, read, update, list, next, nextForWrite, submitted, targets, findById,
     restoreAssets, acquireTargetLease, acquireSessionLease, prune,
   };
 }

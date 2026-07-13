@@ -2,8 +2,9 @@
 //
 // Producers persist jobs through delivery-queue.mjs.  This broker is the only
 // normal tmux writer while the bridge is running. It serializes every source
-// per pane, keeps a drafted prompt at the head of the FIFO until it is either
-// submitted or acknowledged, and resumes the same job after a bridge restart.
+// per pane, keeps a drafted prompt at the head of the FIFO, and resumes it
+// after a bridge restart. A durable submitted transition releases the physical
+// pane slot; JSONL receipt reconciliation continues independently.
 
 import { appendEvent } from "./events.mjs";
 import { deliverToPane } from "./delivery.mjs";
@@ -323,13 +324,35 @@ export function createDeliveryBroker({
     if (acquireLease && !lease) return;
     try {
       while (!stopped) {
-        const job = queue.next(agentName, pane);
-        if (!job) return;
-        if (Number(job.nextAttemptAt || 0) > now()) return;
-        const outcome = await processJob(job);
-        if (outcome.status !== "acknowledged") return;
-        // The head was acknowledged; continue synchronously to the next FIFO
-        // item while this lane is still exclusively owned.
+        // Preserve FIFO for every job that may still own or need the composer.
+        // `submitted` is different: onSubmitted is persisted only after the
+        // exact draft has left the verified composer, so waiting for its later
+        // JSONL echo must not hold the physical write lane hostage.
+        const writable = typeof queue.nextForWrite === "function"
+          ? queue.nextForWrite(agentName, pane)
+          : queue.next(agentName, pane);
+        if (writable && Number(writable.nextAttemptAt || 0) <= now()) {
+          const outcome = await processJob(writable);
+          if (outcome.status === "acknowledged" || outcome.status === "submitted") {
+            continue;
+          }
+          // drafted/blocked/pending still owns the FIFO boundary. A later
+          // prompt must not pass it until a future attempt makes it safe.
+          return;
+        }
+
+        // Reconcile every due submitted receipt once. One missing Codex echo
+        // must not hide acknowledgements for later prompts. If reconciliation
+        // proves that a draft resurfaced (or Claude needs bounded recovery),
+        // stop here so that job regains its original FIFO position next poll.
+        const receipts = (queue.submitted?.(agentName, pane)
+          || queue.list(agentName, pane).filter((job) => job.status === "submitted"))
+          .filter((job) => Number(job.nextAttemptAt || 0) <= now());
+        for (const receipt of receipts) {
+          const outcome = await processJob(receipt);
+          if (outcome.status !== "acknowledged" && outcome.status !== "submitted") return;
+        }
+        return;
       }
     } finally {
       lease?.release();

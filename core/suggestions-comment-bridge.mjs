@@ -23,11 +23,11 @@ export const DEFAULT_COMMENT_BYTES = 64 * 1024;
 export const MAX_COMMENT_BYTES = 64 * 1024;
 export const MAX_PROMPT_BYTES = 96 * 1024;
 export const DEFAULT_IMPLEMENTATION_POLICY = [
-  "Rotorsak före plåster: förstå och åtgärda grundorsaken.",
-  "Refaktorera den berörda sömmen när en hållbar rotfix kräver det och lämna berörd kod bättre.",
-  "Följ kodstandarden; gör lösningen datadriven, deklarativ och generisk där det är lämpligt.",
-  "Lägg en permanent regressionsgate för felklassen.",
-  "Gör ingen orelaterad eller spekulativ refaktorering.",
+  "Root cause before patches: understand and address the underlying cause.",
+  "Refactor the affected seam when a durable root fix requires it, and leave the touched code better than you found it.",
+  "Follow the codebase standards; make the solution data-driven, declarative, and generic where appropriate.",
+  "Add a permanent regression gate for the defect class.",
+  "Do not perform unrelated or speculative refactoring.",
 ].join(" ");
 
 const HUMAN_KINDS = new Set(["creator", "user"]);

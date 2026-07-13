@@ -69,6 +69,64 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
+  component("a late JSONL receipt does not block the next physical FIFO write", {
+    given: ["two prompts and a transport whose receipts arrive out of order", () => {
+      const rootDir = tempRoot();
+      let clock = 1_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      queue.enqueue({ agentName: "ai", pane: 5, text: "first", orderKey: "001" });
+      queue.enqueue({ agentName: "ai", pane: 5, text: "second", orderKey: "002" });
+      const echoed = new Set();
+      const sends = [];
+      const agent = {
+        sends,
+        capturePromptEchoCursor: async () => ({ kind: "test", positions: {} }),
+        waitForPromptEcho: async (_name, _pane, text) => echoed.has(text),
+        dismissBlockingPrompt: async () => null,
+        sendOnly: async (_name, text, _pane, options = {}) => {
+          sends.push(text);
+          await options.onDrafted?.();
+          await options.onSubmitted?.();
+          return { submitted: true, queued: true };
+        },
+      };
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
+      return {
+        rootDir, queue, broker, sends, echoed,
+        advance: () => { clock += 1_001; },
+      };
+    }],
+    when: ["the pane accepts both prompts before either JSONL echo, then receipts reconcile independently", async ({
+      broker, queue, sends, echoed, advance,
+    }) => {
+      await broker.kickTarget("ai", 5);
+      const afterSubmit = {
+        sends: [...sends],
+        states: queue.list("ai", 5).map((job) => job.status),
+      };
+      echoed.add("second");
+      advance();
+      await broker.kickTarget("ai", 5);
+      const afterSecondReceipt = queue.list("ai", 5).map((job) => job.status);
+      echoed.add("first");
+      advance();
+      await broker.kickTarget("ai", 5);
+      return { afterSubmit, afterSecondReceipt };
+    }],
+    then: ["both writes stay ordered while acknowledgements are allowed to lag", ({
+      afterSubmit, afterSecondReceipt,
+    }, ctx) => {
+      expect(afterSubmit).toEqual({
+        sends: ["first", "second"],
+        states: ["submitted", "submitted"],
+      });
+      expect(afterSecondReceipt).toEqual(["submitted", "acknowledged"]);
+      expect(ctx.queue.list("ai", 5).map((job) => job.status))
+        .toEqual(["acknowledged", "acknowledged"]);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("different panes in one tmux session never write concurrently", {
     given: ["two pending panes and a transport that records overlap", () => {
       const rootDir = tempRoot();

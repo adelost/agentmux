@@ -54,10 +54,34 @@ Codex discover generated project instructions.
 ### Reliable session management
 
 - Structured jsonl history for Claude and Codex output extraction.
-- Retry loop with delivery verification.
+- Durable prompt delivery with physical-submit and JSONL receipt verification.
 - Resume hints for panes that restart without prior context.
 - Model-aware context tracking.
 - Recovery commands for stuck panes and blocking prompts.
+
+### Durable prompt delivery
+
+Discord, the `amux` CLI, media handoffs, and internal agent messages all enter
+one persistent queue before agentmux touches tmux. Delivery is FIFO per pane
+and single-writer per tmux session, including across bridge processes. The
+queue also keeps private copies of temporary image and file attachments so a
+bridge restart cannot turn a valid media prompt into a missing path.
+
+A prompt advances through `pending -> drafted -> submitted -> acknowledged`:
+
+- `drafted` means agentmux owns exact text still associated with the composer.
+  It blocks later writes so payloads cannot merge.
+- `submitted` means the exact draft left the verified composer after Enter.
+  The pane's write slot is released immediately, so the next prompt can be
+  injected even while the agent is busy and the earlier JSONL receipt is late.
+- `acknowledged` means the authoritative Claude/Codex history contains the
+  exact prompt. Receipt reconciliation runs independently of later writes.
+
+Foreign human drafts, hidden composers, and ambiguous submit results fail
+closed instead of being overwritten or blindly re-pasted. Durable state and
+bounded dialect-aware recovery let a restarted bridge resume without losing a
+prompt or creating an unbounded duplicate loop. `amux doctor` reports queue
+health alongside bridge and tmux health.
 
 ### Hook-pushed pane state (event ledger)
 
