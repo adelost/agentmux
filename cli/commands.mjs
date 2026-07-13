@@ -1660,6 +1660,7 @@ async function cmdNotifyUser(args) {
     force: "boolean", f: "boolean",
     dry: "boolean",
     test: "boolean",
+    "idempotency-key": "string",
   });
   const level = flags.level || flags.l || "info";
   const title = flags.title || "amux";
@@ -1667,7 +1668,8 @@ async function cmdNotifyUser(args) {
     ? "Test notification from amux notifyuser."
     : positional.join(" ").trim();
   if (!text) {
-    console.error(`Usage: amux notifyuser "message" [--level info|done|warn|error] [--force]`);
+    console.error(`Usage: amux notifyuser "message" [--level info|done|warn|error] `
+      + `[--idempotency-key KEY] [--force]`);
     process.exit(1);
   }
   const opts = {
@@ -1675,6 +1677,7 @@ async function cmdNotifyUser(args) {
     title,
     userId: flags.user || flags.u,
     channel: flags.channel || flags.c,
+    idempotencyKey: flags["idempotency-key"],
     force: !!(flags.force || flags.f || flags.test),
   };
   if (flags.dry) {
@@ -3488,6 +3491,7 @@ Usage:
     --minutes N                   Stale age threshold (default: 60)
   agent notifyuser "message"      High-signal mobile notification to the human
     --level info|done|warn|error  Notification level (default: info)
+    --idempotency-key <key>       Use a stable Discord nonce for crash-safe retry
     --test                        Send a test notification
   agent image <path> [caption]    Send a local image file to the bound Discord channel
     -c <channelId>                Explicit Discord channel ID
@@ -3567,7 +3571,7 @@ const FLAG_SPECS = {
   },
   janitor: { dry: "boolean", days: "number" },
   "playwright-reap": { dry: "boolean", minutes: "number" },
-  notifyuser: { level: "string", l: "string", title: "string", user: "string", u: "string", channel: "string", c: "string", force: "boolean", f: "boolean", dry: "boolean", test: "boolean" },
+  notifyuser: { level: "string", l: "string", title: "string", user: "string", u: "string", channel: "string", c: "string", force: "boolean", f: "boolean", dry: "boolean", test: "boolean", "idempotency-key": "string" },
   remind: {
     p: "number",                      // pane index (only when single agent given)
     all: "boolean",                   // broadcast to every claude pane

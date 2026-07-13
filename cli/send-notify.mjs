@@ -116,8 +116,13 @@ function getDiscordBotToken() {
   return "";
 }
 
+export function discordMessagePayload(content, nonce = null) {
+  return { content: String(content).slice(0, 2000),
+    ...(nonce ? { nonce, enforce_nonce: true } : {}) };
+}
+
 /** Post to a Discord channel directly via REST API using agentmux's bot token. */
-async function discordPost(channelId, content) {
+async function discordPost(channelId, content, nonce = null) {
   const token = getDiscordBotToken();
   if (!token) throw new Error("DISCORD_TOKEN not found — cannot mirror");
   const controller = new AbortController();
@@ -130,7 +135,7 @@ async function discordPost(channelId, content) {
         Authorization: `Bot ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ content: content.slice(0, 2000) }),
+      body: JSON.stringify(discordMessagePayload(content, nonce)),
       signal: controller.signal,
     });
   } finally {
@@ -299,8 +304,19 @@ export function formatUserNotification(message, { level = "info", title = "" } =
   return `${heading}\n${clean}`.slice(0, 1900);
 }
 
-function notifyKey(content, userId, channelName) {
-  return createHash("sha256").update(`${userId || ""}\0${channelName || ""}\0${content}`).digest("hex");
+function notifyKey(content, userId, channelName, idempotencyKey = null) {
+  const identity = idempotencyKey == null ? content : `idempotency:${idempotencyKey}`;
+  return createHash("sha256")
+    .update(`${userId || ""}\0${channelName || ""}\0${identity}`).digest("hex");
+}
+
+export function notificationNonce(idempotencyKey) {
+  if (idempotencyKey == null) return null;
+  if (typeof idempotencyKey !== "string" || Buffer.byteLength(idempotencyKey, "utf8") > 256
+      || !/^[a-zA-Z0-9:._/-]+$/u.test(idempotencyKey)) {
+    throw new Error("idempotencyKey must be 1-256 safe identity characters");
+  }
+  return createHash("sha256").update(`notifyuser\0${idempotencyKey}`).digest("hex").slice(0, 25);
 }
 
 function readNotifyState() {
@@ -332,8 +348,10 @@ export async function notifyUser(message, opts = {}) {
   const userId = resolveNotifyUserId(opts.userId || opts.user);
   const channelName = opts.channel || process.env.AMUX_NOTIFY_CHANNEL || "notify";
   const content = formatUserNotification(message, opts);
-  const key = notifyKey(content, userId, channelName);
-  const dedupeMs = opts.force ? 0 : (opts.dedupeMs ?? DEFAULT_NOTIFY_USER_DEDUPE_MS);
+  const nonce = notificationNonce(opts.idempotencyKey);
+  const key = notifyKey(content, userId, channelName, opts.idempotencyKey);
+  const dedupeMs = nonce ? Number.POSITIVE_INFINITY
+    : opts.force ? 0 : (opts.dedupeMs ?? DEFAULT_NOTIFY_USER_DEDUPE_MS);
   if (isDuplicateNotification(key, dedupeMs)) {
     return { sent: false, deduped: true, target: "dedupe" };
   }
@@ -343,7 +361,7 @@ export async function notifyUser(message, opts = {}) {
     try {
       const dm = await discordCreateDm(userId);
       if (!dm?.id) throw new Error("Discord DM response missing channel id");
-      await discordPost(dm.id, content);
+      await discordPost(dm.id, content, nonce);
       rememberNotification(key);
       return { sent: true, target: "dm", userId };
     } catch (err) {
@@ -357,7 +375,7 @@ export async function notifyUser(message, opts = {}) {
     throw new Error(`notify channel '${channelName}' not found${suffix}`);
   }
   const fallback = userId ? `<@${userId}>\n${content}` : content;
-  await discordPost(channelId, fallback);
+  await discordPost(channelId, fallback, nonce);
   rememberNotification(key);
   return { sent: true, target: channelName, channelId, fallback: !!dmError, dmError: dmError?.message };
 }

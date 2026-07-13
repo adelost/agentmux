@@ -664,6 +664,7 @@ export async function pollSuggestionsComments({
 
   let delivered = 0;
   const deliveryFailures = [];
+  const notificationFailures = [];
   for (const [projectId, target] of Object.entries(config.projects)) {
     const listUrl = new URL("/api/tickets", config.baseUrl);
     listUrl.searchParams.set("project", projectId);
@@ -735,8 +736,17 @@ export async function pollSuggestionsComments({
         const stage = REMINDER_STAGES[tracked.attempts.length];
         if (!stage) {
           if (tracked.notifiedAt == null) {
-            await notify({ projectId, ticketId: detail.ticket.id, commentId: comment.id,
-              agent: target.agent, pane: target.pane });
+            const idempotencyKey = `suggestions-comment-notify:${projectId}:${detail.ticket.id}:${comment.id}`;
+            try {
+              await notify({ projectId, ticketId: detail.ticket.id, commentId: comment.id,
+                agent: target.agent, pane: target.pane, idempotencyKey });
+            } catch {
+              notificationFailures.push({ projectId, ticketId: detail.ticket.id,
+                commentId: comment.id });
+              logger.error?.(`NOTIFICATION_FAILED ${projectId}/${detail.ticket.id} `
+                + `comment ${comment.id}`);
+              continue;
+            }
             tracked.notifiedAt = now();
             persist(state);
             logger.error?.(`UNANSWERED ${projectId}/${detail.ticket.id} comment ${comment.id} after bounded reminders`);
@@ -779,14 +789,24 @@ export async function pollSuggestionsComments({
       persist(state);
     }
   }
-  if (deliveryFailures.length) {
-    const identities = deliveryFailures.map((failure) =>
-      `${failure.projectId}/${failure.ticketId}:${failure.commentId}:${failure.stage}`).join(", ");
-    const errors = deliveryFailures.map((failure) => new Error(
-      `${failure.projectId}/${failure.ticketId}:${failure.commentId}:${failure.stage}`,
-    ));
-    throw new AggregateError(errors,
-      `poller: ${deliveryFailures.length} delivery failure(s): ${identities}`);
+  if (deliveryFailures.length || notificationFailures.length) {
+    const deliveryIdentities = deliveryFailures.map((failure) =>
+      `${failure.projectId}/${failure.ticketId}:${failure.commentId}:${failure.stage}`);
+    const notificationIdentities = notificationFailures.map((failure) =>
+      `${failure.projectId}/${failure.ticketId}:${failure.commentId}`);
+    const parts = [];
+    if (deliveryFailures.length) {
+      parts.push(`${deliveryFailures.length} delivery failure(s): ${deliveryIdentities.join(", ")}`);
+    }
+    if (notificationFailures.length) {
+      parts.push(`${notificationFailures.length} notification failure(s): `
+        + notificationIdentities.join(", "));
+    }
+    const errors = [
+      ...deliveryIdentities.map((identity) => new Error(`delivery:${identity}`)),
+      ...notificationIdentities.map((identity) => new Error(`notification:${identity}`)),
+    ];
+    throw new AggregateError(errors, `poller: ${parts.join("; ")}`);
   }
   return { delivered };
 }
@@ -828,13 +848,14 @@ export function createAmuxCommentDeliverer({
 
 export function createAmuxCommentNotifier({ amuxBin, spawnImpl = spawn }) {
   if (!amuxBin) throw new Error("notification: amux executable path is required");
-  return ({ projectId, ticketId, commentId, agent, pane }) => new Promise((resolvePromise, reject) => {
+  return ({ projectId, ticketId, commentId, agent, pane, idempotencyKey }) => new Promise((resolvePromise, reject) => {
     const message = `Suggestions ${projectId}/${ticketId} comment ${commentId} is still unanswered `
       + `after bounded 15m/60m/4h reminders to ${agent}:${pane}.`;
     const child = spawnImpl(amuxBin, [
       "notifyuser",
       "--level", "error",
       "--title", "Suggestions comment unanswered",
+      "--idempotency-key", idempotencyKey,
       message,
     ], { stdio: ["ignore", "ignore", "ignore"], env: process.env });
     let settled = false;

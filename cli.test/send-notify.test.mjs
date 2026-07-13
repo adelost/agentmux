@@ -3,13 +3,29 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
+  discordMessagePayload,
   formatUserNotification,
+  notificationNonce,
   resolveNotifyUserId,
   sendFileToChannelId,
   sendToChannelId,
 } from "../cli/send-notify.mjs";
 
 feature("notifyuser helpers", () => {
+  unit("derives a stable bounded Discord nonce for explicit idempotency", {
+    when: ["building two notification retries", () => {
+      const first = notificationNonce("suggestions-comment-notify:skydive:SKY-10:7");
+      const second = notificationNonce("suggestions-comment-notify:skydive:SKY-10:7");
+      return { first, second, payload: discordMessagePayload("unanswered", first) };
+    }],
+    then: ["the retry uses one enforce_nonce identity", ({ first, second, payload }) => {
+      expect(first).toBe(second);
+      expect(first).toMatch(/^[0-9a-f]{25}$/u);
+      expect(payload).toEqual({ content: "unanswered", nonce: first, enforce_nonce: true });
+      expect(() => notificationNonce("unsafe key with spaces")).toThrow("safe identity");
+    }],
+  });
+
   unit("formats compact mobile notification", {
     when: ["formatting an error notification", () => formatUserNotification("dream failed", {
       level: "error",

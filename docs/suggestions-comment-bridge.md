@@ -85,6 +85,13 @@ has a deterministic delivery-queue idempotency key, and state advances only
 after amux accepts the durable enqueue. One failed target remains pending and
 is reported as a non-zero aggregate poll error, but it does not prevent other
 mapped projects or comments from being durably enqueued and checkpointed.
+The operator notification follows the same isolation rule: a failed notify is
+aggregated and remains retryable without blocking other mappings. Its
+deterministic identity is forwarded to `amux notifyuser`, which derives a
+stable Discord `nonce`, keeps a non-expiring local receipt after success, and
+sends with `enforce_nonce`; a crash after Discord accepts the notification but
+before relay-state persistence can therefore retry without creating a second
+operator message.
 Tracked unanswered ticket IDs are polled directly when a reminder is due, so
 the schedule continues even after a busy board's bounded list no longer
 contains that ticket. If that authoritative detail endpoint returns `404`

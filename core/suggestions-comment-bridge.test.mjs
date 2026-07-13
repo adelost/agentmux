@@ -8,7 +8,9 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import {
   DEFAULT_IMPLEMENTATION_POLICY,
+  REMINDER_STAGES,
   createAmuxCommentDeliverer,
+  createAmuxCommentNotifier,
   loadSuggestionsBridgeState,
   pollSuggestionsComments,
   saveSuggestionsBridgeState,
@@ -457,6 +459,111 @@ describe.sequential("Suggestions human-comment relay", () => {
       expect(state.projects.alpha.comments["A-1:1"].attempts).toHaveLength(0);
       expect(state.projects.beta.comments["B-1:1"].attempts).toHaveLength(1);
     } finally { await fixture.close(); }
+  });
+
+  it("isolates notification failure while another mapping checkpoints exactly once", async () => {
+    const clock = 30_000_000;
+    const state = { version: 1, projects: { alpha: {
+      bootstrapped: true,
+      comments: { "A-2:1": { firstSeenAt: clock - 5 * 60 * 60 * 1000,
+        attempts: REMINDER_STAGES.map((stage) => ({ stage: stage.id,
+          enqueuedAt: clock - 5 * 60 * 60 * 1000 + stage.afterMs })),
+        answeredAt: null, notifiedAt: null } },
+      ticketUpdatedAt: { "A-2": 1_000 },
+    } } };
+    const fixture = await fixtureServer({ projectIds: ["alpha", "beta"], boards: {
+      alpha: [ticket("A-2", [comment(1, "creator", "notify is due")])],
+      beta: [ticket("B-3", [comment(1, "user", "beta still runs")])],
+    } });
+    const config = bridgeConfig(fixture.baseUrl, {
+      alpha: { agent: "alpha", pane: 1 }, beta: { agent: "beta", pane: 2 },
+    });
+    const deliveries = [];
+    const notificationKeys = [];
+    const notify = async (item) => {
+      notificationKeys.push(item.idempotencyKey);
+      throw new Error("notification target unavailable");
+    };
+    try {
+      await expect(run({ fixture, config, state, now: () => clock, notify,
+        deliver: async (item) => deliveries.push(item) }))
+        .rejects.toThrow("1 notification failure");
+      await expect(run({ fixture, config, state, now: () => clock + 60_000, notify,
+        deliver: async (item) => deliveries.push(item) }))
+        .rejects.toThrow("1 notification failure");
+      expect(notificationKeys).toEqual([
+        "suggestions-comment-notify:alpha:A-2:1",
+        "suggestions-comment-notify:alpha:A-2:1",
+      ]);
+      expect(state.projects.alpha.comments["A-2:1"].notifiedAt).toBeNull();
+      expect(deliveries.map((item) => item.idempotencyKey)).toEqual([
+        "suggestions-comment:beta:B-3:1:initial",
+      ]);
+      expect(state.projects.beta.comments["B-3:1"].attempts).toHaveLength(1);
+    } finally { await fixture.close(); }
+  });
+
+  it("reuses notification idempotency after a success-to-persist crash", async () => {
+    const root = makeRoot();
+    const statePath = join(root, "state.json");
+    const clock = 31_000_000;
+    const initial = { version: 1, projects: { alpha: {
+      bootstrapped: true,
+      comments: { "A-3:1": { firstSeenAt: clock - 5 * 60 * 60 * 1000,
+        attempts: REMINDER_STAGES.map((stage) => ({ stage: stage.id,
+          enqueuedAt: clock - 5 * 60 * 60 * 1000 + stage.afterMs })),
+        answeredAt: null, notifiedAt: null } },
+      ticketUpdatedAt: { "A-3": 1_000 },
+    } } };
+    saveSuggestionsBridgeState(statePath, initial);
+    const fixture = await fixtureServer({ projectIds: ["alpha"], boards: {
+      alpha: [ticket("A-3", [comment(1, "creator", "crash after notify")])],
+    } });
+    const config = bridgeConfig(fixture.baseUrl, { alpha: { agent: "alpha", pane: 1 } });
+    const notifyCalls = [];
+    const externalNotifications = new Set();
+    const notify = async (item) => {
+      notifyCalls.push(item.idempotencyKey);
+      externalNotifications.add(item.idempotencyKey);
+    };
+    let crash = true;
+    try {
+      let state = loadSuggestionsBridgeState(statePath);
+      await expect(run({ fixture, config, state, now: () => clock, notify,
+        deliver: async () => {}, persist: (next) => {
+          if (crash && next.projects.alpha.comments["A-3:1"].notifiedAt != null) {
+            crash = false;
+            throw new Error("simulated persist crash");
+          }
+          saveSuggestionsBridgeState(statePath, next);
+        } })).rejects.toThrow("simulated persist crash");
+
+      state = loadSuggestionsBridgeState(statePath);
+      expect(state.projects.alpha.comments["A-3:1"].notifiedAt).toBeNull();
+      await run({ fixture, config, state, now: () => clock + 60_000, notify,
+        deliver: async () => {}, persist: (next) => saveSuggestionsBridgeState(statePath, next) });
+      expect(notifyCalls).toEqual([
+        "suggestions-comment-notify:alpha:A-3:1",
+        "suggestions-comment-notify:alpha:A-3:1",
+      ]);
+      expect(externalNotifications.size).toBe(1);
+      expect(loadSuggestionsBridgeState(statePath).projects.alpha.comments["A-3:1"].notifiedAt)
+        .toBe(clock + 60_000);
+    } finally { await fixture.close(); }
+  });
+
+  it("passes the stable notification identity to amux notifyuser", async () => {
+    const root = makeRoot();
+    const fake = fakeAmux(root);
+    await createAmuxCommentNotifier({ amuxBin: fake.path })({
+      projectId: "skydive", ticketId: "SKY-10", commentId: 7,
+      agent: "skydive", pane: 3,
+      idempotencyKey: "suggestions-comment-notify:skydive:SKY-10:7",
+    });
+    expect(fake.records()).toHaveLength(1);
+    expect(fake.records()[0].args).toEqual(expect.arrayContaining([
+      "notifyuser", "--idempotency-key", "suggestions-comment-notify:skydive:SKY-10:7",
+    ]));
   });
 
   it("continues reminders for a tracked ticket after it leaves the bounded list", async () => {
