@@ -737,7 +737,11 @@ export async function pollSuggestionsComments({
   if (deliveryFailures.length) {
     const identities = deliveryFailures.map((failure) =>
       `${failure.projectId}/${failure.ticketId}:${failure.commentId}:${failure.stage}`).join(", ");
-    throw new AggregateError([], `poller: ${deliveryFailures.length} delivery failure(s): ${identities}`);
+    const errors = deliveryFailures.map((failure) => new Error(
+      `${failure.projectId}/${failure.ticketId}:${failure.commentId}:${failure.stage}`,
+    ));
+    throw new AggregateError(errors,
+      `poller: ${deliveryFailures.length} delivery failure(s): ${identities}`);
   }
   return { delivered };
 }

@@ -387,6 +387,8 @@ describe.sequential("Suggestions human-comment relay", () => {
       expect(markerLines).toHaveLength(2);
       expect(markerLines[0]).toMatch(/_BEGIN$/u);
       expect(markerLines[1]).toMatch(/_END$/u);
+      expect(prompts[0].split(markerLines[0]).length - 1).toBe(1);
+      expect(prompts[0].split(markerLines[1]).length - 1).toBe(1);
       expect(markerLines.join("\n")).not.toContain(oldBoundary);
       const begin = prompts[0].indexOf(`${markerLines[0]}\n`);
       const end = prompts[0].indexOf(`\n${markerLines[1]}`);
@@ -394,6 +396,8 @@ describe.sequential("Suggestions human-comment relay", () => {
       expect(begin).toBeGreaterThanOrEqual(0);
       expect(end).toBeGreaterThan(begin);
       expect(trustedWorkflow).toBeGreaterThan(end);
+      expect(prompts[0].match(/\nMANDATORY INTENT RECONCILIATION \(trusted workflow\):/gu))
+        .toHaveLength(1);
       expect(prompts[0]).not.toMatch(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u);
       expect(prompts[0]).not.toContain("\u001b[200~");
       expect(prompts[0]).not.toContain("\u001b[201~");
