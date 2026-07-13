@@ -17,6 +17,7 @@
 // that could vanish into the command palette while Discord said "sent".
 
 import { appendEvent } from "./events.mjs";
+import { rewriteModelSlash } from "./claude-model.mjs";
 
 /**
  * Delivery receipt: every verified send leaves a ledger row, so "did my
@@ -49,9 +50,10 @@ function recordReceipt(agentName, pane, kind, text, result) {
  * verification, prompts get jsonl echo verification.
  */
 export async function deliverToPane(agent, agentName, pane, text, opts = {}) {
-  return isSlashCommand(text)
-    ? sendSlashVerified(agent, agentName, pane, text.trim(), opts)
-    : sendPromptVerified(agent, agentName, pane, text, opts);
+  const resolved = rewriteModelSlash(text);
+  return isSlashCommand(resolved)
+    ? sendSlashVerified(agent, agentName, pane, resolved.trim(), opts)
+    : sendPromptVerified(agent, agentName, pane, resolved, opts);
 }
 
 /** "/model fable" yes; "/home/x/file" no (path, not command). */
