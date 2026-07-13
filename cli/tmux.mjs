@@ -204,6 +204,7 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
     text,
     source: opts.source || "cli",
     metadata: { sender: sender?.key || null },
+    idempotencyKey: opts.idempotencyKey || null,
   });
   const settled = await waitForDeliveryJob(queue, job.id, {
     timeoutMs: opts.waitMs ?? ctx.deliveryWaitMs ?? 12_000,

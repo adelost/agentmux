@@ -190,7 +190,21 @@ async function cmdSend(name, prompt, flags, ctx) {
   const sender = detectSenderFromEnv(process.env, exec);
   const finalPrompt = prependSenderHeader(prompt, sender);
 
-  const res = await sendToPane(ctx, name, pane, finalPrompt, { force: !!flags.force });
+  const idempotencyKey = flags["idempotency-key"];
+  if (idempotencyKey != null
+      && (typeof idempotencyKey !== "string" || Buffer.byteLength(idempotencyKey, "utf8") > 256
+        || !/^[a-zA-Z0-9:._/-]+$/u.test(idempotencyKey))) {
+    throw new Error("--idempotency-key must be 1-256 safe identity characters");
+  }
+  const waitMs = flags["wait-ms"];
+  if (waitMs != null && (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > 12_000)) {
+    throw new Error("--wait-ms must be 0-12000");
+  }
+  const res = await sendToPane(ctx, name, pane, finalPrompt, {
+    force: !!flags.force,
+    idempotencyKey: idempotencyKey || null,
+    ...(waitMs != null ? { waitMs } : {}),
+  });
   if (res?.blocked) {
     process.exitCode = 1;
     return;
@@ -200,6 +214,20 @@ async function cmdSend(name, prompt, flags, ctx) {
     return;
   }
   if (!flags.q) console.log(`${res.pending ? "Queued durably for" : "Sent to"} '${name}' (pane ${pane}): ${truncate(prompt)}`);
+}
+
+export async function readPromptFromStdin(maxBytes = 128 * 1024, stream = process.stdin) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of stream) {
+    const bytes = Buffer.from(chunk);
+    size += bytes.length;
+    if (size > maxBytes) throw new Error(`--stdin prompt exceeds ${maxBytes} bytes`);
+    chunks.push(bytes);
+  }
+  const prompt = Buffer.concat(chunks).toString("utf8");
+  if (!prompt.trim()) throw new Error("--stdin requires a non-empty prompt");
+  return prompt;
 }
 
 async function cmdWait(name, flags, ctx) {
@@ -3388,6 +3416,9 @@ Usage:
     --notify-user                 Mobile-push the human when done/problem
     -p <pane>                     Target specific pane (default: 0)
     -q                            Quiet (no confirmation output)
+    --stdin                       Read a bounded prompt from stdin (automation)
+    --idempotency-key <key>       Reuse one durable queue identity on retry
+    --wait-ms <0-12000>           Bound automation receipt wait (enqueue is already durable)
   agent add <name> <dir>          Add new agent
   agent rm <name|:nr>             Remove agent
   agent stop <name|:nr>           Stop tmux session (keep config)
@@ -3484,7 +3515,7 @@ Socket: /tmp/openclaw-claude.sock`);
 // --- Dispatch ---
 
 const FLAG_SPECS = {
-  send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "notify-user": "boolean", "notify-me": "boolean", force: "boolean" },
+  send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "notify-user": "boolean", "notify-me": "boolean", force: "boolean", stdin: "boolean", "idempotency-key": "string", "wait-ms": "number" },
   wait: { p: "number", t: "number", a: "boolean" },
   log: {
     n: "number", p: "number",
@@ -3862,9 +3893,12 @@ export async function dispatch(argv, ctx) {
       const name = resolveAgent(cmd, ctx.configPath);
       const { flags, positional } = parseFlags(rest, FLAG_SPECS.send);
 
-      if (positional.length > 0) {
+      if (flags.stdin && positional.length > 0) {
+        throw new Error("--stdin cannot be combined with a positional prompt");
+      }
+      if (positional.length > 0 || flags.stdin) {
         // Send prompt
-        const prompt = positional.join(" ");
+        const prompt = flags.stdin ? await readPromptFromStdin() : positional.join(" ");
         await cmdSend(name, prompt, flags, ctx);
 
         // Background notification worker (if -n, -m, or --notify-user)

@@ -1,0 +1,22 @@
+# Public Suggestions board. The relay never needs ADMIN_TOKEN or any secret.
+baseUrl: https://suggestions.v1d.io
+
+# Explicit routing. Add another project only after its responsible pane exists.
+projects:
+  skydive:
+    agent: skydive
+    pane: 3
+
+# Current production-safe fallback. A bounded implementationPolicy returned by
+# /api/config takes precedence when Suggestions exposes one.
+implementationPolicy: >-
+  Rotorsak före plåster: förstå och åtgärda grundorsaken. Refaktorera den
+  berörda sömmen när en hållbar rotfix kräver det och lämna berörd kod bättre.
+  Följ kodstandarden; gör lösningen datadriven, deklarativ och generisk där det
+  är lämpligt. Lägg en permanent regressionsgate för felklassen. Gör ingen
+  orelaterad eller spekulativ refaktorering.
+
+maxCommentBytes: 65536
+requestTimeoutMs: 15000
+detailConcurrency: 6
+statePath: ~/.agentmux/suggestions-comment-bridge-state.json
