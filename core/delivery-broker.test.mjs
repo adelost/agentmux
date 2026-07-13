@@ -69,6 +69,55 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
+  component("different panes in one tmux session never write concurrently", {
+    given: ["two pending panes and a transport that records overlap", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir });
+      queue.enqueue({ agentName: "api", pane: 3, text: "pane three" });
+      queue.enqueue({ agentName: "api", pane: 4, text: "pane four" });
+      let active = 0;
+      let maxActive = 0;
+      const agent = acceptingAgent();
+      agent.sendOnly = async (_name, text, _pane, options = {}) => {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        await options.onDrafted?.();
+        await options.onSubmitted?.();
+        active--;
+        return { submitted: true };
+      };
+      const broker = createDeliveryBroker({ agent, queue, notify: async () => {} });
+      return { rootDir, queue, broker, maxActive: () => maxActive };
+    }],
+    when: ["both pane drains are kicked together", ({ broker }) => Promise.all([
+      broker.kickTarget("api", 3),
+      broker.kickTarget("api", 4),
+    ])],
+    then: ["the shared window has one writer", (_, ctx) => {
+      expect(ctx.maxActive()).toBe(1);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("transport zoom is always restored", {
+    given: ["a pane that needs temporary zoom", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir });
+      queue.enqueue({ agentName: "api", pane: 3, text: "show composer" });
+      const agent = acceptingAgent();
+      agent.zoomPaneForPicker = async () => true;
+      agent.restorePaneZoom = async (_name, _pane, changed) => { agent.restored = changed; };
+      const broker = createDeliveryBroker({ agent, queue, notify: async () => {} });
+      return { rootDir, broker, agent };
+    }],
+    when: ["delivery finishes", ({ broker }) => broker.kickTarget("api", 3)],
+    then: ["the tiled layout is restored", (_, ctx) => {
+      expect(ctx.agent.restored).toBe(true);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("a disappearing composer keeps the owned draft at the FIFO head", {
     given: ["a first attempt that pastes, then loses the composer", () => {
       const rootDir = tempRoot();

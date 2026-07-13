@@ -139,4 +139,21 @@ feature("durable delivery queue", () => {
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });
+
+  component("one tmux session lease covers all of its panes", {
+    given: ["two queue instances over the same spool", () => {
+      const rootDir = tempRoot();
+      return { rootDir, first: createDeliveryQueue({ rootDir }), second: createDeliveryQueue({ rootDir }) };
+    }],
+    when: ["one bridge leases api while another targets a different api pane", ({ first, second }) => {
+      const owner = first.acquireSessionLease("api");
+      const rejected = second.acquireSessionLease("api");
+      owner.release();
+      return { rejected };
+    }],
+    then: ["window-global TUI operations cannot overlap", ({ rejected }, ctx) => {
+      expect(rejected).toBeNull();
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
 });

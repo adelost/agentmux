@@ -214,10 +214,7 @@ export function createDeliveryQueue({
     return restored;
   }
 
-  function acquireTargetLease(agentName, pane) {
-    const dir = dirFor(agentName, pane);
-    ensurePrivateDir(dir);
-    const path = join(dir, ".consumer.lock");
+  function acquireLease(path) {
     const token = `${process.pid}:${uuid()}`;
 
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -252,6 +249,20 @@ export function createDeliveryQueue({
     return null;
   }
 
+  function acquireTargetLease(agentName, pane) {
+    const dir = dirFor(agentName, pane);
+    ensurePrivateDir(dir);
+    return acquireLease(join(dir, ".consumer.lock"));
+  }
+
+  // All configured panes for one agent live in the same tmux window. Zoom is
+  // window-global, so two otherwise independent pane deliveries can still
+  // hide each other's composers. This lease makes the bridge single-writer
+  // per tmux session, including across duplicate bridge processes.
+  function acquireSessionLease(agentName) {
+    return acquireLease(join(rootDir, `.session-${encodeURIComponent(agentName)}.lock`));
+  }
+
   function prune({ acknowledgedOlderThanMs = 7 * 24 * 60 * 60 * 1000 } = {}) {
     const cutoff = now() - acknowledgedOlderThanMs;
     let removed = 0;
@@ -280,7 +291,10 @@ export function createDeliveryQueue({
     return removed;
   }
 
-  return { rootDir, enqueue, read, update, list, next, targets, findById, restoreAssets, acquireTargetLease, prune };
+  return {
+    rootDir, enqueue, read, update, list, next, targets, findById,
+    restoreAssets, acquireTargetLease, acquireSessionLease, prune,
+  };
 }
 
 export async function waitForDeliveryJob(queue, id, {

@@ -5,7 +5,7 @@
 // commands actually get sent — the regression that mattered was a runaway
 // firing dozens of /compact into a pane whose context never dropped.
 
-import { feature, unit, expect } from "bdd-vitest";
+import { feature, unit, component, expect } from "bdd-vitest";
 import { writeFileSync, mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -179,7 +179,7 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
   // Codex panes run on AUTO — amux must not touch them (codex has a server-
   // enforced cap + native auto-compaction; /compact is a Claude command). The
   // skip happens BEFORE inspect(), so a codex pane is never even captured.
-  unit("codex panes are inspected (quota watch) but never warned or compacted", {
+  component("codex panes are inspected (quota watch) but never warned or compacted", {
     given: ["an agent with a claude pane (0) and a codex pane (1), both reading 100%", () => {
       const dir = mkdtempSync(join(tmpdir(), "amux-ac-codex-"));
       const path = join(dir, "agents.yaml");

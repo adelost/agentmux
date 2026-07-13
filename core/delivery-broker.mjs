@@ -48,10 +48,13 @@ export function createDeliveryBroker({
   let started = false;
   let stopped = false;
 
-  const laneKey = (agentName, pane) => `${agentName}:${Number(pane) || 0}`;
+  // Panes share one tmux window. Transport temporarily zooms a target pane so
+  // Codex has enough rows to paint its composer; therefore the in-process
+  // critical section is session-wide even though FIFO ordering is per pane.
+  const laneKey = (agentName) => String(agentName);
 
   function runExclusive(agentName, pane, work) {
-    const key = laneKey(agentName, pane);
+    const key = laneKey(agentName);
     const previous = lanes.get(key) || Promise.resolve();
     const next = previous.catch(() => {}).then(work);
     let tracked;
@@ -180,38 +183,48 @@ export function createDeliveryBroker({
     });
     queueEvent(job, "attempt", { attempt: job.attempts });
 
-    const result = await deliverToPane(agent, job.agentName, job.pane, job.text, {
-      verifyText: job.verifyText,
-      attempts: 1,
-      echoTimeoutMs: 3_000,
-      echoCursor: job.echoCursor,
-      notBeforeMs: job.echoCursor ? null : job.echoNotBeforeMs,
-      precheckEcho: true,
-      knownDrafted: drafted,
-      suppressReceipt: true,
-      onDrafted: async () => {
-        drafted = true;
-        const current = queue.read(job.agentName, job.pane, job.id) || job;
-        job = queue.update(current, { status: "drafted", draftOwned: true });
-        queueEvent(job, "drafted");
-      },
-      onSubmitted: async () => {
-        submitted = true;
-        const current = queue.read(job.agentName, job.pane, job.id) || job;
-        job = queue.update(current, {
-          status: "submitted",
-          draftOwned: false,
-          submittedAt: now(),
-          nextAttemptAt: now() + ACTIVE_RETRY_MS,
-        });
-        queueEvent(job, "submitted");
-      },
-      log: (message) => log(`delivery ${job.agentName}:${job.pane} ${job.id}: ${message}`),
-    }).catch((error) => ({
-      delivered: false,
-      blocked: true,
-      reason: error.message,
-    }));
+    let zoomChanged = false;
+    let result;
+    try {
+      if (typeof agent.zoomPaneForPicker === "function") {
+        zoomChanged = await agent.zoomPaneForPicker(job.agentName, job.pane);
+      }
+      result = await deliverToPane(agent, job.agentName, job.pane, job.text, {
+        verifyText: job.verifyText,
+        attempts: 1,
+        echoTimeoutMs: 3_000,
+        echoCursor: job.echoCursor,
+        notBeforeMs: job.echoCursor ? null : job.echoNotBeforeMs,
+        precheckEcho: true,
+        knownDrafted: drafted,
+        suppressReceipt: true,
+        onDrafted: async () => {
+          drafted = true;
+          const current = queue.read(job.agentName, job.pane, job.id) || job;
+          job = queue.update(current, { status: "drafted", draftOwned: true });
+          queueEvent(job, "drafted");
+        },
+        onSubmitted: async () => {
+          submitted = true;
+          const current = queue.read(job.agentName, job.pane, job.id) || job;
+          job = queue.update(current, {
+            status: "submitted",
+            draftOwned: false,
+            submittedAt: now(),
+            nextAttemptAt: now() + ACTIVE_RETRY_MS,
+          });
+          queueEvent(job, "submitted");
+        },
+        log: (message) => log(`delivery ${job.agentName}:${job.pane} ${job.id}: ${message}`),
+      });
+    } catch (error) {
+      result = { delivered: false, blocked: true, reason: error.message };
+    } finally {
+      if (typeof agent.restorePaneZoom === "function") {
+        await agent.restorePaneZoom(job.agentName, job.pane, zoomChanged)
+          .catch((error) => log(`delivery zoom restore failed for ${job.agentName}:${job.pane}: ${error.message}`));
+      }
+    }
 
     job = queue.read(job.agentName, job.pane, job.id) || job;
     if (result.delivered && job.kind === "slash") return acknowledge(job, "slash");
@@ -240,8 +253,9 @@ export function createDeliveryBroker({
   }
 
   async function drainTarget(agentName, pane) {
-    const lease = queue.acquireTargetLease?.(agentName, pane) || null;
-    if (queue.acquireTargetLease && !lease) return;
+    const acquireLease = queue.acquireSessionLease || queue.acquireTargetLease;
+    const lease = acquireLease?.(agentName, pane) || null;
+    if (acquireLease && !lease) return;
     try {
       while (!stopped) {
         const job = queue.next(agentName, pane);
