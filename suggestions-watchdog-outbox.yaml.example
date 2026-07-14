@@ -1,0 +1,12 @@
+# Persistent watchdog delivery for the two boards using assignment watchdogs.
+baseUrl: https://suggest.v1d.io
+projects:
+  - source
+  - skydive
+
+# Both files must be regular, current-user-owned, mode 0600, and one line.
+readCredentialFile: ~/.config/agent/suggestions-read-token
+adminCredentialFile: ~/.config/agent/suggestions-admin-token
+
+requestTimeoutMs: 15000
+deliveryWaitMs: 12000

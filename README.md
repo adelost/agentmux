@@ -309,6 +309,19 @@ bin/install-suggestions-comment-bridge.sh remove
 The default reusable mapping is `skydive -> skydive:3`. Full routing,
 answer/retry, and security contract: [`docs/suggestions-comment-bridge.md`](docs/suggestions-comment-bridge.md).
 
+Suggestions watchdog outbox delivery:
+
+```bash
+bin/install-suggestions-watchdog-outbox.sh install
+bin/install-suggestions-watchdog-outbox.sh status
+bin/install-suggestions-watchdog-outbox.sh run-once
+```
+
+This separate privileged consumer polls Source and Skydive, resolves each live
+bootstrap `brokerOwner`, and ACKs Suggestions only after agentmux records a
+verified delivery receipt. Failures remain pending under one durable identity.
+See [`docs/suggestions-watchdog-outbox.md`](docs/suggestions-watchdog-outbox.md).
+
 `ax` is installed as a shorter alias for `amux`.
 
 ## Agent-to-Agent Delegation
