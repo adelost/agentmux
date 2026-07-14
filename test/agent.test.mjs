@@ -241,10 +241,10 @@ feature("generated agent policy", () => {
       rmSync(root, { recursive: true, force: true });
       return content;
     }],
-    then: ["p4-p6 are allowed while every other pane stays outside the allowlist", (content) => {
-      expect(content).toContain("<!-- amux-hints-version: 1.23.10 -->");
+    then: ["p4-p9 are allowed while p0-p2 remain explicit on-demand exclusions", (content) => {
+      expect(content).toContain("<!-- amux-hints-version: 1.23.11 -->");
       expect(content).toContain("Skydive broker panel authority is a hard allowlist");
-      expect(content).toContain("only for `skydive:4` through `skydive:6`");
+      expect(content).toContain("only for `skydive:4` through `skydive:9`");
       expect(content).toContain("Every other Skydive pane is outside that manager allowlist");
       expect(content).toContain("panes `skydive:0` through `skydive:2` are reserved on-demand");
       expect(content).toMatch(/unless Mattias explicitly names that exact pane for that exact\s+current task/u);
