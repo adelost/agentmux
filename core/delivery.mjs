@@ -4,10 +4,9 @@
 // live in exactly one place:
 //
 //   1. Blocking prompts are dismissed before sending.
-//   2. Delivery is VERIFIED at the source of truth, never assumed:
-//      prompts against the session jsonl, or an exact verified Codex queue
-//      transition while another turn owns JSONL; slash commands against the
-//      composer being consumed (they never reach the jsonl).
+//   2. Delivery is VERIFIED at the source of truth, never assumed: prompts
+//      only against the session JSONL; slash commands against the composer
+//      being consumed (they intentionally never reach JSONL).
 //   3. Failures are rescued (submit-Enter) and retried idempotently.
 //   4. The verdict is HONEST: { delivered: false } means the human/caller
 //      must be told — no path may claim success it cannot prove.
@@ -39,6 +38,7 @@ function recordReceipt(agentName, pane, kind, text, result) {
       rescues: result.rescues ?? null,
       blocked: Boolean(result.blocked),
       pending: Boolean(result.pending),
+      transportHint: result.transportHint ? String(result.transportHint).slice(0, 160) : null,
       reason: result.reason ? String(result.reason).slice(0, 160) : null,
       detail: String(text).slice(0, 120),
     });
@@ -65,10 +65,9 @@ export function isSlashCommand(text) {
  * Verified prompt delivery: dismiss -> send -> echo-verify -> retry.
  * sendText is what goes into the pane (may carry a "[from x]" prefix);
  * verifyText is what the echo check looks for (the bare prompt).
- * Returns { delivered, attempts, via } — prompt delivery is acknowledged
- * by the exact session-jsonl echo or by an exact prompt leaving a verified
- * Codex composer during a busy turn. A generic "pane is busy" signal is never
- * proof that our keystrokes reached the composer.
+ * Returns { delivered, attempts, via } — prompt delivery is acknowledged only
+ * by the exact session-JSONL echo. Composer/queue observations are retained as
+ * transport hints, but may never produce a delivered or blocked verdict.
  */
 export async function sendPromptVerified(agent, agentName, pane, text, opts = {}) {
   const result = await promptDeliveryAttempts(agent, agentName, pane, text, opts);
@@ -131,10 +130,9 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
         log(`send attempt ${attempt} errored${err.code === "AMUX_DELIVERY_BLOCKED" ? " (terminal)" : " (verifying echo anyway)"}: ${err.message.split("\n").slice(0, 2).join(" | ")}`);
       });
 
-    // A terminal composer error can be SECONDARY: the previous attempt may
-    // already have submitted and written JSONL while its receipt check lagged.
-    // Recheck the exact local event cursor before surfacing the terminal error;
-    // this is what prevents a successful turn from producing a false warning.
+    // A composer error is only a TUI hint: the previous attempt may already
+    // have submitted while the repaint lied. Recheck the authoritative sink
+    // before returning, and never let scraping create the delivery verdict.
     if (sendError?.code === "AMUX_DELIVERY_BLOCKED") {
       const echoed = await agent.waitForPromptEcho(agentName, pane, needle, 0, echoOptions);
       if (echoed) return { delivered: true, attempts: attempt, via: "echo" };
@@ -142,8 +140,7 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
         delivered: false,
         attempts: attempt,
         via: null,
-        blocked: true,
-        reason: sendError.message,
+        transportHint: sendError.message,
         ...(sendError.zoomRecoverable ? { zoomRecoverable: true } : {}),
       };
     }
@@ -152,17 +149,17 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
     const echoed = await agent.waitForPromptEcho(agentName, pane, needle, echoWaitMs, echoOptions);
     if (echoed) return { delivered: true, attempts: attempt, via: "echo" };
 
-    // Busy Codex queues are written to rollout JSONL only after the active
-    // turn yields. sendOnly's receipt is exact (verified empty/exact composer
-    // → successful Enter → incoming prompt no longer composed), so one queued
-    // write is accepted without the duplicate-producing retry that regressed
-    // live delivery in v1.21.2.
+    // A physical Enter may be followed by a late JSONL event (especially a
+    // busy Codex steering turn). Do not duplicate the pane write, but do not
+    // call it delivered either: composer/queue state is diagnostic only.
     if (sendReceipt?.submitted || sendReceipt?.queued) {
       return {
-        delivered: true,
+        delivered: false,
         attempts: attempt,
-        via: sendReceipt.queued ? "queue" : "submit",
+        via: null,
         pending: true,
+        transportHint: sendReceipt.tuiHint
+          || (sendReceipt.queued ? "queue-observed" : "submit-key-sent"),
       };
     }
 
