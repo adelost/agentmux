@@ -324,7 +324,10 @@ Generated `.agents/CLAUDE.md` and `.agents/AGENTS.md` files teach Claude Code
 and Codex how to use these commands from inside project panes. They also carry
 the shared ownership policy: one active ticket per agent, one end-to-end owner
 per feature, and at most one risk-appropriate review before the merge broker
-lands the PR and advances capacity to independent READY work.
+lands the PR and advances capacity to independent READY work. Project-specific
+authority fences are generated there too: `skydive:3` autonomously manages
+only `skydive:4`–`skydive:9`; reserved `skydive:0`–`skydive:2` require an
+explicit per-task instruction from Mattias and never count as idle capacity.
 
 ## Configuration
 

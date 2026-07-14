@@ -232,4 +232,22 @@ feature("generated agent policy", () => {
       expect(content).not.toContain("utanför min lane, fråga Mattias");
     }],
   });
+
+  unit("hard-fences the skydive broker to its autonomous pane pool", {
+    when: ["generating fresh agent hints", () => {
+      const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
+      paneDir(root, 0);
+      const content = readFileSync(join(root, ".agents", "AGENTS.md"), "utf-8");
+      rmSync(root, { recursive: true, force: true });
+      return content;
+    }],
+    then: ["p4-p9 are allowed while p0-p2 remain explicit on-demand exclusions", (content) => {
+      expect(content).toContain("<!-- amux-hints-version: 1.23.9 -->");
+      expect(content).toContain("Skydive broker panel authority is a hard allowlist");
+      expect(content).toContain("only for `skydive:4` through `skydive:9`");
+      expect(content).toContain("panes `skydive:0` through `skydive:2` are reserved on-demand");
+      expect(content).toMatch(/unless Mattias explicitly names that exact pane for that exact\s+current task/u);
+      expect(content).toContain("An idle reserved pane is still outside the allowlist");
+    }],
+  });
 });
