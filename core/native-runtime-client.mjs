@@ -163,18 +163,36 @@ export function createNativeRuntimeClient({
       },
     });
     const agentKey = `amux-agent:${spec.entry.id || keyHash(`${name}:${spec.entry.dir}`)}:${pane}`;
-    const agent = await api(spec.runtimeUrl, `/api/projects/${project.id}/agents`, {
+    let agent = await api(spec.runtimeUrl, `/api/projects/${project.id}/agents`, {
       method: "POST",
       body: {
         idempotencyKey: agentKey,
         name: `${name}:${pane}`,
         engine: spec.engine,
-        model: spec.paneConfig.model || undefined,
-        effort: spec.paneConfig.effort || undefined,
         address: { session: name, pane: Number(pane) },
         permissionMode: "automation",
       },
     });
+    const settings = {
+      ...(spec.paneConfig.model && spec.paneConfig.model !== agent.model
+        ? { model: spec.paneConfig.model } : {}),
+      ...(spec.paneConfig.effort && spec.paneConfig.effort !== agent.effort
+        ? { effort: spec.paneConfig.effort } : {}),
+    };
+    if (settings.model || settings.effort) {
+      const transitionKey = keyHash(JSON.stringify({
+        agentId: agent.id,
+        from: { model: agent.model, effort: agent.effort, updatedAt: agent.updatedAt },
+        to: settings,
+      }));
+      agent = await api(spec.runtimeUrl, `/api/agents/${agent.id}`, {
+        method: "PATCH",
+        body: {
+          ...settings,
+          idempotencyKey: `amux-config-settings:${transitionKey}`,
+        },
+      });
+    }
     const resolved = { ...spec, project, agent };
     targetCache.set(cacheKey, resolved);
     return resolved;

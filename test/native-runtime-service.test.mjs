@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  nativeRuntimeEnvironment,
   nativeRuntimeStatus,
   startNativeRuntime,
   stopNativeRuntime,
@@ -32,6 +33,7 @@ describe("native runtime detached lifecycle", () => {
       port,
       stateDir: join(root, "state"),
       dataDir: join(root, "data"),
+      legacyDataDir: null,
     };
     const serverPath = resolve(
       dirname(fileURLToPath(import.meta.url)),
@@ -54,6 +56,25 @@ describe("native runtime detached lifecycle", () => {
       online: false,
       managed: false,
     });
+  });
+
+  it("makes legacy migration an explicit opt-out for isolated runtimes", () => {
+    expect(nativeRuntimeEnvironment({
+      port: 8812,
+      dataDir: "/tmp/native-isolated",
+      legacyDataDir: null,
+      baseEnv: { PATH: "/usr/bin" },
+    })).toEqual({
+      PATH: "/usr/bin",
+      AMUX_WEB_PORT: "8812",
+      AMUX_WEB_DATA_DIR: "/tmp/native-isolated",
+      AMUX_WEB_LEGACY_DATA_DIR: "off",
+    });
+    expect(nativeRuntimeEnvironment({
+      port: 8811,
+      dataDir: "/tmp/native-upgrade",
+      baseEnv: {},
+    })).not.toHaveProperty("AMUX_WEB_LEGACY_DATA_DIR");
   });
 
   it("does not claim or signal a live process whose pid was reused", async () => {

@@ -129,7 +129,8 @@ Start the independent background process, then sync the canary channels:
 ```bash
 amux runtime start --port 8812 \
   --data-dir ~/.agentmux/canaries/skybar-runtime \
-  --state-dir ~/.agentmux/canaries/skybar-runtime-service
+  --state-dir ~/.agentmux/canaries/skybar-runtime-service \
+  --no-legacy-migration
 amux sync
 amux skybar-canary -p 0 "reply CANARY_OK"
 amux log skybar-canary -p 0

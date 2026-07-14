@@ -90,7 +90,9 @@ writeFileSync(attachmentPath, `native attachment ${runId}\n`, { mode: 0o600 });
 assertNoCanaryTmux();
 let runtime = await nativeRuntimeStatus({ port, stateDir, dataDir });
 if (!runtime.online) {
-  runtime = await startNativeRuntime({ port, stateDir, dataDir, serverPath });
+  runtime = await startNativeRuntime({
+    port, stateDir, dataDir, serverPath, legacyDataDir: null,
+  });
 }
 assert(runtime.online, "native runtime did not become healthy");
 assert(runtime.managed, "canary runtime must be owned by its isolated service manager");
@@ -280,7 +282,9 @@ const mirroredBeforeRestart = discordMessages.length;
 assert(mirroredBeforeRestart > 0, "native watcher did not mirror completed turns");
 
 await stopNativeRuntime({ port, stateDir, dataDir });
-runtime = await startNativeRuntime({ port, stateDir, dataDir, serverPath });
+runtime = await startNativeRuntime({
+  port, stateDir, dataDir, serverPath, legacyDataDir: null,
+});
 assert.notEqual(runtime.health.bootId, firstBootId, "runtime restart did not create a new boot identity");
 client = makeClient();
 broker = createDeliveryBroker({ agent: client, queue, notify: async () => {} });

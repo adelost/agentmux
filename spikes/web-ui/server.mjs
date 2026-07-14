@@ -83,6 +83,14 @@ const hashPayload = (payload) => createHash("sha256")
   .update(JSON.stringify(payload))
   .digest("hex");
 
+const agentIdentityFingerprint = ({
+  projectId,
+  name,
+  engine,
+  address,
+  permissionMode,
+}) => hashPayload({ projectId, name, engine, address, permissionMode });
+
 const cleanName = (value, max = 64) => typeof value === "string"
   ? value.trim().replace(/\s+/g, " ").slice(0, max)
   : "";
@@ -227,8 +235,11 @@ export function createWebUi(options = {}) {
   const dataDir = resolve(options.dataDir
     ?? process.env.AMUX_WEB_DATA_DIR
     ?? join(homeDir, ".agentmux", "web-ui"));
+  const legacyDataSetting = process.env.AMUX_WEB_LEGACY_DATA_DIR;
   const legacyDataDir = options.legacyDataDir === undefined
-    ? join(ROOT, "data")
+    ? String(legacyDataSetting || "").toLowerCase() === "off"
+      ? null
+      : legacyDataSetting ? resolve(legacyDataSetting) : join(ROOT, "data")
     : options.legacyDataDir;
   const registryPath = join(dataDir, "registry.json");
   const uploadDir = join(dataDir, "uploads");
@@ -401,6 +412,16 @@ export function createWebUi(options = {}) {
     for (const [name, map] of Object.entries(receipts)) {
       for (const [key, value] of Object.entries(stored.receipts?.[name] ?? {})) map.set(key, value);
     }
+    let upgradedAgentReceipts = false;
+    for (const receipt of receipts.agentCreates.values()) {
+      const agent = agents.get(receipt.id);
+      if (!agent) continue;
+      const identityHash = agentIdentityFingerprint(agent);
+      if (receipt.hash === identityHash) continue;
+      receipt.hash = identityHash;
+      upgradedAgentReceipts = true;
+    }
+    if (upgradedAgentReceipts) saveRegistry();
     return true;
   };
 
@@ -1400,12 +1421,10 @@ export function createWebUi(options = {}) {
           json(response, 400, { error: "unknown-effort", allowed: DEFAULT_EFFORTS[engine] }); return;
         }
         const effort = cleanEffort(engine, body?.effort);
-        const fingerprint = hashPayload({
+        const fingerprint = agentIdentityFingerprint({
           projectId: project.id,
           name,
           engine,
-          model,
-          effort,
           address,
           permissionMode,
         });

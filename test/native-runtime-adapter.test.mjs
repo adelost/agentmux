@@ -33,12 +33,13 @@ function setup() {
     projectId: "11111111-1111-4111-8111-111111111111",
     name: "skybar-canary:0",
     engine: "claude",
-    model: "claude-opus-4-8",
-    effort: "high",
+    model: "claude-sonnet-4-5",
+    effort: "medium",
     address: { session: "skybar-canary", pane: 0 },
     permissionMode: "automation",
     running: false,
     context: { percent: 42.4, usedTokens: 84_800 },
+    updatedAt: 100,
   };
 
   const fetchImpl = async (url, options = {}) => {
@@ -63,6 +64,7 @@ function setup() {
     if (path === `/api/agents/${agent.id}` && options.method === "PATCH") {
       Object.assign(agent, body);
       delete agent.idempotencyKey;
+      agent.updatedAt += 1;
       return jsonResponse(agent);
     }
     if (path === `/api/agents/${agent.id}/compact` && options.method === "POST") {
@@ -120,10 +122,17 @@ describe("native runtime compatibility adapter", () => {
     const agentCreate = calls.find((call) => call.path.endsWith("/agents"));
     expect(agentCreate.body).toMatchObject({
       engine: "claude",
-      model: "claude-opus-4-8",
-      effort: "high",
       address: { session: "skybar-canary", pane: 0 },
       permissionMode: "automation",
+    });
+    expect(agentCreate.body).not.toHaveProperty("model");
+    expect(agentCreate.body).not.toHaveProperty("effort");
+    const configuredSettings = calls.find((call) =>
+      call.path === `/api/agents/${agent.id}`
+      && call.body?.idempotencyKey?.startsWith("amux-config-settings:"));
+    expect(configuredSettings.body).toMatchObject({
+      model: "claude-opus-4-8",
+      effort: "high",
     });
     await expect(nativeRuntime.getContext("skybar-canary", 0)).resolves.toMatchObject({
       percent: 42,
@@ -181,7 +190,9 @@ describe("native runtime compatibility adapter", () => {
       kind: "slash",
       text: "/model claude-sonnet-4-5 high",
     })).resolves.toMatchObject({ accepted: true, via: "native-settings" });
-    const patchCall = calls.find((call) => call.path === `/api/agents/${agent.id}`);
+    const patchCall = calls.find((call) =>
+      call.path === `/api/agents/${agent.id}`
+      && call.body?.idempotencyKey === "delivery:model-change");
     expect(patchCall.body).toMatchObject({
       model: "claude-sonnet-4-5",
       effort: "high",

@@ -326,6 +326,54 @@ describe("AMUX Code project and agent registry", () => {
     });
   });
 
+  it("keeps mutable model and effort settings out of the agent identity receipt", async () => {
+    const { url, workspace } = await setup();
+    const project = await createProject(url, workspace);
+    const agent = await createAgent(url, project, "claude", "stable-agent-key", {
+      effort: "medium",
+      address: { session: "skybar-canary", pane: 0 },
+      permissionMode: "automation",
+    });
+
+    const updated = await request(`${url}/api/agents/${agent.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-5",
+        effort: "high",
+        idempotencyKey: "stable-agent-settings",
+      }),
+    });
+    expect(updated.status).toBe(200);
+
+    const replay = await postJson(`${url}/api/projects/${project.id}/agents`, {
+      name: "Claude agent",
+      engine: "claude",
+      model: "claude-sonnet-4-5",
+      effort: "high",
+      address: { session: "skybar-canary", pane: 0 },
+      permissionMode: "automation",
+      idempotencyKey: "stable-agent-key",
+    });
+    expect(replay.status).toBe(200);
+    expect(replay.body).toMatchObject({
+      id: agent.id,
+      model: "claude-sonnet-4-5",
+      effort: "high",
+      replayed: true,
+    });
+
+    const identityConflict = await postJson(`${url}/api/projects/${project.id}/agents`, {
+      name: "Claude agent",
+      engine: "claude",
+      address: { session: "skybar-canary", pane: 1 },
+      permissionMode: "automation",
+      idempotencyKey: "stable-agent-key",
+    });
+    expect(identityConflict.status).toBe(409);
+    expect(identityConflict.body.error).toBe("idempotency-key-conflict");
+  });
+
   it("runs Claude and Codex in the project, resumes sessions and de-duplicates messages", async () => {
     const { url, workspace, calls } = await setup();
     const project = await createProject(url, workspace);
@@ -669,6 +717,7 @@ describe("AMUX Code project and agent registry", () => {
     // operation key, not the first matching receipt in insertion order.
     const registryPath = join(setupOne.dataDir, "registry.json");
     const registry = JSON.parse(readFileSync(registryPath, "utf8"));
+    registry.receipts.agentCreates["claude-agent-key"].hash = "legacy-mutable-fingerprint";
     const originalReceipt = registry.receipts.messages["persist-turn"];
     originalReceipt.acceptedAt = Date.parse("2026-07-14T09:00:00.000Z");
     registry.receipts.messages["persist-turn-newer"] = {
@@ -735,6 +784,18 @@ describe("AMUX Code project and agent registry", () => {
     });
     const second = await appTwo.listen({ port: 0 });
     cleanups.push(() => appTwo.close());
+    const migratedAgentReplay = await postJson(`${second.url}/api/projects/${project.id}/agents`, {
+      name: "Claude agent",
+      engine: "claude",
+      model: "claude-sonnet-4-5",
+      effort: "high",
+      idempotencyKey: "claude-agent-key",
+    });
+    expect(migratedAgentReplay.status).toBe(200);
+    expect(migratedAgentReplay.body).toMatchObject({ id: agent.id, replayed: true });
+    const migratedRegistry = JSON.parse(readFileSync(registryPath, "utf8"));
+    expect(migratedRegistry.receipts.agentCreates["claude-agent-key"].hash)
+      .not.toBe("legacy-mutable-fingerprint");
     const list = await request(`${second.url}/api/projects`);
     expect(list.body.projects[0].cwd).toBe(setupOne.workspace);
     expect(list.body.projects[0].agents[0].context).toMatchObject({ usedTokens: 30_000, percent: 15 });

@@ -28,6 +28,8 @@ Optional environment variables:
 - `AMUX_WEB_PORT`: loopback port (default `8811`)
 - `AMUX_WEB_DATA_DIR`: registry and upload directory (default
   `~/.agentmux/web-ui`)
+- `AMUX_WEB_LEGACY_DATA_DIR`: legacy spike history source; set to `off` for an
+  isolated runtime (the native canary does this automatically)
 - `AMUX_WEB_CLAUDE_COMMAND` / `AMUX_WEB_CODEX_COMMAND`: alternate CLI binary
 
 ## Persistence and permissions
@@ -44,8 +46,10 @@ Bridge-provisioned canary agents are marked `automation`: Claude receives the
 same bypass-permissions contract as the legacy fleet and Codex app-server gets
 explicit `danger-full-access` + `never` approval settings. The modes cannot be
 confused silently because they are persisted in the registry and included in
-the idempotent create fingerprint. Both use the local CLI
-authentication/subscription, not separate cloud API keys.
+the idempotent create fingerprint. Model and effort are mutable next-turn
+settings and are reconciled only through the settings endpoint, never through
+that stable identity receipt. Both use the local CLI authentication/subscription,
+not separate cloud API keys.
 
 ## Discord/tmux compatibility pilot
 

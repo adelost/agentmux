@@ -198,6 +198,7 @@ async function cmdRuntime(args, ctx) {
     port: flags.port || 8811,
     stateDir: flags["state-dir"],
     dataDir: flags["data-dir"],
+    legacyDataDir: flags["no-legacy-migration"] ? null : undefined,
   };
   if (action === "status") {
     const status = await nativeRuntimeStatus(options);
@@ -3626,6 +3627,7 @@ Usage:
     --port N                      Runtime port (default 8811)
     --data-dir PATH               Registry/uploads directory
     --state-dir PATH              PID/log ownership directory
+    --no-legacy-migration         Do not import checkout-local spike history
     --force                       Permit stopping active turns
   agent log <name|:nr> [-n N]     Show agent output (default: last 3 turns from jsonl)
     -n N                          Number of turns (jsonl) or lines (--tmux)
@@ -3715,7 +3717,7 @@ Socket: /tmp/openclaw-claude.sock`);
 
 const FLAG_SPECS = {
   send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "notify-user": "boolean", "notify-me": "boolean", force: "boolean", stdin: "boolean", "idempotency-key": "string", "wait-ms": "number" },
-  runtime: { port: "number", "data-dir": "string", "state-dir": "string", force: "boolean" },
+  runtime: { port: "number", "data-dir": "string", "state-dir": "string", "no-legacy-migration": "boolean", force: "boolean" },
   wait: { p: "number", t: "number", a: "boolean" },
   log: {
     n: "number", p: "number",

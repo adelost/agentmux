@@ -68,6 +68,22 @@ async function health(url, fetchImpl, timeoutMs = 1_500) {
   }
 }
 
+export function nativeRuntimeEnvironment({
+  port,
+  dataDir,
+  legacyDataDir,
+  baseEnv = process.env,
+} = {}) {
+  return {
+    ...baseEnv,
+    AMUX_WEB_PORT: String(port),
+    AMUX_WEB_DATA_DIR: resolve(dataDir),
+    ...(legacyDataDir === null
+      ? { AMUX_WEB_LEGACY_DATA_DIR: "off" }
+      : legacyDataDir ? { AMUX_WEB_LEGACY_DATA_DIR: resolve(legacyDataDir) } : {}),
+  };
+}
+
 export async function nativeRuntimeStatus({
   port = 8811,
   host = "127.0.0.1",
@@ -97,6 +113,7 @@ export async function startNativeRuntime({
   host = "127.0.0.1",
   stateDir,
   dataDir,
+  legacyDataDir,
   fetchImpl = globalThis.fetch,
   spawnImpl = spawn,
   startupTimeoutMs = 10_000,
@@ -116,11 +133,11 @@ export async function startNativeRuntime({
     child = spawnImpl(process.execPath, [resolve(serverPath)], {
       detached: true,
       stdio: ["ignore", logFd, logFd],
-      env: {
-        ...process.env,
-        AMUX_WEB_PORT: String(port),
-        AMUX_WEB_DATA_DIR: before.paths.dataDir,
-      },
+      env: nativeRuntimeEnvironment({
+        port,
+        dataDir: before.paths.dataDir,
+        legacyDataDir,
+      }),
     });
     child.unref?.();
   } finally {
@@ -131,6 +148,7 @@ export async function startNativeRuntime({
     port,
     serverPath: resolve(serverPath),
     dataDir: before.paths.dataDir,
+    legacyDataDir: legacyDataDir === null ? null : legacyDataDir ? resolve(legacyDataDir) : undefined,
     startedAt: new Date().toISOString(),
   };
   const temporary = `${before.paths.pidPath}.${process.pid}.tmp`;
