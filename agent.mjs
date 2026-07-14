@@ -552,6 +552,22 @@ isn't in git is invisible to other agents.
    \`lsrc:2\` manages \`lsrc:3\` through \`lsrc:9\`, and \`watch:2\` manages
    the existing \`watch:3+\` worker panes. An idle reserved pane is still
    outside the allowlist.
+9. **Blockers live on the board, never only in broker notes (SKY-0034,
+   2026-07-15).** READY ticket + idle capacity = assign now. If a ticket is
+   genuinely blocked, record the blocker ON the ticket (structured comment
+   \`blocked-by: <ticket/PR>\` and defer it) so watchdogs and humans can see
+   and re-verify it. Declaring wave-close/full-stop requires a fresh board
+   query with a disposition for every non-done ticket; a blocker you cannot
+   re-verify right then is stale — assign the ticket. Unowned-ready alerts
+   escalate on a doubling ladder (30m/1h/3h/7h/15h/31h, \`escalation\` in
+   payload); an escalated alert may not be dismissed without one of the two
+   actions above. (SKY-0034 sat 22h HIGH+READY behind a blocker that only
+   existed in the broker's ledger.)
+10. **An assignment is delivered only at owner-ACK.** After briefing a pane,
+   verify pickup within a few minutes (reply or visible plan); a silent pane
+   gets re-checked or the ticket reassigned immediately — don't wait for the
+   30-min watchdog reminder. (The p4 and p3 dropped-balls on SKY-0034 cost
+   30+ min each and were caught only by the reminder.)
 
 ## Minnesloggning
 

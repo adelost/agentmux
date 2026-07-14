@@ -27,6 +27,12 @@
 #                        dispatch; we delegate the "why", we don't micromanage
 #                        tickets). Per-fleet cooldown prevents spam.
 #        * stale twice → amux notifyuser (human escalation), keep nudging.
+#   3. Review-queue sweep (C): any open PR in a watched repo older than
+#      PR_STALE_MIN → nudge the fleet's broker (it owns merge), re-nudge per
+#      PR_COOLDOWN_MIN. The fleet sweep only sees total silence; this catches
+#      a BUSY broker whose review queue quietly ages (SRC-0012 sat 7h+ while
+#      its broker worked other reviews, 2026-07-15). Label a PR "parked" to
+#      intentionally exempt it.
 #
 # Why nudge the broker, not the workers: single-owner rule. The broker owns
 # flow; waking individual workers would cross ownership and risk reviving
@@ -159,7 +165,7 @@ else
 fi
 
 # ── 2. Fleet sweep (A): nudge a broker whose fleet went quiet. ────────────────
-[ -f "$CONF" ] || { log "no fleets.conf at $CONF → fleet sweep skipped"; exit 0; }
+[ -f "$CONF" ] || { log "no fleets.conf at $CONF → fleet + review-queue sweeps skipped"; exit 0; }
 
 while read -r session pane repo _rest; do
   [ -z "${session:-}" ] && continue
@@ -250,3 +256,92 @@ while read -r session pane repo _rest; do
     log "$session:$pane: NUDGED (${age_min}min)"
   fi
 done < "$CONF"
+
+# ── 3. Review-queue sweep (C): a banked PR nobody reviews is invisible rot. ───
+# Independent of the fleet sweep's skip logic ON PURPOSE: a broker that is
+# actively working (fresh jsonl → fleet sweep skips) can still let its review
+# queue age for hours. Snooze does NOT apply here — "nothing READY" says
+# nothing about banked PRs; review IS the broker's work. .OFF still applies.
+PR_STALE_MIN="${PR_STALE_MIN:-240}"       # open PR older than this → nudge broker
+PR_COOLDOWN_MIN="${PR_COOLDOWN_MIN:-240}" # per-PR re-nudge interval
+PRSTATE="${WATCH_DIR}/pr-nudged.state"    # "<repo>#<num> <last_nudge_epoch>" per line
+GH="${GH:-/usr/bin/gh}"
+touch "$PRSTATE"
+if [ ! -x "$GH" ]; then
+  log "review-queue: gh not found at $GH → sweep skipped (fix PATH/GH)"
+else
+  while read -r session pane repo _rest; do
+    [ -z "${session:-}" ] && continue
+    case "$session" in \#*) continue;; esac
+    [ -z "${pane:-}" ] || [ -z "${repo:-}" ] && continue
+    [ -f "${WATCH_DIR}/${session}.OFF" ] && { log "review-queue: $session per-fleet OFF → skip"; continue; }
+    if ! pane_exists "$session" "$pane"; then continue; fi
+
+    due=""   # newline-separated "repo#num (ageh) title" rows past cooldown
+    IFS=',' read -ra _repos <<<"$repo"
+    for _r in "${_repos[@]}"; do
+      rlabel=$(basename "$_r")
+      # One TSV row per stale open PR: <key>\t<age_h>\t<title>. "parked" label
+      # = intentionally exempt. gh failure → empty sweep for that repo.
+      # JSON goes via argv: python's stdin already carries the heredoc program.
+      pr_json=$( (cd "$_r" 2>/dev/null && timeout 20 "$GH" pr list --state open \
+        --json number,title,createdAt,labels --limit 30) 2>/dev/null ) || pr_json="[]"
+      rows=$("$PY" - "$rlabel" "$PR_STALE_MIN" "$pr_json" <<'PY'
+import json, sys
+from datetime import datetime, timezone
+label, stale_min = sys.argv[1], float(sys.argv[2])
+try:
+    prs = json.loads(sys.argv[3])
+except Exception:
+    sys.exit(0)
+now = datetime.now(timezone.utc)
+for pr in prs:
+    if any(l.get("name") == "parked" for l in pr.get("labels", [])):
+        continue
+    try:
+        created = datetime.fromisoformat(pr["createdAt"].replace("Z", "+00:00"))
+    except Exception:
+        continue
+    age_min = (now - created).total_seconds() / 60
+    if age_min < stale_min:
+        continue
+    title = str(pr.get("title", ""))[:70].replace("\t", " ")
+    print(f"{label}#{pr['number']}\t{age_min/60:.0f}\t{title}")
+PY
+) || rows=""
+      [ -z "$rows" ] && continue
+      while IFS=$'\t' read -r key age_h title; do
+        [ -z "$key" ] && continue
+        last=$(awk -v k="$key" '$1 == k { print $2 }' "$PRSTATE" | tail -1)
+        if [ -n "$last" ] && [ $(( (now - last) / 60 )) -lt "$PR_COOLDOWN_MIN" ]; then
+          log "review-queue: $key stale ${age_h}h but in cooldown → skip"
+          continue
+        fi
+        due="${due}${key} öppen ${age_h}h: ${title}"$'\n'
+      done <<<"$rows"
+    done
+    [ -z "$due" ] && continue
+
+    MSG="[fleet-watch, automatisk] Review-kön åldras — öppna PR äldre än $(( PR_STALE_MIN / 60 ))h i din flottas repos:
+${due}Du äger merge: reviewa+merga per merge-by-proof, ELLER kommentera på PR:en varför den väntar och sätt labeln 'parked' om den medvetet ska ligga."
+    if [ "$DRY" = "1" ]; then
+      log "$session:$pane: DRY would nudge review-queue: $(echo "$due" | tr '\n' ' ')"
+      continue
+    fi
+    if is_reserved "$session"; then
+      amux_send notifyuser --level warn "[fleet-watch] $session:$pane har åldrande review-kö men sessionsnamnet krockar med amux-subkommando → knuffa manuellt: $(echo "$due" | tr '\n' ' ')" >/dev/null 2>&1 || true
+    else
+      amux_send "$session" -p "$pane" "$MSG" >/dev/null 2>&1 \
+        || log "$session:$pane: review-queue nudge send timed out/failed (durably enqueued regardless)"
+    fi
+    # Stamp cooldown per nudged PR (replace-or-append keyed on "<repo>#<num>").
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      key="${line%% *}"
+      grep -v "^${key} " "$PRSTATE" > "${PRSTATE}.tmp" 2>/dev/null || true
+      echo "$key $now" >> "${PRSTATE}.tmp"
+      mv "${PRSTATE}.tmp" "$PRSTATE"
+    done <<<"$due"
+    log "$session:$pane: REVIEW-QUEUE NUDGED: $(echo "$due" | tr '\n' ' ')"
+  done < "$CONF"
+fi
