@@ -35,8 +35,11 @@
 #
 # CONFIG:  ~/.agentmux/fleet-watch/fleets.conf   (one fleet per line)
 #            <session> <broker_pane> <repo_abspath>   # '#' comments ok
-# OFF:     per-fleet  touch ~/.agentmux/fleet-watch/<session>.OFF
+# OFF:     per-fleet  touch ~/.agentmux/fleet-watch/<session>.OFF  (PERMANENT, human-only)
 #          global     touch ~/.agentmux/fleet-watch/OFF
+# SNOOZE:  broker     touch ~/.agentmux/fleet-watch/<session>.snooze (AUTO-expires in
+#          SNOOZE_HOURS; a broker's "nothing READY now" — never permanent, so a
+#          stale point-in-time audit can't blind the watch to later tickets)
 # Install: */20 * * * * .../bin/fleet-progress-cron.sh >> ~/.cache/fleet-progress.log 2>&1
 set -uo pipefail
 export HOME="${HOME:-/home/adelost}"
@@ -51,6 +54,7 @@ STALE_MIN="${STALE_MIN:-60}"        # fleet quiet this long → broker gap (Matt
 STUCK_MIN="${STUCK_MIN:-60}"        # queue job non-terminal this long → surface
 ACTIVE_SEC="${ACTIVE_SEC:-150}"     # broker jsonl fresher than this → mid-turn, never interrupt
 COOLDOWN_MIN="${COOLDOWN_MIN:-60}"  # per-fleet re-nudge cooldown
+SNOOZE_HOURS="${SNOOZE_HOURS:-3}"   # broker "nothing READY" self-snooze; AUTO-expires
 DRY="${DRY:-0}"
 
 mkdir -p "$WATCH_DIR"
@@ -179,6 +183,7 @@ while read -r session pane repo _rest; do
 
   warn="${WATCH_DIR}/${session}.warned"
   cd_file="${WATCH_DIR}/${session}.cooldown"
+  snooze="${WATCH_DIR}/${session}.snooze"
 
   # Broker mid-turn → never interrupt (even if repo commits are old: it may be
   # reviewing/about to dispatch). jsonl freshness is the pane-liveness signal.
@@ -187,9 +192,23 @@ while read -r session pane repo _rest; do
     continue
   fi
   if [ "$age_min" -lt "$STALE_MIN" ]; then
-    rm -f "$warn"
+    rm -f "$warn" "$snooze"   # progress made → clear any self-snooze
     log "$session:$pane: OK (framdrift ${age_min}min sedan)"
     continue
+  fi
+
+  # Broker self-snooze: a broker that confirmed "nothing READY" touches this
+  # file. Unlike .OFF (permanent, human-only), the snooze AUTO-EXPIRES via its
+  # mtime — a broker can never permanently blind the watch on a point-in-time
+  # audit (the ai:3/AI-0004 miss, 2026-07-14). Expired → remove and proceed.
+  if [ -f "$snooze" ]; then
+    snooze_age_min=$(( (now - $(stat -c %Y "$snooze" 2>/dev/null || echo 0)) / 60 ))
+    if [ "$snooze_age_min" -lt $(( SNOOZE_HOURS * 60 )) ]; then
+      log "$session:$pane: broker-snoozed ($(( SNOOZE_HOURS * 60 - snooze_age_min ))min kvar) → skip"
+      continue
+    fi
+    rm -f "$snooze"
+    log "$session:$pane: snooze expired → re-arming"
   fi
 
   # Cooldown: don't re-nudge the same fleet within COOLDOWN_MIN.
@@ -205,7 +224,7 @@ while read -r session pane repo _rest; do
   [ -f "$warn" ] && escalate=1
 
   repo_label=$(basename "${_repos[0]}")
-  MSG="[fleet-watch, automatisk] Inga commits i ${repo_label} och du (broker) idle i ${age_min}min. Re-inventera READY-kön NU: dispatcha oberoende arbete till lediga paneler (en ägare/ticket, inga fil-krockar), ELLER om inget är READY/allt blockerat — bekräfta det i en rad så vakten ser dig. Om en panel hänger: checkpointa + ge nästa oberoende item. Tysta din flotta: touch ~/.agentmux/fleet-watch/${session}.OFF"
+  MSG="[fleet-watch, automatisk] Inga commits i ${repo_label} och du (broker) idle i ${age_min}min. Re-inventera READY-kön NU: dispatcha oberoende arbete till lediga paneler (en ägare/ticket, inga fil-krockar), ELLER om inget är READY/allt blockerat — bekräfta det i en rad så vakten ser dig. Om en panel hänger: checkpointa + ge nästa oberoende item. Om inget är READY: touch ~/.agentmux/fleet-watch/${session}.snooze (tystar dig ${SNOOZE_HOURS}h, vaknar sen automatiskt så nya tickets inte missas). Sätt ALDRIG .OFF själv — den är permanent och bara för Mattias."
 
   if is_reserved "$session"; then
     if [ "$DRY" = "1" ]; then log "$session:$pane: DRY reserved-name → would escalate (${age_min}min)"; continue; fi
