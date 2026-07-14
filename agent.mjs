@@ -113,7 +113,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.23.13";
+const HINTS_VERSION = "1.23.14";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -503,11 +503,23 @@ isn't in git is invisible to other agents.
 1. **One owner per feature or project, end to end.** The manager assigns a
    clearly bounded task; its owner plans, implements, tests, pushes, and opens
    the PR without mid-flight interruptions or ongoing peer coordination.
-2. **At most one active ticket per agent.** Give an idle agent the next
-   highest-priority READY ticket only when its file and product areas are
-   independent of active work. Once an owner has banked a PR, the broker may
-   assign that agent's next ticket without waiting for Mattias. Filling spare
-   capacity must never introduce file conflicts or peer-coordination overhead.
+2. **Assign by priority; merge by proof (Mattias 2026-07-14, supersedes the
+   file-independence rule).** An idle agent gets the next highest-priority
+   READY ticket immediately, regardless of file overlap; the broker attaches
+   known overlap as a warning in the brief ("you will collide with X in
+   main.js — keep the diff narrow, merge fast"). Only an INTENT collision
+   (two tickets rewriting the same behavior/subsystem) stacks both tickets
+   under one owner. The hard gate moves to the merge: (a) \`git fetch && git
+   rebase\` onto fresh trunk immediately before merge, (b) the full suite must
+   be green AFTER the rebase (green-before-rebase proves nothing), (c) any
+   conflict-resolved hunks in code the owner did not write are explicitly
+   flagged in the PR and the reviewer reads those first. A file held by 3+
+   active zones (\`overlap-gate scan <repo>\` shows this; \`overlap-gate check
+   <repo> <paths>\` gates a planned zone) triggers an automatic split-ticket
+   on that file at top priority — the queue never absorbs the same contention
+   twice. The worktree is removed the moment the merge lands. Once an owner
+   has banked a PR, the broker may assign that agent's next ticket without
+   waiting for Mattias.
 3. **At most one review; never double-review by default.** Owners may
    self-approve trivial changes (UI polish, docs, scripts, or a one-line fix in
    their own lane) after the relevant gates pass. The manager/merge broker
