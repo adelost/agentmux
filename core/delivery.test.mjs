@@ -110,7 +110,7 @@ feature("sendPromptVerified", () => {
     }],
   });
 
-  component("unsafe composer state stops after one terminal attempt", {
+  component("unsafe composer state remains a non-authoritative transport hint", {
     given: ["an agent that rejects before typing", () => {
       const agent = fakeAgent({ echoResults: [false] });
       agent.sendOnly = async () => {
@@ -125,8 +125,13 @@ feature("sendPromptVerified", () => {
       result: await sendPromptVerified(agent, "claw", 1, "new prompt", { attempts: 3 }),
       agent,
     })],
-    then: ["it fails fast after one final JSONL check and no duplicate retry", ({ result, agent }) => {
-      expect(result).toMatchObject({ delivered: false, attempts: 1, blocked: true });
+    then: ["it reports only the hint after one final JSONL check and no duplicate retry", ({ result, agent }) => {
+      expect(result).toEqual({
+        delivered: false,
+        attempts: 1,
+        via: null,
+        transportHint: "Codex prompt delivery blocked: composer is not empty",
+      });
       expect(agent.calls.filter((call) => call === "blocked-send")).toHaveLength(1);
       expect(agent.calls.filter((call) => call === "echo")).toHaveLength(1);
     }],
@@ -150,7 +155,7 @@ feature("sendPromptVerified", () => {
     }],
   });
 
-  component("exact Codex queue receipt prevents a duplicate retry", {
+  component("a Codex queue observation prevents a duplicate retry without claiming delivery", {
     given: ["a busy send whose prompt left the verified composer before JSONL caught up", () => {
       const agent = fakeAgent({ echoResults: [false] });
       agent.sendOnly = async (_name, text) => {
@@ -166,12 +171,13 @@ feature("sendPromptVerified", () => {
       }),
       agent,
     })],
-    then: ["one queue transition is a pending delivered receipt", ({ result, agent }) => {
+    then: ["one queue transition is only a pending transport hint", ({ result, agent }) => {
       expect(result).toEqual({
-        delivered: true,
+        delivered: false,
         attempts: 1,
-        via: "queue",
+        via: null,
         pending: true,
+        transportHint: "queue-observed",
       });
       expect(agent.calls.filter((call) => call.startsWith("send:"))).toHaveLength(1);
     }],

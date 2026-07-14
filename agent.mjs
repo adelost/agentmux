@@ -1654,7 +1654,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         await t.sendLiteral(target, prompt);
         await wait(1000);
       }
-      if (dialect !== "codex" && onDrafted) await onDrafted();
+      // Durable ownership follows the completed pane write, not a later TUI
+      // repaint. Composer scraping may help recovery, but it is never proof
+      // that the payload was or was not delivered.
+      if (onDrafted) await onDrafted();
     } else if (dialect === "codex") {
       busyAtSend = Boolean(await isBusy(agentName, pane));
     }
@@ -1662,17 +1665,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (dialect === "codex" && !exactDraft) {
       exactDraft = await waitForExactCodexDraft(agentName, pane, prompt);
       if (!exactDraft) {
-        // The durable broker owns this exact draft. If the composer disappears
-        // during a busy repaint, clearing is both unverifiable and destructive:
-        // it produced the 09:08 LSrc drop where the full prompt remained in the
-        // editor but its queue job was discarded. Leave it in place and let the
-        // same FIFO head recover/submit it when the composer becomes visible.
-        throw codexDeliveryBlocked("Codex prompt delivery blocked: exact prompt did not finish painting in the composer", {
-          zoomRecoverable: true,
-        });
+        // Ratatui paint is advisory. The exact pane write above completed, so
+        // a missing/torn composer frame cannot veto the submit attempt. JSONL
+        // remains the only delivery acknowledgement after Enter.
+        console.warn(`send ${agentName}:${pane}: exact Codex draft not visible; continuing to JSONL-verified submit`);
       }
     }
-    if (dialect === "codex" && exactDraft && onDrafted) await onDrafted();
     // A previously queued turn can start during the paste/paint interval.
     // Re-sample immediately before Enter so the delivery layer treats our
     // prompt as one queued steering write instead of retrying it as idle.
@@ -1680,18 +1678,19 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       busyAtSend = Boolean(await isBusy(agentName, pane));
     }
     await t.sendEnter(target);
+    // This callback records only that the physical submit key was attempted.
+    // It must run independently of composer scraping; the durable broker keeps
+    // the FIFO closed until the exact JSONL event acknowledges delivery.
+    if (onSubmitted) await onSubmitted();
     await maybeSendCodexSubmitEnter(agentName, pane, target, prompt, { notBeforeMs });
     await maybeRescueClaudeSubmit(agentName, pane, target, prompt);
 
-    // Codex does not write a queued steering turn to JSONL until the current
-    // turn yields. This is still a strong transport receipt when (a) input was
-    // verified empty or already contained this exact prompt, (b) Enter was
-    // sent successfully, and (c) the exact prompt no longer remains in the
-    // composer. The delivery layer uses it to avoid retyping duplicates while
-    // it waits for the later JSONL echo.
+    // Composer state is retained strictly as a transport hint for diagnostics
+    // and bounded rescue. It never upgrades the submit attempt to delivery.
     let stillComposed = await promptAlreadyInComposer(agentName, pane, prompt, {
       ownedDraft: knownDrafted || exactDraft,
     });
+    let releaseHint = stillComposed ? "draft-visible" : "single-empty";
     if (dialect === "codex" && !stillComposed) {
       let dir = null;
       try { dir = paneDir(agentConfig(agentName).dir, pane); } catch { /* JSONL unavailable */ }
@@ -1709,11 +1708,16 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         sleep: wait,
       });
       stillComposed = !release.released;
+      releaseHint = release.via;
     }
-    const submitted = !stillComposed;
-    const queued = dialect === "codex" && busyAtSend && exactDraft && submitted;
-    if (submitted && onSubmitted) await onSubmitted();
-    return { busyAtSend, queued, exactDraft, submitted };
+    const queued = dialect === "codex" && busyAtSend && exactDraft && !stillComposed;
+    return {
+      busyAtSend,
+      queued,
+      exactDraft,
+      submitted: true,
+      tuiHint: dialect === "codex" ? releaseHint : (stillComposed ? "draft-visible" : "composer-empty"),
+    };
   }
 
   async function promptAlreadyInComposer(agentName, pane, prompt, { ownedDraft = false } = {}) {

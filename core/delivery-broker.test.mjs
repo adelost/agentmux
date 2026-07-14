@@ -102,8 +102,8 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
-  component("a late JSONL receipt does not block the next physical FIFO write", {
-    given: ["two prompts and a transport whose receipts arrive out of order", () => {
+  component("an exact JSONL receipt gates the next physical FIFO write", {
+    given: ["two prompts whose authoritative receipts arrive after each submit", () => {
       const rootDir = tempRoot();
       let clock = 1_000;
       const queue = createDeliveryQueue({ rootDir, now: () => clock });
@@ -129,31 +129,37 @@ feature("single-writer delivery broker", () => {
         advance: () => { clock += 1_001; },
       };
     }],
-    when: ["the pane accepts both prompts before either JSONL echo, then receipts reconcile independently", async ({
+    when: ["the first submit waits at the FIFO head until its echo, then the second does the same", async ({
       broker, queue, sends, echoed, advance,
     }) => {
       await broker.kickTarget("ai", 5);
-      const afterSubmit = {
+      const afterFirstSubmit = {
+        sends: [...sends],
+        states: queue.list("ai", 5).map((job) => job.status),
+      };
+      echoed.add("first");
+      advance();
+      await broker.kickTarget("ai", 5);
+      const afterFirstReceipt = {
         sends: [...sends],
         states: queue.list("ai", 5).map((job) => job.status),
       };
       echoed.add("second");
       advance();
       await broker.kickTarget("ai", 5);
-      const afterSecondReceipt = queue.list("ai", 5).map((job) => job.status);
-      echoed.add("first");
-      advance();
-      await broker.kickTarget("ai", 5);
-      return { afterSubmit, afterSecondReceipt };
+      return { afterFirstSubmit, afterFirstReceipt };
     }],
-    then: ["both writes stay ordered while acknowledgements are allowed to lag", ({
-      afterSubmit, afterSecondReceipt,
+    then: ["neither TUI submit nor queue observation releases the following write", ({
+      afterFirstSubmit, afterFirstReceipt,
     }, ctx) => {
-      expect(afterSubmit).toEqual({
-        sends: ["first", "second"],
-        states: ["submitted", "submitted"],
+      expect(afterFirstSubmit).toEqual({
+        sends: ["first"],
+        states: ["submitted", "pending"],
       });
-      expect(afterSecondReceipt).toEqual(["submitted", "acknowledged"]);
+      expect(afterFirstReceipt).toEqual({
+        sends: ["first", "second"],
+        states: ["acknowledged", "submitted"],
+      });
       expect(ctx.queue.list("ai", 5).map((job) => job.status))
         .toEqual(["acknowledged", "acknowledged"]);
       rmSync(ctx.rootDir, { recursive: true, force: true });
@@ -283,9 +289,12 @@ feature("single-writer delivery broker", () => {
       return { rootDir, queue, job, broker, agent };
     }],
     when: ["delivery fails closed on the foreign draft", ({ broker }) => broker.kickTarget("api", 3)],
-    then: ["the job remains blocked without changing zoom", (_, ctx) => {
+    then: ["the job stays pending with a hint and without changing zoom", (_, ctx) => {
       expect(ctx.agent.zoomCalls).toBe(0);
-      expect(ctx.queue.read("api", 3, ctx.job.id).status).toBe("blocked");
+      expect(ctx.queue.read("api", 3, ctx.job.id)).toMatchObject({
+        status: "pending",
+        lastReason: "awaiting exact JSONL receipt; TUI hint: Codex prompt delivery blocked: composer contains a different draft",
+      });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });
@@ -400,7 +409,7 @@ feature("single-writer delivery broker", () => {
       expect(ctx.queue.read("api", 5, ctx.job.id)).toMatchObject({
         status: "submitted",
         draftOwned: false,
-        lastReason: "submission has no JSONL receipt yet; refusing duplicate paste",
+        lastReason: "awaiting exact JSONL receipt; TUI hint: empty-idle",
       });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
@@ -447,9 +456,41 @@ feature("single-writer delivery broker", () => {
         draftOwned: false,
         terminalAt: 3_604_000,
         nextAttemptAt: null,
-        lastReason: "submission left the composer but no exact JSONL receipt arrived within 60 minutes; refusing duplicate delivery",
+        lastReason: "submit attempt has no exact JSONL receipt after 60 minutes; delivery remains unverified",
       });
       expect(ctx.queue.next("skydive", 3)).toBeNull();
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("delivered-unverified is never exposed as delivered", {
+    given: ["an idempotent replay of a terminal prompt with no JSONL receipt", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir });
+      const request = {
+        agentName: "skydive",
+        pane: 3,
+        text: "still unverified",
+        idempotencyKey: "test:unverified-result",
+      };
+      const job = queue.enqueue(request);
+      queue.update(job, {
+        status: "delivered_unverified",
+        terminalAt: Date.now(),
+        nextAttemptAt: null,
+      });
+      const broker = createDeliveryBroker({ agent: acceptingAgent(), queue, notify: async () => {} });
+      return { rootDir, broker, request };
+    }],
+    when: ["the caller asks for the existing durable result", ({ broker, request }) =>
+      broker.enqueueAndWait(request, { timeoutMs: 0 })],
+    then: ["the API distinguishes terminal uncertainty from authoritative delivery", (result, ctx) => {
+      expect(result).toMatchObject({
+        delivered: false,
+        pending: false,
+        unverified: true,
+        job: { status: "delivered_unverified" },
+      });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });
@@ -523,10 +564,10 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
-  component("a resurfaced owned draft wins at the submitted timeout boundary", {
-    given: ["a stale submission whose exact draft has reappeared in the composer", () => {
+  component("a resurfaced draft is only a TUI hint while awaiting JSONL", {
+    given: ["a submitted prompt whose text has reappeared in the composer", () => {
       const rootDir = tempRoot();
-      const clock = 4_000_000;
+      const clock = 20_000;
       const queue = createDeliveryQueue({ rootDir, now: () => clock });
       const job = queue.enqueue({ agentName: "skydive", pane: 3, text: "draft wins", createdAt: 1_000 });
       queue.update(job, {
@@ -542,21 +583,21 @@ feature("single-writer delivery broker", () => {
       });
       return { rootDir, queue, job, notices, broker };
     }],
-    when: ["the stale receipt is reconciled", ({ broker }) => broker.kickTarget("skydive", 3)],
-    then: ["the exact draft regains FIFO ownership instead of being abandoned", (_, ctx) => {
+    when: ["the pending receipt is reconciled", ({ broker }) => broker.kickTarget("skydive", 3)],
+    then: ["the durable submit fence remains authoritative over the scraped draft", (_, ctx) => {
       expect(ctx.notices).toEqual([]);
       expect(ctx.queue.read("skydive", 3, ctx.job.id)).toMatchObject({
-        status: "drafted",
-        draftOwned: true,
-        nextAttemptAt: 4_000_000,
-        lastReason: "submitted draft resurfaced before JSONL acknowledgement",
+        status: "submitted",
+        draftOwned: false,
+        nextAttemptAt: 21_000,
+        lastReason: "awaiting exact JSONL receipt; TUI hint: drafted",
       });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });
 
-  component("a draft resurfacing during the final timeout probe keeps ownership", {
-    given: ["the first probe is empty but the final probe sees the owned draft", () => {
+  component("TUI state cannot defer the JSONL receipt timeout", {
+    given: ["a timed-out submit whose composer probes would disagree", () => {
       const rootDir = tempRoot();
       const clock = 4_000_000;
       const queue = createDeliveryQueue({ rootDir, now: () => clock });
@@ -579,21 +620,22 @@ feature("single-writer delivery broker", () => {
       });
       return { rootDir, queue, job, notices, broker, probes: () => probes };
     }],
-    when: ["the timeout path performs its ownership gate", ({ broker }) => broker.kickTarget("skydive", 3)],
-    then: ["terminalization fails closed and the exact draft owns FIFO", (_, ctx) => {
-      expect(ctx.probes()).toBe(2);
-      expect(ctx.notices).toEqual([]);
+    when: ["the timeout path reconciles the authoritative sink", ({ broker }) => broker.kickTarget("skydive", 3)],
+    then: ["terminalization does not consult or trust either TUI observation", (_, ctx) => {
+      expect(ctx.probes()).toBe(0);
+      expect(ctx.notices).toEqual(["unverified"]);
       expect(ctx.queue.read("skydive", 3, ctx.job.id)).toMatchObject({
-        status: "drafted",
-        draftOwned: true,
-        nextAttemptAt: 4_000_000,
+        status: "delivered_unverified",
+        draftOwned: false,
+        nextAttemptAt: null,
+        lastReason: "submit attempt has no exact JSONL receipt after 60 minutes; delivery remains unverified",
       });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });
 
   component("terminal timeout never overwrites a concurrent acknowledgement", {
-    given: ["the transport probe observes an acknowledgement committed by another reconciler", () => {
+    given: ["an authoritative echo check overlaps an acknowledgement committed by another reconciler", () => {
       const rootDir = tempRoot();
       const clock = 4_000_000;
       const queue = createDeliveryQueue({ rootDir, now: () => clock });
@@ -606,19 +648,23 @@ feature("single-writer delivery broker", () => {
       });
       const notices = [];
       const agent = acceptingAgent();
-      agent.waitForPromptEcho = async () => false;
-      agent.promptTransportState = async () => {
-        const current = queue.read("skydive", 3, job.id);
-        queue.update(current, { status: "acknowledged", acknowledgedAt: clock, nextAttemptAt: null });
-        return { state: "empty-idle", busy: false, dialect: "codex" };
+      let echoChecks = 0;
+      agent.waitForPromptEcho = async () => {
+        echoChecks++;
+        if (echoChecks === 2) {
+          const current = queue.read("skydive", 3, job.id);
+          queue.update(current, { status: "acknowledged", acknowledgedAt: clock, nextAttemptAt: null });
+        }
+        return false;
       };
       const broker = createDeliveryBroker({
         agent, queue, now: () => clock, notify: async (_job, kind) => notices.push(kind),
       });
-      return { rootDir, queue, job, notices, broker };
+      return { rootDir, queue, job, notices, broker, echoChecks: () => echoChecks };
     }],
     when: ["the stale submitted path reaches terminalization", ({ broker }) => broker.kickTarget("skydive", 3)],
     then: ["the terminal guard preserves acknowledged and emits no warning", (_, ctx) => {
+      expect(ctx.echoChecks()).toBe(2);
       expect(ctx.notices).toEqual([]);
       expect(ctx.queue.read("skydive", 3, ctx.job.id)).toMatchObject({
         status: "acknowledged",
@@ -800,10 +846,10 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
-  component("an idle Claude submission is retried after its JSONL grace period", {
-    given: ["a stale Claude job whose submitted prompt genuinely vanished", () => {
+  component("an idle Claude composer cannot reopen a submitted prompt", {
+    given: ["a Claude job whose submitted prompt is still awaiting JSONL", () => {
       const rootDir = tempRoot();
-      let clock = 4_000_000;
+      let clock = 20_000;
       const queue = createDeliveryQueue({ rootDir, now: () => clock });
       const job = queue.enqueue({
         agentName: "watch", pane: 0, text: "review everything", createdAt: 1_000,
@@ -815,28 +861,21 @@ feature("single-writer delivery broker", () => {
         nextAttemptAt: 0,
       });
       const agent = acceptingAgent();
-      let echoed = false;
-      agent.waitForPromptEcho = async () => echoed;
+      agent.waitForPromptEcho = async () => false;
       agent.promptTransportState = async () => ({ state: "empty-idle", busy: false, dialect: "claude" });
-      const originalSend = agent.sendOnly;
-      agent.sendOnly = async (...args) => {
-        const result = await originalSend(...args);
-        echoed = true;
-        return result;
-      };
       const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
-      return { rootDir, queue, job, agent, broker, advance: () => { clock += 1; } };
+      return { rootDir, queue, job, agent, broker, advance: () => { clock += 1_001; } };
     }],
-    when: ["the broker proves loss and then drains the recovered head", async ({ broker, advance }) => {
+    when: ["the broker observes the empty TUI twice", async ({ broker, advance }) => {
       await broker.kickTarget("watch", 0);
       advance();
       await broker.kickTarget("watch", 0);
     }],
-    then: ["the exact prompt is re-sent once and acknowledged", (_, ctx) => {
-      expect(ctx.agent.sends.map((send) => send.text)).toEqual(["review everything"]);
+    then: ["no retype occurs and only the diagnostic hint changes", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
       expect(ctx.queue.read("watch", 0, ctx.job.id)).toMatchObject({
-        status: "acknowledged",
-        recoveryAttempts: 1,
+        status: "submitted",
+        lastReason: "awaiting exact JSONL receipt; TUI hint: empty-idle",
       });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
@@ -870,8 +909,8 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
-  component("Claude stale recovery stops after two bounded retries", {
-    given: ["a Claude job that exhausted both recovery attempts", () => {
+  component("legacy Claude recovery counters cannot override JSONL truth", {
+    given: ["a Claude job carrying two historical recovery attempts", () => {
       const rootDir = tempRoot();
       const clock = 100_000;
       const queue = createDeliveryQueue({ rootDir, now: () => clock });
@@ -898,13 +937,13 @@ feature("single-writer delivery broker", () => {
       return { rootDir, queue, job, agent, notices, broker };
     }],
     when: ["the broker reconciles the stale submission", ({ broker }) => broker.kickTarget("api", 0)],
-    then: ["it remains fenced and emits one blocked notice", (_, ctx) => {
+    then: ["it remains fenced without a TUI-derived blocked verdict", (_, ctx) => {
       expect(ctx.agent.sends).toHaveLength(0);
-      expect(ctx.notices).toEqual(["blocked"]);
+      expect(ctx.notices).toEqual([]);
       expect(ctx.queue.read("api", 0, ctx.job.id)).toMatchObject({
         status: "submitted",
         recoveryAttempts: 2,
-        lastReason: "Claude delivery recovery exhausted after 2 retries; prompt still absent from JSONL",
+        lastReason: "awaiting exact JSONL receipt; TUI hint: empty-idle",
       });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
