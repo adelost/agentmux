@@ -4,7 +4,8 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { Readable } from "stream";
 import yaml from "js-yaml";
-import { parseFlags, readPromptFromStdin, validateAgentAndPane, loadSourceYaml, saveSourceAndRegenerate, dispatch } from "../cli/commands.mjs";
+import { parseFlags, readPromptFromStdin, validateAgentAndPane, loadSourceYaml,
+  saveSourceAndRegenerate, shouldRouteWatchToAgent, dispatch } from "../cli/commands.mjs";
 
 feature("parseFlags", () => {
   unit("automation prompts are read from bounded stdin without entering argv", {
@@ -87,6 +88,29 @@ feature("parseFlags", () => {
     then: ["empty flags and positional", ({ flags, positional }) => {
       expect(flags).toEqual({});
       expect(positional).toEqual([]);
+    }],
+  });
+});
+
+feature("reserved command and agent name collision", () => {
+  unit("routes watch prompts to the configured watch agent but keeps bare watch as timeline", {
+    given: ["a configured agent named watch", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-watch-agent-"));
+      const configPath = join(root, "agents.yaml");
+      writeFileSync(configPath, `watch:\n  dir: /tmp/watch\n  panes:\n    - name: claude\n      cmd: claude\n`);
+      return { configPath, root };
+    }],
+    when: ["classifying timeline and prompt invocations", ({ configPath, root }) => ({
+      bare: shouldRouteWatchToAgent([], configPath),
+      filteredTimeline: shouldRouteWatchToAgent(["--agent", "claw"], configPath),
+      prompt: shouldRouteWatchToAgent(["-p", "0", "handoff"], configPath),
+      root,
+    })],
+    then: ["only the prompt addresses the agent", ({ bare, filteredTimeline, prompt, root }) => {
+      expect(bare).toBe(false);
+      expect(filteredTimeline).toBe(false);
+      expect(prompt).toBe(true);
+      rmSync(root, { recursive: true, force: true });
     }],
   });
 });

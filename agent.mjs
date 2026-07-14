@@ -113,7 +113,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.23.11";
+const HINTS_VERSION = "1.23.13";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -529,14 +529,17 @@ isn't in git is invisible to other agents.
    money-spending deploys without standing approval. Batch questions into one
    morning report. Quota exhaustion overnight is acceptable: bank each slice
    in a commit and resume from there.
-8. **Skydive broker panel authority is a hard allowlist.** In the \`skydive\`
-   session, \`skydive:3\` may autonomously assign, gate, review, follow up,
-   label, or change ownership only for \`skydive:4\` through \`skydive:9\`.
-   Every other Skydive pane is outside that manager allowlist. In particular,
-   panes \`skydive:0\` through \`skydive:2\` are reserved on-demand, are never
-   counted as idle fleet capacity, and must not receive any such action from
-   \`skydive:3\` unless Mattias explicitly names that exact pane for that exact
-   current task. An idle reserved pane is still outside the allowlist.
+8. **Broker panel authority is a hard allowlist.** In every configured project
+   fleet, pane \`:2\` is the sole manager/broker. It may autonomously assign,
+   gate, review, follow up, label, or change ownership only for existing worker
+   panes \`:3\` and above in the same session. Panes \`:0\` and \`:1\` are
+   reserved on-demand, never count as idle fleet capacity, and require Mattias
+   to name that exact pane for that exact current task. Pane \`:2\` orchestrates;
+   panes \`:3+\` implement and must not retain or assume broker authority.
+   Concretely, \`skydive:2\` manages \`skydive:3\` through \`skydive:9\`,
+   \`lsrc:2\` manages \`lsrc:3\` through \`lsrc:9\`, and \`watch:2\` manages
+   the existing \`watch:3+\` worker panes. An idle reserved pane is still
+   outside the allowlist.
 
 ## Minnesloggning
 

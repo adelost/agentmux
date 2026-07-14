@@ -18,13 +18,24 @@ reusable example if the file is absent:
 baseUrl: https://suggest.v1d.io
 credentialFile: ~/.config/agent/suggestions-read-token
 projects:
+  source:
+    agent: lsrc
+    pane: 2
   skydive:
     agent: skydive
-    pane: 3
+    pane: 2
+  skyvw:
+    agent: watch
+    pane: 2
+  ai:
+    agent: ai
+    pane: 2
 ```
 
-The mapping is deliberately explicit. To reuse the bridge for another board,
-add its public project ID and responsible amux target. A configured ID that is
+The mapping is deliberately explicit. The standard fleet convention routes
+each board to its session's Claude broker on pane 2; Codex implementation
+workers live on panes 3 and above. To reuse the bridge for another board, add
+its public project ID and responsible pane-2 target. A configured ID that is
 not returned by `/api/config` is a visible error; public projects without a
 mapping are intentionally ignored.
 
