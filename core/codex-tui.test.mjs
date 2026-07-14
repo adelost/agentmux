@@ -885,3 +885,87 @@ feature("prepareCodexIdle", () => {
     }],
   });
 });
+
+// Live incident 2026-07-14 (delivery blackhole, api:4 + ai:4): in a NARROW
+// tmux pane Ratatui soft-wraps its own placeholder / idle-hint rows. Those
+// wraps are application-rendered, so tmux -J cannot rejoin them; the
+// continuation lands at column 0 and codexComposerText stopped collecting.
+// The truncated value ("Summarize recent commit", "Find and fix a bug in @
+// esc again to edit previo") matched no known placeholder and was treated as
+// a human draft — delivery blocked forever (attempt→blocked, 65 min FIFO rot)
+// and the usage-limit banner made the layout wrap more often.
+feature("narrow-pane Ratatui wrap tolerance (delivery blackhole 2026-07-14)", () => {
+  const AI4_FRAME = [
+    "• You have 3 usage limit resets available. Run /usage to use one.",
+    "",
+    "⚠ Heads up, you have less than 10% of your weekly limit left. Run /status",
+    "for a breakdown.",
+    "",
+    "› Summarize recent commit",
+    "s",
+    "",
+    "  gpt-5.6-sol max · ~/lsrc/ai-dsl",
+  ].join("\n");
+
+  const API4_FRAME = [
+    "• You have 3 usage limit resets available. Run /",
+    "usage to use one.",
+    "",
+    "› Find and fix a bug in @",
+    "",
+    "  esc again to edit previo",
+    "us message",
+  ].join("\n");
+
+  unit("a wrap-truncated rotating placeholder is an empty composer", {
+    when: ["reading the exact ai:4 incident frame", () => codexComposerText(AI4_FRAME)],
+    then: ["the composer is verified empty", (value) => expect(value).toBe("")],
+  });
+
+  unit("placeholder plus wrap-truncated idle hint is an empty composer", {
+    when: ["reading the exact api:4 incident frame", () => codexComposerText(API4_FRAME)],
+    then: ["the composer is verified empty", (value) => expect(value).toBe("")],
+  });
+
+  unit("a real draft that merely resembles a placeholder still blocks", {
+    when: ["reading a frame with a genuine human draft", () => codexComposerText([
+      "› Summarize recent commits and also deploy everything to prod",
+      "",
+      "  gpt-5.6-sol max · ~/lsrc/ai-dsl",
+    ].join("\n"))],
+    then: ["the draft is preserved verbatim", (value) =>
+      expect(value).toBe("Summarize recent commits and also deploy everything to prod")],
+  });
+
+  unit("a short real draft is never mistaken for a placeholder prefix", {
+    when: ["reading a frame with a short human draft", () => codexComposerText([
+      "› Summarize rec",
+      "",
+      "  gpt-5.6-sol max · ~/lsrc/ai-dsl",
+    ].join("\n"))],
+    then: ["the short draft blocks delivery", (value) => expect(value).toBe("Summarize rec")],
+  });
+
+  unit("verifiedEmptyCodexComposer accepts a tail hint wrapped mid-word", {
+    when: ["reading a neutral receipt whose hint wrapped at pane width", () =>
+      verifiedEmptyCodexComposer([
+        "some scrollback",
+        "",
+        "  esc again to edit previo",
+        "us message",
+      ].join("\n"))],
+    then: ["the receipt proves an empty composer", (value) => expect(value).toBe("")],
+  });
+
+  unit("prepareCodexIdle delivers into the exact api:4 incident frame", {
+    given: ["an idle pane painted exactly like the incident", () => ({
+      agent: fakeAgent({ frames: [API4_FRAME] }),
+    })],
+    when: ["running the prompt readiness gate", ({ agent }) => prepareCodexIdle({
+      agent, name: "api", pane: 4, sleep: noSleep,
+      allowBusy: true, requireVisibleComposer: true, openBusyQueue: true,
+    })],
+    then: ["the pane is ready instead of blocked", (result) =>
+      expect(result).toMatchObject({ ok: true })],
+  });
+});

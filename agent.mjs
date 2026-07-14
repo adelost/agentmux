@@ -1536,8 +1536,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       lastError = ready.error || lastError;
       // Never overwrite a real draft. Retrying delivery would only type on
       // top of it, so fail immediately and let the caller warn the human.
+      // zoomRecoverable: narrow-pane Ratatui wraps can make placeholder
+      // chrome read as a draft (2026-07-14 blackhole); the one zoomed retry
+      // re-reads at canonical width, where a REAL draft still blocks.
       if (/composer is not empty/i.test(lastError)) {
-        throw codexDeliveryBlocked(`Codex prompt delivery blocked: ${lastError}`);
+        throw codexDeliveryBlocked(`Codex prompt delivery blocked: ${lastError}`, {
+          zoomRecoverable: true,
+        });
       }
       await wait(250);
     }
@@ -1569,6 +1574,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         }
         throw codexDeliveryBlocked(
           `Codex prompt delivery blocked: composer contains a different draft (starts with: ${composer.slice(0, 60)})`,
+          { zoomRecoverable: true },
         );
       }
 

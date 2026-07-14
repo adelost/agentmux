@@ -13,6 +13,24 @@ import { promptRequiresAtomicPaste } from "./prompt-paste.mjs";
 // exact while tolerating at most two non-space paint artefacts at that seam.
 const IDLE_EDIT_HINT = /esc again to edit\S{0,2}\s*previous message/i;
 const NO_PREVIOUS_MESSAGE_HINT = /No previous message to edit\./i;
+// In a NARROW pane Ratatui soft-wraps its own hint text mid-word
+// ("...edit previo" / "us message"). Those wraps are application-rendered,
+// so tmux -J cannot rejoin them and the full-phrase regex above never
+// matches. The opening words are still Codex-owned chrome that only renders
+// at a neutral composer, so their presence alone is a valid receipt.
+const IDLE_EDIT_HINT_PREFIX = /esc again to edit\b/i;
+// A wrap-truncated rotating placeholder ("Summarize recent commit" cut from
+// "Summarize recent commits") must stay distinguishable from a short human
+// draft. Require a long exact prefix before treating truncation as empty —
+// the 2026-07-14 delivery blackhole rotted a FIFO head for 65 minutes on
+// exactly this artifact.
+const MIN_PLACEHOLDER_PREFIX_CHARS = 16;
+
+const isWrapTruncatedPlaceholder = (value) =>
+  value.length >= MIN_PLACEHOLDER_PREFIX_CHARS
+  && [...EMPTY_COMPOSER_HINTS].some(
+    (hint) => hint.length > value.length && hint.startsWith(value),
+  );
 const EMPTY_COMPOSER_HINTS = new Set([
   "Explain this codebase",
   "Summarize recent commits",
@@ -151,6 +169,20 @@ export function codexComposerText(text) {
       || [...EMPTY_COMPOSER_HINTS].some((hint) => matchesPaintedPlaceholder(value, hint))) {
     return "";
   }
+  // Narrow-pane wrap artifacts (2026-07-14 blackhole): a placeholder and/or
+  // the idle hint truncated by Ratatui's own soft wrap. A wrap-truncated
+  // idle hint can only follow a NEUTRAL composer, so anything before it must
+  // itself be placeholder chrome for the frame to count as empty.
+  const hintAt = value.search(IDLE_EDIT_HINT_PREFIX);
+  if (hintAt >= 0) {
+    const beforeHint = value.slice(0, hintAt).trim();
+    if (beforeHint === ""
+        || EMPTY_COMPOSER_HINTS.has(beforeHint)
+        || isWrapTruncatedPlaceholder(beforeHint)) {
+      return "";
+    }
+  }
+  if (isWrapTruncatedPlaceholder(value)) return "";
   return value;
 }
 
@@ -387,7 +419,12 @@ export function verifiedEmptyCodexComposer(text) {
   // while the live composer had disappeared; matching the whole capture made
   // delivery wait forever instead of using one safe idle Escape to reveal it.
   const tail = raw.split("\n").slice(-6).join("\n");
-  return IDLE_EDIT_HINT.test(tail) || NO_PREVIOUS_MESSAGE_HINT.test(tail) ? "" : null;
+  if (IDLE_EDIT_HINT.test(tail) || NO_PREVIOUS_MESSAGE_HINT.test(tail)) return "";
+  // Ratatui can wrap the hint mid-word at narrow widths ("previo" / "us
+  // message"); rejoin the tail rows without injecting spaces so the full
+  // Codex-owned phrase becomes matchable again.
+  const dewrapped = raw.split("\n").slice(-6).map((line) => line.trimEnd()).join("");
+  return IDLE_EDIT_HINT.test(dewrapped) || NO_PREVIOUS_MESSAGE_HINT.test(dewrapped) ? "" : null;
 }
 
 const fail = (stage, error) => ({ ok: false, stage, error });
