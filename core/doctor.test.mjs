@@ -268,4 +268,21 @@ feature("durable delivery queue health", () => {
     })],
     then: ["warn", (r) => expect(r.status).toBe(WARN)],
   });
+
+  unit("a provisional owned paste is visible as a warning", {
+    when: ["checking", () => checkDeliveryQueue({
+      stats: {
+        total: 1, pending: 0, pasting: 1, drafted: 0, submitted: 0, blocked: 0,
+        oldestCreatedAt: NOW - 12_000,
+      },
+      bridgeRunning: true,
+      now: NOW,
+    })],
+    then: ["the health row names the provisional state and its age", (result) => {
+      expect(result.status).toBe(WARN);
+      expect(result.detail).toContain("1 pasting");
+      expect(result.detail).toContain("oldest 12s");
+      expect(result.hint).toContain("FIFO head");
+    }],
+  });
 });

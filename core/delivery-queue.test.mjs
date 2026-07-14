@@ -4,12 +4,32 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import { join } from "path";
 import { tmpdir } from "os";
-import { createDeliveryQueue, waitForDeliveryJob } from "./delivery-queue.mjs";
+import { createDeliveryQueue, deliveryQueueStats, waitForDeliveryJob } from "./delivery-queue.mjs";
 
 const tempRoot = () => join(tmpdir(), `amux-delivery-queue-${process.pid}-${Math.random().toString(36).slice(2)}`);
 const execFileAsync = promisify(execFile);
 
 feature("durable delivery queue", () => {
+  component("provisional paste health survives a queue restart", {
+    given: ["one durable paste that has not yet proved its exact composer text", () => {
+      const rootDir = tempRoot();
+      const createdAt = 1_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => createdAt });
+      const job = queue.enqueue({ agentName: "skydive", pane: 7, text: "owned provisional paste" });
+      queue.update(job, { status: "pasting", draftOwned: true, nextAttemptAt: 2_000 });
+      return { rootDir, createdAt };
+    }],
+    when: ["a replacement process reads canonical queue health", ({ rootDir }) =>
+      deliveryQueueStats(createDeliveryQueue({ rootDir }))],
+    then: ["the provisional owner remains visible instead of looking like an empty queue", (stats, ctx) => {
+      expect(stats).toMatchObject({
+        pending: 0, pasting: 1, drafted: 0, submitted: 0, blocked: 0,
+        total: 1, oldestCreatedAt: ctx.createdAt,
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("Discord Gateway and REST replay create one stable job", {
     given: ["an empty private spool", () => {
       const rootDir = tempRoot();

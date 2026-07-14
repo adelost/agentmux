@@ -47,13 +47,14 @@ function queueEvent(job, state, extra = {}) {
 }
 
 /**
- * @param {{agent: object, queue: object, notify?: Function, resolveNotificationChannel?: Function, intervalMs?: number, now?: Function, log?: Function}} options
+ * @param {{agent: object, queue: object, notify?: Function, resolveNotificationChannel?: Function, validateTarget?: Function, intervalMs?: number, now?: Function, log?: Function}} options
  */
 export function createDeliveryBroker({
   agent,
   queue,
   notify = async () => {},
   resolveNotificationChannel = null,
+  validateTarget = null,
   intervalMs = 500,
   now = () => Date.now(),
   log = (message) => console.warn(message),
@@ -248,6 +249,48 @@ export function createDeliveryBroker({
     // retyping the prompt.
     if (await exactEcho(job)) return acknowledge(job, "echo");
 
+    // `pasting` means this broker persisted ownership before the Codex pane
+    // write, but never proved the exact draft and therefore never attempted
+    // Enter. An idle empty composer is conclusive: nothing was submitted, so
+    // the immutable job may safely return to pending. Foreign/hidden content
+    // stays fenced and is never cleared or submitted automatically.
+    if (job.status === "pasting") {
+      if (typeof agent.promptTransportState !== "function") {
+        return queue.update(job, {
+          nextAttemptAt: now() + MAX_BLOCKED_RETRY_MS,
+          lastReason: "provisional paste cannot be inspected safely",
+        });
+      }
+      const transport = await agent.promptTransportState(job.agentName, job.pane, job.text)
+        .catch(() => ({ state: "hidden" }));
+      if (transport.state === "empty-idle") {
+        return queue.update(job, {
+          status: "pending",
+          draftOwned: false,
+          nextAttemptAt: now(),
+          lastReason: "provisional paste absent from idle composer; retrying exact payload",
+        });
+      }
+      if (transport.state === "drafted") {
+        job = queue.update(job, {
+          status: "drafted",
+          draftOwned: true,
+          nextAttemptAt: now(),
+          lastReason: null,
+        });
+      } else {
+        job = queue.update(job, {
+          status: "pasting",
+          draftOwned: true,
+          nextAttemptAt: now() + blockedRetryMs(job, { drafted: true }),
+          lastReason: transport.state === "foreign"
+            ? `provisional paste differs from composer; preserving both (${transport.detail || "unknown"})`
+            : "provisional paste is not currently observable; refusing Enter or duplicate paste",
+        });
+        return maybeNotifyBlocked(job);
+      }
+    }
+
     // Once the exact draft left the composer, never type it again merely
     // because JSONL is late. Keep the FIFO head here until Codex records it.
     if (job.status === "submitted") {
@@ -316,10 +359,11 @@ export function createDeliveryBroker({
       return queue.update(job, { nextAttemptAt: now() + ACTIVE_RETRY_MS });
     }
 
-    let drafted = Boolean(job.draftOwned);
+    let ownsPaneDraft = Boolean(job.draftOwned);
+    let drafted = job.status === "drafted";
     let submitted = false;
     job = queue.update(job, {
-      status: drafted ? "drafted" : "delivering",
+      status: drafted ? "drafted" : (ownsPaneDraft ? "pasting" : "delivering"),
       attempts: Number(job.attempts || 0) + 1,
       lastAttemptAt: now(),
       nextAttemptAt: null,
@@ -335,9 +379,16 @@ export function createDeliveryBroker({
           echoCursor: job.echoCursor,
           notBeforeMs: job.echoCursor ? null : job.echoNotBeforeMs,
           precheckEcho: true,
-          knownDrafted: drafted,
+          knownDrafted: ownsPaneDraft,
+          onPasteStarted: async () => {
+            ownsPaneDraft = true;
+            const current = queue.read(job.agentName, job.pane, job.id) || job;
+            job = queue.update(current, { status: "pasting", draftOwned: true });
+            queueEvent(job, "pasting");
+          },
           suppressReceipt: true,
           onDrafted: async () => {
+            ownsPaneDraft = true;
             drafted = true;
             const current = queue.read(job.agentName, job.pane, job.id) || job;
             job = queue.update(current, { status: "drafted", draftOwned: true });
@@ -410,16 +461,35 @@ export function createDeliveryBroker({
 
     const reason = result.reason || "prompt has not reached the agent yet";
     job = queue.update(job, {
-      status: drafted ? "drafted" : "blocked",
-      draftOwned: drafted,
+      status: drafted ? "drafted" : (ownsPaneDraft ? "pasting" : "blocked"),
+      draftOwned: ownsPaneDraft,
       lastReason: reason,
-      nextAttemptAt: now() + blockedRetryMs(job, { drafted }),
+      nextAttemptAt: now() + blockedRetryMs(job, { drafted: ownsPaneDraft }),
     });
     queueEvent(job, "blocked", { reason: String(reason).slice(0, 160) });
     return maybeNotifyBlocked(job);
   }
 
   async function drainTarget(agentName, pane) {
+    if (typeof validateTarget === "function") {
+      try {
+        await validateTarget(agentName, pane);
+      } catch (error) {
+        for (const job of queue.list(agentName, pane)) {
+          if (TERMINAL_DELIVERY_STATES.has(job.status)) continue;
+          const cancelled = queue.update(job, {
+            status: "cancelled",
+            draftOwned: false,
+            nextAttemptAt: null,
+            terminalAt: now(),
+            lastReason: `invalid delivery target: ${error.message}`,
+          });
+          queueEvent(cancelled, "cancelled", { reason: "invalid-target" });
+        }
+        log(`delivery target ${agentName}:${pane} cancelled: ${error.message}`);
+        return;
+      }
+    }
     const acquireLease = queue.acquireSessionLease || queue.acquireTargetLease;
     const lease = acquireLease?.(agentName, pane) || null;
     if (acquireLease && !lease) return;
@@ -475,6 +545,9 @@ export function createDeliveryBroker({
   }
 
   function enqueue(request) {
+    if (typeof validateTarget === "function") {
+      validateTarget(request.agentName, request.pane);
+    }
     const job = queue.enqueue(request);
     queueEvent(job, "enqueued");
     if (started) {

@@ -69,9 +69,12 @@ bridge restart cannot turn a valid media prompt into a missing path.
 Long and multiline prompts use terminal bracketed-paste mode, so the TUI
 receives one input transaction rather than a slow stream of painted cells.
 
-A prompt advances through `pending -> drafted -> submitted`, then ends as
+A prompt advances through `pending -> pasting -> drafted -> submitted`, then ends as
 `acknowledged` or `delivered_unverified`:
 
+- `pasting` means agentmux initiated the pane write but has not yet proved that
+  the exact text owns the composer. It remains visible in `amux doctor` and
+  blocks blind Enter or duplicate paste across restarts.
 - `drafted` means agentmux owns exact text still associated with the composer.
   It blocks later writes so payloads cannot merge.
 - `submitted` means the exact draft left the verified composer after Enter.
@@ -143,9 +146,11 @@ Manual and intentionally stopped bridges stay user-owned. Rate-limited, logged t
 
 ### Suggestions human-comment relay
 
-An optional one-minute poller routes unanswered human comments from public
-Suggestions boards to explicit amux panes. Idle polls use no agent prompts or
-model tokens; durable delivery, API-confirmed answers, bounded reminders,
+An optional one-minute poller routes unanswered human comments from private
+Suggestions boards to explicit amux panes. It authenticates reads with a
+dedicated read-scoped token loaded from an owner-only credential file and never
+stores that credential in relay state. Idle polls use no agent prompts or model
+tokens; durable delivery, API-confirmed answers, bounded reminders,
 untrusted-data fencing, and overlap locking are built in. See
 [`docs/suggestions-comment-bridge.md`](docs/suggestions-comment-bridge.md).
 

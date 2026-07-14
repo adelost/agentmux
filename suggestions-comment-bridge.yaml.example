@@ -1,5 +1,6 @@
-# Public Suggestions board. The relay never needs ADMIN_TOKEN or any secret.
-baseUrl: https://suggestions.v1d.io
+# Private Suggestions board. The relay uses a read-only token from a 0600 file.
+baseUrl: https://suggest.v1d.io
+credentialFile: ~/.config/agent/suggestions-read-token
 
 # Explicit routing. Add another project only after its responsible pane exists.
 projects:

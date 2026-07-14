@@ -31,6 +31,27 @@ function fakeDeliveryQueue(status = "acknowledged") {
 }
 
 feature("sendToPane delivery outcome", () => {
+  unit("an unknown target is rejected before durable persistence", {
+    given: ["a canonical config without the misspelled target", () => {
+      const configPath = tmpPath();
+      writeFileSync(configPath, "skydive:\n  dir: /tmp/skydive\n  panes:\n    - cmd: codex\n");
+      return { configPath, deliveryQueue: fakeDeliveryQueue() };
+    }],
+    when: ["a command-shaped typo is offered as an agent", async ({ configPath, deliveryQueue }) => {
+      let error = null;
+      try {
+        await sendToPane({ configPath, deliveryQueue, deliveryWaitMs: 0 },
+          "queue", 7, "skydive", { mirror: false });
+      } catch (caught) { error = caught; }
+      try { unlinkSync(configPath); } catch {}
+      return { error, calls: deliveryQueue.enqueue.mock.calls.length };
+    }],
+    then: ["no ghost queue file can be created", ({ error, calls }) => {
+      expect(error?.message).toContain("Agent 'queue' not found");
+      expect(calls).toBe(0);
+    }],
+  });
+
   unit("a caller-supplied idempotency identity reaches the durable queue", {
     given: ["an unparked pane and deterministic relay identity", () => {
       const path = tmpPath();

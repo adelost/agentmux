@@ -38,7 +38,7 @@ import { startHeartbeat } from "./core/heartbeat.mjs";
 import { runPendingFleetRestart } from "./core/fleet-restart.mjs";
 import { createDeliveryQueue } from "./core/delivery-queue.mjs";
 import { createDeliveryBroker } from "./core/delivery-broker.mjs";
-import { findChannelForPane } from "./cli/config.mjs";
+import { findChannelForPane, validateAgentPane } from "./cli/config.mjs";
 
 // --- Config ---
 
@@ -150,6 +150,7 @@ const deliveryQueue = createDeliveryQueue();
 const deliveryBroker = createDeliveryBroker({
   agent,
   queue: deliveryQueue,
+  validateTarget: (agentName, pane) => validateAgentPane(AGENTS_YAML, agentName, pane),
   resolveNotificationChannel: (job) =>
     findChannelForPane(AGENTS_YAML, job.agentName, job.pane),
   notify: async (job, state) => {

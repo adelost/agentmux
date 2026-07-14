@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createServer } from "http";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import {
+  chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync,
+} from "fs";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { createHash } from "crypto";
@@ -11,13 +13,16 @@ import {
   REMINDER_STAGES,
   createAmuxCommentDeliverer,
   createAmuxCommentNotifier,
+  loadSuggestionsBridgeConfig,
   loadSuggestionsBridgeState,
+  loadSuggestionsReadCredential,
   pollSuggestionsComments,
   saveSuggestionsBridgeState,
   serializeImplementationPolicy,
 } from "./suggestions-comment-bridge.mjs";
 
 const execFileAsync = promisify(execFile);
+const TEST_READ_TOKEN = "t".repeat(43);
 const roots = [];
 const logger = { info() {}, warn() {}, error() {} };
 const makeRoot = () => {
@@ -79,6 +84,11 @@ async function fixtureServer({ projectIds = ["skydive"], policy = null, boards =
     const url = new URL(request.url, "http://fixture.invalid");
     requests.push(`${url.pathname}${url.search}`);
     response.setHeader("content-type", "application/json; charset=utf-8");
+    if (request.headers.authorization !== `Bearer ${TEST_READ_TOKEN}`) {
+      response.statusCode = 401;
+      response.end(JSON.stringify({ error: "agent-token-invalid" }));
+      return;
+    }
     if (url.pathname === "/api/config") {
       const projects = projectIds.map((id, index) => ({ id, name: id, default: index === 0 }));
       response.end(JSON.stringify({ project: projects[0], projects,
@@ -160,7 +170,7 @@ async function run({ fixture, config = bridgeConfig(fixture.baseUrl), state = em
   deliver, notify = async () => {}, persist = () => {}, now = () => 1_000_000,
   loggerImpl = logger }) {
   return pollSuggestionsComments({ config, state, deliver, notify, persist, now,
-    logger: loggerImpl });
+    logger: loggerImpl, readToken: TEST_READ_TOKEN, allowTestOrigin: true });
 }
 
 describe.sequential("Suggestions human-comment relay", () => {
@@ -415,7 +425,9 @@ describe.sequential("Suggestions human-comment relay", () => {
     ])] } });
     const deliveries = [];
     try {
-      const agentdocs = await fetch(`${fixture.baseUrl}/api/config/agentdocs?project=skydive`)
+      const agentdocs = await fetch(`${fixture.baseUrl}/api/config/agentdocs?project=skydive`, {
+        headers: { authorization: `Bearer ${TEST_READ_TOKEN}` },
+      })
         .then((response) => response.json());
       const fromAgentdocs = serializeImplementationPolicy(agentdocs.implementationPolicy);
       expect(fromAgentdocs).toContain(structuredPolicy.title);
@@ -661,7 +673,9 @@ describe.sequential("Suggestions human-comment relay", () => {
     ])] } });
     const configPath = join(root, "bridge.yaml");
     const statePath = join(root, "state.json");
-    writeFileSync(configPath, `baseUrl: ${fixture.baseUrl}\nprojects:\n  skydive:\n    agent: skydive\n    pane: 3\nstatePath: ${statePath}\n`);
+    const credentialFile = join(root, "read-token");
+    writeFileSync(credentialFile, `${TEST_READ_TOKEN}\n`, { mode: 0o600 });
+    writeFileSync(configPath, `baseUrl: ${fixture.baseUrl}\ncredentialFile: ${credentialFile}\nprojects:\n  skydive:\n    agent: skydive\n    pane: 3\nstatePath: ${statePath}\n`);
     const wrapper = resolve("bin/suggestions-comment-bridge-cron.sh");
     const env = {
       ...process.env,
@@ -671,6 +685,8 @@ describe.sequential("Suggestions human-comment relay", () => {
       AMUX_SUGGESTIONS_LOCK: join(root, "poll.lock"),
       AMUX_SUGGESTIONS_LOG: join(root, "poll.log"),
       NODE_BIN: process.execPath,
+      NODE_ENV: "test",
+      AMUX_SUGGESTIONS_TEST_ORIGIN: "1",
     };
     try {
       const first = execFileAsync("bash", [wrapper], { env });
@@ -728,6 +744,63 @@ if (process.argv[2] === "-l") {
       await expect(run({ fixture,
         config: bridgeConfig(fixture.baseUrl, { missing: { agent: "x", pane: 0 } }),
         deliver: async () => {} })).rejects.toThrow("configured project 'missing' is absent");
+    } finally { await fixture.close(); }
+  });
+
+  it("pins production origin and loads only a private owned regular credential file", () => {
+    const root = makeRoot();
+    const configPath = join(root, "bridge.yaml");
+    writeFileSync(configPath, "baseUrl: http://127.0.0.1:9999\nprojects:\n  skydive:\n    agent: skydive\n    pane: 3\n");
+    expect(() => loadSuggestionsBridgeConfig(configPath)).toThrow("exactly https://suggest.v1d.io");
+    expect(loadSuggestionsBridgeConfig(configPath, { allowTestOrigin: true }).baseUrl)
+      .toBe("http://127.0.0.1:9999");
+
+    const tokenFile = join(root, "read-token");
+    writeFileSync(tokenFile, `${TEST_READ_TOKEN}\n`, { mode: 0o600 });
+    expect(loadSuggestionsReadCredential(tokenFile)).toBe(TEST_READ_TOKEN);
+    chmodSync(tokenFile, 0o644);
+    expect(() => loadSuggestionsReadCredential(tokenFile)).toThrow("mode must be 0600");
+    chmodSync(tokenFile, 0o600);
+    expect(() => loadSuggestionsReadCredential(tokenFile, { uid: process.getuid() + 1 }))
+      .toThrow("owned by the current uid");
+    const link = join(root, "read-token-link");
+    symlinkSync(tokenFile, link);
+    expect(() => loadSuggestionsReadCredential(link)).toThrow("regular non-symlink");
+  });
+
+  it("never persists credential-shaped or unknown state fields", () => {
+    const root = makeRoot();
+    const statePath = join(root, "state.json");
+    const state = {
+      version: 1,
+      projects: { skydive: { bootstrapped: true, ticketUpdatedAt: { "SKY-1": 10 },
+        comments: { "SKY-1:1": { firstSeenAt: 1, attempts: [], answeredAt: null,
+          notifiedAt: null, terminalAt: null, terminalReason: null,
+          credential: TEST_READ_TOKEN } }, credential: TEST_READ_TOKEN } },
+      credential: TEST_READ_TOKEN,
+    };
+    saveSuggestionsBridgeState(statePath, state);
+    const bytes = readFileSync(statePath, "utf8");
+    expect(bytes).not.toContain(TEST_READ_TOKEN);
+    expect(bytes).not.toContain("credential");
+    expect(loadSuggestionsBridgeState(statePath)).toEqual({
+      version: 1,
+      projects: { skydive: { bootstrapped: true, ticketUpdatedAt: { "SKY-1": 10 },
+        comments: { "SKY-1:1": { firstSeenAt: 1, attempts: [], answeredAt: null,
+          notifiedAt: null, terminalAt: null, terminalReason: null } } } },
+    });
+  });
+
+  it("does not advance state when the API rejects the read credential", async () => {
+    const fixture = await fixtureServer({ boards: { skydive: [] } });
+    const state = emptyState();
+    const before = JSON.stringify(state);
+    try {
+      await expect(pollSuggestionsComments({
+        config: bridgeConfig(fixture.baseUrl), state, readToken: "x".repeat(43),
+        allowTestOrigin: true, deliver: async () => {},
+      })).rejects.toThrow("returned 401");
+      expect(JSON.stringify(state)).toBe(before);
     } finally { await fixture.close(); }
   });
 });

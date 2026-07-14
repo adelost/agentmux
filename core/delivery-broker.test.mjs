@@ -17,6 +17,7 @@ function acceptingAgent() {
     dismissBlockingPrompt: async () => null,
     sendOnly: async (_name, text, _pane, options = {}) => {
       sends.push({ text, options });
+      await options.onPasteStarted?.();
       await options.onDrafted?.();
       await options.onSubmitted?.();
       echoed.add(text);
@@ -28,6 +29,38 @@ function acceptingAgent() {
 }
 
 feature("single-writer delivery broker", () => {
+  component("a legacy job for an invalid target is terminalized without retrying tmux", {
+    given: ["one pre-validation ghost job", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir });
+      const job = queue.enqueue({ agentName: "queue", pane: 7, text: "skydive" });
+      const agent = acceptingAgent();
+      const broker = createDeliveryBroker({
+        agent,
+        queue,
+        validateTarget: (name) => {
+          if (name === "queue") throw new Error("Agent 'queue' not found");
+        },
+        notify: async () => {},
+      });
+      return { rootDir, queue, job, agent, broker };
+    }],
+    when: ["startup reconciliation reaches the malformed target", ({ broker }) =>
+      broker.kickTarget("queue", 7)],
+    then: ["the job becomes terminal and never reaches the pane driver", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.queue.read("queue", 7, ctx.job.id)).toMatchObject({
+        status: "cancelled",
+        draftOwned: false,
+        nextAttemptAt: null,
+        terminalAt: expect.any(Number),
+        lastReason: "invalid delivery target: Agent 'queue' not found",
+      });
+      expect(ctx.queue.targets()).toEqual([]);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("startup recovery loads the complete FIFO before any tmux write", {
     given: ["a broker that has not started and one recovered job", () => {
       const rootDir = tempRoot();
@@ -198,7 +231,7 @@ feature("single-writer delivery broker", () => {
         sendOnly: async (_name, text, _pane, options = {}) => {
           sends.push({ text, options });
           if (sends.length === 1) {
-            await options.onDrafted?.();
+            await options.onPasteStarted?.();
             const error = new Error("Codex prompt delivery blocked: exact prompt did not finish painting in the composer");
             error.code = "AMUX_DELIVERY_BLOCKED";
             error.zoomRecoverable = true;
@@ -257,7 +290,7 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
-  component("a disappearing composer keeps the owned draft at the FIFO head", {
+  component("an unverified disappearing paste stays provisional at the FIFO head", {
     given: ["a first attempt that pastes, then loses the composer", () => {
       const rootDir = tempRoot();
       const queue = createDeliveryQueue({ rootDir });
@@ -271,7 +304,7 @@ feature("single-writer delivery broker", () => {
         dismissBlockingPrompt: async () => null,
         sendOnly: async (_name, text, _pane, options = {}) => {
           sends.push({ text, options });
-          await options.onDrafted?.();
+          await options.onPasteStarted?.();
           const error = new Error("exact prompt did not finish painting");
           error.code = "AMUX_DELIVERY_BLOCKED";
           throw error;
@@ -281,9 +314,9 @@ feature("single-writer delivery broker", () => {
       return { rootDir, queue, first, sends, broker };
     }],
     when: ["the first delivery loses its TUI paint", ({ broker }) => broker.kickTarget("lsrc", 3)],
-    then: ["the draft persists and the later directive is untouched", (_, ctx) => {
+    then: ["the provisional ownership persists and the later directive is untouched", (_, ctx) => {
       expect(ctx.queue.read("lsrc", 3, ctx.first.id)).toMatchObject({
-        status: "drafted",
+        status: "pasting",
         draftOwned: true,
       });
       expect(ctx.sends.map((send) => send.text)).toEqual(["long prompt"]);
@@ -877,7 +910,7 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
-  component("a drafted repaint may recover but never paste the payload twice", {
+  component("a provisional foreign repaint never receives Enter or a duplicate paste", {
     given: ["a first paste whose composer disappears before submit", () => {
       const rootDir = tempRoot();
       let clock = 1_000;
@@ -893,12 +926,15 @@ feature("single-writer delivery broker", () => {
           calls.push({ knownDrafted: options.knownDrafted });
           if (!options.knownDrafted) {
             physicalPastes++;
-            await options.onDrafted?.();
+            await options.onPasteStarted?.();
           }
           const error = new Error("durable draft is not visible; refusing to paste it again");
           error.code = "AMUX_DELIVERY_BLOCKED";
           throw error;
         },
+        promptTransportState: async () => ({
+          state: "foreign", busy: false, dialect: "codex", detail: "torn owned paste",
+        }),
       };
       const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
       return { rootDir, queue, job, broker, calls, physicalPastes: () => physicalPastes, advance: () => { clock += 10_000; } };
@@ -910,11 +946,42 @@ feature("single-writer delivery broker", () => {
     }],
     then: ["only the first attempt may physically paste", (_, ctx) => {
       expect(ctx.physicalPastes()).toBe(1);
-      expect(ctx.calls).toEqual([{ knownDrafted: false }, { knownDrafted: true }]);
+      expect(ctx.calls).toEqual([{ knownDrafted: false }]);
       expect(ctx.queue.read("skydive", 5, ctx.job.id)).toMatchObject({
-        status: "drafted",
+        status: "pasting",
         draftOwned: true,
-        attempts: 2,
+        attempts: 1,
+        lastReason: expect.stringContaining("preserving both"),
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("an empty idle composer safely reopens only a provisional paste", {
+    given: ["a crash after paste initiation but before exact verification or Enter", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir });
+      const job = queue.enqueue({ agentName: "skydive", pane: 7, text: "retry exact once" });
+      queue.update(job, {
+        status: "pasting", draftOwned: true,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0,
+      });
+      const agent = acceptingAgent();
+      agent.promptTransportState = async () => ({
+        state: "empty-idle", busy: false, dialect: "codex",
+      });
+      const broker = createDeliveryBroker({ agent, queue, notify: async () => {} });
+      return { rootDir, queue, job, agent, broker };
+    }],
+    when: ["the broker proves the unsent paste absent, then drains the reopened job", async ({ broker }) => {
+      await broker.kickTarget("skydive", 7);
+      await broker.kickTarget("skydive", 7);
+    }],
+    then: ["the immutable payload is pasted exactly once and acknowledged", (_, ctx) => {
+      expect(ctx.agent.sends.map((send) => send.text)).toEqual(["retry exact once"]);
+      expect(ctx.queue.read("skydive", 7, ctx.job.id)).toMatchObject({
+        status: "acknowledged",
+        attempts: 1,
       });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
@@ -932,6 +999,7 @@ feature("single-writer delivery broker", () => {
         echoed && Number(options?.notBeforeMs) > 0;
       agent.sendOnly = async (_name, text, _pane, options = {}) => {
         agent.sends.push({ text, options });
+        await options.onPasteStarted?.();
         await options.onDrafted?.();
         await options.onSubmitted?.();
         echoed = true;

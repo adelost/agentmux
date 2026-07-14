@@ -8,6 +8,7 @@ import {
   expandHome,
   loadSuggestionsBridgeConfig,
   loadSuggestionsBridgeState,
+  loadSuggestionsReadCredential,
   pollSuggestionsComments,
   saveSuggestionsBridgeState,
 } from "../core/suggestions-comment-bridge.mjs";
@@ -57,7 +58,9 @@ try {
     process.exit(0);
   }
   const configPath = expandHome(args.config || process.env.AMUX_SUGGESTIONS_CONFIG || DEFAULT_CONFIG);
-  const config = loadSuggestionsBridgeConfig(configPath);
+  const allowTestOrigin = process.env.NODE_ENV === "test"
+    && process.env.AMUX_SUGGESTIONS_TEST_ORIGIN === "1";
+  const config = loadSuggestionsBridgeConfig(configPath, { allowTestOrigin });
   const statePath = expandHome(args.state || process.env.AMUX_SUGGESTIONS_STATE || config.statePath);
   const state = loadSuggestionsBridgeState(statePath);
   if (args.status) {
@@ -66,9 +69,12 @@ try {
   }
   const configuredAmux = process.env.AMUX_SUGGESTIONS_AMUX_BIN || resolve(SCRIPT_DIR, "agent-cli.mjs");
   const amuxBin = configuredAmux.includes("/") ? resolve(configuredAmux) : configuredAmux;
+  const readToken = loadSuggestionsReadCredential(config.credentialFile);
   const result = await pollSuggestionsComments({
     config,
     state,
+    readToken,
+    allowTestOrigin,
     deliver: createAmuxCommentDeliverer({ amuxBin }),
     notify: createAmuxCommentNotifier({ amuxBin }),
     persist: (next) => saveSuggestionsBridgeState(statePath, next),

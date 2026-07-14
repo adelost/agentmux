@@ -1,9 +1,11 @@
 # Suggestions comment bridge
 
-The Suggestions comment bridge polls public boards once per minute and routes
+The Suggestions comment bridge polls private boards once per minute and routes
 new human `creator`/`user` comments to an explicitly configured amux pane. It
-does not hold an `ADMIN_TOKEN`, Google session, cookie, or any other Suggestions
-credential. After bootstrap, an idle poll reads config plus each mapped ticket
+does not hold the write-capable `ADMIN_TOKEN`, a Google session or cookie. It
+loads a dedicated read-only token from an owner-only regular file and never
+stores that token in config, state, logs, prompts or process arguments. After
+bootstrap, an idle poll reads config plus each mapped ticket
 list; ticket details are fetched only for changed tickets or a due unanswered
 reminder. It does not prompt an agent or spend model tokens.
 
@@ -13,7 +15,8 @@ Install creates `~/.config/agent/suggestions-comment-bridge.yaml` from the
 reusable example if the file is absent:
 
 ```yaml
-baseUrl: https://suggestions.v1d.io
+baseUrl: https://suggest.v1d.io
+credentialFile: ~/.config/agent/suggestions-read-token
 projects:
   skydive:
     agent: skydive
@@ -59,6 +62,7 @@ state remain for a later reinstall.
 Default local files:
 
 - Config: `~/.config/agent/suggestions-comment-bridge.yaml`
+- Read credential: `~/.config/agent/suggestions-read-token` (regular file, current owner, mode `0600`)
 - State: `~/.agentmux/suggestions-comment-bridge-state.json` (mode `0600`)
 - Lock: `~/.agentmux/suggestions-comment-bridge.lock`
 - High-signal log: `~/.agentmux/suggestions-comment-bridge.log`
@@ -109,7 +113,7 @@ metadata are normalized and encoded as bounded terminal-safe JSON inside a
 payload-dependent fence that the encoded payload cannot contain. Prompt text,
 media, tokens, and credentials are never written to relay state or logs.
 
-The public API contract is intentionally strict: `/api/config` must enumerate
+The authenticated read API contract is intentionally strict: `/api/config` must enumerate
 projects, `/api/tickets?project=...` must return `tickets[]`, and each ticket
 detail must return an ordered `comments[]`. Network failures, malformed JSON,
 unknown comment kinds/purposes, and endpoint/schema drift fail visibly without

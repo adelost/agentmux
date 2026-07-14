@@ -347,7 +347,7 @@ export async function waitForDeliveryJob(queue, id, {
 }
 
 export function deliveryQueueStats(queue) {
-  let pending = 0, drafted = 0, submitted = 0, blocked = 0;
+  let pending = 0, pasting = 0, drafted = 0, submitted = 0, blocked = 0;
   let oldestCreatedAt = null;
   for (const { agentName, pane } of queue.targets()) {
     for (const job of queue.list(agentName, pane)) {
@@ -356,10 +356,15 @@ export function deliveryQueueStats(queue) {
         if (createdAt && (oldestCreatedAt == null || createdAt < oldestCreatedAt)) oldestCreatedAt = createdAt;
       }
       if (job.status === "pending" || job.status === "delivering") pending++;
+      else if (job.status === "pasting") pasting++;
       else if (job.status === "drafted") drafted++;
       else if (job.status === "submitted") submitted++;
       else if (job.status === "blocked") blocked++;
     }
   }
-  return { pending, drafted, submitted, blocked, total: pending + drafted + submitted + blocked, oldestCreatedAt };
+  return {
+    pending, pasting, drafted, submitted, blocked,
+    total: pending + pasting + drafted + submitted + blocked,
+    oldestCreatedAt,
+  };
 }

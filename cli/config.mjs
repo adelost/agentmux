@@ -40,6 +40,20 @@ export function getAgent(configPath, name) {
   return { name, ...agent, dir: expandTilde(agent.dir) };
 }
 
+/** Validate a delivery target against the canonical configured fleet. */
+export function validateAgentPane(configPath, name, pane) {
+  const agent = getAgent(configPath, name);
+  const index = Number(pane);
+  if (!Number.isSafeInteger(index) || index < 0) {
+    throw new Error(`Invalid pane '${pane}' for agent '${name}'`);
+  }
+  const panes = Array.isArray(agent.panes) ? agent.panes : [];
+  if (panes.length > 0 && index >= panes.length) {
+    throw new Error(`Pane ${index} is not configured for agent '${name}'`);
+  }
+  return { agentName: agent.name, pane: index };
+}
+
 /**
  * Find the Discord channel bound to a specific pane of an agent.
  *

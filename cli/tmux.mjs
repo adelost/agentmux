@@ -15,7 +15,7 @@ import {
 } from "../core/delivery-queue.mjs";
 import { parseSenderHeader } from "../core/sender-detect.mjs";
 import { detectPaneStatus } from "./format.mjs";
-import { findChannelForPane } from "./config.mjs";
+import { findChannelForPane, validateAgentPane } from "./config.mjs";
 
 const exec = promisify(execCb);
 
@@ -164,6 +164,10 @@ export async function sendKeys(ctx, name, pane, keys) {
  *                                           Leave empty to send verbatim.
  */
 export async function sendToPane(ctx, name, pane, text, opts = {}) {
+  // Validate before the durable write. A typo such as `amux queue ...`
+  // previously became an immortal target named "queue" and the broker
+  // retried it forever even though that session never existed.
+  if (ctx.configPath) validateAgentPane(ctx.configPath, name, pane);
   const mirror = opts.mirror !== false;
   const mirrorDispatch = opts.mirrorDispatch || spawnMirrorWorker;
   const sender = parseSenderHeader(text);

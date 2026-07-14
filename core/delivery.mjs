@@ -82,6 +82,7 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
   precheckEcho = false,
   notBeforeMs: suppliedNotBeforeMs = null,
   knownDrafted = false,
+  onPasteStarted = null,
   onDrafted = null,
   onSubmitted = null,
 } = {}) {
@@ -120,6 +121,7 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
     let sendReceipt = null;
     await agent.sendOnly(agentName, text, pane, {
       knownDrafted,
+      onPasteStarted,
       onDrafted,
       onSubmitted,
     })
@@ -188,12 +190,14 @@ async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
   settleMs = 1200, maxRescues = 2,
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   knownDrafted = false,
+  onPasteStarted = null,
   onDrafted = null,
   onSubmitted = null,
 } = {}) {
   const target = `${agentName}:.${pane}`;
   await agent.dismissBlockingPrompt(target).catch(() => {});
-  await agent.sendOnly(agentName, claudeCmd, pane, { knownDrafted, onDrafted, onSubmitted });
+  await agent.sendOnly(agentName, claudeCmd, pane,
+    { knownDrafted, onPasteStarted, onDrafted, onSubmitted });
 
   for (let attempt = 0; attempt <= maxRescues; attempt++) {
     await sleep(settleMs);

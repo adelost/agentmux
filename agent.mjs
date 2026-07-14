@@ -1584,6 +1584,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   async function sendPrompt(agentName, prompt, pane, {
     knownDrafted = false,
+    onPasteStarted = null,
     onDrafted = null,
     onSubmitted = null,
   } = {}) {
@@ -1621,6 +1622,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       if (dialect === "codex") {
         const ready = await waitForCodexPromptReady(agentName, pane);
         busyAtSend = Boolean(ready?.busy);
+        // Persist only provisional ownership before the first pane write.
+        // A crash here must fence a duplicate paste, but the broker may not
+        // call this an exact draft until the live composer proves it below.
+        if (onPasteStarted) await onPasteStarted();
       }
       if (promptRequiresAtomicPaste(prompt)) {
         await pastePrompt({ tmux: t, target, prompt, sleep: wait });
@@ -1628,7 +1633,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         await t.sendLiteral(target, prompt);
         await wait(1000);
       }
-      if (onDrafted) await onDrafted();
+      if (dialect !== "codex" && onDrafted) await onDrafted();
     } else if (dialect === "codex") {
       busyAtSend = Boolean(await isBusy(agentName, pane));
     }
@@ -1646,6 +1651,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         });
       }
     }
+    if (dialect === "codex" && exactDraft && onDrafted) await onDrafted();
     // A previously queued turn can start during the paste/paint interval.
     // Re-sample immediately before Enter so the delivery layer treats our
     // prompt as one queued steering write instead of retrying it as idle.

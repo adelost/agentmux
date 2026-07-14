@@ -186,6 +186,7 @@ export function checkDeliveryQueue({ stats, bridgeRunning, now = Date.now() }) {
     : "";
   const parts = [
     stats.pending ? `${stats.pending} pending` : null,
+    stats.pasting ? `${stats.pasting} pasting` : null,
     stats.drafted ? `${stats.drafted} drafted` : null,
     stats.submitted ? `${stats.submitted} submitted` : null,
     stats.blocked ? `${stats.blocked} blocked` : null,
@@ -194,7 +195,7 @@ export function checkDeliveryQueue({ stats, bridgeRunning, now = Date.now() }) {
     return check("delivery queue", WARN, `${parts}${age}; bridge is stopped`,
       "start the bridge to resume the durable FIFO");
   }
-  if (stats.blocked || stats.drafted) {
+  if (stats.blocked || stats.pasting || stats.drafted) {
     return check("delivery queue", WARN, `${parts}${age}`,
       "inspect delivery_queue events; the broker preserves the FIFO head until the composer is safe");
   }

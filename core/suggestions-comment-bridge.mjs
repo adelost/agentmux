@@ -1,5 +1,5 @@
-// Poll the public Suggestions API and hand new human comments to an amux pane.
-// The bridge is deliberately pull-only and keeps no Suggestions credentials.
+// Poll the private Suggestions API and hand new human comments to an amux pane.
+// The bridge is deliberately pull-only and uses a separate read-scoped credential.
 
 import { createHash, randomUUID } from "crypto";
 import {
@@ -7,6 +7,7 @@ import {
   closeSync,
   existsSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -73,9 +74,9 @@ function readYaml(path) {
   return parsed;
 }
 
-export function loadSuggestionsBridgeConfig(path, { home = homedir() } = {}) {
+export function loadSuggestionsBridgeConfig(path, { home = homedir(), allowTestOrigin = false } = {}) {
   const raw = readYaml(path);
-  const baseUrl = assertString(raw.baseUrl ?? "https://suggestions.v1d.io", "baseUrl", {
+  const baseUrl = assertString(raw.baseUrl ?? "https://suggest.v1d.io", "baseUrl", {
     min: 8, max: 2048,
   });
   let parsedBase;
@@ -90,6 +91,9 @@ export function loadSuggestionsBridgeConfig(path, { home = homedir() } = {}) {
   parsedBase.pathname = parsedBase.pathname.replace(/\/+$/u, "");
   parsedBase.search = "";
   parsedBase.hash = "";
+  if (!allowTestOrigin && parsedBase.href !== "https://suggest.v1d.io/") {
+    throw new Error("config: baseUrl must be exactly https://suggest.v1d.io");
+  }
 
   if (!isObject(raw.projects) || !Object.keys(raw.projects).length) {
     throw new Error("config: projects must be a non-empty mapping");
@@ -126,6 +130,8 @@ export function loadSuggestionsBridgeConfig(path, { home = homedir() } = {}) {
     ? DEFAULT_IMPLEMENTATION_POLICY
     : assertString(raw.implementationPolicy, "implementationPolicy", { min: 32, max: MAX_POLICY_BYTES });
   const statePath = expandHome(raw.statePath ?? "~/.agentmux/suggestions-comment-bridge-state.json", home);
+  const credentialFile = expandHome(raw.credentialFile
+    ?? "~/.config/agent/suggestions-read-token", home);
   return {
     baseUrl: parsedBase.toString().replace(/\/$/u, ""),
     projects,
@@ -134,7 +140,29 @@ export function loadSuggestionsBridgeConfig(path, { home = homedir() } = {}) {
     detailConcurrency,
     implementationPolicy,
     statePath,
+    credentialFile,
   };
+}
+
+export function loadSuggestionsReadCredential(path, { uid = process.getuid?.() } = {}) {
+  let stat;
+  try { stat = lstatSync(path); }
+  catch (error) { throw new Error(`credential: cannot stat ${path}: ${error.code || error.message}`); }
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error("credential: token path must be a regular non-symlink file");
+  }
+  if (uid != null && stat.uid !== uid) {
+    throw new Error("credential: token file must be owned by the current uid");
+  }
+  if ((stat.mode & 0o077) !== 0) throw new Error("credential: token file mode must be 0600");
+  if (stat.size < 32 || stat.size > 512) throw new Error("credential: token file has invalid size");
+  const raw = readFileSync(path, "utf8");
+  const token = raw.endsWith("\n") ? raw.slice(0, -1) : raw;
+  if (raw !== token && raw !== `${token}\n`) throw new Error("credential: token must be one line");
+  if (!/^[A-Za-z0-9_-]{32,256}$/u.test(token)) {
+    throw new Error("credential: token must be a bounded base64url value");
+  }
+  return token;
 }
 
 export function loadSuggestionsBridgeState(path) {
@@ -142,12 +170,15 @@ export function loadSuggestionsBridgeState(path) {
   let value;
   try { value = JSON.parse(readFileSync(path, "utf8")); }
   catch (error) { throw new Error(`state: cannot parse ${path}: ${error.message}`); }
-  if (!isObject(value) || value.version !== SUGGESTIONS_BRIDGE_STATE_VERSION
+  if (!isObject(value) || Object.keys(value).some((key) => !["version", "projects"].includes(key))
+      || value.version !== SUGGESTIONS_BRIDGE_STATE_VERSION
       || !isObject(value.projects)) {
     throw new Error(`state: unsupported or malformed state in ${path}`);
   }
   for (const [projectId, project] of Object.entries(value.projects)) {
-    if (!isObject(project) || typeof project.bootstrapped !== "boolean"
+    if (!isObject(project)
+        || Object.keys(project).some((key) => !["bootstrapped", "comments", "ticketUpdatedAt"].includes(key))
+        || typeof project.bootstrapped !== "boolean"
         || !isObject(project.comments) || !isObject(project.ticketUpdatedAt)) {
       throw new Error(`state: malformed project state for ${projectId}`);
     }
@@ -159,6 +190,9 @@ export function loadSuggestionsBridgeState(path) {
     for (const [id, comment] of Object.entries(project.comments)) {
       if (!/^[A-Z0-9][A-Z0-9-]*:[1-9][0-9]*$/u.test(id) || byteLength(id) > 160
           || !isObject(comment)
+          || Object.keys(comment).some((key) => ![
+            "firstSeenAt", "attempts", "answeredAt", "notifiedAt", "terminalAt", "terminalReason",
+          ].includes(key))
           || !Number.isFinite(comment.firstSeenAt) || comment.firstSeenAt < 0
           || !Array.isArray(comment.attempts)
           || comment.attempts.length > REMINDER_STAGES.length
@@ -187,7 +221,28 @@ export function saveSuggestionsBridgeState(path, state) {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   try { chmodSync(dirname(path), 0o700); } catch {}
   const tmp = `${path}.tmp-${process.pid}-${randomUUID()}`;
-  const bytes = `${JSON.stringify(state, null, 2)}\n`;
+  const projects = {};
+  for (const [projectId, project] of Object.entries(state.projects ?? {})) {
+    const comments = {};
+    for (const [id, comment] of Object.entries(project.comments ?? {})) {
+      comments[id] = {
+        firstSeenAt: comment.firstSeenAt,
+        attempts: (comment.attempts ?? []).map((attempt) => ({
+          stage: attempt.stage, enqueuedAt: attempt.enqueuedAt,
+        })),
+        answeredAt: comment.answeredAt ?? null,
+        notifiedAt: comment.notifiedAt ?? null,
+        terminalAt: comment.terminalAt ?? null,
+        terminalReason: comment.terminalReason ?? null,
+      };
+    }
+    projects[projectId] = {
+      bootstrapped: project.bootstrapped,
+      comments,
+      ticketUpdatedAt: { ...(project.ticketUpdatedAt ?? {}) },
+    };
+  }
+  const bytes = `${JSON.stringify({ version: SUGGESTIONS_BRIDGE_STATE_VERSION, projects }, null, 2)}\n`;
   const fd = openSync(tmp, "wx", 0o600);
   try {
     writeFileSync(fd, bytes, "utf8");
@@ -261,7 +316,7 @@ function attachmentPayload(attachments, baseUrl) {
     if (url.origin !== base.origin || !new Set(["http:", "https:"]).has(url.protocol)
         || url.username || url.password || url.search || url.hash
         || !url.pathname.startsWith("/media/")) {
-      throw new Error(`schema: attachment ${index}.url must be a public Suggestions /media path`);
+      throw new Error(`schema: attachment ${index}.url must be a same-origin Suggestions /media path`);
     }
     const bytes = Number(attachment.bytes);
     if (!Number.isSafeInteger(bytes) || bytes < 0) {
@@ -521,7 +576,8 @@ class HttpResponseError extends Error {
   }
 }
 
-async function fetchJson(url, { fetchImpl, timeoutMs, maxBytes = 8 * 1024 * 1024 }) {
+async function fetchJson(url, { fetchImpl, timeoutMs, readToken,
+  maxBytes = 8 * 1024 * 1024 }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   timer.unref?.();
@@ -529,7 +585,7 @@ async function fetchJson(url, { fetchImpl, timeoutMs, maxBytes = 8 * 1024 * 1024
   try {
     response = await fetchImpl(url, {
       method: "GET",
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", authorization: `Bearer ${readToken}` },
       redirect: "error",
       signal: controller.signal,
     });
@@ -641,6 +697,8 @@ function terminalizeTrackedTicket(project, ticketId, nowMs) {
 export async function pollSuggestionsComments({
   config,
   state,
+  readToken,
+  allowTestOrigin = false,
   fetchImpl = globalThis.fetch,
   deliver,
   notify = async () => {},
@@ -651,9 +709,16 @@ export async function pollSuggestionsComments({
   if (typeof fetchImpl !== "function" || typeof deliver !== "function") {
     throw new Error("poller: fetch and deliver functions are required");
   }
+  const baseUrl = new URL(config.baseUrl);
+  if (!allowTestOrigin && baseUrl.href !== "https://suggest.v1d.io/") {
+    throw new Error("poller: Suggestions origin must be exactly https://suggest.v1d.io");
+  }
+  if (!/^[A-Za-z0-9_-]{32,256}$/u.test(readToken ?? "")) {
+    throw new Error("poller: a bounded read credential is required");
+  }
   const configUrl = new URL("/api/config", config.baseUrl);
   const remoteConfig = validateConfigPayload(await fetchJson(configUrl, {
-    fetchImpl, timeoutMs: config.requestTimeoutMs, maxBytes: 256 * 1024,
+    fetchImpl, timeoutMs: config.requestTimeoutMs, readToken, maxBytes: 256 * 1024,
   }));
   const remoteIds = new Set(remoteConfig.projects.map((project) => project.id));
   for (const projectId of Object.keys(config.projects)) {
@@ -669,7 +734,8 @@ export async function pollSuggestionsComments({
     const listUrl = new URL("/api/tickets", config.baseUrl);
     listUrl.searchParams.set("project", projectId);
     const tickets = validateTicketList(await fetchJson(listUrl, {
-      fetchImpl, timeoutMs: config.requestTimeoutMs, maxBytes: 4 * 1024 * 1024,
+      fetchImpl, timeoutMs: config.requestTimeoutMs, readToken,
+      maxBytes: 4 * 1024 * 1024,
     }), projectId);
     const pState = projectState(state, projectId);
     const pollNow = now();
@@ -688,7 +754,7 @@ export async function pollSuggestionsComments({
       detailUrl.searchParams.set("project", projectId);
       try {
         return validateTicketDetail(await fetchJson(detailUrl, {
-          fetchImpl, timeoutMs: config.requestTimeoutMs,
+          fetchImpl, timeoutMs: config.requestTimeoutMs, readToken,
         }), candidate.ticket);
       } catch (error) {
         if (candidate.trackedOnly && error instanceof HttpResponseError && error.status === 404) {
