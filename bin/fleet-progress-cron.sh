@@ -71,6 +71,15 @@ now=$(date +%s)
 SEND_TIMEOUT="${SEND_TIMEOUT:-25}"
 amux_send() { timeout "$SEND_TIMEOUT" "$AMUX" "$@"; }
 
+# `amux <name> -p N "msg"` routes to a SUBCOMMAND when <name> equals one (e.g. a
+# session literally named "watch" hits `amux watch` = live-follow, never a send).
+# `amux :index` sidesteps it but the index is alphabetical over the config and
+# shifts when agents are added/removed — too fragile to send from a cron (it
+# WILL misfire to the wrong pane). So a collision-named fleet is escalated to a
+# human instead of auto-nudged. Robust fix is an `amux send` verb (follow-up).
+RESERVED_CMDS=" ps top done log timeline watch dream compact janitor asks ask questions search serve stop doctor edit label labels lint select image say events run plan resume r esc wait notifyuser remind memory ls help playwright-reap pw-reap "
+is_reserved() { case "$RESERVED_CMDS" in *" $1 "*) return 0;; *) return 1;; esac; }
+
 # Newest Claude/Codex session-jsonl mtime for a pane, or 0 if unresolvable.
 # Mirrors task-keeper's helper: the pane's cwd → project slug ('/' and '.' → '-')
 # → ~/.claude/projects/<slug>/*.jsonl. Codex panes fall back to ~/.codex.
@@ -194,6 +203,14 @@ while read -r session pane repo _rest; do
 
   repo_label=$(basename "${_repos[0]}")
   MSG="[fleet-watch, automatisk] Inga commits i ${repo_label} och du (broker) idle i ${age_min}min. Re-inventera READY-kön NU: dispatcha oberoende arbete till lediga paneler (en ägare/ticket, inga fil-krockar), ELLER om inget är READY/allt blockerat — bekräfta det i en rad så vakten ser dig. Om en panel hänger: checkpointa + ge nästa oberoende item. Tysta din flotta: touch ~/.agentmux/fleet-watch/${session}.OFF"
+
+  if is_reserved "$session"; then
+    if [ "$DRY" = "1" ]; then log "$session:$pane: DRY reserved-name → would escalate (${age_min}min)"; continue; fi
+    amux_send notifyuser --level warn "[fleet-watch] $session:$pane broker tyst ${age_min}min men sessionsnamnet krockar med ett amux-subkommando → kan inte auto-knuffa säkert. Knuffa manuellt." >/dev/null 2>&1 || true
+    echo "$now" > "$cd_file"; touch "$warn"
+    log "$session:$pane: RESERVED-NAME collision → escalated to human (no auto-nudge)"
+    continue
+  fi
 
   if [ "$DRY" = "1" ]; then
     log "$session:$pane: DRY would nudge (${age_min}min, escalate=$escalate)"
