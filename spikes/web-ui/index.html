@@ -65,10 +65,28 @@
             </div>
             <code class="project-path" id="project-path"></code>
           </div>
-          <div class="agent-header-actions">
-            <span class="run-state" id="run-state" role="status">Klar</span>
-            <button class="button compact quiet" id="side-question-button" type="button">Sidofråga</button>
-            <button class="icon-button danger" id="delete-agent-button" type="button" aria-label="Ta bort agent" title="Ta bort agent">×</button>
+          <div class="agent-runtime">
+            <div class="context-control" id="context-control" title="Aktuell kontext, inte abonnemangskvot">
+              <div class="context-heading">
+                <span>Kontext</span>
+                <strong id="context-label">Ingen mätning</strong>
+              </div>
+              <div class="context-track" role="meter" aria-label="Använt kontextfönster" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <span id="context-fill"></span>
+              </div>
+              <small id="context-detail">Auto-compact över 60 % efter 5 min idle</small>
+            </div>
+            <label class="effort-control" for="agent-effort-select">
+              <span>Effort</span>
+              <select id="agent-effort-select" aria-label="Agentens effort"></select>
+            </label>
+            <div class="agent-header-actions">
+              <span class="run-state" id="run-state" role="status">Klar</span>
+              <button class="button compact danger hidden" id="interrupt-button" type="button">Avbryt</button>
+              <button class="button compact quiet" id="compact-button" type="button">Compact</button>
+              <button class="button compact quiet" id="side-question-button" type="button">Sidofråga</button>
+              <button class="icon-button danger" id="delete-agent-button" type="button" aria-label="Ta bort agent" title="Ta bort agent">×</button>
+            </div>
           </div>
         </header>
 
@@ -142,7 +160,7 @@
         Agentnamn
         <input id="agent-name-input" name="name" maxlength="64" autocomplete="off" required placeholder="Exempel: UI-implementation">
       </label>
-      <div class="form-grid">
+      <div class="form-grid agent-config-grid">
         <label>
           Motor
           <select id="engine-input" name="engine">
@@ -155,12 +173,16 @@
           <input id="model-input" name="model" list="model-options" maxlength="120" required>
           <datalist id="model-options"></datalist>
         </label>
+        <label>
+          Effort
+          <select id="effort-input" name="effort" required></select>
+        </label>
       </div>
       <div class="folder-summary">
         <span>Arbetsmapp</span>
         <code id="agent-project-path"></code>
       </div>
-      <p class="form-hint">Agenten körs headless i projektmappen. Varje svar sparas i Claude/Codex egen sessionshistorik.</p>
+      <p class="form-hint">Effort kan ändras senare och gäller då nästa turn. Kontext över 60 % compactas automatiskt efter 5 minuters idle.</p>
       <div class="dialog-actions">
         <button class="button quiet" type="button" data-close-dialog>Avbryt</button>
         <button class="button primary" type="submit">Skapa agent</button>

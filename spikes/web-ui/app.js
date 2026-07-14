@@ -16,6 +16,14 @@ const elements = {
   agentMeta: $("#agent-meta"),
   projectPath: $("#project-path"),
   runState: $("#run-state"),
+  contextControl: $("#context-control"),
+  contextLabel: $("#context-label"),
+  contextTrack: $(".context-track"),
+  contextFill: $("#context-fill"),
+  contextDetail: $("#context-detail"),
+  agentEffortSelect: $("#agent-effort-select"),
+  compactButton: $("#compact-button"),
+  interruptButton: $("#interrupt-button"),
   deleteAgentButton: $("#delete-agent-button"),
   messageList: $("#message-list"),
   composerWrap: $("#composer-wrap"),
@@ -36,6 +44,7 @@ const elements = {
   engineInput: $("#engine-input"),
   modelInput: $("#model-input"),
   modelOptions: $("#model-options"),
+  effortInput: $("#effort-input"),
   sideQuestionButton: $("#side-question-button"),
   sidePanel: $("#side-panel"),
   closeSidePanel: $("#close-side-panel"),
@@ -59,6 +68,7 @@ const state = {
   attachments: [],
   pendingMessage: null,
   sending: false,
+  controlPending: false,
   toastTimer: null,
   snapshot: route.searchParams.get("snapshot") === "1",
 };
@@ -82,7 +92,11 @@ const api = async (url, options = {}) => {
 const errorText = (error) => ({
   "cwd-not-a-directory": "Mappen finns inte eller är inte en katalog på servern.",
   "idempotency-key-conflict": "Försöket ändrades efter att det skickades. Försök igen.",
-  "turn-in-progress": "Agenten arbetar redan. Vänta tills svaret är klart.",
+  "turn-in-progress": "Agenten arbetar redan. Vänta eller avbryt den pågående turnen.",
+  "agent-not-running": "Agenten har ingen pågående turn att avbryta.",
+  "interrupt-not-ready": "Codex startar fortfarande turnen. Försök igen om ett ögonblick.",
+  "compact-needs-session": "Skicka först ett meddelande så agenten får en session att compacta.",
+  "unknown-effort": "Den effort-nivån stöds inte av den valda motorn.",
   "side-question-needs-session": "Skicka först ett vanligt meddelande så agenten får en session.",
   "side-question-claude-only": "Sidofrågor stöds för Claude-agenter i den här versionen.",
   "side-question-failed": `Sidofrågan misslyckades${error.detail ? `: ${error.detail}` : "."}`,
@@ -116,6 +130,27 @@ const openProjectDialog = () => {
   queueMicrotask(() => elements.projectNameInput.focus());
 };
 
+const effortLabel = (effort) => ({
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+}[effort] ?? effort);
+
+const replaceEffortOptions = (select, engine, selected = null) => {
+  const efforts = state.config?.efforts?.[engine] ?? [];
+  select.replaceChildren(...efforts.map((effort) => {
+    const option = document.createElement("option");
+    option.value = effort;
+    option.textContent = effortLabel(effort);
+    return option;
+  }));
+  select.value = efforts.includes(selected)
+    ? selected
+    : (state.config?.defaultEffort?.[engine] ?? efforts[0] ?? "");
+};
+
 const updateModelOptions = (resetValue = true) => {
   const engine = elements.engineInput.value;
   const options = state.config?.models?.[engine] ?? [];
@@ -125,6 +160,8 @@ const updateModelOptions = (resetValue = true) => {
     return option;
   }));
   if (resetValue || !elements.modelInput.value) elements.modelInput.value = options[0] ?? "";
+  replaceEffortOptions(elements.effortInput, engine,
+    resetValue ? state.config?.defaultEffort?.[engine] : elements.effortInput.value);
 };
 
 const openAgentDialog = () => {
@@ -162,7 +199,8 @@ const agentButton = (agent) => {
   name.textContent = agent.name;
   const meta = document.createElement("span");
   meta.className = "agent-button-meta";
-  meta.textContent = `${agent.engine} · ${agent.model}`;
+  const context = Number.isFinite(agent.context?.percent) ? ` · ${Math.round(agent.context.percent)}%` : "";
+  meta.textContent = `${agent.engine} · ${agent.model} · ${effortLabel(agent.effort)}${context}`;
   copy.append(name, meta);
   button.append(dot, copy);
   button.addEventListener("click", () => selectAgent(agent.id));
@@ -201,6 +239,47 @@ const renderProjectSelect = () => {
   elements.projectSelect.value = state.projectId ?? "";
 };
 
+const compactNumber = (value) => {
+  if (!Number.isFinite(value)) return "—";
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}m`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}k`;
+  return String(Math.round(value));
+};
+
+const relativeDuration = (milliseconds) => {
+  const seconds = Math.max(0, Math.ceil(milliseconds / 1_000));
+  if (seconds >= 60) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  return `${seconds}s`;
+};
+
+const renderContext = (agent) => {
+  const context = agent.context;
+  const percent = Number.isFinite(context?.percent) ? context.percent : null;
+  const used = context?.usedTokens;
+  const windowTokens = context?.windowTokens;
+  elements.contextControl.classList.toggle("warning", percent !== null && percent >= 60 && percent < 85);
+  elements.contextControl.classList.toggle("critical", percent !== null && percent >= 85);
+  elements.contextFill.style.width = `${percent ?? 0}%`;
+  elements.contextTrack.setAttribute("aria-valuenow", String(Math.round(percent ?? 0)));
+  elements.contextLabel.textContent = Number.isFinite(used) && Number.isFinite(windowTokens)
+    ? `${compactNumber(used)} / ${compactNumber(windowTokens)} · ${Math.round(percent)} %`
+    : Number.isFinite(used) ? `${compactNumber(used)} tokens` : "Ingen mätning";
+
+  const details = [];
+  if (Number.isFinite(context?.lastInputTokens) || Number.isFinite(context?.lastOutputTokens)) {
+    details.push(`senast ${compactNumber(context?.lastInputTokens ?? 0)} in / ${compactNumber(context?.lastOutputTokens ?? 0)} ut`);
+  }
+  if (agent.autoCompact?.dueAt && !agent.running) {
+    details.push(`auto-compact om ${relativeDuration(agent.autoCompact.dueAt - Date.now())}`);
+  } else {
+    details.push("auto över 60 % efter 5 min idle");
+  }
+  elements.contextDetail.textContent = details.join(" · ");
+  elements.contextControl.title = Number.isFinite(context?.processedTokens)
+    ? `Aktuell kontext, inte abonnemangskvot. Sessionen har processat ${compactNumber(context.processedTokens)} tokens.`
+    : "Aktuell kontext, inte abonnemangskvot.";
+};
+
 const updateAgentHeader = () => {
   const project = selectedProject();
   const agent = selectedAgent();
@@ -208,11 +287,24 @@ const updateAgentHeader = () => {
   elements.engineMark.textContent = agent.engine === "claude" ? "C" : "X";
   elements.engineMark.classList.toggle("codex", agent.engine === "codex");
   elements.agentName.textContent = agent.name;
-  elements.agentMeta.textContent = `${agent.engine} · ${agent.model}`;
+  elements.agentMeta.textContent = `${agent.engine} · ${agent.model} · ${effortLabel(agent.effort)}`;
   elements.projectPath.textContent = project.cwd;
   elements.projectPath.title = project.cwd;
-  elements.runState.textContent = agent.running ? "Arbetar…" : "Klar";
+  elements.runState.textContent = agent.operation === "interrupting"
+    ? "Avbryter…"
+    : ["compact", "auto-compact"].includes(agent.operation)
+      ? "Compactar…"
+      : agent.running ? "Arbetar…" : "Klar";
   elements.runState.classList.toggle("running", agent.running);
+  renderContext(agent);
+  replaceEffortOptions(elements.agentEffortSelect, agent.engine, agent.effort);
+  elements.agentEffortSelect.disabled = state.controlPending;
+  elements.compactButton.disabled = agent.running || !agent.sessionId || state.controlPending;
+  elements.compactButton.title = agent.sessionId
+    ? "Sammanfatta native-sessionens kontext nu"
+    : "Skicka ett meddelande först";
+  elements.interruptButton.classList.toggle("hidden", !agent.running);
+  elements.interruptButton.disabled = !agent.running || agent.operation === "interrupting" || state.controlPending;
   elements.sideQuestionButton.hidden = agent.engine !== "claude";
   elements.sideQuestionButton.disabled = agent.engine !== "claude" || !agent.sessionId;
   elements.sideQuestionButton.title = agent.sessionId
@@ -268,6 +360,7 @@ const detachAgent = () => {
   state.seenEventIds.clear();
   state.liveMessage = null;
   state.attachments = [];
+  state.controlPending = false;
   elements.messageList.replaceChildren();
   elements.sideThread.replaceChildren();
   elements.sidePanel.classList.add("hidden");
@@ -364,15 +457,65 @@ const renderEvent = (event) => {
     }
   } else if (event.type === "result") {
     renderResult(event);
+  } else if (event.type === "web" && event.subtype === "context") {
+    const agent = selectedAgent();
+    if (agent) {
+      agent.context = event.context;
+      renderContext(agent);
+    }
+  } else if (event.type === "web" && event.subtype === "settings") {
+    const agent = selectedAgent();
+    if (agent) {
+      agent.effort = event.effort;
+      updateAgentHeader();
+    }
+  } else if (event.type === "web" && event.subtype === "compact-start") {
+    const agent = selectedAgent();
+    if (agent) {
+      agent.running = true;
+      agent.operation = event.automatic ? "auto-compact" : "compact";
+      updateAgentHeader();
+    }
+    messageElement("notice", event.automatic
+      ? "Auto-compact startade efter 5 minuters idle över 60 % context."
+      : "Compact startade…", "notice");
+  } else if (event.type === "web" && event.subtype === "compacted") {
+    if (event.metadata?.pre_tokens && event.metadata?.post_tokens) {
+      messageElement("notice", `Kontext compactad: ${compactNumber(event.metadata.pre_tokens)} → ${compactNumber(event.metadata.post_tokens)} tokens.`, "notice");
+    }
+  } else if (event.type === "web" && event.subtype === "compact-result") {
+    if (event.message) messageElement("notice", event.message, "notice");
+  } else if (event.type === "web" && event.subtype === "compact-done") {
+    const agent = selectedAgent();
+    if (agent) {
+      agent.running = false;
+      agent.operation = null;
+      updateAgentHeader();
+    }
+    if (event.code !== 0 && !event.interrupted) {
+      messageElement("error", event.error || event.stderr || "Compact misslyckades.", "error");
+    }
+    refreshProjects().catch(() => {});
+  } else if (event.type === "web" && ["interrupt-requested", "interrupt-acknowledged"].includes(event.subtype)) {
+    const agent = selectedAgent();
+    if (agent) {
+      agent.operation = "interrupting";
+      updateAgentHeader();
+    }
+  } else if (event.type === "web" && event.subtype === "interrupted") {
+    messageElement("notice", "Turnen avbröts. Agentens session och kontext finns kvar.", "notice");
+  } else if (event.type === "web" && event.subtype === "interrupt-failed") {
+    messageElement("error", `Kunde inte avbryta: ${event.error}`, "error");
   } else if (event.type === "web" && event.subtype === "turn-done") {
     state.liveMessage?.classList.remove("live");
     state.liveMessage = null;
     const agent = selectedAgent();
     if (agent) {
       agent.running = false;
+      agent.operation = null;
       updateAgentHeader();
     }
-    if (event.code !== 0) {
+    if (event.code !== 0 && !event.interrupted) {
       messageElement("error", event.error || event.stderr || `Turn misslyckades (exit ${event.code})`, "error");
     }
     refreshProjects().catch(() => {});
@@ -488,6 +631,7 @@ const submitMessage = async () => {
       }),
     });
     agent.running = true;
+    agent.operation = "turn";
     elements.prompt.value = "";
     elements.prompt.style.height = "auto";
     state.attachments = [];
@@ -548,6 +692,7 @@ elements.agentForm.addEventListener("submit", async (event) => {
         name: elements.agentNameInput.value,
         engine: elements.engineInput.value,
         model: elements.modelInput.value,
+        effort: elements.effortInput.value,
         idempotencyKey: elements.agentForm.dataset.key,
       }),
     });
@@ -585,6 +730,76 @@ elements.sideForm.addEventListener("submit", async (event) => {
     pending.textContent = errorText(error);
   } finally {
     elements.sideQuestionSend.disabled = false;
+  }
+});
+
+elements.agentEffortSelect.addEventListener("change", async () => {
+  const agent = selectedAgent();
+  if (!agent || state.controlPending) return;
+  const previous = agent.effort;
+  const effort = elements.agentEffortSelect.value;
+  agent.effort = effort;
+  state.controlPending = true;
+  updateAgentHeader();
+  try {
+    const updated = await api(`/api/agents/${agent.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ effort, idempotencyKey: crypto.randomUUID() }),
+    });
+    agent.effort = updated.effort;
+    showToast(agent.running
+      ? `${effortLabel(effort)} sparad för nästa turn.`
+      : `Effort ändrad till ${effortLabel(effort)}.`);
+  } catch (error) {
+    agent.effort = previous;
+    showToast(errorText(error), "error");
+  } finally {
+    state.controlPending = false;
+    updateAgentHeader();
+  }
+});
+
+elements.compactButton.addEventListener("click", async () => {
+  const agent = selectedAgent();
+  if (!agent || agent.running || !agent.sessionId || state.controlPending) return;
+  state.controlPending = true;
+  updateAgentHeader();
+  try {
+    await api(`/api/agents/${agent.id}/compact`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: crypto.randomUUID() }),
+    });
+    agent.running = true;
+    agent.operation = "compact";
+  } catch (error) {
+    showToast(errorText(error), "error");
+  } finally {
+    state.controlPending = false;
+    updateAgentHeader();
+  }
+});
+
+elements.interruptButton.addEventListener("click", async () => {
+  const agent = selectedAgent();
+  if (!agent || !agent.running || state.controlPending) return;
+  const previousOperation = agent.operation;
+  state.controlPending = true;
+  agent.operation = "interrupting";
+  updateAgentHeader();
+  try {
+    await api(`/api/agents/${agent.id}/interrupt`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: crypto.randomUUID() }),
+    });
+  } catch (error) {
+    agent.operation = previousOperation;
+    showToast(errorText(error), "error");
+  } finally {
+    state.controlPending = false;
+    updateAgentHeader();
   }
 });
 
@@ -680,3 +895,6 @@ const init = async () => {
 };
 
 init();
+setInterval(() => {
+  if (selectedAgent()) updateAgentHeader();
+}, 15_000);
