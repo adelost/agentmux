@@ -28,6 +28,12 @@ import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node
 import { fileURLToPath } from "node:url";
 import { claudeProjectDir } from "../../core/claude-paths.mjs";
 import { readTailWindow } from "../../core/jsonl-reader.mjs";
+import {
+  claudeInterruptRequest,
+  claudeUserMessage,
+  openCodexRpc,
+  writeClaudeMessage,
+} from "./runtime-control.mjs";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -36,11 +42,18 @@ const UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
 const HISTORY_MAX_BYTES = 32 * 1024 * 1024;
 const MEMORY_EVENT_LIMIT = 5_000;
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+const AUTO_COMPACT_CONTEXT_PERCENT = 60;
+const AUTO_COMPACT_IDLE_MS = 5 * 60 * 1_000;
 
 const DEFAULT_MODELS = Object.freeze({
   claude: ["claude-opus-4-8", "fable", "sonnet", "haiku"],
   codex: ["gpt-5.6-sol"],
 });
+const DEFAULT_EFFORTS = Object.freeze({
+  claude: ["low", "medium", "high", "xhigh", "max"],
+  codex: ["low", "medium", "high", "xhigh"],
+});
+const DEFAULT_EFFORT = Object.freeze({ claude: "medium", codex: "medium" });
 
 const UPLOAD_EXTENSIONS = new Set([
   ".png", ".jpg", ".jpeg", ".gif", ".webp",
@@ -74,6 +87,10 @@ const cleanName = (value, max = 64) => typeof value === "string"
   ? value.trim().replace(/\s+/g, " ").slice(0, max)
   : "";
 
+const cleanEffort = (engine, value) => DEFAULT_EFFORTS[engine]?.includes(value)
+  ? value
+  : DEFAULT_EFFORT[engine];
+
 const expandDirectory = (value, homeDir) => {
   const raw = typeof value === "string" ? value.trim() : "";
   if (!raw) return "";
@@ -96,6 +113,26 @@ const isEngineNoise = (text) => {
     || trimmed.startsWith("<user_instructions")
     || trimmed.startsWith("# AGENTS.md instructions");
 };
+
+const isClaudeHistoryNoise = (entry, text) => {
+  const trimmed = text.trimStart();
+  return entry.isMeta
+    || entry.isSynthetic
+    || entry.isReplay
+    || trimmed.startsWith("[Request interrupted")
+    || trimmed.startsWith("<local-command-caveat>")
+    || trimmed.startsWith("<command-name>")
+    || trimmed.startsWith("<local-command-stdout>")
+    || trimmed.startsWith("This session is being continued from a previous conversation that ran out of context.");
+};
+
+const normalizeClaudeCompactMetadata = (metadata = {}) => ({
+  trigger: metadata.trigger,
+  pre_tokens: metadata.pre_tokens ?? metadata.preTokens,
+  post_tokens: metadata.post_tokens ?? metadata.postTokens,
+  cumulative_dropped_tokens: metadata.cumulative_dropped_tokens ?? metadata.cumulativeDroppedTokens,
+  duration_ms: metadata.duration_ms ?? metadata.durationMs,
+});
 
 const publicHeaders = (extra = {}) => ({
   "cache-control": "no-store",
@@ -161,6 +198,8 @@ const cleanChildEnv = () => {
  * @param {Function} [options.spawnProcess]
  * @param {string} [options.claudeCommand]
  * @param {string} [options.codexCommand]
+ * @param {number} [options.autoCompactContextPercent]
+ * @param {number} [options.autoCompactIdleMs]
  */
 export function createWebUi(options = {}) {
   const bootId = randomUUID();
@@ -178,6 +217,9 @@ export function createWebUi(options = {}) {
     claude: options.claudeCommand ?? process.env.AMUX_WEB_CLAUDE_COMMAND ?? "claude",
     codex: options.codexCommand ?? process.env.AMUX_WEB_CODEX_COMMAND ?? "codex",
   };
+  const autoCompactContextPercent = options.autoCompactContextPercent
+    ?? AUTO_COMPACT_CONTEXT_PERCENT;
+  const autoCompactIdleMs = options.autoCompactIdleMs ?? AUTO_COMPACT_IDLE_MS;
   const models = {
     claude: [...(options.models?.claude ?? DEFAULT_MODELS.claude)],
     codex: [...(options.models?.codex ?? DEFAULT_MODELS.codex)],
@@ -196,6 +238,9 @@ export function createWebUi(options = {}) {
     agentCreates: new Map(),
     messages: new Map(),
     sideQuestions: new Map(),
+    settings: new Map(),
+    compactions: new Map(),
+    interrupts: new Map(),
   };
   const sideRuns = new Map();
   const sideChildren = new Set();
@@ -207,6 +252,8 @@ export function createWebUi(options = {}) {
   };
 
   const publicAgent = (agent) => {
+    if (!agent.context && agent.sessionId) refreshContextFromSession(agent);
+    if (!agent.running) scheduleAutoCompact(agent);
     const project = projects.get(agent.projectId);
     return {
       id: agent.id,
@@ -214,9 +261,18 @@ export function createWebUi(options = {}) {
       name: agent.name,
       engine: agent.engine,
       model: agent.model,
+      effort: agent.effort,
       cwd: project?.cwd ?? null,
       sessionId: agent.sessionId,
       running: agent.running,
+      operation: agent.interruptRequested ? "interrupting" : agent.operation,
+      context: agent.context,
+      idleSince: agent.idleSince,
+      autoCompact: {
+        contextPercent: autoCompactContextPercent,
+        idleMs: autoCompactIdleMs,
+        dueAt: agent.autoCompactDueAt,
+      },
       createdAt: agent.createdAt,
       updatedAt: agent.updatedAt,
     };
@@ -252,7 +308,10 @@ export function createWebUi(options = {}) {
         name: agent.name,
         engine: agent.engine,
         model: agent.model,
+        effort: agent.effort,
         sessionId: agent.sessionId,
+        context: agent.context,
+        idleSince: agent.idleSince,
         createdAt: agent.createdAt,
         updatedAt: agent.updatedAt,
       })),
@@ -271,11 +330,20 @@ export function createWebUi(options = {}) {
     name: entry.name,
     engine: entry.engine,
     model: entry.model,
+    effort: cleanEffort(entry.engine, entry.effort),
     sessionId: entry.sessionId ?? null,
+    context: entry.context ?? null,
     createdAt: entry.createdAt ?? now(),
     updatedAt: entry.updatedAt ?? entry.createdAt ?? now(),
+    idleSince: entry.idleSince ?? entry.updatedAt ?? entry.createdAt ?? now(),
     running: false,
+    operation: null,
     activeChild: null,
+    activeControl: null,
+    activeTurnId: null,
+    interruptRequested: false,
+    autoCompactTimer: null,
+    autoCompactDueAt: null,
     events: [],
     clients: new Set(),
     hydrated: false,
@@ -383,6 +451,116 @@ export function createWebUi(options = {}) {
     }
   };
 
+  const percentOf = (usedTokens, windowTokens) => Number.isFinite(usedTokens)
+      && Number.isFinite(windowTokens)
+      && windowTokens > 0
+    ? Math.min(100, Math.max(0, (usedTokens / windowTokens) * 100))
+    : null;
+
+  const claudeUsageParts = (usage = {}) => {
+    const inputTokens = Number(usage.input_tokens ?? usage.inputTokens ?? 0)
+      + Number(usage.cache_creation_input_tokens ?? usage.cacheCreationInputTokens ?? 0)
+      + Number(usage.cache_read_input_tokens ?? usage.cacheReadInputTokens ?? 0);
+    const outputTokens = Number(usage.output_tokens ?? usage.outputTokens ?? 0);
+    return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+  };
+
+  const contextFromClaudeResult = (event, previous = null) => {
+    const usageEntries = Object.values(event.modelUsage ?? {});
+    const modelUsage = usageEntries.find((entry) => Number.isFinite(entry?.contextWindow))
+      ?? usageEntries[0]
+      ?? null;
+    const iterations = Array.isArray(event.usage?.iterations) ? event.usage.iterations : [];
+    const parts = claudeUsageParts(iterations.at(-1) ?? event.usage ?? modelUsage);
+    const processed = claudeUsageParts(modelUsage ?? event.usage);
+    const windowTokens = Number(modelUsage?.contextWindow ?? previous?.windowTokens ?? 0) || null;
+    return {
+      usedTokens: parts.totalTokens,
+      windowTokens,
+      percent: percentOf(parts.totalTokens, windowTokens),
+      lastInputTokens: parts.inputTokens,
+      lastOutputTokens: parts.outputTokens,
+      processedTokens: Number(previous?.processedTokens ?? 0) + processed.totalTokens,
+      updatedAt: now(),
+    };
+  };
+
+  const contextFromCodexUsage = (tokenUsage, previous = null) => {
+    const last = tokenUsage?.last ?? tokenUsage?.last_token_usage ?? {};
+    const total = tokenUsage?.total ?? tokenUsage?.total_token_usage ?? {};
+    const usedTokens = Number(last.totalTokens ?? last.total_tokens ?? 0);
+    const windowTokens = Number(tokenUsage?.modelContextWindow
+      ?? tokenUsage?.model_context_window
+      ?? previous?.windowTokens
+      ?? 0) || null;
+    return {
+      usedTokens,
+      windowTokens,
+      percent: percentOf(usedTokens, windowTokens),
+      lastInputTokens: Number(last.inputTokens ?? last.input_tokens ?? 0),
+      lastOutputTokens: Number(last.outputTokens ?? last.output_tokens ?? 0),
+      processedTokens: Number(total.totalTokens ?? total.total_tokens ?? previous?.processedTokens ?? 0),
+      updatedAt: now(),
+    };
+  };
+
+  const refreshContextFromSession = (agent) => {
+    const path = sessionFileFor(agent);
+    if (!path || !existsSync(path)) return agent.context;
+    const lines = readTailWindow(path, HISTORY_MAX_BYTES).text.split("\n");
+    if (agent.engine === "codex") {
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        try {
+          const entry = JSON.parse(lines[index]);
+          if (entry.type === "event_msg" && entry.payload?.type === "token_count" && entry.payload.info) {
+            agent.context = contextFromCodexUsage(entry.payload.info, agent.context);
+            return agent.context;
+          }
+        } catch {}
+      }
+      return agent.context;
+    }
+
+    let lastContext = null;
+    let lastUsageIndex = -1;
+    let lastCompact = null;
+    let lastCompactIndex = -1;
+    const messageUsage = new Map();
+    for (let index = 0; index < lines.length; index += 1) {
+      try {
+        const entry = JSON.parse(lines[index]);
+        if (entry.type === "assistant" && entry.message?.usage
+            && entry.message.model !== "<synthetic>" && !entry.isSynthetic && !entry.isReplay) {
+          const messageId = entry.message.id ?? `${index}`;
+          messageUsage.set(messageId, claudeUsageParts(entry.message.usage));
+          const modelUsage = {
+            ...entry.message.usage,
+            contextWindow: agent.context?.windowTokens ?? null,
+          };
+          lastContext = contextFromClaudeResult({ modelUsage: { [entry.message.model ?? "claude"]: modelUsage } }, {
+            ...agent.context,
+            processedTokens: 0,
+          });
+          lastUsageIndex = index;
+        } else if (entry.type === "system" && entry.subtype === "compact_boundary"
+            && (entry.compact_metadata || entry.compactMetadata)) {
+          lastCompact = normalizeClaudeCompactMetadata(entry.compact_metadata ?? entry.compactMetadata);
+          lastCompactIndex = index;
+        }
+      } catch {}
+    }
+    if (lastContext) {
+      lastContext.processedTokens = [...messageUsage.values()]
+        .reduce((total, item) => total + item.totalTokens, 0);
+      if (lastCompact && lastCompactIndex > lastUsageIndex) {
+        lastContext.usedTokens = Number(lastCompact.post_tokens ?? lastContext.usedTokens);
+        lastContext.percent = percentOf(lastContext.usedTokens, lastContext.windowTokens);
+      }
+      agent.context = lastContext;
+    }
+    return agent.context;
+  };
+
   const pushEvent = (agent, event) => {
     if (!event.webId) event.webId = `${bootId}:${agent.nextEventId++}`;
     agent.events.push(event);
@@ -406,16 +584,25 @@ export function createWebUi(options = {}) {
       let entry;
       try { entry = JSON.parse(line); } catch { continue; }
       if (agent.engine === "claude") {
-        if (entry.type === "user" && !entry.isMeta) {
+        if (entry.type === "user") {
           const text = textOf(entry.message?.content);
-          if (text && !text.startsWith("[Request interrupted") && !isEngineNoise(text)) {
+          if (text && !isClaudeHistoryNoise(entry, text) && !isEngineNoise(text)) {
             pushEvent(agent, { type: "web", subtype: "user", text, at: entry.timestamp ?? 0 });
           }
-        } else if (entry.type === "assistant") {
+        } else if (entry.type === "assistant" && entry.message?.model !== "<synthetic>"
+            && !entry.isSynthetic && !entry.isReplay) {
           const text = textOf(entry.message?.content);
           if (text) pushEvent(agent, {
             type: "assistant",
             message: { content: [{ type: "text", text }] },
+            at: entry.timestamp ?? 0,
+          });
+        } else if (entry.type === "system" && entry.subtype === "compact_boundary"
+            && (entry.compact_metadata || entry.compactMetadata)) {
+          pushEvent(agent, {
+            type: "web",
+            subtype: "compacted",
+            metadata: normalizeClaudeCompactMetadata(entry.compact_metadata ?? entry.compactMetadata),
             at: entry.timestamp ?? 0,
           });
         }
@@ -460,32 +647,30 @@ export function createWebUi(options = {}) {
     return `${text}\n[${label}: ${attachment.path}]`;
   }, prompt);
 
-  const buildLaunch = (agent, rawPrompt, attachments) => {
-    const project = projects.get(agent.projectId);
-    if (agent.engine === "claude") {
-      const prompt = attachmentPrompt(rawPrompt, attachments);
-      const args = [
-        "-p", prompt,
-        "--output-format", "stream-json",
-        "--verbose",
-        "--include-partial-messages",
-        "--model", agent.model,
-        "--permission-mode", "acceptEdits",
-        "--name", agent.name,
-      ];
-      if (agent.sessionId) args.push("--resume", agent.sessionId);
-      return { command: commands.claude, args, prompt };
-    }
+  const buildClaudeLaunch = (agent, rawPrompt, attachments) => {
+    const prompt = attachmentPrompt(rawPrompt, attachments);
+    const args = [
+      "-p",
+      "--input-format", "stream-json",
+      "--output-format", "stream-json",
+      "--verbose",
+      "--include-partial-messages",
+      "--model", agent.model,
+      "--effort", agent.effort,
+      "--permission-mode", "acceptEdits",
+      "--name", agent.name,
+    ];
+    if (agent.sessionId) args.push("--resume", agent.sessionId);
+    return { command: commands.claude, args, prompt };
+  };
 
+  const buildCodexInput = (rawPrompt, attachments) => {
     const images = attachments.filter((attachment) => attachment.image);
     const otherFiles = attachments.filter((attachment) => !attachment.image);
-    const prompt = attachmentPrompt(rawPrompt, otherFiles);
-    const common = ["--json", "--skip-git-repo-check", "-m", agent.model];
-    for (const image of images) common.push("-i", image.path);
-    const args = agent.sessionId
-      ? ["exec", "resume", ...common, agent.sessionId, prompt]
-      : ["exec", ...common, "-C", project.cwd, prompt];
-    return { command: commands.codex, args, prompt };
+    return [
+      { type: "text", text: attachmentPrompt(rawPrompt, otherFiles) },
+      ...images.map((image) => ({ type: "localImage", path: image.path })),
+    ];
   };
 
   const recordSessionId = (agent, sessionId) => {
@@ -495,108 +680,322 @@ export function createWebUi(options = {}) {
     saveRegistry();
   };
 
-  const mapEngineEvent = (agent, event) => {
-    if (agent.engine === "claude") {
-      recordSessionId(agent, event.session_id);
-      if (event.type === "stream_event"
-          && event.event?.type === "content_block_delta"
-          && event.event.delta?.type === "text_delta") {
-        broadcast(agent, event);
-      } else if (event.type === "assistant") {
-        const text = textOf(event.message?.content);
-        if (text) {
-          agent.turnHasAssistantText = true;
-          broadcast(agent, event);
-        }
-      } else if (event.type === "result") {
-        if (!agent.turnHasAssistantText && typeof event.result === "string" && event.result.trim()) {
-          agent.turnHasAssistantText = true;
-          broadcast(agent, {
-            type: "assistant",
-            message: { content: [{ type: "text", text: event.result }] },
-          });
-        }
+  const clearAutoCompact = (agent) => {
+    clearTimeout(agent.autoCompactTimer);
+    agent.autoCompactTimer = null;
+    agent.autoCompactDueAt = null;
+  };
+
+  const setAgentContext = (agent, context, emit = true) => {
+    agent.context = context;
+    if (emit) webEvent(agent, "context", { context });
+  };
+
+  const beginOperation = (agent, operation, rawPrompt = "", attachments = []) => {
+    const project = projects.get(agent.projectId);
+    hydrate(agent);
+    clearAutoCompact(agent);
+    agent.running = true;
+    agent.operation = operation;
+    agent.interruptRequested = false;
+    agent.activeTurnId = null;
+    agent.turnHasAssistantText = false;
+    agent.compactMetadata = null;
+    agent.updatedAt = now();
+    if (operation === "turn") {
+      webEvent(agent, "user", {
+        text: rawPrompt,
+        attachments: attachments.map((attachment) => publicAttachment(project.id, attachment)),
+      });
+    } else {
+      webEvent(agent, "compact-start", { automatic: operation === "auto-compact" });
+    }
+  };
+
+  const finishOperation = (agent, operation, code, error = null, stderr = "") => {
+    if (!agent.running || agent.operation !== operation) return;
+    const control = agent.activeControl;
+    agent.running = false;
+    agent.operation = null;
+    agent.activeChild = null;
+    agent.activeControl = null;
+    agent.activeTurnId = null;
+    agent.updatedAt = now();
+    agent.idleSince = agent.updatedAt;
+    agent.events = agent.events.filter((event) => event.type !== "stream_event");
+    if (agent.engine === "codex") control?.rpc?.close?.();
+    const interrupted = agent.interruptRequested;
+    agent.interruptRequested = false;
+    saveRegistry();
+    if (operation === "turn") {
+      webEvent(agent, "turn-done", {
+        code,
+        interrupted,
+        error: error?.message,
+        stderr: code === 0 || interrupted ? undefined : stderr.slice(-32_000),
+      });
+    } else {
+      webEvent(agent, "compact-done", {
+        code,
+        automatic: operation === "auto-compact",
+        interrupted,
+        error: error?.message,
+        stderr: code === 0 || interrupted ? undefined : stderr.slice(-32_000),
+        metadata: agent.compactMetadata,
+      });
+    }
+    scheduleAutoCompact(agent);
+  };
+
+  const mapClaudeEvent = (agent, event) => {
+    recordSessionId(agent, event.session_id);
+    const operation = agent.operation;
+    if (event.type === "control_response"
+        && event.response?.subtype === "success") {
+      webEvent(agent, "interrupt-acknowledged");
+      return;
+    }
+    if (event.type === "system" && event.subtype === "compact_boundary") {
+      const metadata = normalizeClaudeCompactMetadata(event.compact_metadata ?? event.compactMetadata);
+      agent.compactMetadata = metadata;
+      const usedTokens = Number(metadata.post_tokens ?? agent.context?.usedTokens ?? 0);
+      const context = {
+        ...(agent.context ?? {}),
+        usedTokens,
+        percent: percentOf(usedTokens, agent.context?.windowTokens),
+        updatedAt: now(),
+      };
+      setAgentContext(agent, context);
+      webEvent(agent, "compacted", { metadata });
+      return;
+    }
+    if (event.type === "stream_event"
+        && operation === "turn"
+        && event.event?.type === "content_block_delta"
+        && event.event.delta?.type === "text_delta") {
+      broadcast(agent, event);
+      return;
+    }
+    if (event.type === "assistant" && operation === "turn" && !agent.interruptRequested) {
+      const text = textOf(event.message?.content);
+      if (text) {
+        agent.turnHasAssistantText = true;
         broadcast(agent, event);
       }
       return;
     }
-    recordSessionId(agent, event.thread_id);
-    if (event.type === "item.completed" && event.item?.type === "agent_message") {
-      agent.turnHasAssistantText = true;
-      broadcast(agent, {
-        type: "assistant",
-        message: { content: [{ type: "text", text: event.item.text ?? "" }] },
-      });
-    } else if (event.type === "turn.completed") {
-      broadcast(agent, {
-        type: "result",
-        subtype: "success",
-        engine: "codex",
-        usage: event.usage ?? null,
-        session_id: agent.sessionId,
-      });
+    if (event.type !== "result") return;
+
+    if (operation === "turn" && !agent.interruptRequested) {
+      setAgentContext(agent, contextFromClaudeResult(event, agent.context));
+      if (!agent.turnHasAssistantText && typeof event.result === "string" && event.result.trim()) {
+        agent.turnHasAssistantText = true;
+        broadcast(agent, {
+          type: "assistant",
+          message: { content: [{ type: "text", text: event.result }] },
+        });
+      }
+      broadcast(agent, event);
+    } else if (agent.interruptRequested) {
+      webEvent(agent, "interrupted");
+    } else if (!agent.compactMetadata && typeof event.result === "string" && event.result.trim()) {
+      webEvent(agent, "compact-result", { message: event.result.trim() });
     }
+    try { agent.activeChild?.stdin?.end?.(); } catch {}
   };
 
-  const runTurn = (agent, rawPrompt, attachments) => {
+  const runClaudeOperation = (agent, rawPrompt, attachments, operation) => {
     const project = projects.get(agent.projectId);
-    hydrate(agent);
-    const launch = buildLaunch(agent, rawPrompt, attachments);
-    agent.running = true;
-    agent.turnHasAssistantText = false;
-    agent.updatedAt = now();
-    webEvent(agent, "user", {
-      text: rawPrompt,
-      attachments: attachments.map((attachment) => publicAttachment(project.id, attachment)),
-    });
-
+    const launch = buildClaudeLaunch(agent, rawPrompt, attachments);
+    beginOperation(agent, operation, rawPrompt, attachments);
     let child;
     let stderr = "";
     let finished = false;
     const finish = (code, error = null) => {
       if (finished) return;
       finished = true;
-      agent.running = false;
-      agent.activeChild = null;
-      agent.updatedAt = now();
-      agent.events = agent.events.filter((event) => event.type !== "stream_event");
-      saveRegistry();
-      webEvent(agent, "turn-done", {
-        code,
-        error: error?.message,
-        stderr: code === 0 ? undefined : stderr.slice(-32_000),
-      });
+      finishOperation(agent, operation, code, error, stderr);
     };
-
     try {
       child = spawnProcess(launch.command, launch.args, {
         cwd: project.cwd,
         env: cleanChildEnv(),
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       });
       agent.activeChild = child;
+      agent.activeControl = { type: "claude", child };
     } catch (error) {
       finish(-1, error);
       return;
     }
-
-    child.stderr?.on("data", (chunk) => {
-      stderr = `${stderr}${chunk}`.slice(-32_000);
-    });
+    child.stderr?.on("data", (chunk) => { stderr = `${stderr}${chunk}`.slice(-32_000); });
     if (child.stdout) {
       createInterface({ input: child.stdout }).on("line", (line) => {
         if (!line.trim()) return;
-        let event;
-        try { event = JSON.parse(line); } catch {
+        try { mapClaudeEvent(agent, JSON.parse(line)); } catch {
           webEvent(agent, "protocol-error", { line: line.slice(0, 4_000) });
-          return;
         }
-        mapEngineEvent(agent, event);
       });
     }
     child.once?.("error", (error) => finish(-1, error));
     child.once?.("close", (code) => finish(Number.isInteger(code) ? code : -1));
+    try {
+      writeClaudeMessage(child, claudeUserMessage(launch.prompt));
+    } catch (error) {
+      finish(-1, error);
+      try { child.kill?.("SIGTERM"); } catch {}
+    }
   };
+
+  const runCodexOperation = async (agent, rawPrompt, attachments, operation) => {
+    const project = projects.get(agent.projectId);
+    const effort = agent.effort;
+    beginOperation(agent, operation, rawPrompt, attachments);
+    let stderr = "";
+    let finished = false;
+    const finish = (code, error = null) => {
+      if (finished) return;
+      finished = true;
+      finishOperation(agent, operation, code, error, stderr);
+    };
+    const onNotification = (message) => {
+      const { method, params = {} } = message;
+      if (method === "protocol/error") {
+        webEvent(agent, "protocol-error", { line: params.line });
+      } else if (method === "thread/tokenUsage/updated" && params.tokenUsage) {
+        setAgentContext(agent, contextFromCodexUsage(params.tokenUsage, agent.context));
+      } else if (method === "turn/started" && params.turn?.id) {
+        agent.activeTurnId = params.turn.id;
+      } else if (method === "item/agentMessage/delta" && operation === "turn") {
+        broadcast(agent, {
+          type: "stream_event",
+          event: { type: "content_block_delta", delta: { type: "text_delta", text: params.delta ?? "" } },
+        });
+      } else if (method === "item/completed" && params.item?.type === "agentMessage" && operation === "turn") {
+        agent.turnHasAssistantText = true;
+        broadcast(agent, {
+          type: "assistant",
+          message: { content: [{ type: "text", text: params.item.text ?? "" }] },
+        });
+      } else if (method === "item/completed" && params.item?.type === "contextCompaction") {
+        webEvent(agent, "compacted", { metadata: null });
+      } else if (method === "turn/completed") {
+        const status = params.turn?.status ?? "completed";
+        if (operation === "turn" && !agent.interruptRequested) {
+          broadcast(agent, {
+            type: "result",
+            subtype: status === "completed" ? "success" : status,
+            engine: "codex",
+            usage: agent.context ? {
+              input_tokens: agent.context.lastInputTokens,
+              output_tokens: agent.context.lastOutputTokens,
+            } : null,
+            session_id: agent.sessionId,
+            duration_ms: params.turn?.durationMs,
+          });
+        } else if (agent.interruptRequested) {
+          webEvent(agent, "interrupted");
+        }
+        finish(["completed", "interrupted"].includes(status) ? 0 : 1,
+          status === "failed" ? new Error(params.turn?.error?.message ?? "codex-turn-failed") : null);
+      }
+    };
+
+    let rpc;
+    try {
+      rpc = openCodexRpc({
+        spawnProcess,
+        command: commands.codex,
+        cwd: project.cwd,
+        env: cleanChildEnv(),
+        onNotification,
+        onStderr: (chunk) => { stderr = `${stderr}${chunk}`.slice(-32_000); },
+        onExit: (code) => finish(Number.isInteger(code) ? code : -1,
+          finished ? null : new Error(`codex-app-server-exit-${code ?? "unknown"}`)),
+      });
+      agent.activeChild = rpc.child;
+      agent.activeControl = { type: "codex", rpc };
+      await rpc.initialize();
+      const threadResult = agent.sessionId
+        ? await rpc.request("thread/resume", {
+          threadId: agent.sessionId,
+          cwd: project.cwd,
+          model: agent.model,
+        })
+        : await rpc.request("thread/start", { cwd: project.cwd, model: agent.model });
+      const threadId = threadResult?.thread?.id ?? agent.sessionId;
+      if (!threadId) throw new Error("codex-thread-id-missing");
+      recordSessionId(agent, threadId);
+      if (operation === "compact" || operation === "auto-compact") {
+        await rpc.request("thread/compact/start", { threadId });
+      } else {
+        const result = await rpc.request("turn/start", {
+          threadId,
+          input: buildCodexInput(rawPrompt, attachments),
+          cwd: project.cwd,
+          model: agent.model,
+          effort,
+        });
+        agent.activeTurnId = result?.turn?.id ?? agent.activeTurnId;
+      }
+    } catch (error) {
+      finish(-1, error);
+    }
+  };
+
+  const runTurn = (agent, rawPrompt, attachments) => {
+    if (agent.engine === "claude") runClaudeOperation(agent, rawPrompt, attachments, "turn");
+    else void runCodexOperation(agent, rawPrompt, attachments, "turn");
+  };
+
+  const runCompact = (agent, automatic = false) => {
+    const operation = automatic ? "auto-compact" : "compact";
+    if (agent.engine === "claude") runClaudeOperation(agent, "/compact", [], operation);
+    else void runCodexOperation(agent, "", [], operation);
+  };
+
+  const scheduleAutoCompact = (agent) => {
+    clearAutoCompact(agent);
+    if (agent.running || !agent.sessionId || !Number.isFinite(agent.context?.percent)
+        || agent.context.percent < autoCompactContextPercent) return;
+    const dueAt = Math.max(now(), Number(agent.idleSince ?? now()) + autoCompactIdleMs);
+    agent.autoCompactDueAt = dueAt;
+    agent.autoCompactTimer = setTimeout(() => {
+      agent.autoCompactTimer = null;
+      agent.autoCompactDueAt = null;
+      if (agent.running || !Number.isFinite(agent.context?.percent)
+          || agent.context.percent < autoCompactContextPercent) return;
+      runCompact(agent, true);
+    }, Math.max(0, dueAt - now()));
+    agent.autoCompactTimer.unref?.();
+  };
+
+  const interruptAgent = async (agent) => {
+    if (!agent.running || !agent.activeControl) throw new Error("agent-not-running");
+    agent.interruptRequested = true;
+    webEvent(agent, "interrupt-requested");
+    try {
+      if (agent.activeControl.type === "claude") {
+        writeClaudeMessage(agent.activeControl.child, claudeInterruptRequest());
+        return;
+      }
+      if (!agent.activeTurnId) throw new Error("interrupt-not-ready");
+      await agent.activeControl.rpc.request("turn/interrupt", {
+        threadId: agent.sessionId,
+        turnId: agent.activeTurnId,
+      });
+      webEvent(agent, "interrupt-acknowledged");
+    } catch (error) {
+      agent.interruptRequested = false;
+      webEvent(agent, "interrupt-failed", { error: error.message });
+      throw error;
+    }
+  };
+
+  for (const agent of agents.values()) {
+    if (agent.sessionId) refreshContextFromSession(agent);
+    scheduleAutoCompact(agent);
+  }
 
   const runSideQuestion = (agent, question) => new Promise((resolveAnswer, rejectAnswer) => {
     const sidePrompt = [
@@ -610,6 +1009,7 @@ export function createWebUi(options = {}) {
       "--output-format", "stream-json",
       "--verbose",
       "--model", agent.model,
+      "--effort", agent.effort,
       "--permission-mode", "plan",
       "--resume", agent.sessionId,
       "--fork-session",
@@ -729,6 +1129,12 @@ export function createWebUi(options = {}) {
     if (request.method === "GET" && pathname === "/api/config") {
       json(response, 200, {
         models,
+        efforts: DEFAULT_EFFORTS,
+        defaultEffort: DEFAULT_EFFORT,
+        autoCompact: {
+          contextPercent: autoCompactContextPercent,
+          idleMs: autoCompactIdleMs,
+        },
         limits: { uploadMaxBytes: UPLOAD_MAX_BYTES, uploadExtensions: [...UPLOAD_EXTENSIONS] },
         communicationPolicy: defaultCommunicationPolicy(),
         authBoundary: "loopback-tailnet",
@@ -791,6 +1197,7 @@ export function createWebUi(options = {}) {
           json(response, 409, { error: "project-has-running-agent" }); return;
         }
         for (const agent of projectAgents) {
+          clearAutoCompact(agent);
           for (const client of agent.clients) client.end();
           agents.delete(agent.id);
         }
@@ -809,7 +1216,11 @@ export function createWebUi(options = {}) {
         if (!key) { json(response, 400, { error: "idempotency-key-required" }); return; }
         if (!name) { json(response, 400, { error: "agent-name-required" }); return; }
         if (!engine) { json(response, 400, { error: "unknown-engine" }); return; }
-        const fingerprint = hashPayload({ projectId: project.id, name, engine, model });
+        if (body?.effort !== undefined && !DEFAULT_EFFORTS[engine].includes(body.effort)) {
+          json(response, 400, { error: "unknown-effort", allowed: DEFAULT_EFFORTS[engine] }); return;
+        }
+        const effort = cleanEffort(engine, body?.effort);
+        const fingerprint = hashPayload({ projectId: project.id, name, engine, model, effort });
         const receipt = receiptResult(receipts.agentCreates, key, fingerprint);
         if (receipt?.conflict) { json(response, 409, { error: "idempotency-key-conflict" }); return; }
         if (receipt?.replayed) {
@@ -825,6 +1236,7 @@ export function createWebUi(options = {}) {
           name,
           engine,
           model,
+          effort,
           sessionId: null,
           createdAt: now(),
           updatedAt: now(),
@@ -880,19 +1292,95 @@ export function createWebUi(options = {}) {
       return;
     }
 
-    const agentMatch = pathname.match(new RegExp(`^/api/agents/(${UUID_PATTERN})(/messages|/events|/history|/side-questions)?$`, "i"));
+    const agentMatch = pathname.match(new RegExp(`^/api/agents/(${UUID_PATTERN})(/messages|/events|/history|/side-questions|/compact|/interrupt)?$`, "i"));
     if (agentMatch) {
       const agent = agents.get(agentMatch[1]);
       if (!agent) { json(response, 404, { error: "agent-not-found" }); return; }
       const project = projects.get(agent.projectId);
 
+      if (request.method === "PATCH" && !agentMatch[2]) {
+        const body = await readJsonBody(request);
+        const key = cleanName(body?.idempotencyKey, 160);
+        if (!key) { json(response, 400, { error: "idempotency-key-required" }); return; }
+        if (!DEFAULT_EFFORTS[agent.engine].includes(body?.effort)) {
+          json(response, 400, { error: "unknown-effort", allowed: DEFAULT_EFFORTS[agent.engine] }); return;
+        }
+        const fingerprint = hashPayload({ agentId: agent.id, effort: body.effort });
+        const receipt = receiptResult(receipts.settings, key, fingerprint);
+        if (receipt?.conflict) { json(response, 409, { error: "idempotency-key-conflict" }); return; }
+        if (receipt?.replayed) {
+          json(response, 200, { ...publicAgent(agent), replayed: true });
+          return;
+        }
+        agent.effort = body.effort;
+        agent.updatedAt = now();
+        project.updatedAt = agent.updatedAt;
+        rememberReceipt(receipts.settings, key, { id: agent.id, hash: fingerprint }, 500);
+        saveRegistry();
+        webEvent(agent, "settings", {
+          effort: agent.effort,
+          appliesTo: "next-turn",
+        });
+        json(response, 200, publicAgent(agent));
+        return;
+      }
+
       if (request.method === "DELETE" && !agentMatch[2]) {
         if (agent.running) { json(response, 409, { error: "agent-running" }); return; }
+        clearAutoCompact(agent);
         for (const client of agent.clients) client.end();
         agents.delete(agent.id);
         project.updatedAt = now();
         saveRegistry();
         json(response, 200, { deleted: true, sessionPreserved: true });
+        return;
+      }
+
+      if (request.method === "POST" && agentMatch[2] === "/compact") {
+        const body = await readJsonBody(request);
+        const key = cleanName(body?.idempotencyKey, 160);
+        if (!key) { json(response, 400, { error: "idempotency-key-required" }); return; }
+        if (!agent.sessionId) { json(response, 409, { error: "compact-needs-session" }); return; }
+        const fingerprint = hashPayload({ agentId: agent.id, sessionId: agent.sessionId, action: "compact" });
+        const receipt = receiptResult(receipts.compactions, key, fingerprint);
+        if (receipt?.conflict) { json(response, 409, { error: "idempotency-key-conflict" }); return; }
+        if (receipt?.replayed) {
+          json(response, 200, { ...publicAgent(agent), replayed: true });
+          return;
+        }
+        if (agent.running) { json(response, 409, { error: "turn-in-progress" }); return; }
+        rememberReceipt(receipts.compactions, key, { id: agent.id, hash: fingerprint }, 500);
+        saveRegistry();
+        runCompact(agent, false);
+        json(response, 202, publicAgent(agent));
+        return;
+      }
+
+      if (request.method === "POST" && agentMatch[2] === "/interrupt") {
+        const body = await readJsonBody(request);
+        const key = cleanName(body?.idempotencyKey, 160);
+        if (!key) { json(response, 400, { error: "idempotency-key-required" }); return; }
+        const fingerprint = hashPayload({
+          agentId: agent.id,
+          action: "interrupt",
+        });
+        const receipt = receiptResult(receipts.interrupts, key, fingerprint);
+        if (receipt?.conflict) { json(response, 409, { error: "idempotency-key-conflict" }); return; }
+        if (receipt?.replayed) {
+          json(response, 200, { ...publicAgent(agent), replayed: true });
+          return;
+        }
+        if (!agent.running) { json(response, 409, { error: "agent-not-running" }); return; }
+        try {
+          await interruptAgent(agent);
+          rememberReceipt(receipts.interrupts, key, { id: agent.id, hash: fingerprint }, 500);
+          saveRegistry();
+          json(response, 202, publicAgent(agent));
+        } catch (error) {
+          json(response, error.message === "interrupt-not-ready" ? 409 : 502, {
+            error: error.message,
+          });
+        }
         return;
       }
 
@@ -1046,6 +1534,7 @@ export function createWebUi(options = {}) {
 
   const close = () => new Promise((resolveClose) => {
     for (const agent of agents.values()) {
+      clearAutoCompact(agent);
       try { agent.activeChild?.kill?.("SIGTERM"); } catch {}
       for (const client of agent.clients) client.end();
       agent.clients.clear();
