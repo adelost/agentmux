@@ -24,7 +24,10 @@ import { homedir } from "os";
 import { basename, dirname, join } from "path";
 
 export const DELIVERY_QUEUE_VERSION = 1;
-export const TERMINAL_DELIVERY_STATES = new Set(["acknowledged", "cancelled"]);
+export const DELIVERED_UNVERIFIED_STATE = "delivered_unverified";
+export const TERMINAL_DELIVERY_STATES = new Set([
+  "acknowledged", "cancelled", DELIVERED_UNVERIFIED_STATE,
+]);
 
 export function defaultDeliveryQueueDir() {
   return process.env.AMUX_DELIVERY_QUEUE_DIR
@@ -117,7 +120,12 @@ export function createDeliveryQueue({
       nextAttemptAt: createdAtMs,
       lastReason: null,
       noticeSentAt: null,
+      unverifiedNoticeSentAt: null,
+      unverifiedNoticeAttempts: 0,
+      unverifiedNoticeNextAttemptAt: null,
+      unverifiedNoticeLastReason: null,
       acknowledgedAt: null,
+      terminalAt: null,
       metadata: metadata || {},
       assets: persistAssets(text, dir, id),
     };
@@ -186,6 +194,11 @@ export function createDeliveryQueue({
     return list(agentName, pane).filter((job) => job.status === "submitted");
   }
 
+  function pendingUnverifiedNotices(agentName, pane) {
+    return list(agentName, pane).filter((job) =>
+      job.status === DELIVERED_UNVERIFIED_STATE && !job.unverifiedNoticeSentAt);
+  }
+
   function targets() {
     let names;
     try { names = readdirSync(rootDir, { withFileTypes: true }); }
@@ -197,7 +210,9 @@ export function createDeliveryQueue({
       if (!match) continue;
       const agentName = decodeURIComponent(match[1]);
       const pane = Number(match[2]);
-      if (next(agentName, pane)) out.push({ agentName, pane });
+      if (next(agentName, pane) || pendingUnverifiedNotices(agentName, pane).length) {
+        out.push({ agentName, pane });
+      }
     }
     return out;
   }
@@ -289,8 +304,13 @@ export function createDeliveryQueue({
         const path = join(dir, name);
         try {
           const job = parseJson(path);
-          const finishedAt = Number(job.acknowledgedAt || 0);
-          if (TERMINAL_DELIVERY_STATES.has(job.status) && finishedAt && finishedAt < cutoff) {
+          const finishedAt = Number(job.acknowledgedAt || job.terminalAt || 0);
+          const unverifiedNoticePending = job.status === DELIVERED_UNVERIFIED_STATE
+            && !job.unverifiedNoticeSentAt;
+          if (TERMINAL_DELIVERY_STATES.has(job.status)
+              && !unverifiedNoticePending
+              && finishedAt
+              && finishedAt < cutoff) {
             unlinkSync(path);
             rmSync(join(dir, "assets", job.id), { recursive: true, force: true });
             removed++;
@@ -305,7 +325,8 @@ export function createDeliveryQueue({
   }
 
   return {
-    rootDir, enqueue, read, update, list, next, nextForWrite, submitted, targets, findById,
+    rootDir, enqueue, read, update, list, next, nextForWrite, submitted,
+    pendingUnverifiedNotices, targets, findById,
     restoreAssets, acquireTargetLease, acquireSessionLease, prune,
   };
 }

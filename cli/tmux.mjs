@@ -10,7 +10,9 @@ import { createAgent } from "../agent.mjs";
 import { esc, stripAnsi } from "../lib.mjs";
 import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
 import { readParkState, shouldBlockSend, blockedSendMessage } from "../core/pane-park.mjs";
-import { createDeliveryQueue, waitForDeliveryJob } from "../core/delivery-queue.mjs";
+import {
+  createDeliveryQueue, DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES, waitForDeliveryJob,
+} from "../core/delivery-queue.mjs";
 import { parseSenderHeader } from "../core/sender-detect.mjs";
 import { detectPaneStatus } from "./format.mjs";
 import { findChannelForPane } from "./config.mjs";
@@ -165,12 +167,17 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
   const mirror = opts.mirror !== false;
   const mirrorDispatch = opts.mirrorDispatch || spawnMirrorWorker;
   const sender = parseSenderHeader(text);
+  const targetChannelId = ctx.configPath
+    ? findChannelForPane(ctx.configPath, name, pane)
+    : null;
 
   const mirrorSenderStatus = (result) => {
     if (!mirror || !sender || sender.key === `${name}:${pane}` || !ctx.configPath) return;
     const senderChannelId = findChannelForPane(ctx.configPath, sender.session, sender.pane);
     if (!senderChannelId) return;
-    const status = result?.delivered
+    const status = result?.unverified
+      ? "delivery unverified"
+      : result?.delivered
       ? (result.pending ? "durably queued" : "delivered")
       : "NOT delivered";
     mirrorDispatch({ channelId: senderChannelId, content: `\`amux ${name} -p ${pane} …\` → ${status}.` });
@@ -203,7 +210,7 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
     pane,
     text,
     source: opts.source || "cli",
-    metadata: { sender: sender?.key || null },
+    metadata: { sender: sender?.key || null, channelId: targetChannelId },
     idempotencyKey: opts.idempotencyKey || null,
   });
   const settled = await waitForDeliveryJob(queue, job.id, {
@@ -216,7 +223,8 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
     : {
       delivered: true,
       blocked: false,
-      pending: !acknowledged,
+      pending: !TERMINAL_DELIVERY_STATES.has(settled?.status),
+      unverified: settled?.status === DELIVERED_UNVERIFIED_STATE,
       via: acknowledged ? "broker" : "broker-queue",
       jobId: job.id,
       queueState: settled?.status || job.status,
@@ -230,10 +238,9 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
   }
   if (!mirror) return outcome;
   if (!ctx.configPath) return outcome;
-  const channelId = findChannelForPane(ctx.configPath, name, pane);
-  if (channelId) {
+  if (targetChannelId) {
     const mirrored = opts.source ? `[${opts.source}] ${text}` : text;
-    mirrorDispatch({ channelId, content: mirrored });
+    mirrorDispatch({ channelId: targetChannelId, content: mirrored });
   }
   mirrorSenderStatus(outcome);
   // Channel topic is intentionally NOT touched here. Topics are a stable

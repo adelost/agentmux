@@ -8,13 +8,16 @@
 
 import { appendEvent } from "./events.mjs";
 import { deliverToPane } from "./delivery.mjs";
-import { waitForDeliveryJob } from "./delivery-queue.mjs";
+import {
+  DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES, waitForDeliveryJob,
+} from "./delivery-queue.mjs";
 
 const ACTIVE_RETRY_MS = 1_000;
 const BLOCKED_RETRY_MS = 3_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
 const NOTICE_AFTER_MS = 10_000;
 const STALE_CLAUDE_SUBMITTED_MS = 30_000;
+const STALE_SUBMITTED_TERMINAL_MS = 60 * 60 * 1_000;
 const MAX_CLAUDE_RECOVERY_ATTEMPTS = 2;
 
 function blockedRetryMs(job, { drafted = false } = {}) {
@@ -44,12 +47,13 @@ function queueEvent(job, state, extra = {}) {
 }
 
 /**
- * @param {{agent: object, queue: object, notify?: Function, intervalMs?: number, now?: Function, log?: Function}} options
+ * @param {{agent: object, queue: object, notify?: Function, resolveNotificationChannel?: Function, intervalMs?: number, now?: Function, log?: Function}} options
  */
 export function createDeliveryBroker({
   agent,
   queue,
   notify = async () => {},
+  resolveNotificationChannel = null,
   intervalMs = 500,
   now = () => Date.now(),
   log = (message) => console.warn(message),
@@ -121,6 +125,103 @@ export function createDeliveryBroker({
     return noticed;
   }
 
+  async function notifyUnverified(initialJob) {
+    let current = queue.read(initialJob.agentName, initialJob.pane, initialJob.id) || initialJob;
+    if (current.status !== DELIVERED_UNVERIFIED_STATE || current.unverifiedNoticeSentAt) {
+      return current;
+    }
+    current = queue.update(current, {
+      unverifiedNoticeAttempts: Number(current.unverifiedNoticeAttempts || 0) + 1,
+      unverifiedNoticeNextAttemptAt: null,
+    });
+    if (!current.metadata?.channelId && typeof resolveNotificationChannel === "function") {
+      let channelId = null;
+      try {
+        channelId = await resolveNotificationChannel(current);
+      } catch (error) {
+        log(`delivery broker notification channel lookup failed for ${current.id}: ${error.message}`);
+      }
+      if (!channelId) {
+        const unavailable = queue.update(current, {
+          unverifiedNoticeNextAttemptAt: now() + blockedRetryMs(current),
+          unverifiedNoticeLastReason: "no Discord channel is currently bound to the target pane",
+        });
+        log(`delivery broker unverified notice pending for ${unavailable.id}: no bound Discord channel`);
+        return unavailable;
+      }
+      current = queue.update(current, {
+        metadata: { channelId: String(channelId) },
+        unverifiedNoticeLastReason: null,
+      });
+    }
+    try {
+      await notify(current, "unverified");
+      return queue.update(current, {
+        unverifiedNoticeSentAt: now(),
+        unverifiedNoticeNextAttemptAt: null,
+        unverifiedNoticeLastReason: null,
+      });
+    } catch (error) {
+      const failed = queue.update(current, {
+        unverifiedNoticeNextAttemptAt: now() + blockedRetryMs(current),
+        unverifiedNoticeLastReason: error.message,
+      });
+      log(`delivery broker unverified notice failed for ${failed.id}: ${error.message}`);
+      return failed;
+    }
+  }
+
+  function recoverResurfacedDraft(job) {
+    return queue.update(job, {
+      status: "drafted",
+      draftOwned: true,
+      nextAttemptAt: now(),
+      lastReason: "submitted draft resurfaced before JSONL acknowledgement",
+    });
+  }
+
+  async function terminalizeUnverified(job) {
+    let current = queue.read(job.agentName, job.pane, job.id) || job;
+    if (TERMINAL_DELIVERY_STATES.has(current.status)) return current;
+
+    // Terminalization follows slow, fallible TUI inspection. Recheck both
+    // authoritative receipt and draft ownership at the transition boundary:
+    // JSONL or a resurfaced owned draft may have appeared during that probe.
+    if (await exactEcho(current)) return acknowledge(current, "late-echo-before-unverified");
+    if (typeof agent.promptTransportState !== "function") {
+      return queue.update(current, {
+        nextAttemptAt: now() + MAX_BLOCKED_RETRY_MS,
+        lastReason: "cannot prove final composer ownership before unverified terminalization",
+      });
+    }
+    const transport = await agent.promptTransportState(current.agentName, current.pane, current.text)
+      .catch(() => ({ state: "hidden" }));
+    if (transport.state === "drafted") return recoverResurfacedDraft(current);
+    if (transport.state === "hidden") {
+      return queue.update(current, {
+        nextAttemptAt: now() + MAX_BLOCKED_RETRY_MS,
+        lastReason: "composer is hidden; deferring unverified terminalization to preserve owned draft",
+      });
+    }
+    current = queue.read(current.agentName, current.pane, current.id) || current;
+    if (TERMINAL_DELIVERY_STATES.has(current.status)) return current;
+    if (await exactEcho(current)) return acknowledge(current, "late-echo-before-unverified");
+    current = queue.read(current.agentName, current.pane, current.id) || current;
+    if (TERMINAL_DELIVERY_STATES.has(current.status)) return current;
+
+    const terminal = queue.update(current, {
+      status: DELIVERED_UNVERIFIED_STATE,
+      draftOwned: false,
+      terminalAt: now(),
+      nextAttemptAt: null,
+      unverifiedNoticeSentAt: null,
+      unverifiedNoticeNextAttemptAt: now(),
+      lastReason: "submission left the composer but no exact JSONL receipt arrived within 60 minutes; refusing duplicate delivery",
+    });
+    queueEvent(terminal, DELIVERED_UNVERIFIED_STATE);
+    return notifyUnverified(terminal);
+  }
+
   async function processJob(initialJob) {
     let job = queue.read(initialJob.agentName, initialJob.pane, initialJob.id) || initialJob;
     queue.restoreAssets?.(job);
@@ -155,16 +256,12 @@ export function createDeliveryBroker({
       // composer verification and the final acknowledged file update.
       if (job.kind === "slash") return acknowledge(job, "slash-submit-recovery");
       const submittedAge = now() - Number(job.submittedAt || job.lastAttemptAt || job.createdAt || now());
+      const submittedExpired = submittedAge >= STALE_SUBMITTED_TERMINAL_MS;
       if (submittedAge >= 5_000 && typeof agent.promptTransportState === "function") {
         const transport = await agent.promptTransportState(job.agentName, job.pane, job.text)
           .catch(() => ({ state: "hidden" }));
         if (transport.state === "drafted") {
-          return queue.update(job, {
-            status: "drafted",
-            draftOwned: true,
-            nextAttemptAt: now(),
-            lastReason: "submitted draft resurfaced before JSONL acknowledgement",
-          });
+          return recoverResurfacedDraft(job);
         }
         if (transport.state === "empty-idle") {
           // Claude writes the user event synchronously when it accepts Enter;
@@ -192,12 +289,14 @@ export function createDeliveryBroker({
               nextAttemptAt: now() + MAX_BLOCKED_RETRY_MS,
               lastReason: "Claude delivery recovery exhausted after 2 retries; prompt still absent from JSONL",
             });
+            if (submittedExpired) return terminalizeUnverified(job);
             return maybeNotifyBlocked(job);
           }
           // Empty composer + absent JSONL is ambiguous: Enter may have queued
           // the prompt while Codex is rotating/replaying its rollout. Retyping
           // here produced 22 copies of one long skydive prompt. Submitted is
           // therefore a permanent no-paste fence; only JSONL may advance it.
+          if (submittedExpired) return terminalizeUnverified(job);
           return queue.update(job, {
             status: "submitted",
             draftOwned: false,
@@ -206,12 +305,14 @@ export function createDeliveryBroker({
           });
         }
         if (transport.state === "foreign") {
+          if (submittedExpired) return terminalizeUnverified(job);
           job = queue.update(job, {
             lastReason: `waiting behind a different composer draft: ${transport.detail || "unknown"}`,
           });
           return maybeNotifyBlocked(job);
         }
       }
+      if (submittedExpired) return terminalizeUnverified(job);
       return queue.update(job, { nextAttemptAt: now() + ACTIVE_RETRY_MS });
     }
 
@@ -324,6 +425,10 @@ export function createDeliveryBroker({
     if (acquireLease && !lease) return;
     try {
       while (!stopped) {
+        const notices = (queue.pendingUnverifiedNotices?.(agentName, pane) || [])
+          .filter((job) => Number(job.unverifiedNoticeNextAttemptAt || 0) <= now());
+        for (const notice of notices) await notifyUnverified(notice);
+
         // Preserve FIFO for every job that may still own or need the composer.
         // `submitted` is different: onSubmitted is persisted only after the
         // exact draft has left the verified composer, so waiting for its later
@@ -382,11 +487,13 @@ export function createDeliveryBroker({
   async function enqueueAndWait(request, { timeoutMs = 12_000 } = {}) {
     const accepted = enqueue(request);
     const job = await waitForDeliveryJob(queue, accepted.id, { timeoutMs }) || accepted;
+    const unverified = job.status === DELIVERED_UNVERIFIED_STATE;
     return {
       job,
-      delivered: job.status === "acknowledged",
-      pending: job.status !== "acknowledged" && job.status !== "cancelled",
+      delivered: job.status === "acknowledged" || unverified,
+      pending: !TERMINAL_DELIVERY_STATES.has(job.status),
       cancelled: job.status === "cancelled",
+      unverified,
       reason: job.lastReason || null,
     };
   }

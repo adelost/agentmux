@@ -38,6 +38,7 @@ import { startHeartbeat } from "./core/heartbeat.mjs";
 import { runPendingFleetRestart } from "./core/fleet-restart.mjs";
 import { createDeliveryQueue } from "./core/delivery-queue.mjs";
 import { createDeliveryBroker } from "./core/delivery-broker.mjs";
+import { findChannelForPane } from "./cli/config.mjs";
 
 // --- Config ---
 
@@ -149,9 +150,12 @@ const deliveryQueue = createDeliveryQueue();
 const deliveryBroker = createDeliveryBroker({
   agent,
   queue: deliveryQueue,
+  resolveNotificationChannel: (job) =>
+    findChannelForPane(AGENTS_YAML, job.agentName, job.pane),
   notify: async (job, state) => {
-    const channelId = job.metadata?.channelId;
-    if (!channelId) return;
+    const channelId = job.metadata?.channelId
+      || findChannelForPane(AGENTS_YAML, job.agentName, job.pane);
+    if (!channelId) throw new Error(`no Discord channel bound to ${job.agentName}:${job.pane}`);
     if (state === "blocked") {
       await discord.send(
         channelId,
@@ -160,6 +164,12 @@ const deliveryBroker = createDeliveryBroker({
       );
     } else if (state === "recovered") {
       await discord.send(channelId, "✅ Det tidigare blockerade kömeddelandet har nu levererats.");
+    } else if (state === "unverified") {
+      await discord.send(
+        channelId,
+        "⚠️ Meddelandet lämnade composern men fick inget exakt historikkvitto inom en timme. " +
+        "AMUX skickar inte om det eftersom det kan skapa en dubblett; kontrollera agenthistoriken om instruktionen är kritisk.",
+      );
     }
   },
   log: (message) => console.warn(`[delivery-broker] ${message}`),

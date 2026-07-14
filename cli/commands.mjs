@@ -209,6 +209,11 @@ async function cmdSend(name, prompt, flags, ctx) {
     process.exitCode = 1;
     return;
   }
+  if (res?.unverified) {
+    console.error(`Delivery unverified for '${name}' (pane ${pane}); AMUX will not resend automatically.`);
+    process.exitCode = 1;
+    return;
+  }
   if (!res?.delivered) {
     process.exitCode = 1;
     return;

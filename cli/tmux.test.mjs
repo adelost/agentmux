@@ -124,6 +124,38 @@ feature("sendToPane delivery outcome", () => {
     }],
   });
 
+  unit("returns a terminal unverified receipt without reopening delivery", {
+    given: ["an unparked pane whose durable submission aged out of receipt reconciliation", () => {
+      const path = tmpPath();
+      writeFileSync(path, "");
+      const oldPath = process.env.AMUX_PARK_STATE_PATH;
+      process.env.AMUX_PARK_STATE_PATH = path;
+      return { path, oldPath, agent: fakeAgent(),
+        deliveryQueue: fakeDeliveryQueue("delivered_unverified") };
+    }],
+    when: ["the CLI observes the terminal audit state", async ({
+      path, oldPath, agent, deliveryQueue,
+    }) => {
+      const result = await sendToPane(
+        { agent, configPath: null, deliveryQueue, deliveryWaitMs: 0 },
+        "claw", 3, "already left composer", { mirror: false },
+      );
+      if (oldPath === undefined) delete process.env.AMUX_PARK_STATE_PATH;
+      else process.env.AMUX_PARK_STATE_PATH = oldPath;
+      try { unlinkSync(path); } catch {}
+      return result;
+    }],
+    then: ["it is complete but explicitly not history-verified", (result) => {
+      expect(result).toMatchObject({
+        delivered: true,
+        blocked: false,
+        pending: false,
+        unverified: true,
+        queueState: "delivered_unverified",
+      });
+    }],
+  });
+
   unit("cross-agent delivery mirrors the full brief to target and a receipt to sender", {
     given: ["a verified lsrc:4 to lsrc:0 brief with both panes bound", () => {
       const parkPath = tmpPath();
@@ -157,9 +189,60 @@ feature("sendToPane delivery outcome", () => {
     }],
     then: ["target gets the brief and sender gets immediate delivery proof", ({ result, mirrors }) => {
       expect(result.delivered).toBe(true);
+      expect(result.queueState).toBe("acknowledged");
       expect(mirrors).toEqual([
         { channelId: "target-channel", content: "[from lsrc:4]\n\nreview every image" },
         { channelId: "sender-channel", content: "`amux lsrc -p 0 …` → delivered." },
+      ]);
+    }],
+  });
+
+  unit("CLI delivery persists the bound target channel for unverified warnings", {
+    given: ["an aged inter-agent job whose delivery is terminal but unverified", () => {
+      const parkPath = tmpPath();
+      const configPath = tmpPath();
+      writeFileSync(parkPath, "");
+      writeFileSync(configPath, [
+        "lsrc:",
+        "  dir: /tmp/lsrc",
+        "  discord:",
+        "    sender-channel: 4",
+        "    target-channel: 0",
+        "",
+      ].join("\n"));
+      const oldPath = process.env.AMUX_PARK_STATE_PATH;
+      process.env.AMUX_PARK_STATE_PATH = parkPath;
+      return {
+        parkPath, configPath, oldPath, agent: fakeAgent(),
+        deliveryQueue: fakeDeliveryQueue("delivered_unverified"), mirrors: [],
+      };
+    }],
+    when: ["the CLI reopens the durable identity", async (ctx) => {
+      const result = await sendToPane(
+        { agent: ctx.agent, configPath: ctx.configPath, deliveryQueue: ctx.deliveryQueue, deliveryWaitMs: 0 },
+        "lsrc",
+        0,
+        "[from lsrc:4]\n\ncritical review",
+        { mirrorDispatch: (payload) => ctx.mirrors.push(payload) },
+      );
+      const request = ctx.deliveryQueue.enqueue.mock.calls[0][0];
+      if (ctx.oldPath === undefined) delete process.env.AMUX_PARK_STATE_PATH;
+      else process.env.AMUX_PARK_STATE_PATH = ctx.oldPath;
+      try { unlinkSync(ctx.parkPath); } catch {}
+      try { unlinkSync(ctx.configPath); } catch {}
+      return { result, request, mirrors: ctx.mirrors };
+    }],
+    then: ["the broker can warn the target and the sender is not told delivery was verified", ({ result, request, mirrors }) => {
+      expect(request.metadata).toEqual({ sender: "lsrc:4", channelId: "target-channel" });
+      expect(result).toMatchObject({
+        delivered: true,
+        pending: false,
+        unverified: true,
+        queueState: "delivered_unverified",
+      });
+      expect(mirrors).toEqual([
+        { channelId: "target-channel", content: "[from lsrc:4]\n\ncritical review" },
+        { channelId: "sender-channel", content: "`amux lsrc -p 0 …` → delivery unverified." },
       ]);
     }],
   });

@@ -82,6 +82,72 @@ feature("durable delivery queue", () => {
     }],
   });
 
+  component("delivered-unverified is durable and terminal across restart", {
+    given: ["one submission whose receipt audit timed out", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir, now: () => 4_000 });
+      const job = queue.enqueue({
+        agentName: "skydive", pane: 3, text: "do not resend", idempotencyKey: "discord:late:42",
+      });
+      queue.update(job, {
+        status: "delivered_unverified",
+        terminalAt: 4_000,
+        unverifiedNoticeSentAt: 4_000,
+        nextAttemptAt: null,
+      });
+      return { rootDir, job };
+    }],
+    when: ["a replacement bridge opens the spool and polls the same job", async ({ rootDir, job }) => {
+      const reopened = createDeliveryQueue({ rootDir });
+      return {
+        settled: await waitForDeliveryJob(reopened, job.id, { timeoutMs: 0 }),
+        next: reopened.next("skydive", 3),
+        targets: reopened.targets(),
+      };
+    }],
+    then: ["the audit record remains readable but cannot re-enter delivery", ({ settled, next, targets }, ctx) => {
+      expect(settled).toMatchObject({
+        id: ctx.job.id,
+        status: "delivered_unverified",
+        terminalAt: 4_000,
+      });
+      expect(next).toBeNull();
+      expect(targets).toEqual([]);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("delivered-unverified audit retention uses terminalAt", {
+    given: ["a notified terminal audit record before its retention cutoff", () => {
+      const rootDir = tempRoot();
+      let clock = 10_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "skydive", pane: 3, text: "retain audit" });
+      queue.update(job, {
+        status: "delivered_unverified",
+        terminalAt: 5_000,
+        unverifiedNoticeSentAt: 5_000,
+        nextAttemptAt: null,
+      });
+      return { rootDir, queue, job, advance: () => { clock = 12_000; } };
+    }],
+    when: ["pruning once before and once after the cutoff", ({ queue, job, advance }) => {
+      const before = queue.prune({ acknowledgedOlderThanMs: 6_000 });
+      const retained = queue.read("skydive", 3, job.id);
+      advance();
+      const after = queue.prune({ acknowledgedOlderThanMs: 6_000 });
+      const removed = queue.read("skydive", 3, job.id);
+      return { before, retained, after, removed };
+    }],
+    then: ["the audit is retained before cutoff and removed only after it", ({ before, retained, after, removed }, ctx) => {
+      expect(before).toBe(0);
+      expect(retained).toMatchObject({ status: "delivered_unverified", terminalAt: 5_000 });
+      expect(after).toBe(1);
+      expect(removed).toBeNull();
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("CLI polling distinguishes acknowledged from pending", {
     given: ["one queued job", () => {
       const rootDir = tempRoot();

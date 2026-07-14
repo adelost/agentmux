@@ -373,10 +373,404 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
+  component("a submitted Codex prompt becomes terminal when its receipt never arrives", {
+    given: ["an ambiguous submission just below the one-hour audit boundary", () => {
+      const rootDir = tempRoot();
+      let clock = 3_600_999;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "skydive", pane: 3, text: "preserve at most once", createdAt: 1_000,
+      });
+      queue.update(job, {
+        status: "submitted",
+        submittedAt: 1_000,
+        echoCursor: { kind: "test", positions: {} },
+        nextAttemptAt: 0,
+      });
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      agent.promptTransportState = async () => ({
+        state: "empty-idle", busy: false, dialect: "codex",
+      });
+      const broker = createDeliveryBroker({
+        agent,
+        queue,
+        now: () => clock,
+        notify: async (_job, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, agent, notices, broker, advance: () => { clock += 3_001; } };
+    }],
+    when: ["the broker checks once before and once after the boundary", async ({ broker, advance }) => {
+      await broker.kickTarget("skydive", 3);
+      advance();
+      await broker.kickTarget("skydive", 3);
+    }],
+    then: ["it never retypes and records a terminal delivered-unverified audit state", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.notices).toEqual(["unverified"]);
+      expect(ctx.queue.read("skydive", 3, ctx.job.id)).toMatchObject({
+        status: "delivered_unverified",
+        draftOwned: false,
+        terminalAt: 3_604_000,
+        nextAttemptAt: null,
+        lastReason: "submission left the composer but no exact JSONL receipt arrived within 60 minutes; refusing duplicate delivery",
+      });
+      expect(ctx.queue.next("skydive", 3)).toBeNull();
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("fresh receipt proof wins at the submitted timeout boundary", {
+    given: ["a stale submitted job whose exact JSONL event is now visible", () => {
+      const rootDir = tempRoot();
+      const clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "skydive", pane: 3, text: "receipt wins", createdAt: 1_000 });
+      queue.update(job, {
+        status: "submitted", submittedAt: 1_000,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0,
+      });
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => true;
+      agent.promptTransportState = async () => ({
+        state: "empty-idle", busy: false, dialect: "codex",
+      });
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_job, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, notices, broker };
+    }],
+    when: ["the stale receipt is reconciled", ({ broker }) => broker.kickTarget("skydive", 3)],
+    then: ["the authoritative echo acknowledges instead of dead-lettering", (_, ctx) => {
+      expect(ctx.notices).toEqual([]);
+      expect(ctx.queue.read("skydive", 3, ctx.job.id)).toMatchObject({
+        status: "acknowledged",
+        acknowledgedAt: 4_000_000,
+        lastReason: null,
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a receipt that appears during the final transport probe wins", {
+    given: ["a stale submission whose JSONL echo races the timeout inspection", () => {
+      const rootDir = tempRoot();
+      const clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "skydive", pane: 3, text: "late receipt wins", createdAt: 1_000,
+      });
+      queue.update(job, {
+        status: "submitted", submittedAt: 1_000,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0,
+      });
+      let echoChecks = 0;
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => ++echoChecks >= 2;
+      agent.promptTransportState = async () => ({
+        state: "empty-idle", busy: false, dialect: "codex",
+      });
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_job, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, notices, broker, echoChecks: () => echoChecks };
+    }],
+    when: ["the transport probe overlaps the late receipt", ({ broker }) => broker.kickTarget("skydive", 3)],
+    then: ["the final sink check acknowledges without an unverified warning", (_, ctx) => {
+      expect(ctx.echoChecks()).toBeGreaterThanOrEqual(2);
+      expect(ctx.notices).toEqual([]);
+      expect(ctx.queue.read("skydive", 3, ctx.job.id)).toMatchObject({
+        status: "acknowledged",
+        acknowledgedAt: 4_000_000,
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a resurfaced owned draft wins at the submitted timeout boundary", {
+    given: ["a stale submission whose exact draft has reappeared in the composer", () => {
+      const rootDir = tempRoot();
+      const clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "skydive", pane: 3, text: "draft wins", createdAt: 1_000 });
+      queue.update(job, {
+        status: "submitted", submittedAt: 1_000,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0,
+      });
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      agent.promptTransportState = async () => ({ state: "drafted", busy: false, dialect: "codex" });
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_job, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, notices, broker };
+    }],
+    when: ["the stale receipt is reconciled", ({ broker }) => broker.kickTarget("skydive", 3)],
+    then: ["the exact draft regains FIFO ownership instead of being abandoned", (_, ctx) => {
+      expect(ctx.notices).toEqual([]);
+      expect(ctx.queue.read("skydive", 3, ctx.job.id)).toMatchObject({
+        status: "drafted",
+        draftOwned: true,
+        nextAttemptAt: 4_000_000,
+        lastReason: "submitted draft resurfaced before JSONL acknowledgement",
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a draft resurfacing during the final timeout probe keeps ownership", {
+    given: ["the first probe is empty but the final probe sees the owned draft", () => {
+      const rootDir = tempRoot();
+      const clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "skydive", pane: 3, text: "resurfacing draft", createdAt: 1_000,
+      });
+      queue.update(job, {
+        status: "submitted", submittedAt: 1_000,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0,
+      });
+      let probes = 0;
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      agent.promptTransportState = async () => (++probes === 1
+        ? { state: "empty-idle", busy: false, dialect: "codex" }
+        : { state: "drafted", busy: false, dialect: "codex" });
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_job, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, notices, broker, probes: () => probes };
+    }],
+    when: ["the timeout path performs its ownership gate", ({ broker }) => broker.kickTarget("skydive", 3)],
+    then: ["terminalization fails closed and the exact draft owns FIFO", (_, ctx) => {
+      expect(ctx.probes()).toBe(2);
+      expect(ctx.notices).toEqual([]);
+      expect(ctx.queue.read("skydive", 3, ctx.job.id)).toMatchObject({
+        status: "drafted",
+        draftOwned: true,
+        nextAttemptAt: 4_000_000,
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("terminal timeout never overwrites a concurrent acknowledgement", {
+    given: ["the transport probe observes an acknowledgement committed by another reconciler", () => {
+      const rootDir = tempRoot();
+      const clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "skydive", pane: 3, text: "already acknowledged", createdAt: 1_000,
+      });
+      queue.update(job, {
+        status: "submitted", submittedAt: 1_000,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0,
+      });
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      agent.promptTransportState = async () => {
+        const current = queue.read("skydive", 3, job.id);
+        queue.update(current, { status: "acknowledged", acknowledgedAt: clock, nextAttemptAt: null });
+        return { state: "empty-idle", busy: false, dialect: "codex" };
+      };
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_job, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, notices, broker };
+    }],
+    when: ["the stale submitted path reaches terminalization", ({ broker }) => broker.kickTarget("skydive", 3)],
+    then: ["the terminal guard preserves acknowledged and emits no warning", (_, ctx) => {
+      expect(ctx.notices).toEqual([]);
+      expect(ctx.queue.read("skydive", 3, ctx.job.id)).toMatchObject({
+        status: "acknowledged",
+        acknowledgedAt: 4_000_000,
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("an unverified warning retries after restart without reopening delivery", {
+    given: ["Discord fails the first warning for a terminalized prompt", () => {
+      const rootDir = tempRoot();
+      let clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "skydive", pane: 3, text: "warn durably", createdAt: 1_000,
+        metadata: { channelId: "target-channel" },
+      });
+      queue.update(job, {
+        status: "submitted", submittedAt: 1_000,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0,
+      });
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      agent.promptTransportState = async () => ({
+        state: "empty-idle", busy: false, dialect: "codex",
+      });
+      let notifyCalls = 0;
+      const notify = async () => {
+        notifyCalls++;
+        if (notifyCalls === 1) throw new Error("discord down");
+      };
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify });
+      return {
+        rootDir, queue, job, agent, broker, notify,
+        notifyCalls: () => notifyCalls,
+        advance: () => { clock += 60_000; },
+        now: () => clock,
+      };
+    }],
+    when: ["the first broker terminalizes and two replacement brokers poll the spool", async (ctx) => {
+      await ctx.broker.kickTarget("skydive", 3);
+      ctx.afterFailure = ctx.queue.read("skydive", 3, ctx.job.id);
+      ctx.targetsAfterFailure = ctx.queue.targets();
+      ctx.advance();
+      const reopened = createDeliveryQueue({ rootDir: ctx.rootDir, now: ctx.now });
+      await createDeliveryBroker({
+        agent: ctx.agent, queue: reopened, now: ctx.now, notify: ctx.notify,
+      }).kick();
+      ctx.afterSuccess = reopened.read("skydive", 3, ctx.job.id);
+      const third = createDeliveryQueue({ rootDir: ctx.rootDir, now: ctx.now });
+      await createDeliveryBroker({
+        agent: ctx.agent, queue: third, now: ctx.now, notify: ctx.notify,
+      }).kick();
+      ctx.targetsAfterSuccess = third.targets();
+    }],
+    then: ["warning success is durable while the prompt stays terminal and is never pasted", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.afterFailure).toMatchObject({
+        status: "delivered_unverified",
+        unverifiedNoticeAttempts: 1,
+        unverifiedNoticeSentAt: null,
+      });
+      expect(ctx.targetsAfterFailure).toEqual([{ agentName: "skydive", pane: 3 }]);
+      expect(ctx.afterSuccess).toMatchObject({
+        status: "delivered_unverified",
+        unverifiedNoticeAttempts: 2,
+        unverifiedNoticeSentAt: 4_060_000,
+      });
+      expect(ctx.notifyCalls()).toBe(2);
+      expect(ctx.targetsAfterSuccess).toEqual([]);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("an internal producer resolves the bound target channel centrally", {
+    given: ["a drift-guard prompt without channel metadata and a bound target pane", () => {
+      const rootDir = tempRoot();
+      const clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "claw", pane: 4, text: "refresh instructions", createdAt: 1_000,
+        source: "drift-guard",
+      });
+      queue.update(job, {
+        status: "submitted", submittedAt: 1_000,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0,
+      });
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      agent.promptTransportState = async () => ({
+        state: "empty-idle", busy: false, dialect: "codex",
+      });
+      const sends = [];
+      const broker = createDeliveryBroker({
+        agent,
+        queue,
+        now: () => clock,
+        resolveNotificationChannel: (candidate) =>
+          candidate.agentName === "claw" && candidate.pane === 4 ? "bound-channel" : null,
+        notify: async (candidate, kind) => {
+          sends.push({
+            channelId: candidate.metadata?.channelId,
+            kind,
+            markerBeforeSend: queue.read("claw", 4, job.id).unverifiedNoticeSentAt,
+          });
+        },
+      });
+      return { rootDir, queue, job, agent, sends, broker, clock };
+    }],
+    when: ["the stale internal prompt becomes unverified", async (ctx) => {
+      await ctx.broker.kickTarget("claw", 4);
+      const reopened = createDeliveryQueue({ rootDir: ctx.rootDir, now: () => ctx.clock });
+      await createDeliveryBroker({
+        agent: ctx.agent,
+        queue: reopened,
+        now: () => ctx.clock,
+        resolveNotificationChannel: () => "bound-channel",
+        notify: async () => ctx.sends.push({ duplicate: true }),
+      }).kick();
+      ctx.afterRestart = reopened.read("claw", 4, ctx.job.id);
+      ctx.targetsAfterRestart = reopened.targets();
+    }],
+    then: ["Discord is called before the sent marker and restart does not duplicate it", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.sends).toEqual([{
+        channelId: "bound-channel",
+        kind: "unverified",
+        markerBeforeSend: null,
+      }]);
+      expect(ctx.afterRestart).toMatchObject({
+        status: "delivered_unverified",
+        metadata: { channelId: "bound-channel" },
+        unverifiedNoticeSentAt: 4_000_000,
+        unverifiedNoticeLastReason: null,
+      });
+      expect(ctx.targetsAfterRestart).toEqual([]);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("no bound target channel is distinct from a sent warning", {
+    given: ["an internal prompt whose pane currently has no Discord binding", () => {
+      const rootDir = tempRoot();
+      const clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "unbound", pane: 1, text: "retain warning", createdAt: 1_000,
+        source: "voice-pwa",
+      });
+      queue.update(job, {
+        status: "submitted", submittedAt: 1_000,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0,
+      });
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      agent.promptTransportState = async () => ({
+        state: "empty-idle", busy: false, dialect: "codex",
+      });
+      let notifyCalls = 0;
+      const notify = async () => { notifyCalls++; };
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, resolveNotificationChannel: () => null, notify,
+      });
+      return { rootDir, queue, job, agent, notifyCalls: () => notifyCalls, broker };
+    }],
+    when: ["the warning channel cannot be resolved", ({ broker }) => broker.kickTarget("unbound", 1)],
+    then: ["the prompt stays terminal but warning audit remains retryable and unsent", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.notifyCalls()).toBe(0);
+      expect(ctx.queue.read("unbound", 1, ctx.job.id)).toMatchObject({
+        status: "delivered_unverified",
+        unverifiedNoticeSentAt: null,
+        unverifiedNoticeAttempts: 1,
+        unverifiedNoticeLastReason: "no Discord channel is currently bound to the target pane",
+      });
+      expect(ctx.queue.targets()).toEqual([{ agentName: "unbound", pane: 1 }]);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("an idle Claude submission is retried after its JSONL grace period", {
     given: ["a stale Claude job whose submitted prompt genuinely vanished", () => {
       const rootDir = tempRoot();
-      let clock = 40_000;
+      let clock = 4_000_000;
       const queue = createDeliveryQueue({ rootDir, now: () => clock });
       const job = queue.enqueue({
         agentName: "watch", pane: 0, text: "review everything", createdAt: 1_000,

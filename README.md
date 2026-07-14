@@ -69,7 +69,8 @@ bridge restart cannot turn a valid media prompt into a missing path.
 Long and multiline prompts use terminal bracketed-paste mode, so the TUI
 receives one input transaction rather than a slow stream of painted cells.
 
-A prompt advances through `pending -> drafted -> submitted -> acknowledged`:
+A prompt advances through `pending -> drafted -> submitted`, then ends as
+`acknowledged` or `delivered_unverified`:
 
 - `drafted` means agentmux owns exact text still associated with the composer.
   It blocks later writes so payloads cannot merge.
@@ -80,6 +81,14 @@ A prompt advances through `pending -> drafted -> submitted -> acknowledged`:
   injected even while the agent is busy and the earlier JSONL receipt is late.
 - `acknowledged` means the authoritative Claude/Codex history contains the
   exact prompt. Receipt reconciliation runs independently of later writes.
+- `delivered_unverified` is a terminal at-most-once fence used only when a
+  submitted prompt has lacked an exact history receipt for 60 minutes. AMUX
+  never re-pastes it, removes it from active queue health, preserves it for
+  audit/retention, and warns the bound Discord channel. That warning has its
+  own durable retry state: a Discord outage cannot reopen the prompt, while a
+  bridge restart retries the warning until it is accepted. Internal producers
+  resolve the current channel from `agent:pane`; an unbound pane remains
+  explicitly unsent in the audit instead of being marked as warned.
 
 Foreign human drafts, hidden composers, and ambiguous submit results fail
 closed instead of being overwritten or blindly re-pasted. Durable state and
