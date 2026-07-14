@@ -16,6 +16,10 @@ The server listens only on `127.0.0.1:8811`. To use it from another device,
 publish that loopback endpoint with Tailscale Serve; do not bind the service to
 a public interface.
 
+The HTML, CSS and browser JavaScript are snapshotted when the process starts so
+they always match the running backend. Restart the server to activate a new
+release; editing files in the checkout cannot partially update the live UI.
+
 Optional environment variables:
 
 - `AMUX_WEB_PORT`: loopback port (default `8811`)
