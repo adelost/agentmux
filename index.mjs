@@ -32,6 +32,7 @@ import { parseAutoCompactConfig } from "./core/auto-compact.mjs";
 import { createDriftGuard } from "./channels/drift-guard.mjs";
 import { parseReminderConfig } from "./core/reminder-state.mjs";
 import { createJsonlWatcher } from "./channels/jsonl-watcher.mjs";
+import { createNativeRuntimeWatcher } from "./channels/native-runtime-watcher.mjs";
 import { createPlaywrightWatchdog } from "./channels/playwright-watchdog.mjs";
 import { parsePlaywrightWatchdogConfig } from "./core/playwright-watchdog.mjs";
 import { startHeartbeat } from "./core/heartbeat.mjs";
@@ -39,6 +40,8 @@ import { runPendingFleetRestart } from "./core/fleet-restart.mjs";
 import { createDeliveryQueue } from "./core/delivery-queue.mjs";
 import { createDeliveryBroker } from "./core/delivery-broker.mjs";
 import { findChannelForPane, validateAgentPane } from "./cli/config.mjs";
+import { createNativeRuntimeClient } from "./core/native-runtime-client.mjs";
+import { createAgentRouter } from "./core/agent-router.mjs";
 
 // --- Config ---
 
@@ -105,7 +108,7 @@ if (appState.get("thinking") === undefined) appState.set("thinking", true);
 // until manually cleared. Same lock-file-on-boot reasoning as init scripts.
 appState.set("syncRunning", false);
 
-const agent = createAgent({
+const tmuxAgent = createAgent({
   tmuxSocket: TMUX_SOCKET,
   configPath: AGENTS_YAML,
   timeout: TIMEOUT,
@@ -113,13 +116,15 @@ const agent = createAgent({
   tmuxExec,
   state: appState,
 });
+const nativeRuntime = createNativeRuntimeClient({ configPath: AGENTS_YAML });
+const agent = createAgentRouter({ tmuxAgent, nativeRuntime });
 
 // A fleet restart is deliberately executed by the replacement bridge, not
 // by the requesting CLI/pane: the requester may live inside the very tmux
 // session being destroyed. Consume the one-shot request before channel
 // watchers start so they only ever observe the rebuilt fleet.
 await runPendingFleetRestart({
-  agent,
+  agent: tmuxAgent,
   state: appState,
   log: (message) => console.log(`[fleet-restart] ${message}`),
 });
@@ -281,6 +286,12 @@ const jsonlWatcher = createJsonlWatcher({
   recorder,
   tts,
 });
+const nativeRuntimeWatcher = createNativeRuntimeWatcher({
+  nativeRuntime,
+  agentsYamlPath: AGENTS_YAML,
+  discord,
+  state: appState,
+});
 // The watcher can post immediately during its startup audit. Wait until the
 // Discord client and inbound reconciliation are ready so the first post does
 // not fail against a cold channel cache and burn a retry cycle.
@@ -291,6 +302,7 @@ if (legacyRecovery.recovered || legacyRecovery.remaining) {
 }
 deliveryBroker.start();
 jsonlWatcher.start();
+nativeRuntimeWatcher.start();
 
 // Static PWA bundle is served from the same Node process so the whole
 // app lives behind one Tailscale Serve tunnel. Override with

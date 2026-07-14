@@ -159,6 +159,63 @@ agents:
     }],
   });
 
+  component("parses an isolated native runtime fleet", {
+    given: ["native Claude + Codex config", () => `
+guild: "1"
+agents:
+  skybar-canary:
+    dir: /tmp/skybar-canary
+    backend: native
+    runtime: http://127.0.0.1:9911/
+    claude: 1
+    codex: 1
+    claudeModel: claude-opus-4-8
+    codexModel: gpt-5.6-sol
+    effort: high
+`],
+    when: ["parsing", (source) => parseConfig(source).agents.get("skybar-canary")],
+    then: ["native metadata is explicit and normalized", (agent) => {
+      expect(agent).toMatchObject({
+        backend: "native",
+        runtimeUrl: "http://127.0.0.1:9911",
+        panes: 2,
+        claudeCount: 1,
+        codexCount: 1,
+        effort: "high",
+      });
+    }],
+  });
+
+  component("rejects an empty native target before it can fall through to tmux", {
+    given: ["native config with no engines", () => `
+guild: "1"
+agents:
+  empty-native:
+    dir: /tmp/empty-native
+    backend: native
+    claude: 0
+    codex: 0
+`],
+    when: ["parsing", (source) => () => parseConfig(source)],
+    then: ["the missing native pane is explicit", (parse) => {
+      expect(parse).toThrow(/needs at least one Claude or Codex pane/);
+    }],
+  });
+
+  component("native fleets reject tmux-only service panes", {
+    given: ["invalid mixed backend", () => `
+guild: "1"
+agents:
+  mixed:
+    dir: /tmp/mixed
+    backend: native
+    claude: 1
+    services: [npm run dev]
+`],
+    when: ["parsing", (source) => () => parseConfig(source)],
+    then: ["fails clearly", (run) => expect(run).toThrow("cannot define tmux services or shells")],
+  });
+
   component("preserves an explicit non-default layout", {
     given: ["an agent that explicitly requests main-vertical", () => `
 guild: "1"
@@ -461,6 +518,37 @@ feature("buildSyncPlan", () => {
 });
 
 feature("generateAgentsYaml", () => {
+  component("materializes native backend metadata without tmux commands", {
+    given: ["parsed native fleet", () => {
+      const source = `
+guild: "1"
+agents:
+  skybar-canary:
+    dir: /tmp/skybar-canary
+    backend: native
+    runtime: http://127.0.0.1:8811
+    claude: 1
+    codex: 1
+    effort: high
+`;
+      return parseConfig(source).agents;
+    }],
+    when: ["generating agents.yaml", (agents) => generateAgentsYaml(
+      agents,
+      new Map(),
+      new Map([["skybar-canary", "canary-id"]]),
+    )],
+    then: ["both panes use the native adapter", (output) => {
+      expect(output).toContain("backend: native");
+      expect(output).toContain("runtimeUrl: http://127.0.0.1:8811");
+      expect(output).toContain("cmd: native:claude");
+      expect(output).toContain("cmd: native:codex");
+      expect(output).toContain("effort: high");
+      expect(output).not.toContain("dangerously-skip-permissions");
+      expect(output).not.toContain("--yolo");
+    }],
+  });
+
   component("all generated Codex panes use the supported yolo alias", {
     given: ["an agent with two Codex panes", () => ({
       agents: new Map([["claw", {

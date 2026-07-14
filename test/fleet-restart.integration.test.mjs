@@ -26,6 +26,11 @@ feature("fleet restart against an isolated tmux server", () => {
             { name: "shell-1", cmd: "bash", defer: true },
           ],
         },
+        "skybar-canary": {
+          dir: workspace,
+          backend: "native",
+          panes: [{ name: "claude", cmd: "native:claude" }],
+        },
       }));
       const tmuxExec = (cmd) => exec(cmd, { timeout: 5000 });
       await tmuxExec(`tmux -S '${socket}' new-session -d -s fleet`);
@@ -44,9 +49,11 @@ feature("fleet restart against an isolated tmux server", () => {
       const result = await restartFleet({ log: () => {} });
       const panes = (await tmuxExec(`tmux -S '${socket}' list-panes -t fleet -F '#{pane_index}'`)).stdout.trim().split("\n");
       const after = (await tmuxExec(`tmux -S '${socket}' display-message -t fleet:.0 -p '#{pane_pid}'`)).stdout.trim();
-      return { result, panes, after };
+      const nativeTmuxExists = await tmuxExec(`tmux -S '${socket}' has-session -t skybar-canary`)
+        .then(() => true, () => false);
+      return { result, panes, after, nativeTmuxExists };
     }],
-    then: ["the old process is gone and config is restored", async ({ result, panes, after }, { root, socket, tmuxExec, before }) => {
+    then: ["the old process is gone, config is restored, and native sessions stay outside tmux", async ({ result, panes, after, nativeTmuxExists }, { root, socket, tmuxExec, before }) => {
       expect(result).toMatchObject({
         ok: true,
         configured: ["fleet"],
@@ -57,6 +64,7 @@ feature("fleet restart against an isolated tmux server", () => {
       });
       expect(panes).toEqual(["0", "1"]);
       expect(after).not.toBe(before);
+      expect(nativeTmuxExists).toBe(false);
       await tmuxExec(`tmux -S '${socket}' kill-server`).catch(() => {});
       rmSync(root, { recursive: true, force: true });
     }],

@@ -202,6 +202,46 @@ export function createDeliveryBroker({
     let job = queue.read(initialJob.agentName, initialJob.pane, initialJob.id) || initialJob;
     queue.restoreAssets?.(job);
 
+    // Native targets have an HTTP receipt as their authoritative sink. The
+    // stable delivery job id becomes the runtime idempotency key, so a lost
+    // HTTP response or bridge restart is retried without launching a second
+    // turn. No tmux cursor, composer draft or JSONL echo participates here.
+    if (typeof agent.isNativeTarget === "function"
+        && agent.isNativeTarget(job.agentName, job.pane)) {
+      job = queue.update(job, {
+        status: "delivering",
+        attempts: Number(job.attempts || 0) + 1,
+        lastAttemptAt: now(),
+        nextAttemptAt: null,
+      });
+      queueEvent(job, "native_attempt", { attempt: job.attempts });
+      try {
+        const result = await agent.deliverQueued(job);
+        if (result?.accepted) {
+          return acknowledge(job, result.replayed ? "native-replay" : result.via || "native");
+        }
+        const reason = result?.reason || "native runtime did not accept delivery";
+        const pending = queue.update(job, {
+          status: "pending",
+          lastReason: reason,
+          nextAttemptAt: now() + blockedRetryMs(job),
+        });
+        queueEvent(pending, "native_pending", { reason: String(reason).slice(0, 160) });
+        return maybeNotifyBlocked(pending);
+      } catch (error) {
+        const cancelled = queue.update(job, {
+          status: "cancelled",
+          draftOwned: false,
+          nextAttemptAt: null,
+          terminalAt: now(),
+          lastReason: `native delivery rejected: ${error.message}`,
+        });
+        queueEvent(cancelled, "cancelled", { reason: "native-rejected" });
+        log(`native delivery ${job.agentName}:${job.pane} ${job.id} rejected: ${error.message}`);
+        return cancelled;
+      }
+    }
+
     // Persist a same-host timestamp before the first possible tmux write.
     // Event-identity cursors are stronger, but a fresh/missing JSONL can make
     // cursor capture return null; without this fallback a later real echo

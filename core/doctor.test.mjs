@@ -5,6 +5,7 @@ import { feature, unit, expect } from "bdd-vitest";
 import {
   checkContextBridge,
   checkDeliveryQueue,
+  checkNativeRuntime,
   checkTmuxVersion,
   FAIL, OK, WARN,
   checkBridgeMode, checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors,
@@ -44,6 +45,37 @@ feature("bridge process check", () => {
     given: ["one supervised pid", () => checkBridgeProcess({ pids: [7], supervised: true })],
     when: ["checking", (c) => c],
     then: ["ok", (c) => expect(c.status).toBe(OK)],
+  });
+});
+
+feature("native runtime check", () => {
+  unit("is absent when no fleet opted in", {
+    when: ["checking legacy-only config", () => checkNativeRuntime({ configured: 0 })],
+    then: ["does not add noise", (result) => expect(result).toBeNull()],
+  });
+
+  unit("fails closed when a configured runtime is offline", {
+    when: ["checking an offline canary", () => checkNativeRuntime({
+      configured: 1,
+      online: 0,
+      details: ["http://127.0.0.1:8812: refused"],
+    })],
+    then: ["reports failure and no tmux fallback", (result) => {
+      expect(result.status).toBe(FAIL);
+      expect(result.hint).toContain("fail closed");
+    }],
+  });
+
+  unit("reports active native turns", {
+    when: ["checking a healthy runtime", () => checkNativeRuntime({
+      configured: 1,
+      online: 1,
+      running: 2,
+    })],
+    then: ["is healthy", (result) => {
+      expect(result.status).toBe(OK);
+      expect(result.detail).toContain("2 active turns");
+    }],
   });
 });
 

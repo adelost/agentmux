@@ -83,6 +83,14 @@ const hashPayload = (payload) => createHash("sha256")
   .update(JSON.stringify(payload))
   .digest("hex");
 
+const agentIdentityFingerprint = ({
+  projectId,
+  name,
+  engine,
+  address,
+  permissionMode,
+}) => hashPayload({ projectId, name, engine, address, permissionMode });
+
 const cleanName = (value, max = 64) => typeof value === "string"
   ? value.trim().replace(/\s+/g, " ").slice(0, max)
   : "";
@@ -180,13 +188,32 @@ const readJsonBody = async (request) => {
   }
 };
 
-const cleanChildEnv = () => {
+const cleanAddress = (value) => {
+  if (value === undefined || value === null) return null;
+  const session = typeof value?.session === "string" ? value.session.trim() : "";
+  const pane = Number(value?.pane);
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(session)
+      || !Number.isSafeInteger(pane) || pane < 0 || pane > 999) return undefined;
+  return { session, pane };
+};
+
+const cleanPermissionMode = (value) => value === "automation" ? "automation" : "interactive";
+
+const cleanChildEnv = (agent = null) => {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
     if (/^(CLAUDECODE|CLAUDE_CODE_)/i.test(key)) delete env[key];
   }
   delete env.CODEX_THREAD_ID;
   delete env.CODEX_CI;
+  if (agent) {
+    env.AMUX_NATIVE_RUNTIME = "1";
+    env.AMUX_AGENT_ID = agent.id;
+    if (agent.address) {
+      env.AMUX_AGENT_NAME = agent.address.session;
+      env.AMUX_PANE = String(agent.address.pane);
+    }
+  }
   return env;
 };
 
@@ -208,8 +235,11 @@ export function createWebUi(options = {}) {
   const dataDir = resolve(options.dataDir
     ?? process.env.AMUX_WEB_DATA_DIR
     ?? join(homeDir, ".agentmux", "web-ui"));
+  const legacyDataSetting = process.env.AMUX_WEB_LEGACY_DATA_DIR;
   const legacyDataDir = options.legacyDataDir === undefined
-    ? join(ROOT, "data")
+    ? String(legacyDataSetting || "").toLowerCase() === "off"
+      ? null
+      : legacyDataSetting ? resolve(legacyDataSetting) : join(ROOT, "data")
     : options.legacyDataDir;
   const registryPath = join(dataDir, "registry.json");
   const uploadDir = join(dataDir, "uploads");
@@ -246,6 +276,7 @@ export function createWebUi(options = {}) {
     settings: new Map(),
     compactions: new Map(),
     interrupts: new Map(),
+    uploads: new Map(),
   };
   const sideRuns = new Map();
   const sideChildren = new Set();
@@ -267,6 +298,8 @@ export function createWebUi(options = {}) {
       engine: agent.engine,
       model: agent.model,
       effort: agent.effort,
+      address: agent.address,
+      permissionMode: agent.permissionMode,
       cwd: project?.cwd ?? null,
       sessionId: agent.sessionId,
       running: agent.running,
@@ -314,6 +347,8 @@ export function createWebUi(options = {}) {
         engine: agent.engine,
         model: agent.model,
         effort: agent.effort,
+        address: agent.address,
+        permissionMode: agent.permissionMode,
         sessionId: agent.sessionId,
         context: agent.context,
         idleSince: agent.idleSince,
@@ -336,6 +371,8 @@ export function createWebUi(options = {}) {
     engine: entry.engine,
     model: entry.model,
     effort: cleanEffort(entry.engine, entry.effort),
+    address: cleanAddress(entry.address) ?? null,
+    permissionMode: cleanPermissionMode(entry.permissionMode),
     sessionId: entry.sessionId ?? null,
     context: entry.context ?? null,
     createdAt: entry.createdAt ?? now(),
@@ -346,6 +383,7 @@ export function createWebUi(options = {}) {
     activeChild: null,
     activeControl: null,
     activeTurnId: null,
+    activeOperationKey: null,
     interruptRequested: false,
     autoCompactTimer: null,
     autoCompactDueAt: null,
@@ -374,6 +412,16 @@ export function createWebUi(options = {}) {
     for (const [name, map] of Object.entries(receipts)) {
       for (const [key, value] of Object.entries(stored.receipts?.[name] ?? {})) map.set(key, value);
     }
+    let upgradedAgentReceipts = false;
+    for (const receipt of receipts.agentCreates.values()) {
+      const agent = agents.get(receipt.id);
+      if (!agent) continue;
+      const identityHash = agentIdentityFingerprint(agent);
+      if (receipt.hash === identityHash) continue;
+      receipt.hash = identityHash;
+      upgradedAgentReceipts = true;
+    }
+    if (upgradedAgentReceipts) saveRegistry();
     return true;
   };
 
@@ -567,6 +615,11 @@ export function createWebUi(options = {}) {
   };
 
   const pushEvent = (agent, event) => {
+    const numericAt = Number(event.at);
+    const parsedAt = typeof event.at === "string" ? Date.parse(event.at) : NaN;
+    event.at = Number.isFinite(numericAt) && numericAt > 0
+      ? numericAt
+      : Number.isFinite(parsedAt) ? parsedAt : now();
     if (!event.webId) event.webId = `${bootId}:${agent.nextEventId++}`;
     agent.events.push(event);
     if (agent.events.length > MEMORY_EVENT_LIMIT) {
@@ -584,6 +637,54 @@ export function createWebUi(options = {}) {
     }
 
     const lines = readTailWindow(path, HISTORY_MAX_BYTES).text.split("\n");
+    const receiptMatches = [...receipts.messages.entries()]
+      .filter(([, receipt]) => receipt?.id === agent.id && Array.isArray(receipt.promptHashes))
+      .map(([operationKey, receipt]) => ({ operationKey, receipt }));
+    const usedReceiptKeys = new Set();
+    const operationKeyForPrompt = (text, eventAt) => {
+      const promptHash = hashPayload({ agentId: agent.id, prompt: text });
+      const numericAt = Number(eventAt);
+      const parsedAt = typeof eventAt === "string" ? Date.parse(eventAt) : NaN;
+      const eventTime = Number.isFinite(numericAt) && numericAt > 0
+        ? numericAt
+        : Number.isFinite(parsedAt) ? parsedAt : null;
+      const candidates = receiptMatches.filter(({ operationKey, receipt }) =>
+        !usedReceiptKeys.has(operationKey) && receipt.promptHashes.includes(promptHash));
+      if (eventTime != null) {
+        candidates.sort((left, right) => {
+          const leftDistance = Number.isFinite(left.receipt.acceptedAt)
+            ? Math.abs(left.receipt.acceptedAt - eventTime) : Number.POSITIVE_INFINITY;
+          const rightDistance = Number.isFinite(right.receipt.acceptedAt)
+            ? Math.abs(right.receipt.acceptedAt - eventTime) : Number.POSITIVE_INFINITY;
+          return leftDistance - rightDistance;
+        });
+      }
+      const match = candidates[0];
+      if (!match) return null;
+      usedReceiptKeys.add(match.operationKey);
+      return match.operationKey;
+    };
+    let turnOpen = false;
+    let turnHasAssistant = false;
+    let turnTerminal = false;
+    let turnAt = 0;
+    let turnOperationKey = null;
+    const closeHydratedTurn = () => {
+      if (turnOpen && turnHasAssistant) {
+        pushEvent(agent, {
+          type: "web",
+          subtype: "turn-done",
+          code: 0,
+          historical: true,
+          at: turnAt,
+          operationKey: turnOperationKey,
+        });
+      }
+      turnOpen = false;
+      turnHasAssistant = false;
+      turnTerminal = false;
+      turnOperationKey = null;
+    };
     for (const line of lines) {
       if (!line.trim()) continue;
       let entry;
@@ -592,16 +693,33 @@ export function createWebUi(options = {}) {
         if (entry.type === "user") {
           const text = textOf(entry.message?.content);
           if (text && !isClaudeHistoryNoise(entry, text) && !isEngineNoise(text)) {
-            pushEvent(agent, { type: "web", subtype: "user", text, at: entry.timestamp ?? 0 });
+            closeHydratedTurn();
+            turnOperationKey = operationKeyForPrompt(text, entry.timestamp);
+            pushEvent(agent, {
+              type: "web",
+              subtype: "user",
+              text,
+              at: entry.timestamp ?? 0,
+              operationKey: turnOperationKey,
+            });
+            turnOpen = true;
+            turnAt = entry.timestamp ?? 0;
           }
         } else if (entry.type === "assistant" && entry.message?.model !== "<synthetic>"
             && !entry.isSynthetic && !entry.isReplay) {
-          const text = textOf(entry.message?.content);
-          if (text) pushEvent(agent, {
+          const content = Array.isArray(entry.message?.content)
+            ? entry.message.content
+            : [{ type: "text", text: textOf(entry.message?.content) }];
+          const hasTool = content.some((block) => block?.type === "tool_use");
+          if (textOf(content) || hasTool) pushEvent(agent, {
             type: "assistant",
-            message: { content: [{ type: "text", text }] },
+            message: { ...entry.message, content },
             at: entry.timestamp ?? 0,
           });
+          turnHasAssistant = turnHasAssistant || Boolean(textOf(content)) || hasTool;
+          turnTerminal = turnTerminal || ["end_turn", "stop_sequence", "max_tokens", "refusal"]
+            .includes(entry.message?.stop_reason);
+          turnAt = entry.timestamp ?? turnAt;
         } else if (entry.type === "system" && entry.subtype === "compact_boundary"
             && (entry.compact_metadata || entry.compactMetadata)) {
           pushEvent(agent, {
@@ -615,16 +733,34 @@ export function createWebUi(options = {}) {
         const text = textOf(entry.payload.content);
         if (!text || isEngineNoise(text)) continue;
         if (entry.payload.role === "user") {
-          pushEvent(agent, { type: "web", subtype: "user", text, at: entry.timestamp ?? 0 });
+          closeHydratedTurn();
+          turnOperationKey = operationKeyForPrompt(text, entry.timestamp);
+          pushEvent(agent, {
+            type: "web",
+            subtype: "user",
+            text,
+            at: entry.timestamp ?? 0,
+            operationKey: turnOperationKey,
+          });
+          turnOpen = true;
+          turnAt = entry.timestamp ?? 0;
         } else if (entry.payload.role === "assistant") {
           pushEvent(agent, {
             type: "assistant",
             message: { content: [{ type: "text", text }] },
             at: entry.timestamp ?? 0,
           });
+          turnHasAssistant = true;
+          turnAt = entry.timestamp ?? turnAt;
         }
+      } else if (agent.engine === "codex" && entry.type === "event_msg"
+          && ["task_complete", "turn_aborted"].includes(entry.payload?.type)) {
+        turnTerminal = true;
+        turnAt = entry.timestamp ?? turnAt;
+        closeHydratedTurn();
       }
     }
+    if (turnTerminal) closeHydratedTurn();
   };
 
   const broadcast = (agent, event) => {
@@ -662,9 +798,10 @@ export function createWebUi(options = {}) {
       "--include-partial-messages",
       "--model", agent.model,
       "--effort", agent.effort,
-      "--permission-mode", "acceptEdits",
       "--name", agent.name,
     ];
+    if (agent.permissionMode === "automation") args.push("--dangerously-skip-permissions");
+    else args.push("--permission-mode", "acceptEdits");
     if (agent.sessionId) args.push("--resume", agent.sessionId);
     return { command: commands.claude, args, prompt };
   };
@@ -696,7 +833,7 @@ export function createWebUi(options = {}) {
     if (emit) webEvent(agent, "context", { context });
   };
 
-  const beginOperation = (agent, operation, rawPrompt = "", attachments = []) => {
+  const beginOperation = (agent, operation, rawPrompt = "", attachments = [], operationKey = null) => {
     const project = projects.get(agent.projectId);
     hydrate(agent);
     clearAutoCompact(agent);
@@ -704,6 +841,7 @@ export function createWebUi(options = {}) {
     agent.operation = operation;
     agent.interruptRequested = false;
     agent.activeTurnId = null;
+    agent.activeOperationKey = operationKey;
     agent.turnHasAssistantText = false;
     agent.compactMetadata = null;
     agent.updatedAt = now();
@@ -711,9 +849,13 @@ export function createWebUi(options = {}) {
       webEvent(agent, "user", {
         text: rawPrompt,
         attachments: attachments.map((attachment) => publicAttachment(project.id, attachment)),
+        operationKey,
       });
     } else {
-      webEvent(agent, "compact-start", { automatic: operation === "auto-compact" });
+      webEvent(agent, "compact-start", {
+        automatic: operation === "auto-compact",
+        operationKey,
+      });
     }
   };
 
@@ -725,6 +867,8 @@ export function createWebUi(options = {}) {
     agent.activeChild = null;
     agent.activeControl = null;
     agent.activeTurnId = null;
+    const operationKey = agent.activeOperationKey;
+    agent.activeOperationKey = null;
     agent.updatedAt = now();
     agent.idleSince = agent.updatedAt;
     agent.events = agent.events.filter((event) => event.type !== "stream_event");
@@ -738,6 +882,7 @@ export function createWebUi(options = {}) {
         interrupted,
         error: error?.message,
         stderr: code === 0 || interrupted ? undefined : stderr.slice(-32_000),
+        operationKey,
       });
     } else {
       webEvent(agent, "compact-done", {
@@ -747,6 +892,7 @@ export function createWebUi(options = {}) {
         error: error?.message,
         stderr: code === 0 || interrupted ? undefined : stderr.slice(-32_000),
         metadata: agent.compactMetadata,
+        operationKey,
       });
     }
     scheduleAutoCompact(agent);
@@ -783,8 +929,10 @@ export function createWebUi(options = {}) {
     }
     if (event.type === "assistant" && operation === "turn" && !agent.interruptRequested) {
       const text = textOf(event.message?.content);
-      if (text) {
-        agent.turnHasAssistantText = true;
+      const hasTool = Array.isArray(event.message?.content)
+        && event.message.content.some((block) => block?.type === "tool_use");
+      if (text || hasTool) {
+        if (text) agent.turnHasAssistantText = true;
         broadcast(agent, event);
       }
       return;
@@ -809,10 +957,10 @@ export function createWebUi(options = {}) {
     try { agent.activeChild?.stdin?.end?.(); } catch {}
   };
 
-  const runClaudeOperation = (agent, rawPrompt, attachments, operation) => {
+  const runClaudeOperation = (agent, rawPrompt, attachments, operation, operationKey = null) => {
     const project = projects.get(agent.projectId);
     const launch = buildClaudeLaunch(agent, rawPrompt, attachments);
-    beginOperation(agent, operation, rawPrompt, attachments);
+    beginOperation(agent, operation, rawPrompt, attachments, operationKey);
     let child;
     let stderr = "";
     let finished = false;
@@ -824,7 +972,7 @@ export function createWebUi(options = {}) {
     try {
       child = spawnProcess(launch.command, launch.args, {
         cwd: project.cwd,
-        env: cleanChildEnv(),
+        env: cleanChildEnv(agent),
         stdio: ["pipe", "pipe", "pipe"],
       });
       agent.activeChild = child;
@@ -852,10 +1000,10 @@ export function createWebUi(options = {}) {
     }
   };
 
-  const runCodexOperation = async (agent, rawPrompt, attachments, operation) => {
+  const runCodexOperation = async (agent, rawPrompt, attachments, operation, operationKey = null) => {
     const project = projects.get(agent.projectId);
     const effort = agent.effort;
-    beginOperation(agent, operation, rawPrompt, attachments);
+    beginOperation(agent, operation, rawPrompt, attachments, operationKey);
     let stderr = "";
     let finished = false;
     const finish = (code, error = null) => {
@@ -881,6 +1029,20 @@ export function createWebUi(options = {}) {
         broadcast(agent, {
           type: "assistant",
           message: { content: [{ type: "text", text: params.item.text ?? "" }] },
+        });
+      } else if (method === "item/completed" && operation === "turn"
+          && ["commandExecution", "fileChange", "mcpToolCall", "webSearch"].includes(params.item?.type)) {
+        const item = params.item;
+        const tool = item.type === "commandExecution"
+          ? { name: "exec_command", input: { cmd: item.command || item.commandLine || "command" } }
+          : item.type === "fileChange"
+            ? { name: "apply_patch", input: { path: item.path || item.filePath || "files" } }
+            : item.type === "webSearch"
+              ? { name: "web_search", input: { query: item.query || "" } }
+              : { name: item.tool || item.name || "mcp_tool", input: item.arguments || item.input || {} };
+        broadcast(agent, {
+          type: "assistant",
+          message: { content: [{ type: "tool_use", ...tool }] },
         });
       } else if (method === "item/completed" && params.item?.type === "contextCompaction") {
         webEvent(agent, "compacted", { metadata: null });
@@ -912,7 +1074,7 @@ export function createWebUi(options = {}) {
         spawnProcess,
         command: commands.codex,
         cwd: project.cwd,
-        env: cleanChildEnv(),
+        env: cleanChildEnv(agent),
         onNotification,
         onStderr: (chunk) => { stderr = `${stderr}${chunk}`.slice(-32_000); },
         onExit: (code) => finish(Number.isInteger(code) ? code : -1,
@@ -921,13 +1083,24 @@ export function createWebUi(options = {}) {
       agent.activeChild = rpc.child;
       agent.activeControl = { type: "codex", rpc };
       await rpc.initialize();
+      const codexPolicy = agent.permissionMode === "automation"
+        ? { sandbox: "danger-full-access", approvalPolicy: "never" }
+        : {};
+      const turnPolicy = agent.permissionMode === "automation"
+        ? { sandboxPolicy: { type: "dangerFullAccess" }, approvalPolicy: "never" }
+        : {};
       const threadResult = agent.sessionId
         ? await rpc.request("thread/resume", {
           threadId: agent.sessionId,
           cwd: project.cwd,
           model: agent.model,
+          ...codexPolicy,
         })
-        : await rpc.request("thread/start", { cwd: project.cwd, model: agent.model });
+        : await rpc.request("thread/start", {
+          cwd: project.cwd,
+          model: agent.model,
+          ...codexPolicy,
+        });
       const threadId = threadResult?.thread?.id ?? agent.sessionId;
       if (!threadId) throw new Error("codex-thread-id-missing");
       recordSessionId(agent, threadId);
@@ -940,6 +1113,7 @@ export function createWebUi(options = {}) {
           cwd: project.cwd,
           model: agent.model,
           effort,
+          ...turnPolicy,
         });
         agent.activeTurnId = result?.turn?.id ?? agent.activeTurnId;
       }
@@ -948,15 +1122,22 @@ export function createWebUi(options = {}) {
     }
   };
 
-  const runTurn = (agent, rawPrompt, attachments) => {
-    if (agent.engine === "claude") runClaudeOperation(agent, rawPrompt, attachments, "turn");
-    else void runCodexOperation(agent, rawPrompt, attachments, "turn");
+  const runTurn = (agent, rawPrompt, attachments, operationKey = null) => {
+    if (agent.engine === "claude") {
+      runClaudeOperation(agent, rawPrompt, attachments, "turn", operationKey);
+    } else {
+      void runCodexOperation(agent, rawPrompt, attachments, "turn", operationKey);
+    }
   };
 
-  const runCompact = (agent, automatic = false) => {
+  const runCompact = (agent, automatic = false, operationKey = null, focus = "") => {
     const operation = automatic ? "auto-compact" : "compact";
-    if (agent.engine === "claude") runClaudeOperation(agent, "/compact", [], operation);
-    else void runCodexOperation(agent, "", [], operation);
+    const claudeCommand = focus ? `/compact ${focus}` : "/compact";
+    if (agent.engine === "claude") {
+      runClaudeOperation(agent, claudeCommand, [], operation, operationKey);
+    } else {
+      void runCodexOperation(agent, "", [], operation, operationKey);
+    }
   };
 
   const scheduleAutoCompact = (agent) => {
@@ -1047,7 +1228,7 @@ export function createWebUi(options = {}) {
       const project = projects.get(agent.projectId);
       child = spawnProcess(commands.claude, args, {
         cwd: project.cwd,
-        env: cleanChildEnv(),
+        env: cleanChildEnv(agent),
         stdio: ["ignore", "pipe", "pipe"],
       });
       sideChildren.add(child);
@@ -1133,6 +1314,7 @@ export function createWebUi(options = {}) {
 
     if (request.method === "GET" && pathname === "/api/config") {
       json(response, 200, {
+        bootId,
         models,
         efforts: DEFAULT_EFFORTS,
         defaultEffort: DEFAULT_EFFORT,
@@ -1143,6 +1325,17 @@ export function createWebUi(options = {}) {
         limits: { uploadMaxBytes: UPLOAD_MAX_BYTES, uploadExtensions: [...UPLOAD_EXTENSIONS] },
         communicationPolicy: defaultCommunicationPolicy(),
         authBoundary: "loopback-tailnet",
+      });
+      return;
+    }
+
+    if (request.method === "GET" && pathname === "/api/health") {
+      json(response, 200, {
+        ok: true,
+        bootId,
+        projects: projects.size,
+        agents: agents.size,
+        running: [...agents.values()].filter((agent) => agent.running).length,
       });
       return;
     }
@@ -1218,14 +1411,23 @@ export function createWebUi(options = {}) {
         const name = cleanName(body?.name);
         const engine = body?.engine === "codex" ? "codex" : body?.engine === "claude" ? "claude" : "";
         const model = cleanName(body?.model, 120) || models[engine]?.[0] || "";
+        const address = cleanAddress(body?.address);
+        const permissionMode = cleanPermissionMode(body?.permissionMode);
         if (!key) { json(response, 400, { error: "idempotency-key-required" }); return; }
         if (!name) { json(response, 400, { error: "agent-name-required" }); return; }
         if (!engine) { json(response, 400, { error: "unknown-engine" }); return; }
+        if (address === undefined) { json(response, 400, { error: "invalid-agent-address" }); return; }
         if (body?.effort !== undefined && !DEFAULT_EFFORTS[engine].includes(body.effort)) {
           json(response, 400, { error: "unknown-effort", allowed: DEFAULT_EFFORTS[engine] }); return;
         }
         const effort = cleanEffort(engine, body?.effort);
-        const fingerprint = hashPayload({ projectId: project.id, name, engine, model, effort });
+        const fingerprint = agentIdentityFingerprint({
+          projectId: project.id,
+          name,
+          engine,
+          address,
+          permissionMode,
+        });
         const receipt = receiptResult(receipts.agentCreates, key, fingerprint);
         if (receipt?.conflict) { json(response, 409, { error: "idempotency-key-conflict" }); return; }
         if (receipt?.replayed) {
@@ -1242,6 +1444,8 @@ export function createWebUi(options = {}) {
           engine,
           model,
           effort,
+          address,
+          permissionMode,
           sessionId: null,
           createdAt: now(),
           updatedAt: now(),
@@ -1257,16 +1461,50 @@ export function createWebUi(options = {}) {
 
       if (request.method === "POST" && projectMatch[2] === "/uploads") {
         const original = cleanName(url.searchParams.get("name"), 180);
+        const key = cleanName(request.headers["x-idempotency-key"], 160);
         const extension = extname(original).toLowerCase();
+        if (!key) {
+          json(response, 400, { error: "idempotency-key-required" });
+          return;
+        }
         if (!original || !UPLOAD_EXTENSIONS.has(extension)) {
           json(response, 400, { error: "extension-not-allowed", allowed: [...UPLOAD_EXTENSIONS] });
           return;
         }
         const payload = await readRawBody(request, UPLOAD_MAX_BYTES);
+        const fingerprint = hashPayload({
+          projectId: project.id,
+          original,
+          bytes: payload.length,
+          sha256: createHash("sha256").update(payload).digest("hex"),
+        });
+        const prior = receipts.uploads.get(key);
+        if (prior && prior.hash !== fingerprint) {
+          json(response, 409, { error: "idempotency-key-conflict" });
+          return;
+        }
+        if (prior) {
+          const path = prior.id;
+          if (!existsSync(path)) {
+            json(response, 410, { error: "idempotency-target-deleted" });
+            return;
+          }
+          json(response, 200, {
+            path,
+            name: original,
+            bytes: statSync(path).size,
+            image: IMAGE_EXTENSIONS.has(extension),
+            url: `/api/uploads/${project.id}/${encodeURIComponent(basename(path))}`,
+            replayed: true,
+          });
+          return;
+        }
         const projectUploadDir = join(uploadDir, project.id);
         mkdirSync(projectUploadDir, { recursive: true, mode: 0o700 });
         const path = join(projectUploadDir, `${randomUUID()}${extension}`);
         await writeFile(path, payload, { mode: 0o600 });
+        rememberReceipt(receipts.uploads, key, { id: path, hash: fingerprint }, 2_000);
+        saveRegistry();
         json(response, 201, {
           path,
           name: original,
@@ -1307,23 +1545,33 @@ export function createWebUi(options = {}) {
         const body = await readJsonBody(request);
         const key = cleanName(body?.idempotencyKey, 160);
         if (!key) { json(response, 400, { error: "idempotency-key-required" }); return; }
-        if (!DEFAULT_EFFORTS[agent.engine].includes(body?.effort)) {
+        const hasEffort = body?.effort !== undefined;
+        const hasModel = body?.model !== undefined;
+        if (!hasEffort && !hasModel) {
+          json(response, 400, { error: "setting-required" }); return;
+        }
+        if (hasEffort && !DEFAULT_EFFORTS[agent.engine].includes(body.effort)) {
           json(response, 400, { error: "unknown-effort", allowed: DEFAULT_EFFORTS[agent.engine] }); return;
         }
-        const fingerprint = hashPayload({ agentId: agent.id, effort: body.effort });
+        const model = hasModel ? cleanName(body.model, 120) : agent.model;
+        if (!model) { json(response, 400, { error: "model-required" }); return; }
+        const effort = hasEffort ? body.effort : agent.effort;
+        const fingerprint = hashPayload({ agentId: agent.id, effort, model });
         const receipt = receiptResult(receipts.settings, key, fingerprint);
         if (receipt?.conflict) { json(response, 409, { error: "idempotency-key-conflict" }); return; }
         if (receipt?.replayed) {
           json(response, 200, { ...publicAgent(agent), replayed: true });
           return;
         }
-        agent.effort = body.effort;
+        agent.effort = effort;
+        agent.model = model;
         agent.updatedAt = now();
         project.updatedAt = agent.updatedAt;
         rememberReceipt(receipts.settings, key, { id: agent.id, hash: fingerprint }, 500);
         saveRegistry();
         webEvent(agent, "settings", {
           effort: agent.effort,
+          model: agent.model,
           appliesTo: "next-turn",
         });
         json(response, 200, publicAgent(agent));
@@ -1344,9 +1592,15 @@ export function createWebUi(options = {}) {
       if (request.method === "POST" && agentMatch[2] === "/compact") {
         const body = await readJsonBody(request);
         const key = cleanName(body?.idempotencyKey, 160);
+        const focus = typeof body?.focus === "string" ? body.focus.trim().slice(0, 20_000) : "";
         if (!key) { json(response, 400, { error: "idempotency-key-required" }); return; }
         if (!agent.sessionId) { json(response, 409, { error: "compact-needs-session" }); return; }
-        const fingerprint = hashPayload({ agentId: agent.id, sessionId: agent.sessionId, action: "compact" });
+        const fingerprint = hashPayload({
+          agentId: agent.id,
+          sessionId: agent.sessionId,
+          action: "compact",
+          focus,
+        });
         const receipt = receiptResult(receipts.compactions, key, fingerprint);
         if (receipt?.conflict) { json(response, 409, { error: "idempotency-key-conflict" }); return; }
         if (receipt?.replayed) {
@@ -1356,7 +1610,7 @@ export function createWebUi(options = {}) {
         if (agent.running) { json(response, 409, { error: "turn-in-progress" }); return; }
         rememberReceipt(receipts.compactions, key, { id: agent.id, hash: fingerprint }, 500);
         saveRegistry();
-        runCompact(agent, false);
+        runCompact(agent, false, key, focus);
         json(response, 202, publicAgent(agent));
         return;
       }
@@ -1409,9 +1663,18 @@ export function createWebUi(options = {}) {
           return;
         }
         if (agent.running) { json(response, 409, { error: "turn-in-progress" }); return; }
-        rememberReceipt(receipts.messages, key, { id: agent.id, hash: fingerprint }, 1_000);
+        const enginePrompt = agent.engine === "claude"
+          ? attachmentPrompt(prompt, attachments)
+          : attachmentPrompt(prompt, attachments.filter((attachment) => !attachment.image));
+        rememberReceipt(receipts.messages, key, {
+          id: agent.id,
+          hash: fingerprint,
+          promptHashes: [...new Set([prompt, enginePrompt]
+            .map((value) => hashPayload({ agentId: agent.id, prompt: value })))],
+          acceptedAt: now(),
+        }, 1_000);
         saveRegistry();
-        runTurn(agent, prompt, attachments);
+        runTurn(agent, prompt, attachments, key);
         json(response, 202, publicAgent(agent));
         return;
       }
@@ -1469,7 +1732,7 @@ export function createWebUi(options = {}) {
 
       if (request.method === "GET" && agentMatch[2] === "/history") {
         hydrate(agent);
-        json(response, 200, { agent: publicAgent(agent), events: agent.events });
+        json(response, 200, { bootId, agent: publicAgent(agent), events: agent.events });
         return;
       }
 

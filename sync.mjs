@@ -27,6 +27,13 @@ export function parseConfig(yamlContent) {
   const agents = new Map();
   for (const [name, config] of Object.entries(doc.agents)) {
     if (!config?.dir) throw new Error(`agentmux.yaml: agent '${name}' needs a 'dir'`);
+    const backend = config.backend ?? "tmux";
+    if (!["tmux", "native"].includes(backend)) {
+      throw new Error(`agentmux.yaml: agent '${name}' has unknown backend '${backend}'`);
+    }
+    if (backend === "native" && ((config.services?.length ?? 0) > 0 || (config.shells ?? 0) > 0)) {
+      throw new Error(`agentmux.yaml: native agent '${name}' cannot define tmux services or shells`);
+    }
     // `labels` keyed by absolute pane index (0 = first claude, then
     // service panes, then shells). Coerce keys to numbers so writers
     // can use either numeric or string keys in yaml.
@@ -57,6 +64,9 @@ export function parseConfig(yamlContent) {
     // pane's cmd at runtime by agent.mjs (cmd contains "codex" → codex).
     const claudeCount = config.panes ?? config.claude ?? (config.codex ? 0 : 1);
     const codexCount = config.codex ?? 0;
+    if (backend === "native" && claudeCount + codexCount < 1) {
+      throw new Error(`agentmux.yaml: native agent '${name}' needs at least one Claude or Codex pane`);
+    }
     agents.set(name, {
       dir: expandTilde(config.dir),
       panes: claudeCount + codexCount,
@@ -66,6 +76,13 @@ export function parseConfig(yamlContent) {
       shells: config.shells ?? 0,
       layout: resolveTmuxLayout(config.layout),
       labels,
+      backend,
+      runtimeUrl: backend === "native"
+        ? String(config.runtime || "http://127.0.0.1:8811").replace(/\/+$/, "")
+        : null,
+      claudeModel: config.claudeModel || null,
+      codexModel: config.codexModel || null,
+      effort: config.effort || null,
     });
   }
 
@@ -262,6 +279,10 @@ export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = 
       dir: config.dir,
       id: agentIds.get(name) || randomUUID(),
     };
+    if (config.backend === "native") {
+      entry.backend = "native";
+      entry.runtimeUrl = config.runtimeUrl;
+    }
 
     // Discord channel mapping (claude panes + codex panes; the codex
     // suffix is part of the channel name, see paneChannelName).
@@ -295,7 +316,15 @@ export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = 
     const panes = [];
     let paneIdx = 0;
     for (let i = 0; i < claudeCount; i++) {
-      const pane = { name: i === 0 ? "claude" : `claude-${i + 1}`, cmd: DEFAULT_AGENT_CMD };
+      const pane = config.backend === "native"
+        ? {
+            name: i === 0 ? "claude" : `claude-${i + 1}`,
+            cmd: "native:claude",
+            engine: "claude",
+            ...(config.claudeModel ? { model: config.claudeModel } : {}),
+            ...(config.effort ? { effort: config.effort } : {}),
+          }
+        : { name: i === 0 ? "claude" : `claude-${i + 1}`, cmd: DEFAULT_AGENT_CMD };
       const label = labelFor(paneIdx);
       if (label) pane.label = label;
       panes.push(pane);
@@ -303,7 +332,15 @@ export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = 
     }
     const codexCount = config.codexCount ?? Math.max(0, config.panes - claudeCount);
     for (let i = 0; i < codexCount; i++) {
-      const pane = { name: i === 0 ? "codex" : `codex-${i + 1}`, cmd: DEFAULT_CODEX_CMD };
+      const pane = config.backend === "native"
+        ? {
+            name: i === 0 ? "codex" : `codex-${i + 1}`,
+            cmd: "native:codex",
+            engine: "codex",
+            ...(config.codexModel ? { model: config.codexModel } : {}),
+            ...(config.effort ? { effort: config.effort } : {}),
+          }
+        : { name: i === 0 ? "codex" : `codex-${i + 1}`, cmd: DEFAULT_CODEX_CMD };
       const label = labelFor(paneIdx);
       if (label) pane.label = label;
       panes.push(pane);

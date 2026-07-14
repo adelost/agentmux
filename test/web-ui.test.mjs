@@ -71,7 +71,7 @@ function fakeSpawn(calls) {
               { type: "result", subtype: "error_during_execution", is_error: true, session_id: CLAUDE_SESSION },
             );
             close();
-          } else if (message.message?.content === "/compact") {
+          } else if (message.message?.content?.startsWith("/compact")) {
             emit(
               { type: "system", subtype: "init", session_id: CLAUDE_SESSION },
               {
@@ -247,12 +247,13 @@ async function createProject(url, workspace, key = "project-key") {
   return response.body;
 }
 
-async function createAgent(url, project, engine, key = `${engine}-agent-key`) {
+async function createAgent(url, project, engine, key = `${engine}-agent-key`, extra = {}) {
   const response = await postJson(`${url}/api/projects/${project.id}/agents`, {
     name: engine === "claude" ? "Claude agent" : "Codex agent",
     engine,
     model: engine === "claude" ? "claude-opus-4-8" : "gpt-5.6-sol",
     idempotencyKey: key,
+    ...extra,
   });
   expect(response.status).toBe(201);
   return response.body;
@@ -325,6 +326,54 @@ describe("AMUX Code project and agent registry", () => {
     });
   });
 
+  it("keeps mutable model and effort settings out of the agent identity receipt", async () => {
+    const { url, workspace } = await setup();
+    const project = await createProject(url, workspace);
+    const agent = await createAgent(url, project, "claude", "stable-agent-key", {
+      effort: "medium",
+      address: { session: "skybar-canary", pane: 0 },
+      permissionMode: "automation",
+    });
+
+    const updated = await request(`${url}/api/agents/${agent.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-5",
+        effort: "high",
+        idempotencyKey: "stable-agent-settings",
+      }),
+    });
+    expect(updated.status).toBe(200);
+
+    const replay = await postJson(`${url}/api/projects/${project.id}/agents`, {
+      name: "Claude agent",
+      engine: "claude",
+      model: "claude-sonnet-4-5",
+      effort: "high",
+      address: { session: "skybar-canary", pane: 0 },
+      permissionMode: "automation",
+      idempotencyKey: "stable-agent-key",
+    });
+    expect(replay.status).toBe(200);
+    expect(replay.body).toMatchObject({
+      id: agent.id,
+      model: "claude-sonnet-4-5",
+      effort: "high",
+      replayed: true,
+    });
+
+    const identityConflict = await postJson(`${url}/api/projects/${project.id}/agents`, {
+      name: "Claude agent",
+      engine: "claude",
+      address: { session: "skybar-canary", pane: 1 },
+      permissionMode: "automation",
+      idempotencyKey: "stable-agent-key",
+    });
+    expect(identityConflict.status).toBe(409);
+    expect(identityConflict.body.error).toBe("idempotency-key-conflict");
+  });
+
   it("runs Claude and Codex in the project, resumes sessions and de-duplicates messages", async () => {
     const { url, workspace, calls } = await setup();
     const project = await createProject(url, workspace);
@@ -333,10 +382,23 @@ describe("AMUX Code project and agent registry", () => {
 
     const upload = await request(`${url}/api/projects/${project.id}/uploads?name=note.txt`, {
       method: "POST",
-      headers: { "content-type": "text/plain" },
+      headers: {
+        "content-type": "text/plain",
+        "x-idempotency-key": "note-upload-1",
+      },
       body: "important file",
     });
     expect(upload.status).toBe(201);
+    const uploadReplay = await request(`${url}/api/projects/${project.id}/uploads?name=note.txt`, {
+      method: "POST",
+      headers: {
+        "content-type": "text/plain",
+        "x-idempotency-key": "note-upload-1",
+      },
+      body: "important file",
+    });
+    expect(uploadReplay.status).toBe(200);
+    expect(uploadReplay.body).toMatchObject({ path: upload.body.path, replayed: true });
 
     const first = await postJson(`${url}/api/agents/${claude.id}/messages`, {
       prompt: "hello claude",
@@ -393,6 +455,56 @@ describe("AMUX Code project and agent registry", () => {
     expect(resumeRequest?.params).not.toHaveProperty("excludeTurns");
   });
 
+  it("runs bridge-owned agents with stable identity and explicit automation permissions", async () => {
+    const { url, workspace, calls } = await setup();
+    const project = await createProject(url, workspace);
+    const claude = await createAgent(url, project, "claude", "automation-claude", {
+      address: { session: "skybar-canary", pane: 0 },
+      permissionMode: "automation",
+    });
+    const codex = await createAgent(url, project, "codex", "automation-codex", {
+      address: { session: "skybar-canary", pane: 1 },
+      permissionMode: "automation",
+    });
+    expect(claude.address).toEqual({ session: "skybar-canary", pane: 0 });
+    expect(codex.permissionMode).toBe("automation");
+
+    await postJson(`${url}/api/agents/${claude.id}/messages`, {
+      prompt: "automation claude",
+      attachments: [],
+      idempotencyKey: "automation-claude-turn",
+    });
+    await waitForIdle(url, project.id, claude.id);
+    const claudeCall = calls.find((call) => call.command === "fake-claude");
+    expect(claudeCall.args).toContain("--dangerously-skip-permissions");
+    expect(claudeCall.args).not.toContain("acceptEdits");
+    expect(claudeCall.options.env).toMatchObject({
+      AMUX_NATIVE_RUNTIME: "1",
+      AMUX_AGENT_NAME: "skybar-canary",
+      AMUX_PANE: "0",
+      AMUX_AGENT_ID: claude.id,
+    });
+
+    await postJson(`${url}/api/agents/${codex.id}/messages`, {
+      prompt: "automation codex",
+      attachments: [],
+      idempotencyKey: "automation-codex-turn",
+    });
+    await waitForIdle(url, project.id, codex.id);
+    const codexCall = calls.find((call) => call.command === "fake-codex");
+    expect(codexCall.options.env).toMatchObject({
+      AMUX_AGENT_NAME: "skybar-canary",
+      AMUX_PANE: "1",
+    });
+    expect(codexCall.messages.find((message) => message.method === "thread/start")?.params)
+      .toMatchObject({ sandbox: "danger-full-access", approvalPolicy: "never" });
+    expect(codexCall.messages.find((message) => message.method === "turn/start")?.params)
+      .toMatchObject({
+        sandboxPolicy: { type: "dangerFullAccess" },
+        approvalPolicy: "never",
+      });
+  });
+
   it("persists effort changes and applies them to the next Claude and Codex turns", async () => {
     const { url, workspace, calls } = await setup();
     const project = await createProject(url, workspace);
@@ -419,6 +531,12 @@ describe("AMUX Code project and agent registry", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ effort: "xhigh", idempotencyKey: "codex-effort-xhigh" }),
     })).status).toBe(200);
+    const changeModel = await request(`${url}/api/agents/${claude.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-4-5", idempotencyKey: "claude-model-sonnet" }),
+    });
+    expect(changeModel.body).toMatchObject({ model: "claude-sonnet-4-5", effort: "high" });
 
     await postJson(`${url}/api/agents/${claude.id}/messages`, {
       prompt: "effort claude",
@@ -429,6 +547,8 @@ describe("AMUX Code project and agent registry", () => {
     const claudeCall = calls.find((call) => call.command === "fake-claude" && !call.args.includes("--fork-session"));
     expect(claudeCall.args.slice(claudeCall.args.indexOf("--effort"), claudeCall.args.indexOf("--effort") + 2))
       .toEqual(["--effort", "high"]);
+    expect(claudeCall.args.slice(claudeCall.args.indexOf("--model"), claudeCall.args.indexOf("--model") + 2))
+      .toEqual(["--model", "claude-sonnet-4-5"]);
 
     await postJson(`${url}/api/agents/${codex.id}/messages`, {
       prompt: "effort codex",
@@ -493,7 +613,7 @@ describe("AMUX Code project and agent registry", () => {
   });
 
   it("tracks exact context and manually compacts native Claude and Codex sessions", async () => {
-    const { url, workspace } = await setup();
+    const { url, workspace, calls } = await setup();
     const project = await createProject(url, workspace);
     const claude = await createAgent(url, project, "claude");
     const codex = await createAgent(url, project, "codex");
@@ -510,12 +630,18 @@ describe("AMUX Code project and agent registry", () => {
 
       const compact = await postJson(`${url}/api/agents/${agent.id}/compact`, {
         idempotencyKey: `${key}-compact`,
+        ...(key === "claude" ? { focus: "preserve active ticket and gates" } : {}),
       });
       expect(compact.status).toBe(202);
       const after = await waitForAgent(url, project.id, agent.id,
         (item) => !item.running && item.context?.usedTokens === 30_000,
         `${key} did not compact`);
       expect(after.context.percent).toBe(15);
+      if (key === "claude") {
+        const compactCall = calls.filter((call) => call.command === "fake-claude").at(-1);
+        expect(compactCall.messages[0].message.content)
+          .toBe("/compact preserve active ticket and gates");
+      }
     }
   });
 
@@ -586,9 +712,37 @@ describe("AMUX Code project and agent registry", () => {
     await waitForIdle(setupOne.url, project.id, agent.id);
     await setupOne.app.close();
 
+    // Simulate a bounded engine-history tail containing only the later of two
+    // identical prompts. Timestamp proximity must restore the later stable
+    // operation key, not the first matching receipt in insertion order.
+    const registryPath = join(setupOne.dataDir, "registry.json");
+    const registry = JSON.parse(readFileSync(registryPath, "utf8"));
+    registry.receipts.agentCreates["claude-agent-key"].hash = "legacy-mutable-fingerprint";
+    const originalReceipt = registry.receipts.messages["persist-turn"];
+    originalReceipt.acceptedAt = Date.parse("2026-07-14T09:00:00.000Z");
+    registry.receipts.messages["persist-turn-newer"] = {
+      ...originalReceipt,
+      acceptedAt: Date.parse("2026-07-14T10:00:00.000Z"),
+    };
+    writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+
     const nativeDir = claudeProjectDir(setupOne.workspace, setupOne.homeDir);
     mkdirSync(nativeDir, { recursive: true });
     writeFileSync(join(nativeDir, `${CLAUDE_SESSION}.jsonl`), [
+      JSON.stringify({
+        type: "user",
+        timestamp: "2026-07-14T10:00:00.000Z",
+        message: { content: "persist me" },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-07-14T10:00:01.000Z",
+        message: {
+          model: "claude-opus-4-8",
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: "persisted answer" }],
+        },
+      }),
       JSON.stringify({ type: "user", message: { content: "native question" } }),
       JSON.stringify({
         type: "assistant",
@@ -630,6 +784,18 @@ describe("AMUX Code project and agent registry", () => {
     });
     const second = await appTwo.listen({ port: 0 });
     cleanups.push(() => appTwo.close());
+    const migratedAgentReplay = await postJson(`${second.url}/api/projects/${project.id}/agents`, {
+      name: "Claude agent",
+      engine: "claude",
+      model: "claude-sonnet-4-5",
+      effort: "high",
+      idempotencyKey: "claude-agent-key",
+    });
+    expect(migratedAgentReplay.status).toBe(200);
+    expect(migratedAgentReplay.body).toMatchObject({ id: agent.id, replayed: true });
+    const migratedRegistry = JSON.parse(readFileSync(registryPath, "utf8"));
+    expect(migratedRegistry.receipts.agentCreates["claude-agent-key"].hash)
+      .not.toBe("legacy-mutable-fingerprint");
     const list = await request(`${second.url}/api/projects`);
     expect(list.body.projects[0].cwd).toBe(setupOne.workspace);
     expect(list.body.projects[0].agents[0].context).toMatchObject({ usedTokens: 30_000, percent: 15 });
@@ -642,6 +808,8 @@ describe("AMUX Code project and agent registry", () => {
     expect(historyTexts.some((text) => text.includes("Internal summary"))).toBe(false);
     expect(history.body.events.some((event) => event.subtype === "compacted"
       && event.metadata?.post_tokens === 30_000)).toBe(true);
+    expect(history.body.events.some((event) => event.subtype === "turn-done"
+      && event.operationKey === "persist-turn-newer")).toBe(true);
     expect(readFileSync(join(setupOne.dataDir, "registry.json"), "utf8")).not.toContain("native answer");
   });
 
@@ -696,6 +864,8 @@ describe("AMUX Code project and agent registry", () => {
     expect(app).toContain("/compact");
     expect(app).toContain("/interrupt");
     const config = await request(`${url}/api/config`);
+    const health = await request(`${url}/api/health`);
+    expect(health.body).toMatchObject({ ok: true, bootId: config.body.bootId, projects: 1, agents: 2 });
     expect(config.body.efforts.claude).toContain("max");
     expect(config.body.efforts.codex).toContain("xhigh");
     expect(config.body.autoCompact).toEqual({ contextPercent: 60, idleMs: 300_000 });

@@ -100,6 +100,8 @@ export function listAgents(configPath) {
       panes: conf.panes || [],
       layout: conf.layout,
       discord: conf.discord,
+      backend: conf.backend || "tmux",
+      runtimeUrl: conf.runtimeUrl || null,
     }));
 }
 

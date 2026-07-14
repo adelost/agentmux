@@ -9,8 +9,11 @@ native session on the next operation.
 ## Run
 
 ```bash
-node spikes/web-ui/server.mjs
+amux runtime start
+amux runtime status
 ```
+
+For foreground development, `node spikes/web-ui/server.mjs` remains available.
 
 The server listens only on `127.0.0.1:8811`. To use it from another device,
 publish that loopback endpoint with Tailscale Serve; do not bind the service to
@@ -25,6 +28,8 @@ Optional environment variables:
 - `AMUX_WEB_PORT`: loopback port (default `8811`)
 - `AMUX_WEB_DATA_DIR`: registry and upload directory (default
   `~/.agentmux/web-ui`)
+- `AMUX_WEB_LEGACY_DATA_DIR`: legacy spike history source; set to `off` for an
+  isolated runtime (the native canary does this automatically)
 - `AMUX_WEB_CLAUDE_COMMAND` / `AMUX_WEB_CODEX_COMMAND`: alternate CLI binary
 
 ## Persistence and permissions
@@ -35,11 +40,46 @@ agent registry, idempotency receipts, uploaded files and the engines' native
 session ids. Conversation history stays in Claude Code's and Codex's own JSONL
 session files and is hydrated from those files after a restart.
 
-Closing the browser does not stop an active turn. Claude Code runs in
-`acceptEdits` mode so edits and ordinary project commands can complete without
-an invisible permission dialog; Codex keeps its configured sandbox and
-approval policy. This uses the same local CLI authentication/subscription as
-an ordinary terminal session, not a separate cloud API key.
+Closing the browser does not stop an active turn. Agents created manually in
+the GUI use Claude `acceptEdits` and the locally configured Codex sandbox.
+Bridge-provisioned canary agents are marked `automation`: Claude receives the
+same bypass-permissions contract as the legacy fleet and Codex app-server gets
+explicit `danger-full-access` + `never` approval settings. The modes cannot be
+confused silently because they are persisted in the registry and included in
+the idempotent create fingerprint. Model and effort are mutable next-turn
+settings and are reconciled only through the settings endpoint, never through
+that stable identity receipt. Both use the local CLI authentication/subscription,
+not separate cloud API keys.
+
+## Discord/tmux compatibility pilot
+
+An agentmux source entry with `backend: native` is provisioned idempotently in
+this registry with its stable `agent:pane` address. Discord and `amux send`
+continue to use the existing durable FIFO. The delivery job id becomes the
+native message key: if the bridge loses an HTTP response after acceptance, its
+retry replays the same receipt and never launches a second turn. Attachments
+are copied through the existing durable asset spool and uploaded idempotently
+before the message is accepted.
+
+The native watcher mirrors completed runtime operations to the configured
+Discord channel and persists content-addressed turn receipts across bridge
+restarts. Native token/idle data owns auto-compact; terminal auto-compact,
+drift and Playwright scrapers skip the target. `amux ps`, `top`, `wait`, `log`,
+`esc`, targeted `compact`, `doctor`, `revive`, sender provenance and `/sync`
+all understand the native backend. Fleet-wide tmux restart explicitly excludes
+it. There is no automatic native-to-tmux fallback.
+
+The real-engine release gate uses its own loopback port, registry, queue and
+workspace and refuses the default runtime port:
+
+```bash
+npm run test:webui:native-canary -- --port 8812
+```
+
+It provisions only `skybar-canary` and proves durable attachment delivery,
+context usage, next-turn effort changes, Claude/Codex soft interrupt, resume,
+manual compact, runtime restart and duplicate-free Discord projection. It
+fails if a tmux session with the canary name appears.
 
 ## Runtime controls
 

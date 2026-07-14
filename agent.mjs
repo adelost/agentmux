@@ -2022,7 +2022,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   async function restartFleet({ log = (message) => console.warn(message) } = {}) {
     const config = loadConfig();
     const fleet = Object.entries(config)
-      .filter(([, cfg]) => cfg?.dir && Array.isArray(cfg.panes) && cfg.panes.length > 0)
+      // Native sessions live in the independent AMUX Code process and keep
+      // their own engine session ids. A tmux fleet restart must never create
+      // a shadow session for them or stop their active turns.
+      .filter(([, cfg]) => cfg?.backend !== "native"
+        && cfg?.dir && Array.isArray(cfg.panes) && cfg.panes.length > 0)
       .map(([name, cfg]) => ({ name, cfg }));
     const result = {
       ok: true,

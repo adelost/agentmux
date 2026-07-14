@@ -23,6 +23,7 @@ import {
   checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors, checkLedger,
   checkBridgeMode, checkContextBridge, checkTmux, checkTmuxVersion, checkConfig, overallStatus, formatDoctorReport, FAIL, WARN,
   checkDeliveryQueue,
+  checkNativeRuntime,
 } from "../core/doctor.mjs";
 import { createDeliveryQueue, deliveryQueueStats } from "../core/delivery-queue.mjs";
 import {
@@ -44,6 +45,12 @@ import { spawn, execSync } from "child_process";
 import { runOneshot, showRunLog } from "./run.mjs";
 import { executePlan, showPlanLog } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
+import { groupNativeTurns, nativeHistoryRows } from "../channels/native-runtime-watcher.mjs";
+import {
+  nativeRuntimeStatus,
+  startNativeRuntime,
+  stopNativeRuntime,
+} from "./native-runtime-service.mjs";
 import {
   loadTodos, saveTodos, addTodo, doneTodo, rmTodo, findItem,
   listActive, listRemindable, listDone, formatActiveList, formatReminderSummary, formatItemLine,
@@ -119,12 +126,24 @@ async function cmdAttach(name, ctx) {
     process.exit(1);
   }
   saveLast(ctx.lastFile, name);
-  getAgent(ctx.configPath, name); // validate exists
-  await ensureAndAttach(ctx, name, ctx.configPath);
+  const configured = getAgent(ctx.configPath, name); // validate exists
+  const ready = await ensureAndAttach(ctx, name, ctx.configPath);
+  if (configured.backend === "native" || ready?.native) {
+    console.log(
+      `Native agent '${name}' is ready in AMUX Code (${configured.runtimeUrl || ready?.runtimeUrl}). ` +
+      `Use 'amux ${name} -p N "prompt"', 'amux log ${name} -p N', or the web UI.`,
+    );
+    return;
+  }
   attachSession(ctx.socket, name);
 }
 
 async function cmdStop(name, ctx) {
+  const configured = getAgent(ctx.configPath, name);
+  if (configured.backend === "native") {
+    console.log(`'${name}' is native and has no tmux session to stop; its sessions remain resumable in AMUX Code.`);
+    return;
+  }
   if (!(await hasSession(ctx, name))) {
     console.log(`No tmux session for '${name}'.`);
     return;
@@ -134,6 +153,14 @@ async function cmdStop(name, ctx) {
 }
 
 async function cmdReconcile(name, ctx) {
+  const configured = getAgent(ctx.configPath, name);
+  if (configured.backend === "native") {
+    const results = await Promise.all(
+      configured.panes.map((_, pane) => ctx.agent.nativeRuntime.ensureTarget(name, pane)),
+    );
+    console.log(`Reconciled native '${name}': ${results.length} agent(s) provisioned, no tmux touched.`);
+    return;
+  }
   const result = await ctx.agent.reconcileSession(name);
   if (result.skipped) {
     console.log(`Reconcile '${name}' skipped: ${result.reason}.`);
@@ -164,10 +191,57 @@ async function cmdUnserve(ctx) {
   return bridgeLifecycle.stop(ctx);
 }
 
+async function cmdRuntime(args, ctx) {
+  const { flags, positional } = parseFlags(args, FLAG_SPECS.runtime);
+  const action = positional[0] || "status";
+  const options = {
+    port: flags.port || 8811,
+    stateDir: flags["state-dir"],
+    dataDir: flags["data-dir"],
+    legacyDataDir: flags["no-legacy-migration"] ? null : undefined,
+  };
+  if (action === "status") {
+    const status = await nativeRuntimeStatus(options);
+    const owner = status.managed ? `managed pid ${status.pid}` : "unmanaged";
+    console.log(
+      `Native runtime: ${status.online ? "online" : "offline"} · ${owner} · ${status.url}\n` +
+      `Data: ${status.paths.dataDir}\nLog: ${status.paths.logPath}`,
+    );
+    if (status.health) {
+      console.log(`Boot: ${status.health.bootId} · projects ${status.health.projects} · agents ${status.health.agents} · running ${status.health.running}`);
+    }
+    return;
+  }
+  if (action === "start") {
+    const result = await startNativeRuntime({
+      ...options,
+      serverPath: resolve(ctx.bridgeDir, "spikes/web-ui/server.mjs"),
+    });
+    console.log(`Native runtime ${result.alreadyRunning ? "already" : "now"} online at ${result.url} (pid ${result.pid || "external"}).`);
+    return;
+  }
+  if (action === "stop") {
+    const result = await stopNativeRuntime({ ...options, force: Boolean(flags.force) });
+    console.log(result.alreadyStopped ? "Native runtime already stopped." : "Native runtime stopped; sessions remain persisted.");
+    return;
+  }
+  if (action === "restart") {
+    await stopNativeRuntime({ ...options, force: Boolean(flags.force) });
+    const result = await startNativeRuntime({
+      ...options,
+      serverPath: resolve(ctx.bridgeDir, "spikes/web-ui/server.mjs"),
+    });
+    console.log(`Native runtime restarted at ${result.url} (pid ${result.pid}).`);
+    return;
+  }
+  throw new Error(`unknown runtime action '${action}' (use status|start|stop|restart)`);
+}
+
 async function cmdStopAll(ctx) {
   const agents = listAgents(ctx.configPath);
   const stopped = [];
   for (const a of agents) {
+    if (a.backend === "native") continue;
     if (await hasSession(ctx, a.name)) {
       await killSession(ctx, a.name);
       stopped.push(a.name);
@@ -339,8 +413,46 @@ async function cmdLog(name, flags, ctx) {
   catch (err) { console.error(err.message); process.exit(1); }
 
   if (!(await hasSession(ctx, name))) {
-    console.error(`No tmux session for '${name}'. Run 'amux ${name}' to start it.`);
+    console.error(`No live runtime for '${name}'. Run 'amux ${name}' to start or provision it.`);
     process.exit(1);
+  }
+
+  const configured = getAgent(ctx.configPath, name);
+  if (configured.backend === "native" && !flags.tmux && !flags.text && !flags.t) {
+    const snapshot = await ctx.agent.nativeRuntime.history(name, pane);
+    let turns = groupNativeTurns(snapshot.events);
+    const since = parseSinceArg(flags.since);
+    if (flags.since && !since) {
+      console.error(`invalid --since '${flags.since}'. Use ISO or relative ("30min", "2h", "1d").`);
+      process.exit(1);
+    }
+    if (since) turns = turns.filter((turn) => turn.endAt >= since.getTime());
+    if (flags.grep) {
+      let pattern;
+      try { pattern = new RegExp(flags.grep, "i"); }
+      catch (error) {
+        console.error(`invalid --grep regex: ${error.message}`);
+        process.exit(1);
+      }
+      turns = turns.filter((turn) => pattern.test(`${turn.user}\n${turn.items.map((item) => item.content).join("\n")}`));
+    }
+    turns = turns.slice(-(flags.n || 3));
+    if (!turns.length) {
+      console.log("(no native turns found)");
+      return;
+    }
+    for (const turn of turns) {
+      console.log(`USER  ${new Date(turn.userAt || turn.endAt).toISOString()}`);
+      console.log(turn.user);
+      console.log("ASSISTANT");
+      console.log(turn.items.map((item) => item.type === "tool" ? `[tool] ${item.content}` : item.content).join("\n\n"));
+      console.log("");
+    }
+    if (flags.full || flags.f) {
+      console.log("═══ native runtime ═══");
+      console.log(await ctx.agent.capturePane(name, pane));
+    }
+    return;
   }
 
   // --- legacy mode: --text / -t (old default behavior, kept for compat) ---
@@ -363,7 +475,7 @@ async function cmdLog(name, flags, ctx) {
   // worktree (`${agent.dir}/.agents/${paneIdx}`), so claude's session store
   // is keyed off that subdir, not the agent root. Use panePathFor to match
   // the convention used by readAllTurnsAcrossPanes / cmdDone.
-  const agent = getAgent(ctx.configPath, name);
+  const agent = configured;
   const paneDir = panePathFor(agent, pane);
 
   // --- full: jsonl history + current tmux state ---
@@ -991,6 +1103,24 @@ async function cmdDone(ctx, flags) {
   const allRows = readAllTurnsAcrossPanes({
     agents, since: new Date(readCutoffMs), tailBytes: 4 * 1024 * 1024, tailFallback: false,
   });
+  // Native engines do not write their session JSONL under the legacy
+  // per-pane tmux directories. Pull their completed turns from the runtime
+  // so an opted-in canary remains first-class in the broker's `amux done`
+  // view. An offline canary cannot make the legacy fleet command fail.
+  if (ctx.agent.nativeRuntime) {
+    const nativeRows = await Promise.all(agents
+      .filter((agent) => agent.backend === "native")
+      .flatMap((agent) => (agent.panes || []).map(async (_paneConfig, pane) => {
+        try {
+          const snapshot = await ctx.agent.nativeRuntime.history(agent.name, pane);
+          return nativeHistoryRows(agent.name, pane, snapshot.events, { sinceMs: readCutoffMs });
+        } catch {
+          return [];
+        }
+      })));
+    allRows.push(...nativeRows.flat());
+    allRows.sort((a, b) => Date.parse(a.timestamp || 0) - Date.parse(b.timestamp || 0));
+  }
   const sliceFrom = (cutoff) => cutoff <= readCutoffMs
     ? allRows
     : allRows.filter((r) => r.timestamp && Date.parse(r.timestamp) >= cutoff);
@@ -1977,6 +2107,22 @@ function lastAssistantPreview(agent, paneIdx, paneDir) {
 }
 
 async function inspectPane(ctx, agent, pane) {
+  if (agent.backend === "native") {
+    try {
+      const snapshot = await ctx.agent.nativeRuntime.history(agent.name, pane.index);
+      const turns = groupNativeTurns(snapshot.events);
+      const latest = turns.at(-1);
+      const preview = latest?.items?.filter((item) => item.type === "text").at(-1)?.content || "";
+      const context = await ctx.agent.getContext(agent.name, pane.index);
+      return {
+        status: snapshot.agent.running ? "working" : "idle",
+        preview: preview.replace(/\s+/g, " ").trim(),
+        context,
+      };
+    } catch {
+      return { status: "unknown", preview: "native runtime offline", context: null };
+    }
+  }
   // Single capture per pane. We used to call getPaneStatus (a 30-line
   // capture-pane) AND capturePane(100) — two round-trips to the SINGLE-
   // THREADED tmux server, which serializes them server-side no matter how
@@ -2124,7 +2270,9 @@ async function cmdRevive(ctx, flags) {
   const panes = [];
   for (const a of agents) {
     (a.panes || []).forEach((p, i) => {
-      if (/claude|codex/.test(String(p?.cmd || ""))) panes.push({ agent: a.name, pane: i, cmd: p.cmd });
+      if (/claude|codex/.test(String(p?.cmd || ""))) {
+        panes.push({ agent: a.name, pane: i, cmd: p.cmd, backend: a.backend });
+      }
     });
   }
 
@@ -2133,7 +2281,7 @@ async function cmdRevive(ctx, flags) {
   for (const p of panes) {
     try { statuses.set(`${p.agent}:${p.pane}`, await getPaneStatus(ctx, p.agent, p.pane)); }
     catch { statuses.set(`${p.agent}:${p.pane}`, "unknown"); }
-    if (/codex/.test(String(p.cmd || ""))) {
+    if (p.backend !== "native" && /codex/.test(String(p.cmd || ""))) {
       try {
         const agent = agents.find((item) => item.name === p.agent);
         const paneDir = join(agent.dir, ".agents", String(p.pane));
@@ -2164,7 +2312,10 @@ async function cmdRevive(ctx, flags) {
   if (flags.dry) return;
 
   for (const p of panes) {
-    try { await ctx.agent.ensureReady(p.agent, p.pane); }
+    try {
+      if (p.backend === "native") await ctx.agent.nativeRuntime.ensureTarget(p.agent, p.pane);
+      else await ctx.agent.ensureReady(p.agent, p.pane);
+    }
     catch (err) { console.error(`  ensureReady ${p.agent}:${p.pane} misslyckades: ${err.message.split("\n")[0]}`); }
   }
   for (const b of plan.briefs) {
@@ -2289,10 +2440,31 @@ async function cmdDoctor(ctx) {
   try { agents = listAgents(ctx.configPath); }
   catch (err) { cfgError = err.message; }
 
+  const nativeUrls = [...new Set(agents
+    .filter((agent) => agent.backend === "native")
+    .map((agent) => agent.runtimeUrl || "http://127.0.0.1:8811"))];
+  let nativeOnline = 0;
+  let nativeRunning = 0;
+  const nativeDetails = [];
+  for (const runtimeUrl of nativeUrls) {
+    try {
+      const response = await fetch(`${runtimeUrl.replace(/\/+$/, "")}/api/health`, {
+        signal: AbortSignal.timeout(1_500),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const status = await response.json();
+      nativeOnline++;
+      nativeRunning += Number(status.running || 0);
+    } catch (error) {
+      nativeDetails.push(`${runtimeUrl}: ${error.message}`);
+    }
+  }
+
   // context bridge coverage: how many configured claude panes have a fresh
   // statusline push (core/context.mjs getContextPushed)
   let claudePanes = 0, pushing = 0;
   for (const a of agents) {
+    if (a.backend === "native") continue;
     (a.panes || []).forEach((p, i) => {
       if (!/claude/.test(String(p?.cmd || ""))) return;
       claudePanes++;
@@ -2333,6 +2505,12 @@ async function cmdDoctor(ctx) {
     checkTmuxVersion({ version: tmuxVersion }),
     checkTmux({ sessions, error: tmuxError }),
     checkConfig({ agents, error: cfgError }),
+    checkNativeRuntime({
+      configured: nativeUrls.length,
+      online: nativeOnline,
+      running: nativeRunning,
+      details: nativeDetails,
+    }),
     checkDeliveryQueue({
       stats: deliveryQueueStats(createDeliveryQueue()),
       bridgeRunning: pids.length > 0,
@@ -2438,7 +2616,9 @@ async function cmdPs(ctx, flags = {}) {
         if (label) {
           display = `[${truncate(label, 40)}]`;
         } else {
-          const jsonl = lastAssistantPreview(a, p.index, panePathFor(a, p.index));
+          const jsonl = a.backend === "native"
+            ? ""
+            : lastAssistantPreview(a, p.index, panePathFor(a, p.index));
           display = truncate(jsonl || p.preview, 70);
         }
         const selfTag = selfKey === `${a.name}:${p.index}` ? "  ◀ du" : "";
@@ -3120,7 +3300,7 @@ async function cmdTop(ctx, flags = {}) {
     if (!(await hasSession(ctx, a.name))) continue;
     const panes = await listPanes(ctx, a.name);
     for (const p of panes) {
-      if (!CONTEXT_DIALECT[p.command]) continue;
+      if (!dialectFor(a, p)) continue;
       const { status, preview, context } = await inspectPane(ctx, a, p);
       if (!context) continue;
       const label = a.panes[p.index]?.label || null;
@@ -3440,6 +3620,15 @@ Usage:
     --detach, -d                  Run managed in a background tmux session
   agent stop                      Stop Discord bridge (no arg = bridge)
   agent stop --all                Stop bridge + all agent sessions
+  agent runtime status            Native AMUX Code process + engine health
+  agent runtime start             Start native runtime detached (no tmux)
+  agent runtime stop              Stop it only while idle (sessions persist)
+  agent runtime restart           Controlled idle restart
+    --port N                      Runtime port (default 8811)
+    --data-dir PATH               Registry/uploads directory
+    --state-dir PATH              PID/log ownership directory
+    --no-legacy-migration         Do not import checkout-local spike history
+    --force                       Permit stopping active turns
   agent log <name|:nr> [-n N]     Show agent output (default: last 3 turns from jsonl)
     -n N                          Number of turns (jsonl) or lines (--tmux)
     -p <pane>                     Target pane
@@ -3528,6 +3717,7 @@ Socket: /tmp/openclaw-claude.sock`);
 
 const FLAG_SPECS = {
   send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "notify-user": "boolean", "notify-me": "boolean", force: "boolean", stdin: "boolean", "idempotency-key": "string", "wait-ms": "number" },
+  runtime: { port: "number", "data-dir": "string", "state-dir": "string", "no-legacy-migration": "boolean", force: "boolean" },
   wait: { p: "number", t: "number", a: "boolean" },
   log: {
     n: "number", p: "number",
@@ -3699,6 +3889,9 @@ export async function dispatch(argv, ctx) {
       });
       return cmdServe(flags, ctx);
     }
+
+    case "runtime":
+      return cmdRuntime(rest, ctx);
 
     case "wait": {
       if (!rest[0]) { console.error("Usage: agent wait <name|:nr> [-t S] [-p N]"); process.exit(1); }
