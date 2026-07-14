@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>amux web-ui spike</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font: 14px/1.5 ui-monospace, monospace; background: #14161a; color: #d8dde4; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.1rem; } h1 small { color: #6b7480; font-weight: normal; }
+  #log { border: 1px solid #2a2f36; border-radius: 8px; padding: 1rem; min-height: 200px; }
+  .user { color: #8ab4f8; margin-top: .8rem; }
+  .assistant { color: #d8dde4; white-space: pre-wrap; }
+  .live { color: #9aa4af; white-space: pre-wrap; }
+  .meta { color: #6b7480; font-size: .85em; }
+  .error { color: #f28b82; white-space: pre-wrap; }
+  form { display: flex; gap: .5rem; margin-top: 1rem; }
+  input[type=text] { flex: 1; background: #1c2026; color: inherit; border: 1px solid #2a2f36; border-radius: 6px; padding: .5rem .7rem; }
+  button { background: #2b3a55; color: #d8dde4; border: 0; border-radius: 6px; padding: .5rem 1rem; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+</style>
+</head>
+<body>
+<h1>amux web-ui spike <small id="status">ingen konversation</small></h1>
+<div id="log"></div>
+<form id="composer">
+  <input id="prompt" type="text" placeholder="Skriv en prompt…" autocomplete="off">
+  <button id="send" type="submit">Skicka</button>
+</form>
+<script>
+"use strict";
+const log = document.getElementById("log");
+const statusEl = document.getElementById("status");
+const promptEl = document.getElementById("prompt");
+const sendEl = document.getElementById("send");
+
+let conversationId = new URLSearchParams(location.search).get("c");
+let liveEl = null;
+
+const line = (className, text) => {
+  const el = document.createElement("div");
+  el.className = className;
+  el.textContent = text;
+  log.append(el);
+  return el;
+};
+
+const render = (event) => {
+  if (event.type === "spike" && event.subtype === "user") {
+    line("user", "› " + event.text);
+    liveEl = line("live", "");
+    sendEl.disabled = true;
+    statusEl.textContent = "kör…";
+  } else if (event.type === "stream_event"
+      && event.event?.type === "content_block_delta"
+      && event.event.delta?.type === "text_delta") {
+    if (liveEl) liveEl.textContent += event.event.delta.text;
+  } else if (event.type === "assistant") {
+    const text = (event.message?.content ?? [])
+      .filter((block) => block.type === "text").map((block) => block.text).join("");
+    if (liveEl) { liveEl.remove(); liveEl = null; }
+    if (text) line("assistant", text);
+  } else if (event.type === "result") {
+    line("meta", `✓ ${event.subtype} · ${event.duration_ms} ms · $${(event.total_cost_usd ?? 0).toFixed(4)} · session ${event.session_id}`);
+  } else if (event.type === "spike" && event.subtype === "turn-done") {
+    sendEl.disabled = false;
+    statusEl.textContent = "klar";
+    if (event.code !== 0) line("error", "turn misslyckades (exit " + event.code + ")\n" + (event.stderr ?? ""));
+  } else if (event.type === "spike" && event.subtype === "protocol-error") {
+    line("error", "protokollfel: " + event.line);
+  }
+};
+
+const attach = () => {
+  new EventSource(`/api/conversations/${conversationId}/events`)
+    .onmessage = (message) => render(JSON.parse(message.data));
+  statusEl.textContent = "ansluten";
+};
+
+document.getElementById("composer").addEventListener("submit", async (submit) => {
+  submit.preventDefault();
+  const prompt = promptEl.value.trim();
+  if (!prompt) return;
+  promptEl.value = "";
+  const idempotencyKey = crypto.randomUUID();
+  if (!conversationId) {
+    const created = await fetch("/api/conversations", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prompt, idempotencyKey }),
+    }).then((r) => r.json());
+    conversationId = created.id;
+    history.replaceState(null, "", "?c=" + conversationId);
+    attach();
+  } else {
+    await fetch(`/api/conversations/${conversationId}/messages`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prompt, idempotencyKey }),
+    });
+  }
+});
+
+if (conversationId) attach();
+</script>
+</body>
+</html>
