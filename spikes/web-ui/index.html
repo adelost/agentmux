@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
   <title>AMUX Code</title>
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -131,15 +131,17 @@
         </div>
         <button class="icon-button" type="button" data-close-dialog aria-label="Stäng">×</button>
       </div>
-      <label>
-        Projektnamn
-        <input id="project-name-input" name="name" maxlength="64" autocomplete="off" required placeholder="Exempel: SW00P Game">
-      </label>
-      <label>
-        Arbetsmapp på datorn
-        <input id="project-cwd-input" name="cwd" autocomplete="off" required placeholder="/home/you/projects/swoop-sim">
-      </label>
-      <p class="form-hint">Mappen måste redan finnas. Alla agenter i projektet använder samma mapp.</p>
+      <div class="form-body">
+        <label>
+          Projektnamn
+          <input id="project-name-input" name="name" maxlength="64" autocomplete="off" required placeholder="Exempel: SW00P Game">
+        </label>
+        <label>
+          Arbetsmapp på datorn
+          <input id="project-cwd-input" name="cwd" autocomplete="off" required placeholder="/home/you/projects/swoop-sim">
+        </label>
+        <p class="form-hint">Mappen måste redan finnas. Alla agenter i projektet använder samma mapp.</p>
+      </div>
       <div class="dialog-actions">
         <button class="button quiet" type="button" data-close-dialog>Avbryt</button>
         <button class="button primary" type="submit">Skapa projekt</button>
@@ -156,33 +158,35 @@
         </div>
         <button class="icon-button" type="button" data-close-dialog aria-label="Stäng">×</button>
       </div>
-      <label>
-        Agentnamn
-        <input id="agent-name-input" name="name" maxlength="64" autocomplete="off" required placeholder="Exempel: UI-implementation">
-      </label>
-      <div class="form-grid agent-config-grid">
+      <div class="form-body">
         <label>
-          Motor
-          <select id="engine-input" name="engine">
-            <option value="claude">Claude</option>
-            <option value="codex">Codex</option>
-          </select>
+          Agentnamn
+          <input id="agent-name-input" name="name" maxlength="64" autocomplete="off" required placeholder="Exempel: UI-implementation">
         </label>
-        <label>
-          Modell
-          <input id="model-input" name="model" list="model-options" maxlength="120" required>
-          <datalist id="model-options"></datalist>
-        </label>
-        <label>
-          Effort
-          <select id="effort-input" name="effort" required></select>
-        </label>
+        <div class="form-grid agent-config-grid">
+          <label>
+            Motor
+            <select id="engine-input" name="engine">
+              <option value="claude">Claude</option>
+              <option value="codex">Codex</option>
+            </select>
+          </label>
+          <label>
+            Modell
+            <input id="model-input" name="model" list="model-options" maxlength="120" required>
+            <datalist id="model-options"></datalist>
+          </label>
+          <label>
+            Effort
+            <select id="effort-input" name="effort" required></select>
+          </label>
+        </div>
+        <div class="folder-summary">
+          <span>Arbetsmapp</span>
+          <code id="agent-project-path"></code>
+        </div>
+        <p class="form-hint">Effort kan ändras senare och gäller då nästa turn. Kontext över 60 % compactas automatiskt efter 5 minuters idle.</p>
       </div>
-      <div class="folder-summary">
-        <span>Arbetsmapp</span>
-        <code id="agent-project-path"></code>
-      </div>
-      <p class="form-hint">Effort kan ändras senare och gäller då nästa turn. Kontext över 60 % compactas automatiskt efter 5 minuters idle.</p>
       <div class="dialog-actions">
         <button class="button quiet" type="button" data-close-dialog>Avbryt</button>
         <button class="button primary" type="submit">Skapa agent</button>

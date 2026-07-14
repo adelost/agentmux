@@ -71,3 +71,26 @@ interrupting the main session.
 The project registry includes a versioned communication-policy seam. History
 is readable across the project's agents today; per-agent send ACL enforcement
 is intentionally deferred.
+
+## Design language and visual gate
+
+The UI shares design tokens with Suggest (`suggestions-v1d/src/style.css`):
+the canvas/paper/ink palette, Inter, 1px hairlines, soft status colors and the
+same button recipes, in both light and dark (`prefers-color-scheme`). The
+design is deliberately flat: depth (shadow) is reserved for true overlays
+(dialogs, the side panel, toasts); everything in flow separates with lines and
+paper tiers. When adjusting styles, change tokens first and components second,
+and keep the two products visually in sync.
+
+```bash
+npm run test:webui:visual
+```
+
+boots the real server against a seeded temp registry, renders the snapshot
+view in headless Chrome at desktop (1280x800) and mobile (375x740) and fails
+on horizontal overflow, invisible core surfaces (header controls, composer,
+conversation), controls without an accessible name, a composer that is not
+flush with the viewport at reading position, or any page error. Screenshots
+land in `spikes/web-ui/artifacts/` (gitignored) as review evidence. It needs a
+local Chrome/Chromium (`CHROME_BIN` overrides autodetection) and is therefore
+a separate script rather than part of the default `npm test`.
