@@ -3608,6 +3608,49 @@ const FLAG_SPECS = {
   "todo-remind": { dry: "boolean", path: "string", title: "string", level: "string", force: "boolean" },
 };
 
+/**
+ * WHAT: Disambiguates a configured agent named `watch` from the live-timeline
+ * subcommand of the same name.
+ * WHY: Suggestion routing must be able to deliver `amux watch -p N "prompt"`
+ * without silently starting an endless timeline follower instead.
+ */
+export function shouldRouteWatchToAgent(rest, configPath) {
+  const commandArgs = parseFlags(rest, FLAG_SPECS.watch);
+  const sendArgs = parseFlags(rest, FLAG_SPECS.send);
+  if (commandArgs.positional.length === 0
+      || (sendArgs.positional.length === 0 && !sendArgs.flags.stdin)) return false;
+  try {
+    return resolveAgent("watch", configPath) === "watch";
+  } catch {
+    return false;
+  }
+}
+
+async function dispatchAgentTarget(name, rest, ctx) {
+  const resolved = resolveAgent(name, ctx.configPath);
+  const { flags, positional } = parseFlags(rest, FLAG_SPECS.send);
+
+  if (flags.stdin && positional.length > 0) {
+    throw new Error("--stdin cannot be combined with a positional prompt");
+  }
+  if (positional.length > 0 || flags.stdin) {
+    const prompt = flags.stdin ? await readPromptFromStdin() : positional.join(" ");
+    await cmdSend(resolved, prompt, flags, ctx);
+
+    const notifyUserFlag = !!(flags["notify-user"] || flags["notify-me"]);
+    if (flags.n || flags.m || notifyUserFlag) {
+      const { notifyWorker } = await import("./notify.mjs");
+      const pane = flags.p || 0;
+      notifyWorker({ name: resolved, pane, timeout: flags.t || 600,
+        notifyChannel: flags.n, msgSession: flags.m, notifyUser: notifyUserFlag,
+        prompt, agent: ctx.agent }).catch(() => {});
+      console.log(`🔔 Will notify when '${resolved}' is done.`);
+    }
+  } else {
+    await cmdAttach(resolved, ctx);
+  }
+}
+
 /** Main command dispatch. */
 export async function dispatch(argv, ctx) {
   const [cmd, ...rest] = argv;
@@ -3718,6 +3761,9 @@ export async function dispatch(argv, ctx) {
     }
 
     case "watch": {
+      if (shouldRouteWatchToAgent(rest, ctx.configPath)) {
+        return dispatchAgentTarget("watch", rest, ctx);
+      }
       const { flags } = parseFlags(rest, FLAG_SPECS.watch);
       return cmdWatch(ctx, flags);
     }
@@ -3901,31 +3947,7 @@ export async function dispatch(argv, ctx) {
       return cmdResume(ctx);
 
     // Default: treat first arg as agent name
-    default: {
-      const name = resolveAgent(cmd, ctx.configPath);
-      const { flags, positional } = parseFlags(rest, FLAG_SPECS.send);
-
-      if (flags.stdin && positional.length > 0) {
-        throw new Error("--stdin cannot be combined with a positional prompt");
-      }
-      if (positional.length > 0 || flags.stdin) {
-        // Send prompt
-        const prompt = flags.stdin ? await readPromptFromStdin() : positional.join(" ");
-        await cmdSend(name, prompt, flags, ctx);
-
-        // Background notification worker (if -n, -m, or --notify-user)
-        const notifyUserFlag = !!(flags["notify-user"] || flags["notify-me"]);
-        if (flags.n || flags.m || notifyUserFlag) {
-          const { notifyWorker } = await import("./notify.mjs");
-          const pane = flags.p || 0;
-          // Fire and forget - runs until agent is done
-          notifyWorker({ name, pane, timeout: flags.t || 600, notifyChannel: flags.n, msgSession: flags.m, notifyUser: notifyUserFlag, prompt, agent: ctx.agent }).catch(() => {});
-          console.log(`🔔 Will notify when '${name}' is done.`);
-        }
-      } else {
-        // Attach
-        await cmdAttach(name, ctx);
-      }
-    }
+    default:
+      return dispatchAgentTarget(cmd, rest, ctx);
   }
 }

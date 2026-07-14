@@ -330,9 +330,11 @@ and Codex how to use these commands from inside project panes. They also carry
 the shared ownership policy: one active ticket per agent, one end-to-end owner
 per feature, and at most one risk-appropriate review before the merge broker
 lands the PR and advances capacity to independent READY work. Project-specific
-authority fences are generated there too: `skydive:3` autonomously manages
-only `skydive:4`–`skydive:9`; reserved `skydive:0`–`skydive:2` require an
-explicit per-task instruction from Mattias and never count as idle capacity.
+authority fences are generated there too: pane `2` is the sole Claude
+manager/broker for each configured fleet and may manage only the same
+session's Codex implementation workers on panes `3+`. Panes `0`–`1` remain
+reserved, require an explicit per-task instruction from Mattias, and never
+count as idle capacity.
 
 ## Configuration
 

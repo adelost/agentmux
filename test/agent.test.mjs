@@ -233,7 +233,7 @@ feature("generated agent policy", () => {
     }],
   });
 
-  unit("hard-fences the skydive broker to its autonomous pane pool", {
+  unit("hard-fences pane 2 brokers to same-session implementation workers", {
     when: ["generating fresh agent hints", () => {
       const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
       paneDir(root, 0);
@@ -241,14 +241,17 @@ feature("generated agent policy", () => {
       rmSync(root, { recursive: true, force: true });
       return content;
     }],
-    then: ["p4-p9 are allowed while p0-p2 remain explicit on-demand exclusions", (content) => {
-      expect(content).toContain("<!-- amux-hints-version: 1.23.11 -->");
-      expect(content).toContain("Skydive broker panel authority is a hard allowlist");
-      expect(content).toContain("only for `skydive:4` through `skydive:9`");
-      expect(content).toContain("Every other Skydive pane is outside that manager allowlist");
-      expect(content).toContain("panes `skydive:0` through `skydive:2` are reserved on-demand");
-      expect(content).toMatch(/unless Mattias explicitly names that exact pane for that exact\s+current task/u);
-      expect(content).toContain("An idle reserved pane is still outside the allowlist");
+    then: ["pane 2 manages workers 3+ while panes 0-1 remain reserved", (content) => {
+      expect(content).toContain("<!-- amux-hints-version: 1.23.13 -->");
+      expect(content).toContain("Broker panel authority is a hard allowlist");
+      expect(content).toContain("pane `:2` is the sole manager/broker");
+      expect(content).toContain("panes `:3` and above in the same session");
+      expect(content).toContain("Panes `:0` and `:1` are");
+      expect(content).toContain("`skydive:2` manages `skydive:3` through `skydive:9`");
+      expect(content).toContain("`lsrc:2` manages `lsrc:3` through `lsrc:9`");
+      expect(content).toContain("`watch:2` manages");
+      expect(content).toMatch(/require Mattias\s+to name that exact pane for that exact current task/u);
+      expect(content).toContain("outside the allowlist.");
     }],
   });
 });
