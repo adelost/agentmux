@@ -23,13 +23,6 @@ export const SUGGESTIONS_BRIDGE_STATE_VERSION = 1;
 export const DEFAULT_COMMENT_BYTES = 64 * 1024;
 export const MAX_COMMENT_BYTES = 64 * 1024;
 export const MAX_PROMPT_BYTES = 96 * 1024;
-export const DEFAULT_IMPLEMENTATION_POLICY = [
-  "Root cause before patches: understand and address the underlying cause.",
-  "Refactor the affected seam when a durable root fix requires it, and leave the touched code better than you found it.",
-  "Follow the codebase standards; make the solution data-driven, declarative, and generic where appropriate.",
-  "Add a permanent regression gate for the defect class.",
-  "Do not perform unrelated or speculative refactoring.",
-].join(" ");
 
 const HUMAN_KINDS = new Set(["creator", "user"]);
 const RESPONSE_KINDS = new Set(["ai", "agent", "system"]);
@@ -126,9 +119,9 @@ export function loadSuggestionsBridgeConfig(path, { home = homedir(), allowTestO
   if (!Number.isSafeInteger(detailConcurrency) || detailConcurrency < 1 || detailConcurrency > 12) {
     throw new Error("config: detailConcurrency must be 1-12");
   }
-  const implementationPolicy = raw.implementationPolicy == null
-    ? DEFAULT_IMPLEMENTATION_POLICY
-    : assertString(raw.implementationPolicy, "implementationPolicy", { min: 32, max: MAX_POLICY_BYTES });
+  const implementationPolicy = raw.implementationPolicy == null ? null
+    : assertString(raw.implementationPolicy, "implementationPolicy", { min: 32,
+      max: MAX_POLICY_BYTES });
   const statePath = expandHome(raw.statePath ?? "~/.agentmux/suggestions-comment-bridge-state.json", home);
   const credentialFile = expandHome(raw.credentialFile
     ?? "~/.config/agent/suggestions-read-token", home);
@@ -352,16 +345,24 @@ export function serializeImplementationPolicy(value, label = "implementationPoli
     return assertString(serialized, label, { min: 32, max: MAX_POLICY_BYTES });
   }
   if (!isObject(value) || !Array.isArray(value.principles)
+      || !isObject(value.gateAdmission) || !Array.isArray(value.gateAdmission.levelOrder)
+      || !Array.isArray(value.gateAdmission.waivers)
       || !isObject(value.commentIntent) || !Array.isArray(value.commentIntent.requiredContext)) {
     throw new Error(`schema: ${label} must be a string or structured policy object`);
   }
   if (value.principles.length < 1 || value.principles.length > 16
+      || value.gateAdmission.levelOrder.length < 1 || value.gateAdmission.levelOrder.length > 8
+      || value.gateAdmission.waivers.length < 1 || value.gateAdmission.waivers.length > 16
       || value.commentIntent.requiredContext.length < 1
       || value.commentIntent.requiredContext.length > 16) {
     throw new Error(`schema: ${label} policy arrays must contain 1-16 entries`);
   }
   const principles = value.principles.map((item, index) =>
     policyLine(item, `${label}.principles[${index}]`));
+  const levels = value.gateAdmission.levelOrder.map((item, index) =>
+    policyLine(item, `${label}.gateAdmission.levelOrder[${index}]`, 80));
+  const waivers = value.gateAdmission.waivers.map((item, index) =>
+    policyLine(item, `${label}.gateAdmission.waivers[${index}]`));
   const requiredContext = value.commentIntent.requiredContext.map((item, index) =>
     policyLine(item, `${label}.commentIntent.requiredContext[${index}]`));
   const serialized = [
@@ -369,6 +370,20 @@ export function serializeImplementationPolicy(value, label = "implementationPoli
     `Summary: ${policyLine(value.summary, `${label}.summary`)}`,
     "Principles:",
     ...principles.map((item) => `- ${item}`),
+    "Gate admission:",
+    `- Invariant: ${policyLine(value.gateAdmission.invariant,
+      `${label}.gateAdmission.invariant`)}`,
+    `- Level order: ${levels.join(" -> ")}`,
+    `- Escalation: ${policyLine(value.gateAdmission.escalation,
+      `${label}.gateAdmission.escalation`)}`,
+    `- Red/green proof: ${policyLine(value.gateAdmission.redGreen,
+      `${label}.gateAdmission.redGreen`)}`,
+    "- Waivers:",
+    ...waivers.map((item) => `  - ${item}`),
+    `- Waiver evidence: ${policyLine(value.gateAdmission.waiverEvidence,
+      `${label}.gateAdmission.waiverEvidence`)}`,
+    `- Runtime budget: ${policyLine(value.gateAdmission.runtimeBudget,
+      `${label}.gateAdmission.runtimeBudget`)}`,
     `Boundary: ${policyLine(value.boundary, `${label}.boundary`)}`,
     "Comment intent:",
     `- Summary: ${policyLine(value.commentIntent.summary, `${label}.commentIntent.summary`)}`,
@@ -396,7 +411,12 @@ function remotePolicy(configPayload, projectId, fallback) {
   if (configPayload.project?.id === projectId && Object.hasOwn(configPayload.project, "implementationPolicy")) {
     candidates.unshift([configPayload.project.implementationPolicy, "project.implementationPolicy"]);
   }
-  if (!candidates.length) return serializeImplementationPolicy(fallback, "local implementationPolicy");
+  if (!candidates.length) {
+    if (fallback == null) {
+      throw new Error("schema: canonical implementationPolicy is missing from /api/config");
+    }
+    return serializeImplementationPolicy(fallback, "local implementationPolicy");
+  }
   const [value, label] = candidates[0];
   return serializeImplementationPolicy(value, label);
 }
@@ -418,7 +438,7 @@ export function buildSuggestionsCommentPrompt({
   projectId,
   ticket,
   comment,
-  implementationPolicy = DEFAULT_IMPLEMENTATION_POLICY,
+  implementationPolicy,
   maxCommentBytes = DEFAULT_COMMENT_BYTES,
   deliveryStage = "initial",
 }) {
@@ -721,10 +741,12 @@ export async function pollSuggestionsComments({
     fetchImpl, timeoutMs: config.requestTimeoutMs, readToken, maxBytes: 256 * 1024,
   }));
   const remoteIds = new Set(remoteConfig.projects.map((project) => project.id));
+  const policies = new Map();
   for (const projectId of Object.keys(config.projects)) {
     if (!remoteIds.has(projectId)) {
       throw new Error(`mapping: configured project '${projectId}' is absent from /api/config`);
     }
+    policies.set(projectId, remotePolicy(remoteConfig, projectId, config.implementationPolicy));
   }
 
   let delivered = 0;
@@ -763,7 +785,7 @@ export async function pollSuggestionsComments({
         throw error;
       }
     });
-    const policy = remotePolicy(remoteConfig, projectId, config.implementationPolicy);
+    const policy = policies.get(projectId);
 
     for (const detail of details) {
       if (detail.terminalTicketId) {

@@ -9,7 +9,6 @@ import { createHash } from "crypto";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
 import {
-  DEFAULT_IMPLEMENTATION_POLICY,
   REMINDER_STAGES,
   createAmuxCommentDeliverer,
   createAmuxCommentNotifier,
@@ -56,13 +55,27 @@ const ticket = (id, comments, overrides = {}) => ({
 
 const structuredPolicy = Object.freeze({
   title: "Implementationspolicy",
-  summary: "Fixa rotorsaken före symptom eller plåster och lägg en permanent regressionsgate för bugklassen.",
+  summary: "Fixa rotorsaken före symptom eller plåster och välj den minsta stabila verifieringen som motsvarar återfallsrisken.",
   principles: [
     "Refaktorera den berörda sömmen när rotfixen kräver det.",
     "Lämna den berörda koden bättre och prioritera projektets kodstandard.",
     "Välj datadrivet, deklarativt och generiskt där det minskar upprepning.",
-    "Lägg en permanent regressionsgate som fångar samma bugklass framöver.",
+    "Stärk närmaste befintliga static-, unit- eller contract-gate före en ny gate.",
   ],
+  gateAdmission: {
+    invariant: "Lägg en riktad deterministisk gate endast när felet blottar en stabil invariant med rimlig återfallsrisk.",
+    levelOrder: ["static", "unit", "contract", "integration", "end-to-end"],
+    escalation: "Använd integration endast när sömmen kräver det och end-to-end endast när lägre nivå inte kan fånga felklassen.",
+    redGreen: "En ny gate ska kunna visas falla före fixen och gå grön efter den.",
+    waivers: [
+      "Befintlig coverage fångar redan felet.",
+      "Felet är engångs-content eller engångs-config.",
+      "Oraklet är instabilt.",
+      "Runtime, flakighet eller underhåll är oproportionerligt.",
+    ],
+    waiverEvidence: "När en ny gate avstås krävs en kort motivering och verifieringsevidens.",
+    runtimeBudget: "En materiell ökning av suite-runtime kräver uttryckligt brokerbeslut.",
+  },
   boundary: "Ingen orelaterad eller spekulativ refaktor hör hemma i samma ticket.",
   commentIntent: {
     summary: "Feedback återkontrolleras mot ticketen.",
@@ -78,7 +91,8 @@ const structuredPolicy = Object.freeze({
   },
 });
 
-async function fixtureServer({ projectIds = ["skydive"], policy = null, boards = {}, lists = null } = {}) {
+async function fixtureServer({ projectIds = ["skydive"], policy = structuredPolicy,
+  boards = {}, lists = null } = {}) {
   const requests = [];
   const server = createServer((request, response) => {
     const url = new URL(request.url, "http://fixture.invalid");
@@ -134,7 +148,7 @@ function bridgeConfig(baseUrl, projects = { skydive: { agent: "skydive", pane: 3
     maxCommentBytes: 64 * 1024,
     requestTimeoutMs: 3000,
     detailConcurrency: 3,
-    implementationPolicy: DEFAULT_IMPLEMENTATION_POLICY,
+    implementationPolicy: null,
   };
 }
 
@@ -203,7 +217,8 @@ describe.sequential("Suggestions human-comment relay", () => {
       expect(result.delivered).toBe(1);
       expect(fake.records()).toHaveLength(1);
       expect(fake.records()[0].stdin).toContain("please fix the actual horizon");
-      expect(fake.records()[0].stdin).toContain(DEFAULT_IMPLEMENTATION_POLICY);
+      expect(fake.records()[0].stdin).toContain(structuredPolicy.summary);
+      expect(fake.records()[0].stdin).toContain(structuredPolicy.gateAdmission.invariant);
       expect(fake.records()[0].args).toContain("suggestions-comment:skydive:SKY-1:4:initial");
       expect(fake.records()[0].args).toEqual(expect.arrayContaining(["--wait-ms", "0", "--stdin"]));
     } finally { await fixture.close(); }
@@ -432,17 +447,33 @@ describe.sequential("Suggestions human-comment relay", () => {
       const fromAgentdocs = serializeImplementationPolicy(agentdocs.implementationPolicy);
       expect(fromAgentdocs).toContain(structuredPolicy.title);
       expect(fromAgentdocs).toContain(structuredPolicy.commentIntent.reconciliation);
+      expect(fromAgentdocs).toContain("static -> unit -> contract -> integration -> end-to-end");
       const result = await run({ fixture, state: emptyState(),
         deliver: async (item) => deliveries.push(item) });
       expect(result.delivered).toBe(1);
       expect(deliveries[0].prompt).toContain(fromAgentdocs);
       for (const value of [structuredPolicy.summary, ...structuredPolicy.principles,
+        structuredPolicy.gateAdmission.invariant, structuredPolicy.gateAdmission.escalation,
+        structuredPolicy.gateAdmission.redGreen, ...structuredPolicy.gateAdmission.waivers,
+        structuredPolicy.gateAdmission.waiverEvidence,
+        structuredPolicy.gateAdmission.runtimeBudget,
         structuredPolicy.boundary, structuredPolicy.commentIntent.summary,
         ...structuredPolicy.commentIntent.requiredContext,
         structuredPolicy.commentIntent.reconciliation, structuredPolicy.commentIntent.ambiguity,
         structuredPolicy.commentIntent.trustBoundary]) {
         expect(deliveries[0].prompt).toContain(value);
       }
+    } finally { await fixture.close(); }
+  });
+
+  it("fails closed before board reads when canonical and explicit local policy are absent", async () => {
+    const fixture = await fixtureServer({ policy: null, boards: { skydive: [] } });
+    try {
+      await expect(run({ fixture, config: bridgeConfig(fixture.baseUrl),
+        deliver: async () => {} })).rejects.toThrow(
+        "canonical implementationPolicy is missing from /api/config",
+      );
+      expect(fixture.requests).toEqual(["/api/config"]);
     } finally { await fixture.close(); }
   });
 
