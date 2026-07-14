@@ -108,8 +108,11 @@ if [ -d "$QUEUE_DIR" ]; then
 import json, glob, os, sys, time
 qdir, stuck_min = sys.argv[1], float(sys.argv[2])
 now = time.time()
-TERMINAL = {"delivered", "acknowledged", "acked", "failed", "dead", "dead-letter",
-            "done", "cancelled", "canceled", "delivered-unverified"}
+# Must match core/delivery-queue.mjs TERMINAL_DELIVERY_STATES exactly.
+# 1.23.8 added "delivered_unverified" (UNDERSCORE) — a hyphen here would make a
+# terminalised job look stuck and fire a false "wedged queue" alert.
+TERMINAL = {"acknowledged", "cancelled", "delivered_unverified",
+            "delivered", "acked", "failed", "canceled", "done", "dead"}
 for f in glob.glob(os.path.join(qdir, "*", "*.json")):
     try:
         d = json.load(open(f))
