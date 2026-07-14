@@ -12,7 +12,8 @@
     "start": "node index.mjs",
     "dev": "bash bin/start.sh",
     "test": "vitest run",
-    "test:webui:visual": "node spikes/web-ui/tools/visual-gate.mjs"
+    "test:webui:visual": "node spikes/web-ui/tools/visual-gate.mjs",
+    "test:webui:native-canary": "node spikes/web-ui/tools/native-canary-gate.mjs"
   },
   "dependencies": {
     "@discordjs/opus": "^0.10.0",

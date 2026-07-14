@@ -203,7 +203,31 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     catch { return ""; }
   }
 
+  function isNativePane(mapping, pane) {
+    try { return loadConfig(agentsYamlPath)?.[mapping.name]?.backend === "native"; }
+    catch { return false; }
+  }
+
   const isCodexPane = (mapping, pane) => /codex/i.test(paneCommand(mapping, pane));
+
+  async function replyNativeStatus(msg, mapping, pane) {
+    const snapshot = await agent.nativeRuntime.history(mapping.name, pane);
+    const item = snapshot.agent;
+    const context = item.context;
+    const contextLabel = Number.isFinite(context?.percent)
+      ? `${Math.round(context.percent)}%${Number.isFinite(context.usedTokens)
+        ? Number.isFinite(context.windowTokens)
+          ? ` (${Math.round(context.usedTokens / 1_000)}k/${Math.round(context.windowTokens / 1_000)}k)`
+          : ` (${Math.round(context.usedTokens / 1_000)}k)`
+        : ""}`
+      : "unknown until the next engine usage event";
+    const stateLabel = item.running ? `working (${item.operation || "turn"})` : "idle";
+    await msg.reply(
+      `**${mapping.name}** pane ${pane} · native ${item.engine} · ${stateLabel}\n` +
+      `model: ${item.model} · effort: ${item.effort} · context: ${contextLabel}\n` +
+      `session: ${item.sessionId || "not started"}`,
+    );
+  }
 
   async function nativeCodexStatus(mapping, pane) {
     return codexStatusDriver({
@@ -354,6 +378,10 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     },
 
     "/status": async (msg, mapping, pane) => {
+      if (isNativePane(mapping, pane)) {
+        await replyNativeStatus(msg, mapping, pane);
+        return;
+      }
       const override = overrides.has(msg.channelId) ? " (override)" : "";
       if (isCodexPane(mapping, pane)) {
         const profile = selectedCodexProfile(state, mapping.name, pane);
@@ -390,6 +418,13 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     },
 
     "/switch": async (msg, mapping, pane, args) => {
+      if (isNativePane(mapping, pane)) {
+        await msg.reply(
+          "Native-canaryn delar runtime-processens lokala Codex-inloggning. " +
+          "Kontobyte mitt i samma session är avsiktligt spärrat; använd en separat native-target/profil.",
+        );
+        return;
+      }
       if (!isCodexPane(mapping, pane)) {
         await msg.reply(`**${mapping.name}:${pane}** är inte en Codex-panel; kontoprofiler gäller bara Codex.`);
         return;
@@ -475,6 +510,37 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     // rationale below).
     "/model": async (msg, mapping, pane, args) => {
       const name = (args || "").trim();
+      if (isNativePane(mapping, pane)) {
+        if (!name) {
+          await replyNativeStatus(msg, mapping, pane);
+          return;
+        }
+        const spec = name.match(/^([a-z0-9._\[\]-]+)(?:\s+(low|medium|high|xhigh|max))?$/i);
+        if (!spec) {
+          await msg.reply(`invalid native model spec: \`${name}\` — expected \`<model> [low|medium|high|xhigh|max]\``);
+          return;
+        }
+        const command = `/model ${spec[1]}${spec[2] ? ` ${spec[2].toLowerCase()}` : ""}`;
+        const result = await deliveryBroker.enqueueAndWait({
+          agentName: mapping.name,
+          pane,
+          text: command,
+          kind: "slash",
+          source: "discord",
+          metadata: { channelId: msg.channelId, messageId: msg.id },
+        });
+        if (!result.delivered) {
+          await msg.reply(result.pending
+            ? `queued durably \`${command}\``
+            : `⚠️ native model change failed: ${result.reason || "rejected"}`);
+          return;
+        }
+        const updated = await agent.nativeRuntime.history(mapping.name, pane);
+        await msg.reply(
+          `✅ ${mapping.name}:${pane} → ${updated.agent.model} ${updated.agent.effort}; gäller från nästa turn`,
+        );
+        return;
+      }
       const codexPane = isCodexPane(mapping, pane);
       if (!name) {
         const ctx = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
@@ -569,6 +635,10 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     },
 
     "/restore": async (msg, mapping, pane) => {
+      if (isNativePane(mapping, pane)) {
+        await msg.reply("Native-targets TUI-parkeras inte; använd `//model <modell> [effort]` explicit.");
+        return;
+      }
       const park = readParkState(mapping.name, pane);
       if (!park) {
         await msg.reply(`${mapping.name}:${pane} är inte parkerad; ingen modell behöver återställas.`);
@@ -636,6 +706,10 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     },
 
     "/dismiss": async (msg, mapping, pane) => {
+      if (isNativePane(mapping, pane)) {
+        await msg.reply("native automation has no terminal permission modal to dismiss");
+        return;
+      }
       const target = `${mapping.name}:.${pane}`;
       const dismissed = await withPaneSendLock(`${mapping.name}:${pane}`, () =>
         agent.dismissBlockingPrompt(target));
@@ -659,6 +733,10 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     },
 
     "/follow": async (msg, mapping, pane) => {
+      if (isNativePane(mapping, pane)) {
+        await msg.reply("native follow is always on — completed turns are mirrored from structured runtime events");
+        return;
+      }
       await startFollow(msg, mapping, pane);
     },
 

@@ -296,6 +296,10 @@ export function createAutoCompact({
     const now = Date.now();
 
     for (const a of agents) {
+      // The native runtime owns its exact token counters, idle clock and
+      // compact RPC. Running the terminal heuristic as a second owner would
+      // race or double-compact the same session.
+      if (a.backend === "native") continue;
       const panes = Array.isArray(a.panes) ? a.panes : [];
       for (let i = 0; i < panes.length; i++) {
         const paneKey = `${a.name}:${i}`;

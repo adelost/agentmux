@@ -178,6 +178,23 @@ export function checkConfig({ agents, error }) {
   return check("config", OK, `${agents.length} agents configured`);
 }
 
+export function checkNativeRuntime({ configured = 0, online = 0, running = 0, details = [] } = {}) {
+  if (!configured) return null;
+  if (online !== configured) {
+    return check(
+      "native runtime",
+      FAIL,
+      `${online}/${configured} configured runtime${configured === 1 ? "" : "s"} online${details.length ? ` (${details.join(", ")})` : ""}`,
+      "run `amux runtime status` and start the missing runtime; native targets fail closed",
+    );
+  }
+  return check(
+    "native runtime",
+    OK,
+    `${online}/${configured} online · ${running} active turn${running === 1 ? "" : "s"}`,
+  );
+}
+
 /** Durable prompts must be visible even when the bridge is intentionally off. */
 export function checkDeliveryQueue({ stats, bridgeRunning, now = Date.now() }) {
   if (!stats?.total) return check("delivery queue", OK, "empty");

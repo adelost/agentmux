@@ -19,6 +19,12 @@
  * that runs shell commands synchronously and returns stdout.
  */
 export function detectSenderFromEnv(env, execFn) {
+  const nativeSession = String(env.AMUX_AGENT_NAME || "").trim();
+  const nativePane = Number(env.AMUX_PANE);
+  if (/^[a-zA-Z0-9_-]{1,64}$/.test(nativeSession)
+      && Number.isSafeInteger(nativePane) && nativePane >= 0) {
+    return `${nativeSession}:${nativePane}`;
+  }
   if (!env.TMUX) return null;
   // TMUX_PANE is the per-process pane id (%17, %18, ...) inherited from
   // the calling shell. It survives across active-pane switches, unlike

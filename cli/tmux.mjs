@@ -16,6 +16,9 @@ import {
 import { parseSenderHeader } from "../core/sender-detect.mjs";
 import { detectPaneStatus } from "./format.mjs";
 import { findChannelForPane, validateAgentPane } from "./config.mjs";
+import { loadConfig } from "./config.mjs";
+import { createNativeRuntimeClient } from "../core/native-runtime-client.mjs";
+import { createAgentRouter } from "../core/agent-router.mjs";
 
 const exec = promisify(execCb);
 
@@ -25,13 +28,29 @@ export function createTmuxContext(socket, configPath) {
   const run = (cmd, t = 30000) => exec(cmd, { timeout: t, maxBuffer: 1024 * 1024 });
   const tmux = (cmd) => tmuxExec(`tmux -S '${esc(socket)}' ${cmd}`);
 
-  const agent = createAgent({ tmuxSocket: socket, configPath, timeout: 600000, run, tmuxExec });
+  const tmuxAgent = createAgent({ tmuxSocket: socket, configPath, timeout: 600000, run, tmuxExec });
+  const nativeRuntime = createNativeRuntimeClient({ configPath });
+  const agent = createAgentRouter({ tmuxAgent, nativeRuntime });
 
-  return { tmux, tmuxExec, run, agent, socket, configPath, deliveryQueue: createDeliveryQueue() };
+  return {
+    tmux,
+    tmuxExec,
+    run,
+    agent,
+    tmuxAgent,
+    nativeRuntime,
+    socket,
+    configPath,
+    deliveryQueue: createDeliveryQueue(),
+  };
 }
 
 /** Check if a tmux session exists. */
 export async function hasSession(ctx, name) {
+  if (ctx.agent?.isNativeTarget?.(name, 0)) {
+    try { await ctx.agent.nativeRuntime.ensureTarget(name, 0); return true; }
+    catch { return false; }
+  }
   try {
     await ctx.tmux(`has-session -t '${esc(name)}'`);
     return true;
@@ -50,6 +69,10 @@ export async function ensureAndAttach(ctx, name, configPath) {
   const { loadConfig, getLayout } = await import("./config.mjs");
   const config = loadConfig(configPath);
   const panes = config[name]?.panes || [];
+  if (config[name]?.backend === "native") {
+    await Promise.all(panes.map((_, pane) => ctx.agent.nativeRuntime.ensureTarget(name, pane)));
+    return { native: true, runtimeUrl: config[name].runtimeUrl };
+  }
   const agentPanes = panes
     .map((p, i) => (/claude|codex/.test(p?.cmd || "") ? i : -1))
     .filter((i) => i >= 0);
@@ -90,11 +113,28 @@ export async function ensureAndAttach(ctx, name, configPath) {
 
 /** Kill a tmux session. */
 export async function killSession(ctx, name) {
+  if (ctx.agent?.isNativeTarget?.(name, 0)) {
+    throw new Error(`'${name}' uses the native runtime; stop or delete it from AMUX Code`);
+  }
   await ctx.tmux(`kill-session -t '${esc(name)}'`);
 }
 
 /** List panes in a session. Returns array of { index, command, width, height }. */
 export async function listPanes(ctx, name) {
+  if (ctx.agent?.isNativeTarget?.(name, 0)) {
+    const entry = loadConfig(ctx.configPath)?.[name];
+    if (!entry?.panes) return [];
+    return Promise.all(entry.panes.map(async (pane, index) => {
+      let command = pane.engine || String(pane.cmd || "").replace(/^native:/, "") || "native";
+      try {
+        const snapshot = await ctx.agent.nativeRuntime.history(name, index);
+        command = `${command}:${snapshot.agent.running ? "working" : "idle"}`;
+      } catch {
+        command = `${command}:offline`;
+      }
+      return { index, command, width: 0, height: 0, backend: "native" };
+    }));
+  }
   try {
     const { stdout } = await ctx.tmux(
       `list-panes -t '${esc(name)}' -F '#{pane_index}|#{pane_width}x#{pane_height}|#{pane_current_command}'`,
@@ -117,6 +157,13 @@ export async function listPanes(ctx, name) {
  * captures (they reuse a single capture per pane for latency).
  */
 export async function getPaneStatus(ctx, name, pane) {
+  if (ctx.agent?.isNativeTarget?.(name, pane)) {
+    try {
+      return (await ctx.agent.nativeRuntime.history(name, pane)).agent.running ? "working" : "idle";
+    } catch {
+      return "unknown";
+    }
+  }
   let stdout;
   try {
     ({ stdout } = await ctx.tmux(

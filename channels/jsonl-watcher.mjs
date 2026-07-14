@@ -889,6 +889,7 @@ export function createJsonlWatcher({
 
     for (const [name, entry] of Object.entries(config || {})) {
       if (!entry?.dir || !Array.isArray(entry.panes)) continue;
+      if (entry.backend === "native") continue;
       for (let i = 0; i < entry.panes.length; i++) {
         const cmd = entry.panes[i]?.cmd || "";
         if (!/^(claude|codex)/.test(cmd)) continue;
@@ -914,6 +915,7 @@ export function createJsonlWatcher({
     const now = Date.now();
     for (const [name, entry] of Object.entries(config || {})) {
       if (!entry?.dir || !Array.isArray(entry.panes)) continue;
+      if (entry.backend === "native") continue;
       for (let i = 0; i < entry.panes.length; i++) {
         const cmd = entry.panes[i]?.cmd || "";
         if (!/^(claude|codex)/.test(cmd)) continue;

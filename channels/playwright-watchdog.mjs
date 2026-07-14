@@ -93,6 +93,7 @@ export function createPlaywrightWatchdog({
 
     const now = Date.now();
     for (const a of agents) {
+      if (a.backend === "native") continue;
       const panes = Array.isArray(a.panes) ? a.panes : [];
       for (let i = 0; i < panes.length; i++) {
         await inspectPane(a, i, now);

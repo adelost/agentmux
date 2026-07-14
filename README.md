@@ -8,7 +8,8 @@ safeguards for long-running AI-assisted development workflows.
 ```text
 Discord / amux CLI
         -> agentmux bridge
-        -> tmux panes
+        -> durable per-agent queue
+        -> tmux panes OR AMUX Code native runtime
         -> Claude Code / Codex
         -> structured logs, status, files, and replies
 ```
@@ -33,7 +34,7 @@ workspace.
 | Concept | Purpose |
 |---|---|
 | Agent | A named project workspace from `agentmux.yaml` |
-| Pane | One Claude Code or Codex session inside a tmux window |
+| Pane | One addressed Claude Code or Codex session; tmux or native runtime |
 | Bridge | The Node.js process that connects Discord, tmux, and logs |
 | `amux` | CLI for sending prompts, reading logs, checking status, and coordinating panes |
 | `.agents/` | Generated per-pane working directories and instruction files |
@@ -100,6 +101,55 @@ prompt or creating an unbounded duplicate loop. Rescue Enter and destructive
 composer cleanup require two consistent live observations, while a fresh exact
 JSONL event always wins over tmux repaint. `amux doctor` reports queue health
 alongside bridge and tmux health.
+
+### Native runtime canary (no tmux)
+
+AMUX Code can own selected agents directly through Claude's stream-json mode
+and Codex app-server. The Discord bridge, CLI, durable FIFO, media uploads,
+reply mirroring, context meters, interrupt and compact commands stay the same;
+only the terminal/TUI transport is replaced. Backend selection is explicit per
+agent and fails closed, so an offline native runtime can never create a second
+shadow conversation in tmux.
+
+```yaml
+agents:
+  skybar-canary:
+    dir: ~/.agentmux/canaries/skybar-native
+    backend: native
+    runtime: http://127.0.0.1:8812
+    claude: 1
+    codex: 1
+    claudeModel: claude-opus-4-8
+    codexModel: gpt-5.6-sol
+    effort: high
+```
+
+Start the independent background process, then sync the canary channels:
+
+```bash
+amux runtime start --port 8812 \
+  --data-dir ~/.agentmux/canaries/skybar-runtime \
+  --state-dir ~/.agentmux/canaries/skybar-runtime-service
+amux sync
+amux skybar-canary -p 0 "reply CANARY_OK"
+amux log skybar-canary -p 0
+amux esc skybar-canary -p 0
+```
+
+The runtime process is deliberately separate from the Discord bridge. Either
+one can restart while the other remains available; `amux runtime stop` refuses
+to kill an active turn unless `--force` is explicit. Existing tmux fleets are
+untouched, and `amux restart --all` skips native agents.
+
+Before binding a real Discord channel, run the isolated real-engine gate:
+
+```bash
+npm run test:webui:native-canary -- --port 8812
+```
+
+The gate restarts its own runtime and verifies both engine sessions, delivery,
+uploads, usage, effort, interrupt, compact and duplicate-free reply mirroring
+without creating a tmux session.
 
 ### Hook-pushed pane state (event ledger)
 

@@ -103,6 +103,7 @@ export function createDriftGuard({
     let stateChanged = false;
 
     for (const a of agents) {
+      if (a.backend === "native") continue;
       const panes = Array.isArray(a.panes) ? a.panes : [];
       for (let i = 0; i < panes.length; i++) {
         // Only Claude panes have CLAUDE.md baseline rules; skip shells/make/etc.

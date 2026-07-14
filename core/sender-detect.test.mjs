@@ -24,6 +24,15 @@ const makeExec = ({ session = "claw", pane = "0", throwOn, paneById } = {}) =>
   };
 
 feature("detectSenderFromEnv", () => {
+  unit("uses explicit native runtime identity without tmux", {
+    given: ["native agent env", () => ({
+      env: { AMUX_AGENT_NAME: "skybar-canary", AMUX_PANE: "1" },
+      exec: () => { throw new Error("tmux must not be consulted"); },
+    })],
+    when: ["detecting sender", ({ env, exec }) => detectSenderFromEnv(env, exec)],
+    then: ["returns the stable native address", (result) => expect(result).toBe("skybar-canary:1")],
+  });
+
   unit("returns null when TMUX env not set", {
     given: ["env without TMUX", () => ({ env: {}, exec: makeExec() })],
     when: ["detecting sender", ({ env, exec }) => detectSenderFromEnv(env, exec)],

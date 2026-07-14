@@ -154,6 +154,32 @@ function writeCodexYaml() {
   return path;
 }
 
+function writeNativeCodexYaml() {
+  const path = join(tmpdir(), `amux-handlers-native-${Date.now()}-${Math.random().toString(36).slice(2)}.yaml`);
+  writeFileSync(path, `_ai:\n  dir: /home/user/project\n  backend: native\n  runtimeUrl: http://127.0.0.1:8812\n  panes:\n    - name: codex\n      cmd: native:codex\n      engine: codex\n`);
+  return path;
+}
+
+function enableNativeAgent(setupResult) {
+  setupResult.agent.isNativeTarget = vi.fn(() => true);
+  setupResult.agent.nativeRuntime = {
+    history: vi.fn(async () => ({
+      agent: {
+        id: "native-agent",
+        engine: "codex",
+        model: "gpt-5.6-sol",
+        effort: "high",
+        sessionId: "native-session",
+        running: false,
+        operation: null,
+        context: { percent: 37.4, usedTokens: 74_800, windowTokens: 200_000 },
+      },
+      events: [],
+    })),
+  };
+  return setupResult;
+}
+
 function nativeStatus({ account = "one@example.com (Pro)", model = "gpt-5.6-sol", effort = "xhigh" } = {}) {
   return {
     version: "0.144.1",
@@ -356,6 +382,65 @@ feature("Codex native /status and account switching", () => {
       expect(reply).toContain("Codex-profil **2**");
       delete process.env.AMUX_CODEX_PROFILE_2_HOME;
       rmSync(root, { recursive: true, force: true });
+    }],
+  });
+});
+
+feature("AMUX Code Discord command compatibility", () => {
+  component("native /status reads structured runtime state instead of driving the Codex TUI", {
+    given: ["a native Codex target", () => {
+      const path = writeNativeCodexYaml();
+      const driver = vi.fn();
+      const s = enableNativeAgent(setup({ agentsYamlPath: path, codexStatusDriver: driver }));
+      return { ...s, path, driver, msg: mockMsg({ content: "/status" }) };
+    }],
+    when: ["the command is handled", async ({ onMessage, msg, path }) => {
+      await onMessage(msg);
+      unlinkSync(path);
+    }],
+    then: ["runtime model, effort, tokens and session are shown", (_, { msg, driver }) => {
+      expect(driver).not.toHaveBeenCalled();
+      const reply = msg.reply.mock.calls[0][0];
+      expect(reply).toContain("native codex");
+      expect(reply).toContain("gpt-5.6-sol");
+      expect(reply).toContain("37% (75k/200k)");
+      expect(reply).toContain("native-session");
+    }],
+  });
+
+  component("native /model is durably brokered and applies on the next turn", {
+    given: ["a native Codex target", () => {
+      const path = writeNativeCodexYaml();
+      const s = enableNativeAgent(setup({ agentsYamlPath: path }));
+      return { ...s, path, msg: mockMsg({ content: "/model gpt-5.6-sol high" }) };
+    }],
+    when: ["the command is handled", async ({ onMessage, msg, path }) => {
+      await onMessage(msg);
+      unlinkSync(path);
+    }],
+    then: ["no TUI restart occurs", (_, { msg, agent, deliveryBroker }) => {
+      expect(deliveryBroker.enqueueAndWait).toHaveBeenCalledWith(expect.objectContaining({
+        text: "/model gpt-5.6-sol high",
+        kind: "slash",
+      }));
+      expect(agent.restartCodex).not.toHaveBeenCalled();
+      expect(msg.reply.mock.calls[0][0]).toContain("gäller från nästa turn");
+    }],
+  });
+
+  component("native /switch fails explicitly without touching tmux or account state", {
+    given: ["a native Codex target", () => {
+      const path = writeNativeCodexYaml();
+      const s = enableNativeAgent(setup({ agentsYamlPath: path }));
+      return { ...s, path, msg: mockMsg({ content: "/switch" }) };
+    }],
+    when: ["the command is handled", async ({ onMessage, msg, path }) => {
+      await onMessage(msg);
+      unlinkSync(path);
+    }],
+    then: ["the limitation is visible and no pane restart occurs", (_, { msg, agent }) => {
+      expect(agent.restartCodex).not.toHaveBeenCalled();
+      expect(msg.reply.mock.calls[0][0]).toContain("separat native-target");
     }],
   });
 });
