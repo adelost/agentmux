@@ -200,6 +200,7 @@ const cleanChildEnv = () => {
  * @param {string} [options.codexCommand]
  * @param {number} [options.autoCompactContextPercent]
  * @param {number} [options.autoCompactIdleMs]
+ * @param {Record<string, string | Buffer>} [options.staticAssets]
  */
 export function createWebUi(options = {}) {
   const bootId = randomUUID();
@@ -224,6 +225,10 @@ export function createWebUi(options = {}) {
     claude: [...(options.models?.claude ?? DEFAULT_MODELS.claude)],
     codex: [...(options.models?.codex ?? DEFAULT_MODELS.codex)],
   };
+  const staticAssets = new Map(["index.html", "app.js", "style.css"].map((file) => {
+    const supplied = options.staticAssets?.[file];
+    return [file, Buffer.from(supplied === undefined ? readFileSync(join(ROOT, file)) : supplied)];
+  }));
 
   mkdirSync(uploadDir, { recursive: true, mode: 0o700 });
   try { chmodSync(dataDir, 0o700); } catch {}
@@ -1101,7 +1106,7 @@ export function createWebUi(options = {}) {
       "content-type": contentType,
       "content-security-policy": "default-src 'self'; connect-src 'self'; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'",
     }));
-    response.end(readFileSync(join(ROOT, file)));
+    response.end(staticAssets.get(file));
   };
 
   const handler = async (request, response) => {

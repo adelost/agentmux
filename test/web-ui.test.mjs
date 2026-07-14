@@ -700,4 +700,20 @@ describe("AMUX Code project and agent registry", () => {
     expect(config.body.efforts.codex).toContain("xhigh");
     expect(config.body.autoCompact).toEqual({ contextPercent: 60, idleMs: 300_000 });
   });
+
+  it("snapshots frontend assets at process start so backend and UI releases stay atomic", async () => {
+    const assets = {
+      "index.html": "release-a-index",
+      "app.js": "release-a-app",
+      "style.css": "release-a-style",
+    };
+    const { url } = await setup({ staticAssets: assets });
+    assets["index.html"] = "release-b-index";
+    assets["app.js"] = "release-b-app";
+    assets["style.css"] = "release-b-style";
+
+    expect((await request(url)).body).toBe("release-a-index");
+    expect((await request(`${url}/app.js`)).body).toBe("release-a-app");
+    expect((await request(`${url}/style.css`)).body).toBe("release-a-style");
+  });
 });
