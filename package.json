@@ -11,7 +11,8 @@
     "setup": "bash bin/setup.sh",
     "start": "node index.mjs",
     "dev": "bash bin/start.sh",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:webui:visual": "node spikes/web-ui/tools/visual-gate.mjs"
   },
   "dependencies": {
     "@discordjs/opus": "^0.10.0",

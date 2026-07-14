@@ -4,3 +4,4 @@ agents.yaml
 agentmux.yaml
 *.pid
 test/recordings/
+spikes/web-ui/artifacts/
