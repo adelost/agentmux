@@ -1,105 +1,174 @@
 <!doctype html>
 <html lang="sv">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>amux web-ui spike</title>
-<style>
-  :root { color-scheme: dark; }
-  body { font: 14px/1.5 ui-monospace, monospace; background: #14161a; color: #d8dde4; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
-  h1 { font-size: 1.1rem; } h1 small { color: #6b7480; font-weight: normal; }
-  #log { border: 1px solid #2a2f36; border-radius: 8px; padding: 1rem; min-height: 200px; }
-  .user { color: #8ab4f8; margin-top: .8rem; }
-  .assistant { color: #d8dde4; white-space: pre-wrap; }
-  .live { color: #9aa4af; white-space: pre-wrap; }
-  .meta { color: #6b7480; font-size: .85em; }
-  .error { color: #f28b82; white-space: pre-wrap; }
-  form { display: flex; gap: .5rem; margin-top: 1rem; }
-  input[type=text] { flex: 1; background: #1c2026; color: inherit; border: 1px solid #2a2f36; border-radius: 6px; padding: .5rem .7rem; }
-  button { background: #2b3a55; color: #d8dde4; border: 0; border-radius: 6px; padding: .5rem 1rem; cursor: pointer; }
-  button:disabled { opacity: .5; cursor: default; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>AMUX Code</title>
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<h1>amux web-ui spike <small id="status">ingen konversation</small></h1>
-<div id="log"></div>
-<form id="composer">
-  <input id="prompt" type="text" placeholder="Skriv en prompt…" autocomplete="off">
-  <button id="send" type="submit">Skicka</button>
-</form>
-<script>
-"use strict";
-const log = document.getElementById("log");
-const statusEl = document.getElementById("status");
-const promptEl = document.getElementById("prompt");
-const sendEl = document.getElementById("send");
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="AMUX Code, startsida">
+      <span class="brand-mark" aria-hidden="true">A</span>
+      <span>AMUX Code</span>
+    </a>
 
-let conversationId = new URLSearchParams(location.search).get("c");
-let liveEl = null;
+    <label class="project-switcher" for="project-select">
+      <span>Projekt</span>
+      <select id="project-select" aria-label="Välj projekt"></select>
+    </label>
 
-const line = (className, text) => {
-  const el = document.createElement("div");
-  el.className = className;
-  el.textContent = text;
-  log.append(el);
-  return el;
-};
+    <div class="topbar-actions">
+      <span class="boundary-badge" title="Tjänsten är endast tillgänglig via datorn eller ditt tailnet">
+        Tailnet
+      </span>
+      <button class="button compact" id="new-project-button" type="button">Nytt projekt</button>
+    </div>
+  </header>
 
-const render = (event) => {
-  if (event.type === "spike" && event.subtype === "user") {
-    line("user", "› " + event.text);
-    liveEl = line("live", "");
-    sendEl.disabled = true;
-    statusEl.textContent = "kör…";
-  } else if (event.type === "stream_event"
-      && event.event?.type === "content_block_delta"
-      && event.event.delta?.type === "text_delta") {
-    if (liveEl) liveEl.textContent += event.event.delta.text;
-  } else if (event.type === "assistant") {
-    const text = (event.message?.content ?? [])
-      .filter((block) => block.type === "text").map((block) => block.text).join("");
-    if (liveEl) { liveEl.remove(); liveEl = null; }
-    if (text) line("assistant", text);
-  } else if (event.type === "result") {
-    line("meta", `✓ ${event.subtype} · ${event.duration_ms} ms · $${(event.total_cost_usd ?? 0).toFixed(4)} · session ${event.session_id}`);
-  } else if (event.type === "spike" && event.subtype === "turn-done") {
-    sendEl.disabled = false;
-    statusEl.textContent = "klar";
-    if (event.code !== 0) line("error", "turn misslyckades (exit " + event.code + ")\n" + (event.stderr ?? ""));
-  } else if (event.type === "spike" && event.subtype === "protocol-error") {
-    line("error", "protokollfel: " + event.line);
-  }
-};
+  <main class="app-shell">
+    <aside class="agent-sidebar" aria-label="Agenter i projektet">
+      <div class="aside-heading">
+        <span>Agenter</span>
+        <button class="icon-button" id="new-agent-button" type="button" aria-label="Skapa agent" title="Skapa agent">+</button>
+      </div>
+      <div class="agent-list" id="agent-list"></div>
 
-const attach = () => {
-  new EventSource(`/api/conversations/${conversationId}/events`)
-    .onmessage = (message) => render(JSON.parse(message.data));
-  statusEl.textContent = "ansluten";
-};
+      <div class="read-policy">
+        <span class="read-policy-dot" aria-hidden="true"></span>
+        <span>All agenthistorik är läsbar. Skrivregler kan läggas till senare.</span>
+      </div>
 
-document.getElementById("composer").addEventListener("submit", async (submit) => {
-  submit.preventDefault();
-  const prompt = promptEl.value.trim();
-  if (!prompt) return;
-  promptEl.value = "";
-  const idempotencyKey = crypto.randomUUID();
-  if (!conversationId) {
-    const created = await fetch("/api/conversations", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prompt, idempotencyKey }),
-    }).then((r) => r.json());
-    conversationId = created.id;
-    history.replaceState(null, "", "?c=" + conversationId);
-    attach();
-  } else {
-    await fetch(`/api/conversations/${conversationId}/messages`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prompt, idempotencyKey }),
-    });
-  }
-});
+      <button class="button danger quiet project-delete" id="delete-project-button" type="button">
+        Ta bort projektet
+      </button>
+    </aside>
 
-if (conversationId) attach();
-</script>
+    <section class="workspace">
+      <div class="empty-state" id="empty-state">
+        <p class="eyebrow">Browser-native agentsessioner</p>
+        <h1 id="empty-title">Skapa ditt första projekt</h1>
+        <p id="empty-copy">Ange projektets namn och arbetsmapp. Därefter kan du skapa Claude- och Codex-agenter som arbetar i mappen.</p>
+        <button class="button primary" id="empty-action" type="button">Nytt projekt</button>
+      </div>
+
+      <div class="agent-workspace hidden" id="agent-workspace">
+        <header class="agent-header">
+          <div class="agent-identity">
+            <div class="agent-title-row">
+              <span class="engine-mark" id="engine-mark" aria-hidden="true">C</span>
+              <div>
+                <h1 id="agent-name"></h1>
+                <p id="agent-meta"></p>
+              </div>
+            </div>
+            <code class="project-path" id="project-path"></code>
+          </div>
+          <div class="agent-header-actions">
+            <span class="run-state" id="run-state" role="status">Klar</span>
+            <button class="button compact quiet" id="side-question-button" type="button">Sidofråga</button>
+            <button class="icon-button danger" id="delete-agent-button" type="button" aria-label="Ta bort agent" title="Ta bort agent">×</button>
+          </div>
+        </header>
+
+        <div class="message-list" id="message-list" aria-live="polite" aria-label="Konversation"></div>
+
+        <div class="composer-wrap" id="composer-wrap">
+          <div class="attachment-list" id="attachment-list" aria-live="polite"></div>
+          <form class="composer" id="composer">
+            <button class="attach-button" id="attach-button" type="button" aria-label="Bifoga filer eller bilder" title="Bifoga filer eller bilder">+</button>
+            <textarea id="prompt" rows="1" maxlength="200000" placeholder="Skriv till agenten…" aria-label="Meddelande"></textarea>
+            <button class="send-button" id="send-button" type="submit">Skicka</button>
+            <input id="file-input" type="file" multiple hidden>
+          </form>
+          <p class="composer-hint">Släpp filer här · Enter skickar · Shift+Enter gör ny rad</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <aside class="side-panel hidden" id="side-panel" aria-label="Sidofrågor till Claude">
+    <div class="side-panel-heading">
+      <div>
+        <p class="eyebrow">Claude sidofork</p>
+        <h2>Sidofråga</h2>
+      </div>
+      <button class="icon-button" id="close-side-panel" type="button" aria-label="Stäng sidofrågor">×</button>
+    </div>
+    <p class="side-panel-copy">Samma effekt som /btw, men via Claude Codes headless-läge: en separat fork av senast sparade kontext. Huvuduppgiften avbryts inte.</p>
+    <div class="side-thread" id="side-thread" aria-live="polite"></div>
+    <form class="side-form" id="side-form">
+      <textarea id="side-question-input" rows="3" maxlength="20000" placeholder="Fråga något vid sidan av…" required></textarea>
+      <button class="button primary" id="side-question-send" type="submit">Fråga vid sidan av</button>
+    </form>
+  </aside>
+
+  <dialog class="dialog" id="project-dialog">
+    <form id="project-form">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">Ny arbetsyta</p>
+          <h2>Skapa projekt</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Stäng">×</button>
+      </div>
+      <label>
+        Projektnamn
+        <input id="project-name-input" name="name" maxlength="64" autocomplete="off" required placeholder="Exempel: SW00P Game">
+      </label>
+      <label>
+        Arbetsmapp på datorn
+        <input id="project-cwd-input" name="cwd" autocomplete="off" required placeholder="/home/you/projects/swoop-sim">
+      </label>
+      <p class="form-hint">Mappen måste redan finnas. Alla agenter i projektet använder samma mapp.</p>
+      <div class="dialog-actions">
+        <button class="button quiet" type="button" data-close-dialog>Avbryt</button>
+        <button class="button primary" type="submit">Skapa projekt</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="dialog" id="agent-dialog">
+    <form id="agent-form">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">Ny instans</p>
+          <h2>Skapa agent</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Stäng">×</button>
+      </div>
+      <label>
+        Agentnamn
+        <input id="agent-name-input" name="name" maxlength="64" autocomplete="off" required placeholder="Exempel: UI-implementation">
+      </label>
+      <div class="form-grid">
+        <label>
+          Motor
+          <select id="engine-input" name="engine">
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+          </select>
+        </label>
+        <label>
+          Modell
+          <input id="model-input" name="model" list="model-options" maxlength="120" required>
+          <datalist id="model-options"></datalist>
+        </label>
+      </div>
+      <div class="folder-summary">
+        <span>Arbetsmapp</span>
+        <code id="agent-project-path"></code>
+      </div>
+      <p class="form-hint">Agenten körs headless i projektmappen. Varje svar sparas i Claude/Codex egen sessionshistorik.</p>
+      <div class="dialog-actions">
+        <button class="button quiet" type="button" data-close-dialog>Avbryt</button>
+        <button class="button primary" type="submit">Skapa agent</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
 </body>
 </html>
