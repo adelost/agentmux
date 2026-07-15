@@ -117,6 +117,10 @@ export function parseConfig(yamlContent) {
     guild: String(doc.guild),
     category: doc.category || "Agents",
     agents,
+    // `search.roots` (amux search corpora) lives in the SOURCE yaml so it
+    // survives every regeneration of agents.yaml. A hand-added section in
+    // the generated file dies on the next /sync or `amux label`.
+    search: doc.search ?? null,
   };
 }
 
@@ -296,8 +300,11 @@ export function buildSyncPlan(desired, existing) {
  *   only live in agents.yaml itself; without this merge they'd be
  *   wiped every /sync.
  */
-export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = null) {
-  const result = {};
+export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = null, search = null) {
+  // `search:` is emitted first: it is fleet config, not an agent entry.
+  // Consumers enumerate agents by filtering on `dir`, so the key is inert
+  // for them; loadSearchRoots reads it from this generated file.
+  const result = search ? { search } : {};
   const sortedNames = [...agents.keys()].sort();
 
   for (const name of sortedNames) {
@@ -411,7 +418,7 @@ export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = 
  * @returns {string} regenerated agents.yaml content
  */
 export function regenerateAgentsYaml(sourceYaml, existingAgentsYaml) {
-  const { agents } = parseConfig(sourceYaml);
+  const { agents, search } = parseConfig(sourceYaml);
   const existing = existingAgentsYaml ? yaml.load(existingAgentsYaml) : null;
 
   // Carry over channelMap + agentIds from existing agents.yaml. If none
@@ -440,5 +447,5 @@ export function regenerateAgentsYaml(sourceYaml, existingAgentsYaml) {
     }
   }
 
-  return generateAgentsYaml(agents, channelMap, agentIds, existing);
+  return generateAgentsYaml(agents, channelMap, agentIds, existing, search);
 }

@@ -143,7 +143,7 @@ export async function executeSync({ guild, configYaml, state, agentsYamlPath }) 
     try { existingYaml = yaml.load(readFileSync(agentsYamlPath, "utf-8")); }
     catch (err) { console.warn(`sync: could not parse existing ${agentsYamlPath}: ${err.message}`); }
   }
-  const yamlContent = generateAgentsYaml(config.agents, channelMap, agentIds, existingYaml);
+  const yamlContent = generateAgentsYaml(config.agents, channelMap, agentIds, existingYaml, config.search);
   mkdirSync(dirname(agentsYamlPath), { recursive: true });
   writeFileSync(agentsYamlPath, yamlContent);
 

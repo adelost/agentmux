@@ -521,6 +521,44 @@ feature("buildSyncPlan", () => {
 });
 
 feature("generateAgentsYaml", () => {
+  component("carries search.roots from source yaml into generated agents.yaml", {
+    given: ["a source with a search section and one agent", () => `
+guild: "1"
+search:
+  roots:
+    - name: memory
+      path: ~/mem
+      glob: "*.md"
+      weight: 3
+      semantic: true
+agents:
+  claw:
+    dir: /tmp/claw
+    panes: 1
+`],
+    when: ["regenerating agents.yaml (the amux label path)", (source) =>
+      regenerateAgentsYaml(source, null)],
+    then: ["the search section survives regeneration", (output) => {
+      expect(output).toContain("search:");
+      expect(output).toContain("path: ~/mem");
+      expect(output).toContain("semantic: true");
+    }],
+  });
+
+  component("a source without search regenerates cleanly with no search key", {
+    given: ["a source with only agents", () => `
+guild: "1"
+agents:
+  claw:
+    dir: /tmp/claw
+    panes: 1
+`],
+    when: ["regenerating agents.yaml", (source) => regenerateAgentsYaml(source, null)],
+    then: ["no empty search stub is emitted", (output) => {
+      expect(output).not.toContain("search:");
+    }],
+  });
+
   component("materializes native backend metadata without tmux commands", {
     given: ["parsed native fleet", () => {
       const source = `
