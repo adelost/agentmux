@@ -1254,15 +1254,21 @@ const codexWindowLabel = (window, limit) => {
   return `${window.windowMinutes ?? "?"} min${scope}`;
 };
 
+// Rows carry their own scope so headline selection never depends on the
+// rendered label text.
 const quotaRows = (engine, data) => {
   if (engine === "claude") {
     return data.limits.map((limit) => ({
+      scope: limit.kind === "weekly_scoped" && limit.scopeName === "Fable"
+        ? "weekly-primary"
+        : limit.kind === "weekly_all" ? "weekly" : "other",
       label: claudeLimitLabel(limit),
       usedPercent: limit.usedPercent,
       resetsAt: limit.resetsAt,
     }));
   }
   return data.limits.flatMap((limit) => limit.windows.map((window) => ({
+    scope: window.windowMinutes === 10_080 ? "weekly-primary" : "other",
     label: codexWindowLabel(window, limit),
     usedPercent: window.usedPercent,
     resetsAt: window.resetsAt,
@@ -1270,7 +1276,12 @@ const quotaRows = (engine, data) => {
   })));
 };
 
-const quotaHeadline = (rows) => rows.find((row) => row.label.startsWith("Week")) || rows[0];
+// Fable is the quota the fleet is steered by, so its weekly row leads the
+// chip; the all-models week is the fallback when no scoped row exists.
+const quotaHeadline = (rows) =>
+  rows.find((row) => row.scope === "weekly-primary")
+  || rows.find((row) => row.scope === "weekly")
+  || rows[0];
 
 const formatQuotaReset = (iso) => {
   if (!iso) return "";

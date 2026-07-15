@@ -1,0 +1,5 @@
+# Suggestions quota push: sends the local weekly-quota snapshot (Claude +
+# Codex) to the board so the authority owner sees a quota hint there.
+# Copy to ~/.config/agent/suggestions-quota-push.yaml.
+baseUrl: https://suggest.v1d.io
+adminCredentialFile: ~/.config/agent/suggestions-admin-token
