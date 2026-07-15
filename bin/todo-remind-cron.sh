@@ -17,7 +17,8 @@ export PATH="/usr/bin:/bin:${PATH:-}"
 
 AGENTMUX_DIR="${AGENTMUX_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 NODE_BIN="${NODE_BIN:-$HOME/.nvm/versions/node/v22.19.0/bin/node}"
-TODO_REMIND_LOG="${TODO_REMIND_LOG:-$HOME/agentmux-todo-remind.log}"
+TODO_REMIND_LOG="${TODO_REMIND_LOG:-$HOME/.cache/agentmux-todo-remind.log}"
+mkdir -p "$(dirname "$TODO_REMIND_LOG")"
 TODOS_PATH="${AMUX_TODOS_PATH:-$HOME/.openclaw/workspace/memory/tasks.md}"
 
 notify_failure() {

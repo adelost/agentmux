@@ -12,7 +12,8 @@ export AGENT_CONFIG="${AGENT_CONFIG:-$HOME/.config/agent/agents.yaml}"
 AGENTMUX_DIR="${AGENTMUX_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 NODE_BIN="${NODE_BIN:-$HOME/.nvm/versions/node/v22.19.0/bin/node}"
 OPENCLAW_WORKSPACE="${OPENCLAW_WORKSPACE:-$HOME/.openclaw/workspace}"
-AGENTMUX_DREAM_LOG="${AGENTMUX_DREAM_LOG:-$HOME/agentmux-dream.log}"
+AGENTMUX_DREAM_LOG="${AGENTMUX_DREAM_LOG:-$HOME/.cache/agentmux-dream.log}"
+mkdir -p "$(dirname "$AGENTMUX_DREAM_LOG")"
 
 notify_failure() {
   local status=$?
