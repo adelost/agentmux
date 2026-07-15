@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="sv">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,54 +10,54 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/" aria-label="AMUX Code, startsida">
+    <a class="brand" href="/" aria-label="AMUX Code home">
       <span class="brand-mark" aria-hidden="true">A</span>
       <span>AMUX Code</span>
     </a>
 
     <label class="project-switcher" for="project-select">
-      <span>Projekt</span>
-      <select id="project-select" aria-label="Välj projekt"></select>
+      <span>Project</span>
+      <select id="project-select" aria-label="Select project"></select>
     </label>
 
     <div class="topbar-actions">
-      <div class="quota-strip" id="quota-strip" aria-label="Veckokvoter för Claude och Codex"></div>
-      <button class="icon-button theme-toggle" id="theme-toggle" type="button" aria-label="Byt till mörkt tema" title="Byt till mörkt tema">
+      <div class="quota-strip" id="quota-strip" aria-label="Weekly quotas for Claude and Codex"></div>
+      <button class="icon-button theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" title="Switch to dark theme">
         <span id="theme-toggle-icon" aria-hidden="true">☾</span>
       </button>
-      <span class="boundary-badge" title="Tjänsten är endast tillgänglig via datorn eller ditt tailnet">
+      <span class="boundary-badge" title="This service is available only on this computer or your tailnet">
         Tailnet
       </span>
-      <button class="button compact quiet" id="pinned-conversations-button" type="button">Pinnade</button>
-      <button class="button compact quiet" id="prompt-overview-button" type="button">Skickade frågor</button>
-      <button class="button compact" id="new-project-button" type="button">Nytt projekt</button>
+      <button class="button compact quiet" id="pinned-conversations-button" type="button">Pinned</button>
+      <button class="button compact quiet" id="prompt-overview-button" type="button">Sent prompts</button>
+      <button class="button compact" id="new-project-button" type="button">New project</button>
     </div>
   </header>
 
   <main class="app-shell">
-    <aside class="agent-sidebar" aria-label="Agenter i projektet">
+    <aside class="agent-sidebar" aria-label="Agents in this project">
       <div class="aside-heading">
-        <span>Agenter</span>
-        <button class="icon-button" id="new-agent-button" type="button" aria-label="Skapa agent" title="Skapa agent">+</button>
+        <span>Agents</span>
+        <button class="icon-button" id="new-agent-button" type="button" aria-label="Create agent" title="Create agent">+</button>
       </div>
       <div class="agent-list" id="agent-list"></div>
 
       <div class="read-policy">
         <span class="read-policy-dot" aria-hidden="true"></span>
-        <span>All agenthistorik är läsbar. Skrivregler kan läggas till senare.</span>
+        <span>All agent history is readable. Write rules can be added later.</span>
       </div>
 
       <button class="button danger quiet project-delete" id="delete-project-button" type="button">
-        Ta bort projektet
+        Delete project
       </button>
     </aside>
 
     <section class="workspace">
       <div class="empty-state" id="empty-state">
-        <p class="eyebrow">Browser-native agentsessioner</p>
-        <h1 id="empty-title">Skapa ditt första projekt</h1>
-        <p id="empty-copy">Ange projektets namn och arbetsmapp. Därefter kan du skapa Claude- och Codex-agenter som arbetar i mappen.</p>
-        <button class="button primary" id="empty-action" type="button">Nytt projekt</button>
+        <p class="eyebrow">Browser-native agent sessions</p>
+        <h1 id="empty-title">Create your first project</h1>
+        <p id="empty-copy">Enter the project name and working folder. You can then create Claude and Codex agents that work in that folder.</p>
+        <button class="button primary" id="empty-action" type="button">New project</button>
       </div>
 
       <div class="agent-workspace hidden" id="agent-workspace">
@@ -73,60 +73,60 @@
             <code class="project-path" id="project-path"></code>
           </div>
           <div class="agent-runtime">
-            <div class="context-control" id="context-control" title="Aktuell kontext, inte abonnemangskvot">
+            <div class="context-control" id="context-control" title="Current context, not subscription quota">
               <div class="context-heading">
-                <span>Kontext</span>
-                <strong id="context-label">Ingen mätning</strong>
+                <span>Context</span>
+                <strong id="context-label">No measurement</strong>
               </div>
-              <div class="context-track" role="meter" aria-label="Använt kontextfönster" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="context-track" role="meter" aria-label="Context window used" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                 <span id="context-fill"></span>
               </div>
-              <small id="context-detail">Auto-compact över 60 % efter 5 min idle</small>
+              <small id="context-detail">Auto-compact above 60% after 5 minutes idle</small>
             </div>
             <label class="effort-control" for="agent-effort-select">
               <span>Effort</span>
-              <select id="agent-effort-select" aria-label="Agentens effort"></select>
+              <select id="agent-effort-select" aria-label="Agent effort"></select>
             </label>
             <div class="agent-header-actions">
-              <span class="run-state" id="run-state" role="status">Klar</span>
-              <button class="button compact danger hidden" id="interrupt-button" type="button">Avbryt</button>
-              <button class="button compact quiet" id="pin-conversation-button" type="button" aria-pressed="false">Pinna</button>
+              <span class="run-state" id="run-state" role="status">Ready</span>
+              <button class="button compact danger hidden" id="interrupt-button" type="button">Interrupt</button>
+              <button class="button compact quiet" id="pin-conversation-button" type="button" aria-pressed="false">Pin</button>
               <button class="button compact quiet" id="compact-button" type="button">Compact</button>
-              <button class="button compact quiet" id="side-question-button" type="button">Sidofråga</button>
-              <button class="icon-button danger" id="delete-agent-button" type="button" aria-label="Ta bort agent" title="Ta bort agent">×</button>
+              <button class="button compact quiet" id="side-question-button" type="button">Side question</button>
+              <button class="icon-button danger" id="delete-agent-button" type="button" aria-label="Delete agent" title="Delete agent">×</button>
             </div>
           </div>
         </header>
 
-        <div class="message-list" id="message-list" aria-live="polite" aria-label="Konversation"></div>
+        <div class="message-list" id="message-list" aria-live="polite" aria-label="Conversation"></div>
 
         <div class="composer-wrap" id="composer-wrap">
           <div class="attachment-list" id="attachment-list" aria-live="polite"></div>
           <form class="composer" id="composer">
-            <button class="attach-button" id="attach-button" type="button" aria-label="Bifoga filer eller bilder" title="Bifoga filer eller bilder">+</button>
-            <textarea id="prompt" rows="1" maxlength="200000" placeholder="Skriv till agenten…" aria-label="Meddelande"></textarea>
-            <button class="send-button" id="send-button" type="submit">Skicka</button>
+            <button class="attach-button" id="attach-button" type="button" aria-label="Attach files or images" title="Attach files or images">+</button>
+            <textarea id="prompt" rows="1" maxlength="200000" placeholder="Write to the agent…" aria-label="Message"></textarea>
+            <button class="send-button" id="send-button" type="submit">Send</button>
             <input id="file-input" type="file" multiple hidden>
           </form>
-          <p class="composer-hint">Släpp filer här · Enter skickar · Shift+Enter gör ny rad</p>
+          <p class="composer-hint">Paste images or drop files here · Enter sends · Shift+Enter adds a new line</p>
         </div>
       </div>
     </section>
   </main>
 
-  <aside class="side-panel hidden" id="side-panel" aria-label="Sidofrågor till Claude">
+  <aside class="side-panel hidden" id="side-panel" aria-label="Side questions for Claude">
     <div class="side-panel-heading">
       <div>
-        <p class="eyebrow">Claude sidofork</p>
-        <h2>Sidofråga</h2>
+        <p class="eyebrow">Claude side fork</p>
+        <h2>Side question</h2>
       </div>
-      <button class="icon-button" id="close-side-panel" type="button" aria-label="Stäng sidofrågor">×</button>
+      <button class="icon-button" id="close-side-panel" type="button" aria-label="Close side questions">×</button>
     </div>
-    <p class="side-panel-copy">Samma effekt som /btw, men via Claude Codes headless-läge: en separat fork av senast sparade kontext. Huvuduppgiften avbryts inte.</p>
+    <p class="side-panel-copy">Like /btw, but through Claude Code headless mode: a separate fork of the latest saved context. The main task is not interrupted.</p>
     <div class="side-thread" id="side-thread" aria-live="polite"></div>
     <form class="side-form" id="side-form">
-      <textarea id="side-question-input" rows="3" maxlength="20000" placeholder="Fråga något vid sidan av…" required></textarea>
-      <button class="button primary" id="side-question-send" type="submit">Fråga vid sidan av</button>
+      <textarea id="side-question-input" rows="3" maxlength="20000" placeholder="Ask a side question…" required></textarea>
+      <button class="button primary" id="side-question-send" type="submit">Ask separately</button>
     </form>
   </aside>
 
@@ -134,25 +134,25 @@
     <form id="project-form">
       <div class="dialog-heading">
         <div>
-          <p class="eyebrow">Ny arbetsyta</p>
-          <h2>Skapa projekt</h2>
+          <p class="eyebrow">New workspace</p>
+          <h2>Create project</h2>
         </div>
-        <button class="icon-button" type="button" data-close-dialog aria-label="Stäng">×</button>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Close">×</button>
       </div>
       <div class="form-body">
         <label>
-          Projektnamn
-          <input id="project-name-input" name="name" maxlength="64" autocomplete="off" required placeholder="Exempel: SW00P Game">
+          Project name
+          <input id="project-name-input" name="name" maxlength="64" autocomplete="off" required placeholder="Example: SW00P Game">
         </label>
         <label>
-          Arbetsmapp på datorn
+          Working folder on this computer
           <input id="project-cwd-input" name="cwd" autocomplete="off" required placeholder="/home/you/projects/swoop-sim">
         </label>
-        <p class="form-hint">Mappen måste redan finnas. Alla agenter i projektet använder samma mapp.</p>
+        <p class="form-hint">The folder must already exist. All agents in the project use the same folder.</p>
       </div>
       <div class="dialog-actions">
-        <button class="button quiet" type="button" data-close-dialog>Avbryt</button>
-        <button class="button primary" type="submit">Skapa projekt</button>
+        <button class="button quiet" type="button" data-close-dialog>Cancel</button>
+        <button class="button primary" type="submit">Create project</button>
       </div>
     </form>
   </dialog>
@@ -161,26 +161,26 @@
     <form id="agent-form">
       <div class="dialog-heading">
         <div>
-          <p class="eyebrow">Ny instans</p>
-          <h2>Skapa agent</h2>
+          <p class="eyebrow">New instance</p>
+          <h2>Create agent</h2>
         </div>
-        <button class="icon-button" type="button" data-close-dialog aria-label="Stäng">×</button>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Close">×</button>
       </div>
       <div class="form-body">
         <label>
-          Agentnamn
-          <input id="agent-name-input" name="name" maxlength="64" autocomplete="off" required placeholder="Exempel: UI-implementation">
+          Agent name
+          <input id="agent-name-input" name="name" maxlength="64" autocomplete="off" required placeholder="Example: UI implementation">
         </label>
         <div class="form-grid agent-config-grid">
           <label>
-            Motor
+            Engine
             <select id="engine-input" name="engine">
               <option value="claude">Claude</option>
               <option value="codex">Codex</option>
             </select>
           </label>
           <label>
-            Modell
+            Model
             <input id="model-input" name="model" list="model-options" maxlength="120" required>
             <datalist id="model-options"></datalist>
           </label>
@@ -190,14 +190,14 @@
           </label>
         </div>
         <div class="folder-summary">
-          <span>Arbetsmapp</span>
+          <span>Working folder</span>
           <code id="agent-project-path"></code>
         </div>
-        <p class="form-hint">Effort kan ändras senare och gäller då nästa turn. Kontext över 60 % compactas automatiskt efter 5 minuters idle.</p>
+        <p class="form-hint">Effort can be changed later and applies to the next turn. Context above 60% is compacted automatically after 5 minutes idle.</p>
       </div>
       <div class="dialog-actions">
-        <button class="button quiet" type="button" data-close-dialog>Avbryt</button>
-        <button class="button primary" type="submit">Skapa agent</button>
+        <button class="button quiet" type="button" data-close-dialog>Cancel</button>
+        <button class="button primary" type="submit">Create agent</button>
       </div>
     </form>
   </dialog>
@@ -205,36 +205,36 @@
   <dialog class="dialog prompt-overview-dialog" id="prompt-overview-dialog">
     <div class="dialog-heading">
       <div>
-        <p class="eyebrow">Leveransjournal</p>
-        <h2>Skickade frågor</h2>
+        <p class="eyebrow">Delivery journal</p>
+        <h2>Sent prompts</h2>
       </div>
-      <button class="icon-button" id="close-prompt-overview" type="button" aria-label="Stäng skickade frågor">×</button>
+      <button class="icon-button" id="close-prompt-overview" type="button" aria-label="Close sent prompts">×</button>
     </div>
     <div class="prompt-overview-controls">
-      <div class="prompt-scope-tabs" role="tablist" aria-label="Visa frågor efter nivå">
-        <button type="button" role="tab" data-prompt-scope="all" aria-selected="true">Alla</button>
-        <button type="button" role="tab" data-prompt-scope="project" aria-selected="false">Projektet</button>
-        <button type="button" role="tab" data-prompt-scope="agent" aria-selected="false">Instansen</button>
+      <div class="prompt-scope-tabs" role="tablist" aria-label="Show prompts by scope">
+        <button type="button" role="tab" data-prompt-scope="all" aria-selected="true">All</button>
+        <button type="button" role="tab" data-prompt-scope="project" aria-selected="false">Project</button>
+        <button type="button" role="tab" data-prompt-scope="agent" aria-selected="false">Instance</button>
       </div>
-      <button class="button compact quiet" id="refresh-prompt-overview" type="button">Uppdatera</button>
+      <button class="button compact quiet" id="refresh-prompt-overview" type="button">Refresh</button>
     </div>
-    <p class="prompt-overview-copy" id="prompt-overview-copy">Frågor journalförs när AMUX Code accepterar dem, innan agenten startas.</p>
+    <p class="prompt-overview-copy" id="prompt-overview-copy">Prompts are journaled when AMUX Code accepts them, before the agent starts.</p>
     <div class="prompt-overview-list" id="prompt-overview-list" aria-live="polite"></div>
   </dialog>
 
   <dialog class="dialog pinned-conversations-dialog" id="pinned-conversations-dialog">
     <div class="dialog-heading">
       <div>
-        <p class="eyebrow">Aktiva spår</p>
-        <h2>Pinnade konversationer</h2>
+        <p class="eyebrow">Active threads</p>
+        <h2>Pinned conversations</h2>
       </div>
-      <button class="icon-button" id="close-pinned-conversations" type="button" aria-label="Stäng pinnade konversationer">×</button>
+      <button class="icon-button" id="close-pinned-conversations" type="button" aria-label="Close pinned conversations">×</button>
     </div>
-    <p class="pinned-conversations-copy">Pinna de konversationer du vill ha nära till hands, även när de ligger i andra projekt.</p>
+    <p class="pinned-conversations-copy">Pin the conversations you want close at hand, even when they belong to other projects.</p>
     <div class="pinned-conversations-list" id="pinned-conversations-list" aria-live="polite"></div>
   </dialog>
 
-  <div class="quota-popover" id="quota-popover" role="dialog" aria-label="Kvotdetaljer" hidden></div>
+  <div class="quota-popover" id="quota-popover" role="dialog" aria-label="Quota details" hidden></div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script type="module" src="/app.js"></script>
 </body>

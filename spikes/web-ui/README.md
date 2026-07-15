@@ -48,6 +48,10 @@ project or the selected agent. Discord and `amux` deliveries write through the
 same `/messages` acceptance seam; `amux asks` may consume it later but is not a
 second writer or the source of truth.
 
+The browser UI is English-only. Images copied to the clipboard can be pasted
+directly into the prompt composer; they use the same bounded, idempotent upload
+path and attachment preview as the file picker and drag-and-drop.
+
 Closing the browser does not stop an active turn. Agents created manually in
 the GUI use Claude `acceptEdits` and the locally configured Codex sandbox.
 Bridge-provisioned canary agents are marked `automation`: Claude receives the
@@ -152,8 +156,9 @@ boots the real server against a seeded temp registry, renders the snapshot
 view in headless Chrome at desktop (1280x800) and mobile (375x740) and fails
 on horizontal overflow, invisible core surfaces (header controls, composer,
 conversation), broken all/project/instance prompt filters, missing pinned
-conversation navigation, controls without an accessible name, a composer that is not
-flush with the viewport at reading position, or any page error. Screenshots
+conversation navigation, broken image paste or duplicate upload, controls
+without an accessible name, a composer that is not flush with the viewport at
+reading position, or any page error. Screenshots
 land in `spikes/web-ui/artifacts/` (gitignored) as review evidence. It needs a
 local Chrome/Chromium (`CHROME_BIN` overrides autodetection) and is therefore
 a separate script rather than part of the default `npm test`.
