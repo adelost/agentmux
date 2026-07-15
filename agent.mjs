@@ -568,6 +568,30 @@ isn't in git is invisible to other agents.
    gets re-checked or the ticket reassigned immediately — don't wait for the
    30-min watchdog reminder. (The p4 and p3 dropped-balls on SKY-0034 cost
    30+ min each and were caught only by the reminder.)
+11. **Relay human decisions with the verbatim quote.** When passing a
+   Mattias/human order between panes, include the original wording; the
+   receiver sanity-checks direction against the quote before acting. A relay
+   that inverts the original is the costliest failure class (the api quota
+   whipsaw 2026-07-14: 'använd Codex, spara Claude' arrived as its opposite
+   and workers were flipped work→hold→work for nothing).
+12. **A drained lane is a state, not a failure.** A broker whose backlog is
+   empty reports 'backlog tom, ge nya tickets' instead of inventing scope —
+   honest idle beats fabricated motion, and night rules already forbid
+   speculative dispatch. Proving drained (0 PRs, board empty) IS the
+   deliverable in that case.
+13. **Broker DIY-escalation after repeated failed delegation.** Delegate
+   first, always — but when the same bounded item has failed ~3 delegations,
+   the broker may take direct ownership, note it in its ledger, and root-fix.
+   Delegate-don't-build yields to un-stick-the-fleet (ai:2's progress bar:
+   ~20 failed delegations, then fixed DIY in an hour).
+14. **Escalated alerts at night get a disposition, not silence.** Defer with
+   a recorded reason on the ticket counts as action and satisfies the
+   escalation ladder; full re-prioritization waits for the morning report.
+   This is how night rules and the ladder compose instead of conflicting.
+15. **Expect the data→consumer seam.** Tickets whose data and consumer live
+   in different files or repos (recipe vs renderer) get bounded cross-file
+   amendment authority in the ORIGINAL brief instead of a mid-flight
+   exception round-trip every time (skydive hit this on every such ticket).
 
 ## Minnesloggning
 
