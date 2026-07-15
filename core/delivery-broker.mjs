@@ -9,6 +9,7 @@
 
 import { appendEvent } from "./events.mjs";
 import { deliverToPane } from "./delivery.mjs";
+import { rewriteModelSlash } from "./claude-model.mjs";
 import {
   DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES,
   isNotSentDeliveryJob, waitForDeliveryJob,
@@ -105,8 +106,20 @@ export function createDeliveryBroker({
   }
 
   async function exactEcho(job) {
-    if (job.kind !== "prompt" || (!job.echoCursor && !job.echoNotBeforeMs)) return false;
+    if (!job.echoCursor && !job.echoNotBeforeMs) return false;
     try {
+      if (job.kind === "slash" && typeof agent.waitForSlashReceipt === "function") {
+        return await agent.waitForSlashReceipt(
+          job.agentName,
+          job.pane,
+          rewriteModelSlash(job.verifyText),
+          0,
+          job.echoCursor
+            ? { cursor: job.echoCursor }
+            : { notBeforeMs: job.echoNotBeforeMs },
+        );
+      }
+      if (job.kind !== "prompt") return false;
       return await agent.waitForPromptEcho(
         job.agentName,
         job.pane,
@@ -404,13 +417,20 @@ export function createDeliveryBroker({
     }
 
     if (!job.echoCursor
-        && job.kind === "prompt"
+        && (job.kind === "prompt" || job.kind === "slash")
         && job.metadata?.deliveryTransport !== "native") {
-      const cursor = await agent.capturePromptEchoCursor(job.agentName, job.pane, job.verifyText)
-        .catch((error) => {
+      const captureCursor = job.kind === "slash"
+        ? agent.captureSlashReceiptCursor
+        : agent.capturePromptEchoCursor;
+      const cursorText = job.kind === "slash" ? rewriteModelSlash(job.verifyText) : job.verifyText;
+      let cursor = null;
+      if (typeof captureCursor === "function") {
+        try {
+          cursor = await captureCursor.call(agent, job.agentName, job.pane, cursorText);
+        } catch (error) {
           log(`delivery broker cursor failed for ${job.agentName}:${job.pane}: ${error.message}`);
-          return null;
-        });
+        }
+      }
       if (cursor) job = queue.update(job, { echoCursor: cursor });
     }
 
@@ -514,11 +534,13 @@ export function createDeliveryBroker({
             : "native turn receipt is not yet readable; awaiting completion without redispatch",
         });
       }
-      // Slash commands intentionally have no JSONL user event. The durable
-      // submitted transition is their terminal proof after a crash between
-      // composer verification and the final acknowledged file update.
+      // Older Claude/Codex jobs had no command-event cursor, so preserve their
+      // at-most-once recovery contract. New Claude jobs remain fenced until
+      // the exact <command-name> + <command-args> JSONL receipt is visible.
       if (job.kind === "slash" && job.status === "submitted") {
-        return acknowledge(job, "slash-submit-recovery");
+        if (!job.echoCursor || typeof agent.waitForSlashReceipt !== "function") {
+          return acknowledge(job, "slash-submit-recovery");
+        }
       }
       const submittedAge = now() - Number(
         job.submittedAt || job.submitFenceAt || job.lastAttemptAt || job.createdAt || now(),
@@ -534,7 +556,7 @@ export function createDeliveryBroker({
         }
       }
       const receiptWait = job.status === "submitted"
-        ? "awaiting exact JSONL receipt"
+        ? (job.kind === "slash" ? "awaiting exact command receipt" : "awaiting exact JSONL receipt")
         : "submit fence committed before physical completion; awaiting authoritative receipt";
       return queue.update(job, {
         status: job.status,

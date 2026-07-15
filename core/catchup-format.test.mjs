@@ -171,6 +171,23 @@ feature("formatCatchupPreview: tool-only turn skipped", () => {
   });
 });
 
+feature("formatCatchupPreview: system plumbing skipped", () => {
+  unit("the three /model JSONL wrapper turns never render as conversation", {
+    given: ["local command caveat, name, and stdout around one real turn", () => [
+      turnPending(T1, "<local-command-caveat>internal</local-command-caveat>"),
+      turnPending(T2, "<command-name>/model</command-name>\n<command-args>fable</command-args>"),
+      turnPending(T3, "<local-command-stdout>Set model to Fable</local-command-stdout>"),
+      turnPending(T4, "real pending message"),
+    ]],
+    when: ["formatting catch-up previews", (turns) => formatCatchupPreview(turns)],
+    then: ["only the real pending message remains", (lines) => {
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("you: real pending message");
+      expect(lines[0]).not.toContain("local-command");
+    }],
+  });
+});
+
 // --- 8. Code block collapse ------------------------------------------------
 
 feature("formatCatchupPreview: code blocks", () => {

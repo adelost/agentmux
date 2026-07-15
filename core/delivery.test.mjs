@@ -210,6 +210,56 @@ feature("deliverToPane routing", () => {
     }],
   });
 
+  component("a hidden Claude command palette cannot masquerade as delivery", {
+    given: ["a /model whose first Enter hides the text but does not execute it", () => {
+      const agent = fakeAgent();
+      let receiptChecks = 0;
+      agent.captureSlashReceiptCursor = async () => ({ kind: "claude-slash-events-v1", positions: {} });
+      agent.waitForSlashReceipt = async () => {
+        agent.calls.push("slash-receipt");
+        return ++receiptChecks >= 2;
+      };
+      agent.capturePane = async () => {
+        agent.calls.push("capture-hidden-palette");
+        return "Select model\n";
+      };
+      return agent;
+    }],
+    when: ["delivering with the exact command receipt gate", async (agent) => ({
+      result: await deliverToPane(agent, "claw", 2, "/model fable", {
+        settleMs: 0,
+        sleep: async () => {},
+      }),
+      agent,
+    })],
+    then: ["one rescue Enter executes the selection before delivery is reported", ({ result, agent }) => {
+      expect(result).toEqual({ delivered: true, rescues: 1, via: "command-receipt" });
+      expect(agent.calls.filter((call) => call === "enter")).toHaveLength(1);
+      expect(agent.calls).not.toContain("capture-hidden-palette");
+    }],
+  });
+
+  component("a slash command without an exact receipt fails closed", {
+    given: ["a Claude command that disappears but never reaches JSONL", () => {
+      const agent = fakeAgent();
+      agent.captureSlashReceiptCursor = async () => ({ kind: "claude-slash-events-v1", positions: {} });
+      agent.waitForSlashReceipt = async () => false;
+      agent.capturePane = async () => "❯ \n";
+      return agent;
+    }],
+    when: ["the bounded rescue budget is exhausted", async (agent) => ({
+      result: await deliverToPane(agent, "claw", 2, "/model fable", {
+        settleMs: 0,
+        sleep: async () => {},
+      }),
+      agent,
+    })],
+    then: ["the bridge does not tell Discord that the command was sent", ({ result, agent }) => {
+      expect(result).toEqual({ delivered: false, rescues: 2 });
+      expect(agent.calls.filter((call) => call === "enter")).toHaveLength(2);
+    }],
+  });
+
   component("both prompt and slash routes forward the pre-Enter fence callbacks", {
     given: ["two transport agents that expose the callback order", () => {
       const callbackCalls = [];
