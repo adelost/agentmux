@@ -2331,7 +2331,7 @@ async function cmdSearch(ctx, query, flags) {
   const config = loadConfig(ctx.configPath);
   let roots = loadSearchRoots(config);
   if (!roots.length) {
-    console.error("Inga sökrötter. Lägg till i agents.yaml:\n  search:\n    roots:\n      - { name: memory, path: ~/pathtill/memory, glob: \"*.md\", weight: 3, semantic: true }");
+    console.error("Inga sökrötter. Lägg till i agentmux.yaml (KÄLLAN — agents.yaml är genererad och skrivs över):\n  search:\n    roots:\n      - { name: memory, path: ~/pathtill/memory, glob: \"*.md\", weight: 3, semantic: true }\nKör sen: amux label <agent> 0 --clear (eller /sync) för att materialisera.");
     process.exit(1);
   }
   if (flags.source) roots = roots.filter((r) => r.name.includes(flags.source));
