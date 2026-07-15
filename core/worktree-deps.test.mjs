@@ -5,15 +5,17 @@ import {
   mkdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "fs";
 import { tmpdir } from "os";
-import { join, resolve } from "path";
+import { join, resolve, sep } from "path";
 import { mkdtempSync } from "fs";
 import {
   discoverDependencyRoots,
+  nodeCacheRoot,
   nodeTreeIsRelocatable,
   nodeTreeMatches,
   provisionNodeRoot,
@@ -30,7 +32,15 @@ function fixture() {
   const root = mkdtempSync(join(tmpdir(), "amux-worktree-deps-"));
   const commonDir = join(root, ".git");
   mkdirSync(commonDir);
-  return { root, commonDir, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  // Pin the immutable cache under the fixture root so tests never touch the real
+  // ~/.cache and each fixture is isolated. Tests run sequentially (preset).
+  const priorCacheDir = process.env.AGENTMUX_WORKTREE_DEPS_DIR;
+  process.env.AGENTMUX_WORKTREE_DEPS_DIR = join(root, "deps-cache");
+  return { root, commonDir, cleanup: () => {
+    if (priorCacheDir === undefined) delete process.env.AGENTMUX_WORKTREE_DEPS_DIR;
+    else process.env.AGENTMUX_WORKTREE_DEPS_DIR = priorCacheDir;
+    rmSync(root, { recursive: true, force: true });
+  } };
 }
 
 function packageLock(version = "4.0.18", extra = {}) {
@@ -204,8 +214,34 @@ feature("worktree dependency bootstrap", () => {
       expect(second).toMatchObject({ status: "ready", mode: "immutable-link", key: first.key });
       expect(lstatSync(join(ctx.root, "node_modules")).isSymbolicLink()).toBe(false);
       const target = resolve(ctx.root, "node_modules", readlinkSync(join(ctx.root, "node_modules", "vitest")));
-      expect(target).toContain(join(".git", "agentmux-worktree-deps", "node", first.key));
+      expect(target.startsWith(join(nodeCacheRoot(ctx.commonDir), "node", first.key))).toBe(true);
+      // SKY-0105: a dep realpath must never land inside .git — Vite 6 (and any
+      // tool with a `**/.git/**` deny) refuses to serve its own client from there.
+      expect(target.includes(`${sep}.git${sep}`)).toBe(false);
       expect(nodeTreeMatches(ctx.root)).toBe(true);
+      ctx.cleanup();
+    }],
+  });
+
+  unit("the shared cache and every resolved dep realpath live outside .git (SKY-0105)", {
+    given: ["a worktree whose git dir is the conventional .git", () => {
+      const ctx = fixture();
+      writeNodeRoot(ctx.root);
+      writeInstalledTree(ctx.root);
+      return ctx;
+    }],
+    when: ["provisioning the immutable link farm", (ctx) => ({
+      ctx,
+      result: provisionNodeRoot({ root: ctx.root, repoRoot: ctx.root, commonDir: ctx.commonDir, npmVersion: "11.6.0" }),
+    })],
+    then: ["the cache root, and the realpath a consumer's require.resolve would see, avoid .git", ({ ctx, result }) => {
+      expect(result).toMatchObject({ mode: "immutable-link" });
+      const cacheRoot = nodeCacheRoot(ctx.commonDir);
+      expect(cacheRoot.includes(`${sep}.git${sep}`)).toBe(false);
+      expect(cacheRoot.endsWith(`${sep}.git`)).toBe(false);
+      // What Vite 6 self-aliases from: the realpath of a resolved package.
+      const resolved = realpathSync(join(ctx.root, "node_modules", "vitest"));
+      expect(resolved.includes(`${sep}.git${sep}`)).toBe(false);
       ctx.cleanup();
     }],
   });
@@ -234,7 +270,7 @@ feature("worktree dependency bootstrap", () => {
     then: ["the target and key change while the old cache remains immutable", (ctx) => {
       expect(ctx.second.key).not.toBe(ctx.first.key);
       expect(readlinkSync(join(ctx.root, "node_modules", "vitest"))).toContain(ctx.second.key);
-      expect(existsSync(join(ctx.commonDir, "agentmux-worktree-deps", "node", ctx.first.key))).toBe(true);
+      expect(existsSync(join(nodeCacheRoot(ctx.commonDir), "node", ctx.first.key))).toBe(true);
       expect(nodeTreeMatches(ctx.root)).toBe(true);
       ctx.cleanup();
     }],
