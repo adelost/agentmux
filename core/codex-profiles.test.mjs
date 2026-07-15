@@ -90,9 +90,8 @@ feature("Codex profile filesystem boundary", () => {
         join(ctx.secondary.home, "rules", "agentmux-execution-safety.rules"),
         "utf-8",
       );
-      expect(safetyRules).toContain('decision = "forbidden"');
-      expect(safetyRules).toContain('"xdg-open"');
-      expect(safetyRules).toContain('not_match = ["playwright test"]');
+      expect(safetyRules).toContain("Full autonomous mode");
+      expect(safetyRules).not.toContain("prefix_rule");
       expect(isCodexProfileAuthenticated(ctx.secondary)).toBe(false);
       expect(isCodexProfileAuthenticated(ctx.primary)).toBe(true);
       ctx.cleanup();

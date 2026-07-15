@@ -465,12 +465,7 @@ describe("AMUX Code project and agent registry", () => {
     await waitForIdle(url, project.id, codex.id);
     const codexCall = calls.find((call) => call.command === "fake-codex");
     expect(codexCall.options.cwd).toBe(workspace);
-    expect(codexCall.args).toEqual([
-      "app-server",
-      "-c", "sandbox_workspace_write.network_access=true",
-      "-c", 'approvals_reviewer="auto_review"',
-      "--stdio",
-    ]);
+    expect(codexCall.args).toEqual(["app-server", "--stdio"]);
     expect(codexCall.messages.find((message) => message.method === "thread/start")?.params.cwd).toBe(workspace);
     expect(codexCall.messages.find((message) => message.method === "turn/start")?.params.effort).toBe("medium");
 
@@ -653,9 +648,7 @@ describe("AMUX Code project and agent registry", () => {
     });
     await waitForIdle(url, project.id, claude.id);
     const claudeCall = calls.find((call) => call.command === "fake-claude");
-    expect(claudeCall.args).toContain("auto");
-    expect(claudeCall.args).toContain("--no-chrome");
-    expect(claudeCall.args).not.toContain("--dangerously-skip-permissions");
+    expect(claudeCall.args).toContain("--dangerously-skip-permissions");
     expect(claudeCall.args).not.toContain("acceptEdits");
     expect(claudeCall.options.env).toMatchObject({
       AMUX_NATIVE_RUNTIME: "1",
@@ -677,15 +670,13 @@ describe("AMUX Code project and agent registry", () => {
     });
     expect(codexCall.messages.find((message) => message.method === "thread/start")?.params)
       .toMatchObject({
-        sandbox: "workspace-write",
-        approvalPolicy: "on-request",
-        approvalsReviewer: "auto_review",
+        sandbox: "danger-full-access",
+        approvalPolicy: "never",
       });
     expect(codexCall.messages.find((message) => message.method === "turn/start")?.params)
       .toMatchObject({
-        sandboxPolicy: { type: "workspaceWrite", networkAccess: true },
-        approvalPolicy: "on-request",
-        approvalsReviewer: "auto_review",
+        sandboxPolicy: { type: "dangerFullAccess" },
+        approvalPolicy: "never",
       });
   });
 

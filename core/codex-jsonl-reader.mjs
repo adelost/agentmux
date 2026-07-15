@@ -226,11 +226,11 @@ function readSessionMeta(filePath) {
  * paneDir (e.g. paneDir=/foo/bar, cwd=/foo/bar/sub). That would pick up
  * any codex running inside our workspace, not our pane's own codex.
  */
-function latestSessionFor(paneDir) {
+function latestSessionFor(paneDir, { sessionDirs = codexSessionDirs() } = {}) {
   // Profile 1 remains ~/.codex; profile 2 has its own CODEX_HOME.  Search
   // both so switching accounts does not make the watcher/context layer lose
   // the pane's rollout just because its storage root changed.
-  const files = codexSessionDirs().flatMap((base) => findJsonlFiles(base, 0, []))
+  const files = sessionDirs.flatMap((base) => findJsonlFiles(base, 0, []))
     .map((path) => ({ path, mtime: statSync(path).mtimeMs }));
 
   const candidates = [];
@@ -544,8 +544,21 @@ export function extractFromCodexJsonl(paneDir, promptText = null) {
  * Public wrapper around the internal latestSessionFor() so the watcher can
  * dispatch fs.watch + freshness checks against the right file.
  */
-export function latestCodexSessionFor(paneDir) {
-  return latestSessionFor(paneDir);
+export function latestCodexSessionFor(paneDir, options) {
+  return latestSessionFor(paneDir, options);
+}
+
+/**
+ * Exact pane-owned Codex session identity, or null when this profile has never
+ * started in the pane. Ancestor matches are useful for output discovery but
+ * are not strong enough for resume ownership, so this requires cwd equality.
+ */
+export function latestCodexSessionIdentity(paneDir, options) {
+  const path = latestSessionFor(paneDir, options);
+  if (!path) return null;
+  const meta = readSessionMeta(path);
+  if (meta?.cwd !== paneDir || !/^[0-9a-f-]{36}$/iu.test(String(meta?.id || ""))) return null;
+  return Object.freeze({ sessionId: String(meta.id), cwd: meta.cwd, path });
 }
 
 /**

@@ -72,9 +72,8 @@ feature("Claude pane model pin", () => {
     then: ["both commands pin the full model id", ({ fresh, resumed }) => {
       expect(fresh).toContain("--model 'claude-opus-4-8'");
       expect(resumed).toContain("--model 'claude-opus-4-8'");
-      expect(fresh).toContain("--permission-mode auto --no-chrome");
-      expect(resumed).toContain("--permission-mode auto --no-chrome");
-      expect(fresh).not.toContain("--dangerously-skip-permissions");
+      expect(fresh).toContain("--dangerously-skip-permissions");
+      expect(resumed).toContain("--dangerously-skip-permissions");
       expect(fresh).not.toMatch(/--model ['\"]?opus['\"]?(?:\s|$)/);
       expect(resumed).toContain("--continue");
     }],
@@ -103,14 +102,12 @@ feature("Claude pane model pin", () => {
 });
 
 feature("Codex pane launch isolation", () => {
-  unit("a fresh launch starts a new session and never resumes the global latest", {
-    // scenario 5 (SKY session-guard): `resume --last` hijacks another pane's
-    // most-recent rollout. With no exact pane-owned id, launch fresh — one
-    // codex invocation, no `--last`, no `||` fallback.
-    when: ["building a profile-2 Max launch without a resume id", () => buildCodexLaunchCommand({
+  unit("an explicitly authorized first bootstrap starts once without global latest", {
+    when: ["building a new profile-2 Max pane", () => buildCodexLaunchCommand({
       profileHome: "/home/test/.config/agent/codex-profiles/2",
       model: "gpt-5.6-sol",
       effort: "max",
+      allowFreshBootstrap: true,
     })],
     then: ["it is a single fresh codex invocation carrying the isolated settings", (command) => {
       expect(command).not.toContain("resume --last");
@@ -118,10 +115,18 @@ feature("Codex pane launch isolation", () => {
       expect(command.match(/CODEX_HOME=/g)).toHaveLength(1);
       expect(command.match(/gpt-5\.6-sol/g)).toHaveLength(1);
       expect(command.match(/model_reasoning_effort="max"/g)).toHaveLength(1);
-      expect(command).toContain("--sandbox workspace-write");
-      expect(command).toContain('approvals_reviewer="auto_review"');
-      expect(command).not.toContain("--yolo");
+      expect(command).toContain("--yolo");
       expect(command).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+    }],
+  });
+
+  unit("missing pane identity never silently falls back to fresh", {
+    when: ["building without an exact id or bootstrap authorization", () => {
+      try { return buildCodexLaunchCommand({ profileHome: "/home/test/.codex" }); }
+      catch (error) { return error; }
+    }],
+    then: ["launch is blocked with the continuity precondition", (error) => {
+      expect(error?.message).toMatch(/requires an exact pane session/);
     }],
   });
 

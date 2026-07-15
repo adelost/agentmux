@@ -1,6 +1,7 @@
 // Contract for pane-scoped codex session selection (skydive model-override
 // incident). Proves the guard resumes ONLY a pane's own, provenance-matched,
-// unheld session and falls fresh for everything else — never the global latest.
+// unheld session and blocks everything else — never the global latest and
+// never a silent fresh fallback.
 
 import { feature, unit, expect } from "bdd-vitest";
 import {
@@ -19,10 +20,10 @@ feature("codex session guard (never resume --last)", () => {
         persisted: { sessionId: "aaaa", pane: "skydive:1.16" },
         rolloutPathFor, writersFor: noWriters,
       })],
-    then: ["it starts fresh on foreign provenance, not resume", (decision) => {
-      expect(decision.action).toBe("fresh");
+    then: ["it blocks foreign provenance, not resume or fresh", (decision) => {
+      expect(decision.action).toBe("blocked");
       expect(decision.reason).toBe("foreign-provenance");
-      expect(decision.sessionId).toBeNull();
+      expect(decision.sessionId).toBe("aaaa");
     }],
   });
 
@@ -39,7 +40,7 @@ feature("codex session guard (never resume --last)", () => {
     }],
   });
 
-  unit("a pane's own session still held by a live writer falls fresh (defense-in-depth)", {
+  unit("a pane's own session still held by a live writer blocks (defense-in-depth)", {
     // scenario 3
     when: ["the own session's rollout is held by another live pid", () =>
       decideCodexStart({
@@ -49,22 +50,32 @@ feature("codex session guard (never resume --last)", () => {
         writersFor: () => [144186],
       })],
     then: ["it refuses to become a second writer and names the holder", (decision) => {
-      expect(decision.action).toBe("fresh");
+      expect(decision.action).toBe("blocked");
       expect(decision.reason).toBe("rollout-held-by-live-writer");
       expect(decision.heldBy).toEqual([144186]);
     }],
   });
 
-  unit("no persisted mapping falls fresh", {
+  unit("no persisted mapping blocks by default", {
     // scenario 4
     when: ["the pane recorded no session of its own", () =>
       decideCodexStart({ pane: "skydive:7", persisted: null, rolloutPathFor, writersFor: noWriters })],
-    then: ["it starts fresh, never guessing a session", (decision) => {
-      expect(decision).toMatchObject({ action: "fresh", reason: "no-persisted-session", sessionId: null });
+    then: ["it refuses a silent fresh session", (decision) => {
+      expect(decision).toMatchObject({ action: "blocked", reason: "no-persisted-session", sessionId: null });
     }],
   });
 
-  unit("a persisted own session whose rollout no longer exists falls fresh", {
+  unit("an explicitly new pane/profile may bootstrap exactly once", {
+    when: ["the caller proves this is a first bootstrap", () => decideCodexStart({
+      pane: "skydive:7", persisted: null, rolloutPathFor, writersFor: noWriters,
+      allowFreshBootstrap: true,
+    })],
+    then: ["fresh is explicit and auditable", (decision) => {
+      expect(decision).toMatchObject({ action: "fresh", reason: "explicit-first-bootstrap" });
+    }],
+  });
+
+  unit("a persisted own session whose rollout no longer exists blocks", {
     when: ["the rollout file for the recorded id is gone", () =>
       decideCodexStart({
         pane: "skydive:7",
@@ -72,8 +83,8 @@ feature("codex session guard (never resume --last)", () => {
         rolloutPathFor: () => null,
         writersFor: noWriters,
       })],
-    then: ["it starts fresh rather than resuming a missing rollout", (decision) => {
-      expect(decision).toMatchObject({ action: "fresh", reason: "session-rollout-missing" });
+    then: ["it reports continuity loss rather than creating a replacement", (decision) => {
+      expect(decision).toMatchObject({ action: "blocked", reason: "session-rollout-missing" });
     }],
   });
 

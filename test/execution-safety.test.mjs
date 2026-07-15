@@ -28,19 +28,18 @@ const LAUNCH_SURFACES = [
 ];
 
 feature("shared autonomous execution contract", () => {
-  unit("Claude delegates every autonomous tool call to auto mode without Chrome integration", {
+  unit("Claude uses the centrally authorized permission bypass", {
     when: ["reading the canonical argv", () => ({
       args: CLAUDE_AUTONOMOUS_ARGS,
       flags: CLAUDE_AUTONOMOUS_FLAGS,
     })],
-    then: ["the native reviewer is enabled and the bypass is absent", ({ args, flags }) => {
-      expect(args).toEqual(["--permission-mode", "auto", "--no-chrome"]);
-      expect(flags).toBe("--permission-mode auto --no-chrome");
-      expect(flags).not.toContain("dangerously");
+    then: ["the exact dangerous-skip flag is present once", ({ args, flags }) => {
+      expect(args).toEqual(["--dangerously-skip-permissions"]);
+      expect(flags).toBe("--dangerously-skip-permissions");
     }],
   });
 
-  unit("Codex keeps workspace writes and network while escalation is fail-closed reviewed", {
+  unit("Codex uses yolo semantics in CLI and native app-server turns", {
     when: ["reading CLI and app-server policy", () => ({
       args: CODEX_AUTONOMOUS_ARGS,
       flags: CODEX_AUTONOMOUS_FLAGS,
@@ -48,22 +47,17 @@ feature("shared autonomous execution contract", () => {
       thread: CODEX_AUTONOMOUS_THREAD_POLICY,
       turn: CODEX_AUTONOMOUS_TURN_POLICY,
     })],
-    then: ["all native seams carry the same bounded authority", (policy) => {
-      expect(policy.flags).toContain("--sandbox workspace-write");
-      expect(policy.flags).toContain("--ask-for-approval on-request");
-      expect(policy.flags).toContain("sandbox_workspace_write.network_access=true");
-      expect(policy.flags).toContain('approvals_reviewer="auto_review"');
-      expect(policy.flags).not.toContain("--yolo");
-      expect(policy.appServer).toContain('approvals_reviewer="auto_review"');
+    then: ["all native seams carry full access without approval prompts", (policy) => {
+      expect(policy.args).toEqual(["--yolo"]);
+      expect(policy.flags).toBe("--yolo");
+      expect(policy.appServer).toEqual(["app-server", "--stdio"]);
       expect(policy.thread).toEqual({
-        sandbox: "workspace-write",
-        approvalPolicy: "on-request",
-        approvalsReviewer: "auto_review",
+        sandbox: "danger-full-access",
+        approvalPolicy: "never",
       });
       expect(policy.turn).toEqual({
-        sandboxPolicy: { type: "workspaceWrite", networkAccess: true },
-        approvalPolicy: "on-request",
-        approvalsReviewer: "auto_review",
+        sandboxPolicy: { type: "dangerFullAccess" },
+        approvalPolicy: "never",
       });
     }],
   });
@@ -77,12 +71,12 @@ feature("shared autonomous execution contract", () => {
     }],
   });
 
-  unit("no production launcher can silently restore a vendor bypass", {
+  unit("no production launcher can drift from the shared autonomous policy", {
     when: ["scanning every Claude and Codex launch surface", () => LAUNCH_SURFACES.map((path) => ({
       path,
       source: readFileSync(join(ROOT, path), "utf8"),
     }))],
-    then: ["all bypass spellings and full-access policies are absent", (surfaces) => {
+    then: ["all bypass spellings and full-access policies stay centralized", (surfaces) => {
       for (const { path, source } of surfaces) {
         expect(source, path).not.toContain("--dangerously-skip-permissions");
         expect(source, path).not.toContain("--yolo");
@@ -93,22 +87,16 @@ feature("shared autonomous execution contract", () => {
   });
 });
 
-feature("external navigation defense in depth", () => {
-  unit("direct browser GUI entry points are forbidden while headless tests stay autonomous", {
+feature("autonomous Codex profile reconciliation", () => {
+  unit("the agentmux-owned execpolicy contains no stale restrictions", {
     when: ["reading the installed execpolicy fixture", () => CODEX_EXTERNAL_NAVIGATION_RULES],
-    then: ["direct navigation is blocked and ordinary Playwright tests are excluded", (rules) => {
-      expect(rules).toContain('decision = "forbidden"');
-      expect(rules).toContain('"xdg-open"');
-      expect(rules).toContain('"google-chrome"');
-      expect(rules).toContain('"playwright", ["open", "codegen", "show-report"]');
-      expect(rules).toContain('"playwright", "test", ["--ui", "--headed"]');
-      expect(rules).toContain('not_match = ["npx playwright test"]');
-      expect(rules).not.toContain('decision = "allow"');
-      expect(rules).not.toContain('decision = "prompt"');
+    then: ["the managed file is comment-only", (rules) => {
+      expect(rules).toContain("Full autonomous mode");
+      expect(rules).not.toContain("prefix_rule");
     }],
   });
 
-  component("Codex's native evaluator blocks GUI launch and leaves headless tests unmatched", {
+  component("Codex's native evaluator leaves every command class unmatched", {
     given: ["the managed rules installed in an isolated profile", () => {
       const home = mkdtempSync(join(tmpdir(), "amux-native-execpolicy-"));
       return { home, rulesPath: ensureCodexExecutionSafety({ home }) };
@@ -128,9 +116,11 @@ feature("external navigation defense in depth", () => {
         headless: check("npx", "playwright", "test"),
       };
     }],
-    then: ["the vendor evaluator returns forbidden, forbidden, and no rule", (result, ctx) => {
-      expect(result.gui.decision).toBe("forbidden");
-      expect(result.interactive.decision).toBe("forbidden");
+    then: ["the managed policy does not constrain GUI or headless execution", (result, ctx) => {
+      expect(result.gui.matchedRules).toEqual([]);
+      expect(result.gui.decision).toBeUndefined();
+      expect(result.interactive.matchedRules).toEqual([]);
+      expect(result.interactive.decision).toBeUndefined();
       expect(result.headless.matchedRules).toEqual([]);
       expect(result.headless.decision).toBeUndefined();
       rmSync(ctx.home, { recursive: true, force: true });

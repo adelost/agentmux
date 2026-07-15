@@ -14,8 +14,9 @@ const DEFAULT_AGENT_CMD = `claude --continue ${CLAUDE_AUTONOMOUS_FLAGS} --model 
 // Never `codex resume --last`: it resumes the globally most-recent rollout, not
 // this pane's own, so a pane launched from generated config can attach to
 // another live pane's session — two writers, interleaved model/context (the
-// skydive model-override incident). Start fresh; exact pane-owned resume is
-// selected at launch via core/codex-session-guard.mjs, never a global shortcut.
+// skydive model-override incident). This generated command is only a pane-type
+// descriptor; startCodex resolves and resumes the exact pane-owned session.
+// A bare launch is allowed only for a profile's first explicit bootstrap.
 const DEFAULT_CODEX_CMD = `codex ${CODEX_AUTONOMOUS_FLAGS}`;
 
 /** Expand ~ to $HOME in paths */

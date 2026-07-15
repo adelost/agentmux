@@ -23,6 +23,7 @@ import {
   extractFromCodexJsonl,
   isBusyFromCodexJsonl,
   isPromptInCodexJsonl,
+  latestCodexSessionIdentity,
 } from "./core/codex-jsonl-reader.mjs";
 import { getContextPercent as getContextPercentByDialect, getContextFromPane } from "./core/context.mjs";
 import { findBlockingPrompt } from "./core/dismiss.mjs";
@@ -56,6 +57,8 @@ import {
   CLAUDE_AUTONOMOUS_FLAGS,
   CODEX_AUTONOMOUS_FLAGS,
 } from "./core/execution-safety.mjs";
+import { decideCodexStart, liveRolloutWriters } from "./core/codex-session-guard.mjs";
+const CODEX_SESSION_STATE_KEY = "codex_session_by_pane_profile_v1";
 const CODEX_PROMPT_READY_TIMEOUT_MS = 8_000;
 function codexDeliveryBlocked(message, { zoomRecoverable = false } = {}) {
   const error = new Error(message);
@@ -109,6 +112,7 @@ export function buildCodexLaunchCommand({
   model = null,
   effort = null,
   resumeSessionId = null,
+  allowFreshBootstrap = false,
 } = {}) {
   if (!profileHome) throw new Error("Codex profile home is required");
   if (model && !/^[a-z0-9._-]+$/i.test(model)) throw new Error(`invalid Codex model: ${model}`);
@@ -128,14 +132,12 @@ export function buildCodexLaunchCommand({
     // be resumed.
     return `${env} codex resume ${shellQuote(exactResume)} ${flags}`;
   }
-  // NEVER `codex resume --last`: it resumes the globally most-recent rollout,
-  // not this pane's own, so a respawn can attach to a DIFFERENT live pane's
-  // session — two writers on one rollout, interleaved model/context (the
-  // skydive model-override incident, twice in one day). With no exact
-  // pane-owned session to resume, start fresh; on-disk WIP is untouched. The
-  // exact-session branch above stays fail-closed. Callers select the exact
-  // resume id through core/codex-session-guard.mjs (own + provenance-matched +
-  // not held by a live writer), never a global shortcut.
+  if (!allowFreshBootstrap) {
+    throw new Error("Codex launch requires an exact pane session; fresh bootstrap was not authorized");
+  }
+  // A bare launch is legal only for a pane/profile with no prior rollout.
+  // Respawns always take the exact-session branch above; never `--last` and
+  // never a silent fresh fallback.
   return `${env} codex ${flags}`;
 }
 
@@ -1169,6 +1171,49 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const profile = launch?.profile || selectedCodexProfile(state, name, pane, catalog);
     prepareCodexProfile(profile, catalog[0]);
 
+    const owner = `${name}:${pane}@${profile.id}`;
+    const allSessionState = state?.get?.(CODEX_SESSION_STATE_KEY, {}) || {};
+    const remembered = allSessionState[owner] || null;
+    const discovered = latestCodexSessionIdentity(dir, {
+      sessionDirs: [join(profile.home, "sessions")],
+    });
+    const requestedSessionId = launch?.resumeSessionId
+      || agentConfig(name).panes?.[pane]?.resumeSessionId
+      || null;
+    const persisted = requestedSessionId
+      ? { pane: owner, sessionId: requestedSessionId }
+      : discovered
+        ? { pane: owner, sessionId: discovered.sessionId }
+        : remembered?.sessionId
+          ? { pane: owner, sessionId: remembered.sessionId }
+          : null;
+    const decision = decideCodexStart({
+      pane: owner,
+      persisted,
+      rolloutPathFor: (sessionId) => discovered?.sessionId === sessionId ? discovered.path : null,
+      writersFor: liveRolloutWriters,
+      allowFreshBootstrap: !remembered && !discovered && !requestedSessionId,
+    });
+    if (decision.action === "blocked") {
+      const holders = decision.heldBy?.length ? ` (live writer ${decision.heldBy.join(",")})` : "";
+      throw new Error(`Codex continuity blocked for ${owner}: ${decision.reason}${holders}`);
+    }
+
+    const persistSession = (record) => {
+      if (!state?.set) return;
+      state.set(CODEX_SESSION_STATE_KEY, {
+        ...(state.get(CODEX_SESSION_STATE_KEY, {}) || {}),
+        [owner]: { pane: owner, profileId: profile.id, ...record },
+      });
+    };
+    if (decision.action === "fresh") {
+      // Fence before process creation: a failed bootstrap must not silently
+      // create another unrelated session on the next delivery.
+      persistSession({ sessionId: null, status: "bootstrapping", startedAt: Date.now() });
+    } else {
+      persistSession({ sessionId: decision.sessionId, status: "ready", rolloutPath: discovered.path });
+    }
+
     let override = launch?.model
       ? { model: launch.model, effort: launch.effort ?? null }
       : codexModelOverride(state, name, pane);
@@ -1183,22 +1228,28 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         catch (err) { console.warn(`startCodex: could not pin ${name}:${pane} model: ${err.message}`); }
       }
     }
-    // Resume only an exact pane-owned session id (rollback / guard-selected);
-    // otherwise launch fresh. Never `codex resume --last` — the global latest
-    // belongs to whichever pane wrote most recently, not this one, which is how
-    // a respawn hijacked another pane's live session. CODEX_HOME selects the
-    // ChatGPT account; -m/-c are process-local launch overrides, so pane A can
-    // use Max without mutating pane B's config.toml default.
+    // Resume only the exact pane/profile-owned session selected above. A bare
+    // launch is permitted solely for the fenced first bootstrap.
     const cmd = buildCodexLaunchCommand({
       profileHome: profile.home,
       model: override?.model || null,
       effort: override?.effort || null,
-      resumeSessionId: launch?.resumeSessionId
-        || agentConfig(name).panes?.[pane]?.resumeSessionId
-        || null,
+      resumeSessionId: decision.action === "resume" ? decision.sessionId : null,
+      allowFreshBootstrap: decision.action === "fresh",
     });
     await t.runShell(target, `cd ${esc(dir)} && ${cmd}`);
     await wait(2000);
+
+    if (decision.action === "fresh") {
+      let created = null;
+      const deadline = Date.now() + 6_000;
+      while (!created && Date.now() < deadline) {
+        created = latestCodexSessionIdentity(dir, { sessionDirs: [join(profile.home, "sessions")] });
+        if (!created) await wait(200);
+      }
+      if (!created) throw new Error(`Codex bootstrap for ${owner} produced no pane-owned rollout`);
+      persistSession({ sessionId: created.sessionId, status: "ready", rolloutPath: created.path });
+    }
   }
 
   /**

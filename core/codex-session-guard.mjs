@@ -11,8 +11,9 @@
 // session id whose provenance matches the pane. The live-writer FD check is
 // DEFENSE-IN-DEPTH, not the ownership source — a dead-but-foreign session is
 // still refused on provenance, and a live-held own session is refused on the FD
-// check. Anything missing / foreign / ambiguous / held resolves to a FRESH
-// codex session; on-disk WIP is never touched. `resume --last` is never used.
+// check. Anything missing / foreign / ambiguous / held is BLOCKED — never
+// silently downgraded to a fresh session. Only an explicitly authorized first
+// bootstrap may create a new session. `resume --last` is never used.
 
 import { readdirSync, readlinkSync } from "fs";
 import { join } from "path";
@@ -58,7 +59,7 @@ export function liveRolloutWriters(rolloutPath, {
 }
 
 /**
- * WHAT: Decides how a codex pane starts — resume its exact own session, or fresh.
+ * WHAT: Decides how a codex pane starts — exact resume, first bootstrap, or block.
  * WHY: Pane-scoped, provenance-gated, fail-closed resume is the only safe answer;
  *      the global-latest (`--last`) shortcut is the hijack this replaces.
  *
@@ -67,25 +68,32 @@ export function liveRolloutWriters(rolloutPath, {
  *                        `{ sessionId, pane }`, or null if none was recorded.
  * @param rolloutPathFor  (sessionId) => absolute rollout path | null.
  * @param writersFor      (rolloutPath) => number[] of live writer pids.
- * @returns frozen `{ action: "resume"|"fresh", pane, sessionId, reason, heldBy? }`.
+ * @param allowFreshBootstrap true only for a pane/profile never started before.
+ * @returns frozen `{ action: "resume"|"fresh"|"blocked", pane, sessionId, reason, heldBy? }`.
  */
-export function decideCodexStart({ pane, persisted, rolloutPathFor, writersFor }) {
-  const fresh = (reason, extra = {}) =>
-    Object.freeze({ action: "fresh", pane, sessionId: null, reason, ...extra });
+export function decideCodexStart({
+  pane, persisted, rolloutPathFor, writersFor, allowFreshBootstrap = false,
+}) {
+  const blocked = (reason, extra = {}) =>
+    Object.freeze({ action: "blocked", pane, sessionId: persisted?.sessionId || null, reason, ...extra });
 
-  if (!persisted || !persisted.sessionId) return fresh("no-persisted-session");
+  if (!persisted || !persisted.sessionId) {
+    return allowFreshBootstrap
+      ? Object.freeze({ action: "fresh", pane, sessionId: null, reason: "explicit-first-bootstrap" })
+      : blocked("no-persisted-session");
+  }
   // Ownership authority: a session that belongs to another pane is refused even
   // when it is dead/unheld — that is exactly the `--last` global-latest hijack.
-  if (persisted.pane !== pane) return fresh("foreign-provenance");
+  if (persisted.pane !== pane) return blocked("foreign-provenance");
 
   const rolloutPath = rolloutPathFor(persisted.sessionId);
-  if (!rolloutPath) return fresh("session-rollout-missing");
+  if (!rolloutPath) return blocked("session-rollout-missing");
 
   const writers = writersFor(rolloutPath) || [];
   if (writers.length > 0) {
     // Defense-in-depth: our own recorded session is still being written by a
     // live process (e.g. an un-reaped prior incarnation) — never join it.
-    return fresh("rollout-held-by-live-writer", { heldBy: Object.freeze([...writers]) });
+    return blocked("rollout-held-by-live-writer", { heldBy: Object.freeze([...writers]) });
   }
 
   return Object.freeze({
