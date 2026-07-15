@@ -144,19 +144,28 @@ export function isWaitingLikeText(text) {
  * HUMAN's court when the conversation partner is the human. When the latest
  * prompt carries an inter-agent envelope ("[from lsrc:2] ..."), a generic
  * second-person question ("Vill du att jag mergar?") is addressed to that
- * agent, not to Mattias — needs-you survives only an explicit human mention
- * in the reply. parseSenderHeader covers the canonical auto-prepended
- * envelope; the loose "[from ..." fallback covers hand-written variants
- * ("[from claw:3 · audit]") that the strict routing parser rejects — for
- * CLASSIFICATION a human never types that prefix, so loose is safe here.
+ * agent, not to Mattias. parseSenderHeader covers the canonical
+ * auto-prepended envelope; the loose "[from ..." fallback covers
+ * hand-written variants ("[from claw:3 · audit]") that the strict routing
+ * parser rejects — for CLASSIFICATION a human never types that prefix, so
+ * loose is safe here.
+ *
+ * Inside an agent thread, needs-you survives only when the reply actually
+ * ADDRESSES the human (vocative "Mattias, ...") or states that the human's
+ * decision is what's pending ("väntar på Mattias besked"). A mere MENTION
+ * is not an ask: "Ska jag eskalera detta till Mattias?" asks the peer
+ * agent, and "buggen drabbar användaren, ska jag fixa?" is about the user,
+ * not to the user.
  */
 export function isAskToHuman(replyText, promptText) {
   if (!isWaitingLikeText(replyText)) return false;
   const prompt = String(promptText || "").trimStart();
   const interAgent = parseSenderHeader(prompt) != null || /^\[from \S+/.test(prompt);
   if (!interAgent) return true;
-  const tail = String(replyText).trim().slice(-300).toLowerCase();
-  return /\b(mattias|human|människan|användaren|the user)\b/.test(tail);
+  const tail = String(replyText).trim().slice(-300);
+  return /(^|[.!?]\s+|\n)\s*(mattias|@?human|användaren)\s*[,:;-]/im.test(tail)
+    || /(väntar på|behöver|kräver|inväntar) (mattias'?s?|human|mänskligt?)\s*(besked|svar|beslut|godkännande|approval|input|blick)/i.test(tail)
+    || /needs (mattias|human) (approval|decision|input|call)/i.test(tail);
 }
 
 /**
