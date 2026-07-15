@@ -19,7 +19,7 @@ import { dirname, resolve } from "path";
 import { spawn } from "child_process";
 import yaml from "js-yaml";
 
-export const SUGGESTIONS_BRIDGE_STATE_VERSION = 2;
+export const SUGGESTIONS_BRIDGE_STATE_VERSION = 3;
 export const DEFAULT_COMMENT_BYTES = 64 * 1024;
 export const MAX_COMMENT_BYTES = 64 * 1024;
 export const MAX_PROMPT_BYTES = 96 * 1024;
@@ -179,7 +179,7 @@ export function loadSuggestionsBridgeState(path) {
   if (!isObject(value) || Object.keys(value).some((key) => ![
     "version", "lastSuccessfulSyncAt", "projects",
   ].includes(key))
-      || !new Set([1, SUGGESTIONS_BRIDGE_STATE_VERSION]).has(value.version)
+      || !new Set([1, 2, SUGGESTIONS_BRIDGE_STATE_VERSION]).has(value.version)
       || (value.lastSuccessfulSyncAt != null
         && (!Number.isFinite(value.lastSuccessfulSyncAt) || value.lastSuccessfulSyncAt < 0))
       || !isObject(value.projects)) {
@@ -187,12 +187,17 @@ export function loadSuggestionsBridgeState(path) {
   }
   for (const [projectId, project] of Object.entries(value.projects)) {
     if (!isObject(project)
-        || Object.keys(project).some((key) => !["bootstrapped", "comments", "ticketUpdatedAt"].includes(key))
+        || Object.keys(project).some((key) => ![
+          "bootstrapped", "comments", "ticketUpdatedAt", "cursor",
+        ].includes(key))
         || typeof project.bootstrapped !== "boolean"
-        || !isObject(project.comments) || !isObject(project.ticketUpdatedAt)) {
+        || !isObject(project.comments)
+        || (project.ticketUpdatedAt != null && !isObject(project.ticketUpdatedAt))
+        || (project.cursor != null && (!/^(?:0|[1-9][0-9]*)$/u.test(String(project.cursor))
+          || !Number.isSafeInteger(Number(project.cursor))))) {
       throw new Error(`state: malformed project state for ${projectId}`);
     }
-    for (const [ticketId, updatedAt] of Object.entries(project.ticketUpdatedAt)) {
+    for (const [ticketId, updatedAt] of Object.entries(project.ticketUpdatedAt ?? {})) {
       if (!/^[A-Z0-9][A-Z0-9-]*$/u.test(ticketId) || !Number.isFinite(updatedAt) || updatedAt < 0) {
         throw new Error(`state: malformed ticket cursor for ${projectId}/${ticketId}`);
       }
@@ -231,7 +236,11 @@ export function loadSuggestionsBridgeState(path) {
   return {
     version: SUGGESTIONS_BRIDGE_STATE_VERSION,
     lastSuccessfulSyncAt: value.lastSuccessfulSyncAt ?? null,
-    projects: value.projects,
+    projects: Object.fromEntries(Object.entries(value.projects).map(([projectId, project]) => [
+      projectId,
+      { bootstrapped: project.bootstrapped, comments: project.comments,
+        cursor: project.cursor == null ? "0" : String(project.cursor) },
+    ])),
   };
 }
 
@@ -259,7 +268,7 @@ export function saveSuggestionsBridgeState(path, state) {
     projects[projectId] = {
       bootstrapped: project.bootstrapped,
       comments,
-      ticketUpdatedAt: { ...(project.ticketUpdatedAt ?? {}) },
+      cursor: String(project.cursor ?? "0"),
     };
   }
   const lastSuccessfulSyncAt = state.lastSuccessfulSyncAt == null
@@ -411,23 +420,6 @@ export function serializeImplementationPolicy(value, label = "implementationPoli
   return assertString(serialized, label, { min: 32, max: MAX_POLICY_BYTES });
 }
 
-function remotePolicy(configPayload, projectId, fallback) {
-  const candidates = [];
-  const matching = configPayload.projects.find((project) => project.id === projectId);
-  if (matching && Object.hasOwn(matching, "implementationPolicy")) {
-    candidates.push([matching.implementationPolicy, `projects.${projectId}.implementationPolicy`]);
-  }
-  if (Object.hasOwn(configPayload, "implementationPolicy")) {
-    candidates.push([configPayload.implementationPolicy, "implementationPolicy"]);
-  }
-  if (configPayload.project?.id === projectId && Object.hasOwn(configPayload.project, "implementationPolicy")) {
-    candidates.unshift([configPayload.project.implementationPolicy, "project.implementationPolicy"]);
-  }
-  if (!candidates.length) return serializeImplementationPolicy(fallback, "local implementationPolicy");
-  const [value, label] = candidates[0];
-  return serializeImplementationPolicy(value, label);
-}
-
 function untrustedBoundary(identity, encodedPayload) {
   for (let counter = 0; ; counter++) {
     const seed = counter === 0 ? identity : `${identity}:${counter}`;
@@ -494,20 +486,58 @@ export function buildSuggestionsCommentPrompt({
   return prompt;
 }
 
-function validateConfigPayload(value) {
-  if (!isObject(value) || !Array.isArray(value.projects) || !isObject(value.project)) {
-    throw new Error("schema: /api/config must contain project and projects");
+function validateAgentDocsPayload(value, expectedProjectId) {
+  if (!isObject(value) || !isObject(value.project)) {
+    throw new Error("schema: /api/config/agentdocs must contain project");
   }
-  if (value.projects.length > 100) throw new Error("schema: /api/config projects[] exceeds 100");
-  const seen = new Set();
-  for (const [index, project] of value.projects.entries()) {
-    if (!isObject(project)) throw new Error(`schema: projects[${index}] must be an object`);
-    const id = assertString(project.id, `projects[${index}].id`, { min: 1, max: 64 });
-    if (seen.has(id)) throw new Error(`schema: duplicate project id '${id}'`);
-    seen.add(id);
+  const projectId = assertString(value.project.id, "project.id", { min: 1, max: 64 });
+  if (projectId !== expectedProjectId) {
+    throw new Error(`schema: agentdocs project mismatch for '${expectedProjectId}'`);
   }
-  assertString(value.project.id, "project.id", { min: 1, max: 64 });
   return value;
+}
+
+const decimalCursor = (value, label) => {
+  const text = String(value);
+  const parsed = Number(text);
+  if (!/^(?:0|[1-9][0-9]*)$/u.test(text) || !Number.isSafeInteger(parsed)) {
+    throw new Error(`schema: ${label} must be a safe decimal cursor`);
+  }
+  return { text, parsed };
+};
+
+function validateCommentPoll(value, projectId, previousCursor, limit) {
+  if (!isObject(value) || value.project !== projectId || !Array.isArray(value.events)
+      || typeof value.hasMore !== "boolean") {
+    throw new Error(`schema: ${projectId} /api/tickets/poll has an invalid envelope`);
+  }
+  const previous = decimalCursor(previousCursor, `${projectId}.previousCursor`);
+  const cursor = decimalCursor(value.cursor, `${projectId}.cursor`);
+  const scanned = Number(value.scanned);
+  if (!Number.isSafeInteger(scanned) || scanned < 0 || scanned > limit
+      || value.events.length > scanned || cursor.parsed < previous.parsed
+      || (scanned === 0 && cursor.parsed !== previous.parsed)
+      || (scanned > 0 && cursor.parsed <= previous.parsed)) {
+    throw new Error(`schema: ${projectId} /api/tickets/poll has an invalid cursor window`);
+  }
+  let lastEventCursor = previous.parsed;
+  const events = value.events.map((event, index) => {
+    if (!isObject(event)) throw new Error(`schema: ${projectId} events[${index}] must be an object`);
+    const eventCursor = decimalCursor(event.cursor, `${projectId}.events[${index}].cursor`);
+    if (eventCursor.parsed <= lastEventCursor || eventCursor.parsed > cursor.parsed) {
+      throw new Error(`schema: ${projectId} events must have ascending in-window cursors`);
+    }
+    lastEventCursor = eventCursor.parsed;
+    const ticketId = assertString(event.ticketId, `${projectId}.events[${index}].ticketId`, {
+      min: 3, max: 64,
+    });
+    if (!/^[A-Z0-9][A-Z0-9-]*$/u.test(ticketId)
+        || !new Set(["comment", "answer", "reopened"]).has(event.kind)) {
+      throw new Error(`schema: ${projectId} events[${index}] is unsafe`);
+    }
+    return { cursor: eventCursor.text, ticketId, kind: event.kind };
+  });
+  return { cursor: cursor.text, hasMore: value.hasMore, scanned, events };
 }
 
 function validateTicketSummary(ticket, label, expectedId = null) {
@@ -531,20 +561,6 @@ function validateTicketSummary(ticket, label, expectedId = null) {
     status,
     updatedAt,
   };
-}
-
-function validateTicketList(value, projectId) {
-  if (!isObject(value) || !Array.isArray(value.tickets)) {
-    throw new Error(`schema: ${projectId} /api/tickets must contain tickets[]`);
-  }
-  if (value.tickets.length > 500) throw new Error(`schema: ${projectId} tickets[] exceeds 500`);
-  const ids = new Set();
-  return value.tickets.map((ticket, index) => {
-    const result = validateTicketSummary(ticket, `${projectId} tickets[${index}]`);
-    if (ids.has(result.id)) throw new Error(`schema: ${projectId} duplicate ticket id '${result.id}'`);
-    ids.add(result.id);
-    return result;
-  });
 }
 
 function validateTicketDetail(value, expected) {
@@ -659,7 +675,7 @@ async function fetchJson(url, { fetchImpl, timeoutMs, readToken,
   }
 }
 
-/** Probe the same authenticated board-list seam used by the comment bridge. */
+/** Probe the same bounded board cursor used by the comment bridge. */
 export async function probeSuggestionsBoard({
   config,
   readToken,
@@ -676,15 +692,17 @@ export async function probeSuggestionsBoard({
   const projectIds = Object.keys(config.projects ?? {});
   const projectId = projectIds.includes("source") ? "source" : projectIds[0];
   if (!projectId) throw new Error("probe: no configured Suggestions project");
-  const url = new URL("/api/tickets", config.baseUrl);
+  const url = new URL("/api/tickets/poll", config.baseUrl);
   url.searchParams.set("project", projectId);
+  url.searchParams.set("cursor", "0");
+  url.searchParams.set("limit", "1");
   try {
-    validateTicketList(await fetchJson(url, {
+    validateCommentPoll(await fetchJson(url, {
       fetchImpl,
       timeoutMs: config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS,
       readToken,
-      maxBytes: 4 * 1024 * 1024,
-    }), projectId);
+      maxBytes: 64 * 1024,
+    }), projectId, "0", 1);
     return { ok: true, status: 200, projectId };
   } catch (error) {
     return {
@@ -711,8 +729,12 @@ async function mapLimit(items, limit, mapper) {
 
 function projectState(state, projectId) {
   const existing = state.projects[projectId];
-  if (existing) return existing;
-  const created = { bootstrapped: false, comments: {}, ticketUpdatedAt: {} };
+  if (existing) {
+    if (existing.cursor == null) existing.cursor = "0";
+    delete existing.ticketUpdatedAt;
+    return existing;
+  }
+  const created = { bootstrapped: false, comments: {}, cursor: "0" };
   state.projects[projectId] = created;
   return created;
 }
@@ -727,12 +749,6 @@ function trackedCommentNeedsAction(comment, nowMs) {
   if (!stage) return comment.notifiedAt == null;
   if (stage.afterMs === 0) return true;
   return nowMs - comment.attempts[0].enqueuedAt >= stage.afterMs;
-}
-
-function ticketHasDueComment(project, ticketId, nowMs) {
-  const prefix = `${ticketId}:`;
-  return Object.entries(project.comments).some(([key, comment]) =>
-    key.startsWith(prefix) && trackedCommentNeedsAction(comment, nowMs));
 }
 
 function dueTrackedTicketIds(project, nowMs) {
@@ -784,67 +800,78 @@ export async function pollSuggestionsComments({
   if (!/^[A-Za-z0-9_-]{32,256}$/u.test(readToken ?? "")) {
     throw new Error("poller: a bounded read credential is required");
   }
-  const configUrl = new URL("/api/config", config.baseUrl);
-  const remoteConfig = validateConfigPayload(await fetchJson(configUrl, {
+  const projectEntries = Object.entries(config.projects);
+  if (!projectEntries.length) throw new Error("poller: no configured Suggestions project");
+  const policyProjectId = projectEntries[0][0];
+  const agentDocsUrl = new URL("/api/config/agentdocs", config.baseUrl);
+  agentDocsUrl.searchParams.set("project", policyProjectId);
+  const agentDocs = validateAgentDocsPayload(await fetchJson(agentDocsUrl, {
     fetchImpl, timeoutMs: config.requestTimeoutMs, readToken, maxBytes: 256 * 1024,
-  }));
-  const remoteIds = new Set(remoteConfig.projects.map((project) => project.id));
-  for (const projectId of Object.keys(config.projects)) {
-    if (!remoteIds.has(projectId)) {
-      throw new Error(`mapping: configured project '${projectId}' is absent from /api/config`);
-    }
-  }
+  }), policyProjectId);
+  const policy = serializeImplementationPolicy(
+    Object.hasOwn(agentDocs, "implementationPolicy")
+      ? agentDocs.implementationPolicy : config.implementationPolicy,
+    Object.hasOwn(agentDocs, "implementationPolicy")
+      ? "implementationPolicy" : "local implementationPolicy",
+  );
 
   let delivered = 0;
   const deliveryFailures = [];
   const notificationFailures = [];
   const projectFailures = [];
-  for (const [projectId, target] of Object.entries(config.projects)) {
-    const listUrl = new URL("/api/tickets", config.baseUrl);
-    listUrl.searchParams.set("project", projectId);
+  for (const [projectId, target] of projectEntries) {
+    const pState = projectState(state, projectId);
+    const pollUrl = new URL("/api/tickets/poll", config.baseUrl);
+    pollUrl.searchParams.set("project", projectId);
+    pollUrl.searchParams.set("cursor", pState.cursor);
+    pollUrl.searchParams.set("limit", "100");
     // A single unreadable project degrades to a recorded failure instead of
     // killing the whole sweep (and with it the heartbeat): ONE undeliverable
     // project made the entire bridge read as dead while 99% worked.
     // Authentication errors still throw — they are global and page the owner.
-    let tickets;
+    let poll;
     try {
-      tickets = validateTicketList(await fetchJson(listUrl, {
+      poll = validateCommentPoll(await fetchJson(pollUrl, {
         fetchImpl, timeoutMs: config.requestTimeoutMs, readToken,
-        maxBytes: 4 * 1024 * 1024,
-      }), projectId);
+        maxBytes: 256 * 1024,
+      }), projectId, pState.cursor, 100);
     } catch (error) {
       if (isSuggestionsAuthenticationError(error)) throw error;
       projectFailures.push({ projectId, error: error.message });
       logger.error?.(`PROJECT_FAILED ${projectId}: ${error.message}`);
       continue;
     }
-    const pState = projectState(state, projectId);
     const pollNow = now();
-    const ticketsNeedingDetail = tickets.filter((ticket) =>
-      pState.ticketUpdatedAt[ticket.id] !== ticket.updatedAt
-      || ticketHasDueComment(pState, ticket.id, pollNow))
-      .map((ticket) => ({ ticket, trackedOnly: false }));
-    const listedIds = new Set(tickets.map((ticket) => ticket.id));
+    const eventTicketIds = new Set(poll.events.map((event) => event.ticketId));
+    const ticketsNeedingDetail = [...eventTicketIds]
+      .map((ticketId) => ({ ticket: { id: ticketId }, trackedOnly: false }));
     for (const ticketId of dueTrackedTicketIds(pState, pollNow)) {
-      if (!listedIds.has(ticketId)) {
+      if (!eventTicketIds.has(ticketId)) {
         ticketsNeedingDetail.push({ ticket: { id: ticketId }, trackedOnly: true });
       }
     }
-    const details = await mapLimit(ticketsNeedingDetail, config.detailConcurrency, async (candidate) => {
-      const detailUrl = new URL(`/api/tickets/${encodeURIComponent(candidate.ticket.id)}`, config.baseUrl);
-      detailUrl.searchParams.set("project", projectId);
-      try {
-        return validateTicketDetail(await fetchJson(detailUrl, {
-          fetchImpl, timeoutMs: config.requestTimeoutMs, readToken,
-        }), candidate.ticket);
-      } catch (error) {
-        if (candidate.trackedOnly && error instanceof HttpResponseError && error.status === 404) {
-          return { terminalTicketId: candidate.ticket.id };
+    let details;
+    try {
+      details = await mapLimit(ticketsNeedingDetail, config.detailConcurrency, async (candidate) => {
+        const detailUrl = new URL(`/api/tickets/${encodeURIComponent(candidate.ticket.id)}`, config.baseUrl);
+        detailUrl.searchParams.set("project", projectId);
+        try {
+          return validateTicketDetail(await fetchJson(detailUrl, {
+            fetchImpl, timeoutMs: config.requestTimeoutMs, readToken,
+          }), candidate.ticket);
+        } catch (error) {
+          if (candidate.trackedOnly && error instanceof HttpResponseError && error.status === 404) {
+            return { terminalTicketId: candidate.ticket.id };
+          }
+          throw error;
         }
-        throw error;
-      }
-    });
-    const policy = remotePolicy(remoteConfig, projectId, config.implementationPolicy);
+      });
+    } catch (error) {
+      if (isSuggestionsAuthenticationError(error)) throw error;
+      projectFailures.push({ projectId, error: error.message });
+      logger.error?.(`PROJECT_FAILED ${projectId}: ${error.message}`);
+      continue;
+    }
 
     for (const detail of details) {
       if (detail.terminalTicketId) {
@@ -950,10 +977,10 @@ export async function pollSuggestionsComments({
         delivered++;
         logger.info?.(`DELIVERED ${stage.id} ${projectId}/${detail.ticket.id} comment ${comment.id} -> ${target.agent}:${target.pane}`);
       }
-      if (pState.ticketUpdatedAt[detail.ticket.id] !== detail.ticket.updatedAt) {
-        pState.ticketUpdatedAt[detail.ticket.id] = detail.ticket.updatedAt;
-        persist(state);
-      }
+    }
+    if (pState.cursor !== poll.cursor) {
+      pState.cursor = poll.cursor;
+      persist(state);
     }
     if (!pState.bootstrapped) {
       pState.bootstrapped = true;

@@ -18,7 +18,7 @@ projects:
     pane: 2
 
 # Current production-safe fallback. A bounded implementationPolicy returned by
-# /api/config takes precedence when Suggestions exposes one.
+# /api/config/agentdocs takes precedence when Suggestions exposes one.
 implementationPolicy: >-
   Rotorsak före plåster: förstå och åtgärda grundorsaken. Refaktorera den
   berörda sömmen när en hållbar rotfix kräver det och lämna berörd kod bättre.
