@@ -327,7 +327,7 @@ feature("generated agent policy", () => {
       return content;
     }],
     then: ["pane 2 manages workers 3+ while panes 0-1 remain reserved", (content) => {
-      expect(content).toContain("<!-- amux-hints-version: 1.23.15 -->");
+      expect(content).toContain("<!-- amux-hints-version: 1.23.16 -->");
       expect(content).toContain("Broker panel authority is a hard allowlist");
       expect(content).toContain("pane `:2` is the sole manager/broker");
       expect(content).toContain("panes `:3` and above in the same session");
@@ -353,6 +353,8 @@ feature("generated agent policy", () => {
       expect(content).toMatch(/routine\s+deploys from the human/u);
       expect(content).toMatch(/merged-but-undeployed wave is an open loop/u);
       expect(content).toMatch(/gate-verified free\s+deploys are routine flow per rule 4, day or night/u);
+      expect(content).toMatch(/exactly ONE designated\s+deploy owner/u);
+      expect(content).toMatch(/deploy authority follows the target, not the merge/u);
     }],
   });
 });
