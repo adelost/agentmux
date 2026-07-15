@@ -414,9 +414,23 @@ describe("AMUX Code project and agent registry", () => {
     expect(uploadReplay.status).toBe(200);
     expect(uploadReplay.body).toMatchObject({ path: upload.body.path, replayed: true });
 
+    const pastedImage = await request(`${url}/api/projects/${project.id}/uploads?name=pasted-image-1.png`, {
+      method: "POST",
+      headers: {
+        "content-type": "image/png",
+        "x-idempotency-key": "pasted-image-upload-1",
+      },
+      body: Buffer.from("89504e470d0a1a0a", "hex"),
+    });
+    expect(pastedImage.status).toBe(201);
+    expect(pastedImage.body).toMatchObject({ name: "pasted-image-1.png", image: true });
+
     const first = await postJson(`${url}/api/agents/${claude.id}/messages`, {
       prompt: "hello claude",
-      attachments: [{ path: upload.body.path, name: "note.txt" }],
+      attachments: [
+        { path: upload.body.path, name: "note.txt" },
+        { path: pastedImage.body.path, name: pastedImage.body.name },
+      ],
       idempotencyKey: "claude-turn-1",
     });
     expect(first.status).toBe(202);
@@ -426,6 +440,7 @@ describe("AMUX Code project and agent registry", () => {
     expect(calls[0].args).toContain("acceptEdits");
     expect(calls[0].args).toContain("--effort");
     expect(calls[0].messages[0].message.content).toContain(upload.body.path);
+    expect(calls[0].messages[0].message.content).toContain(pastedImage.body.path);
 
     const secondBody = { prompt: "continue", attachments: [], idempotencyKey: "claude-turn-2" };
     expect((await postJson(`${url}/api/agents/${claude.id}/messages`, secondBody)).status).toBe(202);
@@ -1120,6 +1135,9 @@ describe("AMUX Code project and agent registry", () => {
     expect(page.body).toContain("pin-conversation-button");
     expect(page.body).toContain("theme-toggle");
     expect(page.body).toContain('meta name="theme-color"');
+    expect(page.body).toContain('<html lang="en">');
+    expect(page.body).toContain("Paste images or drop files here");
+    expect(page.body).toContain("Weekly quotas for Claude and Codex");
     expect(page.headers.get("content-security-policy")).toContain("default-src 'self'");
     const style = (await request(`${url}/style.css`)).body;
     expect(style).toContain("--canvas: #f2f3ee");
@@ -1134,6 +1152,13 @@ describe("AMUX Code project and agent registry", () => {
     expect(app).toContain('THEME_STORAGE_KEY = "amux-code:color-theme"');
     expect(app).toContain('window.matchMedia("(prefers-color-scheme: dark)")');
     expect(app).toContain('window.addEventListener("storage"');
+    expect(app).toContain('addEventListener("paste"');
+    expect(app).toContain('"x-idempotency-key": crypto.randomUUID()');
+    expect(app).toContain("handledPasteEvents");
+    expect(app).toContain("Manage Claude quota");
+    const serverSource = readFileSync(new URL("../spikes/web-ui/server.mjs", import.meta.url), "utf8");
+    const swedishUiCopy = /[ÅÄÖåäö]|\b(?:Projekt|Agenter|Skapa|Nytt|Pinnade|Skickade|frågor|Klar|Arbetar|Avbryt|Pinna|Avpinna|Sidofråga|Skriv|Skicka|Släpp|Stäng|Mappen|Kontext|Ingen|Uppdatera|Instansen|arbetsmapp|behörighet|misslyckades|Åtgärden|Borttaget|Borttagen|Kvot|Vecka|använt|kvar|återställs|mätt|otillgänglig|Hämtar|Hantera)\b/iu;
+    expect(`${page.body}\n${app}\n${serverSource}`).not.toMatch(swedishUiCopy);
     const config = await request(`${url}/api/config`);
     const health = await request(`${url}/api/health`);
     expect(health.body).toMatchObject({ ok: true, bootId: config.body.bootId, projects: 1, agents: 2 });

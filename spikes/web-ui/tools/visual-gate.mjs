@@ -112,7 +112,7 @@ const seedWorkspace = () => {
   const nativeDir = claudeProjectDir(workspace, homeDir);
   mkdirSync(nativeDir, { recursive: true });
   const usage = { input_tokens: 12, cache_read_input_tokens: 123_400, cache_creation_input_tokens: 0, output_tokens: 566 };
-  const deniedPrompt = "Kör den skyddade releaseåtgärden.";
+  const deniedPrompt = "Run the protected release action.";
   const deniedAt = at + 2_000;
   const deniedPromptHash = createHash("sha256")
     .update(JSON.stringify({ agentId: claudeAgent.id, prompt: deniedPrompt }))
@@ -144,11 +144,11 @@ const seedWorkspace = () => {
   };
   writeFileSync(join(dataDir, "registry.json"), JSON.stringify(registry, null, 2));
   writeFileSync(join(nativeDir, `${SESSION_ID}.jsonl`), [
-    JSON.stringify({ type: "user", message: { content: "Kan du sammanfatta hur landing-recovery-modulen hänger ihop med frame-loopen efter splitten?" } }),
-    JSON.stringify({ type: "assistant", message: { model: "claude-opus-4-8", usage, content: [{ type: "text", text: "Kort version: landing-recovery äger nu hela statemaskinen för nedslag.\n\n1. frame() anropar landingRecovery.tick(ctx) en gång per frame.\n2. Modulen läser canopy-state via explicit ctx, aldrig via globals.\n3. Vid touchdown skrivs resultatet till session-events som en JumpJudgement.\n\nProbe-ytan window.__SWOOP.landing är oförändrad, så gaten från #30 täcker fortfarande initieringsordningen." }] } }),
+    JSON.stringify({ type: "user", message: { content: "Can you summarize how the landing-recovery module connects to the frame loop after the split?" } }),
+    JSON.stringify({ type: "assistant", message: { model: "claude-opus-4-8", usage, content: [{ type: "text", text: "Short version: landing-recovery now owns the complete touchdown state machine.\n\n1. frame() calls landingRecovery.tick(ctx) once per frame.\n2. The module reads canopy state through an explicit ctx, never through globals.\n3. At touchdown, the result is written to session-events as a JumpJudgement.\n\nThe window.__SWOOP.landing probe surface is unchanged, so the gate from #30 still covers initialization order." }] } }),
     JSON.stringify({ type: "system", subtype: "compact_boundary", compactMetadata: { trigger: "auto", preTokens: 158_000, postTokens: 96_000 } }),
-    JSON.stringify({ type: "user", message: { content: "Snyggt. Kör regressionssviten och banka en PR när den är grön." } }),
-    JSON.stringify({ type: "assistant", message: { model: "claude-opus-4-8", usage, content: [{ type: "text", text: "Sviten är grön (312 test, 0 skips). PR #41 är öppnad som draft mot master med gate-beviset i beskrivningen." }] } }),
+    JSON.stringify({ type: "user", message: { content: "Looks good. Run the regression suite and bank a PR when it is green." } }),
+    JSON.stringify({ type: "assistant", message: { model: "claude-opus-4-8", usage, content: [{ type: "text", text: "The suite is green (312 tests, 0 skips). PR #41 is open as a draft against master with the gate evidence in its description." }] } }),
     JSON.stringify({ type: "user", timestamp: new Date(deniedAt).toISOString(), message: { content: deniedPrompt } }),
     "",
   ].join("\n"));
@@ -310,6 +310,54 @@ const runViewport = async (page, viewport, url) => {
   const artifact = join(ARTIFACT_DIR, `webui-${viewport.name}.png`);
   writeFileSync(artifact, Buffer.from(screenshot.data, "base64"));
 
+  const pasteDispatch = await page.evaluate(`(() => {
+    const originalFetch = window.fetch.bind(window);
+    window.__pasteUploadCalls = 0;
+    window.fetch = (...args) => {
+      if (String(args[0]).includes('/uploads?name=')) window.__pasteUploadCalls += 1;
+      return originalFetch(...args);
+    };
+    const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='), (char) => char.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], '', { type: 'image/png' }));
+    transfer.items.add(new File([bytes], '', { type: 'image/jpeg' }));
+    const imagePaste = new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true });
+    document.querySelector('#prompt').dispatchEvent(imagePaste);
+    document.querySelector('#prompt').dispatchEvent(imagePaste);
+
+    const textTransfer = new DataTransfer();
+    textTransfer.setData('text/plain', 'ordinary text paste');
+    const textPaste = new ClipboardEvent('paste', { clipboardData: textTransfer, bubbles: true, cancelable: true });
+    document.querySelector('#prompt').dispatchEvent(textPaste);
+    return { imagePrevented: imagePaste.defaultPrevented, textPrevented: textPaste.defaultPrevented };
+  })()`);
+  const pasteDeadline = Date.now() + 5_000;
+  let pasteReport;
+  for (;;) {
+    pasteReport = await page.evaluate(`(() => ({
+      uploads: window.__pasteUploadCalls,
+      chips: document.querySelectorAll('.attachment-chip').length,
+      images: document.querySelectorAll('.attachment-chip img').length,
+      name: document.querySelector('.attachment-chip-name')?.textContent,
+    }))()`);
+    if (pasteReport.chips === 2) break;
+    if (Date.now() > pasteDeadline) break;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  if (!pasteDispatch.imagePrevented || pasteDispatch.textPrevented) {
+    failures.push("clipboard handler must consume images but preserve ordinary text paste");
+  }
+  if (pasteReport.uploads !== 2 || pasteReport.chips !== 2 || pasteReport.images !== 2) {
+    failures.push("multiple pasted images were not uploaded and previewed exactly once each");
+  }
+  const pastedNames = await page.evaluate("[...document.querySelectorAll('.attachment-chip-name')].map((node) => node.textContent)");
+  if (pastedNames.join(",") !== "pasted-image-1.png,pasted-image-2.jpg") {
+    failures.push("pasted image fallback filenames are not deterministic");
+  }
+  const pasteScreenshot = await page.send("Page.captureScreenshot", { format: "png" });
+  const pasteArtifact = join(ARTIFACT_DIR, `webui-${viewport.name}-paste.png`);
+  writeFileSync(pasteArtifact, Buffer.from(pasteScreenshot.data, "base64"));
+
   const themeBefore = await page.evaluate(`(() => ({
     theme: document.documentElement.dataset.theme,
     background: getComputedStyle(document.body).backgroundColor,
@@ -324,7 +372,7 @@ const runViewport = async (page, viewport, url) => {
   }))()`);
   const expectedTheme = themeBefore.theme === "light" ? "dark" : "light";
   const expectedMeta = expectedTheme === "dark" ? "#101310" : "#f2f3ee";
-  const expectedLabel = expectedTheme === "dark" ? "Byt till ljust tema" : "Byt till mörkt tema";
+  const expectedLabel = expectedTheme === "dark" ? "Switch to light theme" : "Switch to dark theme";
   if (themeAfter.theme !== expectedTheme || themeAfter.stored !== expectedTheme) {
     failures.push(`theme toggle did not persist ${expectedTheme}`);
   }
@@ -372,7 +420,7 @@ const runViewport = async (page, viewport, url) => {
     };
   })()`);
   if (!promptOverlay.open) failures.push("sent-prompt overview is not open");
-  if (promptOverlay.preview !== "Kör den skyddade releaseåtgärden.") failures.push("sent-prompt preview missing");
+  if (promptOverlay.preview !== "Run the protected release action.") failures.push("sent-prompt preview missing");
   if (promptOverlay.tabs.length !== 3 || promptOverlay.tabs.some((tab) => tab.disabled)) {
     failures.push("all/project/instance prompt scopes are not available");
   }
@@ -406,7 +454,7 @@ const runViewport = async (page, viewport, url) => {
     failures.push("pinned conversation did not navigate across projects to its exact instance");
   }
 
-  return { failures, artifacts: [artifact, themeArtifact, promptArtifact, pinnedArtifact] };
+  return { failures, artifacts: [artifact, pasteArtifact, themeArtifact, promptArtifact, pinnedArtifact] };
 };
 
 const main = async () => {
@@ -452,9 +500,16 @@ const main = async () => {
     page.close();
     browser.close();
   } finally {
-    child.kill("SIGKILL");
+    if (child.exitCode === null) {
+      const exited = new Promise((resolveExit) => child.once("exit", resolveExit));
+      child.kill("SIGKILL");
+      await Promise.race([
+        exited,
+        new Promise((resolveWait) => setTimeout(resolveWait, 5_000)),
+      ]);
+    }
     await app.close();
-    rmSync(seed.root, { recursive: true, force: true });
+    rmSync(seed.root, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
 
   if (failed) {

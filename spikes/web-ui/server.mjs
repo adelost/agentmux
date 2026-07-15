@@ -409,9 +409,9 @@ export function createWebUi(options = {}) {
     return {
       operationKey,
       projectId,
-      projectName: receipt.projectName ?? project?.name ?? "Borttaget projekt",
+      projectName: receipt.projectName ?? project?.name ?? "Deleted project",
       agentId: receipt.id,
-      agentName: receipt.agentName ?? agent?.name ?? "Borttagen instans",
+      agentName: receipt.agentName ?? agent?.name ?? "Deleted instance",
       acceptedAt: receipt.acceptedAt ?? null,
       completedAt: receipt.completedAt ?? null,
       preview: receipt.promptPreview ?? null,
@@ -781,7 +781,7 @@ export function createWebUi(options = {}) {
           pushEvent(agent, {
             type: "web",
             subtype: "permission-denied",
-            message: `Åtgärden stoppades av behörighetspolicyn: ${receipt.denialDetail || "tool request"}`,
+            message: `The action was stopped by the permission policy: ${receipt.denialDetail || "tool request"}`,
             denial: { detail: receipt.denialDetail || "tool request" },
             historical: true,
             at: receipt.completedAt,
@@ -907,7 +907,7 @@ export function createWebUi(options = {}) {
   });
 
   const attachmentPrompt = (prompt, attachments) => attachments.reduce((text, attachment) => {
-    const label = attachment.image ? "Bifogad bild" : "Bifogad fil";
+    const label = attachment.image ? "Attached image" : "Attached file";
     return `${text}\n[${label}: ${attachment.path}]`;
   }, prompt);
 
@@ -1104,7 +1104,7 @@ export function createWebUi(options = {}) {
       if (denial) {
         agent.permissionDenied = denial;
         webEvent(agent, "permission-denied", {
-          message: `Åtgärden stoppades av behörighetspolicyn: ${denial.detail}`,
+          message: `The action was stopped by the permission policy: ${denial.detail}`,
           denial,
           operationKey: agent.activeOperationKey,
         });
@@ -1354,8 +1354,8 @@ export function createWebUi(options = {}) {
 
   const runSideQuestion = (agent, question) => new Promise((resolveAnswer, rejectAnswer) => {
     const sidePrompt = [
-      "[SIDOFRÅGA — ändra eller fortsätt inte huvuduppgiften]",
-      "Svara kort utifrån den befintliga konversationens kontext. Detta är en fristående fråga.",
+      "[SIDE QUESTION — do not change or continue the main task]",
+      "Answer briefly from the existing conversation context. This is a separate question.",
       "",
       question,
     ].join("\n");

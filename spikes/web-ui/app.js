@@ -1,6 +1,13 @@
 const $ = (selector) => document.querySelector(selector);
 
 const THEME_STORAGE_KEY = "amux-code:color-theme";
+const CLIPBOARD_IMAGE_EXTENSIONS = new Map([
+  ["image/png", ".png"],
+  ["image/jpeg", ".jpg"],
+  ["image/gif", ".gif"],
+  ["image/webp", ".webp"],
+]);
+const handledPasteEvents = new WeakSet();
 const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
 const readStoredTheme = () => {
   try {
@@ -97,8 +104,7 @@ const elements = {
 
 const renderThemeToggle = () => {
   const nextTheme = colorTheme === "light" ? "dark" : "light";
-  const translated = nextTheme === "dark" ? "mörkt" : "ljust";
-  const label = `Byt till ${translated} tema`;
+  const label = `Switch to ${nextTheme} theme`;
   elements.themeToggle.setAttribute("aria-label", label);
   elements.themeToggle.title = label;
   elements.themeToggleIcon.textContent = nextTheme === "dark" ? "☾" : "☀";
@@ -167,17 +173,17 @@ const api = async (url, options = {}) => {
 };
 
 const errorText = (error) => ({
-  "cwd-not-a-directory": "Mappen finns inte eller är inte en katalog på servern.",
-  "idempotency-key-conflict": "Försöket ändrades efter att det skickades. Försök igen.",
-  "turn-in-progress": "Agenten arbetar redan. Vänta eller avbryt den pågående turnen.",
-  "agent-not-running": "Agenten har ingen pågående turn att avbryta.",
-  "interrupt-not-ready": "Codex startar fortfarande turnen. Försök igen om ett ögonblick.",
-  "compact-needs-session": "Skicka först ett meddelande så agenten får en session att compacta.",
-  "unknown-effort": "Den effort-nivån stöds inte av den valda motorn.",
-  "side-question-needs-session": "Skicka först ett vanligt meddelande så agenten får en session.",
-  "side-question-claude-only": "Sidofrågor stöds för Claude-agenter i den här versionen.",
-  "side-question-failed": `Sidofrågan misslyckades${error.detail ? `: ${error.detail}` : "."}`,
-  "body-too-large": "Filen är större än 25 MB.",
+  "cwd-not-a-directory": "The folder does not exist or is not a directory on the server.",
+  "idempotency-key-conflict": "The request changed after it was sent. Try again.",
+  "turn-in-progress": "The agent is already working. Wait or interrupt the current turn.",
+  "agent-not-running": "The agent has no active turn to interrupt.",
+  "interrupt-not-ready": "Codex is still starting the turn. Try again in a moment.",
+  "compact-needs-session": "Send a message first so the agent has a session to compact.",
+  "unknown-effort": "That effort level is not supported by the selected engine.",
+  "side-question-needs-session": "Send a regular message first so the agent has a session.",
+  "side-question-claude-only": "Side questions are supported only for Claude agents in this version.",
+  "side-question-failed": `The side question failed${error.detail ? `: ${error.detail}` : "."}`,
+  "body-too-large": "The file is larger than 25 MB.",
 }[error.message] ?? error.message);
 
 const showToast = (text, kind = "normal") => {
@@ -305,12 +311,12 @@ const renderProjectSelect = () => {
   if (!options.length) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "Inga projekt";
+    option.textContent = "No projects";
     options.push(option);
   }
   const create = document.createElement("option");
   create.value = "__create__";
-  create.textContent = "＋ Nytt projekt…";
+  create.textContent = "＋ New project…";
   options.push(create);
   elements.projectSelect.replaceChildren(...options);
   elements.projectSelect.value = state.projectId ?? "";
@@ -340,21 +346,21 @@ const renderContext = (agent) => {
   elements.contextTrack.setAttribute("aria-valuenow", String(Math.round(percent ?? 0)));
   elements.contextLabel.textContent = Number.isFinite(used) && Number.isFinite(windowTokens)
     ? `${compactNumber(used)} / ${compactNumber(windowTokens)} · ${Math.round(percent)} %`
-    : Number.isFinite(used) ? `${compactNumber(used)} tokens` : "Ingen mätning";
+    : Number.isFinite(used) ? `${compactNumber(used)} tokens` : "No measurement";
 
   const details = [];
   if (Number.isFinite(context?.lastInputTokens) || Number.isFinite(context?.lastOutputTokens)) {
-    details.push(`senast ${compactNumber(context?.lastInputTokens ?? 0)} in / ${compactNumber(context?.lastOutputTokens ?? 0)} ut`);
+    details.push(`latest ${compactNumber(context?.lastInputTokens ?? 0)} in / ${compactNumber(context?.lastOutputTokens ?? 0)} out`);
   }
   if (agent.autoCompact?.dueAt && !agent.running) {
-    details.push(`auto-compact om ${relativeDuration(agent.autoCompact.dueAt - Date.now())}`);
+    details.push(`auto-compact in ${relativeDuration(agent.autoCompact.dueAt - Date.now())}`);
   } else {
-    details.push("auto över 60 % efter 5 min idle");
+    details.push("auto above 60% after 5 minutes idle");
   }
   elements.contextDetail.textContent = details.join(" · ");
   elements.contextControl.title = Number.isFinite(context?.processedTokens)
-    ? `Aktuell kontext, inte abonnemangskvot. Sessionen har processat ${compactNumber(context.processedTokens)} tokens.`
-    : "Aktuell kontext, inte abonnemangskvot.";
+    ? `Current context, not subscription quota. The session has processed ${compactNumber(context.processedTokens)} tokens.`
+    : "Current context, not subscription quota.";
 };
 
 const updateAgentHeader = () => {
@@ -368,29 +374,29 @@ const updateAgentHeader = () => {
   elements.projectPath.textContent = project.cwd;
   elements.projectPath.title = project.cwd;
   elements.runState.textContent = agent.operation === "interrupting"
-    ? "Avbryter…"
+    ? "Interrupting…"
     : ["compact", "auto-compact"].includes(agent.operation)
-      ? "Compactar…"
-      : agent.running ? "Arbetar…" : "Klar";
+      ? "Compacting…"
+      : agent.running ? "Working…" : "Ready";
   elements.runState.classList.toggle("running", agent.running);
   renderContext(agent);
   replaceEffortOptions(elements.agentEffortSelect, agent.engine, agent.effort);
   elements.agentEffortSelect.disabled = state.controlPending;
   elements.compactButton.disabled = agent.running || !agent.sessionId || state.controlPending;
   elements.compactButton.title = agent.sessionId
-    ? "Sammanfatta native-sessionens kontext nu"
-    : "Skicka ett meddelande först";
+    ? "Compact the native session context now"
+    : "Send a message first";
   elements.interruptButton.classList.toggle("hidden", !agent.running);
   elements.interruptButton.disabled = !agent.running || agent.operation === "interrupting" || state.controlPending;
   elements.pinConversationButton.disabled = state.pinPending;
-  elements.pinConversationButton.textContent = agent.pinnedAt ? "Avpinna" : "Pinna";
+  elements.pinConversationButton.textContent = agent.pinnedAt ? "Unpin" : "Pin";
   elements.pinConversationButton.setAttribute("aria-pressed", String(Boolean(agent.pinnedAt)));
   elements.pinConversationButton.classList.toggle("pinned", Boolean(agent.pinnedAt));
   elements.sideQuestionButton.hidden = agent.engine !== "claude";
   elements.sideQuestionButton.disabled = agent.engine !== "claude" || !agent.sessionId;
   elements.sideQuestionButton.title = agent.sessionId
-    ? "Fråga en separat fork utan att avbryta huvuduppgiften"
-    : "Skicka ett vanligt meddelande först";
+    ? "Ask a separate fork without interrupting the main task"
+    : "Send a regular message first";
   elements.prompt.disabled = agent.running;
   elements.sendButton.disabled = agent.running || state.sending;
   elements.attachButton.disabled = agent.running;
@@ -405,20 +411,20 @@ const renderChrome = () => {
   elements.agentList.replaceChildren(...(project?.agents ?? []).map(agentButton));
   const pinnedCount = state.projects.reduce((count, item) =>
     count + item.agents.filter((agent) => agent.pinnedAt).length, 0);
-  elements.pinnedConversationsButton.textContent = pinnedCount ? `Pinnade (${pinnedCount})` : "Pinnade";
+  elements.pinnedConversationsButton.textContent = pinnedCount ? `Pinned (${pinnedCount})` : "Pinned";
   elements.newAgentButton.disabled = !project;
   elements.deleteProjectButton.disabled = !project;
 
   if (!project) {
-    elements.emptyTitle.textContent = "Skapa ditt första projekt";
-    elements.emptyCopy.textContent = "Ange projektets namn och arbetsmapp. Därefter kan du skapa Claude- och Codex-agenter som arbetar i mappen.";
-    elements.emptyAction.textContent = "Nytt projekt";
+    elements.emptyTitle.textContent = "Create your first project";
+    elements.emptyCopy.textContent = "Enter the project name and working folder. You can then create Claude and Codex agents that work in that folder.";
+    elements.emptyAction.textContent = "New project";
     elements.emptyState.classList.remove("hidden");
     elements.agentWorkspace.classList.add("hidden");
   } else if (!agent) {
-    elements.emptyTitle.textContent = `Skapa en agent i ${project.name}`;
-    elements.emptyCopy.textContent = `Agenten ärver arbetsmappen ${project.cwd}. Välj Claude eller Codex och en modell.`;
-    elements.emptyAction.textContent = "Ny agent";
+    elements.emptyTitle.textContent = `Create an agent in ${project.name}`;
+    elements.emptyCopy.textContent = `The agent inherits the working folder ${project.cwd}. Select Claude or Codex and a model.`;
+    elements.emptyAction.textContent = "New agent";
     elements.emptyState.classList.remove("hidden");
     elements.agentWorkspace.classList.add("hidden");
   } else {
@@ -456,7 +462,7 @@ const messageElement = (role, text, extraClass = "") => {
   article.className = `message ${role}${extraClass ? ` ${extraClass}` : ""}`;
   const label = document.createElement("div");
   label.className = "message-role";
-  label.textContent = role === "user" ? "Du" : role === "assistant" ? "Agent" : "System";
+  label.textContent = role === "user" ? "You" : role === "assistant" ? "Agent" : "System";
   const body = document.createElement("div");
   body.className = "message-body";
   body.textContent = text;
@@ -506,7 +512,7 @@ const renderResult = (event) => {
   const usage = event.usage;
   const input = usage?.input_tokens ?? usage?.inputTokens;
   const output = usage?.output_tokens ?? usage?.outputTokens;
-  if (Number.isFinite(input) || Number.isFinite(output)) parts.push(`${input ?? 0} in · ${output ?? 0} ut`);
+  if (Number.isFinite(input) || Number.isFinite(output)) parts.push(`${input ?? 0} in · ${output ?? 0} out`);
   const session = event.session_id ? `session ${String(event.session_id).slice(0, 8)}` : null;
   if (session) parts.push(session);
   if (!parts.length) return;
@@ -561,11 +567,11 @@ const renderEvent = (event) => {
       updateAgentHeader();
     }
     messageElement("notice", event.automatic
-      ? "Auto-compact startade efter 5 minuters idle över 60 % context."
-      : "Compact startade…", "notice");
+      ? "Auto-compact started after 5 minutes idle above 60% context."
+      : "Compact started…", "notice");
   } else if (event.type === "web" && event.subtype === "compacted") {
     if (event.metadata?.pre_tokens && event.metadata?.post_tokens) {
-      messageElement("notice", `Kontext compactad: ${compactNumber(event.metadata.pre_tokens)} → ${compactNumber(event.metadata.post_tokens)} tokens.`, "notice");
+      messageElement("notice", `Context compacted: ${compactNumber(event.metadata.pre_tokens)} → ${compactNumber(event.metadata.post_tokens)} tokens.`, "notice");
     }
   } else if (event.type === "web" && event.subtype === "compact-result") {
     if (event.message) messageElement("notice", event.message, "notice");
@@ -577,7 +583,7 @@ const renderEvent = (event) => {
       updateAgentHeader();
     }
     if (event.code !== 0 && !event.interrupted) {
-      messageElement("error", event.error || event.stderr || "Compact misslyckades.", "error");
+      messageElement("error", event.error || event.stderr || "Compact failed.", "error");
     }
     refreshProjects().catch(() => {});
   } else if (event.type === "web" && ["interrupt-requested", "interrupt-acknowledged"].includes(event.subtype)) {
@@ -587,13 +593,13 @@ const renderEvent = (event) => {
       updateAgentHeader();
     }
   } else if (event.type === "web" && event.subtype === "interrupted") {
-    messageElement("notice", "Turnen avbröts. Agentens session och kontext finns kvar.", "notice");
+    messageElement("notice", "The turn was interrupted. The agent session and context remain available.", "notice");
   } else if (event.type === "web" && event.subtype === "interrupt-failed") {
-    messageElement("error", `Kunde inte avbryta: ${event.error}`, "error");
+    messageElement("error", `Could not interrupt: ${event.error}`, "error");
   } else if (event.type === "web" && event.subtype === "permission-denied") {
     messageElement(
       "error",
-      event.message || "Åtgärden stoppades av agentens behörighetspolicy.",
+      event.message || "The action was stopped by the agent permission policy.",
       "error permission-denied",
     );
   } else if (event.type === "web" && event.subtype === "turn-done") {
@@ -606,14 +612,14 @@ const renderEvent = (event) => {
       updateAgentHeader();
     }
     if (event.code !== 0 && !event.interrupted && !event.permissionDenied) {
-      messageElement("error", event.error || event.stderr || `Turn misslyckades (exit ${event.code})`, "error");
+      messageElement("error", event.error || event.stderr || `Turn failed (exit ${event.code})`, "error");
     }
     refreshProjects().catch(() => {});
     if (elements.promptOverviewDialog.open) loadPromptOverview();
   } else if (event.type === "web" && event.subtype === "protocol-error") {
-    messageElement("error", `Protokollfel: ${event.line}`, "error");
+    messageElement("error", `Protocol error: ${event.line}`, "error");
   } else if (event.type === "web" && event.subtype === "history-unavailable") {
-    messageElement("notice", "Sessionen finns registrerad men dess äldre historik kunde inte läsas.", "notice");
+    messageElement("notice", "The session is registered, but its older history could not be read.", "notice");
   }
   requestAnimationFrame(() => elements.messageList.lastElementChild?.scrollIntoView({ block: "end" }));
 };
@@ -638,7 +644,7 @@ function attachAgent(agent) {
     try { renderEvent(JSON.parse(message.data)); } catch {}
   };
   state.eventSource.onerror = () => {
-    elements.runState.textContent = "Återansluter…";
+    elements.runState.textContent = "Reconnecting…";
     elements.runState.classList.add("running");
   };
 }
@@ -655,28 +661,28 @@ function selectAgent(agentId) {
 }
 
 const promptStatus = (status) => ({
-  accepted: "Accepterad",
-  running: "Arbetar",
-  completed: "Klar",
-  failed: "Misslyckad",
-  interrupted: "Avbruten",
-  permission_denied: "Behöver behörighet",
+  accepted: "Accepted",
+  running: "Working",
+  completed: "Completed",
+  failed: "Failed",
+  interrupted: "Interrupted",
+  permission_denied: "Permission required",
 }[status] ?? status);
 
 const promptSource = (source) => ({
   web: "Code",
   discord: "Discord",
   cli: "amux",
-  bridge: "Brygga",
+  bridge: "Bridge",
   api: "API",
 }[source] ?? source);
 
 const promptTime = (timestamp) => Number.isFinite(timestamp)
-  ? new Intl.DateTimeFormat("sv-SE", {
+  ? new Intl.DateTimeFormat("en-US", {
     dateStyle: "short",
     timeStyle: "short",
   }).format(new Date(timestamp))
-  : "Okänd tid";
+  : "Unknown time";
 
 const promptOverviewUrl = () => {
   const query = new URLSearchParams({ scope: state.promptOverviewScope, limit: "100" });
@@ -693,7 +699,7 @@ const renderPromptOverview = (prompts = []) => {
   if (!prompts.length) {
     const empty = document.createElement("p");
     empty.className = "prompt-overview-empty";
-    empty.textContent = "Inga skickade frågor på den här nivån ännu.";
+    empty.textContent = "No sent prompts at this scope yet.";
     elements.promptOverviewList.replaceChildren(empty);
     return;
   }
@@ -715,7 +721,7 @@ const renderPromptOverview = (prompts = []) => {
     preview.className = "prompt-overview-preview";
     preview.textContent = prompt.preview
       ? `${prompt.preview}${prompt.previewTruncated ? "…" : ""}`
-      : "Frågan skickades före leveransjournalen; textutdrag saknas.";
+      : "The prompt was sent before the delivery journal existed; no text preview is available.";
 
     const badges = document.createElement("div");
     badges.className = "prompt-overview-badges";
@@ -747,8 +753,8 @@ const loadPromptOverview = async () => {
     ? selectedProject()?.name
     : state.promptOverviewScope === "agent"
       ? selectedAgent()?.name
-      : "alla projekt";
-  elements.promptOverviewCopy.textContent = `Senast accepterade frågor för ${context}. Journalförs före agentstart.`;
+      : "all projects";
+  elements.promptOverviewCopy.textContent = `Latest accepted prompts for ${context}. Journaled before the agent starts.`;
   try {
     const payload = await api(promptOverviewUrl());
     if (requestId === state.promptOverviewRequest) renderPromptOverview(payload.prompts);
@@ -778,7 +784,7 @@ const renderPinnedConversations = () => {
   if (!pinned.length) {
     const empty = document.createElement("p");
     empty.className = "prompt-overview-empty";
-    empty.textContent = "Inga pinnade konversationer ännu.";
+    empty.textContent = "No pinned conversations yet.";
     elements.pinnedConversationsList.replaceChildren(empty);
     return;
   }
@@ -791,7 +797,7 @@ const renderPinnedConversations = () => {
     const name = document.createElement("strong");
     name.textContent = agent.name;
     const meta = document.createElement("span");
-    meta.textContent = `${project.name} · ${agent.engine} · ${agent.running ? "Arbetar" : "Klar"}`;
+    meta.textContent = `${project.name} · ${agent.engine} · ${agent.running ? "Working" : "Ready"}`;
     copy.append(name, meta);
     const arrow = document.createElement("span");
     arrow.className = "pinned-conversation-arrow";
@@ -829,7 +835,7 @@ const renderAttachments = () => {
     const remove = document.createElement("button");
     remove.type = "button";
     remove.textContent = "×";
-    remove.setAttribute("aria-label", `Ta bort ${attachment.name}`);
+    remove.setAttribute("aria-label", `Remove ${attachment.name}`);
     remove.addEventListener("click", () => {
       state.attachments.splice(index, 1);
       renderAttachments();
@@ -845,10 +851,13 @@ const uploadFiles = async (files) => {
   if (!project || !agent || agent.running) return;
   for (const file of files) {
     try {
-      showToast(`Laddar upp ${file.name}…`);
+      showToast(`Uploading ${file.name}…`);
       const attachment = await api(`/api/projects/${project.id}/uploads?name=${encodeURIComponent(file.name)}`, {
         method: "POST",
-        headers: { "content-type": file.type || "application/octet-stream" },
+        headers: {
+          "content-type": file.type || "application/octet-stream",
+          "x-idempotency-key": crypto.randomUUID(),
+        },
         body: file,
       });
       state.attachments.push(attachment);
@@ -857,8 +866,23 @@ const uploadFiles = async (files) => {
       showToast(`${file.name}: ${errorText(error)}`, "error");
     }
   }
-  if (files.length) showToast(`${files.length} fil${files.length === 1 ? "" : "er"} redo`);
+  if (files.length) showToast(`${files.length} file${files.length === 1 ? "" : "s"} ready`);
 };
+
+const clipboardImageFiles = (clipboardData) => [...(clipboardData?.items ?? [])]
+  .filter((item) => item.kind === "file" && CLIPBOARD_IMAGE_EXTENSIONS.has(item.type.toLowerCase()))
+  .map((item, index) => {
+    const file = item.getAsFile();
+    if (!file) return null;
+    const extension = CLIPBOARD_IMAGE_EXTENSIONS.get(item.type.toLowerCase());
+    const name = file.name && file.name.includes(".")
+      ? file.name
+      : `pasted-image-${index + 1}${extension}`;
+    return name === file.name
+      ? file
+      : new File([file], name, { type: file.type, lastModified: file.lastModified });
+  })
+  .filter(Boolean);
 
 const submitMessage = async () => {
   const agent = selectedAgent();
@@ -966,7 +990,7 @@ elements.sideForm.addEventListener("submit", async (event) => {
   if (!agent || !question) return;
   const key = crypto.randomUUID();
   appendSideMessage("question", question);
-  const pending = appendSideMessage("answer pending", "Claude tänker vid sidan av…");
+  const pending = appendSideMessage("answer pending", "Claude is thinking separately…");
   elements.sideQuestionInput.value = "";
   elements.sideQuestionSend.disabled = true;
   try {
@@ -1001,8 +1025,8 @@ elements.agentEffortSelect.addEventListener("change", async () => {
     });
     agent.effort = updated.effort;
     showToast(agent.running
-      ? `${effortLabel(effort)} sparad för nästa turn.`
-      : `Effort ändrad till ${effortLabel(effort)}.`);
+      ? `${effortLabel(effort)} saved for the next turn.`
+      : `Effort changed to ${effortLabel(effort)}.`);
   } catch (error) {
     agent.effort = previous;
     showToast(errorText(error), "error");
@@ -1117,6 +1141,13 @@ elements.prompt.addEventListener("input", () => {
   elements.prompt.style.height = "auto";
   elements.prompt.style.height = `${Math.min(elements.prompt.scrollHeight, 180)}px`;
 });
+elements.prompt.addEventListener("paste", (event) => {
+  const images = clipboardImageFiles(event.clipboardData);
+  if (!images.length || handledPasteEvents.has(event)) return;
+  handledPasteEvents.add(event);
+  event.preventDefault();
+  uploadFiles(images);
+});
 
 for (const type of ["dragenter", "dragover"]) {
   elements.composerWrap.addEventListener(type, (event) => {
@@ -1134,7 +1165,7 @@ elements.composerWrap.addEventListener("drop", (event) => uploadFiles([...event.
 
 elements.deleteAgentButton.addEventListener("click", async () => {
   const agent = selectedAgent();
-  if (!agent || !confirm(`Ta bort agenten ${agent.name} från listan? Dess native sessionfil behålls.`)) return;
+  if (!agent || !confirm(`Delete agent ${agent.name} from the list? Its native session file will be preserved.`)) return;
   try {
     await api(`/api/agents/${agent.id}`, { method: "DELETE" });
     state.agentId = null;
@@ -1144,7 +1175,7 @@ elements.deleteAgentButton.addEventListener("click", async () => {
 
 elements.deleteProjectButton.addEventListener("click", async () => {
   const project = selectedProject();
-  if (!project || !confirm(`Ta bort projektet ${project.name} och dess agentposter? Sessioner och uppladdade filer raderas inte.`)) return;
+  if (!project || !confirm(`Delete project ${project.name} and its agent records? Sessions and uploaded files will not be deleted.`)) return;
   try {
     await api(`/api/projects/${project.id}`, { method: "DELETE" });
     state.projectId = null;
@@ -1180,18 +1211,18 @@ const QUOTA_CRITICAL_PERCENT = 90;
 const QUOTA_ENGINES = ["claude", "codex"];
 const QUOTA_ENGINE_LABELS = { claude: "Claude", codex: "Codex" };
 const QUOTA_MANAGE_LINKS = {
-  claude: { label: "Hantera Claude-kvot", url: "https://claude.ai/settings/usage" },
-  codex: { label: "Hantera Codex-kvot", url: "https://chatgpt.com/codex/settings/usage" },
+  claude: { label: "Manage Claude quota", url: "https://claude.ai/settings/usage" },
+  codex: { label: "Manage Codex quota", url: "https://chatgpt.com/codex/settings/usage" },
 };
 const QUOTA_ERROR_TEXTS = {
-  credentials_unavailable: "Inloggningsuppgifter saknas på servern",
-  credentials_expired: "Claude-token har gått ut, kör en Claude-tur så förnyas den",
-  network_error: "Nätverksfel mot usage-API:t",
-  invalid_response: "Oväntat svar från usage-API:t",
-  no_limits_in_response: "Usage-svaret saknade kvotrader",
-  no_session_files: "Inga Codex-sessionsfiler hittades",
-  no_rate_limit_events: "Inga rate limit-händelser i sessionerna ännu",
-  fetch_failed: "Kunde inte nå /api/quota",
+  credentials_unavailable: "Credentials are unavailable on the server",
+  credentials_expired: "The Claude token has expired; run a Claude turn to refresh it",
+  network_error: "Network error while contacting the usage API",
+  invalid_response: "Unexpected response from the usage API",
+  no_limits_in_response: "The usage response contained no quota rows",
+  no_session_files: "No Codex session files were found",
+  no_rate_limit_events: "No rate-limit events exist in the sessions yet",
+  fetch_failed: "Could not reach /api/quota",
 };
 
 let quotaSnapshot = null;
@@ -1205,18 +1236,18 @@ const quotaSeverityClass = (usedPercent) => {
 };
 
 const quotaErrorText = (data) =>
-  QUOTA_ERROR_TEXTS[data?.error] || `Kvotdata otillgänglig (${data?.error || "okänt fel"})`;
+  QUOTA_ERROR_TEXTS[data?.error] || `Quota data unavailable (${data?.error || "unknown error"})`;
 
 const claudeLimitLabel = (limit) => {
   if (limit.kind === "session") return "Session (5 h)";
-  if (limit.kind === "weekly_all") return "Vecka · alla modeller";
-  if (limit.kind === "weekly_scoped") return `Vecka · ${limit.scopeName || "modell"}`;
+  if (limit.kind === "weekly_all") return "Week · all models";
+  if (limit.kind === "weekly_scoped") return `Week · ${limit.scopeName || "model"}`;
   return limit.kind;
 };
 
 const codexWindowLabel = (window, limit) => {
   const scope = limit.limitId && limit.limitId !== "codex" ? ` · ${limit.limitId}` : "";
-  if (window.windowMinutes === 10_080) return `Vecka${scope}`;
+  if (window.windowMinutes === 10_080) return `Week${scope}`;
   if (window.windowMinutes && window.windowMinutes % 60 === 0) {
     return `${window.windowMinutes / 60} h${scope}`;
   }
@@ -1239,23 +1270,23 @@ const quotaRows = (engine, data) => {
   })));
 };
 
-const quotaHeadline = (rows) => rows.find((row) => row.label.startsWith("Vecka")) || rows[0];
+const quotaHeadline = (rows) => rows.find((row) => row.label.startsWith("Week")) || rows[0];
 
 const formatQuotaReset = (iso) => {
   if (!iso) return "";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  const formatted = date.toLocaleString("sv-SE", {
+  const formatted = date.toLocaleString("en-US", {
     weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
   });
-  return `återställs ${formatted}`;
+  return `resets ${formatted}`;
 };
 
 const formatQuotaCaptured = (iso) => {
   if (!iso) return "";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return `mätt ${date.toLocaleString("sv-SE", { hour: "2-digit", minute: "2-digit" })}`;
+  return `measured ${date.toLocaleString("en-US", { hour: "2-digit", minute: "2-digit" })}`;
 };
 
 const buildQuotaTrack = (usedPercent) => {
@@ -1286,7 +1317,7 @@ const renderQuotaStrip = () => {
       value.className = "quota-chip-value";
       value.textContent = "…";
       chip.append(value);
-      chip.title = "Hämtar kvotdata";
+      chip.title = "Loading quota data";
     } else if (!data?.ok) {
       chip.classList.add("unavailable");
       const value = document.createElement("span");
@@ -1302,9 +1333,9 @@ const renderQuotaStrip = () => {
       chip.append(buildQuotaTrack(headline.usedPercent));
       const value = document.createElement("span");
       value.className = "quota-chip-value";
-      value.textContent = `${Math.round(100 - headline.usedPercent)}% kvar`;
+      value.textContent = `${Math.round(100 - headline.usedPercent)}% left`;
       chip.append(value);
-      chip.title = `${QUOTA_ENGINE_LABELS[engine]} · ${headline.label}: ${headline.usedPercent}% använt`;
+      chip.title = `${QUOTA_ENGINE_LABELS[engine]} · ${headline.label}: ${headline.usedPercent}% used`;
     }
     chip.setAttribute("aria-expanded", String(quotaPopoverEngine === engine));
     chip.addEventListener("click", (event) => {
@@ -1329,7 +1360,7 @@ const renderQuotaPopover = () => {
   popover.replaceChildren();
 
   const heading = document.createElement("h2");
-  heading.textContent = `${QUOTA_ENGINE_LABELS[engine]} · veckokvot`;
+  heading.textContent = `${QUOTA_ENGINE_LABELS[engine]} · weekly quota`;
   popover.append(heading);
 
   if (!data?.ok) {
@@ -1347,7 +1378,7 @@ const renderQuotaPopover = () => {
       const label = document.createElement("span");
       label.textContent = row.label;
       const value = document.createElement("span");
-      value.textContent = `${Math.round(100 - row.usedPercent)}% kvar`;
+      value.textContent = `${Math.round(100 - row.usedPercent)}% left`;
       head.append(label, value);
       rowElement.append(head, buildQuotaTrack(row.usedPercent));
       const reset = formatQuotaReset(row.resetsAt);
@@ -1364,7 +1395,7 @@ const renderQuotaPopover = () => {
     footer.className = "quota-popover-footer";
     const freshness = document.createElement("span");
     freshness.textContent = engine === "codex"
-      ? formatQuotaCaptured(capturedAt) || "ur senaste Codex-sessionen"
+      ? formatQuotaCaptured(capturedAt) || "from the latest Codex session"
       : formatQuotaCaptured(data.fetchedAt) || "";
     const manage = document.createElement("a");
     manage.href = QUOTA_MANAGE_LINKS[engine].url;
@@ -1378,7 +1409,7 @@ const renderQuotaPopover = () => {
   const refresh = document.createElement("button");
   refresh.type = "button";
   refresh.className = "button compact quiet quota-refresh";
-  refresh.textContent = "Uppdatera nu";
+  refresh.textContent = "Refresh now";
   refresh.addEventListener("click", () => refreshQuota(true));
   popover.append(refresh);
 };
@@ -1430,7 +1461,7 @@ const init = async () => {
     [state.config] = await Promise.all([api("/api/config")]);
     await refreshProjects();
   } catch (error) {
-    showToast(`Kunde inte starta: ${errorText(error)}`, "error");
+    showToast(`Could not start: ${errorText(error)}`, "error");
   }
   renderQuotaStrip();
   refreshQuota();
