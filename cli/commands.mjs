@@ -7,7 +7,20 @@ import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, statSyn
 import { join } from "path";
 import { loadConfig, listAgents, getAgent, addAgent, removeAgent, resolveAgent, saveLast, getLast, getPaneCount, findChannelForPane } from "./config.mjs";
 import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens, detectPaneStatus } from "./format.mjs";
-import { hasSession, ensureAndAttach, attachSession, killSession, listPanes, getPaneStatus, sendKeys, selectOption, createTmuxContext, sendToPane } from "./tmux.mjs";
+import {
+  clearPaneComposer,
+  escapePaneComposer,
+  hasSession,
+  ensureAndAttach,
+  attachSession,
+  killSession,
+  listPanes,
+  getPaneStatus,
+  selectOption,
+  createTmuxContext,
+  sendComposerKeys,
+  sendToPane,
+} from "./tmux.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
 import { stripAnsi, esc, extractActivity, formatDuration, validateImagePath } from "../lib.mjs";
 import { getContextFromPane, getContextPercent, getContextPushed, shortModelName } from "../core/context.mjs";
@@ -3643,9 +3656,40 @@ async function cmdSelect(name, choice, flags, ctx) {
 }
 
 async function cmdEsc(name, flags, ctx) {
-  const pane = flags.p || 0;
-  await ctx.agent.sendEscape(name, pane);
-  console.log(`Sent Escape to '${name}' (pane ${pane}).`);
+  const pane = flags.p ?? 0;
+  // `esc` predates composer-control and remains valid for native-runtime
+  // targets. Pager inspection and the tmux provenance fence apply only to
+  // fallback panes; native delivery keeps its existing adapter-owned path.
+  if (ctx.agent?.isNativeTarget?.(name, pane)) {
+    await ctx.agent.sendEscape(name, pane);
+    console.log(`Sent Escape to '${name}' (pane ${pane}).`);
+    return;
+  }
+  const receipt = await escapePaneComposer(ctx, name, pane, { actor: detectSelfKey() });
+  console.log(receipt.pager
+    ? `Closed transcript pager in '${name}' (pane ${pane}) [${receipt.controlId}].`
+    : `Sent Escape to '${name}' (pane ${pane}) [${receipt.controlId}].`);
+}
+
+async function cmdKeys(name, keys, flags, ctx) {
+  const pane = flags.p ?? 0;
+  const receipt = await sendComposerKeys(ctx, name, pane, keys, { actor: detectSelfKey() });
+  console.log(`Sent ${receipt.keys.join(" ")} to '${name}' (pane ${pane}) [${receipt.controlId}].`);
+}
+
+async function cmdEnter(name, flags, ctx) {
+  const pane = flags.p ?? 0;
+  const receipt = await sendComposerKeys(ctx, name, pane, ["Enter"], {
+    action: "enter",
+    actor: detectSelfKey(),
+  });
+  console.log(`Sent Enter to '${name}' (pane ${pane}) [${receipt.controlId}].`);
+}
+
+async function cmdClearline(name, flags, ctx) {
+  const pane = flags.p ?? 0;
+  const receipt = await clearPaneComposer(ctx, name, pane, { actor: detectSelfKey() });
+  console.log(`Cleared composer in '${name}' (pane ${pane}) [${receipt.controlId}].`);
 }
 
 async function cmdAdd(name, dir, ctx) {
@@ -3787,7 +3831,12 @@ Usage:
     --text                        [legacy] Filtered tmux extract (pre-jsonl default)
   agent wait <name|:nr> [-t S]    Wait until agent is ready
   agent select <name|:nr> [-p N] <N> Select menu option N
-  agent esc <name|:nr>            Send Escape (cancel/interrupt)
+  agent keys <name|:nr> [-p N] <key...>
+                                  Send only Escape,C-a,C-k,C-u,Enter
+  agent enter <name|:nr> [-p N]   Submit the current composer with Enter
+  agent clearline <name|:nr> [-p N]
+                                  Clear composer with Escape,C-a,C-k
+  agent esc <name|:nr> [-p N]     Escape, or close a detected Codex pager
   agent ps                        Show all running agents + status + context%
   agent top [--sort tokens] [-n N] Cross-session context leaderboard
   agent timeline [-n N]           Cross-pane event stream (kronologisk)
@@ -3947,6 +3996,9 @@ const FLAG_SPECS = {
   },
   edit: {},
   select: { p: "number" },
+  keys: { p: "number" },
+  enter: { p: "number" },
+  clearline: { p: "number" },
   esc: { p: "number" },
   topic: { p: "number" },
   todo: { all: "boolean", parked: "boolean", blocked: "boolean", dry: "boolean", path: "string" },
@@ -4246,6 +4298,30 @@ export async function dispatch(argv, ctx) {
       return cmdSelect(name, positional[0], flags, ctx);
     }
 
+    case "keys": {
+      if (!rest[0]) { console.error("Usage: amux keys <name|:nr> [-p N] <key...>"); process.exit(1); }
+      const name = resolveAgent(rest[0], ctx.configPath);
+      const { flags, positional } = parseFlags(rest.slice(1), FLAG_SPECS.keys);
+      if (!positional.length) { console.error("Usage: amux keys <name|:nr> [-p N] <key...>"); process.exit(1); }
+      return cmdKeys(name, positional, flags, ctx);
+    }
+
+    case "enter": {
+      if (!rest[0]) { console.error("Usage: amux enter <name|:nr> [-p N]"); process.exit(1); }
+      const name = resolveAgent(rest[0], ctx.configPath);
+      const { flags, positional } = parseFlags(rest.slice(1), FLAG_SPECS.enter);
+      if (positional.length) throw new Error("amux enter accepts no key arguments");
+      return cmdEnter(name, flags, ctx);
+    }
+
+    case "clearline": {
+      if (!rest[0]) { console.error("Usage: amux clearline <name|:nr> [-p N]"); process.exit(1); }
+      const name = resolveAgent(rest[0], ctx.configPath);
+      const { flags, positional } = parseFlags(rest.slice(1), FLAG_SPECS.clearline);
+      if (positional.length) throw new Error("amux clearline accepts no key arguments");
+      return cmdClearline(name, flags, ctx);
+    }
+
     case "topic": {
       if (rest.length < 2) {
         console.error(`Usage: amux topic <agent|:nr> [-p N] "text"`);
@@ -4264,7 +4340,8 @@ export async function dispatch(argv, ctx) {
     case "esc": {
       if (!rest[0]) { console.error("Usage: agent esc <name|:nr>"); process.exit(1); }
       const name = resolveAgent(rest[0], ctx.configPath);
-      const { flags } = parseFlags(rest.slice(1), FLAG_SPECS.esc);
+      const { flags, positional } = parseFlags(rest.slice(1), FLAG_SPECS.esc);
+      if (positional.length) throw new Error("amux esc accepts no key arguments");
       return cmdEsc(name, flags, ctx);
     }
 

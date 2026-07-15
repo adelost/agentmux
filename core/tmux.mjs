@@ -16,8 +16,9 @@
 //   untouched; specs come from code (dismiss.mjs), never user input.
 
 import { esc } from "../lib.mjs";
+import { CLEARLINE_RECIPE } from "./composer-control.mjs";
 
-const CLEAR_COMPOSER_KEYS = `C-a C-k ${Array(8).fill("C-u BSpace").join(" ")} C-u`;
+const CLEAR_COMPOSER_KEYS = CLEARLINE_RECIPE.join(" ");
 
 export function createTmuxAdapter({ socket, exec }) {
   const raw = (cmd) => exec(`tmux -S '${esc(socket)}' ${cmd}`);
@@ -194,7 +195,7 @@ export function createTmuxAdapter({ socket, exec }) {
       await sendKeys(target, "Escape");
     },
 
-    /** Clear the complete logical TUI input without submitting it. */
+    /** Clear the TUI composer with the canonical no-submit recovery recipe. */
     async clearInputLine(target) {
       await sendKeys(target, CLEAR_COMPOSER_KEYS);
     },

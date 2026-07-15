@@ -62,8 +62,8 @@ feature("tmux adapter: command strings", () => {
       await t.clearInputLine("claw:.1");
       return calls;
     }],
-    then: ["clears paste blocks and walks back across leftover logical lines", (calls) =>
-      expect(calls[0]).toBe(PREFIX + `send-keys -t 'claw:.1' C-a C-k C-u BSpace C-u BSpace C-u BSpace C-u BSpace C-u BSpace C-u BSpace C-u BSpace C-u BSpace C-u`)],
+    then: ["uses the canonical Escape,C-a,C-k recipe without C-u", (calls) =>
+      expect(calls[0]).toBe(PREFIX + `send-keys -t 'claw:.1' Escape C-a C-k`)],
   });
 
   unit("runShell wraps the line verbatim (config cmds may hold quotes)", {

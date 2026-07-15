@@ -2,13 +2,19 @@
 // Stateless: all functions take socket + target explicitly.
 
 import { exec as execCb, execSync, fork } from "child_process";
+import { randomUUID } from "crypto";
 import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { promisify } from "util";
 import { createAgent } from "../agent.mjs";
 import { esc, stripAnsi } from "../lib.mjs";
-import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
+import { appendEvent, latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
+import {
+  CLEARLINE_RECIPE,
+  escapeComposerRecipe,
+  normalizeComposerKeys,
+} from "../core/composer-control.mjs";
 import { readParkState, shouldBlockSend, blockedSendMessage } from "../core/pane-park.mjs";
 import {
   createDeliveryQueue, DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES, waitForDeliveryJob,
@@ -180,9 +186,138 @@ export async function getPaneStatus(ctx, name, pane) {
   return mergeStatus(scraped, pushed).status;
 }
 
-/** Send keys to a pane. */
-export async function sendKeys(ctx, name, pane, keys) {
-  await ctx.tmux(`send-keys -t '${esc(name)}:.${pane}' ${keys}`);
+function validateComposerTarget(ctx, name, pane) {
+  if (ctx.configPath) validateAgentPane(ctx.configPath, name, pane);
+  if (!Number.isSafeInteger(Number(pane)) || Number(pane) < 0) {
+    throw new Error(`Invalid pane '${pane}' for agent '${name}'`);
+  }
+  if (ctx.agent?.isNativeTarget?.(name, pane)) {
+    throw new Error("composer-control is available only for tmux fallback panes");
+  }
+  if (typeof ctx.tmux !== "function") throw new Error("composer-control requires a tmux context");
+}
+
+const actorAddress = (actor) => {
+  const match = String(actor || "").match(/^([a-zA-Z0-9_-]+):(\d+)$/u);
+  return match ? { session: match[1], pane: Number(match[2]) } : null;
+};
+
+async function mirrorComposerControl(ctx, name, pane, receipt, {
+  actor = null,
+  mirrorDispatch = spawnMirrorWorker,
+} = {}) {
+  if (!ctx.configPath) return;
+  const targetChannel = findChannelForPane(ctx.configPath, name, pane);
+  const sender = actorAddress(actor);
+  const senderChannel = sender
+    ? findChannelForPane(ctx.configPath, sender.session, sender.pane)
+    : null;
+  const label = receipt.action === "keys"
+    ? `keys ${receipt.keys.join(" ")}`
+    : receipt.action === "esc-pager" ? "esc (pager exit)" : receipt.action;
+  const command = receipt.action === "keys"
+    ? `amux keys ${name} -p ${pane} ${receipt.keys.join(" ")}`
+    : `amux ${receipt.action === "esc-pager" ? "esc" : receipt.action} ${name} -p ${pane}`;
+  try {
+    if (targetChannel) {
+      await mirrorDispatch({
+        channelId: targetChannel,
+        content: `[composer-control${actor ? ` from ${actor}` : ""}] ${label} (${receipt.controlId})`,
+      });
+    }
+    if (senderChannel && senderChannel !== targetChannel) {
+      await mirrorDispatch({
+        channelId: senderChannel,
+        content: `\`${command}\` → sent (${receipt.controlId})`,
+      });
+    }
+  } catch (error) {
+    console.warn(`composer-control mirror failed: ${error.message}`);
+  }
+}
+
+async function sendComposerControl(ctx, name, pane, keys, {
+  action,
+  actor = null,
+  controlId = randomUUID(),
+  now = () => new Date(),
+  record = appendEvent,
+  mirrorDispatch = spawnMirrorWorker,
+} = {}) {
+  validateComposerTarget(ctx, name, pane);
+  const keyList = Object.freeze([...keys]);
+  const event = (state, detail = "") => ({
+    ts: now().toISOString(),
+    event: `composer_control_${state}`,
+    session: name,
+    pane: Number(pane),
+    controlId,
+    action,
+    keys: keyList,
+    actor,
+    detail,
+  });
+
+  // Durable intent precedes the physical write. A crash after tmux accepts
+  // the keys therefore remains an explicit ambiguous request, never an
+  // invisible mutation that automation can safely assume did not happen.
+  record(event("requested"));
+  try {
+    await ctx.tmux(`send-keys -t '${esc(name)}:.${Number(pane)}' ${keyList.join(" ")}`);
+  } catch (error) {
+    try { record(event("failed", String(error.message || error).slice(0, 200))); }
+    catch { /* requested is the durable provenance floor */ }
+    throw error;
+  }
+
+  const receipt = Object.freeze({
+    controlId,
+    action,
+    keys: keyList,
+    target: `${name}:${Number(pane)}`,
+  });
+  let receiptError = null;
+  try { record(event("sent")); }
+  catch (error) { receiptError = error; }
+  await mirrorComposerControl(ctx, name, Number(pane), receipt, { actor, mirrorDispatch });
+  if (receiptError) {
+    // The requested row is already durable and the physical write cannot be
+    // rolled back. Fail-loud without suggesting that retry is safe.
+    throw new Error(
+      `composer-control ${controlId} was sent but its receipt failed; do not retry: ${receiptError.message}`,
+    );
+  }
+  return receipt;
+}
+
+/** Public allowlisted key primitive used by `amux keys` and `amux enter`. */
+export async function sendComposerKeys(ctx, name, pane, keys, options = {}) {
+  return sendComposerControl(ctx, name, pane, normalizeComposerKeys(keys), {
+    ...options,
+    action: options.action || "keys",
+  });
+}
+
+/** Exact explicit clear recipe; C-u is intentionally not part of it. */
+export async function clearPaneComposer(ctx, name, pane, options = {}) {
+  return sendComposerControl(ctx, name, pane, CLEARLINE_RECIPE, {
+    ...options,
+    action: "clearline",
+  });
+}
+
+/** Escape a normal pane, or close a verified Codex pager with internal `q`. */
+export async function escapePaneComposer(ctx, name, pane, options = {}) {
+  validateComposerTarget(ctx, name, pane);
+  let snapshot = "";
+  try { snapshot = await ctx.agent.captureScreen(name, pane); }
+  catch { /* retain historical Escape behavior when capture is unavailable */ }
+  const recipe = escapeComposerRecipe(snapshot);
+  const receipt = await sendComposerControl(ctx, name, pane, recipe.keys, {
+    ...options,
+    action: recipe.pager ? "esc-pager" : "esc",
+  });
+  return Object.freeze({ ...receipt, pager: recipe.pager });
 }
 
 /**

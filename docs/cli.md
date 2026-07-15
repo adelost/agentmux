@@ -145,9 +145,25 @@ Output groups include:
 
 ```bash
 amux esc <agent> -p <pane>
+amux enter <agent> -p <pane>
+amux clearline <agent> -p <pane>
+amux keys <agent> -p <pane> Escape C-a C-k
 amux wait <agent> -p <pane>
 amux log <agent> -p <pane> --tmux
 ```
+
+Composer control is intentionally narrow. `amux keys`, `amux enter`, and
+`amux clearline` apply only to the tmux fallback backend. `amux keys` accepts
+exactly `Escape`, `C-a`, `C-k`, `C-u`, and
+`Enter`; arbitrary text, tmux flags, and other keys are rejected before the
+pane is touched. `amux enter` submits an already visible composer.
+`amux clearline` uses the fixed `Escape,C-a,C-k` recipe and never relies on
+`C-u`, which does not clear the Codex composer. On tmux panes, `amux esc`
+detects Codex's full-screen transcript/backtrack pager and exits it with its
+internal `q` recipe in one invocation; native targets retain their existing
+adapter-owned Escape path. Every tmux composer control has a durable requested/sent/failed
+ledger identity and a best-effort Discord projection; composer text is never
+copied into that audit record.
 
 For Discord channels, the equivalent recovery commands are `/raw`, `/esc`,
 `/dismiss`, and `//new`.
