@@ -39,7 +39,15 @@ import {
   checkDeliveryQueue,
   checkNativeRuntime,
   checkGuardCronHeartbeats,
+  checkSuggestionsBoard,
 } from "../core/doctor.mjs";
+import {
+  expandHome,
+  loadSuggestionsBridgeConfig,
+  loadSuggestionsBridgeState,
+  loadSuggestionsReadCredential,
+  probeSuggestionsBoard,
+} from "../core/suggestions-comment-bridge.mjs";
 import {
   createDeliveryQueue,
   deliveryQueueStats,
@@ -2600,6 +2608,33 @@ async function cmdDoctor(ctx) {
   try { agents = listAgents(ctx.configPath); }
   catch (err) { cfgError = err.message; }
 
+  // Suggestions board + comment bridge. Probe the same authenticated list
+  // seam as cron, then join it with cron's durable full-success timestamp.
+  const suggestionsConfigPath = expandHome(process.env.AMUX_SUGGESTIONS_CONFIG
+    || "~/.config/agent/suggestions-comment-bridge.yaml");
+  const suggestionsConfigured = existsSync(suggestionsConfigPath);
+  let suggestionsProbe = null;
+  let suggestionsLastSuccessfulSyncAt = null;
+  if (suggestionsConfigured) {
+    try {
+      const allowTestOrigin = process.env.NODE_ENV === "test"
+        && process.env.AMUX_SUGGESTIONS_TEST_ORIGIN === "1";
+      const suggestionsConfig = loadSuggestionsBridgeConfig(suggestionsConfigPath, { allowTestOrigin });
+      const suggestionsStatePath = expandHome(process.env.AMUX_SUGGESTIONS_STATE
+        || suggestionsConfig.statePath);
+      const suggestionsState = loadSuggestionsBridgeState(suggestionsStatePath);
+      suggestionsLastSuccessfulSyncAt = suggestionsState.lastSuccessfulSyncAt;
+      const readToken = loadSuggestionsReadCredential(suggestionsConfig.credentialFile);
+      suggestionsProbe = await probeSuggestionsBoard({
+        config: suggestionsConfig,
+        readToken,
+        allowTestOrigin,
+      });
+    } catch (error) {
+      suggestionsProbe = { ok: false, status: null, error: error.message };
+    }
+  }
+
   const nativeUrls = [...new Set(agents
     .filter((agent) => agent.backend === "native")
     .map((agent) => agent.runtimeUrl || "http://127.0.0.1:8811"))];
@@ -2665,6 +2700,11 @@ async function cmdDoctor(ctx) {
     checkTmuxVersion({ version: tmuxVersion }),
     checkTmux({ sessions, error: tmuxError }),
     checkConfig({ agents, error: cfgError }),
+    checkSuggestionsBoard({
+      configured: suggestionsConfigured,
+      probe: suggestionsProbe,
+      lastSuccessfulSyncAt: suggestionsLastSuccessfulSyncAt,
+    }),
     checkNativeRuntime({
       configured: nativeUrls.length,
       online: nativeOnline,
@@ -3874,7 +3914,7 @@ Usage:
   agent dream                     Write/update nightly pane digest in workspace memory
     --since T                     Window to summarize (default: 24h)
     --dry                         Preview pane work, do nothing
-  agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)\n  agent doctor                    Health check: bridge alive/hung/stale-code, hooks, ledger, tmux (exit 0/1/2)\n  agent revive                    Post-boot: respawn all panes + resume-brief those interrupted mid-turn (--dry to preview)\n  agent memory status             Memory warnings, compact backlog, latest dream
+  agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)\n  agent doctor                    Health check: bridge, Suggestions board/sync, hooks, ledger, tmux (exit 0/1/2)\n  agent revive                    Post-boot: respawn all panes + resume-brief those interrupted mid-turn (--dry to preview)\n  agent memory status             Memory warnings, compact backlog, latest dream
   agent queue                     List live durable delivery jobs (id, target, age, state, attempts, reason, preview)
     --all                         Include terminal delivery history retained on disk
     --limit N                     Maximum rows (default 100, max 1000)

@@ -3,12 +3,14 @@
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import {
+  createAmuxBoardAuthNotifier,
   createAmuxCommentDeliverer,
   createAmuxCommentNotifier,
   expandHome,
   loadSuggestionsBridgeConfig,
   loadSuggestionsBridgeState,
   loadSuggestionsReadCredential,
+  isSuggestionsAuthenticationError,
   pollSuggestionsComments,
   saveSuggestionsBridgeState,
 } from "../core/suggestions-comment-bridge.mjs";
@@ -49,9 +51,13 @@ function statusLine(config, state) {
     return `${projectId}->${target.agent}:${target.pane} bootstrap=${Boolean(project?.bootstrapped)} `
       + `answered=${answered} unanswered=${unanswered} terminal=${terminal}`;
   });
-  return rows.join("\n");
+  const lastSync = Number.isFinite(state.lastSuccessfulSyncAt)
+    ? new Date(state.lastSuccessfulSyncAt).toISOString() : "never";
+  return `last_successful_sync=${lastSync}\n${rows.join("\n")}`;
 }
 
+let amuxBin = null;
+let state = null;
 try {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
@@ -63,13 +69,13 @@ try {
     && process.env.AMUX_SUGGESTIONS_TEST_ORIGIN === "1";
   const config = loadSuggestionsBridgeConfig(configPath, { allowTestOrigin });
   const statePath = expandHome(args.state || process.env.AMUX_SUGGESTIONS_STATE || config.statePath);
-  const state = loadSuggestionsBridgeState(statePath);
+  state = loadSuggestionsBridgeState(statePath);
   if (args.status) {
     console.log(statusLine(config, state));
     process.exit(0);
   }
   const configuredAmux = process.env.AMUX_SUGGESTIONS_AMUX_BIN || resolve(SCRIPT_DIR, "agent-cli.mjs");
-  const amuxBin = configuredAmux.includes("/") ? resolve(configuredAmux) : configuredAmux;
+  amuxBin = configuredAmux.includes("/") ? resolve(configuredAmux) : configuredAmux;
   const readToken = loadSuggestionsReadCredential(config.credentialFile);
   const result = await pollSuggestionsComments({
     config,
@@ -90,6 +96,16 @@ try {
   });
   if (result.delivered > 0) console.log(`OK delivered=${result.delivered}`);
 } catch (error) {
+  if (amuxBin && isSuggestionsAuthenticationError(error)) {
+    try {
+      await createAmuxBoardAuthNotifier({ amuxBin })({
+        status: error.status,
+        lastSuccessfulSyncAt: state?.lastSuccessfulSyncAt ?? null,
+      });
+    } catch (notificationError) {
+      console.error(`ERROR suggestions-comment-bridge auth page failed: ${notificationError.message}`);
+    }
+  }
   console.error(`ERROR suggestions-comment-bridge: ${error.message}`);
   process.exit(1);
 }

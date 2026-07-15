@@ -16,8 +16,57 @@ import { classifyGuardHeartbeat } from "./guard-heartbeat.mjs";
 export const OK = "ok";
 export const WARN = "warn";
 export const FAIL = "fail";
+export const SUGGESTIONS_BRIDGE_STALE_MS = 5 * 60 * 1000;
 
 const check = (name, status, detail, hint = "") => ({ name, status, detail, hint });
+
+function suggestionsSyncDetail(lastSuccessfulSyncAt, now) {
+  if (!Number.isFinite(lastSuccessfulSyncAt)) return "comment bridge has never completed a sync";
+  const ageMs = Math.max(0, now - lastSuccessfulSyncAt);
+  const age = ageMs < 60_000
+    ? `${Math.round(ageMs / 1000)}s`
+    : ageMs < 60 * 60_000
+      ? `${Math.round(ageMs / 60_000)}m`
+      : `${Math.round(ageMs / (60 * 60_000))}h`;
+  return `comment bridge synced ${age} ago at ${new Date(lastSuccessfulSyncAt).toISOString()}`;
+}
+
+/** One row joins live read-token reachability with the durable bridge success cursor. */
+export function checkSuggestionsBoard({
+  configured = true,
+  probe = null,
+  lastSuccessfulSyncAt = null,
+  now = Date.now(),
+  staleAfterMs = SUGGESTIONS_BRIDGE_STALE_MS,
+} = {}) {
+  if (!configured) {
+    return check("suggestions board", WARN, "comment bridge is not configured",
+      "install it: bin/install-suggestions-comment-bridge.sh install");
+  }
+  const freshness = suggestionsSyncDetail(lastSuccessfulSyncAt, now);
+  if (!probe?.ok) {
+    const status = Number.isSafeInteger(probe?.status) ? `HTTP ${probe.status}` : "probe failed";
+    const error = String(probe?.error || "unknown error").replace(/[\r\n\t]+/gu, " ").slice(0, 180);
+    const hint = new Set([401, 403]).has(probe?.status)
+      ? "verify deployed READ_TOKEN matches ~/.config/agent/suggestions-read-token; rerun amux doctor"
+      : probe?.status >= 500
+        ? "check Suggestions deployment health/logs, then rerun amux doctor"
+        : "check bridge config, read-token file, and network; rerun amux doctor";
+    return check("suggestions board", FAIL,
+      `${status}${error ? ` (${error})` : ""} · ${freshness}`, hint);
+  }
+  if (!Number.isFinite(lastSuccessfulSyncAt)) {
+    return check("suggestions board", FAIL, `HTTP ${probe.status || 200} · ${freshness}`,
+      "run bin/suggestions-comment-bridge-cron.sh once and inspect its log");
+  }
+  const ageMs = Math.max(0, now - lastSuccessfulSyncAt);
+  if (ageMs > staleAfterMs) {
+    return check("suggestions board", FAIL, `HTTP ${probe.status || 200} · ${freshness}`,
+      "comment bridge is stale; inspect its cron entry/log and run it once");
+  }
+  return check("suggestions board", OK,
+    `HTTP ${probe.status || 200} (${probe.projectId || "board"}) · ${freshness}`);
+}
 
 export function checkBridgeProcess({ pids, supervised }) {
   if (!pids.length) {
