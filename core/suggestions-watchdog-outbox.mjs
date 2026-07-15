@@ -235,11 +235,15 @@ async function fetchJson(url, {
 }
 
 function brokerTarget(value, projectId) {
-  const project = value?.project ?? value?.assignmentBootstrap?.project;
-  if (!isObject(project) || project.id !== projectId || typeof project.brokerOwner !== "string") {
+  const project = value?.assignmentBootstrap?.project ?? value?.project;
+  const routingBroker = value?.project?.routingGuide?.workers?.find?.(
+    (worker) => isObject(worker) && worker.role === "broker",
+  )?.id;
+  const brokerOwner = project?.brokerOwner ?? routingBroker;
+  if (!isObject(project) || project.id !== projectId || typeof brokerOwner !== "string") {
     throw new Error("schema: bootstrap project/brokerOwner missing");
   }
-  const match = project.brokerOwner.match(/^([a-z][a-z0-9-]{0,31}):([0-9]{1,3})$/u);
+  const match = brokerOwner.match(/^([a-z][a-z0-9-]{0,31}):([0-9]{1,3})$/u);
   const pane = Number(match?.[2]);
   if (!match || !Number.isSafeInteger(pane) || pane < 0 || pane > 128) {
     throw new Error("schema: bootstrap brokerOwner is not an agentmux target");

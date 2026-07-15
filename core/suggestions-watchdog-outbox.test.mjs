@@ -31,8 +31,11 @@ function api({ ackStatus = 200 } = {}) {
     const url = new URL(input);
     calls.push({ url, init, body: init.body ? JSON.parse(String(init.body)) : null });
     if (url.pathname === "/api/config/agentdocs") return Response.json({
-      project: { id: url.searchParams.get("project"),
-        brokerOwner: url.searchParams.get("project") === "source" ? "lsrc:2" : "skydive:2" },
+      project: {
+        id: url.searchParams.get("project"),
+        routingGuide: { workers: [{ role: "broker",
+          id: url.searchParams.get("project") === "source" ? "lsrc:2" : "skydive:2" }] },
+      },
     });
     if (url.pathname === "/api/watchdog/outbox") return Response.json({ alerts: [alert] });
     if (url.pathname === "/api/watchdog/outbox/ack") {
@@ -124,7 +127,7 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
       const url = new URL(input);
       remote.calls.push({ url, init, body: init.body ? JSON.parse(String(init.body)) : null });
       if (url.pathname === "/api/config/agentdocs") return Response.json({
-        project: { id: "source", brokerOwner: "lsrc:2" },
+        project: { id: "source", routingGuide: { workers: [{ role: "broker", id: "lsrc:2" }] } },
       });
       if (url.pathname === "/api/watchdog/outbox") return Response.json({ alerts: [alert] });
       if (url.pathname.endsWith("/ack")) {
