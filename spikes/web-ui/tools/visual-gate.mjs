@@ -237,6 +237,15 @@ const GATE_CHECKS = `(() => {
   const doc = document.documentElement;
   const composerRect = document.querySelector("#composer-wrap")?.getBoundingClientRect() ?? null;
   const lastMessageRect = document.querySelector("#message-list")?.lastElementChild?.getBoundingClientRect() ?? null;
+  const quotaChips = [...document.querySelectorAll(".quota-chip")].map((node) => {
+    const rect = node.getBoundingClientRect();
+    return {
+      engine: node.dataset.engine ?? "unknown",
+      left: rect.left,
+      right: rect.right,
+      width: rect.width,
+    };
+  });
   const unnamed = [...document.querySelectorAll("button, a, input, select, textarea")]
     .filter((node) => !node.closest(".hidden") && !node.hidden && node.type !== "hidden")
     .filter((node) => {
@@ -250,7 +259,9 @@ const GATE_CHECKS = `(() => {
     .map((node) => node.id || node.className || node.tagName);
   return {
     snapshotReady: doc.dataset.snapshotReady === "true",
+    viewportWidth: window.innerWidth,
     horizontalOverflow: Math.max(doc.scrollWidth - doc.clientWidth, document.body.scrollWidth - doc.clientWidth),
+    quotaChips,
     surfaces: {
       topbar: visible(".topbar"),
       themeToggle: visible("#theme-toggle"),
@@ -299,6 +310,17 @@ const runViewport = async (page, viewport, url) => {
   if (!report.composerFlush) failures.push("composer is not flush with the viewport bottom at reading position");
   if (!report.lastMessageClear) failures.push("last message is occluded by the composer at reading position");
   if (report.horizontalOverflow > 1) failures.push(`horizontal overflow of ${report.horizontalOverflow}px`);
+  const quotaEngines = new Set(report.quotaChips.map((chip) => chip.engine));
+  for (const engine of ["claude", "codex"]) {
+    if (!quotaEngines.has(engine)) failures.push(`quota chip missing: ${engine}`);
+  }
+  for (const chip of report.quotaChips) {
+    if (chip.left < 0 || chip.right > report.viewportWidth) {
+      failures.push(`quota chip ${chip.engine} leaves viewport: `
+        + `left ${chip.left.toFixed(1)}px, right ${chip.right.toFixed(1)}px, `
+        + `viewport ${report.viewportWidth}px`);
+    }
+  }
   for (const [surface, ok] of Object.entries(report.surfaces)) {
     if (!ok) failures.push(`surface missing/invisible: ${surface}`);
   }
