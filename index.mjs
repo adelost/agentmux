@@ -18,7 +18,7 @@ import { readFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { parseEnv, downloadBuffer } from "./lib.mjs";
-import { createAgent } from "./agent.mjs";
+import { createAgent, ensureAgentHints, HINTS_VERSION } from "./agent.mjs";
 import { createAttachmentHandler } from "./attachments.mjs";
 import { createState } from "./core/state.mjs";
 import { createRecorder } from "./core/recorder.mjs";
@@ -36,10 +36,11 @@ import { createNativeRuntimeWatcher } from "./channels/native-runtime-watcher.mj
 import { createPlaywrightWatchdog } from "./channels/playwright-watchdog.mjs";
 import { parsePlaywrightWatchdogConfig } from "./core/playwright-watchdog.mjs";
 import { startHeartbeat } from "./core/heartbeat.mjs";
+import { syncConfiguredAgentHints } from "./core/hints-sync.mjs";
 import { runPendingFleetRestart } from "./core/fleet-restart.mjs";
 import { createDeliveryQueue } from "./core/delivery-queue.mjs";
 import { createDeliveryBroker } from "./core/delivery-broker.mjs";
-import { findChannelForPane, validateAgentPane } from "./cli/config.mjs";
+import { findChannelForPane, listAgents, validateAgentPane } from "./cli/config.mjs";
 import { createNativeRuntimeClient } from "./core/native-runtime-client.mjs";
 import { createAgentRouter } from "./core/agent-router.mjs";
 
@@ -82,6 +83,20 @@ if (!TOKEN) {
   process.exit(1);
 }
 
+// Refresh every configured workspace before any pane/watcher can consume an
+// older generated policy. This is the same engine exposed by `amux hints-sync`.
+const startupHints = syncConfiguredAgentHints(listAgents(AGENTS_YAML), {
+  ensure: ensureAgentHints,
+  version: HINTS_VERSION,
+});
+console.log(
+  `[hints-sync] v${HINTS_VERSION}: ${startupHints.workspaceRoots} workspaces, ` +
+  `${startupHints.changedFiles} files updated`,
+);
+for (const failure of startupHints.errors) {
+  console.warn(`[hints-sync] ${failure.rootDir}/${failure.file || "workspace"}: ${failure.error}`);
+}
+
 // --- Services ---
 
 const exec = promisify(execCb);
@@ -97,7 +112,7 @@ const pkgVersion = (() => {
   try { return JSON.parse(readFileSync(resolve(__dir, "package.json"), "utf-8")).version; }
   catch { return "unknown"; }
 })();
-startHeartbeat({ version: pkgVersion });
+startHeartbeat({ version: pkgVersion, hintsVersion: HINTS_VERSION });
 
 const appState = createState(STATE_FILE);
 if (appState.get("tts") === undefined) appState.set("tts", process.env.TTS === "1");

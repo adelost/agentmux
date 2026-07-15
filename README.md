@@ -403,6 +403,10 @@ session's Codex implementation workers on panes `3+`. Panes `0`–`1` remain
 reserved, require an explicit per-task instruction from Mattias, and never
 count as idle capacity.
 
+`amux hints-sync` refreshes that generated block across every configured
+workspace immediately; the bridge performs the same fleet sync at startup.
+Operator additions below the generated end marker remain intact.
+
 ## Configuration
 
 Common `.env` variables:

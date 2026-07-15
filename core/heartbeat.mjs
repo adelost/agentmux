@@ -23,9 +23,15 @@ export function heartbeatPath() {
   return process.env.AMUX_HEARTBEAT_PATH || join(homedir(), ".agentmux", "bridge-heartbeat.json");
 }
 
-export function writeHeartbeat({ version, startedAt, path = heartbeatPath(), now = new Date() }) {
+export function writeHeartbeat({
+  version,
+  hintsVersion = null,
+  startedAt,
+  path = heartbeatPath(),
+  now = new Date(),
+}) {
   mkdirSync(dirname(path), { recursive: true });
-  const beat = { ts: now.toISOString(), pid: process.pid, version, startedAt };
+  const beat = { ts: now.toISOString(), pid: process.pid, version, hintsVersion, startedAt };
   writeFileSync(path, JSON.stringify(beat) + "\n");
   return beat;
 }
@@ -59,11 +65,16 @@ export function classifyHeartbeat(beat, { repoVersion, now = Date.now(), pidAliv
 }
 
 /** Start the interval writer. Returns a stop function. */
-export function startHeartbeat({ version, intervalMs = HEARTBEAT_INTERVAL_MS, path = heartbeatPath() }) {
+export function startHeartbeat({
+  version,
+  hintsVersion = null,
+  intervalMs = HEARTBEAT_INTERVAL_MS,
+  path = heartbeatPath(),
+}) {
   const startedAt = new Date().toISOString();
   const tick = () => {
     try {
-      writeHeartbeat({ version, startedAt, path });
+      writeHeartbeat({ version, hintsVersion, startedAt, path });
     } catch (err) {
       console.warn(`heartbeat write failed: ${err.message}`);
     }

@@ -168,6 +168,23 @@ copied into that audit record.
 For Discord channels, the equivalent recovery commands are `/raw`, `/esc`,
 `/dismiss`, and `//new`.
 
+## Generated agent hints
+
+```bash
+amux hints-sync
+```
+
+Refreshes `.agents/CLAUDE.md` and `.agents/AGENTS.md` for every workspace root
+in the canonical `agents.yaml`. Duplicate session roots are written once. The
+generated block is replaced by content, while workspace-specific operator
+rules below `<!-- amux-hints-end -->` in `CLAUDE.md` are preserved and mirrored
+to `AGENTS.md`. Bridge startup runs the same sync automatically.
+
+The CLI is a fresh process and therefore reads the current template from disk.
+If a live bridge heartbeat reports an older or unknown hints version, the
+command prints `bridge restart required`; otherwise that older in-memory
+template could overwrite the refreshed files on a later pane spawn.
+
 ## Labels
 
 ```bash
