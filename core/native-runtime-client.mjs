@@ -333,7 +333,11 @@ export function createNativeRuntimeClient({
         const message = await prepareMessage(resolved, job);
         const agent = await api(resolved.runtimeUrl, `/api/agents/${resolved.agent.id}/messages`, {
           method: "POST",
-          body: { ...message, idempotencyKey: key },
+          body: {
+            ...message,
+            idempotencyKey: key,
+            source: String(job.source || "bridge").slice(0, 40),
+          },
         });
         return {
           accepted: true,

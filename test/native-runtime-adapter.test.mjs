@@ -235,6 +235,7 @@ describe("native runtime compatibility adapter", () => {
       { path: "/runtime/uploads/proof.png", name: "proof.png" },
     ]);
     expect(messages[0].body.prompt).toBe("Inspect this");
+    expect(messages[0].body.source).toBe("test");
   });
 
   it("reprovisions a missing cached agent and retries the same operation key once", async () => {

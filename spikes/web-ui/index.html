@@ -23,6 +23,8 @@
       <span class="boundary-badge" title="Tjänsten är endast tillgänglig via datorn eller ditt tailnet">
         Tailnet
       </span>
+      <button class="button compact quiet" id="pinned-conversations-button" type="button">Pinnade</button>
+      <button class="button compact quiet" id="prompt-overview-button" type="button">Skickade frågor</button>
       <button class="button compact" id="new-project-button" type="button">Nytt projekt</button>
     </div>
   </header>
@@ -83,6 +85,7 @@
             <div class="agent-header-actions">
               <span class="run-state" id="run-state" role="status">Klar</span>
               <button class="button compact danger hidden" id="interrupt-button" type="button">Avbryt</button>
+              <button class="button compact quiet" id="pin-conversation-button" type="button" aria-pressed="false">Pinna</button>
               <button class="button compact quiet" id="compact-button" type="button">Compact</button>
               <button class="button compact quiet" id="side-question-button" type="button">Sidofråga</button>
               <button class="icon-button danger" id="delete-agent-button" type="button" aria-label="Ta bort agent" title="Ta bort agent">×</button>
@@ -192,6 +195,38 @@
         <button class="button primary" type="submit">Skapa agent</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog class="dialog prompt-overview-dialog" id="prompt-overview-dialog">
+    <div class="dialog-heading">
+      <div>
+        <p class="eyebrow">Leveransjournal</p>
+        <h2>Skickade frågor</h2>
+      </div>
+      <button class="icon-button" id="close-prompt-overview" type="button" aria-label="Stäng skickade frågor">×</button>
+    </div>
+    <div class="prompt-overview-controls">
+      <div class="prompt-scope-tabs" role="tablist" aria-label="Visa frågor efter nivå">
+        <button type="button" role="tab" data-prompt-scope="all" aria-selected="true">Alla</button>
+        <button type="button" role="tab" data-prompt-scope="project" aria-selected="false">Projektet</button>
+        <button type="button" role="tab" data-prompt-scope="agent" aria-selected="false">Instansen</button>
+      </div>
+      <button class="button compact quiet" id="refresh-prompt-overview" type="button">Uppdatera</button>
+    </div>
+    <p class="prompt-overview-copy" id="prompt-overview-copy">Frågor journalförs när AMUX Code accepterar dem, innan agenten startas.</p>
+    <div class="prompt-overview-list" id="prompt-overview-list" aria-live="polite"></div>
+  </dialog>
+
+  <dialog class="dialog pinned-conversations-dialog" id="pinned-conversations-dialog">
+    <div class="dialog-heading">
+      <div>
+        <p class="eyebrow">Aktiva spår</p>
+        <h2>Pinnade konversationer</h2>
+      </div>
+      <button class="icon-button" id="close-pinned-conversations" type="button" aria-label="Stäng pinnade konversationer">×</button>
+    </div>
+    <p class="pinned-conversations-copy">Pinna de konversationer du vill ha nära till hands, även när de ligger i andra projekt.</p>
+    <div class="pinned-conversations-list" id="pinned-conversations-list" aria-live="polite"></div>
   </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

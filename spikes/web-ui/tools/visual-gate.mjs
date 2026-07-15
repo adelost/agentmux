@@ -54,18 +54,26 @@ const seedWorkspace = () => {
   const dataDir = join(root, "data");
   const homeDir = join(root, "home");
   const workspace = join(root, "workspace");
+  const secondWorkspace = join(root, "workspace-review");
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(homeDir, { recursive: true });
   mkdirSync(workspace, { recursive: true });
+  mkdirSync(secondWorkspace, { recursive: true });
 
   const at = Date.now();
   const project = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "SW00P Game", cwd: workspace };
+  const secondProject = { id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", name: "Release review", cwd: secondWorkspace };
   const claudeAgent = { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "UI-implementation", engine: "claude", model: "claude-opus-4-8" };
   const codexAgent = { id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", name: "Review-wingman", engine: "codex", model: "gpt-5.6-sol" };
 
   writeFileSync(join(dataDir, "registry.json"), JSON.stringify({
     schemaVersion: 1,
-    projects: [{ ...project, createdAt: at, updatedAt: at, communicationPolicy: { version: 1, read: "all_agents", send: { mode: "open", allow: {} }, enforced: false } }],
+    projects: [project, secondProject].map((entry) => ({
+      ...entry,
+      createdAt: at,
+      updatedAt: at,
+      communicationPolicy: { version: 1, read: "all_agents", send: { mode: "open", allow: {} }, enforced: false },
+    })),
     agents: [
       {
         ...claudeAgent,
@@ -82,10 +90,21 @@ const seedWorkspace = () => {
           updatedAt: at,
         },
         idleSince: at,
+        pinnedAt: at,
         createdAt: at,
         updatedAt: at,
       },
-      { ...codexAgent, projectId: project.id, effort: "medium", sessionId: null, context: null, idleSince: at, createdAt: at + 1, updatedAt: at + 1 },
+      {
+        ...codexAgent,
+        projectId: secondProject.id,
+        effort: "medium",
+        sessionId: null,
+        context: null,
+        idleSince: at,
+        pinnedAt: at + 1,
+        createdAt: at + 1,
+        updatedAt: at + 1,
+      },
     ],
     receipts: {},
   }, null, 2));
@@ -105,6 +124,12 @@ const seedWorkspace = () => {
         id: claudeAgent.id,
         hash: "visual-only",
         promptHashes: [deniedPromptHash],
+        projectId: project.id,
+        projectName: project.name,
+        agentName: claudeAgent.name,
+        promptPreview: deniedPrompt,
+        promptPreviewTruncated: false,
+        source: "discord",
         acceptedAt: deniedAt,
         completedAt: deniedAt + 100,
         sessionId: SESSION_ID,
@@ -284,7 +309,63 @@ const runViewport = async (page, viewport, url) => {
   const artifact = join(ARTIFACT_DIR, `webui-${viewport.name}.png`);
   writeFileSync(artifact, Buffer.from(screenshot.data, "base64"));
 
-  return { failures, artifact };
+  await page.evaluate("document.querySelector('#prompt-overview-button').click(), true");
+  const overlayDeadline = Date.now() + 5_000;
+  for (;;) {
+    const ready = await page.evaluate("document.querySelector('#prompt-overview-dialog')?.open && document.querySelectorAll('.prompt-overview-item').length === 1");
+    if (ready) break;
+    if (Date.now() > overlayDeadline) {
+      failures.push("sent-prompt overview did not render its persisted receipt");
+      break;
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  const promptOverlay = await page.evaluate(`(() => {
+    const dialog = document.querySelector('#prompt-overview-dialog');
+    const tabs = [...document.querySelectorAll('[data-prompt-scope]')];
+    return {
+      open: Boolean(dialog?.open),
+      preview: document.querySelector('.prompt-overview-preview')?.textContent,
+      tabs: tabs.map((tab) => ({ name: tab.textContent.trim(), disabled: tab.disabled })),
+      overflow: dialog ? Math.max(0, dialog.scrollWidth - dialog.clientWidth) : -1,
+    };
+  })()`);
+  if (!promptOverlay.open) failures.push("sent-prompt overview is not open");
+  if (promptOverlay.preview !== "Kör den skyddade releaseåtgärden.") failures.push("sent-prompt preview missing");
+  if (promptOverlay.tabs.length !== 3 || promptOverlay.tabs.some((tab) => tab.disabled)) {
+    failures.push("all/project/instance prompt scopes are not available");
+  }
+  if (promptOverlay.overflow > 1) failures.push(`sent-prompt overview overflows ${promptOverlay.overflow}px`);
+  const promptScreenshot = await page.send("Page.captureScreenshot", { format: "png" });
+  const promptArtifact = join(ARTIFACT_DIR, `webui-${viewport.name}-prompts.png`);
+  writeFileSync(promptArtifact, Buffer.from(promptScreenshot.data, "base64"));
+  await page.evaluate("document.querySelector('#prompt-overview-dialog').close(), document.querySelector('#pinned-conversations-button').click(), true");
+  const pinnedOverlay = await page.evaluate(`(() => ({
+    open: Boolean(document.querySelector('#pinned-conversations-dialog')?.open),
+    items: document.querySelectorAll('.pinned-conversation-item').length,
+    text: document.querySelector('#pinned-conversations-list')?.textContent,
+  }))()`);
+  if (!pinnedOverlay.open || pinnedOverlay.items !== 2
+      || !pinnedOverlay.text?.includes("UI-implementation")
+      || !pinnedOverlay.text?.includes("Review-wingman")) {
+    failures.push("global pinned-conversation overview is not aggregating projects");
+  }
+  const pinnedScreenshot = await page.send("Page.captureScreenshot", { format: "png" });
+  const pinnedArtifact = join(ARTIFACT_DIR, `webui-${viewport.name}-pinned.png`);
+  writeFileSync(pinnedArtifact, Buffer.from(pinnedScreenshot.data, "base64"));
+  await page.evaluate("document.querySelector('.pinned-conversation-item').click(), true");
+  const pinnedNavigation = await page.evaluate(`(() => ({
+    project: document.querySelector('#project-select')?.value,
+    agent: new URL(location.href).searchParams.get('agent'),
+    heading: document.querySelector('#agent-name')?.textContent,
+  }))()`);
+  if (pinnedNavigation.project !== "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+      || pinnedNavigation.agent !== "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+      || pinnedNavigation.heading !== "Review-wingman") {
+    failures.push("pinned conversation did not navigate across projects to its exact instance");
+  }
+
+  return { failures, artifacts: [artifact, promptArtifact, pinnedArtifact] };
 };
 
 const main = async () => {
@@ -317,7 +398,7 @@ const main = async () => {
 
     const snapshotUrl = `${url}/?snapshot=1&project=${seed.project.id}&agent=${seed.claudeAgent.id}`;
     for (const viewport of VIEWPORTS) {
-      const { failures, artifact } = await runViewport(page, viewport, snapshotUrl);
+      const { failures, artifacts } = await runViewport(page, viewport, snapshotUrl);
       if (failures.length) {
         failed = true;
         console.error(`✗ ${viewport.name} (${viewport.width}x${viewport.height})`);
@@ -325,7 +406,7 @@ const main = async () => {
       } else {
         console.log(`✓ ${viewport.name} (${viewport.width}x${viewport.height}) — no overflow, all surfaces visible, controls named`);
       }
-      console.log(`  screenshot: ${artifact}`);
+      for (const artifact of artifacts) console.log(`  screenshot: ${artifact}`);
     }
     page.close();
     browser.close();

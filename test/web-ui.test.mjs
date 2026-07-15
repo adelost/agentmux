@@ -469,6 +469,149 @@ describe("AMUX Code project and agent registry", () => {
     expect(resumeRequest?.params).not.toHaveProperty("excludeTurns");
   });
 
+  it("journals prompts before engine completion and filters one ledger by all, project or agent", async () => {
+    const { url, workspace, dataDir } = await setup();
+    const project = await createProject(url, workspace);
+    const claude = await createAgent(url, project, "claude");
+    const blockedPrompt = "WAIT_FOR_INTERRUPT";
+
+    expect((await postJson(`${url}/api/agents/${claude.id}/messages`, {
+      prompt: blockedPrompt,
+      attachments: [],
+      idempotencyKey: "journal-running-turn",
+      source: "web",
+    })).status).toBe(202);
+
+    const persisted = JSON.parse(readFileSync(join(dataDir, "registry.json"), "utf8"))
+      .receipts.messages["journal-running-turn"];
+    expect(persisted).toMatchObject({
+      projectId: project.id,
+      projectName: "Testprojekt",
+      agentName: "Claude agent",
+      source: "web",
+      promptPreview: blockedPrompt,
+      promptPreviewTruncated: false,
+    });
+
+    const whileRunning = await request(`${url}/api/prompts?scope=all`);
+    expect(whileRunning.status).toBe(200);
+    expect(whileRunning.body.prompts).toEqual([expect.objectContaining({
+      operationKey: "journal-running-turn",
+      projectId: project.id,
+      agentId: claude.id,
+      source: "web",
+      deliveryStatus: "accepted",
+      turnStatus: "running",
+      preview: blockedPrompt,
+      previewTruncated: false,
+    })]);
+
+    expect((await postJson(`${url}/api/agents/${claude.id}/messages`, {
+      prompt: blockedPrompt,
+      attachments: [],
+      idempotencyKey: "journal-running-turn",
+      source: "web",
+    })).body.replayed).toBe(true);
+    expect((await request(`${url}/api/prompts?scope=all`)).body.prompts).toHaveLength(1);
+
+    expect((await postJson(`${url}/api/agents/${claude.id}/interrupt`, {
+      idempotencyKey: "journal-interrupt",
+    })).status).toBe(202);
+    await waitForAgent(url, project.id, claude.id, (agent) => !agent.running);
+
+    const secondProject = (await postJson(`${url}/api/projects`, {
+      name: "Andra projektet",
+      cwd: workspace,
+      idempotencyKey: "journal-project-two",
+    })).body;
+    const codex = await createAgent(url, secondProject, "codex", "journal-codex");
+    const longPrompt = `  Fråga från Discord\n${"x".repeat(520)}  `;
+    expect((await postJson(`${url}/api/agents/${codex.id}/messages`, {
+      prompt: longPrompt,
+      attachments: [],
+      idempotencyKey: "delivery:journal-discord",
+      source: "discord",
+    })).status).toBe(202);
+    await waitForIdle(url, secondProject.id, codex.id);
+
+    const all = await request(`${url}/api/prompts?scope=all&limit=2`);
+    expect(all.body.prompts.map((entry) => entry.operationKey)).toEqual([
+      "delivery:journal-discord",
+      "journal-running-turn",
+    ]);
+    expect(all.body.prompts[0]).toMatchObject({
+      source: "discord",
+      turnStatus: "completed",
+      previewTruncated: true,
+    });
+    expect(all.body.prompts[0].preview).toHaveLength(500);
+    expect(all.body.prompts[0].preview).toMatch(/^Fråga från Discord x/u);
+
+    const projectOnly = await request(`${url}/api/prompts?scope=project&projectId=${project.id}`);
+    expect(projectOnly.body.prompts.map((entry) => entry.operationKey)).toEqual(["journal-running-turn"]);
+    const agentOnly = await request(`${url}/api/prompts?scope=agent&agentId=${codex.id}`);
+    expect(agentOnly.body.prompts.map((entry) => entry.operationKey)).toEqual(["delivery:journal-discord"]);
+    expect((await request(`${url}/api/prompts?scope=project`)).status).toBe(400);
+    expect((await request(`${url}/api/prompts?scope=unknown`)).status).toBe(400);
+    expect((await request(`${url}/api/prompts?scope=all&limit=501`)).status).toBe(400);
+
+    expect((await request(`${url}/api/agents/${claude.id}`, { method: "DELETE" })).status).toBe(200);
+    expect((await request(`${url}/api/projects/${project.id}`, { method: "DELETE" })).status).toBe(200);
+    const afterDelete = await request(`${url}/api/prompts?scope=agent&agentId=${claude.id}`);
+    expect(afterDelete.body.prompts[0]).toMatchObject({
+      projectId: project.id,
+      projectName: "Testprojekt",
+      agentName: "Claude agent",
+      turnStatus: "interrupted",
+    });
+  });
+
+  it("pins and unpins conversations idempotently and preserves pins across restart", async () => {
+    const { url, workspace, dataDir, homeDir, app } = await setup();
+    const project = await createProject(url, workspace);
+    const agent = await createAgent(url, project, "claude");
+
+    const pinBody = { pinned: true, idempotencyKey: "pin-conversation-once" };
+    const pinned = await postJson(`${url}/api/agents/${agent.id}/pin`, pinBody);
+    expect(pinned.status).toBe(200);
+    expect(pinned.body.pinnedAt).toEqual(expect.any(Number));
+    const pinnedAt = pinned.body.pinnedAt;
+
+    const replay = await postJson(`${url}/api/agents/${agent.id}/pin`, pinBody);
+    expect(replay.body).toMatchObject({ pinnedAt, replayed: true });
+    const conflict = await postJson(`${url}/api/agents/${agent.id}/pin`, {
+      pinned: false,
+      idempotencyKey: "pin-conversation-once",
+    });
+    expect(conflict.status).toBe(409);
+    expect((await postJson(`${url}/api/agents/${agent.id}/pin`, {
+      pinned: "yes",
+      idempotencyKey: "invalid-pin",
+    })).status).toBe(400);
+
+    await app.close();
+    const restarted = createWebUi({
+      dataDir,
+      homeDir,
+      legacyDataDir: null,
+      claudeCommand: "fake-claude",
+      codexCommand: "fake-codex",
+      spawnProcess: fakeSpawn([]),
+      appendEventImpl: () => {},
+    });
+    const second = await restarted.listen({ port: 0 });
+    cleanups.push(() => restarted.close());
+    const restored = await request(`${second.url}/api/projects`);
+    expect(restored.body.projects[0].agents[0].pinnedAt).toBe(pinnedAt);
+
+    const unpinned = await postJson(`${second.url}/api/agents/${agent.id}/pin`, {
+      pinned: false,
+      idempotencyKey: "unpin-conversation",
+    });
+    expect(unpinned.body.pinnedAt).toBeNull();
+    expect((await request(`${second.url}/api/projects`)).body.projects[0].agents[0].pinnedAt).toBeNull();
+  });
+
   it("runs bridge-owned agents with stable identity and explicit automation permissions", async () => {
     const { url, workspace, calls } = await setup();
     const project = await createProject(url, workspace);
@@ -907,6 +1050,12 @@ describe("AMUX Code project and agent registry", () => {
     const list = await request(`${second.url}/api/projects`);
     expect(list.body.projects[0].cwd).toBe(setupOne.workspace);
     expect(list.body.projects[0].agents[0].context).toMatchObject({ usedTokens: 30_000, percent: 15 });
+    const promptJournal = await request(`${second.url}/api/prompts?scope=agent&agentId=${agent.id}`);
+    expect(promptJournal.body.prompts.map((entry) => entry.operationKey)).toEqual([
+      "persist-turn-newer",
+      "persist-turn",
+    ]);
+    expect(promptJournal.body.prompts.every((entry) => entry.preview === "persist me")).toBe(true);
     const history = await request(`${second.url}/api/agents/${agent.id}/history`);
     const historyTexts = history.body.events
       .map((event) => event.text || event.message?.content?.[0]?.text)
@@ -965,12 +1114,18 @@ describe("AMUX Code project and agent registry", () => {
     expect(page.body).toContain("context-control");
     expect(page.body).toContain("compact-button");
     expect(page.body).toContain("interrupt-button");
+    expect(page.body).toContain("prompt-overview-button");
+    expect(page.body).toContain("data-prompt-scope=\"project\"");
+    expect(page.body).toContain("pinned-conversations-button");
+    expect(page.body).toContain("pin-conversation-button");
     expect(page.headers.get("content-security-policy")).toContain("default-src 'self'");
     expect((await request(`${url}/style.css`)).body).toContain("--canvas: #f2f3ee");
     const app = (await request(`${url}/app.js`)).body;
     expect(app).toContain("/side-questions");
     expect(app).toContain("/compact");
     expect(app).toContain("/interrupt");
+    expect(app).toContain("/api/prompts");
+    expect(app).toContain("/pin");
     const config = await request(`${url}/api/config`);
     const health = await request(`${url}/api/health`);
     expect(health.body).toMatchObject({ ok: true, bootId: config.body.bootId, projects: 1, agents: 2 });
