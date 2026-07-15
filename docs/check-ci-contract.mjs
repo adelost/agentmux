@@ -12,7 +12,7 @@ const inputs = {
   reviewer: "lsrc:2",
   evidence_url: "https://github.com/adelost/agentmux/pull/49#issuecomment-123",
 };
-assert.equal(STATUS_CONTEXT, "Broker verdict (self-reported)",
+assert.equal(STATUS_CONTEXT, "broker-verdict (self-reported)",
   "the public status name must disclose that the verdict is self-reported");
 const markerFor = (receipt) =>
   `<!-- broker-verdict:self-reported:v1 verdict=${receipt.verdict} reviewer=${receipt.reviewer} head=${receipt.head_sha} -->`;

@@ -1,4 +1,4 @@
-name: Broker verdict (self-reported)
+name: broker-verdict (self-reported)
 run-name: Self-reported broker verdict for PR #${{ github.event.client_payload.pull_request }}
 
 on:
@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   publish:
-    name: Broker verdict (self-reported)
+    name: broker-verdict (self-reported)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -46,7 +46,7 @@ jobs:
               },
             });
             await core.summary
-              .addHeading("Broker verdict (self-reported)")
+              .addHeading("broker-verdict (self-reported)")
               .addRaw(`Recorded ${result.verdict.toUpperCase()} for PR #${result.pullNumber} at ${result.headSha}.`)
               .addEOL()
               .addRaw("This status proves SHA freshness only. It is not an independent GitHub approval.")

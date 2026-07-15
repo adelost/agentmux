@@ -1,4 +1,4 @@
-export const STATUS_CONTEXT = "Broker verdict (self-reported)";
+export const STATUS_CONTEXT = "broker-verdict (self-reported)";
 
 const requiredText = (value, name, maxLength) => {
   const normalized = String(value ?? "").trim();

@@ -11,7 +11,7 @@ The workflow has only `contents: read` permission. It receives no Suggestions,
 Discord, model-provider, or deployment credentials and cannot mutate fleet
 state.
 
-Repository rules must require both `Required test` and `Broker verdict
+Repository rules must require both `Required test` and `broker-verdict
 (self-reported)` for `master`. Until that rule is enabled, the checks are
 machine evidence but not a merge fence.
 
@@ -34,7 +34,7 @@ broker-only GitHub App with pull-request review permission. That identity and
 credential boundary require an explicit fleet decision.
 
 Until that principal exists, the broker may publish the deliberately named
-`Broker verdict (self-reported)` status. It proves only that a recorded
+`broker-verdict (self-reported)` status. It proves only that a recorded
 `pass`/`hold` verdict names the pull request's **current, full head SHA**. A new
 commit receives no inherited status and therefore needs a new verdict. It does
 not prove who performed the review and must never be described as an approval.
