@@ -64,7 +64,7 @@ import { createBridgeLifecycle } from "./bridge.mjs";
 import { consumeFleetRestart, queueFleetRestart } from "../core/fleet-restart.mjs";
 import {
   groupByPane, previewText,
-  isRunningNow, isWaitingLikeText, looksDone,
+  isRunningNow, isAskToHuman, looksDone,
 } from "../core/orchestrator-checkpoint.mjs";
 import { isSystemNoiseDirective } from "../core/system-noise.mjs";
 import { collectCommitsSince, reposFromAgents } from "../core/commit-log.mjs";
@@ -1075,7 +1075,7 @@ function renderSelfBlock(selfKey, widerBuckets, statuses, nowMs) {
   const status = statuses.get(selfKey) || "unknown";
   let state = "🟡 jobbar";
   if (needsHumanStatus(status)) state = "🔴 väntar på input";
-  else if (isWaitingLikeText(b.lastAssistantText)) state = "🔴 du väntar på svar (från Mattias)";
+  else if (isAskToHuman(b.lastAssistantText, b.lastUserText)) state = "🔴 du väntar på svar (från Mattias)";
   else if (isLiveStatus(status) || isRunningNow(b, nowMs)) state = "🟡 jobbar";
   else if (looksDone(b.lastAssistantText)) state = "✅ klar";
   else state = "⚠️ idle, ev. mer att göra (sa aldrig 'klart')";
@@ -1227,7 +1227,7 @@ async function cmdDone(ctx, flags) {
     else if (live) working.push(entry);
     else if (bucket.turns === 0) idleCount++;
     else if (userSpokeLast && ageMs > STALL_MIN_MS) stalled.push(entry);             // directive unanswered → dropped
-    else if (isWaitingLikeText(bucket.lastAssistantText)) needsYou.push(entry);      // agent asked the human something
+    else if (isAskToHuman(bucket.lastAssistantText, bucket.lastUserText)) needsYou.push(entry); // agent asked the HUMAN something
     else if (inWindow) doneRecent.push(entry);                                       // replied within the window
     else idleCount++;                                                                // old + already replied
   }

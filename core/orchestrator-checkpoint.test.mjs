@@ -3,6 +3,7 @@ import {
   groupByPane,
   classifyPane,
   isWaitingLikeText,
+  isAskToHuman,
   looksDone,
   previewText,
   isStaleWaiter,
@@ -172,6 +173,38 @@ feature("isWaitingLikeText", () => {
     when: ["checking each", ({ texts }) => texts.map(isWaitingLikeText)],
     then: ["all are human-directed asks", (result) =>
       expect(result).toEqual([true, true, true, true, true])],
+  });
+});
+
+feature("isAskToHuman provenance (SRC-0053 A)", () => {
+  unit("a question answering an inter-agent envelope is that agent's ball", {
+    when: ["classifying the live repro pairs", () => ([
+      // Canonical auto-prepended envelope.
+      isAskToHuman("Vill du att jag mergar PR #24?", "[from lsrc:2]\n\nreview-kön åldras, disponera"),
+      // Hand-written envelope variant the strict parser rejects.
+      isAskToHuman("Ska jag ta nästa våg också?", "[from claw:3 · audit-reconcile] granska brokers"),
+      // Generic human-target phrase inside an agent thread stays agent-bound.
+      isAskToHuman("Väntar på ditt besked innan jag fortsätter.", "[from skydive:2] koordinera deployen"),
+    ])],
+    then: ["none is human needs-you", (result) => expect(result).toEqual([false, false, false])],
+  });
+
+  unit("explicit human mention keeps needs-you even in an agent thread", {
+    when: ["asking about the human inside an inter-agent thread", () =>
+      isAskToHuman("Ska jag eskalera detta till Mattias?", "[from lsrc:2]\n\nquota-läget oklart")],
+    then: ["it is a human ask", (result) => expect(result).toBe(true)],
+  });
+
+  unit("a question answering a human prompt is human needs-you", {
+    when: ["human directive followed by a question back", () =>
+      isAskToHuman("Vill du att jag deployar hela vågen nu?", "fixa deploy-flödet")],
+    then: ["it is a human ask", (result) => expect(result).toBe(true)],
+  });
+
+  unit("non-waiting replies are never asks regardless of provenance", {
+    when: ["a done reply after a human prompt", () =>
+      isAskToHuman("Klart och pushat.", "fixa deploy-flödet")],
+    then: ["not an ask", (result) => expect(result).toBe(false)],
   });
 });
 

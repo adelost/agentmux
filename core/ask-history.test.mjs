@@ -39,6 +39,17 @@ feature("ask-history: classifyAskTurn", () => {
     then: ["it is needs-you", (status) => expect(status).toBe("needs-you")],
   });
 
+  unit("a question answering an inter-agent envelope is answered, not needs-you (SRC-0053 A)", {
+    when: ["classifying a broker-thread reply that asks a generic question", () =>
+      classifyAskTurn(turn({
+        userPrompt: "[from lsrc:2]\n\nreview-kön åldras — disponera PR #24/#27",
+        items: [text("Båda är rebasade. Vill du att jag mergar direkt?")],
+        isComplete: true,
+      }))],
+    then: ["it is answered (the ball is lsrc:2's, not the human's)", (status) =>
+      expect(status).toBe("answered")],
+  });
+
   unit("complete done-like reply is done", {
     when: ["classifying a complete done reply", () =>
       classifyAskTurn(turn({

@@ -9,6 +9,7 @@
 
 import { isLiveStatus, needsHumanStatus } from "./pane-status.mjs";
 import { isSystemNoiseDirective } from "./system-noise.mjs";
+import { parseSenderHeader } from "./sender-detect.mjs";
 
 /**
  * Bucket timeline rows by `agent:pane` key. Each bucket captures the turn
@@ -136,6 +137,26 @@ export function isWaitingLikeText(text) {
     /(please|can you) confirm/,
   ];
   return cues.some((r) => r.test(tail));
+}
+
+/**
+ * Provenance-aware needs-you: a waiting-like reply only puts the ball in the
+ * HUMAN's court when the conversation partner is the human. When the latest
+ * prompt carries an inter-agent envelope ("[from lsrc:2] ..."), a generic
+ * second-person question ("Vill du att jag mergar?") is addressed to that
+ * agent, not to Mattias — needs-you survives only an explicit human mention
+ * in the reply. parseSenderHeader covers the canonical auto-prepended
+ * envelope; the loose "[from ..." fallback covers hand-written variants
+ * ("[from claw:3 · audit]") that the strict routing parser rejects — for
+ * CLASSIFICATION a human never types that prefix, so loose is safe here.
+ */
+export function isAskToHuman(replyText, promptText) {
+  if (!isWaitingLikeText(replyText)) return false;
+  const prompt = String(promptText || "").trimStart();
+  const interAgent = parseSenderHeader(prompt) != null || /^\[from \S+/.test(prompt);
+  if (!interAgent) return true;
+  const tail = String(replyText).trim().slice(-300).toLowerCase();
+  return /\b(mattias|human|människan|användaren|the user)\b/.test(tail);
 }
 
 /**
