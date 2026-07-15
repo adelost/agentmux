@@ -41,6 +41,8 @@ const MAX_ATTACHMENT_LINES_BYTES = 8 * 1024;
 const MAX_ATTACHMENTS = 12;
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_DETAIL_CONCURRENCY = 6;
+export const NOTIFY_FAILURE_BUDGET = 5;
+
 export const REMINDER_STAGES = Object.freeze([
   Object.freeze({ id: "initial", afterMs: 0 }),
   Object.freeze({ id: "reminder-15m", afterMs: 15 * 60 * 1000 }),
@@ -199,7 +201,8 @@ export function loadSuggestionsBridgeState(path) {
       if (!/^[A-Z0-9][A-Z0-9-]*:[1-9][0-9]*$/u.test(id) || byteLength(id) > 160
           || !isObject(comment)
           || Object.keys(comment).some((key) => ![
-            "firstSeenAt", "attempts", "answeredAt", "notifiedAt", "terminalAt", "terminalReason",
+            "firstSeenAt", "attempts", "answeredAt", "notifiedAt", "notifyFailures",
+            "terminalAt", "terminalReason",
           ].includes(key))
           || !Number.isFinite(comment.firstSeenAt) || comment.firstSeenAt < 0
           || !Array.isArray(comment.attempts)
@@ -213,8 +216,12 @@ export function loadSuggestionsBridgeState(path) {
             && (!Number.isFinite(comment.notifiedAt) || comment.notifiedAt < 0))
           || (comment.terminalAt != null
             && (!Number.isFinite(comment.terminalAt) || comment.terminalAt < 0))
+          || (comment.notifyFailures != null
+            && (!Number.isInteger(comment.notifyFailures) || comment.notifyFailures < 0
+              || comment.notifyFailures > NOTIFY_FAILURE_BUDGET))
           || (comment.terminalAt == null && comment.terminalReason != null)
-          || (comment.terminalAt != null && comment.terminalReason !== "ticket-not-found")
+          || (comment.terminalAt != null
+            && !["ticket-not-found", "notify-budget-exhausted"].includes(comment.terminalReason))
           || (comment.terminalAt != null && comment.answeredAt != null)
           || (comment.notifiedAt != null && comment.attempts.length !== REMINDER_STAGES.length)) {
         throw new Error(`state: malformed comment state for ${projectId}/${id}`);
@@ -244,6 +251,7 @@ export function saveSuggestionsBridgeState(path, state) {
         })),
         answeredAt: comment.answeredAt ?? null,
         notifiedAt: comment.notifiedAt ?? null,
+        notifyFailures: comment.notifyFailures ?? 0,
         terminalAt: comment.terminalAt ?? null,
         terminalReason: comment.terminalReason ?? null,
       };
@@ -790,13 +798,26 @@ export async function pollSuggestionsComments({
   let delivered = 0;
   const deliveryFailures = [];
   const notificationFailures = [];
+  const projectFailures = [];
   for (const [projectId, target] of Object.entries(config.projects)) {
     const listUrl = new URL("/api/tickets", config.baseUrl);
     listUrl.searchParams.set("project", projectId);
-    const tickets = validateTicketList(await fetchJson(listUrl, {
-      fetchImpl, timeoutMs: config.requestTimeoutMs, readToken,
-      maxBytes: 4 * 1024 * 1024,
-    }), projectId);
+    // A single unreadable project degrades to a recorded failure instead of
+    // killing the whole sweep (and with it the heartbeat): ONE undeliverable
+    // project made the entire bridge read as dead while 99% worked.
+    // Authentication errors still throw — they are global and page the owner.
+    let tickets;
+    try {
+      tickets = validateTicketList(await fetchJson(listUrl, {
+        fetchImpl, timeoutMs: config.requestTimeoutMs, readToken,
+        maxBytes: 4 * 1024 * 1024,
+      }), projectId);
+    } catch (error) {
+      if (isSuggestionsAuthenticationError(error)) throw error;
+      projectFailures.push({ projectId, error: error.message });
+      logger.error?.(`PROJECT_FAILED ${projectId}: ${error.message}`);
+      continue;
+    }
     const pState = projectState(state, projectId);
     const pollNow = now();
     const ticketsNeedingDetail = tickets.filter((ticket) =>
@@ -859,14 +880,37 @@ export async function pollSuggestionsComments({
           persist(state);
           continue;
         }
-        const stage = REMINDER_STAGES[tracked.attempts.length];
-        if (!stage) {
+        const decision = boundedRetryDecision({
+          schedule: REMINDER_STAGES,
+          attempts: tracked.attempts.length,
+          firstAttemptAt: tracked.attempts[0]?.enqueuedAt ?? now(),
+          nowMs: now(),
+          notifyFailures: tracked.notifyFailures ?? 0,
+        });
+        if (decision.action === "wait") continue;
+        if (decision.action === "terminal") {
+          if (tracked.terminalAt == null) {
+            tracked.terminalAt = now();
+            tracked.terminalReason = "notify-budget-exhausted";
+            persist(state);
+            logger.error?.(`NOTIFICATION_TERMINAL ${projectId}/${detail.ticket.id} `
+              + `comment ${comment.id} dead-lettered after ${NOTIFY_FAILURE_BUDGET} notify attempts`);
+          }
+          continue;
+        }
+        if (decision.action === "notify") {
           if (tracked.notifiedAt == null) {
             const idempotencyKey = `suggestions-comment-notify:${projectId}:${detail.ticket.id}:${comment.id}`;
             try {
               await notify({ projectId, ticketId: detail.ticket.id, commentId: comment.id,
                 agent: target.agent, pane: target.pane, idempotencyKey });
             } catch {
+              // Delivery is stage-bounded; the notify fallback must be too.
+              // Without a budget one undeliverable notification retried every
+              // minute forever (SKY-0088:351 looped ~11x from 14:44). The
+              // terminal cut happens via boundedRetryDecision on a later tick.
+              tracked.notifyFailures = (tracked.notifyFailures ?? 0) + 1;
+              persist(state);
               notificationFailures.push({ projectId, ticketId: detail.ticket.id,
                 commentId: comment.id });
               logger.error?.(`NOTIFICATION_FAILED ${projectId}/${detail.ticket.id} `
@@ -879,8 +923,7 @@ export async function pollSuggestionsComments({
           }
           continue;
         }
-        const firstAttemptAt = tracked.attempts[0]?.enqueuedAt ?? now();
-        if (stage.afterMs > 0 && now() - firstAttemptAt < stage.afterMs) continue;
+        const stage = decision.stage;
         const prompt = buildSuggestionsCommentPrompt({
           baseUrl: config.baseUrl,
           projectId,
@@ -944,7 +987,40 @@ export async function pollSuggestionsComments({
   });
   state.version = SUGGESTIONS_BRIDGE_STATE_VERSION;
   state.lastSuccessfulSyncAt = lastSuccessfulSyncAt;
-  return { delivered, lastSuccessfulSyncAt };
+  return { delivered, lastSuccessfulSyncAt, projectFailures,
+    deliveryFailures: deliveryFailures.length,
+    notificationFailures: notificationFailures.length };
+}
+
+/**
+ * The ONE bounded-retry decision, pure and shared by every queue in this
+ * bridge (delivery stages AND the notify fallback). Each queue keeps its OWN
+ * ledger (attempts / notifyFailures / terminalAt): sharing the policy but not
+ * the ledger means one queue's terminal state can never lie about another's.
+ * Instance-patches without this shape died three times (SRC-0033, SRC-0013,
+ * and the 2026-07-15 incident).
+ */
+export function boundedRetryDecision({ schedule, attempts, firstAttemptAt, nowMs,
+  notifyFailures = 0, notifyBudget = NOTIFY_FAILURE_BUDGET }) {
+  const stage = schedule[attempts];
+  if (stage) {
+    if (stage.afterMs > 0 && nowMs - firstAttemptAt < stage.afterMs) return { action: "wait" };
+    return { action: "deliver", stage };
+  }
+  if (notifyFailures >= notifyBudget) return { action: "terminal" };
+  return { action: "notify" };
+}
+
+/**
+ * Spawn an amux .mjs entrypoint with THE PARENT'S OWN node interpreter.
+ * Spawning the script directly makes the kernel follow its
+ * '#!/usr/bin/env node' shebang, and under cron PATH has no nvm node →
+ * ENOENT → silent delivery loss (Mattias' own ticket comments sat
+ * undelivered 4h, 2026-07-15). The child must inherit the parent's
+ * interpreter, never re-resolve it from PATH.
+ */
+function spawnAmux(spawnImpl, amuxBin, args, options) {
+  return spawnImpl(process.execPath, [amuxBin, ...args], options);
 }
 
 export function createAmuxCommentDeliverer({
@@ -953,7 +1029,7 @@ export function createAmuxCommentDeliverer({
 }) {
   if (!amuxBin) throw new Error("delivery: amux executable path is required");
   return ({ agent, pane, prompt, idempotencyKey }) => new Promise((resolvePromise, reject) => {
-    const child = spawnImpl(amuxBin, [
+    const child = spawnAmux(spawnImpl, amuxBin, [
       agent,
       "-p", String(pane),
       "--idempotency-key", idempotencyKey,
@@ -987,7 +1063,7 @@ export function createAmuxCommentNotifier({ amuxBin, spawnImpl = spawn }) {
   return ({ projectId, ticketId, commentId, agent, pane, idempotencyKey }) => new Promise((resolvePromise, reject) => {
     const message = `Suggestions ${projectId}/${ticketId} comment ${commentId} is still unanswered `
       + `after bounded 15m/60m/4h reminders to ${agent}:${pane}.`;
-    const child = spawnImpl(amuxBin, [
+    const child = spawnAmux(spawnImpl, amuxBin, [
       "notifyuser",
       "--level", "error",
       "--title", "Suggestions comment unanswered",
@@ -1017,7 +1093,7 @@ export function createAmuxBoardAuthNotifier({ amuxBin, spawnImpl = spawn }) {
     const idempotencyKey = `suggestions-board-auth:${status}:${lastSuccessfulSyncAt ?? "never"}`;
     const message = `Suggestions comment bridge received HTTP ${status}. Suggestions owner: `
       + "verify the deployed READ_TOKEN matches ~/.config/agent/suggestions-read-token, then run amux doctor.";
-    const child = spawnImpl(amuxBin, [
+    const child = spawnAmux(spawnImpl, amuxBin, [
       "notifyuser",
       "--level", "error",
       "--title", "Suggestions board authentication failed",
