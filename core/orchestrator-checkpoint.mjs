@@ -8,6 +8,7 @@
 // What remains: bucket-and-classify helpers used by cmdDone to render rows.
 
 import { isLiveStatus, needsHumanStatus } from "./pane-status.mjs";
+import { isSystemNoiseDirective } from "./system-noise.mjs";
 
 /**
  * Bucket timeline rows by `agent:pane` key. Each bucket captures the turn
@@ -45,7 +46,10 @@ export function groupByPane(rows) {
       b.latestTurnTs = t;
     }
     if (r.type === "text" || r.type == null) {
-      if (r.role === "user" && r.content) {
+      // Machine plumbing (/compact wrappers, continuation preambles) still
+      // counts toward turns but must never occupy the directive slots — a
+      // pane whose "senast ombedd" reads <command-name>/compact is a lie.
+      if (r.role === "user" && r.content && !isSystemNoiseDirective(r.content)) {
         b.lastUserText = r.content;
         if (tValid) b.lastUserTextTs = t;
         b.recentUserTexts.push(r.content);
@@ -93,12 +97,17 @@ export function isRunningNow(bucket, nowMs, withinMs = 60_000) {
 }
 
 /**
- * Heuristic: does this assistant message read like it's waiting on user
- * input? Matches explicit question marks + common Swedish/English prompts
- * ("säg", "bekräfta", "vill du", "want me to", etc). Kept conservative —
- * false-positives just show "waiting" instead of "finished" which is
- * annoying but not dangerous; false-negatives miss a wait signal which
- * matters more for orchestration correctness.
+ * Heuristic: does this assistant message read like an EXPLICIT ask directed
+ * at the human? Matches a trailing question mark plus second-person ask cues
+ * ("vill du", "ska jag", "want me to", "säg till", ...).
+ *
+ * Deliberately does NOT match generic waiting-state verbs ("awaiting",
+ * "avvaktar", "väntar på", "confirm"): those fire on process states —
+ * "awaiting review/CI/deploy", "väntar på lsrc:2" — and flooded the
+ * needs-you bucket with panes that were waiting on ANOTHER AGENT, not the
+ * human (SRC-0053). A needs-you row must mean the ball is in the human's
+ * court; a missed generic waiter shows up as idle instead, which the
+ * fleet watchdogs already cover.
  */
 export function isWaitingLikeText(text) {
   if (!text) return false;
@@ -117,11 +126,14 @@ export function isWaitingLikeText(text) {
     /ska jag /,
     /want me to /,
     /should i /,
-    /let me know /,
-    /awaiting /,
-    /avvaktar\b/,
-    /väntar på /,
-    /confirm\b/,
+    // Waiting-verbs count ONLY with an explicit human target. Bare "väntar
+    // på review/merge/CI" is an agent-lane state, not a human ask; optional
+    // offers ("klart — säg till om ...", "let me know if ...") must not
+    // block either, so neither phrase is a cue on its own.
+    /väntar på (dig|ditt|din|mattias)/,
+    /avvaktar (ditt|dina|din) /,
+    /awaiting your /,
+    /(please|can you) confirm/,
   ];
   return cues.some((r) => r.test(tail));
 }

@@ -6,6 +6,7 @@
 
 import { isWaitingLikeText, looksDone, previewText } from "./orchestrator-checkpoint.mjs";
 import { isLiveStatus } from "./pane-status.mjs";
+import { isSystemNoiseDirective } from "./system-noise.mjs";
 
 const OPEN_STATUSES = new Set(["open", "working", "partial", "needs-you"]);
 
@@ -43,7 +44,8 @@ export function buildAskEntries({
   const out = [];
   for (let i = 0; i < turns.length; i++) {
     const turn = turns[i] || {};
-    if (!turn.userPrompt) continue;
+    // A /compact wrapper or continuation preamble is not an ask anyone made.
+    if (!turn.userPrompt || isSystemNoiseDirective(turn.userPrompt)) continue;
     const tsMs = parseTs(turn.timestamp);
     const reply = latestTextItem(turn.items || []);
     const status = classifyAskTurn(turn, {

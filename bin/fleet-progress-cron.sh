@@ -194,6 +194,10 @@ for f in glob.glob(os.path.join(qdir, "*", "*.json")):
 PY
 )
   guard_heartbeat_metric stuckJobs "${#STUCK[@]}"
+  # Rollup (SRC-0053 B): every job is logged, but the human gets ONE notify
+  # per sweep — count + oldest + a bounded sample of ids. 25 wedged jobs in
+  # one storm meant 25 pushes under the old per-job notify (2026-07-15).
+  new_ids=""; new_count=0; oldest_min=0; sample=""
   for row in "${STUCK[@]:-}"; do
     [ -z "$row" ] && continue
     IFS=$'\t' read -r jf jagent jpane jstatus jage jhead <<<"$row"
@@ -203,11 +207,24 @@ PY
       continue
     fi
     log "queue: STUCK $jagent:$jpane $jid ${jage}min $jstatus :: $jhead"
-    if [ "$DRY" != "1" ]; then
-      amux_send notifyuser --level error "[fleet-watch] leveranskö-jobb fast ${jage}min → $jagent:$jpane ($jstatus). Rotorsak-fix hos ägaren; jobb-id $jid" || true
-      echo "$jid" >> "$QSTATE"
-    fi
+    new_ids="${new_ids}${jid}"$'\n'
+    new_count=$(( new_count + 1 ))
+    [ "${jage%%.*}" -gt "$oldest_min" ] && oldest_min=${jage%%.*}
+    [ "$new_count" -le 3 ] && sample="${sample}${jid:0:8}→${jagent}:${jpane} "
   done
+  if [ "$new_count" -gt 0 ] && [ "$DRY" != "1" ]; then
+    extra=$(( new_count - 3 ))
+    [ "$extra" -gt 0 ] && sample="${sample}(+${extra} till) "
+    # Mark the batch as alerted ONLY after the notify succeeded — a failed
+    # send must retry next sweep, never become a silent miss.
+    if amux_send notifyuser --level error "[fleet-watch] ${new_count} leveranskö-jobb fasta (äldst ${oldest_min}min): ${sample}— rotorsak hos ägaren, inspektera med amux queue"; then
+      printf '%s' "$new_ids" >> "$QSTATE"
+    else
+      log "queue: rollup notify failed → NOT marked, retrying next sweep"
+    fi
+  elif [ "$new_count" -gt 0 ]; then
+    log "queue: DRY would notify rollup (${new_count} nya, äldst ${oldest_min}min)"
+  fi
 else
   log "queue: no queue dir at $QUEUE_DIR → skip sweep"
 fi

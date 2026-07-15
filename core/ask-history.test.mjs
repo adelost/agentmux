@@ -106,6 +106,24 @@ feature("ask-history: build and filter entries", () => {
     }],
   });
 
+  unit("system-noise prompts never become ask entries (SRC-0053)", {
+    given: ["a real ask surrounded by machine plumbing", () => ({
+      turns: [
+        turn({ userPrompt: "<command-name>/compact</command-name>", items: [] }),
+        turn({ userPrompt: "This session is being continued from a previous conversation that ran out of context.", items: [] }),
+        turn({ timestamp: "2026-07-15T08:10:00.000Z", userPrompt: "granska PR #22", items: [] }),
+      ],
+    })],
+    when: ["building ask entries", ({ turns }) => buildAskEntries({
+      agent: "lsrc", pane: 2, turns,
+      nowMs: Date.parse("2026-07-15T08:15:00.000Z"),
+    })],
+    then: ["only the human ask survives", (entries) => {
+      expect(entries).toHaveLength(1);
+      expect(entries[0].prompt).toBe("granska PR #22");
+    }],
+  });
+
   unit("filterAskEntries supports openOnly, grep, since, and limit", {
     given: ["mixed entries", () => [
       { prompt: "alpha", reply: "", open: true, tsMs: 10 },

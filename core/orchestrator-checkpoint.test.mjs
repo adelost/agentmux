@@ -83,6 +83,24 @@ feature("groupByPane", () => {
   });
 });
 
+feature("groupByPane system-noise filtering (SRC-0053)", () => {
+  unit("a /compact wrapper counts as a turn but never as the directive", {
+    given: ["a real directive followed by a compact wrapper", () => ({
+      rows: [
+        row("ai", 2, "user", "deploya FE-vågen till home", "2026-07-15T08:00:00Z"),
+        row("ai", 2, "user", "<command-name>/compact</command-name>", "2026-07-15T08:12:00Z"),
+        row("ai", 2, "user", "This session is being continued from a previous conversation that ran out of context.", "2026-07-15T08:13:00Z"),
+      ],
+    })],
+    when: ["grouping", ({ rows }) => groupByPane(rows).get("ai:2")],
+    then: ["turns count all three, directive slots keep only the human text", (b) => {
+      expect(b.turns).toBe(3);
+      expect(b.lastUserText).toBe("deploya FE-vågen till home");
+      expect(b.recentUserTexts).toEqual(["deploya FE-vågen till home"]);
+    }],
+  });
+});
+
 feature("isWaitingLikeText", () => {
   unit("returns false for empty / null", {
     given: ["no content", () => ({ texts: [null, "", "   "] })],
@@ -128,6 +146,32 @@ feature("isWaitingLikeText", () => {
     })],
     when: ["checking", ({ text }) => isWaitingLikeText(text)],
     then: ["not waiting", (result) => expect(result).toBe(false)],
+  });
+
+  unit("agent-lane waiting states do NOT count as human asks (SRC-0053)", {
+    given: ["live false-positives from 2026-07-15", () => ({ texts: [
+      "SRC-0012 är bankad i två draft-PR:er. Awaiting owner rebase.",
+      "Väntar på merge/review från lsrc:2 innan jag fortsätter.",
+      "Deploy staged. The ball is in the owner's court now.",
+      "Klart och pushat. Säg till om du vill ha en sanity check.",
+      "All done — let me know if anything looks off.",
+    ] })],
+    when: ["checking each", ({ texts }) => texts.map(isWaitingLikeText)],
+    then: ["none is a human-directed ask", (result) =>
+      expect(result).toEqual([false, false, false, false, false])],
+  });
+
+  unit("explicitly human-targeted waits DO count", {
+    given: ["waits that name the human or second person", () => ({ texts: [
+      "Vågen är bankad. Väntar på ditt besked innan deploy.",
+      "Avvaktar ditt beslut om färg A eller B.",
+      "Awaiting your confirmation before I delete the branch.",
+      "Please confirm the rollback window.",
+      "Vill du att jag deployar hela vågen nu?",
+    ] })],
+    when: ["checking each", ({ texts }) => texts.map(isWaitingLikeText)],
+    then: ["all are human-directed asks", (result) =>
+      expect(result).toEqual([true, true, true, true, true])],
   });
 });
 
