@@ -676,8 +676,9 @@ button { color: inherit; }
   .project-switcher { justify-self: stretch; }
   .project-switcher > span { display: none; }
   .project-switcher select { width: 100%; max-width: none; }
-  .topbar-actions { grid-column: 2; grid-row: 2; justify-content: flex-end; }
+  .topbar-actions { grid-column: 1 / -1; grid-row: 2; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
   .topbar-actions .boundary-badge, .topbar-actions #new-project-button { display: none; }
+  .quota-strip { flex: 0 0 100%; justify-content: flex-end; min-width: 0; }
   .quota-chip { gap: 6px; padding: 4px 9px; }
   .quota-chip .quota-track { width: 30px; }
   .app-shell { display: block; }
