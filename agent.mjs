@@ -65,6 +65,16 @@ function codexDeliveryBlocked(message, { zoomRecoverable = false } = {}) {
 }
 
 const shellQuote = (value) => `'${esc(String(value))}'`;
+const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function exactSessionId(value, engine) {
+  if (value == null || value === "") return null;
+  const sessionId = String(value);
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    throw new Error(`invalid ${engine} resume session id: ${sessionId}`);
+  }
+  return sessionId;
+}
 
 /** A durable draft is an at-most-once paste fence, even when its TUI vanishes. */
 export function shouldPastePrompt({ knownDrafted = false, alreadyComposed = false } = {}) {
@@ -80,14 +90,26 @@ export async function submitWithDurableFence({ onSubmitting = null, sendEnter, o
 }
 
 /** Build a pinned Claude launch command so the moving `opus` alias cannot drift. */
-export function buildClaudeLaunchCommand({ resume = false, model = resolveClaudeModel() } = {}) {
+export function buildClaudeLaunchCommand({
+  resume = false,
+  resumeSessionId = null,
+  model = resolveClaudeModel(),
+} = {}) {
   const exactModel = resolveClaudeModel(model);
-  const sessionFlag = resume ? " --continue" : "";
+  const exactResume = exactSessionId(resumeSessionId, "Claude");
+  const sessionFlag = exactResume
+    ? ` --resume ${shellQuote(exactResume)}`
+    : resume ? " --continue" : "";
   return `ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_FLAGS} --model ${shellQuote(exactModel)}${sessionFlag}`;
 }
 
 /** Build the exact pane command; exported so injection boundaries are gated. */
-export function buildCodexLaunchCommand({ profileHome, model = null, effort = null } = {}) {
+export function buildCodexLaunchCommand({
+  profileHome,
+  model = null,
+  effort = null,
+  resumeSessionId = null,
+} = {}) {
   if (!profileHome) throw new Error("Codex profile home is required");
   if (model && !/^[a-z0-9._-]+$/i.test(model)) throw new Error(`invalid Codex model: ${model}`);
   if (effort && !/^(minimal|low|medium|high|xhigh|max|ultra)$/i.test(effort)) {
@@ -99,6 +121,13 @@ export function buildCodexLaunchCommand({ profileHome, model = null, effort = nu
   ].filter(Boolean).join(" ");
   const flags = [CODEX_FLAGS, overrideFlags].filter(Boolean).join(" ");
   const env = `CODEX_HOME=${shellQuote(profileHome)}`;
+  const exactResume = exactSessionId(resumeSessionId, "Codex");
+  if (exactResume) {
+    // An explicit rollback id is a fail-closed continuity boundary: never
+    // fall back to a fresh thread when the requested native session cannot
+    // be resumed.
+    return `${env} codex resume ${shellQuote(exactResume)} ${flags}`;
+  }
   return `${env} codex resume --last ${flags} 2>/dev/null || ${env} codex ${flags}`;
 }
 
@@ -1051,7 +1080,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     const dir = paneDir(rootDir, pane);
     const sessionFlag = await resolveSessionFlag(dir, name, pane);
-    const command = buildClaudeLaunchCommand({ resume: sessionFlag === "--continue" });
+    const resumeSessionId = agentConfig(name).panes?.[pane]?.resumeSessionId || null;
+    const command = buildClaudeLaunchCommand({
+      resume: !resumeSessionId && sessionFlag === "--continue",
+      resumeSessionId,
+    });
     await t.runShell(target, `cd ${esc(dir)} && ${command}`);
     await wait(2000);
   }
@@ -1088,6 +1121,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       profileHome: profile.home,
       model: override?.model || null,
       effort: override?.effort || null,
+      resumeSessionId: launch?.resumeSessionId
+        || agentConfig(name).panes?.[pane]?.resumeSessionId
+        || null,
     });
     await t.runShell(target, `cd ${esc(dir)} && ${cmd}`);
     await wait(2000);

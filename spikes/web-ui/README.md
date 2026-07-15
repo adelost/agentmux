@@ -78,8 +78,11 @@ npm run test:webui:native-canary -- --port 8812
 
 It provisions only `skybar-canary` and proves durable attachment delivery,
 context usage, next-turn effort changes, Claude/Codex soft interrupt, resume,
-manual compact, runtime restart and duplicate-free Discord projection. It
-fails if a tmux session with the canary name appears.
+manual compact, runtime restart, event-ledger state and duplicate-free Discord
+projection. Its final M3 phase stops only that isolated runtime, resumes both
+exact engine session IDs in an isolated tmux socket, flips back to native and
+requires `replayed: true` with no duplicate turn. It fails if a canary session
+appears on the live/default tmux socket.
 
 ## Runtime controls
 

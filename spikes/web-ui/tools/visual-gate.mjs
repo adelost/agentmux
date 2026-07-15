@@ -16,7 +16,8 @@
  * Run: node spikes/web-ui/tools/visual-gate.mjs   (or npm run test:webui:visual)
  */
 import { spawn, execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -92,12 +93,38 @@ const seedWorkspace = () => {
   const nativeDir = claudeProjectDir(workspace, homeDir);
   mkdirSync(nativeDir, { recursive: true });
   const usage = { input_tokens: 12, cache_read_input_tokens: 123_400, cache_creation_input_tokens: 0, output_tokens: 566 };
+  const deniedPrompt = "Kör den skyddade releaseåtgärden.";
+  const deniedAt = at + 2_000;
+  const deniedPromptHash = createHash("sha256")
+    .update(JSON.stringify({ agentId: claudeAgent.id, prompt: deniedPrompt }))
+    .digest("hex");
+  const registry = JSON.parse(readFileSync(join(dataDir, "registry.json"), "utf8"));
+  registry.receipts = {
+    messages: {
+      "visual-permission-denied": {
+        id: claudeAgent.id,
+        hash: "visual-only",
+        promptHashes: [deniedPromptHash],
+        acceptedAt: deniedAt,
+        completedAt: deniedAt + 100,
+        sessionId: SESSION_ID,
+        code: 1,
+        interrupted: false,
+        hasAssistant: false,
+        permissionDenied: true,
+        denialDetail: "Bash",
+        error: "permission denied: Bash",
+      },
+    },
+  };
+  writeFileSync(join(dataDir, "registry.json"), JSON.stringify(registry, null, 2));
   writeFileSync(join(nativeDir, `${SESSION_ID}.jsonl`), [
     JSON.stringify({ type: "user", message: { content: "Kan du sammanfatta hur landing-recovery-modulen hänger ihop med frame-loopen efter splitten?" } }),
     JSON.stringify({ type: "assistant", message: { model: "claude-opus-4-8", usage, content: [{ type: "text", text: "Kort version: landing-recovery äger nu hela statemaskinen för nedslag.\n\n1. frame() anropar landingRecovery.tick(ctx) en gång per frame.\n2. Modulen läser canopy-state via explicit ctx, aldrig via globals.\n3. Vid touchdown skrivs resultatet till session-events som en JumpJudgement.\n\nProbe-ytan window.__SWOOP.landing är oförändrad, så gaten från #30 täcker fortfarande initieringsordningen." }] } }),
     JSON.stringify({ type: "system", subtype: "compact_boundary", compactMetadata: { trigger: "auto", preTokens: 158_000, postTokens: 96_000 } }),
     JSON.stringify({ type: "user", message: { content: "Snyggt. Kör regressionssviten och banka en PR när den är grön." } }),
     JSON.stringify({ type: "assistant", message: { model: "claude-opus-4-8", usage, content: [{ type: "text", text: "Sviten är grön (312 test, 0 skips). PR #41 är öppnad som draft mot master med gate-beviset i beskrivningen." }] } }),
+    JSON.stringify({ type: "user", timestamp: new Date(deniedAt).toISOString(), message: { content: deniedPrompt } }),
     "",
   ].join("\n"));
 
@@ -210,6 +237,7 @@ const GATE_CHECKS = `(() => {
       userMessage: visible(".message.user"),
       assistantMessage: visible(".message.assistant"),
       compactNotice: visible(".message.notice"),
+      permissionDenied: visible(".message.permission-denied"),
     },
     unnamedControls: unnamed,
     composerFlush: composerRect ? Math.abs(composerRect.bottom - window.innerHeight) <= 1 : false,

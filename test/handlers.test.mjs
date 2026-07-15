@@ -176,6 +176,9 @@ function enableNativeAgent(setupResult) {
       },
       events: [],
     })),
+    getResponse: vi.fn(async () => "native response text"),
+    getContext: vi.fn(async () => ({ percent: 37, tokens: 74_800, source: "native-runtime" })),
+    capturePane: vi.fn(async () => "native structured output"),
   };
   return setupResult;
 }
@@ -523,6 +526,50 @@ feature("command routing", () => {
     then: ["calls capturePane and replies", (_, { msg, agent }) => {
       expect(agent.capturePane).toHaveBeenCalledWith("_ai", 0);
       expect(msg.reply.mock.calls[0][0]).toContain("raw pane output");
+    }],
+  });
+
+  component("native /peek reads structured history without starting a legacy progress timer", {
+    given: ["an idle native target", () => {
+      const path = writeNativeCodexYaml();
+      return {
+        ...enableNativeAgent(setup({ agentsYamlPath: path })),
+        path,
+        msg: mockMsg({ content: "/peek" }),
+      };
+    }],
+    when: ["the command is handled", async ({ onMessage, msg, path }) => {
+      await onMessage(msg);
+      unlinkSync(path);
+    }],
+    then: ["only native structured methods are used", (_, { msg, agent }) => {
+      expect(agent.nativeRuntime.history).toHaveBeenCalledWith("_ai", 0);
+      expect(agent.nativeRuntime.getResponse).toHaveBeenCalledWith("_ai", 0);
+      expect(agent.nativeRuntime.getContext).toHaveBeenCalledWith("_ai", 0);
+      expect(agent.startProgressTimer).not.toHaveBeenCalled();
+      expect(agent.getResponse).not.toHaveBeenCalled();
+      expect(msg.reply.mock.calls[0][0]).toContain("native response text");
+    }],
+  });
+
+  component("native /raw never falls through to tmux capture", {
+    given: ["a native target", () => {
+      const path = writeNativeCodexYaml();
+      return {
+        ...enableNativeAgent(setup({ agentsYamlPath: path })),
+        path,
+        msg: mockMsg({ content: "/raw" }),
+      };
+    }],
+    when: ["the command is handled", async ({ onMessage, msg, path }) => {
+      await onMessage(msg);
+      unlinkSync(path);
+    }],
+    then: ["the runtime snapshot is the only source", (_, { msg, agent }) => {
+      expect(agent.nativeRuntime.capturePane).toHaveBeenCalledWith("_ai", 0);
+      expect(agent.nativeRuntime.getContext).toHaveBeenCalledWith("_ai", 0);
+      expect(agent.capturePane).not.toHaveBeenCalled();
+      expect(msg.reply.mock.calls[0][0]).toContain("native structured output");
     }],
   });
 

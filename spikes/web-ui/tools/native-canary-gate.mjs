@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +24,10 @@ import {
   startNativeRuntime,
   stopNativeRuntime,
 } from "../../../cli/native-runtime-service.mjs";
+import {
+  claudePrintSessionId,
+  codexJsonlThreadId,
+} from "../canary-proof.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const TARGET = "skybar-canary";
@@ -65,10 +69,13 @@ const canaryRoot = resolve(options.root ?? join(homedir(), ".agentmux", "canarie
 const dataDir = resolve(options["data-dir"] ?? join(canaryRoot, "data"));
 const stateDir = resolve(options["state-dir"] ?? join(canaryRoot, "runtime"));
 const workspace = resolve(options.workspace ?? join(canaryRoot, "workspace"));
+const eventsPath = resolve(options["events-path"] ?? join(canaryRoot, "events.jsonl"));
+const eventsStartOffset = existsSync(eventsPath) ? statSync(eventsPath).size : 0;
 const timeoutMs = Number(options.timeout ?? 180_000);
 const runtimeUrl = `http://127.0.0.1:${port}`;
 const runId = `${new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`;
 const serverPath = join(ROOT, "spikes", "web-ui", "server.mjs");
+const shellQuote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
 
 mkdirSync(workspace, { recursive: true, mode: 0o700 });
 writeFileSync(join(workspace, "AGENTS.md"), [
@@ -91,7 +98,7 @@ assertNoCanaryTmux();
 let runtime = await nativeRuntimeStatus({ port, stateDir, dataDir });
 if (!runtime.online) {
   runtime = await startNativeRuntime({
-    port, stateDir, dataDir, serverPath, legacyDataDir: null,
+    port, stateDir, dataDir, serverPath, legacyDataDir: null, eventsPath,
   });
 }
 assert(runtime.online, "native runtime did not become healthy");
@@ -125,7 +132,21 @@ let client = makeClient();
 const queue = createDeliveryQueue({ rootDir: join(canaryRoot, "queue", runId) });
 let broker = createDeliveryBroker({ agent: client, queue, notify: async () => {} });
 
-async function send(pane, phase, text, kind = "prompt") {
+async function settleJob(job, phase, { acceptSubmitted = false } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let stored = null;
+  while (Date.now() < deadline) {
+    await broker.kickTarget(TARGET, job.pane);
+    stored = queue.read(TARGET, job.pane, job.id);
+    if (stored?.status === "acknowledged") return stored;
+    if (acceptSubmitted && stored?.status === "submitted") return stored;
+    if (["cancelled", "delivered_unverified"].includes(stored?.status)) break;
+    await sleep(250);
+  }
+  throw new Error(`${phase} did not settle safely: ${stored?.status || "missing"} (${stored?.lastReason || "no reason"})`);
+}
+
+async function send(pane, phase, text, kind = "prompt", { waitForCompletion = true } = {}) {
   const job = queue.enqueue({
     agentName: TARGET,
     pane,
@@ -134,9 +155,7 @@ async function send(pane, phase, text, kind = "prompt") {
     source: "native-canary-gate",
     idempotencyKey: `${runId}:${pane}:${phase}`,
   });
-  await broker.kickTarget(TARGET, pane);
-  const stored = queue.read(TARGET, pane, job.id);
-  assert.equal(stored.status, "acknowledged", `${phase} was not durably acknowledged: ${stored.lastReason}`);
+  await settleJob(job, phase, { acceptSubmitted: !waitForCompletion });
   return job;
 }
 
@@ -176,6 +195,7 @@ async function interruptWhenReady(pane) {
 }
 
 const proofs = {};
+const replayJobs = {};
 for (const [pane, engine] of ["claude", "codex"].entries()) {
   const firstMarker = `NATIVE_${engine.toUpperCase()}_CANARY_OK_${runId}`;
   const attachment = pane === 0 ? `\n[file attached: ${attachmentPath}]` : "";
@@ -198,15 +218,17 @@ for (const [pane, engine] of ["claude", "codex"].entries()) {
     "This is an interrupt probe. Do not edit any file.",
     "Use the shell tool to run exactly: sleep 30",
     "After it finishes, reply INTERRUPT_PROBE_SHOULD_NOT_COMPLETE.",
-  ].join("\n"));
+  ].join("\n"), "prompt", { waitForCompletion: false });
   await waitFor(
     () => client.history(TARGET, pane),
     (value) => value.agent.running,
     `${engine} running state`,
     10_000,
   );
-  const effort = await send(pane, "effort-high", "/effort high", "slash");
-  assert.equal(queue.read(TARGET, pane, effort.id).status, "acknowledged");
+  await client.updateSettings(TARGET, pane, {
+    effort: "high",
+    idempotencyKey: `${runId}:${pane}:effort-high`,
+  });
   await interruptWhenReady(pane);
   const interruptKey = `delivery:${interruptJob.id}`;
   const interrupted = await waitFor(
@@ -221,6 +243,7 @@ for (const [pane, engine] of ["claude", "codex"].entries()) {
   assert.equal(interruptDone.interrupted, true, `${engine} turn was not marked interrupted`);
   assert.equal(interrupted.agent.sessionId, initialSessionId, `${engine} interrupt replaced the session`);
   assert.equal(interrupted.agent.effort, "high", `${engine} mid-turn effort did not apply to the next turn`);
+  await settleJob(interruptJob, `${engine} interrupted delivery receipt`);
 
   const resumeMarker = `NATIVE_${engine.toUpperCase()}_RESUME_OK_${runId}`;
   const resumedJob = await send(pane, "resume", [
@@ -256,6 +279,7 @@ for (const [pane, engine] of ["claude", "codex"].entries()) {
     compact: "PASS",
     effortNextTurn: compacted.agent.effort,
   };
+  replayJobs[engine] = first;
 }
 
 // Mirror all completed pre-restart turns once, then preserve the watcher state
@@ -283,7 +307,7 @@ assert(mirroredBeforeRestart > 0, "native watcher did not mirror completed turns
 
 await stopNativeRuntime({ port, stateDir, dataDir });
 runtime = await startNativeRuntime({
-  port, stateDir, dataDir, serverPath, legacyDataDir: null,
+  port, stateDir, dataDir, serverPath, legacyDataDir: null, eventsPath,
 });
 assert.notEqual(runtime.health.bootId, firstBootId, "runtime restart did not create a new boot identity");
 client = makeClient();
@@ -325,6 +349,21 @@ for (const engine of ["claude", "codex"]) {
 }
 assertNoCanaryTmux();
 
+const canaryEvents = existsSync(eventsPath)
+  ? readFileSync(eventsPath).subarray(eventsStartOffset).toString("utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((event) => event.session === TARGET)
+  : [];
+for (const pane of [0, 1]) {
+  const paneEvents = canaryEvents.filter((event) => Number(event.pane) === pane);
+  assert(paneEvents.some((event) => event.event === "prompt"),
+    `native pane ${pane} did not publish working state to the event ledger`);
+  assert(paneEvents.some((event) => event.event === "stop"),
+    `native pane ${pane} did not publish idle state to the event ledger`);
+}
+
 // Exercise the public compatibility surface with a fresh CLI process. This
 // catches accidental calls into tmux that an in-process adapter test cannot.
 const cliEnvironment = {
@@ -354,6 +393,123 @@ assert((await nativeRuntimeStatus({ port, stateDir, dataDir })).online,
   "native-target stop unexpectedly stopped its runtime");
 assertNoCanaryTmux();
 
+// M3: stop only the isolated native runtime, materialize the exact persisted
+// session ids in a temporary tmux config, resume both engines inside an
+// isolated tmux server, then flip the config/runtime back to native and prove
+// an old operation key replays instead of launching a duplicate turn.
+await stopNativeRuntime({ port, stateDir, dataDir });
+const rollbackConfig = {
+  [TARGET]: {
+    id: config[TARGET].id,
+    dir: workspace,
+    layout: "even-horizontal",
+    discord: config[TARGET].discord,
+    panes: ["claude", "codex"].map((engine) => ({
+      name: engine,
+      cmd: engine,
+      engine,
+      resumeSessionId: proofs[engine].sessionId,
+    })),
+  },
+};
+writeFileSync(cliConfigPath, yaml.dump(rollbackConfig), { mode: 0o600 });
+const rollbackSocket = join(canaryRoot, `rollback-${runId}.sock`);
+const rollbackOutputs = {
+  claude: join(canaryRoot, `rollback-${runId}-claude.json`),
+  codex: join(canaryRoot, `rollback-${runId}-codex.jsonl`),
+  codexLast: join(canaryRoot, `rollback-${runId}-codex-last.txt`),
+};
+const rollbackMarkers = {
+  claude: `NATIVE_CLAUDE_TMUX_ROLLBACK_OK_${runId}`,
+  codex: `NATIVE_CODEX_TMUX_ROLLBACK_OK_${runId}`,
+};
+const rollbackPrompt = (engine) => [
+  "This is an isolated transport rollback probe. Do not edit files or use tools.",
+  `Reply with this marker and no other prose: ${rollbackMarkers[engine]}`,
+].join("\n");
+const tmux = (...args) => {
+  const result = spawnSync("tmux", ["-S", rollbackSocket, ...args], {
+    cwd: workspace,
+    env: process.env,
+    encoding: "utf8",
+    timeout: timeoutMs,
+  });
+  assert.equal(result.status, 0, `rollback tmux ${args.join(" ")} failed: ${result.stderr || result.stdout}`);
+};
+const ledgerEnv = [
+  `AMUX_EVENTS_PATH=${shellQuote(eventsPath)}`,
+  `AMUX_AGENT_NAME=${shellQuote(TARGET)}`,
+];
+const claudeCommand = [
+  ...ledgerEnv,
+  "AMUX_PANE=0",
+  "env -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID",
+  "claude -p",
+  `--resume ${shellQuote(proofs.claude.sessionId)}`,
+  "--output-format json --permission-mode acceptEdits",
+  shellQuote(rollbackPrompt("claude")),
+  `> ${shellQuote(rollbackOutputs.claude)} 2>&1`,
+].join(" ");
+const codexCommand = [
+  ...ledgerEnv,
+  "AMUX_PANE=1",
+  "codex exec resume",
+  `--json --skip-git-repo-check -o ${shellQuote(rollbackOutputs.codexLast)}`,
+  shellQuote(proofs.codex.sessionId),
+  shellQuote(rollbackPrompt("codex")),
+  `> ${shellQuote(rollbackOutputs.codex)} 2>&1`,
+].join(" ");
+try {
+  tmux("new-session", "-d", "-s", TARGET, "-c", workspace, claudeCommand);
+  tmux("set-option", "-t", TARGET, "remain-on-exit", "on");
+  tmux("split-window", "-t", `${TARGET}:.0`, "-h", "-c", workspace, codexCommand);
+  await waitFor(
+    async () => ({
+      claude: existsSync(rollbackOutputs.claude)
+        ? readFileSync(rollbackOutputs.claude, "utf8") : "",
+      codex: existsSync(rollbackOutputs.codexLast)
+        ? readFileSync(rollbackOutputs.codexLast, "utf8") : "",
+    }),
+    (value) => value.claude.includes(rollbackMarkers.claude)
+      && value.codex.includes(rollbackMarkers.codex),
+    "native-to-tmux exact-session rollback",
+    timeoutMs,
+  );
+  assert.equal(claudePrintSessionId(readFileSync(rollbackOutputs.claude, "utf8")),
+    proofs.claude.sessionId,
+    "Claude tmux rollback opened a different session");
+  assert.equal(codexJsonlThreadId(readFileSync(rollbackOutputs.codex, "utf8")),
+    proofs.codex.sessionId,
+    "Codex tmux rollback opened a different session");
+} finally {
+  spawnSync("tmux", ["-S", rollbackSocket, "kill-server"], { stdio: "ignore" });
+}
+assertNoCanaryTmux();
+writeFileSync(cliConfigPath, yaml.dump(config), { mode: 0o600 });
+runtime = await startNativeRuntime({
+  port, stateDir, dataDir, serverPath, legacyDataDir: null, eventsPath,
+});
+client = makeClient();
+broker = createDeliveryBroker({ agent: client, queue, notify: async () => {} });
+for (const engine of ["claude", "codex"]) {
+  const pane = proofs[engine].pane;
+  const beforeReplay = await client.history(TARGET, pane);
+  const priorTurns = beforeReplay.events.filter((event) => event.type === "web"
+    && event.subtype === "turn-done"
+    && event.operationKey === `delivery:${replayJobs[engine].id}`).length;
+  const replay = await client.deliverQueued(replayJobs[engine]);
+  assert.equal(replay.replayed, true, `${engine} native flip-back did not replay the old receipt`);
+  const afterReplay = await client.history(TARGET, pane);
+  const afterTurns = afterReplay.events.filter((event) => event.type === "web"
+    && event.subtype === "turn-done"
+    && event.operationKey === `delivery:${replayJobs[engine].id}`).length;
+  assert.equal(afterTurns, priorTurns, `${engine} native flip-back launched a duplicate turn`);
+  assert.equal(afterReplay.agent.sessionId, proofs[engine].sessionId,
+    `${engine} native flip-back lost exact session continuity`);
+  proofs[engine].tmuxRollback = "PASS";
+  proofs[engine].nativeReplay = "PASS";
+}
+
 const finalHealth = await nativeRuntimeStatus({ port, stateDir, dataDir });
 const result = {
   ok: true,
@@ -365,6 +521,7 @@ const result = {
   tmuxSessionCreated: false,
   watcherDuplicateAfterRestart: false,
   watcherMessages: discordMessages.length,
+  fleetEvents: canaryEvents.length,
   cliCompatibility: ["reconcile", "ps", "log", "done", "stop"],
   engines: proofs,
 };

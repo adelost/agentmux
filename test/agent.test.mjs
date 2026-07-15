@@ -86,6 +86,17 @@ feature("Claude pane model pin", () => {
     }],
     then: ["validation fails", (error) => expect(error?.message).toMatch(/invalid Claude model/)],
   });
+
+  unit("a rollback launch resumes the exact native Claude session", {
+    when: ["building an exact rollback command", () => buildClaudeLaunchCommand({
+      resume: true,
+      resumeSessionId: "11111111-1111-4111-8111-111111111111",
+    })],
+    then: ["the exact id replaces cwd-relative continue", (command) => {
+      expect(command).toContain("--resume '11111111-1111-4111-8111-111111111111'");
+      expect(command).not.toContain("--continue");
+    }],
+  });
 });
 
 feature("Codex pane launch isolation", () => {
@@ -114,6 +125,33 @@ feature("Codex pane launch isolation", () => {
       } catch (err) { return err; }
     }],
     then: ["validation fails", (error) => expect(error?.message).toMatch(/invalid Codex model/)],
+  });
+
+  unit("a rollback launch resumes exactly one Codex session without a fresh fallback", {
+    when: ["building an exact rollback command", () => buildCodexLaunchCommand({
+      profileHome: "/home/test/.codex",
+      resumeSessionId: "22222222-2222-4222-8222-222222222222",
+      model: "gpt-5.6-sol",
+      effort: "high",
+    })],
+    then: ["the command fails closed on that id", (command) => {
+      expect(command).toContain("codex resume '22222222-2222-4222-8222-222222222222'");
+      expect(command).not.toContain("--last");
+      expect(command).not.toContain("||");
+    }],
+  });
+
+  unit("unsafe rollback ids are rejected before shell construction", {
+    when: ["building with shell syntax in the id", () => {
+      try {
+        buildCodexLaunchCommand({
+          profileHome: "/home/test/.codex",
+          resumeSessionId: "$(touch /tmp/no)",
+        });
+        return null;
+      } catch (err) { return err; }
+    }],
+    then: ["validation fails", (error) => expect(error?.message).toMatch(/invalid Codex resume session id/)],
   });
 });
 

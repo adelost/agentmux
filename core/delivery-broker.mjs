@@ -180,17 +180,21 @@ export function createDeliveryBroker({
     }
   }
 
-  async function terminalizeUnverified(job) {
+  async function terminalizeUnverified(job, {
+    skipEcho = false,
+    reason = null,
+    ambiguity = null,
+  } = {}) {
     let current = queue.read(job.agentName, job.pane, job.id) || job;
     if (TERMINAL_DELIVERY_STATES.has(current.status)) return current;
 
     // Recheck only the authoritative sink at the transition boundary. TUI
     // inspection is allowed to annotate a pending submit, never to postpone
     // or trigger this outcome.
-    if (await exactEcho(current)) return acknowledge(current, "late-echo-before-unverified");
+    if (!skipEcho && await exactEcho(current)) return acknowledge(current, "late-echo-before-unverified");
     current = queue.read(current.agentName, current.pane, current.id) || current;
     if (TERMINAL_DELIVERY_STATES.has(current.status)) return current;
-    if (await exactEcho(current)) return acknowledge(current, "late-echo-before-unverified");
+    if (!skipEcho && await exactEcho(current)) return acknowledge(current, "late-echo-before-unverified");
     current = queue.read(current.agentName, current.pane, current.id) || current;
     if (TERMINAL_DELIVERY_STATES.has(current.status)) return current;
 
@@ -202,10 +206,12 @@ export function createDeliveryBroker({
       nextAttemptAt: null,
       unverifiedNoticeSentAt: null,
       unverifiedNoticeNextAttemptAt: now(),
-      ...(preEnterFence ? { metadata: { deliveryAmbiguity: "submitting-fence" } } : {}),
-      lastReason: preEnterFence
+      ...(ambiguity || preEnterFence ? {
+        metadata: { deliveryAmbiguity: ambiguity || "submitting-fence" },
+      } : {}),
+      lastReason: reason || (preEnterFence
         ? "pre-Enter submit fence has no exact receipt after 60 minutes; physical delivery remains unverified"
-        : "submit attempt has no exact JSONL receipt after 60 minutes; delivery remains unverified",
+        : "submit attempt has no exact JSONL receipt after 60 minutes; delivery remains unverified"),
     });
     queueEvent(terminal, DELIVERED_UNVERIFIED_STATE);
     return notifyTerminal(terminal);
@@ -349,6 +355,20 @@ export function createDeliveryBroker({
       try {
         const result = await agent.deliverQueued(job);
         if (result?.accepted) {
+          if (result.completionPending) {
+            const submitted = queue.update(job, {
+              status: "submitted",
+              submittedAt: now(),
+              nextAttemptAt: now() + ACTIVE_RETRY_MS,
+              metadata: {
+                deliveryTransport: "native",
+                nativeOperationKey: result.operationKey || `delivery:${job.id}`,
+              },
+              lastReason: "native turn accepted; awaiting successful completion receipt",
+            });
+            queueEvent(submitted, "submitted", { via: "native" });
+            return submitted;
+          }
           return acknowledge(job, result.replayed ? "native-replay" : result.via || "native");
         }
         const reason = result?.reason || "native runtime did not accept delivery";
@@ -377,11 +397,15 @@ export function createDeliveryBroker({
     // Event-identity cursors are stronger, but a fresh/missing JSONL can make
     // cursor capture return null; without this fallback a later real echo
     // would be invisible after restart and the broker could retype it.
-    if (job.kind === "prompt" && !job.echoNotBeforeMs) {
+    if (job.kind === "prompt"
+        && job.metadata?.deliveryTransport !== "native"
+        && !job.echoNotBeforeMs) {
       job = queue.update(job, { echoNotBeforeMs: now() });
     }
 
-    if (!job.echoCursor && job.kind === "prompt") {
+    if (!job.echoCursor
+        && job.kind === "prompt"
+        && job.metadata?.deliveryTransport !== "native") {
       const cursor = await agent.capturePromptEchoCursor(job.agentName, job.pane, job.verifyText)
         .catch((error) => {
           log(`delivery broker cursor failed for ${job.agentName}:${job.pane}: ${error.message}`);
@@ -448,6 +472,48 @@ export function createDeliveryBroker({
     // again merely because JSONL is late, and never let TUI inspection reopen
     // or release the FIFO head. Only the exact JSONL event can acknowledge it.
     if (job.status === "submitted" || job.status === "submitting") {
+      if (job.status === "submitted" && job.metadata?.deliveryTransport === "native") {
+        const submittedAge = now() - Number(
+          job.submittedAt || job.lastAttemptAt || job.createdAt || now(),
+        );
+        let native = null;
+        try {
+          native = typeof agent.deliveryStatus === "function"
+            ? await agent.deliveryStatus(job)
+            : null;
+        } catch (error) {
+          return queue.update(job, {
+            status: "submitted",
+            draftOwned: false,
+            nextAttemptAt: now() + ACTIVE_RETRY_MS,
+            lastReason: `native completion check unavailable: ${error.message}`,
+          });
+        }
+        if (native?.state === "completed") return acknowledge(job, "native-turn-complete");
+        if (native?.state === "interrupted") return acknowledge(job, "native-turn-interrupted");
+        if (native?.state === "failed") {
+          return terminalizeUnverified(job, {
+            skipEcho: true,
+            ambiguity: "native-turn-failed",
+            reason: `native runtime accepted the turn but it failed before a successful completion receipt: ${native.reason}`,
+          });
+        }
+        if (submittedAge >= STALE_SUBMITTED_TERMINAL_MS) {
+          return terminalizeUnverified(job, {
+            skipEcho: true,
+            ambiguity: "native-completion-missing",
+            reason: "native runtime accepted the turn but no terminal operation receipt appeared within 60 minutes; delivery remains unverified",
+          });
+        }
+        return queue.update(job, {
+          status: "submitted",
+          draftOwned: false,
+          nextAttemptAt: now() + ACTIVE_RETRY_MS,
+          lastReason: native?.state === "running"
+            ? "native turn accepted; awaiting successful completion receipt"
+            : "native turn receipt is not yet readable; awaiting completion without redispatch",
+        });
+      }
       // Slash commands intentionally have no JSONL user event. The durable
       // submitted transition is their terminal proof after a crash between
       // composer verification and the final acknowledged file update.

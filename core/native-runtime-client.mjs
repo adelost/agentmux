@@ -78,16 +78,19 @@ export function createNativeRuntimeClient({
 
   const config = () => loadConfigImpl(configPath);
 
-  function target(name, pane) {
+  function target(name, pane, { strict = false } = {}) {
     const entry = config()?.[name];
     if (entry?.backend !== "native") return null;
     const index = Number(pane);
     const paneConfig = entry.panes?.[index];
     const engine = paneEngine(paneConfig);
     if (!entry.dir || !Number.isSafeInteger(index) || index < 0 || !paneConfig || !engine) {
-      throw new NativeRuntimeError(`invalid native target ${name}:${pane}`, {
-        code: "invalid-native-target",
-      });
+      if (strict) {
+        throw new NativeRuntimeError(`invalid native target ${name}:${pane}`, {
+          code: "invalid-native-target",
+        });
+      }
+      return null;
     }
     return {
       name,
@@ -146,7 +149,7 @@ export function createNativeRuntimeClient({
   }
 
   async function ensureTarget(name, pane = 0) {
-    const spec = target(name, pane);
+    const spec = target(name, pane, { strict: true });
     if (!spec) throw new NativeRuntimeError(`${name}:${pane} is not native`, { code: "not-native" });
     const cacheKey = `${name}:${pane}`;
     const cached = targetCache.get(cacheKey);
@@ -274,56 +277,107 @@ export function createNativeRuntimeClient({
     return { prompt: prompt || "Se bifogad fil.", attachments };
   }
 
+  async function withReprovisionedTarget(name, pane, operation) {
+    let resolved = await ensureTarget(name, pane);
+    try {
+      return await operation(resolved);
+    } catch (error) {
+      if (!(error instanceof NativeRuntimeError) || error.status !== 404) throw error;
+      // A runtime restart or registry replacement can invalidate an agent id
+      // cached by the long-lived bridge. A 404 is a conclusive non-acceptance,
+      // so reprovisioning and retrying the same idempotency key is safe.
+      targetCache.delete(`${name}:${Number(pane)}`);
+      resolved = await ensureTarget(name, pane);
+      return operation(resolved);
+    }
+  }
+
   async function deliverQueued(job) {
-    const resolved = await ensureTarget(job.agentName, job.pane);
     const trimmed = String(job.text || "").trim();
     const key = `delivery:${job.id}`;
     try {
-      if (job.kind === "slash" && /^\/compact(?:\s|$)/i.test(trimmed)) {
-        const agent = await api(resolved.runtimeUrl, `/api/agents/${resolved.agent.id}/compact`, {
-          method: "POST",
-          body: {
-            idempotencyKey: key,
-            focus: trimmed.replace(/^\/compact\s*/i, "").trim() || undefined,
-          },
-        });
-        return { accepted: true, replayed: Boolean(agent.replayed), via: "native-compact" };
-      }
-      if (job.kind === "slash" && /^\/interrupt(?:\s|$)/i.test(trimmed)) {
-        const agent = await api(resolved.runtimeUrl, `/api/agents/${resolved.agent.id}/interrupt`, {
-          method: "POST",
-          body: { idempotencyKey: key },
-        });
-        return { accepted: true, replayed: Boolean(agent.replayed), via: "native-interrupt" };
-      }
-      const modelSpec = trimmed.match(/^\/model\s+([^\s]+)(?:\s+(low|medium|high|xhigh|max))?$/i);
-      const model = modelSpec?.[1]?.trim();
-      const modelEffort = modelSpec?.[2]?.toLowerCase();
-      const effort = trimmed.match(/^\/effort\s+(\w+)$/i)?.[1]?.trim();
-      if (job.kind === "slash" && (model || modelEffort || effort)) {
-        const agent = await api(resolved.runtimeUrl, `/api/agents/${resolved.agent.id}`, {
-          method: "PATCH",
-          body: {
-            idempotencyKey: key,
-            ...(model ? { model } : {}),
-            ...(modelEffort || effort ? { effort: modelEffort || effort } : {}),
-          },
-        });
-        return { accepted: true, replayed: Boolean(agent.replayed), via: "native-settings" };
-      }
+      return await withReprovisionedTarget(job.agentName, job.pane, async (resolved) => {
+        if (job.kind === "slash" && /^\/compact(?:\s|$)/i.test(trimmed)) {
+          const agent = await api(resolved.runtimeUrl, `/api/agents/${resolved.agent.id}/compact`, {
+            method: "POST",
+            body: {
+              idempotencyKey: key,
+              focus: trimmed.replace(/^\/compact\s*/i, "").trim() || undefined,
+            },
+          });
+          return { accepted: true, replayed: Boolean(agent.replayed), via: "native-compact" };
+        }
+        if (job.kind === "slash" && /^\/interrupt(?:\s|$)/i.test(trimmed)) {
+          const agent = await api(resolved.runtimeUrl, `/api/agents/${resolved.agent.id}/interrupt`, {
+            method: "POST",
+            body: { idempotencyKey: key },
+          });
+          return { accepted: true, replayed: Boolean(agent.replayed), via: "native-interrupt" };
+        }
+        const modelSpec = trimmed.match(/^\/model\s+([^\s]+)(?:\s+(low|medium|high|xhigh|max))?$/i);
+        const model = modelSpec?.[1]?.trim();
+        const modelEffort = modelSpec?.[2]?.toLowerCase();
+        const effort = trimmed.match(/^\/effort\s+(\w+)$/i)?.[1]?.trim();
+        if (job.kind === "slash" && (model || modelEffort || effort)) {
+          const agent = await api(resolved.runtimeUrl, `/api/agents/${resolved.agent.id}`, {
+            method: "PATCH",
+            body: {
+              idempotencyKey: key,
+              ...(model ? { model } : {}),
+              ...(modelEffort || effort ? { effort: modelEffort || effort } : {}),
+            },
+          });
+          return { accepted: true, replayed: Boolean(agent.replayed), via: "native-settings" };
+        }
 
-      const message = await prepareMessage(resolved, job);
-      const agent = await api(resolved.runtimeUrl, `/api/agents/${resolved.agent.id}/messages`, {
-        method: "POST",
-        body: { ...message, idempotencyKey: key },
+        const message = await prepareMessage(resolved, job);
+        const agent = await api(resolved.runtimeUrl, `/api/agents/${resolved.agent.id}/messages`, {
+          method: "POST",
+          body: { ...message, idempotencyKey: key },
+        });
+        return {
+          accepted: true,
+          replayed: Boolean(agent.replayed),
+          completionPending: true,
+          operationKey: key,
+          via: "native-message",
+        };
       });
-      return { accepted: true, replayed: Boolean(agent.replayed), via: "native-message" };
     } catch (error) {
       if (error instanceof NativeRuntimeError && error.retryable) {
         return { accepted: false, retryable: true, reason: error.message, code: error.code };
       }
       throw error;
     }
+  }
+
+  async function deliveryStatus(job) {
+    const operationKey = `delivery:${job.id}`;
+    const snapshot = await history(job.agentName, job.pane);
+    const durable = (snapshot.operations || [])
+      .find((operation) => operation.operationKey === operationKey);
+    const terminal = snapshot.events.find((event) => event?.type === "web"
+      && event.subtype === "turn-done" && event.operationKey === operationKey);
+    const outcome = durable || terminal;
+    if (outcome && outcome.code != null) {
+      if (outcome.interrupted) {
+        return { state: "interrupted", operationKey, code: Number(outcome.code) };
+      }
+      return Number(outcome.code) === 0
+        ? { state: "completed", operationKey, code: 0 }
+        : {
+          state: "failed",
+          operationKey,
+          code: Number(outcome.code),
+          reason: outcome.error || outcome.stderr || `native turn failed (${outcome.code})`,
+        };
+    }
+    const accepted = snapshot.events.some((event) => event?.type === "web"
+      && event.subtype === "user" && event.operationKey === operationKey);
+    return {
+      state: accepted || durable ? "running" : "unknown",
+      operationKey,
+    };
   }
 
   async function history(name, pane = 0) {
@@ -445,6 +499,7 @@ export function createNativeRuntimeClient({
     ensureTarget,
     ensureSession,
     deliverQueued,
+    deliveryStatus,
     history,
     getContext,
     getResponse,

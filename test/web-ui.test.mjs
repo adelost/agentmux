@@ -12,7 +12,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claudeProjectDir } from "../core/claude-paths.mjs";
-import { createWebUi } from "../spikes/web-ui/server.mjs";
+import { latestPaneStates } from "../core/events.mjs";
+import { claudePermissionDenial, createWebUi } from "../spikes/web-ui/server.mjs";
 
 const CLAUDE_SESSION = "11111111-1111-4111-8111-111111111111";
 const CODEX_SESSION = "22222222-2222-4222-8222-222222222222";
@@ -81,6 +82,18 @@ function fakeSpawn(calls) {
                 compact_metadata: { trigger: "manual", pre_tokens: 130_000, post_tokens: 30_000 },
               },
               { type: "result", subtype: "success", session_id: CLAUDE_SESSION, result: "" },
+            );
+            close();
+          } else if (message.message?.content === "DENY_PERMISSION") {
+            emit(
+              { type: "system", subtype: "init", session_id: CLAUDE_SESSION },
+              {
+                type: "result",
+                subtype: "success",
+                session_id: CLAUDE_SESSION,
+                result: "The requested tool was not allowed.",
+                permission_denials: [{ tool_name: "Bash", reason: "approval unavailable" }],
+              },
             );
             close();
           } else if (message.message?.content !== "WAIT_FOR_INTERRUPT") {
@@ -227,6 +240,7 @@ async function setup(overrides = {}) {
     claudeCommand: "fake-claude",
     codexCommand: "fake-codex",
     spawnProcess: fakeSpawn(calls),
+    appendEventImpl: () => {},
     ...overrides,
   });
   const { url } = await app.listen({ port: 0 });
@@ -505,6 +519,99 @@ describe("AMUX Code project and agent registry", () => {
       });
   });
 
+  it("surfaces Claude permission denial in the UI stream and fleet event ledger", async () => {
+    const fleetEvents = [];
+    const { url, root, workspace, dataDir, homeDir, app, calls } = await setup({
+      appendEventImpl: (event) => fleetEvents.push(structuredClone(event)),
+    });
+    const project = await createProject(url, workspace);
+    const claude = await createAgent(url, project, "claude", "permission-agent", {
+      address: { session: "skybar-canary", pane: 0 },
+    });
+
+    expect((await postJson(`${url}/api/agents/${claude.id}/messages`, {
+      prompt: "DENY_PERMISSION",
+      attachments: [],
+      idempotencyKey: "permission-denied-turn",
+    })).status).toBe(202);
+    await waitForIdle(url, project.id, claude.id);
+
+    const history = await request(`${url}/api/agents/${claude.id}/history`);
+    const denial = history.body.events.find((event) => event.subtype === "permission-denied");
+    const done = history.body.events.find((event) => event.subtype === "turn-done");
+    expect(denial).toMatchObject({
+      message: expect.stringContaining("Bash"),
+      denial: { count: 1, detail: "Bash" },
+    });
+    expect(done).toMatchObject({ code: 1, permissionDenied: true });
+    expect(history.body.operations).toEqual([expect.objectContaining({
+      operationKey: "permission-denied-turn",
+      code: 1,
+      sessionId: CLAUDE_SESSION,
+      permissionDenied: true,
+      denialDetail: "Bash",
+    })]);
+    expect(claudePermissionDenial({
+      type: "result",
+      permission_denials: [{ tool_name: "Bash" }],
+    })).toEqual({ count: 1, detail: "Bash" });
+    expect(calls[0].args).toContain("acceptEdits");
+    expect(calls[0].args).not.toContain("--dangerously-skip-permissions");
+    expect(fleetEvents.map((event) => event.event)).toEqual([
+      "prompt", "session_start", "prompt", "stop", "notification",
+    ]);
+    expect(fleetEvents.at(-1)).toMatchObject({
+      session: "skybar-canary",
+      pane: 0,
+      event: "notification",
+      needsYou: true,
+      detail: expect.stringContaining("permission denied"),
+    });
+    const stateAt = (count) => {
+      const path = join(root, `fleet-events-${count}.jsonl`);
+      writeFileSync(path, `${fleetEvents.slice(0, count).map(JSON.stringify).join("\n")}\n`);
+      return latestPaneStates({ path, now: Date.now() }).get("skybar-canary:0")?.state;
+    };
+    expect(stateAt(1)).toBe("working");
+    expect(stateAt(4)).toBe("idle");
+    expect(stateAt(5)).toBe("needs_you");
+
+    await app.close();
+    const nativeDir = claudeProjectDir(workspace, homeDir);
+    mkdirSync(nativeDir, { recursive: true });
+    const registryPath = join(dataDir, "registry.json");
+    const receipt = JSON.parse(readFileSync(registryPath, "utf8"))
+      .receipts.messages["permission-denied-turn"];
+    writeFileSync(join(nativeDir, `${CLAUDE_SESSION}.jsonl`), `${JSON.stringify({
+      type: "user",
+      timestamp: new Date(receipt.acceptedAt).toISOString(),
+      message: { content: "DENY_PERMISSION" },
+    })}\n`);
+    const restarted = createWebUi({
+      dataDir,
+      homeDir,
+      legacyDataDir: null,
+      spawnProcess: fakeSpawn([]),
+      appendEventImpl: () => {},
+    });
+    const second = await restarted.listen({ port: 0 });
+    cleanups.push(() => restarted.close());
+    const restored = await request(`${second.url}/api/agents/${claude.id}/history`);
+    expect(restored.body.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        subtype: "permission-denied",
+        historical: true,
+        operationKey: "permission-denied-turn",
+      }),
+      expect.objectContaining({
+        subtype: "turn-done",
+        code: 1,
+        permissionDenied: true,
+        operationKey: "permission-denied-turn",
+      }),
+    ]));
+  });
+
   it("persists effort changes and applies them to the next Claude and Codex turns", async () => {
     const { url, workspace, calls } = await setup();
     const project = await createProject(url, workspace);
@@ -712,9 +819,10 @@ describe("AMUX Code project and agent registry", () => {
     await waitForIdle(setupOne.url, project.id, agent.id);
     await setupOne.app.close();
 
-    // Simulate a bounded engine-history tail containing only the later of two
-    // identical prompts. Timestamp proximity must restore the later stable
-    // operation key, not the first matching receipt in insertion order.
+    // Simulate a bounded engine-history tail containing an engine-normalized
+    // form of the later of two prompts. Its hash no longer round-trips, so
+    // same-session timestamp proximity must restore the later stable operation
+    // key instead of emitting a second history-hash identity after restart.
     const registryPath = join(setupOne.dataDir, "registry.json");
     const registry = JSON.parse(readFileSync(registryPath, "utf8"));
     registry.receipts.agentCreates["claude-agent-key"].hash = "legacy-mutable-fingerprint";
@@ -732,7 +840,7 @@ describe("AMUX Code project and agent registry", () => {
       JSON.stringify({
         type: "user",
         timestamp: "2026-07-14T10:00:00.000Z",
-        message: { content: "persist me" },
+        message: { content: "persist me (engine-normalized)" },
       }),
       JSON.stringify({
         type: "assistant",

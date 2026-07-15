@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "node:net";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -63,11 +63,13 @@ describe("native runtime detached lifecycle", () => {
       port: 8812,
       dataDir: "/tmp/native-isolated",
       legacyDataDir: null,
+      eventsPath: "/tmp/native-isolated/events.jsonl",
       baseEnv: { PATH: "/usr/bin" },
     })).toEqual({
       PATH: "/usr/bin",
       AMUX_WEB_PORT: "8812",
       AMUX_WEB_DATA_DIR: "/tmp/native-isolated",
+      AMUX_EVENTS_PATH: "/tmp/native-isolated/events.jsonl",
       AMUX_WEB_LEGACY_DATA_DIR: "off",
     });
     expect(nativeRuntimeEnvironment({
@@ -95,5 +97,74 @@ describe("native runtime detached lifecycle", () => {
     await expect(stopNativeRuntime({ port: 65_534, stateDir })).resolves.toMatchObject({
       alreadyStopped: true,
     });
+  });
+
+  it("re-verifies process identity immediately before SIGTERM", async () => {
+    const root = mkdtempSync(join(tmpdir(), "amux-native-stop-race-"));
+    const stateDir = join(root, "state");
+    const pidPath = join(stateDir, "process.json");
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(pidPath, JSON.stringify({
+      pid: 42_424,
+      port: 8_812,
+      serverPath: "/runtime/server.mjs",
+      startedAt: "2026-07-15T00:00:00.000Z",
+    }));
+    cleanups.push(async () => rmSync(root, { recursive: true, force: true }));
+    const killImpl = vi.fn();
+
+    await expect(stopNativeRuntime({
+      port: 8_812,
+      stateDir,
+      statusImpl: async () => ({
+        managed: true,
+        online: true,
+        pid: 42_424,
+        health: { running: 0 },
+        paths: { pidPath },
+      }),
+      processMatchesImpl: () => false,
+      killImpl,
+    })).rejects.toThrow(/ownership changed before SIGTERM/);
+    expect(killImpl).not.toHaveBeenCalled();
+    expect(existsSync(pidPath)).toBe(true);
+  });
+
+  it("re-verifies process identity again before a forced SIGKILL", async () => {
+    const root = mkdtempSync(join(tmpdir(), "amux-native-kill-race-"));
+    const stateDir = join(root, "state");
+    const pidPath = join(stateDir, "process.json");
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(pidPath, JSON.stringify({
+      pid: 43_434,
+      port: 8_813,
+      serverPath: "/runtime/server.mjs",
+      startedAt: "2026-07-15T00:00:00.000Z",
+    }));
+    cleanups.push(async () => rmSync(root, { recursive: true, force: true }));
+    const matches = vi.fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
+    const killImpl = vi.fn();
+
+    await expect(stopNativeRuntime({
+      port: 8_813,
+      stateDir,
+      force: true,
+      timeoutMs: 0,
+      statusImpl: async () => ({
+        managed: true,
+        online: true,
+        pid: 43_434,
+        health: { running: 0 },
+        paths: { pidPath },
+      }),
+      processMatchesImpl: matches,
+      processAliveImpl: () => true,
+      killImpl,
+    })).rejects.toThrow(/ownership changed before SIGKILL/);
+    expect(killImpl).toHaveBeenCalledTimes(1);
+    expect(killImpl).toHaveBeenCalledWith(43_434, "SIGTERM");
+    expect(existsSync(pidPath)).toBe(true);
   });
 });

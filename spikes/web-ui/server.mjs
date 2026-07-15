@@ -27,6 +27,7 @@ import { createInterface } from "node:readline";
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { claudeProjectDir } from "../../core/claude-paths.mjs";
+import { appendEvent as appendFleetEvent } from "../../core/events.mjs";
 import { readTailWindow } from "../../core/jsonl-reader.mjs";
 import {
   claudeInterruptRequest,
@@ -44,6 +45,7 @@ const MEMORY_EVENT_LIMIT = 5_000;
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 const AUTO_COMPACT_CONTEXT_PERCENT = 60;
 const AUTO_COMPACT_IDLE_MS = 5 * 60 * 1_000;
+const OPERATION_TIME_MATCH_MS = 5 * 60 * 1_000;
 
 const DEFAULT_MODELS = Object.freeze({
   claude: ["claude-opus-4-8", "fable", "sonnet", "haiku"],
@@ -82,6 +84,29 @@ const now = () => Date.now();
 const hashPayload = (payload) => createHash("sha256")
   .update(JSON.stringify(payload))
   .digest("hex");
+
+const canonicalPrompt = (value) => String(value || "")
+  .replace(/\r\n?/g, "\n")
+  .trim();
+
+const promptHashes = (agentId, ...values) => [...new Set(values.flatMap((value) => [
+  hashPayload({ agentId, prompt: String(value || "") }),
+  hashPayload({ agentId, prompt: canonicalPrompt(value) }),
+]))];
+
+export function claudePermissionDenial(event) {
+  if (event?.type !== "result" || !Array.isArray(event.permission_denials)
+      || event.permission_denials.length === 0) return null;
+  const details = event.permission_denials.map((denial) => {
+    if (typeof denial === "string") return denial;
+    return denial?.tool_name || denial?.toolName || denial?.tool
+      || denial?.command || denial?.reason || "tool request";
+  });
+  return {
+    count: event.permission_denials.length,
+    detail: details.map(String).join(", ").slice(0, 500),
+  };
+}
 
 const agentIdentityFingerprint = ({
   projectId,
@@ -228,6 +253,7 @@ const cleanChildEnv = (agent = null) => {
  * @param {number} [options.autoCompactContextPercent]
  * @param {number} [options.autoCompactIdleMs]
  * @param {Record<string, string | Buffer>} [options.staticAssets]
+ * @param {Function} [options.appendEventImpl]
  */
 export function createWebUi(options = {}) {
   const bootId = randomUUID();
@@ -244,6 +270,7 @@ export function createWebUi(options = {}) {
   const registryPath = join(dataDir, "registry.json");
   const uploadDir = join(dataDir, "uploads");
   const spawnProcess = options.spawnProcess ?? spawn;
+  const appendEventImpl = options.appendEventImpl ?? appendFleetEvent;
   const commands = {
     claude: options.claudeCommand ?? process.env.AMUX_WEB_CLAUDE_COMMAND ?? "claude",
     codex: options.codexCommand ?? process.env.AMUX_WEB_CODEX_COMMAND ?? "codex",
@@ -285,6 +312,24 @@ export function createWebUi(options = {}) {
     map.delete(key);
     map.set(key, value);
     while (map.size > limit) map.delete(map.keys().next().value);
+  };
+
+  const fleetEvent = (agent, event, extra = {}) => {
+    if (!agent.address?.session || !Number.isSafeInteger(Number(agent.address.pane))) return;
+    try {
+      appendEventImpl({
+        ts: new Date().toISOString(),
+        event,
+        session: agent.address.session,
+        pane: Number(agent.address.pane),
+        cwd: projects.get(agent.projectId)?.cwd || "",
+        sessionId: agent.sessionId || "",
+        ...extra,
+        detail: String(extra.detail || "").slice(0, 200),
+      });
+    } catch (error) {
+      console.error(`[native-runtime] event ledger append failed: ${error.message}`);
+    }
   };
 
   const publicAgent = (agent) => {
@@ -392,6 +437,7 @@ export function createWebUi(options = {}) {
     hydrated: false,
     nextEventId: 1,
     turnHasAssistantText: false,
+    permissionDenied: null,
   });
 
   const loadRegistry = () => {
@@ -642,24 +688,31 @@ export function createWebUi(options = {}) {
       .map(([operationKey, receipt]) => ({ operationKey, receipt }));
     const usedReceiptKeys = new Set();
     const operationKeyForPrompt = (text, eventAt) => {
-      const promptHash = hashPayload({ agentId: agent.id, prompt: text });
+      const eventHashes = promptHashes(agent.id, text);
       const numericAt = Number(eventAt);
       const parsedAt = typeof eventAt === "string" ? Date.parse(eventAt) : NaN;
       const eventTime = Number.isFinite(numericAt) && numericAt > 0
         ? numericAt
         : Number.isFinite(parsedAt) ? parsedAt : null;
-      const candidates = receiptMatches.filter(({ operationKey, receipt }) =>
-        !usedReceiptKeys.has(operationKey) && receipt.promptHashes.includes(promptHash));
-      if (eventTime != null) {
-        candidates.sort((left, right) => {
-          const leftDistance = Number.isFinite(left.receipt.acceptedAt)
-            ? Math.abs(left.receipt.acceptedAt - eventTime) : Number.POSITIVE_INFINITY;
-          const rightDistance = Number.isFinite(right.receipt.acceptedAt)
-            ? Math.abs(right.receipt.acceptedAt - eventTime) : Number.POSITIVE_INFINITY;
-          return leftDistance - rightDistance;
-        });
-      }
-      const match = candidates[0];
+      const unmatched = receiptMatches.filter(({ operationKey }) => !usedReceiptKeys.has(operationKey));
+      const distance = ({ receipt }) => Number.isFinite(receipt.acceptedAt) && eventTime != null
+        ? Math.abs(receipt.acceptedAt - eventTime)
+        : Number.POSITIVE_INFINITY;
+      const exact = unmatched
+        .filter(({ receipt }) => receipt.promptHashes.some((hash) => eventHashes.includes(hash)))
+        .sort((left, right) => distance(left) - distance(right));
+      // Engine JSONL can normalize attachment wrappers or message text in a
+      // way that does not round-trip through a prompt hash. The runtime owns
+      // this session exclusively, so a completed receipt from the same
+      // session within a tight timestamp window is a stronger fallback than
+      // emitting a second, content-hash turn identity after restart.
+      const temporal = eventTime == null ? [] : unmatched
+        .filter(({ receipt }) => receipt.sessionId === agent.sessionId
+          && receipt.completedAt
+          && receipt.hasAssistant
+          && distance({ receipt }) <= OPERATION_TIME_MATCH_MS)
+        .sort((left, right) => distance(left) - distance(right));
+      const match = exact[0] || temporal[0];
       if (!match) return null;
       usedReceiptKeys.add(match.operationKey);
       return match.operationKey;
@@ -670,13 +723,29 @@ export function createWebUi(options = {}) {
     let turnAt = 0;
     let turnOperationKey = null;
     const closeHydratedTurn = () => {
-      if (turnOpen && turnHasAssistant) {
+      const receipt = turnOperationKey ? receipts.messages.get(turnOperationKey) : null;
+      const hasReceiptOutcome = receipt?.completedAt && receipt.code != null;
+      if (turnOpen && (turnHasAssistant || hasReceiptOutcome)) {
+        if (receipt?.permissionDenied) {
+          pushEvent(agent, {
+            type: "web",
+            subtype: "permission-denied",
+            message: `Åtgärden stoppades av behörighetspolicyn: ${receipt.denialDetail || "tool request"}`,
+            denial: { detail: receipt.denialDetail || "tool request" },
+            historical: true,
+            at: receipt.completedAt,
+            operationKey: turnOperationKey,
+          });
+        }
         pushEvent(agent, {
           type: "web",
           subtype: "turn-done",
-          code: 0,
+          code: hasReceiptOutcome ? Number(receipt.code) : 0,
+          interrupted: Boolean(receipt?.interrupted),
+          permissionDenied: Boolean(receipt?.permissionDenied),
+          error: receipt?.error,
           historical: true,
-          at: turnAt,
+          at: receipt?.completedAt ?? turnAt,
           operationKey: turnOperationKey,
         });
       }
@@ -760,7 +829,10 @@ export function createWebUi(options = {}) {
         closeHydratedTurn();
       }
     }
-    if (turnTerminal) closeHydratedTurn();
+    const finalReceipt = turnOperationKey ? receipts.messages.get(turnOperationKey) : null;
+    if (turnTerminal || (turnOpen && finalReceipt?.completedAt && finalReceipt.code != null)) {
+      closeHydratedTurn();
+    }
   };
 
   const broadcast = (agent, event) => {
@@ -820,6 +892,10 @@ export function createWebUi(options = {}) {
     agent.sessionId = sessionId;
     agent.updatedAt = now();
     saveRegistry();
+    fleetEvent(agent, "session_start", { source: "native-runtime", detail: agent.engine });
+    if (agent.running && agent.operation === "turn") {
+      fleetEvent(agent, "prompt", { detail: "native turn started" });
+    }
   };
 
   const clearAutoCompact = (agent) => {
@@ -843,9 +919,11 @@ export function createWebUi(options = {}) {
     agent.activeTurnId = null;
     agent.activeOperationKey = operationKey;
     agent.turnHasAssistantText = false;
+    agent.permissionDenied = null;
     agent.compactMetadata = null;
     agent.updatedAt = now();
     if (operation === "turn") {
+      fleetEvent(agent, "prompt", { detail: rawPrompt });
       webEvent(agent, "user", {
         text: rawPrompt,
         attachments: attachments.map((attachment) => publicAttachment(project.id, attachment)),
@@ -859,8 +937,15 @@ export function createWebUi(options = {}) {
     }
   };
 
-  const finishOperation = (agent, operation, code, error = null, stderr = "") => {
+  const finishOperation = (agent, operation, providedCode, providedError = null, stderr = "") => {
     if (!agent.running || agent.operation !== operation) return;
+    let code = providedCode;
+    let error = providedError;
+    const permissionDenied = agent.permissionDenied;
+    if (operation === "turn" && permissionDenied && code === 0) {
+      code = 1;
+      error = error || new Error(`permission denied: ${permissionDenied.detail}`);
+    }
     const control = agent.activeControl;
     agent.running = false;
     agent.operation = null;
@@ -869,17 +954,41 @@ export function createWebUi(options = {}) {
     agent.activeTurnId = null;
     const operationKey = agent.activeOperationKey;
     agent.activeOperationKey = null;
+    agent.permissionDenied = null;
     agent.updatedAt = now();
     agent.idleSince = agent.updatedAt;
     agent.events = agent.events.filter((event) => event.type !== "stream_event");
     if (agent.engine === "codex") control?.rpc?.close?.();
     const interrupted = agent.interruptRequested;
     agent.interruptRequested = false;
+    if (operation === "turn" && operationKey) {
+      const receipt = receipts.messages.get(operationKey);
+      if (receipt?.id === agent.id) {
+        Object.assign(receipt, {
+          sessionId: agent.sessionId,
+          completedAt: agent.updatedAt,
+          code,
+          interrupted,
+          hasAssistant: Boolean(agent.turnHasAssistantText),
+          permissionDenied: Boolean(permissionDenied),
+          ...(permissionDenied?.detail ? { denialDetail: permissionDenied.detail } : {}),
+          ...(error?.message ? { error: String(error.message).slice(0, 4_000) } : {}),
+        });
+      }
+    }
     saveRegistry();
     if (operation === "turn") {
+      fleetEvent(agent, "stop", { detail: interrupted ? "native turn interrupted" : "native turn finished" });
+      if (permissionDenied) {
+        fleetEvent(agent, "notification", {
+          needsYou: true,
+          detail: `permission denied: ${permissionDenied.detail}`,
+        });
+      }
       webEvent(agent, "turn-done", {
         code,
         interrupted,
+        permissionDenied: Boolean(permissionDenied),
         error: error?.message,
         stderr: code === 0 || interrupted ? undefined : stderr.slice(-32_000),
         operationKey,
@@ -940,6 +1049,15 @@ export function createWebUi(options = {}) {
     if (event.type !== "result") return;
 
     if (operation === "turn" && !agent.interruptRequested) {
+      const denial = claudePermissionDenial(event);
+      if (denial) {
+        agent.permissionDenied = denial;
+        webEvent(agent, "permission-denied", {
+          message: `Åtgärden stoppades av behörighetspolicyn: ${denial.detail}`,
+          denial,
+          operationKey: agent.activeOperationKey,
+        });
+      }
       setAgentContext(agent, contextFromClaudeResult(event, agent.context));
       if (!agent.turnHasAssistantText && typeof event.result === "string" && event.result.trim()) {
         agent.turnHasAssistantText = true;
@@ -1669,8 +1787,7 @@ export function createWebUi(options = {}) {
         rememberReceipt(receipts.messages, key, {
           id: agent.id,
           hash: fingerprint,
-          promptHashes: [...new Set([prompt, enginePrompt]
-            .map((value) => hashPayload({ agentId: agent.id, prompt: value })))],
+          promptHashes: promptHashes(agent.id, prompt, enginePrompt),
           acceptedAt: now(),
         }, 1_000);
         saveRegistry();
@@ -1732,7 +1849,25 @@ export function createWebUi(options = {}) {
 
       if (request.method === "GET" && agentMatch[2] === "/history") {
         hydrate(agent);
-        json(response, 200, { bootId, agent: publicAgent(agent), events: agent.events });
+        const operations = [...receipts.messages.entries()]
+          .filter(([, receipt]) => receipt?.id === agent.id)
+          .map(([operationKey, receipt]) => ({
+            operationKey,
+            acceptedAt: receipt.acceptedAt ?? null,
+            completedAt: receipt.completedAt ?? null,
+            sessionId: receipt.sessionId ?? null,
+            code: receipt.code ?? null,
+            interrupted: Boolean(receipt.interrupted),
+            permissionDenied: Boolean(receipt.permissionDenied),
+            denialDetail: receipt.denialDetail ?? null,
+            error: receipt.error ?? null,
+          }));
+        json(response, 200, {
+          bootId,
+          agent: publicAgent(agent),
+          events: agent.events,
+          operations,
+        });
         return;
       }
 
