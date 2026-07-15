@@ -4,7 +4,7 @@
 const AMUX_COMMANDS = new Set([
   "asks", "attach", "compact", "doctor", "done", "dream", "edit", "esc",
   "image", "janitor", "label", "labels", "log", "memory", "notifyuser",
-  "playwright-reap", "ps", "remind", "search", "select", "serve", "stop",
+  "playwright-reap", "ps", "queue", "remind", "search", "select", "serve", "stop",
   "sync", "timeline", "top", "wait", "watch",
 ]);
 

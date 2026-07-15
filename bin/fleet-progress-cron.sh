@@ -99,7 +99,7 @@ amux_send() { timeout "$SEND_TIMEOUT" "$AMUX" "$@"; }
 # instead of auto-nudged. Exception: "watch" is NOT reserved — the CLI
 # disambiguates it (shouldRouteWatchToAgent routes `amux watch -p N "msg"`
 # to the session whenever a positional message is present).
-RESERVED_CMDS=" ps top done log timeline dream compact janitor asks ask questions search serve stop doctor edit label labels lint select image say events run plan resume r esc wait notifyuser remind memory ls help playwright-reap pw-reap "
+RESERVED_CMDS=" ps top done log timeline dream compact janitor asks ask questions search serve stop doctor queue edit label labels lint select image say events run plan resume r esc wait notifyuser remind memory ls help playwright-reap pw-reap "
 is_reserved() { case "$RESERVED_CMDS" in *" $1 "*) return 0;; *) return 1;; esac; }
 
 # Newest Claude/Codex session-jsonl mtime for a pane, or 0 if unresolvable.
