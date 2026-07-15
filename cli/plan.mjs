@@ -8,9 +8,9 @@ import { fileURLToPath } from "url";
 import { runOneshot } from "./run.mjs";
 import { createEventLogger } from "./events.mjs";
 import { sendToChannel, sendToSession, notifyUser as sendToUser } from "./send-notify.mjs";
+import { CLAUDE_AUTONOMOUS_ARGS } from "../core/execution-safety.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const CLAUDE_FLAGS = "--dangerously-skip-permissions";
 const MAX_PLAN_RETRIES = 2;
 
 /** Build the prompt that tells Claude to create a plan. */
@@ -112,7 +112,7 @@ export async function createPlan({ dir, goal, model, planPath }) {
   for (let attempt = 1; attempt <= MAX_PLAN_RETRIES; attempt++) {
     console.log(`📋 Creating plan (attempt ${attempt}/${MAX_PLAN_RETRIES})...`);
 
-    const args = ["-p", CLAUDE_FLAGS];
+    const args = ["-p", ...CLAUDE_AUTONOMOUS_ARGS];
     if (model) args.push("--model", model);
 
     const child = spawn("claude", args, { cwd: dir, timeout: 300000, env: process.env });

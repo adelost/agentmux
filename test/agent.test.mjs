@@ -72,6 +72,9 @@ feature("Claude pane model pin", () => {
     then: ["both commands pin the full model id", ({ fresh, resumed }) => {
       expect(fresh).toContain("--model 'claude-opus-4-8'");
       expect(resumed).toContain("--model 'claude-opus-4-8'");
+      expect(fresh).toContain("--permission-mode auto --no-chrome");
+      expect(resumed).toContain("--permission-mode auto --no-chrome");
+      expect(fresh).not.toContain("--dangerously-skip-permissions");
       expect(fresh).not.toMatch(/--model ['\"]?opus['\"]?(?:\s|$)/);
       expect(resumed).toContain("--continue");
     }],
@@ -110,7 +113,11 @@ feature("Codex pane launch isolation", () => {
       expect(command.match(/CODEX_HOME=/g)).toHaveLength(2);
       expect(command.match(/gpt-5\.6-sol/g)).toHaveLength(2);
       expect(command.match(/model_reasoning_effort="max"/g)).toHaveLength(2);
-      expect(command.match(/--yolo/g)).toHaveLength(2);
+      expect(command.match(/--sandbox workspace-write/g)).toHaveLength(2);
+      expect(command.match(/--ask-for-approval on-request/g)).toHaveLength(2);
+      expect(command.match(/sandbox_workspace_write\.network_access=true/g)).toHaveLength(2);
+      expect(command.match(/approvals_reviewer="auto_review"/g)).toHaveLength(2);
+      expect(command).not.toContain("--yolo");
       expect(command).not.toContain("--dangerously-bypass-approvals-and-sandbox");
       expect(command).toContain("codex resume --last");
       expect(command).toContain("||");

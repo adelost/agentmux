@@ -30,6 +30,12 @@ import { claudeProjectDir } from "../../core/claude-paths.mjs";
 import { appendEvent as appendFleetEvent } from "../../core/events.mjs";
 import { readTailWindow } from "../../core/jsonl-reader.mjs";
 import { readQuotaSnapshot } from "../../core/quota-usage.mjs";
+import { ensureCodexExecutionSafety } from "../../core/codex-profiles.mjs";
+import {
+  CLAUDE_AUTONOMOUS_ARGS,
+  CODEX_AUTONOMOUS_THREAD_POLICY,
+  CODEX_AUTONOMOUS_TURN_POLICY,
+} from "../../core/execution-safety.mjs";
 import {
   claudeInterruptRequest,
   claudeUserMessage,
@@ -275,6 +281,7 @@ const cleanChildEnv = (agent = null) => {
 export function createWebUi(options = {}) {
   const bootId = randomUUID();
   const homeDir = options.homeDir ?? homedir();
+  ensureCodexExecutionSafety({ home: join(homeDir, ".codex") });
   const dataDir = resolve(options.dataDir
     ?? process.env.AMUX_WEB_DATA_DIR
     ?? join(homeDir, ".agentmux", "web-ui"));
@@ -923,7 +930,7 @@ export function createWebUi(options = {}) {
       "--effort", agent.effort,
       "--name", agent.name,
     ];
-    if (agent.permissionMode === "automation") args.push("--dangerously-skip-permissions");
+    if (agent.permissionMode === "automation") args.push(...CLAUDE_AUTONOMOUS_ARGS);
     else args.push("--permission-mode", "acceptEdits");
     if (agent.sessionId) args.push("--resume", agent.sessionId);
     return { command: commands.claude, args, prompt };
@@ -1253,10 +1260,10 @@ export function createWebUi(options = {}) {
       agent.activeControl = { type: "codex", rpc };
       await rpc.initialize();
       const codexPolicy = agent.permissionMode === "automation"
-        ? { sandbox: "danger-full-access", approvalPolicy: "never" }
+        ? CODEX_AUTONOMOUS_THREAD_POLICY
         : {};
       const turnPolicy = agent.permissionMode === "automation"
-        ? { sandboxPolicy: { type: "dangerFullAccess" }, approvalPolicy: "never" }
+        ? CODEX_AUTONOMOUS_TURN_POLICY
         : {};
       const threadResult = agent.sessionId
         ? await rpc.request("thread/resume", {

@@ -549,7 +549,7 @@ agents:
     }],
   });
 
-  component("all generated Codex panes use the supported yolo alias", {
+  component("all generated Codex panes use the shared sandboxed auto-review contract", {
     given: ["an agent with two Codex panes", () => ({
       agents: new Map([["claw", {
         dir: "/tmp/claw",
@@ -565,8 +565,11 @@ agents:
     })],
     when: ["generating the runtime config", ({ agents, channelMap, agentIds }) =>
       generateAgentsYaml(agents, channelMap, agentIds)],
-    then: ["every Codex command has one --yolo and no duplicate long bypass flag", (yamlStr) => {
-      expect(yamlStr.match(/cmd: codex resume --last --yolo/g)).toHaveLength(2);
+    then: ["every Codex command has the same bounded native policy and no bypass", (yamlStr) => {
+      expect(yamlStr.match(/cmd: codex resume --last --sandbox workspace-write/g)).toHaveLength(2);
+      expect(yamlStr.match(/--ask-for-approval on-request/g)).toHaveLength(2);
+      expect(yamlStr.match(/approvals_reviewer="auto_review"/g)).toHaveLength(2);
+      expect(yamlStr).not.toContain("--yolo");
       expect(yamlStr).not.toContain("--dangerously-bypass-approvals-and-sandbox");
     }],
   });
@@ -587,7 +590,8 @@ agents:
       expect(yamlStr).toContain("id: uuid-1");
       expect(yamlStr).toContain('"100": 0');
       expect(yamlStr).toContain('"101": 1');
-      expect(yamlStr).toContain("claude --continue --dangerously-skip-permissions --model claude-opus-4-8");
+      expect(yamlStr).toContain("claude --continue --permission-mode auto --no-chrome --model claude-opus-4-8");
+      expect(yamlStr).not.toContain("--dangerously-skip-permissions");
       expect(yamlStr).toContain("npm run dev");
     }],
   });

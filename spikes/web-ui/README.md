@@ -54,10 +54,10 @@ path and attachment preview as the file picker and drag-and-drop.
 
 Closing the browser does not stop an active turn. Agents created manually in
 the GUI use Claude `acceptEdits` and the locally configured Codex sandbox.
-Bridge-provisioned canary agents are marked `automation`: Claude receives the
-same bypass-permissions contract as the legacy fleet and Codex app-server gets
-explicit `danger-full-access` + `never` approval settings. The modes cannot be
-confused silently because they are persisted in the registry and included in
+Bridge-provisioned canary agents are marked `automation`: Claude uses native
+`auto` permission review with Chrome integration disabled, while Codex uses a
+network-enabled workspace sandbox plus its native auto reviewer. The modes
+cannot be confused silently because they are persisted in the registry and included in
 the idempotent create fingerprint. Model and effort are mutable next-turn
 settings and are reconciled only through the settings endpoint, never through
 that stable identity receipt. Both use the local CLI authentication/subscription,

@@ -86,6 +86,13 @@ feature("Codex profile filesystem boundary", () => {
       expect(readFileSync(join(ctx.secondary.home, "config.toml"), "utf-8")).toContain("gpt-5.6-sol");
       expect(lstatSync(join(ctx.secondary.home, "skills")).isSymbolicLink()).toBe(true);
       expect(lstatSync(join(ctx.secondary.home, "plugins")).isSymbolicLink()).toBe(true);
+      const safetyRules = readFileSync(
+        join(ctx.secondary.home, "rules", "agentmux-execution-safety.rules"),
+        "utf-8",
+      );
+      expect(safetyRules).toContain('decision = "prompt"');
+      expect(safetyRules).toContain('"xdg-open"');
+      expect(safetyRules).toContain('not_match = ["playwright test"]');
       expect(isCodexProfileAuthenticated(ctx.secondary)).toBe(false);
       expect(isCodexProfileAuthenticated(ctx.primary)).toBe(true);
       ctx.cleanup();
