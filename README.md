@@ -218,6 +218,36 @@ untrusted-data fencing, and overlap locking are built in. See
   - Codex CLI
 - A Discord bot token if you want the Discord bridge
 
+## Isolated worktree gates
+
+Ignored dependency directories do not follow a new Git worktree. Bootstrap all
+tracked npm and uv roots before testing:
+
+```bash
+amux worktree-deps /path/to/worktree
+amux worktree-deps /path/to/worktree --check
+amux gate --scoped /path/to/worktree
+```
+
+The bootstrap discovers root and nested `package-lock.json` files. Relocatable
+npm trees are installed once into an immutable, Git-common-dir cache keyed by
+the package, lock, repository `.npmrc`, npm version, platform, architecture,
+and Node ABI, then linked into the worktree. A changed lock gets a different
+cache; it can never silently
+reuse the previous compiler. npm workspaces and local/file links remain local.
+
+Python always gets a real worktree-local `.venv`: shared virtualenvs can retain
+editable paths to another checkout. `uv sync --locked` and lock hashes make
+dependency drift a visible failure instead of modifying `uv.lock`.
+
+`amux gate --scoped` provisions first, selects `tools/gate.sh`, `make check`,
+`npm run check`, or `npm test` in that order, and reports every skipped root.
+It never reports green when a tracked dependency root could not be provisioned,
+no full gate exists, the gate fails, or a lock changed. Use `-- command ...` for
+a repository-owned full gate that cannot be inferred. Before agentmux itself is
+installed, the stdlib-only bootstrap remains available as
+`node /path/to/agentmux/bin/worktree-deps.mjs /path/to/worktree`.
+
 ## Quick Start
 
 ```bash
