@@ -270,6 +270,9 @@ while read -r session pane repo _rest; do
   jsonl_ts=$(pane_jsonl_mtime "$session" "$pane")
   progress=$(( commit_ts > jsonl_ts ? commit_ts : jsonl_ts ))
   age_min=$(( (now - progress) / 60 ))
+  # Work actually SHIPPED, as opposed to a pane that merely talked. commit_ts=0
+  # (no commits at all) reads as infinitely old, never as fresh.
+  commit_age_min=$(( (now - commit_ts) / 60 ))
   broker_idle_sec=$(( jsonl_ts > 0 ? now - jsonl_ts : 999999 ))
 
   warn="${WATCH_DIR}/${session}.warned"
@@ -283,7 +286,12 @@ while read -r session pane repo _rest; do
     continue
   fi
   if [ "$age_min" -lt "$STALE_MIN" ]; then
-    rm -f "$warn" "$snooze"   # progress made → clear any self-snooze
+    rm -f "$warn"
+    # Drop the self-snooze only on a real COMMIT, never on pane chatter: a
+    # broker must be active to touch the snooze, so clearing on jsonl freshness
+    # always deleted the snooze it had just set, then re-nudged an hour later,
+    # forever (api:2 2026-07-15: set 18:05, deleted 18:20, NUDGED 21:00).
+    [ "$commit_age_min" -lt "$STALE_MIN" ] && rm -f "$snooze"
     log "$session:$pane: OK (framdrift ${age_min}min sedan)"
     continue
   fi
