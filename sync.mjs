@@ -11,7 +11,12 @@ import {
 } from "./core/execution-safety.mjs";
 
 const DEFAULT_AGENT_CMD = `claude --continue ${CLAUDE_AUTONOMOUS_FLAGS} --model ${resolveClaudeModel()}`;
-const DEFAULT_CODEX_CMD = `codex resume --last ${CODEX_AUTONOMOUS_FLAGS}`;
+// Never `codex resume --last`: it resumes the globally most-recent rollout, not
+// this pane's own, so a pane launched from generated config can attach to
+// another live pane's session — two writers, interleaved model/context (the
+// skydive model-override incident). Start fresh; exact pane-owned resume is
+// selected at launch via core/codex-session-guard.mjs, never a global shortcut.
+const DEFAULT_CODEX_CMD = `codex ${CODEX_AUTONOMOUS_FLAGS}`;
 
 /** Expand ~ to $HOME in paths */
 export function expandTilde(p) {
