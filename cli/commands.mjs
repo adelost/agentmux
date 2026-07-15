@@ -2224,7 +2224,29 @@ async function inspectPane(ctx, agent, pane) {
       const turns = groupNativeTurns(snapshot.events);
       const latest = turns.at(-1);
       const preview = latest?.items?.filter((item) => item.type === "text").at(-1)?.content || "";
-      const context = await ctx.agent.getContext(agent.name, pane.index);
+      const rawContext = snapshot.agent.context;
+      const compactEvent = [...(snapshot.events || [])].reverse().find(
+        (event) => event?.type === "web"
+          && ["compacted", "compact-done"].includes(event.subtype),
+      );
+      const observedValue = rawContext?.observedAt
+        ?? rawContext?.updatedAt
+        ?? snapshot.agent.updatedAt
+        ?? Date.now();
+      const observedMs = Number.isFinite(Number(observedValue))
+        ? Number(observedValue)
+        : Date.parse(String(observedValue));
+      const context = rawContext && Number.isFinite(rawContext.percent) ? {
+        percent: Math.round(rawContext.percent),
+        tokens: Number.isFinite(rawContext.usedTokens) ? rawContext.usedTokens : null,
+        windowTokens: Number.isFinite(rawContext.windowTokens) ? rawContext.windowTokens : null,
+        model: snapshot.agent.model ?? null,
+        effort: snapshot.agent.effort ?? null,
+        observedAt: new Date(Number.isFinite(observedMs) ? observedMs : Date.now()).toISOString(),
+        source: "native-runtime",
+        confidence: "exact",
+        lastCompactAt: compactEvent?.at ? new Date(compactEvent.at).toISOString() : null,
+      } : await ctx.agent.getContext(agent.name, pane.index);
       return {
         status: snapshot.agent.running ? "working" : "idle",
         preview: preview.replace(/\s+/g, " ").trim(),
@@ -3605,19 +3627,30 @@ async function cmdImage(args, ctx) {
  * is closest to the context ceiling right now?" without manual digging.
  */
 async function cmdTop(ctx, flags = {}) {
-  const agents = listAgents(ctx.configPath);
-  const rows = [];
+  const rows = await collectContextTelemetry(ctx);
 
-  for (const a of agents) {
-    if (!(await hasSession(ctx, a.name))) continue;
-    const panes = await listPanes(ctx, a.name);
-    for (const p of panes) {
-      if (!dialectFor(a, p)) continue;
-      const { status, preview, context } = await inspectPane(ctx, a, p);
-      if (!context) continue;
-      const label = a.panes[p.index]?.label || null;
-      rows.push({ agent: a.name, pane: p.index, status, context, preview, label });
-    }
+  if (flags.json) {
+    console.log(JSON.stringify({
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      agents: rows.map(({ agent, pane, engine, status, context }) => ({
+        agentId: `${agent}:${pane}`,
+        session: agent,
+        pane,
+        engine,
+        status,
+        model: context.model ?? null,
+        effort: context.effort ?? null,
+        percent: context.percent,
+        usedTokens: context.tokens ?? null,
+        windowTokens: context.windowTokens ?? null,
+        observedAt: context.observedAt ?? null,
+        source: context.source ?? `${engine}-unknown`,
+        confidence: context.confidence ?? "estimated",
+        lastCompactAt: context.lastCompactAt ?? null,
+      })),
+    }));
+    return;
   }
 
   if (!rows.length) { console.log("No claude/codex panes with context data."); return; }
@@ -3638,6 +3671,33 @@ async function cmdTop(ctx, flags = {}) {
     const display = r.label ? `[${truncate(r.label, 40)}]` : truncate(r.preview, 50);
     console.log(`  ${icon} ${ctxCell}  ${agentCell} ${paneCell}  ${display}`);
   }
+}
+
+/** Canonical context rows consumed by both the terminal leaderboard and telemetry publisher. */
+export async function collectContextTelemetry(ctx) {
+  const agents = listAgents(ctx.configPath);
+  const rows = [];
+
+  for (const a of agents) {
+    if (!(await hasSession(ctx, a.name))) continue;
+    const panes = await listPanes(ctx, a.name);
+    for (const p of panes) {
+      if (!dialectFor(a, p)) continue;
+      const { status, preview, context } = await inspectPane(ctx, a, p);
+      if (!context) continue;
+      const label = a.panes[p.index]?.label || null;
+      rows.push({
+        agent: a.name,
+        pane: p.index,
+        engine: dialectFor(a, p),
+        status,
+        context,
+        preview,
+        label,
+      });
+    }
+  }
+  return rows;
 }
 
 // --- Label management -----------------------------------------------------
@@ -4127,7 +4187,7 @@ const FLAG_SPECS = {
     grep: "string",                       // jsonl: regex filter over prompt + items
   },
   ps: { n: "number" },
-  top: { n: "number", sort: "string" },
+  top: { n: "number", sort: "string", json: "boolean" },
   timeline: {
     n: "number",
     agent: "string",

@@ -166,6 +166,7 @@ function newestSessionFile(paneDir) {
   return {
     path: join(projectDir, files[0].name),
     sessionId: files[0].name.replace(/\.jsonl$/, ""),
+    mtimeMs: files[0].mtime,
   };
 }
 
@@ -210,10 +211,15 @@ function getContextFromClaudeJsonl(paneDir) {
       // >100% nonsense.
       const declared = claudeMaxForModel(entry.message?.model);
       const max = Math.max(declared, total);
+      const entryTime = Date.parse(entry?.timestamp || "");
       return {
         percent: Math.round((total / max) * 100),
         tokens: total,
+        windowTokens: max,
         model: entry.message?.model ?? null,
+        observedAt: new Date(Number.isFinite(entryTime) ? entryTime : session.mtimeMs).toISOString(),
+        source: "claude-jsonl",
+        confidence: "estimated",
       };
     } catch {
       // malformed line, try the next
@@ -305,10 +311,20 @@ function getContextFromCodexJsonl(paneDir) {
   // "context used" means).
   let usage = null;
   let turnCtx = null;
-  for (let i = lines.length - 1; i >= 0 && !(usage && turnCtx); i--) {
+  let lastCompactAt = null;
+  for (let i = lines.length - 1; i >= 0; i--) {
     if (!lines[i].trim()) continue;
     let entry;
     try { entry = JSON.parse(lines[i]); } catch { continue; }
+
+    if (!lastCompactAt && (
+      entry?.type === "compacted"
+      || entry?.payload?.type === "context_compacted"
+      || entry?.payload?.type === "compacted"
+    )) {
+      const compactTime = Date.parse(entry?.timestamp || entry?.payload?.timestamp || "");
+      if (Number.isFinite(compactTime)) lastCompactAt = new Date(compactTime).toISOString();
+    }
 
     if (!turnCtx && entry?.type === "turn_context" && entry.payload?.model) {
       turnCtx = {
@@ -328,7 +344,15 @@ function getContextFromCodexJsonl(paneDir) {
     // Add output tokens that contribute to the current turn's context.
     const tokens = (last.input_tokens || 0) + (last.output_tokens || 0);
     const max = info.model_context_window || 256_000;
-    usage = { percent: Math.round((tokens / max) * 100), tokens };
+    const observed = Date.parse(entry?.timestamp || "");
+    usage = {
+      percent: Math.round((tokens / max) * 100),
+      tokens,
+      windowTokens: max,
+      observedAt: new Date(Number.isFinite(observed) ? observed : statSync(file).mtimeMs).toISOString(),
+      source: "codex-jsonl",
+      confidence: "exact",
+    };
   }
   if (!usage) return null;
   // A long-running turn (hundreds of tool events) pushes the newest
@@ -349,7 +373,13 @@ function getContextFromCodexJsonl(paneDir) {
     turnCtx = headTurnContext(file);
     if (turnCtx) modelSource = "head";
   }
-  return { ...usage, model: turnCtx?.model ?? null, effort: turnCtx?.effort ?? null, modelSource };
+  return {
+    ...usage,
+    model: turnCtx?.model ?? null,
+    effort: turnCtx?.effort ?? null,
+    modelSource,
+    lastCompactAt,
+  };
 }
 
 const BACKWARD_SCAN_MAX_BYTES = 8 * 1024 * 1024;
@@ -467,12 +497,22 @@ export function getContextPushed(paneDir) {
   if (!Number.isFinite(ageMs) || ageMs > STATUSLINE_BRIDGE_FRESH_MS) return null;
   let tokens = null;
   let model = null;
+  let windowTokens = null;
   try {
     const jsonl = getContextFromClaudeJsonl(paneDir);
     tokens = jsonl?.tokens ?? null;
     model = jsonl?.model ?? null;
+    windowTokens = jsonl?.windowTokens ?? null;
   } catch { /* display-only — percent stands alone */ }
-  return { percent: Math.round(percent), tokens, model };
+  return {
+    percent: Math.round(percent),
+    tokens,
+    windowTokens,
+    model,
+    observedAt: new Date(Number(data.timestamp) * 1000).toISOString(),
+    source: "claude-statusline",
+    confidence: "reported",
+  };
 }
 
 // --- Public dispatcher -------------------------------------------------
@@ -540,7 +580,16 @@ function getContextFromStatusline(tail, paneDir = null) {
         tokens = getContextFromClaudeJsonl(paneDir)?.tokens ?? null;
       } catch { /* display-only — percent stands alone */ }
     }
-    return { percent, tokens, model: modelMatch[0] };
+    const model = modelMatch[0];
+    return {
+      percent,
+      tokens,
+      windowTokens: claudeMaxForModel(model),
+      model,
+      observedAt: new Date().toISOString(),
+      source: "claude-pane",
+      confidence: "reported",
+    };
   }
   return null;
 }
@@ -632,11 +681,24 @@ export function getContextFromPane(paneContent, paneDir = null) {
     }
     if (max === null) max = CLAUDE_DEFAULT_MAX;
     percent = Math.min(100, Math.round((tokens / max) * 100));
+    tokenSource = `${tokenSource}-estimated`;
   }
 
   let model = null;
   if (paneDir) {
     try { model = readLatestClaudeModel(paneDir); } catch { /* display-only */ }
   }
-  return { percent, tokens, model };
+  const windowTokens = model ? claudeMaxForModel(model) : Math.max(
+    CLAUDE_DEFAULT_MAX,
+    percent > 0 ? Math.round((tokens * 100) / percent) : CLAUDE_DEFAULT_MAX,
+  );
+  return {
+    percent,
+    tokens,
+    windowTokens,
+    model,
+    observedAt: new Date().toISOString(),
+    source: "claude-pane",
+    confidence: tokenSource.endsWith("-estimated") ? "estimated" : "reported",
+  };
 }
