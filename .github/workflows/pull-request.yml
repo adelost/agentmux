@@ -26,6 +26,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Install the ripgrep integration dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ripgrep
       - name: Install locked dependencies
         run: npm ci
       - name: Run the fast repository gate
