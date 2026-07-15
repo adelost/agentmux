@@ -3,6 +3,7 @@ import {
   groupByPane,
   classifyPane,
   isWaitingLikeText,
+  isAskToHuman,
   looksDone,
   previewText,
   isStaleWaiter,
@@ -83,6 +84,24 @@ feature("groupByPane", () => {
   });
 });
 
+feature("groupByPane system-noise filtering (SRC-0053)", () => {
+  unit("a /compact wrapper counts as a turn but never as the directive", {
+    given: ["a real directive followed by a compact wrapper", () => ({
+      rows: [
+        row("ai", 2, "user", "deploya FE-vågen till home", "2026-07-15T08:00:00Z"),
+        row("ai", 2, "user", "<command-name>/compact</command-name>", "2026-07-15T08:12:00Z"),
+        row("ai", 2, "user", "This session is being continued from a previous conversation that ran out of context.", "2026-07-15T08:13:00Z"),
+      ],
+    })],
+    when: ["grouping", ({ rows }) => groupByPane(rows).get("ai:2")],
+    then: ["turns count all three, directive slots keep only the human text", (b) => {
+      expect(b.turns).toBe(3);
+      expect(b.lastUserText).toBe("deploya FE-vågen till home");
+      expect(b.recentUserTexts).toEqual(["deploya FE-vågen till home"]);
+    }],
+  });
+});
+
 feature("isWaitingLikeText", () => {
   unit("returns false for empty / null", {
     given: ["no content", () => ({ texts: [null, "", "   "] })],
@@ -128,6 +147,78 @@ feature("isWaitingLikeText", () => {
     })],
     when: ["checking", ({ text }) => isWaitingLikeText(text)],
     then: ["not waiting", (result) => expect(result).toBe(false)],
+  });
+
+  unit("agent-lane waiting states do NOT count as human asks (SRC-0053)", {
+    given: ["live false-positives from 2026-07-15", () => ({ texts: [
+      "SRC-0012 är bankad i två draft-PR:er. Awaiting owner rebase.",
+      "Väntar på merge/review från lsrc:2 innan jag fortsätter.",
+      "Deploy staged. The ball is in the owner's court now.",
+      "Klart och pushat. Säg till om du vill ha en sanity check.",
+      "All done — let me know if anything looks off.",
+    ] })],
+    when: ["checking each", ({ texts }) => texts.map(isWaitingLikeText)],
+    then: ["none is a human-directed ask", (result) =>
+      expect(result).toEqual([false, false, false, false, false])],
+  });
+
+  unit("explicitly human-targeted waits DO count", {
+    given: ["waits that name the human or second person", () => ({ texts: [
+      "Vågen är bankad. Väntar på ditt besked innan deploy.",
+      "Avvaktar ditt beslut om färg A eller B.",
+      "Awaiting your confirmation before I delete the branch.",
+      "Please confirm the rollback window.",
+      "Vill du att jag deployar hela vågen nu?",
+    ] })],
+    when: ["checking each", ({ texts }) => texts.map(isWaitingLikeText)],
+    then: ["all are human-directed asks", (result) =>
+      expect(result).toEqual([true, true, true, true, true])],
+  });
+});
+
+feature("isAskToHuman provenance (SRC-0053 A)", () => {
+  unit("a question answering an inter-agent envelope is that agent's ball", {
+    when: ["classifying the live repro pairs", () => ([
+      // Canonical auto-prepended envelope.
+      isAskToHuman("Vill du att jag mergar PR #24?", "[from lsrc:2]\n\nreview-kön åldras, disponera"),
+      // Hand-written envelope variant the strict parser rejects.
+      isAskToHuman("Ska jag ta nästa våg också?", "[from claw:3 · audit-reconcile] granska brokers"),
+      // Generic human-target phrase inside an agent thread stays agent-bound.
+      isAskToHuman("Väntar på ditt besked innan jag fortsätter.", "[from skydive:2] koordinera deployen"),
+    ])],
+    then: ["none is human needs-you", (result) => expect(result).toEqual([false, false, false])],
+  });
+
+  unit("a mere MENTION of the human in an agent thread is not a human ask", {
+    when: ["questions about (not to) the human inside inter-agent threads", () => ([
+      // Asks the PEER whether to escalate — the peer's ball.
+      isAskToHuman("Ska jag eskalera detta till Mattias?", "[from lsrc:2]\n\nquota-läget oklart"),
+      // About the user, not to the user.
+      isAskToHuman("Buggen drabbar användaren, ska jag fixa?", "[from skydive:2] triagera SKY-0091"),
+      // "your" in a peer thread is the PEER's approval, not the human's.
+      isAskToHuman("Branch pushed. Needs your approval. Should I merge now?", "[from lsrc:2] granska PR #31"),
+    ])],
+    then: ["all stay agent-bound", (result) => expect(result).toEqual([false, false, false])],
+  });
+
+  unit("direct address or waiting-on-the-human keeps needs-you in an agent thread", {
+    when: ["replies that address Mattias or wait on his decision", () => ([
+      isAskToHuman("Mattias, vill du ha färg A eller B?", "[from ai:2] designfrågorna kvarstår"),
+      isAskToHuman("Vågen är bankad. Väntar på Mattias besked innan deploy.", "[from lsrc:2] status?"),
+    ])],
+    then: ["both are human asks", (result) => expect(result).toEqual([true, true])],
+  });
+
+  unit("a question answering a human prompt is human needs-you", {
+    when: ["human directive followed by a question back", () =>
+      isAskToHuman("Vill du att jag deployar hela vågen nu?", "fixa deploy-flödet")],
+    then: ["it is a human ask", (result) => expect(result).toBe(true)],
+  });
+
+  unit("non-waiting replies are never asks regardless of provenance", {
+    when: ["a done reply after a human prompt", () =>
+      isAskToHuman("Klart och pushat.", "fixa deploy-flödet")],
+    then: ["not an ask", (result) => expect(result).toBe(false)],
   });
 });
 

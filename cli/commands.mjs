@@ -64,8 +64,9 @@ import { createBridgeLifecycle } from "./bridge.mjs";
 import { consumeFleetRestart, queueFleetRestart } from "../core/fleet-restart.mjs";
 import {
   groupByPane, previewText,
-  isRunningNow, isWaitingLikeText, looksDone,
+  isRunningNow, isAskToHuman, looksDone,
 } from "../core/orchestrator-checkpoint.mjs";
+import { isSystemNoiseDirective } from "../core/system-noise.mjs";
 import { collectCommitsSince, reposFromAgents } from "../core/commit-log.mjs";
 import { pruneOldSessions, formatJanitorResult } from "../core/janitor.mjs";
 import { reapStalePlaywrightProcesses, formatPlaywrightReapResult } from "../core/playwright-watchdog.mjs";
@@ -1074,7 +1075,7 @@ function renderSelfBlock(selfKey, widerBuckets, statuses, nowMs) {
   const status = statuses.get(selfKey) || "unknown";
   let state = "🟡 jobbar";
   if (needsHumanStatus(status)) state = "🔴 väntar på input";
-  else if (isWaitingLikeText(b.lastAssistantText)) state = "🔴 du väntar på svar (från Mattias)";
+  else if (isAskToHuman(b.lastAssistantText, b.lastUserText)) state = "🔴 du väntar på svar (från Mattias)";
   else if (isLiveStatus(status) || isRunningNow(b, nowMs)) state = "🟡 jobbar";
   else if (looksDone(b.lastAssistantText)) state = "✅ klar";
   else state = "⚠️ idle, ev. mer att göra (sa aldrig 'klart')";
@@ -1226,7 +1227,7 @@ async function cmdDone(ctx, flags) {
     else if (live) working.push(entry);
     else if (bucket.turns === 0) idleCount++;
     else if (userSpokeLast && ageMs > STALL_MIN_MS) stalled.push(entry);             // directive unanswered → dropped
-    else if (isWaitingLikeText(bucket.lastAssistantText)) needsYou.push(entry);      // agent asked the human something
+    else if (isAskToHuman(bucket.lastAssistantText, bucket.lastUserText)) needsYou.push(entry); // agent asked the HUMAN something
     else if (inWindow) doneRecent.push(entry);                                       // replied within the window
     else idleCount++;                                                                // old + already replied
   }
@@ -2029,15 +2030,6 @@ function formatCommitRow(c) {
   const hash = c.hash.slice(0, 7);
   const subject = c.subject.length > 70 ? c.subject.slice(0, 69) + "…" : c.subject;
   return `${tsLabel}  ${labelPad}  ${hash}  ${subject}`;
-}
-
-// User-role jsonl events that are NOT a human directive: slash-command echoes,
-// resume/compact hints, session-continuation banners, caveat preambles. These
-// must not count as "the user spoke last" (else every resumed pane looks like
-// a dropped ask) nor clutter the ← directive line.
-function isSystemNoiseDirective(text) {
-  if (!text) return true;
-  return /^\s*(<local-command|<command-name>|\[amux (resume|compact) hint\]|This session is being continued|Caveat:|<system-)/i.test(text);
 }
 
 /**

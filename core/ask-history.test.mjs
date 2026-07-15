@@ -39,6 +39,17 @@ feature("ask-history: classifyAskTurn", () => {
     then: ["it is needs-you", (status) => expect(status).toBe("needs-you")],
   });
 
+  unit("a question answering an inter-agent envelope is answered, not needs-you (SRC-0053 A)", {
+    when: ["classifying a broker-thread reply that asks a generic question", () =>
+      classifyAskTurn(turn({
+        userPrompt: "[from lsrc:2]\n\nreview-kön åldras — disponera PR #24/#27",
+        items: [text("Båda är rebasade. Vill du att jag mergar direkt?")],
+        isComplete: true,
+      }))],
+    then: ["it is answered (the ball is lsrc:2's, not the human's)", (status) =>
+      expect(status).toBe("answered")],
+  });
+
   unit("complete done-like reply is done", {
     when: ["classifying a complete done reply", () =>
       classifyAskTurn(turn({
@@ -103,6 +114,24 @@ feature("ask-history: build and filter entries", () => {
         open: true,
         jsonlFile: "/tmp/session.jsonl",
       });
+    }],
+  });
+
+  unit("system-noise prompts never become ask entries (SRC-0053)", {
+    given: ["a real ask surrounded by machine plumbing", () => ({
+      turns: [
+        turn({ userPrompt: "<command-name>/compact</command-name>", items: [] }),
+        turn({ userPrompt: "This session is being continued from a previous conversation that ran out of context.", items: [] }),
+        turn({ timestamp: "2026-07-15T08:10:00.000Z", userPrompt: "granska PR #22", items: [] }),
+      ],
+    })],
+    when: ["building ask entries", ({ turns }) => buildAskEntries({
+      agent: "lsrc", pane: 2, turns,
+      nowMs: Date.parse("2026-07-15T08:15:00.000Z"),
+    })],
+    then: ["only the human ask survives", (entries) => {
+      expect(entries).toHaveLength(1);
+      expect(entries[0].prompt).toBe("granska PR #22");
     }],
   });
 

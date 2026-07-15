@@ -8,6 +8,8 @@
 // What remains: bucket-and-classify helpers used by cmdDone to render rows.
 
 import { isLiveStatus, needsHumanStatus } from "./pane-status.mjs";
+import { isSystemNoiseDirective } from "./system-noise.mjs";
+import { parseSenderHeader } from "./sender-detect.mjs";
 
 /**
  * Bucket timeline rows by `agent:pane` key. Each bucket captures the turn
@@ -45,7 +47,10 @@ export function groupByPane(rows) {
       b.latestTurnTs = t;
     }
     if (r.type === "text" || r.type == null) {
-      if (r.role === "user" && r.content) {
+      // Machine plumbing (/compact wrappers, continuation preambles) still
+      // counts toward turns but must never occupy the directive slots — a
+      // pane whose "senast ombedd" reads <command-name>/compact is a lie.
+      if (r.role === "user" && r.content && !isSystemNoiseDirective(r.content)) {
         b.lastUserText = r.content;
         if (tValid) b.lastUserTextTs = t;
         b.recentUserTexts.push(r.content);
@@ -93,12 +98,17 @@ export function isRunningNow(bucket, nowMs, withinMs = 60_000) {
 }
 
 /**
- * Heuristic: does this assistant message read like it's waiting on user
- * input? Matches explicit question marks + common Swedish/English prompts
- * ("säg", "bekräfta", "vill du", "want me to", etc). Kept conservative —
- * false-positives just show "waiting" instead of "finished" which is
- * annoying but not dangerous; false-negatives miss a wait signal which
- * matters more for orchestration correctness.
+ * Heuristic: does this assistant message read like an EXPLICIT ask directed
+ * at the human? Matches a trailing question mark plus second-person ask cues
+ * ("vill du", "ska jag", "want me to", "säg till", ...).
+ *
+ * Deliberately does NOT match generic waiting-state verbs ("awaiting",
+ * "avvaktar", "väntar på", "confirm"): those fire on process states —
+ * "awaiting review/CI/deploy", "väntar på lsrc:2" — and flooded the
+ * needs-you bucket with panes that were waiting on ANOTHER AGENT, not the
+ * human (SRC-0053). A needs-you row must mean the ball is in the human's
+ * court; a missed generic waiter shows up as idle instead, which the
+ * fleet watchdogs already cover.
  */
 export function isWaitingLikeText(text) {
   if (!text) return false;
@@ -117,13 +127,45 @@ export function isWaitingLikeText(text) {
     /ska jag /,
     /want me to /,
     /should i /,
-    /let me know /,
-    /awaiting /,
-    /avvaktar\b/,
-    /väntar på /,
-    /confirm\b/,
+    // Waiting-verbs count ONLY with an explicit human target. Bare "väntar
+    // på review/merge/CI" is an agent-lane state, not a human ask; optional
+    // offers ("klart — säg till om ...", "let me know if ...") must not
+    // block either, so neither phrase is a cue on its own.
+    /väntar på (dig|ditt|din|mattias)/,
+    /avvaktar (ditt|dina|din) /,
+    /awaiting your /,
+    /(please|can you) confirm/,
   ];
   return cues.some((r) => r.test(tail));
+}
+
+/**
+ * Provenance-aware needs-you: a waiting-like reply only puts the ball in the
+ * HUMAN's court when the conversation partner is the human. When the latest
+ * prompt carries an inter-agent envelope ("[from lsrc:2] ..."), a generic
+ * second-person question ("Vill du att jag mergar?") is addressed to that
+ * agent, not to Mattias. parseSenderHeader covers the canonical
+ * auto-prepended envelope; the loose "[from ..." fallback covers
+ * hand-written variants ("[from claw:3 · audit]") that the strict routing
+ * parser rejects — for CLASSIFICATION a human never types that prefix, so
+ * loose is safe here.
+ *
+ * Inside an agent thread, needs-you survives only when the reply actually
+ * ADDRESSES the human (vocative "Mattias, ...") or states that the human's
+ * decision is what's pending ("väntar på Mattias besked"). A mere MENTION
+ * is not an ask: "Ska jag eskalera detta till Mattias?" asks the peer
+ * agent, and "buggen drabbar användaren, ska jag fixa?" is about the user,
+ * not to the user.
+ */
+export function isAskToHuman(replyText, promptText) {
+  if (!isWaitingLikeText(replyText)) return false;
+  const prompt = String(promptText || "").trimStart();
+  const interAgent = parseSenderHeader(prompt) != null || /^\[from \S+/.test(prompt);
+  if (!interAgent) return true;
+  const tail = String(replyText).trim().slice(-300);
+  return /(^|[.!?]\s+|\n)\s*(mattias|@?human|användaren)\s*[,:;-]/im.test(tail)
+    || /(väntar på|behöver|kräver|inväntar) (mattias'?s?|human|mänskligt?)\s*(besked|svar|beslut|godkännande|approval|input|blick)/i.test(tail)
+    || /needs (mattias|human) (approval|decision|input|call)/i.test(tail);
 }
 
 /**

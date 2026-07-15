@@ -37,6 +37,7 @@ import { readdirSync, statSync } from "fs";
 import { join } from "path";
 import { claudeProjectDir } from "./claude-paths.mjs";
 import { readTailWindow } from "./jsonl-reader.mjs";
+import { isSystemNoiseDirective } from "./system-noise.mjs";
 
 // The hint only needs the LAST user turn, which lives at the tail. Reading the
 // whole session jsonl throws once it passes Node's max string length (512MB+),
@@ -143,10 +144,11 @@ export function extractLastUserTurn(jsonlContent) {
         .join(" ");
     }
     if (!text) continue;
-    if (/^<(local-command|command-message|command-name|command-stdout|command-stderr)/.test(text)) continue;
-
+    // Strip a prepended hint BEFORE the noise check: a hint-plus-brief turn
+    // must surface the brief, while a pure hint/wrapper turn is skipped.
     text = stripResumeHint(text);
     if (!text) continue;
+    if (isSystemNoiseDirective(text)) continue;
 
     return { ts: d.timestamp || null, text };
   }

@@ -4,8 +4,9 @@
 //      pane → jsonl location when work was handed out but not clearly closed.
 // DOES NOT: Read files, inspect tmux, parse config, or decide pane ownership.
 
-import { isWaitingLikeText, looksDone, previewText } from "./orchestrator-checkpoint.mjs";
+import { isAskToHuman, looksDone, previewText } from "./orchestrator-checkpoint.mjs";
 import { isLiveStatus } from "./pane-status.mjs";
+import { isSystemNoiseDirective } from "./system-noise.mjs";
 
 const OPEN_STATUSES = new Set(["open", "working", "partial", "needs-you"]);
 
@@ -23,7 +24,9 @@ export function classifyAskTurn(turn = {}, opts = {}) {
   if (!reply) return isLatest && live ? "working" : "open";
   if (isLatest && live && !turn.isComplete) return "working";
   if (looksDoneForAsk(reply) || looksDoneForAsk(fullReply)) return "done";
-  if (isWaitingLikeText(reply)) return "needs-you";
+  // Provenance-aware: a question answering an inter-agent envelope is that
+  // agent's ball, not the human's — it classifies as answered instead.
+  if (isAskToHuman(reply, turn.userPrompt)) return "needs-you";
   if (!turn.isComplete) return "partial";
   return "answered";
 }
@@ -43,7 +46,8 @@ export function buildAskEntries({
   const out = [];
   for (let i = 0; i < turns.length; i++) {
     const turn = turns[i] || {};
-    if (!turn.userPrompt) continue;
+    // A /compact wrapper or continuation preamble is not an ask anyone made.
+    if (!turn.userPrompt || isSystemNoiseDirective(turn.userPrompt)) continue;
     const tsMs = parseTs(turn.timestamp);
     const reply = latestTextItem(turn.items || []);
     const status = classifyAskTurn(turn, {
