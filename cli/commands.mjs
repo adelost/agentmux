@@ -32,6 +32,8 @@ import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.
 import { appendEvent, latestPaneStatesCached, mergeStatus, readEvents, eventsPath } from "../core/events.mjs";
 import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../core/pane-status.mjs";
 import { readHeartbeat } from "../core/heartbeat.mjs";
+import { assessRunningBridgeHints, syncConfiguredAgentHints } from "../core/hints-sync.mjs";
+import { ensureAgentHints, HINTS_VERSION } from "../agent.mjs";
 import { readGuardHeartbeats } from "../core/guard-heartbeat.mjs";
 import {
   checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors, checkLedger,
@@ -3297,6 +3299,34 @@ async function cmdSync(args) {
   console.log(`sync triggered on bridge (pid ${pid}). Tail bridge log for progress, or watch Discord channel deltas.`);
 }
 
+export function cmdHintsSync(ctx) {
+  const summary = syncConfiguredAgentHints(listAgents(ctx.configPath), {
+    ensure: ensureAgentHints,
+    version: HINTS_VERSION,
+  });
+  console.log(
+    `Hints v${HINTS_VERSION}: ${summary.configuredSessions} sessions / ` +
+    `${summary.workspaceRoots} workspaces, ${summary.changedFiles} files updated.`,
+  );
+  for (const entry of summary.entries.filter((item) => item.changedFiles > 0)) {
+    console.log(`  ${entry.agents.join(",")} -> ${entry.rootDir} (${entry.changedFiles} updated)`);
+  }
+  for (const failure of summary.errors) {
+    console.warn(`  ERROR ${failure.rootDir}/${failure.file || "workspace"}: ${failure.error}`);
+  }
+
+  const beat = (ctx.readHeartbeat || readHeartbeat)();
+  const bridge = assessRunningBridgeHints(beat, {
+    currentVersion: HINTS_VERSION,
+    pidAlive: (ctx.isPidAlive || isPidAlive)(Number(beat?.pid)),
+  });
+  if (bridge.warning) console.warn(`WARNING: ${bridge.warning}`);
+  if (summary.errors.length) {
+    throw new Error(`hints sync failed for ${summary.errors.length} configured path(s)`);
+  }
+  return { ...summary, bridge };
+}
+
 /** Standalone-sync path. Managed ownership is preserved across the bounce;
  *  manual ownership is never stopped without an explicit --detach takeover. */
 async function cmdSyncOffline({ allowManagedTakeover = false } = {}) {
@@ -3944,6 +3974,7 @@ Bridge controls (talk to the running bridge):
   agent sync                      Trigger Discord channel sync from agentmux.yaml
     --offline [--detach]          Standalone sync; managed bounce or explicit manual→managed takeover
                                   (slower; use when bridge is wedged or absent)
+  agent hints-sync                Refresh generated CLAUDE.md/AGENTS.md in every configured workspace
   agent reload                    Reload agents.yaml without restarting (SIGHUP)
   agent restart                   Restart bridge (SIGUSR2 → exit 75 → start.sh respawn)
     --all                         Recreate every configured tmux session, then restart bridge
@@ -4301,6 +4332,11 @@ export async function dispatch(argv, ctx) {
 
     case "sync": {
       return cmdSync(rest);
+    }
+
+    case "hints-sync": {
+      if (rest.length) throw new Error("amux hints-sync accepts no arguments");
+      return cmdHintsSync(ctx);
     }
 
     case "say": {

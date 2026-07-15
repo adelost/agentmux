@@ -150,8 +150,8 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.23.17";
-const HINTS_END_MARKER = "<!-- amux-hints-end -->";
+export const HINTS_VERSION = "1.23.17";
+export const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
 # agentmux
@@ -681,9 +681,20 @@ ${HINTS_END_MARKER}
 // workspace-specific notes that operators tacked on.
 export function ensureAgentHints(rootDir) {
   const agentsDir = join(rootDir, ".agents");
+  if (!existsSync(rootDir) || !statSync(rootDir).isDirectory()) {
+    throw new Error(`agent workspace does not exist: ${rootDir}`);
+  }
+  mkdirSync(agentsDir, { recursive: true });
+  ensureGitignored(rootDir, ".agents/");
+
+  const files = [];
   const tailOf = (content) => {
     const endIdx = content.indexOf(HINTS_END_MARKER);
-    return endIdx >= 0 ? content.slice(endIdx + HINTS_END_MARKER.length) : "";
+    if (endIdx < 0) return "";
+    const raw = content.slice(endIdx + HINTS_END_MARKER.length);
+    // AGENT_HINTS owns exactly one line ending after the marker. Remove only
+    // that generated delimiter; every subsequent byte belongs to the operator.
+    return raw.startsWith("\n") ? raw.slice(1) : raw;
   };
 
   // Operator additions below the end marker are workspace RULES, and rules
@@ -702,13 +713,19 @@ export function ensureAgentHints(rootDir) {
     try {
       const current = existsSync(path) ? readFileSync(path, "utf-8") : null;
       const tail = name === "CLAUDE.md" && current !== null ? tailOf(current) : canonicalTail;
-      const next = AGENT_HINTS + tail.replace(/^\s*\n/, "\n");
+      // The marker newline is generated; the remaining tail is operator
+      // content and survives byte-for-byte, including intentional whitespace.
+      const next = AGENT_HINTS + tail;
       // Content-compare instead of version-compare: also converges tails.
-      if (current !== next) writeFileSync(path, next);
+      const changed = current !== next;
+      if (changed) writeFileSync(path, next);
+      files.push({ name, path, changed, error: null });
     } catch (err) {
+      files.push({ name, path, changed: false, error: err.message });
       console.warn(`agent hints write failed (${name}): ${err.message}`);
     }
   }
+  return { rootDir, version: HINTS_VERSION, files };
 }
 
 function ensureGitignored(rootDir, entry) {
