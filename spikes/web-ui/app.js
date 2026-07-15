@@ -1,6 +1,32 @@
 const $ = (selector) => document.querySelector(selector);
 
+const THEME_STORAGE_KEY = "amux-code:color-theme";
+const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
+const readStoredTheme = () => {
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    return stored === "light" || stored === "dark" ? stored : null;
+  } catch {
+    return null;
+  }
+};
+const storedTheme = readStoredTheme();
+let followsSystemTheme = storedTheme === null;
+let colorTheme = storedTheme ?? (systemTheme.matches ? "dark" : "light");
+
+const applyColorTheme = (theme) => {
+  colorTheme = theme;
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  document.querySelector('meta[name="theme-color"]')
+    ?.setAttribute("content", theme === "dark" ? "#101310" : "#f2f3ee");
+};
+
+applyColorTheme(colorTheme);
+
 const elements = {
+  themeToggle: $("#theme-toggle"),
+  themeToggleIcon: $("#theme-toggle-icon"),
   projectSelect: $("#project-select"),
   pinnedConversationsButton: $("#pinned-conversations-button"),
   promptOverviewButton: $("#prompt-overview-button"),
@@ -66,6 +92,40 @@ const elements = {
   pinnedConversationsList: $("#pinned-conversations-list"),
   toast: $("#toast"),
 };
+
+const renderThemeToggle = () => {
+  const nextTheme = colorTheme === "light" ? "dark" : "light";
+  const translated = nextTheme === "dark" ? "mörkt" : "ljust";
+  const label = `Byt till ${translated} tema`;
+  elements.themeToggle.setAttribute("aria-label", label);
+  elements.themeToggle.title = label;
+  elements.themeToggleIcon.textContent = nextTheme === "dark" ? "☾" : "☀";
+};
+
+const setColorTheme = (theme, persist) => {
+  applyColorTheme(theme);
+  if (persist) {
+    followsSystemTheme = false;
+    try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch {}
+  }
+  renderThemeToggle();
+};
+
+elements.themeToggle.addEventListener("click", () => {
+  setColorTheme(colorTheme === "light" ? "dark" : "light", true);
+});
+renderThemeToggle();
+
+systemTheme.addEventListener("change", (event) => {
+  if (followsSystemTheme) setColorTheme(event.matches ? "dark" : "light", false);
+});
+
+window.addEventListener("storage", (event) => {
+  if (event.key !== THEME_STORAGE_KEY) return;
+  const stored = event.newValue === "light" || event.newValue === "dark" ? event.newValue : null;
+  followsSystemTheme = stored === null;
+  setColorTheme(stored ?? (systemTheme.matches ? "dark" : "light"), false);
+});
 
 const route = new URL(location.href);
 const state = {
