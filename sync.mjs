@@ -18,6 +18,7 @@ const DEFAULT_AGENT_CMD = `claude --continue ${CLAUDE_AUTONOMOUS_FLAGS} --model 
 // descriptor; startCodex resolves and resumes the exact pane-owned session.
 // A bare launch is allowed only for a profile's first explicit bootstrap.
 const DEFAULT_CODEX_CMD = `codex ${CODEX_AUTONOMOUS_FLAGS}`;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Expand ~ to $HOME in paths */
 export function expandTilde(p) {
@@ -77,6 +78,21 @@ export function parseConfig(yamlContent) {
     if (backend === "native" && claudeCount + codexCount < 1) {
       throw new Error(`agentmux.yaml: native agent '${name}' needs at least one Claude or Codex pane`);
     }
+    const nativeAgentIds = {};
+    if (config.nativeAgentIds !== undefined) {
+      if (backend !== "native" || !config.nativeAgentIds || typeof config.nativeAgentIds !== "object"
+          || Array.isArray(config.nativeAgentIds)) {
+        throw new Error(`agentmux.yaml: agent '${name}' has invalid nativeAgentIds`);
+      }
+      for (const [rawIndex, rawId] of Object.entries(config.nativeAgentIds)) {
+        const index = Number(rawIndex);
+        if (!Number.isSafeInteger(index) || index < 0 || index >= claudeCount + codexCount
+            || typeof rawId !== "string" || !UUID_PATTERN.test(rawId)) {
+          throw new Error(`agentmux.yaml: agent '${name}' has invalid nativeAgentIds entry '${rawIndex}'`);
+        }
+        nativeAgentIds[index] = rawId;
+      }
+    }
     agents.set(name, {
       dir: expandTilde(config.dir),
       panes: claudeCount + codexCount,
@@ -93,6 +109,7 @@ export function parseConfig(yamlContent) {
       claudeModel: config.claudeModel || null,
       codexModel: config.codexModel || null,
       effort: config.effort || null,
+      nativeAgentIds,
     });
   }
 
@@ -333,6 +350,7 @@ export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = 
             engine: "claude",
             ...(config.claudeModel ? { model: config.claudeModel } : {}),
             ...(config.effort ? { effort: config.effort } : {}),
+            ...(config.nativeAgentIds?.[paneIdx] ? { nativeAgentId: config.nativeAgentIds[paneIdx] } : {}),
           }
         : { name: i === 0 ? "claude" : `claude-${i + 1}`, cmd: DEFAULT_AGENT_CMD };
       const label = labelFor(paneIdx);
@@ -349,6 +367,7 @@ export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = 
             engine: "codex",
             ...(config.codexModel ? { model: config.codexModel } : {}),
             ...(config.effort ? { effort: config.effort } : {}),
+            ...(config.nativeAgentIds?.[paneIdx] ? { nativeAgentId: config.nativeAgentIds[paneIdx] } : {}),
           }
         : { name: i === 0 ? "codex" : `codex-${i + 1}`, cmd: DEFAULT_CODEX_CMD };
       const label = labelFor(paneIdx);

@@ -1763,8 +1763,13 @@ export function createWebUi(options = {}) {
         if (!key) { json(response, 400, { error: "idempotency-key-required" }); return; }
         const hasEffort = body?.effort !== undefined;
         const hasModel = body?.model !== undefined;
-        if (!hasEffort && !hasModel) {
+        const hasAddress = body?.address !== undefined;
+        const hasPermissionMode = body?.permissionMode !== undefined;
+        if (!hasEffort && !hasModel && !hasAddress && !hasPermissionMode) {
           json(response, 400, { error: "setting-required" }); return;
+        }
+        if ((hasAddress || hasPermissionMode) && agent.running) {
+          json(response, 409, { error: "agent-running" }); return;
         }
         if (hasEffort && !DEFAULT_EFFORTS[agent.engine].includes(body.effort)) {
           json(response, 400, { error: "unknown-effort", allowed: DEFAULT_EFFORTS[agent.engine] }); return;
@@ -1772,7 +1777,24 @@ export function createWebUi(options = {}) {
         const model = hasModel ? cleanName(body.model, 120) : agent.model;
         if (!model) { json(response, 400, { error: "model-required" }); return; }
         const effort = hasEffort ? body.effort : agent.effort;
-        const fingerprint = hashPayload({ agentId: agent.id, effort, model });
+        const address = hasAddress ? cleanAddress(body.address) : agent.address;
+        if (hasAddress && !address) { json(response, 400, { error: "invalid-agent-address" }); return; }
+        if (hasAddress && agent.address
+            && (agent.address.session !== address.session || Number(agent.address.pane) !== Number(address.pane))) {
+          json(response, 409, { error: "agent-address-already-bound" }); return;
+        }
+        if (hasAddress && [...agents.values()].some((candidate) => candidate.id !== agent.id
+            && candidate.address?.session === address.session
+            && Number(candidate.address?.pane) === Number(address.pane))) {
+          json(response, 409, { error: "agent-address-in-use" }); return;
+        }
+        if (hasPermissionMode && !["interactive", "automation"].includes(body.permissionMode)) {
+          json(response, 400, { error: "invalid-permission-mode" }); return;
+        }
+        const permissionMode = hasPermissionMode ? body.permissionMode : agent.permissionMode;
+        const fingerprint = hasAddress || hasPermissionMode
+          ? hashPayload({ agentId: agent.id, effort, model, address, permissionMode })
+          : hashPayload({ agentId: agent.id, effort, model });
         const receipt = receiptResult(receipts.settings, key, fingerprint);
         if (receipt?.conflict) { json(response, 409, { error: "idempotency-key-conflict" }); return; }
         if (receipt?.replayed) {
@@ -1781,6 +1803,8 @@ export function createWebUi(options = {}) {
         }
         agent.effort = effort;
         agent.model = model;
+        agent.address = address;
+        agent.permissionMode = permissionMode;
         agent.updatedAt = now();
         project.updatedAt = agent.updatedAt;
         rememberReceipt(receipts.settings, key, { id: agent.id, hash: fingerprint }, 500);
@@ -1788,6 +1812,8 @@ export function createWebUi(options = {}) {
         webEvent(agent, "settings", {
           effort: agent.effort,
           model: agent.model,
+          address: agent.address,
+          permissionMode: agent.permissionMode,
           appliesTo: "next-turn",
         });
         json(response, 200, publicAgent(agent));

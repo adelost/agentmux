@@ -122,6 +122,10 @@ agents:
     claudeModel: claude-opus-4-8
     codexModel: gpt-5.6-sol
     effort: high
+    # Optional: adopt this exact existing native agent/session. A mismatched
+    # ID, cwd, engine or missing session fails closed; it never starts fresh.
+    nativeAgentIds:
+      "0": 22222222-2222-4222-8222-222222222222
 ```
 
 Start the independent background process, then sync the canary channels:

@@ -156,33 +156,66 @@ export function createNativeRuntimeClient({
     if (cached?.runtimeUrl === spec.runtimeUrl) return cached;
 
     await api(spec.runtimeUrl, "/api/health");
-    const projectKey = `amux-project:${spec.entry.id || keyHash(`${name}:${spec.entry.dir}`)}`;
-    const project = await api(spec.runtimeUrl, "/api/projects", {
-      method: "POST",
-      body: {
-        idempotencyKey: projectKey,
-        name: `AMUX · ${name}`,
-        cwd: spec.entry.dir,
-      },
-    });
-    const agentKey = `amux-agent:${spec.entry.id || keyHash(`${name}:${spec.entry.dir}`)}:${pane}`;
-    let agent = await api(spec.runtimeUrl, `/api/projects/${project.id}/agents`, {
-      method: "POST",
-      body: {
-        idempotencyKey: agentKey,
-        name: `${name}:${pane}`,
-        engine: spec.engine,
-        address: { session: name, pane: Number(pane) },
-        permissionMode: "automation",
-      },
-    });
+    const adoptedId = String(spec.paneConfig.nativeAgentId || "").trim();
+    let project;
+    let agent;
+    if (adoptedId) {
+      const listing = await api(spec.runtimeUrl, "/api/projects");
+      const matches = (listing?.projects || []).flatMap((candidateProject) =>
+        (candidateProject.agents || [])
+          .filter((candidateAgent) => candidateAgent.id === adoptedId)
+          .map((candidateAgent) => ({ project: candidateProject, agent: candidateAgent })));
+      if (matches.length !== 1) {
+        throw new NativeRuntimeError(`native adopted agent ${adoptedId} not found exactly once`, {
+          code: "native-adopted-agent-not-found",
+        });
+      }
+      ({ project, agent } = matches[0]);
+      if (project.cwd !== spec.entry.dir || agent.engine !== spec.engine || !agent.sessionId) {
+        throw new NativeRuntimeError(`native adopted agent ${adoptedId} does not match target continuity`, {
+          code: "native-adopted-agent-mismatch",
+        });
+      }
+      const expectedAddress = { session: name, pane: Number(pane) };
+      if (agent.address && (agent.address.session !== expectedAddress.session
+          || Number(agent.address.pane) !== expectedAddress.pane)) {
+        throw new NativeRuntimeError(`native adopted agent ${adoptedId} already has another address`, {
+          code: "native-adopted-agent-address-conflict",
+        });
+      }
+    } else {
+      const projectKey = `amux-project:${spec.entry.id || keyHash(`${name}:${spec.entry.dir}`)}`;
+      project = await api(spec.runtimeUrl, "/api/projects", {
+        method: "POST",
+        body: {
+          idempotencyKey: projectKey,
+          name: `AMUX · ${name}`,
+          cwd: spec.entry.dir,
+        },
+      });
+      const agentKey = `amux-agent:${spec.entry.id || keyHash(`${name}:${spec.entry.dir}`)}:${pane}`;
+      agent = await api(spec.runtimeUrl, `/api/projects/${project.id}/agents`, {
+        method: "POST",
+        body: {
+          idempotencyKey: agentKey,
+          name: `${name}:${pane}`,
+          engine: spec.engine,
+          address: { session: name, pane: Number(pane) },
+          permissionMode: "automation",
+        },
+      });
+    }
     const settings = {
+      ...(adoptedId && !agent.address
+        ? { address: { session: name, pane: Number(pane) } } : {}),
+      ...(adoptedId && agent.permissionMode !== "automation"
+        ? { permissionMode: "automation" } : {}),
       ...(spec.paneConfig.model && spec.paneConfig.model !== agent.model
         ? { model: spec.paneConfig.model } : {}),
       ...(spec.paneConfig.effort && spec.paneConfig.effort !== agent.effort
         ? { effort: spec.paneConfig.effort } : {}),
     };
-    if (settings.model || settings.effort) {
+    if (Object.keys(settings).length) {
       const transitionKey = keyHash(JSON.stringify({
         agentId: agent.id,
         from: { model: agent.model, effort: agent.effort, updatedAt: agent.updatedAt },

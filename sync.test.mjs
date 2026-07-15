@@ -172,6 +172,8 @@ agents:
     claudeModel: claude-opus-4-8
     codexModel: gpt-5.6-sol
     effort: high
+    nativeAgentIds:
+      "1": 22222222-2222-4222-8222-222222222222
 `],
     when: ["parsing", (source) => parseConfig(source).agents.get("skybar-canary")],
     then: ["native metadata is explicit and normalized", (agent) => {
@@ -182,6 +184,7 @@ agents:
         claudeCount: 1,
         codexCount: 1,
         effort: "high",
+        nativeAgentIds: { 1: "22222222-2222-4222-8222-222222222222" },
       });
     }],
   });
@@ -530,6 +533,8 @@ agents:
     claude: 1
     codex: 1
     effort: high
+    nativeAgentIds:
+      "1": 22222222-2222-4222-8222-222222222222
 `;
       return parseConfig(source).agents;
     }],
@@ -544,6 +549,7 @@ agents:
       expect(output).toContain("cmd: native:claude");
       expect(output).toContain("cmd: native:codex");
       expect(output).toContain("effort: high");
+      expect(output).toContain("nativeAgentId: 22222222-2222-4222-8222-222222222222");
       expect(output).not.toContain("dangerously-skip-permissions");
       expect(output).not.toContain("--yolo");
     }],

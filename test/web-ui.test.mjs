@@ -388,6 +388,46 @@ describe("AMUX Code project and agent registry", () => {
     expect(identityConflict.body.error).toBe("idempotency-key-conflict");
   });
 
+  it("binds an existing idle native session to one automation address without replacing it", async () => {
+    const { url, workspace } = await setup();
+    const project = await createProject(url, workspace);
+    const agent = await createAgent(url, project, "codex", "adoptable-agent");
+    await postJson(`${url}/api/agents/${agent.id}/messages`, {
+      prompt: "establish exact session",
+      attachments: [],
+      idempotencyKey: "adoptable-session-turn",
+    });
+    const idle = await waitForIdle(url, project.id, agent.id);
+    const sessionId = idle.sessionId;
+
+    const adopted = await request(`${url}/api/agents/${agent.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        address: { session: "code", pane: 0 },
+        permissionMode: "automation",
+        idempotencyKey: "adopt-existing-session",
+      }),
+    });
+    expect(adopted.status).toBe(200);
+    expect(adopted.body).toMatchObject({
+      sessionId,
+      address: { session: "code", pane: 0 },
+      permissionMode: "automation",
+    });
+
+    const rebound = await request(`${url}/api/agents/${agent.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        address: { session: "other", pane: 0 },
+        idempotencyKey: "rebind-existing-session",
+      }),
+    });
+    expect(rebound.status).toBe(409);
+    expect(rebound.body.error).toBe("agent-address-already-bound");
+  });
+
   it("runs Claude and Codex in the project, resumes sessions and de-duplicates messages", async () => {
     const { url, workspace, calls } = await setup();
     const project = await createProject(url, workspace);

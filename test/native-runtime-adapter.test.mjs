@@ -16,7 +16,7 @@ const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), 
   headers: { "content-type": "application/json" },
 });
 
-function setup({ loseFirstResponse = true, message404Once = false } = {}) {
+function setup({ loseFirstResponse = true, message404Once = false, adoptExisting = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-native-adapter-"));
   const workspace = join(root, "workspace");
   const queueDir = join(root, "queue");
@@ -42,6 +42,7 @@ function setup({ loseFirstResponse = true, message404Once = false } = {}) {
     running: false,
     context: { percent: 42.4, usedTokens: 84_800 },
     updatedAt: 100,
+    ...(adoptExisting ? { sessionId: "33333333-3333-4333-8333-333333333333" } : {}),
   };
 
   const fetchImpl = async (url, options = {}) => {
@@ -51,6 +52,14 @@ function setup({ loseFirstResponse = true, message404Once = false } = {}) {
       : null;
     calls.push({ path, method: options.method || "GET", body, headers: options.headers });
     if (path === "/api/health") return jsonResponse({ ok: true, bootId: "boot-1" });
+    if (path === "/api/projects" && (!options.method || options.method === "GET")) {
+      return jsonResponse({ projects: [{
+        id: agent.projectId,
+        name: "Existing native project",
+        cwd: workspace,
+        agents: [agent],
+      }] });
+    }
     if (path === "/api/projects" && options.method === "POST") {
       return jsonResponse({
         id: agent.projectId,
@@ -129,6 +138,7 @@ function setup({ loseFirstResponse = true, message404Once = false } = {}) {
         engine: "claude",
         model: "claude-opus-4-8",
         effort: "high",
+        ...(adoptExisting ? { nativeAgentId: agent.id } : {}),
       }],
     },
   };
@@ -179,6 +189,24 @@ describe("native runtime compatibility adapter", () => {
       tokens: 84_800,
       source: "native-runtime",
     });
+  });
+
+  it("adopts one exact persisted native session without provisioning a fresh agent", async () => {
+    const { nativeRuntime, calls, agent } = setup({ adoptExisting: true });
+    agent.address = null;
+    agent.permissionMode = "interactive";
+    const sessionId = agent.sessionId;
+    const resolved = await nativeRuntime.ensureTarget("skybar-canary", 0);
+    expect(resolved.agent.id).toBe(agent.id);
+    expect(resolved.agent.sessionId).toBe(sessionId);
+    expect(calls.some((call) => call.path === "/api/projects" && call.method === "POST")).toBe(false);
+    expect(calls.some((call) => call.path.endsWith("/agents") && call.method === "POST")).toBe(false);
+    const adoption = calls.find((call) => call.path === `/api/agents/${agent.id}` && call.method === "PATCH");
+    expect(adoption.body).toMatchObject({
+      address: { session: "skybar-canary", pane: 0 },
+      permissionMode: "automation",
+    });
+    expect(agent.sessionId).toBe(sessionId);
   });
 
   it("treats a malformed native pane as non-native for routing but rejects explicit provisioning", async () => {
