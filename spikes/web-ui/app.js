@@ -144,6 +144,7 @@ const state = {
   eventSource: null,
   attachedAgentId: null,
   seenEventIds: new Set(),
+  toolActivities: new Map(),
   liveMessage: null,
   attachments: [],
   pendingMessage: null,
@@ -448,6 +449,7 @@ const detachAgent = () => {
   state.eventSource = null;
   state.attachedAgentId = null;
   state.seenEventIds.clear();
+  state.toolActivities.clear();
   state.liveMessage = null;
   state.attachments = [];
   state.controlPending = false;
@@ -505,6 +507,78 @@ const ensureLiveMessage = () => {
   return state.liveMessage.querySelector(".message-body");
 };
 
+const toolDuration = (durationMs) => {
+  if (!Number.isFinite(durationMs)) return "";
+  return durationMs < 1_000 ? `${Math.round(durationMs)} ms` : `${(durationMs / 1_000).toFixed(1)} s`;
+};
+
+const toolTime = (at) => {
+  const date = new Date(at);
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    : "";
+};
+
+const renderToolActivity = (event) => {
+  state.liveMessage?.classList.remove("live");
+  state.liveMessage = null;
+  const key = String(event.toolId || event.webId || "tool");
+  let details = state.toolActivities.get(key);
+  if (!details) {
+    details = document.createElement("details");
+    details.className = "message tool-activity";
+    details.dataset.toolId = key;
+    const heading = document.createElement("summary");
+    heading.className = "tool-activity-heading";
+    const body = document.createElement("div");
+    body.className = "tool-activity-body";
+    details.append(heading, body);
+    elements.messageList.append(details);
+    state.toolActivities.set(key, details);
+  }
+
+  details.classList.remove("phase-started", "phase-completed", "phase-failed");
+  details.classList.add(`phase-${event.phase}`);
+  details.open = event.phase === "failed";
+
+  const heading = details.querySelector(".tool-activity-heading");
+  const title = document.createElement("span");
+  title.className = "tool-activity-title";
+  title.textContent = event.name || "tool";
+  const status = document.createElement("span");
+  status.className = "tool-activity-status";
+  status.textContent = ({ started: "Running", completed: "Completed", failed: "Failed" })[event.phase] || "Failed";
+  const meta = document.createElement("span");
+  meta.className = "tool-activity-meta";
+  meta.textContent = [toolTime(event.at), toolDuration(event.durationMs)].filter(Boolean).join(" · ");
+  heading.replaceChildren(title, status, meta);
+
+  const body = details.querySelector(".tool-activity-body");
+  body.replaceChildren();
+  if (event.summary) {
+    const summaryLabel = document.createElement("span");
+    summaryLabel.className = "tool-activity-label";
+    summaryLabel.textContent = "Input";
+    const summary = document.createElement("pre");
+    summary.textContent = event.summary;
+    body.append(summaryLabel, summary);
+  }
+  if (event.result) {
+    const resultLabel = document.createElement("span");
+    resultLabel.className = "tool-activity-label";
+    resultLabel.textContent = "Result";
+    const result = document.createElement("pre");
+    result.textContent = event.result;
+    body.append(resultLabel, result);
+  }
+  if (!body.childElementCount) {
+    const empty = document.createElement("span");
+    empty.className = "tool-activity-empty";
+    empty.textContent = "No public details.";
+    body.append(empty);
+  }
+};
+
 const renderResult = (event) => {
   const parts = [];
   if (Number.isFinite(event.duration_ms)) parts.push(`${(event.duration_ms / 1000).toFixed(1)} s`);
@@ -545,6 +619,8 @@ const renderEvent = (event) => {
     } else {
       messageElement("assistant", text);
     }
+  } else if (event.type === "web" && event.subtype === "tool") {
+    renderToolActivity(event);
   } else if (event.type === "result") {
     renderResult(event);
   } else if (event.type === "web" && event.subtype === "context") {

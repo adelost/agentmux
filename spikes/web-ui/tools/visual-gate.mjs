@@ -148,6 +148,34 @@ const seedWorkspace = () => {
     JSON.stringify({ type: "assistant", message: { model: "claude-opus-4-8", usage, content: [{ type: "text", text: "Short version: landing-recovery now owns the complete touchdown state machine.\n\n1. frame() calls landingRecovery.tick(ctx) once per frame.\n2. The module reads canopy state through an explicit ctx, never through globals.\n3. At touchdown, the result is written to session-events as a JumpJudgement.\n\nThe window.__SWOOP.landing probe surface is unchanged, so the gate from #30 still covers initialization order." }] } }),
     JSON.stringify({ type: "system", subtype: "compact_boundary", compactMetadata: { trigger: "auto", preTokens: 158_000, postTokens: 96_000 } }),
     JSON.stringify({ type: "user", message: { content: "Looks good. Run the regression suite and bank a PR when it is green." } }),
+    JSON.stringify({
+      type: "assistant",
+      timestamp: new Date(at + 1_000).toISOString(),
+      message: {
+        model: "claude-opus-4-8",
+        usage,
+        content: [
+          { type: "text", text: "I’ll run the complete gate first." },
+          {
+            type: "tool_use",
+            id: "visual-tool-1",
+            name: "Bash",
+            input: { command: "env API_TOKEN=visual-secret-value npm test" },
+          },
+        ],
+      },
+    }),
+    JSON.stringify({
+      type: "user",
+      timestamp: new Date(at + 1_850).toISOString(),
+      message: {
+        content: [{
+          type: "tool_result",
+          tool_use_id: "visual-tool-1",
+          content: "token=visual-result-secret 312 tests passed, 0 skipped",
+        }],
+      },
+    }),
     JSON.stringify({ type: "assistant", message: { model: "claude-opus-4-8", usage, content: [{ type: "text", text: "The suite is green (312 tests, 0 skips). PR #41 is open as a draft against master with the gate evidence in its description." }] } }),
     JSON.stringify({ type: "user", timestamp: new Date(deniedAt).toISOString(), message: { content: deniedPrompt } }),
     "",
@@ -273,8 +301,14 @@ const GATE_CHECKS = `(() => {
       composer: visible("#composer"),
       userMessage: visible(".message.user"),
       assistantMessage: visible(".message.assistant"),
+      toolActivity: visible(".message.tool-activity"),
       compactNotice: visible(".message.notice"),
       permissionDenied: visible(".message.permission-denied"),
+    },
+    toolActivity: {
+      collapsed: !document.querySelector(".tool-activity")?.open,
+      status: document.querySelector(".tool-activity-status")?.textContent,
+      secretAbsent: !document.querySelector("#message-list")?.textContent?.includes("visual-secret"),
     },
     unnamedControls: unnamed,
     composerFlush: composerRect ? Math.abs(composerRect.bottom - window.innerHeight) <= 1 : false,
@@ -324,10 +358,25 @@ const runViewport = async (page, viewport, url) => {
   for (const [surface, ok] of Object.entries(report.surfaces)) {
     if (!ok) failures.push(`surface missing/invisible: ${surface}`);
   }
+  if (!report.toolActivity.collapsed) failures.push("completed tool activity is not collapsed by default");
+  if (report.toolActivity.status !== "Completed") failures.push("tool activity did not reconcile to Completed");
+  if (!report.toolActivity.secretAbsent) failures.push("tool activity exposed a seeded credential");
   if (report.unnamedControls.length) failures.push(`controls without accessible name: ${report.unnamedControls.join(", ")}`);
   if (page.pageErrors.length) failures.push(`page errors: ${page.pageErrors.join("; ")}`);
 
   mkdirSync(ARTIFACT_DIR, { recursive: true });
+  await page.evaluate(`(() => {
+    const tool = document.querySelector('.tool-activity');
+    if (!tool) return;
+    tool.open = true;
+    tool.scrollIntoView({ block: 'center' });
+  })()`);
+  await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  const toolScreenshot = await page.send("Page.captureScreenshot", { format: "png" });
+  const toolArtifact = join(ARTIFACT_DIR, `webui-${viewport.name}-tool.png`);
+  writeFileSync(toolArtifact, Buffer.from(toolScreenshot.data, "base64"));
+  await page.evaluate("window.scrollTo(0, document.body.scrollHeight), true");
+
   const screenshot = await page.send("Page.captureScreenshot", { format: "png" });
   const artifact = join(ARTIFACT_DIR, `webui-${viewport.name}.png`);
   writeFileSync(artifact, Buffer.from(screenshot.data, "base64"));
@@ -476,7 +525,7 @@ const runViewport = async (page, viewport, url) => {
     failures.push("pinned conversation did not navigate across projects to its exact instance");
   }
 
-  return { failures, artifacts: [artifact, pasteArtifact, themeArtifact, promptArtifact, pinnedArtifact] };
+  return { failures, artifacts: [artifact, toolArtifact, pasteArtifact, themeArtifact, promptArtifact, pinnedArtifact] };
 };
 
 const main = async () => {

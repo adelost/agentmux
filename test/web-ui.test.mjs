@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claudeProjectDir } from "../core/claude-paths.mjs";
 import { latestPaneStates } from "../core/events.mjs";
-import { claudePermissionDenial, createWebUi } from "../spikes/web-ui/server.mjs";
+import { claudePermissionDenial, createWebUi, publicToolActivity } from "../spikes/web-ui/server.mjs";
 
 const CLAUDE_SESSION = "11111111-1111-4111-8111-111111111111";
 const CODEX_SESSION = "22222222-2222-4222-8222-222222222222";
@@ -96,6 +96,43 @@ function fakeSpawn(calls) {
               },
             );
             close();
+          } else if (message.message?.content === "SHOW_TOOL_ACTIVITY") {
+            emit(
+              { type: "system", subtype: "init", session_id: CLAUDE_SESSION },
+              {
+                type: "assistant",
+                session_id: CLAUDE_SESSION,
+                message: {
+                  content: [
+                    { type: "text", text: "Checking the workspace." },
+                    {
+                      type: "tool_use",
+                      id: "claude-tool-1",
+                      name: "Bash",
+                      input: { command: "curl -H 'Authorization: Bearer claude-super-secret-value' https://example.test" },
+                    },
+                  ],
+                },
+              },
+              {
+                type: "user",
+                session_id: CLAUDE_SESSION,
+                message: {
+                  content: [{
+                    type: "tool_result",
+                    tool_use_id: "claude-tool-1",
+                    content: "token=claude-result-secret all checks passed",
+                  }],
+                },
+              },
+              {
+                type: "assistant",
+                session_id: CLAUDE_SESSION,
+                message: { content: [{ type: "text", text: "Claude tools complete." }] },
+              },
+              { type: "result", subtype: "success", session_id: CLAUDE_SESSION, duration_ms: 12 },
+            );
+            close();
           } else if (message.message?.content !== "WAIT_FOR_INTERRUPT") {
             emit(
               { type: "system", subtype: "init", session_id: CLAUDE_SESSION },
@@ -162,7 +199,93 @@ function fakeSpawn(calls) {
         } else if (message.method === "turn/start") {
           respond({ turn: { id: "codex-turn" } });
           const prompt = message.params.input.find((item) => item.type === "text")?.text;
-          if (prompt !== "WAIT_FOR_INTERRUPT") queueMicrotask(() => emit(
+          if (prompt === "SHOW_TOOL_ACTIVITY") queueMicrotask(() => emit(
+            { method: "turn/started", params: { threadId: CODEX_SESSION, turn: { id: "codex-turn" } } },
+            {
+              method: "item/started",
+              params: {
+                threadId: CODEX_SESSION,
+                turnId: "codex-turn",
+                item: {
+                  id: "codex-tool-1",
+                  type: "commandExecution",
+                  command: "env API_TOKEN=codex-super-secret-value npm test",
+                },
+              },
+            },
+            {
+              method: "item/completed",
+              params: {
+                threadId: CODEX_SESSION,
+                turnId: "codex-turn",
+                item: {
+                  id: "codex-tool-1",
+                  type: "commandExecution",
+                  command: "env API_TOKEN=codex-super-secret-value npm test",
+                  aggregatedOutput: "password=codex-result-secret 42 tests passed",
+                  status: "completed",
+                  exitCode: 0,
+                  durationMs: 37,
+                },
+              },
+            },
+            {
+              method: "item/started",
+              params: {
+                threadId: CODEX_SESSION,
+                turnId: "codex-turn",
+                item: {
+                  id: "codex-tool-2",
+                  type: "fileChange",
+                  changes: [{ path: "spikes/web-ui/app.js", diff: "+codex-patch-secret" }],
+                },
+              },
+            },
+            {
+              method: "item/completed",
+              params: {
+                threadId: CODEX_SESSION,
+                turnId: "codex-turn",
+                item: {
+                  id: "codex-tool-2",
+                  type: "fileChange",
+                  changes: [{ path: "spikes/web-ui/app.js", diff: "+codex-patch-secret" }],
+                  status: "completed",
+                },
+              },
+            },
+            {
+              method: "item/started",
+              params: {
+                threadId: CODEX_SESSION,
+                turnId: "codex-turn",
+                item: {
+                  id: "codex-tool-3",
+                  type: "mcpToolCall",
+                  tool: "browser.open",
+                  arguments: { url: "https://example.test", apiKey: "codex-mcp-secret" },
+                },
+              },
+            },
+            {
+              method: "item/completed",
+              params: {
+                threadId: CODEX_SESSION,
+                turnId: "codex-turn",
+                item: {
+                  id: "codex-tool-3",
+                  type: "mcpToolCall",
+                  tool: "browser.open",
+                  arguments: { url: "https://example.test", apiKey: "codex-mcp-secret" },
+                  status: "failed",
+                  error: { message: "authorization=codex-mcp-result-secret request failed" },
+                },
+              },
+            },
+            { method: "item/completed", params: { threadId: CODEX_SESSION, turnId: "codex-turn", item: { type: "agentMessage", text: "Codex tools complete." } } },
+            { method: "turn/completed", params: { threadId: CODEX_SESSION, turn: { id: "codex-turn", status: "completed", durationMs: 40 } } },
+          ));
+          else if (prompt !== "WAIT_FOR_INTERRUPT") queueMicrotask(() => emit(
             { method: "turn/started", params: { threadId: CODEX_SESSION, turn: { id: "codex-turn" } } },
             { method: "item/agentMessage/delta", params: { threadId: CODEX_SESSION, turnId: "codex-turn", delta: "CODEX_OK" } },
             { method: "item/completed", params: { threadId: CODEX_SESSION, turnId: "codex-turn", item: { type: "agentMessage", text: "CODEX_OK" } } },
@@ -296,6 +419,40 @@ async function waitForAgent(url, projectId, agentId, predicate, message = "agent
 }
 
 describe("AMUX Code project and agent registry", () => {
+  it("publishes bounded tool details while redacting credentials and patch bodies", () => {
+    const patch = publicToolActivity({
+      toolId: "patch-1",
+      name: "apply_patch",
+      phase: "completed",
+      input: {
+        path: "spikes/web-ui/app.js",
+        patch: "*** Begin Patch\n+const password = 'must-not-leak';\n*** End Patch",
+      },
+      result: `Authorization: Bearer result-secret-token ${"x".repeat(2_000)}`,
+      durationMs: 14.4,
+    });
+    expect(patch).toMatchObject({
+      toolId: "patch-1",
+      name: "apply_patch",
+      phase: "completed",
+      summary: "spikes/web-ui/app.js",
+      durationMs: 14,
+    });
+    expect(JSON.stringify(patch)).not.toContain("must-not-leak");
+    expect(JSON.stringify(patch)).not.toContain("result-secret-token");
+    expect(patch.result.length).toBeLessThanOrEqual(1_200);
+
+    const mcp = publicToolActivity({
+      toolId: "mcp-1",
+      name: "mcp_tool",
+      input: { query: "visible", api_key: "hidden-value", nested: { session_token: "hidden-too" } },
+    });
+    expect(mcp.summary).toContain("visible");
+    expect(mcp.summary).toContain("[redacted]");
+    expect(mcp.summary).not.toContain("hidden-value");
+    expect(mcp.summary).not.toContain("hidden-too");
+  });
+
   it("creates a project, inherits its cwd and rejects changed idempotent retries", async () => {
     const { url, workspace } = await setup();
     const project = await createProject(url, workspace);
@@ -522,6 +679,57 @@ describe("AMUX Code project and agent registry", () => {
     const resumeRequest = codexResumeCall.messages.find((message) => message.method === "thread/resume");
     expect(resumeRequest?.params).toMatchObject({ threadId: CODEX_SESSION, cwd: workspace });
     expect(resumeRequest?.params).not.toHaveProperty("excludeTurns");
+  });
+
+  it("normalizes live Claude and Codex tools into one redacted activity contract", async () => {
+    const { url, workspace } = await setup();
+    const project = await createProject(url, workspace);
+    const claude = await createAgent(url, project, "claude", "tool-claude");
+    const codex = await createAgent(url, project, "codex", "tool-codex");
+
+    for (const [agent, key] of [[claude, "claude"], [codex, "codex"]]) {
+      expect((await postJson(`${url}/api/agents/${agent.id}/messages`, {
+        prompt: "SHOW_TOOL_ACTIVITY",
+        attachments: [],
+        idempotencyKey: `${key}-tool-turn`,
+      })).status).toBe(202);
+      await waitForIdle(url, project.id, agent.id);
+    }
+
+    const claudeEvents = (await request(`${url}/api/agents/${claude.id}/history`)).body.events;
+    const claudeTools = claudeEvents.filter((event) => event.subtype === "tool");
+    expect(claudeTools).toEqual([
+      expect.objectContaining({ toolId: "claude-tool-1", name: "Bash", phase: "started" }),
+      expect.objectContaining({ toolId: "claude-tool-1", name: "Bash", phase: "completed" }),
+    ]);
+    expect(claudeTools[1].durationMs).toBeGreaterThanOrEqual(0);
+    expect(claudeEvents.filter((event) => event.type === "assistant")
+      .flatMap((event) => event.message?.content ?? [])
+      .some((block) => block.type === "tool_use")).toBe(false);
+
+    const codexEvents = (await request(`${url}/api/agents/${codex.id}/history`)).body.events;
+    const codexTools = codexEvents.filter((event) => event.subtype === "tool");
+    expect(codexTools.map((event) => [event.toolId, event.name, event.phase])).toEqual([
+      ["codex-tool-1", "exec_command", "started"],
+      ["codex-tool-1", "exec_command", "completed"],
+      ["codex-tool-2", "apply_patch", "started"],
+      ["codex-tool-2", "apply_patch", "completed"],
+      ["codex-tool-3", "browser.open", "started"],
+      ["codex-tool-3", "browser.open", "failed"],
+    ]);
+    expect(codexTools.find((event) => event.toolId === "codex-tool-2")?.summary)
+      .toContain("spikes/web-ui/app.js");
+
+    const publicEvents = JSON.stringify({ claudeEvents, codexEvents });
+    for (const secret of [
+      "claude-super-secret-value",
+      "claude-result-secret",
+      "codex-super-secret-value",
+      "codex-result-secret",
+      "codex-patch-secret",
+      "codex-mcp-secret",
+      "codex-mcp-result-secret",
+    ]) expect(publicEvents).not.toContain(secret);
   });
 
   it("journals prompts before engine completion and filters one ledger by all, project or agent", async () => {
@@ -1126,6 +1334,84 @@ describe("AMUX Code project and agent registry", () => {
     expect(history.body.events.some((event) => event.subtype === "turn-done"
       && event.operationKey === "persist-turn-newer")).toBe(true);
     expect(readFileSync(join(setupOne.dataDir, "registry.json"), "utf8")).not.toContain("native answer");
+  });
+
+  it("hydrates Codex tool calls and outputs through the same public activity contract", async () => {
+    const setupOne = await setup();
+    const project = await createProject(setupOne.url, setupOne.workspace);
+    const codex = await createAgent(setupOne.url, project, "codex", "codex-history-agent");
+    await postJson(`${setupOne.url}/api/agents/${codex.id}/messages`, {
+      prompt: "establish codex history",
+      attachments: [],
+      idempotencyKey: "codex-history-turn",
+    });
+    await waitForIdle(setupOne.url, project.id, codex.id);
+    await setupOne.app.close();
+
+    const sessionDir = join(setupOne.homeDir, ".codex", "sessions", "2026", "07", "15");
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(join(sessionDir, `rollout-${CODEX_SESSION}.jsonl`), [
+      JSON.stringify({
+        timestamp: "2026-07-15T10:00:00.000Z",
+        type: "response_item",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text: "historic tool turn" }] },
+      }),
+      JSON.stringify({
+        timestamp: "2026-07-15T10:00:01.000Z",
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          call_id: "historic-call-1",
+          name: "exec",
+          input: JSON.stringify({ cmd: "env ACCESS_TOKEN=historic-input-secret npm test" }),
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-07-15T10:00:01.025Z",
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "historic-call-1",
+          output: "api_key=historic-output-secret all green",
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-07-15T10:00:02.000Z",
+        type: "response_item",
+        payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Historic tools complete." }] },
+      }),
+      JSON.stringify({ timestamp: "2026-07-15T10:00:02.100Z", type: "event_msg", payload: { type: "task_complete" } }),
+      "",
+    ].join("\n"));
+
+    const restarted = createWebUi({
+      dataDir: setupOne.dataDir,
+      homeDir: setupOne.homeDir,
+      legacyDataDir: null,
+      spawnProcess: fakeSpawn([]),
+      appendEventImpl: () => {},
+    });
+    const second = await restarted.listen({ port: 0 });
+    cleanups.push(() => restarted.close());
+    const events = (await request(`${second.url}/api/agents/${codex.id}/history`)).body.events;
+    const tools = events.filter((event) => event.subtype === "tool");
+    expect(tools).toEqual([
+      expect.objectContaining({
+        toolId: "historic-call-1",
+        name: "exec",
+        phase: "started",
+        historical: true,
+      }),
+      expect.objectContaining({
+        toolId: "historic-call-1",
+        name: "exec",
+        phase: "completed",
+        historical: true,
+        durationMs: 25,
+      }),
+    ]);
+    expect(JSON.stringify(events)).not.toContain("historic-input-secret");
+    expect(JSON.stringify(events)).not.toContain("historic-output-secret");
   });
 
   it("answers Claude side questions in a non-persistent fork and serves the Suggest-like UI", async () => {
