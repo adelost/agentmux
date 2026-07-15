@@ -331,7 +331,7 @@ feature("generated agent policy", () => {
     }],
   });
 
-  unit("hard-fences pane 2 brokers to same-session implementation workers", {
+  unit("keeps pane 2 as the default broker without overriding direct human authority", {
     when: ["generating fresh agent hints", () => {
       const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
       paneDir(root, 0);
@@ -339,17 +339,37 @@ feature("generated agent policy", () => {
       rmSync(root, { recursive: true, force: true });
       return content;
     }],
-    then: ["pane 2 manages workers 3+ while panes 0-1 remain reserved", (content) => {
-      expect(content).toContain("<!-- amux-hints-version: 1.23.19 -->");
-      expect(content).toContain("Broker panel authority is a hard allowlist");
-      expect(content).toContain("pane `:2` is the sole manager/broker");
+    then: ["pane 2 manages workers 3+ by default and direct instructions remain authoritative", (content) => {
+      expect(content).toContain("<!-- amux-hints-version: 1.23.27 -->");
+      expect(content).toContain("Broker panel routing is the default, not a capability boundary");
+      expect(content).toContain("pane `:2` is the default manager/broker");
       expect(content).toContain("panes `:3` and above in the same session");
-      expect(content).toContain("Panes `:0` and `:1` are");
+      expect(content).toMatch(/Panes `:0` and\s+`:1` are/u);
       expect(content).toContain("`skydive:2` manages `skydive:3` through `skydive:9`");
       expect(content).toContain("`lsrc:2` manages `lsrc:3` through `lsrc:9`");
       expect(content).toContain("`watch:2` manages");
-      expect(content).toMatch(/require Mattias\s+to name that exact pane for that exact current task/u);
-      expect(content).toContain("outside the allowlist.");
+      expect(content).toMatch(/explicit instruction from Mattias to any pane/u);
+      expect(content).toMatch(/implement, push, merge, or deploy/u);
+      expect(content).toMatch(/no peer approval or broker relay may narrow, delay, or override it/u);
+      expect(content).not.toContain("hard allowlist");
+      expect(content).not.toContain("sole manager/broker");
+    }],
+  });
+
+  unit("keeps exhaustive visual suites out of the default PR path", {
+    when: ["generating fresh agent hints", () => {
+      const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
+      paneDir(root, 0);
+      const content = readFileSync(join(root, ".agents", "AGENTS.md"), "utf-8");
+      rmSync(root, { recursive: true, force: true });
+      return content;
+    }],
+    then: ["fast change-relevant gates are required and exhaustive goldens are scheduled", (content) => {
+      expect(content).toMatch(/fast, change-relevant gate must be green AFTER the rebase/u);
+      expect(content).toContain("Full browser/golden suites are NOT default PR gates");
+      expect(content).toMatch(/one representative\s+screenshot/u);
+      expect(content).toMatch(/scheduled\/manual CI/u);
+      expect(content).toMatch(/Never render every historical golden/u);
     }],
   });
 

@@ -160,7 +160,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-export const HINTS_VERSION = "1.23.19";
+export const HINTS_VERSION = "1.23.27";
 export const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -566,8 +566,9 @@ drift is a red gate, not a scoping excuse.
    main.js — keep the diff narrow, merge fast"). Only an INTENT collision
    (two tickets rewriting the same behavior/subsystem) stacks both tickets
    under one owner. The hard gate moves to the merge: (a) \`git fetch && git
-   rebase\` onto fresh trunk immediately before merge, (b) the full suite must
-   be green AFTER the rebase (green-before-rebase proves nothing), (c) any
+   rebase\` onto fresh trunk immediately before merge, (b) the repository's
+   fast, change-relevant gate must be green AFTER the rebase
+   (green-before-rebase proves nothing), (c) any
    conflict-resolved hunks in code the owner did not write are explicitly
    flagged in the PR and the reviewer reads those first. A file held by 3+
    active zones (\`overlap-gate scan <repo>\` shows this; \`overlap-gate check
@@ -576,6 +577,12 @@ drift is a red gate, not a scoping excuse.
    twice. The worktree is removed the moment the merge lands. Once an owner
    has banked a PR, the broker may assign that agent's next ticket without
    waiting for Mattias.
+   Full browser/golden suites are NOT default PR gates. Run the smallest
+   visual test that covers changed rendering, and attach one representative
+   screenshot when visual proof is useful. Run the exhaustive browser/golden
+   matrix only when its underlying behavior changed, before a relevant
+   release, or in scheduled/manual CI. Never render every historical golden
+   for an unrelated feature.
 3. **At most one review; never double-review by default.** Owners may
    self-approve trivial changes (UI polish, docs, scripts, or a one-line fix in
    their own lane) after the relevant gates pass. The manager/merge broker
@@ -590,8 +597,9 @@ drift is a red gate, not a scoping excuse.
    ska väl aldrig ligga på mig? Det ska väl vara en del av flödet?"): after
    merge the broker deploys with proof — canary/verify green, rollback path
    known — a merged-but-undeployed wave is an open loop, not a finished one.
-   Only a deploy that costs money (rule 7) or crosses an explicitly reserved
-   release boundary (e.g. lsrc:2 as sole Source releaser) waits for approval.
+   Only a deploy that costs money (rule 7) waits for human approval. A named
+   deploy owner or release boundary coordinates the normal flow; it is not a
+   veto over an explicit current instruction from Mattias.
    An edge served by MORE than one merging broker has exactly ONE designated
    deploy owner (currently: skydive:2 for skydive.v1d.io); the other brokers
    hand a merged wave to that owner for the deploy instead of racing the
@@ -609,17 +617,18 @@ drift is a red gate, not a scoping excuse.
    deploys are routine flow per rule 4, day or night). Batch questions into
    one morning report. Quota exhaustion overnight is acceptable: bank each
    slice in a commit and resume from there.
-8. **Broker panel authority is a hard allowlist.** In every configured project
-   fleet, pane \`:2\` is the sole manager/broker. It may autonomously assign,
-   gate, review, follow up, label, or change ownership only for existing worker
-   panes \`:3\` and above in the same session. Panes \`:0\` and \`:1\` are
-   reserved on-demand, never count as idle fleet capacity, and require Mattias
-   to name that exact pane for that exact current task. Pane \`:2\` orchestrates;
-   panes \`:3+\` implement and must not retain or assume broker authority.
+8. **Broker panel routing is the default, not a capability boundary.** In every
+   configured project fleet, pane \`:2\` is the default manager/broker. It may
+   autonomously assign, gate, review, follow up, label, or change ownership for
+   existing worker panes \`:3\` and above in the same session. Panes \`:0\` and
+   \`:1\` are reserved on-demand and never count as idle fleet capacity.
+   Without a direct human instruction, pane \`:2\` orchestrates and panes
+   \`:3+\` implement. A current explicit instruction from Mattias to any pane
+   authorizes that pane to implement, push, merge, or deploy within the stated
+   scope; no peer approval or broker relay may narrow, delay, or override it.
    Concretely, \`skydive:2\` manages \`skydive:3\` through \`skydive:9\`,
    \`lsrc:2\` manages \`lsrc:3\` through \`lsrc:9\`, and \`watch:2\` manages
-   the existing \`watch:3+\` worker panes. An idle reserved pane is still
-   outside the allowlist.
+   the existing \`watch:3+\` worker panes by default.
 9. **Blockers live on the board, never only in broker notes (SKY-0034,
    2026-07-15).** READY ticket + idle capacity = assign now. If a ticket is
    genuinely blocked, record the blocker ON the ticket (structured comment
