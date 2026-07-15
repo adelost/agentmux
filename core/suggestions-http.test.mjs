@@ -98,6 +98,35 @@ feature("Suggestions shared HTTP load circuit", () => {
     cleanup: (ctx) => rmSync(ctx.directory, { recursive: true, force: true }),
   });
 
+  component("a successful half-open probe spreads restarted callers during recovery", {
+    given: ["an expired circuit and a healthy half-open probe", async () => {
+      const directory = root();
+      const statePath = join(directory, "circuit.json");
+      let nowMs = Date.parse("2026-07-16T00:00:00Z");
+      const failed = vi.fn(async () => json({ error: "down", retryable: false }, 503));
+      await request(client({ statePath, fetchImpl: failed, now: () => nowMs })).catch(() => {});
+      nowMs = readSuggestionsCircuitState(statePath).blockedUntil;
+      return { directory, statePath, now: () => nowMs,
+        fetchImpl: vi.fn(async () => json({ ok: true })) };
+    }],
+    when: ["one cron recovers the host and a restarted peer polls immediately", async (ctx) => {
+      const recovered = await request(client({ ...ctx, source: "comment-bridge" }));
+      const contender = await request(client({ ...ctx, source: "watchdog-outbox" }))
+        .catch((error) => error);
+      return { recovered, contender, calls: ctx.fetchImpl.mock.calls.length,
+        nowMs: ctx.now(), state: readSuggestionsCircuitState(ctx.statePath) };
+    }],
+    then: ["the peer stays local until a positive recovery spread has elapsed", (result) => {
+      expect(result.recovered).toEqual({ ok: true });
+      expect(result.contender).toBeInstanceOf(SuggestionsCircuitOpenError);
+      expect(result.contender.reason).toBe("circuit-recovering");
+      expect(result.calls).toBe(1);
+      expect(result.state.recoveryUntil).toBeGreaterThan(result.nowMs);
+      expect(result.contender.retryAt).toBe(result.state.recoveryUntil);
+    }],
+    cleanup: (ctx) => rmSync(ctx.directory, { recursive: true, force: true }),
+  });
+
   component("repeated non-retryable probes use bounded exponential backoff", {
     given: ["one persistent circuit and a deterministic clock", () => {
       const directory = root();
