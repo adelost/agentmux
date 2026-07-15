@@ -327,7 +327,7 @@ feature("generated agent policy", () => {
       return content;
     }],
     then: ["pane 2 manages workers 3+ while panes 0-1 remain reserved", (content) => {
-      expect(content).toContain("<!-- amux-hints-version: 1.23.17 -->");
+      expect(content).toContain("<!-- amux-hints-version: 1.23.18 -->");
       expect(content).toContain("Broker panel authority is a hard allowlist");
       expect(content).toContain("pane `:2` is the sole manager/broker");
       expect(content).toContain("panes `:3` and above in the same session");

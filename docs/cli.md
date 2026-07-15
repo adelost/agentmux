@@ -214,3 +214,32 @@ should not get a fake `WHY:` yet.
 With `--strict`, active errors and debt fail the command; style warnings are
 reported without failing.
 See `docs/contract-lint.md` for the writing rules.
+
+## Worktree dependencies and gates
+
+```bash
+amux worktree-deps [path]
+amux worktree-deps [path] --check
+amux worktree-deps [path] --dry
+amux gate --scoped [path]
+amux gate --scoped [path] -- command arg...
+```
+
+`worktree-deps` scans tracked lockfiles, including nested UI package roots. npm
+installs are shared only through an immutable cache under the repository's Git
+common directory and only when the tree is relocatable. The cache key includes
+the exact manifest, lock, repository `.npmrc`, npm version and runtime ABI.
+Workspace/file-linked npm trees stay local. Python virtualenvs are never
+shared: the command replaces an unsafe `.venv` symlink with a local
+`uv sync --locked` environment.
+
+`--check` is mutation-free and exits non-zero for a missing, stale, or unsafe
+root. `--dry` prints the provisioning plan. The standalone
+`node bin/worktree-deps.mjs` entry point uses only Node built-ins, so it works in
+the exact fresh-worktree state where the normal CLI's dependencies are absent.
+
+`gate --scoped` performs the bootstrap, then runs the repo's full gate. It
+prints `Skipped: none` on a complete run or names every root it could not
+provision. Skips are never green. The gate also exports `UV_LOCKED=1` and hashes
+all tracked npm/uv locks before and after execution, preventing an otherwise
+green test command from dirtying the worktree's dependency contract.

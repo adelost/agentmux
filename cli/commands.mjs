@@ -98,6 +98,11 @@ import {
   buildAskEntries,
   filterAskEntries,
 } from "../core/ask-history.mjs";
+import {
+  formatWorktreeDeps,
+  provisionWorktreeDependencies,
+  runScopedGate,
+} from "../core/worktree-deps.mjs";
 
 // Bridge = the Discord bot itself (not a Claude agent). Singleton infra.
 const BRIDGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -3857,6 +3862,43 @@ Options:
   if (flags.strict && blocking > 0) process.exit(1);
 }
 
+/** WHAT: Makes one checkout's tracked npm/uv roots runnable. WHY: Fresh worktrees have no ignored deps. */
+export function cmdWorktreeDeps(args) {
+  const { flags, positional } = parseFlags(args, FLAG_SPECS["worktree-deps"]);
+  if (positional.length > 1) throw new Error("Usage: amux worktree-deps [path] [--check|--dry]");
+  if (flags.check && flags.dry) throw new Error("--check and --dry are mutually exclusive");
+  const result = provisionWorktreeDependencies({
+    root: positional[0] || process.cwd(),
+    check: !!flags.check,
+    dryRun: !!flags.dry,
+  });
+  console.log(formatWorktreeDeps(result));
+  if (!result.ok && !result.planned) process.exitCode = 1;
+  return result;
+}
+
+/** WHAT: Bootstraps then runs the repo-owned full gate. WHY: A green claim cannot hide missing ecosystems. */
+export function cmdScopedGate(args) {
+  const separator = args.indexOf("--");
+  const ownArgs = separator === -1 ? args : args.slice(0, separator);
+  const explicitCommand = separator === -1 ? [] : args.slice(separator + 1);
+  const { flags, positional } = parseFlags(ownArgs, FLAG_SPECS.gate);
+  if (!flags.scoped || positional.length > 1 || (separator !== -1 && !explicitCommand.length)) {
+    throw new Error("Usage: amux gate --scoped [path] [--dry] [-- command ...]");
+  }
+  const result = runScopedGate({
+    root: positional[0] || process.cwd(),
+    explicitCommand,
+    dryRun: !!flags.dry,
+  });
+  console.log(formatWorktreeDeps(result.dependencies));
+  if (!result.gate) console.log("Gate: SKIPPED · no repo-owned full gate found");
+  else console.log(`Gate: ${result.status.toUpperCase()} · ${result.gate.command} ${result.gate.args.join(" ")} (${result.gate.source})`);
+  if (result.locksUnchanged === false) console.log("Gate: RED · a dependency lock changed during the gate");
+  if (result.exitCode !== 0) process.exitCode = result.exitCode;
+  return result;
+}
+
 function cmdHelp() {
   console.log(`agent - Manage Claude Code/Codex tmux sessions
 
@@ -3935,6 +3977,12 @@ Usage:
     --strict                      Exit non-zero on active error/debt findings
     --baseline <path>             Suppress baseline findings
     --update-baseline             Write current findings to baseline
+  agent worktree-deps [path]      Provision every tracked npm/uv root in a worktree
+    --check                       Verify only; fail on missing, stale, or unsafe deps
+    --dry                         Show the immutable-link/local-venv plan
+  agent gate --scoped [path]      Bootstrap deps, run the repo-owned full gate, report skips
+    --dry                         Show dependency + gate plan without changing anything
+    -- command ...                Override gate discovery with an explicit argv-safe command
   agent compact [threshold=20]    Bulk: /compact to idle claude/codex panes ≥ threshold%
   agent compact <agent> [-p N]    Target ONE pane (skips thresholds, keeps working-guard)
     -m "focus"                    Steer the summary: sends '/compact <focus>' (what to preserve)
@@ -4065,6 +4113,8 @@ const FLAG_SPECS = {
     help: "boolean",
     h: "boolean",
   },
+  "worktree-deps": { check: "boolean", dry: "boolean" },
+  gate: { scoped: "boolean", dry: "boolean" },
   edit: {},
   select: { p: "number" },
   keys: { p: "number" },
@@ -4364,6 +4414,14 @@ export async function dispatch(argv, ctx) {
 
     case "lint": {
       return cmdLint(rest, ctx);
+    }
+
+    case "worktree-deps": {
+      return cmdWorktreeDeps(rest);
+    }
+
+    case "gate": {
+      return cmdScopedGate(rest);
     }
 
     case "select": {
