@@ -4091,6 +4091,7 @@ Usage:
     -c <channelId>                Explicit Discord channel ID
     -p <agent>:<pane>             Explicit agent:pane channel mapping
     --dry                         Print target without posting
+  agent quota                     Shared account quota: Claude session/week/Fable + Codex week
   agent r                         Resume last agent
   agent help                      Show this message
 
@@ -4319,6 +4320,13 @@ export async function dispatch(argv, ctx) {
 
     case "doctor": {
       return cmdDoctor(ctx);
+    }
+
+    case "quota": {
+      const { readQuotaSnapshot } = await import("../core/quota-usage.mjs");
+      const { formatQuotaSnapshot } = await import("../core/quota-format.mjs");
+      console.log(formatQuotaSnapshot(await readQuotaSnapshot()));
+      return;
     }
 
     case "queue": {

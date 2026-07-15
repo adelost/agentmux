@@ -11,6 +11,8 @@ import { shortModelName } from "./core/context.mjs";
 import { loadConfig } from "./cli/config.mjs";
 import { decideParkedSend, readParkState, unparkPane } from "./core/pane-park.mjs";
 import { driveCodexStatus, formatCodexStatus } from "./core/codex-status.mjs";
+import { readQuotaSnapshot } from "./core/quota-usage.mjs";
+import { formatQuotaSnapshot } from "./core/quota-format.mjs";
 import { prepareCodexIdle } from "./core/codex-tui.mjs";
 import {
   clearCodexModelOverride,
@@ -76,6 +78,7 @@ const HELP_TEXT = [
   "`/peek` — last response from agent",
   "`/raw` — last 50 lines of tmux pane (raw)",
   "`/status` — native Codex account, model, context and usage limits",
+  "`/quota` — shared account quota: Claude session/week/Fable + Codex week",
   "`/switch` — toggle this Codex pane between account profiles 1 and 2",
   "`/model` — show current model; `/model <name>` — switch (fable/opus/sonnet/haiku)",
   "`/restore` — restore the model that was active before the latest downgrade",
@@ -329,6 +332,13 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
   const commands = {
     "/help": async (msg) => {
       await msg.reply(HELP_TEXT);
+    },
+
+    // Account-wide shared quota (Claude weekly/Fable + Codex weekly) — unlike
+    // /status this is not pane-specific, so it needs no mapping or pane.
+    "/quota": async (msg) => {
+      const snapshot = await readQuotaSnapshot();
+      await msg.reply(formatQuotaSnapshot(snapshot));
     },
 
     "/peek": async (msg, mapping, pane) => {
