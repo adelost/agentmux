@@ -53,6 +53,16 @@ export PATH="${HOME}/.nvm/versions/node/v22.19.0/bin:${HOME}/.local/bin:/usr/loc
 AMUX="${AMUX:-${HOME}/.nvm/versions/node/v22.19.0/bin/amux}"
 PY="${PY:-python3}"
 
+# The agent server runs on a NAMED socket (agent-cli.mjs: TMUX_SOCKET ||
+# /tmp/openclaw-claude.sock). Bare `tmux` only finds it when invoked from
+# inside that server ($TMUX set) — from cron it hits the default socket,
+# sees no server, and every pane check returns "gone". That killed the
+# entire fleet sweep silently from its FIRST cron run (223 'pane gone'
+# rows, 2026-07-14..15) while manual runs worked. Shadow tmux so every
+# call site targets the right socket in both contexts.
+TMUX_SOCKET="${TMUX_SOCKET:-/tmp/openclaw-claude.sock}"
+tmux() { command tmux -S "$TMUX_SOCKET" "$@"; }
+
 WATCH_DIR="${WATCH_DIR:-${HOME}/.agentmux/fleet-watch}"   # overridable for tests
 QUEUE_DIR="${QUEUE_DIR:-${HOME}/.agentmux/delivery-queue}"
 CONF="${CONF:-${WATCH_DIR}/fleets.conf}"
@@ -82,12 +92,14 @@ SEND_TIMEOUT="${SEND_TIMEOUT:-25}"
 amux_send() { timeout "$SEND_TIMEOUT" "$AMUX" "$@"; }
 
 # `amux <name> -p N "msg"` routes to a SUBCOMMAND when <name> equals one (e.g. a
-# session literally named "watch" hits `amux watch` = live-follow, never a send).
-# `amux :index` sidesteps it but the index is alphabetical over the config and
-# shifts when agents are added/removed — too fragile to send from a cron (it
-# WILL misfire to the wrong pane). So a collision-named fleet is escalated to a
-# human instead of auto-nudged. Robust fix is an `amux send` verb (follow-up).
-RESERVED_CMDS=" ps top done log timeline watch dream compact janitor asks ask questions search serve stop doctor edit label labels lint select image say events run plan resume r esc wait notifyuser remind memory ls help playwright-reap pw-reap "
+# session literally named "ps" can never be a send target). `amux :index`
+# sidesteps it but the index is alphabetical over the config and shifts when
+# agents are added/removed — too fragile to send from a cron (it WILL misfire
+# to the wrong pane). So a collision-named fleet is escalated to a human
+# instead of auto-nudged. Exception: "watch" is NOT reserved — the CLI
+# disambiguates it (shouldRouteWatchToAgent routes `amux watch -p N "msg"`
+# to the session whenever a positional message is present).
+RESERVED_CMDS=" ps top done log timeline dream compact janitor asks ask questions search serve stop doctor edit label labels lint select image say events run plan resume r esc wait notifyuser remind memory ls help playwright-reap pw-reap "
 is_reserved() { case "$RESERVED_CMDS" in *" $1 "*) return 0;; *) return 1;; esac; }
 
 # Newest Claude/Codex session-jsonl mtime for a pane, or 0 if unresolvable.
