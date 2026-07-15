@@ -130,7 +130,6 @@ import {
   provisionWorktreeDependencies,
   runScopedGate,
 } from "../core/worktree-deps.mjs";
-
 // Bridge = the Discord bot itself (not a Claude agent). Singleton infra.
 const BRIDGE_DIR = resolve(process.env.AGENTMUX_BRIDGE_DIR || resolve(dirname(fileURLToPath(import.meta.url)), ".."));
 const bridgeLifecycle = createBridgeLifecycle({ bridgeDir: BRIDGE_DIR });
@@ -4499,7 +4498,7 @@ Usage:
     --dry                         Show the immutable-copy/local-venv plan
   agent gate --scoped [path]      Bootstrap deps, run the repo-owned full gate, report skips
     --dry                         Show dependency + gate plan without changing anything
-    -- command ...                Override gate discovery with an explicit argv-safe command
+    -- command ...                Override gate discovery with an explicit argv-safe command\n  agent proof --config FILE [--output FILE]  Run a clean red-first measurement
   agent compact [threshold=20]    Bulk: /compact to idle claude/codex panes ≥ threshold%
   agent compact <agent> [-p N]    Target ONE pane (skips thresholds, keeps working-guard)
     -m "focus"                    Steer the summary: sends '/compact <focus>' (what to preserve)
@@ -4644,7 +4643,7 @@ const FLAG_SPECS = {
     h: "boolean",
   },
   "worktree-deps": { check: "boolean", dry: "boolean" },
-  gate: { scoped: "boolean", dry: "boolean" },
+  gate: { scoped: "boolean", dry: "boolean" }, proof: { config: "string", output: "string" },
   edit: {},
   select: { p: "number" },
   keys: { p: "number" },
@@ -4658,10 +4657,10 @@ const FLAG_SPECS = {
 };
 
 /**
- * WHAT: Disambiguates a configured agent named `watch` from the live-timeline
+ * WHAT: Routes a configured agent named `watch` separately from the live-timeline
  * subcommand of the same name.
- * WHY: Suggestion routing must be able to deliver `amux watch -p N "prompt"`
- * without silently starting an endless timeline follower instead.
+ * WHY: Keeps agent delivery from silently starting the live-timeline follower.
+ *
  */
 export function shouldRouteWatchToAgent(rest, configPath) {
   const commandArgs = parseFlags(rest, FLAG_SPECS.watch);
@@ -4966,9 +4965,8 @@ export async function dispatch(argv, ctx) {
       return cmdWorktreeDeps(rest);
     }
 
-    case "gate": {
-      return cmdScopedGate(rest);
-    }
+    case "gate": return cmdScopedGate(rest);
+    case "proof": return (await import("../core/measurement-proof.mjs")).runMeasurementProofCommand(rest);
 
     case "select": {
       if (rest.length < 2) { console.error("Usage: agent select <name|:nr> [-p N] <N>"); process.exit(1); }

@@ -255,6 +255,7 @@ amux worktree-deps [path] --check
 amux worktree-deps [path] --dry
 amux gate --scoped [path]
 amux gate --scoped [path] -- command arg...
+amux proof --config proof.json --output attestation.json
 ```
 
 `worktree-deps` scans tracked lockfiles, including nested UI package roots.
@@ -277,3 +278,40 @@ prints `Skipped: none` on a complete run or names every root it could not
 provision. Skips are never green. The gate also exports `UV_LOCKED=1` and hashes
 all tracked npm/uv locks before and after execution, preventing an otherwise
 green test command from dirtying the worktree's dependency contract.
+
+`proof` takes an argv-only JSON recipe. It creates clean detached base/head
+worktrees, asserts a named fixture anchor before applying the test-only patch,
+rejects a no-op, runs the same real gate exactly once red and once green, and
+requires the green gate to write a numeric margin to
+`$AMUX_MEASUREMENT_OUTPUT`. Shell and source-grep commands are rejected. The
+canonical output is bound to the ticket, assignment generation, commits,
+fixture hash, gate output hashes and positive margin; it is the
+`measurementBoundary` value accepted by Suggestions completion policy v2.
+The gate must write exactly `metric`, `unit`, `operator`, `limit`, and
+`observed` to the path in `$AMUX_MEASUREMENT_OUTPUT`; agentmux computes and
+requires a strictly positive margin. `prepare` is optional and runs once per
+detached worktree before either measured gate.
+
+```json
+{
+  "schemaVersion": 1,
+  "ticketId": "SRC-0092",
+  "assignmentGeneration": 1,
+  "repository": ".",
+  "baseRef": "origin/main",
+  "headRef": "HEAD",
+  "fixturePatch": "./tmp/src-0092-red-first.patch",
+  "anchor": {
+    "path": "tests/assignment-watchdog.test.ts",
+    "contains": "protocol 1.1 assignment roots"
+  },
+  "prepare": {
+    "argv": ["node", "/opt/agentmux/bin/worktree-deps.mjs", "."],
+    "cwd": "."
+  },
+  "gate": {
+    "argv": ["npm", "run", "test:measurement"],
+    "cwd": "."
+  }
+}
+```
