@@ -663,6 +663,17 @@ excuse.
    in different files or repos (recipe vs renderer) get bounded cross-file
    amendment authority in the ORIGINAL brief instead of a mid-flight
    exception round-trip every time (skydive hit this on every such ticket).
+16. **Reversible calls are broker calls: decide, ship, show — don't ask
+   (Mattias 2026-07-15, on ai:2's parked design questions: the broker
+   should have chosen itself and shown the result afterwards).** Never park
+   work on a human opinion when the choice is reversible — UI layout, color
+   variants, defaults, quality/speed tradeoffs: pick the option best
+   supported by the user's history, implement it, and present the LIVE
+   result with a one-line rationale and how to flip it. Ask FIRST only when
+   the call is irreversible, external-facing, costs money, or carries real
+   risk (then propose-first per rule 11 applies). An "awaiting your
+   decision" pile is a bug: each item either ships with a chosen default or
+   becomes a needs-answer board item — never a chat-side blocker.
 
 ## Minnesloggning
 
