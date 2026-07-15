@@ -63,6 +63,12 @@ settings and are reconciled only through the settings endpoint, never through
 that stable identity receipt. Both use the local CLI authentication/subscription,
 not separate cloud API keys.
 
+Codex profiles also receive a managed execpolicy defense-in-depth rule. It
+deterministically blocks direct host GUI/browser launch commands and interactive
+Playwright entry points; ordinary headless Playwright tests are unaffected.
+This prefix policy is deliberately not described as a complete process sandbox:
+the workspace sandbox and ticket-intake SafetyHold remain separate boundaries.
+
 ## Discord/tmux compatibility pilot
 
 An agentmux source entry with `backend: native` is provisioned idempotently in

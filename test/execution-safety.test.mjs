@@ -1,7 +1,8 @@
-import { feature, unit, expect } from "bdd-vitest";
+import { feature, component, unit, expect } from "bdd-vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import {
   CLAUDE_AUTONOMOUS_ARGS,
   CLAUDE_AUTONOMOUS_FLAGS,
@@ -92,17 +93,47 @@ feature("shared autonomous execution contract", () => {
   });
 });
 
-feature("external navigation approval seam", () => {
-  unit("browser GUI entry points escalate while headless test entry points stay autonomous", {
+feature("external navigation defense in depth", () => {
+  unit("direct browser GUI entry points are forbidden while headless tests stay autonomous", {
     when: ["reading the installed execpolicy fixture", () => CODEX_EXTERNAL_NAVIGATION_RULES],
-    then: ["navigation prompts the native reviewer and ordinary Playwright tests are excluded", (rules) => {
-      expect(rules).toContain('decision = "prompt"');
+    then: ["direct navigation is blocked and ordinary Playwright tests are excluded", (rules) => {
+      expect(rules).toContain('decision = "forbidden"');
       expect(rules).toContain('"xdg-open"');
       expect(rules).toContain('"google-chrome"');
       expect(rules).toContain('"playwright", ["open", "codegen", "show-report"]');
       expect(rules).toContain('"playwright", "test", ["--ui", "--headed"]');
       expect(rules).toContain('not_match = ["npx playwright test"]');
       expect(rules).not.toContain('decision = "allow"');
+      expect(rules).not.toContain('decision = "prompt"');
+    }],
+  });
+
+  component("Codex's native evaluator blocks GUI launch and leaves headless tests unmatched", {
+    given: ["the managed rules installed in an isolated profile", () => {
+      const home = mkdtempSync(join(tmpdir(), "amux-native-execpolicy-"));
+      return { home, rulesPath: ensureCodexExecutionSafety({ home }) };
+    }],
+    when: ["evaluating direct GUI, interactive Playwright, and headless Playwright commands", ({ rulesPath }) => {
+      const check = (...command) => {
+        const result = spawnSync("codex", [
+          "execpolicy", "check", "--rules", rulesPath, "--", ...command,
+        ], { encoding: "utf8" });
+        if (result.error) throw result.error;
+        if (result.status !== 0) throw new Error(result.stderr || result.stdout);
+        return JSON.parse(result.stdout);
+      };
+      return {
+        gui: check("xdg-open", "https://example.com"),
+        interactive: check("npx", "playwright", "codegen", "https://example.com"),
+        headless: check("npx", "playwright", "test"),
+      };
+    }],
+    then: ["the vendor evaluator returns forbidden, forbidden, and no rule", (result, ctx) => {
+      expect(result.gui.decision).toBe("forbidden");
+      expect(result.interactive.decision).toBe("forbidden");
+      expect(result.headless.matchedRules).toEqual([]);
+      expect(result.headless.decision).toBeUndefined();
+      rmSync(ctx.home, { recursive: true, force: true });
     }],
   });
 
