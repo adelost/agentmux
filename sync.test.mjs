@@ -565,8 +565,9 @@ agents:
     })],
     when: ["generating the runtime config", ({ agents, channelMap, agentIds }) =>
       generateAgentsYaml(agents, channelMap, agentIds)],
-    then: ["every Codex command has the same bounded native policy and no bypass", (yamlStr) => {
-      expect(yamlStr.match(/cmd: codex resume --last --sandbox workspace-write/g)).toHaveLength(2);
+    then: ["every Codex command is a fresh bounded launch, never resume --last", (yamlStr) => {
+      expect(yamlStr.match(/cmd: codex --sandbox workspace-write/g)).toHaveLength(2);
+      expect(yamlStr).not.toContain("resume --last");
       expect(yamlStr.match(/--ask-for-approval on-request/g)).toHaveLength(2);
       expect(yamlStr.match(/approvals_reviewer="auto_review"/g)).toHaveLength(2);
       expect(yamlStr).not.toContain("--yolo");

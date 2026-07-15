@@ -103,24 +103,25 @@ feature("Claude pane model pin", () => {
 });
 
 feature("Codex pane launch isolation", () => {
-  unit("account home plus model/effort are process-local on resume and fresh fallback", {
-    when: ["building a profile-2 Max launch", () => buildCodexLaunchCommand({
+  unit("a fresh launch starts a new session and never resumes the global latest", {
+    // scenario 5 (SKY session-guard): `resume --last` hijacks another pane's
+    // most-recent rollout. With no exact pane-owned id, launch fresh — one
+    // codex invocation, no `--last`, no `||` fallback.
+    when: ["building a profile-2 Max launch without a resume id", () => buildCodexLaunchCommand({
       profileHome: "/home/test/.config/agent/codex-profiles/2",
       model: "gpt-5.6-sol",
       effort: "max",
     })],
-    then: ["both branches carry the same isolated settings", (command) => {
-      expect(command.match(/CODEX_HOME=/g)).toHaveLength(2);
-      expect(command.match(/gpt-5\.6-sol/g)).toHaveLength(2);
-      expect(command.match(/model_reasoning_effort="max"/g)).toHaveLength(2);
-      expect(command.match(/--sandbox workspace-write/g)).toHaveLength(2);
-      expect(command.match(/--ask-for-approval on-request/g)).toHaveLength(2);
-      expect(command.match(/sandbox_workspace_write\.network_access=true/g)).toHaveLength(2);
-      expect(command.match(/approvals_reviewer="auto_review"/g)).toHaveLength(2);
+    then: ["it is a single fresh codex invocation carrying the isolated settings", (command) => {
+      expect(command).not.toContain("resume --last");
+      expect(command).not.toContain("||");
+      expect(command.match(/CODEX_HOME=/g)).toHaveLength(1);
+      expect(command.match(/gpt-5\.6-sol/g)).toHaveLength(1);
+      expect(command.match(/model_reasoning_effort="max"/g)).toHaveLength(1);
+      expect(command).toContain("--sandbox workspace-write");
+      expect(command).toContain('approvals_reviewer="auto_review"');
       expect(command).not.toContain("--yolo");
       expect(command).not.toContain("--dangerously-bypass-approvals-and-sandbox");
-      expect(command).toContain("codex resume --last");
-      expect(command).toContain("||");
     }],
   });
 

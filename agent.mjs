@@ -128,7 +128,15 @@ export function buildCodexLaunchCommand({
     // be resumed.
     return `${env} codex resume ${shellQuote(exactResume)} ${flags}`;
   }
-  return `${env} codex resume --last ${flags} 2>/dev/null || ${env} codex ${flags}`;
+  // NEVER `codex resume --last`: it resumes the globally most-recent rollout,
+  // not this pane's own, so a respawn can attach to a DIFFERENT live pane's
+  // session — two writers on one rollout, interleaved model/context (the
+  // skydive model-override incident, twice in one day). With no exact
+  // pane-owned session to resume, start fresh; on-disk WIP is untouched. The
+  // exact-session branch above stays fail-closed. Callers select the exact
+  // resume id through core/codex-session-guard.mjs (own + provenance-matched +
+  // not held by a live writer), never a global shortcut.
+  return `${env} codex ${flags}`;
 }
 
 // --- Session isolation ---
@@ -1175,11 +1183,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         catch (err) { console.warn(`startCodex: could not pin ${name}:${pane} model: ${err.message}`); }
       }
     }
-    // Try `codex resume --last` first to pick up the most recent session
-    // for this pane's cwd; fall back to fresh `codex` when no prior
-    // session exists (first launch). CODEX_HOME selects the ChatGPT account;
-    // -m/-c are process-local launch overrides, so pane A can use Max without
-    // mutating pane B's config.toml default.
+    // Resume only an exact pane-owned session id (rollback / guard-selected);
+    // otherwise launch fresh. Never `codex resume --last` — the global latest
+    // belongs to whichever pane wrote most recently, not this one, which is how
+    // a respawn hijacked another pane's live session. CODEX_HOME selects the
+    // ChatGPT account; -m/-c are process-local launch overrides, so pane A can
+    // use Max without mutating pane B's config.toml default.
     const cmd = buildCodexLaunchCommand({
       profileHome: profile.home,
       model: override?.model || null,
