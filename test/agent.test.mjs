@@ -340,6 +340,21 @@ feature("generated agent policy", () => {
     }],
   });
 
+  unit("makes reversible choices broker-owned instead of parked on the human", {
+    when: ["generating fresh agent hints", () => {
+      const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
+      paneDir(root, 0);
+      const content = readFileSync(join(root, ".agents", "AGENTS.md"), "utf-8");
+      rmSync(root, { recursive: true, force: true });
+      return content;
+    }],
+    then: ["rule 16 says decide-ship-show and reserves ask-first for the irreversible", (content) => {
+      expect(content).toContain("Reversible calls are broker calls: decide, ship, show");
+      expect(content).toMatch(/irreversible, external-facing, costs money, or carries real\s+risk/u);
+      expect(content).toMatch(/"awaiting your\s+decision" pile is a bug/u);
+    }],
+  });
+
   unit("never lets a broker pause dispatch while READY tickets exist", {
     when: ["generating fresh agent hints", () => {
       const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
