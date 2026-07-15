@@ -74,7 +74,7 @@ board_counts() {
   token=$(cat "$READ_TOKEN_FILE" 2>/dev/null) || { log "$project: no read token at $READ_TOKEN_FILE"; return 1; }
   curl -sf --max-time 20 -A "amux-board-curator" \
     -H "Authorization: Bearer $token" \
-    "${BOARD_URL}/api/tickets?project=${project}" \
+    "${BOARD_URL}/api/tickets/summary?project=${project}" \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("total"), json.dumps(d.get("counts"), sort_keys=True))' \
     2>/dev/null
 }

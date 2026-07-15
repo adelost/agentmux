@@ -30,9 +30,9 @@ function api({ ackStatus = 200 } = {}) {
   const fetchImpl = vi.fn(async (input, init = {}) => {
     const url = new URL(input);
     calls.push({ url, init, body: init.body ? JSON.parse(String(init.body)) : null });
-    if (url.pathname === "/api/config") return Response.json({
-      assignmentBootstrap: { project: { id: url.searchParams.get("project"),
-        brokerOwner: url.searchParams.get("project") === "source" ? "lsrc:2" : "skydive:2" } },
+    if (url.pathname === "/api/config/agentdocs") return Response.json({
+      project: { id: url.searchParams.get("project"),
+        brokerOwner: url.searchParams.get("project") === "source" ? "lsrc:2" : "skydive:2" },
     });
     if (url.pathname === "/api/watchdog/outbox") return Response.json({ alerts: [alert] });
     if (url.pathname === "/api/watchdog/outbox/ack") {
@@ -85,6 +85,9 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
       agent: "skydive", pane: 2, prompt: PROMPT,
       idempotencyKey: watchdogDeliveryKey("skydive", alert.dedupeKey),
     })]);
+    expect(remote.calls.filter((call) => call.url.pathname.includes("/api/config"))
+      .map((call) => call.url.pathname))
+      .toEqual(["/api/config/agentdocs", "/api/config/agentdocs"]);
     const acks = remote.calls.filter((call) => call.url.pathname.endsWith("/ack"));
     expect(acks.map((call) => call.body)).toEqual(["source", "skydive"].map((project) => ({
       id: 7, deliveryReceipt: {
@@ -120,8 +123,8 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
     remote.fetchImpl.mockImplementation(async (input, init = {}) => {
       const url = new URL(input);
       remote.calls.push({ url, init, body: init.body ? JSON.parse(String(init.body)) : null });
-      if (url.pathname === "/api/config") return Response.json({
-        assignmentBootstrap: { project: { id: "source", brokerOwner: "lsrc:2" } },
+      if (url.pathname === "/api/config/agentdocs") return Response.json({
+        project: { id: "source", brokerOwner: "lsrc:2" },
       });
       if (url.pathname === "/api/watchdog/outbox") return Response.json({ alerts: [alert] });
       if (url.pathname.endsWith("/ack")) {

@@ -111,7 +111,7 @@ describe("fleet starvation sweep (D)", () => {
     expect(board.seen.length).toBeGreaterThan(0);
     expect(board.seen[0].ua).toContain("amux-fleet-watch");
     expect(board.seen[0].auth).toContain("Bearer test-token");
-    expect(board.seen[0].url).toContain("project=testproj");
+    expect(board.seen[0].url).toBe("/api/tickets/summary?project=testproj");
   });
 
   it("escalates to the human on the second nudge", async () => {
@@ -161,15 +161,14 @@ describe("fleet starvation sweep (D)", () => {
     expect(existsSync(hold)).toBe(false);
   });
 
-  it("handles a board response far beyond the 128KB argv cap", async () => {
-    // A busy board returns full ticket texts; skydive's 64-ticket response
-    // silently broke an argv-passed parse (Linux MAX_ARG_STRLEN, 2026-07-15).
+  it("uses only the bounded summary response even when a server adds unrelated ticket data", async () => {
     board.state.tickets = Array.from({ length: 80 }, (_, i) => ({
       id: `BIG-${i}`, raw: "x".repeat(4000),
     }));
     const out = await run(fx, env());
     expect(out).not.toContain("board unreachable");
     expect(out).toContain("candidate (ready=24 in_progress=0, sweep 1/2)");
+    expect(board.seen.at(-1).url).toBe("/api/tickets/summary?project=testproj");
   });
 
   it("skips loudly without state change when the board is unreachable", async () => {

@@ -132,7 +132,7 @@ export async function pollWatchdogOutboxes({
   const errors = [];
   for (const projectId of config.projects) {
     try {
-      const bootstrapUrl = endpoint(config.baseUrl, "/api/config", projectId);
+      const bootstrapUrl = endpoint(config.baseUrl, "/api/config/agentdocs", projectId);
       const bootstrap = await fetchJson(bootstrapUrl, {
         fetchImpl, token: readToken, timeoutMs: config.requestTimeoutMs,
       });
@@ -235,7 +235,7 @@ async function fetchJson(url, {
 }
 
 function brokerTarget(value, projectId) {
-  const project = value?.assignmentBootstrap?.project;
+  const project = value?.project ?? value?.assignmentBootstrap?.project;
   if (!isObject(project) || project.id !== projectId || typeof project.brokerOwner !== "string") {
     throw new Error("schema: bootstrap project/brokerOwner missing");
   }

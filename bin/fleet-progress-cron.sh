@@ -463,7 +463,7 @@ board_ready_inprog() {
   [ -r "$READ_TOKEN_FILE" ] || return 1
   tok=$(cat "$READ_TOKEN_FILE") || return 1
   timeout 15 curl -sf -A "amux-fleet-watch" -H "Authorization: Bearer ${tok}" \
-    "${BOARD_URL}/api/tickets?project=${project}" 2>/dev/null \
+    "${BOARD_URL}/api/tickets/summary?project=${project}" 2>/dev/null \
     | "$PY" -c '
 import json, sys
 try:

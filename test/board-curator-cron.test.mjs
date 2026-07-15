@@ -122,8 +122,10 @@ describe("board-curator cron", () => {
 
   it("includes board counts in the fingerprint and identifies with a User-Agent", async () => {
     let seenUa = null;
+    let seenUrl = null;
     const server = createServer((req, res) => {
       seenUa = req.headers["user-agent"];
+      seenUrl = req.url;
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ total: 7, counts: { ready: 3, done: 4 } }));
     });
@@ -145,6 +147,7 @@ describe("board-curator cron", () => {
       const stamp = readFileSync(join(fx.watchDir, "ghost.curated"), "utf-8");
       expect(stamp).toContain('board:7 {"done": 4, "ready": 3}');
       expect(seenUa).toContain("amux-board-curator");
+      expect(seenUrl).toBe("/api/tickets/summary?project=testproj");
     } finally {
       server.close();
     }
