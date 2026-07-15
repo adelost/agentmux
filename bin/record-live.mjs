@@ -16,6 +16,7 @@ import { parseEnv } from "../lib.mjs";
 import { createAgent } from "../agent.mjs";
 import { createRecorder } from "../core/recorder.mjs";
 import { createDeliveryQueue, waitForDeliveryJob } from "../core/delivery-queue.mjs";
+import { validateAgentPane } from "../cli/config.mjs";
 import { load as loadYaml } from "js-yaml";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -74,7 +75,9 @@ async function main() {
   const agentDir = loadAgentDir(agentName);
   console.log(`→ ${agentName}:${pane} "${prompt.slice(0, 80)}${prompt.length > 80 ? "…" : ""}"`);
 
-  const queue = createDeliveryQueue();
+  const queue = createDeliveryQueue({
+    validateTarget: (name, targetPane) => validateAgentPane(AGENTS_YAML, name, targetPane),
+  });
   const queued = queue.enqueue({ agentName, pane, text: prompt, source: "record-live" });
   const delivery = await waitForDeliveryJob(queue, queued.id, { timeoutMs: 15_000 });
   if (delivery?.status !== "acknowledged") {

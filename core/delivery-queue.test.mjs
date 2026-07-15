@@ -1,10 +1,11 @@
 import { feature, component, expect } from "bdd-vitest";
-import { mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "fs";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createDeliveryQueue, deliveryQueueStats, waitForDeliveryJob } from "./delivery-queue.mjs";
+import { validateAgentPane } from "../cli/config.mjs";
 
 const tempRoot = () => join(tmpdir(), `amux-delivery-queue-${process.pid}-${Math.random().toString(36).slice(2)}`);
 const execFileAsync = promisify(execFile);
@@ -352,6 +353,90 @@ feature("durable delivery queue", () => {
       expect(jobs.map((job) => job.text)).toEqual(["first process", "second process"]);
       expect(jobs.map((job) => job.status)).toEqual(["pending", "pending"]);
       rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("unknown targets leave no durable artifact under concurrent retry", {
+    given: ["a current fleet config and an empty shared spool", () => {
+      const rootDir = tempRoot();
+      const configPath = `${tempRoot()}.yaml`;
+      mkdirSync(rootDir, { recursive: true });
+      writeFileSync(configPath, [
+        "lsrc:",
+        "  dir: /tmp/lsrc",
+        "  panes:",
+        "    - cmd: codex",
+        "",
+      ].join("\n"));
+      return { rootDir, configPath };
+    }],
+    when: ["independent processes race the same invalid retry identity", async ({ rootDir, configPath }) => {
+      const queueUrl = new URL("./delivery-queue.mjs", import.meta.url).href;
+      const configUrl = new URL("../cli/config.mjs", import.meta.url).href;
+      const producer = [
+        `import { createDeliveryQueue } from ${JSON.stringify(queueUrl)};`,
+        `import { validateAgentPane } from ${JSON.stringify(configUrl)};`,
+        "const [root, config] = process.argv.slice(1);",
+        "const queue = createDeliveryQueue({ rootDir: root, validateTarget: (name, pane) => validateAgentPane(config, name, pane) });",
+        "queue.enqueue({ agentName: 'send', pane: 0, text: 'mistyped retry', idempotencyKey: 'same-retry' });",
+      ].join("\n");
+      const attempts = await Promise.allSettled(Array.from({ length: 6 }, () =>
+        execFileAsync(process.execPath, ["--input-type=module", "-e", producer, rootDir, configPath])));
+
+      const queue = createDeliveryQueue({
+        rootDir,
+        validateTarget: (name, pane) => validateAgentPane(configPath, name, pane),
+      });
+      const retryErrors = [];
+      for (let index = 0; index < 2; index++) {
+        try {
+          queue.enqueue({ agentName: "send", pane: 0, text: "mistyped retry",
+            idempotencyKey: "same-retry" });
+        } catch (error) { retryErrors.push(error.message); }
+      }
+      return { attempts, retryErrors, artifacts: readdirSync(rootDir) };
+    }],
+    then: ["every attempt fails loud before a lane, job, or receipt exists", (result, ctx) => {
+      expect(result.attempts.every((attempt) => attempt.status === "rejected")).toBe(true);
+      expect(result.retryErrors).toEqual([
+        "Agent 'send' not found",
+        "Agent 'send' not found",
+      ]);
+      expect(result.artifacts).toEqual([]);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+      rmSync(ctx.configPath, { force: true });
+    }],
+  });
+
+  component("enqueue validates the current config instead of a construction-time snapshot", {
+    given: ["a queue created while one target pane is configured", () => {
+      const rootDir = tempRoot();
+      const configPath = `${tempRoot()}.yaml`;
+      writeFileSync(configPath, [
+        "lsrc:",
+        "  dir: /tmp/lsrc",
+        "  panes:",
+        "    - cmd: codex",
+        "",
+      ].join("\n"));
+      const queue = createDeliveryQueue({
+        rootDir,
+        validateTarget: (name, pane) => validateAgentPane(configPath, name, pane),
+      });
+      return { rootDir, configPath, queue };
+    }],
+    when: ["the pane is removed before the first durable enqueue", ({ rootDir, configPath, queue }) => {
+      writeFileSync(configPath, "lsrc:\n  dir: /tmp/lsrc\n  panes: []\n");
+      let error = null;
+      try { queue.enqueue({ agentName: "lsrc", pane: 0, text: "stale target" }); }
+      catch (caught) { error = caught; }
+      return { error, artifacts: readdirSync(rootDir) };
+    }],
+    then: ["the removed pane is rejected before target-specific state exists", (result, ctx) => {
+      expect(result.error?.message).toBe("Pane 0 is not configured for agent 'lsrc'");
+      expect(result.artifacts).toEqual([]);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+      rmSync(ctx.configPath, { force: true });
     }],
   });
 
