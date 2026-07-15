@@ -123,6 +123,11 @@ Conversations can be pinned from the agent header. `pinnedAt` is persisted on
 the agent/native-session record, and the global Pinned overview jumps directly
 to the owning project and instance after a browser or runtime restart.
 
+The color theme follows the operating-system preference until the user chooses
+light or dark from the top bar. That explicit choice is browser-local,
+persists across reloads and synchronizes across tabs; it is presentation state
+and never becomes project or server configuration.
+
 The project registry includes a versioned communication-policy seam. History
 is readable across the project's agents today; per-agent send ACL enforcement
 is intentionally deferred.
@@ -131,7 +136,9 @@ is intentionally deferred.
 
 The UI shares design tokens with Suggest (`suggestions-v1d/src/style.css`):
 the canvas/paper/ink palette, Inter, 1px hairlines, soft status colors and the
-same button recipes, in both light and dark (`prefers-color-scheme`). The
+same button recipes, in both light and dark. The initial theme follows
+`prefers-color-scheme`, while the top-bar control can persist an explicit
+browser-local choice. The
 design is deliberately flat: depth (shadow) is reserved for true overlays
 (dialogs, the side panel, toasts); everything in flow separates with lines and
 paper tiers. When adjusting styles, change tokens first and components second,

@@ -253,6 +253,7 @@ const GATE_CHECKS = `(() => {
     horizontalOverflow: Math.max(doc.scrollWidth - doc.clientWidth, document.body.scrollWidth - doc.clientWidth),
     surfaces: {
       topbar: visible(".topbar"),
+      themeToggle: visible("#theme-toggle"),
       sidebarAgent: visible(".agent-button"),
       contextMeter: visible("#context-control"),
       effortSelect: visible("#agent-effort-select"),
@@ -308,6 +309,46 @@ const runViewport = async (page, viewport, url) => {
   const screenshot = await page.send("Page.captureScreenshot", { format: "png" });
   const artifact = join(ARTIFACT_DIR, `webui-${viewport.name}.png`);
   writeFileSync(artifact, Buffer.from(screenshot.data, "base64"));
+
+  const themeBefore = await page.evaluate(`(() => ({
+    theme: document.documentElement.dataset.theme,
+    background: getComputedStyle(document.body).backgroundColor,
+  }))()`);
+  await page.evaluate("document.querySelector('#theme-toggle').click(), true");
+  const themeAfter = await page.evaluate(`(() => ({
+    theme: document.documentElement.dataset.theme,
+    stored: localStorage.getItem('amux-code:color-theme'),
+    background: getComputedStyle(document.body).backgroundColor,
+    meta: document.querySelector('meta[name="theme-color"]')?.content,
+    label: document.querySelector('#theme-toggle')?.getAttribute('aria-label'),
+  }))()`);
+  const expectedTheme = themeBefore.theme === "light" ? "dark" : "light";
+  const expectedMeta = expectedTheme === "dark" ? "#101310" : "#f2f3ee";
+  const expectedLabel = expectedTheme === "dark" ? "Byt till ljust tema" : "Byt till mörkt tema";
+  if (themeAfter.theme !== expectedTheme || themeAfter.stored !== expectedTheme) {
+    failures.push(`theme toggle did not persist ${expectedTheme}`);
+  }
+  if (themeAfter.background === themeBefore.background) failures.push("theme toggle did not change the rendered palette");
+  if (themeAfter.meta !== expectedMeta) failures.push(`theme-color meta did not follow ${expectedTheme}`);
+  if (themeAfter.label !== expectedLabel) failures.push("theme toggle accessible label does not describe the next theme");
+  const themeScreenshot = await page.send("Page.captureScreenshot", { format: "png" });
+  const themeArtifact = join(ARTIFACT_DIR, `webui-${viewport.name}-theme.png`);
+  writeFileSync(themeArtifact, Buffer.from(themeScreenshot.data, "base64"));
+
+  await page.send("Page.reload", { ignoreCache: true });
+  const reloadDeadline = Date.now() + 20_000;
+  for (;;) {
+    const ready = await page.evaluate("document.documentElement.dataset.snapshotReady === 'true'").catch(() => false);
+    if (ready) break;
+    if (Date.now() > reloadDeadline) {
+      failures.push("theme persistence reload did not become snapshot-ready");
+      break;
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+  }
+  const persistedTheme = await page.evaluate("document.documentElement.dataset.theme");
+  if (persistedTheme !== expectedTheme) failures.push(`theme ${expectedTheme} did not survive reload`);
+  await page.evaluate("window.scrollTo(0, document.body.scrollHeight), true");
 
   await page.evaluate("document.querySelector('#prompt-overview-button').click(), true");
   const overlayDeadline = Date.now() + 5_000;
@@ -365,7 +406,7 @@ const runViewport = async (page, viewport, url) => {
     failures.push("pinned conversation did not navigate across projects to its exact instance");
   }
 
-  return { failures, artifacts: [artifact, promptArtifact, pinnedArtifact] };
+  return { failures, artifacts: [artifact, themeArtifact, promptArtifact, pinnedArtifact] };
 };
 
 const main = async () => {
