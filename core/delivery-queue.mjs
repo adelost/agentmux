@@ -29,6 +29,12 @@ export const TERMINAL_DELIVERY_STATES = new Set([
   "acknowledged", "cancelled", DELIVERED_UNVERIFIED_STATE,
 ]);
 
+export function isNotSentDeliveryJob(job) {
+  return job?.status === "cancelled"
+    && (job.metadata?.deliveryOutcome === "not-sent"
+      || job.metadata?.deliveryTimeout === "pre-submit");
+}
+
 export function defaultDeliveryQueueDir() {
   return process.env.AMUX_DELIVERY_QUEUE_DIR
     || join(homedir(), ".agentmux", "delivery-queue");
@@ -61,6 +67,18 @@ export function createDeliveryQueue({
 
   const dirFor = (agentName, pane) => join(rootDir, targetKey(agentName, pane));
   const pathFor = (agentName, pane, id) => join(dirFor(agentName, pane), `${id}.json`);
+  const cancelRequestPathFor = (agentName, pane, id) =>
+    join(dirFor(agentName, pane), `${id}.cancel-request`);
+
+  function hydrateCancellation(job) {
+    if (!job || (job.cancelRequestStatus && job.cancelRequestStatus !== "requested")) return job;
+    try {
+      const request = parseJson(cancelRequestPathFor(job.agentName, job.pane, job.id));
+      return { ...job, ...request, cancelRequestStatus: "requested" };
+    } catch {
+      return job;
+    }
+  }
 
   function persistAssets(text, dir, id) {
     const paths = [...String(text).matchAll(/\[(?:image|file) attached:\s+([^\]\n]+)\]/gi)]
@@ -116,10 +134,17 @@ export function createDeliveryQueue({
       status: "pending",
       attempts: 0,
       echoCursor,
+      firstAttemptAt: null,
       lastAttemptAt: null,
       nextAttemptAt: createdAtMs,
       lastReason: null,
       noticeSentAt: null,
+      cancelRequestStatus: null,
+      cancelRequestedAt: null,
+      cancelRequestedBy: null,
+      cancelRequestedReason: null,
+      cancelRequestResolvedAt: null,
+      cancelRequestLastReason: null,
       unverifiedNoticeSentAt: null,
       unverifiedNoticeAttempts: 0,
       unverifiedNoticeNextAttemptAt: null,
@@ -140,7 +165,7 @@ export function createDeliveryQueue({
       return { ...job, path };
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
-      return { ...parseJson(path), path };
+      return { ...hydrateCancellation(parseJson(path)), path };
     } finally {
       try { unlinkSync(tmp); } catch {}
     }
@@ -148,7 +173,7 @@ export function createDeliveryQueue({
 
   function read(agentName, pane, id) {
     const path = pathFor(agentName, pane, id);
-    try { return { ...parseJson(path), path }; }
+    try { return { ...hydrateCancellation(parseJson(path)), path }; }
     catch { return null; }
   }
 
@@ -172,7 +197,7 @@ export function createDeliveryQueue({
     catch { return []; }
     return names.flatMap((name) => {
       const path = join(dir, name);
-      try { return [{ ...parseJson(path), path }]; }
+      try { return [{ ...hydrateCancellation(parseJson(path)), path }]; }
       catch { return []; }
     }).sort((a, b) => String(a.orderKey).localeCompare(String(b.orderKey)));
   }
@@ -187,16 +212,34 @@ export function createDeliveryQueue({
   // prompt must stay ahead of later work so two payloads can never merge.
   function nextForWrite(agentName, pane) {
     return list(agentName, pane).find((job) =>
-      !TERMINAL_DELIVERY_STATES.has(job.status) && job.status !== "submitted") || null;
+      !TERMINAL_DELIVERY_STATES.has(job.status)
+        && job.status !== "submitting"
+        && job.status !== "submitted") || null;
   }
 
   function submitted(agentName, pane) {
-    return list(agentName, pane).filter((job) => job.status === "submitted");
+    return list(agentName, pane)
+      .filter((job) => job.status === "submitting" || job.status === "submitted");
+  }
+
+  function pendingCancellationRequests(agentName, pane) {
+    return list(agentName, pane)
+      .filter((job) => job.cancelRequestStatus === "requested");
+  }
+
+  function pendingTerminalNotices(agentName, pane) {
+    return list(agentName, pane).filter((job) => {
+      const needsNotice = job.status === DELIVERED_UNVERIFIED_STATE
+        || isNotSentDeliveryJob(job);
+      // These field names predate pre-submit dead-lettering. Keep them on disk
+      // for schema compatibility; they now fence either terminal notice kind.
+      return needsNotice && !job.unverifiedNoticeSentAt;
+    });
   }
 
   function pendingUnverifiedNotices(agentName, pane) {
-    return list(agentName, pane).filter((job) =>
-      job.status === DELIVERED_UNVERIFIED_STATE && !job.unverifiedNoticeSentAt);
+    return pendingTerminalNotices(agentName, pane)
+      .filter((job) => job.status === DELIVERED_UNVERIFIED_STATE);
   }
 
   function targets() {
@@ -210,7 +253,9 @@ export function createDeliveryQueue({
       if (!match) continue;
       const agentName = decodeURIComponent(match[1]);
       const pane = Number(match[2]);
-      if (next(agentName, pane) || pendingUnverifiedNotices(agentName, pane).length) {
+      if (next(agentName, pane)
+          || pendingTerminalNotices(agentName, pane).length
+          || pendingCancellationRequests(agentName, pane).length) {
         out.push({ agentName, pane });
       }
     }
@@ -226,9 +271,43 @@ export function createDeliveryQueue({
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const path = join(rootDir, entry.name, `${id}.json`);
-      try { return { ...parseJson(path), path }; } catch {}
+      try { return { ...hydrateCancellation(parseJson(path)), path }; } catch {}
     }
     return null;
+  }
+
+  function requestCancellation(id, { reason, requestedBy = "unknown" } = {}) {
+    const normalizedReason = String(reason || "").trim();
+    if (!normalizedReason) throw new Error("delivery cancellation requires a reason");
+    if (normalizedReason.length > 500) {
+      throw new Error("delivery cancellation reason must be at most 500 characters");
+    }
+    const current = findById(String(id || ""));
+    if (!current) throw new Error(`delivery job ${id} not found`);
+
+    // Keep the request in its own immutable sidecar. A producer can race a
+    // broker job-file update, so storing both in the mutable job would allow
+    // the later rename to erase a valid cancellation request.
+    if (current.cancelRequestStatus) return current;
+    const request = {
+      cancelRequestStatus: "requested",
+      cancelRequestedAt: now(),
+      cancelRequestedBy: String(requestedBy || "unknown").slice(0, 120),
+      cancelRequestedReason: normalizedReason,
+      cancelRequestResolvedAt: null,
+      cancelRequestLastReason: null,
+    };
+    const path = cancelRequestPathFor(current.agentName, current.pane, current.id);
+    const tmp = `${path}.tmp-${process.pid}-${uuid()}`;
+    writeFileSync(tmp, `${JSON.stringify(request, null, 2)}\n`, { mode: 0o600 });
+    try {
+      linkSync(tmp, path);
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+    } finally {
+      try { unlinkSync(tmp); } catch {}
+    }
+    return read(current.agentName, current.pane, current.id);
   }
 
   function restoreAssets(job) {
@@ -303,15 +382,19 @@ export function createDeliveryQueue({
       for (const name of readdirSync(dir).filter((value) => value.endsWith(".json"))) {
         const path = join(dir, name);
         try {
-          const job = parseJson(path);
+          const job = hydrateCancellation(parseJson(path));
           const finishedAt = Number(job.acknowledgedAt || job.terminalAt || 0);
-          const unverifiedNoticePending = job.status === DELIVERED_UNVERIFIED_STATE
+          const terminalNoticePending = (job.status === DELIVERED_UNVERIFIED_STATE
+              || isNotSentDeliveryJob(job))
             && !job.unverifiedNoticeSentAt;
+          const cancellationResolutionPending = job.cancelRequestStatus === "requested";
           if (TERMINAL_DELIVERY_STATES.has(job.status)
-              && !unverifiedNoticePending
+              && !terminalNoticePending
+              && !cancellationResolutionPending
               && finishedAt
               && finishedAt < cutoff) {
             unlinkSync(path);
+            try { unlinkSync(cancelRequestPathFor(job.agentName, job.pane, job.id)); } catch {}
             rmSync(join(dir, "assets", job.id), { recursive: true, force: true });
             removed++;
           }
@@ -326,7 +409,8 @@ export function createDeliveryQueue({
 
   return {
     rootDir, enqueue, read, update, list, next, nextForWrite, submitted,
-    pendingUnverifiedNotices, targets, findById,
+    pendingTerminalNotices, pendingUnverifiedNotices, pendingCancellationRequests,
+    requestCancellation, targets, findById,
     restoreAssets, acquireTargetLease, acquireSessionLease, prune,
   };
 }
@@ -358,7 +442,7 @@ export function deliveryQueueStats(queue) {
       if (job.status === "pending" || job.status === "delivering") pending++;
       else if (job.status === "pasting") pasting++;
       else if (job.status === "drafted") drafted++;
-      else if (job.status === "submitted") submitted++;
+      else if (job.status === "submitting" || job.status === "submitted") submitted++;
       else if (job.status === "blocked") blocked++;
     }
   }

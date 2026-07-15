@@ -209,6 +209,39 @@ feature("deliverToPane routing", () => {
       expect(agent.calls).not.toContain("echo");
     }],
   });
+
+  component("both prompt and slash routes forward the pre-Enter fence callbacks", {
+    given: ["two transport agents that expose the callback order", () => {
+      const callbackCalls = [];
+      const make = (echo) => {
+        const agent = fakeAgent({ echoResults: [echo] });
+        agent.sendOnly = async (_name, _text, _pane, options = {}) => {
+          await options.onSubmitting?.();
+          await options.onSubmitted?.();
+          return { submitted: true };
+        };
+        return agent;
+      };
+      return { callbackCalls, promptAgent: make(true), slashAgent: make(false) };
+    }],
+    when: ["each routing branch submits once", async ({ callbackCalls, promptAgent, slashAgent }) => {
+      const callbacks = (route) => ({
+        onSubmitting: async () => { callbackCalls.push(`${route}:fence`); },
+        onSubmitted: async () => { callbackCalls.push(`${route}:submitted`); },
+      });
+      await deliverToPane(promptAgent, "claw", 1, "durable prompt", callbacks("prompt"));
+      await deliverToPane(slashAgent, "claw", 1, "/compact", {
+        ...callbacks("slash"), settleMs: 0, sleep: async () => {},
+      });
+      return callbackCalls;
+    }],
+    then: ["both preserve fence-before-final ordering", (calls) => {
+      expect(calls).toEqual([
+        "prompt:fence", "prompt:submitted",
+        "slash:fence", "slash:submitted",
+      ]);
+    }],
+  });
 });
 
 feature("delivery receipts", () => {

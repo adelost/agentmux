@@ -83,6 +83,7 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
   knownDrafted = false,
   onPasteStarted = null,
   onDrafted = null,
+  onSubmitting = null,
   onSubmitted = null,
 } = {}) {
   const target = `${agentName}:.${pane}`;
@@ -122,6 +123,7 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
       knownDrafted,
       onPasteStarted,
       onDrafted,
+      onSubmitting,
       onSubmitted,
     })
       .then((receipt) => { sendReceipt = receipt || null; })
@@ -189,12 +191,13 @@ async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
   knownDrafted = false,
   onPasteStarted = null,
   onDrafted = null,
+  onSubmitting = null,
   onSubmitted = null,
 } = {}) {
   const target = `${agentName}:.${pane}`;
   await agent.dismissBlockingPrompt(target).catch(() => {});
   await agent.sendOnly(agentName, claudeCmd, pane,
-    { knownDrafted, onPasteStarted, onDrafted, onSubmitted });
+    { knownDrafted, onPasteStarted, onDrafted, onSubmitting, onSubmitted });
 
   for (let attempt = 0; attempt <= maxRescues; attempt++) {
     await sleep(settleMs);

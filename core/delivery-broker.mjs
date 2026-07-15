@@ -10,7 +10,8 @@
 import { appendEvent } from "./events.mjs";
 import { deliverToPane } from "./delivery.mjs";
 import {
-  DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES, waitForDeliveryJob,
+  DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES,
+  isNotSentDeliveryJob, waitForDeliveryJob,
 } from "./delivery-queue.mjs";
 
 const ACTIVE_RETRY_MS = 1_000;
@@ -18,6 +19,9 @@ const BLOCKED_RETRY_MS = 3_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
 const NOTICE_AFTER_MS = 10_000;
 const STALE_SUBMITTED_TERMINAL_MS = 60 * 60 * 1_000;
+const STALE_PRE_SUBMIT_TERMINAL_MS = 60 * 60 * 1_000;
+const MAX_PRE_SUBMIT_ATTEMPTS = 64;
+const PRE_SUBMIT_STATES = new Set(["pending", "delivering", "pasting", "drafted"]);
 
 function blockedRetryMs(job, { drafted = false } = {}) {
   const base = drafted ? 5_000 : BLOCKED_RETRY_MS;
@@ -125,11 +129,16 @@ export function createDeliveryBroker({
     return noticed;
   }
 
-  async function notifyUnverified(initialJob) {
+  function terminalNoticeKind(job) {
+    if (job.status === DELIVERED_UNVERIFIED_STATE) return "unverified";
+    if (isNotSentDeliveryJob(job)) return "not-sent";
+    return null;
+  }
+
+  async function notifyTerminal(initialJob) {
     let current = queue.read(initialJob.agentName, initialJob.pane, initialJob.id) || initialJob;
-    if (current.status !== DELIVERED_UNVERIFIED_STATE || current.unverifiedNoticeSentAt) {
-      return current;
-    }
+    const noticeKind = terminalNoticeKind(current);
+    if (!noticeKind || current.unverifiedNoticeSentAt) return current;
     current = queue.update(current, {
       unverifiedNoticeAttempts: Number(current.unverifiedNoticeAttempts || 0) + 1,
       unverifiedNoticeNextAttemptAt: null,
@@ -146,7 +155,7 @@ export function createDeliveryBroker({
           unverifiedNoticeNextAttemptAt: now() + blockedRetryMs(current),
           unverifiedNoticeLastReason: "no Discord channel is currently bound to the target pane",
         });
-        log(`delivery broker unverified notice pending for ${unavailable.id}: no bound Discord channel`);
+        log(`delivery broker terminal notice pending for ${unavailable.id}: no bound Discord channel`);
         return unavailable;
       }
       current = queue.update(current, {
@@ -155,7 +164,7 @@ export function createDeliveryBroker({
       });
     }
     try {
-      await notify(current, "unverified");
+      await notify(current, noticeKind);
       return queue.update(current, {
         unverifiedNoticeSentAt: now(),
         unverifiedNoticeNextAttemptAt: null,
@@ -166,7 +175,7 @@ export function createDeliveryBroker({
         unverifiedNoticeNextAttemptAt: now() + blockedRetryMs(current),
         unverifiedNoticeLastReason: error.message,
       });
-      log(`delivery broker unverified notice failed for ${failed.id}: ${error.message}`);
+      log(`delivery broker terminal notice failed for ${failed.id}: ${error.message}`);
       return failed;
     }
   }
@@ -185,6 +194,7 @@ export function createDeliveryBroker({
     current = queue.read(current.agentName, current.pane, current.id) || current;
     if (TERMINAL_DELIVERY_STATES.has(current.status)) return current;
 
+    const preEnterFence = current.status === "submitting";
     const terminal = queue.update(current, {
       status: DELIVERED_UNVERIFIED_STATE,
       draftOwned: false,
@@ -192,10 +202,126 @@ export function createDeliveryBroker({
       nextAttemptAt: null,
       unverifiedNoticeSentAt: null,
       unverifiedNoticeNextAttemptAt: now(),
-      lastReason: "submit attempt has no exact JSONL receipt after 60 minutes; delivery remains unverified",
+      ...(preEnterFence ? { metadata: { deliveryAmbiguity: "submitting-fence" } } : {}),
+      lastReason: preEnterFence
+        ? "pre-Enter submit fence has no exact receipt after 60 minutes; physical delivery remains unverified"
+        : "submit attempt has no exact JSONL receipt after 60 minutes; delivery remains unverified",
     });
     queueEvent(terminal, DELIVERED_UNVERIFIED_STATE);
-    return notifyUnverified(terminal);
+    return notifyTerminal(terminal);
+  }
+
+  function stalePreSubmit(job) {
+    if (!PRE_SUBMIT_STATES.has(job.status) || Number(job.attempts || 0) <= 0) return false;
+    const firstAttemptAt = Number(job.firstAttemptAt || job.createdAt || 0);
+    const age = firstAttemptAt ? Math.max(0, now() - firstAttemptAt) : 0;
+    return age >= STALE_PRE_SUBMIT_TERMINAL_MS
+      || Number(job.attempts || 0) >= MAX_PRE_SUBMIT_ATTEMPTS;
+  }
+
+  const cancellationRequested = (job) => job.cancelRequestStatus === "requested";
+
+  function settleCancellation(initialJob, status, reason) {
+    const current = queue.read(initialJob.agentName, initialJob.pane, initialJob.id) || initialJob;
+    if (!cancellationRequested(current)) return current;
+    const settled = queue.update(current, {
+      cancelRequestStatus: status,
+      cancelRequestResolvedAt: now(),
+      cancelRequestLastReason: reason,
+    });
+    queueEvent(settled, `cancel_${status}`, { reason: String(reason).slice(0, 160) });
+    return settled;
+  }
+
+  function settleCancellationOutsidePreSubmit(job) {
+    if (!cancellationRequested(job)) return job;
+    if (isNotSentDeliveryJob(job)) {
+      return settleCancellation(job, "completed", "job is terminal and was not sent");
+    }
+    if (job.status === "acknowledged") {
+      return settleCancellation(job, "refused", "authoritative receipt already exists; cancellation cannot be called NOT SENT");
+    }
+    if (job.status === "submitting"
+        || job.status === "submitted"
+        || job.status === DELIVERED_UNVERIFIED_STATE) {
+      return settleCancellation(job, "refused", "submit may already have been attempted; cancellation cannot be called NOT SENT");
+    }
+    if (TERMINAL_DELIVERY_STATES.has(job.status)) {
+      return settleCancellation(job, "refused", `job already ended as ${job.status}; cancellation was not applied`);
+    }
+    return settleCancellation(job, "refused", `state ${job.status} is not safe for pre-submit cancellation`);
+  }
+
+  function notSentCause(job) {
+    if (!PRE_SUBMIT_STATES.has(job.status)) return null;
+    let nativeAttemptMayHaveLeft = false;
+    if (Number(job.attempts || 0) > 0 && typeof agent.isNativeTarget === "function") {
+      try {
+        nativeAttemptMayHaveLeft = Boolean(agent.isNativeTarget(job.agentName, job.pane));
+      } catch {
+        // Unknown routing is ambiguity, never proof that nothing was sent.
+        nativeAttemptMayHaveLeft = true;
+      }
+    }
+    if (nativeAttemptMayHaveLeft) return null;
+    if (cancellationRequested(job)) return "sender-cancel";
+    if (stalePreSubmit(job)) return "pre-submit-timeout";
+    return null;
+  }
+
+  async function terminalizeNotSent(job) {
+    let current = queue.read(job.agentName, job.pane, job.id) || job;
+    let cause = notSentCause(current);
+    if (!cause) return settleCancellationOutsidePreSubmit(current);
+
+    // A late authoritative receipt always wins. Re-read the durable state at
+    // the transition boundary so an acknowledgement or submit fence cannot
+    // be overwritten by a stale pre-submit observer.
+    if (await exactEcho(current)) {
+      return settleCancellationOutsidePreSubmit(
+        await acknowledge(current, "late-echo-before-not-sent"),
+      );
+    }
+    current = queue.read(current.agentName, current.pane, current.id) || current;
+    cause = notSentCause(current);
+    if (!cause) return settleCancellationOutsidePreSubmit(current);
+    if (await exactEcho(current)) {
+      return settleCancellationOutsidePreSubmit(
+        await acknowledge(current, "late-echo-before-not-sent"),
+      );
+    }
+    current = queue.read(current.agentName, current.pane, current.id) || current;
+    cause = notSentCause(current);
+    if (!cause) return settleCancellationOutsidePreSubmit(current);
+
+    const firstAttemptAt = Number(current.firstAttemptAt || current.createdAt || now());
+    const ageMinutes = Math.max(0, Math.floor((now() - firstAttemptAt) / 60_000));
+    const requestedReason = String(current.cancelRequestedReason || "sender no longer needs this job");
+    const requestedBy = String(current.cancelRequestedBy || "unknown sender");
+    const terminalReason = cause === "sender-cancel"
+      ? `not sent: cancellation requested by ${requestedBy} before submit (${requestedReason}); composer preserved`
+      : `not sent: composer remained unsafe for ${ageMinutes} minute(s) across ${Number(current.attempts || 0)} attempt(s); automatic retries stopped`;
+    const terminal = queue.update(current, {
+      status: "cancelled",
+      draftOwned: false,
+      terminalAt: now(),
+      nextAttemptAt: null,
+      unverifiedNoticeSentAt: null,
+      unverifiedNoticeNextAttemptAt: now(),
+      metadata: {
+        deliveryOutcome: "not-sent",
+        ...(cause === "pre-submit-timeout" ? { deliveryTimeout: "pre-submit" } : {}),
+        ...(cause === "sender-cancel" ? { deliveryCancellation: "sender-request" } : {}),
+      },
+      ...(cause === "sender-cancel" ? {
+        cancelRequestStatus: "completed",
+        cancelRequestResolvedAt: now(),
+        cancelRequestLastReason: "cancelled before submit; job was not sent",
+      } : {}),
+      lastReason: terminalReason,
+    });
+    queueEvent(terminal, "cancelled", { reason: cause });
+    return notifyTerminal(terminal);
   }
 
   async function processJob(initialJob) {
@@ -206,7 +332,12 @@ export function createDeliveryBroker({
     // stable delivery job id becomes the runtime idempotency key, so a lost
     // HTTP response or bridge restart is retried without launching a second
     // turn. No tmux cursor, composer draft or JSONL echo participates here.
-    if (typeof agent.isNativeTarget === "function"
+    // A legacy submit fence remains authoritative if routing flips while it
+    // is unresolved. Sending it to a new native backend would create the
+    // duplicate that the fence exists to prevent.
+    if (job.status !== "submitting"
+        && job.status !== "submitted"
+        && typeof agent.isNativeTarget === "function"
         && agent.isNativeTarget(job.agentName, job.pane)) {
       job = queue.update(job, {
         status: "delivering",
@@ -264,6 +395,13 @@ export function createDeliveryBroker({
     // retyping the prompt.
     if (await exactEcho(job)) return acknowledge(job, "echo");
 
+    // Before Enter there is no delivery ambiguity: the broker has not sent
+    // the instruction. Preserve any foreign/partial composer content, stop
+    // retrying after a bounded safety budget, and release the FIFO with an
+    // explicit durable NOT SENT notice. A job that merely waited behind an
+    // older head has attempts=0 and always receives one real attempt first.
+    if (stalePreSubmit(job)) return terminalizeNotSent(job);
+
     // `pasting` means this broker persisted ownership before the Codex pane
     // write, but never proved the exact draft and therefore never attempted
     // Enter. An idle empty composer is conclusive: nothing was submitted, so
@@ -309,12 +447,16 @@ export function createDeliveryBroker({
     // A submit key was attempted, but that is not delivery truth. Never type
     // again merely because JSONL is late, and never let TUI inspection reopen
     // or release the FIFO head. Only the exact JSONL event can acknowledge it.
-    if (job.status === "submitted") {
+    if (job.status === "submitted" || job.status === "submitting") {
       // Slash commands intentionally have no JSONL user event. The durable
       // submitted transition is their terminal proof after a crash between
       // composer verification and the final acknowledged file update.
-      if (job.kind === "slash") return acknowledge(job, "slash-submit-recovery");
-      const submittedAge = now() - Number(job.submittedAt || job.lastAttemptAt || job.createdAt || now());
+      if (job.kind === "slash" && job.status === "submitted") {
+        return acknowledge(job, "slash-submit-recovery");
+      }
+      const submittedAge = now() - Number(
+        job.submittedAt || job.submitFenceAt || job.lastAttemptAt || job.createdAt || now(),
+      );
       const submittedExpired = submittedAge >= STALE_SUBMITTED_TERMINAL_MS;
       if (submittedExpired) return terminalizeUnverified(job);
       let transportHint = null;
@@ -325,13 +467,16 @@ export function createDeliveryBroker({
           transportHint = `TUI hint: ${transport.state}${transport.detail ? ` (${transport.detail})` : ""}`;
         }
       }
+      const receiptWait = job.status === "submitted"
+        ? "awaiting exact JSONL receipt"
+        : "submit fence committed before physical completion; awaiting authoritative receipt";
       return queue.update(job, {
-        status: "submitted",
+        status: job.status,
         draftOwned: false,
         nextAttemptAt: now() + ACTIVE_RETRY_MS,
         lastReason: transportHint
-          ? `awaiting exact JSONL receipt; ${transportHint}`
-          : "awaiting exact JSONL receipt",
+          ? `${receiptWait}; ${transportHint}`
+          : receiptWait,
       });
     }
 
@@ -341,6 +486,7 @@ export function createDeliveryBroker({
     job = queue.update(job, {
       status: drafted ? "drafted" : (ownsPaneDraft ? "pasting" : "delivering"),
       attempts: Number(job.attempts || 0) + 1,
+      firstAttemptAt: job.firstAttemptAt || now(),
       lastAttemptAt: now(),
       nextAttemptAt: null,
     });
@@ -369,6 +515,21 @@ export function createDeliveryBroker({
             const current = queue.read(job.agentName, job.pane, job.id) || job;
             job = queue.update(current, { status: "drafted", draftOwned: true });
             queueEvent(job, "drafted");
+          },
+          onSubmitting: async () => {
+            const current = queue.read(job.agentName, job.pane, job.id) || job;
+            if (cancellationRequested(current)) {
+              const error = new Error("delivery cancellation requested before submit fence");
+              error.code = "AMUX_DELIVERY_CANCEL_REQUESTED";
+              throw error;
+            }
+            job = queue.update(current, {
+              status: "submitting",
+              draftOwned: false,
+              submitFenceAt: now(),
+              nextAttemptAt: now() + ACTIVE_RETRY_MS,
+            });
+            queueEvent(job, "submitting");
           },
           onSubmitted: async () => {
             submitted = true;
@@ -423,6 +584,16 @@ export function createDeliveryBroker({
     job = queue.read(job.agentName, job.pane, job.id) || job;
     if (result.delivered && job.kind === "slash") return acknowledge(job, "slash");
     if (result.delivered && result.via === "echo") return acknowledge(job, "echo");
+    if (cancellationRequested(job) && PRE_SUBMIT_STATES.has(job.status)) {
+      return terminalizeNotSent(job);
+    }
+    if (job.status === "submitting") {
+      return queue.update(job, {
+        draftOwned: false,
+        nextAttemptAt: now() + ACTIVE_RETRY_MS,
+        lastReason: "submit fence committed before physical completion; awaiting authoritative receipt",
+      });
+    }
     if (submitted) {
       if (job.status !== "submitted") {
         job = queue.update(job, {
@@ -473,9 +644,16 @@ export function createDeliveryBroker({
     if (acquireLease && !lease) return;
     try {
       while (!stopped) {
-        const notices = (queue.pendingUnverifiedNotices?.(agentName, pane) || [])
+        // Cancellation is a request, never a producer-side state rewrite.
+        // Resolve every request while holding the same writer lease as pane
+        // delivery; this safely removes an attempts=0 follower out of order.
+        const cancellationRequests = queue.pendingCancellationRequests?.(agentName, pane) || [];
+        for (const request of cancellationRequests) await terminalizeNotSent(request);
+
+        const notices = (queue.pendingTerminalNotices?.(agentName, pane)
+          || queue.pendingUnverifiedNotices?.(agentName, pane) || [])
           .filter((job) => Number(job.unverifiedNoticeNextAttemptAt || 0) <= now());
-        for (const notice of notices) await notifyUnverified(notice);
+        for (const notice of notices) await notifyTerminal(notice);
 
         // Every non-terminal head, including `submitted`, retains FIFO until
         // the exact JSONL event acknowledges it. A TUI transition can no
@@ -483,9 +661,7 @@ export function createDeliveryBroker({
         const head = queue.next(agentName, pane);
         if (!head || Number(head.nextAttemptAt || 0) > now()) return;
         const outcome = await processJob(head);
-        if (outcome.status === "acknowledged") {
-          continue;
-        }
+        if (TERMINAL_DELIVERY_STATES.has(outcome.status)) continue;
         return;
       }
     } finally {
