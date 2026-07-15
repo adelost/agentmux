@@ -638,6 +638,36 @@ button { color: inherit; }
 .toast.visible { opacity: 1; transform: none; }
 .toast.error { background: var(--red); color: #ffffff; }
 
+/* ---------- Weekly quota ---------- */
+
+.quota-strip { display: flex; gap: 6px; }
+.quota-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 4px 11px; border: 1px solid var(--line-dark); border-radius: 99px; background: var(--paper); color: var(--ink); font-size: 11px; font-weight: 700; cursor: pointer; }
+.quota-chip:hover { background: var(--hover); }
+.quota-chip.warning { border-color: var(--amber); }
+.quota-chip.critical { border-color: var(--red); color: var(--red); }
+.quota-chip.unavailable { border-style: dashed; color: var(--muted); }
+.quota-chip.loading { color: var(--muted); }
+.quota-chip .quota-track { width: 44px; }
+.quota-chip-value { white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.quota-track { display: inline-block; height: 6px; overflow: hidden; border-radius: 99px; background: var(--line-subtle); }
+.quota-track span { display: block; height: 100%; border-radius: inherit; background: var(--green); transition: width 180ms ease, background 180ms ease; }
+.quota-chip.warning .quota-track span, .quota-row.warning .quota-track span { background: var(--amber); }
+.quota-chip.critical .quota-track span, .quota-row.critical .quota-track span { background: var(--red); }
+
+.quota-popover { position: fixed; z-index: 40; width: min(320px, calc(100vw - 24px)); padding: 14px 14px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper-raised); box-shadow: var(--overlay-shadow); }
+.quota-popover h2 { margin: 0 0 8px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.quota-popover-error { margin: 4px 0 8px; color: var(--red); font-size: 12px; }
+.quota-row { display: grid; gap: 4px; padding: 8px 0; border-top: 1px solid var(--line-subtle); }
+.quota-row:first-of-type { border-top: 0; }
+.quota-row-head { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; font-weight: 700; }
+.quota-row .quota-track { width: 100%; }
+.quota-row small { color: var(--muted); font-size: 11px; }
+.quota-popover-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line-subtle); color: var(--muted); font-size: 11px; }
+.quota-popover-footer a { color: var(--accent); font-weight: 700; text-decoration: none; }
+.quota-popover-footer a:hover { text-decoration: underline; }
+.quota-refresh { margin-top: 9px; }
+
 /* ---------- Mobile ---------- */
 
 @media (max-width: 760px) {
@@ -648,6 +678,8 @@ button { color: inherit; }
   .project-switcher select { width: 100%; max-width: none; }
   .topbar-actions { grid-column: 2; grid-row: 2; justify-content: flex-end; }
   .topbar-actions .boundary-badge, .topbar-actions #new-project-button { display: none; }
+  .quota-chip { gap: 6px; padding: 4px 9px; }
+  .quota-chip .quota-track { width: 30px; }
   .app-shell { display: block; }
   .agent-sidebar { position: static; width: 100%; height: auto; min-height: 82px; display: block; padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--line); overflow: hidden; }
   .aside-heading { padding: 0 2px 7px; }

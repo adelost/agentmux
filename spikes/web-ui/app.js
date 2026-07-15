@@ -90,6 +90,8 @@ const elements = {
   pinnedConversationsDialog: $("#pinned-conversations-dialog"),
   closePinnedConversations: $("#close-pinned-conversations"),
   pinnedConversationsList: $("#pinned-conversations-list"),
+  quotaStrip: $("#quota-strip"),
+  quotaPopover: $("#quota-popover"),
   toast: $("#toast"),
 };
 
@@ -1169,6 +1171,260 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") elements.sidePanel.classList.add("hidden");
 });
 
+// ---------- Weekly quota (Claude + Codex) ----------
+
+const QUOTA_POLL_MS = 5 * 60 * 1_000;
+const QUOTA_STALE_MS = 60 * 1_000;
+const QUOTA_WARN_PERCENT = 70;
+const QUOTA_CRITICAL_PERCENT = 90;
+const QUOTA_ENGINES = ["claude", "codex"];
+const QUOTA_ENGINE_LABELS = { claude: "Claude", codex: "Codex" };
+const QUOTA_MANAGE_LINKS = {
+  claude: { label: "Hantera Claude-kvot", url: "https://claude.ai/settings/usage" },
+  codex: { label: "Hantera Codex-kvot", url: "https://chatgpt.com/codex/settings/usage" },
+};
+const QUOTA_ERROR_TEXTS = {
+  credentials_unavailable: "Inloggningsuppgifter saknas på servern",
+  credentials_expired: "Claude-token har gått ut, kör en Claude-tur så förnyas den",
+  network_error: "Nätverksfel mot usage-API:t",
+  invalid_response: "Oväntat svar från usage-API:t",
+  no_limits_in_response: "Usage-svaret saknade kvotrader",
+  no_session_files: "Inga Codex-sessionsfiler hittades",
+  no_rate_limit_events: "Inga rate limit-händelser i sessionerna ännu",
+  fetch_failed: "Kunde inte nå /api/quota",
+};
+
+let quotaSnapshot = null;
+let quotaFetchedAt = 0;
+let quotaPopoverEngine = null;
+
+const quotaSeverityClass = (usedPercent) => {
+  if (usedPercent >= QUOTA_CRITICAL_PERCENT) return "critical";
+  if (usedPercent >= QUOTA_WARN_PERCENT) return "warning";
+  return "ok";
+};
+
+const quotaErrorText = (data) =>
+  QUOTA_ERROR_TEXTS[data?.error] || `Kvotdata otillgänglig (${data?.error || "okänt fel"})`;
+
+const claudeLimitLabel = (limit) => {
+  if (limit.kind === "session") return "Session (5 h)";
+  if (limit.kind === "weekly_all") return "Vecka · alla modeller";
+  if (limit.kind === "weekly_scoped") return `Vecka · ${limit.scopeName || "modell"}`;
+  return limit.kind;
+};
+
+const codexWindowLabel = (window, limit) => {
+  const scope = limit.limitId && limit.limitId !== "codex" ? ` · ${limit.limitId}` : "";
+  if (window.windowMinutes === 10_080) return `Vecka${scope}`;
+  if (window.windowMinutes && window.windowMinutes % 60 === 0) {
+    return `${window.windowMinutes / 60} h${scope}`;
+  }
+  return `${window.windowMinutes ?? "?"} min${scope}`;
+};
+
+const quotaRows = (engine, data) => {
+  if (engine === "claude") {
+    return data.limits.map((limit) => ({
+      label: claudeLimitLabel(limit),
+      usedPercent: limit.usedPercent,
+      resetsAt: limit.resetsAt,
+    }));
+  }
+  return data.limits.flatMap((limit) => limit.windows.map((window) => ({
+    label: codexWindowLabel(window, limit),
+    usedPercent: window.usedPercent,
+    resetsAt: window.resetsAt,
+    capturedAt: limit.capturedAt,
+  })));
+};
+
+const quotaHeadline = (rows) => rows.find((row) => row.label.startsWith("Vecka")) || rows[0];
+
+const formatQuotaReset = (iso) => {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const formatted = date.toLocaleString("sv-SE", {
+    weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+  });
+  return `återställs ${formatted}`;
+};
+
+const formatQuotaCaptured = (iso) => {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return `mätt ${date.toLocaleString("sv-SE", { hour: "2-digit", minute: "2-digit" })}`;
+};
+
+const buildQuotaTrack = (usedPercent) => {
+  const track = document.createElement("span");
+  track.className = "quota-track";
+  const fill = document.createElement("span");
+  fill.style.width = `${usedPercent}%`;
+  track.append(fill);
+  return track;
+};
+
+const renderQuotaStrip = () => {
+  elements.quotaStrip.replaceChildren();
+  for (const engine of QUOTA_ENGINES) {
+    const data = quotaSnapshot?.[engine];
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "quota-chip";
+    chip.dataset.engine = engine;
+    const name = document.createElement("span");
+    name.className = "quota-chip-name";
+    name.textContent = QUOTA_ENGINE_LABELS[engine];
+    chip.append(name);
+
+    if (quotaSnapshot === null) {
+      chip.classList.add("loading");
+      const value = document.createElement("span");
+      value.className = "quota-chip-value";
+      value.textContent = "…";
+      chip.append(value);
+      chip.title = "Hämtar kvotdata";
+    } else if (!data?.ok) {
+      chip.classList.add("unavailable");
+      const value = document.createElement("span");
+      value.className = "quota-chip-value";
+      value.textContent = "—";
+      chip.append(value);
+      chip.title = quotaErrorText(data);
+    } else {
+      const rows = quotaRows(engine, data);
+      const headline = quotaHeadline(rows);
+      const worstUsed = Math.max(...rows.map((row) => row.usedPercent));
+      chip.classList.add(quotaSeverityClass(worstUsed));
+      chip.append(buildQuotaTrack(headline.usedPercent));
+      const value = document.createElement("span");
+      value.className = "quota-chip-value";
+      value.textContent = `${Math.round(100 - headline.usedPercent)}% kvar`;
+      chip.append(value);
+      chip.title = `${QUOTA_ENGINE_LABELS[engine]} · ${headline.label}: ${headline.usedPercent}% använt`;
+    }
+    chip.setAttribute("aria-expanded", String(quotaPopoverEngine === engine));
+    chip.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleQuotaPopover(engine);
+    });
+    elements.quotaStrip.append(chip);
+  }
+};
+
+const closeQuotaPopover = () => {
+  quotaPopoverEngine = null;
+  elements.quotaPopover.hidden = true;
+  renderQuotaStrip();
+};
+
+const renderQuotaPopover = () => {
+  const engine = quotaPopoverEngine;
+  if (!engine) return;
+  const data = quotaSnapshot?.[engine];
+  const popover = elements.quotaPopover;
+  popover.replaceChildren();
+
+  const heading = document.createElement("h2");
+  heading.textContent = `${QUOTA_ENGINE_LABELS[engine]} · veckokvot`;
+  popover.append(heading);
+
+  if (!data?.ok) {
+    const message = document.createElement("p");
+    message.className = "quota-popover-error";
+    message.textContent = quotaErrorText(data);
+    popover.append(message);
+  } else {
+    let capturedAt = null;
+    for (const row of quotaRows(engine, data)) {
+      const rowElement = document.createElement("div");
+      rowElement.className = `quota-row ${quotaSeverityClass(row.usedPercent)}`;
+      const head = document.createElement("div");
+      head.className = "quota-row-head";
+      const label = document.createElement("span");
+      label.textContent = row.label;
+      const value = document.createElement("span");
+      value.textContent = `${Math.round(100 - row.usedPercent)}% kvar`;
+      head.append(label, value);
+      rowElement.append(head, buildQuotaTrack(row.usedPercent));
+      const reset = formatQuotaReset(row.resetsAt);
+      if (reset) {
+        const detail = document.createElement("small");
+        detail.textContent = reset;
+        rowElement.append(detail);
+      }
+      if (row.capturedAt) capturedAt = row.capturedAt;
+      popover.append(rowElement);
+    }
+
+    const footer = document.createElement("div");
+    footer.className = "quota-popover-footer";
+    const freshness = document.createElement("span");
+    freshness.textContent = engine === "codex"
+      ? formatQuotaCaptured(capturedAt) || "ur senaste Codex-sessionen"
+      : formatQuotaCaptured(data.fetchedAt) || "";
+    const manage = document.createElement("a");
+    manage.href = QUOTA_MANAGE_LINKS[engine].url;
+    manage.target = "_blank";
+    manage.rel = "noreferrer";
+    manage.textContent = QUOTA_MANAGE_LINKS[engine].label;
+    footer.append(freshness, manage);
+    popover.append(footer);
+  }
+
+  const refresh = document.createElement("button");
+  refresh.type = "button";
+  refresh.className = "button compact quiet quota-refresh";
+  refresh.textContent = "Uppdatera nu";
+  refresh.addEventListener("click", () => refreshQuota(true));
+  popover.append(refresh);
+};
+
+const toggleQuotaPopover = (engine) => {
+  if (quotaPopoverEngine === engine) {
+    closeQuotaPopover();
+    return;
+  }
+  quotaPopoverEngine = engine;
+  renderQuotaPopover();
+  const chip = elements.quotaStrip.querySelector(`[data-engine="${engine}"]`);
+  const rect = chip.getBoundingClientRect();
+  const popover = elements.quotaPopover;
+  popover.hidden = false;
+  popover.style.top = `${rect.bottom + 8}px`;
+  popover.style.right = `${Math.max(12, window.innerWidth - rect.right)}px`;
+  renderQuotaStrip();
+};
+
+const refreshQuota = async (force = false) => {
+  try {
+    quotaSnapshot = await api(`/api/quota${force ? "?refresh=1" : ""}`);
+    quotaFetchedAt = Date.now();
+  } catch {
+    quotaSnapshot = {
+      claude: { ok: false, error: "fetch_failed" },
+      codex: { ok: false, error: "fetch_failed" },
+    };
+  }
+  renderQuotaStrip();
+  if (quotaPopoverEngine) renderQuotaPopover();
+};
+
+document.addEventListener("click", (event) => {
+  if (quotaPopoverEngine && !elements.quotaPopover.contains(event.target)) {
+    closeQuotaPopover();
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && quotaPopoverEngine) closeQuotaPopover();
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && Date.now() - quotaFetchedAt > QUOTA_STALE_MS) refreshQuota();
+});
+
 const init = async () => {
   try {
     [state.config] = await Promise.all([api("/api/config")]);
@@ -1176,6 +1432,9 @@ const init = async () => {
   } catch (error) {
     showToast(`Kunde inte starta: ${errorText(error)}`, "error");
   }
+  renderQuotaStrip();
+  refreshQuota();
+  setInterval(refreshQuota, QUOTA_POLL_MS);
 };
 
 init();

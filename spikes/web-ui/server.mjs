@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import { claudeProjectDir } from "../../core/claude-paths.mjs";
 import { appendEvent as appendFleetEvent } from "../../core/events.mjs";
 import { readTailWindow } from "../../core/jsonl-reader.mjs";
+import { readQuotaSnapshot } from "../../core/quota-usage.mjs";
 import {
   claudeInterruptRequest,
   claudeUserMessage,
@@ -49,6 +50,9 @@ const OPERATION_TIME_MATCH_MS = 5 * 60 * 1_000;
 const PROMPT_PREVIEW_MAX_CHARS = 500;
 const PROMPT_JOURNAL_DEFAULT_LIMIT = 100;
 const PROMPT_JOURNAL_MAX_LIMIT = 500;
+const QUOTA_CACHE_MS = 60 * 1_000;
+
+let quotaCache = { at: 0, payload: null };
 
 const DEFAULT_MODELS = Object.freeze({
   claude: ["claude-opus-4-8", "fable", "sonnet", "haiku"],
@@ -1502,6 +1506,18 @@ export function createWebUi(options = {}) {
         agents: agents.size,
         running: [...agents.values()].filter((agent) => agent.running).length,
       });
+      return;
+    }
+
+    if (request.method === "GET" && pathname === "/api/quota") {
+      const forceRefresh = url.searchParams.get("refresh") === "1";
+      if (!forceRefresh && quotaCache.payload && now() - quotaCache.at < QUOTA_CACHE_MS) {
+        json(response, 200, quotaCache.payload);
+        return;
+      }
+      const snapshot = await readQuotaSnapshot();
+      quotaCache = { at: now(), payload: snapshot };
+      json(response, 200, snapshot);
       return;
     }
 
