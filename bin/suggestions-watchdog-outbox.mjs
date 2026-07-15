@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 import { resolve } from "path";
+import { homedir } from "os";
+import { validateAgentPane } from "../cli/config.mjs";
+import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import {
   createAmuxOutboxDeliverer,
   loadPrivateCredential,
@@ -38,6 +41,8 @@ try {
     process.exit(0);
   }
   const configPath = expandHome(args.config || process.env.AMUX_WATCHDOG_OUTBOX_CONFIG || DEFAULT_CONFIG);
+  const agentConfigPath = process.env.AGENT_CONFIG
+    || resolve(homedir(), ".config/agent/agents.yaml");
   const allowTestOrigin = process.env.NODE_ENV === "test"
     && process.env.AMUX_WATCHDOG_OUTBOX_TEST_ORIGIN === "1";
   const config = loadWatchdogOutboxConfig(configPath, { allowTestOrigin });
@@ -51,7 +56,12 @@ try {
     config,
     readToken,
     adminToken,
-    deliver: createAmuxOutboxDeliverer({ waitMs: config.deliveryWaitMs }),
+    deliver: createAmuxOutboxDeliverer({
+      queue: createDeliveryQueue({
+        validateTarget: (agent, pane) => validateAgentPane(agentConfigPath, agent, pane),
+      }),
+      waitMs: config.deliveryWaitMs,
+    }),
   });
   writeGuardHeartbeat({
     key: "watchdog-outbox",

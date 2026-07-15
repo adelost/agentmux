@@ -68,6 +68,7 @@ export function createDeliveryQueue({
   rootDir = defaultDeliveryQueueDir(),
   now = () => Date.now(),
   uuid = () => randomUUID(),
+  validateTarget = null,
 } = {}) {
   ensurePrivateDir(rootDir);
 
@@ -116,6 +117,12 @@ export function createDeliveryQueue({
   }) {
     if (!agentName) throw new Error("delivery queue requires agentName");
     if (!String(text || "").trim()) throw new Error("delivery queue requires non-empty text");
+
+    // This is the last shared boundary before any target-specific durable
+    // artifact is created. Producers may validate earlier for clearer UX, but
+    // retries and alternate producers must still re-read their current config
+    // here so an unknown session/pane can never become an immortal spool lane.
+    if (typeof validateTarget === "function") validateTarget(agentName, pane);
 
     const createdAtMs = Number(createdAt) || now();
     const identity = idempotencyKey || `generated:${uuid()}`;

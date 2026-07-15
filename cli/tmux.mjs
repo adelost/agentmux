@@ -47,7 +47,9 @@ export function createTmuxContext(socket, configPath) {
     nativeRuntime,
     socket,
     configPath,
-    deliveryQueue: createDeliveryQueue(),
+    deliveryQueue: createDeliveryQueue({
+      validateTarget: (name, pane) => validateAgentPane(configPath, name, pane),
+    }),
   };
 }
 
@@ -390,7 +392,11 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
   // drains this per-pane FIFO. Separate `amux` processes therefore cannot
   // concatenate their paste blocks in one composer. If the bridge is stopped,
   // the command remains safely queued for its next start.
-  const queue = ctx.deliveryQueue || createDeliveryQueue();
+  const queue = ctx.deliveryQueue || createDeliveryQueue({
+    validateTarget: ctx.configPath
+      ? (targetName, targetPane) => validateAgentPane(ctx.configPath, targetName, targetPane)
+      : null,
+  });
   const job = queue.enqueue({
     agentName: name,
     pane,

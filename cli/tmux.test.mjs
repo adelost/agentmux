@@ -39,16 +39,18 @@ feature("sendToPane delivery outcome", () => {
     }],
     when: ["a command-shaped typo is offered as an agent", async ({ configPath, deliveryQueue }) => {
       let error = null;
+      const mirrors = [];
       try {
         await sendToPane({ configPath, deliveryQueue, deliveryWaitMs: 0 },
-          "queue", 7, "skydive", { mirror: false });
+          "queue", 7, "skydive", { mirrorDispatch: (payload) => mirrors.push(payload) });
       } catch (caught) { error = caught; }
       try { unlinkSync(configPath); } catch {}
-      return { error, calls: deliveryQueue.enqueue.mock.calls.length };
+      return { error, calls: deliveryQueue.enqueue.mock.calls.length, mirrors };
     }],
-    then: ["no ghost queue file can be created", ({ error, calls }) => {
+    then: ["no queue job, Discord mirror, or receipt can be created", ({ error, calls, mirrors }) => {
       expect(error?.message).toContain("Agent 'queue' not found");
       expect(calls).toBe(0);
+      expect(mirrors).toEqual([]);
     }],
   });
 
@@ -185,6 +187,8 @@ feature("sendToPane delivery outcome", () => {
       writeFileSync(configPath, [
         "lsrc:",
         "  dir: /tmp/lsrc",
+        "  panes:",
+        "    - cmd: codex",
         "  discord:",
         "    sender-channel: 4",
         "    target-channel: 0",
@@ -226,6 +230,8 @@ feature("sendToPane delivery outcome", () => {
       writeFileSync(configPath, [
         "lsrc:",
         "  dir: /tmp/lsrc",
+        "  panes:",
+        "    - cmd: codex",
         "  discord:",
         "    sender-channel: 4",
         "    target-channel: 0",

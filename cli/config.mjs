@@ -48,7 +48,7 @@ export function validateAgentPane(configPath, name, pane) {
     throw new Error(`Invalid pane '${pane}' for agent '${name}'`);
   }
   const panes = Array.isArray(agent.panes) ? agent.panes : [];
-  if (panes.length > 0 && index >= panes.length) {
+  if (index >= panes.length) {
     throw new Error(`Pane ${index} is not configured for agent '${name}'`);
   }
   return { agentName: agent.name, pane: index };

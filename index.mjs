@@ -166,11 +166,13 @@ function stampChannelMirror(channelId) {
 }
 
 const discord = createDiscordChannel({ token: TOKEN, onSent: stampChannelMirror });
-const deliveryQueue = createDeliveryQueue();
+const validateDeliveryTarget = (agentName, pane) =>
+  validateAgentPane(AGENTS_YAML, agentName, pane);
+const deliveryQueue = createDeliveryQueue({ validateTarget: validateDeliveryTarget });
 const deliveryBroker = createDeliveryBroker({
   agent,
   queue: deliveryQueue,
-  validateTarget: (agentName, pane) => validateAgentPane(AGENTS_YAML, agentName, pane),
+  validateTarget: validateDeliveryTarget,
   resolveNotificationChannel: (job) =>
     findChannelForPane(AGENTS_YAML, job.agentName, job.pane),
   notify: async (job, state) => {
