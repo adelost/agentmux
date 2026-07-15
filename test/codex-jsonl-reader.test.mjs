@@ -12,6 +12,7 @@ import {
   isPromptPrefixInCodexJsonl,
   readLastTurnsCodex,
   latestCodexJsonlMtime,
+  latestCodexSessionIdentity,
   latestCodexSessionFor,
 } from "../core/codex-jsonl-reader.mjs";
 
@@ -740,6 +741,40 @@ feature("latestCodexSessionFor", () => {
     when: ["looking up", ({ paneDir }) => latestCodexSessionFor(paneDir)],
     then: ["returns a path containing rollout-", (r, { cleanup }) => {
       expect(r).toMatch(/rollout-/);
+      cleanup();
+    }],
+  });
+});
+
+feature("latestCodexSessionIdentity", () => {
+  unit("returns the exact pane-owned UUID and rollout path", {
+    given: ["an exact-cwd rollout with a native session id", () => setupFakeCodex([
+      { type: "session_meta", payload: {
+        id: "22222222-2222-4222-8222-222222222222",
+        cwd: "/fake/workspace",
+      } },
+    ])],
+    when: ["resolving resume ownership", ({ paneDir }) => latestCodexSessionIdentity(paneDir)],
+    then: ["the identity is exact and provenance-bearing", (identity, { cleanup }) => {
+      expect(identity).toMatchObject({
+        sessionId: "22222222-2222-4222-8222-222222222222",
+        cwd: "/fake/workspace",
+        path: expect.stringContaining("rollout-"),
+      });
+      cleanup();
+    }],
+  });
+
+  unit("refuses an ancestor session as resume ownership", {
+    given: ["a rollout started above the pane directory", () => setupFakeCodex([
+      { type: "session_meta", payload: {
+        id: "33333333-3333-4333-8333-333333333333",
+        cwd: "/fake",
+      } },
+    ], "/fake/workspace")],
+    when: ["resolving resume ownership", ({ paneDir }) => latestCodexSessionIdentity(paneDir)],
+    then: ["no pane-owned identity is fabricated", (identity, { cleanup }) => {
+      expect(identity).toBeNull();
       cleanup();
     }],
   });
