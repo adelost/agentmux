@@ -11,6 +11,7 @@
 // wrapper (cmdDoctor) does the real reads.
 
 import { classifyHeartbeat } from "./heartbeat.mjs";
+import { classifyGuardHeartbeat } from "./guard-heartbeat.mjs";
 
 export const OK = "ok";
 export const WARN = "warn";
@@ -224,6 +225,28 @@ export function checkDeliveryQueue({ stats, bridgeRunning, now = Date.now() }) {
       "run `amux queue`; the broker preserves the FIFO head until the composer is safe");
   }
   return check("delivery queue", OK, `${parts}${oldest}; broker draining · inspect with amux queue`);
+}
+
+/** Scheduled guards fail silently unless their own successful sweeps are observable. */
+export function checkGuardCronHeartbeats({ heartbeats, now = Date.now() }) {
+  const rows = heartbeats.map((entry) => classifyGuardHeartbeat(entry, { now }));
+  if (!rows.length) {
+    return check("guard crons", FAIL, "RED 0/0: registry empty",
+      "restore the canonical guard registry before relying on cron liveness");
+  }
+  const red = rows.filter((entry) => entry.state !== "ok");
+  if (red.length) {
+    const detail = red.map((entry) => {
+      if (entry.state === "missing") return `${entry.key} missing`;
+      if (entry.state === "invalid") return `${entry.key} invalid`;
+      return `${entry.key} ${Math.floor(entry.ageMs / 60000)}m > 2×${Math.ceil(entry.intervalSec / 60)}m`;
+    }).join(", ");
+    return check("guard crons", FAIL, `RED ${red.length}/${rows.length}: ${detail}`,
+      "inspect cron/logs; a heartbeat is written only after a successful sweep");
+  }
+  const oldest = [...rows].sort((left, right) => right.ageMs - left.ageMs)[0];
+  return check("guard crons", OK,
+    `${rows.length}/${rows.length} fresh · oldest ${oldest.key} ${Math.floor(oldest.ageMs / 60000)}m ago`);
 }
 
 /** Worst status wins for the exit code: fail > warn > ok. */

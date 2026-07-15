@@ -684,6 +684,7 @@ describe.sequential("Suggestions human-comment relay", () => {
       AMUX_SUGGESTIONS_AMUX_BIN: fake.path,
       AMUX_SUGGESTIONS_LOCK: join(root, "poll.lock"),
       AMUX_SUGGESTIONS_LOG: join(root, "poll.log"),
+      AMUX_GUARD_HEARTBEAT_DIR: join(root, "heartbeats"),
       NODE_BIN: process.execPath,
       NODE_ENV: "test",
       AMUX_SUGGESTIONS_TEST_ORIGIN: "1",
@@ -694,6 +695,12 @@ describe.sequential("Suggestions human-comment relay", () => {
       const second = execFileAsync("bash", [wrapper], { env });
       await Promise.all([first, second]);
       expect(fake.records().filter((record) => record.args[0] !== "notifyuser")).toHaveLength(1);
+      const heartbeat = JSON.parse(readFileSync(join(root, "heartbeats", "comment-bridge.json"), "utf8"));
+      expect(heartbeat).toMatchObject({
+        key: "comment-bridge",
+        intervalSec: 60,
+        metrics: { projects: 1, delivered: 1 },
+      });
     } finally { await fixture.close(); }
   });
 

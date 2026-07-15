@@ -44,7 +44,17 @@ export HOME="${HOME:-/home/adelost}"
 export PATH="${HOME}/.nvm/versions/node/v22.19.0/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin"
 AMUX="${AMUX:-${HOME}/.nvm/versions/node/v22.19.0/bin/amux}"
 KEEPER_DIR="${KEEPER_DIR:-${HOME}/.agentmux-keeper}"   # overridable for tests
-[ -f "${KEEPER_DIR}/OFF" ] && exit 0          # global kill-switch
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=guard-heartbeat.sh
+source "$SCRIPT_DIR/guard-heartbeat.sh"
+guard_heartbeat_arm "task-keeper" 1740
+guard_heartbeat_metric watched 0
+guard_heartbeat_metric healthy 0
+guard_heartbeat_metric nudged 0
+guard_heartbeat_metric escalated 0
+guard_heartbeat_metric invalid 0
+watched=0; healthy=0; nudged=0; escalated=0; invalid=0
+[ -f "${KEEPER_DIR}/OFF" ] && { guard_heartbeat_metric disabled true; exit 0; } # global kill-switch
 mkdir -p "$KEEPER_DIR"
 
 # The agent server runs on a NAMED socket (agent-cli.mjs default); bare tmux
@@ -80,11 +90,12 @@ now=$(date +%s)
 for on in "$KEEPER_DIR"/*.ON; do
   [ -e "$on" ] || continue
   name=$(basename "$on" .ON)
+  watched=$((watched + 1))
   AGENT=""; PANE=""; REPO=""; TASKFILE=""; LOGFILE=""; STALE_MIN=110; JSONL_GLOB=""
   # shellcheck disable=SC1090
   source "$on"
   if [ -z "$AGENT" ] || [ -z "$PANE" ] || [ -z "$REPO" ]; then
-    echo "[$(date -Is)] $name: bad ON-file, skipping"; continue
+    invalid=$((invalid + 1)); echo "[$(date -Is)] $name: bad ON-file, skipping"; continue
   fi
 
   log_ts=0
@@ -106,15 +117,23 @@ for on in "$KEEPER_DIR"/*.ON; do
   if [ "$age_min" -lt "$STALE_MIN" ]; then
     rm -f "$warn"
     echo "[$(date -Is)] $name: OK (senaste framdrift ${age_min}min sedan, ${signal})"
+    healthy=$((healthy + 1))
     continue
   fi
 
   if [ -f "$warn" ]; then
     "$AMUX" notifyuser --level error "[keeper] $name: ingen framdrift på ${age_min}min trots knuff — behöver mänsklig blick (task: ${TASKFILE:-?})" || true
     echo "[$(date -Is)] $name: ESKALERAD (${age_min}min, ${signal})"
+    escalated=$((escalated + 1))
   else
     touch "$warn"
     echo "[$(date -Is)] $name: NUDGE (${age_min}min, ${signal})"
+    nudged=$((nudged + 1))
   fi
   "$AMUX" "$AGENT" -p "$PANE" "[keeper, automatisk] Ingen framdrift registrerad på ${age_min} min (våg-logg + commits). Om du JOBBAR: fortsätt — men committa nästa gröna delmängd + skriv en rad i ${LOGFILE:-din våg-logg} så vakten ser dig. Om du är FAST: timebox-regeln — checkpointa + ta nästa OBEROENDE item i ${TASKFILE:-din task-fil}. Om HELA kön är KLAR: stäng av din vakt med \`rm ~/.agentmux-keeper/${name}.ON\` och rapportera till api:0." || true
 done
+guard_heartbeat_metric watched "$watched"
+guard_heartbeat_metric healthy "$healthy"
+guard_heartbeat_metric nudged "$nudged"
+guard_heartbeat_metric escalated "$escalated"
+guard_heartbeat_metric invalid "$invalid"

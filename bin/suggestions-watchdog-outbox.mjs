@@ -7,6 +7,7 @@ import {
   loadWatchdogOutboxConfig,
   pollWatchdogOutboxes,
 } from "../core/suggestions-watchdog-outbox.mjs";
+import { writeGuardHeartbeat } from "../core/guard-heartbeat.mjs";
 
 const DEFAULT_CONFIG = "~/.config/agent/suggestions-watchdog-outbox.yaml";
 
@@ -51,6 +52,15 @@ try {
     readToken,
     adminToken,
     deliver: createAmuxOutboxDeliverer({ waitMs: config.deliveryWaitMs }),
+  });
+  writeGuardHeartbeat({
+    key: "watchdog-outbox",
+    intervalSec: 60,
+    metrics: {
+      projects: result.projects,
+      pending: result.pending,
+      delivered: result.delivered,
+    },
   });
   if (result.delivered > 0) console.log(`OK delivered=${result.delivered}`);
 } catch (error) {

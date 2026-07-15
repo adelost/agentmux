@@ -66,6 +66,9 @@ export HOME="${HOME:-/home/adelost}"
 export PATH="${HOME}/.nvm/versions/node/v22.19.0/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin"
 AMUX="${AMUX:-${HOME}/.nvm/versions/node/v22.19.0/bin/amux}"
 PY="${PY:-python3}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=guard-heartbeat.sh
+source "$SCRIPT_DIR/guard-heartbeat.sh"
 
 # The agent server runs on a NAMED socket (agent-cli.mjs: TMUX_SOCKET ||
 # /tmp/openclaw-claude.sock). Bare `tmux` only finds it when invoked from
@@ -87,13 +90,31 @@ COOLDOWN_MIN="${COOLDOWN_MIN:-60}"  # per-fleet re-nudge cooldown
 SNOOZE_HOURS="${SNOOZE_HOURS:-3}"   # broker "nothing READY" self-snooze; AUTO-expires
 DRY="${DRY:-0}"
 
+guard_heartbeat_arm "fleet-progress" 1200
+guard_heartbeat_metric dry "$DRY"
+guard_heartbeat_metric stuckJobs 0
+guard_heartbeat_metric fleetsChecked 0
+guard_heartbeat_metric fleetNudges 0
+guard_heartbeat_metric stalePrs 0
+guard_heartbeat_metric reviewNudges 0
+guard_heartbeat_metric starvingBoards 0
+guard_heartbeat_metric starvationNudges 0
+guard_heartbeat_metric boardFailures 0
+fleet_checked=0
+fleet_nudges=0
+stale_prs=0
+review_nudges=0
+starving_boards=0
+starvation_nudges=0
+board_failures=0
+
 mkdir -p "$WATCH_DIR"
-[ -f "${WATCH_DIR}/OFF" ] && { echo "[$(date -Is)] global OFF → skip"; exit 0; }
+[ -f "${WATCH_DIR}/OFF" ] && { guard_heartbeat_metric disabled true; echo "[$(date -Is)] global OFF → skip"; exit 0; }
 
 # Single-instance: a nudge to a busy pane can take seconds; under a */20 cron a
 # slow run must never stack on top of the previous one.
 exec 9>"${WATCH_DIR}/.lock"
-flock -n 9 || { echo "[$(date -Is)] another run holds the lock → skip"; exit 0; }
+flock -n 9 || { guard_heartbeat_disarm; echo "[$(date -Is)] another run holds the lock → skip"; exit 0; }
 
 log() { echo "[$(date -Is)] $*"; }
 now=$(date +%s)
@@ -172,6 +193,7 @@ for f in glob.glob(os.path.join(qdir, "*", "*.json")):
     print(f"{f}\t{d.get('agentName','?')}\t{d.get('pane','?')}\t{status}\t{age_min:.0f}\t{head}")
 PY
 )
+  guard_heartbeat_metric stuckJobs "${#STUCK[@]}"
   for row in "${STUCK[@]:-}"; do
     [ -z "$row" ] && continue
     IFS=$'\t' read -r jf jagent jpane jstatus jage jhead <<<"$row"
@@ -197,6 +219,7 @@ while read -r session pane repo _rest; do
   [ -z "${session:-}" ] && continue
   case "$session" in \#*) continue;; esac
   [ -z "${pane:-}" ] || [ -z "${repo:-}" ] && { log "$session: bad conf line, skip"; continue; }
+  fleet_checked=$((fleet_checked + 1))
   [ -f "${WATCH_DIR}/${session}.OFF" ] && { log "$session: per-fleet OFF → skip"; continue; }
   if ! pane_exists "$session" "$pane"; then log "$session:$pane: pane gone → skip"; continue; fi
 
@@ -273,6 +296,7 @@ while read -r session pane repo _rest; do
 
   amux_send "$session" -p "$pane" "$MSG" >/dev/null 2>&1 \
     || log "$session:$pane: nudge send timed out/failed (durably enqueued regardless)"
+  fleet_nudges=$((fleet_nudges + 1))
   echo "$now" > "$cd_file"
   if [ "$escalate" = "1" ]; then
     amux_send notifyuser --level error "[fleet-watch] $session:$pane broker: ingen framdrift på ${age_min}min trots knuff — behöver din blick" || true
@@ -344,6 +368,7 @@ PY
           continue
         fi
         due="${due}${key} öppen ${age_h}h: ${title}"$'\n'
+        stale_prs=$((stale_prs + 1))
       done <<<"$rows"
     done
     [ -z "$due" ] && continue
@@ -360,6 +385,7 @@ ${due}Du äger merge: reviewa+merga per merge-by-proof, ELLER kommentera på PR:
       amux_send "$session" -p "$pane" "$MSG" >/dev/null 2>&1 \
         || log "$session:$pane: review-queue nudge send timed out/failed (durably enqueued regardless)"
     fi
+    review_nudges=$((review_nudges + 1))
     # Stamp cooldown per nudged PR (replace-or-append keyed on "<repo>#<num>").
     while IFS= read -r line; do
       [ -z "$line" ] && continue
@@ -413,6 +439,7 @@ while read -r session pane repo project _rest; do
 
   sstate="${WATCH_DIR}/starve-${session}.state"   # "<hits> <last_nudge_epoch> <nudges>"
   if ! read -r b_ready b_inprog < <(board_ready_inprog "$project"); then
+    board_failures=$((board_failures + 1))
     log "starvation: $session/$project board unreachable → skip (no state change)"
     continue
   fi
@@ -422,6 +449,8 @@ while read -r session pane repo project _rest; do
     rm -f "$sstate"
     continue
   fi
+
+  starving_boards=$((starving_boards + 1))
 
   hits=0; last_nudge=0; nudges=0
   [ -f "$sstate" ] && read -r hits last_nudge nudges < "$sstate" 2>/dev/null
@@ -464,6 +493,7 @@ while read -r session pane repo project _rest; do
   if is_reserved "$session"; then
     amux_send notifyuser --level warn "[fleet-watch] $session/$project SVÄLTER (${b_ready} READY, 0 Pågår) men sessionsnamnet krockar med ett amux-subkommando → knuffa brokern manuellt." >/dev/null 2>&1 || true
     echo "$hits $now $(( nudges + 1 ))" > "$sstate"
+    starvation_nudges=$((starvation_nudges + 1))
     log "starvation: $session/$project RESERVED-NAME → escalated to human"
     continue
   fi
@@ -477,4 +507,13 @@ while read -r session pane repo project _rest; do
     log "starvation: $session/$project NUDGED (ready=$b_ready)"
   fi
   echo "$hits $now $(( nudges + 1 ))" > "$sstate"
+  starvation_nudges=$((starvation_nudges + 1))
 done < "$CONF"
+
+guard_heartbeat_metric fleetsChecked "$fleet_checked"
+guard_heartbeat_metric fleetNudges "$fleet_nudges"
+guard_heartbeat_metric stalePrs "$stale_prs"
+guard_heartbeat_metric reviewNudges "$review_nudges"
+guard_heartbeat_metric starvingBoards "$starving_boards"
+guard_heartbeat_metric starvationNudges "$starvation_nudges"
+guard_heartbeat_metric boardFailures "$board_failures"

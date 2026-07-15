@@ -12,6 +12,7 @@ import {
   pollSuggestionsComments,
   saveSuggestionsBridgeState,
 } from "../core/suggestions-comment-bridge.mjs";
+import { writeGuardHeartbeat } from "../core/guard-heartbeat.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CONFIG = "~/.config/agent/suggestions-comment-bridge.yaml";
@@ -78,6 +79,14 @@ try {
     deliver: createAmuxCommentDeliverer({ amuxBin }),
     notify: createAmuxCommentNotifier({ amuxBin }),
     persist: (next) => saveSuggestionsBridgeState(statePath, next),
+  });
+  writeGuardHeartbeat({
+    key: "comment-bridge",
+    intervalSec: 60,
+    metrics: {
+      projects: Object.keys(config.projects).length,
+      delivered: result.delivered,
+    },
   });
   if (result.delivered > 0) console.log(`OK delivered=${result.delivered}`);
 } catch (error) {
