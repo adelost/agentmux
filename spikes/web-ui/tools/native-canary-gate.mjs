@@ -24,6 +24,10 @@ import {
   startNativeRuntime,
   stopNativeRuntime,
 } from "../../../cli/native-runtime-service.mjs";
+import {
+  claudePrintSessionId,
+  codexJsonlThreadId,
+} from "../canary-proof.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const TARGET = "skybar-canary";
@@ -471,16 +475,12 @@ try {
     "native-to-tmux exact-session rollback",
     timeoutMs,
   );
-  const claudeResult = JSON.parse(readFileSync(rollbackOutputs.claude, "utf8"));
-  assert.equal(claudeResult.session_id, proofs.claude.sessionId,
+  assert.equal(claudePrintSessionId(readFileSync(rollbackOutputs.claude, "utf8")),
+    proofs.claude.sessionId,
     "Claude tmux rollback opened a different session");
-  const codexEvents = readFileSync(rollbackOutputs.codex, "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
-  assert(codexEvents.some((event) => event.type === "thread.started"
-      && event.thread_id === proofs.codex.sessionId),
-  "Codex tmux rollback opened a different session");
+  assert.equal(codexJsonlThreadId(readFileSync(rollbackOutputs.codex, "utf8")),
+    proofs.codex.sessionId,
+    "Codex tmux rollback opened a different session");
 } finally {
   spawnSync("tmux", ["-S", rollbackSocket, "kill-server"], { stdio: "ignore" });
 }
