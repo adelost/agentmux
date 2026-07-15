@@ -232,6 +232,25 @@ fi
 # ── 2. Fleet sweep (A): nudge a broker whose fleet went quiet. ────────────────
 [ -f "$CONF" ] || { log "no fleets.conf at $CONF → fleet + review-queue sweeps skipped"; exit 0; }
 
+# ── 2a. Drift guard: a live fleet nobody watches is a silent gap. ─────────────
+# The watch list is hand-maintained, so a new fleet reaches tmux and never
+# reaches fleets.conf: the first symptom is a dropped ball no one saw (api ran
+# unwatched until 2026-07-15). Name it instead of failing silently.
+# DRIFT_IGNORE = deliberate non-fleets. Keep it accurate: an alert that is
+# correct to ignore teaches the fleet to ignore alerts.
+DRIFT_IGNORE="${DRIFT_IGNORE:-claw}"   # claw = workspace/orchestrator, watched live by claw:0
+_configured=" $(awk '!/^[[:space:]]*#/ && NF >= 3 { printf "%s ", $1 }' "$CONF") "
+_unwatched=""
+for _s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
+  case "$_configured" in *" $_s "*) continue;; esac
+  case " $DRIFT_IGNORE " in *" $_s "*) continue;; esac
+  _unwatched="${_unwatched}${_s} "
+done
+if [ -n "$_unwatched" ]; then
+  log "DRIFT: live session(s) missing from fleets.conf → UNWATCHED: ${_unwatched% }"
+fi
+guard_heartbeat_metric unwatchedSessions "$(set -- $_unwatched; echo $#)"
+
 while read -r session pane repo _rest; do
   [ -z "${session:-}" ] && continue
   case "$session" in \#*) continue;; esac
