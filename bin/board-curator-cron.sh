@@ -28,7 +28,9 @@
 #         project id (lines without one are skipped):
 #           <session> <broker_pane> <repos> [board_project]
 # OFF:    same switches as fleet-progress (global OFF / <session>.OFF).
-# Install: 7 * * * * .../bin/board-curator-cron.sh >> ~/.cache/board-curator.log 2>&1
+# Install: bin/install-board-curator.sh — idempotent, refuses a dangling
+#          entry (script must exist on the running checkout). Run AFTER the
+#          merge has landed on the checkout the crontab points at.
 set -uo pipefail
 export HOME="${HOME:-/home/adelost}"
 export PATH="${HOME}/.nvm/versions/node/v22.19.0/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin"
@@ -73,29 +75,38 @@ while read -r session pane repo project _rest; do
   [ -z "${project:-}" ] && { log "${session:-?}: no board project column → skip"; continue; }
   [ -f "${WATCH_DIR}/${session}.OFF" ] && { log "$session: per-fleet OFF → skip"; continue; }
 
-  # Activity fingerprint: newest commit across repos + board counts.
-  commit_ts=0
+  # Activity fingerprint: per-repo HEAD hashes + board counts. Hashes, not
+  # commit timestamps — %ct has second granularity (two commits in the same
+  # second look identical) and goes backwards on revert/force-push; a HEAD
+  # hash moves on every kind of motion.
+  heads=""
   IFS=',' read -ra _repos <<<"$repo"
   for _r in "${_repos[@]}"; do
-    ct=$(git -C "$_r" log -1 --format=%ct 2>/dev/null || echo 0)
-    [ "$ct" -gt "$commit_ts" ] && commit_ts=$ct
+    heads="${heads}$(git -C "$_r" log -1 --format=%h 2>/dev/null || echo none),"
   done
   counts=$(board_counts "$project") || counts=""
   [ -z "$counts" ] && log "$session/$project: board unreachable → commit-signal only"
-  fingerprint="commits:${commit_ts} board:${counts}"
+  fingerprint="heads:${heads} board:${counts}"
 
   stamp="${WATCH_DIR}/${session}.curated"
-  if [ -f "$stamp" ]; then
-    last_fp=$(tail -n +2 "$stamp" 2>/dev/null)
-    last_at=$(head -1 "$stamp" 2>/dev/null || echo 0)
-    if [ "$fingerprint" = "$last_fp" ]; then
-      log "$session/$project: no motion since last pass → silent"
-      continue
-    fi
-    if [ $(( (now - last_at) / 60 )) -lt "$CURATE_COOLDOWN_MIN" ]; then
-      log "$session/$project: motion but in cooldown → next hour"
-      continue
-    fi
+  if [ ! -f "$stamp" ]; then
+    # Bootstrap: no prior point exists, so "motion since last pass" is
+    # undefined — claiming it would brief every broker on install day.
+    # Establish the baseline silently; the first brief fires on the first
+    # REAL motion after this.
+    { echo "$now"; echo "$fingerprint"; } > "$stamp"
+    log "$session/$project: baseline established (no brief on bootstrap)"
+    continue
+  fi
+  last_fp=$(tail -n +2 "$stamp" 2>/dev/null)
+  last_at=$(head -1 "$stamp" 2>/dev/null || echo 0)
+  if [ "$fingerprint" = "$last_fp" ]; then
+    log "$session/$project: no motion since last pass → silent"
+    continue
+  fi
+  if [ $(( (now - last_at) / 60 )) -lt "$CURATE_COOLDOWN_MIN" ]; then
+    log "$session/$project: motion but in cooldown → next hour"
+    continue
   fi
 
   MSG="[board-curator, automatisk] Aktivitet sedan förra kuratorspasset — kör ett KURATORSPASS på boarden (projekt ${project}):
@@ -108,11 +119,15 @@ Rapportera BARA om du ändrade något; ren board = tyst. Nästa pass triggas fö
     log "$session/$project: DRY would send curation brief (fp changed)"
     continue
   fi
+  # Stamp ONLY on a verified send (amux exit 0 = delivery proven). A timed-out
+  # send may still land later via the durable queue, so the retry next hour
+  # can produce a duplicate brief — an idempotent nuisance. The alternative
+  # (stamping an unproven send) silently skips a curation pass; correctness
+  # wins over the occasional duplicate.
   if amux_send "$session" -p "$pane" "$MSG" >/dev/null 2>&1; then
     { echo "$now"; echo "$fingerprint"; } > "$stamp"
     log "$session/$project: CURATION BRIEF SENT"
   else
-    log "$session/$project: send timed out/failed (durably enqueued) — stamping anyway"
-    { echo "$now"; echo "$fingerprint"; } > "$stamp"
+    log "$session/$project: send unverified (timeout/fail) — NOT stamped, retrying next run"
   fi
 done < "$CONF"
