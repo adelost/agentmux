@@ -129,7 +129,7 @@ async function promptDeliveryAttempts(agent, agentName, pane, text, {
       .then((receipt) => { sendReceipt = receipt || null; })
       .catch((err) => {
         sendError = err;
-        log(`send attempt ${attempt} errored${err.code === "AMUX_DELIVERY_BLOCKED" ? " (terminal)" : " (verifying echo anyway)"}: ${err.message.split("\n").slice(0, 2).join(" | ")}`);
+        log(`send attempt ${attempt} errored${err.code === "AMUX_DELIVERY_BLOCKED" ? " (blocked, durable queue retries)" : " (verifying echo anyway)"}: ${err.message.split("\n").slice(0, 2).join(" | ")}`);
       });
 
     // A composer error is only a TUI hint: the previous attempt may already

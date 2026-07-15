@@ -175,11 +175,20 @@ const deliveryBroker = createDeliveryBroker({
   validateTarget: validateDeliveryTarget,
   resolveNotificationChannel: (job) =>
     findChannelForPane(AGENTS_YAML, job.agentName, job.pane),
-  notify: async (job, state) => {
+  notify: async (job, state, extra = {}) => {
     const channelId = job.metadata?.channelId
       || findChannelForPane(AGENTS_YAML, job.agentName, job.pane);
     if (!channelId) throw new Error(`no Discord channel bound to ${job.agentName}:${job.pane}`);
-    if (state === "blocked") {
+    if (state === "stalled") {
+      const behind = Number(extra?.queuedBehind || 0);
+      await discord.send(
+        channelId,
+        "⚠️ Meddelandet skickades in till panelen men har inte fått något historikkvitto ännu " +
+        "(panelen verkar upptagen med en lång tur). AMUX bevakar vidare och skickar inte om det, " +
+        "för att inte skapa en dubblett." +
+        (behind > 0 ? ` ${behind} meddelande(n) väntar i kö bakom det.` : ""),
+      );
+    } else if (state === "blocked") {
       await discord.send(
         channelId,
         "⚠️ Meddelandet är säkert köat men panelen kan inte ta emot det ännu. " +
