@@ -46,6 +46,9 @@ const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 const AUTO_COMPACT_CONTEXT_PERCENT = 60;
 const AUTO_COMPACT_IDLE_MS = 5 * 60 * 1_000;
 const OPERATION_TIME_MATCH_MS = 5 * 60 * 1_000;
+const PROMPT_PREVIEW_MAX_CHARS = 500;
+const PROMPT_JOURNAL_DEFAULT_LIMIT = 100;
+const PROMPT_JOURNAL_MAX_LIMIT = 500;
 
 const DEFAULT_MODELS = Object.freeze({
   claude: ["claude-opus-4-8", "fable", "sonnet", "haiku"],
@@ -88,6 +91,16 @@ const hashPayload = (payload) => createHash("sha256")
 const canonicalPrompt = (value) => String(value || "")
   .replace(/\r\n?/g, "\n")
   .trim();
+
+const promptPreview = (value) => canonicalPrompt(value)
+  .replace(/\s+/gu, " ")
+  .slice(0, PROMPT_PREVIEW_MAX_CHARS);
+
+const cleanPromptSource = (value, operationKey = "") => {
+  const source = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (/^[a-z0-9][a-z0-9:_-]{0,39}$/u.test(source)) return source;
+  return String(operationKey).startsWith("delivery:") ? "bridge" : "api";
+};
 
 const promptHashes = (agentId, ...values) => [...new Set(values.flatMap((value) => [
   hashPayload({ agentId, prompt: String(value || "") }),
@@ -301,6 +314,7 @@ export function createWebUi(options = {}) {
     messages: new Map(),
     sideQuestions: new Map(),
     settings: new Map(),
+    pins: new Map(),
     compactions: new Map(),
     interrupts: new Map(),
     uploads: new Map(),
@@ -356,6 +370,7 @@ export function createWebUi(options = {}) {
         idleMs: autoCompactIdleMs,
         dueAt: agent.autoCompactDueAt,
       },
+      pinnedAt: agent.pinnedAt,
       createdAt: agent.createdAt,
       updatedAt: agent.updatedAt,
     };
@@ -373,6 +388,36 @@ export function createWebUi(options = {}) {
       .sort((a, b) => a.createdAt - b.createdAt)
       .map(publicAgent),
   });
+
+  const promptTurnStatus = (operationKey, receipt) => {
+    const agent = agents.get(receipt.id);
+    if (agent?.running && agent.activeOperationKey === operationKey) return "running";
+    if (!receipt.completedAt || receipt.code == null) return "accepted";
+    if (receipt.permissionDenied) return "permission_denied";
+    if (receipt.interrupted) return "interrupted";
+    return Number(receipt.code) === 0 ? "completed" : "failed";
+  };
+
+  const publicPromptReceipt = (operationKey, receipt) => {
+    const agent = agents.get(receipt.id);
+    const projectId = receipt.projectId ?? agent?.projectId ?? null;
+    const project = projectId ? projects.get(projectId) : null;
+    return {
+      operationKey,
+      projectId,
+      projectName: receipt.projectName ?? project?.name ?? "Borttaget projekt",
+      agentId: receipt.id,
+      agentName: receipt.agentName ?? agent?.name ?? "Borttagen instans",
+      acceptedAt: receipt.acceptedAt ?? null,
+      completedAt: receipt.completedAt ?? null,
+      preview: receipt.promptPreview ?? null,
+      previewTruncated: Boolean(receipt.promptPreviewTruncated),
+      source: receipt.source ?? cleanPromptSource(null, operationKey),
+      deliveryStatus: "accepted",
+      turnStatus: promptTurnStatus(operationKey, receipt),
+      legacy: !receipt.promptPreview,
+    };
+  };
 
   const saveRegistry = () => {
     const body = JSON.stringify({
@@ -397,6 +442,7 @@ export function createWebUi(options = {}) {
         sessionId: agent.sessionId,
         context: agent.context,
         idleSince: agent.idleSince,
+        pinnedAt: agent.pinnedAt,
         createdAt: agent.createdAt,
         updatedAt: agent.updatedAt,
       })),
@@ -423,6 +469,7 @@ export function createWebUi(options = {}) {
     createdAt: entry.createdAt ?? now(),
     updatedAt: entry.updatedAt ?? entry.createdAt ?? now(),
     idleSince: entry.idleSince ?? entry.updatedAt ?? entry.createdAt ?? now(),
+    pinnedAt: Number.isFinite(entry.pinnedAt) ? entry.pinnedAt : null,
     running: false,
     operation: null,
     activeChild: null,
@@ -1467,6 +1514,34 @@ export function createWebUi(options = {}) {
       return;
     }
 
+    if (request.method === "GET" && pathname === "/api/prompts") {
+      const scope = url.searchParams.get("scope") || "all";
+      const projectId = url.searchParams.get("projectId");
+      const agentId = url.searchParams.get("agentId");
+      const rawLimit = Number(url.searchParams.get("limit") || PROMPT_JOURNAL_DEFAULT_LIMIT);
+      const validId = (value) => new RegExp(`^${UUID_PATTERN}$`, "i").test(String(value || ""));
+      if (!new Set(["all", "project", "agent"]).has(scope)) {
+        json(response, 400, { error: "unknown-prompt-scope" }); return;
+      }
+      if ((scope === "project" && !validId(projectId))
+          || (scope === "agent" && !validId(agentId))) {
+        json(response, 400, { error: "prompt-scope-id-required" }); return;
+      }
+      if (!Number.isSafeInteger(rawLimit) || rawLimit < 1 || rawLimit > PROMPT_JOURNAL_MAX_LIMIT) {
+        json(response, 400, { error: "invalid-prompt-limit" }); return;
+      }
+      const prompts = [...receipts.messages.entries()]
+        .filter(([, receipt]) => Number.isFinite(receipt?.acceptedAt))
+        .map(([operationKey, receipt]) => publicPromptReceipt(operationKey, receipt))
+        .filter((entry) => scope === "all"
+          || (scope === "project" && entry.projectId === projectId)
+          || (scope === "agent" && entry.agentId === agentId))
+        .sort((a, b) => b.acceptedAt - a.acceptedAt)
+        .slice(0, rawLimit);
+      json(response, 200, { scope, projectId, agentId, prompts });
+      return;
+    }
+
     if (request.method === "POST" && pathname === "/api/projects") {
       const body = await readJsonBody(request);
       const key = cleanName(body?.idempotencyKey, 160);
@@ -1653,7 +1728,7 @@ export function createWebUi(options = {}) {
       return;
     }
 
-    const agentMatch = pathname.match(new RegExp(`^/api/agents/(${UUID_PATTERN})(/messages|/events|/history|/side-questions|/compact|/interrupt)?$`, "i"));
+    const agentMatch = pathname.match(new RegExp(`^/api/agents/(${UUID_PATTERN})(/messages|/events|/history|/side-questions|/compact|/interrupt|/pin)?$`, "i"));
     if (agentMatch) {
       const agent = agents.get(agentMatch[1]);
       if (!agent) { json(response, 404, { error: "agent-not-found" }); return; }
@@ -1704,6 +1779,29 @@ export function createWebUi(options = {}) {
         project.updatedAt = now();
         saveRegistry();
         json(response, 200, { deleted: true, sessionPreserved: true });
+        return;
+      }
+
+      if (request.method === "POST" && agentMatch[2] === "/pin") {
+        const body = await readJsonBody(request);
+        const key = cleanName(body?.idempotencyKey, 160);
+        if (!key) { json(response, 400, { error: "idempotency-key-required" }); return; }
+        if (typeof body?.pinned !== "boolean") {
+          json(response, 400, { error: "pinned-boolean-required" }); return;
+        }
+        const fingerprint = hashPayload({ agentId: agent.id, pinned: body.pinned });
+        const receipt = receiptResult(receipts.pins, key, fingerprint);
+        if (receipt?.conflict) { json(response, 409, { error: "idempotency-key-conflict" }); return; }
+        if (receipt?.replayed) {
+          json(response, 200, { ...publicAgent(agent), replayed: true });
+          return;
+        }
+        agent.pinnedAt = body.pinned ? now() : null;
+        agent.updatedAt = now();
+        project.updatedAt = agent.updatedAt;
+        rememberReceipt(receipts.pins, key, { id: agent.id, hash: fingerprint }, 1_000);
+        saveRegistry();
+        json(response, 200, publicAgent(agent));
         return;
       }
 
@@ -1788,6 +1886,12 @@ export function createWebUi(options = {}) {
           id: agent.id,
           hash: fingerprint,
           promptHashes: promptHashes(agent.id, prompt, enginePrompt),
+          projectId: project.id,
+          projectName: project.name,
+          agentName: agent.name,
+          promptPreview: promptPreview(prompt),
+          promptPreviewTruncated: canonicalPrompt(prompt).length > PROMPT_PREVIEW_MAX_CHARS,
+          source: cleanPromptSource(body?.source, key),
           acceptedAt: now(),
         }, 1_000);
         saveRegistry();

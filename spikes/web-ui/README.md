@@ -40,6 +40,14 @@ agent registry, idempotency receipts, uploaded files and the engines' native
 session ids. Conversation history stays in Claude Code's and Codex's own JSONL
 session files and is hydrated from those files after a restart.
 
+The registry also contains a bounded delivery journal for accepted prompts.
+The receipt is written before an engine turn starts and keeps a clipped
+500-character preview, target snapshots, source and terminal status. The
+browser reads this one journal at three scopes: all projects, the selected
+project or the selected agent. Discord and `amux` deliveries write through the
+same `/messages` acceptance seam; `amux asks` may consume it later but is not a
+second writer or the source of truth.
+
 Closing the browser does not stop an active turn. Agents created manually in
 the GUI use Claude `acceptEdits` and the locally configured Codex sandbox.
 Bridge-provisioned canary agents are marked `automation`: Claude receives the
@@ -111,6 +119,10 @@ Claude side questions use a non-persistent fork of the current native session.
 This provides the context-preserving effect of `/btw` without changing or
 interrupting the main session.
 
+Conversations can be pinned from the agent header. `pinnedAt` is persisted on
+the agent/native-session record, and the global Pinned overview jumps directly
+to the owning project and instance after a browser or runtime restart.
+
 The project registry includes a versioned communication-policy seam. History
 is readable across the project's agents today; per-agent send ACL enforcement
 is intentionally deferred.
@@ -132,7 +144,8 @@ npm run test:webui:visual
 boots the real server against a seeded temp registry, renders the snapshot
 view in headless Chrome at desktop (1280x800) and mobile (375x740) and fails
 on horizontal overflow, invisible core surfaces (header controls, composer,
-conversation), controls without an accessible name, a composer that is not
+conversation), broken all/project/instance prompt filters, missing pinned
+conversation navigation, controls without an accessible name, a composer that is not
 flush with the viewport at reading position, or any page error. Screenshots
 land in `spikes/web-ui/artifacts/` (gitignored) as review evidence. It needs a
 local Chrome/Chromium (`CHROME_BIN` overrides autodetection) and is therefore

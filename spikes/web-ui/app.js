@@ -2,6 +2,8 @@ const $ = (selector) => document.querySelector(selector);
 
 const elements = {
   projectSelect: $("#project-select"),
+  pinnedConversationsButton: $("#pinned-conversations-button"),
+  promptOverviewButton: $("#prompt-overview-button"),
   newProjectButton: $("#new-project-button"),
   newAgentButton: $("#new-agent-button"),
   deleteProjectButton: $("#delete-project-button"),
@@ -24,6 +26,7 @@ const elements = {
   agentEffortSelect: $("#agent-effort-select"),
   compactButton: $("#compact-button"),
   interruptButton: $("#interrupt-button"),
+  pinConversationButton: $("#pin-conversation-button"),
   deleteAgentButton: $("#delete-agent-button"),
   messageList: $("#message-list"),
   composerWrap: $("#composer-wrap"),
@@ -52,6 +55,15 @@ const elements = {
   sideForm: $("#side-form"),
   sideQuestionInput: $("#side-question-input"),
   sideQuestionSend: $("#side-question-send"),
+  promptOverviewDialog: $("#prompt-overview-dialog"),
+  closePromptOverview: $("#close-prompt-overview"),
+  refreshPromptOverview: $("#refresh-prompt-overview"),
+  promptOverviewCopy: $("#prompt-overview-copy"),
+  promptOverviewList: $("#prompt-overview-list"),
+  promptScopeButtons: [...document.querySelectorAll("[data-prompt-scope]")],
+  pinnedConversationsDialog: $("#pinned-conversations-dialog"),
+  closePinnedConversations: $("#close-pinned-conversations"),
+  pinnedConversationsList: $("#pinned-conversations-list"),
   toast: $("#toast"),
 };
 
@@ -69,6 +81,9 @@ const state = {
   pendingMessage: null,
   sending: false,
   controlPending: false,
+  pinPending: false,
+  promptOverviewScope: "all",
+  promptOverviewRequest: 0,
   toastTimer: null,
   snapshot: route.searchParams.get("snapshot") === "1",
 };
@@ -305,6 +320,10 @@ const updateAgentHeader = () => {
     : "Skicka ett meddelande först";
   elements.interruptButton.classList.toggle("hidden", !agent.running);
   elements.interruptButton.disabled = !agent.running || agent.operation === "interrupting" || state.controlPending;
+  elements.pinConversationButton.disabled = state.pinPending;
+  elements.pinConversationButton.textContent = agent.pinnedAt ? "Avpinna" : "Pinna";
+  elements.pinConversationButton.setAttribute("aria-pressed", String(Boolean(agent.pinnedAt)));
+  elements.pinConversationButton.classList.toggle("pinned", Boolean(agent.pinnedAt));
   elements.sideQuestionButton.hidden = agent.engine !== "claude";
   elements.sideQuestionButton.disabled = agent.engine !== "claude" || !agent.sessionId;
   elements.sideQuestionButton.title = agent.sessionId
@@ -322,6 +341,9 @@ const renderChrome = () => {
   const project = selectedProject();
   const agent = selectedAgent();
   elements.agentList.replaceChildren(...(project?.agents ?? []).map(agentButton));
+  const pinnedCount = state.projects.reduce((count, item) =>
+    count + item.agents.filter((agent) => agent.pinnedAt).length, 0);
+  elements.pinnedConversationsButton.textContent = pinnedCount ? `Pinnade (${pinnedCount})` : "Pinnade";
   elements.newAgentButton.disabled = !project;
   elements.deleteProjectButton.disabled = !project;
 
@@ -525,6 +547,7 @@ const renderEvent = (event) => {
       messageElement("error", event.error || event.stderr || `Turn misslyckades (exit ${event.code})`, "error");
     }
     refreshProjects().catch(() => {});
+    if (elements.promptOverviewDialog.open) loadPromptOverview();
   } else if (event.type === "web" && event.subtype === "protocol-error") {
     messageElement("error", `Protokollfel: ${event.line}`, "error");
   } else if (event.type === "web" && event.subtype === "history-unavailable") {
@@ -568,6 +591,165 @@ function selectAgent(agentId) {
   state.agentId = agentId;
   renderChrome();
 }
+
+const promptStatus = (status) => ({
+  accepted: "Accepterad",
+  running: "Arbetar",
+  completed: "Klar",
+  failed: "Misslyckad",
+  interrupted: "Avbruten",
+  permission_denied: "Behöver behörighet",
+}[status] ?? status);
+
+const promptSource = (source) => ({
+  web: "Code",
+  discord: "Discord",
+  cli: "amux",
+  bridge: "Brygga",
+  api: "API",
+}[source] ?? source);
+
+const promptTime = (timestamp) => Number.isFinite(timestamp)
+  ? new Intl.DateTimeFormat("sv-SE", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(timestamp))
+  : "Okänd tid";
+
+const promptOverviewUrl = () => {
+  const query = new URLSearchParams({ scope: state.promptOverviewScope, limit: "100" });
+  if (state.promptOverviewScope === "project" && state.projectId) {
+    query.set("projectId", state.projectId);
+  }
+  if (state.promptOverviewScope === "agent" && state.agentId) {
+    query.set("agentId", state.agentId);
+  }
+  return `/api/prompts?${query}`;
+};
+
+const renderPromptOverview = (prompts = []) => {
+  if (!prompts.length) {
+    const empty = document.createElement("p");
+    empty.className = "prompt-overview-empty";
+    empty.textContent = "Inga skickade frågor på den här nivån ännu.";
+    elements.promptOverviewList.replaceChildren(empty);
+    return;
+  }
+  elements.promptOverviewList.replaceChildren(...prompts.map((prompt) => {
+    const item = document.createElement("article");
+    item.className = "prompt-overview-item";
+    item.title = prompt.operationKey;
+
+    const heading = document.createElement("div");
+    heading.className = "prompt-overview-meta";
+    const target = document.createElement("strong");
+    target.textContent = `${prompt.projectName} › ${prompt.agentName}`;
+    const time = document.createElement("time");
+    time.dateTime = prompt.acceptedAt ? new Date(prompt.acceptedAt).toISOString() : "";
+    time.textContent = promptTime(prompt.acceptedAt);
+    heading.append(target, time);
+
+    const preview = document.createElement("p");
+    preview.className = "prompt-overview-preview";
+    preview.textContent = prompt.preview
+      ? `${prompt.preview}${prompt.previewTruncated ? "…" : ""}`
+      : "Frågan skickades före leveransjournalen; textutdrag saknas.";
+
+    const badges = document.createElement("div");
+    badges.className = "prompt-overview-badges";
+    const source = document.createElement("span");
+    source.textContent = promptSource(prompt.source);
+    const status = document.createElement("span");
+    status.className = `prompt-status ${prompt.turnStatus}`;
+    status.textContent = promptStatus(prompt.turnStatus);
+    badges.append(source, status);
+    item.append(heading, preview, badges);
+    return item;
+  }));
+};
+
+const loadPromptOverview = async () => {
+  if ((state.promptOverviewScope === "project" && !selectedProject())
+      || (state.promptOverviewScope === "agent" && !selectedAgent())) {
+    state.promptOverviewScope = "all";
+  }
+  const requestId = ++state.promptOverviewRequest;
+  elements.refreshPromptOverview.disabled = true;
+  for (const button of elements.promptScopeButtons) {
+    const scope = button.dataset.promptScope;
+    button.disabled = (scope === "project" && !selectedProject())
+      || (scope === "agent" && !selectedAgent());
+    button.setAttribute("aria-selected", String(scope === state.promptOverviewScope));
+  }
+  const context = state.promptOverviewScope === "project"
+    ? selectedProject()?.name
+    : state.promptOverviewScope === "agent"
+      ? selectedAgent()?.name
+      : "alla projekt";
+  elements.promptOverviewCopy.textContent = `Senast accepterade frågor för ${context}. Journalförs före agentstart.`;
+  try {
+    const payload = await api(promptOverviewUrl());
+    if (requestId === state.promptOverviewRequest) renderPromptOverview(payload.prompts);
+  } catch (error) {
+    if (requestId === state.promptOverviewRequest) {
+      renderPromptOverview([]);
+      showToast(errorText(error), "error");
+    }
+  } finally {
+    if (requestId === state.promptOverviewRequest) elements.refreshPromptOverview.disabled = false;
+  }
+};
+
+const openPromptOverview = () => {
+  if (!elements.promptOverviewDialog.open) elements.promptOverviewDialog.showModal();
+  loadPromptOverview();
+};
+
+const pinnedConversations = () => state.projects
+  .flatMap((project) => project.agents
+    .filter((agent) => agent.pinnedAt)
+    .map((agent) => ({ project, agent })))
+  .sort((a, b) => b.agent.pinnedAt - a.agent.pinnedAt);
+
+const renderPinnedConversations = () => {
+  const pinned = pinnedConversations();
+  if (!pinned.length) {
+    const empty = document.createElement("p");
+    empty.className = "prompt-overview-empty";
+    empty.textContent = "Inga pinnade konversationer ännu.";
+    elements.pinnedConversationsList.replaceChildren(empty);
+    return;
+  }
+  elements.pinnedConversationsList.replaceChildren(...pinned.map(({ project, agent }) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "pinned-conversation-item";
+    const copy = document.createElement("span");
+    copy.className = "pinned-conversation-copy";
+    const name = document.createElement("strong");
+    name.textContent = agent.name;
+    const meta = document.createElement("span");
+    meta.textContent = `${project.name} · ${agent.engine} · ${agent.running ? "Arbetar" : "Klar"}`;
+    copy.append(name, meta);
+    const arrow = document.createElement("span");
+    arrow.className = "pinned-conversation-arrow";
+    arrow.setAttribute("aria-hidden", "true");
+    arrow.textContent = "→";
+    button.append(copy, arrow);
+    button.addEventListener("click", () => {
+      state.projectId = project.id;
+      state.agentId = agent.id;
+      renderChrome();
+      elements.pinnedConversationsDialog.close();
+    });
+    return button;
+  }));
+};
+
+const openPinnedConversations = () => {
+  renderPinnedConversations();
+  if (!elements.pinnedConversationsDialog.open) elements.pinnedConversationsDialog.showModal();
+};
 
 const renderAttachments = () => {
   elements.attachmentList.replaceChildren(...state.attachments.map((attachment, index) => {
@@ -634,6 +816,7 @@ const submitMessage = async () => {
         prompt,
         attachments: state.attachments.map(({ path, name }) => ({ path, name })),
         idempotencyKey: state.pendingMessage.key,
+        source: "web",
       }),
     });
     agent.running = true;
@@ -643,6 +826,7 @@ const submitMessage = async () => {
     state.attachments = [];
     state.pendingMessage = null;
     renderAttachments();
+    if (elements.promptOverviewDialog.open) loadPromptOverview();
   } catch (error) {
     showToast(errorText(error), "error");
   } finally {
@@ -766,6 +950,29 @@ elements.agentEffortSelect.addEventListener("change", async () => {
   }
 });
 
+elements.pinConversationButton.addEventListener("click", async () => {
+  const agent = selectedAgent();
+  if (!agent || state.pinPending) return;
+  const pinned = !agent.pinnedAt;
+  state.pinPending = true;
+  updateAgentHeader();
+  try {
+    const updated = await api(`/api/agents/${agent.id}/pin`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pinned, idempotencyKey: crypto.randomUUID() }),
+    });
+    agent.pinnedAt = updated.pinnedAt;
+    await refreshProjects();
+    if (elements.pinnedConversationsDialog.open) renderPinnedConversations();
+  } catch (error) {
+    showToast(errorText(error), "error");
+  } finally {
+    state.pinPending = false;
+    if (selectedAgent()) updateAgentHeader();
+  }
+});
+
 elements.compactButton.addEventListener("click", async () => {
   const agent = selectedAgent();
   if (!agent || agent.running || !agent.sessionId || state.controlPending) return;
@@ -817,6 +1024,17 @@ elements.projectSelect.addEventListener("change", () => {
     selectProject(elements.projectSelect.value);
   }
 });
+elements.pinnedConversationsButton.addEventListener("click", openPinnedConversations);
+elements.closePinnedConversations.addEventListener("click", () => elements.pinnedConversationsDialog.close());
+elements.promptOverviewButton.addEventListener("click", openPromptOverview);
+elements.closePromptOverview.addEventListener("click", () => elements.promptOverviewDialog.close());
+elements.refreshPromptOverview.addEventListener("click", loadPromptOverview);
+for (const button of elements.promptScopeButtons) {
+  button.addEventListener("click", () => {
+    state.promptOverviewScope = button.dataset.promptScope;
+    loadPromptOverview();
+  });
+}
 elements.newProjectButton.addEventListener("click", openProjectDialog);
 elements.newAgentButton.addEventListener("click", openAgentDialog);
 elements.emptyAction.addEventListener("click", () => selectedProject() ? openAgentDialog() : openProjectDialog());
