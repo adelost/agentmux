@@ -30,6 +30,28 @@ feature("durable delivery queue", () => {
     }],
   });
 
+  component("the pre-Enter submit fence is visible and never selected for another write", {
+    given: ["one ambiguous submitting head followed by untouched work", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir, now: () => 2_000 });
+      const first = queue.enqueue({ agentName: "api", pane: 4, text: "ambiguous", orderKey: "001" });
+      queue.update(first, { status: "submitting", submitFenceAt: 2_000, nextAttemptAt: 3_000 });
+      const second = queue.enqueue({ agentName: "api", pane: 4, text: "later", orderKey: "002" });
+      return { rootDir, queue, first, second };
+    }],
+    when: ["queue readers classify the durable restart state", ({ queue }) => ({
+      fenced: queue.submitted("api", 4),
+      nextWrite: queue.nextForWrite("api", 4),
+      stats: deliveryQueueStats(queue),
+    })],
+    then: ["submitting counts as the at-most-once fence while only untouched work is write-eligible", ({ fenced, nextWrite, stats }, ctx) => {
+      expect(fenced.map((job) => job.id)).toEqual([ctx.first.id]);
+      expect(nextWrite.id).toBe(ctx.second.id);
+      expect(stats).toMatchObject({ pending: 1, submitted: 1, total: 2 });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("Discord Gateway and REST replay create one stable job", {
     given: ["an empty private spool", () => {
       const rootDir = tempRoot();
@@ -68,6 +90,50 @@ feature("durable delivery queue", () => {
     }],
     then: ["the exact per-pane order remains", (texts, ctx) => {
       expect(texts).toEqual(["first", "second", "third"]);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a sender cancellation request is durable and retry-idempotent", {
+    given: ["one queued follower and a stable request identity", () => {
+      const rootDir = tempRoot();
+      let clock = 2_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "ai", pane: 5, text: "obsolete queued work" });
+      return { rootDir, queue, job, advance: () => { clock = 9_000; } };
+    }],
+    when: ["the sender races a stale broker write, loses the receipt and retries", ({ rootDir, queue, job, advance }) => {
+      const staleJobFile = readFileSync(job.path, "utf-8");
+      const first = queue.requestCancellation(job.id, {
+        reason: "work already shipped elsewhere", requestedBy: "ai:2",
+      });
+      // Reproduce a cross-process writer that read the mutable job before the
+      // request sidecar existed, then atomically replaced it afterwards.
+      writeFileSync(job.path, staleJobFile);
+      advance();
+      const retry = queue.requestCancellation(job.id, {
+        reason: "retry must not rewrite the audit", requestedBy: "ai:2",
+      });
+      const reopened = createDeliveryQueue({ rootDir });
+      return {
+        first, retry,
+        pending: reopened.pendingCancellationRequests("ai", 5),
+        targets: reopened.targets(),
+      };
+    }],
+    then: ["the immutable sidecar survives the stale write and restart sees one unchanged request", ({ first, retry, pending, targets }, ctx) => {
+      expect(first).toMatchObject({
+        cancelRequestStatus: "requested",
+        cancelRequestedAt: 2_000,
+        cancelRequestedBy: "ai:2",
+        cancelRequestedReason: "work already shipped elsewhere",
+      });
+      expect(retry).toMatchObject({
+        cancelRequestedAt: 2_000,
+        cancelRequestedReason: "work already shipped elsewhere",
+      });
+      expect(pending).toHaveLength(1);
+      expect(targets).toEqual([{ agentName: "ai", pane: 5 }]);
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });
@@ -164,6 +230,38 @@ feature("durable delivery queue", () => {
       expect(retained).toMatchObject({ status: "delivered_unverified", terminalAt: 5_000 });
       expect(after).toBe(1);
       expect(removed).toBeNull();
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a timed-out pre-submit failure keeps its NOT SENT notice durable", {
+    given: ["one cancelled job whose terminal notice has not reached Discord", () => {
+      const rootDir = tempRoot();
+      let clock = 20_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "ai", pane: 5, text: "never submitted" });
+      queue.update(job, {
+        status: "cancelled",
+        terminalAt: 5_000,
+        nextAttemptAt: null,
+        metadata: { deliveryTimeout: "pre-submit" },
+        unverifiedNoticeSentAt: null,
+      });
+      return { rootDir, queue, job, advance: () => { clock = 30_000; } };
+    }],
+    when: ["pruning runs before and after the durable notice is marked sent", ({ queue, job, advance }) => {
+      const targetsBefore = queue.targets();
+      const retained = queue.prune({ acknowledgedOlderThanMs: 10_000 });
+      queue.update(job, { unverifiedNoticeSentAt: 20_000 });
+      advance();
+      const removed = queue.prune({ acknowledgedOlderThanMs: 10_000 });
+      return { targetsBefore, retained, removed, after: queue.read("ai", 5, job.id) };
+    }],
+    then: ["restart polling retains the warning until sent, then normal audit retention applies", (result, ctx) => {
+      expect(result.targetsBefore).toEqual([{ agentName: "ai", pane: 5 }]);
+      expect(result.retained).toBe(0);
+      expect(result.removed).toBe(1);
+      expect(result.after).toBeNull();
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });

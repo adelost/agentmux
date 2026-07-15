@@ -71,6 +71,14 @@ export function shouldPastePrompt({ knownDrafted = false, alreadyComposed = fals
   return !knownDrafted && !alreadyComposed;
 }
 
+/** Persist ambiguity before the physical submit key can leave this process. */
+export async function submitWithDurableFence({ onSubmitting = null, sendEnter, onSubmitted = null }) {
+  if (typeof sendEnter !== "function") throw new Error("submit fence requires sendEnter");
+  if (onSubmitting) await onSubmitting();
+  await sendEnter();
+  if (onSubmitted) await onSubmitted();
+}
+
 /** Build a pinned Claude launch command so the moving `opus` alias cannot drift. */
 export function buildClaudeLaunchCommand({ resume = false, model = resolveClaudeModel() } = {}) {
   const exactModel = resolveClaudeModel(model);
@@ -1647,6 +1655,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     knownDrafted = false,
     onPasteStarted = null,
     onDrafted = null,
+    onSubmitting = null,
     onSubmitted = null,
   } = {}) {
     const target = `${agentName}:.${pane}`;
@@ -1717,11 +1726,14 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (dialect === "codex" && !busyAtSend) {
       busyAtSend = Boolean(await isBusy(agentName, pane));
     }
-    await t.sendEnter(target);
-    // This callback records only that the physical submit key was attempted.
-    // It must run independently of composer scraping; the durable broker keeps
-    // the FIFO closed until the exact JSONL event acknowledges delivery.
-    if (onSubmitted) await onSubmitted();
+    // The first callback persists an ambiguous at-most-once fence BEFORE the
+    // physical key. If the process dies after Enter but before the second
+    // callback, restart must never retype or claim NOT SENT.
+    await submitWithDurableFence({
+      onSubmitting,
+      sendEnter: () => t.sendEnter(target),
+      onSubmitted,
+    });
     await maybeSendCodexSubmitEnter(agentName, pane, target, prompt, { notBeforeMs });
     await maybeRescueClaudeSubmit(agentName, pane, target, prompt);
 

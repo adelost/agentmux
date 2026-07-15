@@ -173,8 +173,19 @@ const deliveryBroker = createDeliveryBroker({
     } else if (state === "unverified") {
       await discord.send(
         channelId,
-        "⚠️ Meddelandet lämnade composern men fick inget exakt historikkvitto inom en timme. " +
-        "AMUX skickar inte om det eftersom det kan skapa en dubblett; kontrollera agenthistoriken om instruktionen är kritisk.",
+        job.metadata?.deliveryAmbiguity === "submitting-fence"
+          ? "⚠️ Leveransen stannade mellan den durabla submit-fencen och slutkvittot. Enter kan ha skickats; " +
+            "AMUX vet inte säkert och skickar därför inte om. Kontrollera agenten och composern om instruktionen är kritisk."
+          : "⚠️ Meddelandet lämnade composern men fick inget exakt historikkvitto inom en timme. " +
+            "AMUX skickar inte om det eftersom det kan skapa en dubblett; kontrollera agenthistoriken om instruktionen är kritisk.",
+      );
+    } else if (state === "not-sent") {
+      await discord.send(
+        channelId,
+        job.metadata?.deliveryCancellation === "sender-request"
+          ? "⚠️ Meddelandet avbröts före submit och skickades inte. Composern lämnades orörd; skicka en ny instruktion om arbetet ändå behövs."
+          : "⚠️ Meddelandet skickades inte. Composern förblev osäker för länge eller efter för många försök, så AMUX har stoppat automatiken " +
+            "för att inte skriva över eller blanda innehåll. Kontrollera/rensa composern och skicka instruktionen igen om den fortfarande behövs.",
       );
     }
   },

@@ -19,6 +19,7 @@ function acceptingAgent() {
       sends.push({ text, options });
       await options.onPasteStarted?.();
       await options.onDrafted?.();
+      await options.onSubmitting?.();
       await options.onSubmitted?.();
       echoed.add(text);
       return { submitted: true, queued: false };
@@ -119,6 +120,7 @@ feature("single-writer delivery broker", () => {
         sendOnly: async (_name, text, _pane, options = {}) => {
           sends.push(text);
           await options.onDrafted?.();
+          await options.onSubmitting?.();
           await options.onSubmitted?.();
           return { submitted: true, queued: true };
         },
@@ -180,6 +182,7 @@ feature("single-writer delivery broker", () => {
         maxActive = Math.max(maxActive, active);
         await new Promise((resolve) => setTimeout(resolve, 10));
         await options.onDrafted?.();
+        await options.onSubmitting?.();
         await options.onSubmitted?.();
         active--;
         return { submitted: true };
@@ -243,6 +246,7 @@ feature("single-writer delivery broker", () => {
             error.zoomRecoverable = true;
             throw error;
           }
+          await options.onSubmitting?.();
           await options.onSubmitted?.();
           echoed = true;
           return { submitted: true };
@@ -377,6 +381,86 @@ feature("single-writer delivery broker", () => {
     then: ["no second tmux write occurs", (_, ctx) => {
       expect(ctx.agent.sends).toHaveLength(0);
       expect(ctx.queue.read("api", 4, ctx.job.id).status).toBe("submitted");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a crash after Enter preserves the pre-Enter fence across restart", {
+    given: ["a transport that fails after persisting submitting but before submitted", () => {
+      const rootDir = tempRoot();
+      let clock = 1_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "api", pane: 4, text: "never retype after Enter" });
+      const firstAgent = acceptingAgent();
+      firstAgent.waitForPromptEcho = async () => false;
+      firstAgent.sendOnly = async (_name, text, _pane, options = {}) => {
+        firstAgent.sends.push({ text, options });
+        await options.onPasteStarted?.();
+        await options.onDrafted?.();
+        await options.onSubmitting?.();
+        throw new Error("process lost after physical Enter");
+      };
+      const firstBroker = createDeliveryBroker({
+        agent: firstAgent, queue, now: () => clock, notify: async () => {},
+      });
+      return {
+        rootDir, queue, job, firstAgent, firstBroker,
+        now: () => clock,
+        advance: (ms) => { clock += ms; },
+      };
+    }],
+    when: ["the first bridge fails, the sender cancels, and a replacement reaches the audit timeout", async (ctx) => {
+      await ctx.firstBroker.kickTarget("api", 4);
+      ctx.afterCrash = ctx.queue.read("api", 4, ctx.job.id);
+      ctx.queue.requestCancellation(ctx.job.id, {
+        reason: "do not retry after the crash", requestedBy: "api:2",
+      });
+      ctx.advance(1_001);
+      const reopened = createDeliveryQueue({ rootDir: ctx.rootDir, now: ctx.now });
+      const replacementAgent = acceptingAgent();
+      replacementAgent.waitForPromptEcho = async () => false;
+      let nativeDispatches = 0;
+      replacementAgent.isNativeTarget = () => true;
+      replacementAgent.deliverQueued = async () => {
+        nativeDispatches++;
+        return { accepted: true };
+      };
+      const notices = [];
+      const replacement = createDeliveryBroker({
+        agent: replacementAgent,
+        queue: reopened,
+        now: ctx.now,
+        notify: async (_candidate, kind) => notices.push(kind),
+      });
+      await replacement.kickTarget("api", 4);
+      ctx.afterRestart = reopened.read("api", 4, ctx.job.id);
+      ctx.advance(3_600_000);
+      await replacement.kickTarget("api", 4);
+      ctx.afterTimeout = reopened.read("api", 4, ctx.job.id);
+      ctx.replacementAgent = replacementAgent;
+      ctx.nativeDispatches = () => nativeDispatches;
+      ctx.notices = notices;
+    }],
+    then: ["neither restart nor cancellation retypes or falsely says NOT SENT", (_, ctx) => {
+      expect(ctx.firstAgent.sends).toHaveLength(1);
+      expect(ctx.afterCrash).toMatchObject({
+        status: "submitting",
+        submitFenceAt: 1_000,
+        lastReason: "submit fence committed before physical completion; awaiting authoritative receipt",
+      });
+      expect(ctx.afterRestart).toMatchObject({
+        status: "submitting",
+        cancelRequestStatus: "refused",
+        cancelRequestLastReason: expect.stringContaining("submit may already have been attempted"),
+      });
+      expect(ctx.replacementAgent.sends).toHaveLength(0);
+      expect(ctx.nativeDispatches()).toBe(0);
+      expect(ctx.notices).toEqual(["unverified"]);
+      expect(ctx.afterTimeout).toMatchObject({
+        status: "delivered_unverified",
+        metadata: { deliveryAmbiguity: "submitting-fence" },
+        lastReason: "pre-Enter submit fence has no exact receipt after 60 minutes; physical delivery remains unverified",
+      });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });
@@ -996,6 +1080,436 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
+  component("an exhausted pending head becomes NOT SENT and releases a never-attempted follower", {
+    given: ["the live ai:5 shape: one repeatedly blocked head and an old job waiting behind it", () => {
+      const rootDir = tempRoot();
+      const clock = 3_700_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const first = queue.enqueue({
+        agentName: "ai", pane: 5, text: "blocked by foreign q draft", createdAt: 1_000, orderKey: "001",
+      });
+      queue.update(first, {
+        status: "pending",
+        attempts: 64,
+        firstAttemptAt: 1_000,
+        lastAttemptAt: 3_600_000,
+        echoCursor: { kind: "test", positions: {} },
+        nextAttemptAt: 0,
+      });
+      const second = queue.enqueue({
+        agentName: "ai", pane: 5, text: "old but never attempted", createdAt: 2_000, orderKey: "002",
+      });
+      const notices = [];
+      const agent = acceptingAgent();
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_job, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, first, second, notices, agent, broker };
+    }],
+    when: ["the broker terminalizes the exhausted head, then polls the released lane", async ({ broker }) => {
+      await broker.kickTarget("ai", 5);
+      await broker.kickTarget("ai", 5);
+    }],
+    then: ["the first job is explicitly not sent while the follower receives its first real attempt", (_, ctx) => {
+      expect(ctx.queue.read("ai", 5, ctx.first.id)).toMatchObject({
+        status: "cancelled",
+        terminalAt: 3_700_000,
+        nextAttemptAt: null,
+        metadata: { deliveryTimeout: "pre-submit" },
+        unverifiedNoticeSentAt: 3_700_000,
+        lastReason: expect.stringContaining("not sent:"),
+      });
+      expect(ctx.notices).toEqual(["not-sent"]);
+      expect(ctx.agent.sends.map((send) => send.text)).toEqual(["old but never attempted"]);
+      expect(ctx.queue.read("ai", 5, ctx.second.id)).toMatchObject({
+        status: "acknowledged",
+        attempts: 1,
+        firstAttemptAt: 3_700_000,
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a sender can cancel a never-attempted follower without disturbing the FIFO head", {
+    given: ["a fresh blocked head and an obsolete job that has never touched the composer", () => {
+      const rootDir = tempRoot();
+      const clock = 10_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const head = queue.enqueue({
+        agentName: "ai", pane: 5, text: "keep the head", createdAt: 1_000, orderKey: "001",
+      });
+      queue.update(head, {
+        status: "pending", attempts: 1, firstAttemptAt: 9_000, nextAttemptAt: 20_000,
+      });
+      const obsolete = queue.enqueue({
+        agentName: "ai", pane: 5, text: "obsolete follower", createdAt: 2_000, orderKey: "002",
+      });
+      queue.requestCancellation(obsolete.id, {
+        reason: "already merged and deployed elsewhere", requestedBy: "ai:2",
+      });
+      const notices = [];
+      const agent = acceptingAgent();
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_candidate, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, head, obsolete, notices, agent, broker };
+    }],
+    when: ["the broker adjudicates cancellation under the pane writer lease", ({ broker }) =>
+      broker.kickTarget("ai", 5)],
+    then: ["the follower is provably NOT SENT while the head and composer remain untouched", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.notices).toEqual(["not-sent"]);
+      expect(ctx.queue.read("ai", 5, ctx.head.id)).toMatchObject({
+        status: "pending", attempts: 1, nextAttemptAt: 20_000,
+      });
+      expect(ctx.queue.read("ai", 5, ctx.obsolete.id)).toMatchObject({
+        status: "cancelled",
+        attempts: 0,
+        cancelRequestStatus: "completed",
+        cancelRequestResolvedAt: 10_000,
+        metadata: {
+          deliveryOutcome: "not-sent",
+          deliveryCancellation: "sender-request",
+        },
+        lastReason: expect.stringContaining("already merged and deployed elsewhere"),
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a cancellation request loses to an authoritative receipt", {
+    given: ["a pre-submit record whose exact JSONL event is already durable", () => {
+      const rootDir = tempRoot();
+      const clock = 10_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "claw", pane: 4, text: "receipt beats cancel", createdAt: 1_000,
+        echoCursor: { kind: "test", positions: {} },
+      });
+      queue.requestCancellation(job.id, {
+        reason: "sender changed its mind", requestedBy: "claw:2",
+      });
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => true;
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_candidate, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, notices, agent, broker };
+    }],
+    when: ["the broker checks the authoritative sink before declaring NOT SENT", ({ broker }) =>
+      broker.kickTarget("claw", 4)],
+    then: ["delivery truth is retained and the cancellation is explicitly refused", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.notices).toEqual([]);
+      expect(ctx.queue.read("claw", 4, ctx.job.id)).toMatchObject({
+        status: "acknowledged",
+        cancelRequestStatus: "refused",
+        cancelRequestResolvedAt: 10_000,
+        cancelRequestLastReason: expect.stringContaining("authoritative receipt"),
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a cancellation arriving before the submit fence prevents Enter", {
+    given: ["a sender request that appears after paste but before the durable pre-Enter callback", () => {
+      const rootDir = tempRoot();
+      const clock = 10_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "lsrc", pane: 8, text: "stop before Enter", createdAt: 9_000 });
+      const notices = [];
+      let physicalEnters = 0;
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      agent.sendOnly = async (_name, text, _pane, options = {}) => {
+        agent.sends.push({ text, options });
+        await options.onPasteStarted?.();
+        await options.onDrafted?.();
+        queue.requestCancellation(job.id, {
+          reason: "became obsolete before Enter", requestedBy: "lsrc:2",
+        });
+        await options.onSubmitting?.();
+        physicalEnters++;
+        await options.onSubmitted?.();
+        return { submitted: true, queued: false };
+      };
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_candidate, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, notices, agent, broker, physicalEnters: () => physicalEnters };
+    }],
+    when: ["the durable fence callback observes the sender request", ({ broker }) =>
+      broker.kickTarget("lsrc", 8)],
+    then: ["the composer is preserved, Enter never runs, and NOT SENT is truthful", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(1);
+      expect(ctx.physicalEnters()).toBe(0);
+      expect(ctx.notices).toEqual(["not-sent"]);
+      expect(ctx.queue.read("lsrc", 8, ctx.job.id)).toMatchObject({
+        status: "cancelled",
+        cancelRequestStatus: "completed",
+        metadata: {
+          deliveryOutcome: "not-sent",
+          deliveryCancellation: "sender-request",
+        },
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a cancellation racing physical submit is refused instead of misreported", {
+    given: ["a sender request that arrives after paste but before the submit callback commits", () => {
+      const rootDir = tempRoot();
+      const clock = 10_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "lsrc", pane: 8, text: "in-flight prompt", createdAt: 9_000 });
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      agent.sendOnly = async (_name, text, _pane, options = {}) => {
+        agent.sends.push({ text, options });
+        await options.onPasteStarted?.();
+        await options.onDrafted?.();
+        await options.onSubmitting?.();
+        queue.requestCancellation(job.id, {
+          reason: "arrived during the physical write", requestedBy: "lsrc:2",
+        });
+        await options.onSubmitted?.();
+        return { submitted: true, queued: false };
+      };
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_candidate, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, notices, agent, broker };
+    }],
+    when: ["one pass submits and the next pass adjudicates the late request", async ({ broker }) => {
+      await broker.kickTarget("lsrc", 8);
+      await broker.kickTarget("lsrc", 8);
+    }],
+    then: ["the durable submit fence survives and no false NOT SENT warning is emitted", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(1);
+      expect(ctx.notices).toEqual([]);
+      expect(ctx.queue.read("lsrc", 8, ctx.job.id)).toMatchObject({
+        status: "submitted",
+        cancelRequestStatus: "refused",
+        cancelRequestResolvedAt: 10_000,
+        cancelRequestLastReason: expect.stringContaining("submit may already have been attempted"),
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("an attempted native dispatch is never misreported as NOT SENT", {
+    given: ["a native job whose HTTP attempt may have outlived the bridge response", () => {
+      const rootDir = tempRoot();
+      const clock = 10_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "skybar", pane: 3, text: "native ambiguity", createdAt: 1_000 });
+      queue.update(job, {
+        status: "pending", attempts: 1, firstAttemptAt: 1_000, nextAttemptAt: 20_000,
+      });
+      queue.requestCancellation(job.id, {
+        reason: "cancel after HTTP uncertainty", requestedBy: "skybar:2",
+      });
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.isNativeTarget = () => true;
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_candidate, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, notices, agent, broker };
+    }],
+    when: ["the broker adjudicates the request before the next native retry", ({ broker }) =>
+      broker.kickTarget("skybar", 3)],
+    then: ["the ambiguous request is refused without dispatch or a false terminal notice", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.notices).toEqual([]);
+      expect(ctx.queue.read("skybar", 3, ctx.job.id)).toMatchObject({
+        status: "pending",
+        cancelRequestStatus: "refused",
+        cancelRequestLastReason: expect.stringContaining("not safe for pre-submit cancellation"),
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a stale provisional paste is dead-lettered without touching the foreign composer", {
+    given: ["the live lsrc:8 shape: an old paste fence and a different visible compact command", () => {
+      const rootDir = tempRoot();
+      const clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "lsrc", pane: 8, text: "/compact", kind: "slash", createdAt: 1_000,
+      });
+      queue.update(job, {
+        status: "pasting",
+        draftOwned: true,
+        attempts: 1,
+        lastAttemptAt: 2_000,
+        nextAttemptAt: 0,
+      });
+      let transportProbes = 0;
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.promptTransportState = async () => {
+        transportProbes++;
+        return { state: "foreign", detail: "/compact summarize conversation" };
+      };
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_candidate, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, notices, agent, broker, transportProbes: () => transportProbes };
+    }],
+    when: ["the stale provisional owner reaches its terminal audit", ({ broker }) =>
+      broker.kickTarget("lsrc", 8)],
+    then: ["no paste, Enter, cleanup or permissive composer probe occurs", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.transportProbes()).toBe(0);
+      expect(ctx.notices).toEqual(["not-sent"]);
+      expect(ctx.queue.read("lsrc", 8, ctx.job.id)).toMatchObject({
+        status: "cancelled",
+        draftOwned: false,
+        metadata: { deliveryTimeout: "pre-submit" },
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("an authoritative receipt wins at the pre-submit timeout boundary", {
+    given: ["an exhausted-looking pending job whose exact JSONL event has arrived", () => {
+      const rootDir = tempRoot();
+      const clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "api", pane: 2, text: "receipt wins", createdAt: 1_000 });
+      queue.update(job, {
+        status: "pending", attempts: 64, firstAttemptAt: 1_000,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0,
+      });
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => true;
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_candidate, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, notices, agent, broker };
+    }],
+    when: ["the terminal audit first checks the authoritative sink", ({ broker }) =>
+      broker.kickTarget("api", 2)],
+    then: ["the job is acknowledged without a NOT SENT warning or another write", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.notices).toEqual([]);
+      expect(ctx.queue.read("api", 2, ctx.job.id)).toMatchObject({
+        status: "acknowledged",
+        acknowledgedAt: 4_000_000,
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("pre-submit timeout never overwrites a concurrent acknowledgement", {
+    given: ["a legacy exhausted job whose final sink check overlaps another reconciler", () => {
+      const rootDir = tempRoot();
+      const clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "ai", pane: 5, text: "concurrent receipt wins", createdAt: 1_000,
+      });
+      queue.update(job, {
+        status: "pending", attempts: 64,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0,
+      });
+      let echoChecks = 0;
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => {
+        echoChecks++;
+        if (echoChecks === 2) {
+          const current = queue.read("ai", 5, job.id);
+          queue.update(current, {
+            status: "acknowledged", acknowledgedAt: clock, nextAttemptAt: null,
+          });
+        }
+        return false;
+      };
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_candidate, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, notices, agent, broker, echoChecks: () => echoChecks };
+    }],
+    when: ["the stale observer reaches the guarded terminal transition", ({ broker }) =>
+      broker.kickTarget("ai", 5)],
+    then: ["the committed acknowledgement survives without a write or false NOT SENT warning", (_, ctx) => {
+      expect(ctx.echoChecks()).toBe(2);
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.notices).toEqual([]);
+      expect(ctx.queue.read("ai", 5, ctx.job.id)).toMatchObject({
+        status: "acknowledged",
+        acknowledgedAt: 4_000_000,
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a failed NOT SENT warning retries durably after broker restart", {
+    given: ["an exhausted pre-submit job and a transient Discord failure", () => {
+      const rootDir = tempRoot();
+      let clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "watch", pane: 3, text: "warn that this was not sent", createdAt: 1_000,
+        metadata: { channelId: "target-channel" },
+      });
+      queue.update(job, {
+        status: "pending", attempts: 64, firstAttemptAt: 1_000,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0,
+      });
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      let notifyCalls = 0;
+      const notify = async (_candidate, kind) => {
+        expect(kind).toBe("not-sent");
+        notifyCalls++;
+        if (notifyCalls === 1) throw new Error("discord down");
+      };
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify });
+      return {
+        rootDir, queue, job, agent, broker, notify,
+        calls: () => notifyCalls,
+        advance: () => { clock += 60_000; },
+        now: () => clock,
+      };
+    }],
+    when: ["one broker terminalizes and a replacement retries the notice", async (ctx) => {
+      await ctx.broker.kickTarget("watch", 3);
+      ctx.afterFailure = ctx.queue.read("watch", 3, ctx.job.id);
+      ctx.targetsAfterFailure = ctx.queue.targets();
+      ctx.advance();
+      const reopened = createDeliveryQueue({ rootDir: ctx.rootDir, now: ctx.now });
+      await createDeliveryBroker({
+        agent: ctx.agent, queue: reopened, now: ctx.now, notify: ctx.notify,
+      }).kick();
+      ctx.afterSuccess = reopened.read("watch", 3, ctx.job.id);
+      ctx.targetsAfterSuccess = reopened.targets();
+    }],
+    then: ["the terminal job never reopens while the notice becomes exactly-once durable", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.afterFailure).toMatchObject({
+        status: "cancelled",
+        unverifiedNoticeAttempts: 1,
+        unverifiedNoticeSentAt: null,
+      });
+      expect(ctx.targetsAfterFailure).toEqual([{ agentName: "watch", pane: 3 }]);
+      expect(ctx.afterSuccess).toMatchObject({
+        status: "cancelled",
+        unverifiedNoticeAttempts: 2,
+        unverifiedNoticeSentAt: 4_060_000,
+      });
+      expect(ctx.calls()).toBe(2);
+      expect(ctx.targetsAfterSuccess).toEqual([]);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("an empty idle composer safely reopens only a provisional paste", {
     given: ["a crash after paste initiation but before exact verification or Enter", () => {
       const rootDir = tempRoot();
@@ -1040,6 +1554,7 @@ feature("single-writer delivery broker", () => {
         agent.sends.push({ text, options });
         await options.onPasteStarted?.();
         await options.onDrafted?.();
+        await options.onSubmitting?.();
         await options.onSubmitted?.();
         echoed = true;
         return { submitted: true };
@@ -1075,6 +1590,36 @@ feature("single-writer delivery broker", () => {
     then: ["it advances without executing /compact twice", (_, ctx) => {
       expect(ctx.agent.sends).toHaveLength(0);
       expect(ctx.queue.read("claw", 1, ctx.job.id).status).toBe("acknowledged");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a submitting slash command remains ambiguous after restart", {
+    given: ["a slash whose pre-Enter fence persisted but post-Enter callback did not", () => {
+      const rootDir = tempRoot();
+      const clock = 3_602_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "claw", pane: 1, text: "/compact", kind: "slash" });
+      queue.update(job, {
+        status: "submitting", submitFenceAt: 1_000, lastAttemptAt: 1_000, nextAttemptAt: 0,
+      });
+      const notices = [];
+      const agent = acceptingAgent();
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_candidate, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, notices, agent, broker };
+    }],
+    when: ["the replacement broker reaches the ambiguity timeout", ({ broker }) =>
+      broker.kickTarget("claw", 1)],
+    then: ["it never executes the slash twice or upgrades missing proof to delivered", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.notices).toEqual(["unverified"]);
+      expect(ctx.queue.read("claw", 1, ctx.job.id)).toMatchObject({
+        status: "delivered_unverified",
+        metadata: { deliveryAmbiguity: "submitting-fence" },
+        lastReason: "pre-Enter submit fence has no exact receipt after 60 minutes; physical delivery remains unverified",
+      });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });

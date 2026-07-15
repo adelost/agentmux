@@ -2,7 +2,10 @@ import { feature, component, unit, expect } from "bdd-vitest";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { buildClaudeLaunchCommand, buildCodexLaunchCommand, createAgent, paneDir, shouldPastePrompt } from "../agent.mjs";
+import {
+  buildClaudeLaunchCommand, buildCodexLaunchCommand, createAgent, paneDir,
+  shouldPastePrompt, submitWithDurableFence,
+} from "../agent.mjs";
 
 feature("durable draft paste fence", () => {
   unit("a vanished durable draft is never permission to type it again", {
@@ -13,6 +16,50 @@ feature("durable draft paste fence", () => {
     })],
     then: ["only a never-written job may paste", (result) =>
       expect(result).toEqual({ fresh: true, visible: false, vanished: false })],
+  });
+
+  component("the ambiguous submit fence is durable before physical Enter", {
+    given: ["three observable submit steps", () => {
+      const calls = [];
+      return {
+        calls,
+        submit: () => submitWithDurableFence({
+          onSubmitting: async () => { calls.push("fence"); },
+          sendEnter: async () => { calls.push("enter"); },
+          onSubmitted: async () => {
+            calls.push("submitted");
+            throw new Error("process crashed after Enter");
+          },
+        }).catch((error) => error),
+      };
+    }],
+    when: ["the process fails after the physical key but before final state", ({ submit }) => submit()],
+    then: ["the durable fence necessarily precedes Enter and the missing final callback remains detectable", (error, ctx) => {
+      expect(error.message).toBe("process crashed after Enter");
+      expect(ctx.calls).toEqual(["fence", "enter", "submitted"]);
+    }],
+  });
+
+  component("a failed durable fence prevents physical Enter", {
+    given: ["a persistence failure before submit", () => {
+      const calls = [];
+      return {
+        calls,
+        submit: () => submitWithDurableFence({
+          onSubmitting: async () => {
+            calls.push("fence");
+            throw new Error("disk unavailable");
+          },
+          sendEnter: async () => { calls.push("enter"); },
+          onSubmitted: async () => { calls.push("submitted"); },
+        }).catch((error) => error),
+      };
+    }],
+    when: ["the durable transition cannot be written", ({ submit }) => submit()],
+    then: ["no physical or final submit step runs", (error, ctx) => {
+      expect(error.message).toBe("disk unavailable");
+      expect(ctx.calls).toEqual(["fence"]);
+    }],
   });
 });
 
