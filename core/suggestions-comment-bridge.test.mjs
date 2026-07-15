@@ -22,6 +22,8 @@ import {
   probeSuggestionsBoard,
   saveSuggestionsBridgeState,
   serializeImplementationPolicy,
+  NOTIFY_FAILURE_BUDGET,
+  boundedRetryDecision,
 } from "./suggestions-comment-bridge.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -313,6 +315,101 @@ describe.sequential("Suggestions human-comment relay", () => {
         REMINDER_STAGES.map((stage) => stage.id),
       );
       expect(tracked.notifiedAt).toBe(start + 241 * 60 * 1000);
+    } finally { await fixture.close(); }
+  });
+
+  it("spawns amux with the parent's interpreter, never via the shebang (the cron ENOENT class)", async () => {
+    // Under cron, PATH has no nvm node, so '#!/usr/bin/env node' resolves to
+    // nothing and every send died as ENOENT — silently, for 4h.
+    const child = { once(event, callback) {
+      if (event === "close") setImmediate(() => callback(0));
+      return child;
+    }, stdin: { once() {}, end() {} } };
+    const calls = [];
+    const spawnImpl = (...args) => { calls.push(args); return child; };
+    await createAmuxCommentNotifier({ amuxBin: "/abs/agent-cli.mjs", spawnImpl })({
+      projectId: "skydive", ticketId: "SKY-9", commentId: 1,
+      agent: "skydive", pane: 2, idempotencyKey: "k" });
+    await createAmuxBoardAuthNotifier({ amuxBin: "/abs/agent-cli.mjs", spawnImpl })({
+      status: 401, lastSuccessfulSyncAt: null });
+    createAmuxCommentDeliverer({ amuxBin: "/abs/agent-cli.mjs", spawnImpl })({
+      agent: "skydive", pane: 2, prompt: "p", idempotencyKey: "k2" });
+    expect(calls).toHaveLength(3);
+    for (const [argv0, argv] of calls) {
+      expect(argv0).toBe(process.execPath);
+      expect(argv[0]).toBe("/abs/agent-cli.mjs");
+    }
+  });
+
+  it("shares ONE bounded-retry policy across delivery and notify queues", () => {
+    const schedule = REMINDER_STAGES;
+    expect(boundedRetryDecision({ schedule, attempts: 0, firstAttemptAt: 0, nowMs: 0 }))
+      .toMatchObject({ action: "deliver" });
+    expect(boundedRetryDecision({ schedule, attempts: 1, firstAttemptAt: 0, nowMs: 1 }))
+      .toMatchObject({ action: "wait" });
+    expect(boundedRetryDecision({ schedule, attempts: schedule.length,
+      firstAttemptAt: 0, nowMs: 0 })).toMatchObject({ action: "notify" });
+    expect(boundedRetryDecision({ schedule, attempts: schedule.length, firstAttemptAt: 0,
+      nowMs: 0, notifyFailures: NOTIFY_FAILURE_BUDGET })).toMatchObject({ action: "terminal" });
+  });
+
+  it("bounds the notify fallback and dead-letters instead of retrying forever", async () => {
+    const root = makeRoot();
+    const statePath = join(root, "state.json");
+    const fixture = await fixtureServer({ boards: { skydive: [ticket("SKY-13", [
+      comment(1, "creator", "poison pill"),
+    ])] } });
+    const start = 20_000_000;
+    let notifyCalls = 0;
+    try {
+      // Stages exhaust at minute 240; the notify fallback then fails every
+      // minute. Pre-fix this looped forever (SKY-0088:351 from 14:44).
+      for (let minute = 0; minute <= 240 + NOTIFY_FAILURE_BUDGET + 10; minute++) {
+        const state = existsSync(statePath) ? loadSuggestionsBridgeState(statePath) : emptyState();
+        await run({ fixture, state, now: () => start + minute * 60 * 1000,
+          persist: (next) => saveSuggestionsBridgeState(statePath, next),
+          deliver: async () => { throw new Error("permanent target failure"); },
+          notify: async () => { notifyCalls += 1; throw new Error("notify down"); } })
+          .catch(() => {});
+      }
+      expect(notifyCalls).toBe(NOTIFY_FAILURE_BUDGET);
+      const tracked = loadSuggestionsBridgeState(statePath)
+        .projects.skydive.comments["SKY-13:1"];
+      expect(tracked.notifyFailures).toBe(NOTIFY_FAILURE_BUDGET);
+      expect(tracked.terminalAt).not.toBeNull();
+      expect(tracked.terminalReason).toBe("notify-budget-exhausted");
+    } finally { await fixture.close(); }
+  });
+
+  it("one unreadable project degrades to a recorded failure while the rest still delivers", async () => {
+    const fixture = await fixtureServer({ projectIds: ["skydive", "ghost"],
+      boards: { skydive: [ticket("SKY-14", [comment(1, "creator", "deliver me")])],
+        ghost: [] } });
+    const fake = fakeAmux(makeRoot());
+    try {
+      const config = bridgeConfig(fixture.baseUrl, {
+        ghost: { agent: "ghost", pane: 2 },
+        skydive: { agent: "skydive", pane: 2 },
+      });
+      // ghost is KNOWN but its ticket list breaks (transient 500): the sweep
+      // records the failure and still delivers skydive — one bad project must
+      // never take the whole bridge (and its heartbeat) down.
+      const brokenFetch = async (url, init) => {
+        const target = String(url);
+        if (target.includes("/api/tickets") && target.includes("project=ghost")) {
+          return new Response(JSON.stringify({ error: "boom" }), { status: 500,
+            headers: { "content-type": "application/json" } });
+        }
+        return fetch(url, init);
+      };
+      const result = await pollSuggestionsComments({ config, state: emptyState(),
+        fetchImpl: brokenFetch,
+        deliver: createAmuxCommentDeliverer({ amuxBin: fake.path }),
+        notify: async () => {}, persist: () => {}, now: () => 1_000_000,
+        logger, readToken: TEST_READ_TOKEN, allowTestOrigin: true });
+      expect(result.projectFailures.map((failure) => failure.projectId)).toEqual(["ghost"]);
+      expect(result.delivered).toBe(1);
+      expect(fake.records()).toHaveLength(1);
     } finally { await fixture.close(); }
   });
 
@@ -900,7 +997,8 @@ if (process.argv[2] === "-l") {
       lastSuccessfulSyncAt: null,
       projects: { skydive: { bootstrapped: true, ticketUpdatedAt: { "SKY-1": 10 },
         comments: { "SKY-1:1": { firstSeenAt: 1, attempts: [], answeredAt: null,
-          notifiedAt: null, terminalAt: null, terminalReason: null } } } },
+          notifiedAt: null, notifyFailures: 0, terminalAt: null,
+          terminalReason: null } } } },
     });
   });
 

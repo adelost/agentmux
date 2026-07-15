@@ -86,14 +86,27 @@ try {
     notify: createAmuxCommentNotifier({ amuxBin }),
     persist: (next) => saveSuggestionsBridgeState(statePath, next),
   });
+  // Heartbeat carries an explicit STATUS: failures are metrics, not death.
+  // ONE undeliverable comment used to throw before this line, so the bridge
+  // read as DEAD in doctor while 99% of it worked.
+  const failures = (result.projectFailures?.length ?? 0)
+    + (result.deliveryFailures ?? 0) + (result.notificationFailures ?? 0);
   writeGuardHeartbeat({
     key: "comment-bridge",
     intervalSec: 60,
     metrics: {
+      status: failures ? "partial" : "ok",
       projects: Object.keys(config.projects).length,
       delivered: result.delivered,
+      projectFailures: result.projectFailures?.length ?? 0,
+      deliveryFailures: result.deliveryFailures ?? 0,
+      notificationFailures: result.notificationFailures ?? 0,
     },
   });
+  if (result.projectFailures?.length) {
+    console.error(`PARTIAL projectFailures=${result.projectFailures
+      .map((failure) => failure.projectId).join(",")}`);
+  }
   if (result.delivered > 0) console.log(`OK delivered=${result.delivered}`);
 } catch (error) {
   if (amuxBin && isSuggestionsAuthenticationError(error)) {
@@ -106,6 +119,12 @@ try {
       console.error(`ERROR suggestions-comment-bridge auth page failed: ${notificationError.message}`);
     }
   }
+  // A hard failure is visible as status=failed with a FRESH timestamp rather
+  // than ambiguous staleness (doctor can tell "broken" from "not running").
+  try {
+    writeGuardHeartbeat({ key: "comment-bridge", intervalSec: 60,
+      metrics: { status: "failed", error: String(error.message).slice(0, 160) } });
+  } catch { /* heartbeat must never mask the original failure */ }
   console.error(`ERROR suggestions-comment-bridge: ${error.message}`);
   process.exit(1);
 }
