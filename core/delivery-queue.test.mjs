@@ -30,6 +30,39 @@ feature("durable delivery queue", () => {
     }],
   });
 
+  component("health stats retain exact oldest-job and pending receipt identity", {
+    given: ["one terminal notice and one cancellation request", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir, now: () => 20_000 });
+      const terminal = queue.enqueue({
+        agentName: "ai", pane: 5, text: "ambiguous old delivery", createdAt: 1_000,
+      });
+      queue.update(terminal, { status: "delivered_unverified", terminalAt: 20_000 });
+      const pending = queue.enqueue({
+        agentName: "lsrc", pane: 8, text: "obsolete work", createdAt: 2_000,
+      });
+      queue.requestCancellation(pending.id, { reason: "superseded", requestedBy: "lsrc:2" });
+      return { rootDir, queue, terminal };
+    }],
+    when: ["doctor-facing stats are rebuilt from disk", ({ rootDir }) =>
+      deliveryQueueStats(createDeliveryQueue({ rootDir }))],
+    then: ["the terminal receipt stays live and the oldest exact identity is preserved", (stats, ctx) => {
+      expect(stats).toMatchObject({
+        total: 1,
+        pendingNotices: 1,
+        cancellationRequests: 1,
+        oldestCreatedAt: 1_000,
+        oldestJob: {
+          id: ctx.terminal.id,
+          agentName: "ai",
+          pane: 5,
+          status: "delivered_unverified",
+        },
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("the pre-Enter submit fence is visible and never selected for another write", {
     given: ["one ambiguous submitting head followed by untouched work", () => {
       const rootDir = tempRoot();
@@ -134,6 +167,21 @@ feature("durable delivery queue", () => {
       });
       expect(pending).toHaveLength(1);
       expect(targets).toEqual([{ agentName: "ai", pane: 5 }]);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("public job lookup rejects path-like identifiers", {
+    given: ["a target directory and tempting JSON outside it", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir });
+      queue.enqueue({ agentName: "ai", pane: 5, text: "real job" });
+      writeFileSync(join(rootDir, "escape.json"), JSON.stringify({ id: "escape", status: "pending" }));
+      return { rootDir, queue };
+    }],
+    when: ["a CLI-shaped traversal id is looked up", ({ queue }) => queue.findById("../escape")],
+    then: ["only canonical 32-hex job ids can reach spool files", (job, ctx) => {
+      expect(job).toBeNull();
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });

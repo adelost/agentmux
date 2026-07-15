@@ -35,6 +35,12 @@ export function isNotSentDeliveryJob(job) {
       || job.metadata?.deliveryTimeout === "pre-submit");
 }
 
+/** A terminal job remains operationally live until its sender saw the receipt. */
+export function needsDeliveryTerminalNotice(job) {
+  return (job?.status === DELIVERED_UNVERIFIED_STATE || isNotSentDeliveryJob(job))
+    && !job?.unverifiedNoticeSentAt;
+}
+
 export function defaultDeliveryQueueDir() {
   return process.env.AMUX_DELIVERY_QUEUE_DIR
     || join(homedir(), ".agentmux", "delivery-queue");
@@ -228,13 +234,9 @@ export function createDeliveryQueue({
   }
 
   function pendingTerminalNotices(agentName, pane) {
-    return list(agentName, pane).filter((job) => {
-      const needsNotice = job.status === DELIVERED_UNVERIFIED_STATE
-        || isNotSentDeliveryJob(job);
-      // These field names predate pre-submit dead-lettering. Keep them on disk
-      // for schema compatibility; they now fence either terminal notice kind.
-      return needsNotice && !job.unverifiedNoticeSentAt;
-    });
+    // These field names predate pre-submit dead-lettering. Keep them on disk
+    // for schema compatibility; they now fence either terminal notice kind.
+    return list(agentName, pane).filter(needsDeliveryTerminalNotice);
   }
 
   function pendingUnverifiedNotices(agentName, pane) {
@@ -242,7 +244,7 @@ export function createDeliveryQueue({
       .filter((job) => job.status === DELIVERED_UNVERIFIED_STATE);
   }
 
-  function targets() {
+  function allTargets() {
     let names;
     try { names = readdirSync(rootDir, { withFileTypes: true }); }
     catch { return []; }
@@ -253,24 +255,29 @@ export function createDeliveryQueue({
       if (!match) continue;
       const agentName = decodeURIComponent(match[1]);
       const pane = Number(match[2]);
-      if (next(agentName, pane)
-          || pendingTerminalNotices(agentName, pane).length
-          || pendingCancellationRequests(agentName, pane).length) {
-        out.push({ agentName, pane });
-      }
+      out.push({ agentName, pane });
     }
     return out;
+  }
+
+  function targets() {
+    return allTargets().filter(({ agentName, pane }) =>
+      next(agentName, pane)
+        || pendingTerminalNotices(agentName, pane).length
+        || pendingCancellationRequests(agentName, pane).length);
   }
 
   function findById(id) {
     // Scan all pane directories, including terminal-only ones: a CLI caller
     // often polls a job that the bridge acknowledged between two reads.
+    const normalizedId = String(id || "");
+    if (!/^[a-f0-9]{32}$/.test(normalizedId)) return null;
     let entries;
     try { entries = readdirSync(rootDir, { withFileTypes: true }); }
     catch { return null; }
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const path = join(rootDir, entry.name, `${id}.json`);
+      const path = join(rootDir, entry.name, `${normalizedId}.json`);
       try { return { ...hydrateCancellation(parseJson(path)), path }; } catch {}
     }
     return null;
@@ -410,7 +417,7 @@ export function createDeliveryQueue({
   return {
     rootDir, enqueue, read, update, list, next, nextForWrite, submitted,
     pendingTerminalNotices, pendingUnverifiedNotices, pendingCancellationRequests,
-    requestCancellation, targets, findById,
+    requestCancellation, targets, allTargets, findById,
     restoreAssets, acquireTargetLease, acquireSessionLease, prune,
   };
 }
@@ -432,13 +439,31 @@ export async function waitForDeliveryJob(queue, id, {
 
 export function deliveryQueueStats(queue) {
   let pending = 0, pasting = 0, drafted = 0, submitted = 0, blocked = 0;
+  let pendingNotices = 0, cancellationRequests = 0;
   let oldestCreatedAt = null;
+  let oldestJob = null;
   for (const { agentName, pane } of queue.targets()) {
     for (const job of queue.list(agentName, pane)) {
-      if (!TERMINAL_DELIVERY_STATES.has(job.status)) {
+      const nonTerminal = !TERMINAL_DELIVERY_STATES.has(job.status);
+      const noticePending = needsDeliveryTerminalNotice(job);
+      const cancellationPending = job.cancelRequestStatus === "requested";
+      if (nonTerminal || noticePending || cancellationPending) {
         const createdAt = Number(job.createdAt || 0);
-        if (createdAt && (oldestCreatedAt == null || createdAt < oldestCreatedAt)) oldestCreatedAt = createdAt;
+        const stableTieBreak = createdAt === oldestCreatedAt
+          && String(job.id).localeCompare(String(oldestJob?.id || "")) < 0;
+        if (createdAt && (oldestCreatedAt == null || createdAt < oldestCreatedAt || stableTieBreak)) {
+          oldestCreatedAt = createdAt;
+          oldestJob = {
+            id: job.id,
+            agentName: job.agentName,
+            pane: job.pane,
+            status: job.status,
+            createdAt,
+          };
+        }
       }
+      if (noticePending) pendingNotices++;
+      if (cancellationPending) cancellationRequests++;
       if (job.status === "pending" || job.status === "delivering") pending++;
       else if (job.status === "pasting") pasting++;
       else if (job.status === "drafted") drafted++;
@@ -449,6 +474,9 @@ export function deliveryQueueStats(queue) {
   return {
     pending, pasting, drafted, submitted, blocked,
     total: pending + pasting + drafted + submitted + blocked,
+    pendingNotices,
+    cancellationRequests,
     oldestCreatedAt,
+    oldestJob,
   };
 }
