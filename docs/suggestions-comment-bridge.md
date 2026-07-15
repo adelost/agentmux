@@ -90,17 +90,21 @@ On first bootstrap, a human comment is routed only when no later `kind=agent`
 system, agent, and AI content is never routed as human input. Evidence alone
 does not acknowledge a human comment.
 
-Successful durable enqueue is recorded as a delivery attempt, not as an
+Every completed delivery attempt is recorded durably, including a transport
+rejection. The state field retains its original `enqueuedAt` name, but its
+timestamp represents when that stage was attempted; an attempt is not an
 answer. The comment becomes answered only after a later `kind=agent` plus
 `purpose=comment` appears in the API. AI, system, and evidence comments never
 count as answers. Several human comments before one such
 reply are all acknowledged by that reply. If no answer appears, the relay uses
 a bounded schedule: initial handoff, reminders after 15 minutes, 60 minutes,
 and 4 hours, followed by one explicit operator error notification. Each stage
-has a deterministic delivery-queue idempotency key, and state advances only
-after amux accepts the durable enqueue. One failed target remains pending and
-is reported as a non-zero aggregate poll error, but it does not prevent other
-mapped projects or comments from being durably enqueued and checkpointed.
+has a deterministic delivery-queue idempotency key. A rejected stage remains
+unanswered but does not repeat on every cron poll: the next attempt waits for
+the next bounded reminder deadline, and the operator notification is persisted
+after the final stage. The rejected poll is still reported as a non-zero
+aggregate error, but one failed target does not prevent other mapped projects
+or comments from being durably enqueued and checkpointed.
 The operator notification follows the same isolation rule: a failed notify is
 aggregated and remains retryable without blocking other mappings. Its
 deterministic identity is forwarded to `amux notifyuser`, which derives a

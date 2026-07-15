@@ -835,6 +835,8 @@ export async function pollSuggestionsComments({
           await deliver({ ...target, prompt, idempotencyKey, projectId,
             ticketId: detail.ticket.id, commentId: comment.id });
         } catch {
+          tracked.attempts.push({ stage: stage.id, enqueuedAt: now() });
+          persist(state);
           deliveryFailures.push({ projectId, ticketId: detail.ticket.id,
             commentId: comment.id, stage: stage.id });
           logger.error?.(`DELIVERY_FAILED ${stage.id} ${projectId}/${detail.ticket.id} comment ${comment.id} -> ${target.agent}:${target.pane}`);

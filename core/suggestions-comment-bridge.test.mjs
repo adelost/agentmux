@@ -230,29 +230,41 @@ describe.sequential("Suggestions human-comment relay", () => {
     } finally { await fixture.close(); }
   });
 
-  it("does not checkpoint a failed enqueue and retries without data loss", async () => {
+  it("persists failed attempts across minute-cron restarts and stops after bounded retries", async () => {
     const root = makeRoot();
-    const fake = fakeAmux(root, { failOnce: true });
     const statePath = join(root, "state.json");
     const fixture = await fixtureServer({ boards: { skydive: [ticket("SKY-3", [
       comment(1, "creator", "retry me"),
     ])] } });
+    const start = 10_000_000;
+    const deliveryMinutes = [];
+    const notifications = [];
     try {
-      const firstState = emptyState();
-      await expect(run({ fixture, state: firstState,
-        persist: (next) => saveSuggestionsBridgeState(statePath, next),
-        deliver: createAmuxCommentDeliverer({ amuxBin: fake.path }) }))
-        .rejects.toThrow("1 delivery failure");
-      expect(existsSync(statePath)).toBe(true);
-      expect(loadSuggestionsBridgeState(statePath).projects.skydive.comments["SKY-3:1"].attempts)
-        .toHaveLength(0);
-      const secondState = loadSuggestionsBridgeState(statePath);
-      await run({ fixture, state: secondState,
-        persist: (next) => saveSuggestionsBridgeState(statePath, next),
-        deliver: createAmuxCommentDeliverer({ amuxBin: fake.path }) });
-      expect(fake.records()).toHaveLength(2);
-      expect(loadSuggestionsBridgeState(statePath).projects.skydive.comments["SKY-3:1"].attempts)
-        .toHaveLength(1);
+      for (let minute = 0; minute <= 242; minute++) {
+        const state = existsSync(statePath) ? loadSuggestionsBridgeState(statePath) : emptyState();
+        const poll = run({ fixture, state, now: () => start + minute * 60 * 1000,
+          persist: (next) => saveSuggestionsBridgeState(statePath, next),
+          deliver: async () => {
+            deliveryMinutes.push(minute);
+            throw new Error("permanent target failure");
+          },
+          notify: async (item) => notifications.push(item) });
+        if ([0, 15, 60, 240].includes(minute)) {
+          await expect(poll).rejects.toThrow("1 delivery failure");
+        } else {
+          await expect(poll).resolves.toEqual({ delivered: 0 });
+        }
+      }
+      expect(deliveryMinutes).toEqual([0, 15, 60, 240]);
+      expect(notifications.map((item) => item.idempotencyKey)).toEqual([
+        "suggestions-comment-notify:skydive:SKY-3:1",
+      ]);
+      const tracked = loadSuggestionsBridgeState(statePath)
+        .projects.skydive.comments["SKY-3:1"];
+      expect(tracked.attempts.map((attempt) => attempt.stage)).toEqual(
+        REMINDER_STAGES.map((stage) => stage.id),
+      );
+      expect(tracked.notifiedAt).toBe(start + 241 * 60 * 1000);
     } finally { await fixture.close(); }
   });
 
@@ -462,13 +474,12 @@ describe.sequential("Suggestions human-comment relay", () => {
     };
     try {
       await expect(run({ fixture, config, state, deliver })).rejects.toThrow("1 delivery failure");
-      await expect(run({ fixture, config, state, deliver })).rejects.toThrow("1 delivery failure");
+      await expect(run({ fixture, config, state, deliver })).resolves.toEqual({ delivered: 0 });
       expect(attempts).toEqual([
         "suggestions-comment:alpha:A-1:1:initial",
         "suggestions-comment:beta:B-1:1:initial",
-        "suggestions-comment:alpha:A-1:1:initial",
       ]);
-      expect(state.projects.alpha.comments["A-1:1"].attempts).toHaveLength(0);
+      expect(state.projects.alpha.comments["A-1:1"].attempts).toHaveLength(1);
       expect(state.projects.beta.comments["B-1:1"].attempts).toHaveLength(1);
     } finally { await fixture.close(); }
   });
