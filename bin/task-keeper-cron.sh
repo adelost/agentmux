@@ -47,6 +47,12 @@ KEEPER_DIR="${KEEPER_DIR:-${HOME}/.agentmux-keeper}"   # overridable for tests
 [ -f "${KEEPER_DIR}/OFF" ] && exit 0          # global kill-switch
 mkdir -p "$KEEPER_DIR"
 
+# The agent server runs on a NAMED socket (agent-cli.mjs default); bare tmux
+# from cron hits the default socket and resolves no panes, silently forcing
+# the jsonl fallback path on every run. Same fix as fleet-progress-cron.sh.
+TMUX_SOCKET="${TMUX_SOCKET:-/tmp/openclaw-claude.sock}"
+tmux() { command tmux -S "$TMUX_SOCKET" "$@"; }
+
 # Newest Claude session-jsonl mtime for a pane, or 0 if unresolvable. The pane's
 # jsonl lives in ~/.claude/projects/<slug>/*.jsonl where <slug> is the pane's
 # cwd with every '/' and '.' replaced by '-' (mirrors amux core encodePath()).
