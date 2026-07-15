@@ -83,6 +83,21 @@ Environment overrides for service/test installations are
 `AMUX_SUGGESTIONS_LOCK`, `AMUX_SUGGESTIONS_LOG`,
 `AMUX_SUGGESTIONS_AMUX_BIN`, and `NODE_BIN`.
 
+`amux doctor` includes a `suggestions board` row. It probes an authenticated
+`/api/tickets` list with the same read-only credential as the bridge (preferring
+the `source` mapping) and joins that result with the bridge's last completed
+full-poll timestamp. HTTP 401/403 and 5xx responses are failures with separate
+credential/deployment repair hints. A missing or older-than-five-minutes
+successful sync is also a failure even when the endpoint itself is reachable.
+The timestamp advances only after every configured mapping and notification
+step succeeds; a partial or failed poll cannot make the bridge look fresh.
+
+When the poller receives HTTP 401 or 403, it pages the Suggestions owner through
+`amux notifyuser`. The page identity includes the HTTP status and the preceding
+successful-sync timestamp, so minute-by-minute retries remain deduplicated for
+one outage while a later recovery permits a new auth-flip page. No token value
+is included in notification text, process arguments, state, or logs.
+
 ## Delivery and answer contract
 
 On first bootstrap, a human comment is routed only when no later `kind=agent`

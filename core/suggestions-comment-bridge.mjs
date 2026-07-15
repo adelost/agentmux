@@ -19,7 +19,7 @@ import { dirname, resolve } from "path";
 import { spawn } from "child_process";
 import yaml from "js-yaml";
 
-export const SUGGESTIONS_BRIDGE_STATE_VERSION = 1;
+export const SUGGESTIONS_BRIDGE_STATE_VERSION = 2;
 export const DEFAULT_COMMENT_BYTES = 64 * 1024;
 export const MAX_COMMENT_BYTES = 64 * 1024;
 export const MAX_PROMPT_BYTES = 96 * 1024;
@@ -166,12 +166,20 @@ export function loadSuggestionsReadCredential(path, { uid = process.getuid?.() }
 }
 
 export function loadSuggestionsBridgeState(path) {
-  if (!existsSync(path)) return { version: SUGGESTIONS_BRIDGE_STATE_VERSION, projects: {} };
+  if (!existsSync(path)) return {
+    version: SUGGESTIONS_BRIDGE_STATE_VERSION,
+    lastSuccessfulSyncAt: null,
+    projects: {},
+  };
   let value;
   try { value = JSON.parse(readFileSync(path, "utf8")); }
   catch (error) { throw new Error(`state: cannot parse ${path}: ${error.message}`); }
-  if (!isObject(value) || Object.keys(value).some((key) => !["version", "projects"].includes(key))
-      || value.version !== SUGGESTIONS_BRIDGE_STATE_VERSION
+  if (!isObject(value) || Object.keys(value).some((key) => ![
+    "version", "lastSuccessfulSyncAt", "projects",
+  ].includes(key))
+      || !new Set([1, SUGGESTIONS_BRIDGE_STATE_VERSION]).has(value.version)
+      || (value.lastSuccessfulSyncAt != null
+        && (!Number.isFinite(value.lastSuccessfulSyncAt) || value.lastSuccessfulSyncAt < 0))
       || !isObject(value.projects)) {
     throw new Error(`state: unsupported or malformed state in ${path}`);
   }
@@ -213,7 +221,11 @@ export function loadSuggestionsBridgeState(path) {
       }
     }
   }
-  return value;
+  return {
+    version: SUGGESTIONS_BRIDGE_STATE_VERSION,
+    lastSuccessfulSyncAt: value.lastSuccessfulSyncAt ?? null,
+    projects: value.projects,
+  };
 }
 
 /** Persist only comment identities; prompt bodies, attachments and credentials never enter state. */
@@ -242,7 +254,14 @@ export function saveSuggestionsBridgeState(path, state) {
       ticketUpdatedAt: { ...(project.ticketUpdatedAt ?? {}) },
     };
   }
-  const bytes = `${JSON.stringify({ version: SUGGESTIONS_BRIDGE_STATE_VERSION, projects }, null, 2)}\n`;
+  const lastSuccessfulSyncAt = state.lastSuccessfulSyncAt == null
+    ? null : Number(state.lastSuccessfulSyncAt);
+  const bytes = `${JSON.stringify({
+    version: SUGGESTIONS_BRIDGE_STATE_VERSION,
+    lastSuccessfulSyncAt: Number.isFinite(lastSuccessfulSyncAt) && lastSuccessfulSyncAt >= 0
+      ? lastSuccessfulSyncAt : null,
+    projects,
+  }, null, 2)}\n`;
   const fd = openSync(tmp, "wx", 0o600);
   try {
     writeFileSync(fd, bytes, "utf8");
@@ -576,6 +595,10 @@ class HttpResponseError extends Error {
   }
 }
 
+export function isSuggestionsAuthenticationError(error) {
+  return error?.name === "HttpResponseError" && new Set([401, 403]).has(error.status);
+}
+
 async function fetchJson(url, { fetchImpl, timeoutMs, readToken,
   maxBytes = 8 * 1024 * 1024 }) {
   const controller = new AbortController();
@@ -625,6 +648,43 @@ async function fetchJson(url, { fetchImpl, timeoutMs, readToken,
     throw new Error(`schema: GET ${new URL(url).pathname} returned invalid or oversized JSON (${error.message})`);
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/** Probe the same authenticated board-list seam used by the comment bridge. */
+export async function probeSuggestionsBoard({
+  config,
+  readToken,
+  allowTestOrigin = false,
+  fetchImpl = globalThis.fetch,
+}) {
+  const baseUrl = new URL(config.baseUrl);
+  if (!allowTestOrigin && baseUrl.href !== "https://suggest.v1d.io/") {
+    throw new Error("probe: Suggestions origin must be exactly https://suggest.v1d.io");
+  }
+  if (!/^[A-Za-z0-9_-]{32,256}$/u.test(readToken ?? "")) {
+    throw new Error("probe: a bounded read credential is required");
+  }
+  const projectIds = Object.keys(config.projects ?? {});
+  const projectId = projectIds.includes("source") ? "source" : projectIds[0];
+  if (!projectId) throw new Error("probe: no configured Suggestions project");
+  const url = new URL("/api/tickets", config.baseUrl);
+  url.searchParams.set("project", projectId);
+  try {
+    validateTicketList(await fetchJson(url, {
+      fetchImpl,
+      timeoutMs: config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS,
+      readToken,
+      maxBytes: 4 * 1024 * 1024,
+    }), projectId);
+    return { ok: true, status: 200, projectId };
+  } catch (error) {
+    return {
+      ok: false,
+      status: Number.isSafeInteger(error?.status) ? error.status : null,
+      projectId,
+      error: error?.message || "unknown probe failure",
+    };
   }
 }
 
@@ -876,7 +936,15 @@ export async function pollSuggestionsComments({
     ];
     throw new AggregateError(errors, `poller: ${parts.join("; ")}`);
   }
-  return { delivered };
+  const lastSuccessfulSyncAt = now();
+  persist({
+    ...state,
+    version: SUGGESTIONS_BRIDGE_STATE_VERSION,
+    lastSuccessfulSyncAt,
+  });
+  state.version = SUGGESTIONS_BRIDGE_STATE_VERSION;
+  state.lastSuccessfulSyncAt = lastSuccessfulSyncAt;
+  return { delivered, lastSuccessfulSyncAt };
 }
 
 export function createAmuxCommentDeliverer({
@@ -937,6 +1005,36 @@ export function createAmuxCommentNotifier({ amuxBin, spawnImpl = spawn }) {
       if (settled) return;
       settled = true;
       if (code === 0) resolvePromise();
+      else reject(new Error(`notification: amux failed (exit ${code ?? signal ?? "unknown"})`));
+    });
+  });
+}
+
+/** Page the operator once per auth-failure episode; notifyuser owns durable dedupe. */
+export function createAmuxBoardAuthNotifier({ amuxBin, spawnImpl = spawn }) {
+  if (!amuxBin) throw new Error("notification: amux executable path is required");
+  return ({ status, lastSuccessfulSyncAt = null }) => new Promise((resolvePromise, reject) => {
+    const idempotencyKey = `suggestions-board-auth:${status}:${lastSuccessfulSyncAt ?? "never"}`;
+    const message = `Suggestions comment bridge received HTTP ${status}. Suggestions owner: `
+      + "verify the deployed READ_TOKEN matches ~/.config/agent/suggestions-read-token, then run amux doctor.";
+    const child = spawnImpl(amuxBin, [
+      "notifyuser",
+      "--level", "error",
+      "--title", "Suggestions board authentication failed",
+      "--idempotency-key", idempotencyKey,
+      message,
+    ], { stdio: ["ignore", "ignore", "ignore"], env: process.env });
+    let settled = false;
+    const fail = (reason) => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(reason));
+    };
+    child.once("error", (error) => fail(`notification: amux failed (${error.code || error.name})`));
+    child.once("close", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      if (code === 0) resolvePromise({ idempotencyKey });
       else reject(new Error(`notification: amux failed (exit ${code ?? signal ?? "unknown"})`));
     });
   });

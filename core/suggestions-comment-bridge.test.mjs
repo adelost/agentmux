@@ -11,12 +11,15 @@ import { tmpdir } from "os";
 import {
   DEFAULT_IMPLEMENTATION_POLICY,
   REMINDER_STAGES,
+  SUGGESTIONS_BRIDGE_STATE_VERSION,
+  createAmuxBoardAuthNotifier,
   createAmuxCommentDeliverer,
   createAmuxCommentNotifier,
   loadSuggestionsBridgeConfig,
   loadSuggestionsBridgeState,
   loadSuggestionsReadCredential,
   pollSuggestionsComments,
+  probeSuggestionsBoard,
   saveSuggestionsBridgeState,
   serializeImplementationPolicy,
 } from "./suggestions-comment-bridge.mjs";
@@ -78,7 +81,8 @@ const structuredPolicy = Object.freeze({
   },
 });
 
-async function fixtureServer({ projectIds = ["skydive"], policy = null, boards = {}, lists = null } = {}) {
+async function fixtureServer({ projectIds = ["skydive"], policy = null, boards = {}, lists = null,
+  ticketListStatus = null } = {}) {
   const requests = [];
   const server = createServer((request, response) => {
     const url = new URL(request.url, "http://fixture.invalid");
@@ -104,6 +108,11 @@ async function fixtureServer({ projectIds = ["skydive"], policy = null, boards =
     const projectId = url.searchParams.get("project");
     const board = boards[projectId] || [];
     if (url.pathname === "/api/tickets") {
+      if (ticketListStatus != null) {
+        response.statusCode = ticketListStatus;
+        response.end(JSON.stringify({ error: "fixture-board-failure" }));
+        return;
+      }
       const listed = lists?.[projectId] ?? board;
       response.end(JSON.stringify({ tickets: listed.map((row) => row.ticket) }));
       return;
@@ -139,7 +148,7 @@ function bridgeConfig(baseUrl, projects = { skydive: { agent: "skydive", pane: 3
 }
 
 function emptyState() {
-  return { version: 1, projects: {} };
+  return { version: SUGGESTIONS_BRIDGE_STATE_VERSION, lastSuccessfulSyncAt: null, projects: {} };
 }
 
 function fakeAmux(root, { failOnce = false, delayMs = 0 } = {}) {
@@ -174,6 +183,32 @@ async function run({ fixture, config = bridgeConfig(fixture.baseUrl), state = em
 }
 
 describe.sequential("Suggestions human-comment relay", () => {
+  it("probes the authenticated board-list seam and preserves HTTP 401/500 status", async () => {
+    const healthy = await fixtureServer({ projectIds: ["source"], boards: { source: [] } });
+    const broken = await fixtureServer({ projectIds: ["source"], boards: { source: [] },
+      ticketListStatus: 500 });
+    try {
+      const config = bridgeConfig(healthy.baseUrl, { source: { agent: "lsrc", pane: 2 } });
+      await expect(probeSuggestionsBoard({ config, readToken: TEST_READ_TOKEN,
+        allowTestOrigin: true })).resolves.toEqual({ ok: true, status: 200, projectId: "source" });
+      await expect(probeSuggestionsBoard({ config, readToken: "x".repeat(43),
+        allowTestOrigin: true })).resolves.toMatchObject({ ok: false, status: 401,
+        projectId: "source" });
+      await expect(probeSuggestionsBoard({
+        config: bridgeConfig(broken.baseUrl, { source: { agent: "lsrc", pane: 2 } }),
+        readToken: TEST_READ_TOKEN,
+        allowTestOrigin: true,
+      })).resolves.toMatchObject({ ok: false, status: 500, projectId: "source" });
+      expect(healthy.requests).toEqual([
+        "/api/tickets?project=source",
+        "/api/tickets?project=source",
+      ]);
+    } finally {
+      await healthy.close();
+      await broken.close();
+    }
+  });
+
   it("does HTTP/state work but enqueues zero prompts on an idle board", async () => {
     const fixture = await fixtureServer({ boards: { skydive: [] } });
     const deliveries = [];
@@ -184,6 +219,19 @@ describe.sequential("Suggestions human-comment relay", () => {
       expect(deliveries).toEqual([]);
       expect(fixture.requests).toEqual(["/api/config", "/api/tickets?project=skydive"]);
       expect(state.projects.skydive.bootstrapped).toBe(true);
+      expect(result.lastSuccessfulSyncAt).toBe(1_000_000);
+      expect(state.lastSuccessfulSyncAt).toBe(1_000_000);
+    } finally { await fixture.close(); }
+  });
+
+  it("does not advance in-memory freshness when the final durable checkpoint fails", async () => {
+    const fixture = await fixtureServer({ boards: { skydive: [] } });
+    const state = { version: SUGGESTIONS_BRIDGE_STATE_VERSION, lastSuccessfulSyncAt: 900_000,
+      projects: { skydive: { bootstrapped: true, comments: {}, ticketUpdatedAt: {} } } };
+    try {
+      await expect(run({ fixture, state, deliver: async () => {},
+        persist: () => { throw new Error("disk full"); } })).rejects.toThrow("disk full");
+      expect(state.lastSuccessfulSyncAt).toBe(900_000);
     } finally { await fixture.close(); }
   });
 
@@ -252,7 +300,7 @@ describe.sequential("Suggestions human-comment relay", () => {
         if ([0, 15, 60, 240].includes(minute)) {
           await expect(poll).rejects.toThrow("1 delivery failure");
         } else {
-          await expect(poll).resolves.toEqual({ delivered: 0 });
+          await expect(poll).resolves.toMatchObject({ delivered: 0 });
         }
       }
       expect(deliveryMinutes).toEqual([0, 15, 60, 240]);
@@ -474,7 +522,7 @@ describe.sequential("Suggestions human-comment relay", () => {
     };
     try {
       await expect(run({ fixture, config, state, deliver })).rejects.toThrow("1 delivery failure");
-      await expect(run({ fixture, config, state, deliver })).resolves.toEqual({ delivered: 0 });
+      await expect(run({ fixture, config, state, deliver })).resolves.toMatchObject({ delivered: 0 });
       expect(attempts).toEqual([
         "suggestions-comment:alpha:A-1:1:initial",
         "suggestions-comment:beta:B-1:1:initial",
@@ -587,6 +635,24 @@ describe.sequential("Suggestions human-comment relay", () => {
     expect(fake.records()[0].args).toEqual(expect.arrayContaining([
       "notifyuser", "--idempotency-key", "suggestions-comment-notify:skydive:SKY-10:7",
     ]));
+  });
+
+  it("pages the Suggestions owner with one stable identity per auth-failure episode", async () => {
+    const root = makeRoot();
+    const fake = fakeAmux(root);
+    const notify = createAmuxBoardAuthNotifier({ amuxBin: fake.path });
+    await notify({ status: 401, lastSuccessfulSyncAt: 123_000 });
+    await notify({ status: 401, lastSuccessfulSyncAt: 123_000 });
+    expect(fake.records()).toHaveLength(2);
+    for (const record of fake.records()) {
+      expect(record.args).toEqual(expect.arrayContaining([
+        "notifyuser", "--level", "error",
+        "--title", "Suggestions board authentication failed",
+        "--idempotency-key", "suggestions-board-auth:401:123000",
+      ]));
+      expect(record.args.join(" ")).toContain("READ_TOKEN");
+      expect(record.args.join(" ")).not.toContain(TEST_READ_TOKEN);
+    }
   });
 
   it("continues reminders for a tracked ticket after it leaves the bounded list", async () => {
@@ -715,6 +781,34 @@ describe.sequential("Suggestions human-comment relay", () => {
     } finally { await fixture.close(); }
   });
 
+  it("pages the Suggestions owner when the live read token flips to 401", async () => {
+    const root = makeRoot();
+    const fake = fakeAmux(root);
+    const fixture = await fixtureServer({ boards: { skydive: [] } });
+    const configPath = join(root, "bridge.yaml");
+    const statePath = join(root, "state.json");
+    const credentialFile = join(root, "read-token");
+    writeFileSync(credentialFile, `${"x".repeat(43)}\n`, { mode: 0o600 });
+    writeFileSync(configPath, `baseUrl: ${fixture.baseUrl}\ncredentialFile: ${credentialFile}\nprojects:\n  skydive:\n    agent: skydive\n    pane: 3\nstatePath: ${statePath}\n`);
+    const script = resolve("bin/suggestions-comment-bridge.mjs");
+    const env = {
+      ...process.env,
+      AMUX_SUGGESTIONS_CONFIG: configPath,
+      AMUX_SUGGESTIONS_STATE: statePath,
+      AMUX_SUGGESTIONS_AMUX_BIN: fake.path,
+      NODE_ENV: "test",
+      AMUX_SUGGESTIONS_TEST_ORIGIN: "1",
+    };
+    try {
+      await expect(execFileAsync(process.execPath, [script], { env })).rejects.toMatchObject({ code: 1 });
+      expect(fake.records()).toHaveLength(1);
+      expect(fake.records()[0].args).toEqual(expect.arrayContaining([
+        "notifyuser",
+        "--idempotency-key", "suggestions-board-auth:401:never",
+      ]));
+    } finally { await fixture.close(); }
+  });
+
   it("installs exactly one reusable cron entry and removes only that tag", async () => {
     const root = makeRoot();
     const fakeBin = join(root, "bin");
@@ -802,10 +896,22 @@ if (process.argv[2] === "-l") {
     expect(bytes).not.toContain(TEST_READ_TOKEN);
     expect(bytes).not.toContain("credential");
     expect(loadSuggestionsBridgeState(statePath)).toEqual({
-      version: 1,
+      version: SUGGESTIONS_BRIDGE_STATE_VERSION,
+      lastSuccessfulSyncAt: null,
       projects: { skydive: { bootstrapped: true, ticketUpdatedAt: { "SKY-1": 10 },
         comments: { "SKY-1:1": { firstSeenAt: 1, attempts: [], answeredAt: null,
           notifiedAt: null, terminalAt: null, terminalReason: null } } } },
+    });
+  });
+
+  it("migrates a legacy v1 state without inventing a successful sync", () => {
+    const root = makeRoot();
+    const statePath = join(root, "state.json");
+    writeFileSync(statePath, `${JSON.stringify({ version: 1, projects: {} })}\n`, { mode: 0o600 });
+    expect(loadSuggestionsBridgeState(statePath)).toEqual({
+      version: SUGGESTIONS_BRIDGE_STATE_VERSION,
+      lastSuccessfulSyncAt: null,
+      projects: {},
     });
   });
 

@@ -7,6 +7,9 @@ import {
   checkDeliveryQueue,
   checkGuardCronHeartbeats,
   checkNativeRuntime,
+  checkSuggestionsBoard,
+  formatDoctorReport,
+  SUGGESTIONS_BRIDGE_STALE_MS,
   checkTmuxVersion,
   FAIL, OK, WARN,
   checkBridgeMode, checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors,
@@ -16,6 +19,69 @@ import { classifyHeartbeat, HEARTBEAT_STALE_MS } from "./heartbeat.mjs";
 
 const NOW = new Date("2026-07-08T12:00:00Z").getTime();
 const beatAt = (iso, version = "1.20.37") => ({ ts: iso, pid: 1, version, startedAt: iso });
+
+feature("Suggestions board and comment-bridge health", () => {
+  unit("a successful probe and fresh completed sync are one green row", {
+    when: ["checking a fresh source board", () => checkSuggestionsBoard({
+      probe: { ok: true, status: 200, projectId: "source" },
+      lastSuccessfulSyncAt: NOW - 45_000,
+      now: NOW,
+    })],
+    then: ["the endpoint and exact successful-sync time are visible", (result) => {
+      expect(result.status).toBe(OK);
+      expect(result.detail).toContain("HTTP 200 (source)");
+      expect(result.detail).toContain("45s ago");
+      expect(result.detail).toContain("2026-07-08T11:59:15.000Z");
+    }],
+  });
+
+  unit("HTTP 401 is a red row with the read-token repair", {
+    when: ["checking an auth flip", () => checkSuggestionsBoard({
+      probe: { ok: false, status: 401, error: "http: GET /api/tickets returned 401" },
+      lastSuccessfulSyncAt: NOW - 40 * 60_000,
+      now: NOW,
+    })],
+    then: ["the failure and fix are explicit", (result) => {
+      expect(result.status).toBe(FAIL);
+      expect(result.detail).toContain("HTTP 401");
+      expect(result.detail).toContain("40m ago");
+      expect(result.hint).toContain("READ_TOKEN");
+      expect(formatDoctorReport([result])).toContain("❌  suggestions board");
+    }],
+  });
+
+  unit("HTTP 500 is a red row with deployment-health direction", {
+    when: ["checking a server failure", () => checkSuggestionsBoard({
+      probe: { ok: false, status: 500, error: "http: GET /api/tickets returned 500" },
+      lastSuccessfulSyncAt: NOW - 60_000,
+      now: NOW,
+    })],
+    then: ["the server-side repair is explicit", (result) => {
+      expect(result.status).toBe(FAIL);
+      expect(result.hint).toContain("deployment health");
+    }],
+  });
+
+  unit("a reachable board cannot hide a stale comment bridge", {
+    when: ["checking beyond the freshness budget", () => checkSuggestionsBoard({
+      probe: { ok: true, status: 200, projectId: "source" },
+      lastSuccessfulSyncAt: NOW - SUGGESTIONS_BRIDGE_STALE_MS - 60_000,
+      now: NOW,
+    })],
+    then: ["the row is red and points to cron", (result) => {
+      expect(result.status).toBe(FAIL);
+      expect(result.hint).toContain("cron");
+    }],
+  });
+
+  unit("an optional unconfigured installation warns without pretending to probe", {
+    when: ["checking without bridge config", () => checkSuggestionsBoard({ configured: false })],
+    then: ["install direction is visible", (result) => {
+      expect(result.status).toBe(WARN);
+      expect(result.hint).toContain("install-suggestions-comment-bridge");
+    }],
+  });
+});
 
 feature("bridge process check", () => {
   unit("no process is a failure with a start hint", {
