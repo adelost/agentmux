@@ -17,11 +17,13 @@ import {
   nodeTreeIsRelocatable,
   nodeTreeMatches,
   provisionNodeRoot,
+  provisionPnpmRoot,
   provisionPythonRoot,
   provisionWorktreeDependencies,
   runScopedGate,
   runWorktreeCommand,
   selectScopedGate,
+  snapshotLocks,
 } from "./worktree-deps.mjs";
 
 function fixture() {
@@ -75,8 +77,111 @@ feature("worktree dependency bootstrap", () => {
       expect(result.unsupported).toEqual([{
         ecosystem: "node",
         root: "/repo/orphan",
-        reason: "tracked package.json has no covering package-lock.json",
+        reason: "tracked package.json has no covering package-lock.json or pnpm-lock.yaml",
       }]);
+    }],
+  });
+
+  unit("a pnpm lock covers its root and every workspace member", {
+    given: ["a pnpm workspace repo on disk", () => {
+      const ctx = fixture();
+      writeFileSync(join(ctx.root, "package.json"), `${JSON.stringify({ name: "fixture", packageManager: "pnpm@10.28.1" })}\n`);
+      writeFileSync(join(ctx.root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+      writeFileSync(join(ctx.root, "pnpm-workspace.yaml"), "packages:\n  - \"packages/*\"\n  - \"!packages/legacy\"\n");
+      mkdirSync(join(ctx.root, "packages", "app"), { recursive: true });
+      mkdirSync(join(ctx.root, "packages", "legacy"), { recursive: true });
+      writeFileSync(join(ctx.root, "packages", "app", "package.json"), "{}\n");
+      writeFileSync(join(ctx.root, "packages", "legacy", "package.json"), "{}\n");
+      return ctx;
+    }],
+    when: ["discovering dependency roots", (ctx) => ({
+      ctx,
+      result: discoverDependencyRoots(ctx.root, [
+        "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
+        "packages/app/package.json", "packages/legacy/package.json",
+      ]),
+    })],
+    then: ["the root is a pnpm flavor and only the excluded member is uncovered", ({ ctx, result }) => {
+      expect(result.node).toEqual([{
+        ecosystem: "node", flavor: "pnpm", root: ctx.root, lock: join(ctx.root, "pnpm-lock.yaml"),
+      }]);
+      expect(result.unsupported).toEqual([{
+        ecosystem: "node",
+        root: join(ctx.root, "packages", "legacy"),
+        reason: "tracked package.json has no covering package-lock.json or pnpm-lock.yaml",
+      }]);
+      ctx.cleanup();
+    }],
+  });
+
+  unit("conflicting npm and pnpm locks in one root are refused instead of guessed", {
+    given: ["a root tracking both lockfiles", () => [
+      "package.json", "package-lock.json", "pnpm-lock.yaml",
+    ]],
+    when: ["discovering dependency roots", (files) => discoverDependencyRoots("/repo", files)],
+    then: ["no node root is provisioned and the conflict is the stated reason", (result) => {
+      expect(result.node).toEqual([]);
+      expect(result.unsupported).toEqual([{
+        ecosystem: "node",
+        root: "/repo",
+        reason: "conflicting package-lock.json and pnpm-lock.yaml in one root (keep exactly one)",
+      }]);
+    }],
+  });
+
+  unit("a pnpm root is provisioned by one frozen install and passes the next check", {
+    given: ["a pnpm repo without node_modules", () => {
+      const ctx = fixture();
+      writeFileSync(join(ctx.root, "package.json"), `${JSON.stringify({ name: "fixture", packageManager: "pnpm@10.28.1" })}\n`);
+      writeFileSync(join(ctx.root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+      return ctx;
+    }],
+    when: ["checking, installing, then checking again with a fake corepack", (ctx) => {
+      const calls = [];
+      const run = (command, args) => {
+        calls.push([command, ...args]);
+        if (args[1] === "--version") return { status: 0, stdout: "10.28.1\n", stderr: "" };
+        return { status: 0, stdout: "", stderr: "" };
+      };
+      return {
+        ctx,
+        calls,
+        before: provisionPnpmRoot({ root: ctx.root, repoRoot: ctx.root, check: true, run }),
+        installed: provisionPnpmRoot({ root: ctx.root, repoRoot: ctx.root, run }),
+        after: provisionPnpmRoot({ root: ctx.root, repoRoot: ctx.root, check: true, run }),
+      };
+    }],
+    then: ["exactly one frozen install runs, the marker admits the tree, the lock is untouched", ({ ctx, calls, before, installed, after }) => {
+      expect(before).toMatchObject({ status: "missing", mode: "install-required" });
+      expect(installed).toMatchObject({ status: "ready", mode: "local-pnpm-store" });
+      expect(after).toMatchObject({ status: "ready", mode: "local-pnpm-store" });
+      expect(calls.filter((call) => call[2] === "install")).toEqual([
+        ["corepack", "pnpm", "install", "--frozen-lockfile"],
+      ]);
+      expect(readFileSync(join(ctx.root, "pnpm-lock.yaml"), "utf8")).toBe("lockfileVersion: '9.0'\n");
+      expect(existsSync(join(ctx.root, "node_modules", ".agentmux-worktree-deps.json"))).toBe(true);
+      ctx.cleanup();
+    }],
+  });
+
+  unit("a pnpm manifest selects the corepack gate runner and its lock is drift-guarded", {
+    given: ["a pnpm repo with only an npm-style test script", () => {
+      const ctx = fixture();
+      writeFileSync(join(ctx.root, "package.json"), `${JSON.stringify({
+        name: "fixture", packageManager: "pnpm@10.28.1", scripts: { test: "vitest run" },
+      })}\n`);
+      writeFileSync(join(ctx.root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+      return ctx;
+    }],
+    when: ["selecting the gate and snapshotting locks", (ctx) => ({
+      ctx,
+      gate: selectScopedGate(ctx.root),
+      locks: snapshotLocks(ctx.root, ["package.json", "pnpm-lock.yaml"]),
+    })],
+    then: ["corepack pnpm owns the script and pnpm-lock.yaml is fingerprinted", ({ ctx, gate, locks }) => {
+      expect(gate).toEqual({ command: "corepack", args: ["pnpm", "test"], source: "package.json test" });
+      expect(Object.keys(locks)).toEqual(["pnpm-lock.yaml"]);
+      ctx.cleanup();
     }],
   });
 

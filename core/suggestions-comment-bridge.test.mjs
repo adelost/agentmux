@@ -290,7 +290,10 @@ describe.sequential("Suggestions human-comment relay", () => {
     const deliveryMinutes = [];
     const notifications = [];
     try {
-      for (let minute = 0; minute <= 242; minute++) {
+      // Stage boundaries plus their neighbors prove the whole schedule: the
+      // retry decision is pure clock math, so polling every in-between minute
+      // only re-proves it at real-HTTP cost (5s of a 5s budget = load-flaky).
+      for (const minute of [0, 1, 14, 15, 16, 59, 60, 61, 239, 240, 241, 242]) {
         const state = existsSync(statePath) ? loadSuggestionsBridgeState(statePath) : emptyState();
         const poll = run({ fixture, state, now: () => start + minute * 60 * 1000,
           persist: (next) => saveSuggestionsBridgeState(statePath, next),

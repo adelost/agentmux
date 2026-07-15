@@ -152,7 +152,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-export const HINTS_VERSION = "1.23.18";
+export const HINTS_VERSION = "1.23.19";
 export const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -529,9 +529,10 @@ Fresh worktrees do not inherit ignored dependency directories. Before claiming
 a gate, run \`amux worktree-deps <worktree>\` (or the stdlib-only
 \`node /path/to/agentmux/bin/worktree-deps.mjs <worktree>\` during bootstrap),
 then \`amux gate --scoped <worktree>\`. The bootstrap links only immutable npm
-trees keyed by exact locks and keeps Python \`.venv\` local with
-\`uv sync --locked\`; a skipped root or lock drift is a red gate, not a scoping
-excuse.
+trees keyed by exact locks, installs pnpm roots locally via
+\`corepack pnpm install --frozen-lockfile\` (pnpm's store already dedupes), and
+keeps Python \`.venv\` local with \`uv sync --locked\`; a skipped root or lock
+drift is a red gate, not a scoping excuse.
 
 ## Kommunikationsdisciplin (Mattias 2026-07-10 — efter ledger-mätt token-svinn)
 

@@ -1,6 +1,8 @@
 // Reproducible dependency bootstrap for isolated git worktrees.
-// WHAT: Discovers every tracked npm/uv dependency root, provisions it without
-// mutating locks, and shares only immutable npm trees keyed by their inputs.
+// WHAT: Discovers every tracked npm/pnpm/uv dependency root, provisions it
+// without mutating locks, and shares only immutable npm trees keyed by their
+// inputs; pnpm roots install locally because pnpm's content-addressable store
+// already dedupes across worktrees.
 // WHY: Blind links to a mutable checkout can silently swap compiler versions;
 // Python virtualenvs also retain checkout-specific editable paths.
 
@@ -108,24 +110,84 @@ function pythonManifestCoveredBy(root, roots) {
   return roots.some((candidate) => root === candidate || root.startsWith(`${candidate}${sep}`));
 }
 
+// One entry per supported node package manager, keyed by its tracked lockfile.
+const NODE_LOCK_FLAVORS = [
+  { flavor: "npm", lockName: "package-lock.json" },
+  { flavor: "pnpm", lockName: "pnpm-lock.yaml" },
+];
+
+/** WHAT: Extracts include/exclude globs from the packages block of pnpm-workspace.yaml. WHY: Manifest coverage must mirror what one frozen install actually provisions. */
+function pnpmWorkspaceGlobs(root) {
+  const path = join(root, "pnpm-workspace.yaml");
+  if (!existsSync(path)) return null;
+  const include = [];
+  const exclude = [];
+  let inPackages = false;
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    if (/^\S/u.test(line)) inPackages = /^packages\s*:/u.test(line);
+    const item = inPackages ? line.match(/^\s+-\s*["']?([^"'#]+?)["']?\s*$/u)?.[1]?.trim() : null;
+    if (!item) continue;
+    if (item.startsWith("!")) exclude.push(item.slice(1));
+    else include.push(item);
+  }
+  return { include, exclude };
+}
+
+/** WHAT: Compiles one workspace glob to an exact relative-path matcher. WHY: Keeps coverage identical to pnpm's own workspace resolution. */
+function workspaceGlobMatches(glob, relPath) {
+  const pattern = glob.replace(/\/+$/u, "").split("/").map((segment) =>
+    segment === "**" ? "(?:[^/]+/)*[^/]+"
+      : segment.split("*").map((part) => part.replace(/[.+^${}()|[\]\\?]/gu, "\\$&")).join("[^/]*"),
+  ).join("/");
+  return new RegExp(`^${pattern}$`, "u").test(relPath);
+}
+
+/** WHAT: Maps a plain manifest to a covering pnpm workspace root. WHY: One frozen install at the lock root provisions every matched member. */
+function pnpmManifestCoveredBy(root, pnpmRoots) {
+  return pnpmRoots.some((candidate) => {
+    if (root === candidate.root) return true;
+    if (!root.startsWith(`${candidate.root}${sep}`)) return false;
+    const workspace = pnpmWorkspaceGlobs(candidate.root);
+    if (!workspace) return false;
+    const relPath = relative(candidate.root, root).split(sep).join("/");
+    return workspace.include.some((glob) => workspaceGlobMatches(glob, relPath))
+      && !workspace.exclude.some((glob) => workspaceGlobMatches(glob, relPath));
+  });
+}
+
 /** WHAT: Maps tracked lockfiles to dependency roots. WHY: Keeps root and nested UI compilers separately versioned. */
 export function discoverDependencyRoots(repoRoot, trackedFiles) {
-  const node = trackedFiles
-    .filter((file) => basename(file) === "package-lock.json")
-    .map((file) => ({ ecosystem: "node", root: resolve(repoRoot, dirname(file)), lock: resolve(repoRoot, file) }))
-    .sort((a, b) => a.root.localeCompare(b.root));
+  const nodeAll = trackedFiles
+    .map((file) => ({ file, spec: NODE_LOCK_FLAVORS.find((lock) => lock.lockName === basename(file)) }))
+    .filter((item) => item.spec)
+    .map(({ file, spec }) => ({
+      ecosystem: "node",
+      flavor: spec.flavor,
+      root: resolve(repoRoot, dirname(file)),
+      lock: resolve(repoRoot, file),
+    }))
+    .sort((a, b) => a.root.localeCompare(b.root) || a.flavor.localeCompare(b.flavor));
+  const conflicted = new Set(nodeAll
+    .filter((item, _, all) => all.some((other) => other.root === item.root && other.flavor !== item.flavor))
+    .map((item) => item.root));
+  const node = nodeAll.filter((item) => !conflicted.has(item.root));
   const python = trackedFiles
     .filter((file) => basename(file) === "uv.lock")
     .map((file) => ({ ecosystem: "python", root: resolve(repoRoot, dirname(file)), lock: resolve(repoRoot, file) }))
     .sort((a, b) => a.root.localeCompare(b.root));
 
+  const npmRoots = nodeAll.filter((item) => item.flavor === "npm");
+  const pnpmRoots = nodeAll.filter((item) => item.flavor === "pnpm");
   const pythonRoots = python.map((item) => item.root);
-  const unsupported = [];
+  const unsupported = [...conflicted].sort().map((root) => ({
+    ecosystem: "node", root,
+    reason: "conflicting package-lock.json and pnpm-lock.yaml in one root (keep exactly one)",
+  }));
   for (const file of trackedFiles) {
     const name = basename(file);
     const root = resolve(repoRoot, dirname(file));
-    if (name === "package.json" && !nodeManifestCoveredBy(root, node)) {
-      unsupported.push({ ecosystem: "node", root, reason: "tracked package.json has no covering package-lock.json" });
+    if (name === "package.json" && !nodeManifestCoveredBy(root, npmRoots) && !pnpmManifestCoveredBy(root, pnpmRoots)) {
+      unsupported.push({ ecosystem: "node", root, reason: "tracked package.json has no covering package-lock.json or pnpm-lock.yaml" });
     }
     if (name === "pyproject.toml" && !pythonManifestCoveredBy(root, pythonRoots)) {
       unsupported.push({ ecosystem: "python", root, reason: "tracked pyproject.toml has no covering uv.lock" });
@@ -342,6 +404,63 @@ export function provisionNodeRoot({
   return { ecosystem: "node", root, status: "ready", mode: "immutable-link", key: input.key };
 }
 
+/** WHAT: Builds one pnpm input identity. WHY: Prevents lock, workspace, or runtime drift from passing a stale marker. */
+function pnpmInput(root, repoRoot, pnpmVersion) {
+  const packagePath = join(root, "package.json");
+  if (!existsSync(packagePath)) throw new Error(`missing ${packagePath}`);
+  const optionalHash = (path) => (existsSync(path) ? hashFile(path) : null);
+  return {
+    repoRelativeRoot: relative(repoRoot, root) || ".",
+    packageHash: hashFile(packagePath),
+    lockHash: hashFile(join(root, "pnpm-lock.yaml")),
+    workspaceHash: optionalHash(join(root, "pnpm-workspace.yaml")),
+    npmrcHash: optionalHash(join(root, ".npmrc")),
+    pnpmVersion,
+    platform: process.platform,
+    arch: process.arch,
+    nodeModulesAbi: process.versions.modules,
+  };
+}
+
+/** WHAT: Builds one locked pnpm dependency root in place. WHY: pnpm's content-addressable store already dedupes
+ * packages across worktrees, so a local frozen install is exact without the immutable npm cache layer. */
+export function provisionPnpmRoot({
+  root,
+  repoRoot,
+  check = false,
+  dryRun = false,
+  run = runWorktreeCommand,
+}) {
+  const probe = run("corepack", ["pnpm", "--version"], { cwd: root, capture: true });
+  if (probe.status !== 0) throw new Error("corepack pnpm is required for tracked pnpm-lock.yaml");
+  const input = pnpmInput(root, repoRoot, String(probe.stdout || "").trim());
+  const marker = join(root, "node_modules", ".agentmux-worktree-deps.json");
+  const exact = markerMatches(marker, input);
+  if (check) return {
+    ecosystem: "node", root,
+    status: exact ? "ready" : "missing",
+    mode: exact ? "local-pnpm-store" : "install-required",
+  };
+  if (dryRun) return {
+    ecosystem: "node", root, status: "planned",
+    mode: exact ? "local-pnpm-store" : "would-install-pnpm-local",
+  };
+  if (!exact) {
+    const lockPath = join(root, "pnpm-lock.yaml");
+    const before = hashFile(lockPath);
+    const result = run("corepack", ["pnpm", "install", "--frozen-lockfile"], {
+      cwd: root,
+      env: { ...process.env, npm_config_audit: "false", npm_config_fund: "false" },
+    });
+    const after = hashFile(lockPath);
+    if (before !== after) throw new Error("pnpm install --frozen-lockfile mutated pnpm-lock.yaml");
+    if (result.status !== 0) throw new Error(`corepack pnpm install --frozen-lockfile failed in ${root}`);
+    mkdirSync(dirname(marker), { recursive: true });
+    writeFileSync(marker, `${JSON.stringify({ version: MARKER_VERSION, input }, null, 2)}\n`);
+  }
+  return { ecosystem: "node", root, status: "ready", mode: "local-pnpm-store" };
+}
+
 /** WHAT: Builds one uv environment input identity. WHY: Keeps lock and manifest drift visible per worktree. */
 function pythonInput(root, repoRoot) {
   const pyproject = join(root, "pyproject.toml");
@@ -408,10 +527,12 @@ export function provisionWorktreeDependencies({
   const skipped = [...discovered.unsupported];
   for (const item of discovered.node) {
     try {
-      results.push(provisionNodeRoot({
-        root: item.root, repoRoot: resolved.repoRoot, commonDir: resolved.commonDir,
-        check, dryRun, run,
-      }));
+      results.push(item.flavor === "pnpm"
+        ? provisionPnpmRoot({ root: item.root, repoRoot: resolved.repoRoot, check, dryRun, run })
+        : provisionNodeRoot({
+          root: item.root, repoRoot: resolved.repoRoot, commonDir: resolved.commonDir,
+          check, dryRun, run,
+        }));
     } catch (error) {
       skipped.push({ ecosystem: "node", root: item.root, reason: error.message });
     }
@@ -468,17 +589,27 @@ export function selectScopedGate(repoRoot, explicit = []) {
   }
   const packagePath = join(repoRoot, "package.json");
   if (existsSync(packagePath)) {
-    const scripts = JSON.parse(readFileSync(packagePath, "utf8")).scripts || {};
-    if (scripts.check) return { command: "npm", args: ["run", "check"], source: "package.json check" };
-    if (scripts.test) return { command: "npm", args: ["test"], source: "package.json test" };
+    const manifest = JSON.parse(readFileSync(packagePath, "utf8"));
+    const scripts = manifest.scripts || {};
+    // corepack honors the manifest's pinned packageManager version.
+    const pnpm = String(manifest.packageManager || "").startsWith("pnpm")
+      || existsSync(join(repoRoot, "pnpm-lock.yaml"));
+    const runner = pnpm ? { command: "corepack", prefix: ["pnpm"] } : { command: "npm", prefix: [] };
+    if (scripts.check) {
+      return { command: runner.command, args: [...runner.prefix, "run", "check"], source: "package.json check" };
+    }
+    if (scripts.test) {
+      return { command: runner.command, args: [...runner.prefix, "test"], source: "package.json test" };
+    }
   }
   return null;
 }
 
 /** WHAT: Maps tracked dependency locks to content identities. WHY: Prevents green gates from hiding lock mutations. */
 export function snapshotLocks(repoRoot, trackedFiles) {
+  const lockNames = [...NODE_LOCK_FLAVORS.map((lock) => lock.lockName), "uv.lock"];
   return Object.fromEntries(trackedFiles
-    .filter((file) => basename(file) === "package-lock.json" || basename(file) === "uv.lock")
+    .filter((file) => lockNames.includes(basename(file)))
     .map((file) => [file, hashFile(join(repoRoot, file))]));
 }
 
