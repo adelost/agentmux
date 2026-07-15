@@ -19,6 +19,10 @@ const ACTIVE_RETRY_MS = 1_000;
 const BLOCKED_RETRY_MS = 3_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
 const NOTICE_AFTER_MS = 10_000;
+// A submitted prompt may legitimately wait a long busy turn out before its
+// receipt appears, but the human must not wait in silence: warn well before
+// the 60-minute unverified verdict.
+const SUBMITTED_STALL_NOTICE_MS = 3 * 60_000;
 const STALE_SUBMITTED_TERMINAL_MS = 60 * 60 * 1_000;
 const STALE_PRE_SUBMIT_TERMINAL_MS = 60 * 60 * 1_000;
 const MAX_PRE_SUBMIT_ATTEMPTS = 64;
@@ -547,6 +551,18 @@ export function createDeliveryBroker({
       );
       const submittedExpired = submittedAge >= STALE_SUBMITTED_TERMINAL_MS;
       if (submittedExpired) return terminalizeUnverified(job);
+      // The receipt wait is honest but must never be silent: a busy pane can
+      // hold the FIFO for a full turn, and every follower starves behind it.
+      // One durable notice tells the human what is stuck and how much waits;
+      // the existing noticeSentAt/recovered pair closes the loop on receipt.
+      if (!job.noticeSentAt && submittedAge >= SUBMITTED_STALL_NOTICE_MS) {
+        const queuedBehind = queue.list(job.agentName, job.pane)
+          .filter((other) => other.id !== job.id && !TERMINAL_DELIVERY_STATES.has(other.status))
+          .length;
+        job = queue.update(job, { noticeSentAt: now() });
+        await notify(job, "stalled", { queuedBehind }).catch((error) =>
+          log(`delivery broker stalled notice failed for ${job.id}: ${error.message}`));
+      }
       let transportHint = null;
       if (submittedAge >= 5_000 && typeof agent.promptTransportState === "function") {
         const transport = await agent.promptTransportState(job.agentName, job.pane, job.text)

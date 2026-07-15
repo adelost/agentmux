@@ -385,6 +385,93 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
+  // The 2026-07-15 claw:6 freeze: a submitted head waited silently on its
+  // receipt while ten messages starved behind it and the human learned it
+  // from the queue files. The receipt wait may be long; the silence may not.
+  const stalledSubmittedHead = () => {
+    const rootDir = tempRoot();
+    let clock = 1_000;
+    const queue = createDeliveryQueue({ rootDir, now: () => clock });
+    const job = queue.enqueue({ agentName: "api", pane: 4, text: "stuck order" });
+    queue.update(job, {
+      status: "submitted",
+      submittedAt: clock,
+      echoCursor: { kind: "test", positions: {} },
+      nextAttemptAt: 0,
+    });
+    // Same-millisecond jobs tie on orderKey and fall back to random identity;
+    // distinct timestamps keep the submitted job the deterministic FIFO head.
+    clock += 100;
+    queue.enqueue({ agentName: "api", pane: 4, text: "follower one" });
+    clock += 100;
+    queue.enqueue({ agentName: "api", pane: 4, text: "follower two" });
+    const agent = acceptingAgent();
+    let receiptVisible = false;
+    agent.waitForPromptEcho = async () => receiptVisible;
+    const notices = [];
+    const broker = createDeliveryBroker({
+      agent,
+      queue,
+      now: () => clock,
+      notify: async (noticedJob, state, extra) => notices.push({ id: noticedJob.id, state, extra }),
+    });
+    return {
+      rootDir, queue, job, agent, broker, notices,
+      advance: (ms) => { clock += ms; },
+      revealReceipt: () => { receiptVisible = true; },
+    };
+  };
+
+  component("a stalled submitted head warns the human once with the queue depth", {
+    given: ["a submitted job with no receipt and two starving followers", stalledSubmittedHead],
+    when: ["the broker polls past the stall threshold, twice", async (ctx) => {
+      ctx.advance(3 * 60_000);
+      await ctx.broker.kickTarget("api", 4);
+      ctx.advance(2_000);
+      await ctx.broker.kickTarget("api", 4);
+    }],
+    then: ["exactly one stalled notice fires and it counts both followers", (_, ctx) => {
+      const stalled = ctx.notices.filter((notice) => notice.state === "stalled");
+      expect(stalled).toHaveLength(1);
+      expect(stalled[0]).toMatchObject({ id: ctx.job.id, extra: { queuedBehind: 2 } });
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.queue.read("api", 4, ctx.job.id)).toMatchObject({
+        status: "submitted",
+        noticeSentAt: expect.any(Number),
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a submitted head below the stall threshold stays quiet", {
+    given: ["a submitted job whose receipt is merely seconds late", stalledSubmittedHead],
+    when: ["the broker polls one minute in", async (ctx) => {
+      ctx.advance(60_000);
+      await ctx.broker.kickTarget("api", 4);
+    }],
+    then: ["no notice of any kind fires", (_, ctx) => {
+      expect(ctx.notices).toHaveLength(0);
+      expect(ctx.queue.read("api", 4, ctx.job.id).noticeSentAt).toBeNull();
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a stall warning resolves into recovery the moment the receipt lands", {
+    given: ["a stalled-notified job whose exact JSONL receipt then appears", stalledSubmittedHead],
+    when: ["the broker polls after the stall notice and again once the receipt exists", async (ctx) => {
+      ctx.advance(3 * 60_000);
+      await ctx.broker.kickTarget("api", 4);
+      ctx.revealReceipt();
+      ctx.advance(2_000);
+      await ctx.broker.kickTarget("api", 4);
+    }],
+    then: ["the head acknowledges and the human hears recovered, in that order", (_, ctx) => {
+      expect(ctx.notices.map((notice) => notice.state)).toEqual(["stalled", "recovered"]);
+      expect(ctx.queue.read("api", 4, ctx.job.id).status).toBe("acknowledged");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("a crash after Enter preserves the pre-Enter fence across restart", {
     given: ["a transport that fails after persisting submitting but before submitted", () => {
       const rootDir = tempRoot();
@@ -534,7 +621,9 @@ feature("single-writer delivery broker", () => {
     }],
     then: ["it never retypes and records a terminal delivered-unverified audit state", (_, ctx) => {
       expect(ctx.agent.sends).toHaveLength(0);
-      expect(ctx.notices).toEqual(["unverified"]);
+      // The hour-long receipt wait now warns the human on the way (stalled)
+      // before the terminal unverified verdict; silence was the 07-15 bug.
+      expect(ctx.notices).toEqual(["stalled", "unverified"]);
       expect(ctx.queue.read("skydive", 3, ctx.job.id)).toMatchObject({
         status: "delivered_unverified",
         draftOwned: false,
