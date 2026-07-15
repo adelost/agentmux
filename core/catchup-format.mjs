@@ -17,6 +17,8 @@
 //   - Multi-line → first line + "…"
 //   - Long text trimmed to ~80 chars + "…"
 
+import { isSystemNoiseDirective } from "./system-noise.mjs";
+
 const MAX_PREVIEW_LINES = 3;
 const MAX_PREVIEW_CHARS = 80;
 
@@ -41,6 +43,9 @@ export function formatCatchupPreview(turns, opts = {}) {
 
 /** Decide which single row (if any) represents a turn in the preview. */
 function extractPreviewRow(turn) {
+  // Claude records /model and other local UI commands as user-role wrapper
+  // turns. They are transport plumbing, not missed conversation.
+  if (isSystemNoiseDirective(turn.userPrompt)) return null;
   const items = turn.items || [];
   const textItems = items.filter((i) => i.type === "text");
 

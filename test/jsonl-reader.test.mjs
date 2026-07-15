@@ -3,7 +3,7 @@ import { appendFileSync, mkdtempSync, mkdirSync, copyFileSync, rmSync, writeFile
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
-import { captureClaudePromptEchoCursor, extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl, isPromptInJsonl, readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, countTurnsSince } from "../core/jsonl-reader.mjs";
+import { captureClaudePromptEchoCursor, captureClaudeSlashReceiptCursor, extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl, isPromptInJsonl, isSlashReceiptInJsonl, readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, countTurnsSince } from "../core/jsonl-reader.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const fixtureFile = (name) => join(__dir, "fixtures/jsonl", name);
@@ -876,6 +876,49 @@ feature("readAllTurnsAcrossPanes: merges events from multiple panes in timestamp
   });
 });
 
+feature("Claude slash-command receipts", () => {
+  unit("only an exact command event appended after the cursor is a receipt", {
+    given: ["a session containing an old identical /model receipt", () => {
+      const fakeHome = mkdtempSync(join(tmpdir(), "agentmux-slash-receipt-"));
+      const origHome = process.env.HOME;
+      process.env.HOME = fakeHome;
+      const paneDir = "/fake/slash/dir";
+      const projectDir = join(fakeHome, ".claude", "projects", paneDir.replace(/[\/.]/g, "-"));
+      mkdirSync(projectDir, { recursive: true });
+      const jsonl = join(projectDir, "session.jsonl");
+      const event = (args) => JSON.stringify({
+        type: "user",
+        timestamp: "2026-07-15T13:43:21.649Z",
+        message: {
+          role: "user",
+          content: `<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>${args}</command-args>`,
+        },
+      });
+      writeFileSync(jsonl, `${event("fable")}\n`);
+      const cursor = captureClaudeSlashReceiptCursor(paneDir, "/model fable");
+      return {
+        paneDir, jsonl, cursor, event,
+        cleanup: () => {
+          process.env.HOME = origHome;
+          rmSync(fakeHome, { recursive: true, force: true });
+        },
+      };
+    }],
+    when: ["checking old, wrong-argument, then exact appended events", (ctx) => {
+      const old = isSlashReceiptInJsonl(ctx.paneDir, "/model fable", { cursor: ctx.cursor });
+      appendFileSync(ctx.jsonl, `${ctx.event("opus")}\n`);
+      const wrong = isSlashReceiptInJsonl(ctx.paneDir, "/model fable", { cursor: ctx.cursor });
+      appendFileSync(ctx.jsonl, `${ctx.event("fable")}\n`);
+      const exact = isSlashReceiptInJsonl(ctx.paneDir, "/model fable", { cursor: ctx.cursor });
+      return { old, wrong, exact, ctx };
+    }],
+    then: ["history and a different selection do not release the queue", ({ old, wrong, exact, ctx }) => {
+      expect({ old, wrong, exact }).toEqual({ old: false, wrong: false, exact: true });
+      ctx.cleanup();
+    }],
+  });
+});
+
 // --- countTurnsSince (Discord catch-up notice) ---------------------------
 
 feature("countTurnsSince: counts user turns after a cutoff", () => {
@@ -1026,6 +1069,20 @@ feature("countTurnsSince: counts user turns after a cutoff", () => {
     when: ["counting", ({ paneDir }) => countTurnsSince(paneDir, null)],
     then: ["2 real turns, tool_result skipped", (r, { cleanup }) => {
       expect(r.count).toBe(2);
+      cleanup();
+    }],
+  });
+
+  unit("local-command wrappers are not counted as missed Discord turns", {
+    given: ["one human turn followed by the three /model wrapper rows", () => buildTurnsFixture([
+      { timestamp: "2026-04-22T10:00:00Z", content: "real message" },
+      { timestamp: "2026-04-22T10:01:00Z", content: "<local-command-caveat>internal</local-command-caveat>" },
+      { timestamp: "2026-04-22T10:01:01Z", content: "<command-name>/model</command-name>\n<command-args>fable</command-args>" },
+      { timestamp: "2026-04-22T10:01:02Z", content: "<local-command-stdout>Set model to Fable</local-command-stdout>" },
+    ])],
+    when: ["counting all apparent user-role rows", ({ paneDir }) => countTurnsSince(paneDir, null)],
+    then: ["only the human message contributes to count and latest", (r, { cleanup }) => {
+      expect(r).toMatchObject({ count: 1, latest: "2026-04-22T10:00:00Z", capped: false });
       cleanup();
     }],
   });

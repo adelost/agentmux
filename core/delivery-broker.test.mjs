@@ -1594,6 +1594,70 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
+  component("a cursor-backed slash remains fenced until its exact command receipt", {
+    given: ["a submitted /model whose palette transition survived a broker restart", () => {
+      const rootDir = tempRoot();
+      let clock = 20_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "claw", pane: 2, text: "/model fable", kind: "slash" });
+      queue.update(job, {
+        status: "submitted",
+        submittedAt: 1_000,
+        echoCursor: { kind: "claude-slash-events-v1", positions: {} },
+        nextAttemptAt: 0,
+      });
+      let receiptChecks = 0;
+      const agent = acceptingAgent();
+      agent.waitForSlashReceipt = async () => ++receiptChecks >= 2;
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
+      return { rootDir, queue, job, agent, broker, advance: () => { clock += 1_001; } };
+    }],
+    when: ["one missing receipt then the exact receipt are observed", async ({ broker, advance, queue, job }) => {
+      await broker.kickTarget("claw", 2);
+      advance();
+      const fenced = queue.read("claw", 2, job.id);
+      await broker.kickTarget("claw", 2);
+      return fenced;
+    }],
+    then: ["the first check does not release FIFO and the second does without a retype", (fenced, ctx) => {
+      expect(fenced.status).toBe("submitted");
+      expect(fenced.lastReason).toContain("awaiting exact command receipt");
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.queue.read("claw", 2, ctx.job.id).status).toBe("acknowledged");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("slash crash recovery verifies the command after model-alias rewriting", {
+    given: ["a submitted /model opus job whose executed command used the pinned model id", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir });
+      const job = queue.enqueue({ agentName: "claw", pane: 2, text: "/model opus", kind: "slash" });
+      queue.update(job, {
+        status: "submitted",
+        submittedAt: Date.now(),
+        echoCursor: { kind: "claude-slash-events-v1", positions: {} },
+        nextAttemptAt: 0,
+      });
+      const receiptTexts = [];
+      const agent = acceptingAgent();
+      agent.waitForSlashReceipt = async (_name, _pane, text) => {
+        receiptTexts.push(text);
+        return text === "/model claude-opus-4-8";
+      };
+      const broker = createDeliveryBroker({ agent, queue, notify: async () => {} });
+      return { rootDir, queue, job, agent, receiptTexts, broker };
+    }],
+    when: ["the replacement broker checks the authoritative receipt", ({ broker }) =>
+      broker.kickTarget("claw", 2)],
+    then: ["the rewritten command identity acknowledges without a duplicate write", (_, ctx) => {
+      expect(ctx.receiptTexts).toEqual(["/model claude-opus-4-8"]);
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.queue.read("claw", 2, ctx.job.id).status).toBe("acknowledged");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("a submitting slash command remains ambiguous after restart", {
     given: ["a slash whose pre-Enter fence persisted but post-Enter callback did not", () => {
       const rootDir = tempRoot();

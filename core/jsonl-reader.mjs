@@ -17,6 +17,7 @@ import { claudeProjectDir } from "./claude-paths.mjs";
 import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 import { describeToolCall } from "./tool-display.mjs";
 import { captureJsonlAppendCursor, jsonlEventsAfterCursor } from "./jsonl-append-cursor.mjs";
+import { isSystemNoiseDirective } from "./system-noise.mjs";
 
 
 // Bounded tail-window reading for session jsonl. Long-running panes grow these
@@ -238,6 +239,7 @@ function extractPromptFromEvent(event) {
  * @returns boolean or null (no jsonl file → caller should fall back)
  */
 const CLAUDE_PROMPT_CURSOR_KIND = "claude-prompt-events-v1";
+const CLAUDE_SLASH_CURSOR_KIND = "claude-slash-events-v1";
 
 /** Local event-identity cursor; see the Codex twin for the clock-skew rationale. */
 export function captureClaudePromptEchoCursor(paneDir, promptText) {
@@ -266,6 +268,63 @@ export function isPromptInJsonl(paneDir, promptText, { notBeforeMs = 0, cursor =
   // findJsonlAndEvents scans all files newest-first for the needle, so it
   // returns non-null iff some file contains the prompt.
   return findJsonlAndEvents(projectDir, needle, { notBeforeMs }) !== null;
+}
+
+function splitSlashCommand(commandText) {
+  const match = /^(\/[a-z][\w-]*)(?:\s+([\s\S]*?))?\s*$/i.exec(String(commandText || "").trim());
+  if (!match) return null;
+  return { name: match[1], args: String(match[2] || "").trim() };
+}
+
+function commandTag(content, tag) {
+  const match = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "i").exec(String(content || ""));
+  return match ? match[1].trim() : null;
+}
+
+function slashReceiptEventMatches(event, commandText) {
+  const expected = splitSlashCommand(commandText);
+  if (!expected || event?.type !== "user" || typeof event.message?.content !== "string") return false;
+  const content = event.message.content;
+  const name = commandTag(content, "command-name");
+  const args = commandTag(content, "command-args") ?? "";
+  return name === expected.name && args === expected.args;
+}
+
+/** Snapshot Claude's local-command event stream before a slash-command Enter. */
+export function captureClaudeSlashReceiptCursor(paneDir, commandText) {
+  if (!splitSlashCommand(commandText)) return null;
+  const files = listJsonlFiles(claudeProjectDir(paneDir));
+  return captureJsonlAppendCursor(CLAUDE_SLASH_CURSOR_KIND, files.map(({ path }) => path));
+}
+
+/**
+ * True only after Claude records the exact local command name + arguments.
+ * A disappearing composer is not a receipt: the command palette can consume
+ * the first Enter while keeping the action pending until a later Enter.
+ */
+export function isSlashReceiptInJsonl(paneDir, commandText, {
+  notBeforeMs = 0,
+  cursor = null,
+} = {}) {
+  if (!splitSlashCommand(commandText)) return null;
+  const projectDir = claudeProjectDir(paneDir);
+  const files = listJsonlFiles(projectDir);
+  if (!existsSync(projectDir) || files.length === 0) {
+    return cursor?.kind === CLAUDE_SLASH_CURSOR_KIND ? false : null;
+  }
+  if (cursor?.kind === CLAUDE_SLASH_CURSOR_KIND) {
+    return jsonlEventsAfterCursor(files.map(({ path }) => path), cursor)
+      .some((event) => slashReceiptEventMatches(event, commandText));
+  }
+  for (const { path } of files) {
+    const events = parseJsonl(path).filter((event) => {
+      if (!notBeforeMs) return true;
+      const eventMs = Date.parse(event?.timestamp || "");
+      return Number.isFinite(eventMs) && eventMs >= notBeforeMs;
+    });
+    if (events.some((event) => slashReceiptEventMatches(event, commandText))) return true;
+  }
+  return false;
 }
 
 /**
@@ -997,6 +1056,7 @@ export function countTurnsSince(paneDir, sinceTs) {
     const t = Date.parse(e.timestamp);
     if (Number.isNaN(t)) continue;
     if (cutoffMs !== null && t <= cutoffMs) break; // hit the cutoff, stop
+    if (isSystemNoiseDirective(e.message.content)) continue;
     count++;
     if (!latest) latest = e.timestamp; // first hit in reverse = newest
     if (count >= 51) { capped = true; break; }

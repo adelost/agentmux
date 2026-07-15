@@ -11,9 +11,11 @@ import { extractText, extractLastTurn, classifyLines, extractSegments, extractMi
 import { detectDialect, COMPOSER_LINE_RE, foreignComposerText } from "./core/dialects.mjs";
 import {
   captureClaudePromptEchoCursor,
+  captureClaudeSlashReceiptCursor,
   extractFromJsonl,
   isBusyFromJsonl,
   isPromptInJsonl,
+  isSlashReceiptInJsonl,
 } from "./core/jsonl-reader.mjs";
 import {
   captureCodexPromptEchoCursor,
@@ -1649,6 +1651,27 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return null;
   }
 
+  async function captureSlashReceiptCursor(agentName, pane, commandText) {
+    const dir = paneDir(agentConfig(agentName).dir, pane);
+    return paneDialectName(agentName, pane) === "claude"
+      ? captureClaudeSlashReceiptCursor(dir, commandText)
+      : null;
+  }
+
+  async function waitForSlashReceipt(agentName, pane, commandText, timeoutMs = 15_000, {
+    notBeforeMs = 0,
+    cursor = null,
+  } = {}) {
+    if (paneDialectName(agentName, pane) !== "claude") return false;
+    const dir = paneDir(agentConfig(agentName).dir, pane);
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+    while (true) {
+      if (isSlashReceiptInJsonl(dir, commandText, { notBeforeMs, cursor }) === true) return true;
+      if (Date.now() >= deadline) return false;
+      await wait(200);
+    }
+  }
+
   // --- Send ---
 
   /**
@@ -2427,7 +2450,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     ensureReady, sendAndWait, sendOnly,
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
     promptTransportState,
-    capturePane, captureScreen, capturePromptEchoCursor, sendEscape, sendTab, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
+    capturePane, captureScreen, capturePromptEchoCursor, captureSlashReceiptCursor, waitForSlashReceipt, sendEscape, sendTab, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
     dismissBlockingPrompt, waitForPromptEcho,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession,
     sanitizeTmuxGlobalEnv, restartCodex, restartFleet,

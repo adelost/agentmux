@@ -188,6 +188,8 @@ export async function sendSlashVerified(agent, agentName, pane, claudeCmd, opts 
 async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
   settleMs = 1200, maxRescues = 2,
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  echoCursor: suppliedReceiptCursor = null,
+  notBeforeMs: suppliedNotBeforeMs = null,
   knownDrafted = false,
   onPasteStarted = null,
   onDrafted = null,
@@ -195,12 +197,36 @@ async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
   onSubmitted = null,
 } = {}) {
   const target = `${agentName}:.${pane}`;
+  const notBeforeMs = Number(suppliedNotBeforeMs) > 0
+    ? Number(suppliedNotBeforeMs)
+    : Date.now();
+  let receiptCursor = suppliedReceiptCursor;
+  if (!receiptCursor && typeof agent.captureSlashReceiptCursor === "function") {
+    try { receiptCursor = await agent.captureSlashReceiptCursor(agentName, pane, claudeCmd); }
+    catch { /* legacy TUI verification remains available below */ }
+  }
+  const hasAuthoritativeReceipt = Boolean(
+    receiptCursor && typeof agent.waitForSlashReceipt === "function",
+  );
+  const receiptOptions = receiptCursor ? { cursor: receiptCursor } : { notBeforeMs };
   await agent.dismissBlockingPrompt(target).catch(() => {});
   await agent.sendOnly(agentName, claudeCmd, pane,
     { knownDrafted, onPasteStarted, onDrafted, onSubmitting, onSubmitted });
 
   for (let attempt = 0; attempt <= maxRescues; attempt++) {
     await sleep(settleMs);
+    if (hasAuthoritativeReceipt) {
+      if (await agent.waitForSlashReceipt(
+        agentName, pane, claudeCmd, 0, receiptOptions,
+      )) {
+        return { delivered: true, rescues: attempt, via: "command-receipt" };
+      }
+      // The Claude command palette can hide the command after consuming the
+      // first Enter while leaving the selected action pending. A bare Enter on
+      // an idle composer is harmless; rescue until the exact JSONL event exists.
+      if (attempt < maxRescues) await agent.sendEnter(agentName, pane);
+      continue;
+    }
     if (!(await stuckInComposer(agent, agentName, pane, claudeCmd))) {
       return { delivered: true, rescues: attempt };
     }
