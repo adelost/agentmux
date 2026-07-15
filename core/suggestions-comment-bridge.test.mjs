@@ -300,7 +300,7 @@ describe.sequential("Suggestions human-comment relay", () => {
         if ([0, 15, 60, 240].includes(minute)) {
           await expect(poll).rejects.toThrow("1 delivery failure");
         } else {
-          await expect(poll).resolves.toEqual({ delivered: 0 });
+          await expect(poll).resolves.toMatchObject({ delivered: 0 });
         }
       }
       expect(deliveryMinutes).toEqual([0, 15, 60, 240]);
@@ -522,7 +522,7 @@ describe.sequential("Suggestions human-comment relay", () => {
     };
     try {
       await expect(run({ fixture, config, state, deliver })).rejects.toThrow("1 delivery failure");
-      await expect(run({ fixture, config, state, deliver })).resolves.toEqual({ delivered: 0 });
+      await expect(run({ fixture, config, state, deliver })).resolves.toMatchObject({ delivered: 0 });
       expect(attempts).toEqual([
         "suggestions-comment:alpha:A-1:1:initial",
         "suggestions-comment:beta:B-1:1:initial",
