@@ -33,6 +33,17 @@
 #      a BUSY broker whose review queue quietly ages (SRC-0012 sat 7h+ while
 #      its broker worked other reviews, 2026-07-15). Label a PR "parked" to
 #      intentionally exempt it.
+#   4. Starvation sweep (D): board shows READY tickets while NOTHING is
+#      in_progress → the fleet is starving regardless of how busy the broker
+#      pane looks. Sustained STARVE_SWEEPS consecutive runs → dispatch-first
+#      nudge to the broker; 2nd+ nudge also notifies the human. Board-driven
+#      on purpose: lsrc:2 was ACTIVE all night (sweep A never fires on an
+#      active pane) reviewing 6 PRs while 24 READY sat unassigned and 7
+#      workers idled (Mattias 2026-07-15: "det går ju inte pausa när det
+#      finns taska att göra"). Broker snooze does NOT apply (snooze means
+#      "nothing READY" — this sweep only fires when something IS ready);
+#      a physically impossible dispatch (all workers quota-dead) is declared
+#      via <session>.dispatch-hold with a reason, which auto-expires.
 #
 # Why nudge the broker, not the workers: single-owner rule. The broker owns
 # flow; waking individual workers would cross ownership and risk reviving
@@ -40,7 +51,10 @@
 # if nothing is READY the broker just confirms idle (cheap no-op).
 #
 # CONFIG:  ~/.agentmux/fleet-watch/fleets.conf   (one fleet per line)
-#            <session> <broker_pane> <repo_abspath>   # '#' comments ok
+#            <session> <broker_pane> <repo_abspath>[,<repo2>...] [board_project]
+#          4th column = suggestions-board project slug (same column the board
+#          curator reads); fleets without it are skipped by the starvation
+#          sweep. '#' comments ok.
 # OFF:     per-fleet  touch ~/.agentmux/fleet-watch/<session>.OFF  (PERMANENT, human-only)
 #          global     touch ~/.agentmux/fleet-watch/OFF
 # SNOOZE:  broker     touch ~/.agentmux/fleet-watch/<session>.snooze (AUTO-expires in
@@ -357,3 +371,110 @@ ${due}Du äger merge: reviewa+merga per merge-by-proof, ELLER kommentera på PR:
     log "$session:$pane: REVIEW-QUEUE NUDGED: $(echo "$due" | tr '\n' ' ')"
   done < "$CONF"
 fi
+
+# ── 4. Starvation sweep (D): READY tickets + zero in_progress = starving fleet.
+# Runs even when the broker pane is busy (that's the failure mode it exists
+# for) and ignores broker snooze. No pane_exists gate: the sweep is board-
+# driven, and a failed send is logged while amux's durable queue still holds
+# the nudge for a session that comes back.
+BOARD_URL="${BOARD_URL:-https://suggest.v1d.io}"
+READ_TOKEN_FILE="${READ_TOKEN_FILE:-${HOME}/.config/agent/suggestions-read-token}"
+STARVE_SWEEPS="${STARVE_SWEEPS:-2}"              # consecutive hits before first nudge (~40 min at */20)
+STARVE_COOLDOWN_MIN="${STARVE_COOLDOWN_MIN:-60}" # per-fleet re-nudge interval
+DISPATCH_HOLD_HOURS="${DISPATCH_HOLD_HOURS:-3}"  # broker-declared impossible-dispatch; AUTO-expires
+
+# Prints "<ready> <in_progress>" for a board project, or nothing on failure.
+# Body goes to python via STDIN, never argv: a busy board's response (full
+# ticket texts) exceeds Linux's 128KB per-argument cap, and argv would turn
+# "big fleet" into a silent unreachable-skip on exactly the boards that
+# matter most (skydive did, 2026-07-15, 64 tickets).
+board_ready_inprog() {
+  local project="$1" tok
+  [ -r "$READ_TOKEN_FILE" ] || return 1
+  tok=$(cat "$READ_TOKEN_FILE") || return 1
+  timeout 15 curl -sf -A "amux-fleet-watch" -H "Authorization: Bearer ${tok}" \
+    "${BOARD_URL}/api/tickets?project=${project}" 2>/dev/null \
+    | "$PY" -c '
+import json, sys
+try:
+    counts = json.load(sys.stdin).get("counts") or {}
+except Exception:
+    sys.exit(1)
+print(int(counts.get("ready") or 0), int(counts.get("in_progress") or 0))
+'
+}
+
+while read -r session pane repo project _rest; do
+  [ -z "${session:-}" ] && continue
+  case "$session" in \#*) continue;; esac
+  [ -z "${pane:-}" ] || [ -z "${repo:-}" ] && continue
+  [ -z "${project:-}" ] && { log "starvation: $session has no board project column → skip"; continue; }
+  [ -f "${WATCH_DIR}/${session}.OFF" ] && { log "starvation: $session per-fleet OFF → skip"; continue; }
+
+  sstate="${WATCH_DIR}/starve-${session}.state"   # "<hits> <last_nudge_epoch> <nudges>"
+  if ! read -r b_ready b_inprog < <(board_ready_inprog "$project"); then
+    log "starvation: $session/$project board unreachable → skip (no state change)"
+    continue
+  fi
+
+  if [ "$b_ready" -lt 1 ] || [ "$b_inprog" -gt 0 ]; then
+    [ -f "$sstate" ] && log "starvation: $session/$project recovered (ready=$b_ready in_progress=$b_inprog) → reset"
+    rm -f "$sstate"
+    continue
+  fi
+
+  hits=0; last_nudge=0; nudges=0
+  [ -f "$sstate" ] && read -r hits last_nudge nudges < "$sstate" 2>/dev/null
+  hits=${hits:-0}; last_nudge=${last_nudge:-0}; nudges=${nudges:-0}
+  hits=$(( hits + 1 ))
+
+  if [ "$hits" -lt "$STARVE_SWEEPS" ]; then
+    echo "$hits $last_nudge $nudges" > "$sstate"
+    log "starvation: $session/$project candidate (ready=$b_ready in_progress=0, sweep $hits/$STARVE_SWEEPS)"
+    continue
+  fi
+
+  # Broker-declared impossible dispatch (e.g. every worker quota-dead). Unlike
+  # a ledger note this is machine-visible, carries a reason, and AUTO-expires —
+  # it can never quietly become "held for morning".
+  hold="${WATCH_DIR}/${session}.dispatch-hold"
+  if [ -f "$hold" ]; then
+    hold_age_min=$(( (now - $(stat -c %Y "$hold" 2>/dev/null || echo 0)) / 60 ))
+    if [ "$hold_age_min" -lt $(( DISPATCH_HOLD_HOURS * 60 )) ]; then
+      echo "$hits $last_nudge $nudges" > "$sstate"
+      log "starvation: $session/$project dispatch-hold ($(( DISPATCH_HOLD_HOURS * 60 - hold_age_min ))min kvar): $(head -c 120 "$hold" | tr '\n' ' ')"
+      continue
+    fi
+    rm -f "$hold"
+    log "starvation: $session/$project dispatch-hold expired → re-arming"
+  fi
+
+  if [ "$last_nudge" -gt 0 ] && [ $(( (now - last_nudge) / 60 )) -lt "$STARVE_COOLDOWN_MIN" ]; then
+    echo "$hits $last_nudge $nudges" > "$sstate"
+    log "starvation: $session/$project starving (ready=$b_ready) but in cooldown → skip"
+    continue
+  fi
+
+  MSG="[fleet-watch, automatisk] SVÄLT: boarden för ${project} visar ${b_ready} READY och 0 Pågår. Dispatch-first (Mattias 2026-07-15: 'det går ju inte pausa när det finns taska att göra'): (1) assigna varje READY-ticket en kapabel ledig worker kan ta, per prio; (2) tickets som väntar på människobeslut → flippa till 'Behöver svar' så de lämnar READY; (3) genuint blockerade → blocked-by PÅ ticketen + defer. 'Upptagen med review' är INGEN disposition — dispatch kostar ett meddelande och går före nästa review/merge. Om dispatch är FYSISKT omöjligt (t.ex. alla workers quota-döda): echo 'orsak' > ~/.agentmux/fleet-watch/${session}.dispatch-hold (auto-expirerar ${DISPATCH_HOLD_HOURS}h, syns i loggen). Sätt aldrig .OFF själv."
+
+  if [ "$DRY" = "1" ]; then
+    log "starvation: $session/$project DRY would nudge (ready=$b_ready, nudges=$nudges)"
+    continue
+  fi
+  if is_reserved "$session"; then
+    amux_send notifyuser --level warn "[fleet-watch] $session/$project SVÄLTER (${b_ready} READY, 0 Pågår) men sessionsnamnet krockar med ett amux-subkommando → knuffa brokern manuellt." >/dev/null 2>&1 || true
+    echo "$hits $now $(( nudges + 1 ))" > "$sstate"
+    log "starvation: $session/$project RESERVED-NAME → escalated to human"
+    continue
+  fi
+
+  amux_send "$session" -p "$pane" "$MSG" >/dev/null 2>&1 \
+    || log "starvation: $session/$project nudge send timed out/failed (durably enqueued regardless)"
+  if [ "$nudges" -ge 1 ]; then
+    amux_send notifyuser --level error "[fleet-watch] $session/$project SVÄLTER fortfarande: ${b_ready} READY, 0 Pågår trots knuff — brokern dispatchar inte, behöver din blick" || true
+    log "starvation: $session/$project ESCALATED (ready=$b_ready, nudge #$(( nudges + 1 )))"
+  else
+    log "starvation: $session/$project NUDGED (ready=$b_ready)"
+  fi
+  echo "$hits $now $(( nudges + 1 ))" > "$sstate"
+done < "$CONF"

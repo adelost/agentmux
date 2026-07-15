@@ -150,7 +150,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.23.16";
+const HINTS_VERSION = "1.23.17";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -611,7 +611,13 @@ isn't in git is invisible to other agents.
    escalate on a doubling ladder (30m/1h/3h/7h/15h/31h, \`escalation\` in
    payload); an escalated alert may not be dismissed without one of the two
    actions above. (SKY-0034 sat 22h HIGH+READY behind a blocker that only
-   existed in the broker's ledger.)
+   existed in the broker's ledger.) Dispatch precedes review: at every broker
+   decision point, first drain the READY column to capable idle workers (or
+   move tickets out of READY per rule 14) BEFORE the next review/merge/
+   deploy — assignment costs one message, review costs an hour, and a
+   backlog must never queue behind the broker's other work. The starvation
+   sweep enforces this: READY >= 1 with zero in_progress nudges the broker,
+   then the human.
 10. **An assignment is delivered only at owner-ACK.** After briefing a pane,
    verify pickup within a few minutes (reply or visible plan); a silent pane
    gets re-checked or the ticket reassigned immediately — don't wait for the
@@ -633,10 +639,18 @@ isn't in git is invisible to other agents.
    the broker may take direct ownership, note it in its ledger, and root-fix.
    Delegate-don't-build yields to un-stick-the-fleet (ai:2's progress bar:
    ~20 failed delegations, then fixed DIY in an hour).
-14. **Escalated alerts at night get a disposition, not silence.** Defer with
-   a recorded reason on the ticket counts as action and satisfies the
-   escalation ladder; full re-prioritization waits for the morning report.
-   This is how night rules and the ladder compose instead of conflicting.
+14. **A disposition is an action ON the ticket, never a note to self —
+   day or night (Mattias 2026-07-15: "det går ju inte pausa när det finns
+   taska att göra").** Valid dispositions for an unowned-READY alert are
+   exactly three: (a) assign it now, (b) record \`blocked-by:\` on the ticket
+   and defer it, or (c) flip it to needs-answer so the human decision lands
+   in the morning queue while it LEAVES the ready pool. "Busy", "held for
+   morning", or a ledger/memory note are NOT dispositions — board tickets
+   are already-sanctioned work, so night rules never pause dispatch (rule 7
+   restricts speculative scope and paid deploys, not assignment; lsrc held
+   24 READY behind "held for morning" while 7 workers idled, 2026-07-15).
+   Full re-prioritization still waits for the morning report — but the
+   backlog keeps moving underneath it.
 15. **Expect the data→consumer seam.** Tickets whose data and consumer live
    in different files or repos (recipe vs renderer) get bounded cross-file
    amendment authority in the ORIGINAL brief instead of a mid-flight
