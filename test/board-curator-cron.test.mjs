@@ -49,6 +49,7 @@ const run = (fx, extraEnv = {}) => spawnSync("bash", [SCRIPT], {
     WATCH_DIR: fx.watchDir,
     CONF: fx.conf,
     AMUX: fx.amux,
+    AMUX_GUARD_HEARTBEAT_DIR: join(fx.root, "heartbeats"),
     READ_TOKEN_FILE: fx.tokenFile,
     BOARD_URL: "http://127.0.0.1:9", // unreachable → loud commit-only degradation
     CURATE_COOLDOWN_MIN: "0",
@@ -134,6 +135,7 @@ describe("board-curator cron", () => {
       await new Promise((ok, bad) => {
         const child = spawn("bash", [SCRIPT], { env: {
           ...process.env, WATCH_DIR: fx.watchDir, CONF: fx.conf, AMUX: fx.amux,
+          AMUX_GUARD_HEARTBEAT_DIR: join(fx.root, "heartbeats"),
           READ_TOKEN_FILE: fx.tokenFile, BOARD_URL: `http://127.0.0.1:${port}`,
           CURATE_COOLDOWN_MIN: "0", SEND_TIMEOUT: "5",
         } });

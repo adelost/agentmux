@@ -5,6 +5,7 @@ import { feature, unit, expect } from "bdd-vitest";
 import {
   checkContextBridge,
   checkDeliveryQueue,
+  checkGuardCronHeartbeats,
   checkNativeRuntime,
   checkTmuxVersion,
   FAIL, OK, WARN,
@@ -154,6 +155,58 @@ feature("heartbeat classification", () => {
     then: ["fail + kill hint", (c) => {
       expect(c.status).toBe(FAIL);
       expect(c.hint).toContain("kill");
+    }],
+  });
+});
+
+feature("scheduled guard heartbeats", () => {
+  const fresh = (key, intervalSec, ageMs = 30_000) => ({
+    key,
+    intervalSec,
+    beat: {
+      schemaVersion: 1,
+      key,
+      intervalSec,
+      ts: new Date(NOW - ageMs).toISOString(),
+      metrics: {},
+    },
+  });
+
+  unit("all fresh guard sweeps render one healthy doctor row", {
+    when: ["checking", () => checkGuardCronHeartbeats({
+      heartbeats: [fresh("comment-bridge", 60), fresh("fleet-progress", 1200)],
+      now: NOW,
+    })],
+    then: ["green", (result) => {
+      expect(result.status).toBe(OK);
+      expect(result.detail).toContain("2/2 fresh");
+    }],
+  });
+
+  unit("a beat older than twice its interval is RED", {
+    when: ["checking", () => checkGuardCronHeartbeats({
+      heartbeats: [
+        fresh("fleet-progress", 1200),
+        fresh("comment-bridge", 60, 120_001),
+      ],
+      now: NOW,
+    })],
+    then: ["fail with the exact guard", (result) => {
+      expect(result.status).toBe(FAIL);
+      expect(result.detail).toContain("RED 1/2");
+      expect(result.detail).toContain("comment-bridge");
+      expect(result.hint).toContain("successful sweep");
+    }],
+  });
+
+  unit("a guard that never wrote is not omitted from doctor", {
+    when: ["checking", () => checkGuardCronHeartbeats({
+      heartbeats: [{ key: "board-curator", intervalSec: 3600, beat: null }],
+      now: NOW,
+    })],
+    then: ["missing is red", (result) => {
+      expect(result.status).toBe(FAIL);
+      expect(result.detail).toContain("board-curator missing");
     }],
   });
 });

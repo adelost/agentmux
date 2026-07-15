@@ -22,25 +22,32 @@
 set -uo pipefail
 export PATH="/home/adelost/.nvm/versions/node/v22.19.0/bin:/usr/local/bin:/usr/bin:/bin"
 
-REPO="/home/adelost/lsrc/ai-dsl"
-BACKLOG="$REPO/.planning/BACKLOG-mattias-followups.md"
-STATE="$HOME/.agentmux-backlog-pull.state"   # last dispatched: "ITEM EPOCH"
-OFF_FLAG="$HOME/.agentmux-backlog-pull.OFF"
+REPO="${REPO:-/home/adelost/lsrc/ai-dsl}"
+BACKLOG="${BACKLOG:-$REPO/.planning/BACKLOG-mattias-followups.md}"
+STATE="${STATE:-$HOME/.agentmux-backlog-pull.state}"   # last dispatched: "ITEM EPOCH"
+OFF_FLAG="${OFF_FLAG:-$HOME/.agentmux-backlog-pull.OFF}"
 WRITER_PANE=1                                  # ai:1 = FE writer lane
 COOLDOWN_SEC=5400                              # 90 min per-item cooldown
 DRY="${DRY:-0}"                                # DRY=1 → print, don't send
 NOW=$(date +%s)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=guard-heartbeat.sh
+source "$SCRIPT_DIR/guard-heartbeat.sh"
+guard_heartbeat_arm "backlog-pull" 900
+guard_heartbeat_metric dry "$DRY"
+guard_heartbeat_metric outcome started
 
 log() { echo "[$(date '+%F %T')] $*"; }
 
-[ -f "$OFF_FLAG" ] && { log "OFF flag present → skip"; exit 0; }
-[ -f "$BACKLOG" ] || { log "no backlog file → skip"; exit 0; }
+[ -f "$OFF_FLAG" ] && { guard_heartbeat_metric outcome disabled; log "OFF flag present → skip"; exit 0; }
+[ -f "$BACKLOG" ] || { guard_heartbeat_metric outcome noBacklog; log "no backlog file → skip"; exit 0; }
 
 # ── Guard 1: never interrupt active work. ──
 # Grab the '● ai' block from amux ps; if any pane line shows 🟢 → busy.
 PS="$(amux ps 2>/dev/null)"
 AI_BLOCK="$(printf '%s\n' "$PS" | awk '/● ai /{f=1;next} /● [a-z]/{f=0} f')"
 if printf '%s\n' "$AI_BLOCK" | grep -q '🟢'; then
+  guard_heartbeat_metric outcome activeFleet
   log "an ai pane is working (🟢) → skip (rule: working pane pulls next)"
   exit 0
 fi
@@ -80,13 +87,15 @@ while IFS= read -r line; do
   break
 done < <(grep -E '^### \[🔵\] [0-9]+\.' "$BACKLOG")
 
-[ -z "$pick_num" ] && { log "no FE-eligible ready 🔵 item → backlog drained / all blocked or non-FE → skip"; exit 0; }
+[ -z "$pick_num" ] && { guard_heartbeat_metric outcome drained; log "no FE-eligible ready 🔵 item → backlog drained / all blocked or non-FE → skip"; exit 0; }
 
 # ── Cooldown: don't re-dispatch the same item within COOLDOWN_SEC. ──
 if [ -f "$STATE" ]; then
   read -r last_item last_epoch < "$STATE" 2>/dev/null || true
   if [ "${last_item:-}" = "$pick_num" ] && [ $((NOW - ${last_epoch:-0})) -lt "$COOLDOWN_SEC" ]; then
     log "item #$pick_num still in cooldown ($(( (COOLDOWN_SEC-(NOW-last_epoch))/60 ))min left) → skip"
+    guard_heartbeat_metric outcome cooldown
+    guard_heartbeat_metric item "$pick_num"
     exit 0
   fi
 fi
@@ -97,11 +106,13 @@ spec_txt="${SPEC:+spec .planning/$SPEC}"
 MSG="AUTO-PULL (idle+öppen backlog, cron — alla ai-lanes var idle): plocka backlog #$pick_num — $pick_title. $spec_txt. Single-writer, bygg+test+commit scoped. Om den kräver GPU eller är blockerad: hoppa till nästa 🔵 och säg till. Pinga api:0 vid klar."
 
 if [ "$DRY" = "1" ]; then
+  guard_heartbeat_metric outcome dryDispatch
+  guard_heartbeat_metric item "$pick_num"
   log "DRY: would dispatch #$pick_num to ai:$WRITER_PANE → $pick_title"
   log "DRY: msg = $MSG"
   exit 0
 fi
 
 amux ai -p "$WRITER_PANE" "$MSG" >/dev/null 2>&1 \
-  && { echo "$pick_num $NOW" > "$STATE"; log "dispatched #$pick_num ($pick_title) → ai:$WRITER_PANE"; } \
-  || log "amux send FAILED for #$pick_num"
+  && { echo "$pick_num $NOW" > "$STATE"; guard_heartbeat_metric outcome dispatched; guard_heartbeat_metric item "$pick_num"; log "dispatched #$pick_num ($pick_title) → ai:$WRITER_PANE"; } \
+  || { guard_heartbeat_disarm; log "amux send FAILED for #$pick_num"; exit 1; }

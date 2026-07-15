@@ -35,6 +35,9 @@ set -uo pipefail
 export HOME="${HOME:-/home/adelost}"
 export PATH="${HOME}/.nvm/versions/node/v22.19.0/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin"
 AMUX="${AMUX:-${HOME}/.nvm/versions/node/v22.19.0/bin/amux}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=guard-heartbeat.sh
+source "$SCRIPT_DIR/guard-heartbeat.sh"
 
 WATCH_DIR="${WATCH_DIR:-${HOME}/.agentmux/fleet-watch}"
 CONF="${CONF:-${WATCH_DIR}/fleets.conf}"
@@ -43,12 +46,19 @@ READ_TOKEN_FILE="${READ_TOKEN_FILE:-${HOME}/.config/agent/suggestions-read-token
 CURATE_COOLDOWN_MIN="${CURATE_COOLDOWN_MIN:-55}"   # never more than ~hourly per fleet
 DRY="${DRY:-0}"
 
+guard_heartbeat_arm "board-curator" 3600
+guard_heartbeat_metric dry "$DRY"
+guard_heartbeat_metric fleets 0
+guard_heartbeat_metric briefs 0
+guard_heartbeat_metric boardFailures 0
+fleets=0; briefs=0; board_failures=0
+
 mkdir -p "$WATCH_DIR"
 [ -f "${WATCH_DIR}/OFF" ] && { echo "[$(date -Is)] global OFF → skip"; exit 0; }
 [ -f "$CONF" ] || { echo "[$(date -Is)] no fleets.conf at $CONF → skip"; exit 0; }
 
 exec 9>"${WATCH_DIR}/.curator-lock"
-flock -n 9 || { echo "[$(date -Is)] another run holds the lock → skip"; exit 0; }
+flock -n 9 || { guard_heartbeat_disarm; echo "[$(date -Is)] another run holds the lock → skip"; exit 0; }
 
 log() { echo "[$(date -Is)] $*"; }
 now=$(date +%s)
@@ -73,6 +83,7 @@ while read -r session pane repo project _rest; do
   [ -z "${session:-}" ] && continue
   case "$session" in \#*) continue;; esac
   [ -z "${project:-}" ] && { log "${session:-?}: no board project column → skip"; continue; }
+  fleets=$((fleets + 1))
   [ -f "${WATCH_DIR}/${session}.OFF" ] && { log "$session: per-fleet OFF → skip"; continue; }
 
   # Activity fingerprint: per-repo HEAD hashes + board counts. Hashes, not
@@ -84,7 +95,7 @@ while read -r session pane repo project _rest; do
   for _r in "${_repos[@]}"; do
     heads="${heads}$(git -C "$_r" log -1 --format=%h 2>/dev/null || echo none),"
   done
-  counts=$(board_counts "$project") || counts=""
+  counts=$(board_counts "$project") || { counts=""; board_failures=$((board_failures + 1)); }
   [ -z "$counts" ] && log "$session/$project: board unreachable → commit-signal only"
   fingerprint="heads:${heads} board:${counts}"
 
@@ -127,7 +138,11 @@ Rapportera BARA om du ändrade något; ren board = tyst. Nästa pass triggas fö
   if amux_send "$session" -p "$pane" "$MSG" >/dev/null 2>&1; then
     { echo "$now"; echo "$fingerprint"; } > "$stamp"
     log "$session/$project: CURATION BRIEF SENT"
+    briefs=$((briefs + 1))
   else
     log "$session/$project: send unverified (timeout/fail) — NOT stamped, retrying next run"
   fi
 done < "$CONF"
+guard_heartbeat_metric fleets "$fleets"
+guard_heartbeat_metric briefs "$briefs"
+guard_heartbeat_metric boardFailures "$board_failures"

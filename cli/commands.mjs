@@ -19,11 +19,13 @@ import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.
 import { appendEvent, latestPaneStatesCached, mergeStatus, readEvents, eventsPath } from "../core/events.mjs";
 import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../core/pane-status.mjs";
 import { readHeartbeat } from "../core/heartbeat.mjs";
+import { readGuardHeartbeats } from "../core/guard-heartbeat.mjs";
 import {
   checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors, checkLedger,
   checkBridgeMode, checkContextBridge, checkTmux, checkTmuxVersion, checkConfig, overallStatus, formatDoctorReport, FAIL, WARN,
   checkDeliveryQueue,
   checkNativeRuntime,
+  checkGuardCronHeartbeats,
 } from "../core/doctor.mjs";
 import {
   createDeliveryQueue,
@@ -2554,6 +2556,7 @@ async function cmdDoctor(ctx) {
   try { repoVersion = JSON.parse(readFileSync(join(repoDir, "package.json"), "utf-8")).version; }
   catch {}
   const beat = readHeartbeat();
+  const guardHeartbeats = readGuardHeartbeats();
 
   // hooks
   let settings = null, hookFileExists = false;
@@ -2659,6 +2662,7 @@ async function cmdDoctor(ctx) {
       stats: deliveryQueueStats(createDeliveryQueue()),
       bridgeRunning: pids.length > 0,
     }),
+    checkGuardCronHeartbeats({ heartbeats: guardHeartbeats }),
   ];
 
   const activeChecks = checks.filter(Boolean);
