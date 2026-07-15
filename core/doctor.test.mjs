@@ -358,6 +358,20 @@ feature("hooks + ledger + tmux checks", () => {
     then: ["fail", (c) => expect(c.status).toBe(FAIL)],
   });
 
+  unit("native-only fleets do not require a tmux binary or socket", {
+    given: ["no tmux observations for a native-only fleet", () => ({
+      socket: checkTmux({ sessions: [], error: "no server", required: false }),
+      version: checkTmuxVersion({ version: null, required: false }),
+    })],
+    when: ["checking both tmux rows", (checks) => checks],
+    then: ["both are green and explicitly optional", ({ socket, version }) => {
+      expect(socket.status).toBe(OK);
+      expect(version.status).toBe(OK);
+      expect(socket.detail).toContain("native-only");
+      expect(version.detail).toContain("native-only");
+    }],
+  });
+
   unit("overall status: worst wins", {
     given: ["ok + warn + fail", () => [
       { status: OK }, { status: WARN }, { status: FAIL },

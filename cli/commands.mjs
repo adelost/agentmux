@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, statSync, readlinkSync } from "fs";
 import { join } from "path";
+import { createHash } from "crypto";
 import { loadConfig, listAgents, getAgent, addAgent, removeAgent, resolveAgent, saveLast, getLast, getPaneCount, findChannelForPane } from "./config.mjs";
 import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens, detectPaneStatus } from "./format.mjs";
 import {
@@ -84,6 +85,25 @@ import {
   stopNativeRuntime,
 } from "./native-runtime-service.mjs";
 import {
+  nativeServiceStatus,
+  startNativeServices,
+  stopNativeServices,
+} from "./native-service-manager.mjs";
+import {
+  createCutoverReceipt,
+  ensureCutoverProject,
+  materializeCutoverConfigs,
+  nativeCutoverRequest,
+  planNativeCutover,
+  readCutoverReceipt,
+  recordCutoverPhase,
+  restoreCutoverConfigs,
+  sourceAfterNativeCutover,
+  writeCutoverConfigs,
+  writeCutoverReceipt,
+} from "../core/native-cutover.mjs";
+import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
+import {
   loadTodos, saveTodos, addTodo, doneTodo, rmTodo, findItem,
   listActive, listRemindable, listDone, formatActiveList, formatReminderSummary, formatItemLine,
   DEFAULT_TODOS_PATH, SECTION_NOW, SECTION_PARKED, SECTION_BLOCKED,
@@ -107,7 +127,7 @@ import {
 } from "../core/worktree-deps.mjs";
 
 // Bridge = the Discord bot itself (not a Claude agent). Singleton infra.
-const BRIDGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const BRIDGE_DIR = resolve(process.env.AGENTMUX_BRIDGE_DIR || resolve(dirname(fileURLToPath(import.meta.url)), ".."));
 const bridgeLifecycle = createBridgeLifecycle({ bridgeDir: BRIDGE_DIR });
 const DREAM_LOCK_PATH = () => join(process.env.HOME, ".openclaw", ".dream.lock");
 const DREAM_BLOCKING_STATUSES = new Set([
@@ -272,6 +292,398 @@ async function cmdRuntime(args, ctx) {
     return;
   }
   throw new Error(`unknown runtime action '${action}' (use status|start|stop|restart)`);
+}
+
+function configuredServiceTargets(ctx, requested = null) {
+  const source = loadSourceYaml(ctx);
+  if (requested && !source.agents?.[requested]) throw new Error(`unknown agent '${requested}'`);
+  return Object.entries(source.agents || {})
+    .filter(([name, agent]) => (!requested || name === requested)
+      && Array.isArray(agent.services) && agent.services.length)
+    .map(([name, agent]) => ({
+      name,
+      dir: expandHome(agent.dir),
+      services: [...agent.services],
+      backend: agent.backend ?? "tmux",
+    }));
+}
+
+async function cmdServices(args, ctx) {
+  const { flags, positional } = parseFlags(args, FLAG_SPECS.services);
+  const action = positional[0] || "status";
+  const requested = positional[1] || null;
+  if (!["status", "start", "stop"].includes(action)) {
+    throw new Error(`unknown services action '${action}' (use status|start|stop)`);
+  }
+  const targets = configuredServiceTargets(ctx, requested);
+  if (!targets.length) {
+    console.log(requested ? `${requested}: no configured services.` : "No configured services.");
+    return;
+  }
+  for (const target of targets) {
+    if (action === "start") {
+      if (target.backend !== "native") {
+        throw new Error(`${target.name}: service panes are still tmux-owned; cut over before native start`);
+      }
+      await startNativeServices(target);
+    } else if (action === "stop") {
+      await stopNativeServices(target, { force: Boolean(flags.force) });
+    }
+    for (let index = 0; index < target.services.length; index += 1) {
+      const status = nativeServiceStatus({
+        agentName: target.name,
+        index,
+        command: target.services[index],
+        cwd: target.dir,
+      });
+      console.log(`${status.managed && status.matchesConfig ? "●" : "○"} ${target.name}:${index} ${
+        status.managed ? "running" : "stopped"} · ${target.services[index]} · ${status.paths.logPath}`);
+    }
+  }
+}
+
+const CUTOVER_BLOCKING_STATUSES = new Set([
+  "working", "permission", "menu", "resume", "dismiss", "interrupted", "limited",
+]);
+
+const cutoverHash = (value) => createHash("sha256").update(String(value)).digest("hex");
+
+export function signalBridgeReload({
+  pidPath = process.env.PIDFILE || "/tmp/agentmux.pid",
+  kill = process.kill.bind(process),
+} = {}) {
+  if (!existsSync(pidPath)) throw new Error(`bridge is not running (no pidfile at ${pidPath})`);
+  const pid = Number(readFileSync(pidPath, "utf8").trim());
+  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error(`bridge pidfile is invalid at ${pidPath}`);
+  kill(pid, 0);
+  kill(pid, "SIGHUP");
+  return pid;
+}
+
+const cutoverModelAndEffort = async (ctx, target, paneSpec) => {
+  const source = loadSourceYaml(ctx).agents[target.name];
+  let context = null;
+  try { context = await ctx.agent.getContext(target.name, paneSpec.pane); } catch {}
+  const commandModel = String(paneSpec.paneConfig?.cmd || "").match(/(?:^|\s)--model\s+([^\s]+)/u)?.[1];
+  return {
+    model: context?.model || commandModel
+      || (paneSpec.engine === "claude" ? source.claudeModel : source.codexModel)
+      || (paneSpec.engine === "claude" ? "claude-opus-4-8" : "gpt-5.6-sol"),
+    effort: context?.effort || source.effort || (paneSpec.engine === "codex" ? "xhigh" : "medium"),
+    inferred: !context?.model || !context?.effort,
+  };
+};
+
+/** Two independent idle samples plus exact JSONL identity and an empty lane. */
+export async function collectCutoverEvidence(ctx, plan, {
+  allowEmpty = false,
+  pauseMs = 250,
+  sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)),
+} = {}) {
+  const blockers = [];
+  const warnings = [];
+  const evidence = {};
+  await nativeCutoverRequest(plan.runtimeUrl, "/api/health");
+
+  const samplePane = async (target, paneSpec) => {
+    const status = await getPaneStatus(ctx, target.name, paneSpec.pane).catch(() => "unknown");
+    const busy = await ctx.agent.isBusy(target.name, paneSpec.pane).catch(() => null);
+    return { status, busy };
+  };
+
+  for (const target of plan.targets) {
+    if (!(await hasSession(ctx, target.name))) {
+      blockers.push(`${target.name}: tmux session is not running`);
+      continue;
+    }
+    const livePanes = await listPanes(ctx, target.name);
+    const liveIndexes = new Set(livePanes.map((pane) => Number(pane.index)));
+    evidence[target.name] = {};
+    for (const paneSpec of target.panes) {
+      const label = `${target.name}:${paneSpec.pane}`;
+      if (!liveIndexes.has(paneSpec.pane)) {
+        blockers.push(`${label}: live tmux pane is missing`);
+        continue;
+      }
+      const queued = ctx.deliveryQueue.next(target.name, paneSpec.pane);
+      if (queued) blockers.push(`${label}: delivery ${queued.id} is still ${queued.status}`);
+      const identity = latestPaneSessionIdentity(paneSpec.engine, paneSpec.sourceCwd);
+      if (!identity) {
+        if (!allowEmpty) {
+          blockers.push(`${label}: exact persisted ${paneSpec.engine} session not found (use --allow-empty only for a deliberately blank pane)`);
+          continue;
+        }
+        const persisted = paneSpec.engine === "codex"
+          ? readLastTurnsCodex(paneSpec.sourceCwd, { limit: 1, headless: true })
+          : readLastTurns(paneSpec.sourceCwd, { limit: 1, headless: true });
+        if (persisted?.turns?.length) {
+          blockers.push(`${label}: persisted history exists without an importable session identity`);
+          continue;
+        }
+      }
+      const first = await samplePane(target, paneSpec);
+      const model = await cutoverModelAndEffort(ctx, target, paneSpec);
+      evidence[target.name][paneSpec.pane] = identity
+        ? { ...identity, ...model, first, fresh: false }
+        : {
+          sessionId: null,
+          cwd: paneSpec.sourceCwd,
+          path: null,
+          ...model,
+          first,
+          fresh: true,
+          emptyProof: "no persisted engine session or turn history",
+        };
+      if (model.inferred) warnings.push(`${label}: model or effort inferred from fleet defaults`);
+      if (!identity) warnings.push(`${label}: explicitly creating a fresh native session for a proven-empty pane`);
+    }
+  }
+  await sleep(pauseMs);
+  for (const target of plan.targets) {
+    for (const paneSpec of target.panes) {
+      const item = evidence[target.name]?.[paneSpec.pane];
+      if (!item) continue;
+      const second = await samplePane(target, paneSpec);
+      item.second = second;
+      for (const [sample, result] of [["first", item.first], ["second", second]]) {
+        if (CUTOVER_BLOCKING_STATUSES.has(result.status)) {
+          blockers.push(`${target.name}:${paneSpec.pane}: ${sample} sample is ${result.status}`);
+        }
+        if (result.busy !== false) {
+          blockers.push(`${target.name}:${paneSpec.pane}: ${sample} JSONL busy proof is ${String(result.busy)}`);
+        }
+      }
+    }
+  }
+
+  const identities = new Map();
+  for (const [name, panes] of Object.entries(evidence)) {
+    for (const [pane, item] of Object.entries(panes)) {
+      if (item.fresh) continue;
+      const key = `${item.sessionId}:${item.path}`;
+      const previous = identities.get(key);
+      if (previous) blockers.push(`${name}:${pane}: session identity is already owned by ${previous}`);
+      else identities.set(key, `${name}:${pane}`);
+    }
+  }
+  return { blockers: [...new Set(blockers)], warnings: [...new Set(warnings)], evidence };
+}
+
+const formatCutoverPlan = (plan, evidence = null) => {
+  const paneCount = plan.targets.reduce((sum, target) => sum + target.panes.length, 0);
+  const lines = [
+    `Native cutover: ${plan.targets.length} agent group(s), ${paneCount} coding pane(s) → ${plan.runtimeUrl}`,
+  ];
+  for (const target of plan.targets) {
+    const imported = evidence?.[target.name];
+    const exact = imported ? Object.values(imported).filter((item) => !item.fresh).length : 0;
+    const fresh = imported ? Object.values(imported).filter((item) => item.fresh).length : 0;
+    lines.push(`  ${target.name}: ${target.counts.claude} Claude + ${target.counts.codex} Codex${
+      imported ? ` · ${exact} exact session(s)${fresh ? ` + ${fresh} proven-empty` : ""}` : ""}`);
+  }
+  return lines.join("\n");
+};
+
+async function rollbackCutoverReceipt(receipt, receiptPath, ctx) {
+  const listing = await nativeCutoverRequest(receipt.runtimeUrl, "/api/projects");
+  const importedIds = new Set(Object.values(receipt.imports || {}).flatMap((panes) => Object.values(panes)));
+  const importedAgents = (listing.projects || []).flatMap((project) => project.agents || [])
+    .filter((agent) => importedIds.has(agent.id));
+  const running = importedAgents.filter((agent) => agent.running);
+  if (running.length) {
+    throw new Error(`rollback refused: ${running.length} imported native turn(s) are still running`);
+  }
+  if (receipt.manageServices) {
+    for (const target of [...receipt.targets].reverse()) await stopNativeServices(target, { force: true });
+  }
+  restoreCutoverConfigs({
+    sourcePath: receipt.paths.sourcePath,
+    generatedPath: receipt.paths.generatedPath,
+    sourceYaml: receipt.original.sourceYaml,
+    generatedYaml: receipt.original.generatedYaml,
+  });
+  signalBridgeReload();
+  const restarted = [];
+  for (const target of receipt.targets) {
+    await ensureAndAttach(ctx, target.name, ctx.configPath);
+    if (!(await hasSession(ctx, target.name))) throw new Error(`${target.name}: tmux rollback did not restart`);
+    restarted.push(target.name);
+  }
+  recordCutoverPhase(receipt, "rolled_back", { restarted });
+  writeCutoverReceipt(receipt, receiptPath);
+  return restarted;
+}
+
+export async function cmdCutover(args, ctx) {
+  const { flags, positional } = parseFlags(args, FLAG_SPECS.cutover);
+  if (flags.rollback) {
+    const receipt = readCutoverReceipt(flags.rollback);
+    const restarted = await rollbackCutoverReceipt(receipt, flags.rollback, ctx);
+    console.log(`Native cutover rolled back byte-exactly; tmux restarted: ${restarted.join(", ")}.`);
+    return;
+  }
+  if (flags.apply && flags.dry) throw new Error("choose either --apply or --dry");
+  const sourcePath = agentmuxYamlPath(ctx);
+  const generatedPath = ctx.configPath;
+  const sourceYaml = readFileSync(sourcePath, "utf8");
+  const generatedYaml = readFileSync(generatedPath, "utf8");
+  const sourceDoc = yaml.load(sourceYaml);
+  const generatedConfig = yaml.load(generatedYaml) || {};
+  const plan = planNativeCutover({
+    sourceDoc,
+    generatedConfig,
+    names: positional,
+    all: Boolean(flags.all),
+    runtimeUrl: flags.runtime,
+    manageServices: Boolean(flags["manage-services"]),
+    dropServices: Boolean(flags["drop-services"]),
+    dropShells: Boolean(flags["drop-shells"]),
+  });
+  console.log(formatCutoverPlan(plan));
+  for (const warning of plan.warnings) console.log(`  WARNING: ${warning}`);
+  if (plan.blockers.length) throw new Error(`cutover blocked:\n- ${plan.blockers.join("\n- ")}`);
+
+  const checked = await collectCutoverEvidence(ctx, plan, { allowEmpty: Boolean(flags["allow-empty"]) });
+  for (const warning of checked.warnings) console.log(`  WARNING: ${warning}`);
+  if (checked.blockers.length) throw new Error(`cutover preflight blocked:\n- ${checked.blockers.join("\n- ")}`);
+  console.log(formatCutoverPlan(plan, checked.evidence));
+  if (!flags.apply) {
+    console.log("DRY RUN GREEN · no process or config changed. Re-run with --apply to cut over.");
+    return;
+  }
+
+  const receipt = createCutoverReceipt({
+    plan,
+    sourcePath,
+    generatedPath,
+    sourceYaml,
+    generatedYaml,
+  });
+  receipt.manageServices = Boolean(flags["manage-services"]);
+  const receiptPath = writeCutoverReceipt(receipt);
+  const importedIds = {};
+  const killed = [];
+  const managedServiceTargets = [];
+  let configsWritten = false;
+  try {
+    for (const target of plan.targets) {
+      const project = await ensureCutoverProject(target);
+      importedIds[target.name] = {};
+      receipt.imports[target.name] = {};
+      for (const paneSpec of target.panes) {
+        const proof = checked.evidence[target.name][paneSpec.pane];
+        if (proof.fresh) {
+          importedIds[target.name][paneSpec.pane] = null;
+          receipt.imports[target.name][paneSpec.pane] = null;
+          continue;
+        }
+        const idempotencyKey = `amux-session-import:${cutoverHash([
+          target.generatedId, target.name, paneSpec.pane, proof.sessionId, proof.sourceCwd,
+        ].join(":"))}`;
+        const imported = await nativeCutoverRequest(target.runtimeUrl,
+          `/api/projects/${project.id}/session-imports`, {
+            method: "POST",
+            body: {
+              idempotencyKey,
+              name: `${target.name}:${paneSpec.pane}`,
+              engine: paneSpec.engine,
+              model: proof.model,
+              effort: proof.effort,
+              address: { session: target.name, pane: paneSpec.pane },
+              permissionMode: "automation",
+              sessionId: proof.sessionId,
+              sourceCwd: proof.sourceCwd,
+            },
+          });
+        if (imported.sessionId !== proof.sessionId || imported.running) {
+          throw new Error(`${target.name}:${paneSpec.pane}: runtime import continuity mismatch`);
+        }
+        importedIds[target.name][paneSpec.pane] = imported.id;
+        receipt.imports[target.name][paneSpec.pane] = imported.id;
+      }
+      recordCutoverPhase(receipt, "imported", { target: target.name });
+      writeCutoverReceipt(receipt, receiptPath);
+    }
+
+    // Import is read-only against engine history. Re-prove every writer is
+    // still idle and every delivery lane empty immediately before teardown.
+    const finalCheck = await collectCutoverEvidence(ctx, plan, { allowEmpty: Boolean(flags["allow-empty"]) });
+    if (finalCheck.blockers.length) {
+      throw new Error(`cutover changed during import:\n- ${finalCheck.blockers.join("\n- ")}`);
+    }
+    if (cutoverHash(readFileSync(sourcePath, "utf8")) !== receipt.original.sourceSha256
+        || cutoverHash(readFileSync(generatedPath, "utf8")) !== receipt.original.generatedSha256) {
+      throw new Error("fleet config changed after preflight; retry from the new config");
+    }
+
+    for (const target of plan.targets) {
+      await killSession(ctx, target.name);
+      killed.push(target.name);
+      if (flags["manage-services"] && target.services.length) {
+        await startNativeServices(target);
+        managedServiceTargets.push(target);
+      }
+      recordCutoverPhase(receipt, "tmux_stopped", { target: target.name });
+      writeCutoverReceipt(receipt, receiptPath);
+    }
+
+    const nextSource = sourceAfterNativeCutover(sourceDoc, plan, importedIds, {
+      dropServices: Boolean(flags["drop-services"]),
+      dropShells: Boolean(flags["drop-shells"]),
+    });
+    const next = materializeCutoverConfigs({
+      sourceDoc: nextSource,
+      currentGeneratedYaml: generatedYaml,
+    });
+    writeCutoverConfigs({ sourcePath, generatedPath, ...next });
+    configsWritten = true;
+    const bridgePid = signalBridgeReload();
+    recordCutoverPhase(receipt, "config_switched", { bridgePid });
+    writeCutoverReceipt(receipt, receiptPath);
+
+    for (const target of plan.targets) {
+      for (const paneSpec of target.panes) {
+        const adopted = await ctx.nativeRuntime.ensureTarget(target.name, paneSpec.pane);
+        const expected = checked.evidence[target.name][paneSpec.pane].sessionId;
+        if (adopted.agent.sessionId !== expected || adopted.agent.running) {
+          throw new Error(`${target.name}:${paneSpec.pane}: post-switch continuity verification failed`);
+        }
+      }
+    }
+    recordCutoverPhase(receipt, "complete", { killed, verifiedPanes: plan.targets
+      .reduce((sum, target) => sum + target.panes.length, 0) });
+    writeCutoverReceipt(receipt, receiptPath);
+    console.log(`CUTOVER COMPLETE · receipt ${receiptPath}`);
+    console.log(`Rollback: amux cutover --rollback '${receiptPath}'`);
+  } catch (error) {
+    if (killed.length || configsWritten) {
+      try {
+        for (const target of [...managedServiceTargets].reverse()) {
+          await stopNativeServices(target, { force: true });
+        }
+        restoreCutoverConfigs({
+          sourcePath,
+          generatedPath,
+          sourceYaml: receipt.original.sourceYaml,
+          generatedYaml: receipt.original.generatedYaml,
+        });
+        signalBridgeReload();
+        for (const name of killed) await ensureAndAttach(ctx, name, ctx.configPath);
+        recordCutoverPhase(receipt, "rolled_back", { reason: error.message, restarted: killed });
+      } catch (rollbackError) {
+        recordCutoverPhase(receipt, "rollback_failed", {
+          reason: error.message,
+          rollbackError: rollbackError.message,
+        });
+        writeCutoverReceipt(receipt, receiptPath);
+        throw new Error(`${error.message}; automatic rollback failed: ${rollbackError.message}; receipt ${receiptPath}`);
+      }
+    } else {
+      recordCutoverPhase(receipt, "failed", { reason: error.message });
+    }
+    writeCutoverReceipt(receipt, receiptPath);
+    throw new Error(`${error.message}; no fleet switch remains active; receipt ${receiptPath}`);
+  }
 }
 
 async function cmdStopAll(ctx) {
@@ -2378,6 +2790,8 @@ async function cmdRevive(ctx, flags) {
   console.log(`Boot: ${new Date(bootMs).toLocaleString("sv-SE")}`);
 
   const agents = listAgents(ctx.configPath);
+  const nativeServiceTargets = configuredServiceTargets(ctx)
+    .filter((target) => target.backend === "native");
   const panes = [];
   for (const a of agents) {
     (a.panes || []).forEach((p, i) => {
@@ -2416,6 +2830,7 @@ async function cmdRevive(ctx, flags) {
   const plan = planRevive({ events, bootMs, panes, statuses, codexInterruptions });
 
   console.log(`Paneler: ${panes.length} konfigurerade coding-panes säkras (idempotent).`);
+  console.log(`Tjänster: ${nativeServiceTargets.reduce((sum, target) => sum + target.services.length, 0)} native-processer säkras (idempotent).`);
   if (!plan.briefs.length) console.log("Avbrutna mitt i arbete: inga.");
   for (const b of plan.briefs) {
     console.log(`  ⚡ ${b.agent}:${b.pane}  avbruten ${new Date(b.interruptedAtMs).toTimeString().slice(0, 8)} → resume-brief${flags.dry ? " (dry)" : ""}`);
@@ -2428,6 +2843,10 @@ async function cmdRevive(ctx, flags) {
       else await ctx.agent.ensureReady(p.agent, p.pane);
     }
     catch (err) { console.error(`  ensureReady ${p.agent}:${p.pane} misslyckades: ${err.message.split("\n")[0]}`); }
+  }
+  for (const target of nativeServiceTargets) {
+    try { await startNativeServices(target); }
+    catch (err) { console.error(`  services ${target.name} misslyckades: ${err.message.split("\n")[0]}`); }
   }
   for (const b of plan.briefs) {
     const sent = await sendToPane(ctx, b.agent, b.pane, reviveBrief(b.interruptedAtMs, bootMs));
@@ -2772,6 +3191,7 @@ async function cmdDoctor(ctx) {
     }
   } catch { /* no log / no procs: nothing to flag */ }
 
+  const tmuxRequired = Boolean(cfgError) || agents.some((agent) => agent.backend !== "native");
   const checks = [
     checkBridgeProcess({ pids, supervised }),
     checkBridgeMode({ mode: readBridgeMode(), running: pids.length > 0 }),
@@ -2780,8 +3200,8 @@ async function cmdDoctor(ctx) {
     checkHooksInstalled({ settings, hookFileExists }),
     checkLedger({ stat: ledgerStat }),
     checkContextBridge({ claudePanes, pushing }),
-    checkTmuxVersion({ version: tmuxVersion }),
-    checkTmux({ sessions, error: tmuxError }),
+    checkTmuxVersion({ version: tmuxVersion, required: tmuxRequired }),
+    checkTmux({ sessions, error: tmuxError, required: tmuxRequired }),
     checkConfig({ agents, error: cfgError }),
     checkSuggestionsBoard({
       configured: suggestionsConfigured,
@@ -3997,7 +4417,7 @@ Usage:
                                   (preserves live coding-agent panes — use instead of stop+start
                                    when only services died)
   agent serve                     Run Discord bridge here; Ctrl+C stops it
-    --detach, -d                  Run managed in a background tmux session
+    --detach, -d                  Run under a managed tmux-free supervisor
   agent stop                      Stop Discord bridge (no arg = bridge)
   agent stop --all                Stop bridge + all agent sessions
   agent runtime status            Native AMUX Code process + engine health
@@ -4009,6 +4429,18 @@ Usage:
     --state-dir PATH              PID/log ownership directory
     --no-legacy-migration         Do not import checkout-local spike history
     --force                       Permit stopping active turns
+  agent services status [name]    Native service process ownership + logs
+  agent services start [name]     Start configured native services without tmux
+  agent services stop [name]      Stop only ownership-verified process groups
+  agent cutover <name...>         Dry-run exact-session tmux → native migration
+    --all                         Target every remaining tmux agent group
+    --runtime URL                 Loopback native runtime (default 127.0.0.1:8811)
+    --apply                       Execute only after two idle/queue/session proofs
+    --drop-services               Explicitly discard configured service panes
+    --manage-services             Move service panes to the tmux-free supervisor
+    --drop-shells                 Explicitly discard configured shell panes
+    --allow-empty                 Fresh sessions only for proven-empty panes
+    --rollback RECEIPT            Byte-exact config restore + tmux restart
   agent log <name|:nr> [-n N]     Show agent output (default: last 3 turns from jsonl)
     -n N                          Number of turns (jsonl) or lines (--tmux)
     -p <pane>                     Target pane
@@ -4117,6 +4549,18 @@ Socket: /tmp/openclaw-claude.sock`);
 const FLAG_SPECS = {
   send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "notify-user": "boolean", "notify-me": "boolean", force: "boolean", stdin: "boolean", "idempotency-key": "string", "wait-ms": "number" },
   runtime: { port: "number", "data-dir": "string", "state-dir": "string", "no-legacy-migration": "boolean", force: "boolean" },
+  services: { force: "boolean" },
+  cutover: {
+    all: "boolean",
+    runtime: "string",
+    apply: "boolean",
+    dry: "boolean",
+    "drop-services": "boolean",
+    "manage-services": "boolean",
+    "drop-shells": "boolean",
+    "allow-empty": "boolean",
+    rollback: "string",
+  },
   wait: { p: "number", t: "number", a: "boolean" },
   log: {
     n: "number", p: "number",
@@ -4298,6 +4742,12 @@ export async function dispatch(argv, ctx) {
 
     case "runtime":
       return cmdRuntime(rest, ctx);
+
+    case "services":
+      return cmdServices(rest, ctx);
+
+    case "cutover":
+      return cmdCutover(rest, ctx);
 
     case "wait": {
       if (!rest[0]) { console.error("Usage: agent wait <name|:nr> [-t S] [-p N]"); process.exit(1); }

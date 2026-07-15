@@ -562,6 +562,26 @@ export function latestCodexSessionIdentity(paneDir, options) {
 }
 
 /**
+ * Resolve one persisted Codex rollout by its immutable thread id and exact
+ * starting cwd. Cutover uses this stricter lookup than latestSessionFor(): an
+ * ancestor match is useful for displaying history, but is not proof that a
+ * session belongs to the pane being migrated.
+ */
+export function codexSessionIdentityById(sessionId, paneDir, {
+  sessionDirs = codexSessionDirs(),
+} = {}) {
+  const expectedId = String(sessionId || "");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(expectedId)) {
+    return null;
+  }
+  const matches = sessionDirs.flatMap((base) => findJsonlFiles(base, 0, []))
+    .map((path) => ({ path, meta: readSessionMeta(path) }))
+    .filter(({ meta }) => String(meta?.id || "") === expectedId && meta?.cwd === paneDir);
+  if (matches.length !== 1) return null;
+  return Object.freeze({ sessionId: expectedId, cwd: paneDir, path: matches[0].path });
+}
+
+/**
  * Latest codex jsonl mtime for a pane in epoch ms, or null when no
  * matching session exists. Cheap, single fs.stat. Mirrors the claude
  * latestJsonlMtime() helper so the watcher's freshness/grace logic can be

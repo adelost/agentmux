@@ -1,4 +1,5 @@
 import { feature, component, expect } from "bdd-vitest";
+import yaml from "js-yaml";
 import {
   parseConfig,
   generateChannelNames,
@@ -205,8 +206,8 @@ agents:
     }],
   });
 
-  component("native fleets reject tmux-only service panes", {
-    given: ["invalid mixed backend", () => `
+  component("native fleets keep managed services out of agent addresses", {
+    given: ["a native agent with an externally supervised service", () => `
 guild: "1"
 agents:
   mixed:
@@ -215,8 +216,31 @@ agents:
     claude: 1
     services: [npm run dev]
 `],
+    when: ["parsing and generating", (source) => {
+      const parsed = parseConfig(source);
+      return {
+        parsed: parsed.agents.get("mixed"),
+        generated: yaml.load(generateAgentsYaml(parsed.agents, new Map(), new Map())).mixed,
+      };
+    }],
+    then: ["the command remains supervisor input but never becomes a fake native pane", ({ parsed, generated }) => {
+      expect(parsed.services).toEqual(["npm run dev"]);
+      expect(generated.panes).toEqual([expect.objectContaining({ cmd: "native:claude" })]);
+    }],
+  });
+
+  component("native fleets reject interactive shell panes", {
+    given: ["a native agent with an unsupported interactive shell", () => `
+guild: "1"
+agents:
+  mixed:
+    dir: /tmp/mixed
+    backend: native
+    claude: 1
+    shells: 1
+`],
     when: ["parsing", (source) => () => parseConfig(source)],
-    then: ["fails clearly", (run) => expect(run).toThrow("cannot define tmux services or shells")],
+    then: ["fails clearly", (run) => expect(run).toThrow("cannot define tmux shell panes")],
   });
 
   component("preserves an explicit non-default layout", {

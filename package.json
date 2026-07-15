@@ -1,7 +1,7 @@
 {
   "name": "agentmux",
-  "version": "1.23.32",
-  "description": "Discord bridge for tmux-based coding agents (Claude Code, Codex)",
+  "version": "1.24.0",
+  "description": "Local bridge and native workspace for coding agents (Claude Code, Codex)",
   "type": "module",
   "bin": {
     "amux": "./bin/agent-cli.mjs",

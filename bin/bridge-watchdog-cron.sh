@@ -76,7 +76,9 @@ if [ -z "$PIDS" ] && ! supervisor_alive; then
   # available only after an explicit `amux serve --detach` wrote managed.
   MODE=$(cat "$MODE_FILE" 2>/dev/null || echo manual)
   [ "$MODE" = "managed" ] || exit 0
-  # Whole stack dead. Start detached; start.sh supervises from here on.
+  # Whole stack dead. Start detached; start.sh supervises from here on. The
+  # watchdog is itself the trusted launcher in this recovery path, so it does
+  # not need the CLI's interactive ownership receipt.
   if rate_limited; then log "bridge+supervisor DEAD but rate-limited, skipping"; exit 0; fi
   log "bridge+supervisor dead -> starting bin/start.sh detached"
   record_intervention

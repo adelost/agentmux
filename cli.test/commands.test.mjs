@@ -1,11 +1,12 @@
 import { feature, unit, component, expect } from "bdd-vitest";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { Readable } from "stream";
 import yaml from "js-yaml";
 import { parseFlags, readPromptFromStdin, validateAgentAndPane, loadSourceYaml,
   saveSourceAndRegenerate, shouldRouteWatchToAgent, dispatch } from "../cli/commands.mjs";
+import { createBridgeLifecycle } from "../cli/bridge.mjs";
 
 feature("parseFlags", () => {
   unit("automation prompts are read from bounded stdin without entering argv", {
@@ -211,46 +212,54 @@ ai:
 
 feature("serve readiness", () => {
   component("waits for ready marker instead of pidfile alone", {
-    given: ["fake tmux session that writes pid before ready", () => {
+    given: ["a managed supervisor that writes pid before ready", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-serve-"));
+      const bridgeDir = join(root, "bridge");
+      mkdirSync(join(bridgeDir, "bin"), { recursive: true });
       const pidfile = join(root, "agentmux.pid");
       const readyFile = join(root, "agentmux.ready");
       const modeFile = join(root, "bridge-mode");
-      const oldPidfile = process.env.PIDFILE;
-      const oldReadyFile = process.env.READY_FILE;
-      const oldModeFile = process.env.AMUX_BRIDGE_MODE_FILE;
-      process.env.PIDFILE = pidfile;
-      process.env.READY_FILE = readyFile;
-      process.env.AMUX_BRIDGE_MODE_FILE = modeFile;
-      const cleanup = () => {
-        if (oldPidfile === undefined) delete process.env.PIDFILE;
-        else process.env.PIDFILE = oldPidfile;
-        if (oldReadyFile === undefined) delete process.env.READY_FILE;
-        else process.env.READY_FILE = oldReadyFile;
-        if (oldModeFile === undefined) delete process.env.AMUX_BRIDGE_MODE_FILE;
-        else process.env.AMUX_BRIDGE_MODE_FILE = oldModeFile;
-        rmSync(root, { recursive: true, force: true });
+      const start = join(bridgeDir, "bin", "start.sh");
+      writeFileSync(start, `#!/usr/bin/env bash
+set -u
+cleanup() { rm -f "$PIDFILE" "$READY_FILE"; exit 0; }
+trap cleanup TERM INT
+echo $$ > "$PIDFILE"
+sleep 0.65
+echo $$ > "$READY_FILE"
+while true; do sleep 1 & wait $! || true; done
+`);
+      chmodSync(start, 0o755);
+      const env = {
+        ...process.env,
+        HOME: root,
+        PIDFILE: pidfile,
+        READY_FILE: readyFile,
+        AMUX_BRIDGE_MODE_FILE: modeFile,
+        AMUX_BRIDGE_SERVICE_DIR: join(root, "bridge-service"),
+        AMUX_BRIDGE_LOG: join(root, "bridge.log"),
       };
       const ctx = {
         socket: "/tmp/fake.sock",
         tmux: async (cmd) => {
           if (cmd.startsWith("has-session")) throw new Error("no session");
-          if (cmd.startsWith("new-session")) {
-            writeFileSync(pidfile, String(process.pid));
-            setTimeout(() => writeFileSync(readyFile, String(process.pid)), 650);
-          }
           return { stdout: "" };
         },
       };
-      return { ctx, cleanup };
+      return {
+        ctx,
+        lifecycle: createBridgeLifecycle({ bridgeDir, env }),
+        cleanup: () => rmSync(root, { recursive: true, force: true }),
+      };
     }],
-    when: ["running serve", async ({ ctx, cleanup }) => {
+    when: ["running serve", async ({ ctx, lifecycle, cleanup }) => {
       const logs = [];
       const originalLog = console.log;
       console.log = (...args) => { logs.push(args.join(" ")); };
       const start = Date.now();
       try {
-        await dispatch(["serve", "--detach"], ctx);
+        await lifecycle.serve({ detach: true }, ctx);
+        await lifecycle.stop(ctx);
         return { logs: logs.join("\n"), elapsed: Date.now() - start, cleanup };
       } finally {
         console.log = originalLog;

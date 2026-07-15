@@ -3,7 +3,11 @@
 
 # Native runtime rollback
 
-This procedure applies to one isolated canary target at a time. It does not authorize a fleet migration. Discord and the tmux bridge remain available as the fallback until the native replacement gate is green and a separate migration is approved.
+This procedure applies to one isolated canary target at a time. Fleet migration
+uses the separately gated [`amux cutover` contract](native-cutover.md), which
+automates exact-session import, receipts and rollback. Discord and the tmux
+bridge remain available as the fallback until the native replacement gate is
+green and a migration is explicitly applied.
 
 ## Preconditions
 

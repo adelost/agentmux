@@ -42,8 +42,8 @@ export function parseConfig(yamlContent) {
     if (!["tmux", "native"].includes(backend)) {
       throw new Error(`agentmux.yaml: agent '${name}' has unknown backend '${backend}'`);
     }
-    if (backend === "native" && ((config.services?.length ?? 0) > 0 || (config.shells ?? 0) > 0)) {
-      throw new Error(`agentmux.yaml: native agent '${name}' cannot define tmux services or shells`);
+    if (backend === "native" && (config.shells ?? 0) > 0) {
+      throw new Error(`agentmux.yaml: native agent '${name}' cannot define tmux shell panes`);
     }
     // `labels` keyed by absolute pane index (0 = first claude, then
     // service panes, then shells). Coerce keys to numbers so writers
@@ -382,19 +382,24 @@ export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = 
       panes.push(pane);
       paneIdx++;
     }
-    for (let i = 0; i < config.services.length; i++) {
-      const pane = { name: `service-${i + 1}`, cmd: config.services[i] };
-      const label = labelFor(paneIdx);
-      if (label) pane.label = label;
-      panes.push(pane);
-      paneIdx++;
-    }
-    for (let i = 0; i < config.shells; i++) {
-      const pane = { name: `shell-${i + 1}`, cmd: "bash" };
-      const label = labelFor(paneIdx);
-      if (label) pane.label = label;
-      panes.push(pane);
-      paneIdx++;
+    // Native services are process-supervised outside tmux and therefore do
+    // not consume an addressable agent pane. Interactive shell panes have no
+    // native equivalent and are rejected above instead of disappearing.
+    if (config.backend !== "native") {
+      for (let i = 0; i < config.services.length; i++) {
+        const pane = { name: `service-${i + 1}`, cmd: config.services[i] };
+        const label = labelFor(paneIdx);
+        if (label) pane.label = label;
+        panes.push(pane);
+        paneIdx++;
+      }
+      for (let i = 0; i < config.shells; i++) {
+        const pane = { name: `shell-${i + 1}`, cmd: "bash" };
+        const label = labelFor(paneIdx);
+        if (label) pane.label = label;
+        panes.push(pane);
+        paneIdx++;
+      }
     }
     entry.panes = panes;
 

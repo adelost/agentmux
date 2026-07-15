@@ -27,7 +27,7 @@ amux lint
 
 ```bash
 amux serve            # visible foreground process; Ctrl+C stops it
-amux serve --detach   # managed background process in tmux
+amux serve --detach   # managed tmux-free background supervisor
 amux doctor           # health, heartbeat, version, and ownership mode
 amux stop             # intentional stop; watchdog does not revive it
 amux sync             # sync through the running bridge without changing ownership
@@ -35,11 +35,27 @@ amux sync --offline   # standalone sync; safely bounces managed bridges only
 ```
 
 Foreground is the default so startup failures and restart loops remain visible.
-The bridge is still discoverable by PID and heartbeat, so agents use
-`amux doctor` rather than assuming it must exist inside tmux.
+The detached supervisor is identity-proven through its private process receipt,
+and the bridge remains discoverable by PID and heartbeat. Agents use `amux
+doctor` rather than assuming the bridge must exist inside tmux.
 For a manually owned bridge, standalone sync refuses to stop the foreground
 process. Passing `amux sync --offline --detach` is the explicit instruction to
 transfer it to managed background ownership.
+
+## Native cutover
+
+```bash
+amux cutover --all --runtime http://127.0.0.1:8813 --manage-services --drop-shells --allow-empty
+amux cutover --all --runtime http://127.0.0.1:8813 --manage-services --drop-shells --allow-empty --apply
+amux services status
+amux cutover --rollback ~/.agentmux/native-cutovers/<receipt>.json
+```
+
+The first command is always read-only. `--apply` proceeds only after every
+pane has two idle proofs and an empty durable lane. Existing engine sessions
+must be imported exactly; `--allow-empty` permits a fresh session only where
+both the session identity and persisted turn history are absent. See [the
+full cutover and rollback contract](native-cutover.md).
 
 ## Sending Work
 

@@ -31,6 +31,7 @@ import { appendEvent as appendFleetEvent } from "../../core/events.mjs";
 import { readTailWindow } from "../../core/jsonl-reader.mjs";
 import { readQuotaSnapshot } from "../../core/quota-usage.mjs";
 import { ensureCodexExecutionSafety } from "../../core/codex-profiles.mjs";
+import { persistedSessionIdentity } from "../../core/native-session-identity.mjs";
 import {
   CLAUDE_AUTONOMOUS_ARGS,
   CODEX_AUTONOMOUS_THREAD_POLICY,
@@ -58,6 +59,7 @@ const TOOL_SUMMARY_MAX_CHARS = 600;
 const TOOL_RESULT_MAX_CHARS = 1_200;
 const PROMPT_JOURNAL_DEFAULT_LIMIT = 100;
 const PROMPT_JOURNAL_MAX_LIMIT = 500;
+const MESSAGE_QUEUE_MAX_PER_AGENT = 100;
 const QUOTA_CACHE_MS = 60 * 1_000;
 
 let quotaCache = { at: 0, payload: null };
@@ -68,7 +70,7 @@ const DEFAULT_MODELS = Object.freeze({
 });
 const DEFAULT_EFFORTS = Object.freeze({
   claude: ["low", "medium", "high", "xhigh", "max"],
-  codex: ["low", "medium", "high", "xhigh"],
+  codex: ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
 });
 const DEFAULT_EFFORT = Object.freeze({ claude: "medium", codex: "medium" });
 
@@ -470,6 +472,7 @@ export function createWebUi(options = {}) {
   const receipts = {
     projectCreates: new Map(),
     agentCreates: new Map(),
+    sessionImports: new Map(),
     messages: new Map(),
     sideQuestions: new Map(),
     settings: new Map(),
@@ -480,6 +483,12 @@ export function createWebUi(options = {}) {
   };
   const sideRuns = new Map();
   const sideChildren = new Set();
+  const queuedMessages = new Map();
+  let shuttingDown = false;
+
+  const queuedMessageCount = (agent) => [...queuedMessages.entries()]
+    .filter(([operationKey, entry]) => entry.id === agent.id
+      && operationKey !== agent.activeOperationKey).length;
 
   const rememberReceipt = (map, key, value, limit = Number.POSITIVE_INFINITY) => {
     map.delete(key);
@@ -529,6 +538,7 @@ export function createWebUi(options = {}) {
         idleMs: autoCompactIdleMs,
         dueAt: agent.autoCompactDueAt,
       },
+      queuedMessages: queuedMessageCount(agent),
       pinnedAt: agent.pinnedAt,
       createdAt: agent.createdAt,
       updatedAt: agent.updatedAt,
@@ -550,6 +560,7 @@ export function createWebUi(options = {}) {
 
   const promptTurnStatus = (operationKey, receipt) => {
     const agent = agents.get(receipt.id);
+    if (queuedMessages.has(operationKey) && agent?.activeOperationKey !== operationKey) return "queued";
     if (agent?.running && agent.activeOperationKey === operationKey) return "running";
     if (!receipt.completedAt || receipt.code == null) return "accepted";
     if (receipt.permissionDenied) return "permission_denied";
@@ -607,6 +618,7 @@ export function createWebUi(options = {}) {
       })),
       receipts: Object.fromEntries(Object.entries(receipts)
         .map(([name, map]) => [name, Object.fromEntries(map)])),
+      queuedMessages: Object.fromEntries(queuedMessages),
     }, null, 2);
     const temporary = `${registryPath}.${process.pid}.tmp`;
     writeFileSync(temporary, body, { mode: 0o600 });
@@ -665,6 +677,21 @@ export function createWebUi(options = {}) {
     for (const [name, map] of Object.entries(receipts)) {
       for (const [key, value] of Object.entries(stored.receipts?.[name] ?? {})) map.set(key, value);
     }
+    for (const [key, value] of Object.entries(stored.queuedMessages ?? {})) {
+      if (agents.has(value?.id) && receipts.messages.has(key)) queuedMessages.set(key, value);
+    }
+    let recoveredUncertainTurns = false;
+    for (const [key, entry] of [...queuedMessages.entries()]) {
+      if (!entry.startedAt) continue;
+      const receipt = receipts.messages.get(key);
+      Object.assign(receipt, {
+        completedAt: now(),
+        code: -1,
+        error: "native runtime restarted after submission; delivery outcome is uncertain",
+      });
+      queuedMessages.delete(key);
+      recoveredUncertainTurns = true;
+    }
     let upgradedAgentReceipts = false;
     for (const receipt of receipts.agentCreates.values()) {
       const agent = agents.get(receipt.id);
@@ -674,7 +701,7 @@ export function createWebUi(options = {}) {
       receipt.hash = identityHash;
       upgradedAgentReceipts = true;
     }
-    if (upgradedAgentReceipts) saveRegistry();
+    if (upgradedAgentReceipts || recoveredUncertainTurns) saveRegistry();
     return true;
   };
 
@@ -1022,6 +1049,7 @@ export function createWebUi(options = {}) {
               type: "web",
               subtype: "user",
               text,
+              historical: true,
               at: entry.timestamp ?? 0,
               operationKey: turnOperationKey,
             });
@@ -1071,6 +1099,7 @@ export function createWebUi(options = {}) {
               type: "web",
               subtype: "user",
               text,
+              historical: true,
               at: entry.timestamp ?? 0,
               operationKey: turnOperationKey,
             });
@@ -1293,6 +1322,7 @@ export function createWebUi(options = {}) {
           ...(error?.message ? { error: String(error.message).slice(0, 4_000) } : {}),
         });
       }
+      queuedMessages.delete(operationKey);
     }
     saveRegistry();
     if (operation === "turn") {
@@ -1323,6 +1353,7 @@ export function createWebUi(options = {}) {
       });
     }
     scheduleAutoCompact(agent);
+    setImmediate(() => drainQueuedMessages(agent));
   };
 
   const mapClaudeEvent = (agent, event) => {
@@ -1589,6 +1620,25 @@ export function createWebUi(options = {}) {
       void runCodexOperation(agent, rawPrompt, attachments, "turn", operationKey);
     }
   };
+
+  const nextQueuedMessage = (agent) => [...queuedMessages.entries()]
+    .filter(([, entry]) => entry.id === agent.id)
+    .sort(([, left], [, right]) => Number(left.acceptedAt) - Number(right.acceptedAt))[0] ?? null;
+
+  function drainQueuedMessages(agent) {
+    if (shuttingDown || agent.running) return false;
+    const next = nextQueuedMessage(agent);
+    if (!next) return false;
+    const [operationKey, entry] = next;
+    // Keep the entry persisted until finishOperation. If the runtime itself
+    // dies mid-turn, startup marks the outcome uncertain and refuses an
+    // automatic replay; deleting at launch would turn that crash window into
+    // silent loss.
+    entry.startedAt = now();
+    saveRegistry();
+    runTurn(agent, entry.prompt, entry.attachments, operationKey);
+    return true;
+  }
 
   const runCompact = (agent, automatic = false, operationKey = null, focus = "") => {
     const operation = automatic ? "auto-compact" : "compact";
@@ -1884,7 +1934,7 @@ export function createWebUi(options = {}) {
       return;
     }
 
-    const projectMatch = pathname.match(new RegExp(`^/api/projects/(${UUID_PATTERN})(/agents|/uploads)?$`, "i"));
+    const projectMatch = pathname.match(new RegExp(`^/api/projects/(${UUID_PATTERN})(/agents|/session-imports|/uploads)?$`, "i"));
     if (projectMatch) {
       const project = projects.get(projectMatch[1]);
       if (!project) { json(response, 404, { error: "project-not-found" }); return; }
@@ -1954,6 +2004,84 @@ export function createWebUi(options = {}) {
         agents.set(agent.id, agent);
         project.updatedAt = now();
         rememberReceipt(receipts.agentCreates, key, { id: agent.id, hash: fingerprint });
+        saveRegistry();
+        json(response, 201, publicAgent(agent));
+        return;
+      }
+
+      if (request.method === "POST" && projectMatch[2] === "/session-imports") {
+        const body = await readJsonBody(request);
+        const key = cleanName(body?.idempotencyKey, 160);
+        const name = cleanName(body?.name);
+        const engine = body?.engine === "codex" ? "codex" : body?.engine === "claude" ? "claude" : "";
+        const model = cleanName(body?.model, 120) || models[engine]?.[0] || "";
+        const sessionId = cleanName(body?.sessionId, 80);
+        const sourceCwd = expandDirectory(body?.sourceCwd, homeDir);
+        const address = cleanAddress(body?.address);
+        if (!key) { json(response, 400, { error: "idempotency-key-required" }); return; }
+        if (!name) { json(response, 400, { error: "agent-name-required" }); return; }
+        if (!engine) { json(response, 400, { error: "unknown-engine" }); return; }
+        if (!address) { json(response, 400, { error: "valid-agent-address-required" }); return; }
+        if (body?.permissionMode !== "automation") {
+          json(response, 400, { error: "session-import-requires-automation" }); return;
+        }
+        if (body?.effort !== undefined && !DEFAULT_EFFORTS[engine].includes(body.effort)) {
+          json(response, 400, { error: "unknown-effort", allowed: DEFAULT_EFFORTS[engine] }); return;
+        }
+        const expectedSourceCwd = join(project.cwd, ".agents", String(address.pane));
+        if (sourceCwd !== expectedSourceCwd) {
+          json(response, 409, { error: "session-source-cwd-mismatch", expectedSourceCwd }); return;
+        }
+        const identity = persistedSessionIdentity(engine, sessionId, sourceCwd, {
+          homeDir,
+          sessionDirs: options.codexSessionDirs,
+        });
+        if (!identity) {
+          json(response, 409, { error: "persisted-session-not-found" }); return;
+        }
+        const effort = cleanEffort(engine, body?.effort);
+        const fingerprint = hashPayload({
+          projectId: project.id,
+          name,
+          engine,
+          address,
+          permissionMode: "automation",
+          sessionId,
+          sourceCwd,
+        });
+        const receipt = receiptResult(receipts.sessionImports, key, fingerprint);
+        if (receipt?.conflict) { json(response, 409, { error: "idempotency-key-conflict" }); return; }
+        if (receipt?.replayed) {
+          const agent = agents.get(receipt.id);
+          json(response, agent ? 200 : 410, agent
+            ? { ...publicAgent(agent), replayed: true }
+            : { error: "idempotency-target-deleted" });
+          return;
+        }
+        if ([...agents.values()].some((candidate) => candidate.address?.session === address.session
+            && Number(candidate.address?.pane) === Number(address.pane))) {
+          json(response, 409, { error: "agent-address-in-use" }); return;
+        }
+        if ([...agents.values()].some((candidate) => candidate.engine === engine
+            && candidate.sessionId === sessionId)) {
+          json(response, 409, { error: "persisted-session-in-use" }); return;
+        }
+        const agent = restoreAgent({
+          id: randomUUID(),
+          projectId: project.id,
+          name,
+          engine,
+          model,
+          effort,
+          address,
+          permissionMode: "automation",
+          sessionId,
+          createdAt: now(),
+          updatedAt: now(),
+        });
+        agents.set(agent.id, agent);
+        project.updatedAt = now();
+        rememberReceipt(receipts.sessionImports, key, { id: agent.id, hash: fingerprint });
         saveRegistry();
         json(response, 201, publicAgent(agent));
         return;
@@ -2211,7 +2339,6 @@ export function createWebUi(options = {}) {
           json(response, 200, { ...publicAgent(agent), replayed: true });
           return;
         }
-        if (agent.running) { json(response, 409, { error: "turn-in-progress" }); return; }
         const enginePrompt = agent.engine === "claude"
           ? attachmentPrompt(prompt, attachments)
           : attachmentPrompt(prompt, attachments.filter((attachment) => !attachment.image));
@@ -2227,6 +2354,35 @@ export function createWebUi(options = {}) {
           source: cleanPromptSource(body?.source, key),
           acceptedAt: now(),
         }, 1_000);
+        if (agent.running) {
+          const queuedForAgent = queuedMessageCount(agent);
+          if (queuedForAgent >= MESSAGE_QUEUE_MAX_PER_AGENT) {
+            receipts.messages.delete(key);
+            json(response, 429, { error: "message-queue-full", limit: MESSAGE_QUEUE_MAX_PER_AGENT });
+            return;
+          }
+          queuedMessages.set(key, {
+            id: agent.id,
+            prompt,
+            attachments,
+            acceptedAt: now(),
+          });
+          saveRegistry();
+          webEvent(agent, "message-queued", {
+            operationKey: key,
+            position: queuedForAgent + 1,
+            preview: promptPreview(prompt),
+          });
+          json(response, 202, publicAgent(agent));
+          return;
+        }
+        queuedMessages.set(key, {
+          id: agent.id,
+          prompt,
+          attachments,
+          acceptedAt: now(),
+          startedAt: now(),
+        });
         saveRegistry();
         runTurn(agent, prompt, attachments, key);
         json(response, 202, publicAgent(agent));
@@ -2364,6 +2520,11 @@ export function createWebUi(options = {}) {
     server.listen(port, host, () => {
       server.off("error", onError);
       const address = server.address();
+      for (const agent of agents.values()) {
+        if ([...queuedMessages.values()].some((entry) => entry.id === agent.id)) {
+          setImmediate(() => drainQueuedMessages(agent));
+        }
+      }
       resolveListen({
         host,
         port: typeof address === "object" ? address.port : port,
@@ -2372,10 +2533,20 @@ export function createWebUi(options = {}) {
     });
   });
 
-  const close = () => new Promise((resolveClose) => {
+  const close = async () => {
+    shuttingDown = true;
+    const activeCloses = [];
     for (const agent of agents.values()) {
       clearAutoCompact(agent);
-      try { agent.activeChild?.kill?.("SIGTERM"); } catch {}
+      const child = agent.activeChild;
+      if (child && agent.running) {
+        activeCloses.push(new Promise((resolveChild) => {
+          const timer = setTimeout(resolveChild, 1_000);
+          timer.unref?.();
+          child.once?.("close", () => { clearTimeout(timer); resolveChild(); });
+        }));
+      }
+      try { child?.kill?.("SIGTERM"); } catch {}
       for (const client of agent.clients) client.end();
       agent.clients.clear();
     }
@@ -2383,9 +2554,10 @@ export function createWebUi(options = {}) {
       try { child.kill?.("SIGTERM"); } catch {}
     }
     sideChildren.clear();
-    if (!server.listening) { resolveClose(); return; }
-    server.close(() => resolveClose());
-  });
+    await Promise.allSettled(activeCloses);
+    if (!server.listening) return;
+    await new Promise((resolveClose) => server.close(() => resolveClose()));
+  };
 
   return {
     server,
