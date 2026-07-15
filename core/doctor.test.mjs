@@ -317,4 +317,52 @@ feature("durable delivery queue health", () => {
       expect(result.hint).toContain("FIFO head");
     }],
   });
+
+  unit("the oldest live job is directly identifiable and points to amux queue", {
+    when: ["checking one nine-hour stall", () => checkDeliveryQueue({
+      stats: {
+        total: 1, pending: 1, pasting: 0, drafted: 0, submitted: 0, blocked: 0,
+        oldestCreatedAt: NOW - 9 * 60 * 60 * 1000,
+        oldestJob: {
+          id: "565b6ddcfce8ec7f0e688313d8245fdc",
+          agentName: "ai",
+          pane: 5,
+          status: "pending",
+        },
+      },
+      bridgeRunning: false,
+      now: NOW,
+    })],
+    then: ["doctor names the exact job and the one-command drilldown", (result) => {
+      expect(result.status).toBe(WARN);
+      expect(result.detail).toContain("565b6ddcfce8ec7f0e688313d8245fdc");
+      expect(result.detail).toContain("ai:5");
+      expect(result.detail).toContain("32400s");
+      expect(result.hint).toContain("amux queue");
+    }],
+  });
+
+  unit("unresolved terminal notices cannot make the spool look empty", {
+    when: ["checking a terminal receipt whose sender has not been notified", () => checkDeliveryQueue({
+      stats: {
+        total: 0,
+        pendingNotices: 1,
+        cancellationRequests: 0,
+        oldestCreatedAt: NOW - 60_000,
+        oldestJob: {
+          id: "terminal-notice-job",
+          agentName: "lsrc",
+          pane: 8,
+          status: "cancelled",
+        },
+      },
+      bridgeRunning: true,
+      now: NOW,
+    })],
+    then: ["doctor warns until the truthful receipt is visible", (result) => {
+      expect(result.status).toBe(WARN);
+      expect(result.detail).toContain("1 terminal notice");
+      expect(result.hint).toContain("amux queue");
+    }],
+  });
 });

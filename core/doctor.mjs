@@ -197,26 +197,33 @@ export function checkNativeRuntime({ configured = 0, online = 0, running = 0, de
 
 /** Durable prompts must be visible even when the bridge is intentionally off. */
 export function checkDeliveryQueue({ stats, bridgeRunning, now = Date.now() }) {
-  if (!stats?.total) return check("delivery queue", OK, "empty");
+  const supplementary = Number(stats?.pendingNotices || 0)
+    + Number(stats?.cancellationRequests || 0);
+  if (!stats?.total && !supplementary) return check("delivery queue", OK, "empty");
   const age = stats.oldestCreatedAt
-    ? `, oldest ${Math.max(0, Math.round((now - stats.oldestCreatedAt) / 1000))}s`
+    ? `${Math.max(0, Math.round((now - stats.oldestCreatedAt) / 1000))}s`
     : "";
+  const oldest = stats.oldestJob?.id
+    ? `, oldest ${stats.oldestJob.id} → ${stats.oldestJob.agentName}:${stats.oldestJob.pane}${age ? ` (${age})` : ""}`
+    : age ? `, oldest ${age}` : "";
   const parts = [
     stats.pending ? `${stats.pending} pending` : null,
     stats.pasting ? `${stats.pasting} pasting` : null,
     stats.drafted ? `${stats.drafted} drafted` : null,
     stats.submitted ? `${stats.submitted} submitted` : null,
     stats.blocked ? `${stats.blocked} blocked` : null,
+    stats.pendingNotices ? `${stats.pendingNotices} terminal notice${stats.pendingNotices === 1 ? "" : "s"}` : null,
+    stats.cancellationRequests ? `${stats.cancellationRequests} cancel request${stats.cancellationRequests === 1 ? "" : "s"}` : null,
   ].filter(Boolean).join(", ");
   if (!bridgeRunning) {
-    return check("delivery queue", WARN, `${parts}${age}; bridge is stopped`,
-      "start the bridge to resume the durable FIFO");
+    return check("delivery queue", WARN, `${parts}${oldest}; bridge is stopped`,
+      "run `amux queue`, then start the bridge to resume the durable FIFO");
   }
-  if (stats.blocked || stats.pasting || stats.drafted) {
-    return check("delivery queue", WARN, `${parts}${age}`,
-      "inspect delivery_queue events; the broker preserves the FIFO head until the composer is safe");
+  if (stats.blocked || stats.pasting || stats.drafted || supplementary) {
+    return check("delivery queue", WARN, `${parts}${oldest}`,
+      "run `amux queue`; the broker preserves the FIFO head until the composer is safe");
   }
-  return check("delivery queue", OK, `${parts}${age}; broker draining`);
+  return check("delivery queue", OK, `${parts}${oldest}; broker draining · inspect with amux queue`);
 }
 
 /** Worst status wins for the exit code: fail > warn > ok. */

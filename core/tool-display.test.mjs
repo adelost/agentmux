@@ -70,6 +70,15 @@ feature("tool display: provider-neutral vocabulary", () => {
     then: ["only the local operation remains", (result) => expect(result).toEqual({ content: "Run amux doctor", kind: "tool" })],
   });
 
+  unit("queue is a local command rather than an agent address", {
+    given: ["a quoted cancellation reason", () => 'const r = await tools.exec_command({"cmd":"amux queue cancel abc --reason \\"obsolete\\""}); text(r.output);'],
+    when: ["describing", (source) => describeCustomExec(source)],
+    then: ["the command is not rendered as an inter-agent send", (result) => {
+      expect(result.kind).toBe("tool");
+      expect(result.content).toContain("amux queue");
+    }],
+  });
+
   unit("scanner ignores tool-looking text inside strings", {
     given: ["patch text plus real apply", () => 'const patch = "mention tools.exec_command({})"; text(await tools.apply_patch(patch));'],
     when: ["extracting", (source) => extractNestedToolCalls(source)],
