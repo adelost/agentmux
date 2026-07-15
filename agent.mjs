@@ -150,7 +150,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.23.15";
+const HINTS_VERSION = "1.23.16";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -573,6 +573,10 @@ isn't in git is invisible to other agents.
    known — a merged-but-undeployed wave is an open loop, not a finished one.
    Only a deploy that costs money (rule 7) or crosses an explicitly reserved
    release boundary (e.g. lsrc:2 as sole Source releaser) waits for approval.
+   An edge served by MORE than one merging broker has exactly ONE designated
+   deploy owner (currently: skydive:2 for skydive.v1d.io); the other brokers
+   hand a merged wave to that owner for the deploy instead of racing the
+   edge — deploy authority follows the target, not the merge.
    If review finds a defect, the same feature owner fixes the root cause and
    adds permanent gates while other agents continue their own work
    undisturbed.
