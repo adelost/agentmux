@@ -20,12 +20,36 @@ import {
   symlinkSync,
   writeFileSync,
 } from "fs";
+import { cpSync } from "fs";
+import { homedir } from "os";
 import { basename, dirname, join, relative, resolve, sep } from "path";
 import { spawnSync } from "child_process";
 
 const MARKER_VERSION = 1;
 const CACHE_DIR = "agentmux-worktree-deps";
 const LINK_MARKER = ".agentmux-worktree-links.json";
+
+/** WHAT: Resolves the shared immutable-npm cache root for one repo. WHY: Keeps the dep tree OUT of `.git/`
+ * (tools like Vite 6 deny `**\/.git/**`, so a dep realpath inside `.git` breaks their own client — SKY-0105),
+ * while still sharing one content-addressed cache across every worktree of the repo (keyed by the shared
+ * git-common-dir) and surviving worktree removal. Override via AGENTMUX_WORKTREE_DEPS_DIR (tests, custom cache). */
+export function nodeCacheRoot(commonDir) {
+  const base = process.env.AGENTMUX_WORKTREE_DEPS_DIR
+    || join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "agentmux", CACHE_DIR);
+  return join(base, sha256(commonDir).slice(0, 16));
+}
+
+/** WHAT: Moves a directory even across filesystems. WHY: The cache now lives under ~/.cache, which may sit on a
+ * different mount than the worktree, so a bare rename can fail with EXDEV; fall back to copy-then-remove. */
+function moveDir(source, destination) {
+  try {
+    renameSync(source, destination);
+  } catch (error) {
+    if (error?.code !== "EXDEV") throw error;
+    cpSync(source, destination, { recursive: true, verbatimSymlinks: true });
+    rmSync(source, { recursive: true, force: true });
+  }
+}
 
 /** WHAT: Dispatches one argv-safe child process. WHY: Keeps shell interpolation out of installs and gates. */
 export function runWorktreeCommand(command, args = [], {
@@ -335,7 +359,9 @@ function promoteNodeCache({ root, cacheEntry, input }) {
   mkdirSync(cacheParent, { recursive: true });
   const staging = `${cacheEntry}.tmp-${process.pid}-${randomUUID()}`;
   mkdirSync(staging);
-  renameSync(join(root, "node_modules"), join(staging, "node_modules"));
+  // node_modules moves from the worktree into the cache root, which may be on a
+  // different filesystem now that the cache lives under ~/.cache (SKY-0105).
+  moveDir(join(root, "node_modules"), join(staging, "node_modules"));
   writeFileSync(join(staging, "manifest.json"), `${JSON.stringify({ version: MARKER_VERSION, input }, null, 2)}\n`);
   try {
     renameSync(staging, cacheEntry);
@@ -364,7 +390,7 @@ export function provisionNodeRoot({
   const input = nodeInput(root, repoRoot, resolvedNpmVersion);
   const target = join(root, "node_modules");
   const relocatable = nodeTreeIsRelocatable(root);
-  const cacheEntry = join(commonDir, CACHE_DIR, "node", input.key);
+  const cacheEntry = join(nodeCacheRoot(commonDir), "node", input.key);
   const cacheModules = join(cacheEntry, "node_modules");
   const cacheReady = relocatable && validateNodeCache(cacheEntry, input);
   const stat = lstatSafe(target);
