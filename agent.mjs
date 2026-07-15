@@ -150,7 +150,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-const HINTS_VERSION = "1.23.14";
+const HINTS_VERSION = "1.23.15";
 const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -565,19 +565,27 @@ isn't in git is invisible to other agents.
    review on top of the broker's own review.
 4. **The manager owns the flow without human babysitting:** prioritize,
    delegate, review non-trivial work, verify gates and the current PR, merge,
-   delete the remote branch, and update the ticket. Do not wait for routine
-   decisions or routine merges from the human. If review finds a defect, the
-   same feature owner fixes the root cause and adds permanent gates while
-   other agents continue their own work undisturbed.
+   delete the remote branch, run the repo's gated deploy, and update the
+   ticket. Do not wait for routine decisions, routine merges, or routine
+   deploys from the human. Deploy is part of done (Mattias 2026-07-15: "det
+   ska väl aldrig ligga på mig? Det ska väl vara en del av flödet?"): after
+   merge the broker deploys with proof — canary/verify green, rollback path
+   known — a merged-but-undeployed wave is an open loop, not a finished one.
+   Only a deploy that costs money (rule 7) or crosses an explicitly reserved
+   release boundary (e.g. lsrc:2 as sole Source releaser) waits for approval.
+   If review finds a defect, the same feature owner fixes the root cause and
+   adds permanent gates while other agents continue their own work
+   undisturbed.
 5. **A finished pane stays quiet:** no live sentry duty and no "are you done?"
    pings. Monitoring belongs in cron, not in a waiting agent.
 6. **Every review finding must graduate into a gate** (a lint or test rule) so
    the machine catches that defect class next time. A review that never
    becomes a gate is a recurring cost; a gate is a one-time cost.
 7. **Night runs do only necessary work.** No speculative refactors and no
-   money-spending deploys without standing approval. Batch questions into one
-   morning report. Quota exhaustion overnight is acceptable: bank each slice
-   in a commit and resume from there.
+   money-spending deploys without standing approval (gate-verified free
+   deploys are routine flow per rule 4, day or night). Batch questions into
+   one morning report. Quota exhaustion overnight is acceptable: bank each
+   slice in a commit and resume from there.
 8. **Broker panel authority is a hard allowlist.** In every configured project
    fleet, pane \`:2\` is the sole manager/broker. It may autonomously assign,
    gate, review, follow up, label, or change ownership only for existing worker

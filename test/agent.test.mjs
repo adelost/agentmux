@@ -327,7 +327,7 @@ feature("generated agent policy", () => {
       return content;
     }],
     then: ["pane 2 manages workers 3+ while panes 0-1 remain reserved", (content) => {
-      expect(content).toContain("<!-- amux-hints-version: 1.23.14 -->");
+      expect(content).toContain("<!-- amux-hints-version: 1.23.15 -->");
       expect(content).toContain("Broker panel authority is a hard allowlist");
       expect(content).toContain("pane `:2` is the sole manager/broker");
       expect(content).toContain("panes `:3` and above in the same session");
@@ -337,6 +337,22 @@ feature("generated agent policy", () => {
       expect(content).toContain("`watch:2` manages");
       expect(content).toMatch(/require Mattias\s+to name that exact pane for that exact current task/u);
       expect(content).toContain("outside the allowlist.");
+    }],
+  });
+
+  unit("puts the gated deploy inside the broker flow, not on the human", {
+    when: ["generating fresh agent hints", () => {
+      const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
+      paneDir(root, 0);
+      const content = readFileSync(join(root, ".agents", "AGENTS.md"), "utf-8");
+      rmSync(root, { recursive: true, force: true });
+      return content;
+    }],
+    then: ["rule 4 owns deploy-with-proof and rule 7 only gates paid deploys", (content) => {
+      expect(content).toContain("run the repo's gated deploy");
+      expect(content).toMatch(/routine\s+deploys from the human/u);
+      expect(content).toMatch(/merged-but-undeployed wave is an open loop/u);
+      expect(content).toMatch(/gate-verified free\s+deploys are routine flow per rule 4, day or night/u);
     }],
   });
 });
