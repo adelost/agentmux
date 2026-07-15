@@ -327,7 +327,7 @@ feature("generated agent policy", () => {
       return content;
     }],
     then: ["pane 2 manages workers 3+ while panes 0-1 remain reserved", (content) => {
-      expect(content).toContain("<!-- amux-hints-version: 1.23.16 -->");
+      expect(content).toContain("<!-- amux-hints-version: 1.23.17 -->");
       expect(content).toContain("Broker panel authority is a hard allowlist");
       expect(content).toContain("pane `:2` is the sole manager/broker");
       expect(content).toContain("panes `:3` and above in the same session");
@@ -337,6 +337,23 @@ feature("generated agent policy", () => {
       expect(content).toContain("`watch:2` manages");
       expect(content).toMatch(/require Mattias\s+to name that exact pane for that exact current task/u);
       expect(content).toContain("outside the allowlist.");
+    }],
+  });
+
+  unit("never lets a broker pause dispatch while READY tickets exist", {
+    when: ["generating fresh agent hints", () => {
+      const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
+      paneDir(root, 0);
+      const content = readFileSync(join(root, ".agents", "AGENTS.md"), "utf-8");
+      rmSync(root, { recursive: true, force: true });
+      return content;
+    }],
+    then: ["dispatch-first is the rule and 'held for morning' is not a disposition", (content) => {
+      expect(content).toContain("Dispatch precedes review");
+      expect(content).toMatch(/a\s+backlog must never queue behind the broker's other work/u);
+      expect(content).toMatch(/"held for\s+morning", or a ledger\/memory note are NOT dispositions/u);
+      expect(content).toMatch(/night rules never pause dispatch/u);
+      expect(content).toMatch(/READY >= 1 with zero in_progress nudges the broker,\s+then the human/u);
     }],
   });
 
