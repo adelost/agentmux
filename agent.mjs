@@ -52,12 +52,10 @@ import {
   selectedCodexProfile,
   setCodexModelOverride,
 } from "./core/codex-profiles.mjs";
-
-const CLAUDE_FLAGS = "--dangerously-skip-permissions";
-// Codex 0.144 keeps --yolo as the concise compatibility alias for full
-// approval + sandbox bypass. Do not combine it with the long spelling:
-// clap treats the aliases as the same argument and rejects duplicate use.
-const CODEX_FLAGS = "--yolo";
+import {
+  CLAUDE_AUTONOMOUS_FLAGS,
+  CODEX_AUTONOMOUS_FLAGS,
+} from "./core/execution-safety.mjs";
 const CODEX_PROMPT_READY_TIMEOUT_MS = 8_000;
 function codexDeliveryBlocked(message, { zoomRecoverable = false } = {}) {
   const error = new Error(message);
@@ -102,7 +100,7 @@ export function buildClaudeLaunchCommand({
   const sessionFlag = exactResume
     ? ` --resume ${shellQuote(exactResume)}`
     : resume ? " --continue" : "";
-  return `ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_FLAGS} --model ${shellQuote(exactModel)}${sessionFlag}`;
+  return `ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_AUTONOMOUS_FLAGS} --model ${shellQuote(exactModel)}${sessionFlag}`;
 }
 
 /** Build the exact pane command; exported so injection boundaries are gated. */
@@ -121,7 +119,7 @@ export function buildCodexLaunchCommand({
     model ? `-m ${shellQuote(model)}` : "",
     effort ? `-c ${shellQuote(`model_reasoning_effort="${effort.toLowerCase()}"`)}` : "",
   ].filter(Boolean).join(" ");
-  const flags = [CODEX_FLAGS, overrideFlags].filter(Boolean).join(" ");
+  const flags = [CODEX_AUTONOMOUS_FLAGS, overrideFlags].filter(Boolean).join(" ");
   const env = `CODEX_HOME=${shellQuote(profileHome)}`;
   const exactResume = exactSessionId(resumeSessionId, "Codex");
   if (exactResume) {

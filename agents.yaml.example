@@ -17,7 +17,7 @@ myproject:
   discord: "1234567890123456789"
   panes:
     - name: claude
-      cmd: claude --continue --dangerously-skip-permissions
+      cmd: claude --continue --permission-mode auto --no-chrome
 
 # Advanced: multiple panes with isolated sessions
 multi:
@@ -30,10 +30,10 @@ multi:
   layout: main-vertical
   panes:
     - name: claude
-      cmd: claude --continue --dangerously-skip-permissions
+      cmd: claude --continue --permission-mode auto --no-chrome
     - name: claude-2
-      cmd: claude --continue --dangerously-skip-permissions
+      cmd: claude --continue --permission-mode auto --no-chrome
       defer: true               # defer: only cd to dir, start claude on first prompt
     - name: claude-3
-      cmd: claude --continue --dangerously-skip-permissions
+      cmd: claude --continue --permission-mode auto --no-chrome
       defer: true

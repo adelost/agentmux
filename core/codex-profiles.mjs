@@ -13,8 +13,10 @@ import {
   mkdirSync,
   readFileSync,
   symlinkSync,
+  writeFileSync,
 } from "fs";
 import { join, resolve } from "path";
+import { CODEX_EXTERNAL_NAVIGATION_RULES } from "./execution-safety.mjs";
 
 export const CODEX_PROFILE_STATE_KEY = "codex_profile_by_pane";
 export const CODEX_MODEL_STATE_KEY = "codex_model_by_pane";
@@ -106,6 +108,18 @@ function linkSharedDirectory(sourceHome, targetHome, name) {
   symlinkSync(source, target, "dir");
 }
 
+export function ensureCodexExecutionSafety(profile) {
+  const rulesDir = join(profile.home, "rules");
+  const rulesPath = join(rulesDir, "agentmux-execution-safety.rules");
+  mkdirSync(rulesDir, { recursive: true, mode: 0o700 });
+  let current = null;
+  try { current = readFileSync(rulesPath, "utf8"); } catch { /* first install */ }
+  if (current !== CODEX_EXTERNAL_NAVIGATION_RULES) {
+    writeFileSync(rulesPath, CODEX_EXTERNAL_NAVIGATION_RULES, { mode: 0o600 });
+  }
+  return rulesPath;
+}
+
 /**
  * Prepare a secondary profile without ever copying auth.json.  Static user
  * extensions are shared; config.toml is copied once so model defaults and
@@ -113,6 +127,7 @@ function linkSharedDirectory(sourceHome, targetHome, name) {
  */
 export function prepareCodexProfile(profile, primary = codexProfileCatalog()[0]) {
   mkdirSync(profile.home, { recursive: true, mode: 0o700 });
+  ensureCodexExecutionSafety(profile);
   if (profile.primary || profile.home === primary.home) return profile;
 
   const sourceConfig = join(primary.home, "config.toml");

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
+import { CODEX_APP_SERVER_ARGS } from "../../core/execution-safety.mjs";
 
 const RPC_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -23,7 +24,7 @@ export function openCodexRpc({
   onStderr = () => {},
   onExit = () => {},
 }) {
-  const child = spawnProcess(command, ["app-server", "--stdio"], {
+  const child = spawnProcess(command, [...CODEX_APP_SERVER_ARGS], {
     cwd,
     env,
     stdio: ["pipe", "pipe", "pipe"],

@@ -5,9 +5,13 @@ import yaml from "js-yaml";
 import { randomUUID } from "crypto";
 import { resolveTmuxLayout } from "./core/layout.mjs";
 import { resolveClaudeModel } from "./core/claude-model.mjs";
+import {
+  CLAUDE_AUTONOMOUS_FLAGS,
+  CODEX_AUTONOMOUS_FLAGS,
+} from "./core/execution-safety.mjs";
 
-const DEFAULT_AGENT_CMD = `claude --continue --dangerously-skip-permissions --model ${resolveClaudeModel()}`;
-const DEFAULT_CODEX_CMD = "codex resume --last --yolo";
+const DEFAULT_AGENT_CMD = `claude --continue ${CLAUDE_AUTONOMOUS_FLAGS} --model ${resolveClaudeModel()}`;
+const DEFAULT_CODEX_CMD = `codex resume --last ${CODEX_AUTONOMOUS_FLAGS}`;
 
 /** Expand ~ to $HOME in paths */
 export function expandTilde(p) {

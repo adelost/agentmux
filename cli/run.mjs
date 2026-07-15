@@ -7,9 +7,10 @@ import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "fs";
 import { join } from "path";
 import { createEventLogger } from "./events.mjs";
 import { sendToChannel, sendToSession, notifyUser as sendToUser } from "./send-notify.mjs";
+import { CLAUDE_AUTONOMOUS_ARGS } from "../core/execution-safety.mjs";
 
 const RUNS_DIR = "/tmp/agent-runs";
-const CLAUDE_FLAGS = ["--dangerously-skip-permissions", "--no-session-persistence", "--verbose"];
+const CLAUDE_FLAGS = [...CLAUDE_AUTONOMOUS_ARGS, "--no-session-persistence", "--verbose"];
 
 /**
  * Run a single claude task via pipe mode.

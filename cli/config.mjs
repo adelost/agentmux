@@ -7,8 +7,9 @@ import { randomUUID } from "crypto";
 import yaml from "js-yaml";
 import { expandTilde } from "../sync.mjs";
 import { resolveTmuxLayout } from "../core/layout.mjs";
+import { CLAUDE_AUTONOMOUS_FLAGS } from "../core/execution-safety.mjs";
 
-const CLAUDE_CMD = "claude --continue --dangerously-skip-permissions";
+const CLAUDE_CMD = `claude --continue ${CLAUDE_AUTONOMOUS_FLAGS}`;
 
 /** Ensure config file exists, create if missing. */
 export function ensureConfig(configPath) {
