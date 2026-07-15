@@ -54,6 +54,8 @@ const AUTO_COMPACT_CONTEXT_PERCENT = 60;
 const AUTO_COMPACT_IDLE_MS = 5 * 60 * 1_000;
 const OPERATION_TIME_MATCH_MS = 5 * 60 * 1_000;
 const PROMPT_PREVIEW_MAX_CHARS = 500;
+const TOOL_SUMMARY_MAX_CHARS = 600;
+const TOOL_RESULT_MAX_CHARS = 1_200;
 const PROMPT_JOURNAL_DEFAULT_LIMIT = 100;
 const PROMPT_JOURNAL_MAX_LIMIT = 500;
 const QUOTA_CACHE_MS = 60 * 1_000;
@@ -116,6 +118,152 @@ const promptHashes = (agentId, ...values) => [...new Set(values.flatMap((value) 
   hashPayload({ agentId, prompt: String(value || "") }),
   hashPayload({ agentId, prompt: canonicalPrompt(value) }),
 ]))];
+
+const SENSITIVE_TOOL_KEY = /(?:^|[_-])(?:access[_-]?token|api[_-]?key|auth(?:orization)?|cookie|credential|pass(?:word|wd)?|private[_-]?key|secret|session[_-]?token|token)(?:$|[_-])/iu;
+const FILE_TOOL = /(?:apply[_-]?patch|edit|file[_-]?change|read|write)/iu;
+const COMMAND_TOOL = /(?:bash|command|exec|shell)/iu;
+const SEARCH_TOOL = /(?:search|web)/iu;
+
+const redactToolText = (value, maxChars) => {
+  let text = String(value ?? "")
+    .replace(/\b(?:Bearer\s+)[^\s'";,]+/giu, "Bearer [redacted]")
+    .replace(/\b(?:sk-[A-Za-z0-9_-]{12,}|github_pat_[A-Za-z0-9_]{12,}|gh[pousr]_[A-Za-z0-9_]{12,}|glpat-[A-Za-z0-9_-]{12,}|npm_[A-Za-z0-9_-]{12,}|pypi-[A-Za-z0-9_-]{12,}|xox[baprs]-[A-Za-z0-9-]{12,})\b/gu, "[redacted]")
+    .replace(/\b([A-Za-z0-9_-]*(?:token|secret|password|passwd|api[_-]?key|authorization)[A-Za-z0-9_-]*)\s*([:=])\s*([^\s,;&]+)/giu, "$1$2[redacted]")
+    .replace(/data:[^;,\s]+;base64,[A-Za-z0-9+/=]{32,}/giu, "[binary data omitted]")
+    .replace(/[A-Za-z0-9+/]{160,}={0,2}/gu, "[binary data omitted]");
+  if (text.length > maxChars) text = `${text.slice(0, Math.max(0, maxChars - 1))}…`;
+  return text;
+};
+
+const parseToolValue = (value) => {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed || !["{", "["].includes(trimmed[0])) return value;
+  try { return JSON.parse(trimmed); } catch { return value; }
+};
+
+const sanitizeToolValue = (value, depth = 0, seen = new WeakSet()) => {
+  const parsed = depth === 0 ? parseToolValue(value) : value;
+  if (parsed == null || typeof parsed === "boolean" || typeof parsed === "number") return parsed;
+  if (typeof parsed === "string") return redactToolText(parsed, TOOL_RESULT_MAX_CHARS);
+  if (typeof parsed !== "object") return String(parsed);
+  if (seen.has(parsed)) return "[circular]";
+  if (depth >= 3) return "[nested value omitted]";
+  seen.add(parsed);
+  if (Array.isArray(parsed)) {
+    const items = parsed.slice(0, 12).map((item) => sanitizeToolValue(item, depth + 1, seen));
+    if (parsed.length > items.length) items.push(`[${parsed.length - items.length} more items]`);
+    return items;
+  }
+  const output = {};
+  const entries = Object.entries(parsed).slice(0, 20);
+  for (const [key, item] of entries) {
+    output[key] = SENSITIVE_TOOL_KEY.test(key)
+      ? "[redacted]"
+      : sanitizeToolValue(item, depth + 1, seen);
+  }
+  if (Object.keys(parsed).length > entries.length) output._more = `${Object.keys(parsed).length - entries.length} fields omitted`;
+  return output;
+};
+
+const compactToolValue = (value, maxChars) => {
+  const sanitized = sanitizeToolValue(value);
+  const text = typeof sanitized === "string" ? sanitized : JSON.stringify(sanitized);
+  return redactToolText(text, maxChars).trim();
+};
+
+const toolPathSummary = (input) => {
+  const parsed = parseToolValue(input);
+  if (parsed && typeof parsed === "object") {
+    const direct = parsed.file_path ?? parsed.filePath ?? parsed.path ?? parsed.paths;
+    if (direct) return compactToolValue(direct, TOOL_SUMMARY_MAX_CHARS);
+    if (Array.isArray(parsed.changes)) {
+      const paths = parsed.changes.map((change) => change?.path ?? change?.filePath).filter(Boolean);
+      if (paths.length) return compactToolValue(paths, TOOL_SUMMARY_MAX_CHARS);
+    }
+  }
+  const patch = typeof input === "string" ? input : parsed?.patch;
+  if (typeof patch === "string") {
+    const paths = [...patch.matchAll(/^\*\*\* (?:Add|Delete|Update) File: (.+)$/gmu)].map((match) => match[1]);
+    if (paths.length) return compactToolValue(paths, TOOL_SUMMARY_MAX_CHARS);
+  }
+  return "File operation";
+};
+
+const toolSummary = (name, input) => {
+  const parsed = parseToolValue(input);
+  if (FILE_TOOL.test(name)) return toolPathSummary(parsed);
+  if (COMMAND_TOOL.test(name) && parsed && typeof parsed === "object") {
+    return compactToolValue(parsed.cmd ?? parsed.command ?? parsed.commandLine ?? parsed, TOOL_SUMMARY_MAX_CHARS);
+  }
+  if (SEARCH_TOOL.test(name) && parsed && typeof parsed === "object") {
+    return compactToolValue(parsed.query ?? parsed.q ?? parsed, TOOL_SUMMARY_MAX_CHARS);
+  }
+  return compactToolValue(parsed, TOOL_SUMMARY_MAX_CHARS);
+};
+
+export function publicToolActivity({
+  toolId,
+  name,
+  phase = "started",
+  input,
+  result,
+  durationMs,
+  historical = false,
+} = {}) {
+  const safeName = redactToolText(String(name || "tool").trim().replace(/\s+/gu, " "), 120) || "tool";
+  const safePhase = ["started", "completed", "failed"].includes(phase) ? phase : "failed";
+  const summary = input === undefined ? "" : toolSummary(safeName, input);
+  const resultPreview = result === undefined ? "" : compactToolValue(result, TOOL_RESULT_MAX_CHARS);
+  const rawToolId = String(toolId || "tool");
+  const safeToolId = /^[A-Za-z0-9:._-]{1,200}$/u.test(rawToolId)
+    ? rawToolId
+    : `tool:${hashPayload(rawToolId).slice(0, 32)}`;
+  return {
+    toolId: safeToolId,
+    name: safeName,
+    phase: safePhase,
+    ...(summary ? { summary } : {}),
+    ...(resultPreview ? { result: resultPreview } : {}),
+    ...(Number.isFinite(Number(durationMs)) && Number(durationMs) >= 0
+      ? { durationMs: Math.round(Number(durationMs)) }
+      : {}),
+    ...(historical ? { historical: true } : {}),
+  };
+}
+
+const codexToolDescriptor = (item = {}) => {
+  const type = item.type;
+  const toolId = item.id ?? item.callId ?? item.call_id;
+  if (type === "commandExecution") return {
+    toolId,
+    name: "exec_command",
+    input: { cmd: item.command ?? item.commandLine ?? item.command_line ?? "command" },
+    result: item.aggregatedOutput ?? item.output ?? item.stdout ?? item.stderr,
+  };
+  if (type === "fileChange") {
+    const changes = Array.isArray(item.changes) ? item.changes : [];
+    const paths = [item.path ?? item.filePath, ...changes.map((change) => change?.path ?? change?.filePath)].filter(Boolean);
+    return {
+      toolId,
+      name: "apply_patch",
+      input: { paths: [...new Set(paths)] },
+      result: changes.length ? `${changes.length} file change${changes.length === 1 ? "" : "s"}` : undefined,
+    };
+  }
+  if (type === "webSearch") return {
+    toolId,
+    name: "web_search",
+    input: { query: item.query ?? "" },
+  };
+  if (type === "mcpToolCall") return {
+    toolId,
+    name: item.tool ?? item.name ?? "mcp_tool",
+    input: item.arguments ?? item.input ?? {},
+    result: item.result ?? item.output,
+  };
+  return null;
+};
 
 export function claudePermissionDenial(event) {
   if (event?.type !== "result" || !Array.isArray(event.permission_denials)
@@ -496,6 +644,7 @@ export function createWebUi(options = {}) {
     nextEventId: 1,
     turnHasAssistantText: false,
     permissionDenied: null,
+    activeTools: new Map(),
   });
 
   const loadRegistry = () => {
@@ -780,6 +929,43 @@ export function createWebUi(options = {}) {
     let turnTerminal = false;
     let turnAt = 0;
     let turnOperationKey = null;
+    const hydratedTools = new Map();
+    const eventTime = (value) => {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric) && numeric > 0) return numeric;
+      const parsed = typeof value === "string" ? Date.parse(value) : NaN;
+      return Number.isFinite(parsed) ? parsed : now();
+    };
+    const pushHydratedTool = (activity, timestamp) => {
+      const at = eventTime(timestamp);
+      const toolId = String(activity.toolId || `history:${hashPayload({
+        name: activity.name,
+        input: activity.input,
+        at,
+        event: agent.nextEventId,
+      }).slice(0, 24)}`);
+      const previous = hydratedTools.get(toolId);
+      if (activity.phase === "started") {
+        hydratedTools.set(toolId, { name: activity.name, input: activity.input, startedAt: at });
+      }
+      pushEvent(agent, {
+        type: "web",
+        subtype: "tool",
+        ...publicToolActivity({
+          ...activity,
+          toolId,
+          name: activity.name ?? previous?.name,
+          input: activity.input ?? previous?.input,
+          durationMs: activity.durationMs ?? (previous?.startedAt && activity.phase !== "started"
+            ? Math.max(0, at - previous.startedAt)
+            : undefined),
+          historical: true,
+        }),
+        at,
+        operationKey: turnOperationKey,
+      });
+      if (activity.phase !== "started") hydratedTools.delete(toolId);
+    };
     const closeHydratedTurn = () => {
       const receipt = turnOperationKey ? receipts.messages.get(turnOperationKey) : null;
       const hasReceiptOutcome = receipt?.completedAt && receipt.code != null;
@@ -818,6 +1004,16 @@ export function createWebUi(options = {}) {
       try { entry = JSON.parse(line); } catch { continue; }
       if (agent.engine === "claude") {
         if (entry.type === "user") {
+          const blocks = Array.isArray(entry.message?.content) ? entry.message.content : [];
+          for (const block of blocks.filter((item) => item?.type === "tool_result")) {
+            const previous = hydratedTools.get(String(block.tool_use_id));
+            pushHydratedTool({
+              toolId: block.tool_use_id,
+              name: previous?.name,
+              phase: block.is_error ? "failed" : "completed",
+              result: block.content,
+            }, entry.timestamp);
+          }
           const text = textOf(entry.message?.content);
           if (text && !isClaudeHistoryNoise(entry, text) && !isEngineNoise(text)) {
             closeHydratedTurn();
@@ -837,13 +1033,20 @@ export function createWebUi(options = {}) {
           const content = Array.isArray(entry.message?.content)
             ? entry.message.content
             : [{ type: "text", text: textOf(entry.message?.content) }];
-          const hasTool = content.some((block) => block?.type === "tool_use");
-          if (textOf(content) || hasTool) pushEvent(agent, {
+          const textContent = content.filter((block) => block?.type === "text" && typeof block.text === "string");
+          const toolBlocks = content.filter((block) => block?.type === "tool_use");
+          if (textContent.length) pushEvent(agent, {
             type: "assistant",
-            message: { ...entry.message, content },
+            message: { ...entry.message, content: textContent },
             at: entry.timestamp ?? 0,
           });
-          turnHasAssistant = turnHasAssistant || Boolean(textOf(content)) || hasTool;
+          for (const block of toolBlocks) pushHydratedTool({
+            toolId: block.id,
+            name: block.name,
+            phase: "started",
+            input: block.input,
+          }, entry.timestamp);
+          turnHasAssistant = turnHasAssistant || Boolean(textOf(textContent)) || toolBlocks.length > 0;
           turnTerminal = turnTerminal || ["end_turn", "stop_sequence", "max_tokens", "refusal"]
             .includes(entry.message?.stop_reason);
           turnAt = entry.timestamp ?? turnAt;
@@ -856,28 +1059,49 @@ export function createWebUi(options = {}) {
             at: entry.timestamp ?? 0,
           });
         }
-      } else if (entry.type === "response_item" && entry.payload?.type === "message") {
-        const text = textOf(entry.payload.content);
-        if (!text || isEngineNoise(text)) continue;
-        if (entry.payload.role === "user") {
-          closeHydratedTurn();
-          turnOperationKey = operationKeyForPrompt(text, entry.timestamp);
-          pushEvent(agent, {
-            type: "web",
-            subtype: "user",
-            text,
-            at: entry.timestamp ?? 0,
-            operationKey: turnOperationKey,
-          });
-          turnOpen = true;
-          turnAt = entry.timestamp ?? 0;
-        } else if (entry.payload.role === "assistant") {
-          pushEvent(agent, {
-            type: "assistant",
-            message: { content: [{ type: "text", text }] },
-            at: entry.timestamp ?? 0,
-          });
+      } else if (agent.engine === "codex" && entry.type === "response_item") {
+        const payload = entry.payload ?? {};
+        if (payload.type === "message") {
+          const text = textOf(payload.content);
+          if (!text || isEngineNoise(text)) continue;
+          if (payload.role === "user") {
+            closeHydratedTurn();
+            turnOperationKey = operationKeyForPrompt(text, entry.timestamp);
+            pushEvent(agent, {
+              type: "web",
+              subtype: "user",
+              text,
+              at: entry.timestamp ?? 0,
+              operationKey: turnOperationKey,
+            });
+            turnOpen = true;
+            turnAt = entry.timestamp ?? 0;
+          } else if (payload.role === "assistant") {
+            pushEvent(agent, {
+              type: "assistant",
+              message: { content: [{ type: "text", text }] },
+              at: entry.timestamp ?? 0,
+            });
+            turnHasAssistant = true;
+            turnAt = entry.timestamp ?? turnAt;
+          }
+        } else if (["custom_tool_call", "function_call"].includes(payload.type)) {
+          pushHydratedTool({
+            toolId: payload.call_id ?? payload.id,
+            name: payload.name,
+            phase: "started",
+            input: payload.input ?? payload.arguments,
+          }, entry.timestamp);
           turnHasAssistant = true;
+          turnAt = entry.timestamp ?? turnAt;
+        } else if (["custom_tool_call_output", "function_call_output"].includes(payload.type)) {
+          const previous = hydratedTools.get(String(payload.call_id ?? payload.id));
+          pushHydratedTool({
+            toolId: payload.call_id ?? payload.id,
+            name: previous?.name,
+            phase: payload.is_error || payload.error ? "failed" : "completed",
+            result: payload.output ?? payload.result ?? payload.error,
+          }, entry.timestamp);
           turnAt = entry.timestamp ?? turnAt;
         }
       } else if (agent.engine === "codex" && entry.type === "event_msg"
@@ -905,6 +1129,40 @@ export function createWebUi(options = {}) {
     at: now(),
     ...extra,
   });
+
+  const emitToolActivity = (agent, activity) => {
+    const phase = activity.phase ?? "started";
+    const fallbackId = `tool:${hashPayload({
+      name: activity.name,
+      input: activity.input,
+      operationKey: agent.activeOperationKey,
+      event: agent.nextEventId,
+    }).slice(0, 24)}`;
+    const toolId = String(activity.toolId || fallbackId);
+    const previous = agent.activeTools.get(toolId);
+    const eventAt = now();
+    if (phase === "started") {
+      agent.activeTools.set(toolId, {
+        name: activity.name,
+        input: activity.input,
+        startedAt: eventAt,
+      });
+    }
+    const durationMs = activity.durationMs ?? (previous?.startedAt && phase !== "started"
+      ? Math.max(0, eventAt - previous.startedAt)
+      : undefined);
+    webEvent(agent, "tool", {
+      ...publicToolActivity({
+        ...activity,
+        toolId,
+        name: activity.name ?? previous?.name,
+        input: activity.input ?? previous?.input,
+        durationMs,
+      }),
+      operationKey: agent.activeOperationKey,
+    });
+    if (phase !== "started") agent.activeTools.delete(toolId);
+  };
 
   const publicAttachment = (projectId, attachment) => ({
     name: attachment.name,
@@ -978,6 +1236,7 @@ export function createWebUi(options = {}) {
     agent.activeOperationKey = operationKey;
     agent.turnHasAssistantText = false;
     agent.permissionDenied = null;
+    agent.activeTools.clear();
     agent.compactMetadata = null;
     agent.updatedAt = now();
     if (operation === "turn") {
@@ -1013,6 +1272,7 @@ export function createWebUi(options = {}) {
     const operationKey = agent.activeOperationKey;
     agent.activeOperationKey = null;
     agent.permissionDenied = null;
+    agent.activeTools.clear();
     agent.updatedAt = now();
     agent.idleSince = agent.updatedAt;
     agent.events = agent.events.filter((event) => event.type !== "stream_event");
@@ -1094,14 +1354,36 @@ export function createWebUi(options = {}) {
       broadcast(agent, event);
       return;
     }
-    if (event.type === "assistant" && operation === "turn" && !agent.interruptRequested) {
-      const text = textOf(event.message?.content);
-      const hasTool = Array.isArray(event.message?.content)
-        && event.message.content.some((block) => block?.type === "tool_use");
-      if (text || hasTool) {
-        if (text) agent.turnHasAssistantText = true;
-        broadcast(agent, event);
+    if (event.type === "user" && operation === "turn" && !agent.interruptRequested) {
+      const blocks = Array.isArray(event.message?.content) ? event.message.content : [];
+      for (const block of blocks.filter((item) => item?.type === "tool_result")) {
+        const previous = agent.activeTools.get(String(block.tool_use_id));
+        emitToolActivity(agent, {
+          toolId: block.tool_use_id,
+          name: previous?.name,
+          phase: block.is_error ? "failed" : "completed",
+          result: block.content,
+        });
       }
+      return;
+    }
+    if (event.type === "assistant" && operation === "turn" && !agent.interruptRequested) {
+      const content = Array.isArray(event.message?.content) ? event.message.content : [];
+      const textContent = content.filter((block) => block?.type === "text" && typeof block.text === "string");
+      const toolBlocks = content.filter((block) => block?.type === "tool_use");
+      if (textContent.length) {
+        agent.turnHasAssistantText = true;
+        broadcast(agent, {
+          ...event,
+          message: { ...event.message, content: textContent },
+        });
+      }
+      for (const block of toolBlocks) emitToolActivity(agent, {
+        toolId: block.id,
+        name: block.name,
+        phase: "started",
+        input: block.input,
+      });
       return;
     }
     if (event.type !== "result") return;
@@ -1206,20 +1488,22 @@ export function createWebUi(options = {}) {
           type: "assistant",
           message: { content: [{ type: "text", text: params.item.text ?? "" }] },
         });
-      } else if (method === "item/completed" && operation === "turn"
+      } else if (["item/started", "item/completed"].includes(method) && operation === "turn"
           && ["commandExecution", "fileChange", "mcpToolCall", "webSearch"].includes(params.item?.type)) {
-        const item = params.item;
-        const tool = item.type === "commandExecution"
-          ? { name: "exec_command", input: { cmd: item.command || item.commandLine || "command" } }
-          : item.type === "fileChange"
-            ? { name: "apply_patch", input: { path: item.path || item.filePath || "files" } }
-            : item.type === "webSearch"
-              ? { name: "web_search", input: { query: item.query || "" } }
-              : { name: item.tool || item.name || "mcp_tool", input: item.arguments || item.input || {} };
-        broadcast(agent, {
-          type: "assistant",
-          message: { content: [{ type: "tool_use", ...tool }] },
-        });
+        const item = params.item ?? {};
+        const tool = codexToolDescriptor(item);
+        if (tool) {
+          const completed = method === "item/completed";
+          const exitCode = Number(item.exitCode ?? item.exit_code);
+          const failed = completed && (item.status === "failed" || Boolean(item.error)
+            || (Number.isFinite(exitCode) && exitCode !== 0));
+          emitToolActivity(agent, {
+            ...tool,
+            phase: completed ? (failed ? "failed" : "completed") : "started",
+            result: failed ? item.error?.message ?? item.error ?? tool.result : tool.result,
+            durationMs: item.durationMs ?? item.duration_ms,
+          });
+        }
       } else if (method === "item/completed" && params.item?.type === "contextCompaction") {
         webEvent(agent, "compacted", { metadata: null });
       } else if (method === "turn/completed") {

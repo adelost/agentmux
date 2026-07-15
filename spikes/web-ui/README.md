@@ -52,6 +52,14 @@ The browser UI is English-only. Images copied to the clipboard can be pasted
 directly into the prompt composer; they use the same bounded, idempotent upload
 path and attachment preview as the file picker and drag-and-drop.
 
+Claude and Codex tool calls share one browser activity format. Running,
+completed and failed calls appear as compact disclosure rows with a timestamp,
+duration and bounded input/result previews. The server never forwards a raw
+tool payload to the browser: file operations expose paths instead of patch
+bodies, previews are clipped, and common credential keys and token formats are
+redacted. The same projection is used for live events and hydrated native
+history so a restart does not change what the browser can see.
+
 Closing the browser does not stop an active turn. Agents created manually in
 the GUI use Claude `acceptEdits` and the locally configured Codex sandbox.
 Bridge-provisioned canary agents are marked `automation`: Claude uses native
