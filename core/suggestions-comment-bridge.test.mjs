@@ -84,7 +84,7 @@ const structuredPolicy = Object.freeze({
 });
 
 async function fixtureServer({ projectIds = ["skydive"], policy = null, boards = {}, lists = null,
-  ticketListStatus = null } = {}) {
+  ticketListStatus = null, pollEvents = null } = {}) {
   const requests = [];
   const server = createServer((request, response) => {
     const url = new URL(request.url, "http://fixture.invalid");
@@ -103,12 +103,42 @@ async function fixtureServer({ projectIds = ["skydive"], policy = null, boards =
     }
     if (url.pathname === "/api/config/agentdocs") {
       const projectId = url.searchParams.get("project") || projectIds[0];
+      if (!projectIds.includes(projectId)) {
+        response.statusCode = 404;
+        response.end(JSON.stringify({ error: "unknown-project" }));
+        return;
+      }
       response.end(JSON.stringify({ project: { id: projectId, name: projectId },
         implementationPolicy: policy || structuredPolicy }));
       return;
     }
     const projectId = url.searchParams.get("project");
     const board = boards[projectId] || [];
+    if (url.pathname === "/api/tickets/poll") {
+      if (ticketListStatus != null) {
+        response.statusCode = ticketListStatus;
+        response.end(JSON.stringify({ error: "fixture-board-failure" }));
+        return;
+      }
+      const rawEvents = pollEvents?.[projectId] ?? board.flatMap((row) =>
+        row.comments.map((entry) => ({ ticketId: row.ticket.id,
+          kind: HUMAN_KINDS_FOR_FIXTURE.has(entry.kind) && entry.purpose !== "evidence"
+            ? "comment" : entry.kind === "agent" && entry.purpose !== "evidence"
+              ? "answer" : null })));
+      const cursor = Number(url.searchParams.get("cursor") || 0);
+      const limit = Number(url.searchParams.get("limit") || 50);
+      const scanned = rawEvents.slice(cursor, cursor + limit);
+      const nextCursor = cursor + scanned.length;
+      response.end(JSON.stringify({ project: projectId, cursor: String(nextCursor),
+        hasMore: nextCursor < rawEvents.length, scanned: scanned.length,
+        events: scanned.flatMap((entry, index) => entry.kind ? [{
+          id: `${projectId}:${cursor + index + 1}`,
+          cursor: String(cursor + index + 1), ticketId: entry.ticketId,
+          revision: cursor + index + 1, actor: entry.kind === "answer" ? "agent:test" : "user",
+          createdAt: 1000 + cursor + index + 1, kind: entry.kind, sourceType: "commented",
+        }] : []) }));
+      return;
+    }
     if (url.pathname === "/api/tickets") {
       if (ticketListStatus != null) {
         response.statusCode = ticketListStatus;
@@ -137,6 +167,8 @@ async function fixtureServer({ projectIds = ["skydive"], policy = null, boards =
     close: () => new Promise((resolvePromise) => server.close(resolvePromise)),
   };
 }
+
+const HUMAN_KINDS_FOR_FIXTURE = new Set(["creator", "user"]);
 
 function bridgeConfig(baseUrl, projects = { skydive: { agent: "skydive", pane: 3 } }) {
   return {
@@ -185,7 +217,7 @@ async function run({ fixture, config = bridgeConfig(fixture.baseUrl), state = em
 }
 
 describe.sequential("Suggestions human-comment relay", () => {
-  it("probes the authenticated board-list seam and preserves HTTP 401/500 status", async () => {
+  it("probes the authenticated bounded cursor and preserves HTTP 401/500 status", async () => {
     const healthy = await fixtureServer({ projectIds: ["source"], boards: { source: [] } });
     const broken = await fixtureServer({ projectIds: ["source"], boards: { source: [] },
       ticketListStatus: 500 });
@@ -202,8 +234,8 @@ describe.sequential("Suggestions human-comment relay", () => {
         allowTestOrigin: true,
       })).resolves.toMatchObject({ ok: false, status: 500, projectId: "source" });
       expect(healthy.requests).toEqual([
-        "/api/tickets?project=source",
-        "/api/tickets?project=source",
+        "/api/tickets/poll?project=source&cursor=0&limit=1",
+        "/api/tickets/poll?project=source&cursor=0&limit=1",
       ]);
     } finally {
       await healthy.close();
@@ -219,10 +251,80 @@ describe.sequential("Suggestions human-comment relay", () => {
       const result = await run({ fixture, state, deliver: async (item) => deliveries.push(item) });
       expect(result.delivered).toBe(0);
       expect(deliveries).toEqual([]);
-      expect(fixture.requests).toEqual(["/api/config", "/api/tickets?project=skydive"]);
+      expect(fixture.requests).toEqual([
+        "/api/config/agentdocs?project=skydive",
+        "/api/tickets/poll?project=skydive&cursor=0&limit=100",
+      ]);
       expect(state.projects.skydive.bootstrapped).toBe(true);
       expect(result.lastSuccessfulSyncAt).toBe(1_000_000);
       expect(state.lastSuccessfulSyncAt).toBe(1_000_000);
+    } finally { await fixture.close(); }
+  });
+
+  it("keeps a four-project idle sweep on bounded cursors and never reads a board list", async () => {
+    const projectIds = ["source", "skydive", "skyvw", "ai"];
+    const projects = Object.fromEntries(projectIds.map((projectId, pane) => [projectId,
+      { agent: projectId, pane }]));
+    const fixture = await fixtureServer({ projectIds, boards: Object.fromEntries(
+      projectIds.map((projectId) => [projectId, []]),
+    ) });
+    try {
+      const state = emptyState();
+      const result = await run({ fixture, config: bridgeConfig(fixture.baseUrl, projects), state,
+        deliver: async () => { throw new Error("idle sweep must not deliver"); } });
+      expect(result).toMatchObject({ delivered: 0, projectFailures: [] });
+      expect(fixture.requests).toHaveLength(5);
+      expect(fixture.requests[0]).toBe("/api/config/agentdocs?project=source");
+      expect(fixture.requests.slice(1)).toEqual(projectIds.map((projectId) =>
+        `/api/tickets/poll?project=${projectId}&cursor=0&limit=100`));
+      expect(fixture.requests.some((path) => /^\/api\/tickets\?/u.test(path))).toBe(false);
+      expect(Object.values(state.projects).map((project) => project.cursor))
+        .toEqual(["0", "0", "0", "0"]);
+    } finally { await fixture.close(); }
+  });
+
+  it("advances a bounded noise backlog without detail reads, then delivers the later comment", async () => {
+    const board = [ticket("SKY-101", [comment(1, "creator", "after the noise")])];
+    const rawEvents = [
+      ...Array.from({ length: 120 }, () => ({ ticketId: "SKY-101", kind: null })),
+      { ticketId: "SKY-101", kind: "comment" },
+    ];
+    const fixture = await fixtureServer({ boards: { skydive: board },
+      pollEvents: { skydive: rawEvents } });
+    const state = emptyState();
+    const deliveries = [];
+    try {
+      await run({ fixture, state, deliver: async (item) => deliveries.push(item) });
+      expect(state.projects.skydive.cursor).toBe("100");
+      expect(deliveries).toEqual([]);
+      expect(fixture.requests.some((path) => path.includes("/api/tickets/SKY-101"))).toBe(false);
+
+      fixture.requests.length = 0;
+      await run({ fixture, state, now: () => 1_060_000,
+        deliver: async (item) => deliveries.push(item) });
+      expect(state.projects.skydive.cursor).toBe("121");
+      expect(deliveries.map((item) => item.idempotencyKey)).toEqual([
+        "suggestions-comment:skydive:SKY-101:1:initial",
+      ]);
+      expect(fixture.requests).toEqual([
+        "/api/config/agentdocs?project=skydive",
+        "/api/tickets/poll?project=skydive&cursor=100&limit=100",
+        "/api/tickets/SKY-101?project=skydive",
+      ]);
+    } finally { await fixture.close(); }
+  });
+
+  it("does not checkpoint a cursor whose ticket detail could not be reconciled", async () => {
+    const fixture = await fixtureServer({ boards: { skydive: [] }, pollEvents: {
+      skydive: [{ ticketId: "SKY-404", kind: "comment" }],
+    } });
+    const state = emptyState();
+    try {
+      const result = await run({ fixture, state, deliver: async () => {} });
+      expect(result.projectFailures).toEqual([
+        { projectId: "skydive", error: "http: GET /api/tickets/SKY-404 returned 404" },
+      ]);
+      expect(state.projects.skydive.cursor).toBe("0");
     } finally { await fixture.close(); }
   });
 
@@ -253,7 +355,7 @@ describe.sequential("Suggestions human-comment relay", () => {
       expect(result.delivered).toBe(1);
       expect(fake.records()).toHaveLength(1);
       expect(fake.records()[0].stdin).toContain("please fix the actual horizon");
-      expect(fake.records()[0].stdin).toContain(DEFAULT_IMPLEMENTATION_POLICY);
+      expect(fake.records()[0].stdin).toContain(structuredPolicy.summary);
       expect(fake.records()[0].args).toContain("suggestions-comment:skydive:SKY-1:4:initial");
       expect(fake.records()[0].args).toEqual(expect.arrayContaining(["--wait-ms", "0", "--stdin"]));
     } finally { await fixture.close(); }
@@ -482,7 +584,10 @@ describe.sequential("Suggestions human-comment relay", () => {
       fixture.requests.length = 0;
       await run({ fixture, state, now: () => 1_000_000 + 6 * 60 * 60 * 1000,
         deliver: async (item) => deliveries.push(item) });
-      expect(fixture.requests).toEqual(["/api/config", "/api/tickets?project=skydive"]);
+      expect(fixture.requests).toEqual([
+        "/api/config/agentdocs?project=skydive",
+        "/api/tickets/poll?project=skydive&cursor=3&limit=100",
+      ]);
       expect(deliveries).toHaveLength(2);
     } finally { await fixture.close(); }
   });
@@ -834,9 +939,9 @@ describe.sequential("Suggestions human-comment relay", () => {
       expect(deliveries).toHaveLength(1);
       expect(errors).toHaveLength(1);
       expect(fixture.requests).toEqual([
-        "/api/config",
-        "/api/tickets?project=alpha",
-        "/api/tickets?project=beta",
+        "/api/config/agentdocs?project=alpha",
+        "/api/tickets/poll?project=alpha&cursor=0&limit=100",
+        "/api/tickets/poll?project=beta&cursor=1&limit=100",
       ]);
       expect(persisted.projects.alpha.comments["A-1:1"].terminalAt).toBe(clock);
     } finally { await fixture.close(); }
@@ -955,7 +1060,7 @@ if (process.argv[2] === "-l") {
     try {
       await expect(run({ fixture,
         config: bridgeConfig(fixture.baseUrl, { missing: { agent: "x", pane: 0 } }),
-        deliver: async () => {} })).rejects.toThrow("configured project 'missing' is absent");
+        deliver: async () => {} })).rejects.toThrow("returned 404");
     } finally { await fixture.close(); }
   });
 
@@ -998,7 +1103,7 @@ if (process.argv[2] === "-l") {
     expect(loadSuggestionsBridgeState(statePath)).toEqual({
       version: SUGGESTIONS_BRIDGE_STATE_VERSION,
       lastSuccessfulSyncAt: null,
-      projects: { skydive: { bootstrapped: true, ticketUpdatedAt: { "SKY-1": 10 },
+      projects: { skydive: { bootstrapped: true, cursor: "0",
         comments: { "SKY-1:1": { firstSeenAt: 1, attempts: [], answeredAt: null,
           notifiedAt: null, notifyFailures: 0, terminalAt: null,
           terminalReason: null } } } },

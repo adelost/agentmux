@@ -4,10 +4,12 @@ The Suggestions comment bridge polls private boards once per minute and routes
 new human `creator`/`user` comments to an explicitly configured amux pane. It
 does not hold the write-capable `ADMIN_TOKEN`, a Google session or cookie. It
 loads a dedicated read-only token from an owner-only regular file and never
-stores that token in config, state, logs, prompts or process arguments. After
-bootstrap, an idle poll reads config plus each mapped ticket
-list; ticket details are fetched only for changed tickets or a due unanswered
-reminder. It does not prompt an agent or spend model tokens.
+stores that token in config, state, logs, prompts or process arguments. An idle
+poll reads the cheap agent-policy document once plus one bounded event cursor
+per mapped project. It never materializes a full board list. Ticket details are
+fetched only when the cursor reports a human comment, an agent answer, a reopen,
+or an unanswered reminder becomes due. It does not prompt an agent or spend
+model tokens.
 
 ## Configure routing
 
@@ -35,12 +37,13 @@ projects:
 The mapping is deliberately explicit. The standard fleet convention routes
 each board to its session's Claude broker on pane 2; Codex implementation
 workers live on panes 3 and above. To reuse the bridge for another board, add
-its public project ID and responsible pane-2 target. A configured ID that is
-not returned by `/api/config` is a visible error; public projects without a
-mapping are intentionally ignored.
+its public project ID and responsible pane-2 target. Each configured ID is
+validated by its project-isolated `/api/tickets/poll` request; an unknown ID is
+a visible error. Public projects without a mapping are intentionally ignored.
 
 Every handoff includes the global implementation policy. The relay prefers the
-bounded canonical structured `implementationPolicy` supplied by `/api/config`
+bounded canonical structured `implementationPolicy` supplied by
+`/api/config/agentdocs`
 (`title`, `summary`, `principles`, `boundary`, and the complete
 `commentIntent` object), serializes it deterministically, and also accepts the
 legacy string form. When the endpoint has no policy, the checked-in fail-safe
@@ -84,8 +87,8 @@ Environment overrides for service/test installations are
 `AMUX_SUGGESTIONS_AMUX_BIN`, and `NODE_BIN`.
 
 `amux doctor` includes a `suggestions board` row. It probes an authenticated
-`/api/tickets` list with the same read-only credential as the bridge (preferring
-the `source` mapping) and joins that result with the bridge's last completed
+`/api/tickets/poll?cursor=0&limit=1` cursor with the same read-only credential as
+the bridge (preferring the `source` mapping) and joins that result with the bridge's last completed
 full-poll timestamp. HTTP 401/403 and 5xx responses are failures with separate
 credential/deployment repair hints. A missing or older-than-five-minutes
 successful sync is also a failure even when the endpoint itself is reachable.
@@ -128,8 +131,7 @@ sends with `enforce_nonce`; a crash after Discord accepts the notification but
 before relay-state persistence can therefore retry without creating a second
 operator message.
 Tracked unanswered ticket IDs are polled directly when a reminder is due, so
-the schedule continues even after a busy board's bounded list no longer
-contains that ticket. If that authoritative detail endpoint returns `404`
+the schedule does not depend on new board events. If that authoritative detail endpoint returns `404`
 because the tracked ticket was deleted or archived, the relay writes a durable
 `ticket-not-found` terminal tombstone, logs it once, stops retrying that ticket,
 and continues other mappings.
@@ -143,8 +145,10 @@ metadata are normalized and encoded as bounded terminal-safe JSON inside a
 payload-dependent fence that the encoded payload cannot contain. Prompt text,
 media, tokens, and credentials are never written to relay state or logs.
 
-The authenticated read API contract is intentionally strict: `/api/config` must enumerate
-projects, `/api/tickets?project=...` must return `tickets[]`, and each ticket
-detail must return an ordered `comments[]`. Network failures, malformed JSON,
-unknown comment kinds/purposes, and endpoint/schema drift fail visibly without
-advancing delivery state.
+The authenticated read API contract is intentionally strict:
+`/api/config/agentdocs` must provide the requested project and policy;
+`/api/tickets/poll` must return a monotonic bounded cursor window; and each
+requested ticket detail must return an ordered `comments[]`. The cursor advances
+only after every detail implicated by that window has reconciled. Network
+failures, malformed JSON, unknown event/comment kinds, and endpoint/schema drift
+fail visibly without advancing that project's cursor.
