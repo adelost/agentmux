@@ -67,6 +67,7 @@ import {
   isRunningNow, isAskToHuman, looksDone,
 } from "../core/orchestrator-checkpoint.mjs";
 import { isSystemNoiseDirective } from "../core/system-noise.mjs";
+import { composeMorningDigest, digestProjects, boardDecisionItem } from "../core/morning-digest.mjs";
 import { collectCommitsSince, reposFromAgents } from "../core/commit-log.mjs";
 import { pruneOldSessions, formatJanitorResult } from "../core/janitor.mjs";
 import { reapStalePlaywrightProcesses, formatPlaywrightReapResult } from "../core/playwright-watchdog.mjs";
@@ -2012,6 +2013,89 @@ async function cmdTodoRemind(args) {
   const result = await notifyUser(body, opts);
   if (result.deduped) console.log("todo-remind skipped duplicate");
   else console.log(`todo-remind sent → ${result.target}${result.fallback ? " (fallback)" : ""} (${active.length} active)`);
+}
+
+/**
+ * The 08:00 morning digest: ONE DM with everything waiting on the HUMAN —
+ * remindable todos + board tickets in needs_detail + open human-directed
+ * asks. Replaces the standalone todo-remind cron entry (todo content is
+ * folded in) so the morning never sends two pushes. Silent when the queue
+ * is genuinely empty; board read-failures are surfaced loudly instead of
+ * reading as an empty queue.
+ */
+async function cmdMorningDigest(ctx, args) {
+  const { notifyUser } = await import("./send-notify.mjs");
+  const { readFileSync } = await import("fs");
+  const { flags } = parseFlags(args, { dry: "boolean", force: "boolean" });
+  const nowMs = Date.now();
+
+  const parsed = loadTodos(process.env.AMUX_TODOS_PATH || DEFAULT_TODOS_PATH);
+  const todoSummary = listRemindable(parsed).length ? formatReminderSummary(parsed) : null;
+
+  const confPath = process.env.FLEETS_CONF
+    || `${process.env.HOME}/.agentmux/fleet-watch/fleets.conf`;
+  const tokenPath = process.env.SUGGEST_READ_TOKEN_FILE
+    || `${process.env.HOME}/.config/agent/suggestions-read-token`;
+  const boardBase = process.env.SUGGEST_BASE_URL || "https://suggest.v1d.io";
+  const boardDecisions = [];
+  const boardFailures = [];
+  let confText = "";
+  try { confText = readFileSync(confPath, "utf-8"); } catch { /* no fleets = no boards */ }
+  let readToken = null;
+  try { readToken = readFileSync(tokenPath, "utf-8").trim(); } catch { /* surfaced below */ }
+  for (const { project } of digestProjects(confText)) {
+    if (!readToken) { boardFailures.push(project); continue; }
+    try {
+      const response = await fetch(`${boardBase}/api/tickets?project=${encodeURIComponent(project)}`, {
+        headers: { authorization: `Bearer ${readToken}`, "user-agent": "amux-morning-digest" },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) { boardFailures.push(project); continue; }
+      const body = await response.json();
+      for (const ticket of body.tickets ?? []) {
+        if (ticket.status === "needs_detail") {
+          boardDecisions.push(boardDecisionItem(project, ticket));
+        }
+      }
+    } catch { boardFailures.push(project); }
+  }
+
+  // Open human-directed asks across every claude/codex pane, last 24h.
+  // buildAskEntries already applies the SRC-0053 noise + provenance
+  // classifiers, so a /compact wrapper or peer-thread question never pages.
+  const openAsks = [];
+  for (const agent of listAgents(ctx.configPath)) {
+    for (let paneIdx = 0; paneIdx < (agent.panes || []).length; paneIdx++) {
+      const cmd = agent.panes[paneIdx]?.cmd || "";
+      if (!/^(claude|codex)/.test(cmd)) continue;
+      const paneDir = panePathFor(agent, paneIdx);
+      const res = readLastTurnsForPane(agent, paneIdx, paneDir,
+        { limit: 20, tailBytes: 4 * 1024 * 1024 });
+      if (!res?.turns?.length) continue;
+      const status = await getPaneStatus(ctx, agent.name, paneIdx).catch(() => "unknown");
+      const entries = buildAskEntries({ agent: agent.name, pane: paneIdx,
+        turns: res.turns, jsonlFile: res.jsonlFile, paneStatus: status, nowMs });
+      for (const entry of filterAskEntries(entries,
+        { openOnly: true, sinceMs: nowMs - 24 * 3_600_000 })) {
+        if (entry.status === "needs-you") openAsks.push(entry);
+      }
+    }
+  }
+  openAsks.sort((left, right) => (right.ageMs || 0) - (left.ageMs || 0));
+
+  const message = composeMorningDigest({ todoSummary, boardDecisions, openAsks, boardFailures });
+  if (!message) {
+    console.log("morning-digest: tom kö — inget skickas.");
+    return;
+  }
+  if (flags.dry) {
+    console.log(`(dry) would notify:\n${message}`);
+    return;
+  }
+  const result = await notifyUser(message, { level: "info", title: "Morgondigest",
+    force: !!flags.force });
+  if (result.deduped) console.log("morning-digest skipped duplicate");
+  else console.log(`morning-digest sent → ${result.target} (todos=${todoSummary ? 1 : 0}, board=${boardDecisions.length}, asks=${openAsks.length}, failures=${boardFailures.length})`);
 }
 
 /** Compress an "age in minutes" into "Xm" / "Xh" / "Xd" for header chrome. */
@@ -4116,6 +4200,7 @@ const FLAG_SPECS = {
   topic: { p: "number" },
   todo: { all: "boolean", parked: "boolean", blocked: "boolean", dry: "boolean", path: "string" },
   "todo-remind": { dry: "boolean", path: "string", title: "string", level: "string", force: "boolean" },
+  "morning-digest": { dry: "boolean", force: "boolean" },
 };
 
 /**
@@ -4346,6 +4431,8 @@ export async function dispatch(argv, ctx) {
     case "todos":
       return cmdTodo(rest);
 
+    case "morning-digest":
+      return cmdMorningDigest(ctx, rest);
     case "todo-remind":
     case "todoremind":
       return cmdTodoRemind(rest);
