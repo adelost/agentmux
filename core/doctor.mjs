@@ -68,6 +68,37 @@ export function checkSuggestionsBoard({
     `HTTP ${probe.status || 200} (${probe.projectId || "board"}) · ${freshness}`);
 }
 
+/** Exact Cloudflare rows-read evidence must be visible before its configured cliff. */
+export function checkSuggestionsRowsRead({ entry, now = Date.now() } = {}) {
+  const classified = classifyGuardHeartbeat(entry, { now });
+  if (classified.state !== "ok") return null;
+  const metrics = classified.beat?.metrics;
+  const tier = metrics?.status;
+  if (tier === "failed") {
+    return check("suggestions rows read", FAIL,
+      `analytics failed (${String(metrics.error || "unknown").slice(0, 160)})`,
+      "inspect Suggestions usage watcher credentials/logs; do not infer usage from request counts");
+  }
+  if (!new Set(["ok", "warning", "critical", "exhausted"]).has(tier)
+    || !Number.isFinite(metrics?.rowsRead) || !Number.isFinite(metrics?.budgetRows)
+    || !Number.isFinite(metrics?.ratio) || typeof metrics?.periodKey !== "string") {
+    return check("suggestions rows read", FAIL, "analytics heartbeat is malformed",
+      "inspect suggestions-usage guard heartbeat and watcher version");
+  }
+  const detail = `${Number(metrics.rowsRead).toLocaleString("en-US")} / `
+    + `${Number(metrics.budgetRows).toLocaleString("en-US")} (${Math.round(metrics.ratio * 10_000) / 100}%) `
+    + `for ${metrics.periodKey}`;
+  if (tier === "exhausted") {
+    return check("suggestions rows read", FAIL, `EXHAUSTED · ${detail}`,
+      "stop avoidable board load and inspect Cloudflare Analytics; attribution is still unknown");
+  }
+  if (tier === "warning" || tier === "critical") {
+    return check("suggestions rows read", WARN, `${tier.toUpperCase()} · ${detail}`,
+      "inspect Cloudflare Analytics before the configured rows-read budget is exhausted");
+  }
+  return check("suggestions rows read", OK, detail);
+}
+
 export function checkBridgeProcess({ pids, supervised }) {
   if (!pids.length) {
     return check("bridge process", FAIL, "not running",

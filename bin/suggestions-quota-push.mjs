@@ -9,6 +9,7 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
 import { readQuotaSnapshot } from "../core/quota-usage.mjs";
+import { createSuggestionsHttpClient } from "../core/suggestions-http.mjs";
 
 const DEFAULT_CONFIG_PATH = join(homedir(), ".config", "agent", "suggestions-quota-push.yaml");
 const PUSH_TIMEOUT_MS = 15_000;
@@ -34,6 +35,19 @@ export function quotaPushSummary(snapshot) {
   return `pushed quota snapshot (${engineState("claude")}, ${engineState("codex")})`;
 }
 
+export async function pushSuggestionsQuota({ config, token, snapshot,
+  httpClient = createSuggestionsHttpClient({ source: "quota-push" }) }) {
+  await httpClient.requestJson(`${config.baseUrl}/api/ops/quota`, {
+    token,
+    method: "POST",
+    body: { version: 1, snapshot },
+    timeoutMs: PUSH_TIMEOUT_MS,
+    expectedStatus: 204,
+    headers: { "user-agent": "agentmux-quota-push/1" },
+  });
+  return quotaPushSummary(snapshot);
+}
+
 async function main() {
   const configPath = process.argv[2] || DEFAULT_CONFIG_PATH;
   const config = loadPushConfig(readFileSync(configPath, "utf-8"));
@@ -41,21 +55,7 @@ async function main() {
   if (!token) throw new Error(`empty admin token in ${config.credentialFile}`);
 
   const snapshot = await readQuotaSnapshot();
-  const response = await fetch(`${config.baseUrl}/api/ops/quota`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-      "user-agent": "agentmux-quota-push/1",
-    },
-    body: JSON.stringify({ version: 1, snapshot }),
-    signal: AbortSignal.timeout(PUSH_TIMEOUT_MS),
-  });
-  if (response.status !== 204) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`push failed: HTTP ${response.status} ${body.slice(0, 200)}`);
-  }
-  console.log(quotaPushSummary(snapshot));
+  console.log(await pushSuggestionsQuota({ config, token, snapshot }));
 }
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : null;

@@ -15,6 +15,7 @@ import {
   saveSuggestionsBridgeState,
 } from "../core/suggestions-comment-bridge.mjs";
 import { writeGuardHeartbeat } from "../core/guard-heartbeat.mjs";
+import { createSuggestionsHttpClient } from "../core/suggestions-http.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CONFIG = "~/.config/agent/suggestions-comment-bridge.yaml";
@@ -81,6 +82,10 @@ try {
     config,
     state,
     readToken,
+    httpClient: createSuggestionsHttpClient({
+      source: "comment-bridge",
+      ...(allowTestOrigin ? { statePath: null, startJitterMaxMs: 0 } : {}),
+    }),
     allowTestOrigin,
     deliver: createAmuxCommentDeliverer({ amuxBin }),
     notify: createAmuxCommentNotifier({ amuxBin }),

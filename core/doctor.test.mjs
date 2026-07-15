@@ -8,6 +8,7 @@ import {
   checkGuardCronHeartbeats,
   checkNativeRuntime,
   checkSuggestionsBoard,
+  checkSuggestionsRowsRead,
   formatDoctorReport,
   SUGGESTIONS_BRIDGE_STALE_MS,
   checkTmuxVersion,
@@ -79,6 +80,41 @@ feature("Suggestions board and comment-bridge health", () => {
     then: ["install direction is visible", (result) => {
       expect(result.status).toBe(WARN);
       expect(result.hint).toContain("install-suggestions-comment-bridge");
+    }],
+  });
+});
+
+feature("Suggestions exact rows-read health", () => {
+  const usage = (status, metrics = {}) => ({
+    key: "suggestions-usage",
+    intervalSec: 900,
+    beat: {
+      schemaVersion: 1,
+      key: "suggestions-usage",
+      intervalSec: 900,
+      ts: new Date(NOW - 60_000).toISOString(),
+      metrics: { status, periodKey: "2026-07-08", rowsRead: 3_600_000,
+        budgetRows: 5_000_000, ratio: 0.72, ...metrics },
+    },
+  });
+
+  unit("pre-cliff analytics renders a visible warning", {
+    when: ["checking a fresh warning heartbeat", () =>
+      checkSuggestionsRowsRead({ entry: usage("warning"), now: NOW })],
+    then: ["doctor names exact usage and Analytics", (result) => {
+      expect(result.status).toBe(WARN);
+      expect(result.detail).toContain("3,600,000 / 5,000,000");
+      expect(result.hint).toContain("Cloudflare Analytics");
+    }],
+  });
+
+  unit("an analytics failure is red instead of silently green", {
+    when: ["checking a fresh failed watcher heartbeat", () =>
+      checkSuggestionsRowsRead({ entry: usage("failed", { error: "credential expired" }), now: NOW })],
+    then: ["doctor refuses request-count inference", (result) => {
+      expect(result.status).toBe(FAIL);
+      expect(result.detail).toContain("credential expired");
+      expect(result.hint).toContain("do not infer usage");
     }],
   });
 });

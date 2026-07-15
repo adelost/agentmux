@@ -11,6 +11,7 @@ import {
   pollWatchdogOutboxes,
 } from "../core/suggestions-watchdog-outbox.mjs";
 import { writeGuardHeartbeat } from "../core/guard-heartbeat.mjs";
+import { createSuggestionsHttpClient } from "../core/suggestions-http.mjs";
 
 const DEFAULT_CONFIG = "~/.config/agent/suggestions-watchdog-outbox.yaml";
 
@@ -56,6 +57,10 @@ try {
     config,
     readToken,
     adminToken,
+    httpClient: createSuggestionsHttpClient({
+      source: "watchdog-outbox",
+      ...(allowTestOrigin ? { statePath: null, startJitterMaxMs: 0 } : {}),
+    }),
     deliver: createAmuxOutboxDeliverer({
       queue: createDeliveryQueue({
         validateTarget: (agent, pane) => validateAgentPane(agentConfigPath, agent, pane),

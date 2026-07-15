@@ -493,7 +493,7 @@ describe.sequential("Suggestions human-comment relay", () => {
     } finally { await fixture.close(); }
   });
 
-  it("one unreadable project degrades to a recorded failure while the rest still delivers", async () => {
+  it("one board 5xx opens the host circuit before the next project can add load", async () => {
     const fixture = await fixtureServer({ projectIds: ["skydive", "ghost"],
       boards: { skydive: [ticket("SKY-14", [comment(1, "creator", "deliver me")])],
         ghost: [] } });
@@ -503,9 +503,9 @@ describe.sequential("Suggestions human-comment relay", () => {
         ghost: { agent: "ghost", pane: 2 },
         skydive: { agent: "skydive", pane: 2 },
       });
-      // ghost is KNOWN but its ticket list breaks (transient 500): the sweep
-      // records the failure and still delivers skydive — one bad project must
-      // never take the whole bridge (and its heartbeat) down.
+      // ghost is KNOWN but its ticket list breaks with 500. The following
+      // project records a local circuit failure without making another HTTP
+      // request. The next cron therefore cannot amplify a sick board.
       const brokenFetch = async (url, init) => {
         const target = String(url);
         if (target.includes("/api/tickets") && target.includes("project=ghost")) {
@@ -519,9 +519,12 @@ describe.sequential("Suggestions human-comment relay", () => {
         deliver: createAmuxCommentDeliverer({ amuxBin: fake.path }),
         notify: async () => {}, persist: () => {}, now: () => 1_000_000,
         logger, readToken: TEST_READ_TOKEN, allowTestOrigin: true });
-      expect(result.projectFailures.map((failure) => failure.projectId)).toEqual(["ghost"]);
-      expect(result.delivered).toBe(1);
-      expect(fake.records()).toHaveLength(1);
+      expect(result.projectFailures.map((failure) => failure.projectId))
+        .toEqual(["ghost", "skydive"]);
+      expect(result.delivered).toBe(0);
+      expect(fake.records()).toHaveLength(0);
+      expect(fixture.requests.filter((path) => path.startsWith("/api/tickets?")))
+        .toEqual([]);
     } finally { await fixture.close(); }
   });
 

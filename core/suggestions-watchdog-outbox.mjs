@@ -8,6 +8,7 @@ import { homedir } from "os";
 import { resolve } from "path";
 import yaml from "js-yaml";
 import { createDeliveryQueue, waitForDeliveryJob } from "./delivery-queue.mjs";
+import { createSuggestionsHttpClient } from "./suggestions-http.mjs";
 
 const LIVE_ORIGIN = "https://suggest.v1d.io";
 const REQUIRED_PROJECTS = Object.freeze(["source", "skydive"]);
@@ -119,6 +120,7 @@ export async function pollWatchdogOutboxes({
   readToken,
   adminToken,
   fetchImpl = globalThis.fetch,
+  httpClient = null,
   deliver,
   logger = console,
 }) {
@@ -127,6 +129,12 @@ export async function pollWatchdogOutboxes({
   }
   validateToken(readToken, "read");
   validateToken(adminToken, "admin");
+  const http = httpClient ?? createSuggestionsHttpClient({
+    source: "watchdog-outbox",
+    fetchImpl,
+    ...(config.baseUrl !== LIVE_ORIGIN || fetchImpl !== globalThis.fetch
+      ? { statePath: null, startJitterMaxMs: 0 } : {}),
+  });
   let delivered = 0;
   let pending = 0;
   const errors = [];
@@ -134,14 +142,14 @@ export async function pollWatchdogOutboxes({
     try {
       const bootstrapUrl = endpoint(config.baseUrl, "/api/config/agentdocs", projectId);
       const bootstrap = await fetchJson(bootstrapUrl, {
-        fetchImpl, token: readToken, timeoutMs: config.requestTimeoutMs,
+        httpClient: http, token: readToken, timeoutMs: config.requestTimeoutMs,
       });
       const target = brokerTarget(bootstrap, projectId);
       const outboxUrl = endpoint(config.baseUrl, "/api/watchdog/outbox", projectId);
       outboxUrl.searchParams.set("after", "0");
       outboxUrl.searchParams.set("limit", "100");
       const outbox = await fetchJson(outboxUrl, {
-        fetchImpl, token: readToken, timeoutMs: config.requestTimeoutMs,
+        httpClient: http, token: readToken, timeoutMs: config.requestTimeoutMs,
       });
       const alerts = validateAlerts(outbox, projectId);
       for (const alert of alerts) {
@@ -153,7 +161,7 @@ export async function pollWatchdogOutboxes({
           }), idempotencyKey);
           const ackUrl = endpoint(config.baseUrl, "/api/watchdog/outbox/ack", projectId);
           const acknowledged = await fetchJson(ackUrl, {
-            fetchImpl,
+            httpClient: http,
             token: adminToken,
             timeoutMs: config.requestTimeoutMs,
             method: "POST",
@@ -200,37 +208,16 @@ function endpoint(baseUrl, pathname, projectId) {
 }
 
 async function fetchJson(url, {
-  fetchImpl,
+  httpClient,
   token,
   timeoutMs,
   method = "GET",
   body = null,
 }) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  timer.unref?.();
-  let response;
-  let text;
-  try {
-    response = await fetchImpl(url, {
-      method,
-      headers: {
-        authorization: `Bearer ${token}`,
-        ...(body == null ? {} : { "content-type": "application/json" }),
-      },
-      ...(body == null ? {} : { body: JSON.stringify(body) }),
-      redirect: "error",
-      signal: controller.signal,
-    });
-    text = await response.text();
-  } finally {
-    clearTimeout(timer);
-  }
-  if (bytes(text) > MAX_RESPONSE_BYTES) throw new Error(`HTTP ${response.status}: response too large`);
-  let value;
-  try { value = JSON.parse(text); } catch { throw new Error(`HTTP ${response.status}: invalid JSON`); }
-  if (!response.ok) throw new Error(`HTTP ${response.status}: ${String(value?.error || "request failed")}`);
-  if (!isObject(value)) throw new Error(`HTTP ${response.status}: JSON object required`);
+  const value = await httpClient.requestJson(url, {
+    token, timeoutMs, method, body, maxBytes: MAX_RESPONSE_BYTES,
+  });
+  if (!isObject(value)) throw new Error("HTTP response: JSON object required");
   return value;
 }
 
