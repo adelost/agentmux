@@ -16,7 +16,7 @@ const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), 
   headers: { "content-type": "application/json" },
 });
 
-function setup() {
+function setup({ loseFirstResponse = true, message404Once = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-native-adapter-"));
   const workspace = join(root, "workspace");
   const queueDir = join(root, "queue");
@@ -27,7 +27,9 @@ function setup() {
 
   const calls = [];
   let messageAccepted = false;
-  let loseFirstMessageResponse = true;
+  let messageCompleted = null;
+  let loseFirstMessageResponse = loseFirstResponse;
+  let returnMessage404 = message404Once;
   const agent = {
     id: "22222222-2222-4222-8222-222222222222",
     projectId: "11111111-1111-4111-8111-111111111111",
@@ -59,7 +61,29 @@ function setup() {
     }
     if (path === `/api/projects/${agent.projectId}/agents`) return jsonResponse(agent, 201);
     if (path === `/api/agents/${agent.id}/history`) {
-      return jsonResponse({ bootId: "boot-1", agent, events: [] });
+      const operationKey = calls.find((call) => call.path.endsWith("/messages"))?.body?.idempotencyKey;
+      const events = !messageAccepted ? [] : [
+        { type: "web", subtype: "user", operationKey },
+        ...(messageCompleted ? [{
+          type: "web",
+          subtype: "turn-done",
+          operationKey,
+          code: messageCompleted.code,
+          error: messageCompleted.error,
+          interrupted: Boolean(messageCompleted.interrupted),
+        }] : []),
+      ];
+      return jsonResponse({
+        bootId: "boot-1",
+        agent,
+        events,
+        operations: messageCompleted ? [{
+          operationKey,
+          code: messageCompleted.code,
+          error: messageCompleted.error,
+          interrupted: Boolean(messageCompleted.interrupted),
+        }] : [],
+      });
     }
     if (path === `/api/agents/${agent.id}` && options.method === "PATCH") {
       Object.assign(agent, body);
@@ -79,6 +103,10 @@ function setup() {
       }, 201);
     }
     if (path === `/api/agents/${agent.id}/messages`) {
+      if (returnMessage404) {
+        returnMessage404 = false;
+        return jsonResponse({ error: "agent-not-found" }, 404);
+      }
       if (!messageAccepted) messageAccepted = true;
       if (loseFirstMessageResponse) {
         loseFirstMessageResponse = false;
@@ -109,7 +137,19 @@ function setup() {
     fetchImpl,
     loadConfigImpl: () => config,
   });
-  return { root, workspace, queueDir, attachment, calls, nativeRuntime, agent };
+  return {
+    root,
+    workspace,
+    queueDir,
+    attachment,
+    calls,
+    nativeRuntime,
+    agent,
+    completeMessage(code = 0, error = null, interrupted = false) {
+      messageCompleted = { code, error, interrupted };
+      agent.running = false;
+    },
+  };
 }
 
 describe("native runtime compatibility adapter", () => {
@@ -141,8 +181,16 @@ describe("native runtime compatibility adapter", () => {
     });
   });
 
+  it("treats a malformed native pane as non-native for routing but rejects explicit provisioning", async () => {
+    const { nativeRuntime } = setup();
+    expect(nativeRuntime.isNativeTarget("skybar-canary", 99)).toBe(false);
+    await expect(nativeRuntime.ensureTarget("skybar-canary", 99)).rejects.toMatchObject({
+      code: "invalid-native-target",
+    });
+  });
+
   it("survives a lost accept response and acknowledges exactly one queued turn on retry", async () => {
-    const { queueDir, attachment, calls, nativeRuntime } = setup();
+    const { queueDir, attachment, calls, nativeRuntime, completeMessage } = setup();
     let clock = 1_000;
     const queue = createDeliveryQueue({ rootDir: queueDir, now: () => clock });
     const broker = createDeliveryBroker({
@@ -165,7 +213,15 @@ describe("native runtime compatibility adapter", () => {
       attempts: 1,
     });
 
+    completeMessage(0);
     clock = 10_000;
+    await broker.kickTarget("skybar-canary", 0);
+    expect(queue.read(job.agentName, job.pane, job.id)).toMatchObject({
+      status: "submitted",
+      attempts: 2,
+      metadata: { deliveryTransport: "native" },
+    });
+    clock = 12_000;
     await broker.kickTarget("skybar-canary", 0);
     expect(queue.read(job.agentName, job.pane, job.id)).toMatchObject({
       status: "acknowledged",
@@ -179,6 +235,93 @@ describe("native runtime compatibility adapter", () => {
       { path: "/runtime/uploads/proof.png", name: "proof.png" },
     ]);
     expect(messages[0].body.prompt).toBe("Inspect this");
+  });
+
+  it("reprovisions a missing cached agent and retries the same operation key once", async () => {
+    const { nativeRuntime, calls } = setup({ loseFirstResponse: false, message404Once: true });
+    const result = await nativeRuntime.deliverQueued({
+      id: "stale-agent",
+      agentName: "skybar-canary",
+      pane: 0,
+      kind: "prompt",
+      text: "continue after registry replacement",
+    });
+
+    expect(result).toMatchObject({
+      accepted: true,
+      completionPending: true,
+      operationKey: "delivery:stale-agent",
+    });
+    const creates = calls.filter((call) => call.path.endsWith("/agents"));
+    const messages = calls.filter((call) => call.path.endsWith("/messages"));
+    expect(creates).toHaveLength(2);
+    expect(messages).toHaveLength(2);
+    expect(messages[0].body.idempotencyKey).toBe("delivery:stale-agent");
+    expect(messages[1].body.idempotencyKey).toBe(messages[0].body.idempotencyKey);
+  });
+
+  it("terminalizes an accepted native turn failure without redispatching it", async () => {
+    const { queueDir, calls, nativeRuntime, completeMessage } = setup({ loseFirstResponse: false });
+    let clock = 1_000;
+    const notices = [];
+    const queue = createDeliveryQueue({ rootDir: queueDir, now: () => clock });
+    const broker = createDeliveryBroker({
+      agent: nativeRuntime,
+      queue,
+      now: () => clock,
+      notify: async (job, kind) => notices.push({ job: structuredClone(job), kind }),
+    });
+    const job = queue.enqueue({
+      agentName: "skybar-canary",
+      pane: 0,
+      text: "fail immediately",
+      source: "test",
+      idempotencyKey: "native-failed-turn",
+    });
+
+    await broker.kickTarget("skybar-canary", 0);
+    expect(queue.read(job.agentName, job.pane, job.id).status).toBe("submitted");
+    completeMessage(1, "engine exited before completion");
+    clock = 2_000;
+    await broker.kickTarget("skybar-canary", 0);
+
+    const terminal = queue.read(job.agentName, job.pane, job.id);
+    expect(terminal).toMatchObject({
+      status: "delivered_unverified",
+      attempts: 1,
+      metadata: {
+        deliveryTransport: "native",
+        deliveryAmbiguity: "native-turn-failed",
+      },
+      lastReason: expect.stringContaining("engine exited before completion"),
+    });
+    expect(notices).toEqual([expect.objectContaining({ kind: "unverified" })]);
+    expect(calls.filter((call) => call.path.endsWith("/messages"))).toHaveLength(1);
+  });
+
+  it("settles an explicitly interrupted native turn without retrying or calling it failed", async () => {
+    const { queueDir, calls, nativeRuntime, completeMessage } = setup({ loseFirstResponse: false });
+    let clock = 1_000;
+    const queue = createDeliveryQueue({ rootDir: queueDir, now: () => clock });
+    const broker = createDeliveryBroker({ agent: nativeRuntime, queue, now: () => clock });
+    const job = queue.enqueue({
+      agentName: "skybar-canary",
+      pane: 0,
+      text: "long task that the operator interrupts",
+      source: "test",
+      idempotencyKey: "native-interrupted-turn",
+    });
+
+    await broker.kickTarget("skybar-canary", 0);
+    completeMessage(1, "interrupted by operator", true);
+    clock = 2_000;
+    await broker.kickTarget("skybar-canary", 0);
+
+    expect(queue.read(job.agentName, job.pane, job.id)).toMatchObject({
+      status: "acknowledged",
+      attempts: 1,
+    });
+    expect(calls.filter((call) => call.path.endsWith("/messages"))).toHaveLength(1);
   });
 
   it("applies a combined native model and effort change without restarting the session", async () => {

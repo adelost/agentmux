@@ -149,8 +149,11 @@ npm run test:webui:native-canary -- --port 8812
 ```
 
 The gate restarts its own runtime and verifies both engine sessions, delivery,
-uploads, usage, effort, interrupt, compact and duplicate-free reply mirroring
-without creating a tmux session.
+uploads, usage, effort, interrupt, compact, pushed fleet-state events and
+duplicate-free reply mirroring. It then performs an isolated exact-session
+native→tmux→native rollback and proves old operation keys replay without a
+second turn. The live/default tmux socket and production runtime are never
+touched. See [the rollback runbook](docs/native-runtime-rollback.md).
 
 ### Hook-pushed pane state (event ledger)
 

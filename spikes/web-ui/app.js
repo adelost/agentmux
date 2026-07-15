@@ -506,6 +506,12 @@ const renderEvent = (event) => {
     messageElement("notice", "Turnen avbröts. Agentens session och kontext finns kvar.", "notice");
   } else if (event.type === "web" && event.subtype === "interrupt-failed") {
     messageElement("error", `Kunde inte avbryta: ${event.error}`, "error");
+  } else if (event.type === "web" && event.subtype === "permission-denied") {
+    messageElement(
+      "error",
+      event.message || "Åtgärden stoppades av agentens behörighetspolicy.",
+      "error permission-denied",
+    );
   } else if (event.type === "web" && event.subtype === "turn-done") {
     state.liveMessage?.classList.remove("live");
     state.liveMessage = null;
@@ -515,7 +521,7 @@ const renderEvent = (event) => {
       agent.operation = null;
       updateAgentHeader();
     }
-    if (event.code !== 0 && !event.interrupted) {
+    if (event.code !== 0 && !event.interrupted && !event.permissionDenied) {
       messageElement("error", event.error || event.stderr || `Turn misslyckades (exit ${event.code})`, "error");
     }
     refreshProjects().catch(() => {});

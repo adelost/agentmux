@@ -332,6 +332,19 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     },
 
     "/peek": async (msg, mapping, pane) => {
+      if (isNativePane(mapping, pane)) {
+        const snapshot = await agent.nativeRuntime.history(mapping.name, pane);
+        // The native watcher owns continuous Discord projection. Starting the
+        // legacy follow timer here would post the same completed turn twice.
+        if (snapshot.agent.running) {
+          await replyNativeStatus(msg, mapping, pane);
+          return;
+        }
+        const text = await agent.nativeRuntime.getResponse(mapping.name, pane);
+        const context = await agent.nativeRuntime.getContext(mapping.name, pane);
+        await sendTextReply(msg, text, context);
+        return;
+      }
       const busy = await agent.isBusy(mapping.name, pane);
       if (!busy) {
         const text = await agent.getResponse(mapping.name, pane);
@@ -372,8 +385,13 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
     },
 
     "/raw": async (msg, mapping, pane) => {
-      const text = await agent.capturePane(mapping.name, pane);
-      const context = await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
+      const native = isNativePane(mapping, pane);
+      const text = native
+        ? await agent.nativeRuntime.capturePane(mapping.name, pane)
+        : await agent.capturePane(mapping.name, pane);
+      const context = native
+        ? await agent.nativeRuntime.getContext(mapping.name, pane)
+        : await (agent.getContext?.(mapping.name, pane) ?? agent.getContextPercent(mapping.name, pane));
       await sendTextReply(msg, text, context);
     },
 

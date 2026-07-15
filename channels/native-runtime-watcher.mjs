@@ -81,6 +81,15 @@ export function groupNativeTurns(events = []) {
       current.complete = true;
       current.interrupted = Boolean(event.interrupted);
       current.code = event.code;
+      current.error = event.error || event.stderr || null;
+      current.permissionDenied = Boolean(event.permissionDenied);
+      if (!current.items.length && Number(event.code) !== 0) {
+        const reason = String(current.error || `native turn failed (${event.code})`).trim();
+        current.items.push({
+          type: "text",
+          content: `${current.permissionDenied ? "🔒 Behörighet nekad" : "⚠️ Native-turn misslyckades"}: ${reason}`,
+        });
+      }
       current = null;
     }
   }
