@@ -160,7 +160,7 @@ export function paneDir(rootDir, pane) {
 // disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
 // content changes materially. User-appended content BELOW the end marker
 // is preserved across upgrades.
-export const HINTS_VERSION = "1.23.27";
+export const HINTS_VERSION = "1.23.28";
 export const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -514,17 +514,22 @@ Concrete pattern: a dedup commit landing between two deploys explains
 a "video count drop" without any race condition. Skipped git log +
 investigation spun up = noise to the user, wasted agent time.
 
-## Multi-agent edit protocol
+## Multi-agent edit protocol (Mattias 2026-07-16 — no file-claims)
 
-You and other agents may be editing the same repo in parallel. Three
-rules to prevent silent regressions and version-bump collisions:
+You and other agents may be editing the same repo in parallel. Do NOT
+claim files or announce ownership before starting — that friction slowed
+the fleet down more than the conflicts it prevented (Mattias 2026-07-16:
+"sluta med claim på filer.. man gör en feature.. och sen löser man
+konflikten"). Build the feature in your own branch/worktree, then resolve
+any conflict at merge:
 
-1. **Before editing a shared file:** \`git status\`. If there's WIP you
-   didn't make → STOP. Run \`amux done\` + \`amux log <agent> -p N\` to
-   identify the owner. Don't overwrite mid-flight refactors.
-2. **Announce ownership for >5min edits:** \`amux <peer> -p N "claim
-   handlers.mjs for X"\` so other panes see it in their channel. Cheap
-   signal, prevents merge conflicts.
+1. **Build, don't claim.** Make the feature; don't \`git status\`-STOP on
+   someone else's WIP and don't post a "claim handlers.mjs" announcement.
+   Two agents touching the same file is normal — the merge resolves it.
+2. **Resolve the conflict at merge, not upfront:** rebase onto fresh trunk
+   immediately before merge, run the change-relevant gate green after the
+   rebase, and flag any conflict-resolved hunks in code you did not write for
+   the reviewer to read first. (Staffing rule 2 below is the full merge gate.)
 3. **Version bumps must be unique:** before \`package.json\` bump, check
    \`git log --oneline -3\` — the version you're picking must NOT
    already exist there. Same minor twice (e.g. two 1.16.2 commits)
@@ -559,24 +564,21 @@ drift is a red gate, not a scoping excuse.
 1. **One owner per feature or project, end to end.** The manager assigns a
    clearly bounded task; its owner plans, implements, tests, pushes, and opens
    the PR without mid-flight interruptions or ongoing peer coordination.
-2. **Assign by priority; merge by proof (Mattias 2026-07-14, supersedes the
+2. **Assign by priority; merge by proof (Mattias 2026-07-14/16, supersedes the
    file-independence rule).** An idle agent gets the next highest-priority
-   READY ticket immediately, regardless of file overlap; the broker attaches
-   known overlap as a warning in the brief ("you will collide with X in
-   main.js — keep the diff narrow, merge fast"). Only an INTENT collision
-   (two tickets rewriting the same behavior/subsystem) stacks both tickets
-   under one owner. The hard gate moves to the merge: (a) \`git fetch && git
-   rebase\` onto fresh trunk immediately before merge, (b) the repository's
+   READY ticket immediately, regardless of file overlap — no overlap warning
+   in the brief, no INTENT-collision stacking, no overlap-gate split-ticket
+   (Mattias 2026-07-16: stop claiming files; build the feature and resolve the
+   conflict at merge — the claim machinery slowed the fleet more than it
+   helped). The hard gate is the merge: (a) \`git fetch && git rebase\` onto
+   fresh trunk immediately before merge, (b) the repository's
    fast, change-relevant gate must be green AFTER the rebase
-   (green-before-rebase proves nothing), (c) any
-   conflict-resolved hunks in code the owner did not write are explicitly
-   flagged in the PR and the reviewer reads those first. A file held by 3+
-   active zones (\`overlap-gate scan <repo>\` shows this; \`overlap-gate check
-   <repo> <paths>\` gates a planned zone) triggers an automatic split-ticket
-   on that file at top priority — the queue never absorbs the same contention
-   twice. The worktree is removed the moment the merge lands. Once an owner
-   has banked a PR, the broker may assign that agent's next ticket without
-   waiting for Mattias.
+   (green-before-rebase proves nothing), (c) any conflict-resolved hunks in
+   code the owner did not write are explicitly flagged in the PR and the
+   reviewer reads those first.
+   The worktree is removed the moment the merge lands. Once an owner has banked
+   a PR, the broker may assign that agent's next ticket without waiting for
+   Mattias.
    Full browser/golden suites are NOT default PR gates. Run the smallest
    visual test that covers changed rendering, and attach one representative
    screenshot when visual proof is useful. Run the exhaustive browser/golden
