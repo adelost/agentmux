@@ -7,6 +7,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, extname } from "node:path";
 import { loadConfig } from "../cli/config.mjs";
+import { unparkPane } from "./pane-park.mjs";
 
 const DEFAULT_RUNTIME_URL = "http://127.0.0.1:8811";
 const ATTACHMENT_PATTERN = /\[(image|file) attached:\s+([^\]\n]+)\]/gi;
@@ -78,6 +79,7 @@ export function createNativeRuntimeClient({
   fetchImpl = globalThis.fetch,
   loadConfigImpl = loadConfig,
   timeoutMs = 10_000,
+  unparkImpl = unparkPane,
 } = {}) {
   if (typeof fetchImpl !== "function") throw new Error("native runtime requires fetch");
   const targetCache = new Map();
@@ -148,6 +150,7 @@ export function createNativeRuntimeClient({
             "interrupt-not-ready",
             "agent-not-running",
             "compact-needs-session",
+            "model-downgrade-parked",
           ].includes(code),
       });
     }
@@ -211,14 +214,18 @@ export function createNativeRuntimeClient({
         },
       });
     }
+    // Runtime model/effort are mutable conversation settings. agents.yaml is
+    // their bootstrap default, not an authority that silently rewinds a
+    // manual /model switch whenever the bridge restarts.
+    const applyConfiguredMutableSettings = !adoptedId && !agent.replayed;
     const settings = {
       ...(adoptedId && !agent.address
         ? { address: { session: name, pane: Number(pane) } } : {}),
       ...(adoptedId && agent.permissionMode !== "automation"
         ? { permissionMode: "automation" } : {}),
-      ...(spec.paneConfig.model && spec.paneConfig.model !== agent.model
+      ...(applyConfiguredMutableSettings && spec.paneConfig.model && spec.paneConfig.model !== agent.model
         ? { model: spec.paneConfig.model } : {}),
-      ...(spec.paneConfig.effort && spec.paneConfig.effort !== agent.effort
+      ...(applyConfiguredMutableSettings && spec.paneConfig.effort && spec.paneConfig.effort !== agent.effort
         ? { effort: spec.paneConfig.effort } : {}),
     };
     if (Object.keys(settings).length) {
@@ -366,6 +373,13 @@ export function createNativeRuntimeClient({
               ...(modelEffort || effort ? { effort: modelEffort || effort } : {}),
             },
           });
+          if (model) {
+            unparkImpl({
+              session: job.agentName,
+              pane: job.pane,
+              detail: `explicit native model switch: ${model}${modelEffort ? ` ${modelEffort}` : ""}`,
+            });
+          }
           return { accepted: true, replayed: Boolean(agent.replayed), via: "native-settings" };
         }
 
@@ -439,8 +453,8 @@ export function createNativeRuntimeClient({
     const snapshot = await history(name, pane);
     const context = contextShape({
       ...snapshot.agent.context,
-      model: snapshot.agent.model,
-      effort: snapshot.agent.effort,
+      model: snapshot.agent.observedModel || snapshot.agent.model,
+      effort: snapshot.agent.observedEffort || snapshot.agent.effort,
     });
     return context;
   }
@@ -474,13 +488,18 @@ export function createNativeRuntimeClient({
     if (settings.model) body.model = settings.model;
     if (settings.effort) body.effort = settings.effort;
     if (!body.model && !body.effort) return resolved.agent;
-    return api(resolved.runtimeUrl, `/api/agents/${resolved.agent.id}`, {
+    const updated = await api(resolved.runtimeUrl, `/api/agents/${resolved.agent.id}`, {
       method: "PATCH",
       body: {
         ...body,
         idempotencyKey: settings.idempotencyKey || `manual-settings:${randomUUID()}`,
       },
     });
+    targetCache.set(`${name}:${Number(pane)}`, { ...resolved, agent: updated });
+    if (body.model) {
+      unparkImpl({ session: name, pane, detail: `explicit native model switch: ${body.model}` });
+    }
+    return updated;
   }
 
   function startProgressTimer(send, name, pane = 0, { streaming = true, intervalMs = 3_000 } = {}) {

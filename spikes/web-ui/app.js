@@ -56,6 +56,8 @@ const elements = {
   contextTrack: $(".context-track"),
   contextFill: $("#context-fill"),
   contextDetail: $("#context-detail"),
+  agentModelInput: $("#agent-model-input"),
+  agentModelOptions: $("#agent-model-options"),
   agentEffortSelect: $("#agent-effort-select"),
   compactButton: $("#compact-button"),
   interruptButton: $("#interrupt-button"),
@@ -182,6 +184,7 @@ const errorText = (error) => ({
   "interrupt-not-ready": "Codex is still starting the turn. Try again in a moment.",
   "compact-needs-session": "Send a message first so the agent has a session to compact.",
   "unknown-effort": "That effort level is not supported by the selected engine.",
+  "model-downgrade-parked": "This agent was stopped after an automatic model downgrade. Choose the intended model to resume.",
   "side-question-needs-session": "Send a regular message first so the agent has a session.",
   "side-question-claude-only": "Side questions are supported only for Claude agents in this version.",
   "side-question-failed": `The side question failed${error.detail ? `: ${error.detail}` : "."}`,
@@ -193,6 +196,15 @@ const showToast = (text, kind = "normal") => {
   elements.toast.textContent = text;
   elements.toast.className = `toast visible${kind === "error" ? " error" : ""}`;
   state.toastTimer = setTimeout(() => { elements.toast.className = "toast"; }, 4_500);
+};
+
+const modelsMatch = (requested, observed) => {
+  const wanted = String(requested || "").trim().toLowerCase();
+  const actual = String(observed || "").trim().toLowerCase();
+  if (!wanted || !actual) return false;
+  if (wanted === actual) return true;
+  return ["fable", "mythos", "opus", "sonnet", "haiku"]
+    .some((alias) => wanted === alias && actual.includes(alias));
 };
 
 const persistRoute = () => {
@@ -372,7 +384,11 @@ const updateAgentHeader = () => {
   elements.engineMark.textContent = agent.engine === "claude" ? "C" : "X";
   elements.engineMark.classList.toggle("codex", agent.engine === "codex");
   elements.agentName.textContent = agent.name;
-  elements.agentMeta.textContent = `${agent.engine} · ${agent.model} · ${effortLabel(agent.effort)}`;
+  const observedModel = agent.observedModel;
+  const drifted = Boolean(observedModel && !modelsMatch(agent.model, observedModel));
+  elements.agentMeta.textContent = `${agent.engine} · requested ${agent.model}`
+    + (observedModel ? ` · observed ${observedModel}` : " · awaiting observation")
+    + ` · ${effortLabel(agent.effort)}`;
   elements.projectPath.textContent = project.cwd;
   elements.projectPath.title = project.cwd;
   const queued = Number(agent.queuedMessages || 0);
@@ -383,6 +399,18 @@ const updateAgentHeader = () => {
       : agent.running ? `Working…${queued ? ` · ${queued} queued` : ""}` : queued ? `${queued} queued` : "Ready";
   elements.runState.classList.toggle("running", agent.running);
   renderContext(agent);
+  const modelOptions = state.config?.models?.[agent.engine] ?? [];
+  elements.agentModelOptions.replaceChildren(...modelOptions.map((model) => {
+    const option = document.createElement("option");
+    option.value = model;
+    return option;
+  }));
+  if (document.activeElement !== elements.agentModelInput) elements.agentModelInput.value = agent.model;
+  elements.agentModelInput.closest(".model-control")?.classList.toggle("drift", drifted);
+  elements.agentModelInput.disabled = state.controlPending;
+  elements.agentModelInput.title = drifted
+    ? `The engine served ${observedModel}; requested model remains ${agent.model}.`
+    : "Changes apply to the next turn and keep the same conversation.";
   replaceEffortOptions(elements.agentEffortSelect, agent.engine, agent.effort);
   elements.agentEffortSelect.disabled = state.controlPending;
   elements.compactButton.disabled = agent.running || !agent.sessionId || state.controlPending;
@@ -400,8 +428,11 @@ const updateAgentHeader = () => {
   elements.sideQuestionButton.title = agent.sessionId
     ? "Ask a separate fork without interrupting the main task"
     : "Send a regular message first";
-  elements.prompt.disabled = false;
-  elements.sendButton.disabled = state.sending;
+  elements.prompt.disabled = Boolean(agent.modelGuard?.blocked);
+  elements.prompt.placeholder = agent.modelGuard?.blocked
+    ? "Automatic model downgrade detected — choose a model above to resume"
+    : "Write to the agent…";
+  elements.sendButton.disabled = state.sending || Boolean(agent.modelGuard?.blocked);
   elements.sendButton.textContent = agent.running ? "Queue" : "Send";
   elements.attachButton.disabled = false;
 };
@@ -652,8 +683,35 @@ const renderEvent = (event) => {
     const agent = selectedAgent();
     if (agent) {
       agent.effort = event.effort;
+      agent.model = event.model;
+      if (event.clearedModelGuard) agent.modelGuard = null;
       updateAgentHeader();
     }
+  } else if (event.type === "web" && event.subtype === "model-observed") {
+    const agent = selectedAgent();
+    if (agent) {
+      agent.observedModel = event.observation?.model ?? null;
+      agent.observedEffort = event.observation?.effort ?? null;
+      agent.modelObservation = event.observation ?? null;
+      updateAgentHeader();
+    }
+  } else if (event.type === "web" && event.subtype === "model-change") {
+    const agent = selectedAgent();
+    if (agent && event.policy === "stop") {
+      agent.modelGuard = {
+        blocked: true,
+        requestedModel: event.requestedModel,
+        observedModel: event.observedModel,
+      };
+      updateAgentHeader();
+    } else if (agent && event.guardChanged) {
+      agent.modelGuard = null;
+      updateAgentHeader();
+    }
+    const automatic = event.cause === "automatic";
+    const text = `${automatic ? "Automatic model change" : "Model changed"}: ${event.from} → ${event.to}.`
+      + (event.policy === "stop" ? " The turn was stopped; choose the intended model to resume." : " The conversation was preserved.");
+    messageElement(event.policy === "stop" ? "error" : "notice", text, event.policy === "stop" ? "error" : "notice");
   } else if (event.type === "web" && event.subtype === "compact-start") {
     const agent = selectedAgent();
     if (agent) {
@@ -691,6 +749,8 @@ const renderEvent = (event) => {
     messageElement("notice", "The turn was interrupted. The agent session and context remain available.", "notice");
   } else if (event.type === "web" && event.subtype === "interrupt-failed") {
     messageElement("error", `Could not interrupt: ${event.error}`, "error");
+  } else if (event.type === "web" && event.subtype === "model-guard-interrupt-failed") {
+    messageElement("error", `The model downgrade was detected, but the active turn could not be interrupted: ${event.error}`, "error");
   } else if (event.type === "web" && event.subtype === "permission-denied") {
     messageElement(
       "error",
@@ -1105,6 +1165,48 @@ elements.sideForm.addEventListener("submit", async (event) => {
     pending.textContent = errorText(error);
   } finally {
     elements.sideQuestionSend.disabled = false;
+  }
+});
+
+elements.agentModelInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    elements.agentModelInput.dispatchEvent(new Event("change"));
+    elements.agentModelInput.blur();
+  }
+});
+
+elements.agentModelInput.addEventListener("change", async () => {
+  const agent = selectedAgent();
+  if (!agent || state.controlPending) return;
+  const previous = agent.model;
+  const model = elements.agentModelInput.value.trim();
+  if (!model || (model === previous && !agent.modelGuard?.blocked)) {
+    elements.agentModelInput.value = previous;
+    return;
+  }
+  const previousGuard = agent.modelGuard;
+  agent.model = model;
+  agent.modelGuard = null;
+  state.controlPending = true;
+  updateAgentHeader();
+  try {
+    const updated = await api(`/api/agents/${agent.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model, idempotencyKey: crypto.randomUUID() }),
+    });
+    Object.assign(agent, updated);
+    showToast(agent.running
+      ? `${model} saved for the next turn.`
+      : `Model changed to ${model}; the conversation is unchanged.`);
+  } catch (error) {
+    agent.model = previous;
+    agent.modelGuard = previousGuard;
+    showToast(errorText(error), "error");
+  } finally {
+    state.controlPending = false;
+    updateAgentHeader();
   }
 });
 

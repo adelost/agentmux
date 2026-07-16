@@ -32,6 +32,13 @@ import { readTailWindow } from "../../core/jsonl-reader.mjs";
 import { readQuotaSnapshot } from "../../core/quota-usage.mjs";
 import { ensureCodexExecutionSafety } from "../../core/codex-profiles.mjs";
 import { persistedSessionIdentity } from "../../core/native-session-identity.mjs";
+import { shouldStopPane } from "../../core/model-watch.mjs";
+import {
+  describeModelObservation,
+  latestCodexModelObservation,
+  observationFromClaudeEvent,
+  observationFromCodexReroute,
+} from "../../core/native-model-observation.mjs";
 import {
   CLAUDE_AUTONOMOUS_ARGS,
   CODEX_AUTONOMOUS_THREAD_POLICY,
@@ -526,6 +533,11 @@ export function createWebUi(options = {}) {
       name: agent.name,
       engine: agent.engine,
       model: agent.model,
+      requestedModel: agent.model,
+      observedModel: agent.modelObservation?.model ?? null,
+      observedEffort: agent.modelObservation?.effort ?? null,
+      modelObservation: agent.modelObservation,
+      modelGuard: agent.modelGuard,
       effort: agent.effort,
       address: agent.address,
       permissionMode: agent.permissionMode,
@@ -610,6 +622,8 @@ export function createWebUi(options = {}) {
         engine: agent.engine,
         model: agent.model,
         effort: agent.effort,
+        modelObservation: agent.modelObservation,
+        modelGuard: agent.modelGuard,
         address: agent.address,
         permissionMode: agent.permissionMode,
         cwd: agent.cwd,
@@ -638,6 +652,8 @@ export function createWebUi(options = {}) {
     engine: entry.engine,
     model: entry.model,
     effort: cleanEffort(entry.engine, entry.effort),
+    modelObservation: entry.modelObservation?.model ? entry.modelObservation : null,
+    modelGuard: entry.modelGuard?.blocked ? entry.modelGuard : null,
     address: cleanAddress(entry.address) ?? null,
     permissionMode: cleanPermissionMode(entry.permissionMode),
     cwd: typeof entry.cwd === "string" && isAbsolute(entry.cwd) ? resolve(entry.cwd) : null,
@@ -653,6 +669,8 @@ export function createWebUi(options = {}) {
     activeControl: null,
     activeTurnId: null,
     activeOperationKey: null,
+    activeModel: null,
+    activeEffort: null,
     interruptRequested: false,
     autoCompactTimer: null,
     autoCompactDueAt: null,
@@ -971,6 +989,7 @@ export function createWebUi(options = {}) {
     let turnTerminal = false;
     let turnAt = 0;
     let turnOperationKey = null;
+    let codexContextTurnId = null;
     const hydratedTools = new Map();
     const eventTime = (value) => {
       const numeric = Number(value);
@@ -1102,12 +1121,21 @@ export function createWebUi(options = {}) {
             at: entry.timestamp ?? 0,
           });
         }
+      } else if (agent.engine === "codex" && entry.type === "turn_context") {
+        codexContextTurnId = String(entry.payload?.turn_id || "").trim() || null;
       } else if (agent.engine === "codex" && entry.type === "response_item") {
         const payload = entry.payload ?? {};
         if (payload.type === "message") {
           const text = textOf(payload.content);
           if (!text || isEngineNoise(text)) continue;
           if (payload.role === "user") {
+            const messageTurnId = String(
+              payload.internal_chat_message_metadata_passthrough?.turn_id || "",
+            ).trim() || null;
+            // Codex writes bootstrap/user-role context before the turn_context
+            // row. It is not the submitted prompt and must not consume that
+            // turn's durable receipt during restart hydration.
+            if (messageTurnId && messageTurnId !== codexContextTurnId) continue;
             closeHydratedTurn();
             turnOperationKey = operationKeyForPrompt(text, entry.timestamp);
             pushEvent(agent, {
@@ -1174,6 +1202,105 @@ export function createWebUi(options = {}) {
     ...extra,
   });
 
+  const observeAgentModel = (agent, observation) => {
+    if (!observation?.model || agent.operation !== "turn") return null;
+    const requestedModel = agent.activeModel ?? agent.model;
+    const requestedEffort = agent.activeEffort ?? agent.effort;
+    const previous = agent.modelObservation;
+    const finding = describeModelObservation({
+      previous,
+      observation,
+      requestedModel,
+      requestedEffort,
+    });
+    if (!finding) return null;
+
+    const sameEvidence = previous?.model === finding.observation.model
+      && previous?.effort === finding.observation.effort
+      && previous?.requestedModel === finding.observation.requestedModel
+      && previous?.requestedEffort === finding.observation.requestedEffort;
+    if (sameEvidence) return finding;
+
+    agent.modelObservation = finding.observation;
+    let guardChanged = false;
+    const mustStop = !finding.expected && shouldStopPane(finding.divergence);
+    if (mustStop) {
+      const nextGuard = {
+        blocked: true,
+        since: observation.observedAt ?? now(),
+        requestedModel,
+        observedModel: observation.model,
+        direction: finding.divergence.direction,
+        detail: `${finding.divergence.from} → ${finding.divergence.to}`,
+      };
+      guardChanged = !agent.modelGuard?.blocked
+        || agent.modelGuard.requestedModel !== nextGuard.requestedModel
+        || agent.modelGuard.observedModel !== nextGuard.observedModel;
+      agent.modelGuard = nextGuard;
+    } else if (agent.modelGuard) {
+      agent.modelGuard = null;
+      guardChanged = true;
+    }
+    agent.updatedAt = now();
+    saveRegistry();
+
+    webEvent(agent, "model-observed", {
+      observation: agent.modelObservation,
+      expected: finding.expected,
+      requestedModel,
+      requestedEffort,
+    });
+
+    if (finding.change) {
+      const event = {
+        direction: finding.change.direction,
+        kind: finding.change.kind,
+        from: finding.change.from,
+        to: finding.change.to,
+        expected: finding.expected,
+        cause: finding.cause,
+        requestedModel,
+        requestedEffort,
+        observedModel: observation.model,
+        observedEffort: observation.effort,
+        source: observation.source,
+        reason: observation.reason ?? null,
+        policy: mustStop ? "stop" : "allow",
+        guardChanged,
+      };
+      webEvent(agent, "model-change", event);
+      fleetEvent(agent, "model_change", {
+        direction: event.direction,
+        detail: `${event.from} → ${event.to}`,
+        source: event.source,
+        requestedModel,
+        observedModel: observation.model,
+        automatic: !finding.expected,
+      });
+      if (mustStop && guardChanged) {
+        fleetEvent(agent, "notification", {
+          needsYou: true,
+          detail: `model downgrade: ${event.from} → ${event.to}`,
+        });
+        if (agent.running && !agent.interruptRequested) {
+          setImmediate(() => void interruptAgent(agent).catch((error) => {
+            webEvent(agent, "model-guard-interrupt-failed", { error: error.message });
+          }));
+        }
+      }
+    }
+    return finding;
+  };
+
+  const refreshModelObservationFromSession = (agent, { deep = false } = {}) => {
+    if (agent.engine !== "codex" || !agent.activeTurnId) return null;
+    const path = sessionFileFor(agent);
+    if (!path || !existsSync(path)) return null;
+    const lines = readTailWindow(path, (deep ? 8 : 1) * 1024 * 1024).text.split("\n");
+    const observation = latestCodexModelObservation(lines, now(), { turnId: agent.activeTurnId });
+    return observation ? observeAgentModel(agent, observation) : null;
+  };
+
   const emitToolActivity = (agent, activity) => {
     const phase = activity.phase ?? "started";
     const fallbackId = `tool:${hashPayload({
@@ -1220,7 +1347,7 @@ export function createWebUi(options = {}) {
     return `${text}\n[${label}: ${attachment.path}]`;
   }, prompt);
 
-  const buildClaudeLaunch = (agent, rawPrompt, attachments) => {
+  const buildClaudeLaunch = (agent, rawPrompt, attachments, settings) => {
     const prompt = attachmentPrompt(rawPrompt, attachments);
     const args = [
       "-p",
@@ -1228,8 +1355,8 @@ export function createWebUi(options = {}) {
       "--output-format", "stream-json",
       "--verbose",
       "--include-partial-messages",
-      "--model", agent.model,
-      "--effort", agent.effort,
+      "--model", settings.model,
+      "--effort", settings.effort,
       "--name", agent.name,
     ];
     if (agent.permissionMode === "automation") args.push(...CLAUDE_AUTONOMOUS_ARGS);
@@ -1269,7 +1396,7 @@ export function createWebUi(options = {}) {
     if (emit) webEvent(agent, "context", { context });
   };
 
-  const beginOperation = (agent, operation, rawPrompt = "", attachments = [], operationKey = null) => {
+  const beginOperation = (agent, operation, rawPrompt = "", attachments = [], operationKey = null, settings = null) => {
     const project = projects.get(agent.projectId);
     hydrate(agent);
     clearAutoCompact(agent);
@@ -1278,6 +1405,8 @@ export function createWebUi(options = {}) {
     agent.interruptRequested = false;
     agent.activeTurnId = null;
     agent.activeOperationKey = operationKey;
+    agent.activeModel = settings?.model ?? agent.model;
+    agent.activeEffort = settings?.effort ?? agent.effort;
     agent.turnHasAssistantText = false;
     agent.permissionDenied = null;
     agent.activeTools.clear();
@@ -1313,6 +1442,8 @@ export function createWebUi(options = {}) {
     agent.activeChild = null;
     agent.activeControl = null;
     agent.activeTurnId = null;
+    agent.activeModel = null;
+    agent.activeEffort = null;
     const operationKey = agent.activeOperationKey;
     agent.activeOperationKey = null;
     agent.permissionDenied = null;
@@ -1375,6 +1506,8 @@ export function createWebUi(options = {}) {
   const mapClaudeEvent = (agent, event) => {
     recordSessionId(agent, event.session_id);
     const operation = agent.operation;
+    const modelObservation = observationFromClaudeEvent(event, now());
+    if (modelObservation) observeAgentModel(agent, modelObservation);
     if (event.type === "control_response"
         && event.response?.subtype === "success") {
       webEvent(agent, "interrupt-acknowledged");
@@ -1464,8 +1597,9 @@ export function createWebUi(options = {}) {
 
   const runClaudeOperation = (agent, rawPrompt, attachments, operation, operationKey = null) => {
     const cwd = workingDirectoryFor(agent);
-    const launch = buildClaudeLaunch(agent, rawPrompt, attachments);
-    beginOperation(agent, operation, rawPrompt, attachments, operationKey);
+    const settings = { model: agent.model, effort: agent.effort };
+    const launch = buildClaudeLaunch(agent, rawPrompt, attachments, settings);
+    beginOperation(agent, operation, rawPrompt, attachments, operationKey, settings);
     let child;
     let stderr = "";
     let finished = false;
@@ -1507,8 +1641,8 @@ export function createWebUi(options = {}) {
 
   const runCodexOperation = async (agent, rawPrompt, attachments, operation, operationKey = null) => {
     const cwd = workingDirectoryFor(agent);
-    const effort = agent.effort;
-    beginOperation(agent, operation, rawPrompt, attachments, operationKey);
+    const settings = { model: agent.model, effort: agent.effort };
+    beginOperation(agent, operation, rawPrompt, attachments, operationKey, settings);
     let stderr = "";
     let finished = false;
     const finish = (code, error = null) => {
@@ -1520,10 +1654,15 @@ export function createWebUi(options = {}) {
       const { method, params = {} } = message;
       if (method === "protocol/error") {
         webEvent(agent, "protocol-error", { line: params.line });
+      } else if (method === "model/rerouted") {
+        const observation = observationFromCodexReroute(params, now());
+        if (observation) observeAgentModel(agent, observation);
       } else if (method === "thread/tokenUsage/updated" && params.tokenUsage) {
         setAgentContext(agent, contextFromCodexUsage(params.tokenUsage, agent.context));
+        refreshModelObservationFromSession(agent);
       } else if (method === "turn/started" && params.turn?.id) {
         agent.activeTurnId = params.turn.id;
+        setImmediate(() => refreshModelObservationFromSession(agent));
       } else if (method === "item/agentMessage/delta" && operation === "turn") {
         broadcast(agent, {
           type: "stream_event",
@@ -1554,6 +1693,7 @@ export function createWebUi(options = {}) {
       } else if (method === "item/completed" && params.item?.type === "contextCompaction") {
         webEvent(agent, "compacted", { metadata: null });
       } else if (method === "turn/completed") {
+        refreshModelObservationFromSession(agent, { deep: true });
         const status = params.turn?.status ?? "completed";
         if (operation === "turn" && !agent.interruptRequested) {
           broadcast(agent, {
@@ -1600,12 +1740,12 @@ export function createWebUi(options = {}) {
         ? await rpc.request("thread/resume", {
           threadId: agent.sessionId,
           cwd,
-          model: agent.model,
+          model: settings.model,
           ...codexPolicy,
         })
         : await rpc.request("thread/start", {
           cwd,
-          model: agent.model,
+          model: settings.model,
           ...codexPolicy,
         });
       const threadId = threadResult?.thread?.id ?? agent.sessionId;
@@ -1618,8 +1758,8 @@ export function createWebUi(options = {}) {
           threadId,
           input: buildCodexInput(rawPrompt, attachments),
           cwd,
-          model: agent.model,
-          effort,
+          model: settings.model,
+          effort: settings.effort,
           ...turnPolicy,
         });
         agent.activeTurnId = result?.turn?.id ?? agent.activeTurnId;
@@ -1642,7 +1782,7 @@ export function createWebUi(options = {}) {
     .sort(([, left], [, right]) => Number(left.acceptedAt) - Number(right.acceptedAt))[0] ?? null;
 
   function drainQueuedMessages(agent) {
-    if (shuttingDown || agent.running) return false;
+    if (shuttingDown || agent.running || agent.modelGuard?.blocked) return false;
     const next = nextQueuedMessage(agent);
     if (!next) return false;
     const [operationKey, entry] = next;
@@ -2237,8 +2377,10 @@ export function createWebUi(options = {}) {
           json(response, 200, { ...publicAgent(agent), replayed: true });
           return;
         }
+        const clearedModelGuard = hasModel && Boolean(agent.modelGuard?.blocked);
         agent.effort = effort;
         agent.model = model;
+        if (hasModel) agent.modelGuard = null;
         agent.address = address;
         agent.permissionMode = permissionMode;
         agent.updatedAt = now();
@@ -2251,7 +2393,9 @@ export function createWebUi(options = {}) {
           address: agent.address,
           permissionMode: agent.permissionMode,
           appliesTo: "next-turn",
+          clearedModelGuard,
         });
+        if (clearedModelGuard && !agent.running) setImmediate(() => drainQueuedMessages(agent));
         json(response, 200, publicAgent(agent));
         return;
       }
@@ -2361,6 +2505,13 @@ export function createWebUi(options = {}) {
         if (receipt?.conflict) { json(response, 409, { error: "idempotency-key-conflict" }); return; }
         if (receipt?.replayed) {
           json(response, 200, { ...publicAgent(agent), replayed: true });
+          return;
+        }
+        if (agent.modelGuard?.blocked) {
+          json(response, 423, {
+            error: "model-downgrade-parked",
+            guard: agent.modelGuard,
+          });
           return;
         }
         const enginePrompt = agent.engine === "claude"

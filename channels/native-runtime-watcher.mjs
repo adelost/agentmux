@@ -12,8 +12,12 @@ import {
   validateImagePath,
 } from "../lib.mjs";
 import { shortModelName } from "../core/context.mjs";
+import { changeMessage } from "../core/model-watch.mjs";
+import { parkPane, unparkPane } from "../core/pane-park.mjs";
+import { notifyUser } from "../cli/send-notify.mjs";
 
 const STATE_KEY = "native_watcher_posted_turns";
+const MODEL_STATE_KEY = "native_watcher_posted_model_changes";
 const DEFAULT_POLL_MS = 1_000;
 const MAX_POSTED_PER_CHANNEL = 500;
 
@@ -58,7 +62,7 @@ function turnId(turn) {
   return `history:${createHash("sha256").update(payload).digest("hex")}`;
 }
 
-export function groupNativeTurns(events = []) {
+export function groupNativeTurns(events = [], { includeEmpty = false } = {}) {
   const turns = [];
   let current = null;
   for (const event of events) {
@@ -93,7 +97,7 @@ export function groupNativeTurns(events = []) {
       current = null;
     }
   }
-  return turns.filter((turn) => turn.complete && turn.items.length > 0)
+  return turns.filter((turn) => turn.complete && (includeEmpty || turn.items.length > 0))
     .map((turn) => ({ ...turn, id: turnId(turn) }));
 }
 
@@ -151,6 +155,9 @@ export function createNativeRuntimeWatcher({
   agentsYamlPath,
   discord,
   state,
+  notify = notifyUser,
+  park = parkPane,
+  unpark = unparkPane,
   pollMs = DEFAULT_POLL_MS,
   log = (message) => console.log(`${new Date().toISOString().slice(11, 19)} native-watcher | ${message}`),
 } = {}) {
@@ -175,6 +182,58 @@ export function createNativeRuntimeWatcher({
     state.set(STATE_KEY, all);
   }
 
+  function postedModelChanges(channelId) {
+    const all = state.get(MODEL_STATE_KEY, {}) || {};
+    return Array.isArray(all[channelId]) ? all[channelId] : [];
+  }
+
+  function rememberModelChange(channelId, id) {
+    const all = state.get(MODEL_STATE_KEY, {}) || {};
+    const ids = Array.isArray(all[channelId]) ? all[channelId] : [];
+    all[channelId] = [...ids.filter((value) => value !== id), id].slice(-MAX_POSTED_PER_CHANNEL);
+    state.set(MODEL_STATE_KEY, all);
+  }
+
+  async function sendModelChanges(name, pane, channelId, events) {
+    const seen = new Set(postedModelChanges(channelId));
+    for (const event of events.filter((candidate) => candidate?.type === "web"
+      && (candidate.subtype === "model-change"
+        || (candidate.subtype === "settings" && candidate.clearedModelGuard)))) {
+      const id = event.webId || `model:${createHash("sha256").update(JSON.stringify({
+        at: event.at,
+        from: event.from,
+        to: event.to,
+        source: event.source,
+      })).digest("hex")}`;
+      if (seen.has(id)) continue;
+      const paneName = `${name}:${pane}`;
+      if (event.subtype === "settings") {
+        unpark({ session: name, pane, detail: `explicit native model switch: ${event.model}` });
+        rememberModelChange(channelId, id);
+        seen.add(id);
+        log(`${paneName} model guard cleared by explicit setting: ${event.model}`);
+        continue;
+      }
+      if (event.policy === "stop" && !event.expected) {
+        park({ session: name, pane, detail: `${event.from} → ${event.to}` });
+      } else if (event.kind === "model" && (event.expected || event.direction === "upgrade")) {
+        unpark({ session: name, pane, detail: `${event.from} → ${event.to}` });
+      }
+      await discord.send(channelId, changeMessage(paneName, event, null))
+        .catch((error) => log(`${paneName} model-change warning failed: ${error.message}`));
+      if (event.policy === "stop" && !event.expected) {
+        try {
+          await notify(`🔀 ${paneName} nedgraderad och STOPPAD: ${event.from} → ${event.to} — byt modell när läget är rätt`);
+        } catch (error) {
+          log(`${paneName} model-change push failed: ${error.message}`);
+        }
+      }
+      rememberModelChange(channelId, id);
+      seen.add(id);
+      log(`${paneName} model change: ${event.from} → ${event.to} (${event.cause || "observed"})`);
+    }
+  }
+
   async function sendTurn(channelId, turn, agent) {
     const rendered = renderTurn(turn);
     const chunks = splitMessage(rendered.text || "(no text)");
@@ -190,8 +249,8 @@ export function createNativeRuntimeWatcher({
     }
     const context = agent.context;
     if (Number.isFinite(context?.percent)) {
-      const model = shortModelName(agent.model);
-      const modelLabel = [model, agent.effort].filter(Boolean).join(" ");
+      const model = shortModelName(agent.observedModel || agent.model);
+      const modelLabel = [model, agent.observedEffort || agent.effort].filter(Boolean).join(" ");
       const tokens = Number.isFinite(context.usedTokens)
         ? ` (${Math.round(context.usedTokens / 1_000)}k)`
         : "";
@@ -210,11 +269,15 @@ export function createNativeRuntimeWatcher({
     if (snapshot.agent.running && typeof discord.sendTyping === "function") {
       await discord.sendTyping(channelId).catch(() => {});
     }
+    await sendModelChanges(name, pane, channelId, snapshot.events);
     const seen = new Set(posted(channelId));
-    const turns = groupNativeTurns(snapshot.events);
+    // Remember terminal operations even when the live stream had no assistant
+    // item (common for an interrupt). Otherwise restart hydration can discover
+    // partial JSONL text later and mirror an already-finished old turn.
+    const turns = groupNativeTurns(snapshot.events, { includeEmpty: true });
     for (const turn of turns.slice(-20)) {
       if (seen.has(turn.id)) continue;
-      await sendTurn(channelId, turn, snapshot.agent);
+      if (turn.items.length) await sendTurn(channelId, turn, snapshot.agent);
       remember(channelId, turn.id);
       seen.add(turn.id);
       log(`${name}:${pane} → ${channelId} (${turn.id})`);
