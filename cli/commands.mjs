@@ -3071,7 +3071,7 @@ async function cmdDoctor(ctx) {
     // [n]ode: the bracket keeps pgrep from matching its own sh wrapper.
     // cwd filter: only count bridges running from THIS repo (other projects
     // legitimately have their own `node index.mjs`).
-    const out = execSync("pgrep -f '[n]ode index.mjs' || true", { encoding: "utf-8" }).trim();
+    const out = execSync("pgrep -f '[n]ode( [^ ]+)* index\\.mjs' || true", { encoding: "utf-8" }).trim();
     pids = (out ? out.split("\n").map((x) => parseInt(x, 10)).filter(Boolean) : [])
       .filter((pid) => {
         try { return readlinkSync(`/proc/${pid}/cwd`) === repoDir; }

@@ -26,9 +26,9 @@ log() { echo "[$(date '+%F %T')] $*" >> "$LOG"; }
 [ -f "$STATE_DIR/watchdog-OFF" ] && exit 0
 
 # Only count bridges running from THIS repo (other projects have their own
-# node index.mjs). [n] bracket keeps pgrep from matching our own shell.
+# node [preload flags] index.mjs). [n] bracket keeps pgrep from matching our own shell.
 bridge_pids() {
-  for pid in $(pgrep -f '[n]ode index.mjs' 2>/dev/null); do
+  for pid in $(pgrep -f '[n]ode( [^ ]+)* index\.mjs' 2>/dev/null); do
     [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$DIR" ] && echo "$pid"
   done
 }
