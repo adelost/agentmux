@@ -137,11 +137,11 @@ else
   ok "agentmux.yaml exists"
 fi
 
-# --- CLI (amux) ---
+# --- CLIs ---
 
 echo ""
-echo "Installing amux CLI..."
-npm link --silent 2>/dev/null && ok "amux CLI" || fail "npm link failed (try with sudo)"
+echo "Installing agentmux CLIs..."
+npm link --silent 2>/dev/null && ok "amux, ax and overlap-gate CLIs" || fail "npm link failed (try with sudo)"
 
 # --- Done ---
 
