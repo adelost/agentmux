@@ -18,6 +18,7 @@ describe("agent backend router", () => {
       ensureSession: vi.fn(async () => [{ agent: { id: "one" } }, { agent: { id: "two" } }]),
       ensureTarget: vi.fn(async () => ({ agent: { id: "one" } })),
       deliverQueued: vi.fn(),
+      deliveryStatus: vi.fn(async () => ({ state: "completed", code: 0 })),
     };
     const agent = createAgentRouter({ tmuxAgent, nativeRuntime });
 
@@ -29,6 +30,9 @@ describe("agent backend router", () => {
       name: "skybar-canary", native: true, skipped: true, provisioned: 2,
     });
     await expect(agent.ensureReady("skybar-canary", 1)).resolves.toMatchObject({ agent: { id: "one" } });
+    const nativeJob = { id: "native-job", metadata: { deliveryTransport: "native" } };
+    await expect(agent.deliveryStatus(nativeJob)).resolves.toEqual({ state: "completed", code: 0 });
+    expect(nativeRuntime.deliveryStatus).toHaveBeenCalledWith(nativeJob);
     await expect(agent.reconcileSession("claw")).resolves.toBe("tmux-reconcile");
     expect(tmuxAgent.reconcileSession).toHaveBeenCalledOnce();
     expect(tmuxAgent.ensureReady).not.toHaveBeenCalled();
