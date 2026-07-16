@@ -22,6 +22,7 @@ amux lint
 | `amux done` | Summarize commits, active panes, finished panes, and waiters |
 | `amux asks` | Show recent human asks/directives with status and jsonl location |
 | `amux lint` | Run default repo linters, starting with WHAT/WHY/DTO/debt contracts |
+| `amux churn` | Show WARN-only young-test and rewrite-hotspot signals from git history |
 
 ## Bridge Lifecycle
 
@@ -230,6 +231,21 @@ should not get a fake `WHY:` yet.
 With `--strict`, active errors and debt fail the command; style warnings are
 reported without failing.
 See `docs/contract-lint.md` for the writing rules.
+
+## Churn visibility
+
+```bash
+amux churn
+amux churn ~/lsrc/agentmux
+amux churn --days 30 --young-days 14 --limit 8
+```
+
+`amux churn` reads git history without writing files or configuration. It shows
+tests and test files removed or rewritten within their first 14 days, plus
+source and test files touched by at least three commits in the selected window.
+Every finding says `worth a look`: churn may be intentional, so the command is
+WARN-only, always exits zero for findings, and is never a PR gate. Invalid
+arguments or a non-git path still fail loudly as command errors.
 
 ## Worktree dependencies and gates
 
