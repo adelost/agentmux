@@ -39,6 +39,7 @@ import { readGuardHeartbeats } from "../core/guard-heartbeat.mjs";
 import {
   checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors, checkLedger,
   checkBridgeMode, checkContextBridge, checkTmux, checkTmuxVersion, checkConfig, overallStatus, formatDoctorReport, FAIL, WARN,
+  checkTmuxClients, checkTmuxPaneGeometry, observeTmuxFleet,
   checkDeliveryQueue,
   checkNativeRuntimeFleet,
   checkGuardCronHeartbeats,
@@ -3105,15 +3106,11 @@ async function cmdDoctor(ctx) {
   } catch {}
 
   // tmux
-  let sessions = [], tmuxError = null, tmuxVersion = null;
+  let tmuxVersion = null;
   try { tmuxVersion = execSync("tmux -V", { encoding: "utf-8" }).trim(); }
   catch {}
-  try {
-    const { stdout } = await ctx.tmux("list-sessions -F '#{session_name}'");
-    sessions = stdout.trim().split("\n").filter(Boolean);
-  } catch (err) {
-    tmuxError = err.message.split("\n")[0];
-  }
+  const tmuxFleet = await observeTmuxFleet(ctx.tmux);
+  const sessions = tmuxFleet.sessions.map((session) => session.name);
 
   // config
   let agents = [], cfgError = null;
@@ -3212,7 +3209,9 @@ async function cmdDoctor(ctx) {
     checkLedger({ stat: ledgerStat }),
     checkContextBridge({ claudePanes, pushing }),
     checkTmuxVersion({ version: tmuxVersion, required: tmuxRequired }),
-    checkTmux({ sessions, error: tmuxError, required: tmuxRequired }),
+    checkTmux({ sessions, error: tmuxFleet.error, required: tmuxRequired }),
+    checkTmuxPaneGeometry({ ...tmuxFleet, required: tmuxRequired }),
+    checkTmuxClients({ ...tmuxFleet, required: tmuxRequired }),
     checkConfig({ agents, error: cfgError }),
     checkSuggestionsBoard({
       configured: suggestionsConfigured,

@@ -8,8 +8,13 @@ import {
   checkGuardCronHeartbeats,
   checkNativeRuntimeFleet,
   checkSuggestionsBoard,
+  checkTmuxClients,
+  checkTmuxPaneGeometry,
   formatDoctorReport,
+  observeTmuxFleet,
   SUGGESTIONS_BRIDGE_STALE_MS,
+  TMUX_MIN_PANE_COLUMNS,
+  TMUX_MIN_PANE_ROWS,
   checkTmuxVersion,
   FAIL, OK, WARN,
   checkBridgeMode, checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors,
@@ -198,6 +203,112 @@ feature("tmux bracketed-paste requirement", () => {
   unit("letter-suffixed tmux 3.2 releases support bracketed paste", {
     when: ["checking tmux 3.2a", () => checkTmuxVersion({ version: "tmux 3.2a" })],
     then: ["the host is accepted", (c) => expect(c.status).toBe(OK)],
+  });
+});
+
+feature("tmux pane usability and attachment health", () => {
+  unit("one observation contract collects every session and pane field", {
+    given: ["a tmux adapter with two fleet sessions", () => {
+      const calls = [];
+      const tmux = async (command) => {
+        calls.push(command);
+        if (command.startsWith("list-sessions")) return { stdout: "claw\t1\nai\t0\n" };
+        return { stdout: "claw\t0\t340\t48\nai\t2\t26\t7\n" };
+      };
+      return { calls, tmux };
+    }],
+    when: ["observing attachment and geometry", async ({ calls, tmux }) => ({
+      calls,
+      result: await observeTmuxFleet(tmux),
+    })],
+    then: ["both queries and typed observations are exact", ({ calls, result }) => {
+      expect(calls).toEqual([
+        "list-sessions -F '#{session_name}\t#{session_attached}'",
+        "list-panes -a -F '#{session_name}\t#{pane_index}\t#{pane_width}\t#{pane_height}'",
+      ]);
+      expect(result).toEqual({
+        sessions: [{ name: "claw", attached: 1 }, { name: "ai", attached: 0 }],
+        panes: [
+          { session: "claw", pane: 0, width: 340, height: 48 },
+          { session: "ai", pane: 2, width: 26, height: 7 },
+        ],
+        error: null,
+      });
+    }],
+  });
+
+  unit("the resurrected 26x7 fleet fails with every exact pane geometry", {
+    given: ["two unusably small panes", () => ({
+      panes: [
+        { session: "claw", pane: 0, width: 26, height: 7 },
+        { session: "ai", pane: 2, width: 59, height: 24 },
+      ],
+    })],
+    when: ["checking the input path", (fleet) => checkTmuxPaneGeometry(fleet)],
+    then: ["doctor is red and gives resize plus attach recovery", (result) => {
+      expect(result.status).toBe(FAIL);
+      expect(result.detail).toContain("claw:0 26x7");
+      expect(result.detail).toContain("ai:2 59x24");
+      expect(result.detail).toContain(`${TMUX_MIN_PANE_COLUMNS}x${TMUX_MIN_PANE_ROWS}`);
+      expect(result.hint).toContain("attach a client");
+      expect(result.hint).toContain("tmux resize-window");
+      expect(formatDoctorReport([result])).toContain("❌  tmux pane geometry");
+    }],
+  });
+
+  unit("the exact 60x20 boundary remains usable", {
+    when: ["checking the minimum geometry", () => checkTmuxPaneGeometry({
+      panes: [{ session: "claw", pane: 0, width: 60, height: 20 }],
+    })],
+    then: ["doctor stays green", (result) => expect(result).toMatchObject({
+      status: OK,
+      detail: "1/1 panes at least 60x20",
+    })],
+  });
+
+  unit("every session without an attached client is a visible warning", {
+    when: ["checking one attached and two detached sessions", () => checkTmuxClients({
+      sessions: [
+        { name: "claw", attached: 1 },
+        { name: "ai", attached: 0 },
+        { name: "lsrc", attached: 0 },
+      ],
+    })],
+    then: ["doctor names both trigger conditions without calling them failures", (result) => {
+      expect(result.status).toBe(WARN);
+      expect(result.detail).toBe("2/3 sessions without a client: ai, lsrc");
+      expect(result.hint).toContain("default-size");
+      expect(formatDoctorReport([result])).toContain("⚠️  tmux clients");
+    }],
+  });
+
+  unit("a failed tmux health query cannot produce green secondary rows", {
+    when: ["observing a broken socket", async () => {
+      const fleet = await observeTmuxFleet(async () => { throw new Error("no server"); });
+      return {
+        fleet,
+        socket: checkTmux({ sessions: [], error: fleet.error }),
+        geometry: checkTmuxPaneGeometry(fleet),
+        clients: checkTmuxClients(fleet),
+      };
+    }],
+    then: ["the primary row fails and derived rows are omitted", ({ fleet, socket, geometry, clients }) => {
+      expect(fleet.error).toBe("no server");
+      expect(socket.status).toBe(FAIL);
+      expect(geometry).toBeNull();
+      expect(clients).toBeNull();
+    }],
+  });
+
+  unit("native-only fleets add no tmux geometry noise", {
+    when: ["checking optional tmux observations", () => ({
+      geometry: checkTmuxPaneGeometry({ required: false }),
+      clients: checkTmuxClients({ required: false }),
+    })],
+    then: ["both extra rows stay absent", ({ geometry, clients }) => {
+      expect(geometry).toBeNull();
+      expect(clients).toBeNull();
+    }],
   });
 });
 

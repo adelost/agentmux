@@ -17,6 +17,10 @@ export const OK = "ok";
 export const WARN = "warn";
 export const FAIL = "fail";
 export const SUGGESTIONS_BRIDGE_STALE_MS = 5 * 60 * 1000;
+/** WHAT: Carries the minimum usable tmux pane width. WHY: Keeps doctor and its regression boundary synchronized. */
+export const TMUX_MIN_PANE_COLUMNS = 60;
+/** WHAT: Carries the minimum usable tmux pane height. WHY: Keeps doctor and its regression boundary synchronized. */
+export const TMUX_MIN_PANE_ROWS = 20;
 
 const check = (name, status, detail, hint = "") => ({ name, status, detail, hint });
 
@@ -199,10 +203,75 @@ export function checkContextBridge({ claudePanes, pushing }) {
 export function checkTmux({ sessions, error, required = true }) {
   if (!required) return check("tmux", OK, "not required by native-only fleet");
   if (error) {
-    return check("tmux", FAIL, `socket not answering: ${error}`,
-      "agents unreachable; is tmux running on the amux socket?");
+    return check("tmux", FAIL, `health query failed: ${error}`,
+      "agents may be unreachable; inspect the amux tmux socket");
   }
   return check("tmux", OK, `${sessions.length} session${sessions.length === 1 ? "" : "s"} (${sessions.join(", ")})`);
+}
+
+/** WHAT: Parses one tab-delimited tmux health result. WHY: Rejects partial fields before doctor can report false health. */
+function tmuxRows(stdout, fields, label) {
+  const lines = String(stdout || "").trim().split("\n").filter(Boolean);
+  return lines.map((line) => {
+    const values = line.split("\t");
+    if (values.length !== fields.length) throw new Error(`invalid ${label} observation: ${line}`);
+    return Object.fromEntries(fields.map((field, index) => [field, values[index]]));
+  });
+}
+
+/** WHAT: Fetches tmux session attachments and every pane's geometry. WHY: Prevents the two coupled health rules from observing separate truths. */
+export async function observeTmuxFleet(tmux) {
+  try {
+    const [sessionResult, paneResult] = await Promise.all([
+      tmux("list-sessions -F '#{session_name}\t#{session_attached}'"),
+      tmux("list-panes -a -F '#{session_name}\t#{pane_index}\t#{pane_width}\t#{pane_height}'"),
+    ]);
+    const sessions = tmuxRows(sessionResult.stdout, ["name", "attached"], "session")
+      .map((session) => ({ ...session, attached: Number(session.attached) }));
+    const panes = tmuxRows(paneResult.stdout, ["session", "pane", "width", "height"], "pane")
+      .map((pane) => ({
+        ...pane,
+        pane: Number(pane.pane),
+        width: Number(pane.width),
+        height: Number(pane.height),
+      }));
+    if (sessions.some((session) => !Number.isSafeInteger(session.attached) || session.attached < 0)
+      || panes.some((pane) => ![pane.pane, pane.width, pane.height].every(Number.isSafeInteger))) {
+      throw new Error("tmux returned non-integer health fields");
+    }
+    return { sessions, panes, error: null };
+  } catch (error) {
+    return { sessions: [], panes: [], error: String(error.message || error).split("\n")[0] };
+  }
+}
+
+/** WHAT: Calculates doctor severity for tmux pane geometry. WHY: Prevents undersized terminal frames from masquerading as healthy prompt ingress. */
+export function checkTmuxPaneGeometry({ panes = [], error = null, required = true } = {}) {
+  if (!required || error) return null;
+  const undersized = panes.filter((pane) => pane.width < TMUX_MIN_PANE_COLUMNS
+    || pane.height < TMUX_MIN_PANE_ROWS);
+  if (!panes.length) {
+    return check("tmux pane geometry", FAIL, "no pane geometry observed",
+      "attach a client or inspect the amux tmux socket, then rerun amux doctor");
+  }
+  if (!undersized.length) {
+    return check("tmux pane geometry", OK,
+      `${panes.length}/${panes.length} panes at least ${TMUX_MIN_PANE_COLUMNS}x${TMUX_MIN_PANE_ROWS}`);
+  }
+  const detail = undersized.map((pane) => `${pane.session}:${pane.pane} ${pane.width}x${pane.height}`).join(", ");
+  return check("tmux pane geometry", FAIL,
+    `${undersized.length}/${panes.length} below ${TMUX_MIN_PANE_COLUMNS}x${TMUX_MIN_PANE_ROWS}: ${detail}`,
+    "attach a client, or run tmux resize-window -t SESSION -x 340 -y 100 on the amux socket");
+}
+
+/** WHAT: Calculates doctor severity for tmux client attachment. WHY: Keeps detached-resurrection risk visible even when pane dimensions are currently safe. */
+export function checkTmuxClients({ sessions = [], error = null, required = true } = {}) {
+  if (!required || error) return null;
+  const detached = sessions.filter((session) => session.attached === 0);
+  if (!detached.length) return check("tmux clients", OK, `${sessions.length}/${sessions.length} sessions attached`);
+  return check("tmux clients", WARN,
+    `${detached.length}/${sessions.length} sessions without a client: ${detached.map((session) => session.name).join(", ")}`,
+    "attach to the session when using its TUI; headless sessions require a safe tmux default-size");
 }
 
 /** tmux added paste-buffer -p (bracketed-paste framing) in 3.2. */
