@@ -29,7 +29,7 @@ amux lint
 ```bash
 amux serve            # visible foreground process; Ctrl+C stops it
 amux serve --detach   # managed tmux-free background supervisor
-amux doctor           # health, heartbeat, version, and ownership mode
+amux doctor           # health, tmux geometry/clients, heartbeat, version, and ownership
 amux stop             # intentional stop; watchdog does not revive it
 amux sync             # sync through the running bridge without changing ownership
 amux sync --offline   # standalone sync; safely bounces managed bridges only
