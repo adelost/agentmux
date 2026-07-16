@@ -14,6 +14,16 @@ Each caller also receives a stable daily start offset inside a 20-second
 window. This spreads minute cron work and prevents every caller from arriving
 together after Cloudflare's 00:00 UTC reset.
 
+## Cross-repository scheduling contract
+
+The Node host circuit cannot import the browser/Worker TypeScript module from
+another repository. It therefore pins `suggestions-poll-schedule/v1` from
+`suggestions-v1d/src/poll-schedule.ts`, including the exact
+`poll-attempts-and-board-failures-only` attribution marker. Unit vectors lock
+tri-state `retryable`, bounded exponential delay, and jitter below the cap in
+both repositories. Policy durations may differ by caller; changing those
+shared semantics requires a contract-version change in both repositories.
+
 ## Exact rows-read warning
 
 `bin/suggestions-usage-watch.mjs` queries Cloudflare's GraphQL Analytics API

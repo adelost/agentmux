@@ -4,10 +4,13 @@ import { join } from "node:path";
 import { component, expect, feature, unit } from "bdd-vitest";
 import { vi } from "vitest";
 import {
+  POLL_SCHEDULE_CONTRACT_VERSION,
+  POLL_SIGNAL_ATTRIBUTION,
   SuggestionsCircuitOpenError,
   SuggestionsHttpError,
   createSuggestionsHttpClient,
   cronStartJitterMs,
+  pollFailureFromHttp,
   readSuggestionsCircuitState,
 } from "./suggestions-http.mjs";
 
@@ -32,6 +35,21 @@ const request = (http) => http.requestJson(URL, {
 });
 
 feature("Suggestions shared HTTP load circuit", () => {
+  unit("pins the cross-repository Suggestions poll contract", {
+    given: ["the agentmux boundary paired with suggestions-v1d poll-schedule", () => ({
+      version: POLL_SCHEDULE_CONTRACT_VERSION,
+      attribution: POLL_SIGNAL_ATTRIBUTION,
+      failure: pollFailureFromHttp(500, { retryable: false, retryAfterMs: 45_000 }, null, 1_000),
+    })],
+    then: ["the marker, evidence boundary, and tri-state failure vector stay lockstep", (contract) => {
+      expect(contract).toEqual({
+        version: "suggestions-poll-schedule/v1",
+        attribution: "poll-attempts-and-board-failures-only",
+        failure: { status: 500, retryable: false, retryAfterMs: 45_000 },
+      });
+    }],
+  });
+
   component("a non-retryable 5xx survives process restart and suppresses the next cron", {
     given: ["one shared state path and a board returning retryable false", () => {
       const directory = root();
@@ -59,6 +77,26 @@ feature("Suggestions shared HTTP load circuit", () => {
       expect(result.state).toMatchObject({ consecutiveFailures: 1,
         lastFailure: { status: 500, retryable: false } });
       expect(result.state.blockedUntil).toBeGreaterThan(result.state.lastFailure.at);
+    }],
+    cleanup: (ctx) => rmSync(ctx.directory, { recursive: true, force: true }),
+  });
+
+  component("an unspecified 5xx stays distinct from an explicit retryable decision", {
+    given: ["a server failure whose public body omits retryable", () => {
+      const directory = root();
+      const nowMs = Date.parse("2026-07-15T12:00:00Z");
+      return { directory, statePath: join(directory, "circuit.json"), now: () => nowMs,
+        fetchImpl: vi.fn(async () => json({ error: "down" }, 500)) };
+    }],
+    when: ["the shared HTTP boundary records it", async (ctx) => {
+      const error = await request(client(ctx)).catch((failure) => failure);
+      const state = readSuggestionsCircuitState(ctx.statePath);
+      return { error, state, delay: state.blockedUntil - state.lastFailure.at };
+    }],
+    then: ["null provenance and the retryable schedule remain observable", (result) => {
+      expect(result.error).toMatchObject({ status: 500, retryable: null });
+      expect(result.state.lastFailure.retryable).toBeNull();
+      expect(result.delay).toBe(48_000);
     }],
     cleanup: (ctx) => rmSync(ctx.directory, { recursive: true, force: true }),
   });
@@ -127,7 +165,7 @@ feature("Suggestions shared HTTP load circuit", () => {
     cleanup: (ctx) => rmSync(ctx.directory, { recursive: true, force: true }),
   });
 
-  component("repeated non-retryable probes use bounded exponential backoff", {
+  component("repeated non-retryable probes follow the versioned bounded-jitter vector", {
     given: ["one persistent circuit and a deterministic clock", () => {
       const directory = root();
       let nowMs = Date.parse("2026-07-15T12:00:00Z");
@@ -135,19 +173,19 @@ feature("Suggestions shared HTTP load circuit", () => {
         now: () => nowMs, advanceTo: (value) => { nowMs = value; },
         fetchImpl: vi.fn(async () => json({ error: "down", retryable: false }, 500)) };
     }],
-    when: ["two allowed probes both fail", async (ctx) => {
-      await request(client(ctx)).catch(() => {});
-      const first = readSuggestionsCircuitState(ctx.statePath);
-      ctx.advanceTo(first.blockedUntil);
-      await request(client({ ...ctx, source: "watchdog-outbox" })).catch(() => {});
-      const second = readSuggestionsCircuitState(ctx.statePath);
-      return { firstDelay: first.blockedUntil - first.lastFailure.at,
-        secondDelay: second.blockedUntil - second.lastFailure.at,
-        failures: second.consecutiveFailures };
+    when: ["five allowed probes fail through saturation", async (ctx) => {
+      const delays = [];
+      for (let index = 0; index < 5; index++) {
+        await request(client({ ...ctx, source: `caller-${index}` })).catch(() => {});
+        const state = readSuggestionsCircuitState(ctx.statePath);
+        delays.push(state.blockedUntil - state.lastFailure.at);
+        ctx.advanceTo(state.blockedUntil);
+      }
+      return { delays, failures: readSuggestionsCircuitState(ctx.statePath).consecutiveFailures };
     }],
-    then: ["the second delay doubles while remaining below the two-hour cap", (result) => {
-      expect(result).toEqual({ firstDelay: 15 * 60_000, secondDelay: 30 * 60_000,
-        failures: 2 });
+    then: ["the schedule doubles, jitters below the cap, and remains spread at saturation", (result) => {
+      expect(result).toEqual({ delays: [12, 24, 48, 96, 96].map((minutes) => minutes * 60_000),
+        failures: 5 });
     }],
     cleanup: (ctx) => rmSync(ctx.directory, { recursive: true, force: true }),
   });

@@ -18,6 +18,12 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
+// This host-local implementation cannot import the browser/Worker TypeScript
+// module across repositories. Pin its public behavior contract and unit vectors
+// to suggestions-v1d/src/poll-schedule.ts instead of allowing silent drift.
+export const POLL_SCHEDULE_CONTRACT_VERSION = "suggestions-poll-schedule/v1";
+export const POLL_SIGNAL_ATTRIBUTION = "poll-attempts-and-board-failures-only";
+
 const STATE_VERSION = 1;
 const LOCK_STALE_MS = 30_000;
 const MIN_PROBE_LEASE_MS = 30_000;
@@ -51,7 +57,7 @@ const validState = (value) => Boolean(value) && typeof value === "object"
     && finiteTimestamp(value.probe.expiresAt)))
   && (value.lastFailure == null || (finiteTimestamp(value.lastFailure.at)
     && (value.lastFailure.status == null || Number.isSafeInteger(value.lastFailure.status))
-    && typeof value.lastFailure.retryable === "boolean"
+    && (typeof value.lastFailure.retryable === "boolean" || value.lastFailure.retryable == null)
     && typeof value.lastFailure.reason === "string"));
 
 const privateDirectory = (path) => {
@@ -167,13 +173,30 @@ const retryAfterMs = (response, nowMs) => {
   return Number.isFinite(timestamp) ? Math.max(0, timestamp - nowMs) : 0;
 };
 
+export const pollFailureFromHttp = (status, body, retryAfter, nowMs) => {
+  const payload = body && typeof body === "object" && !Array.isArray(body) ? body : {};
+  const retryAfterSeconds = retryAfter == null ? Number.NaN : Number(retryAfter);
+  const retryAfterDate = retryAfter == null ? Number.NaN : Date.parse(retryAfter);
+  const headerRetryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0
+    ? retryAfterSeconds * 1_000
+    : Number.isFinite(retryAfterDate) ? Math.max(0, retryAfterDate - nowMs) : null;
+  return {
+    status,
+    retryable: typeof payload.retryable === "boolean" ? payload.retryable : null,
+    retryAfterMs: typeof payload.retryAfterMs === "number" && Number.isFinite(payload.retryAfterMs)
+      && payload.retryAfterMs >= 0 ? payload.retryAfterMs : headerRetryAfterMs,
+  };
+};
+
 const circuitDelayMs = ({ retryable, consecutiveFailures, retryAfter = 0, jitterUnit }) => {
-  const base = retryable ? RETRYABLE_BASE_MS : NON_RETRYABLE_BASE_MS;
-  const cap = retryable ? RETRYABLE_CAP_MS : NON_RETRYABLE_CAP_MS;
+  const base = retryable === false ? NON_RETRYABLE_BASE_MS : RETRYABLE_BASE_MS;
+  const cap = retryable === false ? NON_RETRYABLE_CAP_MS : RETRYABLE_CAP_MS;
   const exponent = Math.min(20, Math.max(0, consecutiveFailures - 1));
   const bounded = Math.min(cap, base * (2 ** exponent));
-  const unit = Math.max(0, Math.min(1, Number(jitterUnit()) || 0));
-  return Math.max(retryAfter, bounded + Math.floor(bounded * 0.2 * unit));
+  const sample = Number(jitterUnit());
+  const unit = Number.isFinite(sample) && sample >= 0 ? Math.min(1, sample) : 0.5;
+  const jittered = Math.round(bounded * (0.8 + 0.4 * unit));
+  return Math.min(cap, Math.max(retryAfter, jittered));
 };
 
 const boundedReason = (value) => String(value ?? "unknown")
@@ -374,14 +397,14 @@ export function createSuggestionsHttpClient({
       }
 
       if (!response.ok) {
-        const retryable = response.status >= 500
-          ? value?.retryable !== false
-          : response.status === 429;
+        const failure = pollFailureFromHttp(response.status, value,
+          response.headers.get("retry-after"), now());
+        const retryable = response.status >= 500 ? failure.retryable : response.status === 429;
         const reason = typeof value?.reason === "string" ? value.reason
           : typeof value?.error === "string" ? value.error : "request-failed";
         if (response.status >= 500 || response.status === 429) {
           recordFailure(store, { nowMs: now(), token: probeToken, status: response.status,
-            retryable, reason, retryAfter: retryAfterMs(response, now()), jitterUnit });
+            retryable, reason, retryAfter: failure.retryAfterMs ?? 0, jitterUnit });
         } else {
           recordNeutral(store, { nowMs: now(), token: probeToken });
         }
