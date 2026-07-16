@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -142,10 +142,12 @@ function setup({ loseFirstResponse = true, message404Once = false, adoptExisting
       }],
     },
   };
+  const unpark = vi.fn();
   const nativeRuntime = createNativeRuntimeClient({
     configPath: "unused",
     fetchImpl,
     loadConfigImpl: () => config,
+    unparkImpl: unpark,
   });
   return {
     root,
@@ -155,6 +157,7 @@ function setup({ loseFirstResponse = true, message404Once = false, adoptExisting
     calls,
     nativeRuntime,
     agent,
+    unpark,
     completeMessage(code = 0, error = null, interrupted = false) {
       messageCompleted = { code, error, interrupted };
       agent.running = false;
@@ -206,6 +209,8 @@ describe("native runtime compatibility adapter", () => {
       address: { session: "skybar-canary", pane: 0 },
       permissionMode: "automation",
     });
+    expect(adoption.body).not.toHaveProperty("model");
+    expect(adoption.body).not.toHaveProperty("effort");
     expect(agent.sessionId).toBe(sessionId);
   });
 
@@ -354,7 +359,8 @@ describe("native runtime compatibility adapter", () => {
   });
 
   it("applies a combined native model and effort change without restarting the session", async () => {
-    const { nativeRuntime, calls, agent } = setup();
+    const { nativeRuntime, calls, agent, unpark } = setup({ adoptExisting: true });
+    const sessionId = agent.sessionId;
     await expect(nativeRuntime.deliverQueued({
       id: "model-change",
       agentName: "skybar-canary",
@@ -370,7 +376,11 @@ describe("native runtime compatibility adapter", () => {
       effort: "high",
       idempotencyKey: "delivery:model-change",
     });
-    expect(agent.sessionId).toBeUndefined();
+    expect(agent.sessionId).toBe(sessionId);
+    expect(unpark).toHaveBeenCalledWith(expect.objectContaining({
+      session: "skybar-canary",
+      pane: 0,
+    }));
   });
 
   it("preserves an orchestrator's compact focus in the native request", async () => {

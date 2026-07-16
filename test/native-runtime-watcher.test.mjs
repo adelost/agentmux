@@ -194,4 +194,244 @@ describe("native runtime Discord watcher", () => {
     expect(discord.send).toHaveBeenCalledTimes(1);
     expect(discord.send.mock.calls[0][1]).toContain("Behörighet nekad");
   });
+
+  it("acknowledges an active turn and mirrors each new tool start once", async () => {
+    const stored = {};
+    const state = {
+      get: (key, fallback) => stored[key] ?? fallback,
+      set: (key, value) => { stored[key] = structuredClone(value); },
+    };
+    const discord = { send: vi.fn(async () => {}), sendTyping: vi.fn(async () => {}) };
+    const config = {
+      "skybar-canary": {
+        backend: "native",
+        dir: "/tmp/canary",
+        discord: { "channel-1": 0 },
+        panes: [{ cmd: "native:claude", engine: "claude" }],
+      },
+    };
+    const historyEvents = [
+      { type: "web", subtype: "user", text: "build it", operationKey: "delivery:live", at: 10 },
+      {
+        webId: "boot:2",
+        type: "web",
+        subtype: "tool",
+        phase: "started",
+        name: "Bash",
+        summary: "npm test",
+        operationKey: "delivery:live",
+        at: 20,
+      },
+    ];
+    const nativeRuntime = {
+      history: async () => ({
+        agent: { running: true, context: null },
+        events: historyEvents,
+      }),
+    };
+    const watcher = createNativeRuntimeWatcher({
+      nativeRuntime,
+      agentsYamlPath: "unused",
+      discord,
+      state,
+      log: () => {},
+    });
+
+    await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
+    await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
+    expect(discord.send.mock.calls.map((call) => call[1])).toEqual([
+      "⏳ **skybar-canary:0 jobbar** — meddelandet är mottaget.",
+      "_🔧 npm test_",
+    ]);
+    expect(discord.sendTyping).toHaveBeenCalledTimes(2);
+
+    historyEvents.push({
+      webId: "boot:3",
+      type: "web",
+      subtype: "tool",
+      phase: "started",
+      name: "Bash",
+      summary: "npm run build",
+      operationKey: "delivery:live",
+      at: 30,
+    });
+    await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
+    expect(discord.send.mock.calls.at(-1)[1]).toBe("_🔧 npm run build_");
+    expect(discord.send).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not resurrect partial text from an already-finished empty turn after restart", async () => {
+    const stored = {};
+    const state = {
+      get: (key, fallback) => stored[key] ?? fallback,
+      set: (key, value) => { stored[key] = structuredClone(value); },
+    };
+    const discord = { send: vi.fn(async () => {}) };
+    const config = {
+      "skybar-canary": {
+        backend: "native",
+        dir: "/tmp/canary",
+        discord: { "channel-1": 0 },
+        panes: [{ cmd: "native:claude", engine: "claude" }],
+      },
+    };
+    let historyEvents = [
+      { type: "web", subtype: "user", text: "interrupt me", operationKey: "delivery:old", at: 10 },
+      { type: "web", subtype: "turn-done", operationKey: "delivery:old", code: 0, interrupted: true, at: 20 },
+    ];
+    const nativeRuntime = {
+      history: async () => ({ agent: { running: false, context: null }, events: historyEvents }),
+    };
+    const firstWatcher = createNativeRuntimeWatcher({
+      nativeRuntime,
+      agentsYamlPath: "unused",
+      discord,
+      state,
+      log: () => {},
+    });
+    await firstWatcher.check("skybar-canary", 0, config["skybar-canary"], config);
+    expect(discord.send).not.toHaveBeenCalled();
+
+    historyEvents = [
+      historyEvents[0],
+      { type: "assistant", message: { content: [{ type: "text", text: "recovered partial" }] }, at: 15 },
+      historyEvents[1],
+    ];
+    const restartedWatcher = createNativeRuntimeWatcher({
+      nativeRuntime,
+      agentsYamlPath: "unused",
+      discord,
+      state,
+      log: () => {},
+    });
+    await restartedWatcher.check("skybar-canary", 0, config["skybar-canary"], config);
+    expect(discord.send).not.toHaveBeenCalled();
+  });
+
+  it("warns, parks and pushes once for an automatic native downgrade", async () => {
+    const stored = {};
+    const state = {
+      get: (key, fallback) => stored[key] ?? fallback,
+      set: (key, value) => { stored[key] = structuredClone(value); },
+    };
+    const discord = { send: vi.fn(async () => {}), sendTyping: vi.fn(async () => {}) };
+    const notify = vi.fn(async () => {});
+    const park = vi.fn();
+    const unpark = vi.fn();
+    const config = {
+      "skybar-canary": {
+        backend: "native",
+        dir: "/tmp/canary",
+        discord: { "channel-1": 0 },
+        panes: [{ cmd: "native:claude", engine: "claude" }],
+      },
+    };
+    const nativeRuntime = {
+      history: async () => ({
+        agent: {
+          running: false,
+          model: "fable",
+          observedModel: "claude-sonnet-4-6",
+          effort: "high",
+          context: null,
+        },
+        events: [{
+          webId: "boot:9",
+          type: "web",
+          subtype: "model-change",
+          from: "claude-fable-5",
+          to: "claude-sonnet-4-6",
+          direction: "downgrade",
+          kind: "model",
+          cause: "automatic",
+          expected: false,
+          policy: "stop",
+          source: "claude-assistant",
+          at: 900,
+        }],
+      }),
+    };
+    const watcher = createNativeRuntimeWatcher({
+      nativeRuntime,
+      agentsYamlPath: "unused",
+      discord,
+      state,
+      notify,
+      park,
+      unpark,
+      log: () => {},
+    });
+
+    await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
+    await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
+
+    expect(discord.send).toHaveBeenCalledTimes(1);
+    expect(discord.send.mock.calls[0][1]).toContain("STOPPAS");
+    expect(park).toHaveBeenCalledWith(expect.objectContaining({ session: "skybar-canary", pane: 0 }));
+    expect(unpark).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the durable park when a later explicit native model setting clears the guard", async () => {
+    const stored = {};
+    const state = {
+      get: (key, fallback) => stored[key] ?? fallback,
+      set: (key, value) => { stored[key] = structuredClone(value); },
+    };
+    const discord = { send: vi.fn(async () => {}) };
+    const park = vi.fn();
+    const unpark = vi.fn();
+    const config = {
+      "skybar-canary": {
+        backend: "native",
+        dir: "/tmp/canary",
+        discord: { "channel-1": 0 },
+        panes: [{ cmd: "native:claude", engine: "claude" }],
+      },
+    };
+    const nativeRuntime = {
+      history: async () => ({
+        agent: { running: false, context: null },
+        events: [
+          {
+            webId: "boot:1",
+            type: "web",
+            subtype: "model-change",
+            from: "fable",
+            to: "sonnet",
+            direction: "downgrade",
+            kind: "model",
+            expected: false,
+            policy: "stop",
+          },
+          {
+            webId: "boot:2",
+            type: "web",
+            subtype: "settings",
+            model: "sonnet",
+            clearedModelGuard: true,
+          },
+        ],
+      }),
+    };
+    const watcher = createNativeRuntimeWatcher({
+      nativeRuntime,
+      agentsYamlPath: "unused",
+      discord,
+      state,
+      notify: async () => {},
+      park,
+      unpark,
+      log: () => {},
+    });
+
+    await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
+    expect(park).toHaveBeenCalledTimes(1);
+    expect(unpark).toHaveBeenCalledWith(expect.objectContaining({
+      session: "skybar-canary",
+      pane: 0,
+      detail: "explicit native model switch: sonnet",
+    }));
+    expect(discord.send).toHaveBeenCalledTimes(1);
+  });
 });
