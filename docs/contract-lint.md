@@ -320,8 +320,9 @@ amux lint --changed --strict
 
 Only changed source files enter the ratchet. Within those files, STYLE001 and
 STYLE002 inspect only target lines added by the branch or local diff, so legacy
-punctuation on untouched lines does not block unrelated work. File-size and
-symbol-contract rules still evaluate the selected file as a whole.
+punctuation on untouched lines does not block unrelated work. File size checks
+the selected file as a whole, while contracts check only public symbols whose
+docs, declaration, or body intersects an added target line.
 
 ## User-text punctuation
 

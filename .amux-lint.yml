@@ -6,7 +6,7 @@ fileSize:
     core/codex-jsonl-reader.mjs: 840
     core/codex-tui.mjs: 553
     core/context.mjs: 642
-    core/contract-lint.mjs: 647
+    core/contract-lint.mjs: 640
     core/delivery-broker.mjs: 863
     core/delivery-queue.mjs: 617
     core/jsonl-reader.mjs: 1098

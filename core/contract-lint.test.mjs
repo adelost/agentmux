@@ -600,6 +600,106 @@ feature("contract-lint changed-file style ratchet", () => {
     }],
   });
 
+  component("changed contracts check only symbols that own added lines", {
+    given: ["a branch that edits hints while retaining undocumented legacy functions", () => {
+      const root = gitRepo("amux-contract-changed-symbols-");
+      writeFileSync(join(root, "hints.mjs"), [
+        "export function untouchedLegacy() { return true; }",
+        "const HINTS_VERSION = '1';",
+        "// WHAT: Builds current agent guidance.",
+        "export function renderHints() {",
+        "  return 'old guidance';",
+        "}",
+        "export function trailingLegacy() { return false; }",
+        "",
+      ].join("\n"));
+      git(root, "add", ".");
+      git(root, "commit", "-m", "legacy hints");
+      const baseRef = git(root, "rev-parse", "HEAD");
+      writeFileSync(join(root, "hints.mjs"), [
+        "export function untouchedLegacy() { return true; }",
+        "const HINTS_VERSION = '2';",
+        "// WHAT: Builds current agent guidance.",
+        "export function renderHints() {",
+        "  return 'new guidance';",
+        "}",
+        "export function trailingLegacy() { return false; }",
+        "",
+      ].join("\n"));
+      git(root, "add", ".");
+      git(root, "commit", "-m", "edit hints");
+      return { root, baseRef };
+    }],
+    when: ["linting only the branch delta", ({ root, baseRef }) => lintRoot(root, { changed: true, baseRef })],
+    then: ["only the changed documented function is evaluated", (result, { root }) => {
+      try {
+        const contracts = result.findings.filter((entry) => entry.code.startsWith("CONTRACT"));
+        expect(contracts.map((entry) => entry.code)).toEqual(["CONTRACT011"]);
+        expect(contracts[0]?.msg).toContain("renderHints");
+        expect(result.symbols).toBe(1);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
+  component("changed contract docs select the symbol they document", {
+    given: ["an undocumented function that receives a WHAT line", () => {
+      const root = gitRepo("amux-contract-changed-doc-");
+      writeFileSync(join(root, "source.mjs"), "export function buildState() { return {}; }\n");
+      git(root, "add", ".");
+      git(root, "commit", "-m", "legacy function");
+      const baseRef = git(root, "rev-parse", "HEAD");
+      writeFileSync(join(root, "source.mjs"), "// WHAT: Builds current state.\nexport function buildState() { return {}; }\n");
+      git(root, "add", ".");
+      git(root, "commit", "-m", "document function");
+      return { root, baseRef };
+    }],
+    when: ["linting the documentation delta", ({ root, baseRef }) => lintRoot(root, { changed: true, baseRef })],
+    then: ["the documented symbol is checked and still requires WHY", (result, { root }) => {
+      try {
+        expect(result.findings.filter((entry) => entry.code === "CONTRACT011")).toHaveLength(1);
+        expect(result.symbols).toBe(1);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
+  component("changed Python contracts stay inside the edited function body", {
+    given: ["a Python module with one untouched legacy function and one edited documented function", () => {
+      const root = gitRepo("amux-contract-python-symbol-");
+      const source = (value) => [
+        "def untouched():",
+        "    return True",
+        "",
+        "def build_state():",
+        '    """WHAT: Builds current state."""',
+        `    return '${value}'`,
+        "",
+      ].join("\n");
+      writeFileSync(join(root, "source.py"), source("old"));
+      git(root, "add", ".");
+      git(root, "commit", "-m", "legacy python");
+      const baseRef = git(root, "rev-parse", "HEAD");
+      writeFileSync(join(root, "source.py"), source("new"));
+      git(root, "add", ".");
+      git(root, "commit", "-m", "edit python function");
+      return { root, baseRef };
+    }],
+    when: ["linting the Python body delta", ({ root, baseRef }) => lintRoot(root, { changed: true, baseRef })],
+    then: ["only the edited Python function is checked", (result, { root }) => {
+      try {
+        const contracts = result.findings.filter((entry) => entry.code.startsWith("CONTRACT"));
+        expect(contracts.map((entry) => entry.code)).toEqual(["CONTRACT011"]);
+        expect(contracts[0]?.msg).toContain("build_state");
+        expect(result.symbols).toBe(1);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
   component("changed mode includes staged, unstaged, and untracked files", {
     given: ["a repo with every local change class", () => {
       const root = gitRepo("amux-changed-local-");
