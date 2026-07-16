@@ -69,7 +69,7 @@ function codexDeliveryBlocked(message, { zoomRecoverable = false } = {}) {
 
 // --- Session isolation ---
 
-/** All panes in .agents/N/ for full session isolation. */
+/** WHAT: Resolves one pane cwd. WHY: Keeps agent histories isolated across panes. */
 export function paneDir(rootDir, pane) {
   const dir = join(rootDir, ".agents", String(pane));
   mkdirSync(dir, { recursive: true });
@@ -82,11 +82,11 @@ export function paneDir(rootDir, pane) {
 // (panes run in .agents/N/, Claude searches upward for CLAUDE.md).
 // Survives /compact because CLAUDE.md is system context, not conversation.
 //
-// The HINTS_VERSION marker lets ensureAgentHints detect stale copies on
-// disk and overwrite them on next spawn — bump it whenever AGENT_HINTS
-// content changes materially. User-appended content BELOW the end marker
-// is preserved across upgrades.
+// The marker lets ensureAgentHints detect stale copies on spawn; bump it
+// whenever AGENT_HINTS content changes. Appended content survives upgrades.
+// WHAT: Names generated agent policy version. WHY: Keeps stale pane instructions from surviving respawns.
 export const HINTS_VERSION = "1.23.28";
+/** DTO: Generated agent policy footer marker. */
 export const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
 const AGENT_HINTS = `<!-- amux-hints-version: ${HINTS_VERSION} -->
@@ -645,7 +645,7 @@ ${HINTS_END_MARKER}
 //     HINTS_END_MARKER, preserve any user-appended content below the marker
 //
 // This way upgrades propagate automatically on next spawn without clobbering
-// workspace-specific notes that operators tacked on.
+// WHAT: Saves generated agent policy. WHY: Keeps pane instructions synchronized without clobbering operator notes.
 export function ensureAgentHints(rootDir) {
   const agentsDir = join(rootDir, ".agents");
   if (!existsSync(rootDir) || !statSync(rootDir).isDirectory()) {
@@ -727,7 +727,7 @@ function ensureGitignored(rootDir, entry) {
 }
 
 // --- Agent factory ---
-
+/** WHAT: Builds the tmux agent lifecycle API. WHY: Keeps bridge routing independent from pane mechanics. */
 export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxExec, state = null }) {
   const wait = delay || ((ms) => new Promise((r) => setTimeout(r, ms)));
   // All tmux syntax lives in the adapter (core/tmux.mjs). agent.mjs speaks
