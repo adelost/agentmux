@@ -413,6 +413,44 @@ feature("durable delivery queue health", () => {
     then: ["ok", (r) => expect(r.status).toBe(OK)],
   });
 
+  // On 2026-07-16 this row read `4 submitted, oldest (14511s); broker draining`
+  // in green while ai:2 had ingested nothing for five hours and five straight
+  // budgets had expired. Movement in the spool is not delivery to a pane.
+  unit("a target that keeps re-proving the same failure is never called draining", {
+    when: ["checking", () => checkDeliveryQueue({
+      stats: {
+        total: 4, pending: 3, submitted: 1, oldestCreatedAt: NOW - 14_511_000,
+        notIngestingTargets: [{ agentName: "ai", pane: 2, unverifiedStreak: 5 }],
+      },
+      bridgeRunning: true,
+      now: NOW,
+    })],
+    then: ["the row fails and names the pane that ingests nothing", (result) => {
+      expect(result.status).toBe(FAIL);
+      expect(result.detail).toContain("ai:2");
+      expect(result.detail).toContain("5 budgets");
+      expect(result.hint).toContain("resend");
+    }],
+  });
+
+  // The delivery breaker keeps a dead target's queue short, so an empty spool
+  // is that target's symptom rather than its absence. Reporting `empty` here
+  // would restore the same lie with a tidier queue.
+  unit("draining the spool does not clear a target that never ingested", {
+    when: ["checking", () => checkDeliveryQueue({
+      stats: {
+        total: 0,
+        notIngestingTargets: [{ agentName: "ai", pane: 2, unverifiedStreak: 2 }],
+      },
+      bridgeRunning: true,
+      now: NOW,
+    })],
+    then: ["an empty queue cannot outrank a target proven not to ingest", (result) => {
+      expect(result.status).toBe(FAIL);
+      expect(result.detail).toContain("ai:2");
+    }],
+  });
+
   unit("queued work cannot disappear behind an intentional bridge stop", {
     when: ["checking", () => checkDeliveryQueue({
       stats: { total: 2, pending: 2, drafted: 0, submitted: 0, blocked: 0, oldestCreatedAt: NOW - 30_000 },

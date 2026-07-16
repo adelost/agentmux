@@ -41,6 +41,32 @@ export function needsDeliveryTerminalNotice(job) {
     && !job?.unverifiedNoticeSentAt;
 }
 
+// Each unacknowledged receipt budget costs a full hour, so a target that cannot
+// ingest drains one message per hour while producers enqueue many more. Two
+// budgets burned back to back is two hours of proof; one is not, because a long
+// turn can legitimately hold a prompt in the composer past a single budget.
+export const NOT_INGESTING_UNVERIFIED_STREAK = 2;
+
+/**
+ * Evidence about a delivery target rather than any single job: receipt budgets
+ * that expired with nothing ingested since the last acknowledgement. Only an
+ * acknowledgement ends the streak, so NOT SENT terminals raised in response to
+ * the streak cannot mask it, and a pane that starts consuming again clears its
+ * own state with no operator action.
+ */
+export function unverifiedStreakSinceLastReceipt(jobs) {
+  const lastReceiptAt = jobs.reduce((latest, job) => (job.status === "acknowledged"
+    ? Math.max(latest, Number(job.acknowledgedAt || job.terminalAt || 0))
+    : latest), 0);
+  return jobs.filter((job) => job.status === DELIVERED_UNVERIFIED_STATE
+    && Number(job.terminalAt || 0) > lastReceiptAt).length;
+}
+
+/** A target that has re-proven the same failure is not a target that is draining. */
+export function isTargetProvenNotIngesting(jobs) {
+  return unverifiedStreakSinceLastReceipt(jobs) >= NOT_INGESTING_UNVERIFIED_STREAK;
+}
+
 export function defaultDeliveryQueueDir() {
   return process.env.AMUX_DELIVERY_QUEUE_DIR
     || join(homedir(), ".agentmux", "delivery-queue");
@@ -449,8 +475,14 @@ export function deliveryQueueStats(queue) {
   let pendingNotices = 0, cancellationRequests = 0;
   let oldestCreatedAt = null;
   let oldestJob = null;
+  const notIngestingTargets = [];
   for (const { agentName, pane } of queue.targets()) {
-    for (const job of queue.list(agentName, pane)) {
+    const jobs = queue.list(agentName, pane);
+    const unverifiedStreak = unverifiedStreakSinceLastReceipt(jobs);
+    if (unverifiedStreak >= NOT_INGESTING_UNVERIFIED_STREAK) {
+      notIngestingTargets.push({ agentName, pane, unverifiedStreak });
+    }
+    for (const job of jobs) {
       const nonTerminal = !TERMINAL_DELIVERY_STATES.has(job.status);
       const noticePending = needsDeliveryTerminalNotice(job);
       const cancellationPending = job.cancelRequestStatus === "requested";
@@ -485,5 +517,6 @@ export function deliveryQueueStats(queue) {
     cancellationRequests,
     oldestCreatedAt,
     oldestJob,
+    notIngestingTargets,
   };
 }

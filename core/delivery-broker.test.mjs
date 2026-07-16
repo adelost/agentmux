@@ -1776,4 +1776,129 @@ feature("single-writer delivery broker", () => {
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });
+
+  // A pane can accept keystrokes forever while ingesting none of them: ai:2 on
+  // 2026-07-16 spun at 109% CPU inside `claude --continue` over an 887MB
+  // session and wrote no JSONL for five hours. Every job then paid its own
+  // 60-minute receipt budget, so the queue drained one message per hour while
+  // fleet-watch enqueued six. Two of the messages burned that way were real
+  // worker reports, not nudges.
+  const wedgeableTarget = () => {
+    const rootDir = tempRoot();
+    let clock = 1_000;
+    const queue = createDeliveryQueue({ rootDir, now: () => clock });
+    const sends = [];
+    const echoed = new Set();
+    const ingestion = { enabled: false };
+    const agent = {
+      sends,
+      capturePromptEchoCursor: async () => ({ kind: "test", positions: {} }),
+      waitForPromptEcho: async (_name, _pane, text) => ingestion.enabled && echoed.has(text),
+      dismissBlockingPrompt: async () => null,
+      sendOnly: async (_name, text, _pane, options = {}) => {
+        sends.push(text);
+        await options.onDrafted?.();
+        await options.onSubmitting?.();
+        await options.onSubmitted?.();
+        echoed.add(text);
+        return { submitted: true, queued: true };
+      },
+      sendEnter: async () => {},
+      capturePane: async () => "› ",
+    };
+    // What a sender is told is the behaviour under test: a job can be
+    // terminalized and then resurrected by the head snapshot, so status alone
+    // cannot distinguish a spared probe from a cancelled-and-retyped one.
+    const notices = [];
+    const broker = createDeliveryBroker({
+      agent, queue, now: () => clock,
+      notify: async (job, kind) => { notices.push(`${job.text}:${kind}`); },
+    });
+    const enqueue = (text, index) =>
+      queue.enqueue({ agentName: "ai", pane: 2, text, orderKey: `00${index}` });
+    const burnBudget = async () => {
+      await broker.kickTarget("ai", 2);
+      clock += 61 * 60_000;
+      await broker.kickTarget("ai", 2);
+    };
+    const statusByText = () =>
+      Object.fromEntries(queue.list("ai", 2).map((job) => [job.text, job.status]));
+    // A submitted head parks on ACTIVE_RETRY_MS, so a frozen clock would skip
+    // it before its receipt is ever read.
+    const tick = () => { clock += 2_000; };
+    return {
+      rootDir, queue, broker, sends, notices, ingestion,
+      enqueue, burnBudget, statusByText, tick,
+    };
+  };
+
+  component("a backlog behind a target proven not to ingest is answered now, not one hour at a time", {
+    given: ["four queued prompts and a pane that accepts keystrokes but ingests none", () => {
+      const context = wedgeableTarget();
+      ["first", "second", "third", "fourth"].forEach(context.enqueue);
+      return context;
+    }],
+    when: ["two consecutive receipt budgets expire without any acknowledgement", async ({
+      broker, burnBudget, statusByText,
+    }) => {
+      await burnBudget();
+      await burnBudget();
+      await broker.kickTarget("ai", 2);
+      return { byText: statusByText() };
+    }],
+    then: ["the head still probes while everything behind it is answered without being typed", ({ byText }, ctx) => {
+      expect(byText).toEqual({
+        first: "delivered_unverified",
+        second: "delivered_unverified",
+        third: "submitted",
+        fourth: "cancelled",
+      });
+      expect(ctx.sends).toEqual(["first", "second", "third"]);
+      expect(ctx.queue.list("ai", 2).find((job) => job.text === "fourth")).toMatchObject({
+        metadata: { deliveryOutcome: "not-sent", deliveryTarget: "not-ingesting" },
+      });
+      // The probe's sender is never told NOT SENT about a prompt the broker is
+      // in fact typing; only the backlog behind it is answered.
+      expect(ctx.notices).toContain("fourth:not-sent");
+      expect(ctx.notices).not.toContain("third:not-sent");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  // Only an acknowledgement ends the streak, so a breaker that silenced the
+  // head too could never see one again and would mute a healed pane forever.
+  // That failure would be worse than the hourly drain it replaces.
+  component("a healed pane reopens its own queue through the probe the breaker spared", {
+    given: ["a target already proven not to ingest across two receipt budgets", async () => {
+      const context = wedgeableTarget();
+      ["first", "second", "third"].forEach(context.enqueue);
+      await context.burnBudget();
+      await context.burnBudget();
+      await context.broker.kickTarget("ai", 2);
+      return context;
+    }],
+    when: ["the pane starts ingesting again and two further prompts arrive", async ({
+      broker, ingestion, enqueue, statusByText, tick,
+    }) => {
+      ingestion.enabled = true;
+      tick();
+      await broker.kickTarget("ai", 2);
+      // Two, deliberately: the head is always spared as the probe, so only a
+      // follower can prove the streak itself cleared rather than being dodged.
+      enqueue("after-recovery", 9);
+      enqueue("behind-recovery", 10);
+      for (let kick = 0; kick < 3; kick++) {
+        tick();
+        await broker.kickTarget("ai", 2);
+      }
+      return { byText: statusByText() };
+    }],
+    then: ["the probe's receipt clears the streak and the backlog behind it delivers again", ({ byText }, ctx) => {
+      expect(byText.third).toBe("acknowledged");
+      expect(byText["after-recovery"]).toBe("acknowledged");
+      expect(byText["behind-recovery"]).toBe("acknowledged");
+      expect(ctx.notices).not.toContain("behind-recovery:not-sent");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
 });

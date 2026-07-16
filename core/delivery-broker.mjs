@@ -12,7 +12,8 @@ import { deliverToPane } from "./delivery.mjs";
 import { rewriteModelSlash } from "./claude-model.mjs";
 import {
   DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES,
-  isNotSentDeliveryJob, waitForDeliveryJob,
+  NOT_INGESTING_UNVERIFIED_STREAK, isNotSentDeliveryJob,
+  isTargetProvenNotIngesting, waitForDeliveryJob,
 } from "./delivery-queue.mjs";
 
 const ACTIVE_RETRY_MS = 1_000;
@@ -242,6 +243,28 @@ export function createDeliveryBroker({
       || Number(job.attempts || 0) >= MAX_PRE_SUBMIT_ATTEMPTS;
   }
 
+  function targetProvenNotIngesting(job) {
+    return isTargetProvenNotIngesting(queue.list(job.agentName, job.pane));
+  }
+
+  /**
+   * A target proven not to ingest answers its whole backlog now rather than one
+   * receipt budget at a time, which is what let a single wedged pane drain one
+   * message per hour while producers enqueued six.
+   *
+   * The head is deliberately spared and keeps making its real attempt: it is
+   * the recovery probe. Only an acknowledgement ends the streak, so a breaker
+   * that also silenced the head could never observe one again and would mute a
+   * healed pane forever.
+   */
+  async function answerBacklogBehindProbe(agentName, pane, head) {
+    if (!isTargetProvenNotIngesting(queue.list(agentName, pane))) return;
+    for (const job of queue.list(agentName, pane)) {
+      if (job.id === head.id || TERMINAL_DELIVERY_STATES.has(job.status)) continue;
+      await terminalizeNotSent(job);
+    }
+  }
+
   const cancellationRequested = (job) => job.cancelRequestStatus === "requested";
 
   function settleCancellation(initialJob, status, reason) {
@@ -289,6 +312,7 @@ export function createDeliveryBroker({
     if (nativeAttemptMayHaveLeft) return null;
     if (cancellationRequested(job)) return "sender-cancel";
     if (stalePreSubmit(job)) return "pre-submit-timeout";
+    if (targetProvenNotIngesting(job)) return "target-not-ingesting";
     return null;
   }
 
@@ -323,7 +347,9 @@ export function createDeliveryBroker({
     const requestedBy = String(current.cancelRequestedBy || "unknown sender");
     const terminalReason = cause === "sender-cancel"
       ? `not sent: cancellation requested by ${requestedBy} before submit (${requestedReason}); composer preserved`
-      : `not sent: composer remained unsafe for ${ageMinutes} minute(s) across ${Number(current.attempts || 0)} attempt(s); automatic retries stopped`;
+      : cause === "target-not-ingesting"
+        ? `not sent: ${current.agentName}:${current.pane} let ${NOT_INGESTING_UNVERIFIED_STREAK} consecutive receipt budgets expire without ingesting a prompt; resend once that pane acknowledges again`
+        : `not sent: composer remained unsafe for ${ageMinutes} minute(s) across ${Number(current.attempts || 0)} attempt(s); automatic retries stopped`;
     const terminal = queue.update(current, {
       status: "cancelled",
       draftOwned: false,
@@ -335,6 +361,7 @@ export function createDeliveryBroker({
         deliveryOutcome: "not-sent",
         ...(cause === "pre-submit-timeout" ? { deliveryTimeout: "pre-submit" } : {}),
         ...(cause === "sender-cancel" ? { deliveryCancellation: "sender-request" } : {}),
+        ...(cause === "target-not-ingesting" ? { deliveryTarget: "not-ingesting" } : {}),
       },
       ...(cause === "sender-cancel" ? {
         cancelRequestStatus: "completed",
@@ -763,7 +790,9 @@ export function createDeliveryBroker({
         // the exact JSONL event acknowledges it. A TUI transition can no
         // longer release later writes or create out-of-order receipts.
         const head = queue.next(agentName, pane);
-        if (!head || Number(head.nextAttemptAt || 0) > now()) return;
+        if (!head) return;
+        await answerBacklogBehindProbe(agentName, pane, head);
+        if (Number(head.nextAttemptAt || 0) > now()) return;
         const outcome = await processJob(head);
         if (TERMINAL_DELIVERY_STATES.has(outcome.status)) continue;
         return;
