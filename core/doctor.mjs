@@ -245,7 +245,7 @@ export async function observeTmuxFleet(tmux) {
   }
 }
 
-/** WHAT: Calculates doctor severity for tmux pane geometry. WHY: Prevents undersized terminal frames from masquerading as healthy prompt ingress. */
+/** WHAT: Calculates doctor severity for tmux pane geometry. WHY: Prevents unreadable terminal frames from masquerading as operator-ready. */
 export function checkTmuxPaneGeometry({ panes = [], error = null, required = true } = {}) {
   if (!required || error) return null;
   const undersized = panes.filter((pane) => pane.width < TMUX_MIN_PANE_COLUMNS
@@ -260,7 +260,7 @@ export function checkTmuxPaneGeometry({ panes = [], error = null, required = tru
   }
   const detail = undersized.map((pane) => `${pane.session}:${pane.pane} ${pane.width}x${pane.height}`).join(", ");
   return check("tmux pane geometry", FAIL,
-    `${undersized.length}/${panes.length} below ${TMUX_MIN_PANE_COLUMNS}x${TMUX_MIN_PANE_ROWS}: ${detail}`,
+    `${undersized.length}/${panes.length} below operator minimum ${TMUX_MIN_PANE_COLUMNS}x${TMUX_MIN_PANE_ROWS}: ${detail}`,
     "attach a client, or run tmux resize-window -t SESSION -x 340 -y 100 on the amux socket");
 }
 
