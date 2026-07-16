@@ -1422,6 +1422,55 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
+  component("a model-parked native job remains durable beyond the pre-submit timeout", {
+    given: ["a native runtime that repeatedly refuses work while its model guard is active", () => {
+      const rootDir = tempRoot();
+      let clock = 1_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "watch", pane: 3, text: "wait for model choice" });
+      let attempts = 0;
+      const agent = acceptingAgent();
+      agent.isNativeTarget = () => true;
+      agent.deliverQueued = async () => {
+        attempts++;
+        return {
+          accepted: false,
+          retryable: true,
+          code: "model-downgrade-parked",
+          reason: "native runtime model-downgrade-parked",
+        };
+      };
+      const notices = [];
+      const broker = createDeliveryBroker({
+        agent,
+        queue,
+        now: () => clock,
+        notify: async (_candidate, kind) => notices.push(kind),
+      });
+      return {
+        rootDir, queue, job, broker, notices,
+        attempts: () => attempts,
+        advance: (ms) => { clock += ms; },
+      };
+    }],
+    when: ["the broker retries once, then retries again more than an hour later", async (ctx) => {
+      await ctx.broker.kickTarget("watch", 3);
+      ctx.advance(2 * 60 * 60 * 1_000);
+      await ctx.broker.kickTarget("watch", 3);
+    }],
+    then: ["the immutable job stays pending instead of becoming terminal NOT SENT", (_, ctx) => {
+      expect(ctx.attempts()).toBe(2);
+      expect(ctx.queue.read("watch", 3, ctx.job.id)).toMatchObject({
+        status: "pending",
+        attempts: 2,
+        terminalAt: null,
+        lastReason: "native runtime model-downgrade-parked",
+      });
+      expect(ctx.notices).not.toContain("unverified");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("a stale provisional paste is dead-lettered without touching the foreign composer", {
     given: ["the live lsrc:8 shape: an old paste fence and a different visible compact command", () => {
       const rootDir = tempRoot();

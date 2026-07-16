@@ -25,7 +25,10 @@ const post = (url, body) => responseJson(url, {
   body: JSON.stringify(body),
 });
 
-function nativeModelSpawn() {
+function nativeModelSpawn({
+  claudeObservedModel = "claude-sonnet-4-6",
+  includeClaudeResultModel = true,
+} = {}) {
   return (command, args) => {
     const child = new EventEmitter();
     child.stdin = new PassThrough();
@@ -71,7 +74,7 @@ function nativeModelSpawn() {
               type: "assistant",
               session_id: CLAUDE_SESSION,
               message: {
-                model: "claude-sonnet-4-6",
+                model: claudeObservedModel,
                 content: [{ type: "text", text: "CLAUDE_MODEL_OK" }],
               },
             },
@@ -81,7 +84,9 @@ function nativeModelSpawn() {
               type: "result",
               subtype: "success",
               session_id: CLAUDE_SESSION,
-              modelUsage: { "claude-sonnet-4-6": { contextWindow: 200_000 } },
+              modelUsage: includeClaudeResultModel
+                ? { [claudeObservedModel]: { contextWindow: 200_000 } }
+                : {},
             });
             close();
           }
@@ -345,6 +350,42 @@ describe("native runtime model truth", () => {
       sessionId: CODEX_SESSION,
       modelGuard: { blocked: true },
     });
+  });
+
+  it("emits one fail-loud event when a successful turn has no actual-model evidence", async () => {
+    const { url, project } = await setup(nativeModelSpawn({
+      claudeObservedModel: "<synthetic>",
+      includeClaudeResultModel: false,
+    }));
+    const created = (await post(`${url}/api/projects/${project.id}/agents`, {
+      name: "Claude missing evidence",
+      engine: "claude",
+      model: "sonnet",
+      effort: "high",
+      idempotencyKey: "claude-missing-evidence",
+    })).body;
+
+    expect((await post(`${url}/api/agents/${created.id}/messages`, {
+      prompt: "complete without model evidence",
+      attachments: [],
+      idempotencyKey: "claude-missing-evidence-turn",
+    })).status).toBe(202);
+    await waitFor(url, project.id, created.id, (agent) => !agent.running);
+
+    const history = (await responseJson(`${url}/api/agents/${created.id}/history`)).body;
+    expect(history.events.filter((event) => event.type === "web"
+      && event.subtype === "model-observation-missing")).toEqual([
+      expect.objectContaining({
+        engine: "claude",
+        requestedModel: "sonnet",
+        operationKey: "claude-missing-evidence-turn",
+      }),
+    ]);
+    expect(history.events).toContainEqual(expect.objectContaining({
+      type: "web",
+      subtype: "turn-done",
+      code: 0,
+    }));
   });
 
   it("snapshots the Codex model before async initialization and applies a mid-turn setting next turn", async () => {

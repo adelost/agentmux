@@ -17,7 +17,9 @@ The requested model is never replaced with an observed fallback. That separation
 - Codex: newest `turn_context.payload.model` in the exact session JSONL. The runtime also consumes the official app-server `model/rerouted` notification.
 - Synthetic Claude messages and Codex session-head defaults are not model-change evidence.
 
-Aliases such as `fable` and `opus` match their full Claude model identifiers. Unknown aliases are not guessed.
+Aliases such as `fable` and `opus` match their full Claude model identifiers. An exact configured model also matches its dated provider variant, while neighboring versions do not. Unknown aliases are not guessed.
+
+A successful turn without any supported actual-model evidence emits `web:model-observation-missing`, an append-only fleet event, a Discord warning, and one push notification. Missing evidence does not silently claim that the requested model was served.
 
 ## Transition and safety policy
 
@@ -30,6 +32,7 @@ Aliases such as `fable` and `opus` match their full Claude model identifiers. Un
 - An explicit model setting clears the guard and park so one verification turn can run. If the provider falls back again, observation re-establishes the guard.
 
 Queued work remains durable while the guard is active and drains only after an explicit model choice clears it.
+The delivery broker permanently tests this beyond its normal one-hour pre-submit timeout; a parked native job remains pending rather than becoming a false `NOT SENT` terminal record.
 
 ## Restart semantics
 

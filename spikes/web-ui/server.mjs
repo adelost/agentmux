@@ -491,6 +491,7 @@ export function createWebUi(options = {}) {
   const sideRuns = new Map();
   const sideChildren = new Set();
   const queuedMessages = new Map();
+  const codexSessionFiles = new Map();
   let shuttingDown = false;
 
   const workingDirectoryFor = (agent) => agent.cwd
@@ -671,6 +672,7 @@ export function createWebUi(options = {}) {
     activeOperationKey: null,
     activeModel: null,
     activeEffort: null,
+    activeModelObserved: false,
     interruptRequested: false,
     autoCompactTimer: null,
     autoCompactDueAt: null,
@@ -808,10 +810,16 @@ export function createWebUi(options = {}) {
     }
     const base = join(homeDir, ".codex", "sessions");
     if (!existsSync(base)) return null;
+    const cached = codexSessionFiles.get(agent.id);
+    if (cached?.sessionId === agent.sessionId && existsSync(cached.path)) return cached.path;
+    codexSessionFiles.delete(agent.id);
     try {
       const match = readdirSync(base, { recursive: true })
         .find((file) => String(file).endsWith(".jsonl") && String(file).includes(agent.sessionId));
-      return match ? join(base, String(match)) : null;
+      if (!match) return null;
+      const path = join(base, String(match));
+      codexSessionFiles.set(agent.id, { sessionId: agent.sessionId, path });
+      return path;
     } catch {
       return null;
     }
@@ -1214,6 +1222,7 @@ export function createWebUi(options = {}) {
       requestedEffort,
     });
     if (!finding) return null;
+    agent.activeModelObserved = true;
 
     const sameEvidence = previous?.model === finding.observation.model
       && previous?.effort === finding.observation.effort
@@ -1301,6 +1310,7 @@ export function createWebUi(options = {}) {
 
   const refreshModelObservationFromSession = (agent, { deep = false } = {}) => {
     if (agent.engine !== "codex" || !agent.activeTurnId) return null;
+    if (agent.modelObservation?.turnId === agent.activeTurnId) return null;
     const path = sessionFileFor(agent);
     if (!path || !existsSync(path)) return null;
     const lines = readTailWindow(path, (deep ? 8 : 1) * 1024 * 1024).text.split("\n");
@@ -1414,6 +1424,7 @@ export function createWebUi(options = {}) {
     agent.activeOperationKey = operationKey;
     agent.activeModel = settings?.model ?? agent.model;
     agent.activeEffort = settings?.effort ?? agent.effort;
+    agent.activeModelObserved = false;
     agent.turnHasAssistantText = false;
     agent.permissionDenied = null;
     agent.activeTools.clear();
@@ -1444,6 +1455,10 @@ export function createWebUi(options = {}) {
       error = error || new Error(`permission denied: ${permissionDenied.detail}`);
     }
     const control = agent.activeControl;
+    const missingModelObservation = operation === "turn"
+      && code === 0
+      && !agent.interruptRequested
+      && !agent.activeModelObserved;
     agent.running = false;
     agent.operation = null;
     agent.activeChild = null;
@@ -1451,6 +1466,7 @@ export function createWebUi(options = {}) {
     agent.activeTurnId = null;
     agent.activeModel = null;
     agent.activeEffort = null;
+    agent.activeModelObserved = false;
     const operationKey = agent.activeOperationKey;
     agent.activeOperationKey = null;
     agent.permissionDenied = null;
@@ -1485,6 +1501,17 @@ export function createWebUi(options = {}) {
         fleetEvent(agent, "notification", {
           needsYou: true,
           detail: `permission denied: ${permissionDenied.detail}`,
+        });
+      }
+      if (missingModelObservation) {
+        webEvent(agent, "model-observation-missing", {
+          engine: agent.engine,
+          requestedModel: agent.model,
+          operationKey,
+        });
+        fleetEvent(agent, "model_observation_missing", {
+          needsYou: true,
+          detail: `actual model unavailable after successful ${agent.engine} turn`,
         });
       }
       webEvent(agent, "turn-done", {
@@ -2411,6 +2438,7 @@ export function createWebUi(options = {}) {
         if (agent.running) { json(response, 409, { error: "agent-running" }); return; }
         clearAutoCompact(agent);
         for (const client of agent.clients) client.end();
+        codexSessionFiles.delete(agent.id);
         agents.delete(agent.id);
         project.updatedAt = now();
         saveRegistry();

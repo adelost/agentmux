@@ -19,8 +19,10 @@ import { notifyUser } from "../cli/send-notify.mjs";
 const STATE_KEY = "native_watcher_posted_turns";
 const MODEL_STATE_KEY = "native_watcher_posted_model_changes";
 const PROGRESS_STATE_KEY = "native_watcher_posted_progress";
+const PROGRESS_ACK_STATE_KEY = "native_watcher_progress_ack";
 const DEFAULT_POLL_MS = 1_000;
 const MAX_POSTED_PER_CHANNEL = 500;
+const MAX_TOOL_PROGRESS_PER_POLL = 4;
 
 const textContent = (content) => (Array.isArray(content) ? content : [])
   .filter((item) => typeof item?.text === "string"
@@ -247,8 +249,20 @@ export function createNativeRuntimeWatcher({
   }
 
   function hasProgressState(channelId) {
-    const all = state.get(PROGRESS_STATE_KEY, {}) || {};
-    return Object.hasOwn(all, channelId);
+    const progress = state.get(PROGRESS_STATE_KEY, {}) || {};
+    const acknowledgements = state.get(PROGRESS_ACK_STATE_KEY, {}) || {};
+    return Object.hasOwn(progress, channelId) || Object.hasOwn(acknowledgements, channelId);
+  }
+
+  function acknowledgedOperation(channelId) {
+    const all = state.get(PROGRESS_ACK_STATE_KEY, {}) || {};
+    return all[channelId] ?? null;
+  }
+
+  function rememberAcknowledgedOperation(channelId, operationId) {
+    const all = state.get(PROGRESS_ACK_STATE_KEY, {}) || {};
+    all[channelId] = operationId;
+    state.set(PROGRESS_ACK_STATE_KEY, all);
   }
 
   function rememberProgress(channelId, ids) {
@@ -267,21 +281,26 @@ export function createNativeRuntimeWatcher({
     const seen = new Set(progressIds(channelId));
     const operationId = turn.operationKey || `at:${turn.userAt}`;
     const acknowledgementId = `working:${operationId}`;
-    if (!seen.has(acknowledgementId)) {
-      await discord.send(channelId, `⏳ **${name}:${pane} jobbar** — meddelandet är mottaget.`);
-      rememberProgress(channelId, acknowledgementId);
-      seen.add(acknowledgementId);
+    if (acknowledgedOperation(channelId) !== acknowledgementId) {
+      await discord.send(channelId, `⏳ **${name}:${pane} jobbar**, meddelandet är mottaget.`);
+      rememberAcknowledgedOperation(channelId, acknowledgementId);
     }
 
     const toolEvents = turn.tools.map((event) => ({ event, id: progressEventId(event) }));
     const unseen = toolEvents.filter(({ id }) => !seen.has(id));
     // On the first poll after upgrading a live bridge, expose the latest tool
     // without flooding Discord with every earlier step from the same turn.
-    const selected = initialized ? unseen : unseen.slice(-1);
-    if (!initialized && unseen.length > selected.length) {
+    const selected = initialized ? unseen.slice(-MAX_TOOL_PROGRESS_PER_POLL) : unseen.slice(-1);
+    if (unseen.length > selected.length) {
       const skipped = unseen.slice(0, unseen.length - selected.length).map(({ id }) => id);
       rememberProgress(channelId, skipped);
       skipped.forEach((id) => seen.add(id));
+      if (initialized) {
+        await discord.send(
+          channelId,
+          `_🔧 ${skipped.length} tidigare verktygssteg grupperades; senaste ${selected.length} visas._`,
+        );
+      }
     }
     for (const { event, id } of selected) {
       await discord.send(channelId, `_🔧 ${progressToolLabel(event)}_`);
@@ -294,6 +313,7 @@ export function createNativeRuntimeWatcher({
     const seen = new Set(postedModelChanges(channelId));
     for (const event of events.filter((candidate) => candidate?.type === "web"
       && (candidate.subtype === "model-change"
+        || candidate.subtype === "model-observation-missing"
         || (candidate.subtype === "settings" && candidate.clearedModelGuard)))) {
       const id = event.webId || `model:${createHash("sha256").update(JSON.stringify({
         at: event.at,
@@ -303,6 +323,16 @@ export function createNativeRuntimeWatcher({
       })).digest("hex")}`;
       if (seen.has(id)) continue;
       const paneName = `${name}:${pane}`;
+      if (event.subtype === "model-observation-missing") {
+        const warning = `⚠️ **${paneName}: faktisk modell kunde inte verifieras för senaste turen.**`;
+        await discord.send(channelId, warning)
+          .catch((error) => log(`${paneName} missing-model warning failed: ${error.message}`));
+        await notify(`⚠️ ${paneName}: faktisk modell kunde inte verifieras för senaste turen`)
+          .catch((error) => log(`${paneName} missing-model push failed: ${error.message}`));
+        rememberModelChange(channelId, id);
+        seen.add(id);
+        continue;
+      }
       if (event.subtype === "settings") {
         unpark({ session: name, pane, detail: `explicit native model switch: ${event.model}` });
         rememberModelChange(channelId, id);
@@ -319,7 +349,7 @@ export function createNativeRuntimeWatcher({
         .catch((error) => log(`${paneName} model-change warning failed: ${error.message}`));
       if (event.policy === "stop" && !event.expected) {
         try {
-          await notify(`🔀 ${paneName} nedgraderad och STOPPAD: ${event.from} → ${event.to} — byt modell när läget är rätt`);
+          await notify(`🔀 ${paneName} nedgraderad och STOPPAD: ${event.from} → ${event.to}. Byt modell när läget är rätt.`);
         } catch (error) {
           log(`${paneName} model-change push failed: ${error.message}`);
         }

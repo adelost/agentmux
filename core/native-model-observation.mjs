@@ -17,6 +17,10 @@ export function modelMatchesRequest(requested, observed) {
   const actual = lower(observed);
   if (!wanted || !actual) return false;
   if (wanted === actual) return true;
+  const datedSuffix = actual.startsWith(`${wanted}-`)
+    ? actual.slice(wanted.length + 1)
+    : "";
+  if (/^(?:20\d{6}|20\d{2}-\d{2}-\d{2})$/.test(datedSuffix)) return true;
   const alias = CLAUDE_ALIASES.find((name) => wanted === name);
   return Boolean(alias && actual.includes(alias));
 }

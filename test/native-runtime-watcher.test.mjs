@@ -240,7 +240,7 @@ describe("native runtime Discord watcher", () => {
     await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
     await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
     expect(discord.send.mock.calls.map((call) => call[1])).toEqual([
-      "⏳ **skybar-canary:0 jobbar** — meddelandet är mottaget.",
+      "⏳ **skybar-canary:0 jobbar**, meddelandet är mottaget.",
       "_🔧 npm test_",
     ]);
     expect(discord.sendTyping).toHaveBeenCalledTimes(2);
@@ -258,6 +258,29 @@ describe("native runtime Discord watcher", () => {
     await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
     expect(discord.send.mock.calls.at(-1)[1]).toBe("_🔧 npm run build_");
     expect(discord.send).toHaveBeenCalledTimes(3);
+
+    for (let index = 0; index < 7; index += 1) {
+      historyEvents.push({
+        webId: `boot:burst-${index}`,
+        type: "web",
+        subtype: "tool",
+        phase: "started",
+        name: "Bash",
+        summary: `tool ${index}`,
+        operationKey: "delivery:live",
+        at: 40 + index,
+      });
+    }
+    await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
+    expect(discord.send.mock.calls.slice(-5).map((call) => call[1])).toEqual([
+      "_🔧 3 tidigare verktygssteg grupperades; senaste 4 visas._",
+      "_🔧 tool 3_",
+      "_🔧 tool 4_",
+      "_🔧 tool 5_",
+      "_🔧 tool 6_",
+    ]);
+    await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
+    expect(discord.send).toHaveBeenCalledTimes(8);
   });
 
   it("does not resurrect partial text from an already-finished empty turn after restart", async () => {
@@ -369,6 +392,52 @@ describe("native runtime Discord watcher", () => {
     expect(discord.send.mock.calls[0][1]).toContain("STOPPAS");
     expect(park).toHaveBeenCalledWith(expect.objectContaining({ session: "skybar-canary", pane: 0 }));
     expect(unpark).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it("warns Discord and push exactly once when actual-model evidence is missing", async () => {
+    const stored = {};
+    const state = {
+      get: (key, fallback) => stored[key] ?? fallback,
+      set: (key, value) => { stored[key] = structuredClone(value); },
+    };
+    const discord = { send: vi.fn(async () => {}), sendTyping: vi.fn(async () => {}) };
+    const notify = vi.fn(async () => {});
+    const config = {
+      "skybar-canary": {
+        backend: "native",
+        dir: "/tmp/canary",
+        discord: { "channel-1": 0 },
+        panes: [{ cmd: "native:claude", engine: "claude" }],
+      },
+    };
+    const nativeRuntime = {
+      history: async () => ({
+        agent: { running: false, model: "sonnet", context: null },
+        events: [{
+          webId: "boot:missing-model",
+          type: "web",
+          subtype: "model-observation-missing",
+          engine: "claude",
+          requestedModel: "sonnet",
+          at: 950,
+        }],
+      }),
+    };
+    const watcher = createNativeRuntimeWatcher({
+      nativeRuntime,
+      agentsYamlPath: "unused",
+      discord,
+      state,
+      notify,
+      log: () => {},
+    });
+
+    await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
+    await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
+
+    expect(discord.send).toHaveBeenCalledTimes(1);
+    expect(discord.send.mock.calls[0][1]).toContain("faktisk modell kunde inte verifieras");
     expect(notify).toHaveBeenCalledTimes(1);
   });
 
