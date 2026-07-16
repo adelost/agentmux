@@ -81,4 +81,26 @@ feature("bridge ownership mode", () => {
       expect(spawn).toBeGreaterThan(gate);
     }],
   });
+
+  unit("every bridge observer recognizes the preload launch command", {
+    given: ["the launch command and both independent process observers", () => {
+      const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+      return {
+        launch: readFileSync(join(root, "bin", "start.sh"), "utf-8"),
+        doctor: readFileSync(join(root, "cli", "commands.mjs"), "utf-8"),
+        watchdog: readFileSync(join(root, "bin", "bridge-watchdog-cron.sh"), "utf-8"),
+      };
+    }],
+    when: ["checking the shared argv boundary", (sources) => sources],
+    then: ["legacy and preload launches stay observable", ({ launch, doctor, watchdog }) => {
+      const processPattern = "[n]ode( [^ ]+)* index\\.mjs";
+      const javascriptPattern = processPattern.replace("\\", "\\\\");
+      expect(launch).toContain("node --import ./bin/quota-recovery-bootstrap.mjs index.mjs");
+      expect(doctor).toContain(`pgrep -f '${javascriptPattern}'`);
+      expect(watchdog).toContain(`pgrep -f '${processPattern}'`);
+      const observer = /node( [^ ]+)* index\.mjs/u;
+      expect(observer.test("node index.mjs")).toBe(true);
+      expect(observer.test("node --import ./bin/quota-recovery-bootstrap.mjs index.mjs")).toBe(true);
+    }],
+  });
 });
