@@ -29,7 +29,6 @@ import { createDiscordChannel } from "./channels/discord.mjs";
 import { createVoicePWA } from "./channels/voice.mjs";
 import { createAutoCompact } from "./channels/auto-compact.mjs";
 import { parseAutoCompactConfig } from "./core/auto-compact.mjs";
-import { createQuotaRecovery, parseQuotaRecoveryConfig } from "./channels/quota-recovery.mjs";
 import { createDriftGuard } from "./channels/drift-guard.mjs";
 import { parseReminderConfig } from "./core/reminder-state.mjs";
 import { createJsonlWatcher } from "./channels/jsonl-watcher.mjs";
@@ -281,13 +280,6 @@ const autoCompact = createAutoCompact({
   config: autoCompactConfig,
 });
 autoCompact.start();
-const quotaRecovery = createQuotaRecovery({
-  agent,
-  deliveryBroker,
-  agentsYamlPath: AGENTS_YAML,
-  discord,
-  config: parseQuotaRecoveryConfig(),
-});
 
 // Drift-guard: periodic reminder to panes that have accumulated many turns
 // without a /compact or prior reminder. Counteracts attention-weight decay
@@ -346,7 +338,6 @@ if (legacyRecovery.recovered || legacyRecovery.remaining) {
   console.log(`[delivery-recovery] queued ${legacyRecovery.recovered}, remaining ${legacyRecovery.remaining}`);
 }
 deliveryBroker.start();
-quotaRecovery.start();
 jsonlWatcher.start();
 nativeRuntimeWatcher.start();
 

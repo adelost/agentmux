@@ -6,83 +6,6 @@ import {
   buildClaudeLaunchCommand, buildCodexLaunchCommand, createAgent, paneDir,
   shouldPastePrompt, submitWithDurableFence,
 } from "../agent.mjs";
-import { claudeProjectDir } from "../core/claude-paths.mjs";
-
-function quotaRestartFixture() {
-  const root = mkdtempSync(join(tmpdir(), "agentmux-quota-restart-"));
-  const homeDir = join(root, "home");
-  const repoDir = join(root, "repo");
-  const configPath = join(root, "agents.yaml");
-  const sessionId = "11111111-1111-4111-8111-111111111111";
-  const limitEventId = "22222222-2222-4222-8222-222222222222";
-  mkdirSync(homeDir, { recursive: true });
-  writeFileSync(configPath, [
-    "claw:",
-    `  dir: ${repoDir}`,
-    "  panes:",
-    "    - { name: worker, cmd: claude }",
-    "",
-  ].join("\n"));
-  const cwd = paneDir(repoDir, 0);
-  const projectDir = claudeProjectDir(cwd, homeDir);
-  const sessionPath = join(projectDir, `${sessionId}.jsonl`);
-  mkdirSync(projectDir, { recursive: true });
-  writeFileSync(sessionPath, [
-    JSON.stringify({
-      type: "user",
-      uuid: "00000000-0000-4000-8000-000000000000",
-      timestamp: "2026-07-16T17:00:00.000Z",
-      message: { content: "finish the release" },
-    }),
-    JSON.stringify({
-      type: "assistant",
-      uuid: limitEventId,
-      timestamp: "2026-07-16T17:01:11.018Z",
-      message: {
-        stop_reason: "stop_sequence",
-        content: [{ type: "text", text: "You've hit your session limit · resets 8:50pm (Europe/Stockholm)" }],
-      },
-    }),
-    "",
-  ].join("\n"));
-
-  let currentCommand = "node";
-  const commands = [];
-  const tmuxExec = async (command) => {
-    commands.push(command);
-    if (command.includes("display-message") && command.includes("pane_current_command")) {
-      return { stdout: `${currentCommand}\n` };
-    }
-    if (command.includes("display-message") && command.includes("pane_dead")) {
-      return { stdout: "0\n" };
-    }
-    if (command.includes("respawn-pane")) {
-      currentCommand = "bash";
-      return { stdout: "" };
-    }
-    if (command.includes("send-keys") && command.includes("ANTHROPIC_DISABLE_SURVEY")) {
-      currentCommand = "node";
-      return { stdout: "" };
-    }
-    if (command.includes("capture-pane")) return { stdout: "\n❯  \n" };
-    return { stdout: "" };
-  };
-  const previousHome = process.env.HOME;
-  process.env.HOME = homeDir;
-  const agent = createAgent({
-    tmuxExec,
-    run: async () => ({ stdout: "" }),
-    delay: async () => {},
-    tmuxSocket: "/tmp/quota-restart-test.sock",
-    configPath,
-  });
-  const cleanup = () => {
-    if (previousHome === undefined) delete process.env.HOME;
-    else process.env.HOME = previousHome;
-    rmSync(root, { recursive: true, force: true });
-  };
-  return { agent, cleanup, commands, limitEventId, sessionId, sessionPath };
-}
 
 feature("durable draft paste fence", () => {
   unit("a vanished durable draft is never permission to type it again", {
@@ -174,44 +97,6 @@ feature("Claude pane model pin", () => {
     then: ["the exact id replaces cwd-relative continue", (command) => {
       expect(command).toContain("--resume '11111111-1111-4111-8111-111111111111'");
       expect(command).not.toContain("--continue");
-    }],
-  });
-
-  component("quota recovery replaces one pane and resumes its exact persisted session", {
-    given: ["a terminal quota receipt and an idle Claude pane", quotaRestartFixture],
-    when: ["the guarded restart crosses the process boundary", ({ agent, sessionId, limitEventId }) =>
-      agent.restartClaude("claw", 0, { resumeSessionId: sessionId, expectedLimitEventId: limitEventId })],
-    then: ["one killed pane launches only the receipt-bound session", (result, ctx) => {
-      expect(result).toEqual({ ok: true, sessionId: ctx.sessionId, limitEventId: ctx.limitEventId });
-      expect(ctx.commands.filter((command) => command.includes("respawn-pane -k"))).toHaveLength(1);
-      const launch = ctx.commands.find((command) => command.includes("ANTHROPIC_DISABLE_SURVEY"));
-      expect(launch).toContain(`--resume '${ctx.sessionId}'`);
-      expect(launch).not.toContain("--continue");
-      ctx.cleanup();
-    }],
-  });
-
-  component("a later human turn invalidates the receipt before any process is killed", {
-    given: ["a previously limited session that the human already resumed", () => {
-      const ctx = quotaRestartFixture();
-      writeFileSync(ctx.sessionPath, `${JSON.stringify({
-        type: "user",
-        uuid: "33333333-3333-4333-8333-333333333333",
-        timestamp: "2026-07-16T17:16:46.827Z",
-        message: { content: "continue" },
-      })}\n`, { flag: "a" });
-      return ctx;
-    }],
-    when: ["the stale watchdog observation reaches the restart seam", async ({ agent, sessionId, limitEventId }) => {
-      try {
-        await agent.restartClaude("claw", 0, { resumeSessionId: sessionId, expectedLimitEventId: limitEventId });
-        return null;
-      } catch (error) { return error; }
-    }],
-    then: ["the restart fails closed without respawning the pane", (error, ctx) => {
-      expect(error?.message).toMatch(/no longer has the expected active quota limit/);
-      expect(ctx.commands.some((command) => command.includes("respawn-pane"))).toBe(false);
-      ctx.cleanup();
     }],
   });
 });

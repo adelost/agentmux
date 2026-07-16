@@ -26,7 +26,6 @@ import { basename, dirname, join } from "path";
 
 export const DELIVERY_QUEUE_VERSION = 1;
 export const DELIVERED_UNVERIFIED_STATE = "delivered_unverified";
-export const QUOTA_PAUSED_STATE = "quota_paused";
 export const TERMINAL_DELIVERY_STATES = new Set([
   "acknowledged", "cancelled", DELIVERED_UNVERIFIED_STATE,
 ]);
@@ -344,8 +343,7 @@ export function createDeliveryQueue({
     return list(agentName, pane).find((job) =>
       !TERMINAL_DELIVERY_STATES.has(job.status)
         && job.status !== "submitting"
-        && job.status !== "submitted"
-        && job.status !== QUOTA_PAUSED_STATE) || null;
+        && job.status !== "submitted") || null;
   }
 
   function submitted(agentName, pane) {
@@ -604,7 +602,7 @@ export function deliveryQueueStats(queue) {
       else if (job.status === "pasting") pasting++;
       else if (job.status === "drafted") drafted++;
       else if (job.status === "submitting" || job.status === "submitted") submitted++;
-      else if (job.status === "blocked" || job.status === QUOTA_PAUSED_STATE) blocked++;
+      else if (job.status === "blocked") blocked++;
     }
   }
   return {
