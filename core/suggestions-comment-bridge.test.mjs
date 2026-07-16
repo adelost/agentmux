@@ -467,11 +467,18 @@ describe.sequential("Suggestions human-comment relay", () => {
     const start = 20_000_000;
     let notifyCalls = 0;
     try {
-      // Stages exhaust at minute 240; the notify fallback then fails every
-      // minute. Pre-fix this looped forever (SKY-0088:351 from 14:44).
-      for (let minute = 0; minute <= 240 + NOTIFY_FAILURE_BUDGET + 10; minute++) {
+      // Exercise only the policy transitions with the injected clock. Walking
+      // every inert minute made this deterministic state test perform 254 real
+      // HTTP polls and race Vitest's 5s timeout on slower runners.
+      const lastReminderAt = REMINDER_STAGES.at(-1).afterMs;
+      const transitionTimes = [
+        ...REMINDER_STAGES.map((stage) => stage.afterMs),
+        ...Array.from({ length: NOTIFY_FAILURE_BUDGET + 1 }, (_, index) =>
+          lastReminderAt + (index + 1) * 60 * 1000),
+      ];
+      for (const elapsedMs of transitionTimes) {
         const state = existsSync(statePath) ? loadSuggestionsBridgeState(statePath) : emptyState();
-        await run({ fixture, state, now: () => start + minute * 60 * 1000,
+        await run({ fixture, state, now: () => start + elapsedMs,
           persist: (next) => saveSuggestionsBridgeState(statePath, next),
           deliver: async () => { throw new Error("permanent target failure"); },
           notify: async () => { notifyCalls += 1; throw new Error("notify down"); } })

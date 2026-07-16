@@ -11,7 +11,9 @@
     "setup": "bash bin/setup.sh",
     "start": "node index.mjs",
     "dev": "bash bin/start.sh",
+    "ci": "npm test && npm run test:ci-contract",
     "test": "vitest run",
+    "test:ci-contract": "node docs/check-ci-contract.mjs",
     "test:webui:visual": "node spikes/web-ui/tools/visual-gate.mjs",
     "test:webui:native-canary": "node spikes/web-ui/tools/native-canary-gate.mjs"
   },
@@ -22,6 +24,7 @@
     "js-yaml": "^4.1.1"
   },
   "devDependencies": {
+    "@openai/codex": "0.144.4",
     "bdd-vitest": "^2.0.0",
     "vitest": "^4.0.18"
   },

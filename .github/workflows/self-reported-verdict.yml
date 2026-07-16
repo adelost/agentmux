@@ -1,0 +1,53 @@
+name: broker-verdict (self-reported)
+run-name: Self-reported broker verdict for PR #${{ github.event.client_payload.pull_request }}
+
+on:
+  repository_dispatch:
+    types:
+      - self-reported-verdict
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  publish:
+    name: broker-verdict (self-reported)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out the default-branch publisher
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Bind the self-reported verdict to the current head
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
+        env:
+          PULL_REQUEST: ${{ github.event.client_payload.pull_request }}
+          HEAD_SHA: ${{ github.event.client_payload.head_sha }}
+          VERDICT: ${{ github.event.client_payload.verdict }}
+          REVIEWER: ${{ github.event.client_payload.reviewer }}
+          EVIDENCE_URL: ${{ github.event.client_payload.evidence_url }}
+        with:
+          script: |
+            const publisher = await import(
+              `${process.env.GITHUB_WORKSPACE}/.github/scripts/publish-self-reported-verdict.mjs`
+            );
+            const result = await publisher.publishSelfReportedVerdict({
+              github,
+              context,
+              inputs: {
+                pull_request: process.env.PULL_REQUEST,
+                head_sha: process.env.HEAD_SHA,
+                verdict: process.env.VERDICT,
+                reviewer: process.env.REVIEWER,
+                evidence_url: process.env.EVIDENCE_URL,
+              },
+            });
+            await core.summary
+              .addHeading("broker-verdict (self-reported)")
+              .addRaw(`Recorded ${result.verdict.toUpperCase()} for PR #${result.pullNumber} at ${result.headSha}.`)
+              .addEOL()
+              .addRaw("This status proves SHA freshness only. It is not an independent GitHub approval.")
+              .write();
