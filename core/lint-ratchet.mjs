@@ -183,6 +183,42 @@ export function changedSourcePaths(root, options = {}) {
   return new Set(outputs.flatMap((output) => outputPaths(context.repoRoot, output)));
 }
 
+function addDiffLines(target, patch) {
+  for (const text of (patch || "").split(/\r?\n/)) {
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(text);
+    if (!hunk) continue;
+    const start = Number(hunk[1]);
+    const count = hunk[2] === undefined ? 1 : Number(hunk[2]);
+    for (let line = start; line < start + count; line += 1) target.add(line);
+  }
+}
+
+/**
+ * WHAT: Collects target line numbers added by committed and local changes for one source file.
+ * WHY: Keeps changed-mode prose rules from reopening untouched legacy text in an edited file.
+ */
+export function changedSourceLineNumbers(root, path, options = {}) {
+  const context = gitContext(root, options);
+  if (!context) return new Set();
+  const absolutePath = resolve(path);
+  const pathspec = relative(context.repoRoot, absolutePath).replaceAll("\\", "/");
+  if (!pathspec || pathspec === ".." || pathspec.startsWith("../")) return new Set();
+  if (gitOutput(context.repoRoot, ["ls-files", "--error-unmatch", "--", pathspec]) === null) {
+    return new Set(Array.from({ length: sourceLineCount(readFileSync(absolutePath, "utf-8")) }, (_, index) => index + 1));
+  }
+  const outputs = [];
+  if (context.baseRef) {
+    outputs.push(gitOutput(context.repoRoot, [
+      "diff", "--unified=0", "--no-color", "--no-ext-diff", "--diff-filter=ACMRTUXB", `${context.baseRef}...HEAD`, "--", pathspec,
+    ]));
+  }
+  outputs.push(gitOutput(context.repoRoot, ["diff", "--unified=0", "--no-color", "--no-ext-diff", "HEAD", "--", pathspec]));
+  if (outputs.some((output) => output === null)) throw new Error(`amux lint: could not inspect changed lines for '${pathspec}'`);
+  const lines = new Set();
+  for (const output of outputs) addDiffLines(lines, output);
+  return lines;
+}
+
 function extractStringLiterals(source, ext) {
   const python = ext === ".py";
   const literals = [];
@@ -289,7 +325,16 @@ function literalLine(literal, offset) {
   return literal.line + literal.value.slice(0, offset).split("\n").length - 1;
 }
 
-function spacedProseHyphen(value) {
+function lintedOffset(value, needle, literal, changedLines) {
+  let offset = value.indexOf(needle);
+  while (offset >= 0) {
+    if (!changedLines || changedLines.has(literalLine(literal, offset))) return offset;
+    offset = value.indexOf(needle, offset + needle.length);
+  }
+  return -1;
+}
+
+function spacedProseHyphen(value, literal, changedLines) {
   for (const match of value.matchAll(/[ \t]+-[ \t]+/g)) {
     const offset = match.index || 0;
     const lineStart = value.lastIndexOf("\n", offset) + 1;
@@ -297,7 +342,8 @@ function spacedProseHyphen(value) {
     const lineEnd = lineEndRaw < 0 ? value.length : lineEndRaw;
     const left = value.slice(lineStart, offset);
     const right = value.slice(offset + match[0].length, lineEnd);
-    if (/\p{L}{2,}/u.test(left) && /\p{L}{2,}/u.test(right)) return offset;
+    if (/\p{L}{2,}/u.test(left) && /\p{L}{2,}/u.test(right)
+      && (!changedLines || changedLines.has(literalLine(literal, offset)))) return offset;
   }
   return -1;
 }
@@ -306,13 +352,13 @@ function spacedProseHyphen(value) {
  * WHAT: Reports banned dash punctuation inside source string literals.
  * WHY: Keeps user-facing prose consistent without flagging examples in comments.
  */
-export function lintStringStyle(path, source, ext) {
+export function lintStringStyle(path, source, ext, changedLines = null) {
   const findings = [];
   for (const literal of extractStringLiterals(source, ext)) {
     const styleValue = literal.delimiter === "`"
       ? literal.value.replace(/\$\{[^}]*\}/gs, (expression) => expression.replace(/[^\n]/g, " "))
       : literal.value;
-    const emDash = styleValue.indexOf(EM_DASH);
+    const emDash = lintedOffset(styleValue, EM_DASH, literal, changedLines);
     if (emDash >= 0) {
       findings.push({
         code: "STYLE001",
@@ -323,7 +369,7 @@ export function lintStringStyle(path, source, ext) {
         suggestion: STYLE_SUGGESTIONS.STYLE001,
       });
     }
-    const spacedHyphen = spacedProseHyphen(styleValue);
+    const spacedHyphen = spacedProseHyphen(styleValue, literal, changedLines);
     if (spacedHyphen >= 0) {
       findings.push({
         code: "STYLE002",

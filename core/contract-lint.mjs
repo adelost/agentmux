@@ -5,7 +5,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { basename, extname, isAbsolute, join, relative, resolve } from "path";
-import { changedSourcePaths, lintFileSizes, lintStringStyle, loadLintPolicy } from "./lint-ratchet.mjs";
+import { changedSourceLineNumbers, changedSourcePaths, lintFileSizes, lintStringStyle, loadLintPolicy } from "./lint-ratchet.mjs";
 
 // WHAT: Names the contract check used by CLI include and exclude filters.
 // WHY: Keeps command routing independent from the check implementation.
@@ -431,7 +431,7 @@ export function extractSymbols(source, ext) {
  * WHY: Keeps file path and line on each finding so the reporter stays format-free.
  */
 export function lintSource(path, source, ext, options = {}) {
-  const findings = lintStringStyle(path, source, ext);
+  const findings = lintStringStyle(path, source, ext, options.styleLines);
   for (const sym of extractSymbols(source, ext)) {
     for (const f of evaluateContract(sym.doc, { name: sym.name, kind: sym.kind, allowedWhatVerbs: options.allowedWhatVerbs })) {
       findings.push({ ...f, path, line: sym.line, suggestion: SUGGESTIONS[f.code] });
@@ -539,7 +539,7 @@ export function lintRoot(root, options = {}) {
   let symbols = 0;
   for (const file of files) {
     const source = readFileSync(file, "utf-8");
-    const fileFindings = lintSource(file, source, extname(file), lintConfig);
+    const fileFindings = lintSource(file, source, extname(file), { ...lintConfig, styleLines: options.changed ? changedSourceLineNumbers(resolvedRoot, file, options) : null });
     findings.push(...fileFindings);
     symbols += extractSymbols(source, extname(file)).length;
   }
