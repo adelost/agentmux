@@ -30,6 +30,7 @@ import { claudeProjectDir } from "../../core/claude-paths.mjs";
 import { appendEvent as appendFleetEvent } from "../../core/events.mjs";
 import { readTailWindow } from "../../core/jsonl-reader.mjs";
 import { readQuotaSnapshot } from "../../core/quota-usage.mjs";
+import { createNativeClaudeQuotaController } from "../../core/native-claude-quota.mjs";
 import { ensureCodexExecutionSafety } from "../../core/codex-profiles.mjs";
 import { persistedSessionIdentity } from "../../core/native-session-identity.mjs";
 import { shouldStopPane } from "../../core/model-watch.mjs";
@@ -40,7 +41,6 @@ import {
   observationFromCodexReroute,
 } from "../../core/native-model-observation.mjs";
 import {
-  CLAUDE_AUTONOMOUS_ARGS,
   CODEX_AUTONOMOUS_THREAD_POLICY,
   CODEX_AUTONOMOUS_TURN_POLICY,
 } from "../../core/execution-safety.mjs";
@@ -50,7 +50,7 @@ import {
   openCodexRpc,
   writeClaudeMessage,
 } from "./runtime-control.mjs";
-
+import { attachmentPrompt, buildNativeClaudeLaunch, buildNativeCodexInput } from "./runtime-prompt.mjs";
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const JSON_MAX_BYTES = 256 * 1024;
@@ -332,6 +332,7 @@ const isClaudeHistoryNoise = (entry, text) => {
   return entry.isMeta
     || entry.isSynthetic
     || entry.isReplay
+    || trimmed.startsWith("[AMUX AUTOMATIC QUOTA RECOVERY")
     || trimmed.startsWith("[Request interrupted")
     || trimmed.startsWith("<local-command-caveat>")
     || trimmed.startsWith("<command-name>")
@@ -432,8 +433,12 @@ const cleanChildEnv = (agent = null) => {
  * @param {string} [options.codexCommand]
  * @param {number} [options.autoCompactContextPercent]
  * @param {number} [options.autoCompactIdleMs]
+ * @param {number} [options.nativeQuotaPollMs]
+ * @param {Function} [options.readQuotaSnapshot]
  * @param {Record<string, string | Buffer>} [options.staticAssets]
  * @param {Function} [options.appendEventImpl]
+ * WHAT: Routes the native agent registry, runtime, history, and control API.
+ * WHY: Keeps engine lifecycle truth behind one durable local boundary.
  */
 export function createWebUi(options = {}) {
   const bootId = randomUUID();
@@ -459,6 +464,8 @@ export function createWebUi(options = {}) {
   const autoCompactContextPercent = options.autoCompactContextPercent
     ?? AUTO_COMPACT_CONTEXT_PERCENT;
   const autoCompactIdleMs = options.autoCompactIdleMs ?? AUTO_COMPACT_IDLE_MS;
+  const nativeQuotaPollMs = options.nativeQuotaPollMs ?? 30_000;
+  const readQuotaSnapshotImpl = options.readQuotaSnapshot ?? readQuotaSnapshot;
   const models = {
     claude: [...(options.models?.claude ?? DEFAULT_MODELS.claude)],
     codex: [...(options.models?.codex ?? DEFAULT_MODELS.codex)],
@@ -532,6 +539,7 @@ export function createWebUi(options = {}) {
       id: agent.id,
       projectId: agent.projectId,
       name: agent.name,
+      backend: "native",
       engine: agent.engine,
       model: agent.model,
       requestedModel: agent.model,
@@ -546,6 +554,7 @@ export function createWebUi(options = {}) {
       sessionId: agent.sessionId,
       running: agent.running,
       operation: agent.interruptRequested ? "interrupting" : agent.operation,
+      quotaWaiting: [...queuedMessages.values()].some((entry) => entry.id === agent.id && entry.quotaWait),
       context: agent.context,
       idleSince: agent.idleSince,
       autoCompact: {
@@ -576,6 +585,7 @@ export function createWebUi(options = {}) {
 
   const promptTurnStatus = (operationKey, receipt) => {
     const agent = agents.get(receipt.id);
+    if (queuedMessages.get(operationKey)?.quotaWait) return "quota_waiting";
     if (queuedMessages.has(operationKey) && agent?.activeOperationKey !== operationKey) return "queued";
     if (agent?.running && agent.activeOperationKey === operationKey) return "running";
     if (!receipt.completedAt || receipt.code == null) return "accepted";
@@ -682,6 +692,9 @@ export function createWebUi(options = {}) {
     hydrated: false,
     nextEventId: 1,
     turnHasAssistantText: false,
+    turnHadToolActivity: false,
+    turnQuotaCandidate: null,
+    turnQuotaWait: null,
     permissionDenied: null,
     activeTools: new Map(),
   });
@@ -1359,38 +1372,6 @@ export function createWebUi(options = {}) {
     url: `/api/uploads/${projectId}/${encodeURIComponent(basename(attachment.path))}`,
   });
 
-  const attachmentPrompt = (prompt, attachments) => attachments.reduce((text, attachment) => {
-    const label = attachment.image ? "Attached image" : "Attached file";
-    return `${text}\n[${label}: ${attachment.path}]`;
-  }, prompt);
-
-  const buildClaudeLaunch = (agent, rawPrompt, attachments, settings) => {
-    const prompt = attachmentPrompt(rawPrompt, attachments);
-    const args = [
-      "-p",
-      "--input-format", "stream-json",
-      "--output-format", "stream-json",
-      "--verbose",
-      "--include-partial-messages",
-      "--model", settings.model,
-      "--effort", settings.effort,
-      "--name", agent.name,
-    ];
-    if (agent.permissionMode === "automation") args.push(...CLAUDE_AUTONOMOUS_ARGS);
-    else args.push("--permission-mode", "acceptEdits");
-    if (agent.sessionId) args.push("--resume", agent.sessionId);
-    return { command: commands.claude, args, prompt };
-  };
-
-  const buildCodexInput = (rawPrompt, attachments) => {
-    const images = attachments.filter((attachment) => attachment.image);
-    const otherFiles = attachments.filter((attachment) => !attachment.image);
-    return [
-      { type: "text", text: attachmentPrompt(rawPrompt, otherFiles) },
-      ...images.map((image) => ({ type: "localImage", path: image.path })),
-    ];
-  };
-
   const recordSessionId = (agent, sessionId) => {
     if (!sessionId || sessionId === agent.sessionId) return;
     agent.sessionId = sessionId;
@@ -1413,7 +1394,7 @@ export function createWebUi(options = {}) {
     if (emit) webEvent(agent, "context", { context });
   };
 
-  const beginOperation = (agent, operation, rawPrompt = "", attachments = [], operationKey = null, settings = null) => {
+  const beginOperation = (agent, operation, rawPrompt = "", attachments = [], operationKey = null, settings = null, quotaRetry = false) => {
     const project = projects.get(agent.projectId);
     hydrate(agent);
     clearAutoCompact(agent);
@@ -1426,17 +1407,20 @@ export function createWebUi(options = {}) {
     agent.activeEffort = settings?.effort ?? agent.effort;
     agent.activeModelObserved = false;
     agent.turnHasAssistantText = false;
+    nativeQuota.resetTurn(agent);
     agent.permissionDenied = null;
     agent.activeTools.clear();
     agent.compactMetadata = null;
     agent.updatedAt = now();
-    if (operation === "turn") {
+    if (operation === "turn" && !quotaRetry) {
       fleetEvent(agent, "prompt", { detail: rawPrompt });
       webEvent(agent, "user", {
         text: rawPrompt,
         attachments: attachments.map((attachment) => publicAttachment(project.id, attachment)),
         operationKey,
       });
+    } else if (operation === "turn") {
+      webEvent(agent, "quota-retry", { backend: "native", operationKey });
     } else {
       webEvent(agent, "compact-start", {
         automatic: operation === "auto-compact",
@@ -1454,6 +1438,8 @@ export function createWebUi(options = {}) {
       code = 1;
       error = error || new Error(`permission denied: ${permissionDenied.detail}`);
     }
+    const operationKey = agent.activeOperationKey;
+    const quotaWait = operation === "turn" ? nativeQuota.take(agent, operationKey) : null;
     const control = agent.activeControl;
     const missingModelObservation = operation === "turn"
       && code === 0
@@ -1467,8 +1453,8 @@ export function createWebUi(options = {}) {
     agent.activeModel = null;
     agent.activeEffort = null;
     agent.activeModelObserved = false;
-    const operationKey = agent.activeOperationKey;
     agent.activeOperationKey = null;
+    nativeQuota.clearTurn(agent);
     agent.permissionDenied = null;
     agent.activeTools.clear();
     agent.updatedAt = now();
@@ -1481,22 +1467,29 @@ export function createWebUi(options = {}) {
     if (operation === "turn" && operationKey) {
       const receipt = receipts.messages.get(operationKey);
       if (receipt?.id === agent.id) {
-        Object.assign(receipt, {
-          sessionId: agent.sessionId,
-          completedAt: agent.updatedAt,
-          code,
-          interrupted,
-          hasAssistant: Boolean(agent.turnHasAssistantText),
-          permissionDenied: Boolean(permissionDenied),
-          ...(permissionDenied?.detail ? { denialDetail: permissionDenied.detail } : {}),
-          ...(error?.message ? { error: String(error.message).slice(0, 4_000) } : {}),
-        });
+        if (quotaWait) {
+          nativeQuota.park(agent, operationKey, receipt, quotaWait);
+        } else {
+          delete receipt.quotaWait;
+          Object.assign(receipt, {
+            sessionId: agent.sessionId, completedAt: agent.updatedAt, code, interrupted,
+            hasAssistant: Boolean(agent.turnHasAssistantText),
+            permissionDenied: Boolean(permissionDenied),
+            ...(permissionDenied?.detail ? { denialDetail: permissionDenied.detail } : {}),
+            ...(error?.message ? { error: String(error.message).slice(0, 4_000) } : {}),
+          });
+        }
       }
-      queuedMessages.delete(operationKey);
+      if (!quotaWait) queuedMessages.delete(operationKey);
     }
     saveRegistry();
     if (operation === "turn") {
-      fleetEvent(agent, "stop", { detail: interrupted ? "native turn interrupted" : "native turn finished" });
+      fleetEvent(agent, "stop", { detail: quotaWait
+        ? "native Claude quota wait" : interrupted ? "native turn interrupted" : "native turn finished" });
+      if (quotaWait) {
+        nativeQuota.wait(agent, operationKey, quotaWait);
+        return;
+      }
       if (permissionDenied) {
         fleetEvent(agent, "notification", {
           needsYou: true,
@@ -1540,6 +1533,11 @@ export function createWebUi(options = {}) {
   const mapClaudeEvent = (agent, event) => {
     recordSessionId(agent, event.session_id);
     const operation = agent.operation;
+    const quota = nativeQuota.observe(agent, event);
+    if (quota?.handled) {
+      if (quota.endInput) try { agent.activeChild?.stdin?.end?.(); } catch {}
+      return;
+    }
     const modelObservation = observationFromClaudeEvent(event, now());
     if (modelObservation) observeAgentModel(agent, modelObservation);
     if (event.type === "control_response"
@@ -1571,6 +1569,7 @@ export function createWebUi(options = {}) {
     if (event.type === "user" && operation === "turn" && !agent.interruptRequested) {
       const blocks = Array.isArray(event.message?.content) ? event.message.content : [];
       for (const block of blocks.filter((item) => item?.type === "tool_result")) {
+        nativeQuota.markTool(agent);
         const previous = agent.activeTools.get(String(block.tool_use_id));
         emitToolActivity(agent, {
           toolId: block.tool_use_id,
@@ -1585,6 +1584,7 @@ export function createWebUi(options = {}) {
       const content = Array.isArray(event.message?.content) ? event.message.content : [];
       const textContent = content.filter((block) => block?.type === "text" && typeof block.text === "string");
       const toolBlocks = content.filter((block) => block?.type === "tool_use");
+      if (toolBlocks.length) nativeQuota.markTool(agent);
       if (textContent.length) {
         agent.turnHasAssistantText = true;
         broadcast(agent, {
@@ -1629,11 +1629,13 @@ export function createWebUi(options = {}) {
     try { agent.activeChild?.stdin?.end?.(); } catch {}
   };
 
-  const runClaudeOperation = (agent, rawPrompt, attachments, operation, operationKey = null) => {
+  const runClaudeOperation = (agent, rawPrompt, attachments, operation, operationKey = null, quotaRetry = false) => {
     const cwd = workingDirectoryFor(agent);
     const settings = { model: agent.model, effort: agent.effort };
-    const launch = buildClaudeLaunch(agent, rawPrompt, attachments, settings);
-    beginOperation(agent, operation, rawPrompt, attachments, operationKey, settings);
+    const launch = buildNativeClaudeLaunch({
+      command: commands.claude, agent, rawPrompt, attachments, settings,
+    });
+    beginOperation(agent, operation, rawPrompt, attachments, operationKey, settings, quotaRetry);
     let child;
     let stderr = "";
     let finished = false;
@@ -1790,7 +1792,7 @@ export function createWebUi(options = {}) {
       } else {
         const result = await rpc.request("turn/start", {
           threadId,
-          input: buildCodexInput(rawPrompt, attachments),
+          input: buildNativeCodexInput(rawPrompt, attachments),
           cwd,
           model: settings.model,
           effort: settings.effort,
@@ -1803,9 +1805,9 @@ export function createWebUi(options = {}) {
     }
   };
 
-  const runTurn = (agent, rawPrompt, attachments, operationKey = null) => {
+  const runTurn = (agent, rawPrompt, attachments, operationKey = null, quotaRetry = false) => {
     if (agent.engine === "claude") {
-      runClaudeOperation(agent, rawPrompt, attachments, "turn", operationKey);
+      runClaudeOperation(agent, rawPrompt, attachments, "turn", operationKey, quotaRetry);
     } else {
       void runCodexOperation(agent, rawPrompt, attachments, "turn", operationKey);
     }
@@ -1815,18 +1817,28 @@ export function createWebUi(options = {}) {
     .filter(([, entry]) => entry.id === agent.id)
     .sort(([, left], [, right]) => Number(left.acceptedAt) - Number(right.acceptedAt))[0] ?? null;
 
+  const nativeQuota = createNativeClaudeQuotaController({
+    queuedMessages, agents,
+    readQuota: async () => (await readQuotaSnapshotImpl()).claude,
+    pollMs: nativeQuotaPollMs,
+    save: saveRegistry, webEvent, fleetEvent, drain: drainQueuedMessages, now,
+    log: (message) => console.error(`[native-runtime] ${message}`),
+  });
+
   function drainQueuedMessages(agent) {
     if (shuttingDown || agent.running || agent.modelGuard?.blocked) return false;
     const next = nextQueuedMessage(agent);
     if (!next) return false;
     const [operationKey, entry] = next;
+    if (nativeQuota.blocks(operationKey, entry)) return false;
     // Keep the entry persisted until finishOperation. If the runtime itself
     // dies mid-turn, startup marks the outcome uncertain and refuses an
     // automatic replay; deleting at launch would turn that crash window into
     // silent loss.
     entry.startedAt = now();
     saveRegistry();
-    runTurn(agent, entry.prompt, entry.attachments, operationKey);
+    const attempt = nativeQuota.attempt(entry);
+    runTurn(agent, attempt.prompt, attempt.attachments, operationKey, attempt.retry);
     return true;
   }
 
@@ -2046,7 +2058,7 @@ export function createWebUi(options = {}) {
         json(response, 200, quotaCache.payload);
         return;
       }
-      const snapshot = await readQuotaSnapshot();
+      const snapshot = await readQuotaSnapshotImpl();
       quotaCache = { at: now(), payload: snapshot };
       json(response, 200, snapshot);
       return;
@@ -2564,20 +2576,15 @@ export function createWebUi(options = {}) {
           source: cleanPromptSource(body?.source, key),
           acceptedAt: now(),
         }, 1_000);
+        const queuedForAgent = queuedMessageCount(agent);
+        if (queuedForAgent >= MESSAGE_QUEUE_MAX_PER_AGENT) {
+          receipts.messages.delete(key);
+          json(response, 429, { error: "message-queue-full", limit: MESSAGE_QUEUE_MAX_PER_AGENT });
+          return;
+        }
+        queuedMessages.set(key, { id: agent.id, prompt, attachments, acceptedAt: now() });
+        saveRegistry();
         if (agent.running) {
-          const queuedForAgent = queuedMessageCount(agent);
-          if (queuedForAgent >= MESSAGE_QUEUE_MAX_PER_AGENT) {
-            receipts.messages.delete(key);
-            json(response, 429, { error: "message-queue-full", limit: MESSAGE_QUEUE_MAX_PER_AGENT });
-            return;
-          }
-          queuedMessages.set(key, {
-            id: agent.id,
-            prompt,
-            attachments,
-            acceptedAt: now(),
-          });
-          saveRegistry();
           webEvent(agent, "message-queued", {
             operationKey: key,
             position: queuedForAgent + 1,
@@ -2586,15 +2593,7 @@ export function createWebUi(options = {}) {
           json(response, 202, publicAgent(agent));
           return;
         }
-        queuedMessages.set(key, {
-          id: agent.id,
-          prompt,
-          attachments,
-          acceptedAt: now(),
-          startedAt: now(),
-        });
-        saveRegistry();
-        runTurn(agent, prompt, attachments, key);
+        drainQueuedMessages(agent);
         json(response, 202, publicAgent(agent));
         return;
       }
@@ -2745,6 +2744,7 @@ export function createWebUi(options = {}) {
 
   const close = async () => {
     shuttingDown = true;
+    nativeQuota.stop();
     const activeCloses = [];
     for (const agent of agents.values()) {
       clearAutoCompact(agent);

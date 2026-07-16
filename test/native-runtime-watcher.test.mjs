@@ -441,6 +441,44 @@ describe("native runtime Discord watcher", () => {
     expect(notify).toHaveBeenCalledTimes(1);
   });
 
+  it("shows native quota waiting and recovery once without a failed-turn projection", async () => {
+    const stored = {};
+    const state = {
+      get: (key, fallback) => stored[key] ?? fallback,
+      set: (key, value) => { stored[key] = structuredClone(value); },
+    };
+    const discord = { send: vi.fn(async () => {}) };
+    const config = {
+      watch: {
+        backend: "native",
+        discord: { "channel-1": 0 },
+        panes: [{ cmd: "native:claude", engine: "claude" }],
+      },
+    };
+    const nativeRuntime = {
+      history: async () => ({
+        agent: { running: false, quotaWaiting: false, context: null },
+        events: [
+          { webId: "quota:1", type: "web", subtype: "quota-waiting", at: 10 },
+          { webId: "quota:2", type: "web", subtype: "quota-recovered", at: 20 },
+        ],
+      }),
+    };
+    const watcher = createNativeRuntimeWatcher({
+      nativeRuntime, agentsYamlPath: "unused", discord, state, log: () => {},
+    });
+
+    await watcher.check("watch", 0, config.watch, config);
+    await watcher.check("watch", 0, config.watch, config);
+
+    expect(discord.send.mock.calls.map((call) => call[1])).toEqual([
+      expect.stringContaining("watch:0 · native"),
+      expect.stringContaining("återupptas automatiskt"),
+    ]);
+    expect(discord.send.mock.calls[0][1]).toContain("kvoten är slut");
+    expect(discord.send.mock.calls[1][1]).toContain("kvoten är tillbaka");
+  });
+
   it("releases the durable park when a later explicit native model setting clears the guard", async () => {
     const stored = {};
     const state = {

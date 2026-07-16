@@ -360,6 +360,22 @@ export function createNativeRuntimeWatcher({
     }
   }
 
+  async function sendQuotaChanges(name, pane, channelId, events) {
+    const seen = new Set(postedModelChanges(channelId));
+    for (const event of events.filter((candidate) => candidate?.type === "web"
+      && ["quota-waiting", "quota-recovered"].includes(candidate.subtype))) {
+      const id = event.webId || progressEventId(event);
+      if (seen.has(id)) continue;
+      const waiting = event.subtype === "quota-waiting";
+      const message = waiting
+        ? `⏸️ **${name}:${pane} · native:** Claude-kvoten är slut. Samma mottagna tur ligger kvar och återupptas automatiskt efter refill.`
+        : `▶️ **${name}:${pane} · native:** Claude-kvoten är tillbaka. Samma tur återupptas automatiskt.`;
+      await discord.send(channelId, message);
+      rememberModelChange(channelId, id);
+      seen.add(id);
+    }
+  }
+
   async function sendTurn(channelId, turn, agent) {
     const rendered = renderTurn(turn);
     const chunks = splitMessage(rendered.text || "(no text)");
@@ -397,6 +413,7 @@ export function createNativeRuntimeWatcher({
     }
     await sendProgress(name, pane, channelId, snapshot);
     await sendModelChanges(name, pane, channelId, snapshot.events);
+    await sendQuotaChanges(name, pane, channelId, snapshot.events);
     const seen = new Set(posted(channelId));
     // Remember terminal operations even when the live stream had no assistant
     // item (common for an interrupt). Otherwise restart hydration can discover
