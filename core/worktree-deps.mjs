@@ -8,39 +8,72 @@
 
 import { createHash, randomUUID } from "crypto";
 import {
+  appendFileSync,
+  constants as fsConstants, cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
-  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "fs";
-import { cpSync } from "fs";
-import { homedir } from "os";
-import { basename, dirname, join, relative, resolve, sep } from "path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { spawnSync } from "child_process";
 
 const MARKER_VERSION = 1;
 const CACHE_DIR = "agentmux-worktree-deps";
-const LINK_MARKER = ".agentmux-worktree-links.json";
+// Preserve the old filename so legacy symlink farms are replaced.
+const MATERIALIZATION_MARKER = ".agentmux-worktree-links.json";
 
-/** WHAT: Resolves the shared immutable-npm cache root for one repo. WHY: Keeps the dep tree OUT of `.git/`
- * (tools like Vite 6 deny `**\/.git/**`, so a dep realpath inside `.git` breaks their own client — SKY-0105),
- * while still sharing one content-addressed cache across every worktree of the repo (keyed by the shared
- * git-common-dir) and surviving worktree removal. Override via AGENTMUX_WORKTREE_DEPS_DIR (tests, custom cache). */
-export function nodeCacheRoot(commonDir) {
-  const base = process.env.AGENTMUX_WORKTREE_DEPS_DIR
-    || join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "agentmux", CACHE_DIR);
-  return join(base, sha256(commonDir).slice(0, 16));
+/** WHAT: Resolves a path with a missing suffix. WHY: Existing parents can symlink outside the safe boundary. */
+function futureRealpath(path) {
+  const missing = []; let cursor = resolve(path);
+  while (!existsSync(cursor)) {
+    const parent = dirname(cursor);
+    if (parent === cursor) break;
+    missing.unshift(basename(cursor)); cursor = parent;
+  }
+  return resolve(realpathSync(cursor), ...missing);
 }
 
-/** WHAT: Moves a directory even across filesystems. WHY: The cache now lives under ~/.cache, which may sit on a
- * different mount than the worktree, so a bare rename can fail with EXDEV; fall back to copy-then-remove. */
+/** WHAT: Tests canonical path containment. WHY: Both Vite-safe boundaries are expressed as directory ancestry. */
+function pathIsWithin(parent, candidate) {
+  const rel = relative(resolve(parent), resolve(candidate)); return rel === ""
+    || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+/** WHAT: Resolves the repository cache boundary. WHY: Nonstandard common directories cannot prove safe containment. */
+function repositoryCacheBoundary(commonDir) {
+  const gitDir = realpathSync(resolve(commonDir)); if (basename(gitDir) !== ".git")
+    throw new Error("immutable npm cache requires a conventional shared .git directory");
+  return { gitDir, repositoryRoot: realpathSync(dirname(gitDir)) };
+}
+
+/** WHAT: Resolves the shared npm cache root. WHY: Prevents cache paths from escaping the repository or entering `.git`. */
+export function nodeCacheRoot(commonDir) {
+  const { gitDir, repositoryRoot } = repositoryCacheBoundary(commonDir);
+  const base = resolve(process.env.AGENTMUX_WORKTREE_DEPS_DIR || join(repositoryRoot, `.${CACHE_DIR}`));
+  const cacheRoot = futureRealpath(join(base, sha256(gitDir).slice(0, 16)));
+  if (!pathIsWithin(repositoryRoot, cacheRoot) || pathIsWithin(gitDir, cacheRoot)) throw new Error(
+    `immutable npm cache must stay inside the repository root and outside its Git common directory: ${cacheRoot}`);
+  return cacheRoot;
+}
+
+/** WHAT: Excludes the cache through local Git metadata. WHY: Persistent bootstrap state must not dirty consumers. */
+function ensureNodeCacheIgnored(commonDir, cacheRoot) {
+  const { gitDir, repositoryRoot } = repositoryCacheBoundary(commonDir);
+  const entry = `/${relative(repositoryRoot, cacheRoot).split(sep).join("/")}/`; const excludePath = join(gitDir, "info", "exclude");
+  mkdirSync(dirname(excludePath), { recursive: true });
+  const content = existsSync(excludePath) ? readFileSync(excludePath, "utf8") : "";
+  if (content.split(/\r?\n/u).includes(entry)) return;
+  appendFileSync(excludePath, `${content && !content.endsWith("\n") ? "\n" : ""}${entry}\n`);
+}
+
+/** WHAT: Moves a directory across filesystems. WHY: Safe cache overrides may live on a different mount. */
 function moveDir(source, destination) {
   try {
     renameSync(source, destination);
@@ -291,52 +324,34 @@ function markerMatches(markerPath, input) {
   }
 }
 
-/** WHAT: Resolves one symbolic-link target. WHY: Keeps link-farm verification exact across relative and absolute links. */
-function linkTarget(path) {
-  if (!existsSync(path) && !lstatSafe(path)) return null;
-  const stat = lstatSync(path);
-  if (!stat.isSymbolicLink()) return null;
-  return resolve(dirname(path), readlinkSync(path));
-}
-
 /** WHAT: Loads link-aware file state without throwing. WHY: Keeps missing dependency roots in normal control flow. */
 function lstatSafe(path) {
   try { return lstatSync(path); } catch { return null; }
 }
-
-/** WHAT: Compares a node link farm with its immutable cache. WHY: Prevents partial or foreign farms from passing checks. */
-function nodeLinkFarmReady(path, cacheModules, key) {
-  const stat = lstatSafe(path);
-  if (!stat?.isDirectory() || stat.isSymbolicLink()) return false;
-  if (!markerMatches(join(path, LINK_MARKER), { cacheModules, key })) return false;
+/** WHAT: Verifies a worktree-local materialization. WHY: Vite resolves package symlinks outside its worktree root. */
+function nodeMaterializationReady(path, cacheModules, key) {
+  const stat = lstatSafe(path); if (!stat?.isDirectory() || stat.isSymbolicLink()
+    || !markerMatches(join(path, MATERIALIZATION_MARKER), { cacheModules, key })) return false;
   try {
     return readdirSync(cacheModules).every((name) => {
-      const linked = join(path, name);
-      return lstatSafe(linked)?.isSymbolicLink() && linkTarget(linked) === join(cacheModules, name);
+      const cached = lstatSafe(join(cacheModules, name)); const local = lstatSafe(join(path, name));
+      return cached && local && !local.isSymbolicLink() && cached.isDirectory() === local.isDirectory()
+        && cached.isFile() === local.isFile();
     });
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
-/** WHAT: Builds a Git-ignored package link farm. WHY: Keeps root node_modules a real ignored directory. */
-function createNodeLinkFarm(path, cacheModules, key) {
-  const stat = lstatSafe(path);
-  if (stat) rmSync(path, { recursive: !stat.isSymbolicLink(), force: true });
-  mkdirSync(path);
-  for (const name of readdirSync(cacheModules)) {
-    symlinkSync(join(cacheModules, name), join(path, name), "dir");
-  }
-  writeFileSync(join(path, LINK_MARKER), `${JSON.stringify({
-    version: MARKER_VERSION,
-    input: { cacheModules, key },
-  }, null, 2)}\n`);
+/** WHAT: Materializes a local npm tree. WHY: Copy-on-write keeps dependency realpaths inside the consuming worktree. */
+function createNodeMaterialization(path, cacheModules, key) {
+  const stat = lstatSafe(path); if (stat) rmSync(path, { recursive: !stat.isSymbolicLink(), force: true });
+  cpSync(cacheModules, path, { recursive: true, verbatimSymlinks: true, mode: fsConstants.COPYFILE_FICLONE });
+  writeFileSync(join(path, MATERIALIZATION_MARKER), `${JSON.stringify(
+    { version: MARKER_VERSION, input: { cacheModules, key } }, null, 2)}\n`);
 }
 
 /** WHAT: Compares an npm cache entry with expected input. WHY: Prevents partial staging directories from being shared. */
 function validateNodeCache(cacheEntry, input) {
-  const marker = join(cacheEntry, "manifest.json");
-  const modules = join(cacheEntry, "node_modules");
+  const marker = join(cacheEntry, "manifest.json"); const modules = join(cacheEntry, "node_modules");
   return existsSync(modules) && markerMatches(marker, input);
 }
 
@@ -355,12 +370,9 @@ function installNode(root, run) {
 
 /** WHAT: Stores an exact npm tree under its immutable key. WHY: Keeps concurrent bootstrap writes atomically isolated. */
 function promoteNodeCache({ root, cacheEntry, input }) {
-  const cacheParent = dirname(cacheEntry);
-  mkdirSync(cacheParent, { recursive: true });
-  const staging = `${cacheEntry}.tmp-${process.pid}-${randomUUID()}`;
-  mkdirSync(staging);
-  // node_modules moves from the worktree into the cache root, which may be on a
-  // different filesystem now that the cache lives under ~/.cache (SKY-0105).
+  const cacheParent = dirname(cacheEntry); mkdirSync(cacheParent, { recursive: true });
+  const staging = `${cacheEntry}.tmp-${process.pid}-${randomUUID()}`; mkdirSync(staging);
+  // A safe override may still use another filesystem, so retain the EXDEV fallback.
   moveDir(join(root, "node_modules"), join(staging, "node_modules"));
   writeFileSync(join(staging, "manifest.json"), `${JSON.stringify({ version: MARKER_VERSION, input }, null, 2)}\n`);
   try {
@@ -373,13 +385,8 @@ function promoteNodeCache({ root, cacheEntry, input }) {
 
 /** WHAT: Builds one runnable npm dependency root. WHY: Prevents mutable cross-worktree compiler sharing. */
 export function provisionNodeRoot({
-  root,
-  repoRoot,
-  commonDir,
-  check = false,
-  dryRun = false,
-  run = runWorktreeCommand,
-  npmVersion = null,
+  root, repoRoot, commonDir, check = false, dryRun = false,
+  run = runWorktreeCommand, npmVersion = null,
 }) {
   let resolvedNpmVersion = npmVersion;
   if (resolvedNpmVersion == null) {
@@ -390,44 +397,38 @@ export function provisionNodeRoot({
   const input = nodeInput(root, repoRoot, resolvedNpmVersion);
   const target = join(root, "node_modules");
   const relocatable = nodeTreeIsRelocatable(root);
-  const cacheEntry = join(nodeCacheRoot(commonDir), "node", input.key);
+  const cacheRoot = nodeCacheRoot(commonDir);
+  if (!check && !dryRun) ensureNodeCacheIgnored(commonDir, cacheRoot);
+  const cacheEntry = join(cacheRoot, "node", input.key);
   const cacheModules = join(cacheEntry, "node_modules");
   const cacheReady = relocatable && validateNodeCache(cacheEntry, input);
   const stat = lstatSafe(target);
-  const exactLink = cacheReady && nodeLinkFarmReady(target, cacheModules, input.key) && nodeTreeMatches(root);
-  const exactLocal = stat && !stat.isSymbolicLink() && !existsSync(join(target, LINK_MARKER)) && nodeTreeMatches(root);
+  const exactCopy = cacheReady && nodeMaterializationReady(target, cacheModules, input.key) && nodeTreeMatches(root);
+  const exactLocal = stat && !stat.isSymbolicLink() && !existsSync(join(target, MATERIALIZATION_MARKER)) && nodeTreeMatches(root);
 
-  if (exactLink) return { ecosystem: "node", root, status: "ready", mode: "immutable-link", key: input.key };
+  if (exactCopy) return { ecosystem: "node", root, status: "ready", mode: "immutable-copy", key: input.key };
   if (exactLocal && !relocatable) return { ecosystem: "node", root, status: "ready", mode: "local-workspace", key: input.key };
   if (check && exactLocal) return { ecosystem: "node", root, status: "ready", mode: "local-exact", key: input.key };
-  if (check) return {
-    ecosystem: "node", root, status: "missing",
-    mode: cacheReady ? "link-required" : "install-required", key: input.key,
-  };
+  if (check) return { ecosystem: "node", root, status: "missing",
+    mode: cacheReady ? "copy-required" : "install-required", key: input.key };
   if (dryRun) return {
     ecosystem: "node", root, status: "planned",
-    mode: cacheReady ? "would-link"
+    mode: cacheReady ? "would-copy"
       : exactLocal && relocatable ? "would-promote-cache"
         : relocatable ? "would-install-cache" : "would-install-local",
     key: input.key,
   };
 
-  if (cacheReady) {
-    createNodeLinkFarm(target, cacheModules, input.key);
-    return { ecosystem: "node", root, status: "ready", mode: "immutable-link", key: input.key };
-  }
-  if (existsSync(cacheEntry)) {
-    throw new Error(`immutable npm cache is corrupt: ${cacheEntry} (remove that entry and retry)`);
-  }
+  if (cacheReady) { createNodeMaterialization(target, cacheModules, input.key);
+    return { ecosystem: "node", root, status: "ready", mode: "immutable-copy", key: input.key }; }
+  if (existsSync(cacheEntry)) throw new Error(`immutable npm cache is corrupt: ${cacheEntry} (remove that entry and retry)`);
   if (stat?.isSymbolicLink()) rmSync(target, { force: true });
-  else if (stat && existsSync(join(target, LINK_MARKER))) rmSync(target, { recursive: true, force: true });
+  else if (stat && existsSync(join(target, MATERIALIZATION_MARKER))) rmSync(target, { recursive: true, force: true });
   if (!nodeTreeMatches(root)) installNode(root, run);
-  if (!relocatable) {
-    return { ecosystem: "node", root, status: "ready", mode: "local-workspace", key: input.key };
-  }
+  if (!relocatable) return { ecosystem: "node", root, status: "ready", mode: "local-workspace", key: input.key };
   promoteNodeCache({ root, cacheEntry, input });
-  createNodeLinkFarm(target, cacheModules, input.key);
-  return { ecosystem: "node", root, status: "ready", mode: "immutable-link", key: input.key };
+  createNodeMaterialization(target, cacheModules, input.key);
+  return { ecosystem: "node", root, status: "ready", mode: "immutable-copy", key: input.key };
 }
 
 /** WHAT: Builds one pnpm input identity. WHY: Prevents lock, workspace, or runtime drift from passing a stale marker. */
@@ -448,8 +449,7 @@ function pnpmInput(root, repoRoot, pnpmVersion) {
   };
 }
 
-/** WHAT: Builds one locked pnpm dependency root in place. WHY: pnpm's content-addressable store already dedupes
- * packages across worktrees, so a local frozen install is exact without the immutable npm cache layer. */
+/** WHAT: Builds one locked pnpm root in place. WHY: Keeps checkout-specific links local while pnpm deduplicates packages. */
 export function provisionPnpmRoot({
   root,
   repoRoot,

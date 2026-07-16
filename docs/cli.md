@@ -257,13 +257,15 @@ amux gate --scoped [path]
 amux gate --scoped [path] -- command arg...
 ```
 
-`worktree-deps` scans tracked lockfiles, including nested UI package roots. npm
-installs are shared only through an immutable cache under the repository's Git
-common directory and only when the tree is relocatable. The cache key includes
-the exact manifest, lock, repository `.npmrc`, npm version and runtime ABI.
-Workspace/file-linked npm trees stay local. Python virtualenvs are never
-shared: the command replaces an unsafe `.venv` symlink with a local
-`uv sync --locked` environment.
+`worktree-deps` scans tracked lockfiles, including nested UI package roots.
+Relocatable npm installs use a content-addressed cache under the primary
+repository root and outside `.git`; each worktree materializes an
+`immutable-copy` locally with copy-on-write where supported and a safe copy
+fallback. Dependency realpaths therefore remain inside the consuming worktree.
+The cache key includes the exact manifest, lock, repository `.npmrc`, npm
+version and runtime ABI. Workspace/file-linked npm trees stay local. Python
+virtualenvs are never shared: the command replaces an unsafe `.venv` symlink
+with a local `uv sync --locked` environment.
 
 `--check` is mutation-free and exits non-zero for a missing, stale, or unsafe
 root. `--dry` prints the provisioning plan. The standalone
