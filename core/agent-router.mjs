@@ -23,6 +23,10 @@ export function createAgentRouter({ tmuxAgent, nativeRuntime }) {
     get(target, property, receiver) {
       if (property === "isNativeTarget") return nativeRuntime.isNativeTarget;
       if (property === "deliverQueued") return nativeRuntime.deliverQueued;
+      // Native submission and its durable completion receipt are one
+      // transport contract. The broker calls deliveryStatus with the queued
+      // job (not a name/pane pair), so it cannot use TARGET_METHODS routing.
+      if (property === "deliveryStatus") return nativeRuntime.deliveryStatus;
       if (property === "nativeRuntime") return nativeRuntime;
       if (property === "reconcileSession") {
         return async (name, ...args) => {
