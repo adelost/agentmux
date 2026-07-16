@@ -237,19 +237,21 @@ feature("tmux pane usability and attachment health", () => {
     }],
   });
 
-  unit("the resurrected 26x7 fleet fails with every exact pane geometry", {
+  unit("a 26x7 fleet is operator-unusable without diagnosing delivery", {
     given: ["two unusably small panes", () => ({
       panes: [
         { session: "claw", pane: 0, width: 26, height: 7 },
         { session: "ai", pane: 2, width: 59, height: 24 },
       ],
     })],
-    when: ["checking the input path", (fleet) => checkTmuxPaneGeometry(fleet)],
-    then: ["doctor is red and gives resize plus attach recovery", (result) => {
+    when: ["checking operator geometry", (fleet) => checkTmuxPaneGeometry(fleet)],
+    then: ["doctor is red, factual, and gives resize plus attach recovery", (result) => {
       expect(result.status).toBe(FAIL);
       expect(result.detail).toContain("claw:0 26x7");
       expect(result.detail).toContain("ai:2 59x24");
+      expect(result.detail).toContain("operator minimum");
       expect(result.detail).toContain(`${TMUX_MIN_PANE_COLUMNS}x${TMUX_MIN_PANE_ROWS}`);
+      expect(`${result.detail} ${result.hint}`).not.toMatch(/delivery|ingest|prompt|queue/iu);
       expect(result.hint).toContain("attach a client");
       expect(result.hint).toContain("tmux resize-window");
       expect(formatDoctorReport([result])).toContain("❌  tmux pane geometry");

@@ -197,9 +197,11 @@ Permission asks and session starts also surface in `amux timeline` as
 `amux doctor` surfaces every silent failure mode in one table: bridge
 dead/hung/unsupervised, bridge running OLDER code than the repo (restart
 needed), hooks broken, ledger stale, tmux unreachable, panes below 60x20,
-and sessions without an attached client. Undersized panes are red because
-agent TUIs may stop ingesting prompts; detached sessions warn because they can
-resurrect at tmux's fallback size. Exit codes 0/1/2 make it cron-friendly.
+and sessions without an attached client. Undersized panes are red because they
+are impractical for a human operator to read or navigate; detached sessions
+warn because they can resurrect at tmux's fallback size. Geometry is not a
+prompt-ingestion or delivery-health signal. Exit codes 0/1/2 make it
+cron-friendly.
 
 The bridge writes a 30s heartbeat (`~/.agentmux/bridge-heartbeat.json`).
 `bin/bridge-watchdog-cron.sh` (install: `bash bin/install-bridge-watchdog.sh`,
