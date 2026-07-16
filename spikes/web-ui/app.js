@@ -203,6 +203,10 @@ const modelsMatch = (requested, observed) => {
   const actual = String(observed || "").trim().toLowerCase();
   if (!wanted || !actual) return false;
   if (wanted === actual) return true;
+  const datedSuffix = actual.startsWith(`${wanted}-`)
+    ? actual.slice(wanted.length + 1)
+    : "";
+  if (/^(?:20\d{6}|20\d{2}-\d{2}-\d{2})$/.test(datedSuffix)) return true;
   return ["fable", "mythos", "opus", "sonnet", "haiku"]
     .some((alias) => wanted === alias && actual.includes(alias));
 };
@@ -337,7 +341,7 @@ const renderProjectSelect = () => {
 };
 
 const compactNumber = (value) => {
-  if (!Number.isFinite(value)) return "—";
+  if (!Number.isFinite(value)) return "N/A";
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}m`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}k`;
   return String(Math.round(value));
@@ -430,7 +434,7 @@ const updateAgentHeader = () => {
     : "Send a regular message first";
   elements.prompt.disabled = Boolean(agent.modelGuard?.blocked);
   elements.prompt.placeholder = agent.modelGuard?.blocked
-    ? "Automatic model downgrade detected — choose a model above to resume"
+    ? "Automatic model downgrade detected, choose a model above to resume"
     : "Write to the agent…";
   elements.sendButton.disabled = state.sending || Boolean(agent.modelGuard?.blocked);
   elements.sendButton.textContent = agent.running ? "Queue" : "Send";
@@ -1534,7 +1538,7 @@ const renderQuotaStrip = () => {
       chip.classList.add("unavailable");
       const value = document.createElement("span");
       value.className = "quota-chip-value";
-      value.textContent = "—";
+      value.textContent = "N/A";
       chip.append(value);
       chip.title = quotaErrorText(data);
     } else {
