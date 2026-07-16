@@ -1,5 +1,4 @@
 // Single-writer delivery broker.
-//
 // Producers persist jobs through delivery-queue.mjs.  This broker is the only
 // normal tmux writer while the bridge is running. It serializes every source
 // per pane, keeps an unacknowledged prompt at the head of the FIFO, and
@@ -10,6 +9,7 @@
 import { appendEvent } from "./events.mjs";
 import { deliverToPane } from "./delivery.mjs";
 import { rewriteModelSlash } from "./claude-model.mjs";
+import { recoverCompactedClaudeSubmit } from "./claude-submit-boundary.mjs";
 import {
   DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES,
   NOT_INGESTING_UNVERIFIED_STREAK, isNotSentDeliveryJob,
@@ -20,9 +20,7 @@ const ACTIVE_RETRY_MS = 1_000;
 const BLOCKED_RETRY_MS = 3_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
 const NOTICE_AFTER_MS = 10_000;
-// A submitted prompt may legitimately wait a long busy turn out before its
-// receipt appears, but the human must not wait in silence: warn well before
-// the 60-minute unverified verdict.
+// Warn well before a legitimate long turn reaches the 60-minute verdict.
 const SUBMITTED_STALL_NOTICE_MS = 3 * 60_000;
 const STALE_SUBMITTED_TERMINAL_MS = 60 * 60 * 1_000;
 const STALE_PRE_SUBMIT_TERMINAL_MS = 60 * 60 * 1_000;
@@ -519,9 +517,8 @@ export function createDeliveryBroker({
       }
     }
 
-    // A submit key was attempted, but that is not delivery truth. Never type
-    // again merely because JSONL is late, and never let TUI inspection reopen
-    // or release the FIFO head. Only the exact JSONL event can acknowledge it.
+    // A submit fence is ambiguous unless a later compact boundary proves that
+    // Claude discarded that epoch without ingesting the exact prompt.
     if (job.status === "submitted" || job.status === "submitting") {
       if (job.status === "submitted" && job.metadata?.deliveryTransport === "native") {
         const submittedAge = now() - Number(
@@ -573,6 +570,9 @@ export function createDeliveryBroker({
           return acknowledge(job, "slash-submit-recovery");
         }
       }
+      const compacted = await recoverCompactedClaudeSubmit({ job, agent, queue, exactEcho,
+        acknowledge, now, onRecovered: (value) => queueEvent(value, "submit_superseded_by_compact") });
+      if (compacted) return compacted;
       const submittedAge = now() - Number(
         job.submittedAt || job.submitFenceAt || job.lastAttemptAt || job.createdAt || now(),
       );
