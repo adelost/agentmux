@@ -6,6 +6,7 @@ import {
   buildClaudeLaunchCommand, buildCodexLaunchCommand, createAgent, paneDir,
   shouldPastePrompt, submitWithDurableFence,
 } from "../agent.mjs";
+import { claudeProjectDir } from "../core/claude-paths.mjs";
 
 feature("durable draft paste fence", () => {
   unit("a vanished durable draft is never permission to type it again", {
@@ -97,6 +98,70 @@ feature("Claude pane model pin", () => {
     then: ["the exact id replaces cwd-relative continue", (command) => {
       expect(command).toContain("--resume '11111111-1111-4111-8111-111111111111'");
       expect(command).not.toContain("--continue");
+    }],
+  });
+});
+
+feature("Claude quota delivery boundary", () => {
+  component("an active persisted limit blocks the physical pane write", {
+    given: ["a running Claude pane with a terminal limit receipt", () => {
+      const root = mkdtempSync(join(tmpdir(), "agentmux-agent-quota-"));
+      const homeDir = join(root, "home");
+      const repoDir = join(root, "repo");
+      const cwd = join(repoDir, ".agents", "0");
+      const configPath = join(root, "agents.yaml");
+      const sessionId = "33333333-3333-4333-8333-333333333333";
+      mkdirSync(cwd, { recursive: true });
+      writeFileSync(configPath, [
+        "claw:",
+        `  dir: ${repoDir}`,
+        "  panes:",
+        "    - { name: worker, cmd: claude }",
+        "",
+      ].join("\n"));
+      const projectDir = claudeProjectDir(cwd, homeDir);
+      mkdirSync(projectDir, { recursive: true });
+      writeFileSync(join(projectDir, `${sessionId}.jsonl`), `${JSON.stringify({
+        type: "assistant",
+        uuid: "44444444-4444-4444-8444-444444444444",
+        timestamp: "2026-07-16T17:01:11.018Z",
+        message: {
+          content: [{ type: "text", text: "You've hit your session limit · resets 8:50pm (Europe/Stockholm)" }],
+        },
+      })}\n`);
+      const oldHome = process.env.HOME;
+      process.env.HOME = homeDir;
+      const calls = [];
+      const tmuxExec = async (command) => {
+        calls.push(command);
+        if (command.includes("show-environment")) return { stdout: "" };
+        if (command.includes("list-panes")) return { stdout: "0\n" };
+        if (command.includes("#{pane_current_command}")) return { stdout: "node\n" };
+        if (command.includes("#{pane_dead}")) return { stdout: "0\n" };
+        return { stdout: "" };
+      };
+      return {
+        root,
+        oldHome,
+        calls,
+        agent: createAgent({
+          tmuxSocket: "/tmp/agent-quota-test.sock",
+          configPath,
+          tmuxExec,
+          run: async () => ({ stdout: "" }),
+          delay: async () => {},
+        }),
+      };
+    }],
+    when: ["an ordinary message reaches sendOnly", ({ agent }) =>
+      agent.sendOnly("claw", "do not lose this message", 0).catch((error) => error)],
+    then: ["the typed quota fence fires before paste or Enter", (error, ctx) => {
+      expect(error).toMatchObject({ code: "AMUX_DELIVERY_BLOCKED", quotaLimited: true });
+      expect(ctx.calls.some((command) => /load-buffer|paste-buffer|send-keys[^\n]*-l|send-keys[^\n]*Enter/u.test(command)))
+        .toBe(false);
+      if (ctx.oldHome === undefined) delete process.env.HOME;
+      else process.env.HOME = ctx.oldHome;
+      rmSync(ctx.root, { recursive: true, force: true });
     }],
   });
 });

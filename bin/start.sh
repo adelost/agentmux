@@ -40,7 +40,7 @@ fi
 
 while true; do
   started=$(date +%s)
-  node index.mjs
+  node --import ./bin/quota-recovery-bootstrap.mjs index.mjs
   code=$?
 
   # Clean exit or SIGTERM → stop

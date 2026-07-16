@@ -30,7 +30,6 @@ import { findBlockingPrompt } from "./core/dismiss.mjs";
 import { claudeProjectDir, classifyHistoryRead } from "./core/claude-paths.mjs";
 import { appendEvent } from "./core/events.mjs";
 import { resolveTmuxLayout } from "./core/layout.mjs";
-import { resolveClaudeModel } from "./core/claude-model.mjs";
 import { pastePrompt, promptRequiresAtomicPaste } from "./core/prompt-paste.mjs";
 import { startProgressTimer as createProgressTimer } from "./core/progress.mjs";
 import {
@@ -53,11 +52,12 @@ import {
   selectedCodexProfile,
   setCodexModelOverride,
 } from "./core/codex-profiles.mjs";
-import {
-  CLAUDE_AUTONOMOUS_FLAGS,
-  CODEX_AUTONOMOUS_FLAGS,
-} from "./core/execution-safety.mjs";
 import { decideCodexStart, liveRolloutWriters } from "./core/codex-session-guard.mjs";
+import { buildClaudeLaunchCommand, buildCodexLaunchCommand } from "./core/agent-launch-command.mjs";
+import { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence.mjs";
+import { assertClaudeQuotaAvailable } from "./core/claude-quota-target.mjs";
+export { buildClaudeLaunchCommand, buildCodexLaunchCommand } from "./core/agent-launch-command.mjs";
+export { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence.mjs";
 const CODEX_SESSION_STATE_KEY = "codex_session_by_pane_profile_v1";
 const CODEX_PROMPT_READY_TIMEOUT_MS = 8_000;
 function codexDeliveryBlocked(message, { zoomRecoverable = false } = {}) {
@@ -65,80 +65,6 @@ function codexDeliveryBlocked(message, { zoomRecoverable = false } = {}) {
   error.code = "AMUX_DELIVERY_BLOCKED";
   if (zoomRecoverable) error.zoomRecoverable = true;
   return error;
-}
-
-const shellQuote = (value) => `'${esc(String(value))}'`;
-const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function exactSessionId(value, engine) {
-  if (value == null || value === "") return null;
-  const sessionId = String(value);
-  if (!SESSION_ID_PATTERN.test(sessionId)) {
-    throw new Error(`invalid ${engine} resume session id: ${sessionId}`);
-  }
-  return sessionId;
-}
-
-/** A durable draft is an at-most-once paste fence, even when its TUI vanishes. */
-export function shouldPastePrompt({ knownDrafted = false, alreadyComposed = false } = {}) {
-  return !knownDrafted && !alreadyComposed;
-}
-
-/** Persist ambiguity before the physical submit key can leave this process. */
-export async function submitWithDurableFence({ onSubmitting = null, sendEnter, onSubmitted = null }) {
-  if (typeof sendEnter !== "function") throw new Error("submit fence requires sendEnter");
-  if (onSubmitting) await onSubmitting();
-  await sendEnter();
-  if (onSubmitted) await onSubmitted();
-}
-
-/** Build a pinned Claude launch command so the moving `opus` alias cannot drift. */
-export function buildClaudeLaunchCommand({
-  resume = false,
-  resumeSessionId = null,
-  model = resolveClaudeModel(),
-} = {}) {
-  const exactModel = resolveClaudeModel(model);
-  const exactResume = exactSessionId(resumeSessionId, "Claude");
-  const sessionFlag = exactResume
-    ? ` --resume ${shellQuote(exactResume)}`
-    : resume ? " --continue" : "";
-  return `ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_AUTONOMOUS_FLAGS} --model ${shellQuote(exactModel)}${sessionFlag}`;
-}
-
-/** Build the exact pane command; exported so injection boundaries are gated. */
-export function buildCodexLaunchCommand({
-  profileHome,
-  model = null,
-  effort = null,
-  resumeSessionId = null,
-  allowFreshBootstrap = false,
-} = {}) {
-  if (!profileHome) throw new Error("Codex profile home is required");
-  if (model && !/^[a-z0-9._-]+$/i.test(model)) throw new Error(`invalid Codex model: ${model}`);
-  if (effort && !/^(minimal|low|medium|high|xhigh|max|ultra)$/i.test(effort)) {
-    throw new Error(`invalid Codex reasoning effort: ${effort}`);
-  }
-  const overrideFlags = [
-    model ? `-m ${shellQuote(model)}` : "",
-    effort ? `-c ${shellQuote(`model_reasoning_effort="${effort.toLowerCase()}"`)}` : "",
-  ].filter(Boolean).join(" ");
-  const flags = [CODEX_AUTONOMOUS_FLAGS, overrideFlags].filter(Boolean).join(" ");
-  const env = `CODEX_HOME=${shellQuote(profileHome)}`;
-  const exactResume = exactSessionId(resumeSessionId, "Codex");
-  if (exactResume) {
-    // An explicit rollback id is a fail-closed continuity boundary: never
-    // fall back to a fresh thread when the requested native session cannot
-    // be resumed.
-    return `${env} codex resume ${shellQuote(exactResume)} ${flags}`;
-  }
-  if (!allowFreshBootstrap) {
-    throw new Error("Codex launch requires an exact pane session; fresh bootstrap was not authorized");
-  }
-  // A bare launch is legal only for a pane/profile with no prior rollout.
-  // Respawns always take the exact-session branch above; never `--last` and
-  // never a silent fresh fallback.
-  return `${env} codex ${flags}`;
 }
 
 // --- Session isolation ---
@@ -1849,6 +1775,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     onSubmitting = null,
     onSubmitted = null,
   } = {}) {
+    assertClaudeQuotaAvailable(agentName, pane, { prompt, configPath });
     const target = `${agentName}:.${pane}`;
     const notBeforeMs = Date.now();
     await exitCopyMode(target);
