@@ -27,6 +27,18 @@ export function normalizeCutoverRuntimeUrl(value) {
   return url.origin;
 }
 
+/** Preserve the pane source path under the field consumed by session-import. */
+export function cutoverSessionEvidence(identity, sourceCwd, model, first) {
+  if (!identity?.sessionId || !sourceCwd) throw new Error("cutover session evidence is incomplete");
+  return {
+    ...identity,
+    sourceCwd,
+    ...model,
+    first,
+    fresh: false,
+  };
+}
+
 const paneCounts = (source) => {
   const claude = Number(source.panes ?? source.claude ?? (source.codex ? 0 : 1));
   const codex = Number(source.codex ?? 0);

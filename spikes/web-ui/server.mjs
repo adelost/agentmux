@@ -486,6 +486,10 @@ export function createWebUi(options = {}) {
   const queuedMessages = new Map();
   let shuttingDown = false;
 
+  const workingDirectoryFor = (agent) => agent.cwd
+    ?? projects.get(agent.projectId)?.cwd
+    ?? null;
+
   const queuedMessageCount = (agent) => [...queuedMessages.entries()]
     .filter(([operationKey, entry]) => entry.id === agent.id
       && operationKey !== agent.activeOperationKey).length;
@@ -504,7 +508,7 @@ export function createWebUi(options = {}) {
         event,
         session: agent.address.session,
         pane: Number(agent.address.pane),
-        cwd: projects.get(agent.projectId)?.cwd || "",
+        cwd: workingDirectoryFor(agent) || "",
         sessionId: agent.sessionId || "",
         ...extra,
         detail: String(extra.detail || "").slice(0, 200),
@@ -516,8 +520,6 @@ export function createWebUi(options = {}) {
 
   const publicAgent = (agent) => {
     if (!agent.context && agent.sessionId) refreshContextFromSession(agent);
-    if (!agent.running) scheduleAutoCompact(agent);
-    const project = projects.get(agent.projectId);
     return {
       id: agent.id,
       projectId: agent.projectId,
@@ -527,7 +529,7 @@ export function createWebUi(options = {}) {
       effort: agent.effort,
       address: agent.address,
       permissionMode: agent.permissionMode,
-      cwd: project?.cwd ?? null,
+      cwd: workingDirectoryFor(agent),
       sessionId: agent.sessionId,
       running: agent.running,
       operation: agent.interruptRequested ? "interrupting" : agent.operation,
@@ -537,6 +539,7 @@ export function createWebUi(options = {}) {
         contextPercent: autoCompactContextPercent,
         idleMs: autoCompactIdleMs,
         dueAt: agent.autoCompactDueAt,
+        armed: agent.autoCompactArmed,
       },
       queuedMessages: queuedMessageCount(agent),
       pinnedAt: agent.pinnedAt,
@@ -609,9 +612,11 @@ export function createWebUi(options = {}) {
         effort: agent.effort,
         address: agent.address,
         permissionMode: agent.permissionMode,
+        cwd: agent.cwd,
         sessionId: agent.sessionId,
         context: agent.context,
         idleSince: agent.idleSince,
+        autoCompactArmed: agent.autoCompactArmed,
         pinnedAt: agent.pinnedAt,
         createdAt: agent.createdAt,
         updatedAt: agent.updatedAt,
@@ -635,6 +640,7 @@ export function createWebUi(options = {}) {
     effort: cleanEffort(entry.engine, entry.effort),
     address: cleanAddress(entry.address) ?? null,
     permissionMode: cleanPermissionMode(entry.permissionMode),
+    cwd: typeof entry.cwd === "string" && isAbsolute(entry.cwd) ? resolve(entry.cwd) : null,
     sessionId: entry.sessionId ?? null,
     context: entry.context ?? null,
     createdAt: entry.createdAt ?? now(),
@@ -650,6 +656,7 @@ export function createWebUi(options = {}) {
     interruptRequested: false,
     autoCompactTimer: null,
     autoCompactDueAt: null,
+    autoCompactArmed: entry.autoCompactArmed !== false,
     events: [],
     clients: new Set(),
     hydrated: false,
@@ -663,6 +670,9 @@ export function createWebUi(options = {}) {
     if (!existsSync(registryPath)) return false;
     const stored = JSON.parse(readFileSync(registryPath, "utf8"));
     if (stored.schemaVersion !== 1) throw new Error(`unsupported registry schema ${stored.schemaVersion}`);
+    const importedAgentIds = new Set(Object.values(stored.receipts?.sessionImports ?? {})
+      .map((receipt) => receipt?.id)
+      .filter(Boolean));
     for (const entry of stored.projects ?? []) {
       projects.set(entry.id, {
         ...entry,
@@ -672,7 +682,11 @@ export function createWebUi(options = {}) {
     for (const entry of stored.agents ?? []) {
       if (!projects.has(entry.projectId)) throw new Error(`agent ${entry.id} has missing project`);
       if (!commands[entry.engine]) throw new Error(`agent ${entry.id} has unknown engine`);
-      agents.set(entry.id, restoreAgent(entry));
+      agents.set(entry.id, restoreAgent({
+        ...entry,
+        autoCompactArmed: entry.autoCompactArmed
+          ?? !importedAgentIds.has(entry.id),
+      }));
     }
     for (const [name, map] of Object.entries(receipts)) {
       for (const [key, value] of Object.entries(stored.receipts?.[name] ?? {})) map.set(key, value);
@@ -755,6 +769,7 @@ export function createWebUi(options = {}) {
         name: `Tidigare Claude ${index + 1}`,
         engine: "claude",
         model: entry.model,
+        cwd: entry.cwd,
         sessionId: entry.sessionId,
         createdAt: entry.mtime,
         updatedAt: entry.mtime,
@@ -768,10 +783,10 @@ export function createWebUi(options = {}) {
 
   const sessionFileFor = (agent) => {
     if (!agent.sessionId) return null;
-    const project = projects.get(agent.projectId);
-    if (!project) return null;
+    const cwd = workingDirectoryFor(agent);
+    if (!cwd) return null;
     if (agent.engine === "claude") {
-      return join(claudeProjectDir(project.cwd, homeDir), `${agent.sessionId}.jsonl`);
+      return join(claudeProjectDir(cwd, homeDir), `${agent.sessionId}.jsonl`);
     }
     const base = join(homeDir, ".codex", "sessions");
     if (!existsSync(base)) return null;
@@ -1304,6 +1319,7 @@ export function createWebUi(options = {}) {
     agent.activeTools.clear();
     agent.updatedAt = now();
     agent.idleSince = agent.updatedAt;
+    if (operation === "turn") agent.autoCompactArmed = true;
     agent.events = agent.events.filter((event) => event.type !== "stream_event");
     if (agent.engine === "codex") control?.rpc?.close?.();
     const interrupted = agent.interruptRequested;
@@ -1447,7 +1463,7 @@ export function createWebUi(options = {}) {
   };
 
   const runClaudeOperation = (agent, rawPrompt, attachments, operation, operationKey = null) => {
-    const project = projects.get(agent.projectId);
+    const cwd = workingDirectoryFor(agent);
     const launch = buildClaudeLaunch(agent, rawPrompt, attachments);
     beginOperation(agent, operation, rawPrompt, attachments, operationKey);
     let child;
@@ -1460,7 +1476,7 @@ export function createWebUi(options = {}) {
     };
     try {
       child = spawnProcess(launch.command, launch.args, {
-        cwd: project.cwd,
+        cwd,
         env: cleanChildEnv(agent),
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -1490,7 +1506,7 @@ export function createWebUi(options = {}) {
   };
 
   const runCodexOperation = async (agent, rawPrompt, attachments, operation, operationKey = null) => {
-    const project = projects.get(agent.projectId);
+    const cwd = workingDirectoryFor(agent);
     const effort = agent.effort;
     beginOperation(agent, operation, rawPrompt, attachments, operationKey);
     let stderr = "";
@@ -1564,7 +1580,7 @@ export function createWebUi(options = {}) {
       rpc = openCodexRpc({
         spawnProcess,
         command: commands.codex,
-        cwd: project.cwd,
+        cwd,
         env: cleanChildEnv(agent),
         onNotification,
         onStderr: (chunk) => { stderr = `${stderr}${chunk}`.slice(-32_000); },
@@ -1583,12 +1599,12 @@ export function createWebUi(options = {}) {
       const threadResult = agent.sessionId
         ? await rpc.request("thread/resume", {
           threadId: agent.sessionId,
-          cwd: project.cwd,
+          cwd,
           model: agent.model,
           ...codexPolicy,
         })
         : await rpc.request("thread/start", {
-          cwd: project.cwd,
+          cwd,
           model: agent.model,
           ...codexPolicy,
         });
@@ -1601,7 +1617,7 @@ export function createWebUi(options = {}) {
         const result = await rpc.request("turn/start", {
           threadId,
           input: buildCodexInput(rawPrompt, attachments),
-          cwd: project.cwd,
+          cwd,
           model: agent.model,
           effort,
           ...turnPolicy,
@@ -1652,7 +1668,8 @@ export function createWebUi(options = {}) {
 
   const scheduleAutoCompact = (agent) => {
     clearAutoCompact(agent);
-    if (agent.running || !agent.sessionId || !Number.isFinite(agent.context?.percent)
+    if (!agent.autoCompactArmed || agent.running || !agent.sessionId
+        || !Number.isFinite(agent.context?.percent)
         || agent.context.percent < autoCompactContextPercent) return;
     const dueAt = Math.max(now(), Number(agent.idleSince ?? now()) + autoCompactIdleMs);
     agent.autoCompactDueAt = dueAt;
@@ -1735,9 +1752,8 @@ export function createWebUi(options = {}) {
     };
 
     try {
-      const project = projects.get(agent.projectId);
       child = spawnProcess(commands.claude, args, {
-        cwd: project.cwd,
+        cwd: workingDirectoryFor(agent),
         env: cleanChildEnv(agent),
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -1996,6 +2012,7 @@ export function createWebUi(options = {}) {
           effort,
           address,
           permissionMode,
+          cwd: project.cwd,
           sessionId: null,
           createdAt: now(),
           updatedAt: now(),
@@ -2053,6 +2070,11 @@ export function createWebUi(options = {}) {
         if (receipt?.conflict) { json(response, 409, { error: "idempotency-key-conflict" }); return; }
         if (receipt?.replayed) {
           const agent = agents.get(receipt.id);
+          if (agent && !agent.cwd) {
+            agent.cwd = sourceCwd;
+            agent.autoCompactArmed = false;
+            saveRegistry();
+          }
           json(response, agent ? 200 : 410, agent
             ? { ...publicAgent(agent), replayed: true }
             : { error: "idempotency-target-deleted" });
@@ -2075,7 +2097,9 @@ export function createWebUi(options = {}) {
           effort,
           address,
           permissionMode: "automation",
+          cwd: sourceCwd,
           sessionId,
+          autoCompactArmed: false,
           createdAt: now(),
           updatedAt: now(),
         });

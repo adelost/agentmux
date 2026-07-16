@@ -4,6 +4,7 @@ import { join } from "node:path";
 import yaml from "js-yaml";
 import { describe, expect, it } from "vitest";
 import {
+  cutoverSessionEvidence,
   materializeCutoverConfigs,
   normalizeCutoverRuntimeUrl,
   planNativeCutover,
@@ -45,6 +46,24 @@ const generated = () => ({
 });
 
 describe("native fleet cutover planning", () => {
+  it("carries the exact pane source cwd from preflight into session import evidence", () => {
+    const proof = cutoverSessionEvidence(
+      { sessionId: "session-1", cwd: "/repo/.agents/0", path: "/history/session-1.jsonl" },
+      "/repo/.agents/0",
+      { model: "claude-opus-4-8", effort: "high", inferred: false },
+      { status: "idle", busy: false },
+    );
+
+    expect(proof).toMatchObject({
+      sessionId: "session-1",
+      cwd: "/repo/.agents/0",
+      sourceCwd: "/repo/.agents/0",
+      fresh: false,
+    });
+    proof.second = { status: "idle", busy: false };
+    expect(proof.second).toEqual({ status: "idle", busy: false });
+  });
+
   it("requires an explicit local runtime and refuses hidden pane loss", () => {
     expect(() => normalizeCutoverRuntimeUrl("https://code.example.test"))
       .toThrow("loopback");
