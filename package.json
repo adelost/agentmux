@@ -16,7 +16,8 @@
     "test": "vitest run",
     "test:ci-contract": "node docs/check-ci-contract.mjs",
     "test:webui:visual": "node spikes/web-ui/tools/visual-gate.mjs",
-    "test:webui:native-canary": "node spikes/web-ui/tools/native-canary-gate.mjs"
+    "test:webui:native-canary": "node spikes/web-ui/tools/native-canary-gate.mjs",
+    "test:webui:claude-process-canary": "node spikes/web-ui/tools/claude-persistent-process-canary.mjs"
   },
   "dependencies": {
     "@discordjs/opus": "^0.10.0",

@@ -118,6 +118,21 @@ exact engine session IDs in an isolated tmux socket, flips back to native and
 requires `replayed: true` with no duplicate turn. It fails if a canary session
 appears on the live/default tmux socket.
 
+The narrower Claude process-lifecycle canary compares the current
+spawn-plus-resume behavior with one long-lived bidirectional stream-json
+process. It uses subscription authentication only, defaults to Haiku, verifies
+same-process/same-session turns, soft interrupt and post-interrupt recovery,
+and reports cache-creation receipts for turns 2-3. It never changes a fleet or
+starts tmux:
+
+```bash
+npm run test:webui:claude-process-canary
+```
+
+This is an opt-in live canary because it consumes real Claude subscription
+usage. The default test suite runs the same lifecycle against a deterministic
+fake CLI and consumes no model quota.
+
 ## Runtime controls
 
 Effort is selected when an agent is created and can be changed from its header.
