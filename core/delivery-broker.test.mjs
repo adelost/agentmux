@@ -1776,4 +1776,33 @@ feature("single-writer delivery broker", () => {
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });
+
+  component("a stale premise terminalizes before the receiver can act on the brief", {
+    given: ["one durable inter-agent brief whose projected trunk moved while queued", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir });
+      const job = queue.enqueue({ agentName: "lsrc", pane: 6, text: "rebase stale work",
+        metadata: { premiseStamp: { schemaVersion: 1, producer: "amux.premise-proof.v1",
+          attestationHash: "sha256:old" } } });
+      const notices = [];
+      const agent = acceptingAgent();
+      const broker = createDeliveryBroker({ agent, queue,
+        verifyPremise: async () => ({ status: "stale", mismatches: ["repository"] }),
+        notify: async (_candidate, kind) => notices.push(kind) });
+      return { rootDir, queue, job, notices, agent, broker };
+    }],
+    when: ["the broker reaches its last pre-delivery premise gate", ({ broker }) =>
+      broker.kickTarget("lsrc", 6)],
+    then: ["the original brief is NOT SENT and its exact stale reason is durable", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.notices).toEqual(["not-sent"]);
+      expect(ctx.queue.read("lsrc", 6, ctx.job.id)).toMatchObject({
+        status: "cancelled",
+        lastReason: "premise stale before delivery: repository",
+        metadata: { deliveryOutcome: "not-sent", premiseStatus: "stale",
+          premiseMismatches: ["repository"] },
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
 });

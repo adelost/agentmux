@@ -40,6 +40,7 @@ import { syncConfiguredAgentHints } from "./core/hints-sync.mjs";
 import { runPendingFleetRestart } from "./core/fleet-restart.mjs";
 import { createDeliveryQueue } from "./core/delivery-queue.mjs";
 import { createDeliveryBroker } from "./core/delivery-broker.mjs";
+import { verifyBriefPremise } from "./core/premise-stamp.mjs";
 import { findChannelForPane, listAgents, validateAgentPane } from "./cli/config.mjs";
 import { createNativeRuntimeClient } from "./core/native-runtime-client.mjs";
 import { createAgentRouter } from "./core/agent-router.mjs";
@@ -173,6 +174,7 @@ const deliveryBroker = createDeliveryBroker({
   agent,
   queue: deliveryQueue,
   validateTarget: validateDeliveryTarget,
+  verifyPremise: (stamp) => verifyBriefPremise(stamp),
   resolveNotificationChannel: (job) =>
     findChannelForPane(AGENTS_YAML, job.agentName, job.pane),
   notify: async (job, state, extra = {}) => {
@@ -206,13 +208,17 @@ const deliveryBroker = createDeliveryBroker({
             "AMUX skickar inte om det eftersom det kan skapa en dubblett; kontrollera agenthistoriken om instruktionen är kritisk.",
       );
     } else if (state === "not-sent") {
-      await discord.send(
-        channelId,
-        job.metadata?.deliveryCancellation === "sender-request"
+      const message = job.metadata?.premiseStatus === "stale"
+          ? `⚠️ Briefen skickades inte: dess premise stamp blev stale före leverans (${(job.metadata.premiseMismatches || []).join(", ") || "state changed"}). Hämta färsk state och skapa en ny brief.`
+          : job.metadata?.deliveryCancellation === "sender-request"
           ? "⚠️ Meddelandet avbröts före submit och skickades inte. Composern lämnades orörd; skicka en ny instruktion om arbetet ändå behövs."
           : "⚠️ Meddelandet skickades inte. Composern förblev osäker för länge eller efter för många försök, så AMUX har stoppat automatiken " +
-            "för att inte skriva över eller blanda innehåll. Kontrollera/rensa composern och skicka instruktionen igen om den fortfarande behövs.",
-      );
+            "för att inte skriva över eller blanda innehåll. Kontrollera/rensa composern och skicka instruktionen igen om den fortfarande behövs.";
+      await discord.send(channelId, message);
+      if (job.metadata?.premiseStatus === "stale" && job.metadata?.senderChannelId
+        && job.metadata.senderChannelId !== channelId) {
+        await discord.send(job.metadata.senderChannelId, message);
+      }
     }
   },
   log: (message) => console.warn(`[delivery-broker] ${message}`),

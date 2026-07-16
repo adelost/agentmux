@@ -358,15 +358,28 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
   const targetChannelId = ctx.configPath
     ? findChannelForPane(ctx.configPath, name, pane)
     : null;
+  const senderChannelId = ctx.configPath && sender
+    ? findChannelForPane(ctx.configPath, sender.session, sender.pane)
+    : null;
+  const senderPayload = sender
+    ? String(text).replace(/^\[from [a-zA-Z0-9_-]+:\d+\](?:\r?\n)*/u, "").trimStart()
+    : String(text).trimStart();
+  if (sender && !senderPayload.startsWith("/")
+    && (!opts.premiseStamp || opts.premiseStamp.schemaVersion !== 1
+      || opts.premiseStamp.producer !== "amux.premise-proof.v1"
+      || !/^sha256:[a-f0-9]{64}$/u.test(String(opts.premiseStamp.attestationHash || "")))) {
+    throw new Error("inter-agent brief requires a tool-generated amux.premise-proof.v1 attestation");
+  }
 
   const mirrorSenderStatus = (result) => {
     if (!mirror || !sender || sender.key === `${name}:${pane}` || !ctx.configPath) return;
-    const senderChannelId = findChannelForPane(ctx.configPath, sender.session, sender.pane);
     if (!senderChannelId) return;
     const status = result?.unverified
       ? "delivery unverified"
       : result?.delivered
-      ? (result.pending ? "durably queued" : "delivered")
+      ? "delivered"
+      : result?.pending
+      ? "durably queued; NOT delivered"
       : "NOT delivered";
     mirrorDispatch({ channelId: senderChannelId, content: `\`amux ${name} -p ${pane} …\` → ${status}.` });
   };
@@ -402,7 +415,8 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
     pane,
     text,
     source: opts.source || "cli",
-    metadata: { sender: sender?.key || null, channelId: targetChannelId },
+    metadata: { sender: sender?.key || null, channelId: targetChannelId, senderChannelId,
+      ...(opts.premiseStamp ? { premiseStamp: opts.premiseStamp } : {}) },
     idempotencyKey: opts.idempotencyKey || null,
   });
   const settled = await waitForDeliveryJob(queue, job.id, {
@@ -410,17 +424,18 @@ export async function sendToPane(ctx, name, pane, text, opts = {}) {
   });
   const acknowledged = settled?.status === "acknowledged";
   const cancelled = settled?.status === "cancelled";
-  const outcome = cancelled
-    ? { delivered: false, blocked: true, pending: false, reason: settled.lastReason, jobId: job.id }
-    : {
-      delivered: true,
-      blocked: false,
-      pending: !TERMINAL_DELIVERY_STATES.has(settled?.status),
-      unverified: settled?.status === DELIVERED_UNVERIFIED_STATE,
-      via: acknowledged ? "broker" : "broker-queue",
-      jobId: job.id,
-      queueState: settled?.status || job.status,
-    };
+  const queueState = settled?.status || job.status;
+  const outcome = {
+    accepted: true,
+    delivered: acknowledged,
+    blocked: cancelled,
+    pending: !TERMINAL_DELIVERY_STATES.has(queueState),
+    unverified: queueState === DELIVERED_UNVERIFIED_STATE,
+    via: acknowledged ? "broker" : "broker-queue",
+    jobId: job.id,
+    queueState,
+    ...(cancelled ? { reason: settled.lastReason } : {}),
+  };
 
   // 2. Best-effort mirror. Failure here is a transparency degradation,
   //    not a correctness issue — the pane already got the text.
