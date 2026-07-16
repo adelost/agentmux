@@ -18,6 +18,7 @@ import { notifyUser } from "../cli/send-notify.mjs";
 
 const STATE_KEY = "native_watcher_posted_turns";
 const MODEL_STATE_KEY = "native_watcher_posted_model_changes";
+const PROGRESS_STATE_KEY = "native_watcher_posted_progress";
 const DEFAULT_POLL_MS = 1_000;
 const MAX_POSTED_PER_CHANNEL = 500;
 
@@ -60,6 +61,52 @@ function turnId(turn) {
     endAt: turn.endAt,
   });
   return `history:${createHash("sha256").update(payload).digest("hex")}`;
+}
+
+function progressEventId(event) {
+  if (event?.webId) return `event:${event.webId}`;
+  return `event:${createHash("sha256").update(JSON.stringify({
+    at: event?.at,
+    operationKey: event?.operationKey,
+    type: event?.type,
+    subtype: event?.subtype,
+    phase: event?.phase,
+    name: event?.name,
+    summary: event?.summary,
+  })).digest("hex")}`;
+}
+
+function activeNativeTurn(events = []) {
+  let start = -1;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.type === "web" && event.subtype === "user") {
+      start = index;
+      break;
+    }
+  }
+  if (start < 0) return null;
+  const user = events[start];
+  const tail = events.slice(start + 1);
+  const completed = tail.some((event) => event?.type === "web"
+    && event.subtype === "turn-done"
+    && (!user.operationKey || !event.operationKey || event.operationKey === user.operationKey));
+  if (completed) return null;
+  return {
+    operationKey: user.operationKey || null,
+    userAt: Number(user.at || 0),
+    tools: tail.filter((event) => event?.type === "web"
+      && event.subtype === "tool"
+      && event.phase === "started"),
+  };
+}
+
+function progressToolLabel(event) {
+  const raw = String(event?.summary || event?.name || "verktyg")
+    .replaceAll("`", "'")
+    .replace(/\s+/g, " ")
+    .trim();
+  return raw.length > 240 ? `${raw.slice(0, 237)}…` : raw;
 }
 
 export function groupNativeTurns(events = [], { includeEmpty = false } = {}) {
@@ -194,6 +241,55 @@ export function createNativeRuntimeWatcher({
     state.set(MODEL_STATE_KEY, all);
   }
 
+  function progressIds(channelId) {
+    const all = state.get(PROGRESS_STATE_KEY, {}) || {};
+    return Array.isArray(all[channelId]) ? all[channelId] : [];
+  }
+
+  function hasProgressState(channelId) {
+    const all = state.get(PROGRESS_STATE_KEY, {}) || {};
+    return Object.hasOwn(all, channelId);
+  }
+
+  function rememberProgress(channelId, ids) {
+    const all = state.get(PROGRESS_STATE_KEY, {}) || {};
+    const current = Array.isArray(all[channelId]) ? all[channelId] : [];
+    const next = Array.isArray(ids) ? ids : [ids];
+    all[channelId] = [...new Set([...current, ...next])].slice(-MAX_POSTED_PER_CHANNEL);
+    state.set(PROGRESS_STATE_KEY, all);
+  }
+
+  async function sendProgress(name, pane, channelId, snapshot) {
+    if (!snapshot.agent.running) return;
+    const turn = activeNativeTurn(snapshot.events);
+    if (!turn) return;
+    const initialized = hasProgressState(channelId);
+    const seen = new Set(progressIds(channelId));
+    const operationId = turn.operationKey || `at:${turn.userAt}`;
+    const acknowledgementId = `working:${operationId}`;
+    if (!seen.has(acknowledgementId)) {
+      await discord.send(channelId, `⏳ **${name}:${pane} jobbar** — meddelandet är mottaget.`);
+      rememberProgress(channelId, acknowledgementId);
+      seen.add(acknowledgementId);
+    }
+
+    const toolEvents = turn.tools.map((event) => ({ event, id: progressEventId(event) }));
+    const unseen = toolEvents.filter(({ id }) => !seen.has(id));
+    // On the first poll after upgrading a live bridge, expose the latest tool
+    // without flooding Discord with every earlier step from the same turn.
+    const selected = initialized ? unseen : unseen.slice(-1);
+    if (!initialized && unseen.length > selected.length) {
+      const skipped = unseen.slice(0, unseen.length - selected.length).map(({ id }) => id);
+      rememberProgress(channelId, skipped);
+      skipped.forEach((id) => seen.add(id));
+    }
+    for (const { event, id } of selected) {
+      await discord.send(channelId, `_🔧 ${progressToolLabel(event)}_`);
+      rememberProgress(channelId, id);
+      seen.add(id);
+    }
+  }
+
   async function sendModelChanges(name, pane, channelId, events) {
     const seen = new Set(postedModelChanges(channelId));
     for (const event of events.filter((candidate) => candidate?.type === "web"
@@ -269,6 +365,7 @@ export function createNativeRuntimeWatcher({
     if (snapshot.agent.running && typeof discord.sendTyping === "function") {
       await discord.sendTyping(channelId).catch(() => {});
     }
+    await sendProgress(name, pane, channelId, snapshot);
     await sendModelChanges(name, pane, channelId, snapshot.events);
     const seen = new Set(posted(channelId));
     // Remember terminal operations even when the live stream had no assistant

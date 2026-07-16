@@ -195,6 +195,71 @@ describe("native runtime Discord watcher", () => {
     expect(discord.send.mock.calls[0][1]).toContain("Behörighet nekad");
   });
 
+  it("acknowledges an active turn and mirrors each new tool start once", async () => {
+    const stored = {};
+    const state = {
+      get: (key, fallback) => stored[key] ?? fallback,
+      set: (key, value) => { stored[key] = structuredClone(value); },
+    };
+    const discord = { send: vi.fn(async () => {}), sendTyping: vi.fn(async () => {}) };
+    const config = {
+      "skybar-canary": {
+        backend: "native",
+        dir: "/tmp/canary",
+        discord: { "channel-1": 0 },
+        panes: [{ cmd: "native:claude", engine: "claude" }],
+      },
+    };
+    const historyEvents = [
+      { type: "web", subtype: "user", text: "build it", operationKey: "delivery:live", at: 10 },
+      {
+        webId: "boot:2",
+        type: "web",
+        subtype: "tool",
+        phase: "started",
+        name: "Bash",
+        summary: "npm test",
+        operationKey: "delivery:live",
+        at: 20,
+      },
+    ];
+    const nativeRuntime = {
+      history: async () => ({
+        agent: { running: true, context: null },
+        events: historyEvents,
+      }),
+    };
+    const watcher = createNativeRuntimeWatcher({
+      nativeRuntime,
+      agentsYamlPath: "unused",
+      discord,
+      state,
+      log: () => {},
+    });
+
+    await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
+    await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
+    expect(discord.send.mock.calls.map((call) => call[1])).toEqual([
+      "⏳ **skybar-canary:0 jobbar** — meddelandet är mottaget.",
+      "_🔧 npm test_",
+    ]);
+    expect(discord.sendTyping).toHaveBeenCalledTimes(2);
+
+    historyEvents.push({
+      webId: "boot:3",
+      type: "web",
+      subtype: "tool",
+      phase: "started",
+      name: "Bash",
+      summary: "npm run build",
+      operationKey: "delivery:live",
+      at: 30,
+    });
+    await watcher.check("skybar-canary", 0, config["skybar-canary"], config);
+    expect(discord.send.mock.calls.at(-1)[1]).toBe("_🔧 npm run build_");
+    expect(discord.send).toHaveBeenCalledTimes(3);
+  });
+
   it("does not resurrect partial text from an already-finished empty turn after restart", async () => {
     const stored = {};
     const state = {
