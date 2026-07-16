@@ -13,7 +13,7 @@ green and a migration is explicitly applied.
 
 1. The target has no active turn and its delivery queue has no `submitting`, `submitted`, or `delivered_unverified` head.
 2. Save each pane's engine, native `sessionId`, model, effort, project directory, and last accepted operation key from `/api/agents/:id/history`.
-3. Verify the runtime is managed by `amux runtime status`. Never signal an unmanaged process.
+3. Run `amux runtime status` without a port and verify every managed runtime row, including port, boot, agent count and data directory. Use `--port N` only to inspect one known runtime. Never signal an unmanaged process.
 4. Keep the original native config and registry directory unchanged; make a dated backup of `agents.yaml` before editing it.
 
 ## Native to tmux

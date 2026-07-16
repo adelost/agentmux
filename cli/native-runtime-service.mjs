@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   renameSync,
   unlinkSync,
@@ -27,6 +28,34 @@ function locations({ port, stateDir, dataDir }) {
 function readPid(path) {
   try { return JSON.parse(readFileSync(path, "utf8")); }
   catch { return null; }
+}
+
+function runtimeManagerRecords(stateRoot, { maxDepth = 4 } = {}) {
+  const records = [];
+  const visit = (directory, depth) => {
+    if (depth > maxDepth) return;
+    const processPath = join(directory, "process.json");
+    const record = readPid(processPath);
+    if (Number.isSafeInteger(Number(record?.port))
+        && Number(record.port) > 0
+        && typeof record?.serverPath === "string"
+        && typeof record?.dataDir === "string") {
+      records.push({ record, stateDir: directory, processPath });
+      return;
+    }
+    // Registry directories are runtime payload, never ownership roots. Do not
+    // recursively scan uploads or queue evidence looking for process files.
+    if (existsSync(join(directory, "registry.json")) || depth === maxDepth) return;
+    let entries = [];
+    try { entries = readdirSync(directory, { withFileTypes: true }); }
+    catch { return; }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      visit(join(directory, entry.name), depth + 1);
+    }
+  };
+  visit(resolve(stateRoot), 0);
+  return records;
 }
 
 function processAlive(pid) {
@@ -104,6 +133,8 @@ export async function nativeRuntimeStatus({
   const url = `http://${host}:${port}`;
   const runtimeHealth = await health(url, fetchImpl);
   return {
+    port: Number(port),
+    host,
     url,
     paths: { ...paths, dataDir: managedDataDir },
     managed: alive,
@@ -112,6 +143,58 @@ export async function nativeRuntimeStatus({
     health: runtimeHealth,
     stalePid: Boolean(processRecord && !alive),
   };
+}
+
+/**
+ * Discover every ownership-proven runtime below the agentmux state root.
+ * Custom canary state directories remain visible when they live below that
+ * root; unrelated process.json files are rejected by the runtime identity
+ * proof inside nativeRuntimeStatus.
+ */
+export async function discoverNativeRuntimes({
+  stateRoot = join(homedir(), ".agentmux"),
+  host = "127.0.0.1",
+  fetchImpl = globalThis.fetch,
+  statusImpl = nativeRuntimeStatus,
+  maxDepth = 4,
+} = {}) {
+  const discovered = [];
+  const seen = new Set();
+  for (const { record, stateDir } of runtimeManagerRecords(stateRoot, { maxDepth })) {
+    const status = await statusImpl({
+      port: Number(record.port),
+      host,
+      stateDir,
+      dataDir: record.dataDir,
+      fetchImpl,
+    });
+    if (!status.managed) continue;
+    const identity = `${status.pid}:${status.port}:${status.paths.dataDir}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    discovered.push({ ...status, stateDir });
+  }
+  return discovered.sort((left, right) => left.port - right.port
+    || left.paths.dataDir.localeCompare(right.paths.dataDir));
+}
+
+export function formatNativeRuntimeStatuses(statuses = []) {
+  const lines = [`Native runtimes: ${statuses.length} managed`];
+  for (const status of statuses) {
+    const health = status.health ?? {};
+    const state = status.online ? "✅" : "❌";
+    const boot = health.bootId || "unavailable";
+    const agents = Number.isFinite(Number(health.agents)) ? Number(health.agents) : "?";
+    const projects = Number.isFinite(Number(health.projects)) ? Number(health.projects) : "?";
+    const running = Number.isFinite(Number(health.running)) ? Number(health.running) : "?";
+    lines.push(
+      `${state} :${status.port} · pid ${status.pid ?? "unmanaged"} · boot ${boot}`
+      + ` · ${projects} project${projects === 1 ? "" : "s"}`
+      + ` · ${agents} agent${agents === 1 ? "" : "s"} · ${running} running`
+      + ` · data ${status.paths.dataDir}`,
+    );
+  }
+  return lines.join("\n");
 }
 
 export async function startNativeRuntime({

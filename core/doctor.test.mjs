@@ -6,7 +6,7 @@ import {
   checkContextBridge,
   checkDeliveryQueue,
   checkGuardCronHeartbeats,
-  checkNativeRuntime,
+  checkNativeRuntimeFleet,
   checkSuggestionsBoard,
   formatDoctorReport,
   SUGGESTIONS_BRIDGE_STALE_MS,
@@ -115,33 +115,73 @@ feature("bridge process check", () => {
   });
 });
 
-feature("native runtime check", () => {
-  unit("is absent when no fleet opted in", {
-    when: ["checking legacy-only config", () => checkNativeRuntime({ configured: 0 })],
-    then: ["does not add noise", (result) => expect(result).toBeNull()],
+feature("managed native runtime fleet truth", () => {
+  unit("is absent only when neither ownership records nor configuration exist", {
+    when: ["checking a legacy-only host", () => checkNativeRuntimeFleet()],
+    then: ["does not add noise", (rows) => expect(rows).toEqual([])],
   });
 
   unit("fails closed when a configured runtime is offline", {
-    when: ["checking an offline canary", () => checkNativeRuntime({
-      configured: 1,
-      online: 0,
-      details: ["http://127.0.0.1:8812: refused"],
+    when: ["checking an offline canary with no owned process", () => checkNativeRuntimeFleet({
+      configured: [{
+        url: "http://127.0.0.1:8812",
+        online: false,
+        error: "connection refused",
+      }],
     })],
-    then: ["reports failure and no tmux fallback", (result) => {
-      expect(result.status).toBe(FAIL);
-      expect(result.hint).toContain("fail closed");
+    then: ["both the fleet total and exact port are red", (rows) => {
+      expect(rows.map((row) => row.status)).toEqual([FAIL, FAIL]);
+      expect(rows[1].name).toBe("native :8812");
+      expect(rows[1].hint).toContain("fail closed");
     }],
   });
 
-  unit("reports active native turns", {
-    when: ["checking a healthy runtime", () => checkNativeRuntime({
-      configured: 1,
-      online: 1,
-      running: 2,
+  unit("shows both managed runtimes even when only one is configured", {
+    when: ["checking the live 8811 plus 8813 shape", () => checkNativeRuntimeFleet({
+      managed: [
+        {
+          port: 8811,
+          online: true,
+          health: { bootId: "boot-web", agents: 3, running: 0 },
+          paths: { dataDir: "/data/web-ui" },
+        },
+        {
+          port: 8813,
+          online: true,
+          health: { bootId: "boot-watch", agents: 15, running: 0 },
+          paths: { dataDir: "/data/code-pilot" },
+        },
+      ],
+      configured: [{
+        url: "http://127.0.0.1:8813",
+        online: true,
+        health: { bootId: "boot-watch", agents: 15, running: 0 },
+      }],
     })],
-    then: ["is healthy", (result) => {
-      expect(result.status).toBe(OK);
-      expect(result.detail).toContain("2 active turns");
+    then: ["the total and each port, boot, agent count and data directory are visible", (rows) => {
+      expect(rows).toHaveLength(3);
+      expect(rows[0]).toMatchObject({
+        name: "native runtimes",
+        status: OK,
+        detail: "2 managed · 2 online · 0 active turns · 1 configured",
+      });
+      expect(rows[1]).toMatchObject({ name: "native :8811", status: OK });
+      expect(rows[1].detail).toContain("boot boot-web · 3 agents");
+      expect(rows[1].detail).toContain("data /data/web-ui · managed-only");
+      expect(rows[2]).toMatchObject({ name: "native :8813", status: OK });
+      expect(rows[2].detail).toContain("boot boot-watch · 15 agents");
+      expect(rows[2].detail).toContain("data /data/code-pilot · configured");
+    }],
+  });
+
+  unit("fails loudly when ownership discovery itself cannot enumerate", {
+    when: ["checking a discovery error", () => checkNativeRuntimeFleet({
+      discoveryError: "permission denied",
+    })],
+    then: ["the report says a runtime may be invisible", (rows) => {
+      expect(rows.map((row) => row.status)).toEqual([FAIL, FAIL]);
+      expect(rows[1].name).toBe("native discovery");
+      expect(rows[1].hint).toContain("running without appearing");
     }],
   });
 });
