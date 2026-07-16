@@ -197,6 +197,55 @@ feature("heartbeat classification", () => {
       expect(hb).toEqual({ state: "stale-code", running: "1.20.31", repo: "1.20.37" })],
   });
 
+  // The version is a hand-maintained proxy for the code, and a bug fix bumps
+  // nothing, so a matching version proves only that nobody edited a string.
+  // agentmux d3e67ae landed 05:47 on 2026-07-16 while the bridge had been up
+  // since 02:48, both reading v1.24.1: this row stayed green for three hours
+  // while the merged fix was provably not the code being run. The module's own
+  // contract is "bridge started before the latest commit", so measure that.
+  const bootedAt = (msBeforeNow) => ({
+    ...beatAt("2026-07-08T11:59:30Z"),
+    startedAt: new Date(NOW - msBeforeNow).toISOString(),
+  });
+
+  unit("a bridge older than the newest commit is stale code even when nobody bumped the version", {
+    given: ["a bridge that booted three hours before the repo's newest commit", () =>
+      bootedAt(3 * 60 * 60_000)],
+    when: ["classifying against the very version the bridge is already running", (beat) =>
+      classifyHeartbeat(beat, {
+        repoVersion: "1.20.37", repoCodeChangedAt: NOW - 60_000, pidAlive: true, now: NOW,
+      })],
+    then: ["it is classified as stale code, not as a healthy heartbeat", (hb) =>
+      expect(hb.state).toBe("stale-code")],
+  });
+
+  unit("a bridge booted after the newest commit is current", {
+    given: ["a bridge that booted one minute ago", () => bootedAt(60_000)],
+    when: ["classifying against an hour-old commit", (beat) =>
+      classifyHeartbeat(beat, {
+        repoVersion: "1.20.37", repoCodeChangedAt: NOW - 60 * 60_000, pidAlive: true, now: NOW,
+      })],
+    then: ["ok, so the row does not nag every healthy bridge", (hb) =>
+      expect(hb.state).toBe("ok")],
+  });
+
+  unit("stale code found by commit time still renders the restart hint", {
+    given: ["a bridge that predates the newest commit on an unchanged version", () => ({
+      beat: bootedAt(3 * 60 * 60_000),
+      repoVersion: "1.20.37", repoCodeChangedAt: NOW - 60_000, pidAlive: true, now: NOW,
+    })],
+    when: ["running the doctor check", (x) => checkHeartbeatHealth(x)],
+    then: ["the operator reads that the bridge predates its code, and how to fix it", (c) => {
+      expect(c.status).toBe(WARN);
+      expect(c.name).toBe("bridge code");
+      // What the operator is told is the contract. A matching version string
+      // must never be allowed to render this as a green heartbeat.
+      expect(c.detail).toContain("179 min");
+      expect(c.detail).toContain("before the repo's newest commit");
+      expect(c.hint).toContain("restart");
+    }],
+  });
+
   unit("stale beat + live pid = hung event loop", {
     given: ["a beat older than the stale window", () =>
       beatAt(new Date(NOW - HEARTBEAT_STALE_MS - 60000).toISOString())],

@@ -3078,6 +3078,18 @@ async function cmdDoctor(ctx) {
   let repoVersion = null;
   try { repoVersion = JSON.parse(readFileSync(join(repoDir, "package.json"), "utf-8")).version; }
   catch {}
+  // A bug fix bumps no version, so the version alone cannot tell a bridge that
+  // is current from one that booted hours before the code it is supposed to be
+  // running. The newest commit's time can.
+  let repoCodeChangedAt = null;
+  try {
+    const committedAt = Number(execSync("git log -1 --format=%ct HEAD", {
+      cwd: repoDir, encoding: "utf8", timeout: 2000,
+    }).trim());
+    repoCodeChangedAt = Number.isFinite(committedAt) && committedAt > 0
+      ? committedAt * 1000
+      : null;
+  } catch {}
   const beat = readHeartbeat();
   const guardHeartbeats = readGuardHeartbeats();
 
@@ -3196,7 +3208,7 @@ async function cmdDoctor(ctx) {
     checkBridgeProcess({ pids, supervised }),
     checkBridgeMode({ mode: readBridgeMode(), running: pids.length > 0 }),
     checkSupervisors({ pids: supervisorPids, crashLooping }),
-    checkHeartbeatHealth({ beat, repoVersion, pidAlive: pids.length > 0 }),
+    checkHeartbeatHealth({ beat, repoVersion, repoCodeChangedAt, pidAlive: pids.length > 0 }),
     checkHooksInstalled({ settings, hookFileExists }),
     checkLedger({ stat: ledgerStat }),
     checkContextBridge({ claudePanes, pushing }),
