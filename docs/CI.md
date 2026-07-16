@@ -3,7 +3,10 @@
 Every pull request to `master` runs the repository-owned `Pull request gate` on
 a GitHub-hosted runner. The stable required-check name is `Required test`. It
 installs exactly `package-lock.json` and runs the Vitest suite through
-`npm run ci`. The workflow installs ripgrep for the real search integration;
+`npm run ci`. Before the suite it runs `amux lint --changed --strict` against
+the exact pull-request or merge-group base SHA. The workflow fetches full Git
+history so a clean checkout cannot turn changed-file lint into a zero-file
+pass. The workflow installs ripgrep for the real search integration;
 the exact Codex CLI used by the execpolicy contract is a locked dev dependency.
 Agentmux has no compile/typecheck build step; setup, native runtime canaries,
 and visual gates are intentionally not smuggled into the fast default PR gate.

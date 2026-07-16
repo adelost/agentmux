@@ -4,32 +4,33 @@
  */
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
-import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "path";
-import { execFileSync } from "child_process";
-import yaml from "js-yaml";
+import { basename, extname, isAbsolute, join, relative, resolve } from "path";
+import { changedSourcePaths, lintFileSizes, lintStringStyle, loadLintPolicy } from "./lint-ratchet.mjs";
 
+// WHAT: Names the contract check used by CLI include and exclude filters.
+// WHY: Keeps command routing independent from the check implementation.
 export const CONTRACT_CHECK_ID = "contract";
 
 // WHAT: Filler/meta phrases banned anywhere in a doc block, with a teaching hint.
 // WHY: Keeps unambiguous narration out while leaving position-sensitive words alone.
 const ALWAYS_BANNED = [
-  [/\bit exists as\b/i, "existential filler — name the boundary instead"],
-  [/\bit exists to\b/i, "existential filler — name the boundary instead"],
-  [/\bthis class\b/i, "don't narrate that it's a class — say what it does"],
-  [/\bthis helper\b/i, "don't narrate that it's a helper — say what it does"],
-  [/\bprovides a way to\b/i, "filler — state what it does directly"],
-  [/\blightweight fallback\b/i, "vague — say what it falls back from"],
-  [/\btruthful\b(?!\s+[a-z])/i, "vague predicate — say exactly what stays consistent"],
+  [/\bit exists as\b/i, "existential filler; name the boundary instead"],
+  [/\bit exists to\b/i, "existential filler; name the boundary instead"],
+  [/\bthis class\b/i, "don't narrate that it's a class; say what it does"],
+  [/\bthis helper\b/i, "don't narrate that it's a helper; say what it does"],
+  [/\bprovides a way to\b/i, "filler; state what it does directly"],
+  [/\blightweight fallback\b/i, "vague; say what it falls back from"],
+  [/\btruthful\b(?!\s+[a-z])/i, "vague predicate; say exactly what stays consistent"],
 ];
 
 // WHAT: Openers banned only when they START a WHAT/WHY value (or untagged doc).
 // WHY: Separates the lazy "Used to X" description from legit mid-sentence "used to".
 const LEADING_BANNED = [
-  [/^used to\b/i, "filler opener — state the action directly"],
-  [/^(?:is )?responsible for\b/i, "meta opener — name the behavior"],
-  [/^serves as\b/i, "meta opener — name the behavior"],
-  [/^acts as\b/i, "meta opener — name the behavior"],
-  [/^(?:a |the )?helper for\b/i, "lazy opener — name the behavior, not 'helper for'"],
+  [/^used to\b/i, "filler opener; state the action directly"],
+  [/^(?:is )?responsible for\b/i, "meta opener; name the behavior"],
+  [/^serves as\b/i, "meta opener; name the behavior"],
+  [/^acts as\b/i, "meta opener; name the behavior"],
+  [/^(?:a |the )?helper for\b/i, "lazy opener; name the behavior, not 'helper for'"],
 ];
 
 // WHAT: Vague adjectives banned only when the WHY has no real boundary.
@@ -60,11 +61,15 @@ const ECHO_OVERLAP_THRESHOLD = 0.5;
 const CONTRACT_TAGS = ["WHAT", "WHY", "DTO", "REMOVE", "REFACTOR", "MERGE", "DEPRECATED", "DEBT"];
 const DEBT_TAGS = ["REMOVE", "REFACTOR", "MERGE", "DEPRECATED", "DEBT"];
 
+// WHAT: Defines precise active verbs accepted across repositories by default.
+// WHY: Keeps contract grammar shared while repo-specific verbs remain configurable.
 export const DEFAULT_WHAT_VERBS = [
   "Assigns",
   "Builds",
   "Calculates",
   "Carries",
+  "Checks",
+  "Collects",
   "Compares",
   "Decodes",
   "Defines",
@@ -72,17 +77,22 @@ export const DEFAULT_WHAT_VERBS = [
   "Dispatches",
   "Encodes",
   "Expands",
+  "Extracts",
   "Fetches",
   "Filters",
   "Formats",
   "Indexes",
   "Loads",
+  "Lints",
   "Maps",
   "Names",
   "Normalizes",
   "Parses",
+  "Reads",
+  "Reports",
   "Resolves",
   "Routes",
+  "Returns",
   "Saves",
   "Schedules",
   "Stores",
@@ -98,13 +108,13 @@ const SUGGESTIONS = {
   CONTRACT001: "add  WHAT: <verb + responsibility>  and  WHY: Keeps <X> from <Y>",
   CONTRACT010: "add  WHAT: <active verb + local responsibility>",
   CONTRACT011: "add  WHY: Keeps <X> from <Y>  (name the coupling it prevents)",
-  CONTRACT020: "drop the phrase — name the boundary it prevents",
+  CONTRACT020: "drop the phrase; name the boundary it prevents",
   CONTRACT021: "open with a verb (Tracks/Keeps/Filters), not a meta-phrase",
   CONTRACT030: "WHY must name a boundary: Keeps/Separates/Prevents/Avoids <X> from <Y>",
   CONTRACT031: "replace the adjective with the boundary it preserves",
-  CONTRACT040: "WHY repeats WHAT — name a consumer, dependency, or failure mode instead",
+  CONTRACT040: "WHY repeats WHAT; name a consumer, dependency, or failure mode instead",
   CONTRACT041: "fill the DTO: line with the payload/schema shape",
-  CONTRACT042: "use WHAT:/WHY: — this symbol owns a domain boundary, not a pure shape",
+  CONTRACT042: "use WHAT:/WHY: because this symbol owns a domain boundary, not a pure shape",
   CONTRACT043: "choose either DTO: for pure shape OR WHAT:/WHY: for domain boundary, not both",
   CONTRACT050: "resolve the debt, or keep the action tag baselined until that milestone",
   CONTRACT051: "fill the debt tag with concrete evidence + next action",
@@ -196,7 +206,7 @@ function allowedWhatVerbs(options = {}) {
 }
 
 /**
- * WHAT: Checks one doc block against the WHAT:/WHY: contract and voice rules.
+ * WHAT: Checks one doc block against tagged contract and voice rules.
  * WHY: Keeps every language's findings flowing from one deterministic floor.
  */
 export function evaluateContract(doc, { name = "", kind = "symbol", allowedWhatVerbs: verbs } = {}) {
@@ -233,14 +243,14 @@ export function evaluateContract(doc, { name = "", kind = "symbol", allowedWhatV
   // so prose-only files still surface fluff, not just missing-tag noise.
   for (const [re, hint] of ALWAYS_BANNED) {
     const m = doc.match(re);
-    if (m) findings.push({ code: "CONTRACT020", sev: "error", msg: `${label}: banned phrase "${m[0].trim()}" — ${hint}` });
+    if (m) findings.push({ code: "CONTRACT020", sev: "error", msg: `${label}: banned phrase "${m[0].trim()}"; ${hint}` });
   }
   const leadTargets = [what, why].filter(Boolean);
   if (leadTargets.length === 0) leadTargets.push(doc.replace(/^[\s*/]+/, ""));
   for (const [re, hint] of LEADING_BANNED) {
     for (const t of leadTargets) {
       const m = t.trim().match(re);
-      if (m) { findings.push({ code: "CONTRACT021", sev: "error", msg: `${label}: contract opens with "${m[0].trim()}" — ${hint}` }); break; }
+      if (m) { findings.push({ code: "CONTRACT021", sev: "error", msg: `${label}: contract opens with "${m[0].trim()}"; ${hint}` }); break; }
     }
   }
 
@@ -278,7 +288,7 @@ export function evaluateContract(doc, { name = "", kind = "symbol", allowedWhatV
 const SKIP_DIRS = new Set([
   "node_modules", "build", "dist", ".git", ".gradle", ".venv", "venv",
   "__pycache__", ".svelte-kit", "target", "out", ".idea", "generated",
-  ".mypy_cache", ".pytest_cache", ".ruff_cache", "coverage", "fixtures",
+  ".mypy_cache", ".pytest_cache", ".ruff_cache", ".wrangler", "coverage", "fixtures",
   "test", "tests", "__tests__",
 ]);
 
@@ -332,9 +342,10 @@ function leadingComment(lines, declIndex) {
 
 // WHAT: Extracts public class/function symbols and their docs from C-family source.
 // WHY: Keeps JS, Kotlin, and C++ on one regex extractor until tree-sitter is needed.
-function extractCFamily(source) {
+function extractCFamily(source, ext) {
   const lines = source.split("\n");
   const symbols = [];
+  const moduleLanguage = [".js", ".mjs", ".ts", ".svelte"].includes(ext);
   for (let idx = 0; idx < lines.length; idx += 1) {
     const line = lines[idx];
     // Top-level only: an indented decl is a method or nested type whose parent
@@ -344,6 +355,7 @@ function extractCFamily(source) {
     // Non-public decls and companion holders do not own a documented boundary.
     if (/^(?:export\s+)?(?:private|internal)\b/.test(line)) continue;
     if (/^companion\s+object\b/.test(line)) continue;
+    if (moduleLanguage && !/^export\b/.test(line)) continue;
     for (const re of CFAMILY_DECL) {
       const m = line.match(re);
       if (!m) continue;
@@ -411,7 +423,7 @@ function pythonDocstring(lines, declIndex) {
  * WHY: Keeps the rule layer fed by a uniform symbol shape across languages.
  */
 export function extractSymbols(source, ext) {
-  return LANG_BY_EXT[ext] === "python" ? extractPython(source) : extractCFamily(source);
+  return LANG_BY_EXT[ext] === "python" ? extractPython(source) : extractCFamily(source, ext);
 }
 
 /**
@@ -419,7 +431,7 @@ export function extractSymbols(source, ext) {
  * WHY: Keeps file path and line on each finding so the reporter stays format-free.
  */
 export function lintSource(path, source, ext, options = {}) {
-  const findings = [];
+  const findings = lintStringStyle(path, source, ext);
   for (const sym of extractSymbols(source, ext)) {
     for (const f of evaluateContract(sym.doc, { name: sym.name, kind: sym.kind, allowedWhatVerbs: options.allowedWhatVerbs })) {
       findings.push({ ...f, path, line: sym.line, suggestion: SUGGESTIONS[f.code] });
@@ -438,40 +450,12 @@ export function lintSource(path, source, ext, options = {}) {
   return findings;
 }
 
-function parseLintConfig(path) {
-  try {
-    const doc = yaml.load(readFileSync(path, "utf-8")) || {};
-    const verbs = doc?.contract?.allowedWhatVerbs;
-    return {
-      allowedWhatVerbs: Array.isArray(verbs)
-        ? [...new Set([...DEFAULT_WHAT_VERBS, ...verbs.map(String).filter(Boolean)])]
-        : DEFAULT_WHAT_VERBS,
-    };
-  } catch {
-    return { allowedWhatVerbs: DEFAULT_WHAT_VERBS };
-  }
-}
-
-function findLintConfigPath(root) {
-  let dir = root;
-  try {
-    if (existsSync(dir) && statSync(dir).isFile()) dir = dirname(dir);
-  } catch {}
-  let prev = "";
-  while (dir && dir !== prev) {
-    for (const name of [".amux-lint.yml", ".amux-lint.yaml"]) {
-      const candidate = join(dir, name);
-      if (existsSync(candidate)) return candidate;
-    }
-    prev = dir;
-    dir = dirname(dir);
-  }
-  return null;
-}
-
+/**
+ * WHAT: Loads the closest repo-local lint grammar and legacy file caps.
+ * WHY: Keeps repository policy explicit instead of embedding exceptions in the engine.
+ */
 export function loadLintConfig(root) {
-  const configPath = findLintConfigPath(resolve(expandHome(root)));
-  return configPath ? parseLintConfig(configPath) : { allowedWhatVerbs: DEFAULT_WHAT_VERBS };
+  return loadLintPolicy(resolve(expandHome(root)), DEFAULT_WHAT_VERBS);
 }
 
 const DOMAIN_SUFFIXES_REQUIRE_WHY = [
@@ -495,12 +479,14 @@ function requiresWhyName(name) {
 
 const TEST_FILE_MARKERS = [".test.", ".spec."];
 
+/** WHAT: Expands a leading home alias in one lint target. WHY: Keeps path resolution independent from shell expansion. */
 export function expandHome(path, home = process.env.HOME || "") {
   if (path === "~") return home;
   if (path?.startsWith("~/")) return join(home, path.slice(2));
   return path;
 }
 
+/** WHAT: Resolves one CLI lint target into an absolute path. WHY: Keeps agent aliases and filesystem roots from sharing path rules. */
 export function resolvePathTarget(target, cwd = process.cwd()) {
   if (!target) return cwd;
   const expanded = expandHome(target);
@@ -518,28 +504,15 @@ function isSkippedPath(path) {
   return path.split(/[\\/]+/).some((part) => SKIP_DIRS.has(part));
 }
 
-function changedFiles(root) {
-  try {
-    // --relative makes git emit paths relative to `root` AND restricts output to
-    // that subtree, so a scoped root (e.g. src/ai_tools) matches the root-relative
-    // lookup in collectSourceFiles. Without it git prints repo-root-relative paths
-    // and the --changed filter silently scans nothing for any non-repo-root target.
-    const out = execFileSync(
-      "git",
-      ["-C", root, "diff", "--name-only", "--relative", "--diff-filter=ACMRTUXB", "HEAD", "--"],
-      { encoding: "utf-8" },
-    );
-    return new Set(out.split(/\r?\n/).filter(Boolean).filter((p) => supportedSourceFile(p)));
-  } catch {
-    return new Set();
-  }
-}
-
+/**
+ * WHAT: Collects supported source files under one lint target.
+ * WHY: Keeps trunk-relative selection and directory traversal on one path identity.
+ */
 export function collectSourceFiles(root, options = {}) {
   const resolvedRoot = resolve(expandHome(root));
   if (!existsSync(resolvedRoot)) return [];
   const files = [];
-  const changedSet = options.changed ? changedFiles(resolvedRoot) : null;
+  const changedSet = options.changed ? changedSourcePaths(resolvedRoot, options) : null;
 
   const visit = (path) => {
     if (isSkippedPath(path)) return;
@@ -549,7 +522,7 @@ export function collectSourceFiles(root, options = {}) {
       return;
     }
     if (!st.isFile() || !supportedSourceFile(path)) return;
-    if (changedSet && !changedSet.has(relative(resolvedRoot, path))) return;
+    if (changedSet && !changedSet.has(resolve(path))) return;
     files.push(path);
   };
 
@@ -557,11 +530,12 @@ export function collectSourceFiles(root, options = {}) {
   return files.sort();
 }
 
+/** WHAT: Builds one lint result for a file or repository root. WHY: Keeps file, contract, and size findings in one report boundary. */
 export function lintRoot(root, options = {}) {
   const resolvedRoot = resolve(expandHome(root));
   const files = collectSourceFiles(resolvedRoot, options);
   const lintConfig = options.lintConfig || loadLintConfig(resolvedRoot);
-  const findings = [];
+  const findings = lintFileSizes(resolvedRoot, files, lintConfig, options);
   let symbols = 0;
   for (const file of files) {
     const source = readFileSync(file, "utf-8");
@@ -572,6 +546,7 @@ export function lintRoot(root, options = {}) {
   return { root: resolvedRoot, files, symbols, findings };
 }
 
+/** WHAT: Formats a line-stable baseline key for one finding. WHY: Keeps unrelated line shifts from reopening accepted legacy debt. */
 export function findingFingerprint(finding, root) {
   // Line number is deliberately excluded: the message already carries the symbol
   // name + kind, so the fingerprint stays stable when unrelated edits shift lines.
@@ -579,6 +554,7 @@ export function findingFingerprint(finding, root) {
   return `${relative(root, finding.path)}:${finding.code}:${finding.msg}`;
 }
 
+/** WHAT: Loads accepted legacy finding keys from one baseline file. WHY: Keeps missing or malformed baselines from crashing lint reads. */
 export function loadBaseline(path) {
   if (!path || !existsSync(path)) return new Set();
   try {
@@ -589,6 +565,7 @@ export function loadBaseline(path) {
   }
 }
 
+/** WHAT: Saves unique finding keys for a reviewed legacy baseline. WHY: Keeps baseline generation deterministic across roots and runs. */
 export function writeBaseline(path, results) {
   const fingerprints = [];
   for (const result of results) {
@@ -603,6 +580,7 @@ export function writeBaseline(path, results) {
   }, null, 2)}\n`);
 }
 
+/** WHAT: Builds lint results and active findings across requested roots. WHY: Keeps baseline filtering consistent for single and multi-root runs. */
 export function lintRoots(roots, options = {}) {
   const results = roots.map((root) => lintRoot(root, options));
   if (options.updateBaseline && options.baselinePath) writeBaseline(options.baselinePath, results);
@@ -618,6 +596,7 @@ function formatFinding(finding, root) {
   return finding.suggestion ? `${base}\n    Try: ${finding.suggestion}` : base;
 }
 
+/** WHAT: Formats lint totals, debt, findings, and fix guidance for the CLI. WHY: Keeps policy evaluation independent from terminal presentation. */
 export function formatLintReport(results, options = {}) {
   const lines = [];
   const findingsFor = (result) => result.activeFindings || result.findings;

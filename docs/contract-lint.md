@@ -303,3 +303,47 @@ The baseline suppresses known findings. New or changed findings still show up.
 Debt findings can be baselined too, but that should be a temporary ratchet:
 each cleanup milestone should shrink both the normal finding count and the debt
 count.
+
+## Changed-file PR ratchet
+
+`--changed` compares the branch, staged changes, unstaged changes, and untracked
+source files with trunk. It does not compare only the clean CI worktree with
+`HEAD`; that would scan zero files after checkout. CI passes the exact pull
+request or merge-queue base SHA through `AMUX_LINT_BASE_REF` and fails loudly if
+that revision is unavailable.
+
+The PR gate is therefore:
+
+```bash
+amux lint --changed --strict
+```
+
+Only changed source files need to be clean. Untouched legacy findings do not
+block unrelated work.
+
+## User-text punctuation
+
+Source string literals reject two recurring prose defects:
+
+- `STYLE001`: an em dash in user-facing text
+- `STYLE002`: a single spaced hyphen used between prose on both sides
+
+Comments are excluded, and command syntax such as `git -C` is not classified as
+prose punctuation. Use a comma, colon, semicolon, or period instead.
+
+## File-size ratchet
+
+New source files have a 500-line cap. A legacy file already above 500 lines may
+be recorded at its exact current size:
+
+```yaml
+fileSize:
+  caps:
+    worker/board.ts: 7421
+```
+
+The recorded cap is not a growth allowance. The linter rejects a cap above the
+file's current line count and compares the configuration with trunk; an existing
+cap may only decrease. When code moves out of a legacy file, lower its cap in
+the same change. Adding a new exception above the 500-line default after initial
+adoption is a cap increase and fails the gate.

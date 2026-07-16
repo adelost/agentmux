@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { publishSelfReportedVerdict, STATUS_CONTEXT } from
   "../.github/scripts/publish-self-reported-verdict.mjs";
+
+const pullRequestWorkflow = readFileSync(
+  new URL("../.github/workflows/pull-request.yml", import.meta.url),
+  "utf-8",
+);
+assert.match(pullRequestWorkflow, /fetch-depth:\s*0/,
+  "changed-file lint requires trunk history in the PR checkout");
+assert.match(pullRequestWorkflow, /AMUX_LINT_BASE_REF:[^\n]*(?:pull_request\.base\.sha)[^\n]*(?:merge_group\.base_sha)/,
+  "pull requests and merge groups must bind lint to their exact base SHA");
+assert.match(pullRequestWorkflow, /run:\s*amux lint --changed --strict/,
+  "every PR must run the strict changed-file ratchet");
 
 const SHA = "a".repeat(40);
 const NEXT_SHA = "b".repeat(40);
@@ -103,4 +115,4 @@ await assert.rejects(publishSelfReportedVerdict({ github: closed.github, context
   /not open/);
 assert.equal(closed.statuses.length, 0);
 
-console.log("CI contract: current-head PASS/HOLD receipts and stale-head rejection verified");
+console.log("CI contract: changed-file lint plus current-head PASS/HOLD receipts verified");
