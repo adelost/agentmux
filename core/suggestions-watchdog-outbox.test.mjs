@@ -6,6 +6,7 @@ import { createDeliveryQueue } from "./delivery-queue.mjs";
 import {
   createAmuxOutboxDeliverer,
   loadPrivateCredential,
+  loadWatchdogOutboxConfig,
   pollWatchdogOutboxes,
   watchdogDeliveryKey,
 } from "./suggestions-watchdog-outbox.mjs";
@@ -13,6 +14,13 @@ import {
 const READ = "r".repeat(40);
 const ADMIN = "a".repeat(40);
 const PROMPT = "BROKER CHECK — SRC-0025 — immutable\ncontinue(next checkpoint/recheck)";
+const PUBLIC_PROJECTS = Object.freeze(["skydive", "skyvw", "ai", "source"]);
+const PROJECT_BROKERS = Object.freeze({
+  source: "lsrc:2",
+  skydive: "skydive:2",
+  skyvw: "watch:2",
+  ai: "ai:2",
+});
 
 const alert = Object.freeze({
   id: 7,
@@ -25,16 +33,20 @@ const alert = Object.freeze({
   deliveredAt: null,
 });
 
-function api({ ackStatus = 200 } = {}) {
+function api({ ackStatus = 200, registryProjects = PUBLIC_PROJECTS } = {}) {
   const calls = [];
   const fetchImpl = vi.fn(async (input, init = {}) => {
     const url = new URL(input);
     calls.push({ url, init, body: init.body ? JSON.parse(String(init.body)) : null });
+    if (url.pathname === "/api/config") return Response.json({
+      project: { id: url.searchParams.get("project") },
+      projects: registryProjects.map((id) => ({ id })),
+    });
     if (url.pathname === "/api/config/agentdocs") return Response.json({
       project: {
         id: url.searchParams.get("project"),
         routingGuide: { workers: [{ role: "broker",
-          id: url.searchParams.get("project") === "source" ? "lsrc:2" : "skydive:2" }] },
+          id: PROJECT_BROKERS[url.searchParams.get("project")] }] },
       },
     });
     if (url.pathname === "/api/watchdog/outbox") return Response.json({ alerts: [alert] });
@@ -50,10 +62,34 @@ function api({ ackStatus = 200 } = {}) {
 const config = (projects = ["source"]) => ({
   baseUrl: "https://suggest.v1d.io",
   projects,
+  discoveryProject: "source",
   requestTimeoutMs: 1_000,
 });
 
 describe("persistent Suggestions watchdog outbox consumer", () => {
+  it("defaults to registry discovery and keeps a bounded explicit project override", () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "amux-watchdog-config-"));
+    const path = join(rootDir, "watchdog.yaml");
+    try {
+      writeFileSync(path, "baseUrl: https://suggest.v1d.io\n");
+      expect(loadWatchdogOutboxConfig(path)).toMatchObject({
+        projects: null,
+        discoveryProject: "source",
+      });
+
+      writeFileSync(path, "baseUrl: https://suggest.v1d.io\nprojects: [source, ai]\n");
+      expect(loadWatchdogOutboxConfig(path)).toMatchObject({
+        projects: ["source", "ai"],
+        discoveryProject: "source",
+      });
+      writeFileSync(path, `baseUrl: https://suggest.v1d.io\nprojects: [${Array.from(
+        { length: 33 }, (_, index) => `project${index}`).join(", ")}]\n`);
+      expect(() => loadWatchdogOutboxConfig(path)).toThrow(/1-32 project ids/u);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("loads existing standard bearer token characters only from a private file", () => {
     const rootDir = mkdtempSync(join(tmpdir(), "amux-watchdog-credential-"));
     const path = join(rootDir, "token");
@@ -98,6 +134,47 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
         jobId: "1".repeat(32), status: "acknowledged", acknowledgedAt: 1_100,
       },
     })));
+  });
+
+  it("discovers and routes every public project without a local config edit", async () => {
+    const remote = api();
+    const deliveries = [];
+    const result = await pollWatchdogOutboxes({
+      config: config(null), readToken: READ, adminToken: ADMIN,
+      fetchImpl: remote.fetchImpl,
+      deliver: async (request) => {
+        deliveries.push(request);
+        return { jobId: "4".repeat(32), status: "acknowledged", acknowledgedAt: 1_500 };
+      },
+    });
+
+    expect(result).toEqual({ delivered: 4, pending: 0, projects: 4 });
+    expect(deliveries.map(({ projectId, agent, pane }) => ({ projectId, agent, pane })))
+      .toEqual([
+        { projectId: "skydive", agent: "skydive", pane: 2 },
+        { projectId: "skyvw", agent: "watch", pane: 2 },
+        { projectId: "ai", agent: "ai", pane: 2 },
+        { projectId: "source", agent: "lsrc", pane: 2 },
+      ]);
+    expect(remote.calls.filter((call) => call.url.pathname === "/api/config")).toHaveLength(1);
+    expect(remote.calls.filter((call) => call.url.pathname === "/api/config/agentdocs")
+      .map((call) => call.url.searchParams.get("project"))).toEqual(PUBLIC_PROJECTS);
+  });
+
+  it.each([
+    ["duplicates", ["source", "source"], /duplicate project ids/u],
+    ["invalid ids", ["source", "Not-Public"], /invalid project id/u],
+    ["oversized registries", Array.from({ length: 33 }, (_, index) => `project${index}`), /1-32 project ids/u],
+  ])("fails closed before delivery for %s", async (_label, registryProjects, expected) => {
+    const remote = api({ registryProjects });
+    const deliver = vi.fn();
+
+    await expect(pollWatchdogOutboxes({
+      config: config(null), readToken: READ, adminToken: ADMIN,
+      fetchImpl: remote.fetchImpl, deliver,
+    })).rejects.toThrow(expected);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(remote.calls.map((call) => call.url.pathname)).toEqual(["/api/config"]);
   });
 
   it("leaves delivery failures pending and retries once with the same durable identity", async () => {

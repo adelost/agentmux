@@ -1,9 +1,12 @@
 # Suggestions watchdog outbox delivery
 
 Suggestions durably queues assignment/watchdog alerts. This local agentmux
-consumer closes the external side effect: every minute it polls the `source`
-and `skydive` outboxes, reads each project's current bootstrap `brokerOwner`,
-and writes the immutable alert prompt into agentmux's durable delivery queue.
+consumer closes the external side effect: every minute it reads the `source`
+project's public registry, polls every accessible project outbox, reads each
+project's current bootstrap `brokerOwner`, and writes the immutable alert
+prompt into agentmux's durable delivery queue. New public projects are included
+without a cron or config edit. A bounded explicit `projects` list remains
+available as an intentional operational override.
 
 The remote outbox is acknowledged only after the delivery broker has recorded
 an exact `acknowledged` receipt. A queue timeout, target failure,
@@ -20,7 +23,7 @@ Do not install or schedule the consumer against an unaudited backlog. The
 initial rollout is deliberately operator-gated: first deploy the assignment
 lifecycle cleanup, verify that stale alerts are removed or reclassified, then
 run one current synthetic alert as a canary and confirm its real agentmux
-receipt plus Suggestions ACK. Enable the one-minute Source+Skydive schedule
+receipt plus Suggestions ACK. Enable the one-minute all-project schedule
 only after that canary passes.
 
 ```bash

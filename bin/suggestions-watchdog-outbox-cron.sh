@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One overlap-locked Source+Skydive watchdog outbox drain.
+# One overlap-locked all-project watchdog outbox drain.
 set -euo pipefail
 
 if [ -z "${HOME:-}" ]; then
