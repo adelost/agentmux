@@ -11,10 +11,14 @@ import { appendEvent } from "./events.mjs";
 import { deliverToPane } from "./delivery.mjs";
 import { rewriteModelSlash } from "./claude-model.mjs";
 import {
-  DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES,
+  DELIVERED_UNVERIFIED_STATE, QUOTA_PAUSED_STATE, TERMINAL_DELIVERY_STATES,
   NOT_INGESTING_UNVERIFIED_STREAK, isNotSentDeliveryJob,
   isTargetProvenNotIngesting, waitForDeliveryJob,
 } from "./delivery-queue.mjs";
+import {
+  quotaRecoveryContinuation,
+  quotaRecoveryJobKey,
+} from "./claude-quota-recovery.mjs";
 
 const ACTIVE_RETRY_MS = 1_000;
 const BLOCKED_RETRY_MS = 3_000;
@@ -27,6 +31,7 @@ const SUBMITTED_STALL_NOTICE_MS = 3 * 60_000;
 const STALE_SUBMITTED_TERMINAL_MS = 60 * 60 * 1_000;
 const STALE_PRE_SUBMIT_TERMINAL_MS = 60 * 60 * 1_000;
 const MAX_PRE_SUBMIT_ATTEMPTS = 64;
+const QUOTA_PAUSED_RECHECK_MS = 30_000;
 const PRE_SUBMIT_STATES = new Set(["pending", "delivering", "pasting", "drafted"]);
 
 function blockedRetryMs(job, { drafted = false } = {}) {
@@ -137,6 +142,33 @@ export function createDeliveryBroker({
     } catch {
       return false;
     }
+  }
+
+  function sameLimit(left, right) {
+    return Boolean(left && right
+      && left.sessionId === right.sessionId
+      && left.limitEventId === right.limitEventId);
+  }
+
+  function pauseForQuota(job, receipt) {
+    const previousStatus = job.status === QUOTA_PAUSED_STATE
+      ? job.metadata?.quotaPreviousStatus || "pending"
+      : job.status;
+    const paused = queue.update(job, {
+      status: QUOTA_PAUSED_STATE,
+      draftOwned: false,
+      nextAttemptAt: now() + QUOTA_PAUSED_RECHECK_MS,
+      metadata: {
+        quotaPreviousStatus: previousStatus,
+        quotaLimitEventId: receipt.limitEventId,
+        quotaSessionId: receipt.sessionId,
+        quotaLimitedAt: receipt.observedAt,
+        quotaResetAt: receipt.resetAt,
+      },
+      lastReason: "Claude quota is exhausted; waiting for exact-session automatic recovery",
+    });
+    queueEvent(paused, QUOTA_PAUSED_STATE, { limitEventId: receipt.limitEventId });
+    return paused;
   }
 
   async function maybeNotifyBlocked(job) {
@@ -470,6 +502,29 @@ export function createDeliveryBroker({
     // retyping the prompt.
     if (await exactEcho(job)) return acknowledge(job, "echo");
 
+    // A quota response ends the active turn before queued work can be trusted.
+    // Park the FIFO durably instead of typing into Claude's visually-idle but
+    // non-ingesting composer. Only recoverClaudeQuota() can reopen this state;
+    // a stale banner or bridge restart is never permission to retype.
+    if (job.status === QUOTA_PAUSED_STATE) {
+      return queue.update(job, {
+        nextAttemptAt: now() + QUOTA_PAUSED_RECHECK_MS,
+        lastReason: "Claude quota recovery is still pending; automatic delivery remains fenced",
+      });
+    }
+    if (job.metadata?.deliveryTransport !== "native"
+        && typeof agent.claudeLimitReceipt === "function") {
+      let receipt = null;
+      try { receipt = await agent.claudeLimitReceipt(job.agentName, job.pane); }
+      catch (error) {
+        log(`Claude limit receipt failed for ${job.agentName}:${job.pane}: ${error.message}`);
+      }
+      const recoveryBypass = receipt
+        && job.metadata?.quotaRecoveryLimitId === receipt.limitEventId
+        && job.metadata?.quotaRecoverySessionId === receipt.sessionId;
+      if (receipt && !recoveryBypass) return pauseForQuota(job, receipt);
+    }
+
     // Before Enter there is no delivery ambiguity: the broker has not sent
     // the instruction. Preserve any foreign/partial composer content, stop
     // retrying after a bounded safety budget, and release the FIFO with an
@@ -802,6 +857,125 @@ export function createDeliveryBroker({
     }
   }
 
+  /**
+   * Resume one exact Claude session after a proven quota NACK.
+   *
+   * The same session lease used by normal delivery spans the process restart,
+   * so no writer can race the destructive boundary. Any old submit fence with
+   * no authoritative echo becomes safe to retry only AFTER the old Claude
+   * process is gone. The continuation is a new idempotent job and never
+   * replays the original task from its beginning.
+   */
+  function recoverClaudeQuota({ agentName, pane = 0, receipt } = {}) {
+    return runExclusive(agentName, pane, async () => {
+      if (!receipt?.sessionId || !receipt?.limitEventId) {
+        return { recovered: false, reason: "missing exact Claude limit receipt" };
+      }
+      const acquireLease = queue.acquireSessionLease || queue.acquireTargetLease;
+      const lease = acquireLease?.(agentName, pane) || null;
+      if (acquireLease && !lease) return { recovered: false, reason: "delivery session is busy" };
+      try {
+        const currentReceipt = typeof agent.claudeLimitReceipt === "function"
+          ? await agent.claudeLimitReceipt(agentName, pane)
+          : null;
+        if (!sameLimit(currentReceipt, receipt)) {
+          return { recovered: false, reason: "quota receipt was superseded before restart" };
+        }
+
+        const idempotencyKey = quotaRecoveryJobKey(agentName, pane, receipt);
+        let continuation = queue.enqueue({
+          agentName,
+          pane,
+          text: quotaRecoveryContinuation(),
+          source: "quota-recovery",
+          idempotencyKey,
+          // Recovery of the interrupted turn precedes messages that arrived
+          // while the pane was known unable to ingest.
+          orderKey: `0000000000000000:${idempotencyKey}`,
+          metadata: {
+            quotaRecoveryLimitId: receipt.limitEventId,
+            quotaRecoverySessionId: receipt.sessionId,
+          },
+        });
+        if (continuation.status === "acknowledged") {
+          return { recovered: true, restarted: false, replayed: true, job: continuation };
+        }
+        if (continuation.metadata?.quotaRestartedAt) {
+          return { recovered: true, restarted: false, replayed: true, job: continuation };
+        }
+        continuation = queue.update(continuation, {
+          status: QUOTA_PAUSED_STATE,
+          nextAttemptAt: now() + QUOTA_PAUSED_RECHECK_MS,
+          metadata: { quotaPreviousStatus: continuation.status },
+          lastReason: "exact quota recovery reserved; awaiting pane restart",
+        });
+        queueEvent(continuation, "quota_recovery_reserved", { limitEventId: receipt.limitEventId });
+
+        // Fence every other non-terminal job before the pane process moves.
+        // Jobs with real JSONL echoes are acknowledged, never replayed.
+        for (const candidate of queue.list(agentName, pane)) {
+          if (candidate.id === continuation.id || TERMINAL_DELIVERY_STATES.has(candidate.status)) continue;
+          if (await exactEcho(candidate)) {
+            await acknowledge(candidate, "echo-before-quota-restart");
+            continue;
+          }
+          pauseForQuota(candidate, receipt);
+        }
+
+        try {
+          await agent.restartClaude(agentName, pane, {
+            resumeSessionId: receipt.sessionId,
+            expectedLimitEventId: receipt.limitEventId,
+          });
+        } catch (error) {
+          const failed = queue.update(continuation, {
+            status: QUOTA_PAUSED_STATE,
+            nextAttemptAt: now() + QUOTA_PAUSED_RECHECK_MS,
+            metadata: { quotaRestartAttempts: Number(continuation.metadata?.quotaRestartAttempts || 0) + 1 },
+            lastReason: `Claude exact-session restart failed: ${error.message}`,
+          });
+          queueEvent(failed, "quota_restart_failed", { reason: error.message.slice(0, 160) });
+          return { recovered: false, reason: error.message, job: failed };
+        }
+
+        // The old process is now gone. A missing sink echo is finally proof
+        // that an ambiguous submit cannot execute later, so it may re-enter
+        // FIFO as a fresh pending write without violating at-most-once.
+        for (const candidate of queue.list(agentName, pane)) {
+          if (candidate.id === continuation.id
+              || candidate.status !== QUOTA_PAUSED_STATE
+              || candidate.metadata?.quotaLimitEventId !== receipt.limitEventId) continue;
+          if (await exactEcho(candidate)) {
+            await acknowledge(candidate, "echo-during-quota-restart");
+            continue;
+          }
+          const pending = queue.update(candidate, {
+            status: "pending",
+            draftOwned: false,
+            submitFenceAt: null,
+            submittedAt: null,
+            nextAttemptAt: now(),
+            metadata: { quotaRecoveredAt: now() },
+            lastReason: "old limited process stopped without an echo; exact payload is safe to retry",
+          });
+          queueEvent(pending, "quota_unpaused", { limitEventId: receipt.limitEventId });
+        }
+
+        continuation = queue.update(continuation, {
+          status: "pending",
+          draftOwned: false,
+          nextAttemptAt: now(),
+          metadata: { quotaRestartedAt: now() },
+          lastReason: "exact Claude session resumed; continuation is ready for one idempotent delivery",
+        });
+        queueEvent(continuation, "quota_restarted", { sessionId: receipt.sessionId });
+        return { recovered: true, restarted: true, replayed: false, job: continuation };
+      } finally {
+        lease?.release();
+      }
+    });
+  }
+
   function kickTarget(agentName, pane) {
     if (stopped) return Promise.resolve();
     return runExclusive(agentName, pane, () => drainTarget(agentName, pane));
@@ -859,5 +1033,8 @@ export function createDeliveryBroker({
     await Promise.allSettled([...lanes.values()]);
   }
 
-  return { queue, enqueue, enqueueAndWait, start, stop, kick, kickTarget, runExclusive };
+  return {
+    queue, enqueue, enqueueAndWait, start, stop, kick, kickTarget, runExclusive,
+    recoverClaudeQuota,
+  };
 }

@@ -262,10 +262,10 @@ export function createAutoCompact({
     const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
     if (channelId && discord) {
       await discord.send(channelId,
-        `🚫 **${paneKey} har slagit i kvot/limit — arbetet står stilla.** Återställningstiden syns i panelen (\`amux log ${agentName} -p ${paneIdx} --tmux\`). Knuffa igång den när kvoten är tillbaka.`)
+        `🚫 **${paneKey} har slagit i kvot/limit — arbetet är säkert pausat.** Återställningstiden syns i panelen (\`amux log ${agentName} -p ${paneIdx} --tmux\`). AMUX återstartar exakt samma session och fortsätter automatiskt när kvoten är tillbaka.`)
         .catch((err) => log(`limited warning send failed for ${paneKey}: ${err.message}`));
     }
-    notifyUser(`🚫 ${paneKey} slut på kvot — står stilla tills du knuffar`)
+    notifyUser(`🚫 ${paneKey} slut på kvot — AMUX fortsätter automatiskt efter påfyllning/reset`)
       .catch?.((err) => log(`limited push failed: ${err.message}`));
   }
 

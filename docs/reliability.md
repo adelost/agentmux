@@ -82,6 +82,23 @@ Auto-compacting claw:3 (was 78%). Summary preserves recent context.
 | `AUTO_COMPACT_POLL_MS` | `60000` | Milliseconds between poll ticks |
 | `AUTO_COMPACT_MIN_IDLE_MS` | `300000` | Required conversation silence before warning |
 
+### Claude quota recovery
+
+When Claude returns its exact session-limit response, AMUX parks delivery for
+that pane instead of typing into a non-ingesting composer. It polls the local
+OAuth usage endpoint and, after a top-up or reset, restarts only the exact
+persisted Claude session. A new idempotent continuation turn resumes at the
+limit checkpoint; the original task is never replayed from the beginning.
+If quota telemetry is unavailable, the reset time embedded in Claude's signed
+session history is the conservative fallback. A later human turn supersedes
+automatic recovery and prevents a stale restart.
+
+| Variable | Default | Meaning |
+|---|---:|---|
+| `AMUX_QUOTA_RECOVERY_ENABLED` | `true` | Set `false` to disable automatic exact-session recovery |
+| `AMUX_QUOTA_RECOVERY_POLL_MS` | `30000` | Fresh quota check interval while a Claude limit receipt is active |
+| `AMUX_QUOTA_RECOVERY_RESET_GRACE_MS` | `15000` | Grace after the banner reset time before clock-based fallback |
+
 ## Recovery Commands
 
 Use these when a pane appears stuck or the bridge cannot confirm delivery:

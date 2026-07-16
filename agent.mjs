@@ -58,6 +58,8 @@ import {
   CODEX_AUTONOMOUS_FLAGS,
 } from "./core/execution-safety.mjs";
 import { decideCodexStart, liveRolloutWriters } from "./core/codex-session-guard.mjs";
+import { activeClaudeLimitReceipt } from "./core/claude-quota-recovery.mjs";
+import { persistedSessionIdentity } from "./core/native-session-identity.mjs";
 const CODEX_SESSION_STATE_KEY = "codex_session_by_pane_profile_v1";
 const CODEX_PROMPT_READY_TIMEOUT_MS = 8_000;
 function codexDeliveryBlocked(message, { zoomRecoverable = false } = {}) {
@@ -1158,16 +1160,19 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   // --- Claude lifecycle ---
 
-  async function startClaude(name, target, rootDir, pane = 0) {
+  async function startClaude(name, target, rootDir, pane = 0, launch = null) {
     if (await isPaneDead(target)) await respawnPane(target);
     if (await isAlreadyRunning(target)) return;
 
     const dir = paneDir(rootDir, pane);
     const sessionFlag = await resolveSessionFlag(dir, name, pane);
-    const resumeSessionId = agentConfig(name).panes?.[pane]?.resumeSessionId || null;
+    const resumeSessionId = launch?.resumeSessionId
+      || agentConfig(name).panes?.[pane]?.resumeSessionId
+      || null;
     const command = buildClaudeLaunchCommand({
       resume: !resumeSessionId && sessionFlag === "--continue",
       resumeSessionId,
+      model: launch?.model || resolveClaudeModel(),
     });
     await t.runShell(target, `cd ${esc(dir)} && ${command}`);
     await wait(2000);
@@ -1299,6 +1304,78 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       await wait(200);
     }
     throw new Error(`Codex did not start in ${agentName}:${pane}`);
+  }
+
+  /** Exact active Claude limit receipt for a configured tmux pane. */
+  async function claudeLimitReceipt(agentName, pane) {
+    const config = agentConfig(agentName);
+    const paneCmd = config.panes?.[pane]?.cmd || "";
+    if (!isClaudeCmd(paneCmd)) return null;
+    return activeClaudeLimitReceipt(paneDir(config.dir, pane));
+  }
+
+  /**
+   * Restart exactly one quota-limited Claude pane on its persisted session.
+   * The expected limit event is checked immediately before the destructive
+   * process boundary so a human continuation can never be killed by a stale
+   * watchdog observation.
+   */
+  async function restartClaude(agentName, pane, {
+    resumeSessionId,
+    expectedLimitEventId,
+  } = {}) {
+    const config = agentConfig(agentName);
+    const paneCmd = config.panes?.[pane]?.cmd || "";
+    if (!isClaudeCmd(paneCmd)) throw new Error(`${agentName}:${pane} is not a Claude pane`);
+    const exactResume = exactSessionId(resumeSessionId, "Claude");
+    if (!exactResume || !expectedLimitEventId) {
+      throw new Error("Claude quota recovery requires an exact session and limit event");
+    }
+
+    const dir = paneDir(config.dir, pane);
+    if (!persistedSessionIdentity("claude", exactResume, dir)) {
+      throw new Error(`Claude session ${exactResume} is not owned by ${agentName}:${pane}`);
+    }
+    const matchesExpectedLimit = () => {
+      const receipt = activeClaudeLimitReceipt(dir);
+      return receipt?.sessionId === exactResume
+        && receipt?.limitEventId === expectedLimitEventId;
+    };
+    if (!matchesExpectedLimit()) {
+      throw new Error(`${agentName}:${pane} no longer has the expected active quota limit`);
+    }
+    if (await isBusy(agentName, pane)) throw new Error(`${agentName}:${pane} is still working`);
+    // Close the human-input race after the asynchronous busy check.
+    if (!matchesExpectedLimit()) {
+      throw new Error(`${agentName}:${pane} recovered or changed before restart`);
+    }
+
+    const target = `${agentName}:.${pane}`;
+    await t.respawnPane(target, { kill: true, cwd: dir });
+    const shellDeadline = Date.now() + 5_000;
+    let shellReady = false;
+    while (Date.now() < shellDeadline) {
+      const command = await t.currentCommand(target).catch(() => "");
+      if (isShellProc(command)) { shellReady = true; break; }
+      await wait(100);
+    }
+    if (!shellReady) throw new Error(`replacement shell did not start in ${agentName}:${pane}`);
+
+    await startClaude(agentName, target, config.dir, pane, { resumeSessionId: exactResume });
+    await waitForClaudeReady(target, agentName, pane);
+    const readyDeadline = Date.now() + 12_000;
+    while (Date.now() < readyDeadline) {
+      const [command, screen] = await Promise.all([
+        t.currentCommand(target).catch(() => ""),
+        t.captureScreen(target).catch(() => ""),
+      ]);
+      if (/^(claude|node)$/.test(command)
+          && String(screen).split("\n").some((line) => line.trimStart().startsWith("❯"))) {
+        return { ok: true, sessionId: exactResume, limitEventId: expectedLimitEventId };
+      }
+      await wait(200);
+    }
+    throw new Error(`Claude resumed but its composer never became ready in ${agentName}:${pane}`);
   }
 
   async function isPaneDead(target) {
@@ -2523,6 +2600,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     capturePane, captureScreen, capturePromptEchoCursor, captureSlashReceiptCursor, waitForSlashReceipt, sendEscape, sendTab, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
     dismissBlockingPrompt, waitForPromptEcho,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession,
-    sanitizeTmuxGlobalEnv, restartCodex, restartFleet,
+    sanitizeTmuxGlobalEnv, claudeLimitReceipt, restartClaude, restartCodex, restartFleet,
   };
 }
