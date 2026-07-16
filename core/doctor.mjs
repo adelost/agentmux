@@ -251,6 +251,20 @@ export function checkNativeRuntime({ configured = 0, online = 0, running = 0, de
 export function checkDeliveryQueue({ stats, bridgeRunning, now = Date.now() }) {
   const supplementary = Number(stats?.pendingNotices || 0)
     + Number(stats?.cancellationRequests || 0);
+  // Queue movement is not delivery. A target that let consecutive receipt
+  // budgets expire without ingesting anything is the one state this row must
+  // never report as draining, and it outranks every count below including the
+  // empty fast path: the delivery breaker exists precisely to keep such a
+  // target's queue short, so an empty queue is its symptom, not its absence.
+  const notIngesting = stats?.notIngestingTargets || [];
+  if (notIngesting.length) {
+    const targets = notIngesting
+      .map((target) => `${target.agentName}:${target.pane} (${target.unverifiedStreak} budgets)`)
+      .join(", ");
+    return check("delivery queue", FAIL,
+      `${notIngesting.length} target${notIngesting.length === 1 ? "" : "s"} not ingesting prompts: ${targets}`,
+      "the pane accepts keystrokes but ingested nothing across consecutive receipt budgets; inspect the pane process, then have senders resend");
+  }
   if (!stats?.total && !supplementary) return check("delivery queue", OK, "empty");
   const age = stats.oldestCreatedAt
     ? `${Math.max(0, Math.round((now - stats.oldestCreatedAt) / 1000))}s`
