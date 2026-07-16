@@ -14,7 +14,7 @@
 // Real tmux on a throwaway socket, real git repo, temp HOME. No real amux.
 import { feature, integration, expect } from "bdd-vitest";
 import { spawn, execSync } from "child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, chmodSync, utimesSync } from "fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, chmodSync, utimesSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -30,7 +30,7 @@ const BROKER_CHATTER_AGE_MIN = 10;
 
 const ageStamp = (minutes) => new Date(Date.now() - minutes * MINUTE_MS);
 
-const setup = ({ lastCommitAgeMin }) => {
+const setup = ({ lastCommitAgeMin, brokerChatterAgeMin = BROKER_CHATTER_AGE_MIN }) => {
   const root = mkdtempSync(join(tmpdir(), "snooze-sweep-"));
   const home = join(root, "home");
   const watchDir = join(root, "watch");
@@ -53,7 +53,7 @@ const setup = ({ lastCommitAgeMin }) => {
   mkdirSync(projects, { recursive: true });
   const jsonl = join(projects, "session.jsonl");
   writeFileSync(jsonl, "{}\n");
-  const chatteredAt = ageStamp(BROKER_CHATTER_AGE_MIN);
+  const chatteredAt = ageStamp(brokerChatterAgeMin);
   utimesSync(jsonl, chatteredAt, chatteredAt);
 
   const amuxLog = join(root, "amux-calls");
@@ -61,13 +61,24 @@ const setup = ({ lastCommitAgeMin }) => {
   writeFileSync(amux, `#!/usr/bin/env bash\necho "CALL $*" >> "${amuxLog}"\nexit 0\n`);
   chmodSync(amux, 0o755);
 
-  const conf = join(root, "fleets.conf");           // no 4th column → board sweep skips
-  writeFileSync(conf, `ghost 0 ${repoDir}\n`);
+  const boardState = join(root, "board.json");
+  writeFileSync(boardState, JSON.stringify({ counts: { deferred: 8, done: 109 } }));
+  const curl = join(root, "curl");
+  writeFileSync(curl, `#!/usr/bin/env bash\ncat "${boardState}"\n`);
+  chmodSync(curl, 0o755);
+  const tokenFile = join(root, "read-token");
+  writeFileSync(tokenFile, "test-token-test-token-test-token-1234\n");
+
+  const conf = join(root, "fleets.conf");
+  writeFileSync(conf, `ghost 0 ${repoDir} testproj\n`);
 
   const snooze = join(watchDir, "ghost.snooze");
   writeFileSync(snooze, "");
 
-  return { root, home, watchDir, repoDir, socket, conf, amux, amuxLog, snooze };
+  return {
+    root, home, watchDir, repoDir, socket, conf, amux, amuxLog,
+    boardState, curl, tokenFile, snooze,
+  };
 };
 
 const teardown = (fx) => {
@@ -85,6 +96,9 @@ const runSweep = (fx) => new Promise((ok, bad) => {
       WATCH_DIR: fx.watchDir,
       CONF: fx.conf,
       AMUX: fx.amux,
+      CURL: fx.curl,
+      BOARD_URL: "http://board.test",
+      READ_TOKEN_FILE: fx.tokenFile,
       TMUX_SOCKET: fx.socket,
       QUEUE_DIR: join(fx.root, "no-queue"),     // absent → queue sweep skipped
       GH: "/nonexistent-gh",                    // review-queue sweep skipped
@@ -121,6 +135,42 @@ feature("fleet-watch broker self-snooze", () => {
     then: ["the stale snooze is dropped so the watch re-arms", ({ stdout, snoozeSurvived }, fx) => {
       expect(stdout).toContain("framdrift");
       expect(snoozeSurvived).toBe(false);
+      teardown(fx);
+    }],
+  });
+
+  integration("never wakes an idle broker for a deferred and terminal-only board", {
+    given: ["a stale fleet whose board has no unfinished tickets", () =>
+      setup({ lastCommitAgeMin: 300, brokerChatterAgeMin: 300 })],
+    when: ["the quiet-fleet sweep runs", async (fx) => {
+      rmSync(fx.snooze);
+      const stdout = await runSweep(fx);
+      const calls = existsSync(fx.amuxLog) ? readFileSync(fx.amuxLog, "utf-8") : "";
+      return { stdout, calls };
+    }],
+    then: ["the board truth suppresses both broker and human messages", ({ stdout, calls }, fx) => {
+      expect(stdout).toContain("zero unfinished board tickets → silent");
+      expect(calls).toBe("");
+      teardown(fx);
+    }],
+  });
+
+  integration("still wakes a stale broker when the board has executable work", {
+    given: ["a stale fleet with one READY ticket", () => {
+      const fx = setup({ lastCommitAgeMin: 300, brokerChatterAgeMin: 300 });
+      rmSync(fx.snooze);
+      writeFileSync(fx.boardState, JSON.stringify({ counts: { ready: 1 } }));
+      return fx;
+    }],
+    when: ["the quiet-fleet sweep runs", async (fx) => {
+      const stdout = await runSweep(fx);
+      const calls = existsSync(fx.amuxLog) ? readFileSync(fx.amuxLog, "utf-8") : "";
+      return { stdout, calls };
+    }],
+    then: ["the broker receives one board-grounded typed-deferral brief", ({ stdout, calls }, fx) => {
+      expect(stdout).toContain("NUDGED");
+      expect(calls).toContain("TYPAD deferral");
+      expect(calls).toContain("human_decision");
       teardown(fx);
     }],
   });

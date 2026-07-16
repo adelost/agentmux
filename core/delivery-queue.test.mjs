@@ -128,6 +128,51 @@ feature("durable delivery queue", () => {
     }],
   });
 
+  component("idle polling does not reread terminal spool history", {
+    given: ["a terminal-heavy target and an independently opened broker queue", () => {
+      const rootDir = tempRoot();
+      const producer = createDeliveryQueue({ rootDir, now: () => 10_000 });
+      for (let index = 0; index < 48; index++) {
+        const job = producer.enqueue({
+          agentName: "claw", pane: 6, text: `historical ${index}`, orderKey: String(index).padStart(3, "0"),
+        });
+        producer.update(job, { status: "acknowledged", acknowledgedAt: 10_000, terminalAt: 10_000 });
+      }
+      let reads = 0;
+      const broker = createDeliveryQueue({ rootDir, onListJobRead: () => { reads++; } });
+      return { rootDir, producer, broker, reads: () => reads };
+    }],
+    when: ["the broker polls repeatedly, then an external producer changes the target twice", (ctx) => {
+      const initiallyActive = ctx.broker.targets();
+      const firstReads = ctx.reads();
+      for (let poll = 0; poll < 20; poll++) ctx.broker.targets();
+      const idleReads = ctx.reads();
+
+      const pending = ctx.producer.enqueue({ agentName: "claw", pane: 6, text: "new work", orderKey: "999" });
+      const activeAfterEnqueue = ctx.broker.targets();
+      const enqueueReads = ctx.reads();
+      ctx.producer.update(pending, {
+        status: "acknowledged", acknowledgedAt: 20_000, terminalAt: 20_000,
+      });
+      const activeAfterTerminal = ctx.broker.targets();
+      const terminalReads = ctx.reads();
+      return {
+        initiallyActive, firstReads, idleReads,
+        activeAfterEnqueue, enqueueReads, activeAfterTerminal, terminalReads,
+      };
+    }],
+    then: ["unchanged polls read zero job files while cross-process revisions remain immediately visible", (result, ctx) => {
+      expect(result.initiallyActive).toEqual([]);
+      expect(result.firstReads).toBe(48);
+      expect(result.idleReads).toBe(48);
+      expect(result.activeAfterEnqueue).toEqual([{ agentName: "claw", pane: 6 }]);
+      expect(result.enqueueReads).toBe(97);
+      expect(result.activeAfterTerminal).toEqual([]);
+      expect(result.terminalReads).toBe(146);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("a sender cancellation request is durable and retry-idempotent", {
     given: ["one queued follower and a stable request identity", () => {
       const rootDir = tempRoot();

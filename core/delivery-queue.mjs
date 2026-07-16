@@ -16,6 +16,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "fs";
@@ -95,6 +96,7 @@ export function createDeliveryQueue({
   now = () => Date.now(),
   uuid = () => randomUUID(),
   validateTarget = null,
+  onListJobRead = null,
 } = {}) {
   ensurePrivateDir(rootDir);
 
@@ -102,6 +104,35 @@ export function createDeliveryQueue({
   const pathFor = (agentName, pane, id) => join(dirFor(agentName, pane), `${id}.json`);
   const cancelRequestPathFor = (agentName, pane, id) =>
     join(dirFor(agentName, pane), `${id}.cancel-request`);
+  const revisionPathFor = (agentName, pane) => join(dirFor(agentName, pane), ".queue-revision");
+  const listCache = new Map();
+
+  function cacheKey(agentName, pane) {
+    return targetKey(agentName, pane);
+  }
+
+  function readRevision(agentName, pane) {
+    const signature = (path) => {
+      try {
+        const stat = statSync(path, { bigint: true });
+        return `${stat.ino}:${stat.mtimeNs}:${stat.ctimeNs}:${stat.size}`;
+      } catch {
+        return "missing";
+      }
+    };
+    // The directory signature closes the crash window between persisting a
+    // job/sidecar and advancing .queue-revision. Session leases live at the
+    // queue root, so a stable target directory really does mean stable jobs.
+    return `${signature(revisionPathFor(agentName, pane))}|${signature(dirFor(agentName, pane))}`;
+  }
+
+  function markChanged(agentName, pane) {
+    const paneNumber = Number(pane) || 0;
+    const dir = dirFor(agentName, paneNumber);
+    ensurePrivateDir(dir);
+    atomicReplace(revisionPathFor(agentName, paneNumber), `${process.pid}:${uuid()}`);
+    listCache.delete(cacheKey(agentName, paneNumber));
+  }
 
   function hydrateCancellation(job) {
     if (!job || (job.cancelRequestStatus && job.cancelRequestStatus !== "requested")) return job;
@@ -201,6 +232,7 @@ export function createDeliveryQueue({
     writeFileSync(tmp, `${JSON.stringify(job, null, 2)}\n`, { mode: 0o600 });
     try {
       linkSync(tmp, path);
+      markChanged(agentName, paneNumber);
       return { ...job, path };
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
@@ -226,19 +258,77 @@ export function createDeliveryQueue({
     };
     delete next.path;
     atomicReplace(current.path, next);
+    markChanged(current.agentName, current.pane);
     return { ...next, path: current.path };
   }
 
-  function list(agentName, pane) {
+  const operationalJob = (job) => !TERMINAL_DELIVERY_STATES.has(job.status)
+    || needsDeliveryTerminalNotice(job)
+    || job.cancelRequestStatus === "requested";
+
+  function listInternal(agentName, pane, { targetScan = false } = {}) {
     const dir = dirFor(agentName, pane);
-    let names;
-    try { names = readdirSync(dir).filter((name) => name.endsWith(".json")); }
-    catch { return []; }
-    return names.flatMap((name) => {
+    const key = cacheKey(agentName, pane);
+
+    // Producers and the broker are separate processes. Every queue mutation
+    // advances this tiny durable revision, so an idle broker can poll it
+    // without reopening and parsing thousands of immutable terminal jobs.
+    // A target without a revision is legacy state; its directory metadata is
+    // still a cross-process invalidation signal until the first mutation.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const revisionBefore = readRevision(agentName, pane);
+      const cached = listCache.get(key);
+      if (cached && cached.revision === revisionBefore) {
+        if (cached.jobs) return cached.jobs;
+        if (targetScan && cached.operational === false) return [];
+      }
+
+      let names;
+      try { names = readdirSync(dir).filter((name) => name.endsWith(".json")); }
+      catch {
+        listCache.delete(key);
+        return [];
+      }
+      const jobs = names.flatMap((name) => {
+        const path = join(dir, name);
+        try {
+          if (typeof onListJobRead === "function") onListJobRead(path);
+          return [{ ...hydrateCancellation(parseJson(path)), path }];
+        } catch {
+          return [];
+        }
+      }).sort((a, b) => String(a.orderKey).localeCompare(String(b.orderKey)));
+      const revisionAfter = readRevision(agentName, pane);
+      if (revisionAfter === revisionBefore) {
+        const operational = jobs.some(operationalJob);
+        // Terminal history can contain large prompt bodies and attachments.
+        // The 500 ms target poll needs only the negative result, not thousands
+        // of parsed objects retained forever. Keep full jobs only for a live
+        // target or an explicit list() caller.
+        listCache.set(key, {
+          revision: revisionAfter,
+          operational,
+          jobs: targetScan && !operational ? null : jobs,
+        });
+        return jobs;
+      }
+    }
+
+    // Continuous concurrent writers are rare. Return a fresh coherent-enough
+    // view but do not cache it; the next 500 ms broker poll retries.
+    return readdirSync(dir).filter((name) => name.endsWith(".json")).flatMap((name) => {
       const path = join(dir, name);
-      try { return [{ ...hydrateCancellation(parseJson(path)), path }]; }
-      catch { return []; }
+      try {
+        if (typeof onListJobRead === "function") onListJobRead(path);
+        return [{ ...hydrateCancellation(parseJson(path)), path }];
+      } catch {
+        return [];
+      }
     }).sort((a, b) => String(a.orderKey).localeCompare(String(b.orderKey)));
+  }
+
+  function list(agentName, pane) {
+    return listInternal(agentName, pane);
   }
 
   function next(agentName, pane) {
@@ -295,9 +385,7 @@ export function createDeliveryQueue({
 
   function targets() {
     return allTargets().filter(({ agentName, pane }) =>
-      next(agentName, pane)
-        || pendingTerminalNotices(agentName, pane).length
-        || pendingCancellationRequests(agentName, pane).length);
+      listInternal(agentName, pane, { targetScan: true }).some(operationalJob));
   }
 
   function findById(id) {
@@ -342,6 +430,7 @@ export function createDeliveryQueue({
     writeFileSync(tmp, `${JSON.stringify(request, null, 2)}\n`, { mode: 0o600 });
     try {
       linkSync(tmp, path);
+      markChanged(current.agentName, current.pane);
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
     } finally {
@@ -419,6 +508,7 @@ export function createDeliveryQueue({
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const dir = join(rootDir, entry.name);
+      let changed = false;
       for (const name of readdirSync(dir).filter((value) => value.endsWith(".json"))) {
         const path = join(dir, name);
         try {
@@ -437,11 +527,16 @@ export function createDeliveryQueue({
             try { unlinkSync(cancelRequestPathFor(job.agentName, job.pane, job.id)); } catch {}
             rmSync(join(dir, "assets", job.id), { recursive: true, force: true });
             removed++;
+            changed = true;
           }
         } catch {
           // A corrupt job is evidence, not disposable state. Leave it for
           // doctor/audit instead of silently deleting the only prompt copy.
         }
+      }
+      if (changed) {
+        const match = entry.name.match(/^(.*)--p(\d+)$/);
+        if (match) markChanged(decodeURIComponent(match[1]), Number(match[2]));
       }
     }
     return removed;

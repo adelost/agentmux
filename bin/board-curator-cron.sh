@@ -10,10 +10,9 @@
 # arbetet i onödan").
 #
 # WHAT each run (hourly cron) does, per fleet with a board project:
-#   1. Compute an ACTIVITY FINGERPRINT: newest commit across the fleet's
-#      repos + the board's ticket counts (total + per-status). Status counts
-#      change on real ticket motion but NOT on watchdog pokes (those only
-#      bump revision/updatedAt), so a poked-but-idle board stays quiet.
+#   1. Compute an ACTIONABLE BOARD FINGERPRINT from triaging, needs_detail,
+#      ready, and in_progress counts. Repo commits and terminal/deferred
+#      tickets are deliberately excluded: neither creates broker work.
 #   2. Fingerprint unchanged since the last pass → silent skip.
 #   3. Changed → send the BROKER a curation brief (it has the context and
 #      the mandate): merge duplicates, rewrite unclear tickets, re-verify
@@ -35,6 +34,7 @@ set -uo pipefail
 export HOME="${HOME:-/home/adelost}"
 export PATH="${HOME}/.nvm/versions/node/v22.19.0/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin"
 AMUX="${AMUX:-${HOME}/.nvm/versions/node/v22.19.0/bin/amux}"
+CURL="${CURL:-curl}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=guard-heartbeat.sh
 source "$SCRIPT_DIR/guard-heartbeat.sh"
@@ -66,16 +66,16 @@ now=$(date +%s)
 SEND_TIMEOUT="${SEND_TIMEOUT:-25}"
 amux_send() { timeout "$SEND_TIMEOUT" "$AMUX" "$@"; }
 
-# Board ticket-count fingerprint for a project, or empty on any failure
+# Actionable board fingerprint for a project, or empty on any failure
 # (logged loud — a 401/500 here is a health event, never a silent zero).
 # Cloudflare requires a real User-Agent (bare python/curl defaults are 403).
 board_counts() {
   local project="$1" token
   token=$(cat "$READ_TOKEN_FILE" 2>/dev/null) || { log "$project: no read token at $READ_TOKEN_FILE"; return 1; }
-  curl -sf --max-time 20 -A "amux-board-curator" \
+  "$CURL" -sf --max-time 20 -A "amux-board-curator" \
     -H "Authorization: Bearer $token" \
     "${BOARD_URL}/api/tickets/summary?project=${project}" \
-    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("total"), json.dumps(d.get("counts"), sort_keys=True))' \
+    | python3 -c 'import json,sys; c=json.load(sys.stdin).get("counts") or {}; keys=("triaging","needs_detail","ready","in_progress"); actionable={k:int(c.get(k) or 0) for k in keys}; print(sum(actionable.values()), json.dumps(actionable, sort_keys=True))' \
     2>/dev/null
 }
 
@@ -86,20 +86,23 @@ while read -r session pane repo project _rest; do
   fleets=$((fleets + 1))
   [ -f "${WATCH_DIR}/${session}.OFF" ] && { log "$session: per-fleet OFF → skip"; continue; }
 
-  # Activity fingerprint: per-repo HEAD hashes + board counts. Hashes, not
-  # commit timestamps — %ct has second granularity (two commits in the same
-  # second look identical) and goes backwards on revert/force-push; a HEAD
-  # hash moves on every kind of motion.
-  heads=""
-  IFS=',' read -ra _repos <<<"$repo"
-  for _r in "${_repos[@]}"; do
-    heads="${heads}$(git -C "$_r" log -1 --format=%h 2>/dev/null || echo none),"
-  done
   counts=$(board_counts "$project") || { counts=""; board_failures=$((board_failures + 1)); }
-  [ -z "$counts" ] && log "$session/$project: board unreachable → commit-signal only"
-  fingerprint="heads:${heads} board:${counts}"
+  if [ -z "$counts" ]; then
+    log "$session/$project: board unreachable → silent (cannot prove actionable work)"
+    continue
+  fi
+  actionable_total=${counts%% *}
+  fingerprint="board:${counts}"
 
   stamp="${WATCH_DIR}/${session}.curated"
+  if [ "$actionable_total" -eq 0 ]; then
+    # Deferred, parked and terminal-only boards are settled state. Refreshing
+    # the silent baseline prevents a repo commit or a done-ticket audit update
+    # from waking a broker that has nothing executable to do.
+    { echo "$now"; echo "$fingerprint"; } > "$stamp"
+    log "$session/$project: zero actionable tickets → silent"
+    continue
+  fi
   if [ ! -f "$stamp" ]; then
     # Bootstrap: no prior point exists, so "motion since last pass" is
     # undefined — claiming it would brief every broker on install day.
