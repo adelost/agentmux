@@ -230,21 +230,81 @@ export function checkConfig({ agents, error }) {
   return check("config", OK, `${agents.length} agents configured`);
 }
 
-export function checkNativeRuntime({ configured = 0, online = 0, running = 0, details = [] } = {}) {
-  if (!configured) return null;
-  if (online !== configured) {
-    return check(
-      "native runtime",
-      FAIL,
-      `${online}/${configured} configured runtime${configured === 1 ? "" : "s"} online${details.length ? ` (${details.join(", ")})` : ""}`,
-      "run `amux runtime status` and start the missing runtime; native targets fail closed",
-    );
+const runtimeKey = (runtime = {}) => {
+  if (Number.isSafeInteger(Number(runtime.port))) return `local:${Number(runtime.port)}`;
+  try {
+    const parsed = new URL(runtime.url);
+    const port = Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80));
+    if (["127.0.0.1", "localhost", "::1", "[::1]"].includes(parsed.hostname)) {
+      return `local:${port}`;
+    }
+    return parsed.origin;
+  } catch {
+    return String(runtime.url || "unknown");
   }
-  return check(
-    "native runtime",
-    OK,
-    `${online}/${configured} online · ${running} active turn${running === 1 ? "" : "s"}`,
-  );
+};
+
+/** Every managed runtime is a row; configured-but-unmanaged runtimes cannot hide. */
+export function checkNativeRuntimeFleet({ managed = [], configured = [], discoveryError = null } = {}) {
+  if (!managed.length && !configured.length && !discoveryError) return [];
+  const configuredByKey = new Map(configured.map((runtime) => [runtimeKey(runtime), runtime]));
+  const managedKeys = new Set(managed.map(runtimeKey));
+  const onlineManaged = managed.filter((runtime) => runtime.online).length;
+  const running = managed.reduce((total, runtime) => total + Number(runtime.health?.running || 0), 0);
+  const managedFailure = managed.some((runtime) => !runtime.online);
+  const configuredFailure = configured.some((runtime) => !runtime.online);
+  const unmanagedConfigured = configured.some((runtime) => runtime.online && !managedKeys.has(runtimeKey(runtime)));
+  const status = discoveryError || managedFailure || configuredFailure ? FAIL : unmanagedConfigured ? WARN : OK;
+  const rows = [check(
+    "native runtimes",
+    status,
+    `${managed.length} managed · ${onlineManaged} online · ${running} active turn${running === 1 ? "" : "s"} · ${configured.length} configured`,
+    status === FAIL
+      ? "run `amux runtime status`; every configured runtime must be online and every managed process must answer health"
+      : status === WARN
+        ? "an online configured runtime is not owned by the local service manager"
+        : null,
+  )];
+
+  if (discoveryError) {
+    rows.push(check(
+      "native discovery",
+      FAIL,
+      `managed runtime enumeration failed · ${discoveryError}`,
+      "inspect ~/.agentmux ownership records; a runtime may be running without appearing above",
+    ));
+  }
+
+  for (const runtime of managed) {
+    const health = runtime.health ?? {};
+    const port = Number(runtime.port);
+    const isConfigured = configuredByKey.has(runtimeKey(runtime));
+    rows.push(check(
+      `native :${port}`,
+      runtime.online ? OK : FAIL,
+      `boot ${health.bootId || "unavailable"} · ${Number.isFinite(Number(health.agents)) ? Number(health.agents) : "?"} agents`
+      + ` · ${Number.isFinite(Number(health.running)) ? Number(health.running) : "?"} active`
+      + ` · data ${runtime.paths?.dataDir || "unknown"} · ${isConfigured ? "configured" : "managed-only"}`,
+      runtime.online ? null : `inspect ${runtime.paths?.logPath || "the runtime log"}`,
+    ));
+  }
+
+  for (const runtime of configured) {
+    if (managedKeys.has(runtimeKey(runtime))) continue;
+    let label = runtime.url || "unknown";
+    try { label = `:${new URL(runtime.url).port || "80"}`; } catch {}
+    rows.push(check(
+      `native ${label}`,
+      runtime.online ? WARN : FAIL,
+      runtime.online
+        ? `online but unmanaged · boot ${runtime.health?.bootId || "unavailable"} · ${Number(runtime.health?.agents ?? 0)} agents`
+        : `configured but offline${runtime.error ? ` · ${runtime.error}` : ""}`,
+      runtime.online
+        ? "adopt this runtime into the service manager or remove the stale configured URL"
+        : "start the configured runtime; native targets fail closed",
+    ));
+  }
+  return rows;
 }
 
 /** Durable prompts must be visible even when the bridge is intentionally off. */

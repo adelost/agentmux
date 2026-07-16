@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  discoverNativeRuntimes,
+  formatNativeRuntimeStatuses,
   nativeRuntimeEnvironment,
   nativeRuntimeStatus,
   startNativeRuntime,
@@ -26,6 +28,53 @@ const availablePort = () => new Promise((resolvePort, rejectPort) => {
 });
 
 describe("native runtime detached lifecycle", () => {
+  it("enumerates every managed runtime data directory and formats one truthful row each", async () => {
+    const root = mkdtempSync(join(tmpdir(), "amux-native-discovery-"));
+    const firstState = join(root, "web-runtime-8811");
+    const secondState = join(root, "nested", "runtime");
+    mkdirSync(firstState, { recursive: true });
+    mkdirSync(secondState, { recursive: true });
+    writeFileSync(join(firstState, "process.json"), JSON.stringify({
+      pid: 11,
+      port: 8811,
+      serverPath: "/runtime/server.mjs",
+      dataDir: "/data/web-ui",
+    }));
+    writeFileSync(join(secondState, "process.json"), JSON.stringify({
+      pid: 13,
+      port: 8813,
+      serverPath: "/runtime/server.mjs",
+      dataDir: "/data/code-pilot",
+    }));
+    const statusImpl = vi.fn(async ({ port, stateDir, dataDir }) => ({
+      port,
+      url: `http://127.0.0.1:${port}`,
+      managed: true,
+      online: true,
+      pid: port === 8811 ? 11 : 13,
+      health: {
+        bootId: `boot-${port}`,
+        projects: port === 8811 ? 1 : 4,
+        agents: port === 8811 ? 3 : 15,
+        running: 0,
+      },
+      paths: { root: stateDir, dataDir, logPath: join(stateDir, "runtime.log") },
+    }));
+    cleanups.push(async () => rmSync(root, { recursive: true, force: true }));
+
+    const statuses = await discoverNativeRuntimes({ stateRoot: root, statusImpl });
+    expect(statusImpl).toHaveBeenCalledTimes(2);
+    expect(statuses.map((status) => [status.port, status.paths.dataDir])).toEqual([
+      [8811, "/data/web-ui"],
+      [8813, "/data/code-pilot"],
+    ]);
+    expect(formatNativeRuntimeStatuses(statuses).split("\n")).toEqual([
+      "Native runtimes: 2 managed",
+      "✅ :8811 · pid 11 · boot boot-8811 · 1 project · 3 agents · 0 running · data /data/web-ui",
+      "✅ :8813 · pid 13 · boot boot-8813 · 4 projects · 15 agents · 0 running · data /data/code-pilot",
+    ]);
+  });
+
   it("starts without tmux, reports health and stops only its managed process", async () => {
     const root = mkdtempSync(join(tmpdir(), "amux-native-service-"));
     const port = await availablePort();

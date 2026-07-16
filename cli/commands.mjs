@@ -40,7 +40,7 @@ import {
   checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors, checkLedger,
   checkBridgeMode, checkContextBridge, checkTmux, checkTmuxVersion, checkConfig, overallStatus, formatDoctorReport, FAIL, WARN,
   checkDeliveryQueue,
-  checkNativeRuntime,
+  checkNativeRuntimeFleet,
   checkGuardCronHeartbeats,
   checkSuggestionsBoard,
 } from "../core/doctor.mjs";
@@ -80,6 +80,8 @@ import { executePlan, showPlanLog } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
 import { groupNativeTurns, nativeHistoryRows } from "../channels/native-runtime-watcher.mjs";
 import {
+  discoverNativeRuntimes,
+  formatNativeRuntimeStatuses,
   nativeRuntimeStatus,
   startNativeRuntime,
   stopNativeRuntime,
@@ -259,15 +261,22 @@ async function cmdRuntime(args, ctx) {
     legacyDataDir: flags["no-legacy-migration"] ? null : undefined,
   };
   if (action === "status") {
-    const status = await nativeRuntimeStatus(options);
-    const owner = status.managed ? `managed pid ${status.pid}` : "unmanaged";
-    console.log(
-      `Native runtime: ${status.online ? "online" : "offline"} · ${owner} · ${status.url}\n` +
-      `Data: ${status.paths.dataDir}\nLog: ${status.paths.logPath}`,
-    );
-    if (status.health) {
-      console.log(`Boot: ${status.health.bootId} · projects ${status.health.projects} · agents ${status.health.agents} · running ${status.health.running}`);
+    const scoped = flags.port !== undefined
+      || flags["state-dir"] !== undefined
+      || flags["data-dir"] !== undefined;
+    if (!scoped) {
+      const statuses = await discoverNativeRuntimes();
+      console.log(formatNativeRuntimeStatuses(statuses));
+      if (!statuses.length) {
+        const fallback = await nativeRuntimeStatus(options);
+        console.log(`No managed runtime discovered. Default :${fallback.port} is ${fallback.online ? "online but unmanaged" : "offline"}.`);
+      }
+      return;
     }
+    const status = await nativeRuntimeStatus(options);
+    console.log(formatNativeRuntimeStatuses(status.managed ? [status] : []));
+    if (!status.managed) console.log(`❌ :${status.port} · ${status.online ? "online but unmanaged" : "offline"} · data ${status.paths.dataDir}`);
+    console.log(`Log: ${status.paths.logPath}`);
     return;
   }
   if (action === "start") {
@@ -3141,9 +3150,11 @@ async function cmdDoctor(ctx) {
   const nativeUrls = [...new Set(agents
     .filter((agent) => agent.backend === "native")
     .map((agent) => agent.runtimeUrl || "http://127.0.0.1:8811"))];
-  let nativeOnline = 0;
-  let nativeRunning = 0;
-  const nativeDetails = [];
+  let managedRuntimes = [];
+  let nativeDiscoveryError = null;
+  try { managedRuntimes = await discoverNativeRuntimes(); }
+  catch (error) { nativeDiscoveryError = error.message; }
+  const configuredRuntimes = [];
   for (const runtimeUrl of nativeUrls) {
     try {
       const response = await fetch(`${runtimeUrl.replace(/\/+$/, "")}/api/health`, {
@@ -3151,10 +3162,9 @@ async function cmdDoctor(ctx) {
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const status = await response.json();
-      nativeOnline++;
-      nativeRunning += Number(status.running || 0);
+      configuredRuntimes.push({ url: runtimeUrl, online: true, health: status });
     } catch (error) {
-      nativeDetails.push(`${runtimeUrl}: ${error.message}`);
+      configuredRuntimes.push({ url: runtimeUrl, online: false, error: error.message });
     }
   }
 
@@ -3209,11 +3219,10 @@ async function cmdDoctor(ctx) {
       probe: suggestionsProbe,
       lastSuccessfulSyncAt: suggestionsLastSuccessfulSyncAt,
     }),
-    checkNativeRuntime({
-      configured: nativeUrls.length,
-      online: nativeOnline,
-      running: nativeRunning,
-      details: nativeDetails,
+    ...checkNativeRuntimeFleet({
+      managed: managedRuntimes,
+      configured: configuredRuntimes,
+      discoveryError: nativeDiscoveryError,
     }),
     checkDeliveryQueue({
       stats: deliveryQueueStats(createDeliveryQueue()),
@@ -4421,11 +4430,11 @@ Usage:
     --detach, -d                  Run under a managed tmux-free supervisor
   agent stop                      Stop Discord bridge (no arg = bridge)
   agent stop --all                Stop bridge + all agent sessions
-  agent runtime status            Native AMUX Code process + engine health
+  agent runtime status            Every managed native runtime + engine health
   agent runtime start             Start native runtime detached (no tmux)
   agent runtime stop              Stop it only while idle (sessions persist)
   agent runtime restart           Controlled idle restart
-    --port N                      Runtime port (default 8811)
+    --port N                      Select one runtime (start/stop default 8811)
     --data-dir PATH               Registry/uploads directory
     --state-dir PATH              PID/log ownership directory
     --no-legacy-migration         Do not import checkout-local spike history
