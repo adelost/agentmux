@@ -202,14 +202,16 @@ function delayedCodexSpawn(calls, control) {
 }
 
 async function waitFor(url, projectId, agentId, predicate) {
+  let lastAgent = null;
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const projects = (await responseJson(`${url}/api/projects`)).body.projects;
     const agent = projects.find((project) => project.id === projectId)
       ?.agents.find((candidate) => candidate.id === agentId);
+    lastAgent = agent ?? lastAgent;
     if (agent && predicate(agent)) return agent;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  throw new Error("native model state did not settle");
+  throw new Error(`native model state did not settle: ${JSON.stringify(lastAgent)}`);
 }
 
 describe("native runtime model truth", () => {
@@ -257,6 +259,67 @@ describe("native runtime model truth", () => {
       body: JSON.stringify({ model: "sonnet", idempotencyKey: "claude-sonnet" }),
     });
     expect(switched.body).toMatchObject({ sessionId: CLAUDE_SESSION, model: "sonnet", modelGuard: null });
+  });
+
+  it("re-arms the guard when the same fallback repeats after an explicit model retry", async () => {
+    const { url, project } = await setup();
+    const created = (await post(`${url}/api/projects/${project.id}/agents`, {
+      name: "Claude repeated fallback",
+      engine: "claude",
+      model: "fable",
+      effort: "high",
+      idempotencyKey: "claude-rearm",
+    })).body;
+
+    expect((await post(`${url}/api/agents/${created.id}/messages`, {
+      prompt: "observe first fallback",
+      attachments: [],
+      idempotencyKey: "claude-rearm-turn-1",
+    })).status).toBe(202);
+    await waitFor(url, project.id, created.id,
+      (agent) => !agent.running && agent.modelGuard?.blocked);
+
+    const retried = await responseJson(`${url}/api/agents/${created.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "fable", idempotencyKey: "claude-rearm-clear" }),
+    });
+    expect(retried.body).toMatchObject({
+      model: "fable",
+      modelGuard: null,
+      observedModel: "claude-sonnet-4-6",
+      modelObservation: {
+        model: "claude-sonnet-4-6",
+        requestedModel: "fable",
+      },
+    });
+
+    expect((await post(`${url}/api/agents/${created.id}/messages`, {
+      prompt: "observe the same fallback again",
+      attachments: [],
+      idempotencyKey: "claude-rearm-turn-2",
+    })).status).toBe(202);
+    const stoppedAgain = await waitFor(url, project.id, created.id,
+      (agent) => !agent.running && agent.modelGuard?.blocked);
+    expect(stoppedAgain).toMatchObject({
+      model: "fable",
+      observedModel: "claude-sonnet-4-6",
+      modelGuard: {
+        blocked: true,
+        requestedModel: "fable",
+        observedModel: "claude-sonnet-4-6",
+      },
+    });
+    expect((await post(`${url}/api/agents/${created.id}/messages`, {
+      prompt: "must be parked after repeated fallback",
+      attachments: [],
+      idempotencyKey: "claude-rearm-blocked",
+    })).status).toBe(423);
+
+    const history = (await responseJson(`${url}/api/agents/${created.id}/history`)).body;
+    expect(history.events.filter((event) => event.type === "web"
+      && event.subtype === "model-change"
+      && event.policy === "stop")).toHaveLength(2);
   });
 
   it("records and stops a Codex app-server reroute without changing requested model", async () => {

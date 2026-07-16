@@ -1219,11 +1219,14 @@ export function createWebUi(options = {}) {
       && previous?.effort === finding.observation.effort
       && previous?.requestedModel === finding.observation.requestedModel
       && previous?.requestedEffort === finding.observation.requestedEffort;
-    if (sameEvidence) return finding;
+    const mustStop = !finding.expected && shouldStopPane(finding.divergence);
+    // Repeated evidence is normally noise, but not after an operator has
+    // explicitly cleared a model guard for a verification turn. In that case
+    // the same fallback is fresh safety evidence and must re-arm the guard.
+    if (sameEvidence && (!mustStop || agent.modelGuard?.blocked)) return finding;
 
     agent.modelObservation = finding.observation;
     let guardChanged = false;
-    const mustStop = !finding.expected && shouldStopPane(finding.divergence);
     if (mustStop) {
       const nextGuard = {
         blocked: true,
@@ -1251,12 +1254,16 @@ export function createWebUi(options = {}) {
       requestedEffort,
     });
 
-    if (finding.change) {
+    // A repeated fallback after an explicit clear is a new safety incident
+    // even though the model pair itself did not change. Re-emit that
+    // requested-to-observed divergence so the interrupt and audit paths run.
+    const actionableChange = finding.change ?? (mustStop && guardChanged ? finding.divergence : null);
+    if (actionableChange) {
       const event = {
-        direction: finding.change.direction,
-        kind: finding.change.kind,
-        from: finding.change.from,
-        to: finding.change.to,
+        direction: actionableChange.direction,
+        kind: actionableChange.kind,
+        from: actionableChange.from,
+        to: actionableChange.to,
         expected: finding.expected,
         cause: finding.cause,
         requestedModel,
