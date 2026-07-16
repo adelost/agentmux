@@ -10,9 +10,11 @@ import yaml from "js-yaml";
 import { createDeliveryQueue, waitForDeliveryJob } from "./delivery-queue.mjs";
 
 const LIVE_ORIGIN = "https://suggest.v1d.io";
-const REQUIRED_PROJECTS = Object.freeze(["source", "skydive"]);
+const DEFAULT_DISCOVERY_PROJECT = "source";
+const MAX_PROJECTS = 32;
 const MAX_RESPONSE_BYTES = 512 * 1024;
 const MAX_PROMPT_BYTES = 32 * 1024;
+const PROJECT_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/u;
 
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const bytes = (value) => Buffer.byteLength(String(value), "utf8");
@@ -42,11 +44,12 @@ export function loadWatchdogOutboxConfig(path, {
   if (!allowTestOrigin && origin.toString().replace(/\/$/u, "") !== LIVE_ORIGIN) {
     throw new Error(`config: baseUrl must use ${LIVE_ORIGIN}`);
   }
-  const projects = Array.isArray(raw.projects) ? raw.projects.map(String) : REQUIRED_PROJECTS;
-  if (projects.length !== REQUIRED_PROJECTS.length
-    || REQUIRED_PROJECTS.some((project) => !projects.includes(project))
-    || new Set(projects).size !== projects.length) {
-    throw new Error("config: projects must contain source and skydive exactly once");
+  const projects = raw.projects == null || raw.projects === "auto"
+    ? null
+    : validateProjectIds(raw.projects, "config: projects");
+  const discoveryProject = String(raw.discoveryProject ?? DEFAULT_DISCOVERY_PROJECT);
+  if (!PROJECT_ID.test(discoveryProject)) {
+    throw new Error("config: discoveryProject must be a valid project id");
   }
   const requestTimeoutMs = Number(raw.requestTimeoutMs ?? 15_000);
   const deliveryWaitMs = Number(raw.deliveryWaitMs ?? 12_000);
@@ -59,6 +62,7 @@ export function loadWatchdogOutboxConfig(path, {
   return {
     baseUrl: origin.toString().replace(/\/$/u, ""),
     projects,
+    discoveryProject,
     requestTimeoutMs,
     deliveryWaitMs,
     readCredentialFile: expandPath(raw.readCredentialFile
@@ -122,15 +126,19 @@ export async function pollWatchdogOutboxes({
   deliver,
   logger = console,
 }) {
-  if (!isObject(config) || !Array.isArray(config.projects) || typeof deliver !== "function") {
-    throw new Error("poller: config projects and deliver function are required");
+  if (!isObject(config) || (config.projects !== null && !Array.isArray(config.projects))
+    || typeof deliver !== "function") {
+    throw new Error("poller: config and deliver function are required");
   }
   validateToken(readToken, "read");
   validateToken(adminToken, "admin");
+  const projects = config.projects === null
+    ? await discoverProjects(config, readToken, fetchImpl)
+    : validateProjectIds(config.projects, "poller: projects");
   let delivered = 0;
   let pending = 0;
   const errors = [];
-  for (const projectId of config.projects) {
+  for (const projectId of projects) {
     try {
       const bootstrapUrl = endpoint(config.baseUrl, "/api/config/agentdocs", projectId);
       const bootstrap = await fetchJson(bootstrapUrl, {
@@ -177,7 +185,42 @@ export async function pollWatchdogOutboxes({
     }
   }
   if (errors.length) throw new AggregateError(errors, `watchdog outbox: ${pending} pending alert(s)`);
-  return { delivered, pending, projects: config.projects.length };
+  return { delivered, pending, projects: projects.length };
+}
+
+async function discoverProjects(config, readToken, fetchImpl) {
+  const discoveryProject = String(config.discoveryProject ?? DEFAULT_DISCOVERY_PROJECT);
+  if (!PROJECT_ID.test(discoveryProject)) {
+    throw new Error("poller: discoveryProject must be a valid project id");
+  }
+  const registry = await fetchJson(endpoint(config.baseUrl, "/api/config", discoveryProject), {
+    fetchImpl,
+    token: readToken,
+    timeoutMs: config.requestTimeoutMs,
+  });
+  if (registry?.project?.id !== discoveryProject || !Array.isArray(registry.projects)) {
+    throw new Error("schema: project registry missing");
+  }
+  const projects = validateProjectIds(registry.projects.map((project) => project?.id),
+    "schema: project registry");
+  if (!projects.includes(discoveryProject)) {
+    throw new Error("schema: project registry omits discovery project");
+  }
+  return projects;
+}
+
+function validateProjectIds(value, label) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_PROJECTS) {
+    throw new Error(`${label} must contain 1-${MAX_PROJECTS} project ids`);
+  }
+  const projects = value.map((project) => String(project));
+  if (projects.some((project) => !PROJECT_ID.test(project))) {
+    throw new Error(`${label} contains an invalid project id`);
+  }
+  if (new Set(projects).size !== projects.length) {
+    throw new Error(`${label} contains duplicate project ids`);
+  }
+  return projects;
 }
 
 function expandPath(path, home) {
@@ -193,7 +236,7 @@ function validateToken(token, label) {
 }
 
 function endpoint(baseUrl, pathname, projectId) {
-  if (!/^[a-z0-9][a-z0-9_-]{0,31}$/u.test(projectId)) throw new Error(`schema: invalid project '${projectId}'`);
+  if (!PROJECT_ID.test(projectId)) throw new Error(`schema: invalid project '${projectId}'`);
   const url = new URL(pathname, baseUrl);
   url.searchParams.set("project", projectId);
   return url;

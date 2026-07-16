@@ -418,9 +418,10 @@ bin/install-suggestions-watchdog-outbox.sh status
 bin/install-suggestions-watchdog-outbox.sh run-once
 ```
 
-This separate privileged consumer polls Source and Skydive, resolves each live
-bootstrap `brokerOwner`, and ACKs Suggestions only after agentmux records a
-verified delivery receipt. Failures remain pending under one durable identity.
+This separate privileged consumer discovers every accessible public project,
+resolves each live bootstrap `brokerOwner`, and ACKs Suggestions only after
+agentmux records a verified delivery receipt. Failures remain pending under one
+durable identity. An explicit bounded project list is available as an override.
 See [`docs/suggestions-watchdog-outbox.md`](docs/suggestions-watchdog-outbox.md).
 
 `ax` is installed as a shorter alias for `amux`.

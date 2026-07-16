@@ -49,7 +49,10 @@ try {
   const readToken = loadPrivateCredential(config.readCredentialFile);
   const adminToken = loadPrivateCredential(config.adminCredentialFile);
   if (args.status) {
-    console.log(`READY projects=${config.projects.join(",")} base=${config.baseUrl}`);
+    const projects = config.projects === null
+      ? `auto discovery=${config.discoveryProject}`
+      : config.projects.join(",");
+    console.log(`READY projects=${projects} base=${config.baseUrl}`);
     process.exit(0);
   }
   const result = await pollWatchdogOutboxes({

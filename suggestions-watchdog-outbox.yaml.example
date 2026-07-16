@@ -1,8 +1,12 @@
-# Persistent watchdog delivery for the two boards using assignment watchdogs.
+# Persistent watchdog delivery for every public project visible to this token.
 baseUrl: https://suggest.v1d.io
-projects:
-  - source
-  - skydive
+discoveryProject: source
+
+# By default the project registry is discovered on every run. Set a bounded
+# explicit override only when intentionally limiting delivery:
+# projects:
+#   - source
+#   - skydive
 
 # Both files must be regular, current-user-owned, mode 0600, and one line.
 readCredentialFile: ~/.config/agent/suggestions-read-token
