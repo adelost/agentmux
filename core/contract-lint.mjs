@@ -6,6 +6,7 @@
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { basename, extname, isAbsolute, join, relative, resolve } from "path";
 import { changedSourceLineNumbers, changedSourcePaths, lintFileSizes, lintStringStyle, loadLintPolicy } from "./lint-ratchet.mjs";
+import { changedSymbols } from "./lint-symbol-scope.mjs";
 
 // WHAT: Names the contract check used by CLI include and exclude filters.
 // WHY: Keeps command routing independent from the check implementation.
@@ -432,7 +433,7 @@ export function extractSymbols(source, ext) {
  */
 export function lintSource(path, source, ext, options = {}) {
   const findings = lintStringStyle(path, source, ext, options.styleLines);
-  for (const sym of extractSymbols(source, ext)) {
+  for (const sym of options.symbols || extractSymbols(source, ext)) {
     for (const f of evaluateContract(sym.doc, { name: sym.name, kind: sym.kind, allowedWhatVerbs: options.allowedWhatVerbs })) {
       findings.push({ ...f, path, line: sym.line, suggestion: SUGGESTIONS[f.code] });
     }
@@ -459,18 +460,8 @@ export function loadLintConfig(root) {
 }
 
 const DOMAIN_SUFFIXES_REQUIRE_WHY = [
-  "Calculator",
-  "Coordinator",
-  "Engine",
-  "Policy",
-  "Repository",
-  "Settings",
-  "Snapshot",
-  "State",
-  "Status",
-  "Store",
-  "Track",
-  "Worker",
+  "Calculator", "Coordinator", "Engine", "Policy", "Repository", "Settings",
+  "Snapshot", "State", "Status", "Store", "Track", "Worker",
 ];
 
 function requiresWhyName(name) {
@@ -539,9 +530,11 @@ export function lintRoot(root, options = {}) {
   let symbols = 0;
   for (const file of files) {
     const source = readFileSync(file, "utf-8");
-    const fileFindings = lintSource(file, source, extname(file), { ...lintConfig, styleLines: options.changed ? changedSourceLineNumbers(resolvedRoot, file, options) : null });
+    const changedLines = options.changed ? changedSourceLineNumbers(resolvedRoot, file, options) : null;
+    const sourceSymbols = changedSymbols(source, extname(file), extractSymbols(source, extname(file)), changedLines);
+    const fileFindings = lintSource(file, source, extname(file), { ...lintConfig, styleLines: changedLines, symbols: sourceSymbols });
     findings.push(...fileFindings);
-    symbols += extractSymbols(source, extname(file)).length;
+    symbols += sourceSymbols.length;
   }
   return { root: resolvedRoot, files, symbols, findings };
 }
