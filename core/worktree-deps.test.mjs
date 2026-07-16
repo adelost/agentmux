@@ -1,4 +1,4 @@
-import { feature, unit, expect } from "bdd-vitest";
+import { feature, unit, component, expect } from "bdd-vitest";
 import {
   existsSync,
   lstatSync,
@@ -246,7 +246,7 @@ feature("worktree dependency bootstrap", () => {
     }],
   });
 
-  unit("a changed lock never reuses the previous compiler cache", {
+  component("a changed lock never reuses the previous compiler cache", {
     given: ["a worktree linked for Vitest 4.0.18", () => {
       const ctx = fixture();
       writeNodeRoot(ctx.root);
@@ -371,7 +371,7 @@ feature("worktree dependency bootstrap", () => {
     }],
   });
 
-  unit("scoped gate runs only after dependency admission and preserves every lock", {
+  component("scoped gate runs only after dependency admission and preserves every lock", {
     given: ["a tracked repository and an admitted dependency plan", () => {
       const ctx = fixture();
       writeNodeRoot(ctx.root);
