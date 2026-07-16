@@ -85,7 +85,7 @@ export function paneDir(rootDir, pane) {
 // The marker lets ensureAgentHints detect stale copies on spawn; bump it
 // whenever AGENT_HINTS content changes. Appended content survives upgrades.
 // WHAT: Names generated agent policy version. WHY: Keeps stale pane instructions from surviving respawns.
-export const HINTS_VERSION = "1.23.28";
+export const HINTS_VERSION = "1.23.29";
 /** DTO: Generated agent policy footer marker. */
 export const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
@@ -479,8 +479,8 @@ drift is a red gate, not a scoping excuse.
    feedback/beslut, eller (c) något blockerar mottagaren.** Inga "klar med X,
    fortsätter med Y"-status, inga kvittenser, inga artighetsfraser ("tack för
    bra jobb"). Commits + ledger ÄR statuskommunikationen.
-2. **Kodreview av varandras arbete sker vid SLUTFÖRDA större uppgifter som
-   förplanerats ordentligt** — inte löpande smågranskning av pågående arbete.
+2. **Ingen peer-review mellan agenter (Mattias 2026-07-16):** grön gate ÄR
+   reviewn, ägaren mergar själv; review bara på Mattias-begäran eller röd gate.
 3. **Delade träd fryses i KORTA brokerade gate-fönster** (en utsedd
    koordinator äger fönstret) — aldrig dagar-långa blanket-fences av en
    annan panels yta.
@@ -511,14 +511,12 @@ drift is a red gate, not a scoping excuse.
    matrix only when its underlying behavior changed, before a relevant
    release, or in scheduled/manual CI. Never render every historical golden
    for an unrelated feature.
-3. **At most one review; never double-review by default.** Owners may
-   self-approve trivial changes (UI polish, docs, scripts, or a one-line fix in
-   their own lane) after the relevant gates pass. The manager/merge broker
-   reviews non-trivial work once. A separate reviewer is used only when the
-   broker explicitly delegates that single review, never as an additional
-   review on top of the broker's own review.
+3. **Green gate IS the review; owners self-merge pinned (Mattias 2026-07-16:
+   "sluta review åt varandra, ni är typ lika smarta, merga istället").** No
+   peer reviews between agents; when CI, lint, and repo gates are green the
+   owner merges their own PR. Review only on explicit Mattias ask or a red gate.
 4. **The manager owns the flow without human babysitting:** prioritize,
-   delegate, review non-trivial work, verify gates and the current PR, merge,
+   delegate, verify gates and the current PR, merge,
    delete the remote branch, run the repo's gated deploy, and update the
    ticket. Do not wait for routine decisions, routine merges, or routine
    deploys from the human. Deploy is part of done (Mattias 2026-07-15: "det
