@@ -557,6 +557,49 @@ feature("contract-lint changed-file style ratchet", () => {
     }],
   });
 
+  component("changed style checks only added lines inside an edited file", {
+    given: ["a branch that retains legacy violations and adds one violation of each style", () => {
+      const root = gitRepo("amux-style-added-lines-");
+      writeFileSync(join(root, "messages.mjs"), [
+        "const emDash = `",
+        "legacy — text",
+        "stable message",
+        "`;",
+        "const proseHyphen = `",
+        "legacy - text",
+        "stable fallback",
+        "`;",
+        "",
+      ].join("\n"));
+      git(root, "add", ".");
+      git(root, "commit", "-m", "legacy base");
+      const baseRef = git(root, "rev-parse", "HEAD");
+      writeFileSync(join(root, "messages.mjs"), [
+        "const emDash = `",
+        "legacy — text",
+        "new — message",
+        "`;",
+        "const proseHyphen = `",
+        "legacy - text",
+        "new - fallback",
+        "`;",
+        "",
+      ].join("\n"));
+      git(root, "add", ".");
+      git(root, "commit", "-m", "feature copy");
+      return { root, baseRef };
+    }],
+    when: ["linting only the branch delta", ({ root, baseRef }) => lintRoot(root, { changed: true, baseRef })],
+    then: ["legacy lines stay quiet while both newly added violations fail", (result, { root }) => {
+      try {
+        expect(result.findings.filter((entry) => entry.code === "STYLE001").map((entry) => entry.line)).toEqual([3]);
+        expect(result.findings.filter((entry) => entry.code === "STYLE002").map((entry) => entry.line)).toEqual([7]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
   component("changed mode includes staged, unstaged, and untracked files", {
     given: ["a repo with every local change class", () => {
       const root = gitRepo("amux-changed-local-");
