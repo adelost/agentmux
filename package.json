@@ -10,7 +10,7 @@
   },
   "scripts": {
     "setup": "bash bin/setup.sh",
-    "start": "node index.mjs",
+    "start": "node --import ./bin/quota-recovery-bootstrap.mjs index.mjs",
     "dev": "bash bin/start.sh",
     "ci": "npm test && npm run test:ci-contract",
     "test": "vitest run",
