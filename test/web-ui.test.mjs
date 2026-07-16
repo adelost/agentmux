@@ -585,7 +585,7 @@ describe("AMUX Code project and agent registry", () => {
     expect(rebound.body.error).toBe("agent-address-already-bound");
   });
 
-  it("imports exact idle tmux sessions without launching a second writer", async () => {
+  it("imports exact idle tmux sessions in their pane cwd without launching a second writer", async () => {
     const { url, workspace, homeDir, calls } = await setup();
     const project = await createProject(url, workspace);
     const claudePane = join(workspace, ".agents", "0");
@@ -618,8 +618,10 @@ describe("AMUX Code project and agent registry", () => {
     expect(importClaude.status).toBe(201);
     expect(importClaude.body).toMatchObject({
       sessionId: CLAUDE_SESSION,
+      cwd: claudePane,
       running: false,
       address: { session: "claw", pane: 0 },
+      autoCompact: { armed: false, dueAt: null },
     });
     expect(calls).toHaveLength(0);
 
@@ -651,8 +653,10 @@ describe("AMUX Code project and agent registry", () => {
     expect(importCodex.status).toBe(201);
     expect(importCodex.body).toMatchObject({
       sessionId: CODEX_SESSION,
+      cwd: codexPane,
       running: false,
       address: { session: "claw", pane: 1 },
+      autoCompact: { armed: false, dueAt: null },
     });
     expect(calls).toHaveLength(0);
 
@@ -676,6 +680,7 @@ describe("AMUX Code project and agent registry", () => {
     await waitForIdle(url, project.id, importClaude.body.id);
     expect(calls[0].args).toContain("--resume");
     expect(calls[0].args).toContain(CLAUDE_SESSION);
+    expect(calls[0].options.cwd).toBe(claudePane);
 
     await postJson(`${url}/api/agents/${importCodex.body.id}/messages`, {
       prompt: "continue imported codex session",
@@ -683,10 +688,15 @@ describe("AMUX Code project and agent registry", () => {
       idempotencyKey: "imported-codex-first-turn",
     });
     await waitForIdle(url, project.id, importCodex.body.id);
+    expect(calls.at(-1).options.cwd).toBe(codexPane);
     expect(calls.at(-1).messages).toEqual(expect.arrayContaining([
       expect.objectContaining({
         method: "thread/resume",
-        params: expect.objectContaining({ threadId: CODEX_SESSION }),
+        params: expect.objectContaining({ threadId: CODEX_SESSION, cwd: codexPane }),
+      }),
+      expect.objectContaining({
+        method: "turn/start",
+        params: expect.objectContaining({ cwd: codexPane }),
       }),
     ]));
   });

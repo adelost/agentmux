@@ -65,6 +65,7 @@ set -uo pipefail
 export HOME="${HOME:-/home/adelost}"
 export PATH="${HOME}/.nvm/versions/node/v22.19.0/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin"
 AMUX="${AMUX:-${HOME}/.nvm/versions/node/v22.19.0/bin/amux}"
+CURL="${CURL:-curl}"
 PY="${PY:-python3}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=guard-heartbeat.sh
@@ -83,6 +84,8 @@ tmux() { command tmux -S "$TMUX_SOCKET" "$@"; }
 WATCH_DIR="${WATCH_DIR:-${HOME}/.agentmux/fleet-watch}"   # overridable for tests
 QUEUE_DIR="${QUEUE_DIR:-${HOME}/.agentmux/delivery-queue}"
 CONF="${CONF:-${WATCH_DIR}/fleets.conf}"
+BOARD_URL="${BOARD_URL:-https://suggest.v1d.io}"
+READ_TOKEN_FILE="${READ_TOKEN_FILE:-${HOME}/.config/agent/suggestions-read-token}"
 STALE_MIN="${STALE_MIN:-60}"        # fleet quiet this long → broker gap (Mattias: "en timme")
 STUCK_MIN="${STUCK_MIN:-60}"        # queue job non-terminal this long → surface
 ACTIVE_SEC="${ACTIVE_SEC:-150}"     # broker jsonl fresher than this → mid-turn, never interrupt
@@ -136,6 +139,34 @@ amux_send() { timeout "$SEND_TIMEOUT" "$AMUX" "$@"; }
 # to the session whenever a positional message is present).
 RESERVED_CMDS=" ps top done log timeline dream compact janitor asks ask questions search serve stop doctor queue edit label labels lint select image say events run plan resume r esc wait notifyuser remind memory ls help playwright-reap pw-reap "
 is_reserved() { case "$RESERVED_CMDS" in *" $1 "*) return 0;; *) return 1;; esac; }
+
+# Read the board once per project and run. The board is the authority for
+# whether a quiet fleet has unfinished work; repo age alone must never wake an
+# idle broker. Deferred/backlog/done tickets intentionally count as settled.
+declare -A BOARD_COUNTS_CACHE=()
+load_board_counts() {
+  local project="$1" token result
+  if [[ ${BOARD_COUNTS_CACHE[$project]+_} ]]; then
+    result="${BOARD_COUNTS_CACHE[$project]}"
+  else
+    [ -r "$READ_TOKEN_FILE" ] || return 1
+    token=$(cat "$READ_TOKEN_FILE") || return 1
+    result=$(timeout 15 "$CURL" -sf -A "amux-fleet-watch" \
+      -H "Authorization: Bearer ${token}" \
+      "${BOARD_URL}/api/tickets/summary?project=${project}" 2>/dev/null \
+      | "$PY" -c '
+import json, sys
+try:
+    counts = json.load(sys.stdin).get("counts") or {}
+except Exception:
+    sys.exit(1)
+keys = ("ready", "in_progress", "needs_detail", "triaging")
+print(*(int(counts.get(key) or 0) for key in keys))
+') || return 1
+    BOARD_COUNTS_CACHE[$project]="$result"
+  fi
+  read -r BOARD_READY BOARD_IN_PROGRESS BOARD_NEEDS_DETAIL BOARD_TRIAGING <<<"$result"
+}
 
 # Newest Claude/Codex session-jsonl mtime for a pane, or 0 if unresolvable.
 # Mirrors task-keeper's helper: the pane's cwd → project slug ('/' and '.' → '-')
@@ -251,7 +282,7 @@ if [ -n "$_unwatched" ]; then
 fi
 guard_heartbeat_metric unwatchedSessions "$(set -- $_unwatched; echo $#)"
 
-while read -r session pane repo _rest; do
+while read -r session pane repo project _rest; do
   [ -z "${session:-}" ] && continue
   case "$session" in \#*) continue;; esac
   [ -z "${pane:-}" ] || [ -z "${repo:-}" ] && { log "$session: bad conf line, skip"; continue; }
@@ -296,6 +327,25 @@ while read -r session pane repo _rest; do
     continue
   fi
 
+  # A quiet repo is healthy when its board has no unfinished tickets. This
+  # check is deliberately before cooldown/escalation so an old warning cannot
+  # turn a settled board into a human alert hours later.
+  if [ -z "${project:-}" ]; then
+    log "$session:$pane: stale but no board project → silent (cannot prove work)"
+    continue
+  fi
+  if ! load_board_counts "$project"; then
+    board_failures=$((board_failures + 1))
+    log "$session:$pane: stale but board unreachable → silent (cannot prove work)"
+    continue
+  fi
+  unfinished=$(( BOARD_READY + BOARD_IN_PROGRESS + BOARD_NEEDS_DETAIL + BOARD_TRIAGING ))
+  if [ "$unfinished" -eq 0 ]; then
+    rm -f "$warn" "$cd_file"
+    log "$session:$pane: zero unfinished board tickets → silent"
+    continue
+  fi
+
   # Broker self-snooze: a broker that confirmed "nothing READY" touches this
   # file. Unlike .OFF (permanent, human-only), the snooze AUTO-EXPIRES via its
   # mtime — a broker can never permanently blind the watch on a point-in-time
@@ -323,7 +373,7 @@ while read -r session pane repo _rest; do
   [ -f "$warn" ] && escalate=1
 
   repo_label=$(basename "${_repos[0]}")
-  MSG="[fleet-watch, automatisk] Inga commits i ${repo_label} och du (broker) idle i ${age_min}min. Re-inventera READY-kön NU: dispatcha oberoende arbete till lediga paneler (en ägare/ticket, inga fil-krockar), ELLER om inget är READY/allt blockerat — bekräfta det i en rad så vakten ser dig. Om en panel hänger: checkpointa + ge nästa oberoende item. Om inget är READY: touch ~/.agentmux/fleet-watch/${session}.snooze (tystar dig ${SNOOZE_HOURS}h, vaknar sen automatiskt så nya tickets inte missas). Sätt ALDRIG .OFF själv — den är permanent och bara för Mattias."
+  MSG="[fleet-watch, automatisk] Boarden ${project} har ${unfinished} oavslutade tickets (READY=${BOARD_READY}, Pågår=${BOARD_IN_PROGRESS}, needs_detail=${BOARD_NEEDS_DETAIL}, triaging=${BOARD_TRIAGING}) men inga commits i ${repo_label} och brokern har varit idle i ${age_min}min. Reconcile NU: dispatcha READY per prio; verifiera ägare/checkpoint för Pågår; lös needs_detail/triaging. Genuin väntan ska skrivas som en TYPAD deferral på ticketen: dependency, capacity, time, human_decision eller backlog — aldrig fri kommentar, aldrig en READY-ticket som egentligen är parkerad. Om en panel hänger: checkpointa + ge nästa oberoende item. Sätt ALDRIG .OFF själv — den är permanent och bara för Mattias."
 
   if is_reserved "$session"; then
     if [ "$DRY" = "1" ]; then log "$session:$pane: DRY reserved-name → would escalate (${age_min}min)"; continue; fi
@@ -447,32 +497,9 @@ fi
 # for) and ignores broker snooze. No pane_exists gate: the sweep is board-
 # driven, and a failed send is logged while amux's durable queue still holds
 # the nudge for a session that comes back.
-BOARD_URL="${BOARD_URL:-https://suggest.v1d.io}"
-READ_TOKEN_FILE="${READ_TOKEN_FILE:-${HOME}/.config/agent/suggestions-read-token}"
 STARVE_SWEEPS="${STARVE_SWEEPS:-2}"              # consecutive hits before first nudge (~40 min at */20)
 STARVE_COOLDOWN_MIN="${STARVE_COOLDOWN_MIN:-60}" # per-fleet re-nudge interval
 DISPATCH_HOLD_HOURS="${DISPATCH_HOLD_HOURS:-3}"  # broker-declared impossible-dispatch; AUTO-expires
-
-# Prints "<ready> <in_progress>" for a board project, or nothing on failure.
-# Body goes to python via STDIN, never argv: a busy board's response (full
-# ticket texts) exceeds Linux's 128KB per-argument cap, and argv would turn
-# "big fleet" into a silent unreachable-skip on exactly the boards that
-# matter most (skydive did, 2026-07-15, 64 tickets).
-board_ready_inprog() {
-  local project="$1" tok
-  [ -r "$READ_TOKEN_FILE" ] || return 1
-  tok=$(cat "$READ_TOKEN_FILE") || return 1
-  timeout 15 curl -sf -A "amux-fleet-watch" -H "Authorization: Bearer ${tok}" \
-    "${BOARD_URL}/api/tickets/summary?project=${project}" 2>/dev/null \
-    | "$PY" -c '
-import json, sys
-try:
-    counts = json.load(sys.stdin).get("counts") or {}
-except Exception:
-    sys.exit(1)
-print(int(counts.get("ready") or 0), int(counts.get("in_progress") or 0))
-'
-}
 
 while read -r session pane repo project _rest; do
   [ -z "${session:-}" ] && continue
@@ -482,11 +509,13 @@ while read -r session pane repo project _rest; do
   [ -f "${WATCH_DIR}/${session}.OFF" ] && { log "starvation: $session per-fleet OFF → skip"; continue; }
 
   sstate="${WATCH_DIR}/starve-${session}.state"   # "<hits> <last_nudge_epoch> <nudges>"
-  if ! read -r b_ready b_inprog < <(board_ready_inprog "$project"); then
+  if ! load_board_counts "$project"; then
     board_failures=$((board_failures + 1))
     log "starvation: $session/$project board unreachable → skip (no state change)"
     continue
   fi
+  b_ready=$BOARD_READY
+  b_inprog=$BOARD_IN_PROGRESS
 
   if [ "$b_ready" -lt 1 ] || [ "$b_inprog" -gt 0 ]; then
     [ -f "$sstate" ] && log "starvation: $session/$project recovered (ready=$b_ready in_progress=$b_inprog) → reset"
@@ -528,7 +557,7 @@ while read -r session pane repo project _rest; do
     continue
   fi
 
-  MSG="[fleet-watch, automatisk] SVÄLT: boarden för ${project} visar ${b_ready} READY och 0 Pågår. Dispatch-first (Mattias 2026-07-15: 'det går ju inte pausa när det finns taska att göra'): (1) assigna varje READY-ticket en kapabel ledig worker kan ta, per prio; (2) tickets som väntar på människobeslut → flippa till 'Behöver svar' så de lämnar READY; (3) genuint blockerade → blocked-by PÅ ticketen + defer. 'Upptagen med review' är INGEN disposition — dispatch kostar ett meddelande och går före nästa review/merge. Om dispatch är FYSISKT omöjligt (t.ex. alla workers quota-döda): echo 'orsak' > ~/.agentmux/fleet-watch/${session}.dispatch-hold (auto-expirerar ${DISPATCH_HOLD_HOURS}h, syns i loggen). Sätt aldrig .OFF själv."
+  MSG="[fleet-watch, automatisk] SVÄLT: boarden för ${project} visar ${b_ready} READY och 0 Pågår. Dispatch-first (Mattias 2026-07-15: 'det går ju inte pausa när det finns taska att göra'): (1) assigna varje READY-ticket en kapabel ledig worker kan ta, per prio; (2) genuin väntan ska lämna READY genom en TYPAD deferral: dependency med blockerRef+nextCheckAt, capacity med konkreta requiredCapabilities+nextCheckAt, time med wakeAt, human_decision eller backlog; (3) fri kommentar eller påhittad 'Behöver svar'-status är aldrig en disposition. 'Upptagen med review' är INGEN disposition — dispatch kostar ett meddelande och går före nästa review/merge. Om dispatch är FYSISKT omöjligt (t.ex. alla workers quota-döda): echo 'orsak' > ~/.agentmux/fleet-watch/${session}.dispatch-hold (auto-expirerar ${DISPATCH_HOLD_HOURS}h, syns i loggen). Sätt aldrig .OFF själv."
 
   if [ "$DRY" = "1" ]; then
     log "starvation: $session/$project DRY would nudge (ready=$b_ready, nudges=$nudges)"

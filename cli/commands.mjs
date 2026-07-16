@@ -91,6 +91,7 @@ import {
 } from "./native-service-manager.mjs";
 import {
   createCutoverReceipt,
+  cutoverSessionEvidence,
   ensureCutoverProject,
   materializeCutoverConfigs,
   nativeCutoverRequest,
@@ -424,7 +425,7 @@ export async function collectCutoverEvidence(ctx, plan, {
       const first = await samplePane(target, paneSpec);
       const model = await cutoverModelAndEffort(ctx, target, paneSpec);
       evidence[target.name][paneSpec.pane] = identity
-        ? { ...identity, ...model, first, fresh: false }
+        ? cutoverSessionEvidence(identity, paneSpec.sourceCwd, model, first)
         : {
           sessionId: null,
           cwd: paneSpec.sourceCwd,

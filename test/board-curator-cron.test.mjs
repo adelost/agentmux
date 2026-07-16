@@ -35,11 +35,24 @@ echo "CALL \${args//$'\\n'/ }" >> "${amuxLog}"
 exit 0
 `);
   chmodSync(amux, 0o755);
+  const boardState = join(root, "board-state.json");
+  writeFileSync(boardState, JSON.stringify({ total: 1, counts: { ready: 1 } }));
+  const curl = join(root, "curl");
+  writeFileSync(curl, `#!/usr/bin/env bash
+cat "${boardState}"
+`);
+  chmodSync(curl, 0o755);
+  const failingCurl = join(root, "curl-fail");
+  writeFileSync(failingCurl, "#!/usr/bin/env bash\nexit 22\n");
+  chmodSync(failingCurl, 0o755);
   const tokenFile = join(root, "read-token");
   writeFileSync(tokenFile, "test-token-test-token-test-token-1234\n");
   const conf = join(root, "fleets.conf");
   writeFileSync(conf, `ghost 2 ${repoDir} testproj\n`);
-  return { root, watchDir, repoDir, amux, amuxLog, amuxMode, tokenFile, conf };
+  return {
+    root, watchDir, repoDir, amux, amuxLog, amuxMode,
+    boardState, curl, failingCurl, tokenFile, conf,
+  };
 };
 
 const run = (fx, extraEnv = {}) => spawnSync("bash", [SCRIPT], {
@@ -49,9 +62,10 @@ const run = (fx, extraEnv = {}) => spawnSync("bash", [SCRIPT], {
     WATCH_DIR: fx.watchDir,
     CONF: fx.conf,
     AMUX: fx.amux,
+    CURL: fx.curl,
     AMUX_GUARD_HEARTBEAT_DIR: join(fx.root, "heartbeats"),
     READ_TOKEN_FILE: fx.tokenFile,
-    BOARD_URL: "http://127.0.0.1:9", // unreachable → loud commit-only degradation
+    BOARD_URL: "http://board.test",
     CURATE_COOLDOWN_MIN: "0",
     SEND_TIMEOUT: "5",
     ...extraEnv,
@@ -63,6 +77,9 @@ const amuxCalls = (fx) => existsSync(fx.amuxLog)
 const commit = (fx, msg) => execSync(
   `git -c user.email=t@t -c user.name=t commit -q --allow-empty -m ${msg}`,
   { cwd: fx.repoDir },
+);
+const setBoard = (fx, counts) => writeFileSync(
+  fx.boardState, JSON.stringify({ total: Object.values(counts).reduce((sum, value) => sum + value, 0), counts }),
 );
 
 describe("board-curator cron", () => {
@@ -84,9 +101,17 @@ describe("board-curator cron", () => {
     expect(amuxCalls(fx)).toHaveLength(0);
   });
 
-  it("sends exactly one brief on real motion, then goes silent again", () => {
+  it("does not wake a broker for repo-only motion", () => {
     run(fx);
     commit(fx, "work");
+    const second = run(fx);
+    expect(second.stdout).toContain("no motion");
+    expect(amuxCalls(fx)).toHaveLength(0);
+  });
+
+  it("sends exactly one brief on actionable board motion, then goes silent again", () => {
+    run(fx);
+    setBoard(fx, { ready: 2 });
     const third = run(fx);
     expect(third.stdout).toContain("CURATION BRIEF SENT");
     const calls = amuxCalls(fx);
@@ -101,7 +126,7 @@ describe("board-curator cron", () => {
   it("does NOT stamp an unverified send and retries next run", () => {
     run(fx);
     const stampBefore = readFileSync(join(fx.watchDir, "ghost.curated"), "utf-8");
-    commit(fx, "work");
+    setBoard(fx, { ready: 2 });
     writeFileSync(fx.amuxMode, "fail");
     const failed = run(fx);
     expect(failed.stdout).toContain("NOT stamped");
@@ -114,10 +139,22 @@ describe("board-curator cron", () => {
     expect(readFileSync(join(fx.watchDir, "ghost.curated"), "utf-8")).not.toBe(stampBefore);
   });
 
-  it("degrades loudly to commit-signal when the board is unreachable", () => {
+  it("stays silent and unstamped when the board is unreachable", () => {
+    const first = run(fx, { CURL: fx.failingCurl });
+    expect(first.stdout).toContain("board unreachable → silent");
+    expect(existsSync(join(fx.watchDir, "ghost.curated"))).toBe(false);
+    expect(amuxCalls(fx)).toHaveLength(0);
+  });
+
+  it("treats deferred and terminal-only boards as settled", () => {
+    setBoard(fx, { deferred: 8, done: 109 });
     const first = run(fx);
-    expect(first.stdout).toContain("board unreachable → commit-signal only");
-    expect(readFileSync(join(fx.watchDir, "ghost.curated"), "utf-8")).toContain("board:\n");
+    expect(first.stdout).toContain("zero actionable tickets → silent");
+    expect(amuxCalls(fx)).toHaveLength(0);
+    commit(fx, "unrelated-repo-motion");
+    const second = run(fx);
+    expect(second.stdout).toContain("zero actionable tickets → silent");
+    expect(amuxCalls(fx)).toHaveLength(0);
   });
 
   it("includes board counts in the fingerprint and identifies with a User-Agent", async () => {
@@ -137,6 +174,7 @@ describe("board-curator cron", () => {
       await new Promise((ok, bad) => {
         const child = spawn("bash", [SCRIPT], { env: {
           ...process.env, WATCH_DIR: fx.watchDir, CONF: fx.conf, AMUX: fx.amux,
+          CURL: "curl",
           AMUX_GUARD_HEARTBEAT_DIR: join(fx.root, "heartbeats"),
           READ_TOKEN_FILE: fx.tokenFile, BOARD_URL: `http://127.0.0.1:${port}`,
           CURATE_COOLDOWN_MIN: "0", SEND_TIMEOUT: "5",
@@ -145,7 +183,7 @@ describe("board-curator cron", () => {
         child.on("error", bad);
       });
       const stamp = readFileSync(join(fx.watchDir, "ghost.curated"), "utf-8");
-      expect(stamp).toContain('board:7 {"done": 4, "ready": 3}');
+      expect(stamp).toContain('board:3 {"in_progress": 0, "needs_detail": 0, "ready": 3, "triaging": 0}');
       expect(seenUa).toContain("amux-board-curator");
       expect(seenUrl).toBe("/api/tickets/summary?project=testproj");
     } finally {
