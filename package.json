@@ -5,7 +5,8 @@
   "type": "module",
   "bin": {
     "amux": "./bin/agent-cli.mjs",
-    "ax": "./bin/agent-cli.mjs"
+    "ax": "./bin/agent-cli.mjs",
+    "overlap-gate": "./bin/overlap-gate.mjs"
   },
   "scripts": {
     "setup": "bash bin/setup.sh",
