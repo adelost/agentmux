@@ -1,8 +1,8 @@
 import { feature, integration, expect } from "bdd-vitest";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
-import { spawnSync } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -17,7 +17,7 @@ function setupCli({ managed = false } = {}) {
   writeFileSync(start, managed
     ? `#!/usr/bin/env bash
 set -u
-cleanup() { rm -f "$PIDFILE" "$READY_FILE"; exit 0; }
+cleanup() { sleep "\${FAKE_STOP_DELAY:-0}"; rm -f "$PIDFILE" "$READY_FILE"; exit 0; }
 trap cleanup TERM INT
 echo $$ > "$PIDFILE"
 echo $$ > "$READY_FILE"
@@ -42,8 +42,17 @@ while true; do sleep 1 & wait $! || true; done
   const run = (...args) => spawnSync("node", [join(REPO, "bin", "agent-cli.mjs"), ...args], {
     cwd: REPO, env, encoding: "utf-8", timeout: 10_000,
   });
-  return { root, env, run, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  return { root, env, run, bridgeDir, start, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
+
+const waitFor = async (predicate, timeoutMs = 3_000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+  }
+  return false;
+};
 
 feature("serve CLI ownership UX", () => {
   integration("plain serve runs visibly and records manual ownership", {
@@ -94,6 +103,46 @@ feature("serve CLI ownership UX", () => {
         ctx.run("stop");
         ctx.cleanup();
       }
+    }],
+  });
+
+  integration("manual stop completes before an immediate managed replacement can publish readiness", {
+    given: ["a manual supervisor whose shutdown hook is deliberately slow", () => setupCli({ managed: true })],
+    when: ["stopping manual ownership and immediately starting managed ownership", async (ctx) => {
+      try {
+        const manual = spawn("bash", [ctx.start], {
+          cwd: ctx.bridgeDir,
+          detached: true,
+          stdio: "ignore",
+          env: { ...ctx.env, FAKE_STOP_DELAY: "0.6" },
+        });
+        manual.unref();
+        expect(await waitFor(() => existsSync(ctx.env.READY_FILE))).toBe(true);
+        const stopped = ctx.run("stop");
+        if (stopped.status !== 0) throw new Error(`manual stop failed: ${stopped.stderr || stopped.stdout}`);
+        const restarted = ctx.run("serve", "--detach");
+        await new Promise((resolveWait) => setTimeout(resolveWait, 800));
+        const readinessSurvived = existsSync(ctx.env.READY_FILE);
+        const finalStop = ctx.run("stop");
+        return { ctx, stopped, restarted, readinessSurvived, finalStop };
+      } catch (error) {
+        ctx.run("stop");
+        ctx.cleanup();
+        throw error;
+      }
+    }],
+    then: ["the old hook cannot erase the replacement sentinels", ({
+      ctx, stopped, restarted, readinessSurvived, finalStop,
+    }) => {
+      try {
+        expect({ status: stopped.status, stdout: stopped.stdout, stderr: stopped.stderr })
+          .toMatchObject({ status: 0 });
+        expect({ status: restarted.status, stdout: restarted.stdout, stderr: restarted.stderr })
+          .toMatchObject({ status: 0 });
+        expect(restarted.stdout).toContain("managed supervisor pid");
+        expect(readinessSurvived).toBe(true);
+        expect(finalStop.status).toBe(0);
+      } finally { ctx.cleanup(); }
     }],
   });
 });

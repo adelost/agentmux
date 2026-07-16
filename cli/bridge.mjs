@@ -49,7 +49,18 @@ export function createBridgeLifecycle({ bridgeDir, env = process.env } = {}) {
   const processAlive = (value) => {
     const processId = Number(value);
     if (!Number.isSafeInteger(processId) || processId <= 0) return false;
-    try { process.kill(processId, 0); return true; }
+    try {
+      process.kill(processId, 0);
+      // kill(0) also succeeds for an unreaped zombie. A stopped manual
+      // supervisor can briefly remain Z while its original terminal/parent
+      // handles SIGCHLD; treating that as live creates a false stop timeout.
+      try {
+        if (/^\)\s+Z\s/u.test(readFileSync(`/proc/${processId}/stat`, "utf8").replace(/^[^(]*\([^)]*/, ""))) {
+          return false;
+        }
+      } catch {}
+      return true;
+    }
     catch (error) { return error?.code === "EPERM"; }
   };
 
@@ -126,8 +137,7 @@ export function createBridgeLifecycle({ bridgeDir, env = process.env } = {}) {
   }
 
   /** WHAT: Signals the process named by the pidfile. WHY: Lets start.sh observe a clean child stop before markers are removed. */
-  function signalBridge() {
-    const livePid = pid();
+  function signalBridge(livePid = pid()) {
     if (!livePid) return false;
     try { process.kill(livePid, "SIGTERM"); return true; }
     catch { return false; }
@@ -277,9 +287,17 @@ export function createBridgeLifecycle({ bridgeDir, env = process.env } = {}) {
   async function stop(ctx) {
     writeMode(BRIDGE_MODE_STOPPED);
     const hadLegacySession = await hasSession(ctx, LEGACY_BRIDGE_SESSION);
-    const wasAlive = isAlive();
+    const bridgePid = pid();
+    const wasAlive = bridgePid !== null;
     const managedBefore = managedSupervisorAlive();
-    signalBridge();
+    signalBridge(bridgePid);
+    // A manually owned start.sh has no private service record. Wait for its
+    // child shutdown hook to remove the old sentinels before a caller can run
+    // `amux serve --detach`; otherwise the old hook can unlink the new
+    // process's pid/readiness files after the replacement is already ready.
+    if (bridgePid && !await waitUntilStopped(bridgePid, 5_000)) {
+      throw new Error(`bridge pid ${bridgePid} did not stop cleanly`);
+    }
     const record = readServiceRecord();
     if (record && serviceRecordMatches(record)) {
       await waitUntilStopped(record.pid, 5_000);
