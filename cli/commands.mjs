@@ -43,6 +43,7 @@ import {
   checkNativeRuntime,
   checkGuardCronHeartbeats,
   checkSuggestionsBoard,
+  checkSuggestionsRowsRead,
 } from "../core/doctor.mjs";
 import {
   expandHome,
@@ -3207,6 +3208,9 @@ async function cmdDoctor(ctx) {
       configured: suggestionsConfigured,
       probe: suggestionsProbe,
       lastSuccessfulSyncAt: suggestionsLastSuccessfulSyncAt,
+    }),
+    checkSuggestionsRowsRead({
+      entry: guardHeartbeats.find((entry) => entry.key === "suggestions-usage"),
     }),
     checkNativeRuntime({
       configured: nativeUrls.length,

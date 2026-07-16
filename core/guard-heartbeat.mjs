@@ -15,6 +15,7 @@ export const GUARD_CRON_REGISTRY = Object.freeze([
   guard("task-keeper", 29 * 60),
   guard("watchdog-outbox", 60),
   guard("comment-bridge", 60),
+  guard("suggestions-usage", 15 * 60),
   guard("backlog-pull", 15 * 60),
   guard("board-curator", 60 * 60),
 ]);

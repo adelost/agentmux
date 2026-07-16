@@ -1,0 +1,16 @@
+# Exact account-level Durable Object rows-read signal from Cloudflare GraphQL.
+# The budget is an explicit operational limit, not automatic plan detection.
+accountId: REPLACE_WITH_32_HEX_ACCOUNT_ID
+credentialFile: ~/.config/agent/cloudflare-analytics-token
+
+# Cloudflare free limits reset at 00:00 UTC. A paid account may instead choose
+# period: monthly and its own operational budget.
+period: daily
+budgetRows: 5000000
+warnAt: 0.70
+criticalAt: 0.90
+
+# Durable warning delivery target.
+agent: lsrc
+pane: 2
+deliveryWaitMs: 12000

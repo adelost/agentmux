@@ -18,6 +18,9 @@ import { homedir } from "os";
 import { dirname, resolve } from "path";
 import { spawn } from "child_process";
 import yaml from "js-yaml";
+import {
+  createSuggestionsHttpClient,
+} from "./suggestions-http.mjs";
 
 export const SUGGESTIONS_BRIDGE_STATE_VERSION = 3;
 export const DEFAULT_COMMENT_BYTES = 64 * 1024;
@@ -611,69 +614,14 @@ function validateTicketDetail(value, expected) {
   return { ticket, comments };
 }
 
-class HttpResponseError extends Error {
-  constructor(url, status) {
-    super(`http: GET ${new URL(url).pathname} returned ${status}`);
-    this.name = "HttpResponseError";
-    this.status = status;
-  }
-}
-
 export function isSuggestionsAuthenticationError(error) {
-  return error?.name === "HttpResponseError" && new Set([401, 403]).has(error.status);
+  return error?.name === "SuggestionsHttpError" && new Set([401, 403]).has(error.status);
 }
 
-async function fetchJson(url, { fetchImpl, timeoutMs, readToken,
-  maxBytes = 8 * 1024 * 1024 }) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  timer.unref?.();
-  let response;
-  try {
-    response = await fetchImpl(url, {
-      method: "GET",
-      headers: { accept: "application/json", authorization: `Bearer ${readToken}` },
-      redirect: "error",
-      signal: controller.signal,
-    });
-  } catch (error) {
-    clearTimeout(timer);
-    const reason = error?.name === "AbortError" ? "timeout" : (error?.code || error?.name || "network-error");
-    throw new Error(`http: GET ${new URL(url).pathname} failed (${reason})`);
-  }
-  if (!response.ok) {
-    clearTimeout(timer);
-    throw new HttpResponseError(url, response.status);
-  }
-  const type = response.headers.get("content-type") || "";
-  if (!type.toLowerCase().includes("application/json")) {
-    clearTimeout(timer);
-    throw new Error(`schema: GET ${new URL(url).pathname} did not return application/json`);
-  }
-  const chunks = [];
-  let total = 0;
-  try {
-    if (!response.body) throw new Error("empty body");
-    const reader = response.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > maxBytes) {
-        await reader.cancel().catch(() => {});
-        throw new Error(`body exceeds ${maxBytes} bytes`);
-      }
-      chunks.push(Buffer.from(value));
-    }
-    const bytes = Buffer.concat(chunks, total);
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    return JSON.parse(text);
-  } catch (error) {
-    throw new Error(`schema: GET ${new URL(url).pathname} returned invalid or oversized JSON (${error.message})`);
-  } finally {
-    clearTimeout(timer);
-  }
-}
+const fetchJson = async (url, { fetchImpl, timeoutMs, readToken,
+  maxBytes = 8 * 1024 * 1024, httpClient }) => httpClient.requestJson(url, {
+  token: readToken, timeoutMs, maxBytes,
+});
 
 /** Probe the same bounded board cursor used by the comment bridge. */
 export async function probeSuggestionsBoard({
@@ -681,6 +629,7 @@ export async function probeSuggestionsBoard({
   readToken,
   allowTestOrigin = false,
   fetchImpl = globalThis.fetch,
+  httpClient = null,
 }) {
   const baseUrl = new URL(config.baseUrl);
   if (!allowTestOrigin && baseUrl.href !== "https://suggest.v1d.io/") {
@@ -696,12 +645,19 @@ export async function probeSuggestionsBoard({
   url.searchParams.set("project", projectId);
   url.searchParams.set("cursor", "0");
   url.searchParams.set("limit", "1");
+  const http = httpClient ?? createSuggestionsHttpClient({
+    source: "doctor",
+    fetchImpl,
+    ...(allowTestOrigin || fetchImpl !== globalThis.fetch
+      ? { statePath: null, startJitterMaxMs: 0 } : {}),
+  });
   try {
     validateCommentPoll(await fetchJson(url, {
       fetchImpl,
       timeoutMs: config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS,
       readToken,
       maxBytes: 64 * 1024,
+      httpClient: http,
     }), projectId, "0", 1);
     return { ok: true, status: 200, projectId };
   } catch (error) {
@@ -784,6 +740,7 @@ export async function pollSuggestionsComments({
   readToken,
   allowTestOrigin = false,
   fetchImpl = globalThis.fetch,
+  httpClient = null,
   deliver,
   notify = async () => {},
   persist = () => {},
@@ -800,6 +757,12 @@ export async function pollSuggestionsComments({
   if (!/^[A-Za-z0-9_-]{32,256}$/u.test(readToken ?? "")) {
     throw new Error("poller: a bounded read credential is required");
   }
+  const http = httpClient ?? createSuggestionsHttpClient({
+    source: "comment-bridge",
+    fetchImpl,
+    ...(allowTestOrigin || fetchImpl !== globalThis.fetch
+      ? { statePath: null, startJitterMaxMs: 0 } : {}),
+  });
   const projectEntries = Object.entries(config.projects);
   if (!projectEntries.length) throw new Error("poller: no configured Suggestions project");
   const policyProjectId = projectEntries[0][0];
@@ -807,6 +770,7 @@ export async function pollSuggestionsComments({
   agentDocsUrl.searchParams.set("project", policyProjectId);
   const agentDocs = validateAgentDocsPayload(await fetchJson(agentDocsUrl, {
     fetchImpl, timeoutMs: config.requestTimeoutMs, readToken, maxBytes: 256 * 1024,
+    httpClient: http,
   }), policyProjectId);
   const policy = serializeImplementationPolicy(
     Object.hasOwn(agentDocs, "implementationPolicy")
@@ -834,6 +798,7 @@ export async function pollSuggestionsComments({
       poll = validateCommentPoll(await fetchJson(pollUrl, {
         fetchImpl, timeoutMs: config.requestTimeoutMs, readToken,
         maxBytes: 256 * 1024,
+        httpClient: http,
       }), projectId, pState.cursor, 100);
     } catch (error) {
       if (isSuggestionsAuthenticationError(error)) throw error;
@@ -858,9 +823,10 @@ export async function pollSuggestionsComments({
         try {
           return validateTicketDetail(await fetchJson(detailUrl, {
             fetchImpl, timeoutMs: config.requestTimeoutMs, readToken,
+            httpClient: http,
           }), candidate.ticket);
         } catch (error) {
-          if (candidate.trackedOnly && error instanceof HttpResponseError && error.status === 404) {
+          if (candidate.trackedOnly && error?.name === "SuggestionsHttpError" && error.status === 404) {
             return { terminalTicketId: candidate.ticket.id };
           }
           throw error;
