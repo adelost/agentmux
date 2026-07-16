@@ -89,7 +89,7 @@ that pane instead of typing into a non-ingesting composer. It polls the local
 OAuth usage endpoint and, after a top-up or reset, restarts only the exact
 persisted Claude session. A new idempotent continuation turn resumes at the
 limit checkpoint; the original task is never replayed from the beginning.
-If quota telemetry is unavailable, the reset time embedded in Claude's signed
+If quota telemetry is unavailable, the reset time embedded in Claude's persisted
 session history is the conservative fallback. A later human turn supersedes
 automatic recovery and prevents a stale restart.
 
