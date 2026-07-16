@@ -1,8 +1,32 @@
-import { feature, unit, expect } from "bdd-vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { component, feature, unit, expect } from "bdd-vitest";
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { evaluateContract, extractSymbols, formatLintReport, lintRoot, lintRoots, overlapRatio, writeBaseline } from "./contract-lint.mjs";
+import { execFileSync } from "child_process";
+import { collectSourceFiles, evaluateContract, extractSymbols, formatLintReport, lintRoot, lintRoots, overlapRatio, writeBaseline } from "./contract-lint.mjs";
+
+function git(root, ...args) {
+  return execFileSync("git", ["-C", root, ...args], {
+    encoding: "utf-8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "Contract Lint Test",
+      GIT_AUTHOR_EMAIL: "contract-lint@example.test",
+      GIT_COMMITTER_NAME: "Contract Lint Test",
+      GIT_COMMITTER_EMAIL: "contract-lint@example.test",
+    },
+  }).trim();
+}
+
+function gitRepo(prefix) {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  git(root, "init", "-b", "main");
+  return root;
+}
+
+function sourceLines(count) {
+  return Array.from({ length: count }, (_, index) => `const value${index} = ${index};`).join("\n") + "\n";
+}
 
 // Real WHAT/WHY rewrites from ai-dsl + skydive-altimeter. The linter must pass
 // every one with zero error-level findings — they are the gold voice.
@@ -286,6 +310,35 @@ feature("contract-lint helpers", () => {
     }],
   });
 
+  unit("requires contracts only on exported JavaScript module symbols", {
+    given: ["one local helper and one exported function", () => [
+      "function localHelper() {}",
+      "/** WHAT: Routes one request. WHY: Keeps callers independent from transport details. */",
+      "export function publicRoute() {}",
+      "",
+    ].join("\n")],
+    when: ["extracting module symbols", (source) => extractSymbols(source, ".mjs").map((symbol) => symbol.name)],
+    then: ["only the exported boundary is selected", (names) => expect(names).toEqual(["publicRoute"])],
+  });
+
+  unit("skips generated Wrangler bundles", {
+    given: ["one source file and one generated Wrangler bundle", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-wrangler-skip-"));
+      mkdirSync(join(root, ".wrangler", "tmp", "dev-build"), { recursive: true });
+      writeFileSync(join(root, "source.mjs"), "const source = true;\n");
+      writeFileSync(join(root, ".wrangler", "tmp", "dev-build", "index.js"), sourceLines(600));
+      return root;
+    }],
+    when: ["collecting source files", (root) => collectSourceFiles(root)],
+    then: ["only the authored source remains", (files, root) => {
+      try {
+        expect(files.map((file) => file.slice(root.length + 1))).toEqual(["source.mjs"]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
   unit("baseline filters existing located findings", {
     given: ["one missing contract and a baseline", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-contract-baseline-"));
@@ -409,6 +462,238 @@ feature("contract-lint scope + guidance", () => {
         expect(report).toContain("CONTRACT050");
         expect(report).toContain("Findings:");
         expect(report).toContain("CONTRACT001");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+});
+
+feature("contract-lint changed-file style ratchet", () => {
+  unit("flags em dashes and spaced prose hyphens only inside strings", {
+    given: ["source with user text, a CLI flag, and comment examples", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-style-strings-"));
+      writeFileSync(join(root, "messages.mjs"), [
+        "// comment example — allowed here",
+        "// worker - message is also only an example",
+        "const patterns = [/[\"']/, /—/];",
+        "const emDash = \"worker — message received\";",
+        "const proseHyphen = `worker - message received`;",
+        "const cliFlag = \"git -C repo status\";",
+        "",
+      ].join("\n"));
+      return root;
+    }],
+    when: ["linting the file", (root) => lintRoot(root)],
+    then: ["the two user-text violations are reported without a CLI false positive", (result, root) => {
+      try {
+        expect(result.findings.filter((finding) => finding.code === "STYLE001")).toHaveLength(1);
+        expect(result.findings.filter((finding) => finding.code === "STYLE002")).toHaveLength(1);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
+  unit("enforces the 500-line default on source files", {
+    given: ["an unconfigured 501-line source file", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-size-default-"));
+      writeFileSync(join(root, "large.mjs"), sourceLines(501));
+      return root;
+    }],
+    when: ["linting the repo", (root) => lintRoot(root)],
+    then: ["STYLE010 names the actual and allowed sizes", (result, root) => {
+      try {
+        const finding = result.findings.find((entry) => entry.code === "STYLE010");
+        expect(finding?.msg).toContain("501 lines; cap is 500");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
+  unit("accepts an exact legacy file cap but rejects slack", {
+    given: ["two 501-line repos with exact and loose caps", () => {
+      const exact = mkdtempSync(join(tmpdir(), "amux-size-exact-"));
+      const loose = mkdtempSync(join(tmpdir(), "amux-size-loose-"));
+      for (const root of [exact, loose]) writeFileSync(join(root, "large.mjs"), sourceLines(501));
+      writeFileSync(join(exact, ".amux-lint.yml"), "fileSize:\n  caps:\n    large.mjs: 501\n");
+      writeFileSync(join(loose, ".amux-lint.yml"), "fileSize:\n  caps:\n    large.mjs: 502\n");
+      return { exact, loose };
+    }],
+    when: ["linting both configs", ({ exact, loose }) => ({ exact: lintRoot(exact), loose: lintRoot(loose) })],
+    then: ["only the loose cap fails", (results, roots) => {
+      try {
+        expect(results.exact.findings.map((entry) => entry.code)).not.toContain("STYLE010");
+        expect(results.exact.findings.map((entry) => entry.code)).not.toContain("STYLE012");
+        expect(results.loose.findings.map((entry) => entry.code)).toContain("STYLE012");
+      } finally {
+        rmSync(roots.exact, { recursive: true, force: true });
+        rmSync(roots.loose, { recursive: true, force: true });
+      }
+    }],
+  });
+
+  component("changed mode compares committed branch changes with the requested trunk", {
+    given: ["a repo with one file changed after the base commit", () => {
+      const root = gitRepo("amux-changed-committed-");
+      writeFileSync(join(root, "same.mjs"), "const same = true;\n");
+      writeFileSync(join(root, "changed.mjs"), "const changed = false;\n");
+      git(root, "add", ".");
+      git(root, "commit", "-m", "base");
+      const baseRef = git(root, "rev-parse", "HEAD");
+      writeFileSync(join(root, "changed.mjs"), "const changed = true;\n");
+      git(root, "add", "changed.mjs");
+      git(root, "commit", "-m", "feature");
+      return { root, baseRef };
+    }],
+    when: ["collecting trunk-relative files", ({ root, baseRef }) => collectSourceFiles(root, { changed: true, baseRef })],
+    then: ["the committed feature file is selected on a clean worktree", (files, { root }) => {
+      try {
+        expect(files.map((file) => file.slice(root.length + 1))).toEqual(["changed.mjs"]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
+  component("changed mode includes staged, unstaged, and untracked files", {
+    given: ["a repo with every local change class", () => {
+      const root = gitRepo("amux-changed-local-");
+      writeFileSync(join(root, "staged.mjs"), "const staged = false;\n");
+      writeFileSync(join(root, "unstaged.mjs"), "const unstaged = false;\n");
+      writeFileSync(join(root, "outside.mjs"), "const outside = false;\n");
+      writeFileSync(join(root, "src.mjs"), "const scoped = false;\n");
+      git(root, "add", ".");
+      git(root, "commit", "-m", "base");
+      const baseRef = git(root, "rev-parse", "HEAD");
+      writeFileSync(join(root, "staged.mjs"), "const staged = true;\n");
+      git(root, "add", "staged.mjs");
+      writeFileSync(join(root, "unstaged.mjs"), "const unstaged = true;\n");
+      writeFileSync(join(root, "new.mjs"), "const untracked = true;\n");
+      return { root, baseRef };
+    }],
+    when: ["collecting local changed files", ({ root, baseRef }) => collectSourceFiles(root, { changed: true, baseRef })],
+    then: ["all three local change classes are present", (files, { root }) => {
+      try {
+        expect(files.map((file) => file.slice(root.length + 1))).toEqual(["new.mjs", "staged.mjs", "unstaged.mjs"]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
+  component("rejects a file-cap increase relative to trunk", {
+    given: ["a committed 501-line legacy cap raised with the file", () => {
+      const root = gitRepo("amux-cap-raise-");
+      writeFileSync(join(root, "large.mjs"), sourceLines(501));
+      writeFileSync(join(root, ".amux-lint.yml"), "fileSize:\n  caps:\n    large.mjs: 501\n");
+      git(root, "add", ".");
+      git(root, "commit", "-m", "base cap");
+      const baseRef = git(root, "rev-parse", "HEAD");
+      writeFileSync(join(root, "large.mjs"), sourceLines(502));
+      writeFileSync(join(root, ".amux-lint.yml"), "fileSize:\n  caps:\n    large.mjs: 502\n");
+      return { root, baseRef };
+    }],
+    when: ["linting against the base cap", ({ root, baseRef }) => lintRoot(root, { changed: true, baseRef })],
+    then: ["STYLE011 blocks the raised budget", (result, { root }) => {
+      try {
+        expect(result.findings.map((entry) => entry.code)).toContain("STYLE011");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
+  component("renaming the lint config cannot reset file caps", {
+    given: ["a legacy cap moved from yml to yaml and raised", () => {
+      const root = gitRepo("amux-cap-rename-");
+      const oldConfig = join(root, ".amux-lint.yml");
+      const newConfig = join(root, ".amux-lint.yaml");
+      writeFileSync(join(root, "large.mjs"), sourceLines(501));
+      writeFileSync(oldConfig, "fileSize:\n  caps:\n    large.mjs: 501\n");
+      git(root, "add", ".");
+      git(root, "commit", "-m", "base cap");
+      const baseRef = git(root, "rev-parse", "HEAD");
+      renameSync(oldConfig, newConfig);
+      writeFileSync(newConfig, "fileSize:\n  caps:\n    large.mjs: 502\n");
+      writeFileSync(join(root, "large.mjs"), sourceLines(502));
+      return { root, baseRef };
+    }],
+    when: ["linting the renamed policy", ({ root, baseRef }) => lintRoot(root, { changed: true, baseRef })],
+    then: ["the trunk cap still blocks the increase", (result, { root }) => {
+      try {
+        expect(result.findings.map((entry) => entry.code)).toContain("STYLE011");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
+  component("deleting the lint config cannot reset cap history", {
+    given: ["a trunk policy with one grandfathered source file", () => {
+      const root = gitRepo("amux-cap-delete-");
+      const config = join(root, ".amux-lint.yml");
+      writeFileSync(join(root, "large.mjs"), sourceLines(501));
+      writeFileSync(config, "fileSize:\n  caps:\n    large.mjs: 501\n");
+      git(root, "add", ".");
+      git(root, "commit", "-m", "base cap");
+      const baseRef = git(root, "rev-parse", "HEAD");
+      rmSync(config);
+      return { root, baseRef };
+    }],
+    when: ["linting without the current policy", ({ root, baseRef }) => lintRoot(root, { changed: true, baseRef })],
+    then: ["STYLE014 blocks removal of the monotonic history", (result, { root }) => {
+      try {
+        expect(result.findings.map((entry) => entry.code)).toContain("STYLE014");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
+  component("allows a legacy file and cap to shrink together", {
+    given: ["a 501-line cap lowered with a one-line extraction", () => {
+      const root = gitRepo("amux-cap-lower-");
+      writeFileSync(join(root, "large.mjs"), sourceLines(501));
+      writeFileSync(join(root, ".amux-lint.yml"), "fileSize:\n  caps:\n    large.mjs: 501\n");
+      git(root, "add", ".");
+      git(root, "commit", "-m", "base cap");
+      const baseRef = git(root, "rev-parse", "HEAD");
+      writeFileSync(join(root, "large.mjs"), sourceLines(500));
+      writeFileSync(join(root, ".amux-lint.yml"), "fileSize:\n  caps:\n    large.mjs: 500\n");
+      return { root, baseRef };
+    }],
+    when: ["linting the lowered cap", ({ root, baseRef }) => lintRoot(root, { changed: true, baseRef })],
+    then: ["no size-ratchet rule blocks it", (result, { root }) => {
+      try {
+        expect(result.findings.filter((entry) => entry.code.startsWith("STYLE01"))).toEqual([]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
+  component("fails loud when an explicit trunk ref cannot be resolved", {
+    given: ["a git repo and a missing base ref", () => {
+      const root = gitRepo("amux-missing-base-");
+      writeFileSync(join(root, "source.mjs"), "const value = true;\n");
+      git(root, "add", ".");
+      git(root, "commit", "-m", "base");
+      return root;
+    }],
+    when: ["running changed selection", (root) => {
+      let error;
+      try {
+        collectSourceFiles(root, { changed: true, baseRef: "missing-trunk" });
+      } catch (caught) {
+        error = caught;
+      }
+      return error;
+    }],
+    then: ["the gate refuses the silent empty scan", (error, root) => {
+      try {
+        expect(error?.message).toContain("base ref 'missing-trunk' is unavailable");
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
