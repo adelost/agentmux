@@ -177,6 +177,7 @@ const errorText = (error) => ({
   "cwd-not-a-directory": "The folder does not exist or is not a directory on the server.",
   "idempotency-key-conflict": "The request changed after it was sent. Try again.",
   "turn-in-progress": "The agent is already working. Wait or interrupt the current turn.",
+  "message-queue-full": "This agent already has 100 queued messages. Let it catch up first.",
   "agent-not-running": "The agent has no active turn to interrupt.",
   "interrupt-not-ready": "Codex is still starting the turn. Try again in a moment.",
   "compact-needs-session": "Send a message first so the agent has a session to compact.",
@@ -374,11 +375,12 @@ const updateAgentHeader = () => {
   elements.agentMeta.textContent = `${agent.engine} · ${agent.model} · ${effortLabel(agent.effort)}`;
   elements.projectPath.textContent = project.cwd;
   elements.projectPath.title = project.cwd;
+  const queued = Number(agent.queuedMessages || 0);
   elements.runState.textContent = agent.operation === "interrupting"
     ? "Interrupting…"
     : ["compact", "auto-compact"].includes(agent.operation)
       ? "Compacting…"
-      : agent.running ? "Working…" : "Ready";
+      : agent.running ? `Working…${queued ? ` · ${queued} queued` : ""}` : queued ? `${queued} queued` : "Ready";
   elements.runState.classList.toggle("running", agent.running);
   renderContext(agent);
   replaceEffortOptions(elements.agentEffortSelect, agent.engine, agent.effort);
@@ -398,9 +400,10 @@ const updateAgentHeader = () => {
   elements.sideQuestionButton.title = agent.sessionId
     ? "Ask a separate fork without interrupting the main task"
     : "Send a regular message first";
-  elements.prompt.disabled = agent.running;
-  elements.sendButton.disabled = agent.running || state.sending;
-  elements.attachButton.disabled = agent.running;
+  elements.prompt.disabled = false;
+  elements.sendButton.disabled = state.sending;
+  elements.sendButton.textContent = agent.running ? "Queue" : "Send";
+  elements.attachButton.disabled = false;
 };
 
 const renderChrome = () => {
@@ -605,6 +608,22 @@ const renderEvent = (event) => {
     state.liveMessage = null;
     const article = messageElement("user", event.text);
     renderMessageAttachments(article, event.attachments);
+    if (!event.historical) {
+      const agent = selectedAgent();
+      if (agent) {
+        agent.running = true;
+        agent.operation = "turn";
+        agent.queuedMessages = Math.max(0, Number(agent.queuedMessages || 0) - 1);
+        updateAgentHeader();
+      }
+    }
+  } else if (event.type === "web" && event.subtype === "message-queued") {
+    const agent = selectedAgent();
+    if (agent) {
+      agent.queuedMessages = Math.max(Number(agent.queuedMessages || 0), Number(event.position || 0));
+      updateAgentHeader();
+    }
+    messageElement("notice", `Queued for this agent · position ${event.position}.`, "notice");
   } else if (event.type === "stream_event"
       && event.event?.type === "content_block_delta"
       && event.event.delta?.type === "text_delta") {
@@ -683,8 +702,8 @@ const renderEvent = (event) => {
     state.liveMessage = null;
     const agent = selectedAgent();
     if (agent) {
-      agent.running = false;
-      agent.operation = null;
+      agent.running = Number(agent.queuedMessages || 0) > 0;
+      agent.operation = agent.running ? "turn" : null;
       updateAgentHeader();
     }
     if (event.code !== 0 && !event.interrupted && !event.permissionDenied) {
@@ -738,6 +757,7 @@ function selectAgent(agentId) {
 
 const promptStatus = (status) => ({
   accepted: "Accepted",
+  queued: "Queued",
   running: "Working",
   completed: "Completed",
   failed: "Failed",
@@ -924,7 +944,7 @@ const renderAttachments = () => {
 const uploadFiles = async (files) => {
   const project = selectedProject();
   const agent = selectedAgent();
-  if (!project || !agent || agent.running) return;
+  if (!project || !agent) return;
   for (const file of files) {
     try {
       showToast(`Uploading ${file.name}…`);
@@ -963,7 +983,8 @@ const clipboardImageFiles = (clipboardData) => [...(clipboardData?.items ?? [])]
 const submitMessage = async () => {
   const agent = selectedAgent();
   const prompt = elements.prompt.value.trim();
-  if (!agent || !prompt || agent.running || state.sending) return;
+  if (!agent || !prompt || state.sending) return;
+  const wasRunning = agent.running;
   const fingerprint = JSON.stringify({ prompt, attachments: state.attachments.map((attachment) => attachment.path) });
   if (!state.pendingMessage || state.pendingMessage.fingerprint !== fingerprint) {
     state.pendingMessage = { key: crypto.randomUUID(), fingerprint };
@@ -971,7 +992,7 @@ const submitMessage = async () => {
   state.sending = true;
   updateAgentHeader();
   try {
-    await api(`/api/agents/${agent.id}/messages`, {
+    const accepted = await api(`/api/agents/${agent.id}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -981,13 +1002,15 @@ const submitMessage = async () => {
         source: "web",
       }),
     });
-    agent.running = true;
-    agent.operation = "turn";
+    agent.running = accepted.running;
+    agent.operation = accepted.operation || (accepted.running ? "turn" : null);
+    agent.queuedMessages = Number(accepted.queuedMessages || 0);
     elements.prompt.value = "";
     elements.prompt.style.height = "auto";
     state.attachments = [];
     state.pendingMessage = null;
     renderAttachments();
+    if (wasRunning) showToast(`Queued · ${agent.queuedMessages} waiting`);
     if (elements.promptOverviewDialog.open) loadPromptOverview();
   } catch (error) {
     showToast(errorText(error), "error");

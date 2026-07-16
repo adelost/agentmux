@@ -585,6 +585,112 @@ describe("AMUX Code project and agent registry", () => {
     expect(rebound.body.error).toBe("agent-address-already-bound");
   });
 
+  it("imports exact idle tmux sessions without launching a second writer", async () => {
+    const { url, workspace, homeDir, calls } = await setup();
+    const project = await createProject(url, workspace);
+    const claudePane = join(workspace, ".agents", "0");
+    const codexPane = join(workspace, ".agents", "1");
+    mkdirSync(claudePane, { recursive: true });
+    mkdirSync(codexPane, { recursive: true });
+    const claudeStore = claudeProjectDir(claudePane, homeDir);
+    mkdirSync(claudeStore, { recursive: true });
+    writeFileSync(join(claudeStore, `${CLAUDE_SESSION}.jsonl`), "{}\n");
+    const codexStore = join(homeDir, ".codex", "sessions", "2026", "07", "16");
+    mkdirSync(codexStore, { recursive: true });
+    writeFileSync(join(codexStore, `rollout-${CODEX_SESSION}.jsonl`), `${JSON.stringify({
+      type: "session_meta",
+      payload: { id: CODEX_SESSION, cwd: codexPane },
+    })}\n`);
+
+    // Override points at the exact isolated test store. Nothing is spawned by
+    // import; the old tmux process can remain the sole writer until cutover.
+    const importClaude = await postJson(`${url}/api/projects/${project.id}/session-imports`, {
+      name: "claw:0",
+      engine: "claude",
+      model: "claude-opus-4-8",
+      effort: "high",
+      address: { session: "claw", pane: 0 },
+      permissionMode: "automation",
+      sessionId: CLAUDE_SESSION,
+      sourceCwd: claudePane,
+      idempotencyKey: "import-claw-0",
+    });
+    expect(importClaude.status).toBe(201);
+    expect(importClaude.body).toMatchObject({
+      sessionId: CLAUDE_SESSION,
+      running: false,
+      address: { session: "claw", pane: 0 },
+    });
+    expect(calls).toHaveLength(0);
+
+    const replay = await postJson(`${url}/api/projects/${project.id}/session-imports`, {
+      name: "claw:0",
+      engine: "claude",
+      model: "claude-opus-4-8",
+      effort: "high",
+      address: { session: "claw", pane: 0 },
+      permissionMode: "automation",
+      sessionId: CLAUDE_SESSION,
+      sourceCwd: claudePane,
+      idempotencyKey: "import-claw-0",
+    });
+    expect(replay.status).toBe(200);
+    expect(replay.body).toMatchObject({ id: importClaude.body.id, replayed: true });
+
+    const importCodex = await postJson(`${url}/api/projects/${project.id}/session-imports`, {
+      name: "claw:1",
+      engine: "codex",
+      model: "gpt-5.6-sol",
+      effort: "xhigh",
+      address: { session: "claw", pane: 1 },
+      permissionMode: "automation",
+      sessionId: CODEX_SESSION,
+      sourceCwd: codexPane,
+      idempotencyKey: "import-claw-1",
+    });
+    expect(importCodex.status).toBe(201);
+    expect(importCodex.body).toMatchObject({
+      sessionId: CODEX_SESSION,
+      running: false,
+      address: { session: "claw", pane: 1 },
+    });
+    expect(calls).toHaveLength(0);
+
+    const wrongCwd = await postJson(`${url}/api/projects/${project.id}/session-imports`, {
+      name: "claw:1",
+      engine: "codex",
+      address: { session: "claw", pane: 1 },
+      permissionMode: "automation",
+      sessionId: CODEX_SESSION,
+      sourceCwd: workspace,
+      idempotencyKey: "import-claw-1-wrong",
+    });
+    expect(wrongCwd.status).toBe(409);
+    expect(wrongCwd.body.error).toBe("session-source-cwd-mismatch");
+
+    await postJson(`${url}/api/agents/${importClaude.body.id}/messages`, {
+      prompt: "continue imported session",
+      attachments: [],
+      idempotencyKey: "imported-first-turn",
+    });
+    await waitForIdle(url, project.id, importClaude.body.id);
+    expect(calls[0].args).toContain("--resume");
+    expect(calls[0].args).toContain(CLAUDE_SESSION);
+
+    await postJson(`${url}/api/agents/${importCodex.body.id}/messages`, {
+      prompt: "continue imported codex session",
+      attachments: [],
+      idempotencyKey: "imported-codex-first-turn",
+    });
+    await waitForIdle(url, project.id, importCodex.body.id);
+    expect(calls.at(-1).messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        method: "thread/resume",
+        params: expect.objectContaining({ threadId: CODEX_SESSION }),
+      }),
+    ]));
+  });
+
   it("runs Claude and Codex in the project, resumes sessions and de-duplicates messages", async () => {
     const { url, workspace, calls } = await setup();
     const project = await createProject(url, workspace);
@@ -679,6 +785,141 @@ describe("AMUX Code project and agent registry", () => {
     const resumeRequest = codexResumeCall.messages.find((message) => message.method === "thread/resume");
     expect(resumeRequest?.params).toMatchObject({ threadId: CODEX_SESSION, cwd: workspace });
     expect(resumeRequest?.params).not.toHaveProperty("excludeTurns");
+  });
+
+  it("accepts multiple messages during a turn and drains them in durable FIFO order", async () => {
+    const { url, workspace, calls } = await setup();
+    const project = await createProject(url, workspace);
+    const claude = await createAgent(url, project, "claude");
+    const first = await postJson(`${url}/api/agents/${claude.id}/messages`, {
+      prompt: "WAIT_FOR_INTERRUPT",
+      attachments: [],
+      idempotencyKey: "fifo-first",
+    });
+    expect(first.status).toBe(202);
+    await waitForAgent(url, project.id, claude.id, (agent) => agent.running, "first turn never started");
+
+    const second = await postJson(`${url}/api/agents/${claude.id}/messages`, {
+      prompt: "FIFO_SECOND",
+      attachments: [],
+      idempotencyKey: "fifo-second",
+    });
+    const third = await postJson(`${url}/api/agents/${claude.id}/messages`, {
+      prompt: "FIFO_THIRD",
+      attachments: [],
+      idempotencyKey: "fifo-third",
+    });
+    expect(second).toMatchObject({ status: 202, body: { running: true, queuedMessages: 1 } });
+    expect(third).toMatchObject({ status: 202, body: { running: true, queuedMessages: 2 } });
+    const replay = await postJson(`${url}/api/agents/${claude.id}/messages`, {
+      prompt: "FIFO_SECOND",
+      attachments: [],
+      idempotencyKey: "fifo-second",
+    });
+    expect(replay).toMatchObject({ status: 200, body: { replayed: true, queuedMessages: 2 } });
+
+    let interrupt;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      interrupt = await postJson(`${url}/api/agents/${claude.id}/interrupt`, {
+        idempotencyKey: "fifo-interrupt-first",
+      });
+      if (interrupt.status === 202) break;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+    }
+    expect(interrupt.status).toBe(202);
+    const idle = await waitForAgent(url, project.id, claude.id,
+      (agent) => !agent.running && agent.queuedMessages === 0,
+      "queued turns did not drain");
+    expect(idle.queuedMessages).toBe(0);
+    expect(calls.filter((call) => call.command === "fake-claude")
+      .map((call) => call.messages[0]?.message?.content)).toEqual([
+      "WAIT_FOR_INTERRUPT", "FIFO_SECOND", "FIFO_THIRD",
+    ]);
+    const history = await request(`${url}/api/agents/${claude.id}/history`);
+    expect(history.body.operations.map((operation) => operation.operationKey)).toEqual(expect.arrayContaining([
+      "fifo-first", "fifo-second", "fifo-third",
+    ]));
+    expect(history.body.operations.every((operation) => operation.code === 0)).toBe(true);
+  });
+
+  it("resumes accepted-but-not-started FIFO messages after a runtime restart", async () => {
+    const firstRuntime = await setup();
+    const project = await createProject(firstRuntime.url, firstRuntime.workspace);
+    const claude = await createAgent(firstRuntime.url, project, "claude");
+    await postJson(`${firstRuntime.url}/api/agents/${claude.id}/messages`, {
+      prompt: "WAIT_FOR_INTERRUPT",
+      attachments: [],
+      idempotencyKey: "restart-active",
+    });
+    await waitForAgent(firstRuntime.url, project.id, claude.id, (agent) => agent.running);
+    await postJson(`${firstRuntime.url}/api/agents/${claude.id}/messages`, {
+      prompt: "RUN_AFTER_RESTART",
+      attachments: [],
+      idempotencyKey: "restart-queued",
+    });
+    await firstRuntime.app.close();
+
+    const calls = [];
+    const secondApp = createWebUi({
+      dataDir: firstRuntime.dataDir,
+      homeDir: firstRuntime.homeDir,
+      legacyDataDir: null,
+      claudeCommand: "fake-claude",
+      codexCommand: "fake-codex",
+      spawnProcess: fakeSpawn(calls),
+      appendEventImpl: () => {},
+    });
+    const { url } = await secondApp.listen({ port: 0 });
+    cleanups.push(async () => secondApp.close());
+    const idle = await waitForAgent(url, project.id, claude.id,
+      (agent) => !agent.running && agent.queuedMessages === 0,
+      "persisted queue did not resume after restart");
+    expect(idle.queuedMessages).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].messages[0].message.content).toBe("RUN_AFTER_RESTART");
+    const history = await request(`${url}/api/agents/${claude.id}/history`);
+    expect(history.body.operations.find((operation) => operation.operationKey === "restart-queued"))
+      .toMatchObject({ code: 0 });
+  });
+
+  it("fails a submitted crash-window message loudly instead of replaying it", async () => {
+    const firstRuntime = await setup();
+    const project = await createProject(firstRuntime.url, firstRuntime.workspace);
+    const claude = await createAgent(firstRuntime.url, project, "claude");
+    await firstRuntime.app.close();
+    const registryPath = join(firstRuntime.dataDir, "registry.json");
+    const registry = JSON.parse(readFileSync(registryPath, "utf8"));
+    registry.receipts.messages.uncertain = {
+      id: claude.id,
+      hash: "uncertain-hash",
+      acceptedAt: Date.now() - 1_000,
+    };
+    registry.queuedMessages = {
+      uncertain: {
+        id: claude.id,
+        prompt: "MAY_ALREADY_HAVE_RUN",
+        attachments: [],
+        acceptedAt: Date.now() - 1_000,
+        startedAt: Date.now() - 900,
+      },
+    };
+    writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+
+    const calls = [];
+    const secondApp = createWebUi({
+      dataDir: firstRuntime.dataDir,
+      homeDir: firstRuntime.homeDir,
+      legacyDataDir: null,
+      spawnProcess: fakeSpawn(calls),
+      appendEventImpl: () => {},
+    });
+    const { url } = await secondApp.listen({ port: 0 });
+    cleanups.push(async () => secondApp.close());
+    const history = await request(`${url}/api/agents/${claude.id}/history`);
+    expect(history.body.agent).toMatchObject({ running: false, queuedMessages: 0 });
+    expect(history.body.operations.find((operation) => operation.operationKey === "uncertain"))
+      .toMatchObject({ code: -1, error: expect.stringContaining("outcome is uncertain") });
+    expect(calls).toHaveLength(0);
   });
 
   it("normalizes live Claude and Codex tools into one redacted activity contract", async () => {

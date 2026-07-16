@@ -5,7 +5,7 @@
 //   - is it running the repo's CURRENT code (the stale-bridge trap)?
 //   - are the Claude Code hooks installed and their script present?
 //   - is the event ledger alive and rotating?
-//   - does tmux answer on the amux socket?
+//   - does tmux answer when at least one configured project still needs it?
 //
 // Pure functions + injected I/O so every rule is unit-testable; the CLI
 // wrapper (cmdDoctor) does the real reads.
@@ -196,7 +196,8 @@ export function checkContextBridge({ claudePanes, pushing }) {
   return check("context bridge", OK, `${pushing}/${claudePanes} claude panes push fresh context`);
 }
 
-export function checkTmux({ sessions, error }) {
+export function checkTmux({ sessions, error, required = true }) {
+  if (!required) return check("tmux", OK, "not required by native-only fleet");
   if (error) {
     return check("tmux", FAIL, `socket not answering: ${error}`,
       "agents unreachable; is tmux running on the amux socket?");
@@ -205,7 +206,8 @@ export function checkTmux({ sessions, error }) {
 }
 
 /** tmux added paste-buffer -p (bracketed-paste framing) in 3.2. */
-export function checkTmuxVersion({ version, minimumMajor = 3, minimumMinor = 2 }) {
+export function checkTmuxVersion({ version, minimumMajor = 3, minimumMinor = 2, required = true }) {
+  if (!required) return check("tmux version", OK, "not required by native-only fleet");
   const label = String(version || "").trim();
   const match = label.match(/(\d+)\.(\d+)/);
   if (!match) {

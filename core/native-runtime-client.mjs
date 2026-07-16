@@ -25,6 +25,12 @@ export class NativeRuntimeError extends Error {
 const normalizeUrl = (value) => String(value || DEFAULT_RUNTIME_URL).replace(/\/+$/, "");
 const keyHash = (value) => createHash("sha256").update(String(value)).digest("hex").slice(0, 24);
 
+export const nativeProjectKey = (name, entry) =>
+  `amux-project:${entry?.id || keyHash(`${name}:${entry?.dir || ""}`)}`;
+
+export const nativeAgentKey = (name, entry, pane) =>
+  `amux-agent:${entry?.id || keyHash(`${name}:${entry?.dir || ""}`)}:${Number(pane)}`;
+
 function paneEngine(pane) {
   if (["claude", "codex"].includes(pane?.engine)) return pane.engine;
   const match = String(pane?.cmd || "").match(NATIVE_COMMAND);
@@ -184,7 +190,7 @@ export function createNativeRuntimeClient({
         });
       }
     } else {
-      const projectKey = `amux-project:${spec.entry.id || keyHash(`${name}:${spec.entry.dir}`)}`;
+      const projectKey = nativeProjectKey(name, spec.entry);
       project = await api(spec.runtimeUrl, "/api/projects", {
         method: "POST",
         body: {
@@ -193,7 +199,7 @@ export function createNativeRuntimeClient({
           cwd: spec.entry.dir,
         },
       });
-      const agentKey = `amux-agent:${spec.entry.id || keyHash(`${name}:${spec.entry.dir}`)}:${pane}`;
+      const agentKey = nativeAgentKey(name, spec.entry, pane);
       agent = await api(spec.runtimeUrl, `/api/projects/${project.id}/agents`, {
         method: "POST",
         body: {

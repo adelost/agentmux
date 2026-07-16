@@ -48,6 +48,14 @@ project or the selected agent. Discord and `amux` deliveries write through the
 same `/messages` acceptance seam; `amux asks` may consume it later but is not a
 second writer or the source of truth.
 
+Messages accepted while an agent is already running enter a bounded,
+persisted per-agent FIFO. The browser composer remains enabled, displays the
+queue count and gives every queued prompt its own idempotency receipt. FIFO
+entries retain their full payload only until their turn finishes; the durable
+journal keeps the existing clipped preview. A runtime restart after submission
+is reported as an uncertain failure instead of automatically replaying a turn
+that may already have changed the workspace.
+
 The browser UI is English-only. Images copied to the clipboard can be pasted
 directly into the prompt composer; they use the same bounded, idempotent upload
 path and attachment preview as the file picker and drag-and-drop.

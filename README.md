@@ -159,6 +159,18 @@ native→tmux→native rollback and proves old operation keys replay without a
 second turn. The live/default tmux socket and production runtime are never
 touched. See [the rollback runbook](docs/native-runtime-rollback.md).
 
+### Fail-closed fleet cutover
+
+Once the canary is green, `amux cutover` migrates existing tmux panes by their
+exact persisted engine session IDs. It is a read-only dry run unless `--apply`
+is explicit, repeats the idle and queue proof immediately before stopping
+tmux, writes a phase receipt, and rolls both config files and sessions back on
+any failed continuity check. Configured dev services can move to the native
+process supervisor; shell panes must be explicitly dropped. An explicit
+`--allow-empty` creates a fresh session only for a pane with neither an engine
+session nor persisted turn history. See the
+[cutover runbook](docs/native-cutover.md).
+
 ### Hook-pushed pane state (event ledger)
 
 Panes report their own state transitions through Claude Code hooks instead
@@ -292,8 +304,9 @@ amux serve
 ```
 
 This keeps logs visible in the current terminal; `Ctrl+C` stops the bridge.
-For an explicitly managed background bridge, run `amux serve --detach`.
-Both modes are observable with `amux doctor`.
+For an explicitly managed background bridge, run `amux serve --detach`. The
+managed supervisor does not use tmux; it owns a detached process group with an
+identity-checked private receipt. Both modes are observable with `amux doctor`.
 
 In Discord, run:
 
