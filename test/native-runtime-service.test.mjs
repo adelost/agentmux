@@ -49,6 +49,14 @@ describe("native runtime detached lifecycle", () => {
     expect(started.pid).toBeGreaterThan(0);
     const status = await nativeRuntimeStatus(options);
     expect(status.health).toMatchObject({ ok: true, projects: 0, agents: 0, running: 0 });
+    const statusWithoutRepeatedDataDir = await nativeRuntimeStatus({
+      port,
+      stateDir: options.stateDir,
+    });
+    expect(statusWithoutRepeatedDataDir).toMatchObject({
+      managed: true,
+      paths: { dataDir: resolve(options.dataDir) },
+    });
 
     const stopped = await stopNativeRuntime(options);
     expect(stopped.stopped).toBe(true);

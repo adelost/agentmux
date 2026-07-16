@@ -45,7 +45,9 @@ function processMatches(record) {
     const environment = readFileSync(`/proc/${Number(record.pid)}/environ`, "utf8")
       .split("\0");
     return args.includes(resolve(record.serverPath))
-      && environment.includes(`AMUX_WEB_PORT=${Number(record.port)}`);
+      && environment.includes(`AMUX_WEB_PORT=${Number(record.port)}`)
+      && (!record.dataDir
+        || environment.includes(`AMUX_WEB_DATA_DIR=${resolve(record.dataDir)}`));
   } catch {
     // Refuse ownership when process identity cannot be proven. A stale PID
     // must never let `amux runtime stop` signal an unrelated reused process.
@@ -96,11 +98,14 @@ export async function nativeRuntimeStatus({
   const paths = locations({ port, stateDir, dataDir });
   const processRecord = readPid(paths.pidPath);
   const alive = processMatches(processRecord);
+  const managedDataDir = alive && typeof processRecord?.dataDir === "string"
+    ? resolve(processRecord.dataDir)
+    : paths.dataDir;
   const url = `http://${host}:${port}`;
   const runtimeHealth = await health(url, fetchImpl);
   return {
     url,
-    paths,
+    paths: { ...paths, dataDir: managedDataDir },
     managed: alive,
     pid: alive ? Number(processRecord.pid) : null,
     online: Boolean(runtimeHealth?.ok),
