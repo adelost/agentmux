@@ -70,9 +70,11 @@ try {
       projects: result.projects,
       pending: result.pending,
       delivered: result.delivered,
+      rejected: result.rejected,
     },
   });
   if (result.delivered > 0) console.log(`OK delivered=${result.delivered}`);
+  if (result.rejected > 0) console.log(`OK rejected-stale=${result.rejected}`);
 } catch (error) {
   console.error(`ERROR suggestions-watchdog-outbox: ${error.message}`);
   process.exit(1);

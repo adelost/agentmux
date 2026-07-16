@@ -30,6 +30,7 @@ import { codexInterruptionFromTurns, planRevive, reviveBrief, parseBootMs } from
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { latestCodexJsonlMtime, readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
+import { captureBriefPremise, premiseEnvelope } from "../core/premise-stamp.mjs";
 import { appendEvent, latestPaneStatesCached, mergeStatus, readEvents, eventsPath } from "../core/events.mjs";
 import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../core/pane-status.mjs";
 import { readHeartbeat } from "../core/heartbeat.mjs";
@@ -711,7 +712,17 @@ async function cmdSend(name, prompt, flags, ctx) {
   // Sender is invariant — provenance must never be silently erased.
   const exec = (cmd) => execSync(cmd, { encoding: "utf8", timeout: 2000 });
   const sender = detectSenderFromEnv(process.env, exec);
-  const finalPrompt = prependSenderHeader(prompt, sender);
+  const slashCommand = String(prompt).trimStart().startsWith("/");
+  let stampedPrompt = prompt;
+  let premiseStamp = null;
+  if (sender && !slashCommand) {
+    premiseStamp = await captureBriefPremise(prompt, {
+      sender,
+      repoPath: flags["premise-repo"] || process.cwd(),
+    });
+    stampedPrompt = `${premiseEnvelope(premiseStamp)}\n\n${prompt}`;
+  }
+  const finalPrompt = slashCommand ? prompt : prependSenderHeader(stampedPrompt, sender);
 
   const idempotencyKey = flags["idempotency-key"];
   if (idempotencyKey != null
@@ -726,6 +737,7 @@ async function cmdSend(name, prompt, flags, ctx) {
   const res = await sendToPane(ctx, name, pane, finalPrompt, {
     force: !!flags.force,
     idempotencyKey: idempotencyKey || null,
+    premiseStamp,
     ...(waitMs != null ? { waitMs } : {}),
   });
   if (res?.blocked) {
@@ -737,11 +749,16 @@ async function cmdSend(name, prompt, flags, ctx) {
     process.exitCode = 1;
     return;
   }
+  if (res?.pending) {
+    console.error(`Queued durably for '${name}' (pane ${pane}) but NOT delivered; job ${res.jobId}.`);
+    process.exitCode = 75;
+    return;
+  }
   if (!res?.delivered) {
     process.exitCode = 1;
     return;
   }
-  if (!flags.q) console.log(`${res.pending ? "Queued durably for" : "Sent to"} '${name}' (pane ${pane}): ${truncate(prompt)}`);
+  if (!flags.q) console.log(`Sent to '${name}' (pane ${pane}): ${truncate(prompt)}`);
 }
 
 export async function readPromptFromStdin(maxBytes = 128 * 1024, stream = process.stdin) {
@@ -4410,6 +4427,7 @@ Usage:
     --stdin                       Read a bounded prompt from stdin (automation)
     --idempotency-key <key>       Reuse one durable queue identity on retry
     --wait-ms <0-12000>           Bound automation receipt wait (enqueue is already durable)
+    --premise-repo <path>         Project actual repo/PR state into an inter-agent brief
   agent add <name> <dir>          Add new agent
   agent rm <name|:nr>             Remove agent
   agent stop <name|:nr>           Stop tmux session (keep config)
@@ -4547,7 +4565,7 @@ Socket: /tmp/openclaw-claude.sock`);
 // --- Dispatch ---
 
 const FLAG_SPECS = {
-  send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "notify-user": "boolean", "notify-me": "boolean", force: "boolean", stdin: "boolean", "idempotency-key": "string", "wait-ms": "number" },
+  send: { n: "string", m: "string", p: "number", t: "number", q: "boolean", quiet: "boolean", "notify-user": "boolean", "notify-me": "boolean", force: "boolean", stdin: "boolean", "idempotency-key": "string", "wait-ms": "number", "premise-repo": "string" },
   runtime: { port: "number", "data-dir": "string", "state-dir": "string", "no-legacy-migration": "boolean", force: "boolean" },
   services: { force: "boolean" },
   cutover: {

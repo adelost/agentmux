@@ -55,7 +55,7 @@ function queueEvent(job, state, extra = {}) {
 }
 
 /**
- * @param {{agent: object, queue: object, notify?: Function, resolveNotificationChannel?: Function, validateTarget?: Function, intervalMs?: number, now?: Function, log?: Function}} options
+ * @param {{agent: object, queue: object, notify?: Function, resolveNotificationChannel?: Function, validateTarget?: Function, verifyPremise?: Function, intervalMs?: number, now?: Function, log?: Function}} options
  */
 export function createDeliveryBroker({
   agent,
@@ -63,6 +63,7 @@ export function createDeliveryBroker({
   notify = async () => {},
   resolveNotificationChannel = null,
   validateTarget = null,
+  verifyPremise = null,
   intervalMs = 500,
   now = () => Date.now(),
   log = (message) => console.warn(message),
@@ -350,6 +351,47 @@ export function createDeliveryBroker({
   async function processJob(initialJob) {
     let job = queue.read(initialJob.agentName, initialJob.pane, initialJob.id) || initialJob;
     queue.restoreAssets?.(job);
+
+    // A sender-side premise projection is an execution fence, not decoration.
+    // Recheck it at the last shared boundary before native or tmux delivery;
+    // stale instructions become durable NOT SENT outcomes and never enter the
+    // receiver's history. Transient verifier failures remain queued fail-safe.
+    if (job.metadata?.premiseStamp
+        && job.status !== "submitting" && job.status !== "submitted"
+        && !TERMINAL_DELIVERY_STATES.has(job.status)) {
+      if (typeof verifyPremise !== "function") {
+        return queue.update(job, {
+          status: "pending",
+          nextAttemptAt: now() + blockedRetryMs(job),
+          lastReason: "premise verification unavailable; refusing delivery",
+        });
+      }
+      const verdict = await verifyPremise(job.metadata.premiseStamp);
+      if (verdict?.status === "unavailable") {
+        return queue.update(job, {
+          status: "pending",
+          nextAttemptAt: now() + blockedRetryMs(job),
+          lastReason: `premise verification unavailable: ${verdict.reason || "unknown reason"}`,
+        });
+      }
+      if (verdict?.status !== "valid") {
+        const mismatches = Array.isArray(verdict?.mismatches)
+          ? verdict.mismatches.join(", ") : "invalid premise";
+        const stale = queue.update(job, {
+          status: "cancelled",
+          terminalAt: now(),
+          nextAttemptAt: null,
+          lastReason: `premise stale before delivery: ${mismatches}`,
+          metadata: { deliveryOutcome: "not-sent", premiseStatus: "stale",
+            premiseMismatches: verdict?.mismatches || [] },
+        });
+        queueEvent(stale, "premise_stale", { mismatches: mismatches.slice(0, 240) });
+        return notifyTerminal(stale);
+      }
+      job = queue.update(job, {
+        metadata: { premiseVerifiedAt: now(), premiseStatus: "valid" },
+      });
+    }
 
     // Native targets have an HTTP receipt as their authoritative sink. The
     // stable delivery job id becomes the runtime idempotency key, so a lost

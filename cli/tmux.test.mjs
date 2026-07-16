@@ -5,8 +5,12 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { sendToPane } from "./tmux.mjs";
 import { parkPane } from "../core/pane-park.mjs";
+import { premiseEnvelope } from "../core/premise-stamp.mjs";
 
 const tmpPath = () => join(tmpdir(), `amux-send-test-${process.pid}-${Math.random().toString(36).slice(2)}.jsonl`);
+const PREMISE = Object.freeze({ schemaVersion: 1, producer: "amux.premise-proof.v1",
+  observedAt: 1, selectors: {}, basis: {}, attestationHash: `sha256:${"a".repeat(64)}` });
+const stamped = (sender, text) => `[from ${sender}]\n\n${premiseEnvelope(PREMISE)}\n\n${text}`;
 
 function fakeAgent() {
   const sent = [];
@@ -134,16 +138,16 @@ feature("sendToPane delivery outcome", () => {
         { agent, configPath: null, deliveryQueue, deliveryWaitMs: 0 },
         "claw",
         3,
-        "[from claw:0]\n\nclaim respected",
-        { mirror: false },
+        stamped("claw:0", "claim respected"),
+        { mirror: false, premiseStamp: PREMISE },
       );
       if (oldPath === undefined) delete process.env.AMUX_PARK_STATE_PATH;
       else process.env.AMUX_PARK_STATE_PATH = oldPath;
       try { unlinkSync(path); } catch {}
       return result;
     }],
-    then: ["the caller knows it is safely queued, not falsely failed", (result) => {
-      expect(result).toMatchObject({ delivered: true, blocked: false, pending: true, queueState: "drafted" });
+    then: ["the caller knows it is safely queued but not yet delivered", (result) => {
+      expect(result).toMatchObject({ delivered: false, blocked: false, pending: true, queueState: "drafted" });
     }],
   });
 
@@ -170,7 +174,7 @@ feature("sendToPane delivery outcome", () => {
     }],
     then: ["it is complete but explicitly not history-verified", (result) => {
       expect(result).toMatchObject({
-        delivered: true,
+        delivered: false,
         blocked: false,
         pending: false,
         unverified: true,
@@ -203,8 +207,8 @@ feature("sendToPane delivery outcome", () => {
         { agent: ctx.agent, configPath: ctx.configPath, deliveryQueue: ctx.deliveryQueue, deliveryWaitMs: 0 },
         "lsrc",
         0,
-        "[from lsrc:4]\n\nreview every image",
-        { mirrorDispatch: (payload) => ctx.mirrors.push(payload) },
+        stamped("lsrc:4", "review every image"),
+        { premiseStamp: PREMISE, mirrorDispatch: (payload) => ctx.mirrors.push(payload) },
       );
       if (ctx.oldPath === undefined) delete process.env.AMUX_PARK_STATE_PATH;
       else process.env.AMUX_PARK_STATE_PATH = ctx.oldPath;
@@ -216,7 +220,7 @@ feature("sendToPane delivery outcome", () => {
       expect(result.delivered).toBe(true);
       expect(result.queueState).toBe("acknowledged");
       expect(mirrors).toEqual([
-        { channelId: "target-channel", content: "[from lsrc:4]\n\nreview every image" },
+        { channelId: "target-channel", content: stamped("lsrc:4", "review every image") },
         { channelId: "sender-channel", content: "`amux lsrc -p 0 …` → delivered." },
       ]);
     }],
@@ -249,8 +253,8 @@ feature("sendToPane delivery outcome", () => {
         { agent: ctx.agent, configPath: ctx.configPath, deliveryQueue: ctx.deliveryQueue, deliveryWaitMs: 0 },
         "lsrc",
         0,
-        "[from lsrc:4]\n\ncritical review",
-        { mirrorDispatch: (payload) => ctx.mirrors.push(payload) },
+        stamped("lsrc:4", "critical review"),
+        { premiseStamp: PREMISE, mirrorDispatch: (payload) => ctx.mirrors.push(payload) },
       );
       const request = ctx.deliveryQueue.enqueue.mock.calls[0][0];
       if (ctx.oldPath === undefined) delete process.env.AMUX_PARK_STATE_PATH;
@@ -260,15 +264,15 @@ feature("sendToPane delivery outcome", () => {
       return { result, request, mirrors: ctx.mirrors };
     }],
     then: ["the broker can warn the target and the sender is not told delivery was verified", ({ result, request, mirrors }) => {
-      expect(request.metadata).toEqual({ sender: "lsrc:4", channelId: "target-channel" });
+      expect(request.metadata).toEqual({ sender: "lsrc:4", channelId: "target-channel",
+        senderChannelId: "sender-channel", premiseStamp: PREMISE });
       expect(result).toMatchObject({
-        delivered: true,
+        delivered: false,
         pending: false,
         unverified: true,
         queueState: "delivered_unverified",
       });
       expect(mirrors).toEqual([
-        { channelId: "target-channel", content: "[from lsrc:4]\n\ncritical review" },
         { channelId: "sender-channel", content: "`amux lsrc -p 0 …` → delivery unverified." },
       ]);
     }],

@@ -8,6 +8,7 @@ import { homedir } from "os";
 import { resolve } from "path";
 import yaml from "js-yaml";
 import { createDeliveryQueue, waitForDeliveryJob } from "./delivery-queue.mjs";
+import { premiseEnvelope, verifyBriefPremise } from "./premise-stamp.mjs";
 
 const LIVE_ORIGIN = "https://suggest.v1d.io";
 const REQUIRED_PROJECTS = Object.freeze(["source", "skydive"]);
@@ -95,15 +96,25 @@ export function createAmuxOutboxDeliverer({
       kind: "prompt",
       source: "suggestions-watchdog",
       idempotencyKey,
-      metadata: { projectId, outboxId: alert.id, dedupeKey: alert.dedupeKey },
+      metadata: { projectId, outboxId: alert.id, dedupeKey: alert.dedupeKey,
+        ...(alert.payload.premise ? { premiseStamp: alert.payload.premise } : {}) },
     });
     if (accepted.idempotencyKey !== idempotencyKey || accepted.agentName !== agent
       || Number(accepted.pane) !== pane || accepted.text !== prompt || accepted.verifyText !== prompt
-      || accepted.kind !== "prompt" || accepted.source !== "suggestions-watchdog") {
+      || accepted.kind !== "prompt" || accepted.source !== "suggestions-watchdog"
+      || (alert.payload.premise
+        && accepted.metadata?.premiseStamp?.attestationHash
+          !== alert.payload.premise.attestationHash)) {
       throw new Error(`delivery: idempotency payload conflict for ${projectId}/${alert.id}`);
     }
     const settled = await waitForDeliveryJob(queue, accepted.id, { timeoutMs: waitMs }) || accepted;
     if (settled.status !== "acknowledged" || !Number.isFinite(settled.acknowledgedAt)) {
+      if (settled.metadata?.premiseStatus === "stale") {
+        const error = new Error(`premise-stale: ${(settled.metadata.premiseMismatches || []).join(", ")}`);
+        error.code = "AMUX_PREMISE_STALE";
+        error.mismatches = settled.metadata.premiseMismatches || ["identity"];
+        throw error;
+      }
       throw new Error(`delivery: agentmux job ${accepted.id} is not acknowledged (${settled.status})`);
     }
     return {
@@ -128,6 +139,7 @@ export async function pollWatchdogOutboxes({
   validateToken(readToken, "read");
   validateToken(adminToken, "admin");
   let delivered = 0;
+  let rejected = 0;
   let pending = 0;
   const errors = [];
   for (const projectId of config.projects) {
@@ -136,7 +148,7 @@ export async function pollWatchdogOutboxes({
       const bootstrap = await fetchJson(bootstrapUrl, {
         fetchImpl, token: readToken, timeoutMs: config.requestTimeoutMs,
       });
-      const target = brokerTarget(bootstrap, projectId);
+      const broker = brokerTarget(bootstrap, projectId);
       const outboxUrl = endpoint(config.baseUrl, "/api/watchdog/outbox", projectId);
       outboxUrl.searchParams.set("after", "0");
       outboxUrl.searchParams.set("limit", "100");
@@ -146,8 +158,10 @@ export async function pollWatchdogOutboxes({
       const alerts = validateAlerts(outbox, projectId);
       for (const alert of alerts) {
         const idempotencyKey = watchdogDeliveryKey(projectId, alert.dedupeKey);
-        const prompt = alertPrompt(projectId, alert);
         try {
+          const target = alertTarget(bootstrap, broker, projectId, alert);
+          await verifyAlertPremise({ config, projectId, alert, readToken, fetchImpl });
+          const prompt = alertPrompt(projectId, alert);
           const receipt = validateReceipt(await deliver({
             ...target, prompt, idempotencyKey, projectId, alert,
           }), idempotencyKey);
@@ -165,6 +179,33 @@ export async function pollWatchdogOutboxes({
           delivered += 1;
           logger.info?.(`DELIVERED ${projectId}/${alert.id} ${alert.kind} -> ${target.agent}:${target.pane}`);
         } catch (error) {
+          if (error?.code === "AMUX_PREMISE_STALE") {
+            try {
+              const rejectUrl = endpoint(config.baseUrl, "/api/watchdog/outbox/reject", projectId);
+              const detectedAt = Date.now();
+              const result = await fetchJson(rejectUrl, {
+                fetchImpl,
+                token: adminToken,
+                timeoutMs: config.requestTimeoutMs,
+                method: "POST",
+                body: { id: alert.id, premiseRejection: {
+                  status: "stale",
+                  attestationHash: alert.payload.premise.attestationHash,
+                  mismatches: error.mismatches,
+                  detectedAt,
+                } },
+              });
+              if (result.rejected !== true || result.id !== alert.id
+                || result.attestationHash !== alert.payload.premise.attestationHash) {
+                throw new Error("rejection: exact outbox premise was not confirmed");
+              }
+              rejected += 1;
+              logger.warn?.(`REJECTED ${projectId}/${alert.id} stale premise: ${error.mismatches.join(", ")}`);
+              continue;
+            } catch (rejectError) {
+              error = new Error(`${error.message}; rejection pending: ${rejectError.message}`);
+            }
+          }
           pending += 1;
           errors.push(new Error(`${projectId}/${alert.id}: ${error.message}`));
           logger.error?.(`PENDING ${projectId}/${alert.id} ${alert.kind}: ${error.message}`);
@@ -177,7 +218,7 @@ export async function pollWatchdogOutboxes({
     }
   }
   if (errors.length) throw new AggregateError(errors, `watchdog outbox: ${pending} pending alert(s)`);
-  return { delivered, pending, projects: config.projects.length };
+  return { delivered, rejected, pending, projects: config.projects.length };
 }
 
 function expandPath(path, home) {
@@ -251,6 +292,60 @@ function brokerTarget(value, projectId) {
   return { agent: match[1], pane };
 }
 
+function alertTarget(bootstrap, broker, projectId, alert) {
+  const ownerDelivery = alert.kind === "assignment_wake_condition_recorded"
+    || alert.kind === "assignment_offer_delivery";
+  if (!ownerDelivery) return broker;
+  const project = bootstrap?.assignmentBootstrap?.project ?? bootstrap?.project;
+  const routingWorkers = bootstrap?.project?.routingGuide?.workers
+    ?? project?.routingGuide?.workers;
+  const allowed = Array.isArray(project?.allowedWorkerPanes)
+    ? project.allowedWorkerPanes.map(String)
+    : Array.isArray(routingWorkers)
+      ? routingWorkers.filter((worker) => isObject(worker) && worker.role === "worker")
+        .map((worker) => String(worker.id))
+      : [];
+  const target = String(alert.kind === "assignment_offer_delivery"
+    ? alert.payload.targetAgent : alert.payload.targetAgentId || "");
+  if (!allowed.includes(target)) {
+    throw new Error(`schema: owner target '${target || "missing"}' is not an allowed ${projectId} worker pane`);
+  }
+  const match = target.match(/^([a-z][a-z0-9-]{0,31}):([0-9]{1,3})$/u);
+  const pane = Number(match?.[2]);
+  if (!match || !Number.isSafeInteger(pane) || pane < 0 || pane > 128) {
+    throw new Error("schema: owner target is not an agentmux target");
+  }
+  return { agent: match[1], pane };
+}
+
+async function verifyAlertPremise({ config, projectId, alert, readToken, fetchImpl }) {
+  if (alert.kind !== "assignment_wake_condition_recorded") return;
+  const premise = alert.payload.premise;
+  const expected = premise?.basis?.board?.[0];
+  if (!isObject(premise) || premise.schemaVersion !== 1
+    || premise.producer !== "amux.premise-proof.v1"
+    || !isObject(expected) || expected.ticketId !== alert.ticketId
+    || expected.projectId !== projectId) {
+    throw new Error("schema: assignment wake premise is missing or invalid");
+  }
+  if (expected.assignment?.ownerAgentId !== alert.payload.targetAgentId
+    || expected.assignment?.generation !== alert.payload.assignmentGeneration) {
+    throw new Error("schema: wake target/generation is not bound by its premise");
+  }
+  const verdict = await verifyBriefPremise(premise, {
+    baseUrl: config.baseUrl, readToken, fetchImpl,
+  });
+  if (verdict.status === "unavailable") {
+    throw new Error(`premise verification unavailable: ${verdict.reason || "unknown reason"}`);
+  }
+  if (verdict.status !== "valid") {
+    const error = new Error(`premise-stale: ${verdict.mismatches.join(", ") || "invalid identity"}`);
+    error.code = "AMUX_PREMISE_STALE";
+    error.mismatches = verdict.mismatches.length ? verdict.mismatches : ["identity"];
+    throw error;
+  }
+}
+
 function validateAlerts(value, projectId) {
   if (!Array.isArray(value?.alerts)) throw new Error("schema: outbox alerts[] missing");
   return value.alerts.map((row, index) => {
@@ -268,6 +363,17 @@ function validateAlerts(value, projectId) {
 }
 
 function alertPrompt(projectId, alert) {
+  if (alert.kind === "assignment_offer_delivery") {
+    const prompt = alert.payload.offerPrompt;
+    const expectedHash = alert.payload.promptHash;
+    const actualHash = typeof prompt === "string"
+      ? `sha256:${createHash("sha256").update(prompt).digest("hex")}` : null;
+    if (typeof prompt !== "string" || !prompt.trim() || bytes(prompt) > MAX_PROMPT_BYTES
+      || typeof expectedHash !== "string" || expectedHash !== actualHash) {
+      throw new Error("schema: assignment offer prompt/hash is missing, oversized, or inconsistent");
+    }
+    return prompt;
+  }
   if (alert.kind === "broker_check_due") {
     if (typeof alert.payload.resolvedPrompt !== "string" || !alert.payload.resolvedPrompt.trim()
       || bytes(alert.payload.resolvedPrompt) > MAX_PROMPT_BYTES) {
@@ -275,7 +381,11 @@ function alertPrompt(projectId, alert) {
     }
     return alert.payload.resolvedPrompt;
   }
-  const prompt = `WATCHDOG ALERT — ${projectId}/${alert.ticketId} — ${alert.kind}\n${JSON.stringify({
+  const premise = alert.payload.premise;
+  const premiseHeader = premise
+    ? `${premiseEnvelope(premise)}\n`
+    : "";
+  const prompt = `${premiseHeader}WATCHDOG ALERT — ${projectId}/${alert.ticketId} — ${alert.kind}\n${JSON.stringify({
     id: alert.id,
     ticketId: alert.ticketId,
     assignmentId: alert.assignmentId ?? null,
