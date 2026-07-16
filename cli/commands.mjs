@@ -4493,8 +4493,8 @@ Usage:
     --all-agents                  Lint every configured agent directory
     --changed                     Only changed files
     --strict                      Exit non-zero on active error/debt findings
-    --baseline <path>             Suppress baseline findings
-    --update-baseline             Write current findings to baseline
+    --baseline <path>             Suppress baseline findings\n    --update-baseline             Write current findings to baseline
+  agent churn [path]              WARN-only young tests + rewrite hotspots from git history
   agent worktree-deps [path]      Provision every tracked npm/uv root in a worktree
     --check                       Verify only; fail on missing, stale, or unsafe deps
     --dry                         Show the immutable-link/local-venv plan
@@ -4701,7 +4701,7 @@ async function dispatchAgentTarget(name, rest, ctx) {
   }
 }
 
-/** Main command dispatch. */
+/** WHAT: Dispatches parsed CLI arguments to one command handler. WHY: Keeps command routing separate from process startup and error reporting. */
 export async function dispatch(argv, ctx) {
   const [cmd, ...rest] = argv;
 
@@ -4962,7 +4962,7 @@ export async function dispatch(argv, ctx) {
     case "lint": {
       return cmdLint(rest, ctx);
     }
-
+    case "churn": return (await import("../core/churn.mjs")).runChurnCommand(rest);
     case "worktree-deps": {
       return cmdWorktreeDeps(rest);
     }
