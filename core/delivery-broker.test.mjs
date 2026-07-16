@@ -1,5 +1,5 @@
 import { feature, component, expect } from "bdd-vitest";
-import { rmSync } from "fs";
+import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
@@ -582,6 +582,78 @@ feature("single-writer delivery broker", () => {
         draftOwned: false,
         lastReason: "awaiting exact JSONL receipt; TUI hint: empty-idle",
       });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a Claude compact boundary safely retries a prompt lost at submit", {
+    given: ["a submitted prompt absent after a newer compact boundary", () => {
+      const rootDir = tempRoot();
+      const clock = 20_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "ai", pane: 2, text: "survive compact" });
+      const jsonl = join(rootDir, "claude.jsonl");
+      mkdirSync(rootDir, { recursive: true });
+      writeFileSync(jsonl, `${JSON.stringify({ type: "system", subtype: "compact_boundary",
+        timestamp: new Date(10_001).toISOString() })}\n`);
+      queue.update(job, { status: "submitted", submittedAt: 10_000,
+        echoCursor: { kind: "claude-prompt-events-v1", positions: { [jsonl]: 0 } },
+        nextAttemptAt: 0 });
+      const agent = acceptingAgent();
+      agent.promptTransportState = async () => ({ state: "empty-idle", busy: false,
+        dialect: "claude" });
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
+      return { rootDir, queue, job, agent, broker };
+    }],
+    when: ["the broker crosses the compact fence and drains again", async (ctx) => {
+      await ctx.broker.kickTarget("ai", 2);
+      ctx.afterBoundary = ctx.queue.read("ai", 2, ctx.job.id);
+      await ctx.broker.kickTarget("ai", 2);
+    }],
+    then: ["one fresh cursor and one physical write produce the receipt", (_, ctx) => {
+      expect(ctx.afterBoundary).toMatchObject({ status: "pending", submittedAt: null,
+        submitFenceAt: null, echoCursor: null, nextAttemptAt: 20_000 });
+      expect(ctx.agent.sends).toHaveLength(1);
+      expect(ctx.queue.read("ai", 2, ctx.job.id).status).toBe("acknowledged");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a sender cancellation becomes NOT SENT after Claude proves the compact loss", {
+    given: ["an ambiguous submitted job whose cancel was initially refused", () => {
+      const rootDir = tempRoot();
+      const clock = 20_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "ai", pane: 2, text: "obsolete after compact" });
+      const jsonl = join(rootDir, "claude.jsonl");
+      mkdirSync(rootDir, { recursive: true });
+      writeFileSync(jsonl, `${JSON.stringify({ type: "system", subtype: "compact_boundary",
+        timestamp: new Date(10_001).toISOString() })}\n`);
+      queue.update(job, { status: "submitted", submittedAt: 10_000,
+        echoCursor: { kind: "claude-prompt-events-v1", positions: { [jsonl]: 0 } },
+        nextAttemptAt: 0 });
+      queue.requestCancellation(job.id, { requestedBy: "claw:3", reason: "replace stale brief" });
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      agent.promptTransportState = async () => ({ state: "empty-idle", busy: false,
+        dialect: "claude" });
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock,
+        notify: async (_job, kind) => notices.push(kind) });
+      return { rootDir, queue, job, agent, notices, broker };
+    }],
+    when: ["the broker first proves the loss and then adjudicates cancellation", async (ctx) => {
+      await ctx.broker.kickTarget("ai", 2);
+      ctx.afterBoundary = ctx.queue.read("ai", 2, ctx.job.id);
+      await ctx.broker.kickTarget("ai", 2);
+    }],
+    then: ["the prompt is terminally NOT SENT and never retyped", (_, ctx) => {
+      expect(ctx.afterBoundary).toMatchObject({ status: "pending", cancelRequestStatus: "requested" });
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.notices).toEqual(["not-sent"]);
+      expect(ctx.queue.read("ai", 2, ctx.job.id)).toMatchObject({ status: "cancelled",
+        cancelRequestStatus: "completed", metadata: { deliveryOutcome: "not-sent",
+          deliveryCancellation: "sender-request" } });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });
