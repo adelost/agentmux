@@ -2,15 +2,19 @@
 
 import { resolve } from "path";
 import { homedir } from "os";
-import { validateAgentPane } from "../cli/config.mjs";
+import { listAgents, validateAgentPane } from "../cli/config.mjs";
+import { createTmuxContext, getPaneStatus } from "../cli/tmux.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import {
+  assignmentDeliveryEligibility,
   createAmuxOutboxDeliverer,
   loadPrivateCredential,
   loadWatchdogOutboxConfig,
   pollWatchdogOutboxes,
 } from "../core/suggestions-watchdog-outbox.mjs";
 import { writeGuardHeartbeat } from "../core/guard-heartbeat.mjs";
+import { readAllTurnsAcrossPanes } from "../core/jsonl-reader.mjs";
+import { groupByPane } from "../core/orchestrator-checkpoint.mjs";
 
 const DEFAULT_CONFIG = "~/.config/agent/suggestions-watchdog-outbox.yaml";
 
@@ -55,10 +59,28 @@ try {
     console.log(`READY projects=${projects} base=${config.baseUrl}`);
     process.exit(0);
   }
+  const agents = listAgents(agentConfigPath);
+  const tmux = createTmuxContext(process.env.TMUX_SOCKET || "/tmp/openclaw-claude.sock",
+    agentConfigPath);
+  const availability = async ({ agent, pane, idleMs }) => {
+    const paneStatus = await getPaneStatus(tmux, agent, pane);
+    const rows = readAllTurnsAcrossPanes({
+      agents, agent, pane, limit: 200, tailBytes: 1024 * 1024,
+    });
+    const bucket = groupByPane(rows).get(`${agent}:${pane}`) || {};
+    return assignmentDeliveryEligibility({
+      paneStatus,
+      lastAssistantText: bucket.lastAssistantText,
+      lastAssistantAt: bucket.lastAssistantTextTs,
+      lastUserAt: bucket.lastUserTextTs,
+      idleMs,
+    });
+  };
   const result = await pollWatchdogOutboxes({
     config,
     readToken,
     adminToken,
+    availability,
     deliver: createAmuxOutboxDeliverer({
       queue: createDeliveryQueue({
         validateTarget: (agent, pane) => validateAgentPane(agentConfigPath, agent, pane),

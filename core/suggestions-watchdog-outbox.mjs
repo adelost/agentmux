@@ -8,6 +8,7 @@ import { homedir } from "os";
 import { resolve } from "path";
 import yaml from "js-yaml";
 import { createDeliveryQueue, waitForDeliveryJob } from "./delivery-queue.mjs";
+import { looksDone } from "./orchestrator-checkpoint.mjs";
 
 const LIVE_ORIGIN = "https://suggest.v1d.io";
 const DEFAULT_DISCOVERY_PROJECT = "source";
@@ -15,6 +16,8 @@ const MAX_PROJECTS = 32;
 const MAX_RESPONSE_BYTES = 512 * 1024;
 const MAX_PROMPT_BYTES = 32 * 1024;
 const PROJECT_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/u;
+/** WHAT: Defines the sustained-idle assignment threshold. WHY: Keeps short pauses from looking like worker availability. */
+export const DEFAULT_ASSIGNMENT_IDLE_MS = 10 * 60_000;
 
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const bytes = (value) => Buffer.byteLength(String(value), "utf8");
@@ -72,6 +75,34 @@ export function loadWatchdogOutboxConfig(path, {
   };
 }
 
+/** WHAT: Resolves whether one pane can receive a new assignment. WHY: Keeps unfinished work from being interrupted or stacked. */
+export function assignmentDeliveryEligibility({
+  paneStatus,
+  lastAssistantText = null,
+  lastAssistantAt = null,
+  lastUserAt = null,
+  now = Date.now(),
+  idleMs = DEFAULT_ASSIGNMENT_IDLE_MS,
+}) {
+  if (paneStatus !== "idle") {
+    return { eligible: false, reason: `pane-${paneStatus || "unknown"}` };
+  }
+  const assistantAt = Number(lastAssistantAt);
+  const userAt = Number(lastUserAt);
+  const hasAssistant = Number.isFinite(assistantAt) && assistantAt > 0;
+  const hasUser = Number.isFinite(userAt) && userAt > 0;
+  const answeredLatest = hasAssistant && (!hasUser || assistantAt >= userAt);
+  if (answeredLatest && looksDone(lastAssistantText)) {
+    return { eligible: true, reason: "explicit-done", idleForMs: Math.max(0, now - assistantAt) };
+  }
+  const lastActivityAt = Math.max(hasAssistant ? assistantAt : 0, hasUser ? userAt : 0);
+  const idleForMs = lastActivityAt > 0 ? Math.max(0, now - lastActivityAt) : 0;
+  if (lastActivityAt > 0 && idleForMs >= idleMs) {
+    return { eligible: true, reason: "sustained-idle", idleForMs };
+  }
+  return { eligible: false, reason: "idle-threshold-not-met", idleForMs };
+}
+
 export function loadPrivateCredential(path, { uid = process.getuid?.() } = {}) {
   let stat;
   try { stat = lstatSync(path); }
@@ -118,12 +149,14 @@ export function createAmuxOutboxDeliverer({
   };
 }
 
+/** WHAT: Dispatches eligible watchdog outbox alerts. WHY: Keeps unavailable assignment targets pending without starting their ACK clock. */
 export async function pollWatchdogOutboxes({
   config,
   readToken,
   adminToken,
   fetchImpl = globalThis.fetch,
   deliver,
+  availability,
   logger = console,
 }) {
   if (!isObject(config) || (config.projects !== null && !Array.isArray(config.projects))
@@ -144,7 +177,7 @@ export async function pollWatchdogOutboxes({
       const bootstrap = await fetchJson(bootstrapUrl, {
         fetchImpl, token: readToken, timeoutMs: config.requestTimeoutMs,
       });
-      const target = brokerTarget(bootstrap, projectId);
+      const broker = brokerTarget(bootstrap, projectId);
       const outboxUrl = endpoint(config.baseUrl, "/api/watchdog/outbox", projectId);
       outboxUrl.searchParams.set("after", "0");
       outboxUrl.searchParams.set("limit", "100");
@@ -153,9 +186,21 @@ export async function pollWatchdogOutboxes({
       });
       const alerts = validateAlerts(outbox, projectId);
       for (const alert of alerts) {
+        const target = alertTarget(alert, broker);
         const idempotencyKey = watchdogDeliveryKey(projectId, alert.dedupeKey);
         const prompt = alertPrompt(projectId, alert);
         try {
+          if (alert.kind === "assignment_offer_delivery") {
+            if (typeof availability !== "function") {
+              throw new Error("assignment availability reader is required");
+            }
+            const policy = assignmentDeliveryPolicy(bootstrap);
+            const state = await availability({ ...target, projectId, alert,
+              idleMs: policy.idleMs });
+            if (!isObject(state) || state.eligible !== true) {
+              throw new Error(`assignment target is not available (${state?.reason || "unknown"})`);
+            }
+          }
           const receipt = validateReceipt(await deliver({
             ...target, prompt, idempotencyKey, projectId, alert,
           }), idempotencyKey);
@@ -294,6 +339,30 @@ function brokerTarget(value, projectId) {
   return { agent: match[1], pane };
 }
 
+function alertTarget(alert, broker) {
+  if (alert.kind !== "assignment_offer_delivery") return broker;
+  const targetAgent = alert.payload.targetAgent;
+  const match = typeof targetAgent === "string"
+    ? targetAgent.match(/^([a-z][a-z0-9-]{0,31}):([0-9]{1,3})$/u) : null;
+  const pane = Number(match?.[2]);
+  if (!match || !Number.isSafeInteger(pane) || pane < 0 || pane > 128) {
+    throw new Error("schema: assignment offer targetAgent is not an agentmux target");
+  }
+  return { agent: match[1], pane };
+}
+
+function assignmentDeliveryPolicy(value) {
+  const policy = value?.assignmentDelivery;
+  if (!isObject(policy) || policy.version !== "assignment-delivery.v1"
+    || policy.requireExplicitDoneOrSustainedIdle !== true
+    || policy.unknownPresence !== "deny"
+    || !Number.isSafeInteger(policy.idleMs)
+    || policy.idleMs < 60_000 || policy.idleMs > 2 * 60 * 60_000) {
+    throw new Error("schema: assignment delivery availability policy missing");
+  }
+  return policy;
+}
+
 function validateAlerts(value, projectId) {
   if (!Array.isArray(value?.alerts)) throw new Error("schema: outbox alerts[] missing");
   return value.alerts.map((row, index) => {
@@ -311,6 +380,13 @@ function validateAlerts(value, projectId) {
 }
 
 function alertPrompt(projectId, alert) {
+  if (alert.kind === "assignment_offer_delivery") {
+    if (typeof alert.payload.offerPrompt !== "string" || !alert.payload.offerPrompt.trim()
+      || bytes(alert.payload.offerPrompt) > MAX_PROMPT_BYTES) {
+      throw new Error("schema: assignment offerPrompt is missing or oversized");
+    }
+    return alert.payload.offerPrompt;
+  }
   if (alert.kind === "broker_check_due") {
     if (typeof alert.payload.resolvedPrompt !== "string" || !alert.payload.resolvedPrompt.trim()
       || bytes(alert.payload.resolvedPrompt) > MAX_PROMPT_BYTES) {

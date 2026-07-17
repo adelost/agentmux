@@ -85,7 +85,7 @@ export function paneDir(rootDir, pane) {
 // The marker lets ensureAgentHints detect stale copies on spawn; bump it
 // whenever AGENT_HINTS content changes. Appended content survives upgrades.
 // WHAT: Names generated agent policy version. WHY: Keeps stale pane instructions from surviving respawns.
-export const HINTS_VERSION = "1.24.11";
+export const HINTS_VERSION = "1.24.12";
 /** DTO: Generated agent policy footer marker. */
 export const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
@@ -490,9 +490,11 @@ drift is a red gate, not a scoping excuse.
 1. **One owner per feature or project, end to end.** The manager assigns a
    clearly bounded task; its owner plans, implements, tests, pushes, and opens
    the PR without mid-flight interruptions or ongoing peer coordination.
-2. **Assign by priority; merge by proof (Mattias 2026-07-14/16, supersedes the
-   file-independence rule).** An idle agent gets the next highest-priority
-   READY ticket immediately, regardless of file overlap — no overlap warning
+2. **Assign by priority and proven availability; merge by proof (Mattias 2026-07-14/16/17, supersedes the file-independence rule).** A worker gets the
+   next highest-priority READY ticket only after it has explicitly reported
+   its previous task done, or agentmux observed it continuously idle for at least 10 minutes.
+   A pane that is working, waiting, blocked, in a modal, or merely between tool calls is not available.
+   Never interrupt it or stack a new assignment. Once eligible, assign regardless of file overlap; no overlap warning
    in the brief, no INTENT-collision stacking, no overlap-gate split-ticket
    (Mattias 2026-07-16: stop claiming files; build the feature and resolve the
    conflict at merge — the claim machinery slowed the fleet more than it
@@ -502,9 +504,7 @@ drift is a red gate, not a scoping excuse.
    (green-before-rebase proves nothing), (c) any conflict-resolved hunks in
    code the owner did not write are explicitly flagged in the PR and the
    reviewer reads those first.
-   The worktree is removed the moment the merge lands. Once an owner has banked
-   a PR, the broker may assign that agent's next ticket without waiting for
-   Mattias.
+   The worktree is removed only after merge, deploy, live verification, and cleanup. A banked or merged PR is not availability proof; the next ticket waits for explicit done or the 10-minute idle threshold.
    Full browser/golden suites are NOT default PR gates. Run the smallest
    visual test that covers changed rendering, and attach one representative
    screenshot when visual proof is useful. Run the exhaustive browser/golden
@@ -531,8 +531,8 @@ drift is a red gate, not a scoping excuse.
    If review finds a defect, the same feature owner fixes the root cause and
    adds permanent gates while other agents continue their own work
    undisturbed.
-5. **A finished pane stays quiet:** no live sentry duty and no "are you done?"
-   pings. Monitoring belongs in cron, not in a waiting agent.
+5. **A finished pane stays quiet:** no live sentry duty and no "are you done?" pings. Monitoring belongs in cron, not in a waiting agent. Dispatch reads the explicit done signal or sustained-idle clock; absence of a board lease
+   alone never means that the local process is free.
 6. **Every review finding must graduate into a gate** (a lint or test rule) so
    the machine catches that defect class next time. A review that never
    becomes a gate is a recurring cost; a gate is a one-time cost.

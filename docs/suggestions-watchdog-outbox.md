@@ -44,6 +44,17 @@ to `~/.agentmux/suggestions-watchdog-outbox.log`. A non-blocking flock prevents
 overlap. The server outbox remains the cursor; removing/reinstalling the local
 consumer cannot mark an undelivered alert as sent.
 
-`broker_check_due` is delivered byte-for-byte from its snapshotted
-`payload.resolvedPrompt`. Other watchdog kinds use a deterministic bounded JSON
-envelope addressed to the same bootstrap broker.
+Assignment offers have an additional fail-closed availability gate. The
+consumer routes the immutable offer prompt to its declared owner only when
+that pane is idle and either its latest reply explicitly reports completion or
+it has remained idle for the Suggestions-owned threshold (currently 10
+minutes). A
+working, waiting, modal, unknown, or briefly idle pane keeps the outbox item
+pending and is never interrupted or given a queued second assignment. Other
+watchdog alerts continue to route to the project broker.
+
+`assignment_offer_delivery` is delivered byte-for-byte from its snapshotted
+`payload.offerPrompt` to `payload.targetAgent`. `broker_check_due` is delivered
+byte-for-byte from its snapshotted `payload.resolvedPrompt`. Other watchdog
+kinds use a deterministic bounded JSON envelope addressed to the bootstrap
+broker.
