@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createHash } from "crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -49,14 +50,21 @@ const assignmentAlert = Object.freeze({
 });
 
 function api({ ackStatus = 200, registryProjects = PUBLIC_PROJECTS,
-  outboxAlert = alert } = {}) {
+  outboxAlert = alert, outboxAlerts = null, watchdogPolicy = null } = {}) {
   const calls = [];
   const fetchImpl = vi.fn(async (input, init = {}) => {
     const url = new URL(input);
     calls.push({ url, init, body: init.body ? JSON.parse(String(init.body)) : null });
     if (url.pathname === "/api/config") return Response.json({
-      project: { id: url.searchParams.get("project") },
+      project: { id: url.searchParams.get("project"),
+        routingGuide: { workers: [{ role: "broker",
+          id: PROJECT_BROKERS[url.searchParams.get("project")] }] } },
       projects: registryProjects.map((id) => ({ id })),
+      assignmentBootstrap: { project: { id: url.searchParams.get("project"),
+        brokerOwner: PROJECT_BROKERS[url.searchParams.get("project")] } },
+      assignmentDelivery: { version: "assignment-delivery.v1", idleMs: 600_000,
+        requireExplicitDoneOrSustainedIdle: true, unknownPresence: "deny" },
+      ...(watchdogPolicy ? { watchdogPolicy } : {}),
     });
     if (url.pathname === "/api/config/agentdocs") return Response.json({
       project: {
@@ -67,9 +75,12 @@ function api({ ackStatus = 200, registryProjects = PUBLIC_PROJECTS,
       assignmentDelivery: { version: "assignment-delivery.v1", idleMs: 600_000,
         requireExplicitDoneOrSustainedIdle: true, unknownPresence: "deny" },
     });
-    if (url.pathname === "/api/watchdog/outbox") return Response.json({ alerts: [outboxAlert] });
+    if (url.pathname === "/api/watchdog/outbox") {
+      return Response.json({ alerts: outboxAlerts ?? [outboxAlert] });
+    }
     if (url.pathname === "/api/watchdog/outbox/ack") {
-      return Response.json(ackStatus === 200 ? { acknowledged: true, id: outboxAlert.id }
+      const requestedId = init.body ? JSON.parse(String(init.body)).id : null;
+      return Response.json(ackStatus === 200 ? { acknowledged: true, id: requestedId }
         : { error: "ack-failed" }, { status: ackStatus });
     }
     return Response.json({ error: "not-found" }, { status: 404 });
@@ -194,7 +205,7 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
     })]);
     expect(remote.calls.filter((call) => call.url.pathname.includes("/api/config"))
       .map((call) => call.url.pathname))
-      .toEqual(["/api/config/agentdocs", "/api/config/agentdocs"]);
+      .toEqual(["/api/config", "/api/config"]);
     const acks = remote.calls.filter((call) => call.url.pathname.endsWith("/ack"));
     expect(acks.map((call) => call.body)).toEqual(["source", "skydive"].map((project) => ({
       id: 7, deliveryReceipt: {
@@ -224,9 +235,9 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
         { projectId: "ai", agent: "ai", pane: 2 },
         { projectId: "source", agent: "lsrc", pane: 2 },
       ]);
-    expect(remote.calls.filter((call) => call.url.pathname === "/api/config")).toHaveLength(1);
-    expect(remote.calls.filter((call) => call.url.pathname === "/api/config/agentdocs")
-      .map((call) => call.url.searchParams.get("project"))).toEqual(PUBLIC_PROJECTS);
+    expect(remote.calls.filter((call) => call.url.pathname === "/api/config")
+      .map((call) => call.url.searchParams.get("project")))
+      .toEqual(["source", ...PUBLIC_PROJECTS]);
   });
 
   it.each([
@@ -271,8 +282,10 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
     remote.fetchImpl.mockImplementation(async (input, init = {}) => {
       const url = new URL(input);
       remote.calls.push({ url, init, body: init.body ? JSON.parse(String(init.body)) : null });
-      if (url.pathname === "/api/config/agentdocs") return Response.json({
-        project: { id: "source", routingGuide: { workers: [{ role: "broker", id: "lsrc:2" }] } },
+      if (url.pathname === "/api/config") return Response.json({
+        assignmentBootstrap: { project: { id: "source", brokerOwner: "lsrc:2" } },
+        assignmentDelivery: { version: "assignment-delivery.v1", idleMs: 600_000,
+          requireExplicitDoneOrSustainedIdle: true, unknownPresence: "deny" },
       });
       if (url.pathname === "/api/watchdog/outbox") return Response.json({ alerts: [alert] });
       if (url.pathname.endsWith("/ack")) {
@@ -320,5 +333,153 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
     } finally {
       rmSync(rootDir, { recursive: true, force: true });
     }
+  });
+
+  it("re-enqueues one proven not-sent cancellation once across restart instead of latching it forever", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "amux-watchdog-cancelled-"));
+    const idempotencyKey = watchdogDeliveryKey("source", alert.dedupeKey);
+    const request = { agent: "lsrc", pane: 2, prompt: PROMPT,
+      idempotencyKey, projectId: "source", alert };
+    const now = 61_001;
+    try {
+      const queue = createDeliveryQueue({ rootDir, now: () => now });
+      const seeded = queue.enqueue({ agentName: "lsrc", pane: 2, text: PROMPT,
+        verifyText: PROMPT, kind: "prompt", source: "suggestions-watchdog",
+        idempotencyKey,
+        metadata: { projectId: "source", outboxId: alert.id, dedupeKey: alert.dedupeKey } });
+      queue.update(seeded, { status: "cancelled", terminalAt: 1_000, nextAttemptAt: null,
+        cancelRequestStatus: "completed", metadata: { deliveryOutcome: "not-sent" },
+        lastReason: "not sent: target was not ingesting" });
+
+      const deliver = createAmuxOutboxDeliverer({ queue, waitMs: 0,
+        now: () => now, cancelledRetryAfterMs: 60_000 });
+      await expect(deliver(request)).rejects.toThrow(/not acknowledged \(pending\)/u);
+      expect(queue.findById(seeded.id)).toMatchObject({ status: "pending", terminalAt: null,
+        metadata: { watchdogReenqueueCount: 1, watchdogReenqueuedAt: now } });
+
+      const reopened = createDeliveryQueue({ rootDir, now: () => now });
+      const afterRestart = createAmuxOutboxDeliverer({ queue: reopened, waitMs: 0,
+        now: () => now, cancelledRetryAfterMs: 60_000 });
+      await expect(afterRestart(request)).rejects.toThrow(/not acknowledged \(pending\)/u);
+      expect(reopened.findById(seeded.id)).toMatchObject({ status: "pending",
+        metadata: { watchdogReenqueueCount: 1 } });
+
+      reopened.update(reopened.findById(seeded.id), {
+        status: "acknowledged", acknowledgedAt: now + 1, terminalAt: now + 1,
+      });
+      await expect(afterRestart(request)).resolves.toEqual({
+        jobId: seeded.id, status: "acknowledged", acknowledgedAt: now + 1,
+      });
+      expect(reopened.list("lsrc", 2)).toHaveLength(1);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("persists one human escalation when the bounded re-enqueue is cancelled again", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "amux-watchdog-escalated-"));
+    let now = 120_000;
+    try {
+      const queue = createDeliveryQueue({ rootDir, now: () => now });
+      const idempotencyKey = watchdogDeliveryKey("source", alert.dedupeKey);
+      const seeded = queue.enqueue({ agentName: "lsrc", pane: 2, text: PROMPT,
+        verifyText: PROMPT, kind: "prompt", source: "suggestions-watchdog",
+        idempotencyKey, metadata: { projectId: "source", outboxId: alert.id,
+          dedupeKey: alert.dedupeKey, deliveryOutcome: "not-sent",
+          watchdogReenqueueCount: 1 } });
+      queue.update(seeded, { status: "cancelled", terminalAt: 60_000,
+        nextAttemptAt: null, lastReason: "not sent after the bounded re-enqueue" });
+      const request = { agent: "lsrc", pane: 2, prompt: PROMPT,
+        idempotencyKey, projectId: "source", alert };
+      const deliver = createAmuxOutboxDeliverer({ queue, waitMs: 0, now: () => now });
+
+      await expect(deliver(request)).rejects.toThrow(/human escalation persisted/u);
+      expect(queue.findById(seeded.id)).toMatchObject({ status: "cancelled",
+        metadata: { watchdogReenqueueCount: 1, watchdogEscalatedAt: now,
+          watchdogEscalationReason: "not-sent-after-bounded-reenqueue" } });
+      now += 60_000;
+      await expect(deliver(request)).rejects.toThrow(/human escalation persisted/u);
+      expect(queue.findById(seeded.id).metadata.watchdogEscalatedAt).toBe(120_000);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["missing", "", "schema: broker_check_due resolvedPrompt is missing"],
+    ["oversized", "x".repeat(32 * 1024 + 1),
+      "schema: broker_check_due resolvedPrompt is oversized"],
+  ])("classifies %s broker-check prompts without conflating schema failures",
+    async (_label, resolvedPrompt, expected) => {
+      const remote = api({ outboxAlert: { ...alert,
+        payload: { ...alert.payload, resolvedPrompt } } });
+      let failure;
+      try {
+        await pollWatchdogOutboxes({ config: config(), readToken: READ, adminToken: ADMIN,
+          fetchImpl: remote.fetchImpl, deliver: vi.fn() });
+      } catch (error) { failure = error; }
+      expect(failure).toBeInstanceOf(AggregateError);
+      expect(failure.errors.map((error) => error.message)).toEqual([`source/7: ${expected}`]);
+    });
+
+  it("does not let one malformed broker check starve a later assignment offer", async () => {
+    const malformed = { ...alert, payload: { ...alert.payload, resolvedPrompt: "" } };
+    const remote = api({ outboxAlerts: [malformed, assignmentAlert] });
+    const deliver = vi.fn(async () => ({
+      jobId: "8".repeat(32), status: "acknowledged", acknowledgedAt: 2_100,
+    }));
+
+    let failure;
+    try {
+      await pollWatchdogOutboxes({ config: config(), readToken: READ, adminToken: ADMIN,
+        fetchImpl: remote.fetchImpl, deliver,
+        availability: async () => ({ eligible: true, reason: "explicit-done" }) });
+    } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(failure.errors.map((error) => error.message)).toEqual([
+      "source/7: schema: broker_check_due resolvedPrompt is missing",
+    ]);
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: assignmentAlert.payload.offerPrompt, alert: expect.objectContaining({ id: 8 }),
+    }));
+    expect(remote.calls.filter((call) => call.url.pathname.endsWith("/ack")))
+      .toHaveLength(1);
+  });
+
+  it("recovers a legacy empty off-board prompt only from the hash-bound current template", async () => {
+    const template = "BROKER CHECK — {{ticket.id}} — assignment {{assignment.generation}}\n"
+      + "Legacy off-board compatibility.";
+    const templateHash = `sha256:${createHash("sha256").update(template).digest("hex")}`;
+    const legacy = { ...alert, payload: { ...alert.payload, resolvedPrompt: "", generation: 2,
+      templateVersion: "off-board.v1", templateHash, overrideScope: "default" } };
+    const remote = api({ outboxAlert: legacy, watchdogPolicy: {
+      resolvedPromptTemplate: template, templateVersion: "1.0.0", templateHash,
+      overrideScope: "default",
+    } });
+    const deliver = vi.fn(async () => ({
+      jobId: "7".repeat(32), status: "acknowledged", acknowledgedAt: 1_100,
+    }));
+
+    await expect(pollWatchdogOutboxes({ config: config(), readToken: READ, adminToken: ADMIN,
+      fetchImpl: remote.fetchImpl, deliver })).resolves.toMatchObject({ delivered: 1, pending: 0 });
+    expect(deliver).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: "BROKER CHECK — SRC-0025 — assignment 2\nLegacy off-board compatibility.",
+    }));
+
+    const mismatch = api({ outboxAlert: { ...legacy, payload: {
+      ...legacy.payload, templateHash: `sha256:${"0".repeat(64)}`,
+    } }, watchdogPolicy: {
+      resolvedPromptTemplate: template, templateVersion: "1.0.0", templateHash,
+      overrideScope: "default",
+    } });
+    let failure;
+    try {
+      await pollWatchdogOutboxes({ config: config(), readToken: READ, adminToken: ADMIN,
+        fetchImpl: mismatch.fetchImpl, deliver: vi.fn() });
+    } catch (error) { failure = error; }
+    expect(failure.errors.map((error) => error.message)).toEqual([
+      "source/7: schema: broker_check_due resolvedPrompt is missing",
+    ]);
   });
 });

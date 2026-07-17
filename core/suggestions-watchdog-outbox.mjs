@@ -7,7 +7,7 @@ import { lstatSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { resolve } from "path";
 import yaml from "js-yaml";
-import { createDeliveryQueue, waitForDeliveryJob } from "./delivery-queue.mjs";
+import { createDeliveryQueue, isNotSentDeliveryJob, waitForDeliveryJob } from "./delivery-queue.mjs";
 import { looksDone } from "./orchestrator-checkpoint.mjs";
 
 const LIVE_ORIGIN = "https://suggest.v1d.io";
@@ -18,6 +18,8 @@ const MAX_PROMPT_BYTES = 32 * 1024;
 const PROJECT_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/u;
 /** WHAT: Defines the sustained-idle assignment threshold. WHY: Keeps short pauses from looking like worker availability. */
 export const DEFAULT_ASSIGNMENT_IDLE_MS = 10 * 60_000;
+/** WHAT: Defines one safe retry of a prompt proven not sent. WHY: Avoids reviving a deliberate cancellation in the same scheduler tick. */
+export const DEFAULT_CANCELLED_REENQUEUE_AFTER_MS = 60_000;
 
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const bytes = (value) => Buffer.byteLength(String(value), "utf8");
@@ -117,12 +119,19 @@ export function loadPrivateCredential(path, { uid = process.getuid?.() } = {}) {
   return token;
 }
 
+/** WHAT: Dispatches one durable watchdog alert through agentmux. WHY: Keeps cancelled jobs from blocking the outbox forever or fabricating ACKs. */
 export function createAmuxOutboxDeliverer({
   queue = createDeliveryQueue(),
   waitMs = 12_000,
+  now = () => Date.now(),
+  cancelledRetryAfterMs = DEFAULT_CANCELLED_REENQUEUE_AFTER_MS,
 } = {}) {
+  if (!Number.isSafeInteger(cancelledRetryAfterMs)
+    || cancelledRetryAfterMs < 1_000 || cancelledRetryAfterMs > 60 * 60_000) {
+    throw new Error("delivery: cancelledRetryAfterMs must be 1000-3600000");
+  }
   return async ({ agent, pane, prompt, idempotencyKey, projectId, alert }) => {
-    const accepted = queue.enqueue({
+    let accepted = queue.enqueue({
       agentName: agent,
       pane,
       text: prompt,
@@ -136,6 +145,40 @@ export function createAmuxOutboxDeliverer({
       || Number(accepted.pane) !== pane || accepted.text !== prompt || accepted.verifyText !== prompt
       || accepted.kind !== "prompt" || accepted.source !== "suggestions-watchdog") {
       throw new Error(`delivery: idempotency payload conflict for ${projectId}/${alert.id}`);
+    }
+    if (accepted.status === "cancelled" && isNotSentDeliveryJob(accepted)) {
+      const observedAt = Number(now());
+      const terminalAt = Number(accepted.terminalAt);
+      const reenqueueCount = Number(accepted.metadata?.watchdogReenqueueCount || 0);
+      if (!Number.isSafeInteger(observedAt) || observedAt < 0
+        || !Number.isSafeInteger(terminalAt) || terminalAt < 0) {
+        throw new Error(`delivery: cancelled agentmux job ${accepted.id} lacks a durable not-sent boundary; human escalation required`);
+      }
+      if (reenqueueCount >= 1) {
+        if (!Number.isSafeInteger(accepted.metadata?.watchdogEscalatedAt)) {
+          accepted = queue.update(accepted, { metadata: {
+            watchdogEscalatedAt: observedAt,
+            watchdogEscalationReason: "not-sent-after-bounded-reenqueue",
+          } });
+        }
+        throw new Error(`delivery: agentmux job ${accepted.id} remained not-sent after one bounded re-enqueue; human escalation persisted`);
+      }
+      const eligibleAt = terminalAt + cancelledRetryAfterMs;
+      if (observedAt < eligibleAt) {
+        throw new Error(`delivery: agentmux job ${accepted.id} is proven not-sent; bounded re-enqueue opens in ${eligibleAt - observedAt}ms`);
+      }
+      accepted = queue.update(accepted, {
+        status: "pending",
+        acknowledgedAt: null,
+        terminalAt: null,
+        nextAttemptAt: observedAt,
+        lastReason: "watchdog outbox re-enqueued one prompt after a durable not-sent cancellation",
+        metadata: {
+          watchdogReenqueueCount: 1,
+          watchdogReenqueuedAt: observedAt,
+          watchdogOriginalTerminalAt: terminalAt,
+        },
+      });
     }
     const settled = await waitForDeliveryJob(queue, accepted.id, { timeoutMs: waitMs }) || accepted;
     if (settled.status !== "acknowledged" || !Number.isFinite(settled.acknowledgedAt)) {
@@ -173,7 +216,7 @@ export async function pollWatchdogOutboxes({
   const errors = [];
   for (const projectId of projects) {
     try {
-      const bootstrapUrl = endpoint(config.baseUrl, "/api/config/agentdocs", projectId);
+      const bootstrapUrl = endpoint(config.baseUrl, "/api/config", projectId);
       const bootstrap = await fetchJson(bootstrapUrl, {
         fetchImpl, token: readToken, timeoutMs: config.requestTimeoutMs,
       });
@@ -186,10 +229,10 @@ export async function pollWatchdogOutboxes({
       });
       const alerts = validateAlerts(outbox, projectId);
       for (const alert of alerts) {
-        const target = alertTarget(alert, broker);
-        const idempotencyKey = watchdogDeliveryKey(projectId, alert.dedupeKey);
-        const prompt = alertPrompt(projectId, alert);
         try {
+          const target = alertTarget(alert, broker);
+          const idempotencyKey = watchdogDeliveryKey(projectId, alert.dedupeKey);
+          const prompt = alertPrompt(projectId, alert, bootstrap);
           if (alert.kind === "assignment_offer_delivery") {
             if (typeof availability !== "function") {
               throw new Error("assignment availability reader is required");
@@ -379,18 +422,25 @@ function validateAlerts(value, projectId) {
   });
 }
 
-function alertPrompt(projectId, alert) {
+function alertPrompt(projectId, alert, bootstrap) {
   if (alert.kind === "assignment_offer_delivery") {
-    if (typeof alert.payload.offerPrompt !== "string" || !alert.payload.offerPrompt.trim()
-      || bytes(alert.payload.offerPrompt) > MAX_PROMPT_BYTES) {
-      throw new Error("schema: assignment offerPrompt is missing or oversized");
+    if (typeof alert.payload.offerPrompt !== "string" || !alert.payload.offerPrompt.trim()) {
+      throw new Error("schema: assignment offerPrompt is missing");
+    }
+    if (bytes(alert.payload.offerPrompt) > MAX_PROMPT_BYTES) {
+      throw new Error("schema: assignment offerPrompt is oversized");
     }
     return alert.payload.offerPrompt;
   }
   if (alert.kind === "broker_check_due") {
-    if (typeof alert.payload.resolvedPrompt !== "string" || !alert.payload.resolvedPrompt.trim()
-      || bytes(alert.payload.resolvedPrompt) > MAX_PROMPT_BYTES) {
-      throw new Error("schema: broker_check_due resolvedPrompt is missing or oversized");
+    if (typeof alert.payload.resolvedPrompt !== "string"
+      || !alert.payload.resolvedPrompt.trim()) {
+      const recovered = recoverLegacyBrokerCheckPrompt(alert, bootstrap);
+      if (recovered) return recovered;
+      throw new Error("schema: broker_check_due resolvedPrompt is missing");
+    }
+    if (bytes(alert.payload.resolvedPrompt) > MAX_PROMPT_BYTES) {
+      throw new Error("schema: broker_check_due resolvedPrompt is oversized");
     }
     return alert.payload.resolvedPrompt;
   }
@@ -404,6 +454,35 @@ function alertPrompt(projectId, alert) {
   })}`;
   if (bytes(prompt) > MAX_PROMPT_BYTES) throw new Error("schema: watchdog alert prompt is oversized");
   return prompt;
+}
+
+function recoverLegacyBrokerCheckPrompt(alert, bootstrap) {
+  const policy = bootstrap?.watchdogPolicy;
+  const template = policy?.resolvedPromptTemplate;
+  const declaredHash = policy?.templateHash;
+  const payloadHash = alert.payload.templateHash;
+  const policyScope = policy?.overrideScope;
+  const payloadScope = alert.payload.overrideScope;
+  const policyVersion = policy?.templateVersion;
+  const payloadVersion = alert.payload.templateVersion;
+  const generation = Number(alert.payload.generation);
+  if (!isObject(policy) || typeof template !== "string" || !template.trim()
+    || bytes(template) > MAX_PROMPT_BYTES
+    || typeof declaredHash !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(declaredHash)
+    || payloadHash !== declaredHash || payloadScope !== policyScope
+    || !Number.isSafeInteger(generation) || generation < 0) return null;
+  const computedHash = `sha256:${createHash("sha256").update(template).digest("hex")}`;
+  if (computedHash !== declaredHash) return null;
+  const compatibleVersion = payloadVersion === policyVersion
+    || (payloadVersion === "off-board.v1" && payloadScope === "default"
+      && policyScope === "default");
+  if (!compatibleVersion) return null;
+  const rendered = template
+    .replaceAll("{{ticket.id}}", alert.ticketId)
+    .replaceAll("{{assignment.generation}}", String(generation));
+  if (!rendered.trim() || /\{\{|\}\}/u.test(rendered)
+    || bytes(rendered) > MAX_PROMPT_BYTES) return null;
+  return rendered;
 }
 
 function validateReceipt(value, idempotencyKey) {
