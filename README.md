@@ -428,6 +428,29 @@ agentmux records a verified delivery receipt. Failures remain pending under one
 durable identity. An explicit bounded project list is available as an override.
 See [`docs/suggestions-watchdog-outbox.md`](docs/suggestions-watchdog-outbox.md).
 
+### Exact Unicode for Suggestions writes
+
+Agent-authored board mutations use `amux-suggest` with a strict UTF-8 JSON
+body file. When a request contains a human quote, pass the original quote in a
+separate `--expect-file` and provide `--read-path`; the client checks that text
+unchanged before the mutation, sends the persisted body bytes verbatim, then
+checks the authoritative GET response. Reusing a `mutationId` with different
+bytes fails locally instead of becoming an ambiguous retry.
+
+```bash
+amux-suggest --method PATCH \
+  --path '/api/tickets/AI-0014/admin?project=ai' \
+  --body-file /tmp/ai-0014-update.json \
+  --expect-file /tmp/mattias-quote.txt \
+  --read-path '/api/tickets/AI-0014?project=ai'
+```
+
+`bin/install-hooks.mjs` installs a `PreToolUse/Bash` guard that rejects direct
+inline curl/Python mutations to the public Suggestions API. Read-only calls
+remain available. The guard is at the authoring boundary because JSON, HTTP,
+and Suggestions storage already preserve Unicode; a retyped ASCII quote cannot
+be reconstructed downstream.
+
 `ax` is installed as a shorter alias for `amux`.
 
 ## Agent-to-Agent Delegation
