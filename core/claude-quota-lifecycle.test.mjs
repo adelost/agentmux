@@ -7,7 +7,7 @@ import { createClaudeQuotaLifecycle } from "./claude-quota-lifecycle.mjs";
 import { assertClaudeQuotaAvailable } from "./claude-quota-target.mjs";
 import { quotaRecoveryContinuation } from "./claude-quota-recovery.mjs";
 
-function fixture({ composer = "❯  ", resumeDialogOnLaunch = false } = {}) {
+function fixture({ composer = "❯  ", scrollback = null, resumeDialogOnLaunch = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-quota-lifecycle-"));
   const homeDir = join(root, "home");
   const repoDir = join(root, "repo");
@@ -47,6 +47,7 @@ function fixture({ composer = "❯  ", resumeDialogOnLaunch = false } = {}) {
 
   let currentCommand = "node";
   let screen = composer;
+  let history = scrollback ?? screen;
   const commands = [];
   const tmuxExec = async (command) => {
     commands.push(command);
@@ -56,6 +57,7 @@ function fixture({ composer = "❯  ", resumeDialogOnLaunch = false } = {}) {
     if (command.includes("respawn-pane")) {
       currentCommand = "bash";
       screen = "$ ";
+      history = screen;
       return { stdout: "" };
     }
     if (command.includes("send-keys") && command.includes("ANTHROPIC_DISABLE_SURVEY")) {
@@ -69,6 +71,7 @@ function fixture({ composer = "❯  ", resumeDialogOnLaunch = false } = {}) {
             "Enter to confirm · Esc to cancel",
           ].join("\n")
         : "❯  ";
+      history = `${command}\n${screen}`;
       return { stdout: "" };
     }
     if (command.includes("send-keys") && command.includes("Enter")
@@ -76,7 +79,9 @@ function fixture({ composer = "❯  ", resumeDialogOnLaunch = false } = {}) {
       screen = "❯  ";
       return { stdout: "" };
     }
-    if (command.includes("capture-pane")) return { stdout: `${screen}\n` };
+    if (command.includes("capture-pane")) {
+      return { stdout: `${command.includes(" -S -") ? history : screen}\n` };
+    }
     return { stdout: "" };
   };
   const lifecycle = createClaudeQuotaLifecycle({
@@ -99,15 +104,16 @@ function pendingResumeFixture({ exact = true } = {}) {
   const sessionId = exact
     ? "11111111-1111-4111-8111-111111111111"
     : "99999999-9999-4999-8999-999999999999";
+  const menu = [
+    "This session is 7h 3m old and 234.3k tokens.",
+    "❯ 1. Resume from summary (recommended)",
+    "  2. Resume full session as-is",
+    "  3. Don't ask me again",
+    "Enter to confirm · Esc to cancel",
+  ].join("\n");
   return fixture({
-    composer: [
-      `claude --resume ${sessionId}`,
-      "This session is 7h 3m old and 234.3k tokens.",
-      "❯ 1. Resume from summary (recommended)",
-      "  2. Resume full session as-is",
-      "  3. Don't ask me again",
-      "Enter to confirm · Esc to cancel",
-    ].join("\n"),
+    composer: menu,
+    scrollback: `claude --resume ${sessionId}\n${menu}`,
   });
 }
 
