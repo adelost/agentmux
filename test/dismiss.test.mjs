@@ -73,6 +73,26 @@ feature("dismissBlockingPrompt", () => {
     ],
   });
 
+  unit("always resumes when Codex is actively offering a pane summary", {
+    given: [
+      "the live bottom row is Codex's resume-from-summary confirmation",
+      () => setup({ paneOutput: "Resume from summary? Press Enter to confirm\n" }),
+    ],
+    when: [
+      "checking the startup blocker",
+      ({ dismissBlockingPrompt }) => dismissBlockingPrompt("claw:.4"),
+    ],
+    then: [
+      "the summary is selected with one Enter instead of starting fresh",
+      (result, { tmuxExec }) => {
+        expect(result).toBe("resume");
+        expect(tmuxExec).toHaveBeenCalledTimes(2);
+        expect(tmuxExec.mock.calls[1][0]).toContain("send-keys");
+        expect(tmuxExec.mock.calls[1][0]).toContain("Enter");
+      },
+    ],
+  });
+
   unit("dismisses when feedback prompt is visible", {
     given: [
       "tmux pane showing feedback prompt",
