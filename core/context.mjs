@@ -166,6 +166,7 @@ function newestSessionFile(paneDir) {
   return {
     path: join(projectDir, files[0].name),
     sessionId: files[0].name.replace(/\.jsonl$/, ""),
+    mtimeMs: files[0].mtime,
   };
 }
 
@@ -210,11 +211,11 @@ function getContextFromClaudeJsonl(paneDir) {
       // >100% nonsense.
       const declared = claudeMaxForModel(entry.message?.model);
       const max = Math.max(declared, total);
-      return {
-        percent: Math.round((total / max) * 100),
-        tokens: total,
+      const observed = Date.parse(entry?.timestamp || "");
+      return { percent: Math.round((total / max) * 100), tokens: total, windowTokens: max,
         model: entry.message?.model ?? null,
-      };
+        observedAt: new Date(Number.isFinite(observed) ? observed : session.mtimeMs).toISOString(),
+        source: "claude-jsonl", confidence: "estimated" };
     } catch {
       // malformed line, try the next
     }
@@ -297,19 +298,20 @@ function getContextFromCodexJsonl(paneDir) {
   // in the file's tail — no need to read the whole rollout (can be many MB).
   const lines = readTailLines(file);
 
-  // Walk backwards for the most recent token_count event (usage truth) and
-  // the most recent turn_context (model truth — /model can switch it
-  // mid-session, so newest wins). Use last_token_usage (current turn's
-  // input+output), NOT total_token_usage (cumulative across the whole
-  // session, which can exceed the context window and isn't what
-  // "context used" means).
+  // Read newest current-context usage/model plus the newest compaction marker.
   let usage = null;
   let turnCtx = null;
-  for (let i = lines.length - 1; i >= 0 && !(usage && turnCtx); i--) {
+  let lastCompactAt = null;
+  for (let i = lines.length - 1; i >= 0; i--) {
     if (!lines[i].trim()) continue;
     let entry;
     try { entry = JSON.parse(lines[i]); } catch { continue; }
 
+    if (!lastCompactAt && (entry?.type === "compacted"
+      || ["context_compacted", "compacted"].includes(entry?.payload?.type))) {
+      const compactTime = Date.parse(entry?.timestamp || entry?.payload?.timestamp || "");
+      if (Number.isFinite(compactTime)) lastCompactAt = new Date(compactTime).toISOString();
+    }
     if (!turnCtx && entry?.type === "turn_context" && entry.payload?.model) {
       turnCtx = {
         model: entry.payload.model,
@@ -328,18 +330,12 @@ function getContextFromCodexJsonl(paneDir) {
     // Add output tokens that contribute to the current turn's context.
     const tokens = (last.input_tokens || 0) + (last.output_tokens || 0);
     const max = info.model_context_window || 256_000;
-    usage = { percent: Math.round((tokens / max) * 100), tokens };
+    const observed = Date.parse(entry?.timestamp || "");
+    usage = { percent: Math.round((tokens / max) * 100), tokens, windowTokens: max,
+      observedAt: new Date(Number.isFinite(observed) ? observed : statSync(file).mtimeMs).toISOString(),
+      source: "codex-jsonl", confidence: "exact" };
   }
   if (!usage) return null;
-  // A long-running turn (hundreds of tool events) pushes the newest
-  // turn_context out of the 1MB tail — observed live on api:4 at 273k
-  // context: model label vanished mid-work. Recovery order matters:
-  //   1. deeper BACKWARD scan (up to 8MB) — still the newest truth
-  //   2. session HEAD — the session's ORIGINAL model, which can be STALE.
-  // modelSource lets consumers separate truth grades: model-watch must act
-  // only on "turn"-sourced readings. The head fallback once reported the
-  // session's old gpt-5.5 on panes live on 5.6 and model-watch false-fired
-  // and PARKED two working panes (ai:3/ai:4, 2026-07-10 18:10).
   let modelSource = turnCtx ? "turn" : null;
   if (!turnCtx) {
     turnCtx = backwardTurnContext(file);
@@ -349,7 +345,8 @@ function getContextFromCodexJsonl(paneDir) {
     turnCtx = headTurnContext(file);
     if (turnCtx) modelSource = "head";
   }
-  return { ...usage, model: turnCtx?.model ?? null, effort: turnCtx?.effort ?? null, modelSource };
+  return { ...usage, model: turnCtx?.model ?? null, effort: turnCtx?.effort ?? null,
+    modelSource, lastCompactAt };
 }
 
 const BACKWARD_SCAN_MAX_BYTES = 8 * 1024 * 1024;
@@ -465,14 +462,16 @@ export function getContextPushed(paneDir) {
   const ageMs = Date.now() - Number(data?.timestamp) * 1000;
   if (!Number.isFinite(percent) || percent < 0 || percent > 100) return null;
   if (!Number.isFinite(ageMs) || ageMs > STATUSLINE_BRIDGE_FRESH_MS) return null;
-  let tokens = null;
-  let model = null;
+  let tokens = null, model = null, windowTokens = null;
   try {
     const jsonl = getContextFromClaudeJsonl(paneDir);
     tokens = jsonl?.tokens ?? null;
     model = jsonl?.model ?? null;
+    windowTokens = jsonl?.windowTokens ?? null;
   } catch { /* display-only — percent stands alone */ }
-  return { percent: Math.round(percent), tokens, model };
+  return { percent: Math.round(percent), tokens, windowTokens, model,
+    observedAt: new Date(Number(data.timestamp) * 1000).toISOString(),
+    source: "claude-statusline", confidence: "reported" };
 }
 
 // --- Public dispatcher -------------------------------------------------
