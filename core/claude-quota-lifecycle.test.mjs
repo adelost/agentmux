@@ -95,6 +95,22 @@ function fixture({ composer = "❯  ", resumeDialogOnLaunch = false } = {}) {
   };
 }
 
+function pendingResumeFixture({ exact = true } = {}) {
+  const sessionId = exact
+    ? "11111111-1111-4111-8111-111111111111"
+    : "99999999-9999-4999-8999-999999999999";
+  return fixture({
+    composer: [
+      `claude --resume ${sessionId}`,
+      "This session is 7h 3m old and 234.3k tokens.",
+      "❯ 1. Resume from summary (recommended)",
+      "  2. Resume full session as-is",
+      "  3. Don't ask me again",
+      "Enter to confirm · Esc to cancel",
+    ].join("\n"),
+  });
+}
+
 feature("Claude quota process boundary", () => {
   component("one pane resumes only the exact persisted session", {
     given: ["a terminal quota receipt and empty composer", fixture],
@@ -118,6 +134,28 @@ feature("Claude quota process boundary", () => {
       expect(ctx.commands.slice(launchIndex + 1).some((command) => (
         command.includes("send-keys") && command.includes("Enter")
       ))).toBe(true);
+      ctx.cleanup();
+    }],
+  });
+
+  component("an interrupted recovery finishes its exact pending resume", {
+    given: ["the current Claude process proves the receipt session and active menu", pendingResumeFixture],
+    when: ["a later sidecar tick reaches the boundary", ({ lifecycle, receipt }) => lifecycle.restart("claw", 0, receipt)],
+    then: ["the menu is confirmed without killing or relaunching the pane", (result, ctx) => {
+      expect(result).toMatchObject({ ok: true, sessionId: ctx.sessionId, limitEventId: ctx.limitEventId });
+      expect(ctx.commands.some((command) => command.includes("respawn-pane"))).toBe(false);
+      expect(ctx.commands.some((command) => command.includes("send-keys") && command.includes("Enter"))).toBe(true);
+      ctx.cleanup();
+    }],
+  });
+
+  component("a foreign pending resume remains untouched", {
+    given: ["a resume menu whose launch line names another session", () => pendingResumeFixture({ exact: false })],
+    when: ["the receipt-bound recovery inspects it", ({ lifecycle, receipt }) => lifecycle.restart("claw", 0, receipt)],
+    then: ["the lifecycle fails closed without Enter or respawn", (result, ctx) => {
+      expect(result).toEqual({ ok: false, reason: "pane-has-no-empty-claude-composer" });
+      expect(ctx.commands.some((command) => command.includes("respawn-pane"))).toBe(false);
+      expect(ctx.commands.some((command) => command.includes("send-keys") && command.includes("Enter"))).toBe(false);
       ctx.cleanup();
     }],
   });

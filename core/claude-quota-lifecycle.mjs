@@ -24,6 +24,13 @@ function hasEmptyClaudeComposer(screen) {
     .some((line) => /^\s*❯\s*$/u.test(line));
 }
 
+function hasExactResumeLaunch(screen, sessionId) {
+  if (!sessionId) return false;
+  const escaped = String(sessionId).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return new RegExp(`--resume\\s+['\"]?${escaped}['\"]?(?:\\s|$)`, "u")
+    .test(String(screen || ""));
+}
+
 /**
  * WHAT: Routes the destructive tmux boundary for exact-session Claude recovery.
  * WHY: Keeps quota polling separate from process identity and manual-draft guards.
@@ -100,7 +107,36 @@ export function createClaudeQuotaLifecycle({
       tmux.captureScreen(target).catch(() => ""),
     ]);
     if (CLAUDE_PROCESS.test(command) && !hasEmptyClaudeComposer(screen)) {
-      return { ok: false, reason: "pane-has-no-empty-claude-composer" };
+      const blocker = findBlockingPrompt(screen);
+      const pendingExactResume = blocker?.name === "resume"
+        && hasExactResumeLaunch(screen, expectedReceipt.sessionId);
+      if (!pendingExactResume) {
+        return { ok: false, reason: "pane-has-no-empty-claude-composer" };
+      }
+      // A prior recovery attempt can survive while the sidecar/bridge restarts.
+      // Finish only a screen-proven resume of this exact receipt-bound session;
+      // an unrelated manual resume menu remains fail-closed above.
+      if (!await waitForComposer(target)) {
+        return { ok: false, reason: "pending-exact-resume-composer-not-ready" };
+      }
+      if (!sameReceipt(activeReceipt(agentName, pane), expectedReceipt)) {
+        return { ok: false, reason: "limit-receipt-superseded" };
+      }
+      try {
+        record({
+          ts: new Date().toISOString(),
+          event: "quota_recovery",
+          session: agentName,
+          pane: Number(pane) || 0,
+          state: "resumed_pending_exact",
+          detail: expectedReceipt.sessionId,
+        });
+      } catch { /* diagnostics never invalidate a successful process boundary */ }
+      return {
+        ok: true,
+        sessionId: expectedReceipt.sessionId,
+        limitEventId: expectedReceipt.limitEventId,
+      };
     }
     if (!sameReceipt(activeReceipt(agentName, pane), expectedReceipt)) {
       return { ok: false, reason: "limit-receipt-superseded" };
