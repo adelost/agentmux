@@ -85,7 +85,7 @@ export function paneDir(rootDir, pane) {
 // The marker lets ensureAgentHints detect stale copies on spawn; bump it
 // whenever AGENT_HINTS content changes. Appended content survives upgrades.
 // WHAT: Names generated agent policy version. WHY: Keeps stale pane instructions from surviving respawns.
-export const HINTS_VERSION = "1.24.12";
+export const HINTS_VERSION = "1.24.13";
 /** DTO: Generated agent policy footer marker. */
 export const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
@@ -518,8 +518,10 @@ drift is a red gate, not a scoping excuse.
 4. **The feature owner owns delivery end to end; the broker owns dispatch.**
    The broker prioritizes and assigns work. The feature owner implements in its
    own branch/worktree, gates, rebases onto fresh trunk, self-merges the pinned
-   PR, deletes its branch/worktree, deploys through the repository gate,
-   verifies live, and updates the ticket (Mattias 2026-07-17). Do not hand
+   PR, deletes its branch/worktree, then runs the repository's own deploy
+   command itself (whatever \`deploy\` is wired to in that repo — its built-in
+   pre-deploy gates ARE the gate; no person and no pane is one), verifies live,
+   and updates the ticket (Mattias 2026-07-17). Do not hand
    routine review, merge, or deploy back to the broker or human. A
    merged-but-undeployed feature is an open loop. Only a money-spending or
    otherwise irreversible deploy (rule 7) waits for human approval.
