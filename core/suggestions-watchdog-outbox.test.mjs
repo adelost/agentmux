@@ -177,10 +177,8 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
           content: "ASSIGNMENT OFFER — SRC-0117 — generation 1\nOwner: lsrc:6" },
         { agent: "lsrc", pane: 6, role: "assistant", type: "tool",
           timestamp: new Date(presenceNow - 45_000).toISOString(), content: "exec tests" },
-        { agent: "lsrc", pane: 6, role: "assistant", type: "text",
-          timestamp: new Date(presenceNow - 30_000).toISOString(), content: "Arbetet är inte klart." },
       ] }))
-      .toMatchObject({ eligible: false, reason: "idle-threshold-not-met", idleForMs: 30_000 });
+      .toMatchObject({ eligible: false, reason: "idle-threshold-not-met", idleForMs: 45_000 });
   });
 
   it("keeps a busy assignment offer pending and routes an eligible offer to its owner", async () => {

@@ -116,7 +116,7 @@ export function assignmentDeliveryAvailability({ paneStatus, rows = [], agent, p
       } continue;
     }
     if (row.role !== "assistant") continue;
-    if (row.type === "tool") { if (offerTurn) offerTurnHasTool = true; else lastAssistantAt = at; continue; }
+    if (row.type === "tool") { if (offerTurn) offerTurnHasTool = true; [lastAssistantAt, lastAssistantText] = [at, ""]; continue; }
     const explicitAvailable = String(row.content).trimEnd().split(/\r?\n/u).at(-1)?.trim() === "ASSIGNMENT_AVAILABLE";
     if ((row.type == null || row.type === "text") && (!offerTurn || offerTurnHasTool || explicitAvailable)
       && (lastAssistantAt == null || at >= lastAssistantAt)) {
