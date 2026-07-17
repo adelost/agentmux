@@ -108,8 +108,11 @@ export function createClaudeQuotaLifecycle({
     ]);
     if (CLAUDE_PROCESS.test(command) && !hasEmptyClaudeComposer(screen)) {
       const blocker = findBlockingPrompt(screen);
+      const recentHistory = blocker?.name === "resume"
+        ? await tmux.capture(target, { lines: 80 }).catch(() => "")
+        : "";
       const pendingExactResume = blocker?.name === "resume"
-        && hasExactResumeLaunch(screen, expectedReceipt.sessionId);
+        && hasExactResumeLaunch(recentHistory, expectedReceipt.sessionId);
       if (!pendingExactResume) {
         return { ok: false, reason: "pane-has-no-empty-claude-composer" };
       }
