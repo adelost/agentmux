@@ -9,6 +9,8 @@ import { resolve } from "path";
 import yaml from "js-yaml";
 import { createDeliveryQueue, waitForDeliveryJob } from "./delivery-queue.mjs";
 import { looksDone } from "./orchestrator-checkpoint.mjs";
+import { parseSenderHeader } from "./sender-detect.mjs";
+import { isSystemNoiseDirective } from "./system-noise.mjs";
 import {
   DEFAULT_BROKER_FALLBACK_AFTER_MS,
   prepareWatchdogDelivery,
@@ -98,6 +100,9 @@ export function assignmentDeliveryEligibility({
   const userAt = Number(lastUserAt);
   const hasAssistant = Number.isFinite(assistantAt) && assistantAt > 0;
   const hasUser = Number.isFinite(userAt) && userAt > 0;
+  if (!hasAssistant && !hasUser) {
+    return { eligible: false, reason: "no-turn-data", idleForMs: null };
+  }
   const answeredLatest = hasAssistant && (!hasUser || assistantAt >= userAt);
   if (answeredLatest && looksDone(lastAssistantText)) {
     return { eligible: true, reason: "explicit-done", idleForMs: Math.max(0, now - assistantAt) };
@@ -108,6 +113,37 @@ export function assignmentDeliveryEligibility({
     return { eligible: true, reason: "sustained-idle", idleForMs };
   }
   return { eligible: false, reason: "idle-threshold-not-met", idleForMs };
+}
+
+/** WHAT: Builds assignment presence from the real pane timeline. WHY: Keeps broker envelopes from resetting owner activity and makes unreadable histories explicit. */
+export function assignmentDeliveryAvailability({
+  paneStatus,
+  rows = [],
+  agent,
+  pane,
+  now = Date.now(),
+  idleMs = DEFAULT_ASSIGNMENT_IDLE_MS,
+}) {
+  let lastAssistantText = null;
+  let lastAssistantAt = null;
+  let lastUserAt = null;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.agent !== agent || Number(row?.pane) !== Number(pane)
+      || (row.type != null && row.type !== "text")) continue;
+    const at = Date.parse(String(row.timestamp || ""));
+    if (!Number.isFinite(at) || !String(row.content || "").trim()) continue;
+    if (row.role === "assistant" && (lastAssistantAt == null || at >= lastAssistantAt)) {
+      lastAssistantAt = at;
+      lastAssistantText = String(row.content);
+    }
+    if (row.role === "user" && !parseSenderHeader(row.content)
+      && !isSystemNoiseDirective(row.content)
+      && (lastUserAt == null || at >= lastUserAt)) {
+      lastUserAt = at;
+    }
+  }
+  return assignmentDeliveryEligibility({ paneStatus, lastAssistantText, lastAssistantAt,
+    lastUserAt, now, idleMs });
 }
 
 export function loadPrivateCredential(path, { uid = process.getuid?.() } = {}) {
@@ -183,6 +219,8 @@ export async function pollWatchdogOutboxes({
   fetchImpl = globalThis.fetch,
   deliver,
   availability,
+  onAssignmentUnavailable = null,
+  now = () => Date.now(),
   logger = console,
 }) {
   if (!isObject(config) || (config.projects !== null && !Array.isArray(config.projects))
@@ -224,7 +262,30 @@ export async function pollWatchdogOutboxes({
             const state = await availability({ ...target, projectId, alert,
               idleMs: policy.idleMs });
             if (!isObject(state) || state.eligible !== true) {
-              throw new Error(`assignment target is not available (${state?.reason || "unknown"})`);
+              const reason = String(state?.reason || "unknown");
+              const observedAt = Number(now());
+              const pendingForMs = Number.isSafeInteger(observedAt)
+                ? Math.max(0, observedAt - alert.queuedAt) : 0;
+              const shouldAlarm = reason === "no-turn-data" || pendingForMs >= policy.idleMs;
+              if (shouldAlarm && typeof onAssignmentUnavailable === "function") {
+                const digest = createHash("sha256")
+                  .update(`${projectId}\0${alert.dedupeKey}\0assignment-availability`)
+                  .digest("hex");
+                const idempotencyKey = `suggestions-watchdog-availability:${digest}`;
+                const alarmReason = `assignment-offer-never-attempted:${reason}`;
+                const message = `[SRC-0114] Assignment offer ${projectId}/${alert.id}`
+                  + ` (${alert.ticketId}) to ${target.agent}:${target.pane} was never attempted.`
+                  + ` reason=${reason}; ownerAckClockStarted=false (fick aldrig frågan, not owner ACK timeout).`
+                  + ` pendingForMs=${pendingForMs}.`;
+                try {
+                  await onAssignmentUnavailable({ projectId, alert, target, state,
+                    ownerAckClockStarted: false, pendingForMs, alarmReason,
+                    idempotencyKey, message });
+                } catch (error) {
+                  throw new Error(`assignment offer was not attempted (${reason}; ownerAckClockStarted=false); human alarm failed: ${error.message}`);
+                }
+              }
+              throw new Error(`assignment offer was not attempted (${reason}; ownerAckClockStarted=false)`);
             }
           }
           const receipt = validateReceipt(await deliver({

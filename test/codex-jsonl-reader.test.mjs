@@ -359,6 +359,33 @@ feature("latestSessionFor: cwd specificity", () => {
       cleanup();
     }],
   });
+
+  unit("matches a newer descendant only when it is a pane-owned git worktree", {
+    given: ["pane root plus a rollout started from its git worktree", () => {
+      const paneDir = join(tmpdir(), `amux-pane-${process.pid}-${Date.now()}`);
+      const worktreeDir = join(paneDir, "suggestions-v1d");
+      mkdirSync(worktreeDir, { recursive: true });
+      writeFileSync(join(worktreeDir, ".git"), "gitdir: /repo/.git/worktrees/suggestions-v1d\n");
+      const ctx = setupFakeCodex([
+        { type: "session_meta", payload: { cwd: "/unrelated" } },
+      ], paneDir);
+      addExtraRollout(ctx.fakeHome, worktreeDir, "rollout-worktree.jsonl",
+        { mtime: 3_000, prompt: "worktree-prompt" });
+      const originalCleanup = ctx.cleanup;
+      ctx.cleanup = () => {
+        originalCleanup();
+        rmSync(paneDir, { recursive: true, force: true });
+      };
+      return ctx;
+    }],
+    when: ["reading the pane root", ({ paneDir }) =>
+      extractFromCodexJsonl(paneDir, "worktree-prompt")],
+    then: ["the verified worktree session supplies the pane history", (result, { cleanup }) => {
+      expect(result).not.toBeNull();
+      expect(result.items[0].content).toContain("suggestions-v1d");
+      cleanup();
+    }],
+  });
 });
 
 feature("isPromptInCodexJsonl", () => {
@@ -547,7 +574,7 @@ feature("readLastTurnsCodex: multi-turn limit", () => {
     }],
   });
 
-  unit("headless tail mode reconstructs a final answer after a huge tool result", {
+  unit("bounded operational tails automatically reconstruct a final answer after a huge tool result", {
     given: ["the bounded tail starts inside a multi-megabyte tool output after the prompt", () => setupFakeCodex([
       { type: "session_meta", payload: { cwd: "/fake/workspace" } },
       { type: "event_msg", timestamp: "2026-04-09T10:00:00Z", payload: { type: "task_started", turn_id: "A" } },
@@ -556,8 +583,8 @@ feature("readLastTurnsCodex: multi-turn limit", () => {
       { type: "response_item", timestamp: "2026-04-09T10:00:03Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "summary after the images" }] } },
       { type: "event_msg", timestamp: "2026-04-09T10:00:04Z", payload: { type: "task_complete", turn_id: "A" } },
     ])],
-    when: ["reading only the last 2KB with headless recovery enabled", ({ paneDir }) =>
-      readLastTurnsCodex(paneDir, { limit: 1, tailBytes: 2 * 1024, headless: true })],
+    when: ["reading only the last 2KB through the ordinary operational path", ({ paneDir }) =>
+      readLastTurnsCodex(paneDir, { limit: 1, tailBytes: 2 * 1024 })],
     then: ["the orphaned final text is recovered as a complete synthetic turn", (r, { cleanup }) => {
       expect(r.turns).toHaveLength(1);
       expect(r.turns[0].userPrompt).toBe("");

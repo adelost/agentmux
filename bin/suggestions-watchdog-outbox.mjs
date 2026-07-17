@@ -10,7 +10,7 @@ import {
   watchdogFallbackView,
 } from "../core/suggestions-watchdog-fallback.mjs";
 import {
-  assignmentDeliveryEligibility,
+  assignmentDeliveryAvailability,
   createAmuxOutboxDeliverer,
   loadPrivateCredential,
   loadWatchdogOutboxConfig,
@@ -18,7 +18,6 @@ import {
 } from "../core/suggestions-watchdog-outbox.mjs";
 import { writeGuardHeartbeat } from "../core/guard-heartbeat.mjs";
 import { readAllTurnsAcrossPanes } from "../core/jsonl-reader.mjs";
-import { groupByPane } from "../core/orchestrator-checkpoint.mjs";
 
 const DEFAULT_CONFIG = "~/.config/agent/suggestions-watchdog-outbox.yaml";
 
@@ -28,6 +27,16 @@ async function escalateBrokerUnavailable({ message, idempotencyKey }) {
   return notifyUser(message, {
     level: "error",
     title: "Watchdog broker unavailable",
+    idempotencyKey,
+  });
+}
+
+/** WHAT: Alerts the human about one offer that never reached its owner. WHY: Keeps ownerAckClockStarted=false distinct from an owner ACK timeout. */
+async function escalateAssignmentUnavailable({ message, idempotencyKey }) {
+  const { notifyUser } = await import("../cli/send-notify.mjs");
+  return notifyUser(message, {
+    level: "error",
+    title: "Assignment offer not delivered",
     idempotencyKey,
   });
 }
@@ -87,20 +96,14 @@ try {
     const rows = readAllTurnsAcrossPanes({
       agents, agent, pane, limit: 200, tailBytes: 1024 * 1024,
     });
-    const bucket = groupByPane(rows).get(`${agent}:${pane}`) || {};
-    return assignmentDeliveryEligibility({
-      paneStatus,
-      lastAssistantText: bucket.lastAssistantText,
-      lastAssistantAt: bucket.lastAssistantTextTs,
-      lastUserAt: bucket.lastUserTextTs,
-      idleMs,
-    });
+    return assignmentDeliveryAvailability({ paneStatus, rows, agent, pane, idleMs });
   };
   const result = await pollWatchdogOutboxes({
     config,
     readToken,
     adminToken,
     availability,
+    onAssignmentUnavailable: escalateAssignmentUnavailable,
     deliver: createAmuxOutboxDeliverer({
       queue: createDeliveryQueue({
         validateTarget: (agent, pane) => validateAgentPane(agentConfigPath, agent, pane),

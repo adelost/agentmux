@@ -13,7 +13,7 @@
 // function_call events.
 
 import { readdirSync, readFileSync, statSync, existsSync, openSync, readSync, closeSync, fstatSync } from "fs";
-import { join } from "path";
+import { dirname, join } from "path";
 import { createHash } from "crypto";
 import { describeCustomExec, describeToolCall } from "./tool-display.mjs";
 import { codexSessionDirs } from "./codex-profiles.mjs";
@@ -212,7 +212,7 @@ function readSessionMeta(filePath) {
  * Codex records `cwd` at session start. A pane may cd into subdirs later,
  * but the session file stays the same. Matching rules (in priority order):
  *
- *   1. Exact cwd == paneDir (most reliable)
+ *   1. Exact cwd == paneDir or a verified git worktree below it
  *   2. cwd is an ancestor of paneDir (pane cd'd deeper since start)
  *
  * When multiple ancestors match (e.g. both /foo and /foo/bar have sessions
@@ -222,10 +222,21 @@ function readSessionMeta(filePath) {
  *
  * Ties on specificity break to newest mtime.
  *
- * We deliberately do NOT match sessions whose cwd is a *descendant* of
- * paneDir (e.g. paneDir=/foo/bar, cwd=/foo/bar/sub). That would pick up
- * any codex running inside our workspace, not our pane's own codex.
+ * Other descendant sessions remain rejected: only an on-disk `.git` marker
+ * establishes that the pane intentionally started Codex in its worktree.
  */
+function isPaneWorktreeCwd(paneDir, cwd) {
+  if (!String(cwd).startsWith(`${paneDir}/`)) return false;
+  let current = cwd;
+  while (current !== paneDir && current.startsWith(`${paneDir}/`)) {
+    if (existsSync(join(current, ".git"))) return true;
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return false;
+}
+
 function latestSessionFor(paneDir, { sessionDirs = codexSessionDirs() } = {}) {
   // Profile 1 remains ~/.codex; profile 2 has its own CODEX_HOME.  Search
   // both so switching accounts does not make the watcher/context layer lose
@@ -239,17 +250,22 @@ function latestSessionFor(paneDir, { sessionDirs = codexSessionDirs() } = {}) {
     const cwd = meta?.cwd;
     if (!cwd) continue;
     if (paneDir === cwd) {
-      candidates.push({ path, mtime, specificity: cwd.length, exact: true });
+      candidates.push({ path, mtime, specificity: cwd.length, direct: true, exact: true });
+    } else if (isPaneWorktreeCwd(paneDir, cwd)) {
+      candidates.push({ path, mtime, specificity: cwd.length, direct: true, exact: false });
     } else if (paneDir.startsWith(cwd + "/")) {
-      candidates.push({ path, mtime, specificity: cwd.length, exact: false });
+      candidates.push({ path, mtime, specificity: cwd.length, direct: false, exact: false });
     }
   }
 
   if (candidates.length === 0) return null;
 
-  // Priority: exact > longest prefix > newest mtime
+  // Exact pane roots and pane-owned git worktrees are both direct session
+  // identities; newest activity chooses between them. Generic ancestors keep
+  // the old closest-prefix rule, while arbitrary descendants remain rejected.
   candidates.sort((a, b) => {
-    if (a.exact !== b.exact) return a.exact ? -1 : 1;
+    if (a.direct !== b.direct) return a.direct ? -1 : 1;
+    if (a.direct && b.direct && a.mtime !== b.mtime) return b.mtime - a.mtime;
     if (a.specificity !== b.specificity) return b.specificity - a.specificity;
     return b.mtime - a.mtime;
   });
@@ -816,7 +832,11 @@ export function readLastTurnsCodex(paneDir, opts = {}) {
     : parseJsonl(file);
   if (events.length === 0) return { turns: [], compactions: [], jsonlFile: file };
 
-  let turns = groupCodexIntoTurns(events, { headless });
+  // Operational tail readers can begin after the user_message of one very
+  // large turn. Automatically reconstruct its visible suffix; requiring each
+  // caller to remember `headless` made the watchdog report rows=0 for a live
+  // 15MB rollout even though recent assistant events were present.
+  let turns = groupCodexIntoTurns(events, { headless: headless || Boolean(tailBytes) });
   const compactions = codexCompactions(events);
 
   if (since) {
