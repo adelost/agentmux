@@ -1140,12 +1140,19 @@ describe("AMUX Code project and agent registry", () => {
     expect(claude.address).toEqual({ session: "skybar-canary", pane: 0 });
     expect(codex.permissionMode).toBe("automation");
 
-    await postJson(`${url}/api/agents/${claude.id}/messages`, {
-      prompt: "automation claude",
-      attachments: [],
-      idempotencyKey: "automation-claude-turn",
-    });
-    await waitForIdle(url, project.id, claude.id);
+    const previousApiKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "must-not-reach-native-claude";
+    try {
+      await postJson(`${url}/api/agents/${claude.id}/messages`, {
+        prompt: "automation claude",
+        attachments: [],
+        idempotencyKey: "automation-claude-turn",
+      });
+      await waitForIdle(url, project.id, claude.id);
+    } finally {
+      if (previousApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = previousApiKey;
+    }
     const claudeCall = calls.find((call) => call.command === "fake-claude");
     expect(claudeCall.args).toContain("--dangerously-skip-permissions");
     expect(claudeCall.args).not.toContain("acceptEdits");
@@ -1154,7 +1161,9 @@ describe("AMUX Code project and agent registry", () => {
       AMUX_AGENT_NAME: "skybar-canary",
       AMUX_PANE: "0",
       AMUX_AGENT_ID: claude.id,
+      AMUX_NATIVE_CLAUDE_BILLING_MODE: "subscription",
     });
+    expect(claudeCall.options.env).not.toHaveProperty("ANTHROPIC_API_KEY");
 
     await postJson(`${url}/api/agents/${codex.id}/messages`, {
       prompt: "automation codex",

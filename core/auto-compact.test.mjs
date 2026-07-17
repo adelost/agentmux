@@ -39,13 +39,13 @@ feature("decideAutoCompactAction — first crossing (warn)", () => {
   });
 
   unit("exactly at threshold → warn", {
-    given: ["70% idle", () => ({ ...base, contextPercent: 70 })],
+    given: ["60% idle", () => ({ ...base, contextPercent: 60 })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=warn", (r) => expect(r.action).toBe("warn")],
   });
 
   unit("1% below threshold → none", {
-    given: ["69% idle", () => ({ ...base, contextPercent: 69 })],
+    given: ["59% idle", () => ({ ...base, contextPercent: 59 })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=none", (r) => expect(r.action).toBe("none")],
   });
@@ -118,9 +118,9 @@ feature("decideAutoCompactAction — activity cancels warning", () => {
   });
 
   unit("context dropped below threshold during grace → cancel", {
-    given: ["warning + context=60%", () => {
+    given: ["warning + context=59%", () => {
       const warnings = new Map([[key, { warned_at: base.now - 20_000 }]]);
-      return { ...base, warnings, contextPercent: 60 };
+      return { ...base, warnings, contextPercent: 59 };
     }],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=cancel", (r) => expect(r.action).toBe("cancel")],
@@ -435,6 +435,7 @@ feature("parseAutoCompactConfig", () => {
     when: ["parsing", ({ env }) => parseAutoCompactConfig(env)],
     then: ["matches DEFAULT_CONFIG", (r) => {
       expect(r.enabled).toBe(true);
+      expect(r.threshold).toBe(60);
       expect(r.threshold).toBe(DEFAULT_CONFIG.threshold);
       expect(r.graceMs).toBe(DEFAULT_CONFIG.graceMs);
       expect(r.pollMs).toBe(DEFAULT_CONFIG.pollMs);

@@ -8,6 +8,7 @@ import {
   checkGuardCronHeartbeats,
   checkNativeRuntimeFleet,
   checkSuggestionsBoard,
+  checkQuotaRecoveryHealth,
   checkTmuxClients,
   checkTmuxPaneGeometry,
   formatDoctorReport,
@@ -24,6 +25,35 @@ import { classifyHeartbeat, HEARTBEAT_STALE_MS } from "./heartbeat.mjs";
 
 const NOW = new Date("2026-07-08T12:00:00Z").getTime();
 const beatAt = (iso, version = "1.20.37") => ({ ts: iso, pid: 1, version, startedAt: iso });
+
+feature("Claude quota recovery health", () => {
+  unit("a fresh independent sidecar beat is visible even with parked continuations", {
+    when: ["checking the quota loop", () => checkQuotaRecoveryHealth({
+      beat: { state: "ok", ts: new Date(NOW - 20_000).toISOString() },
+      bridgeRunning: true,
+      pending: 3,
+      now: NOW,
+    })],
+    then: ["doctor reports the loop and pending count", (result) => {
+      expect(result).toMatchObject({ name: "quota recovery", status: OK });
+      expect(result.detail).toContain("3 pending continuations");
+    }],
+  });
+
+  unit("a stale quota loop is red even while the main bridge can still beat", {
+    when: ["checking a six-hour-old sidecar beat", () => checkQuotaRecoveryHealth({
+      beat: { state: "running", ts: new Date(NOW - 6 * 60 * 60_000).toISOString() },
+      bridgeRunning: true,
+      pending: 1,
+      now: NOW,
+    })],
+    then: ["doctor refuses false bridge health", (result) => {
+      expect(result).toMatchObject({ name: "quota recovery", status: FAIL });
+      expect(result.detail).toContain("1 pending continuation");
+      expect(result.hint).toContain("watchdog");
+    }],
+  });
+});
 
 feature("Suggestions board and comment-bridge health", () => {
   unit("a successful probe and fresh completed sync are one green row", {

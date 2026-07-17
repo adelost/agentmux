@@ -10,6 +10,7 @@ import { readClaudeQuota } from "../core/quota-usage.mjs";
 import { createClaudeQuotaLifecycle } from "../core/claude-quota-lifecycle.mjs";
 import { createClaudeQuotaCoordinator } from "../core/claude-quota-coordinator.mjs";
 import { createQuotaRecoveryLoop, parseQuotaRecoveryConfig } from "../channels/quota-recovery.mjs";
+import { writeQuotaRecoveryHeartbeat } from "../core/quota-recovery-heartbeat.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 try {
@@ -19,8 +20,11 @@ try {
   }
 } catch { /* The bridge entrypoint owns the required-env error message. */ }
 const config = parseQuotaRecoveryConfig();
+const LOOP_KEY = Symbol.for("agentmux.quotaRecoveryLoop");
 
-if (config.enabled) {
+if (!config.enabled) {
+  try { writeQuotaRecoveryHeartbeat({ state: "disabled" }); } catch {}
+} else if (!globalThis[LOOP_KEY]) {
   const configPath = process.env.AGENTS_YAML || `${ROOT}/agents.yaml`;
   const tmuxSocket = process.env.TMUX_SOCKET || "/tmp/openclaw-claude.sock";
   const shellPath = process.env.SHELL_PATH || `${process.env.HOME}/bin:${process.env.PATH}`;
@@ -38,5 +42,7 @@ if (config.enabled) {
     readQuota: () => readClaudeQuota(),
     resetGraceMs: config.resetGraceMs,
   });
-  createQuotaRecoveryLoop({ coordinator, config }).start();
+  const loop = createQuotaRecoveryLoop({ coordinator, config });
+  globalThis[LOOP_KEY] = loop;
+  loop.start();
 }

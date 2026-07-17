@@ -30,7 +30,7 @@ import { claudeProjectDir } from "../../core/claude-paths.mjs";
 import { appendEvent as appendFleetEvent } from "../../core/events.mjs";
 import { readTailWindow } from "../../core/jsonl-reader.mjs";
 import { readQuotaSnapshot } from "../../core/quota-usage.mjs";
-import { createNativeClaudeQuotaController } from "../../core/native-claude-quota.mjs";
+import { createNativeClaudeQuotaController, subscriptionSafeClaudeEnv } from "../../core/native-claude-quota.mjs";
 import { ensureCodexExecutionSafety } from "../../core/codex-profiles.mjs";
 import { persistedSessionIdentity } from "../../core/native-session-identity.mjs";
 import { shouldStopPane } from "../../core/model-watch.mjs";
@@ -406,7 +406,7 @@ const cleanAddress = (value) => {
 const cleanPermissionMode = (value) => value === "automation" ? "automation" : "interactive";
 
 const cleanChildEnv = (agent = null) => {
-  const env = { ...process.env };
+  const env = agent?.engine === "claude" ? subscriptionSafeClaudeEnv(process.env) : { ...process.env };
   for (const key of Object.keys(env)) {
     if (/^(CLAUDECODE|CLAUDE_CODE_)/i.test(key)) delete env[key];
   }

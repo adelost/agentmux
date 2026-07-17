@@ -12,6 +12,8 @@
 
 import { classifyHeartbeat } from "./heartbeat.mjs";
 import { classifyGuardHeartbeat } from "./guard-heartbeat.mjs";
+import { QUOTA_RECOVERY_STALE_MS, quotaRecoveryHealthObservation } from "./quota-recovery-heartbeat.mjs";
+export { quotaRecoveryHealthObservation };
 
 export const OK = "ok";
 export const WARN = "warn";
@@ -120,6 +122,35 @@ export function checkHeartbeatHealth({ beat, repoVersion, pidAlive, now = Date.n
       return check("bridge heartbeat", WARN, "no heartbeat file",
         "bridge predates heartbeat support: restart it once");
   }
+}
+
+/**
+ * WHAT: Checks the independent quota-recovery loop.
+ * WHY: Prevents a healthy Discord loop from masking stalled recovery.
+ */
+export function checkQuotaRecoveryHealth({ beat, bridgeRunning, pending = 0, now = Date.now() } = {}) {
+  if (beat?.state === "disabled") {
+    return check("quota recovery", WARN, "disabled by configuration",
+      "automatic exact-session resume is off; set AMUX_QUOTA_RECOVERY_ENABLED=true and restart");
+  }
+  if (!beat) {
+    return check("quota recovery", bridgeRunning ? WARN : OK,
+      bridgeRunning ? "no sidecar heartbeat" : "bridge is stopped",
+      bridgeRunning ? "restart once to activate the quota recovery sidecar" : "");
+  }
+  const ageMs = now - Date.parse(beat.ts || "");
+  if (!Number.isFinite(ageMs) || ageMs > QUOTA_RECOVERY_STALE_MS || beat.state === "stalled") {
+    return check("quota recovery", FAIL,
+      `${beat.state || "unknown"}, last heartbeat ${Math.max(0, Math.round(ageMs / 60_000))}m ago, ${pending} pending continuation${pending === 1 ? "" : "s"}`,
+      "the bridge watchdog restarts a stale quota sidecar; inspect ~/.agentmux/watchdog.log");
+  }
+  if (beat.state === "error") {
+    return check("quota recovery", WARN,
+      `last poll failed ${Math.max(0, Math.round(ageMs / 1000))}s ago${beat.error ? `: ${beat.error}` : ""}`,
+      "the loop will retry; inspect quota telemetry if this persists");
+  }
+  return check("quota recovery", OK,
+    `${beat.state}, ${Math.max(0, Math.round(ageMs / 1000))}s ago, ${pending} pending continuation${pending === 1 ? "" : "s"}`);
 }
 
 /**

@@ -43,7 +43,7 @@ import {
   checkDeliveryQueue,
   checkNativeRuntimeFleet,
   checkGuardCronHeartbeats,
-  checkSuggestionsBoard,
+  checkSuggestionsBoard, checkQuotaRecoveryHealth, quotaRecoveryHealthObservation,
 } from "../core/doctor.mjs";
 import {
   expandHome,
@@ -3204,7 +3204,7 @@ async function cmdDoctor(ctx) {
     checkBridgeProcess({ pids, supervised }),
     checkBridgeMode({ mode: readBridgeMode(), running: pids.length > 0 }),
     checkSupervisors({ pids: supervisorPids, crashLooping }),
-    checkHeartbeatHealth({ beat, repoVersion, pidAlive: pids.length > 0 }),
+    checkHeartbeatHealth({ beat, repoVersion, pidAlive: pids.length > 0 }), checkQuotaRecoveryHealth({ ...quotaRecoveryHealthObservation(createDeliveryQueue()), bridgeRunning: pids.length > 0 }),
     checkHooksInstalled({ settings, hookFileExists }),
     checkLedger({ stat: ledgerStat }),
     checkContextBridge({ claudePanes, pushing }),

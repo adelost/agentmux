@@ -10,6 +10,7 @@
 
 import { isLiveStatus, isCompactUnsafe } from "./pane-status.mjs";
 
+/** WHAT: Defines automatic compaction defaults. WHY: Keeps every caller on one safety policy. */
 export const DEFAULT_CONFIG = {
   enabled: true,
   codexEnabled: false,    // Auto-compact is OFF for codex panes by default.
@@ -19,7 +20,7 @@ export const DEFAULT_CONFIG = {
                           // amux would only spam warnings at a pane it can't
                           // actually shrink. Let codex run on auto. Flip with
                           // AUTO_COMPACT_CODEX=true.
-  threshold: 70,          // percent context
+  threshold: 60,          // percent context; compact before huge repeated turns
   graceMs: 60_000,        // 1 minute between warn and fire
   pollMs: 60_000,         // poll cadence in the bridge.
                           // Matched to graceMs so each pane gets one decide
