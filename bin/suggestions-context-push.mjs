@@ -35,6 +35,7 @@ const expandHome = (value) => typeof value === "string" && value.startsWith("~/"
   ? join(homedir(), value.slice(2))
   : value;
 
+/** WHAT: Loads context delivery configuration. WHY: Keeps credentials and telemetry paths explicit. */
 export function loadContextPushConfig(raw) {
   const parsed = yaml.load(raw);
   const baseUrl = typeof parsed?.baseUrl === "string" ? parsed.baseUrl.replace(/\/+$/u, "") : "";
@@ -56,12 +57,14 @@ export function loadContextPushConfig(raw) {
   };
 }
 
+/** WHAT: Loads durable context delivery state. WHY: Keeps torn or missing state fail-visible. */
 export function loadContextState(path) {
   if (!existsSync(path)) return emptyContextPushState();
   try { return normalizeContextPushState(JSON.parse(readFileSync(path, "utf-8"))); }
   catch (error) { throw new Error(`invalid context state ${path}: ${error.message}`); }
 }
 
+/** WHAT: Stores context delivery state atomically. WHY: Keeps lost-response receipts durable across restarts. */
 export function saveContextState(path, state) {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.tmp`;
@@ -69,7 +72,7 @@ export function saveContextState(path, state) {
   renameSync(temporary, path);
 }
 
-/** Read only complete new event-ledger lines and advance a byte cursor safely. */
+/** WHAT: Reads complete compact event lines. WHY: Keeps partial ledger writes behind a byte cursor. */
 export function readCompactEvents(path, cursor = 0) {
   if (!existsSync(path)) return { cursor: 0, events: [] };
   let fd;
@@ -100,6 +103,7 @@ export function readCompactEvents(path, cursor = 0) {
   }
 }
 
+/** WHAT: Reads one canonical top snapshot. WHY: Keeps engine parsing inside the shared context producer. */
 export async function readTopSnapshot({
   agentCli = join(__dirname, "agent-cli.mjs"),
   execFileImpl = execFile,
@@ -134,6 +138,7 @@ async function postContext(baseUrl, token, payload, fetchImpl) {
   return response.json().catch(() => ({}));
 }
 
+/** WHAT: Dispatches one replay-safe context update. WHY: Keeps unknown response outcomes from duplicating samples. */
 export async function pushContextOnce({
   config,
   token,

@@ -434,7 +434,6 @@ const STATUSLINE_BRIDGE_FRESH_MS = 2 * 60 * 60 * 1000;
 
 /**
  * Claude Code's OWN context percent, pushed — not scraped.
- *
  * The user's statusline command receives exact context JSON from Claude
  * Code on every render, and the installed GSD statusline tees it to
  * os.tmpdir()/claude-ctx-<session>.json ({ used_pct, timestamp }). That
@@ -448,6 +447,8 @@ const STATUSLINE_BRIDGE_FRESH_MS = 2 * 60 * 60 * 1000;
  *
  * Tokens/model are not in the bridge file; they come from the jsonl
  * reader for display only. Percent is the authoritative field.
+ * WHAT: Reads Claude's statusline context observation.
+ * WHY: Keeps displayed percent authoritative over reconstructed estimates.
  */
 export function getContextPushed(paneDir) {
   const session = newestSessionFile(paneDir);

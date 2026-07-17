@@ -2209,6 +2209,8 @@ function lastAssistantPreview(agent, paneIdx, paneDir) {
   return "";
 }
 
+// WHAT: Reads one pane's canonical context and preview.
+// WHY: Keeps native and tmux engines behind one top-row contract.
 async function inspectPane(ctx, agent, pane) {
   if (agent.backend === "native") {
     try {
@@ -3597,6 +3599,8 @@ async function cmdImage(args, ctx) {
 }
 
 /**
+ * WHAT: Prints the fleet context leaderboard or its canonical JSON snapshot.
+ * WHY: Keeps human and machine consumers on the same context observations.
  * Cross-session context leaderboard. Sorts all claude/codex panes by
  * percent descending (tokens as tie-breaker). Helps answer "which pane
  * is closest to the context ceiling right now?" without manual digging.

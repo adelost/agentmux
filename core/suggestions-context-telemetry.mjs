@@ -29,6 +29,7 @@ const finiteInteger = (value, min, max) => {
   return Number.isSafeInteger(number) && number >= min && number <= max ? number : null;
 };
 
+/** WHAT: Maps one native runtime snapshot to context. WHY: Keeps compact events and exact readings together. */
 export function nativeContextReading(snapshot, nowMs = Date.now()) {
   const raw = snapshot?.agent?.context;
   if (!raw || !Number.isFinite(raw.percent)) return null;
@@ -47,6 +48,7 @@ export function nativeContextReading(snapshot, nowMs = Date.now()) {
   };
 }
 
+/** WHAT: Collects context from every live agent pane. WHY: Keeps roster production on one canonical inspector. */
 export async function collectContextTelemetry(ctx, {
   agents, hasSession, listPanes, dialectFor, inspectPane,
 }) {
@@ -65,6 +67,7 @@ export async function collectContextTelemetry(ctx, {
   return rows;
 }
 
+/** WHAT: Builds the versioned top snapshot. WHY: Keeps CLI and delivery consumers on one schema. */
 export function contextTelemetrySnapshot(rows, generatedAt = new Date().toISOString()) {
   return { version: 1, generatedAt, agents: rows.map(({ agent, pane, engine, status, context }) => ({
     agentId: `${agent}:${pane}`, session: agent, pane, engine, status,
@@ -76,10 +79,12 @@ export function contextTelemetrySnapshot(rows, generatedAt = new Date().toISOStr
   })) };
 }
 
+/** WHAT: Builds empty context delivery state. WHY: Keeps first runs independent from preexisting files. */
 export function emptyContextPushState() {
   return { version: STATE_VERSION, eventCursor: 0, agents: {}, pending: null };
 }
 
+/** WHAT: Normalizes durable context delivery state. WHY: Keeps malformed receipts out of reconciliation. */
 export function normalizeContextPushState(value) {
   if (!value || value.version !== STATE_VERSION || typeof value.agents !== "object") {
     return emptyContextPushState();
@@ -92,7 +97,7 @@ export function normalizeContextPushState(value) {
   };
 }
 
-/** Parse fleet-progress's canonical session -> Suggestions project mapping. */
+/** WHAT: Parses the canonical session-to-project mapping. WHY: Keeps context samples on their owning board. */
 export function parseFleetProjects(raw) {
   const projects = {};
   for (const sourceLine of String(raw || "").split(/\r?\n/u)) {
@@ -171,11 +176,11 @@ function compactCandidates(snapshot, explicitEvents) {
 }
 
 /**
- * Reconcile one collection pass.
- *
  * A compact advances generation before readings are considered. A reading
  * observed at/before that compact is therefore discarded, permanently
  * preventing a delayed pre-compact sample from overwriting the reset.
+ * WHAT: Maps one collection pass to replay-safe context mutations.
+ * WHY: Keeps compact generations ahead of delayed samples.
  */
 export function reconcileContextTelemetry({
   state: inputState,
