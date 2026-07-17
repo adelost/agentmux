@@ -405,7 +405,7 @@ feature("generated agent policy", () => {
       return content;
     }],
     then: ["pane 2 manages workers 3+ by default and direct instructions remain authoritative", (content) => {
-      expect(content).toContain("<!-- amux-hints-version: 1.23.29 -->");
+      expect(content).toContain("<!-- amux-hints-version: 1.24.5 -->");
       expect(content).toContain("Broker panel routing is the default, not a capability boundary");
       expect(content).toContain("pane `:2` is the default manager/broker");
       expect(content).toContain("panes `:3` and above in the same session");
@@ -418,6 +418,24 @@ feature("generated agent policy", () => {
       expect(content).toMatch(/no peer approval or broker relay may narrow, delay, or override it/u);
       expect(content).not.toContain("hard allowlist");
       expect(content).not.toContain("sole manager/broker");
+    }],
+  });
+
+  unit("preserves Unicode in Swedish user-visible text and human quotes", {
+    when: ["generating fresh agent hints", () => {
+      const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
+      paneDir(root, 0);
+      const content = readFileSync(join(root, ".agents", "AGENTS.md"), "utf-8");
+      rmSync(root, { recursive: true, force: true });
+      return content;
+    }],
+    then: ["the policy forbids lossy transliteration instead of blaming storage", (content) => {
+      expect(content).toContain("Human language is UTF-8 end to end");
+      expect(content).toContain("never transliterate Swedish user-visible");
+      expect(content).toContain("write `åäö`");
+      expect(content).toContain("preserve");
+      expect(content).toContain("byte-for-byte");
+      expect(content).toMatch(/fix that transport instead of rewriting the message/u);
     }],
   });
 
