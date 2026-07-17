@@ -73,7 +73,10 @@ export function assertVerbatimSources(bodyBytes, sourceBytes) {
   const { value } = parseJsonBytes(bodyBytes, "request body");
   const values = allStrings(value);
   return sourceBytes.map((bytes, index) => {
-    const source = strictUtf8(bytes, `verbatim source ${index + 1}`);
+    const fileText = strictUtf8(bytes, `verbatim source ${index + 1}`);
+    const source = fileText.endsWith("\r\n")
+      ? fileText.slice(0, -2)
+      : fileText.endsWith("\n") ? fileText.slice(0, -1) : fileText;
     if (!source) throw new Error(`verbatim source ${index + 1} is empty`);
     if (!values.some((valueText) => valueText.includes(source))) {
       throw new Error(`verbatim source ${index + 1} is not present unchanged in the request body`);

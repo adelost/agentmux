@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
-  inspectSuggestionsMutationCommand, sendSuggestionsRequest,
+  assertVerbatimSources, inspectSuggestionsMutationCommand, sendSuggestionsRequest,
 } from "./suggestions-authoring.mjs";
 
 const mutationId = "11111111-1111-4111-8111-111111111111";
@@ -18,7 +18,7 @@ const fixture = (comment = exactQuote) => {
   const expectFile = join(root, "quote.txt");
   const stateDir = join(root, "outbox");
   writeFileSync(bodyFile, `${JSON.stringify({ mutationId, source: "ai:4", comment }, null, 2)}\n`);
-  writeFileSync(expectFile, exactQuote);
+  writeFileSync(expectFile, `${exactQuote}\n`);
   return { root, bodyFile, expectFile, stateDir };
 };
 
@@ -48,6 +48,19 @@ PY`)],
     then: ["neither is denied", ({ read, client }) => {
       expect(read.blocked).toBe(false);
       expect(client.blocked).toBe(false);
+    }],
+  });
+
+  unit("treats one final line ending as quote-file framing", {
+    given: ["a JSON body and quote files ending in LF or CRLF", () => ({
+      body: Buffer.from(JSON.stringify({ comment: exactQuote }), "utf8"),
+      sources: [Buffer.from(`${exactQuote}\n`), Buffer.from(`${exactQuote}\r\n`)],
+    })],
+    when: ["checking both source files", ({ body, sources }) => sources.map(
+      (source) => assertVerbatimSources(body, [source]),
+    )],
+    then: ["only the file framing is removed", (results) => {
+      expect(results).toEqual([[exactQuote], [exactQuote]]);
     }],
   });
 
