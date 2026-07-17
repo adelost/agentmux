@@ -10,7 +10,6 @@ import {
   watchdogFallbackView,
 } from "./suggestions-watchdog-fallback.mjs";
 import {
-  ASSIGNMENT_AVAILABLE_SIGNAL,
   assignmentDeliveryAvailability,
   assignmentDeliveryEligibility,
   createAmuxOutboxDeliverer,
@@ -127,7 +126,7 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
       .toMatchObject({ eligible: false, reason: "recent-inter-agent-contact" });
     expect(assignmentDeliveryEligibility({ paneStatus: "idle", now,
       lastCoordinationAt: now - 30_000, lastAssistantAt: now - 1,
-      lastAssistantText: `Jag är idle och tillgänglig.\n${ASSIGNMENT_AVAILABLE_SIGNAL}` }))
+      lastAssistantText: "Jag är idle och tillgänglig.\nASSIGNMENT_AVAILABLE" }))
       .toMatchObject({ eligible: true, reason: "explicit-available" });
 
     expect(assignmentDeliveryAvailability({ paneStatus: "idle", now,
@@ -165,7 +164,7 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
           content: "ASSIGNMENT OFFER — SRC-0117 — generation 1\nOwner: lsrc:6" },
         { agent: "lsrc", pane: 6, role: "assistant", type: "text",
           timestamp: new Date(presenceNow - 30_000).toISOString(),
-          content: `Offret är olevererat; jag är idle.\n${ASSIGNMENT_AVAILABLE_SIGNAL}` },
+          content: "Offret är olevererat; jag är idle.\nASSIGNMENT_AVAILABLE" },
       ] }))
       .toMatchObject({ eligible: true, reason: "explicit-available", idleForMs: 30_000 });
 
