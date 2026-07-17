@@ -405,7 +405,7 @@ feature("generated agent policy", () => {
       return content;
     }],
     then: ["pane 2 manages workers 3+ by default and direct instructions remain authoritative", (content) => {
-      expect(content).toContain("<!-- amux-hints-version: 1.24.6 -->");
+      expect(content).toContain("<!-- amux-hints-version: 1.24.11 -->");
       expect(content).toContain("Broker panel routing is the default, not a capability boundary");
       expect(content).toContain("pane `:2` is the default manager/broker");
       expect(content).toContain("panes `:3` and above in the same session");
@@ -435,6 +435,9 @@ feature("generated agent policy", () => {
       expect(content).toContain("write `åäö`");
       expect(content).toContain("preserve");
       expect(content).toContain("byte-for-byte");
+      expect(content).toContain("`amux-suggest`");
+      expect(content).toContain("`--expect-file`");
+      expect(content).toContain("Direct inline curl/Python mutations are blocked");
       expect(content).toMatch(/fix that transport instead of rewriting the message/u);
     }],
   });

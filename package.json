@@ -1,11 +1,12 @@
 {
   "name": "agentmux",
-  "version": "1.24.10",
+  "version": "1.24.11",
   "description": "Local bridge and native workspace for coding agents (Claude Code, Codex)",
   "type": "module",
   "bin": {
     "amux": "./bin/agent-cli.mjs",
     "ax": "./bin/agent-cli.mjs",
+    "amux-suggest": "./bin/amux-suggest.mjs",
     "overlap-gate": "./bin/overlap-gate.mjs"
   },
   "scripts": {
