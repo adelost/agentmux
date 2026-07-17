@@ -54,7 +54,7 @@ feature("fleet hints synchronization", () => {
     )],
     then: ["startup sync precedes the heartbeat", (source) => {
       const syncAt = source.indexOf("syncConfiguredAgentHints(listAgents(AGENTS_YAML)");
-      const heartbeatAt = source.indexOf("startHeartbeat({ version: pkgVersion, hintsVersion: HINTS_VERSION })");
+      const heartbeatAt = source.indexOf("startHeartbeat({");
       expect(syncAt).toBeGreaterThan(0);
       expect(heartbeatAt).toBeGreaterThan(syncAt);
     }],
@@ -171,6 +171,7 @@ feature("running bridge template provenance", () => {
     when: ["writing one bridge beat", (fx) => {
       writeHeartbeat({
         version: "1.2.3",
+        sourceSha: "a".repeat(40),
         hintsVersion: "hints-v4",
         startedAt: "2026-07-15T00:00:00.000Z",
         path: fx.path,
@@ -181,6 +182,7 @@ feature("running bridge template provenance", () => {
     then: ["the template provenance can be compared by a fresh CLI", (fx) => {
       expect(readHeartbeat(fx.path)).toMatchObject({
         version: "1.2.3",
+        sourceSha: "a".repeat(40),
         hintsVersion: "hints-v4",
         startedAt: "2026-07-15T00:00:00.000Z",
       });

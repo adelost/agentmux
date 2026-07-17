@@ -64,7 +64,7 @@ PY`)],
     }],
   });
 
-  unit("the installed hook turns the reproduced finding into a hard denial", {
+  component("the installed hook turns the reproduced finding into a hard denial", {
     when: ["running the hook with a direct mutation", () => spawnSync(
       process.execPath,
       [resolve("bin/suggestions-write-guard.mjs")],

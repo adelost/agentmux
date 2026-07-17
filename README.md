@@ -276,8 +276,23 @@ cd agentmux
 bash bin/setup.sh
 ```
 
-The setup script checks prerequisites, installs npm dependencies, and creates
-starter config files.
+The setup script checks prerequisites, installs npm dependencies, creates
+starter config files, and installs the fetched `origin/master` commit as a
+copied global npm package. It never `npm link`s the CLI to the checkout.
+
+For later upgrades, fetch first and pass the full immutable commit identity:
+
+```bash
+git fetch origin
+MASTER_SHA=$(git rev-parse refs/remotes/origin/master)
+node bin/install-release.mjs --sha "$MASTER_SHA"
+```
+
+The installer builds only `git archive` bytes from that SHA, preserves local
+runtime config without checking out another branch, refreshes the Claude hooks,
+and writes `~/.agentmux/release-receipt.json`. `amux doctor` turns red if the
+global package points into a Git worktree, the receipt or binary realpath drifts,
+hook hashes/behavior drift, or the running bridge reports another source SHA.
 
 Create or edit `agentmux.yaml`:
 

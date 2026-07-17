@@ -8,7 +8,7 @@
 //     it, so fixes silently aren't live — the 1.20.32-35 trap)
 //
 // File: ~/.agentmux/bridge-heartbeat.json
-//   { ts, pid, version, startedAt }
+//   { ts, pid, version, sourceSha, startedAt }
 
 import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
@@ -23,15 +23,17 @@ export function heartbeatPath() {
   return process.env.AMUX_HEARTBEAT_PATH || join(homedir(), ".agentmux", "bridge-heartbeat.json");
 }
 
+/** WHAT: Stores one bridge heartbeat with exact code identity. WHY: Keeps liveness and release provenance observable outside the process. */
 export function writeHeartbeat({
   version,
+  sourceSha = null,
   hintsVersion = null,
   startedAt,
   path = heartbeatPath(),
   now = new Date(),
 }) {
   mkdirSync(dirname(path), { recursive: true });
-  const beat = { ts: now.toISOString(), pid: process.pid, version, hintsVersion, startedAt };
+  const beat = { ts: now.toISOString(), pid: process.pid, version, sourceSha, hintsVersion, startedAt };
   writeFileSync(path, JSON.stringify(beat) + "\n");
   return beat;
 }
@@ -45,19 +47,22 @@ export function readHeartbeat(path = heartbeatPath()) {
   }
 }
 
-/**
- * Classify a heartbeat against the current repo version:
- *   missing  - no file: bridge never ran with heartbeat support (or never ran)
- *   hung     - pid still alive but the beat is stale: event loop is stuck
- *   dead     - beat is stale and the pid is gone
- *   stale-code - beating fine but on an older version than the repo
- *   ok       - beating and current
- */
-export function classifyHeartbeat(beat, { repoVersion, now = Date.now(), pidAlive }) {
+// States: missing, hung, dead, stale-code, or ok.
+/** WHAT: Calculates bridge health from liveness and release identity. WHY: Prevents matching versions from hiding stale running code. */
+export function classifyHeartbeat(beat, {
+  repoVersion, repoSourceSha = null, now = Date.now(), pidAlive,
+}) {
   if (!beat) return { state: "missing" };
   const age = now - new Date(beat.ts || 0).getTime();
   const fresh = Number.isFinite(age) && age <= HEARTBEAT_STALE_MS;
   if (!fresh) return { state: pidAlive ? "hung" : "dead", ageMs: age };
+  if (repoSourceSha && beat.sourceSha !== repoSourceSha) {
+    return {
+      state: "stale-code",
+      runningSourceSha: beat.sourceSha || null,
+      repoSourceSha,
+    };
+  }
   if (repoVersion && beat.version && beat.version !== repoVersion) {
     return { state: "stale-code", running: beat.version, repo: repoVersion };
   }
@@ -65,8 +70,10 @@ export function classifyHeartbeat(beat, { repoVersion, now = Date.now(), pidAliv
 }
 
 /** Start the interval writer. Returns a stop function. */
+/** WHAT: Schedules periodic bridge identity heartbeats. WHY: Keeps hung and stale processes visible without relying on their event loop output. */
 export function startHeartbeat({
   version,
+  sourceSha = null,
   hintsVersion = null,
   intervalMs = HEARTBEAT_INTERVAL_MS,
   path = heartbeatPath(),
@@ -74,7 +81,7 @@ export function startHeartbeat({
   const startedAt = new Date().toISOString();
   const tick = () => {
     try {
-      writeHeartbeat({ version, hintsVersion, startedAt, path });
+      writeHeartbeat({ version, sourceSha, hintsVersion, startedAt, path });
     } catch (err) {
       console.warn(`heartbeat write failed: ${err.message}`);
     }

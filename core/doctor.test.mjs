@@ -18,7 +18,7 @@ import {
   TMUX_MIN_PANE_ROWS,
   checkTmuxVersion,
   FAIL, OK, WARN,
-  checkBridgeMode, checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors,
+  checkBridgeMode, checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkReleaseIdentity, checkSupervisors,
   checkLedger, checkTmux, overallStatus,
 } from "./doctor.mjs";
 import { classifyHeartbeat, HEARTBEAT_STALE_MS } from "./heartbeat.mjs";
@@ -380,6 +380,41 @@ feature("heartbeat classification", () => {
       expect(hb).toEqual({ state: "stale-code", running: "1.20.31", repo: "1.20.37" })],
   });
 
+  unit("a matching version cannot hide a bridge running an older release SHA", {
+    given: ["a fresh beat from an older exact source revision", () => ({
+      ...beatAt("2026-07-08T11:59:30Z"), sourceSha: "a".repeat(40),
+    })],
+    when: ["classifying against the installed release receipt", (beat) =>
+      classifyHeartbeat(beat, {
+        repoVersion: "1.20.37",
+        repoSourceSha: "b".repeat(40),
+        pidAlive: true,
+        now: NOW,
+      })],
+    then: ["the exact runtime drift is stale code", (hb) => expect(hb).toMatchObject({
+      state: "stale-code",
+      runningSourceSha: "a".repeat(40),
+      repoSourceSha: "b".repeat(40),
+    })],
+  });
+
+  unit("doctor renders the exact stale bridge revisions and restart action", {
+    given: ["a current-version bridge behind the installed release SHA", () => ({
+      beat: { ...beatAt("2026-07-08T11:59:30Z"), sourceSha: "a".repeat(40) },
+      repoVersion: "1.20.37",
+      repoSourceSha: "b".repeat(40),
+      pidAlive: true,
+      now: NOW,
+    })],
+    when: ["rendering bridge health", (input) => checkHeartbeatHealth(input)],
+    then: ["the bridge-code row names both SHA identities", (result) => {
+      expect(result).toMatchObject({ name: "bridge code", status: WARN });
+      expect(result.detail).toContain("aaaaaaaaaaaa");
+      expect(result.detail).toContain("bbbbbbbbbbbb");
+      expect(result.hint).toContain("restart");
+    }],
+  });
+
   unit("stale beat + live pid = hung event loop", {
     given: ["a beat older than the stale window", () =>
       beatAt(new Date(NOW - HEARTBEAT_STALE_MS - 60000).toISOString())],
@@ -404,6 +439,36 @@ feature("heartbeat classification", () => {
     then: ["fail + kill hint", (c) => {
       expect(c.status).toBe(FAIL);
       expect(c.hint).toContain("kill");
+    }],
+  });
+});
+
+feature("release installation health", () => {
+  unit("an immutable exact-SHA install with verified hooks is green", {
+    when: ["rendering the release observation", () => checkReleaseIdentity({
+      ok: true,
+      sourceSha: "a".repeat(40),
+      packageVersion: "1.25.0",
+      hooksVerified: true,
+      issues: [],
+    })],
+    then: ["doctor exposes the source receipt", (result) => {
+      expect(result).toMatchObject({ name: "release identity", status: OK });
+      expect(result.detail).toContain("1.25.0");
+      expect(result.detail).toContain("aaaaaaaaaaaa");
+      expect(result.detail).toContain("hooks verified");
+    }],
+  });
+
+  unit("a worktree-linked global package is red with the immutable installer repair", {
+    when: ["rendering a linked-checkout observation", () => checkReleaseIdentity({
+      ok: false,
+      issues: [{ code: "linked-checkout", detail: "global package resolves into a git working tree" }],
+    })],
+    then: ["doctor rejects the mutable runtime", (result) => {
+      expect(result).toMatchObject({ name: "release identity", status: FAIL });
+      expect(result.detail).toContain("git working tree");
+      expect(result.hint).toContain("install-release");
     }],
   });
 });
