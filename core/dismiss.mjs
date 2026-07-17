@@ -44,13 +44,20 @@ export const BLOCKING_PROMPTS = [
   },
   {
     name: "resume",
-    // The resume dialog renders as a single line that includes both phrases.
-    // Require the LAST non-empty line to match — anything below it (typical:
-    // an input prompt char) means the dialog is gone.
+    // Claude 2.1.212 changed this from one confirmation line to a three-choice
+    // menu whose first, preselected option is "Resume from summary". Accept
+    // only either exact active layout at the bottom of the pane. In
+    // particular, prose or stale scrollback mentioning the option must never
+    // receive an unsolicited Enter.
     match: (text) => {
-      const lines = tailLines(text, 1);
-      const last = lines[0] || "";
-      return last.includes("Resume from summary") && last.includes("Enter to confirm");
+      const lines = tailLines(text, 8);
+      const last = lines.at(-1)?.trim() || "";
+      if (last.includes("Resume from summary") && last.includes("Enter to confirm")) return true;
+      const block = lines.join("\n");
+      return /^Enter to confirm\s*·\s*Esc to cancel$/u.test(last)
+          && /(?:❯\s*)?1\.\s*Resume from summary(?:\s*\(recommended\))?/u.test(block)
+          && /2\.\s*Resume full session as-is/u.test(block)
+          && /3\.\s*Don't ask me again/u.test(block);
     },
     keys: "Enter",
     waitMs: 3000,
