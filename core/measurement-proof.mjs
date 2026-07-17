@@ -160,10 +160,12 @@ function verifyClean(worktree, expectedChanged = []) {
   }
 }
 
-function measurementResult(path) {
+function measurementResult(path, phase) {
   let value;
   try { value = JSON.parse(readFileSync(path, "utf8")); }
-  catch (error) { throw new Error(`green gate did not write valid measurement JSON: ${error.message}`); }
+  catch (error) {
+    throw new Error(`${phase} gate did not write valid measurement JSON: ${error.message}`);
+  }
   if (!isObject(value) || Object.keys(value).some((key) =>
     !["metric", "unit", "operator", "limit", "observed"].includes(key))) {
     throw new Error("measurement result has unknown or missing fields");
@@ -176,9 +178,25 @@ function measurementResult(path) {
   if (!operator || !Number.isFinite(limit) || !Number.isFinite(observed)) {
     throw new Error("measurement result must contain finite limit/observed values");
   }
-  const margin = operator === "<=" ? limit - observed : observed - limit;
+  return { metric, unit, operator, limit, observed };
+}
+
+function measuredMargin(red, green) {
+  if (["metric", "unit", "operator", "limit"].some((key) => red[key] !== green[key])) {
+    throw new Error("red and green measurement boundaries must match");
+  }
+  if (red.observed === green.observed) {
+    throw new Error("red and green measurements must have different observed values");
+  }
+  const redMargin = red.operator === "<="
+    ? red.limit - red.observed
+    : red.observed - red.limit;
+  if (redMargin >= 0) throw new Error("red measurement must violate the limit");
+  const margin = green.operator === "<="
+    ? green.limit - green.observed
+    : green.observed - green.limit;
   if (!(margin > 0)) throw new Error(`measurement has no passing margin (${margin})`);
-  return { metric, unit, operator, limit, observed, margin };
+  return { ...green, margin };
 }
 
 function gateResult(result) {
@@ -257,12 +275,14 @@ export function runMeasurementProof(input, { now = Date.now } = {}) {
     const red = executeGate(baseDir, "red");
     if (red.exitCode === 0) throw new Error("red-first gate unexpectedly passed");
     verifyClean(baseDir, changedFiles);
+    const redMeasurement = measurementResult(resultPath, "red");
     const green = executeGate(headDir, "green");
     if (green.exitCode !== 0) {
       throw new Error(`green gate failed (${green.exitCode}); stderr=${green.stderr}`);
     }
     verifyClean(headDir, []);
-    const margin = measurementResult(resultPath);
+    const greenMeasurement = measurementResult(resultPath, "green");
+    const margin = measuredMargin(redMeasurement, greenMeasurement);
     const generatedAt = now();
     if (!Number.isSafeInteger(generatedAt) || generatedAt < 0) {
       throw new Error("measurement proof clock returned an invalid timestamp");

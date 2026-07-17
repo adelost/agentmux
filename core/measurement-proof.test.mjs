@@ -30,9 +30,15 @@ if (process.env.PROOF_COUNTER) appendFileSync(process.env.PROOF_COUNTER,
 if (process.env.DIRTY_GATE === process.env.AMUX_MEASUREMENT_PHASE) {
   writeFileSync("gate-dirt.txt", "must be rejected\\n");
 }
-writeFileSync(process.env.AMUX_MEASUREMENT_OUTPUT, JSON.stringify({
-  metric: "pixel-error", unit: "px", operator: "<=", limit: 10, observed: 4,
-}));
+const phase = process.env.AMUX_MEASUREMENT_PHASE;
+const observed = Number(process.env[phase === "red" ? "RED_OBSERVED" : "GREEN_OBSERVED"]
+  ?? (phase === "red" ? 12 : 4));
+const limit = Number(process.env[phase === "red" ? "RED_LIMIT" : "GREEN_LIMIT"] ?? 10);
+if (process.env.OMIT_MEASUREMENT_PHASE !== phase) {
+  writeFileSync(process.env.AMUX_MEASUREMENT_OUTPUT, JSON.stringify({
+    metric: "pixel-error", unit: "px", operator: "<=", limit, observed,
+  }));
+}
 process.exit(fixture === "fixture-enabled" && feature === "fixed" ? 0 : 23);
 `.trimStart());
   git(root, ["add", "."]);
@@ -91,6 +97,50 @@ describe("measurement proof runner", () => {
     expect(canonicalJson(proof)).not.toContain("undefined");
     expect(readFileSync(counter, "utf8")).toBe("red\ngreen\n");
     expect(git(fx.root, ["worktree", "list", "--porcelain"]).match(/worktree /gu)).toHaveLength(1);
+  });
+
+  it("rejects identical observed values from the red and green phases", () => {
+    const fx = fixture();
+    process.env.RED_OBSERVED = "4";
+    try {
+      expect(() => runMeasurementProof(config(fx)))
+        .toThrow("red and green measurements must have different observed values");
+    } finally {
+      delete process.env.RED_OBSERVED;
+    }
+  });
+
+  it("rejects a red measurement that already satisfies the limit", () => {
+    const fx = fixture();
+    process.env.RED_OBSERVED = "5";
+    try {
+      expect(() => runMeasurementProof(config(fx)))
+        .toThrow("red measurement must violate the limit");
+    } finally {
+      delete process.env.RED_OBSERVED;
+    }
+  });
+
+  it("rejects incomparable phase boundaries instead of reporting a measured margin", () => {
+    const fx = fixture();
+    process.env.RED_LIMIT = "11";
+    try {
+      expect(() => runMeasurementProof(config(fx)))
+        .toThrow("red and green measurement boundaries must match");
+    } finally {
+      delete process.env.RED_LIMIT;
+    }
+  });
+
+  it("requires the real gate to emit a measurement in the red phase", () => {
+    const fx = fixture();
+    process.env.OMIT_MEASUREMENT_PHASE = "red";
+    try {
+      expect(() => runMeasurementProof(config(fx)))
+        .toThrow("red gate did not write valid measurement JSON");
+    } finally {
+      delete process.env.OMIT_MEASUREMENT_PHASE;
+    }
   });
 
   it("fails before execution when the asserted anchor is absent", () => {
