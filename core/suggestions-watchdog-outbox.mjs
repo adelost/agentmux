@@ -7,8 +7,13 @@ import { lstatSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { resolve } from "path";
 import yaml from "js-yaml";
-import { createDeliveryQueue, isNotSentDeliveryJob, waitForDeliveryJob } from "./delivery-queue.mjs";
+import { createDeliveryQueue, waitForDeliveryJob } from "./delivery-queue.mjs";
 import { looksDone } from "./orchestrator-checkpoint.mjs";
+import {
+  DEFAULT_BROKER_FALLBACK_AFTER_MS,
+  prepareWatchdogDelivery,
+  reconcileWatchdogFallback,
+} from "./suggestions-watchdog-fallback.mjs";
 
 const LIVE_ORIGIN = "https://suggest.v1d.io";
 const DEFAULT_DISCOVERY_PROJECT = "source";
@@ -125,6 +130,8 @@ export function createAmuxOutboxDeliverer({
   waitMs = 12_000,
   now = () => Date.now(),
   cancelledRetryAfterMs = DEFAULT_CANCELLED_REENQUEUE_AFTER_MS,
+  brokerFallbackAfterMs = DEFAULT_BROKER_FALLBACK_AFTER_MS,
+  escalate = null,
 } = {}) {
   if (!Number.isSafeInteger(cancelledRetryAfterMs)
     || cancelledRetryAfterMs < 1_000 || cancelledRetryAfterMs > 60 * 60_000) {
@@ -146,42 +153,18 @@ export function createAmuxOutboxDeliverer({
       || accepted.kind !== "prompt" || accepted.source !== "suggestions-watchdog") {
       throw new Error(`delivery: idempotency payload conflict for ${projectId}/${alert.id}`);
     }
-    if (accepted.status === "cancelled" && isNotSentDeliveryJob(accepted)) {
-      const observedAt = Number(now());
-      const terminalAt = Number(accepted.terminalAt);
-      const reenqueueCount = Number(accepted.metadata?.watchdogReenqueueCount || 0);
-      if (!Number.isSafeInteger(observedAt) || observedAt < 0
-        || !Number.isSafeInteger(terminalAt) || terminalAt < 0) {
-        throw new Error(`delivery: cancelled agentmux job ${accepted.id} lacks a durable not-sent boundary; human escalation required`);
-      }
-      if (reenqueueCount >= 1) {
-        if (!Number.isSafeInteger(accepted.metadata?.watchdogEscalatedAt)) {
-          accepted = queue.update(accepted, { metadata: {
-            watchdogEscalatedAt: observedAt,
-            watchdogEscalationReason: "not-sent-after-bounded-reenqueue",
-          } });
-        }
-        throw new Error(`delivery: agentmux job ${accepted.id} remained not-sent after one bounded re-enqueue; human escalation persisted`);
-      }
-      const eligibleAt = terminalAt + cancelledRetryAfterMs;
-      if (observedAt < eligibleAt) {
-        throw new Error(`delivery: agentmux job ${accepted.id} is proven not-sent; bounded re-enqueue opens in ${eligibleAt - observedAt}ms`);
-      }
-      accepted = queue.update(accepted, {
-        status: "pending",
-        acknowledgedAt: null,
-        terminalAt: null,
-        nextAttemptAt: observedAt,
-        lastReason: "watchdog outbox re-enqueued one prompt after a durable not-sent cancellation",
-        metadata: {
-          watchdogReenqueueCount: 1,
-          watchdogReenqueuedAt: observedAt,
-          watchdogOriginalTerminalAt: terminalAt,
-        },
-      });
-    }
+    accepted = await prepareWatchdogDelivery({ queue, job: accepted, projectId, alert, now,
+      cancelledRetryAfterMs, fallbackAfterMs: brokerFallbackAfterMs, escalate });
     const settled = await waitForDeliveryJob(queue, accepted.id, { timeoutMs: waitMs }) || accepted;
+    const fallback = await reconcileWatchdogFallback({ queue, job: settled, projectId, alert,
+      now, fallbackAfterMs: brokerFallbackAfterMs, escalate });
     if (settled.status !== "acknowledged" || !Number.isFinite(settled.acknowledgedAt)) {
+      if (fallback.state === "blocked") {
+        throw new Error(`delivery: agentmux job ${accepted.id} is unacknowledged; fallback opens in ${fallback.remainingMs}ms (ownerAckClockStarted=false)`);
+      }
+      if (fallback.state === "escalated") {
+        throw new Error(`delivery: agentmux job ${accepted.id} is unacknowledged; human escalation persisted (ownerAckClockStarted=false)`);
+      }
       throw new Error(`delivery: agentmux job ${accepted.id} is not acknowledged (${settled.status})`);
     }
     return {

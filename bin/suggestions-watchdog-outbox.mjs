@@ -6,6 +6,10 @@ import { listAgents, validateAgentPane } from "../cli/config.mjs";
 import { createTmuxContext, getPaneStatus } from "../cli/tmux.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import {
+  formatWatchdogFallbackView,
+  watchdogFallbackView,
+} from "../core/suggestions-watchdog-fallback.mjs";
+import {
   assignmentDeliveryEligibility,
   createAmuxOutboxDeliverer,
   loadPrivateCredential,
@@ -17,6 +21,16 @@ import { readAllTurnsAcrossPanes } from "../core/jsonl-reader.mjs";
 import { groupByPane } from "../core/orchestrator-checkpoint.mjs";
 
 const DEFAULT_CONFIG = "~/.config/agent/suggestions-watchdog-outbox.yaml";
+
+/** WHAT: Escalates one broker-unavailable generation directly to the human. WHY: Keeps fallback independent from the unavailable delivery broker. */
+async function escalateBrokerUnavailable({ message, idempotencyKey }) {
+  const { notifyUser } = await import("../cli/send-notify.mjs");
+  return notifyUser(message, {
+    level: "error",
+    title: "Watchdog broker unavailable",
+    idempotencyKey,
+  });
+}
 
 function expandHome(path) {
   if (path === "~") return process.env.HOME;
@@ -56,7 +70,13 @@ try {
     const projects = config.projects === null
       ? `auto discovery=${config.discoveryProject}`
       : config.projects.join(",");
-    console.log(`READY projects=${projects} base=${config.baseUrl}`);
+    const queue = createDeliveryQueue();
+    const fallbacks = queue.allTargets().flatMap(({ agentName, pane }) =>
+      queue.list(agentName, pane).map((job) => watchdogFallbackView(job)).filter(Boolean))
+      .sort((left, right) => Number(left.deadlineAt || 0) - Number(right.deadlineAt || 0))
+      .slice(-20);
+    console.log(`READY projects=${projects} base=${config.baseUrl} fallbacks=${fallbacks.length}`);
+    for (const fallback of fallbacks) console.log(formatWatchdogFallbackView(fallback));
     process.exit(0);
   }
   const agents = listAgents(agentConfigPath);
@@ -86,6 +106,7 @@ try {
         validateTarget: (agent, pane) => validateAgentPane(agentConfigPath, agent, pane),
       }),
       waitMs: config.deliveryWaitMs,
+      escalate: escalateBrokerUnavailable,
     }),
   });
   writeGuardHeartbeat({
