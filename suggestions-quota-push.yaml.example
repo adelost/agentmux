@@ -3,3 +3,10 @@
 # Copy to ~/.config/agent/suggestions-quota-push.yaml.
 baseUrl: https://suggest.v1d.io
 adminCredentialFile: ~/.config/agent/suggestions-admin-token
+
+# Optional context telemetry settings. Context uses the same local admin
+# credential but a separate endpoint, state file, cadence and UI semantics.
+contextFleetConfigFile: ~/.agentmux/fleet-watch/fleets.conf
+contextEventsFile: ~/.agentmux/events.jsonl
+contextStateFile: ~/.agentmux/suggestions-context-push-state.json
+contextHeartbeatMs: 300000

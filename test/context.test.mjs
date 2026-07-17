@@ -51,6 +51,10 @@ feature("getContextPercent (claude): model-based max lookup", () => {
       expect(r).not.toBeNull();
       expect(r.tokens).toBe(200_000);
       expect(r.percent).toBe(20);
+      expect(r.windowTokens).toBe(1_000_000);
+      expect(r.source).toBe("claude-jsonl");
+      expect(r.confidence).toBe("estimated");
+      expect(Date.parse(r.observedAt)).not.toBeNaN();
       cleanup();
     }],
   });
