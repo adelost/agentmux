@@ -405,7 +405,7 @@ feature("generated agent policy", () => {
       return content;
     }],
     then: ["pane 2 manages workers 3+ by default and direct instructions remain authoritative", (content) => {
-      expect(content).toContain("<!-- amux-hints-version: 1.24.11 -->");
+      expect(content).toContain("<!-- amux-hints-version: 1.24.12 -->");
       expect(content).toContain("Broker panel routing is the default, not a capability boundary");
       expect(content).toContain("pane `:2` is the default manager/broker");
       expect(content).toContain("panes `:3` and above in the same session");
@@ -488,6 +488,24 @@ feature("generated agent policy", () => {
       expect(content).toMatch(/"held for\s+morning", or a ledger\/memory note are NOT dispositions/u);
       expect(content).toMatch(/night rules never pause dispatch/u);
       expect(content).toMatch(/READY >= 1 with zero in_progress nudges the broker,\s+then the human/u);
+    }],
+  });
+
+  unit("never stacks a new assignment onto an unfinished worker", {
+    when: ["generating fresh agent hints", () => {
+      const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
+      paneDir(root, 0);
+      const content = readFileSync(join(root, ".agents", "AGENTS.md"), "utf-8");
+      rmSync(root, { recursive: true, force: true });
+      return content;
+    }],
+    then: ["dispatch requires explicit done or ten minutes of sustained idle", (content) => {
+      expect(content).toMatch(/explicitly reported\s+its previous task done/u);
+      expect(content).toMatch(/continuously idle for at\s+least 10 minutes/u);
+      expect(content).toMatch(/merely between tool calls is not available/u);
+      expect(content).toMatch(/Never interrupt it or stack a\s+new assignment/u);
+      expect(content).toMatch(/A banked or merged PR is not availability proof/u);
+      expect(content).toMatch(/absence of a board lease\s+alone never means/u);
     }],
   });
 

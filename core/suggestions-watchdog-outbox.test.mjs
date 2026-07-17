@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 import {
+  assignmentDeliveryEligibility,
   createAmuxOutboxDeliverer,
   loadPrivateCredential,
   loadWatchdogOutboxConfig,
@@ -33,7 +34,22 @@ const alert = Object.freeze({
   deliveredAt: null,
 });
 
-function api({ ackStatus = 200, registryProjects = PUBLIC_PROJECTS } = {}) {
+const assignmentAlert = Object.freeze({
+  id: 8,
+  ticketId: "SRC-0026",
+  assignmentId: 9,
+  kind: "assignment_offer_delivery",
+  dedupeKey: "assignment-offer:9:1",
+  payload: Object.freeze({
+    targetAgent: "lsrc:4",
+    offerPrompt: "ASSIGNMENT OFFER — SRC-0026 — owner lsrc:4",
+  }),
+  queuedAt: 2_000,
+  deliveredAt: null,
+});
+
+function api({ ackStatus = 200, registryProjects = PUBLIC_PROJECTS,
+  outboxAlert = alert } = {}) {
   const calls = [];
   const fetchImpl = vi.fn(async (input, init = {}) => {
     const url = new URL(input);
@@ -48,10 +64,12 @@ function api({ ackStatus = 200, registryProjects = PUBLIC_PROJECTS } = {}) {
         routingGuide: { workers: [{ role: "broker",
           id: PROJECT_BROKERS[url.searchParams.get("project")] }] },
       },
+      assignmentDelivery: { version: "assignment-delivery.v1", idleMs: 600_000,
+        requireExplicitDoneOrSustainedIdle: true, unknownPresence: "deny" },
     });
-    if (url.pathname === "/api/watchdog/outbox") return Response.json({ alerts: [alert] });
+    if (url.pathname === "/api/watchdog/outbox") return Response.json({ alerts: [outboxAlert] });
     if (url.pathname === "/api/watchdog/outbox/ack") {
-      return Response.json(ackStatus === 200 ? { acknowledged: true, id: alert.id }
+      return Response.json(ackStatus === 200 ? { acknowledged: true, id: outboxAlert.id }
         : { error: "ack-failed" }, { status: ackStatus });
     }
     return Response.json({ error: "not-found" }, { status: 404 });
@@ -67,6 +85,56 @@ const config = (projects = ["source"]) => ({
 });
 
 describe("persistent Suggestions watchdog outbox consumer", () => {
+  it("requires explicit done or ten minutes of sustained idle", () => {
+    const now = 1_000_000;
+    expect(assignmentDeliveryEligibility({ paneStatus: "working", now,
+      lastAssistantAt: now - 60_000, lastAssistantText: "klart" }))
+      .toMatchObject({ eligible: false, reason: "pane-working" });
+    expect(assignmentDeliveryEligibility({ paneStatus: "idle", now,
+      lastUserAt: now - 30_000, lastAssistantAt: now - 60_000,
+      lastAssistantText: "klart" })).toMatchObject({ eligible: false });
+    expect(assignmentDeliveryEligibility({ paneStatus: "idle", now,
+      lastUserAt: now - 60_000, lastAssistantAt: now - 30_000,
+      lastAssistantText: "Fixat, mergat och deployat." }))
+      .toMatchObject({ eligible: true, reason: "explicit-done" });
+    expect(assignmentDeliveryEligibility({ paneStatus: "idle", now,
+      lastUserAt: now - 600_001, lastAssistantText: "jobbar vidare" }))
+      .toMatchObject({ eligible: true, reason: "sustained-idle" });
+    expect(assignmentDeliveryEligibility({ paneStatus: "idle", now,
+      lastUserAt: now - 599_999, lastAssistantText: "jobbar vidare" }))
+      .toMatchObject({ eligible: false, reason: "idle-threshold-not-met" });
+  });
+
+  it("keeps a busy assignment offer pending and routes an eligible offer to its owner", async () => {
+    const remote = api({ outboxAlert: assignmentAlert });
+    const deliver = vi.fn(async () => ({
+      jobId: "9".repeat(32), status: "acknowledged", acknowledgedAt: 2_100,
+    }));
+    const logger = { info: vi.fn(), error: vi.fn() };
+
+    await expect(pollWatchdogOutboxes({
+      config: config(), readToken: READ, adminToken: ADMIN,
+      fetchImpl: remote.fetchImpl, deliver,
+      availability: async ({ idleMs }) => ({ eligible: false,
+        reason: idleMs === 600_000 ? "pane-working" : "wrong-policy" }),
+      logger,
+    })).rejects.toThrow(/1 pending alert/u);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith(expect.stringMatching(
+      /assignment target is not available \(pane-working\)/u));
+    expect(remote.calls.filter((call) => call.url.pathname.endsWith("/ack"))).toHaveLength(0);
+
+    await expect(pollWatchdogOutboxes({
+      config: config(), readToken: READ, adminToken: ADMIN,
+      fetchImpl: remote.fetchImpl, deliver,
+      availability: async ({ idleMs }) => ({ eligible: idleMs === 600_000,
+        reason: "explicit-done" }),
+    })).resolves.toMatchObject({ delivered: 1, pending: 0 });
+    expect(deliver).toHaveBeenCalledWith(expect.objectContaining({
+      agent: "lsrc", pane: 4, prompt: assignmentAlert.payload.offerPrompt,
+    }));
+  });
+
   it("defaults to registry discovery and keeps a bounded explicit project override", () => {
     const rootDir = mkdtempSync(join(tmpdir(), "amux-watchdog-config-"));
     const path = join(rootDir, "watchdog.yaml");
