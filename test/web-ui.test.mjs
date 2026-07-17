@@ -45,12 +45,7 @@ function fakeSpawn(calls) {
     };
 
     if (command === "fake-claude" && args.includes("--fork-session")) {
-      const prompt = args[args.indexOf("-p") + 1];
-      queueMicrotask(() => {
-        emit({ type: "result", subtype: "success", result: `SIDE_OK: ${prompt.split("\n").at(-1)}` });
-        close();
-      });
-      return child;
+      throw new Error("per-turn-claude-process-forbidden");
     }
 
     let buffer = "";
@@ -71,7 +66,6 @@ function fakeSpawn(calls) {
               { type: "control_response", response: { subtype: "success", request_id: message.request_id } },
               { type: "result", subtype: "error_during_execution", is_error: true, session_id: CLAUDE_SESSION },
             );
-            close();
           } else if (message.message?.content?.startsWith("/compact")) {
             emit(
               { type: "system", subtype: "init", session_id: CLAUDE_SESSION },
@@ -83,7 +77,6 @@ function fakeSpawn(calls) {
               },
               { type: "result", subtype: "success", session_id: CLAUDE_SESSION, result: "" },
             );
-            close();
           } else if (message.message?.content === "DENY_PERMISSION") {
             emit(
               { type: "system", subtype: "init", session_id: CLAUDE_SESSION },
@@ -95,7 +88,6 @@ function fakeSpawn(calls) {
                 permission_denials: [{ tool_name: "Bash", reason: "approval unavailable" }],
               },
             );
-            close();
           } else if (message.message?.content === "SHOW_TOOL_ACTIVITY") {
             emit(
               { type: "system", subtype: "init", session_id: CLAUDE_SESSION },
@@ -132,7 +124,6 @@ function fakeSpawn(calls) {
               },
               { type: "result", subtype: "success", session_id: CLAUDE_SESSION, duration_ms: 12 },
             );
-            close();
           } else if (message.message?.content !== "WAIT_FOR_INTERRUPT") {
             emit(
               { type: "system", subtype: "init", session_id: CLAUDE_SESSION },
@@ -169,7 +160,6 @@ function fakeSpawn(calls) {
                 },
               },
             );
-            close();
           }
           continue;
         }
@@ -701,7 +691,7 @@ describe("AMUX Code project and agent registry", () => {
     ]));
   });
 
-  it("runs Claude and Codex in the project, resumes sessions and de-duplicates messages", async () => {
+  it("keeps one Claude process across turns while Codex resumes threads and messages de-duplicate", async () => {
     const { url, workspace, calls } = await setup();
     const project = await createProject(url, workspace);
     const claude = await createAgent(url, project, "claude");
@@ -758,8 +748,15 @@ describe("AMUX Code project and agent registry", () => {
     const secondBody = { prompt: "continue", attachments: [], idempotencyKey: "claude-turn-2" };
     expect((await postJson(`${url}/api/agents/${claude.id}/messages`, secondBody)).status).toBe(202);
     await waitForIdle(url, project.id, claude.id);
-    expect(calls[1].args).toContain("--resume");
-    expect(calls[1].args).toContain(CLAUDE_SESSION);
+    const claudeCalls = calls.filter((call) => call.command === "fake-claude");
+    expect(claudeCalls).toHaveLength(1);
+    expect(claudeCalls[0].args).not.toContain("--resume");
+    expect(claudeCalls[0].messages
+      .filter((message) => message.type === "user")
+      .map((message) => message.message.content)).toEqual([
+      expect.stringContaining("hello claude"),
+      "continue",
+    ]);
     const callCount = calls.length;
     const replay = await postJson(`${url}/api/agents/${claude.id}/messages`, secondBody);
     expect(replay.body.replayed).toBe(true);
@@ -842,7 +839,9 @@ describe("AMUX Code project and agent registry", () => {
       "queued turns did not drain");
     expect(idle.queuedMessages).toBe(0);
     expect(calls.filter((call) => call.command === "fake-claude")
-      .map((call) => call.messages[0]?.message?.content)).toEqual([
+      .flatMap((call) => call.messages)
+      .filter((message) => message.type === "user")
+      .map((message) => message.message.content)).toEqual([
       "WAIT_FOR_INTERRUPT", "FIFO_SECOND", "FIFO_THIRD",
     ]);
     const history = await request(`${url}/api/agents/${claude.id}/history`);
@@ -1414,9 +1413,10 @@ describe("AMUX Code project and agent registry", () => {
         `${key} did not compact`);
       expect(after.context.percent).toBe(15);
       if (key === "claude") {
-        const compactCall = calls.filter((call) => call.command === "fake-claude").at(-1);
-        expect(compactCall.messages[0].message.content)
-          .toBe("/compact preserve active ticket and gates");
+        const compactMessage = calls.filter((call) => call.command === "fake-claude")
+          .flatMap((call) => call.messages)
+          .find((message) => message.message?.content?.startsWith("/compact"));
+        expect(compactMessage.message.content).toBe("/compact preserve active ticket and gates");
       }
     }
   });
@@ -1473,7 +1473,10 @@ describe("AMUX Code project and agent registry", () => {
       (agent) => !agent.running && agent.context?.usedTokens === 30_000,
       "automatic compact did not finish");
     expect(after.context.percent).toBe(15);
-    expect(calls.filter((call) => call.command === "fake-claude")).toHaveLength(2);
+    const claudeCalls = calls.filter((call) => call.command === "fake-claude");
+    expect(claudeCalls).toHaveLength(1);
+    expect(claudeCalls[0].messages.filter((message) => message.type === "user")
+      .map((message) => message.message.content)).toEqual(["fill context", "/compact"]);
   });
 
   it("persists only the registry and hydrates readable native history after restart", async () => {
@@ -1674,7 +1677,7 @@ describe("AMUX Code project and agent registry", () => {
     expect(JSON.stringify(events)).not.toContain("historic-output-secret");
   });
 
-  it("answers Claude side questions in a non-persistent fork and serves the Suggest-like UI", async () => {
+  it("fails side questions closed instead of spawning a resumed Claude fork and serves the Suggest-like UI", async () => {
     const { url, workspace, calls } = await setup();
     const project = await createProject(url, workspace);
     const claude = await createAgent(url, project, "claude");
@@ -1690,20 +1693,22 @@ describe("AMUX Code project and agent registry", () => {
       question: "what is the context?",
       idempotencyKey: "side-1",
     });
-    expect(side.status).toBe(200);
-    expect(side.body.answer).toBe("SIDE_OK: what is the context?");
-    const sideCall = calls.at(-1);
-    expect(sideCall.args).toContain("--fork-session");
-    expect(sideCall.args).toContain("--no-session-persistence");
-    expect(sideCall.args).toContain(CLAUDE_SESSION);
-    expect(sideCall.args.some((argument) => argument.includes("what is the context?"))).toBe(true);
+    expect(side).toMatchObject({
+      status: 409,
+      body: { error: "side-question-disabled-persistent-runtime" },
+    });
+    expect(calls.filter((call) => call.command === "fake-claude")).toHaveLength(1);
+    expect(calls.some((call) => call.args.includes("--fork-session"))).toBe(false);
 
     const count = calls.length;
     const replay = await postJson(`${url}/api/agents/${claude.id}/side-questions`, {
       question: "what is the context?",
       idempotencyKey: "side-1",
     });
-    expect(replay.body.replayed).toBe(true);
+    expect(replay).toMatchObject({
+      status: 409,
+      body: { error: "side-question-disabled-persistent-runtime" },
+    });
     expect(calls).toHaveLength(count);
     expect((await postJson(`${url}/api/agents/${codex.id}/side-questions`, {
       question: "side",

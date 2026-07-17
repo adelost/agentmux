@@ -8,7 +8,10 @@ export const attachmentPrompt = (prompt, attachments) => attachments.reduce((tex
   return `${text}\n[${label}: ${attachment.path}]`;
 }, prompt);
 
-/** WHAT: Builds one native Claude CLI launch. WHY: Keeps resume and permission arguments consistent for every turn. */
+/**
+ * WHAT: Builds one long-lived native Claude CLI launch.
+ * WHY: Resume is a process-recovery input, never a per-turn transport.
+ */
 export function buildNativeClaudeLaunch({ command, agent, rawPrompt, attachments, settings }) {
   const args = [
     "-p",

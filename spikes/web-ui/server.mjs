@@ -4,9 +4,10 @@
  *
  * A project owns a trusted working directory. Agents created inside the
  * project inherit that directory and only persist a small registry record:
- * engine, model and the engine's native session id. Each message launches one
- * headless CLI turn and resumes that native session. There is no tmux input,
- * terminal scraping or second conversation database on this path.
+ * engine, model and the engine's native session id. Claude agents keep one
+ * stream-json process alive across turns; resume is used only to recover that
+ * process after a runtime restart. There is no tmux input, terminal scraping
+ * or second conversation database on this path.
  */
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
@@ -23,7 +24,6 @@ import {
 } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { createInterface } from "node:readline";
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { claudeProjectDir } from "../../core/claude-paths.mjs";
@@ -48,9 +48,9 @@ import {
   claudeInterruptRequest,
   claudeUserMessage,
   openCodexRpc,
-  writeClaudeMessage,
 } from "./runtime-control.mjs";
 import { attachmentPrompt, buildNativeClaudeLaunch, buildNativeCodexInput } from "./runtime-prompt.mjs";
+import { openPersistentClaudeRuntime } from "./persistent-claude-runtime.mjs";
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const JSON_MAX_BYTES = 256 * 1024;
@@ -495,8 +495,6 @@ export function createWebUi(options = {}) {
     interrupts: new Map(),
     uploads: new Map(),
   };
-  const sideRuns = new Map();
-  const sideChildren = new Set();
   const queuedMessages = new Map();
   const codexSessionFiles = new Map();
   let shuttingDown = false;
@@ -676,8 +674,10 @@ export function createWebUi(options = {}) {
     pinnedAt: Number.isFinite(entry.pinnedAt) ? entry.pinnedAt : null,
     running: false,
     operation: null,
+    claudeRuntime: null,
     activeChild: null,
     activeControl: null,
+    activeStderr: "",
     activeTurnId: null,
     activeOperationKey: null,
     activeModel: null,
@@ -845,10 +845,11 @@ export function createWebUi(options = {}) {
     : null;
 
   const claudeUsageParts = (usage = {}) => {
-    const inputTokens = Number(usage.input_tokens ?? usage.inputTokens ?? 0)
-      + Number(usage.cache_creation_input_tokens ?? usage.cacheCreationInputTokens ?? 0)
-      + Number(usage.cache_read_input_tokens ?? usage.cacheReadInputTokens ?? 0);
-    const outputTokens = Number(usage.output_tokens ?? usage.outputTokens ?? 0);
+    const safeUsage = usage ?? {};
+    const inputTokens = Number(safeUsage.input_tokens ?? safeUsage.inputTokens ?? 0)
+      + Number(safeUsage.cache_creation_input_tokens ?? safeUsage.cacheCreationInputTokens ?? 0)
+      + Number(safeUsage.cache_read_input_tokens ?? safeUsage.cacheReadInputTokens ?? 0);
+    const outputTokens = Number(safeUsage.output_tokens ?? safeUsage.outputTokens ?? 0);
     return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
   };
 
@@ -1406,6 +1407,7 @@ export function createWebUi(options = {}) {
     agent.activeModel = settings?.model ?? agent.model;
     agent.activeEffort = settings?.effort ?? agent.effort;
     agent.activeModelObserved = false;
+    agent.activeStderr = "";
     agent.turnHasAssistantText = false;
     nativeQuota.resetTurn(agent);
     agent.permissionDenied = null;
@@ -1535,7 +1537,9 @@ export function createWebUi(options = {}) {
     const operation = agent.operation;
     const quota = nativeQuota.observe(agent, event);
     if (quota?.handled) {
-      if (quota.endInput) try { agent.activeChild?.stdin?.end?.(); } catch {}
+      if (quota.endInput) {
+        finishOperation(agent, operation, 1, null, agent.activeStderr);
+      }
       return;
     }
     const modelObservation = observationFromClaudeEvent(event, now());
@@ -1626,52 +1630,80 @@ export function createWebUi(options = {}) {
     } else if (!agent.compactMetadata && typeof event.result === "string" && event.result.trim()) {
       webEvent(agent, "compact-result", { message: event.result.trim() });
     }
-    try { agent.activeChild?.stdin?.end?.(); } catch {}
+    const code = agent.interruptRequested
+      ? 0
+      : event.subtype === "success" && event.is_error !== true ? 0 : 1;
+    const detail = code === 0 || agent.interruptRequested
+      ? null
+      : new Error(typeof event.result === "string" && event.result.trim()
+        ? event.result.trim().slice(0, 4_000)
+        : `claude-result-${event.subtype || "error"}`);
+    finishOperation(agent, operation, code, detail, agent.activeStderr);
   };
 
-  const runClaudeOperation = (agent, rawPrompt, attachments, operation, operationKey = null, quotaRetry = false) => {
+  const runClaudeOperation = async (agent, rawPrompt, attachments, operation, operationKey = null, quotaRetry = false) => {
     const cwd = workingDirectoryFor(agent);
     const settings = { model: agent.model, effort: agent.effort };
     const launch = buildNativeClaudeLaunch({
       command: commands.claude, agent, rawPrompt, attachments, settings,
     });
     beginOperation(agent, operation, rawPrompt, attachments, operationKey, settings, quotaRetry);
-    let child;
-    let stderr = "";
-    let finished = false;
-    const finish = (code, error = null) => {
-      if (finished) return;
-      finished = true;
-      finishOperation(agent, operation, code, error, stderr);
-    };
+    const signature = hashPayload({
+      command: launch.command,
+      cwd,
+      model: settings.model,
+      effort: settings.effort,
+      permissionMode: agent.permissionMode,
+      name: agent.name,
+    });
+    if (agent.claudeRuntime && agent.claudeRuntime.signature !== signature) {
+      const previous = agent.claudeRuntime;
+      agent.claudeRuntime = null;
+      await previous.stop();
+    }
+    let runtime = agent.claudeRuntime;
     try {
-      child = spawnProcess(launch.command, launch.args, {
-        cwd,
-        env: cleanChildEnv(agent),
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      agent.activeChild = child;
-      agent.activeControl = { type: "claude", child };
+      if (!runtime || runtime.stopped) {
+        runtime = openPersistentClaudeRuntime({
+          spawnProcess,
+          command: launch.command,
+          args: launch.args,
+          cwd,
+          env: cleanChildEnv(agent),
+          signature,
+          onEvent: (event) => {
+            if (agent.claudeRuntime === runtime) mapClaudeEvent(agent, event);
+          },
+          onProtocolError: ({ line }) => {
+            if (agent.claudeRuntime === runtime) webEvent(agent, "protocol-error", { line });
+          },
+          onStderr: (chunk) => {
+            if (agent.claudeRuntime === runtime && agent.running) {
+              agent.activeStderr = `${agent.activeStderr}${chunk}`.slice(-32_000);
+            }
+          },
+          onExit: ({ code, error, expected }) => {
+            if (agent.claudeRuntime !== runtime) return;
+            agent.claudeRuntime = null;
+            if (agent.running && agent.activeControl?.runtime === runtime) {
+              finishOperation(agent, agent.operation, code, error ?? (expected
+                ? null
+                : new Error(`claude-stream-exit-${code}`)), agent.activeStderr);
+            } else if (!expected && !shuttingDown) {
+              webEvent(agent, "runtime-exit", { engine: "claude", code, error: error?.message });
+            }
+          },
+        });
+        agent.claudeRuntime = runtime;
+      }
+      agent.activeChild = runtime.child;
+      agent.activeControl = { type: "claude", runtime };
+      runtime.send(claudeUserMessage(launch.prompt));
     } catch (error) {
-      finish(-1, error);
+      if (agent.claudeRuntime === runtime) agent.claudeRuntime = null;
+      try { runtime?.stop?.(); } catch {}
+      finishOperation(agent, operation, -1, error, agent.activeStderr);
       return;
-    }
-    child.stderr?.on("data", (chunk) => { stderr = `${stderr}${chunk}`.slice(-32_000); });
-    if (child.stdout) {
-      createInterface({ input: child.stdout }).on("line", (line) => {
-        if (!line.trim()) return;
-        try { mapClaudeEvent(agent, JSON.parse(line)); } catch {
-          webEvent(agent, "protocol-error", { line: line.slice(0, 4_000) });
-        }
-      });
-    }
-    child.once?.("error", (error) => finish(-1, error));
-    child.once?.("close", (code) => finish(Number.isInteger(code) ? code : -1));
-    try {
-      writeClaudeMessage(child, claudeUserMessage(launch.prompt));
-    } catch (error) {
-      finish(-1, error);
-      try { child.kill?.("SIGTERM"); } catch {}
     }
   };
 
@@ -1807,7 +1839,7 @@ export function createWebUi(options = {}) {
 
   const runTurn = (agent, rawPrompt, attachments, operationKey = null, quotaRetry = false) => {
     if (agent.engine === "claude") {
-      runClaudeOperation(agent, rawPrompt, attachments, "turn", operationKey, quotaRetry);
+      void runClaudeOperation(agent, rawPrompt, attachments, "turn", operationKey, quotaRetry);
     } else {
       void runCodexOperation(agent, rawPrompt, attachments, "turn", operationKey);
     }
@@ -1846,7 +1878,7 @@ export function createWebUi(options = {}) {
     const operation = automatic ? "auto-compact" : "compact";
     const claudeCommand = focus ? `/compact ${focus}` : "/compact";
     if (agent.engine === "claude") {
-      runClaudeOperation(agent, claudeCommand, [], operation, operationKey);
+      void runClaudeOperation(agent, claudeCommand, [], operation, operationKey);
     } else {
       void runCodexOperation(agent, "", [], operation, operationKey);
     }
@@ -1875,7 +1907,7 @@ export function createWebUi(options = {}) {
     webEvent(agent, "interrupt-requested");
     try {
       if (agent.activeControl.type === "claude") {
-        writeClaudeMessage(agent.activeControl.child, claudeInterruptRequest());
+        agent.activeControl.runtime.send(claudeInterruptRequest());
         return;
       }
       if (!agent.activeTurnId) throw new Error("interrupt-not-ready");
@@ -1895,77 +1927,6 @@ export function createWebUi(options = {}) {
     if (agent.sessionId) refreshContextFromSession(agent);
     scheduleAutoCompact(agent);
   }
-
-  const runSideQuestion = (agent, question) => new Promise((resolveAnswer, rejectAnswer) => {
-    const sidePrompt = [
-      "[SIDE QUESTION — do not change or continue the main task]",
-      "Answer briefly from the existing conversation context. This is a separate question.",
-      "",
-      question,
-    ].join("\n");
-    const args = [
-      "-p", sidePrompt,
-      "--output-format", "stream-json",
-      "--verbose",
-      "--model", agent.model,
-      "--effort", agent.effort,
-      "--permission-mode", "plan",
-      "--resume", agent.sessionId,
-      "--fork-session",
-      "--no-session-persistence",
-    ];
-    let child;
-    let stderr = "";
-    let answer = "";
-    let finished = false;
-    const timeout = setTimeout(() => {
-      try { child?.kill?.("SIGTERM"); } catch {}
-      finish(new Error("side-question-timeout"));
-    }, 120_000);
-    timeout.unref?.();
-
-    const finish = (error = null) => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(timeout);
-      if (child) sideChildren.delete(child);
-      if (error) { rejectAnswer(error); return; }
-      if (!answer.trim()) {
-        rejectAnswer(new Error(stderr.trim() || "side-question-empty-result"));
-        return;
-      }
-      resolveAnswer(answer.trim());
-    };
-
-    try {
-      child = spawnProcess(commands.claude, args, {
-        cwd: workingDirectoryFor(agent),
-        env: cleanChildEnv(agent),
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      sideChildren.add(child);
-    } catch (error) {
-      finish(error);
-      return;
-    }
-
-    child.stderr?.on("data", (chunk) => { stderr = `${stderr}${chunk}`.slice(-32_000); });
-    if (child.stdout) {
-      createInterface({ input: child.stdout }).on("line", (line) => {
-        if (!line.trim()) return;
-        try {
-          const event = JSON.parse(line);
-          if (event.type === "result" && typeof event.result === "string") answer = event.result;
-          if (event.type === "assistant") {
-            const text = textOf(event.message?.content);
-            if (text) answer = text;
-          }
-        } catch {}
-      });
-    }
-    child.once?.("error", (error) => finish(error));
-    child.once?.("close", (code) => finish(code === 0 ? null : new Error(stderr.trim() || `side-question-exit-${code}`)));
-  });
 
   const json = (response, status, body) => {
     response.writeHead(status, publicHeaders({ "content-type": "application/json; charset=utf-8" }));
@@ -2615,37 +2576,7 @@ export function createWebUi(options = {}) {
         if (existing?.status === "done") {
           json(response, 200, { answer: existing.result, replayed: true }); return;
         }
-
-        let run = sideRuns.get(key);
-        if (!run) {
-          rememberReceipt(receipts.sideQuestions, key, {
-            id: agent.id,
-            hash: fingerprint,
-            status: "running",
-          }, 200);
-          saveRegistry();
-          run = runSideQuestion(agent, question)
-            .then((answer) => {
-              rememberReceipt(receipts.sideQuestions, key, {
-                id: agent.id,
-                hash: fingerprint,
-                status: "done",
-                result: answer.slice(0, 20_000),
-              }, 200);
-              saveRegistry();
-              return answer;
-            })
-            .finally(() => sideRuns.delete(key));
-          sideRuns.set(key, run);
-        }
-        try {
-          const answer = await run;
-          json(response, 200, { answer, replayed: Boolean(existing) });
-        } catch (error) {
-          receipts.sideQuestions.delete(key);
-          saveRegistry();
-          json(response, 502, { error: "side-question-failed", detail: error.message });
-        }
+        json(response, 409, { error: "side-question-disabled-persistent-runtime" });
         return;
       }
 
@@ -2749,21 +2680,20 @@ export function createWebUi(options = {}) {
     for (const agent of agents.values()) {
       clearAutoCompact(agent);
       const child = agent.activeChild;
-      if (child && agent.running) {
+      const claudeRuntime = agent.claudeRuntime;
+      if (claudeRuntime?.child) {
         activeCloses.push(new Promise((resolveChild) => {
           const timer = setTimeout(resolveChild, 1_000);
           timer.unref?.();
-          child.once?.("close", () => { clearTimeout(timer); resolveChild(); });
+          claudeRuntime.child.once?.("close", () => { clearTimeout(timer); resolveChild(); });
         }));
       }
-      try { child?.kill?.("SIGTERM"); } catch {}
+      agent.claudeRuntime = null;
+      try { claudeRuntime?.stop?.(); } catch {}
+      if (!claudeRuntime) try { child?.kill?.("SIGTERM"); } catch {}
       for (const client of agent.clients) client.end();
       agent.clients.clear();
     }
-    for (const child of sideChildren) {
-      try { child.kill?.("SIGTERM"); } catch {}
-    }
-    sideChildren.clear();
     await Promise.allSettled(activeCloses);
     if (!server.listening) return;
     await new Promise((resolveClose) => server.close(() => resolveClose()));

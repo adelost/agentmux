@@ -187,6 +187,7 @@ const errorText = (error) => ({
   "model-downgrade-parked": "This agent was stopped after an automatic model downgrade. Choose the intended model to resume.",
   "side-question-needs-session": "Send a regular message first so the agent has a session.",
   "side-question-claude-only": "Side questions are supported only for Claude agents in this version.",
+  "side-question-disabled-persistent-runtime": "Side questions are temporarily disabled while they are moved onto the persistent runtime.",
   "side-question-failed": `The side question failed${error.detail ? `: ${error.detail}` : "."}`,
   "body-too-large": "The file is larger than 25 MB.",
 }[error.message] ?? error.message);
@@ -428,10 +429,8 @@ const updateAgentHeader = () => {
   elements.pinConversationButton.setAttribute("aria-pressed", String(Boolean(agent.pinnedAt)));
   elements.pinConversationButton.classList.toggle("pinned", Boolean(agent.pinnedAt));
   elements.sideQuestionButton.hidden = agent.engine !== "claude";
-  elements.sideQuestionButton.disabled = agent.engine !== "claude" || !agent.sessionId;
-  elements.sideQuestionButton.title = agent.sessionId
-    ? "Ask a separate fork without interrupting the main task"
-    : "Send a regular message first";
+  elements.sideQuestionButton.disabled = true;
+  elements.sideQuestionButton.title = "Temporarily disabled while side questions move to the persistent runtime";
   elements.prompt.disabled = Boolean(agent.modelGuard?.blocked);
   elements.prompt.placeholder = agent.modelGuard?.blocked
     ? "Automatic model downgrade detected, choose a model above to resume"
