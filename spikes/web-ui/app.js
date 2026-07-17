@@ -1,3 +1,13 @@
+import {
+  formatQuotaObservation,
+  formatQuotaReset,
+  quotaDeliveryView,
+  quotaHeadline,
+  quotaObservationView,
+  quotaRows,
+  quotaSeverityClass,
+} from "./quota-observation.js";
+
 const $ = (selector) => document.querySelector(selector);
 
 const THEME_STORAGE_KEY = "amux-code:color-theme";
@@ -1410,8 +1420,6 @@ document.addEventListener("keydown", (event) => {
 
 const QUOTA_POLL_MS = 5 * 60 * 1_000;
 const QUOTA_STALE_MS = 60 * 1_000;
-const QUOTA_WARN_PERCENT = 70;
-const QUOTA_CRITICAL_PERCENT = 90;
 const QUOTA_ENGINES = ["claude", "codex"];
 const QUOTA_ENGINE_LABELS = { claude: "Claude", codex: "Codex" };
 const QUOTA_MANAGE_LINKS = {
@@ -1433,82 +1441,14 @@ let quotaSnapshot = null;
 let quotaFetchedAt = 0;
 let quotaPopoverEngine = null;
 
-const quotaSeverityClass = (usedPercent) => {
-  if (usedPercent >= QUOTA_CRITICAL_PERCENT) return "critical";
-  if (usedPercent >= QUOTA_WARN_PERCENT) return "warning";
-  return "ok";
-};
-
 const quotaErrorText = (data) =>
   QUOTA_ERROR_TEXTS[data?.error] || `Quota data unavailable (${data?.error || "unknown error"})`;
 
-const claudeLimitLabel = (limit) => {
-  if (limit.kind === "session") return "Session (5 h)";
-  if (limit.kind === "weekly_all") return "Week · all models";
-  if (limit.kind === "weekly_scoped") return `Week · ${limit.scopeName || "model"}`;
-  return limit.kind;
-};
-
-const codexWindowLabel = (window, limit) => {
-  const scope = limit.limitId && limit.limitId !== "codex" ? ` · ${limit.limitId}` : "";
-  if (window.windowMinutes === 10_080) return `Week${scope}`;
-  if (window.windowMinutes && window.windowMinutes % 60 === 0) {
-    return `${window.windowMinutes / 60} h${scope}`;
-  }
-  return `${window.windowMinutes ?? "?"} min${scope}`;
-};
-
-// Rows carry their own scope so headline selection never depends on the
-// rendered label text.
-const quotaRows = (engine, data) => {
-  if (engine === "claude") {
-    return data.limits.map((limit) => ({
-      scope: limit.kind === "weekly_scoped" && limit.scopeName === "Fable"
-        ? "weekly-primary"
-        : limit.kind === "weekly_all" ? "weekly" : "other",
-      label: claudeLimitLabel(limit),
-      usedPercent: limit.usedPercent,
-      resetsAt: limit.resetsAt,
-    }));
-  }
-  return data.limits.flatMap((limit) => limit.windows.map((window) => ({
-    scope: window.windowMinutes === 10_080 ? "weekly-primary" : "other",
-    label: codexWindowLabel(window, limit),
-    usedPercent: window.usedPercent,
-    resetsAt: window.resetsAt,
-    capturedAt: limit.capturedAt,
-  })));
-};
-
-// Fable is the quota the fleet is steered by, so its weekly row leads the
-// chip; the all-models week is the fallback when no scoped row exists.
-const quotaHeadline = (rows) =>
-  rows.find((row) => row.scope === "weekly-primary")
-  || rows.find((row) => row.scope === "weekly")
-  || rows[0];
-
-const formatQuotaReset = (iso) => {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
-  const formatted = date.toLocaleString("en-US", {
-    weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
-  });
-  return `resets ${formatted}`;
-};
-
-const formatQuotaCaptured = (iso) => {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
-  return `measured ${date.toLocaleString("en-US", { hour: "2-digit", minute: "2-digit" })}`;
-};
-
-const buildQuotaTrack = (usedPercent) => {
+const buildQuotaTrack = (remainingPercent) => {
   const track = document.createElement("span");
   track.className = "quota-track";
   const fill = document.createElement("span");
-  fill.style.width = `${usedPercent}%`;
+  fill.style.width = `${remainingPercent}%`;
   track.append(fill);
   return track;
 };
@@ -1517,6 +1457,7 @@ const renderQuotaStrip = () => {
   elements.quotaStrip.replaceChildren();
   for (const engine of QUOTA_ENGINES) {
     const data = quotaSnapshot?.[engine];
+    const observation = quotaObservationView(data?.observation);
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "quota-chip";
@@ -1540,17 +1481,26 @@ const renderQuotaStrip = () => {
       value.textContent = "N/A";
       chip.append(value);
       chip.title = quotaErrorText(data);
+    } else if (observation.state !== "fresh") {
+      chip.classList.add("unavailable");
+      const value = document.createElement("span");
+      value.className = "quota-chip-value";
+      value.textContent = observation.state === "stale" ? "Stale" : "N/A";
+      chip.append(value);
+      chip.title = `${QUOTA_ENGINE_LABELS[engine]} · ${formatQuotaObservation(observation)}`;
     } else {
-      const rows = quotaRows(engine, data);
+      const rows = quotaRows(engine, data, observation);
       const headline = quotaHeadline(rows);
       const worstUsed = Math.max(...rows.map((row) => row.usedPercent));
       chip.classList.add(quotaSeverityClass(worstUsed));
-      chip.append(buildQuotaTrack(headline.usedPercent));
+      chip.dataset.quotaSource = observation.source;
+      chip.dataset.quotaObservedAt = observation.observedAt;
+      chip.append(buildQuotaTrack(headline.remainingPercent));
       const value = document.createElement("span");
       value.className = "quota-chip-value";
-      value.textContent = `${Math.round(100 - headline.usedPercent)}% left`;
+      value.textContent = `${Math.round(headline.remainingPercent)}% left`;
       chip.append(value);
-      chip.title = `${QUOTA_ENGINE_LABELS[engine]} · ${headline.label}: ${headline.usedPercent}% used`;
+      chip.title = `${QUOTA_ENGINE_LABELS[engine]} · ${headline.label}: ${headline.remainingPercent}% left · ${formatQuotaObservation(observation)}`;
     }
     chip.setAttribute("aria-expanded", String(quotaPopoverEngine === engine));
     chip.addEventListener("click", (event) => {
@@ -1558,6 +1508,17 @@ const renderQuotaStrip = () => {
       toggleQuotaPopover(engine);
     });
     elements.quotaStrip.append(chip);
+  }
+  if (quotaSnapshot) {
+    const delivery = quotaDeliveryView(quotaSnapshot.delivery);
+    if (delivery.state !== "synced") {
+      const status = document.createElement("span");
+      status.className = "quota-delivery-failed";
+      status.textContent = delivery.state === "recovered"
+        ? "Suggest sync recovered after gap" : "Suggest sync failed";
+      status.title = delivery.reason;
+      elements.quotaStrip.append(status);
+    }
   }
 };
 
@@ -1571,6 +1532,7 @@ const renderQuotaPopover = () => {
   const engine = quotaPopoverEngine;
   if (!engine) return;
   const data = quotaSnapshot?.[engine];
+  const observation = quotaObservationView(data?.observation);
   const popover = elements.quotaPopover;
   popover.replaceChildren();
 
@@ -1578,14 +1540,16 @@ const renderQuotaPopover = () => {
   heading.textContent = `${QUOTA_ENGINE_LABELS[engine]} · weekly quota`;
   popover.append(heading);
 
-  if (!data?.ok) {
+  if (!data?.ok || observation.state !== "fresh") {
     const message = document.createElement("p");
     message.className = "quota-popover-error";
-    message.textContent = quotaErrorText(data);
+    message.textContent = !data?.ok ? quotaErrorText(data)
+      : observation.state === "stale"
+        ? `Quota observation is stale · ${formatQuotaObservation(observation)}`
+        : formatQuotaObservation(observation);
     popover.append(message);
   } else {
-    let capturedAt = null;
-    for (const row of quotaRows(engine, data)) {
+    for (const row of quotaRows(engine, data, observation)) {
       const rowElement = document.createElement("div");
       rowElement.className = `quota-row ${quotaSeverityClass(row.usedPercent)}`;
       const head = document.createElement("div");
@@ -1593,25 +1557,22 @@ const renderQuotaPopover = () => {
       const label = document.createElement("span");
       label.textContent = row.label;
       const value = document.createElement("span");
-      value.textContent = `${Math.round(100 - row.usedPercent)}% left`;
+      value.textContent = `${Math.round(row.remainingPercent)}% left`;
       head.append(label, value);
-      rowElement.append(head, buildQuotaTrack(row.usedPercent));
+      rowElement.append(head, buildQuotaTrack(row.remainingPercent));
       const reset = formatQuotaReset(row.resetsAt);
       if (reset) {
         const detail = document.createElement("small");
         detail.textContent = reset;
         rowElement.append(detail);
       }
-      if (row.capturedAt) capturedAt = row.capturedAt;
       popover.append(rowElement);
     }
 
     const footer = document.createElement("div");
     footer.className = "quota-popover-footer";
     const freshness = document.createElement("span");
-    freshness.textContent = engine === "codex"
-      ? formatQuotaCaptured(capturedAt) || "from the latest Codex session"
-      : formatQuotaCaptured(data.fetchedAt) || "";
+    freshness.textContent = formatQuotaObservation(observation);
     const manage = document.createElement("a");
     manage.href = QUOTA_MANAGE_LINKS[engine].url;
     manage.target = "_blank";
@@ -1619,6 +1580,16 @@ const renderQuotaPopover = () => {
     manage.textContent = QUOTA_MANAGE_LINKS[engine].label;
     footer.append(freshness, manage);
     popover.append(footer);
+  }
+
+  const delivery = quotaDeliveryView(quotaSnapshot?.delivery);
+  if (delivery.state !== "synced") {
+    const failure = document.createElement("p");
+    failure.className = "quota-popover-error";
+    failure.textContent = delivery.state === "recovered"
+      ? `Suggest delivery recovered after gap: ${delivery.reason}`
+      : `Suggest delivery failed: ${delivery.reason}`;
+    popover.append(failure);
   }
 
   const refresh = document.createElement("button");

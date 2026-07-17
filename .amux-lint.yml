@@ -14,7 +14,7 @@ fileSize:
     core/suggestions-comment-bridge.mjs: 1144
     core/worktree-deps.mjs: 675
     handlers.mjs: 1249
-    spikes/web-ui/app.js: 1689
+    spikes/web-ui/app.js: 1660
     spikes/web-ui/server.mjs: 2725
     spikes/web-ui/tools/native-canary-gate.mjs: 534
     spikes/web-ui/tools/visual-gate.mjs: 597

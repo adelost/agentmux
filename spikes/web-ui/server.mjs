@@ -30,6 +30,7 @@ import { claudeProjectDir } from "../../core/claude-paths.mjs";
 import { appendEvent as appendFleetEvent } from "../../core/events.mjs";
 import { readTailWindow } from "../../core/jsonl-reader.mjs";
 import { readQuotaSnapshot } from "../../core/quota-usage.mjs";
+import { pushQuotaSnapshot } from "../../bin/suggestions-quota-push.mjs";
 import { createNativeClaudeQuotaController, subscriptionSafeClaudeEnv } from "../../core/native-claude-quota.mjs";
 import { ensureCodexExecutionSafety } from "../../core/codex-profiles.mjs";
 import { persistedSessionIdentity } from "../../core/native-session-identity.mjs";
@@ -68,8 +69,6 @@ const PROMPT_JOURNAL_DEFAULT_LIMIT = 100;
 const PROMPT_JOURNAL_MAX_LIMIT = 500;
 const MESSAGE_QUEUE_MAX_PER_AGENT = 100;
 const QUOTA_CACHE_MS = 60 * 1_000;
-
-let quotaCache = { at: 0, payload: null };
 
 const DEFAULT_MODELS = Object.freeze({
   claude: ["claude-opus-4-8", "fable", "sonnet", "haiku"],
@@ -435,6 +434,7 @@ const cleanChildEnv = (agent = null) => {
  * @param {number} [options.autoCompactIdleMs]
  * @param {number} [options.nativeQuotaPollMs]
  * @param {Function} [options.readQuotaSnapshot]
+ * @param {Function} [options.pushQuotaSnapshot]
  * @param {Record<string, string | Buffer>} [options.staticAssets]
  * @param {Function} [options.appendEventImpl]
  * WHAT: Routes the native agent registry, runtime, history, and control API.
@@ -466,11 +466,12 @@ export function createWebUi(options = {}) {
   const autoCompactIdleMs = options.autoCompactIdleMs ?? AUTO_COMPACT_IDLE_MS;
   const nativeQuotaPollMs = options.nativeQuotaPollMs ?? 30_000;
   const readQuotaSnapshotImpl = options.readQuotaSnapshot ?? readQuotaSnapshot;
+  const pushQuotaSnapshotImpl = options.pushQuotaSnapshot ?? pushQuotaSnapshot; let quotaCache = { at: 0, payload: null };
   const models = {
     claude: [...(options.models?.claude ?? DEFAULT_MODELS.claude)],
     codex: [...(options.models?.codex ?? DEFAULT_MODELS.codex)],
   };
-  const staticAssets = new Map(["index.html", "app.js", "style.css"].map((file) => {
+  const staticAssets = new Map(["index.html", "app.js", "quota-observation.js", "style.css"].map((file) => {
     const supplied = options.staticAssets?.[file];
     return [file, Buffer.from(supplied === undefined ? readFileSync(join(ROOT, file)) : supplied)];
   }));
@@ -1971,8 +1972,8 @@ export function createWebUi(options = {}) {
       serveStatic(response, "index.html", "text/html; charset=utf-8");
       return;
     }
-    if (request.method === "GET" && pathname === "/app.js") {
-      serveStatic(response, "app.js", "application/javascript; charset=utf-8");
+    if (request.method === "GET" && ["/app.js", "/quota-observation.js"].includes(pathname)) {
+      serveStatic(response, pathname.slice(1), "application/javascript; charset=utf-8");
       return;
     }
     if (request.method === "GET" && pathname === "/style.css") {
@@ -2012,7 +2013,6 @@ export function createWebUi(options = {}) {
       });
       return;
     }
-
     if (request.method === "GET" && pathname === "/api/quota") {
       const forceRefresh = url.searchParams.get("refresh") === "1";
       if (!forceRefresh && quotaCache.payload && now() - quotaCache.at < QUOTA_CACHE_MS) {
@@ -2020,11 +2020,11 @@ export function createWebUi(options = {}) {
         return;
       }
       const snapshot = await readQuotaSnapshotImpl();
-      quotaCache = { at: now(), payload: snapshot };
-      json(response, 200, snapshot);
+      const delivery = await Promise.resolve().then(() => pushQuotaSnapshotImpl(snapshot)).catch(() => ({ ok: false, error: "delivery_internal_error", health: null }));
+      quotaCache = { at: now(), payload: { ...snapshot, delivery } };
+      json(response, 200, quotaCache.payload);
       return;
     }
-
     if (request.method === "GET" && pathname === "/api/projects") {
       json(response, 200, {
         projects: [...projects.values()]
