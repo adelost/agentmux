@@ -136,10 +136,54 @@ function runtime(root, calls, options = {}) {
     codexCommand: "fake-codex",
     spawnProcess: quotaThenSuccessSpawn(calls, options),
     readQuotaSnapshot: options.readQuotaSnapshot,
+    pushQuotaSnapshot: options.pushQuotaSnapshot,
     nativeQuotaPollMs: 5,
     appendEventImpl: () => {},
   });
 }
+
+describe("Code quota refresh boundary", () => {
+  it("force refresh collects and propagates the exact provider observation", async () => {
+    const root = mkdtempSync(join(tmpdir(), "amux-code-quota-refresh-"));
+    const calls = [];
+    const pushed = [];
+    let collections = 0;
+    const snapshot = {
+      generatedAt: "2026-07-17T12:00:05.000Z",
+      claude: { ok: false, engine: "claude", error: "unused" },
+      codex: { ok: true, engine: "codex", observation: {
+        schemaVersion: 1,
+        source: "codex.rollout.rate_limits",
+        observedAt: "2026-07-17T12:00:00.000Z",
+        refreshIntervalMs: 15 * 60_000,
+        usedPercent: 65,
+        remainingPercent: 35,
+        resetsAt: "2026-07-23T04:16:00.000Z",
+      }, limits: [{ capturedAt: "2026-07-17T12:00:00.000Z", windows: [{
+        id: "primary", usedPercent: 65, windowMinutes: 10_080,
+        resetsAt: "2026-07-23T04:16:00.000Z",
+      }] }] },
+    };
+    const app = runtime(root, calls, {
+      readQuotaSnapshot: async () => { collections += 1; return structuredClone(snapshot); },
+      pushQuotaSnapshot: async (value) => {
+        pushed.push(structuredClone(value));
+        return { ok: true, health: { state: "nominal" } };
+      },
+    });
+    cleanups.push(async () => { await app.close(); rmSync(root, { recursive: true, force: true }); });
+    const url = (await app.listen({ port: 0 })).url;
+
+    const first = await get(url, "/api/quota?refresh=1");
+    const second = await get(url, "/api/quota?refresh=1");
+
+    expect(collections).toBe(2);
+    expect(pushed).toEqual([snapshot, snapshot]);
+    expect(first.body.codex.observation).toEqual(snapshot.codex.observation);
+    expect(second.body.codex.observation).toEqual(snapshot.codex.observation);
+    expect(first.body.delivery).toEqual({ ok: true, health: { state: "nominal" } });
+  });
+});
 
 describe("native Claude quota recovery", () => {
   it("persists a pre-execution 429 and completes the same operation after restart", async () => {

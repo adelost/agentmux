@@ -1,7 +1,7 @@
 // Quota contracts: what the gauges show must survive real payload shapes,
 // partial jsonl tails and missing credentials — loudly, never silently.
 
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { feature, unit, expect } from "bdd-vitest";
@@ -181,6 +181,57 @@ feature("Codex rate-limit parsing", () => {
       expect(result.limits).toHaveLength(1);
       expect(result.limits[0].capturedAt).toBe("2026-07-15T11:30:00.000Z");
       expect(result.limits[0].windows[0].usedPercent).toBe(52);
+    }],
+  });
+
+  unit("an older-named live rollout wins the bounded scan by actual activity", {
+    given: ["thirteen sessions where the old start-name has the freshest provider event", () => {
+      const root = mkdtempSync(join(tmpdir(), "quota-codex-activity-"));
+      const day = join(root, "2026", "07", "17");
+      mkdirSync(day, { recursive: true });
+      const oldLive = join(day, "rollout-2026-07-01T08-00-00-live.jsonl");
+      writeFileSync(oldLive, `${codexEventLine({
+        timestamp: "2026-07-17T12:00:00.000Z",
+        usedPercent: 65,
+        resetsAt: Date.parse("2026-07-23T04:16:00.000Z") / 1000,
+      })}\n`);
+      utimesSync(oldLive, new Date("2026-07-17T12:00:00.000Z"),
+        new Date("2026-07-17T12:00:00.000Z"));
+      for (let index = 0; index < 12; index += 1) {
+        const stale = join(day, `rollout-2026-07-17T${String(index).padStart(2, "0")}-00-00-stale.jsonl`);
+        writeFileSync(stale, `${codexEventLine({
+          timestamp: `2026-07-17T${String(index).padStart(2, "0")}:00:00.000Z`,
+          usedPercent: 20,
+        })}\n`);
+        utimesSync(stale, new Date(`2026-07-17T${String(index).padStart(2, "0")}:00:00.000Z`),
+          new Date(`2026-07-17T${String(index).padStart(2, "0")}:00:00.000Z`));
+      }
+      return root;
+    }],
+    when: ["reading only the twelve most active rollouts", (root) =>
+      readCodexQuota({ sessionsRoot: root, maxFiles: 12 })],
+    then: ["the provider observation yields the official 35% remaining value", (result) => {
+      if (process.env.AMUX_MEASUREMENT_OUTPUT) {
+        expect(["red", "green"]).toContain(process.env.AMUX_MEASUREMENT_PHASE);
+        writeFileSync(process.env.AMUX_MEASUREMENT_OUTPUT, JSON.stringify({
+          metric: "activity-selected-used-percent",
+          unit: "percent",
+          operator: ">=",
+          limit: 64,
+          observed: result.observation?.usedPercent ?? -1,
+        }));
+      }
+      expect(result.ok).toBe(true);
+      expect(result.limits[0].windows[0].usedPercent).toBe(65);
+      expect(result.observation).toEqual({
+        schemaVersion: 1,
+        source: "codex.rollout.rate_limits",
+        observedAt: "2026-07-17T12:00:00.000Z",
+        refreshIntervalMs: 15 * 60_000,
+        usedPercent: 65,
+        remainingPercent: 35,
+        resetsAt: "2026-07-23T04:16:00.000Z",
+      });
     }],
   });
 

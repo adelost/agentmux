@@ -7,7 +7,7 @@
 //
 // Pure normalizers with injected IO so contracts are testable offline.
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readTailWindow } from "./jsonl-reader.mjs";
@@ -16,6 +16,14 @@ export const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 export const CLAUDE_OAUTH_BETA = "oauth-2025-04-20";
 export const CODEX_TAIL_BYTES = 256 * 1024;
 export const CODEX_SCAN_FILES = 12;
+/** WHAT: Defines provider observation fields. WHY: Keeps Code and Suggest on one decodable shape. */
+export const QUOTA_OBSERVATION_SCHEMA_VERSION = 1;
+/** WHAT: Names the collector cadence. WHY: Keeps both surfaces on one stale boundary. */
+export const QUOTA_REFRESH_INTERVAL_MS = 15 * 60_000;
+/** WHAT: Names Claude quota provenance. WHY: Keeps collection time distinct from provider source. */
+export const CLAUDE_QUOTA_SOURCE = "anthropic.oauth.usage";
+/** WHAT: Names Codex quota provenance. WHY: Keeps rollout events distinct from push receipt time. */
+export const CODEX_QUOTA_SOURCE = "codex.rollout.rate_limits";
 
 const clampPercent = (value) => {
   const numeric = Number(value);
@@ -23,8 +31,24 @@ const clampPercent = (value) => {
   return Math.min(100, Math.max(0, Math.round(numeric * 10) / 10));
 };
 
+const quotaObservation = ({ source, observedAt, usedPercent, resetsAt }) => {
+  const observedMs = Date.parse(String(observedAt || ""));
+  const used = clampPercent(usedPercent);
+  if (!Number.isFinite(observedMs) || used === null) return null;
+  return {
+    schemaVersion: QUOTA_OBSERVATION_SCHEMA_VERSION,
+    source,
+    observedAt: new Date(observedMs).toISOString(),
+    refreshIntervalMs: QUOTA_REFRESH_INTERVAL_MS,
+    usedPercent: used,
+    remainingPercent: Math.round((100 - used) * 10) / 10,
+    resetsAt: typeof resetsAt === "string" ? resetsAt : null,
+  };
+};
+
 // ---------- Claude ----------
 
+/** WHAT: Normalizes one Claude provider response. WHY: Keeps raw OAuth fields out of shared consumers. */
 export function normalizeClaudeUsage(payload, fetchedAt) {
   const rows = Array.isArray(payload?.limits) ? payload.limits : [];
   const limits = rows
@@ -47,7 +71,13 @@ export function normalizeClaudeUsage(payload, fetchedAt) {
   if (limits.length === 0) {
     return { ok: false, engine: "claude", error: "no_limits_in_response", fetchedAt };
   }
-  return { ok: true, engine: "claude", fetchedAt, limits };
+  const headline = limits.find((limit) => limit.kind === "weekly_scoped"
+    && limit.scopeName === "Fable")
+    ?? limits.find((limit) => limit.kind === "weekly_all")
+    ?? limits[0];
+  const observation = quotaObservation({ source: CLAUDE_QUOTA_SOURCE,
+    observedAt: fetchedAt, usedPercent: headline.usedPercent, resetsAt: headline.resetsAt });
+  return { ok: true, engine: "claude", fetchedAt, observation, limits };
 }
 
 export async function readClaudeQuota({
@@ -131,7 +161,7 @@ export function parseCodexRateLimitEvents(text) {
   return events;
 }
 
-function listRolloutFilesNewestFirst(sessionsRoot) {
+function listRolloutFilesMostActiveFirst(sessionsRoot) {
   let entries;
   try {
     entries = readdirSync(sessionsRoot, { recursive: true, withFileTypes: true });
@@ -143,8 +173,17 @@ function listRolloutFilesNewestFirst(sessionsRoot) {
       && entry.name.startsWith("rollout-")
       && entry.name.endsWith(".jsonl"))
     .map((entry) => join(entry.parentPath ?? entry.path, entry.name))
-    .sort()
-    .reverse(); // rollout filenames embed their UTC timestamp, so name order is time order
+    .flatMap((path) => {
+      try {
+        const activityMs = statSync(path).mtimeMs;
+        return Number.isFinite(activityMs) ? [{ path, activityMs }] : [];
+      } catch {
+        return [];
+      }
+    })
+    .sort((left, right) => right.activityMs - left.activityMs
+      || right.path.localeCompare(left.path))
+    .map((entry) => entry.path);
 }
 
 export function readCodexQuota({
@@ -152,7 +191,10 @@ export function readCodexQuota({
   maxFiles = CODEX_SCAN_FILES,
   tailBytes = CODEX_TAIL_BYTES,
 } = {}) {
-  const files = listRolloutFilesNewestFirst(sessionsRoot).slice(0, maxFiles);
+  // A rollout name records when the session started, not when it last emitted
+  // a provider event. Bound IO by actual file activity, then choose by the
+  // event's own provider timestamp after parsing the selected tails.
+  const files = listRolloutFilesMostActiveFirst(sessionsRoot).slice(0, maxFiles);
   if (files.length === 0) {
     return { ok: false, engine: "codex", error: "no_session_files" };
   }
@@ -165,8 +207,9 @@ export function readCodexQuota({
       continue;
     }
     for (const event of parseCodexRateLimitEvents(tail)) {
+      if (!Number.isFinite(Date.parse(String(event.capturedAt || "")))) continue;
       const existing = latestByLimit.get(event.limitId);
-      if (!existing || String(event.capturedAt) > String(existing.capturedAt)) {
+      if (!existing || Date.parse(event.capturedAt) > Date.parse(existing.capturedAt)) {
         latestByLimit.set(event.limitId, event);
       }
     }
@@ -174,11 +217,17 @@ export function readCodexQuota({
   if (latestByLimit.size === 0) {
     return { ok: false, engine: "codex", error: "no_rate_limit_events" };
   }
+  const limits = [...latestByLimit.values()]
+    .sort((a, b) => Date.parse(b.capturedAt) - Date.parse(a.capturedAt));
+  const newest = limits[0];
+  const headline = newest.windows.find((window) => window.windowMinutes === 10_080)
+    ?? newest.windows[0];
   return {
     ok: true,
     engine: "codex",
-    limits: [...latestByLimit.values()]
-      .sort((a, b) => String(b.capturedAt).localeCompare(String(a.capturedAt))),
+    observation: quotaObservation({ source: CODEX_QUOTA_SOURCE,
+      observedAt: newest.capturedAt, usedPercent: headline.usedPercent, resetsAt: headline.resetsAt }),
+    limits,
   };
 }
 
@@ -186,7 +235,7 @@ export function readCodexQuota({
 
 export async function readQuotaSnapshot({ claude, codex, now = Date.now } = {}) {
   const [claudeQuota, codexQuota] = await Promise.all([
-    readClaudeQuota(claude),
+    readClaudeQuota({ ...(claude ?? {}), now }),
     Promise.resolve(readCodexQuota(codex)),
   ]);
   return {
