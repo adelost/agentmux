@@ -10,7 +10,7 @@ export const attachmentPrompt = (prompt, attachments) => attachments.reduce((tex
 
 /**
  * WHAT: Builds one long-lived native Claude CLI launch.
- * WHY: Resume is a process-recovery input, never a per-turn transport.
+ * WHY: Keeps resume in process recovery and out of per-turn transport.
  */
 export function buildNativeClaudeLaunch({ command, agent, rawPrompt, attachments, settings }) {
   const args = [

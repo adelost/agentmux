@@ -1,8 +1,8 @@
 import { createInterface } from "node:readline";
 
 /**
- * WHAT: Owns one long-lived Claude stream-json child for an agent.
- * WHY: A turn boundary must not become a process boundary and rebuild session state.
+ * WHAT: Wraps one long-lived Claude stream-json child for an agent.
+ * WHY: Prevents a turn boundary from becoming a process boundary and rebuilding session state.
  */
 export function openPersistentClaudeRuntime({
   spawnProcess,
