@@ -405,7 +405,7 @@ feature("generated agent policy", () => {
       return content;
     }],
     then: ["pane 2 manages workers 3+ by default and direct instructions remain authoritative", (content) => {
-      expect(content).toContain("<!-- amux-hints-version: 1.24.5 -->");
+      expect(content).toContain("<!-- amux-hints-version: 1.24.6 -->");
       expect(content).toContain("Broker panel routing is the default, not a capability boundary");
       expect(content).toContain("pane `:2` is the default manager/broker");
       expect(content).toContain("panes `:3` and above in the same session");
@@ -413,8 +413,8 @@ feature("generated agent policy", () => {
       expect(content).toContain("`skydive:2` manages `skydive:3` through `skydive:9`");
       expect(content).toContain("`lsrc:2` manages `lsrc:3` through `lsrc:9`");
       expect(content).toContain("`watch:2` manages");
-      expect(content).toMatch(/explicit instruction from Mattias to any pane/u);
-      expect(content).toMatch(/implement, push, merge, or deploy/u);
+      expect(content).toMatch(/explicit instruction from\s+Mattias to any pane/u);
+      expect(content).toMatch(/own their assigned feature through implementation, push, merge/u);
       expect(content).toMatch(/no peer approval or broker relay may narrow, delay, or override it/u);
       expect(content).not.toContain("hard allowlist");
       expect(content).not.toContain("sole manager/broker");
@@ -488,7 +488,7 @@ feature("generated agent policy", () => {
     }],
   });
 
-  unit("puts the gated deploy inside the broker flow, not on the human", {
+  unit("puts merge and gated deploy inside the feature-owner flow", {
     when: ["generating fresh agent hints", () => {
       const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
       paneDir(root, 0);
@@ -497,12 +497,14 @@ feature("generated agent policy", () => {
       return content;
     }],
     then: ["rule 4 owns deploy-with-proof and rule 7 only gates paid deploys", (content) => {
-      expect(content).toContain("run the repo's gated deploy");
-      expect(content).toMatch(/routine\s+deploys from the human/u);
-      expect(content).toMatch(/merged-but-undeployed wave is an open loop/u);
+      expect(content).toContain("The feature owner owns delivery end to end");
+      expect(content).toMatch(/Do not hand\s+routine review, merge, or deploy back to the\s+broker or human/u);
+      expect(content).toMatch(/merged-but-undeployed feature is an\s+open loop/u);
       expect(content).toMatch(/gate-verified free\s+deploys are routine flow per rule 4, day or night/u);
-      expect(content).toMatch(/exactly ONE designated\s+deploy owner/u);
-      expect(content).toMatch(/deploy authority follows the target, not the merge/u);
+      expect(content).toMatch(/Deployment safety comes from fresh repository state, not a designated\s+person/u);
+      expect(content).toMatch(/never\s+deploy a stale\s+feature checkout/u);
+      expect(content).not.toMatch(/exactly ONE designated\s+deploy owner/u);
+      expect(content).not.toMatch(/deploy authority follows the target, not the merge/u);
     }],
   });
 });
