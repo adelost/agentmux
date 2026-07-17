@@ -5,13 +5,14 @@ import {
   readFileSync, realpathSync, renameSync, rmSync, writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  observeReleaseIdentity, RELEASE_MANIFEST_NAME, releaseReceiptPath,
+  observeReleaseIdentity, readReleaseManifest, RELEASE_MANIFEST_NAME, releaseReceiptPath,
 } from "./release-identity.mjs";
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/u;
+const SHA256 = /^[0-9a-f]{64}$/u;
 const CONFIG_FILES = [".env", "agentmux.yaml"];
 const INSTALLER_FILES = [
   "bin/install-release.mjs",
@@ -30,6 +31,24 @@ function hashBuffer(buffer) {
 
 function hashFile(path) {
   return hashBuffer(readFileSync(path));
+}
+
+function manifestFiles(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || Object.keys(value).length === 0) {
+    throw new Error(`${label} has no packed-file hashes`);
+  }
+  return Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(
+    ([path, hash]) => {
+      const normalized = String(path).replaceAll("\\", "/");
+      if (!path || normalized !== path || isAbsolute(path)
+        || path.split("/").some((part) => !part || part === "." || part === "..")
+        || typeof hash !== "string" || !SHA256.test(hash)) {
+        throw new Error(`${label} contains an invalid packed-file hash at ${path || "<empty>"}`);
+      }
+      return [path, hash];
+    },
+  );
 }
 
 function atomicJson(path, value) {
@@ -128,6 +147,63 @@ export function stageReleaseArtifact({ repoRoot, sourceSha, outputRoot }) {
 }
 
 /**
+ * WHAT: Compares one npm installation with the exact package bytes rebuilt from fetched master.
+ * WHY: Keeps equal package versions and self-consistent forged manifests from hiding stale code.
+ */
+function verifyInstalledContent({ installedRoot, masterSha, expected }) {
+  assertReleaseSha(masterSha);
+  const installed = readReleaseManifest(installedRoot);
+  if (!installed || installed.schemaVersion !== 1 || installed.sourceSha !== masterSha) {
+    throw new Error(`installed release sourceSha ${String(installed?.sourceSha || "missing")} does not match origin/master ${masterSha}`);
+  }
+  if (expected.schemaVersion !== 1 || expected.sourceSha !== masterSha) {
+    throw new Error("rebuilt origin/master release manifest has an invalid sourceSha");
+  }
+  const expectedFiles = manifestFiles(expected.files, "origin/master release manifest");
+  const installedFiles = new Map(manifestFiles(installed.files, "installed release manifest"));
+  if (installedFiles.size !== expectedFiles.length) {
+    throw new Error(`installed release manifest lists ${installedFiles.size} files; origin/master lists ${expectedFiles.length}`);
+  }
+  for (const [path, expectedHash] of expectedFiles) {
+    if (installedFiles.get(path) !== expectedHash) {
+      throw new Error(`installed release manifest hash differs from origin/master bytes at ${path}`);
+    }
+    const candidate = resolve(installedRoot, path);
+    const rel = relative(installedRoot, candidate);
+    if (rel.startsWith("..") || isAbsolute(rel) || hashFile(candidate) !== expectedHash) {
+      throw new Error(`installed package bytes differ from origin/master at ${path}`);
+    }
+  }
+  return {
+    sourceSha: masterSha,
+    packageVersion: expected.packageVersion || null,
+    packageRoot: installedRoot,
+    fileCount: expectedFiles.length,
+  };
+}
+
+/** WHAT: Compares one installed package with rebuilt master bytes. WHY: Keeps version equality from masking stale bytes. */
+export function verifyInstalledReleaseAgainstRepository({
+  repoRoot,
+  packageRoot = join(run("npm", ["root", "--global"]).trim(), "agentmux"),
+}) {
+  const root = realpathSync(resolve(repoRoot));
+  const installedRoot = realpathSync(resolve(packageRoot));
+  const masterSha = run("git", ["rev-parse", "refs/remotes/origin/master"], { cwd: root }).trim();
+  const temporary = mkdtempSync(join(tmpdir(), "agentmux-release-verify-"));
+  try {
+    const expected = stageReleaseArtifact({
+      repoRoot: root,
+      sourceSha: masterSha,
+      outputRoot: join(temporary, "artifact"),
+    }).manifest;
+    return verifyInstalledContent({ installedRoot, masterSha, expected });
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+}
+
+/**
  * WHAT: Builds one installed release from fetched master and publishes its verified host receipt.
  * WHY: Prevents global npm from following whichever feature branch a shared checkout exposes.
  */
@@ -193,8 +269,13 @@ export function installRelease({ repoRoot, sourceSha, home = homedir() }) {
     if (!identity.ok) {
       throw new Error(`installed release failed identity verification: ${identity.issues.map((issue) => issue.detail).join("; ")}`);
     }
+    const contentVerification = verifyInstalledContent({
+      installedRoot: packageRoot,
+      masterSha: target,
+      expected: staged.manifest,
+    });
     atomicJson(releaseReceiptPath(home), receipt);
-    return { ...receipt, identity };
+    return { ...receipt, identity, contentVerification };
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
