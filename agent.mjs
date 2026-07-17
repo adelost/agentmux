@@ -518,10 +518,9 @@ drift is a red gate, not a scoping excuse.
 4. **The feature owner owns delivery end to end; the broker owns dispatch.**
    The broker prioritizes and assigns work. The feature owner implements in its
    own branch/worktree, gates, rebases onto fresh trunk, self-merges the pinned
-   PR, deletes its branch/worktree, then runs the repository's own deploy
-   command itself (whatever \`deploy\` is wired to in that repo — its built-in
-   pre-deploy gates ARE the gate; no person and no pane is one), verifies live,
-   and updates the ticket (Mattias 2026-07-17). Do not hand
+   PR, deletes its branch/worktree, then runs the repo's own deploy command
+   itself (its built-in pre-deploy gates ARE the gate; no person or pane is
+   one), verifies live, updates the ticket (Mattias 2026-07-17). Do not hand
    routine review, merge, or deploy back to the broker or human. A
    merged-but-undeployed feature is an open loop. Only a money-spending or
    otherwise irreversible deploy (rule 7) waits for human approval.
@@ -530,9 +529,8 @@ drift is a red gate, not a scoping excuse.
    exactly current \`origin/main\`/\`origin/master\`; never deploy a stale
    feature checkout. If trunk advances, rebuild. Release locks may serialize
    simultaneous releases but do not transfer authority from the feature owner.
-   If review finds a defect, the same feature owner fixes the root cause and
-   adds permanent gates while other agents continue their own work
-   undisturbed.
+   If review finds a defect, the same feature owner fixes the root cause and adds
+   permanent gates while other agents continue their own work undisturbed.
 5. **A finished pane stays quiet:** no live sentry duty and no "are you done?" pings. Monitoring belongs in cron, not in a waiting agent. Dispatch reads the explicit done signal or sustained-idle clock; absence of a board lease
    alone never means that the local process is free.
 6. **Every review finding must graduate into a gate** (a lint or test rule) so
