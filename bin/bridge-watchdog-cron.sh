@@ -16,8 +16,10 @@ STATE_DIR="$HOME/.agentmux"
 MODE_FILE="${AMUX_BRIDGE_MODE_FILE:-$STATE_DIR/bridge-mode}"
 LOG="$STATE_DIR/watchdog.log"
 HEARTBEAT="$STATE_DIR/bridge-heartbeat.json"
+QUOTA_HEARTBEAT="$STATE_DIR/quota-recovery-heartbeat.json"
 INTERVENTIONS="$STATE_DIR/watchdog-interventions"
 STALE_SEC=300
+QUOTA_STALE_SEC=900
 MAX_PER_HOUR=3
 
 mkdir -p "$STATE_DIR"
@@ -56,8 +58,17 @@ heartbeat_age() {
   echo $((now - mtime))
 }
 
+quota_heartbeat_age() {
+  [ -f "$QUOTA_HEARTBEAT" ] || { echo 0; return; }
+  local mtime now
+  mtime=$(stat -c %Y "$QUOTA_HEARTBEAT" 2>/dev/null || echo 0)
+  now=$(date +%s)
+  echo $((now - mtime))
+}
+
 PIDS=$(bridge_pids)
 AGE=$(heartbeat_age)
+QUOTA_AGE=$(quota_heartbeat_age)
 
 if [ -n "$PIDS" ] && [ "$AGE" -gt "$STALE_SEC" ] && [ -f "$HEARTBEAT" ]; then
   # Hung: alive but not beating. Kill; the supervisor restarts with fresh code.
@@ -67,6 +78,18 @@ if [ -n "$PIDS" ] && [ "$AGE" -gt "$STALE_SEC" ] && [ -f "$HEARTBEAT" ]; then
   # SIGKILL is deliberate: TERM reads as clean stop (exit 143 -> supervisor
   # BREAKS), INT makes bash kill the supervisor itself (child-died-of-SIGINT
   # semantics, observed 2026-07-08). KILL -> exit 137 -> crash branch -> restart.
+  kill -9 $PIDS 2>/dev/null
+  exit 0
+fi
+
+# The Discord/event loop can keep beating while the independent quota poll is
+# wedged. A stale non-disabled sidecar is therefore its own restart condition.
+if [ -n "$PIDS" ] && [ -f "$QUOTA_HEARTBEAT" ] \
+  && ! grep -q '"state":"disabled"' "$QUOTA_HEARTBEAT" \
+  && [ "$QUOTA_AGE" -gt "$QUOTA_STALE_SEC" ]; then
+  if rate_limited; then log "STALE quota recovery (${QUOTA_AGE}s) but rate-limited, skipping"; exit 0; fi
+  log "STALE quota recovery (${QUOTA_AGE}s) with live bridge pid(s) $PIDS -> kill -9 (supervisor restarts)"
+  record_intervention
   kill -9 $PIDS 2>/dev/null
   exit 0
 fi

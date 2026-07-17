@@ -10,6 +10,7 @@ import {
   parseClaudeLimitResetAt,
   quotaRecoveryContinuation,
 } from "./claude-quota-recovery.mjs";
+export { subscriptionSafeClaudeEnv } from "./native-claude-billing.mjs";
 
 const ZERO_USAGE_FIELDS = [
   "input_tokens",

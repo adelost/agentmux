@@ -82,6 +82,20 @@ feature("bridge ownership mode", () => {
     }],
   });
 
+  unit("a stale quota sidecar restarts a still-responsive bridge", {
+    when: ["reading the shell watchdog contract", () => readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "bridge-watchdog-cron.sh"),
+      "utf-8",
+    )],
+    then: ["the independent heartbeat is bounded and the disabled state is exempt", (script) => {
+      expect(script).toContain('QUOTA_HEARTBEAT="$STATE_DIR/quota-recovery-heartbeat.json"');
+      expect(script).toContain('QUOTA_STALE_SEC=900');
+      expect(script).toContain('! grep -q \'"state":"disabled"\'');
+      expect(script).toContain('STALE quota recovery');
+      expect(script).toContain('kill -9 $PIDS');
+    }],
+  });
+
   unit("every bridge observer recognizes the preload launch command", {
     given: ["the launch command and both independent process observers", () => {
       const root = join(dirname(fileURLToPath(import.meta.url)), "..");

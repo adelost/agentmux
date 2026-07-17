@@ -147,4 +147,33 @@ feature("quota polling", () => {
       ctx.cleanup();
     }],
   });
+
+  component("a temporary composer guard is retried after fresh quota telemetry", {
+    given: ["one limited pane whose composer becomes safe after the first poll", () => {
+      const ctx = fixture();
+      let attempts = 0;
+      ctx.lifecycle.restart = async (...args) => {
+        ctx.restarts.push(args);
+        attempts++;
+        return attempts === 1
+          ? { ok: false, reason: "pane-has-no-empty-claude-composer" }
+          : { ok: true, sessionId: receipt.sessionId };
+      };
+      return ctx;
+    }],
+    when: ["two independent quota polls run", async (ctx) => ({
+      blocked: await ctx.coordinator.tick(),
+      recovered: await ctx.coordinator.tick(),
+    })],
+    then: ["the same receipt and continuation recover without a duplicate", ({ blocked, recovered }, ctx) => {
+      expect(blocked[0].outcome).toMatchObject({
+        recovered: false,
+        reason: "pane-has-no-empty-claude-composer",
+      });
+      expect(recovered[0].outcome).toMatchObject({ recovered: true, restarted: true });
+      expect(ctx.restarts).toHaveLength(2);
+      expect(ctx.queue.list("lsrc", 0).filter((job) => job.source === "quota-recovery")).toHaveLength(1);
+      ctx.cleanup();
+    }],
+  });
 });
