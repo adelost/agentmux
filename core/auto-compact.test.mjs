@@ -39,13 +39,13 @@ feature("decideAutoCompactAction — first crossing (warn)", () => {
   });
 
   unit("exactly at threshold → warn", {
-    given: ["60% idle", () => ({ ...base, contextPercent: 60 })],
+    given: ["70% idle", () => ({ ...base, contextPercent: 70 })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=warn", (r) => expect(r.action).toBe("warn")],
   });
 
   unit("1% below threshold → none", {
-    given: ["59% idle", () => ({ ...base, contextPercent: 59 })],
+    given: ["69% idle", () => ({ ...base, contextPercent: 69 })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=none", (r) => expect(r.action).toBe("none")],
   });
@@ -435,7 +435,7 @@ feature("parseAutoCompactConfig", () => {
     when: ["parsing", ({ env }) => parseAutoCompactConfig(env)],
     then: ["matches DEFAULT_CONFIG", (r) => {
       expect(r.enabled).toBe(true);
-      expect(r.threshold).toBe(60);
+      expect(r.threshold).toBe(70);
       expect(r.threshold).toBe(DEFAULT_CONFIG.threshold);
       expect(r.graceMs).toBe(DEFAULT_CONFIG.graceMs);
       expect(r.pollMs).toBe(DEFAULT_CONFIG.pollMs);
