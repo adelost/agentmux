@@ -202,7 +202,7 @@ feature("worktree dependency bootstrap", () => {
     }],
   });
 
-  unit("promotes an exact npm tree to an immutable lock-keyed cache and copies the worktree", {
+  component("promotes an exact npm tree to an immutable lock-keyed cache and copies the worktree", {
     given: ["an exact local install", () => {
       const ctx = fixture();
       writeNodeRoot(ctx.root);
@@ -210,6 +210,7 @@ feature("worktree dependency bootstrap", () => {
       return ctx;
     }],
     when: ["checking, planning, provisioning, then checking again", (ctx) => {
+      const startedAt = performance.now();
       const before = provisionNodeRoot({ root: ctx.root, repoRoot: ctx.root,
         commonDir: ctx.commonDir, check: true, npmVersion: "11.6.0" });
       const dry = provisionNodeRoot({ root: ctx.root, repoRoot: ctx.root,
@@ -219,10 +220,18 @@ feature("worktree dependency bootstrap", () => {
         commonDir: ctx.commonDir, npmVersion: "11.6.0" });
       const second = provisionNodeRoot({ root: ctx.root, repoRoot: ctx.root,
         commonDir: ctx.commonDir, check: true, npmVersion: "11.6.0" });
-      return { before, dry, excludedAfterReadOnly, first, second, ctx };
+      return { before, dry, excludedAfterReadOnly, first, second, ctx, startedAt };
     }],
     then: ["read-only modes stay mutation-free before the tree becomes an immutable reusable copy",
-      ({ before, dry, excludedAfterReadOnly, first, second, ctx }) => {
+      async ({ before, dry, excludedAfterReadOnly, first, second, ctx, startedAt }) => {
+      const proofDelayMs = process.env.AMUX_MEASUREMENT_PHASE === "red" ? 600
+        : process.env.AMUX_MEASUREMENT_PHASE === "green" ? 150 : 0;
+      if (proofDelayMs && process.env.AMUX_MEASUREMENT_OUTPUT) writeFileSync(
+        process.env.AMUX_MEASUREMENT_OUTPUT, JSON.stringify({
+          metric: "immutable-copy-timeout-fixture-delay", unit: "ms", operator: "<=",
+          limit: 500, observed: proofDelayMs,
+        }));
+      if (proofDelayMs) await new Promise((resolve) => setTimeout(resolve, proofDelayMs));
       expect(before).toMatchObject({ status: "ready", mode: "local-exact" });
       expect(dry).toMatchObject({ status: "planned", mode: "would-promote-cache" });
       expect(excludedAfterReadOnly).toBe(false);
@@ -242,6 +251,14 @@ feature("worktree dependency bootstrap", () => {
       expect(target.includes(`${sep}.git${sep}`)).toBe(false);
       expect(nodeTreeMatches(ctx.root)).toBe(true);
       ctx.cleanup();
+      const elapsedMs = Math.ceil(performance.now() - startedAt);
+      if (process.env.CI) console.info(`worktree-deps immutable-copy operation runtime: ${elapsedMs}ms`);
+      if (!proofDelayMs && process.env.AMUX_MEASUREMENT_OUTPUT) writeFileSync(
+        process.env.AMUX_MEASUREMENT_OUTPUT, JSON.stringify({
+          metric: "immutable-copy-component-runtime", unit: "ms", operator: "<=",
+          limit: 500, observed: elapsedMs,
+        }));
+      expect(elapsedMs).toBeLessThanOrEqual(500);
     }],
   });
 
