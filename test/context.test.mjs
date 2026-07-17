@@ -51,6 +51,13 @@ feature("getContextPercent (claude): model-based max lookup", () => {
       expect(r).not.toBeNull();
       expect(r.tokens).toBe(200_000);
       expect(r.percent).toBe(20);
+      const canonicalFields = [Number.isFinite(r.percent), Number.isFinite(r.tokens),
+        typeof r.model === "string", Number.isFinite(r.windowTokens),
+        typeof r.source === "string", typeof r.confidence === "string",
+        Number.isFinite(Date.parse(r.observedAt))].filter(Boolean).length;
+      if (process.env.AMUX_MEASUREMENT_OUTPUT) writeFileSync(process.env.AMUX_MEASUREMENT_OUTPUT,
+        JSON.stringify({ metric: "canonical context fields", unit: "fields",
+          operator: ">=", limit: 6, observed: canonicalFields }));
       expect(r.windowTokens).toBe(1_000_000);
       expect(r.source).toBe("claude-jsonl");
       expect(r.confidence).toBe("estimated");
