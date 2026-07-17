@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -161,6 +162,35 @@ describe("context telemetry reconciliation", () => {
 });
 
 describe("context push durability", () => {
+  it("pins the resolved Node executable and replaces a broken context cron row", () => {
+    const root = mkdtempSync(join(tmpdir(), "context-push-install-"));
+    const bin = join(root, "bin");
+    const state = join(root, "crontab");
+    const config = join(root, "push.yaml");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "crontab"), `#!/bin/sh
+if [ "$1" = "-l" ]; then cat "$CRONTAB_STATE"; exit 0; fi
+if [ "$1" = "-" ]; then cat > "$CRONTAB_STATE"; exit 0; fi
+exit 2
+`);
+    chmodSync(join(bin, "crontab"), 0o755);
+    writeFileSync(config, "baseUrl: https://suggest.v1d.io\nadminCredentialFile: /tmp/token\n");
+    writeFileSync(state, "* * * * * /old/suggestions-context-push-cron.sh >> /dev/null 2>&1\n");
+    const installer = join(process.cwd(), "bin", "install-context-push.sh");
+    const result = spawnSync("bash", [installer, config], { encoding: "utf8", env: {
+      HOME: root,
+      PATH: `${bin}:/usr/bin:/bin`,
+      NODE_BIN: process.execPath,
+      CRONTAB_STATE: state,
+    } });
+    const installed = readFileSync(state, "utf8");
+    expect(result.status).toBe(0);
+    expect(installed).toContain(`NODE_BIN=${process.execPath}`);
+    expect(installed).not.toContain("/old/suggestions-context-push-cron.sh");
+    expect(installed.match(/suggestions-context-push-cron\.sh/gu)).toHaveLength(1);
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it("keeps incomplete ledger lines behind the cursor", () => {
     const root = mkdtempSync(join(tmpdir(), "amux-context-ledger-"));
     const path = join(root, "events.jsonl");
