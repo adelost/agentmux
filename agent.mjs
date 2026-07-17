@@ -85,7 +85,7 @@ export function paneDir(rootDir, pane) {
 // The marker lets ensureAgentHints detect stale copies on spawn; bump it
 // whenever AGENT_HINTS content changes. Appended content survives upgrades.
 // WHAT: Names generated agent policy version. WHY: Keeps stale pane instructions from surviving respawns.
-export const HINTS_VERSION = "1.23.29";
+export const HINTS_VERSION = "1.24.5";
 /** DTO: Generated agent policy footer marker. */
 export const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
@@ -582,7 +582,7 @@ drift is a red gate, not a scoping excuse.
    receiver sanity-checks direction against the quote before acting. A relay
    that inverts the original is the costliest failure class (the api quota
    whipsaw 2026-07-14: 'använd Codex, spara Claude' arrived as its opposite
-   and workers were flipped work→hold→work for nothing).
+   and workers were flipped work→hold→work for nothing). Human language is UTF-8 end to end: never transliterate Swedish user-visible text (write \`åäö\`, never \`aao\`/\`ar\`/\`for\` substitutes), and preserve quoted human text byte-for-byte. English code identifiers, filenames and technical terms stay English. If a tool cannot carry the original Unicode, stop and fix that transport instead of rewriting the message.
 12. **A drained lane is a state, not a failure.** A broker whose backlog is
    empty reports 'backlog tom, ge nya tickets' instead of inventing scope —
    honest idle beats fabricated motion, and night rules already forbid

@@ -346,7 +346,7 @@ describe.sequential("Suggestions human-comment relay", () => {
       comment(1, "agent", "agent output"),
       comment(2, "system", "system output"),
       comment(3, "creator", "human evidence", { purpose: "evidence" }),
-      comment(4, "user", "please fix the actual horizon"),
+      comment(4, "user", "Åtgärda höjden — den är för låg. Citat: ‘behåll åäö exakt’."),
     ])] } });
     try {
       const state = emptyState();
@@ -354,7 +354,8 @@ describe.sequential("Suggestions human-comment relay", () => {
         deliver: createAmuxCommentDeliverer({ amuxBin: fake.path }) });
       expect(result.delivered).toBe(1);
       expect(fake.records()).toHaveLength(1);
-      expect(fake.records()[0].stdin).toContain("please fix the actual horizon");
+      expect(fake.records()[0].stdin)
+        .toContain("Åtgärda höjden — den är för låg. Citat: ‘behåll åäö exakt’.");
       expect(fake.records()[0].stdin).toContain(structuredPolicy.summary);
       expect(fake.records()[0].args).toContain("suggestions-comment:skydive:SKY-1:4:initial");
       expect(fake.records()[0].args).toEqual(expect.arrayContaining(["--wait-ms", "0", "--stdin"]));
