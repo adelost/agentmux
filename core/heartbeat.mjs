@@ -53,13 +53,25 @@ export function readHeartbeat(path = heartbeatPath()) {
  *   stale-code - beating fine but on an older version than the repo
  *   ok       - beating and current
  */
-export function classifyHeartbeat(beat, { repoVersion, now = Date.now(), pidAlive }) {
+export function classifyHeartbeat(beat, {
+  repoVersion, repoCodeChangedAt, now = Date.now(), pidAlive,
+}) {
   if (!beat) return { state: "missing" };
   const age = now - new Date(beat.ts || 0).getTime();
   const fresh = Number.isFinite(age) && age <= HEARTBEAT_STALE_MS;
   if (!fresh) return { state: pidAlive ? "hung" : "dead", ageMs: age };
   if (repoVersion && beat.version && beat.version !== repoVersion) {
     return { state: "stale-code", running: beat.version, repo: repoVersion };
+  }
+  // The version above is a hand-maintained proxy for the code, and a bug fix
+  // bumps nothing, so a matching version proves only that nobody edited a
+  // string. That check can therefore catch a release but never the fix class
+  // this state exists for. The contract in this file's header is "started
+  // before the latest commit": a process cannot be running code that did not
+  // exist when it booted, and that is the fact worth measuring.
+  const startedAt = new Date(beat.startedAt || 0).getTime();
+  if (repoCodeChangedAt && startedAt > 0 && repoCodeChangedAt > startedAt) {
+    return { state: "stale-code", behindMs: repoCodeChangedAt - startedAt };
   }
   return { state: "ok", ageMs: age };
 }
