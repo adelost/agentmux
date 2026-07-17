@@ -30,7 +30,11 @@ const BROKER_CHATTER_AGE_MIN = 10;
 
 const ageStamp = (minutes) => new Date(Date.now() - minutes * MINUTE_MS);
 
-const setup = ({ lastCommitAgeMin, brokerChatterAgeMin = BROKER_CHATTER_AGE_MIN }) => {
+const setup = ({
+  lastCommitAgeMin,
+  brokerChatterAgeMin = BROKER_CHATTER_AGE_MIN,
+  pullRequests = [],
+}) => {
   const root = mkdtempSync(join(tmpdir(), "snooze-sweep-"));
   const home = join(root, "home");
   const watchDir = join(root, "watch");
@@ -61,6 +65,17 @@ const setup = ({ lastCommitAgeMin, brokerChatterAgeMin = BROKER_CHATTER_AGE_MIN 
   writeFileSync(amux, `#!/usr/bin/env bash\necho "CALL $*" >> "${amuxLog}"\nexit 0\n`);
   chmodSync(amux, 0o755);
 
+  const ghLog = join(root, "gh-calls");
+  const ghState = join(root, "pulls.json");
+  writeFileSync(ghState, JSON.stringify(pullRequests));
+  const gh = join(root, "gh");
+  writeFileSync(gh, `#!/usr/bin/env bash
+echo "$*" >> "${ghLog}"
+[[ "$*" == *"isDraft"* ]] || exit 64
+cat "${ghState}"
+`);
+  chmodSync(gh, 0o755);
+
   const boardState = join(root, "board.json");
   writeFileSync(boardState, JSON.stringify({ counts: { deferred: 8, done: 109 } }));
   const curl = join(root, "curl");
@@ -77,7 +92,7 @@ const setup = ({ lastCommitAgeMin, brokerChatterAgeMin = BROKER_CHATTER_AGE_MIN 
 
   return {
     root, home, watchDir, repoDir, socket, conf, amux, amuxLog,
-    boardState, curl, tokenFile, snooze,
+    boardState, curl, tokenFile, snooze, gh, ghLog,
   };
 };
 
@@ -101,7 +116,7 @@ const runSweep = (fx) => new Promise((ok, bad) => {
       READ_TOKEN_FILE: fx.tokenFile,
       TMUX_SOCKET: fx.socket,
       QUEUE_DIR: join(fx.root, "no-queue"),     // absent → queue sweep skipped
-      GH: "/nonexistent-gh",                    // review-queue sweep skipped
+      GH: fx.gh,
       SEND_TIMEOUT: "5",
     },
   });
@@ -171,6 +186,64 @@ feature("fleet-watch broker self-snooze", () => {
       expect(stdout).toContain("NUDGED");
       expect(calls).toContain("TYPAD deferral");
       expect(calls).toContain("human_decision");
+      teardown(fx);
+    }],
+  });
+
+  integration("keeps broker review pressure silent for an old draft", {
+    given: ["a moving fleet whose only old pull request is still a draft", () =>
+      setup({
+        lastCommitAgeMin: 1,
+        pullRequests: [{
+          number: 105,
+          title: "Owner is still implementing",
+          createdAt: ageStamp(300).toISOString(),
+          labels: [],
+          isDraft: true,
+        }],
+      })],
+    when: ["the review-queue sweep reads readiness as well as age", async (fx) => {
+      const stdout = await runSweep(fx);
+      const calls = existsSync(fx.amuxLog) ? readFileSync(fx.amuxLog, "utf-8") : "";
+      const ghCalls = readFileSync(fx.ghLog, "utf-8");
+      return { stdout, calls, ghCalls };
+    }],
+    then: ["the query requests isDraft and no broker nudge is sent", ({ stdout, calls, ghCalls }, fx) => {
+      expect(ghCalls).toContain("isDraft");
+      expect(stdout).not.toContain("REVIEW-QUEUE NUDGED");
+      expect(calls).toBe("");
+      teardown(fx);
+    }],
+  });
+
+  integration("nudges only the reviewable pull request in a mixed old queue", {
+    given: ["one old draft and one old non-draft pull request", () =>
+      setup({
+        lastCommitAgeMin: 1,
+        pullRequests: [{
+          number: 105,
+          title: "Unfinished draft",
+          createdAt: ageStamp(360).toISOString(),
+          labels: [],
+          isDraft: true,
+        }, {
+          number: 106,
+          title: "Ready for broker review",
+          createdAt: ageStamp(300).toISOString(),
+          labels: [],
+          isDraft: false,
+        }],
+      })],
+    when: ["the review-queue sweep selects actionable pull requests", async (fx) => {
+      const stdout = await runSweep(fx);
+      const calls = existsSync(fx.amuxLog) ? readFileSync(fx.amuxLog, "utf-8") : "";
+      return { stdout, calls };
+    }],
+    then: ["only the non-draft reaches the broker", ({ stdout, calls }, fx) => {
+      expect(stdout).toContain("repo#106");
+      expect(stdout).not.toContain("repo#105");
+      expect(calls).toContain("repo#106");
+      expect(calls).not.toContain("repo#105");
       teardown(fx);
     }],
   });

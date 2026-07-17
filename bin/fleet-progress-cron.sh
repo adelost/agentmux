@@ -27,7 +27,7 @@
 #                        dispatch; we delegate the "why", we don't micromanage
 #                        tickets). Per-fleet cooldown prevents spam.
 #        * stale twice → amux notifyuser (human escalation), keep nudging.
-#   3. Review-queue sweep (C): any open PR in a watched repo older than
+#   3. Review-queue sweep (C): any reviewable open PR in a watched repo older than
 #      PR_STALE_MIN → nudge the fleet's broker (it owns merge), re-nudge per
 #      PR_COOLDOWN_MIN. The fleet sweep only sees total silence; this catches
 #      a BUSY broker whose review queue quietly ages (SRC-0012 sat 7h+ while
@@ -425,11 +425,11 @@ else
     IFS=',' read -ra _repos <<<"$repo"
     for _r in "${_repos[@]}"; do
       rlabel=$(basename "$_r")
-      # One TSV row per stale open PR: <key>\t<age_h>\t<title>. "parked" label
-      # = intentionally exempt. gh failure → empty sweep for that repo.
+      # One TSV row per stale reviewable PR: <key>\t<age_h>\t<title>. Drafts
+      # and the "parked" label are intentionally exempt. gh failure → empty sweep.
       # JSON goes via argv: python's stdin already carries the heredoc program.
       pr_json=$( (cd "$_r" 2>/dev/null && timeout 20 "$GH" pr list --state open \
-        --json number,title,createdAt,labels --limit 30) 2>/dev/null ) || pr_json="[]"
+        --json number,title,createdAt,labels,isDraft --limit 30) 2>/dev/null ) || pr_json="[]"
       rows=$("$PY" - "$rlabel" "$PR_STALE_MIN" "$pr_json" <<'PY'
 import json, sys
 from datetime import datetime, timezone
@@ -440,7 +440,7 @@ except Exception:
     sys.exit(0)
 now = datetime.now(timezone.utc)
 for pr in prs:
-    if any(l.get("name") == "parked" for l in pr.get("labels", [])):
+    if pr.get("isDraft") is True or any(l.get("name") == "parked" for l in pr.get("labels", [])):
         continue
     try:
         created = datetime.fromisoformat(pr["createdAt"].replace("Z", "+00:00"))
