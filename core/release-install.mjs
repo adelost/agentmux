@@ -54,6 +54,13 @@ function restoreRuntimeConfig(files, installedRoot) {
   }
 }
 
+/** WHAT: Maps packed paths to npm's installed names. WHY: Keeps extraction renames aligned with byte verification. */
+function installedPackagePath(path) {
+  return path === ".gitignore" || path.endsWith("/.gitignore")
+    ? `${path.slice(0, -".gitignore".length)}.npmignore`
+    : path;
+}
+
 function verifyInstallerMatchesTarget(repoRoot, sourceSha) {
   for (const relative of INSTALLER_FILES) {
     const current = readFileSync(join(MODULE_ROOT, relative));
@@ -100,11 +107,16 @@ export function stageReleaseArtifact({ repoRoot, sourceSha, outputRoot }) {
   const manifest = { schemaVersion: 1, sourceSha, packageVersion: packageJson.version };
   writeFileSync(join(source, RELEASE_MANIFEST_NAME), `${JSON.stringify(manifest)}\n`);
   const preview = JSON.parse(run("npm", ["pack", "--dry-run", "--json"], { cwd: source }));
-  manifest.files = Object.fromEntries(preview[0].files
-    .map((file) => file.path)
-    .filter((path) => path !== RELEASE_MANIFEST_NAME)
-    .sort()
-    .map((path) => [path, hashFile(join(source, path))]));
+  manifest.files = {};
+  for (const path of preview[0].files.map((file) => file.path).sort()) {
+    if (path === RELEASE_MANIFEST_NAME) continue;
+    // npm renames packed .gitignore files while extracting the installed package.
+    const installedPath = installedPackagePath(path);
+    if (Object.hasOwn(manifest.files, installedPath)) {
+      throw new Error(`npm package paths collide after install: ${installedPath}`);
+    }
+    manifest.files[installedPath] = hashFile(join(source, path));
+  }
   writeFileSync(join(source, RELEASE_MANIFEST_NAME), `${JSON.stringify(manifest)}\n`);
   const packed = JSON.parse(run("npm", ["pack", "--json", "--pack-destination", output], { cwd: source }));
   const artifactPath = join(output, packed[0].filename);

@@ -21,6 +21,7 @@ function repositoryFixture() {
   const base = mkdtempSync(join(tmpdir(), "amux-release-stage-"));
   const repo = join(base, "repo");
   mkdirSync(join(repo, "bin"), { recursive: true });
+  mkdirSync(join(repo, "nested"), { recursive: true });
   git(repo, ["init", "--quiet"]);
   git(repo, ["config", "user.name", "Release Test"]);
   git(repo, ["config", "user.email", "release@example.invalid"]);
@@ -30,6 +31,8 @@ function repositoryFixture() {
   })}\n`);
   writeFileSync(join(repo, "bin", "agent-cli.mjs"), "#!/usr/bin/env node\nconsole.log('committed');\n");
   writeFileSync(join(repo, "tracked.txt"), "committed\n");
+  writeFileSync(join(repo, "nested", ".gitignore"), "*\n!.gitignore\n!keep.txt\n");
+  writeFileSync(join(repo, "nested", "keep.txt"), "keep\n");
   git(repo, ["add", "."]);
   git(repo, ["commit", "--quiet", "-m", "fixture"]);
   const sha = git(repo, ["rev-parse", "HEAD"]);
@@ -71,6 +74,11 @@ feature("explicit-SHA release artifact", () => {
       const unpacked = join(ctx.base, "unpacked");
       mkdirSync(unpacked);
       execFileSync("tar", ["-xzf", staged.artifactPath, "-C", unpacked]);
+      const prefix = join(ctx.base, "npm-prefix");
+      execFileSync("npm", [
+        "install", "--global", "--prefix", prefix, "--ignore-scripts", staged.artifactPath,
+      ]);
+      const installed = join(prefix, "lib", "node_modules", "agentmux");
       expect(readFileSync(join(unpacked, "package", "tracked.txt"), "utf8")).toBe("committed\n");
       expect(existsSync(join(unpacked, "package", "untracked.txt"))).toBe(false);
       const manifest = JSON.parse(readFileSync(
@@ -80,6 +88,12 @@ feature("explicit-SHA release artifact", () => {
       expect(manifest.files["tracked.txt"]).toBe(
         createHash("sha256").update("committed\n").digest("hex"),
       );
+      expect(existsSync(join(unpacked, "package", "nested", ".gitignore"))).toBe(true);
+      expect(existsSync(join(installed, "nested", ".npmignore"))).toBe(true);
+      expect(manifest.files["nested/.npmignore"]).toBe(
+        createHash("sha256").update("*\n!.gitignore\n!keep.txt\n").digest("hex"),
+      );
+      expect(manifest.files["nested/.gitignore"]).toBeUndefined();
       expect(staged.artifactSha256).toMatch(/^[0-9a-f]{64}$/u);
       expect(git(ctx.repo, ["rev-parse", "HEAD"])).toBe(before.head);
       expect(git(ctx.repo, ["status", "--porcelain"])).toBe(before.status);
