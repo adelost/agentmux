@@ -27,7 +27,7 @@ import { stripAnsi, esc, extractActivity, formatDuration, validateImagePath } fr
 import { getContextFromPane, getContextPercent, getContextPushed, shortModelName } from "../core/context.mjs";
 import { loadSearchRoots, lexicalSearch, formatHits, saveLastResults, loadLastResults, expandHit, withScore, dedupeByFile } from "../core/search.mjs";
 import { codexInterruptionFromTurns, planRevive, reviveBrief, parseBootMs } from "../core/revive.mjs";
-import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
+import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime, countTurnsSince } from "../core/jsonl-reader.mjs";
 import { latestCodexJsonlMtime, readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
 import { appendEvent, latestPaneStatesCached, mergeStatus, readEvents, eventsPath } from "../core/events.mjs";
@@ -1942,6 +1942,12 @@ async function waitForPaneIdle(ctx, agentName, paneIdx, maxMs = 300_000, idleStr
   return { idle: false, status: last };
 }
 
+// A pane must have been genuinely used, not just touched, to be worth a
+// nightly /compact + brief round-trip. Gate on real user turns in the window
+// (countTurnsSince already excludes system-noise directives like the dream and
+// /compact injections), so a barely-used pane is left alone.
+const MIN_DREAM_TURNS = 10;
+
 function isDreamClaudePane(cmd) {
   return String(cmd || "").trim().startsWith("claude");
 }
@@ -1958,6 +1964,8 @@ export async function collectDreamTargets(ctx, agents, sinceMs, opts = {}) {
   const getStatus = opts.getStatus || getPaneStatus;
   const getMtime = opts.getMtime || latestJsonlMtime;
   const getLivePanes = opts.getLivePanes || listPanes;
+  const getTurns = opts.getTurns || ((paneDir) => countTurnsSince(paneDir, new Date(sinceMs))?.count ?? 0);
+  const minTurns = opts.minTurns ?? MIN_DREAM_TURNS;
   const targets = [];
   const skipped = [];
 
@@ -1976,6 +1984,15 @@ export async function collectDreamTargets(ctx, agents, sinceMs, opts = {}) {
         lastMs = getMtime(panePathFor(a, i)) || 0;
       } catch {}
       if (lastMs < sinceMs) continue;
+
+      // Barely-used pane: recent enough to look active, but not enough real
+      // usage to justify compacting and briefing it. Skip silently, like the
+      // mtime gate above (not a failure, so it stays out of the sentinel).
+      let turns = 0;
+      try {
+        turns = getTurns(panePathFor(a, i)) || 0;
+      } catch {}
+      if (turns < minTurns) continue;
 
       const livePane = liveByIndex.get(i);
       const liveCommand = livePane?.command || "missing";

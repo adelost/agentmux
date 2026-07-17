@@ -86,6 +86,7 @@ feature("amux dream command target selection", () => {
         getMtime: (dir) => mtimes.get(dir) || 0,
         getStatus: async (_ctx, agent, pane) => statuses.get(`${agent}:${pane}`) || "unknown",
         getLivePanes: async () => livePanes,
+        getTurns: () => 20,
       })],
     then: ["only the recent idle Claude pane is targeted", (result) => {
       expect(result.targets).toEqual([
@@ -95,6 +96,44 @@ feature("amux dream command target selection", () => {
         { agent: "claw", pane: 1, lastMs: 2_100, status: "working", liveCommand: "claude" },
         { agent: "claw", pane: 4, lastMs: 2_300, status: "not-live-claude", liveCommand: "bash" },
       ]);
+    }],
+  });
+
+  unit("skips a barely-used pane below the minimum-turn threshold", {
+    given: ["two recent idle live-Claude panes, one heavily used, one barely", () => {
+      const agents = [
+        {
+          name: "claw",
+          dir: "/workspace/claw",
+          panes: [
+            { cmd: "claude" },
+            { cmd: "claude" },
+          ],
+        },
+      ];
+      const turns = new Map([
+        ["/workspace/claw/.agents/0", 12],
+        ["/workspace/claw/.agents/1", 3],
+      ]);
+      const livePanes = [
+        { index: 0, command: "claude" },
+        { index: 1, command: "claude" },
+      ];
+      return { agents, turns, livePanes };
+    }],
+    when: ["collecting dream targets with a min-turn gate of 10", ({ agents, turns, livePanes }) =>
+      collectDreamTargets({}, agents, 1_000, {
+        getMtime: () => 2_000,
+        getStatus: async () => "idle",
+        getLivePanes: async () => livePanes,
+        getTurns: (dir) => turns.get(dir) || 0,
+        minTurns: 10,
+      })],
+    then: ["only the heavily-used pane is targeted; the barely-used one is neither targeted nor reported as skipped", (result) => {
+      expect(result.targets).toEqual([
+        { agent: "claw", pane: 0, lastMs: 2_000, status: "idle", liveCommand: "claude" },
+      ]);
+      expect(result.skipped).toEqual([]);
     }],
   });
 
