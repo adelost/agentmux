@@ -7,7 +7,7 @@ import { createClaudeQuotaLifecycle } from "./claude-quota-lifecycle.mjs";
 import { assertClaudeQuotaAvailable } from "./claude-quota-target.mjs";
 import { quotaRecoveryContinuation } from "./claude-quota-recovery.mjs";
 
-function fixture({ composer = "❯  " } = {}) {
+function fixture({ composer = "❯  ", resumeDialogOnLaunch = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-quota-lifecycle-"));
   const homeDir = join(root, "home");
   const repoDir = join(root, "repo");
@@ -60,6 +60,19 @@ function fixture({ composer = "❯  " } = {}) {
     }
     if (command.includes("send-keys") && command.includes("ANTHROPIC_DISABLE_SURVEY")) {
       currentCommand = "node";
+      screen = resumeDialogOnLaunch
+        ? [
+            "This session is 7h 3m old and 234.3k tokens.",
+            "❯ 1. Resume from summary (recommended)",
+            "  2. Resume full session as-is",
+            "  3. Don't ask me again",
+            "Enter to confirm · Esc to cancel",
+          ].join("\n")
+        : "❯  ";
+      return { stdout: "" };
+    }
+    if (command.includes("send-keys") && command.includes("Enter")
+        && screen.includes("Resume from summary")) {
       screen = "❯  ";
       return { stdout: "" };
     }
@@ -92,6 +105,19 @@ feature("Claude quota process boundary", () => {
       const launch = ctx.commands.find((command) => command.includes("ANTHROPIC_DISABLE_SURVEY"));
       expect(launch).toContain(`--resume '${ctx.sessionId}'`);
       expect(launch).not.toContain("--continue");
+      ctx.cleanup();
+    }],
+  });
+
+  component("a large exact session takes Claude's recommended summary path", {
+    given: ["a resume command that opens Claude's current size warning", () => fixture({ resumeDialogOnLaunch: true })],
+    when: ["the lifecycle waits for the resumed composer", ({ lifecycle, receipt }) => lifecycle.restart("claw", 0, receipt)],
+    then: ["the menu is confirmed and the same session becomes ready", (result, ctx) => {
+      expect(result).toMatchObject({ ok: true, sessionId: ctx.sessionId, limitEventId: ctx.limitEventId });
+      const launchIndex = ctx.commands.findIndex((command) => command.includes("ANTHROPIC_DISABLE_SURVEY"));
+      expect(ctx.commands.slice(launchIndex + 1).some((command) => (
+        command.includes("send-keys") && command.includes("Enter")
+      ))).toBe(true);
       ctx.cleanup();
     }],
   });

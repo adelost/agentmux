@@ -113,6 +113,59 @@ feature("dismissBlockingPrompt", () => {
     ],
   });
 
+  unit("accepts Claude's current summary-resume menu", {
+    given: [
+      "a large resumed session with the recommended first option selected",
+      () => setup({
+        paneOutput:
+          "This session is 7h 3m old and 234.3k tokens.\n\n" +
+          "Resuming the full session will consume a substantial portion of your usage limits.\n\n" +
+          "❯ 1. Resume from summary (recommended)\n" +
+          "  2. Resume full session as-is\n" +
+          "  3. Don't ask me again\n\n" +
+          "Enter to confirm · Esc to cancel\n",
+      }),
+    ],
+    when: [
+      "checking the active resume blocker",
+      ({ dismissBlockingPrompt }) => dismissBlockingPrompt("ai:.2"),
+    ],
+    then: [
+      "the preselected summary path is confirmed once",
+      (result, { tmuxExec }) => {
+        expect(result).toBe("resume");
+        expect(tmuxExec).toHaveBeenCalledTimes(2);
+        expect(tmuxExec.mock.calls[1][0]).toContain("send-keys");
+        expect(tmuxExec.mock.calls[1][0]).toContain("Enter");
+      },
+    ],
+  });
+
+  unit("does not accept the current resume menu after a composer returned", {
+    given: [
+      "the same menu lingering above a live composer",
+      () => setup({
+        paneOutput:
+          "❯ 1. Resume from summary (recommended)\n" +
+          "  2. Resume full session as-is\n" +
+          "  3. Don't ask me again\n" +
+          "Enter to confirm · Esc to cancel\n" +
+          "❯ \n",
+      }),
+    ],
+    when: [
+      "checking after the menu was already handled",
+      ({ dismissBlockingPrompt }) => dismissBlockingPrompt("ai:.2"),
+    ],
+    then: [
+      "no Enter leaks into the live composer",
+      (result, { tmuxExec }) => {
+        expect(result).toBeNull();
+        expect(tmuxExec).toHaveBeenCalledTimes(1);
+      },
+    ],
+  });
+
   // --- Regression for 1.16.2: stale scrollback false positive --------------
   // Bug: dismissBlockingPrompt fired whenever "0: Dismiss" appeared anywhere
   // in the last 20 lines of scrollback — even after the survey was already
