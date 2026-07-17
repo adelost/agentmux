@@ -65,6 +65,9 @@ import {
 } from "../core/bridge-mode.mjs";
 import { createBridgeLifecycle } from "./bridge.mjs";
 import { cmdDream } from "./dream.mjs";
+import {
+  collectContextTelemetry, contextTelemetrySnapshot, nativeContextReading,
+} from "../core/suggestions-context-telemetry.mjs";
 export {
   collectDreamTargets,
   hasDreamPaneBlock,
@@ -2206,6 +2209,8 @@ function lastAssistantPreview(agent, paneIdx, paneDir) {
   return "";
 }
 
+// WHAT: Reads one pane's canonical context and preview.
+// WHY: Keeps native and tmux engines behind one top-row contract.
 async function inspectPane(ctx, agent, pane) {
   if (agent.backend === "native") {
     try {
@@ -2213,7 +2218,7 @@ async function inspectPane(ctx, agent, pane) {
       const turns = groupNativeTurns(snapshot.events);
       const latest = turns.at(-1);
       const preview = latest?.items?.filter((item) => item.type === "text").at(-1)?.content || "";
-      const context = await ctx.agent.getContext(agent.name, pane.index);
+      const context = nativeContextReading(snapshot);
       return {
         status: snapshot.agent.running ? "working" : "idle",
         preview: preview.replace(/\s+/g, " ").trim(),
@@ -3594,24 +3599,19 @@ async function cmdImage(args, ctx) {
 }
 
 /**
+ * WHAT: Prints the fleet context leaderboard or its canonical JSON snapshot.
+ * WHY: Keeps human and machine consumers on the same context observations.
  * Cross-session context leaderboard. Sorts all claude/codex panes by
  * percent descending (tokens as tie-breaker). Helps answer "which pane
  * is closest to the context ceiling right now?" without manual digging.
  */
 async function cmdTop(ctx, flags = {}) {
-  const agents = listAgents(ctx.configPath);
-  const rows = [];
+  const rows = await collectContextTelemetry(ctx, { agents: listAgents(ctx.configPath),
+    hasSession, listPanes, dialectFor, inspectPane });
 
-  for (const a of agents) {
-    if (!(await hasSession(ctx, a.name))) continue;
-    const panes = await listPanes(ctx, a.name);
-    for (const p of panes) {
-      if (!dialectFor(a, p)) continue;
-      const { status, preview, context } = await inspectPane(ctx, a, p);
-      if (!context) continue;
-      const label = a.panes[p.index]?.label || null;
-      rows.push({ agent: a.name, pane: p.index, status, context, preview, label });
-    }
+  if (flags.json) {
+    console.log(JSON.stringify(contextTelemetrySnapshot(rows)));
+    return;
   }
 
   if (!rows.length) { console.log("No claude/codex panes with context data."); return; }
@@ -4146,7 +4146,7 @@ const FLAG_SPECS = {
     grep: "string",                       // jsonl: regex filter over prompt + items
   },
   ps: { n: "number" },
-  top: { n: "number", sort: "string" },
+  top: { n: "number", sort: "string", json: "boolean" },
   timeline: {
     n: "number",
     agent: "string",
