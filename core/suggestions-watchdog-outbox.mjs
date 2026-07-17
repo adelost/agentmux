@@ -1,6 +1,4 @@
-// Drain Suggestions watchdog outboxes only after agentmux proves pane delivery.
-// The server outbox and agentmux queue are the two durable halves; this bridge
-// deliberately keeps no third cursor that could skip a pending alert.
+// Bridge the server outbox to proven agentmux delivery without a third cursor.
 
 import { createHash } from "crypto";
 import { lstatSync, readFileSync } from "fs";
@@ -38,10 +36,9 @@ export function watchdogDeliveryKey(projectId, dedupeKey) {
   return `suggestions-watchdog:${projectId}:${digest}`;
 }
 
-export function loadWatchdogOutboxConfig(path, {
-  home = homedir(),
-  allowTestOrigin = false,
-} = {}) {
+/** WHAT: Loads bounded watchdog configuration. WHY: Keeps untrusted origins and paths from reaching delivery. */
+export function loadWatchdogOutboxConfig(path, { home = homedir(),
+  allowTestOrigin = false } = {}) {
   let raw;
   try { raw = yaml.load(readFileSync(path, "utf8")); }
   catch (error) { throw new Error(`config: cannot read ${path}: ${error.message}`); }
@@ -85,14 +82,9 @@ export function loadWatchdogOutboxConfig(path, {
 }
 
 /** WHAT: Resolves whether one pane can receive a new assignment. WHY: Keeps unfinished work from being interrupted or stacked. */
-export function assignmentDeliveryEligibility({
-  paneStatus,
-  lastAssistantText = null,
-  lastAssistantAt = null,
-  lastUserAt = null,
-  now = Date.now(),
-  idleMs = DEFAULT_ASSIGNMENT_IDLE_MS,
-}) {
+export function assignmentDeliveryEligibility({ paneStatus, lastAssistantText = null,
+  lastAssistantAt = null, lastUserAt = null, now = Date.now(),
+  idleMs = DEFAULT_ASSIGNMENT_IDLE_MS }) {
   if (paneStatus !== "idle") {
     return { eligible: false, reason: `pane-${paneStatus || "unknown"}` };
   }
@@ -100,9 +92,7 @@ export function assignmentDeliveryEligibility({
   const userAt = Number(lastUserAt);
   const hasAssistant = Number.isFinite(assistantAt) && assistantAt > 0;
   const hasUser = Number.isFinite(userAt) && userAt > 0;
-  if (!hasAssistant && !hasUser) {
-    return { eligible: false, reason: "no-turn-data", idleForMs: null };
-  }
+  if (!hasAssistant && !hasUser) return { eligible: false, reason: "no-turn-data", idleForMs: null };
   const answeredLatest = hasAssistant && (!hasUser || assistantAt >= userAt);
   if (answeredLatest && looksDone(lastAssistantText)) {
     return { eligible: true, reason: "explicit-done", idleForMs: Math.max(0, now - assistantAt) };
@@ -116,36 +106,26 @@ export function assignmentDeliveryEligibility({
 }
 
 /** WHAT: Builds assignment presence from the real pane timeline. WHY: Keeps broker envelopes from resetting owner activity and makes unreadable histories explicit. */
-export function assignmentDeliveryAvailability({
-  paneStatus,
-  rows = [],
-  agent,
-  pane,
-  now = Date.now(),
-  idleMs = DEFAULT_ASSIGNMENT_IDLE_MS,
-}) {
-  let lastAssistantText = null;
-  let lastAssistantAt = null;
-  let lastUserAt = null;
+export function assignmentDeliveryAvailability({ paneStatus, rows = [], agent, pane,
+  now = Date.now(), idleMs = DEFAULT_ASSIGNMENT_IDLE_MS }) {
+  let lastAssistantText = null, lastAssistantAt = null, lastUserAt = null;
   for (const row of Array.isArray(rows) ? rows : []) {
     if (row?.agent !== agent || Number(row?.pane) !== Number(pane)
       || (row.type != null && row.type !== "text")) continue;
     const at = Date.parse(String(row.timestamp || ""));
     if (!Number.isFinite(at) || !String(row.content || "").trim()) continue;
     if (row.role === "assistant" && (lastAssistantAt == null || at >= lastAssistantAt)) {
-      lastAssistantAt = at;
-      lastAssistantText = String(row.content);
+      [lastAssistantAt, lastAssistantText] = [at, String(row.content)];
     }
     if (row.role === "user" && !parseSenderHeader(row.content)
       && !isSystemNoiseDirective(row.content)
-      && (lastUserAt == null || at >= lastUserAt)) {
-      lastUserAt = at;
-    }
+      && (lastUserAt == null || at >= lastUserAt)) lastUserAt = at;
   }
   return assignmentDeliveryEligibility({ paneStatus, lastAssistantText, lastAssistantAt,
     lastUserAt, now, idleMs });
 }
 
+/** WHAT: Loads one private bearer credential. WHY: Keeps unsafe files and malformed tokens from authorizing delivery. */
 export function loadPrivateCredential(path, { uid = process.getuid?.() } = {}) {
   let stat;
   try { stat = lstatSync(path); }
@@ -161,14 +141,11 @@ export function loadPrivateCredential(path, { uid = process.getuid?.() } = {}) {
 }
 
 /** WHAT: Dispatches one durable watchdog alert through agentmux. WHY: Keeps cancelled jobs from blocking the outbox forever or fabricating ACKs. */
-export function createAmuxOutboxDeliverer({
-  queue = createDeliveryQueue(),
-  waitMs = 12_000,
-  now = () => Date.now(),
+export function createAmuxOutboxDeliverer({ queue = createDeliveryQueue(),
+  waitMs = 12_000, now = () => Date.now(),
   cancelledRetryAfterMs = DEFAULT_CANCELLED_REENQUEUE_AFTER_MS,
   brokerFallbackAfterMs = DEFAULT_BROKER_FALLBACK_AFTER_MS,
-  escalate = null,
-} = {}) {
+  escalate = null } = {}) {
   if (!Number.isSafeInteger(cancelledRetryAfterMs)
     || cancelledRetryAfterMs < 1_000 || cancelledRetryAfterMs > 60 * 60_000) {
     throw new Error("delivery: cancelledRetryAfterMs must be 1000-3600000");
@@ -212,17 +189,9 @@ export function createAmuxOutboxDeliverer({
 }
 
 /** WHAT: Dispatches eligible watchdog outbox alerts. WHY: Keeps unavailable assignment targets pending without starting their ACK clock. */
-export async function pollWatchdogOutboxes({
-  config,
-  readToken,
-  adminToken,
-  fetchImpl = globalThis.fetch,
-  deliver,
-  availability,
-  onAssignmentUnavailable = null,
-  now = () => Date.now(),
-  logger = console,
-}) {
+export async function pollWatchdogOutboxes({ config, readToken, adminToken,
+  fetchImpl = globalThis.fetch, deliver, availability, onAssignmentUnavailable = null,
+  now = () => Date.now(), logger = console }) {
   if (!isObject(config) || (config.projects !== null && !Array.isArray(config.projects))
     || typeof deliver !== "function") {
     throw new Error("poller: config and deliver function are required");
@@ -264,23 +233,19 @@ export async function pollWatchdogOutboxes({
             if (!isObject(state) || state.eligible !== true) {
               const reason = String(state?.reason || "unknown");
               const observedAt = Number(now());
-              const pendingForMs = Number.isSafeInteger(observedAt)
-                ? Math.max(0, observedAt - alert.queuedAt) : 0;
+              const pendingForMs = Number.isSafeInteger(observedAt) ? Math.max(0, observedAt - alert.queuedAt) : 0;
               const shouldAlarm = reason === "no-turn-data" || pendingForMs >= policy.idleMs;
               if (shouldAlarm && typeof onAssignmentUnavailable === "function") {
-                const digest = createHash("sha256")
-                  .update(`${projectId}\0${alert.dedupeKey}\0assignment-availability`)
-                  .digest("hex");
+                const digest = createHash("sha256").update(`${projectId}\0${alert.dedupeKey}\0assignment-availability`).digest("hex");
                 const idempotencyKey = `suggestions-watchdog-availability:${digest}`;
                 const alarmReason = `assignment-offer-never-attempted:${reason}`;
-                const message = `[SRC-0114] Assignment offer ${projectId}/${alert.id}`
-                  + ` (${alert.ticketId}) to ${target.agent}:${target.pane} was never attempted.`
+                const message = `[SRC-0114] Assignment offer ${projectId}/${alert.id} (${alert.ticketId})`
+                  + ` to ${target.agent}:${target.pane} was never attempted.`
                   + ` reason=${reason}; ownerAckClockStarted=false (fick aldrig frågan, not owner ACK timeout).`
                   + ` pendingForMs=${pendingForMs}.`;
                 try {
                   await onAssignmentUnavailable({ projectId, alert, target, state,
-                    ownerAckClockStarted: false, pendingForMs, alarmReason,
-                    idempotencyKey, message });
+                    ownerAckClockStarted: false, pendingForMs, alarmReason, idempotencyKey, message });
                 } catch (error) {
                   throw new Error(`assignment offer was not attempted (${reason}; ownerAckClockStarted=false); human alarm failed: ${error.message}`);
                 }
@@ -374,13 +339,8 @@ function endpoint(baseUrl, pathname, projectId) {
   return url;
 }
 
-async function fetchJson(url, {
-  fetchImpl,
-  token,
-  timeoutMs,
-  method = "GET",
-  body = null,
-}) {
+async function fetchJson(url, { fetchImpl, token, timeoutMs,
+  method = "GET", body = null }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   timer.unref?.();
@@ -411,9 +371,8 @@ async function fetchJson(url, {
 
 function brokerTarget(value, projectId) {
   const project = value?.assignmentBootstrap?.project ?? value?.project;
-  const routingBroker = value?.project?.routingGuide?.workers?.find?.(
-    (worker) => isObject(worker) && worker.role === "broker",
-  )?.id;
+  const routingBroker = value?.project?.routingGuide?.workers
+    ?.find?.((worker) => isObject(worker) && worker.role === "broker")?.id;
   const brokerOwner = project?.brokerOwner ?? routingBroker;
   if (!isObject(project) || project.id !== projectId || typeof brokerOwner !== "string") {
     throw new Error("schema: bootstrap project/brokerOwner missing");
@@ -535,10 +494,6 @@ function validateReceipt(value, idempotencyKey) {
     || !Number.isSafeInteger(value.acknowledgedAt) || value.acknowledgedAt < 0) {
     throw new Error("delivery: exact acknowledged agentmux receipt required");
   }
-  return {
-    idempotencyKey,
-    jobId: value.jobId,
-    status: "acknowledged",
-    acknowledgedAt: Number(value.acknowledgedAt),
-  };
+  return { idempotencyKey, jobId: value.jobId, status: "acknowledged",
+    acknowledgedAt: Number(value.acknowledgedAt) };
 }

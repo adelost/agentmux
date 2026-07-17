@@ -206,32 +206,15 @@ function readSessionMeta(filePath) {
   return payload;
 }
 
-/**
- * Find the most specific codex rollout file matching a pane dir.
- *
- * Codex records `cwd` at session start. A pane may cd into subdirs later,
- * but the session file stays the same. Matching rules (in priority order):
- *
- *   1. Exact cwd == paneDir or a verified git worktree below it
- *   2. cwd is an ancestor of paneDir (pane cd'd deeper since start)
- *
- * When multiple ancestors match (e.g. both /foo and /foo/bar have sessions
- * for paneDir /foo/bar/sub), prefer the *closest* ancestor, the one with
- * the longest cwd prefix. That's the session that actually started in the
- * pane's directory tree, not some unrelated codex running in /foo.
- *
- * Ties on specificity break to newest mtime.
- *
- * Other descendant sessions remain rejected: only an on-disk `.git` marker
- * establishes that the pane intentionally started Codex in its worktree.
- */
+// Prefer exact pane/worktree sessions, then the closest cwd ancestor. Arbitrary
+// descendants stay rejected; an on-disk `.git` marker proves pane ownership.
 function isPaneWorktreeCwd(paneDir, cwd) {
   if (!String(cwd).startsWith(`${paneDir}/`)) return false;
   let current = cwd;
   while (current !== paneDir && current.startsWith(`${paneDir}/`)) {
     if (existsSync(join(current, ".git"))) return true;
     const parent = dirname(current);
-    if (parent === current) break;
+    if (parent === current) return false;
     current = parent;
   }
   return false;
@@ -260,9 +243,7 @@ function latestSessionFor(paneDir, { sessionDirs = codexSessionDirs() } = {}) {
 
   if (candidates.length === 0) return null;
 
-  // Exact pane roots and pane-owned git worktrees are both direct session
-  // identities; newest activity chooses between them. Generic ancestors keep
-  // the old closest-prefix rule, while arbitrary descendants remain rejected.
+  // Direct identities prefer newest activity; ancestors prefer closest cwd.
   candidates.sort((a, b) => {
     if (a.direct !== b.direct) return a.direct ? -1 : 1;
     if (a.direct && b.direct && a.mtime !== b.mtime) return b.mtime - a.mtime;
@@ -286,6 +267,8 @@ function codexPromptEventMatches(event, needle) {
  * prompt. A later receipt must contain a NEW event identity, so repeated
  * prompts remain distinguishable without comparing Discord's server clock to
  * the host clock used by Codex JSONL timestamps.
+ * WHAT: Builds an exact prompt-event identity cursor.
+ * WHY: Keeps repeated prompts from sharing one delivery receipt.
  */
 export function captureCodexPromptEchoCursor(paneDir, promptText) {
   const needle = promptText?.trim();
@@ -832,10 +815,7 @@ export function readLastTurnsCodex(paneDir, opts = {}) {
     : parseJsonl(file);
   if (events.length === 0) return { turns: [], compactions: [], jsonlFile: file };
 
-  // Operational tail readers can begin after the user_message of one very
-  // large turn. Automatically reconstruct its visible suffix; requiring each
-  // caller to remember `headless` made the watchdog report rows=0 for a live
-  // 15MB rollout even though recent assistant events were present.
+  // A bounded tail can begin after user_message; reconstruct its visible suffix.
   let turns = groupCodexIntoTurns(events, { headless: headless || Boolean(tailBytes) });
   const compactions = codexCompactions(events);
 
