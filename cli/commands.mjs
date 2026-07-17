@@ -33,11 +33,12 @@ import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.
 import { appendEvent, latestPaneStatesCached, mergeStatus, readEvents, eventsPath } from "../core/events.mjs";
 import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../core/pane-status.mjs";
 import { readHeartbeat } from "../core/heartbeat.mjs";
+import { observeReleaseIdentity } from "../core/release-identity.mjs";
 import { assessRunningBridgeHints, syncConfiguredAgentHints } from "../core/hints-sync.mjs";
 import { ensureAgentHints, HINTS_VERSION } from "../agent.mjs";
 import { readGuardHeartbeats } from "../core/guard-heartbeat.mjs";
 import {
-  checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkSupervisors, checkLedger,
+  checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkReleaseIdentity, checkSupervisors, checkLedger,
   checkBridgeMode, checkContextBridge, checkTmux, checkTmuxVersion, checkConfig, overallStatus, formatDoctorReport, FAIL, WARN,
   checkTmuxClients, checkTmuxPaneGeometry, observeTmuxFleet,
   checkDeliveryQueue,
@@ -3065,7 +3066,6 @@ function cmdQueue(positional, flags, ctx) {
 async function cmdDoctor(ctx) {
   const home = process.env.HOME;
   const repoDir = dirname(dirname(fileURLToPath(import.meta.url)));
-
   // bridge process + supervision
   let pids = [], supervised = false;
   try {
@@ -3084,19 +3084,18 @@ async function cmdDoctor(ctx) {
       supervised = /start\.sh/.test(parent);
     }
   } catch {}
-
   // repo version + heartbeat
   let repoVersion = null;
   try { repoVersion = JSON.parse(readFileSync(join(repoDir, "package.json"), "utf-8")).version; }
   catch {}
   const beat = readHeartbeat();
   const guardHeartbeats = readGuardHeartbeats();
-
   // hooks
   let settings = null, hookFileExists = false;
   try { settings = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf-8")); }
   catch {}
   hookFileExists = existsSync(join(repoDir, "bin", "amux-hook.mjs"));
+  const releaseIdentity = observeReleaseIdentity({ runtimeRoot: repoDir, entryPath: process.argv[1], home, settings });
 
   // ledger
   let ledgerStat = null;
@@ -3204,7 +3203,8 @@ async function cmdDoctor(ctx) {
     checkBridgeProcess({ pids, supervised }),
     checkBridgeMode({ mode: readBridgeMode(), running: pids.length > 0 }),
     checkSupervisors({ pids: supervisorPids, crashLooping }),
-    checkHeartbeatHealth({ beat, repoVersion, pidAlive: pids.length > 0 }), checkQuotaRecoveryHealth({ ...quotaRecoveryHealthObservation(createDeliveryQueue()), bridgeRunning: pids.length > 0 }),
+    checkReleaseIdentity(releaseIdentity),
+    checkHeartbeatHealth({ beat, repoVersion, repoSourceSha: releaseIdentity.sourceSha, pidAlive: pids.length > 0 }), checkQuotaRecoveryHealth({ ...quotaRecoveryHealthObservation(createDeliveryQueue()), bridgeRunning: pids.length > 0 }),
     checkHooksInstalled({ settings, hookFileExists }),
     checkLedger({ stat: ledgerStat }),
     checkContextBridge({ claudePanes, pushing }),

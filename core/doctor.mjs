@@ -13,6 +13,7 @@
 import { classifyHeartbeat } from "./heartbeat.mjs";
 import { classifyGuardHeartbeat } from "./guard-heartbeat.mjs";
 import { QUOTA_RECOVERY_STALE_MS, quotaRecoveryHealthObservation } from "./quota-recovery-heartbeat.mjs";
+export { checkReleaseIdentity } from "./release-identity.mjs";
 export { quotaRecoveryHealthObservation };
 
 export const OK = "ok";
@@ -104,13 +105,16 @@ export function checkBridgeMode({ mode, running }) {
   return check("bridge mode", OK, "managed · detached auto-recovery");
 }
 
-export function checkHeartbeatHealth({ beat, repoVersion, pidAlive, now = Date.now() }) {
-  const hb = classifyHeartbeat(beat, { repoVersion, pidAlive, now });
+/** WHAT: Formats bridge heartbeat health. WHY: Keeps exact stale-code and hung-process recovery visible to operators. */
+export function checkHeartbeatHealth({ beat, repoVersion, repoSourceSha = null, pidAlive, now = Date.now() }) {
+  const hb = classifyHeartbeat(beat, { repoVersion, repoSourceSha, pidAlive, now });
   switch (hb.state) {
     case "ok":
       return check("bridge heartbeat", OK, `beating (${Math.round(hb.ageMs / 1000)}s ago), v${beat.version}`);
     case "stale-code":
-      return check("bridge code", WARN, `bridge runs v${hb.running}, repo is v${hb.repo}`,
+      return check("bridge code", WARN, hb.repoSourceSha
+        ? `bridge runs ${hb.runningSourceSha?.slice(0, 12) || "no release SHA"}, installed ${hb.repoSourceSha.slice(0, 12)}`
+        : `bridge runs v${hb.running}, repo is v${hb.repo}`,
         "restart to activate: /restart in Discord (or amux stop && amux serve)");
     case "hung":
       return check("bridge heartbeat", FAIL, `pid alive but last beat ${Math.round(hb.ageMs / 60000)} min ago`,

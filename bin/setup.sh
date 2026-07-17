@@ -141,7 +141,10 @@ fi
 
 echo ""
 echo "Installing agentmux CLIs..."
-npm link --silent 2>/dev/null && ok "amux, ax, amux-suggest and overlap-gate CLIs" || fail "npm link failed (try with sudo)"
+MASTER_SHA="$(git rev-parse refs/remotes/origin/master)"
+node bin/install-release.mjs --repo "$SCRIPT_DIR" --sha "$MASTER_SHA" \
+  && ok "amux, ax, amux-suggest and overlap-gate CLIs from $MASTER_SHA" \
+  || fail "immutable agentmux release install failed"
 
 # --- Done ---
 

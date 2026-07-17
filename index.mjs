@@ -36,6 +36,7 @@ import { createNativeRuntimeWatcher } from "./channels/native-runtime-watcher.mj
 import { createPlaywrightWatchdog } from "./channels/playwright-watchdog.mjs";
 import { parsePlaywrightWatchdogConfig } from "./core/playwright-watchdog.mjs";
 import { startHeartbeat } from "./core/heartbeat.mjs";
+import { readReleaseManifest } from "./core/release-identity.mjs";
 import { syncConfiguredAgentHints } from "./core/hints-sync.mjs";
 import { runPendingFleetRestart } from "./core/fleet-restart.mjs";
 import { createDeliveryQueue } from "./core/delivery-queue.mjs";
@@ -112,7 +113,12 @@ const pkgVersion = (() => {
   try { return JSON.parse(readFileSync(resolve(__dir, "package.json"), "utf-8")).version; }
   catch { return "unknown"; }
 })();
-startHeartbeat({ version: pkgVersion, hintsVersion: HINTS_VERSION });
+const releaseManifest = readReleaseManifest(__dir);
+startHeartbeat({
+  version: pkgVersion,
+  sourceSha: releaseManifest?.sourceSha || null,
+  hintsVersion: HINTS_VERSION,
+});
 
 const appState = createState(STATE_FILE);
 if (appState.get("tts") === undefined) appState.set("tts", process.env.TTS === "1");
