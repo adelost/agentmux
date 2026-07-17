@@ -85,7 +85,7 @@ export function paneDir(rootDir, pane) {
 // The marker lets ensureAgentHints detect stale copies on spawn; bump it
 // whenever AGENT_HINTS content changes. Appended content survives upgrades.
 // WHAT: Names generated agent policy version. WHY: Keeps stale pane instructions from surviving respawns.
-export const HINTS_VERSION = "1.24.5";
+export const HINTS_VERSION = "1.24.6";
 /** DTO: Generated agent policy footer marker. */
 export const HINTS_END_MARKER = "<!-- amux-hints-end -->";
 
@@ -515,21 +515,19 @@ drift is a red gate, not a scoping excuse.
    "sluta review åt varandra, ni är typ lika smarta, merga istället").** No
    peer reviews between agents; when CI, lint, and repo gates are green the
    owner merges their own PR. Review only on explicit Mattias ask or a red gate.
-4. **The manager owns the flow without human babysitting:** prioritize,
-   delegate, verify gates and the current PR, merge,
-   delete the remote branch, run the repo's gated deploy, and update the
-   ticket. Do not wait for routine decisions, routine merges, or routine
-   deploys from the human. Deploy is part of done (Mattias 2026-07-15: "det
-   ska väl aldrig ligga på mig? Det ska väl vara en del av flödet?"): after
-   merge the broker deploys with proof — canary/verify green, rollback path
-   known — a merged-but-undeployed wave is an open loop, not a finished one.
-   Only a deploy that costs money (rule 7) waits for human approval. A named
-   deploy owner or release boundary coordinates the normal flow; it is not a
-   veto over an explicit current instruction from Mattias.
-   An edge served by MORE than one merging broker has exactly ONE designated
-   deploy owner (currently: skydive:2 for skydive.v1d.io); the other brokers
-   hand a merged wave to that owner for the deploy instead of racing the
-   edge — deploy authority follows the target, not the merge.
+4. **The feature owner owns delivery end to end; the broker owns dispatch.**
+   The broker prioritizes and assigns work. The feature owner implements in its
+   own branch/worktree, gates, rebases onto fresh trunk, self-merges the pinned
+   PR, deletes its branch/worktree, deploys through the repository gate,
+   verifies live, and updates the ticket (Mattias 2026-07-17). Do not hand
+   routine review, merge, or deploy back to the broker or human. A
+   merged-but-undeployed feature is an open loop. Only a money-spending or
+   otherwise irreversible deploy (rule 7) waits for human approval.
+   Deployment safety comes from fresh repository state, not a designated
+   person: before release, fetch trunk and assert the clean deploy worktree is
+   exactly current \`origin/main\`/\`origin/master\`; never deploy a stale
+   feature checkout. If trunk advances, rebuild. Release locks may serialize
+   simultaneous releases but do not transfer authority from the feature owner.
    If review finds a defect, the same feature owner fixes the root cause and
    adds permanent gates while other agents continue their own work
    undisturbed.
@@ -545,12 +543,13 @@ drift is a red gate, not a scoping excuse.
    slice in a commit and resume from there.
 8. **Broker panel routing is the default, not a capability boundary.** In every
    configured project fleet, pane \`:2\` is the default manager/broker. It may
-   autonomously assign, gate, review, follow up, label, or change ownership for
+   autonomously prioritize, assign, follow up, label, or change ownership for
    existing worker panes \`:3\` and above in the same session. Panes \`:0\` and
    \`:1\` are reserved on-demand and never count as idle fleet capacity.
    Without a direct human instruction, pane \`:2\` orchestrates and panes
-   \`:3+\` implement. A current explicit instruction from Mattias to any pane
-   authorizes that pane to implement, push, merge, or deploy within the stated
+   \`:3+\` own their assigned feature through implementation, push, merge,
+   deploy, verification, and cleanup. A current explicit instruction from
+   Mattias to any pane authorizes that same end-to-end flow within the stated
    scope; no peer approval or broker relay may narrow, delay, or override it.
    Concretely, \`skydive:2\` manages \`skydive:3\` through \`skydive:9\`,
    \`lsrc:2\` manages \`lsrc:3\` through \`lsrc:9\`, and \`watch:2\` manages
