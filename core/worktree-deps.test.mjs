@@ -4,14 +4,13 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
-  readlinkSync,
   realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "fs";
 import { tmpdir } from "os";
-import { join, resolve, sep } from "path";
+import { isAbsolute, join, relative, resolve, sep } from "path";
 import { mkdtempSync } from "fs";
 import {
   discoverDependencyRoots,
@@ -28,19 +27,26 @@ import {
   snapshotLocks,
 } from "./worktree-deps.mjs";
 
-function fixture() {
+function fixture({ cacheOverride = true } = {}) {
   const root = mkdtempSync(join(tmpdir(), "amux-worktree-deps-"));
   const commonDir = join(root, ".git");
   mkdirSync(commonDir);
-  // Pin the immutable cache under the fixture root so tests never touch the real
-  // ~/.cache and each fixture is isolated. Tests run sequentially (preset).
+  // Most tests pin the immutable cache under the fixture root for isolation.
+  // Boundary coverage deliberately exercises the production default. Tests run
+  // sequentially (preset), so restoring this process-wide override is safe.
   const priorCacheDir = process.env.AGENTMUX_WORKTREE_DEPS_DIR;
-  process.env.AGENTMUX_WORKTREE_DEPS_DIR = join(root, "deps-cache");
+  if (cacheOverride) process.env.AGENTMUX_WORKTREE_DEPS_DIR = join(root, "deps-cache");
+  else delete process.env.AGENTMUX_WORKTREE_DEPS_DIR;
   return { root, commonDir, cleanup: () => {
     if (priorCacheDir === undefined) delete process.env.AGENTMUX_WORKTREE_DEPS_DIR;
     else process.env.AGENTMUX_WORKTREE_DEPS_DIR = priorCacheDir;
     rmSync(root, { recursive: true, force: true });
   } };
+}
+
+function pathIsWithin(parent, candidate) {
+  const rel = relative(realpathSync(parent), realpathSync(candidate));
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
 function packageLock(version = "4.0.18", extra = {}) {
@@ -68,6 +74,7 @@ function writeNodeRoot(root, { lock = packageLock(), pkg = { name: "fixture", pr
 function writeInstalledTree(root, lock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8"))) {
   const modules = join(root, "node_modules");
   mkdirSync(join(modules, "vitest"), { recursive: true });
+  writeFileSync(join(modules, "vitest", "index.js"), "export const source = 'cache';\n");
   const packages = Object.fromEntries(Object.entries(lock.packages).filter(([key]) => key));
   writeFileSync(join(modules, ".package-lock.json"), `${JSON.stringify({ lockfileVersion: 3, packages })}\n`);
 }
@@ -195,26 +202,41 @@ feature("worktree dependency bootstrap", () => {
     }],
   });
 
-  unit("promotes an exact npm tree to an immutable lock-keyed cache and links the worktree", {
+  unit("promotes an exact npm tree to an immutable lock-keyed cache and copies the worktree", {
     given: ["an exact local install", () => {
       const ctx = fixture();
       writeNodeRoot(ctx.root);
       writeInstalledTree(ctx.root);
       return ctx;
     }],
-    when: ["provisioning twice", (ctx) => ({
-      before: provisionNodeRoot({ root: ctx.root, repoRoot: ctx.root, commonDir: ctx.commonDir, check: true, npmVersion: "11.6.0" }),
-      first: provisionNodeRoot({ root: ctx.root, repoRoot: ctx.root, commonDir: ctx.commonDir, npmVersion: "11.6.0" }),
-      second: provisionNodeRoot({ root: ctx.root, repoRoot: ctx.root, commonDir: ctx.commonDir, check: true, npmVersion: "11.6.0" }),
-      ctx,
-    })],
-    then: ["the exact local tree passes check before becoming an immutable reusable link", ({ before, first, second, ctx }) => {
+    when: ["checking, planning, provisioning, then checking again", (ctx) => {
+      const before = provisionNodeRoot({ root: ctx.root, repoRoot: ctx.root,
+        commonDir: ctx.commonDir, check: true, npmVersion: "11.6.0" });
+      const dry = provisionNodeRoot({ root: ctx.root, repoRoot: ctx.root,
+        commonDir: ctx.commonDir, dryRun: true, npmVersion: "11.6.0" });
+      const excludedAfterReadOnly = existsSync(join(ctx.commonDir, "info", "exclude"));
+      const first = provisionNodeRoot({ root: ctx.root, repoRoot: ctx.root,
+        commonDir: ctx.commonDir, npmVersion: "11.6.0" });
+      const second = provisionNodeRoot({ root: ctx.root, repoRoot: ctx.root,
+        commonDir: ctx.commonDir, check: true, npmVersion: "11.6.0" });
+      return { before, dry, excludedAfterReadOnly, first, second, ctx };
+    }],
+    then: ["read-only modes stay mutation-free before the tree becomes an immutable reusable copy",
+      ({ before, dry, excludedAfterReadOnly, first, second, ctx }) => {
       expect(before).toMatchObject({ status: "ready", mode: "local-exact" });
-      expect(first).toMatchObject({ status: "ready", mode: "immutable-link" });
-      expect(second).toMatchObject({ status: "ready", mode: "immutable-link", key: first.key });
+      expect(dry).toMatchObject({ status: "planned", mode: "would-promote-cache" });
+      expect(excludedAfterReadOnly).toBe(false);
+      expect(first).toMatchObject({ status: "ready", mode: "immutable-copy" });
+      expect(second).toMatchObject({ status: "ready", mode: "immutable-copy", key: first.key });
       expect(lstatSync(join(ctx.root, "node_modules")).isSymbolicLink()).toBe(false);
-      const target = resolve(ctx.root, "node_modules", readlinkSync(join(ctx.root, "node_modules", "vitest")));
-      expect(target.startsWith(join(nodeCacheRoot(ctx.commonDir), "node", first.key))).toBe(true);
+      const target = realpathSync(join(ctx.root, "node_modules", "vitest"));
+      expect(target).toBe(join(ctx.root, "node_modules", "vitest"));
+      expect(existsSync(join(nodeCacheRoot(ctx.commonDir), "node", first.key,
+        "node_modules", "vitest"))).toBe(true);
+      writeFileSync(join(ctx.root, "node_modules", "vitest", "index.js"),
+        "export const source = 'worktree';\n");
+      expect(readFileSync(join(nodeCacheRoot(ctx.commonDir), "node", first.key,
+        "node_modules", "vitest", "index.js"), "utf8")).toBe("export const source = 'cache';\n");
       // SKY-0105: a dep realpath must never land inside .git — Vite 6 (and any
       // tool with a `**/.git/**` deny) refuses to serve its own client from there.
       expect(target.includes(`${sep}.git${sep}`)).toBe(false);
@@ -230,12 +252,12 @@ feature("worktree dependency bootstrap", () => {
       writeInstalledTree(ctx.root);
       return ctx;
     }],
-    when: ["provisioning the immutable link farm", (ctx) => ({
+    when: ["provisioning the immutable local copy", (ctx) => ({
       ctx,
       result: provisionNodeRoot({ root: ctx.root, repoRoot: ctx.root, commonDir: ctx.commonDir, npmVersion: "11.6.0" }),
     })],
     then: ["the cache root, and the realpath a consumer's require.resolve would see, avoid .git", ({ ctx, result }) => {
-      expect(result).toMatchObject({ mode: "immutable-link" });
+      expect(result).toMatchObject({ mode: "immutable-copy" });
       const cacheRoot = nodeCacheRoot(ctx.commonDir);
       expect(cacheRoot.includes(`${sep}.git${sep}`)).toBe(false);
       expect(cacheRoot.endsWith(`${sep}.git`)).toBe(false);
@@ -243,6 +265,82 @@ feature("worktree dependency bootstrap", () => {
       const resolved = realpathSync(join(ctx.root, "node_modules", "vitest"));
       expect(resolved.includes(`${sep}.git${sep}`)).toBe(false);
       ctx.cleanup();
+    }],
+  });
+
+  unit("a shared dependency realpath stays inside the repository and outside .git", {
+    given: ["a linked worktree using the production cache location", () => {
+      const ctx = fixture({ cacheOverride: false });
+      const worktree = join(ctx.root, ".agents", "7", "worktree");
+      mkdirSync(worktree, { recursive: true });
+      writeNodeRoot(worktree);
+      writeInstalledTree(worktree);
+      return { ...ctx, worktree };
+    }],
+    when: ["provisioning the immutable local copy", (ctx) => ({
+      ctx,
+      result: provisionNodeRoot({ root: ctx.worktree, repoRoot: ctx.worktree,
+        commonDir: ctx.commonDir, npmVersion: "11.6.0" }),
+    })],
+    then: ["the dependency is worktree-local while the shared cache satisfies both repository boundaries",
+      ({ ctx, result }) => {
+        try {
+          const cacheRoot = nodeCacheRoot(ctx.commonDir);
+          const resolved = realpathSync(join(ctx.worktree, "node_modules", "vitest"));
+          const safeBoundaryCount = Number(pathIsWithin(ctx.worktree, resolved))
+            + Number(pathIsWithin(ctx.root, cacheRoot))
+            + Number(!pathIsWithin(ctx.commonDir, cacheRoot));
+          if (process.env.AMUX_MEASUREMENT_OUTPUT) {
+            writeFileSync(process.env.AMUX_MEASUREMENT_OUTPUT, JSON.stringify({
+              metric: "safe-cache-path-boundaries",
+              unit: "boundaries",
+              operator: ">=",
+              limit: 2,
+              observed: safeBoundaryCount,
+            }));
+          }
+          expect(safeBoundaryCount).toBeGreaterThan(2);
+          expect(pathIsWithin(ctx.worktree, resolved)).toBe(true);
+          expect(pathIsWithin(ctx.root, cacheRoot)).toBe(true);
+          expect(pathIsWithin(ctx.commonDir, cacheRoot)).toBe(false);
+          expect(result).toMatchObject({ status: "ready" });
+          expect(readFileSync(join(ctx.commonDir, "info", "exclude"), "utf8"))
+            .toContain(`/${relative(ctx.root, cacheRoot).split(sep).join("/")}/`);
+        } finally {
+          ctx.cleanup();
+        }
+      }],
+  });
+
+  unit("an override cannot put shared dependency realpaths beyond either safe boundary", {
+    given: ["a conventional repository and both unsafe override directions", () => {
+      const ctx = fixture();
+      const external = mkdtempSync(join(tmpdir(), "amux-worktree-external-cache-"));
+      const escaped = join(ctx.root, "symlink-cache");
+      symlinkSync(external, escaped, "dir");
+      return { ctx, external, unsafe: [join(ctx.root, "..", "outside-cache"),
+        join(ctx.commonDir, "inside-git-cache"), escaped] };
+    }],
+    when: ["resolving each unsafe cache root", ({ ctx, external, unsafe }) => ({
+      ctx,
+      external,
+      errors: unsafe.map((path) => {
+        process.env.AGENTMUX_WORKTREE_DEPS_DIR = path;
+        try { nodeCacheRoot(ctx.commonDir); return null; }
+        catch (error) { return error; }
+      }),
+    })],
+    then: ["all are rejected instead of silently recreating SRC-0107 or SKY-0105", ({ ctx, external, errors }) => {
+      try {
+        expect(errors).toHaveLength(3);
+        for (const error of errors) {
+          expect(error).toBeInstanceOf(Error);
+          expect(error.message).toContain("inside the repository root and outside its Git common directory");
+        }
+      } finally {
+        ctx.cleanup();
+        rmSync(external, { recursive: true, force: true });
+      }
     }],
   });
 
@@ -269,7 +367,10 @@ feature("worktree dependency bootstrap", () => {
     }],
     then: ["the target and key change while the old cache remains immutable", (ctx) => {
       expect(ctx.second.key).not.toBe(ctx.first.key);
-      expect(readlinkSync(join(ctx.root, "node_modules", "vitest"))).toContain(ctx.second.key);
+      expect(realpathSync(join(ctx.root, "node_modules", "vitest")))
+        .toBe(join(ctx.root, "node_modules", "vitest"));
+      expect(existsSync(join(nodeCacheRoot(ctx.commonDir), "node", ctx.second.key,
+        "node_modules", "vitest"))).toBe(true);
       expect(existsSync(join(nodeCacheRoot(ctx.commonDir), "node", ctx.first.key))).toBe(true);
       expect(nodeTreeMatches(ctx.root)).toBe(true);
       ctx.cleanup();
@@ -391,7 +492,7 @@ feature("worktree dependency bootstrap", () => {
       const provision = ({ context }) => ({
         repoRoot: context.repoRoot,
         commonDir: context.commonDir,
-        results: [{ ecosystem: "node", root: context.repoRoot, status: "ready", mode: "immutable-link" }],
+        results: [{ ecosystem: "node", root: context.repoRoot, status: "ready", mode: "immutable-copy" }],
         skipped: [],
         ok: true,
         planned: false,

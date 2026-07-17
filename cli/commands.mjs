@@ -4496,7 +4496,7 @@ Usage:
   agent churn [path]              WARN-only young tests + rewrite hotspots from git history
   agent worktree-deps [path]      Provision every tracked npm/uv root in a worktree
     --check                       Verify only; fail on missing, stale, or unsafe deps
-    --dry                         Show the immutable-link/local-venv plan
+    --dry                         Show the immutable-copy/local-venv plan
   agent gate --scoped [path]      Bootstrap deps, run the repo-owned full gate, report skips
     --dry                         Show dependency + gate plan without changing anything
     -- command ...                Override gate discovery with an explicit argv-safe command
