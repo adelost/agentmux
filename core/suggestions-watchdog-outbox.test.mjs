@@ -5,6 +5,10 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 import {
+  formatWatchdogFallbackView,
+  watchdogFallbackView,
+} from "./suggestions-watchdog-fallback.mjs";
+import {
   assignmentDeliveryEligibility,
   createAmuxOutboxDeliverer,
   loadPrivateCredential,
@@ -335,6 +339,136 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
     }
   });
 
+  it("counts down an unacknowledged delivery and cancels fallback honestly on recovery", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "amux-watchdog-fallback-recovery-"));
+    let now = 10_000;
+    try {
+      const queue = createDeliveryQueue({ rootDir, now: () => now });
+      const idempotencyKey = watchdogDeliveryKey("source", alert.dedupeKey);
+      const request = { agent: "lsrc", pane: 2, prompt: PROMPT,
+        idempotencyKey, projectId: "source", alert };
+      const escalate = vi.fn();
+      const deliver = createAmuxOutboxDeliverer({ queue, waitMs: 0, now: () => now,
+        brokerFallbackAfterMs: 60_000, escalate });
+
+      await expect(deliver(request)).rejects.toThrow(/fallback opens in 60000ms/u);
+      expect(escalate).not.toHaveBeenCalled();
+      const blocked = queue.list("lsrc", 2)[0];
+      expect(blocked).toMatchObject({ status: "pending", acknowledgedAt: null,
+        metadata: { watchdogDeliveryGeneration: 1, watchdogFallbackState: "blocked",
+          watchdogFallbackDeadlineAt: 70_000, watchdogOwnerAckClockStarted: false } });
+      const countdown = watchdogFallbackView(blocked, { now: 65_000 });
+      expect(countdown).toMatchObject({ state: "blocked", remainingMs: 5_000,
+        ownerAckClockStarted: false, humanEscalation: "none" });
+      expect(formatWatchdogFallbackView(countdown)).toContain(
+        "state=blocked remaining=5s ownerAckClockStarted=false human=none");
+
+      now = 69_999;
+      queue.update(queue.findById(blocked.id), {
+        status: "delivering", attempts: 1, firstAttemptAt: 20_000,
+      });
+      await expect(deliver(request)).rejects.toThrow(/fallback opens in 1ms/u);
+      expect(queue.findById(blocked.id).metadata.watchdogFallbackState).toBe("blocked");
+      queue.update(queue.findById(blocked.id), {
+        status: "acknowledged", acknowledgedAt: now, terminalAt: now,
+      });
+      await expect(deliver(request)).resolves.toMatchObject({
+        jobId: blocked.id, status: "acknowledged", acknowledgedAt: now,
+      });
+      expect(queue.findById(blocked.id)).toMatchObject({ metadata: {
+        watchdogFallbackState: "cancelled", watchdogFallbackCancelledAt: now,
+        watchdogFallbackCancelReason: "broker-recovered-before-deadline",
+      } });
+      expect(escalate).not.toHaveBeenCalled();
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("persists one human fallback across restart at the exact deadline", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "amux-watchdog-fallback-deadline-"));
+    let now = 20_000;
+    const effects = [];
+    const identities = new Set();
+    const escalate = vi.fn(async ({ idempotencyKey }) => {
+      if (!identities.has(idempotencyKey)) effects.push(idempotencyKey);
+      identities.add(idempotencyKey);
+      return { sent: true, target: "dm" };
+    });
+    const request = { agent: "lsrc", pane: 2, prompt: PROMPT,
+      idempotencyKey: watchdogDeliveryKey("source", alert.dedupeKey),
+      projectId: "source", alert };
+    try {
+      const queue = createDeliveryQueue({ rootDir, now: () => now });
+      const beforeDeadline = createAmuxOutboxDeliverer({ queue, waitMs: 0, now: () => now,
+        brokerFallbackAfterMs: 60_000, escalate });
+      await expect(beforeDeadline(request)).rejects.toThrow(/fallback opens in 60000ms/u);
+
+      now = 80_000;
+      const reopened = createDeliveryQueue({ rootDir, now: () => now });
+      const atDeadline = createAmuxOutboxDeliverer({ queue: reopened, waitMs: 0,
+        now: () => now, brokerFallbackAfterMs: 60_000, escalate });
+      await expect(atDeadline(request)).rejects.toThrow(/human escalation persisted/u);
+      await expect(atDeadline(request)).rejects.toThrow(/human escalation persisted/u);
+      const job = reopened.list("lsrc", 2)[0];
+      expect(job).toMatchObject({ status: "pending", acknowledgedAt: null, metadata: {
+        watchdogFallbackState: "escalated", watchdogEscalatedAt: now,
+        watchdogEscalationIdempotencyKey: `suggestions-watchdog-fallback:${job.id}:g1`,
+        watchdogOwnerAckClockStarted: false,
+      } });
+      expect(escalate).toHaveBeenCalledTimes(1);
+      expect(effects).toEqual([`suggestions-watchdog-fallback:${job.id}:g1`]);
+      expect(formatWatchdogFallbackView(watchdogFallbackView(job, { now })))
+        .toContain("state=escalated remaining=0s ownerAckClockStarted=false human=sent");
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("retries an ambiguous human fallback with the same identity and no duplicate effect", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "amux-watchdog-fallback-ambiguous-"));
+    const now = 90_000;
+    const effects = new Set();
+    const calls = [];
+    const request = { agent: "lsrc", pane: 2, prompt: PROMPT,
+      idempotencyKey: watchdogDeliveryKey("source", alert.dedupeKey),
+      projectId: "source", alert };
+    try {
+      const firstQueue = createDeliveryQueue({ rootDir, now: () => 30_000 });
+      await expect(createAmuxOutboxDeliverer({ queue: firstQueue, waitMs: 0,
+        now: () => 30_000, brokerFallbackAfterMs: 60_000,
+        escalate: vi.fn() })(request)).rejects.toThrow(/fallback opens/u);
+
+      const ambiguous = async ({ idempotencyKey }) => {
+        calls.push(idempotencyKey);
+        effects.add(idempotencyKey);
+        throw new Error("notification receipt lost");
+      };
+      const deadlineQueue = createDeliveryQueue({ rootDir, now: () => now });
+      await expect(createAmuxOutboxDeliverer({ queue: deadlineQueue, waitMs: 0,
+        now: () => now, brokerFallbackAfterMs: 60_000,
+        escalate: ambiguous })(request)).rejects.toThrow(/notification receipt lost/u);
+
+      const recovered = async ({ idempotencyKey }) => {
+        calls.push(idempotencyKey);
+        const deduped = effects.has(idempotencyKey);
+        effects.add(idempotencyKey);
+        return { sent: !deduped, deduped, target: "dedupe" };
+      };
+      const restartedQueue = createDeliveryQueue({ rootDir, now: () => now });
+      await expect(createAmuxOutboxDeliverer({ queue: restartedQueue, waitMs: 0,
+        now: () => now, brokerFallbackAfterMs: 60_000,
+        escalate: recovered })(request)).rejects.toThrow(/human escalation persisted/u);
+      expect(new Set(calls).size).toBe(1);
+      expect(effects.size).toBe(1);
+      expect(restartedQueue.list("lsrc", 2)[0]).toMatchObject({
+        metadata: { watchdogFallbackState: "escalated" },
+      });
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("re-enqueues one proven not-sent cancellation once across restart instead of latching it forever", async () => {
     const rootDir = mkdtempSync(join(tmpdir(), "amux-watchdog-cancelled-"));
     const idempotencyKey = watchdogDeliveryKey("source", alert.dedupeKey);
@@ -353,14 +487,15 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
 
       const deliver = createAmuxOutboxDeliverer({ queue, waitMs: 0,
         now: () => now, cancelledRetryAfterMs: 60_000 });
-      await expect(deliver(request)).rejects.toThrow(/not acknowledged \(pending\)/u);
+      await expect(deliver(request)).rejects.toThrow(/fallback opens in 300000ms/u);
       expect(queue.findById(seeded.id)).toMatchObject({ status: "pending", terminalAt: null,
-        metadata: { watchdogReenqueueCount: 1, watchdogReenqueuedAt: now } });
+        metadata: { watchdogReenqueueCount: 1, watchdogReenqueuedAt: now,
+          watchdogDeliveryGeneration: 2, watchdogFallbackState: "blocked" } });
 
       const reopened = createDeliveryQueue({ rootDir, now: () => now });
       const afterRestart = createAmuxOutboxDeliverer({ queue: reopened, waitMs: 0,
         now: () => now, cancelledRetryAfterMs: 60_000 });
-      await expect(afterRestart(request)).rejects.toThrow(/not acknowledged \(pending\)/u);
+      await expect(afterRestart(request)).rejects.toThrow(/fallback opens in 300000ms/u);
       expect(reopened.findById(seeded.id)).toMatchObject({ status: "pending",
         metadata: { watchdogReenqueueCount: 1 } });
 
@@ -391,7 +526,9 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
         nextAttemptAt: null, lastReason: "not sent after the bounded re-enqueue" });
       const request = { agent: "lsrc", pane: 2, prompt: PROMPT,
         idempotencyKey, projectId: "source", alert };
-      const deliver = createAmuxOutboxDeliverer({ queue, waitMs: 0, now: () => now });
+      const escalate = vi.fn(async () => ({ sent: true, target: "dm" }));
+      const deliver = createAmuxOutboxDeliverer({ queue, waitMs: 0, now: () => now,
+        escalate });
 
       await expect(deliver(request)).rejects.toThrow(/human escalation persisted/u);
       expect(queue.findById(seeded.id)).toMatchObject({ status: "cancelled",
@@ -400,6 +537,7 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
       now += 60_000;
       await expect(deliver(request)).rejects.toThrow(/human escalation persisted/u);
       expect(queue.findById(seeded.id).metadata.watchdogEscalatedAt).toBe(120_000);
+      expect(escalate).toHaveBeenCalledTimes(1);
     } finally {
       rmSync(rootDir, { recursive: true, force: true });
     }
