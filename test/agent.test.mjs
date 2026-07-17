@@ -405,7 +405,7 @@ feature("generated agent policy", () => {
       return content;
     }],
     then: ["pane 2 manages workers 3+ by default and direct instructions remain authoritative", (content) => {
-      expect(content).toContain("<!-- amux-hints-version: 1.24.12 -->");
+      expect(content).toContain("<!-- amux-hints-version: 1.24.13 -->");
       expect(content).toContain("Broker panel routing is the default, not a capability boundary");
       expect(content).toContain("pane `:2` is the default manager/broker");
       expect(content).toContain("panes `:3` and above in the same session");
