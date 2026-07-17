@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
 } from "node:fs";
@@ -72,9 +73,13 @@ feature("explicit-SHA release artifact", () => {
       execFileSync("tar", ["-xzf", staged.artifactPath, "-C", unpacked]);
       expect(readFileSync(join(unpacked, "package", "tracked.txt"), "utf8")).toBe("committed\n");
       expect(existsSync(join(unpacked, "package", "untracked.txt"))).toBe(false);
-      expect(JSON.parse(readFileSync(
+      const manifest = JSON.parse(readFileSync(
         join(unpacked, "package", RELEASE_MANIFEST_NAME), "utf8",
-      ))).toEqual({ schemaVersion: 1, sourceSha: ctx.sha, packageVersion: "9.8.7" });
+      ));
+      expect(manifest).toMatchObject({ schemaVersion: 1, sourceSha: ctx.sha, packageVersion: "9.8.7" });
+      expect(manifest.files["tracked.txt"]).toBe(
+        createHash("sha256").update("committed\n").digest("hex"),
+      );
       expect(staged.artifactSha256).toMatch(/^[0-9a-f]{64}$/u);
       expect(git(ctx.repo, ["rev-parse", "HEAD"])).toBe(before.head);
       expect(git(ctx.repo, ["status", "--porcelain"])).toBe(before.status);

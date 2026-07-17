@@ -33,9 +33,6 @@ function fixture({ linkedCheckout = false } = {}) {
     symlinkSync(packageRoot, packageLink);
   }
   write(join(packageRoot, "package.json"), `${JSON.stringify({ name: "agentmux", version: VERSION })}\n`);
-  write(join(packageRoot, RELEASE_MANIFEST_NAME), `${JSON.stringify({
-    schemaVersion: 1, sourceSha: SOURCE_SHA, packageVersion: VERSION,
-  })}\n`);
   for (const path of [
     join(packageRoot, "bin", "agent-cli.mjs"),
     join(packageRoot, "bin", "amux-hook.mjs"),
@@ -43,6 +40,13 @@ function fixture({ linkedCheckout = false } = {}) {
     join(home, ".agentmux", "bin", "amux-suggest.mjs"),
     join(home, ".agentmux", "core", "suggestions-authoring.mjs"),
   ]) write(path, `// ${path}\n`);
+  const packageFiles = ["package.json", "bin/agent-cli.mjs", "bin/amux-hook.mjs"];
+  write(join(packageRoot, RELEASE_MANIFEST_NAME), `${JSON.stringify({
+    schemaVersion: 1,
+    sourceSha: SOURCE_SHA,
+    packageVersion: VERSION,
+    files: Object.fromEntries(packageFiles.map((path) => [path, sha256(join(packageRoot, path))])),
+  })}\n`);
   mkdirSync(dirname(binary), { recursive: true });
   symlinkSync(join(packageRoot, "bin", "agent-cli.mjs"), binary);
 
@@ -121,6 +125,29 @@ feature("installed release identity", () => {
     then: ["the worktree link is a permanent gate failure", ({ ctx, result }) => {
       expect(result.ok).toBe(false);
       expect(result.issues.map((issue) => issue.code)).toContain("linked-checkout");
+      ctx.cleanup();
+    }],
+  });
+
+  component("post-install code mutation invalidates the embedded package manifest", {
+    given: ["an immutable receipted package whose CLI bytes are later edited", () => {
+      const ctx = fixture();
+      writeFileSync(join(ctx.packageLink, "bin", "agent-cli.mjs"), "// mutated after install\n");
+      return ctx;
+    }],
+    when: ["verifying every packed runtime file", (ctx) => ({
+      ctx,
+      result: observeReleaseIdentity({
+        runtimeRoot: ctx.packageLink,
+        entryPath: ctx.binary,
+        home: ctx.home,
+        readRemoteMaster: () => SOURCE_SHA,
+        runGuardCanary: () => ({ status: 2, stderr: "BLOCKED" }),
+      }),
+    })],
+    then: ["the claimed source SHA cannot mask changed code bytes", ({ ctx, result }) => {
+      expect(result.ok).toBe(false);
+      expect(result.issues.map((issue) => issue.code)).toContain("package-content");
       ctx.cleanup();
     }],
   });

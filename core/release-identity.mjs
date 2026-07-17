@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import {
   existsSync, lstatSync, readFileSync, realpathSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 /** WHAT: Names the source manifest embedded in each package. WHY: Keeps archived code identity independent from host receipts. */
 export const RELEASE_MANIFEST_NAME = ".agentmux-release.json";
@@ -100,6 +100,20 @@ export function observeReleaseIdentity({
   const receipt = suppliedReceipt || readJson(releaseReceiptPath(home));
   if (!manifest || manifest.schemaVersion !== 1 || !COMMIT_SHA.test(manifest.sourceSha || "")) {
     issues.push({ code: "manifest", detail: "installed package has no valid exact-SHA release manifest" });
+  }
+  if (!manifest?.files || typeof manifest.files !== "object" || Array.isArray(manifest.files)
+    || Object.keys(manifest.files).length === 0) {
+    issues.push({ code: "package-content", detail: "release manifest has no packed-file hashes" });
+  } else if (packageRoot) {
+    for (const [path, expectedHash] of Object.entries(manifest.files)) {
+      const candidate = resolve(packageRoot, path);
+      const rel = relative(packageRoot, candidate);
+      if (!path || rel.startsWith("..") || isAbsolute(rel)
+        || !SHA256.test(expectedHash) || sha256(candidate) !== expectedHash) {
+        issues.push({ code: "package-content", detail: `installed package bytes differ at ${path}` });
+        break;
+      }
+    }
   }
   if (!receipt || receipt.schemaVersion !== 1 || !COMMIT_SHA.test(receipt.sourceSha || "")) {
     issues.push({ code: "receipt", detail: "permanent release receipt is missing or invalid" });

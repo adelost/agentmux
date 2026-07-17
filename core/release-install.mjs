@@ -99,6 +99,13 @@ export function stageReleaseArtifact({ repoRoot, sourceSha, outputRoot }) {
   const packageJson = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
   const manifest = { schemaVersion: 1, sourceSha, packageVersion: packageJson.version };
   writeFileSync(join(source, RELEASE_MANIFEST_NAME), `${JSON.stringify(manifest)}\n`);
+  const preview = JSON.parse(run("npm", ["pack", "--dry-run", "--json"], { cwd: source }));
+  manifest.files = Object.fromEntries(preview[0].files
+    .map((file) => file.path)
+    .filter((path) => path !== RELEASE_MANIFEST_NAME)
+    .sort()
+    .map((path) => [path, hashFile(join(source, path))]));
+  writeFileSync(join(source, RELEASE_MANIFEST_NAME), `${JSON.stringify(manifest)}\n`);
   const packed = JSON.parse(run("npm", ["pack", "--json", "--pack-destination", output], { cwd: source }));
   const artifactPath = join(output, packed[0].filename);
   return {
