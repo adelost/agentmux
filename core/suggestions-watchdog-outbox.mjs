@@ -23,6 +23,8 @@ const MAX_PROMPT_BYTES = 32 * 1024;
 const PROJECT_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/u;
 /** WHAT: Defines the sustained-idle assignment threshold. WHY: Keeps short pauses from looking like worker availability. */
 export const DEFAULT_ASSIGNMENT_IDLE_MS = 10 * 60_000;
+/** WHAT: Lets an idle worker explicitly reopen its assignment lane. WHY: Availability must not require ten minutes of silence. */
+export const ASSIGNMENT_AVAILABLE_SIGNAL = "ASSIGNMENT_AVAILABLE";
 /** WHAT: Defines one safe retry of a prompt proven not sent. WHY: Avoids reviving a deliberate cancellation in the same scheduler tick. */
 export const DEFAULT_CANCELLED_REENQUEUE_AFTER_MS = 60_000;
 
@@ -83,46 +85,102 @@ export function loadWatchdogOutboxConfig(path, { home = homedir(),
 
 /** WHAT: Resolves whether one pane can receive a new assignment. WHY: Keeps unfinished work from being interrupted or stacked. */
 export function assignmentDeliveryEligibility({ paneStatus, lastAssistantText = null,
-  lastAssistantAt = null, lastUserAt = null, now = Date.now(),
+  lastAssistantAt = null, lastUserAt = null, lastCoordinationAt = null, now = Date.now(),
   idleMs = DEFAULT_ASSIGNMENT_IDLE_MS }) {
   if (paneStatus !== "idle") {
     return { eligible: false, reason: `pane-${paneStatus || "unknown"}` };
   }
   const assistantAt = Number(lastAssistantAt);
   const userAt = Number(lastUserAt);
+  const coordinationAt = Number(lastCoordinationAt);
   const hasAssistant = Number.isFinite(assistantAt) && assistantAt > 0;
   const hasUser = Number.isFinite(userAt) && userAt > 0;
-  if (!hasAssistant && !hasUser) return { eligible: false, reason: "no-turn-data", idleForMs: null };
-  const answeredLatest = hasAssistant && (!hasUser || assistantAt >= userAt);
+  const hasCoordination = Number.isFinite(coordinationAt) && coordinationAt > 0;
+  if (!hasAssistant && !hasUser && !hasCoordination) {
+    return { eligible: false, reason: "no-turn-data", idleForMs: null };
+  }
+  const latestPromptAt = Math.max(hasUser ? userAt : 0, hasCoordination ? coordinationAt : 0);
+  const answeredLatest = hasAssistant && assistantAt >= latestPromptAt;
+  if (answeredLatest && signalsAssignmentAvailable(lastAssistantText)) {
+    return { eligible: true, reason: "explicit-available", idleForMs: Math.max(0, now - assistantAt) };
+  }
   if (answeredLatest && looksDone(lastAssistantText)) {
     return { eligible: true, reason: "explicit-done", idleForMs: Math.max(0, now - assistantAt) };
   }
-  const lastActivityAt = Math.max(hasAssistant ? assistantAt : 0, hasUser ? userAt : 0);
+  const lastActivityAt = Math.max(hasAssistant ? assistantAt : 0, hasUser ? userAt : 0,
+    hasCoordination ? coordinationAt : 0);
   const idleForMs = lastActivityAt > 0 ? Math.max(0, now - lastActivityAt) : 0;
   if (lastActivityAt > 0 && idleForMs >= idleMs) {
     return { eligible: true, reason: "sustained-idle", idleForMs };
   }
-  return { eligible: false, reason: "idle-threshold-not-met", idleForMs };
+  return { eligible: false,
+    reason: hasCoordination && coordinationAt === lastActivityAt
+      ? "recent-inter-agent-contact" : "idle-threshold-not-met",
+    idleForMs };
 }
 
-/** WHAT: Builds assignment presence from the real pane timeline. WHY: Keeps broker envelopes from resetting owner activity and makes unreadable histories explicit. */
+function signalsAssignmentAvailable(text) {
+  const lines = String(text || "").split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+  return lines.at(-1) === ASSIGNMENT_AVAILABLE_SIGNAL;
+}
+
+function isAssignmentOfferPrompt(text) {
+  const raw = String(text || "");
+  const sender = parseSenderHeader(raw);
+  const prompt = sender ? raw.slice(raw.indexOf("\n") + 1).trimStart() : raw.trimStart();
+  return /^ASSIGNMENT OFFER — [A-Z][A-Z0-9]*-[0-9]{4,} — generation [0-9]+(?:\r?\n|$)/u
+    .test(prompt);
+}
+
+/** WHAT: Builds assignment presence from the real pane timeline. WHY: Separates owner activity, peer contact, and offer-protocol turns. */
 export function assignmentDeliveryAvailability({ paneStatus, rows = [], agent, pane,
   now = Date.now(), idleMs = DEFAULT_ASSIGNMENT_IDLE_MS }) {
   let lastAssistantText = null, lastAssistantAt = null, lastUserAt = null;
+  let lastCoordinationAt = null, offerTurn = null;
+  const recordAssistant = (text, at) => {
+    if (lastAssistantAt == null || at >= lastAssistantAt) {
+      [lastAssistantAt, lastAssistantText] = [at, String(text)];
+    }
+  };
+  const finishOfferTurn = () => {
+    if (!offerTurn) return;
+    if (offerTurn.assistantText != null
+      && (offerTurn.hasTool || signalsAssignmentAvailable(offerTurn.assistantText))) {
+      recordAssistant(offerTurn.assistantText, offerTurn.assistantAt);
+    }
+    offerTurn = null;
+  };
   for (const row of Array.isArray(rows) ? rows : []) {
-    if (row?.agent !== agent || Number(row?.pane) !== Number(pane)
-      || (row.type != null && row.type !== "text")) continue;
+    if (row?.agent !== agent || Number(row?.pane) !== Number(pane)) continue;
     const at = Date.parse(String(row.timestamp || ""));
     if (!Number.isFinite(at) || !String(row.content || "").trim()) continue;
-    if (row.role === "assistant" && (lastAssistantAt == null || at >= lastAssistantAt)) {
-      [lastAssistantAt, lastAssistantText] = [at, String(row.content)];
+    if (row.role === "user") {
+      finishOfferTurn();
+      if (row.type != null && row.type !== "text") continue;
+      if (isAssignmentOfferPrompt(row.content)) {
+        offerTurn = { hasTool: false, assistantText: null, assistantAt: null };
+        continue;
+      }
+      if (isSystemNoiseDirective(row.content)) continue;
+      if (parseSenderHeader(row.content)) {
+        if (lastCoordinationAt == null || at >= lastCoordinationAt) lastCoordinationAt = at;
+      } else if (lastUserAt == null || at >= lastUserAt) lastUserAt = at;
+      continue;
     }
-    if (row.role === "user" && !parseSenderHeader(row.content)
-      && !isSystemNoiseDirective(row.content)
-      && (lastUserAt == null || at >= lastUserAt)) lastUserAt = at;
+    if (row.role !== "assistant") continue;
+    if (offerTurn) {
+      if (row.type === "tool") offerTurn.hasTool = true;
+      else if (row.type == null || row.type === "text") {
+        offerTurn.assistantText = String(row.content);
+        offerTurn.assistantAt = at;
+      }
+    } else if (row.type == null || row.type === "text") {
+      recordAssistant(row.content, at);
+    }
   }
+  finishOfferTurn();
   return assignmentDeliveryEligibility({ paneStatus, lastAssistantText, lastAssistantAt,
-    lastUserAt, now, idleMs });
+    lastUserAt, lastCoordinationAt, now, idleMs });
 }
 
 /** WHAT: Loads one private bearer credential. WHY: Keeps unsafe files and malformed tokens from authorizing delivery. */
@@ -242,7 +300,7 @@ export async function pollWatchdogOutboxes({ config, readToken, adminToken,
                 const message = `[SRC-0114] Assignment offer ${projectId}/${alert.id} (${alert.ticketId})`
                   + ` to ${target.agent}:${target.pane} was never attempted.`
                   + ` reason=${reason}; ownerAckClockStarted=false (fick aldrig frågan, not owner ACK timeout).`
-                  + ` pendingForMs=${pendingForMs}.`;
+                  + ` pendingForMs=${pendingForMs}; availabilitySignal=${ASSIGNMENT_AVAILABLE_SIGNAL}.`;
                 try {
                   await onAssignmentUnavailable({ projectId, alert, target, state,
                     ownerAckClockStarted: false, pendingForMs, alarmReason, idempotencyKey, message });

@@ -10,6 +10,7 @@ import {
   watchdogFallbackView,
 } from "./suggestions-watchdog-fallback.mjs";
 import {
+  ASSIGNMENT_AVAILABLE_SIGNAL,
   assignmentDeliveryAvailability,
   assignmentDeliveryEligibility,
   createAmuxOutboxDeliverer,
@@ -120,6 +121,14 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
     expect(assignmentDeliveryEligibility({ paneStatus: "idle", now,
       lastUserAt: now - 599_999, lastAssistantText: "jobbar vidare" }))
       .toMatchObject({ eligible: false, reason: "idle-threshold-not-met" });
+    expect(assignmentDeliveryEligibility({ paneStatus: "idle", now,
+      lastCoordinationAt: now - 30_000, lastAssistantAt: now - 20 * 60_000,
+      lastAssistantText: "Klart." }))
+      .toMatchObject({ eligible: false, reason: "recent-inter-agent-contact" });
+    expect(assignmentDeliveryEligibility({ paneStatus: "idle", now,
+      lastCoordinationAt: now - 30_000, lastAssistantAt: now - 1,
+      lastAssistantText: `Jag är idle och tillgänglig.\n${ASSIGNMENT_AVAILABLE_SIGNAL}` }))
+      .toMatchObject({ eligible: true, reason: "explicit-available" });
 
     expect(assignmentDeliveryAvailability({ paneStatus: "idle", now,
       agent: "lsrc", pane: 6, rows: [] }))
@@ -134,7 +143,45 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
           timestamp: new Date(presenceNow - 60_000).toISOString(),
           content: "[from lsrc:2]\n\nBroker follow-up that must not reset owner availability." },
       ] }))
+      .toMatchObject({ eligible: false, reason: "recent-inter-agent-contact", idleForMs: 60_000 });
+
+    expect(assignmentDeliveryAvailability({ paneStatus: "idle", now: presenceNow,
+      agent: "lsrc", pane: 6, rows: [
+        { agent: "lsrc", pane: 6, role: "assistant", type: "text",
+          timestamp: new Date(presenceNow - 45 * 60_000).toISOString(), content: "jobbar vidare" },
+        { agent: "lsrc", pane: 6, role: "user", type: "text",
+          timestamp: new Date(presenceNow - 60_000).toISOString(),
+          content: "ASSIGNMENT OFFER — SRC-0117 — generation 1\nOwner: lsrc:6" },
+        { agent: "lsrc", pane: 6, role: "assistant", type: "text",
+          timestamp: new Date(presenceNow - 30_000).toISOString(),
+          content: "Offret saknar fortfarande receipt; jag gör inget annat i turen." },
+      ] }))
       .toMatchObject({ eligible: true, reason: "sustained-idle", idleForMs: 45 * 60_000 });
+
+    expect(assignmentDeliveryAvailability({ paneStatus: "idle", now: presenceNow,
+      agent: "lsrc", pane: 6, rows: [
+        { agent: "lsrc", pane: 6, role: "user", type: "text",
+          timestamp: new Date(presenceNow - 60_000).toISOString(),
+          content: "ASSIGNMENT OFFER — SRC-0117 — generation 1\nOwner: lsrc:6" },
+        { agent: "lsrc", pane: 6, role: "assistant", type: "text",
+          timestamp: new Date(presenceNow - 30_000).toISOString(),
+          content: `Offret är olevererat; jag är idle.\n${ASSIGNMENT_AVAILABLE_SIGNAL}` },
+      ] }))
+      .toMatchObject({ eligible: true, reason: "explicit-available", idleForMs: 30_000 });
+
+    expect(assignmentDeliveryAvailability({ paneStatus: "idle", now: presenceNow,
+      agent: "lsrc", pane: 6, rows: [
+        { agent: "lsrc", pane: 6, role: "assistant", type: "text",
+          timestamp: new Date(presenceNow - 45 * 60_000).toISOString(), content: "jobbar vidare" },
+        { agent: "lsrc", pane: 6, role: "user", type: "text",
+          timestamp: new Date(presenceNow - 60_000).toISOString(),
+          content: "ASSIGNMENT OFFER — SRC-0117 — generation 1\nOwner: lsrc:6" },
+        { agent: "lsrc", pane: 6, role: "assistant", type: "tool",
+          timestamp: new Date(presenceNow - 45_000).toISOString(), content: "exec tests" },
+        { agent: "lsrc", pane: 6, role: "assistant", type: "text",
+          timestamp: new Date(presenceNow - 30_000).toISOString(), content: "Arbetet är inte klart." },
+      ] }))
+      .toMatchObject({ eligible: false, reason: "idle-threshold-not-met", idleForMs: 30_000 });
   });
 
   it("keeps a busy assignment offer pending and routes an eligible offer to its owner", async () => {
@@ -148,6 +195,7 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
     await expect(pollWatchdogOutboxes({
       config: config(), readToken: READ, adminToken: ADMIN,
       fetchImpl: remote.fetchImpl, deliver,
+      now: () => assignmentAlert.queuedAt + 5 * 60_000,
       availability: async ({ idleMs }) => ({ eligible: false,
         reason: idleMs === 600_000 ? "pane-working" : "wrong-policy" }),
       onAssignmentUnavailable,
@@ -156,6 +204,16 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
     expect(deliver).not.toHaveBeenCalled();
     expect(logger.error).toHaveBeenCalledWith(expect.stringMatching(
       /assignment offer was not attempted \(pane-working; ownerAckClockStarted=false\)/u));
+    expect(onAssignmentUnavailable).not.toHaveBeenCalled();
+
+    await expect(pollWatchdogOutboxes({
+      config: config(), readToken: READ, adminToken: ADMIN,
+      fetchImpl: remote.fetchImpl, deliver,
+      now: () => assignmentAlert.queuedAt + 10 * 60_000,
+      availability: async () => ({ eligible: false, reason: "pane-working" }),
+      onAssignmentUnavailable,
+      logger,
+    })).rejects.toThrow(/1 pending alert/u);
     expect(onAssignmentUnavailable).toHaveBeenCalledWith(expect.objectContaining({
       alarmReason: "assignment-offer-never-attempted:pane-working",
       ownerAckClockStarted: false,
@@ -171,6 +229,37 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
     expect(deliver).toHaveBeenCalledWith(expect.objectContaining({
       agent: "lsrc", pane: 4, prompt: assignmentAlert.payload.offerPrompt,
     }));
+  });
+
+  it("delivers at sustained idle before the receipt SLA instead of aging to fallback", async () => {
+    const remote = api({ outboxAlert: assignmentAlert });
+    const deliver = vi.fn(async () => ({
+      jobId: "8".repeat(32), status: "acknowledged", acknowledgedAt: 602_001,
+    }));
+    const onAssignmentUnavailable = vi.fn();
+    const rows = [{ agent: "lsrc", pane: 4, role: "assistant", type: "text",
+      timestamp: new Date(2_001).toISOString(), content: "Jag arbetar fortfarande." }];
+    let clock = assignmentAlert.queuedAt + 5 * 60_000;
+    const availability = async ({ agent, pane, idleMs }) => assignmentDeliveryAvailability({
+      paneStatus: "idle", rows, agent, pane, idleMs, now: clock,
+    });
+
+    await expect(pollWatchdogOutboxes({
+      config: config(), readToken: READ, adminToken: ADMIN,
+      fetchImpl: remote.fetchImpl, deliver, availability,
+      onAssignmentUnavailable, now: () => clock,
+    })).rejects.toThrow(/1 pending alert/u);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(onAssignmentUnavailable).not.toHaveBeenCalled();
+
+    clock = 2_001 + 10 * 60_000;
+    await expect(pollWatchdogOutboxes({
+      config: config(), readToken: READ, adminToken: ADMIN,
+      fetchImpl: remote.fetchImpl, deliver, availability,
+      onAssignmentUnavailable, now: () => clock,
+    })).resolves.toMatchObject({ delivered: 1, pending: 0 });
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(onAssignmentUnavailable).not.toHaveBeenCalled();
   });
 
   it("runs eligibility against the bounded Codex timeline instead of an idle fixture", () => {
