@@ -13,7 +13,8 @@ const usage = () => {
 
 The request body is sent as the exact strict-UTF-8 bytes read from --body-file.
 Each --expect-file must occur unchanged as literal UTF-8 in that body and in the
-GET response from --read-path. Direct inline Suggestions mutations are guarded.`);
+GET response from --read-path. One final LF or CRLF is treated as text-file
+framing, not quote content. Direct inline Suggestions mutations are guarded.`);
 };
 
 function parseArgs(argv) {

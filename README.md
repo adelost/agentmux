@@ -435,7 +435,8 @@ body file. When a request contains a human quote, pass the original quote in a
 separate `--expect-file` and provide `--read-path`; the client checks that text
 unchanged before the mutation, sends the persisted body bytes verbatim, then
 checks the authoritative GET response. Reusing a `mutationId` with different
-bytes fails locally instead of becoming an ambiguous retry.
+bytes fails locally instead of becoming an ambiguous retry. A single final LF
+or CRLF in the quote file is treated as text-file framing, not quote content.
 
 ```bash
 amux-suggest --method PATCH \
