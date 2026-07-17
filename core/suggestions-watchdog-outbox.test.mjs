@@ -1,14 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { createHash } from "crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
+import { readAllTurnsAcrossPanes } from "./jsonl-reader.mjs";
 import {
   formatWatchdogFallbackView,
   watchdogFallbackView,
 } from "./suggestions-watchdog-fallback.mjs";
 import {
+  assignmentDeliveryAvailability,
   assignmentDeliveryEligibility,
   createAmuxOutboxDeliverer,
   loadPrivateCredential,
@@ -118,6 +120,21 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
     expect(assignmentDeliveryEligibility({ paneStatus: "idle", now,
       lastUserAt: now - 599_999, lastAssistantText: "jobbar vidare" }))
       .toMatchObject({ eligible: false, reason: "idle-threshold-not-met" });
+
+    expect(assignmentDeliveryAvailability({ paneStatus: "idle", now,
+      agent: "lsrc", pane: 6, rows: [] }))
+      .toEqual({ eligible: false, reason: "no-turn-data", idleForMs: null });
+
+    const presenceNow = 5_000_000;
+    expect(assignmentDeliveryAvailability({ paneStatus: "idle", now: presenceNow,
+      agent: "lsrc", pane: 6, rows: [
+        { agent: "lsrc", pane: 6, role: "assistant", type: "text",
+          timestamp: new Date(presenceNow - 45 * 60_000).toISOString(), content: "jobbar vidare" },
+        { agent: "lsrc", pane: 6, role: "user", type: "text",
+          timestamp: new Date(presenceNow - 60_000).toISOString(),
+          content: "[from lsrc:2]\n\nBroker follow-up that must not reset owner availability." },
+      ] }))
+      .toMatchObject({ eligible: true, reason: "sustained-idle", idleForMs: 45 * 60_000 });
   });
 
   it("keeps a busy assignment offer pending and routes an eligible offer to its owner", async () => {
@@ -126,17 +143,23 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
       jobId: "9".repeat(32), status: "acknowledged", acknowledgedAt: 2_100,
     }));
     const logger = { info: vi.fn(), error: vi.fn() };
+    const onAssignmentUnavailable = vi.fn(async () => ({ sent: true }));
 
     await expect(pollWatchdogOutboxes({
       config: config(), readToken: READ, adminToken: ADMIN,
       fetchImpl: remote.fetchImpl, deliver,
       availability: async ({ idleMs }) => ({ eligible: false,
         reason: idleMs === 600_000 ? "pane-working" : "wrong-policy" }),
+      onAssignmentUnavailable,
       logger,
     })).rejects.toThrow(/1 pending alert/u);
     expect(deliver).not.toHaveBeenCalled();
     expect(logger.error).toHaveBeenCalledWith(expect.stringMatching(
-      /assignment target is not available \(pane-working\)/u));
+      /assignment offer was not attempted \(pane-working; ownerAckClockStarted=false\)/u));
+    expect(onAssignmentUnavailable).toHaveBeenCalledWith(expect.objectContaining({
+      alarmReason: "assignment-offer-never-attempted:pane-working",
+      ownerAckClockStarted: false,
+    }));
     expect(remote.calls.filter((call) => call.url.pathname.endsWith("/ack"))).toHaveLength(0);
 
     await expect(pollWatchdogOutboxes({
@@ -148,6 +171,69 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
     expect(deliver).toHaveBeenCalledWith(expect.objectContaining({
       agent: "lsrc", pane: 4, prompt: assignmentAlert.payload.offerPrompt,
     }));
+  });
+
+  it("runs eligibility against the bounded Codex timeline instead of an idle fixture", () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), "amux-src0114-real-path-"));
+    const originalHome = process.env.HOME;
+    const agentDir = join(fakeHome, "lsrc");
+    const paneDir = join(agentDir, ".agents", "6");
+    const sessionDir = join(fakeHome, ".codex", "sessions", "2026", "07", "17");
+    const now = Date.parse("2026-07-17T12:00:00Z");
+    try {
+      process.env.HOME = fakeHome;
+      mkdirSync(paneDir, { recursive: true });
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(join(sessionDir, "rollout-src0114.jsonl"), [
+        { type: "session_meta", payload: { cwd: paneDir } },
+        { type: "event_msg", timestamp: "2026-07-17T10:00:00Z",
+          payload: { type: "task_started", turn_id: "SRC-0114" } },
+        { type: "event_msg", timestamp: "2026-07-17T10:00:01Z",
+          payload: { type: "user_message", message: "long active turn" } },
+        { type: "response_item", timestamp: "2026-07-17T10:30:00Z",
+          payload: { type: "custom_tool_call_output", output: "x".repeat(16_000) } },
+        { type: "response_item", timestamp: "2026-07-17T11:15:00Z", payload: {
+          type: "message", role: "assistant",
+          content: [{ type: "output_text", text: "work paused while the prompt remains outside the tail" }],
+        } },
+        { type: "event_msg", timestamp: "2026-07-17T11:15:01Z",
+          payload: { type: "task_complete", turn_id: "SRC-0114" } },
+      ].map((event) => JSON.stringify(event)).join("\n") + "\n");
+      const panes = Array.from({ length: 7 }, () => ({ cmd: "bash" }));
+      panes[6] = { cmd: "codex --yolo" };
+      const rows = readAllTurnsAcrossPanes({ agents: [{ name: "lsrc", dir: agentDir, panes }],
+        agent: "lsrc", pane: 6, limit: 200, tailBytes: 2 * 1024 });
+      expect(rows.length).toBeGreaterThan(0);
+      expect(assignmentDeliveryAvailability({ paneStatus: "idle", rows,
+        agent: "lsrc", pane: 6, now, idleMs: 600_000 }))
+        .toMatchObject({ eligible: true, reason: "sustained-idle" });
+    } finally {
+      process.env.HOME = originalHome;
+      rmSync(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  it("raises one stable human alarm identity when the real presence read has no turns", async () => {
+    const remote = api({ outboxAlert: assignmentAlert });
+    const onAssignmentUnavailable = vi.fn(async () => ({ sent: true }));
+    const request = () => pollWatchdogOutboxes({
+      config: config(), readToken: READ, adminToken: ADMIN,
+      fetchImpl: remote.fetchImpl, deliver: vi.fn(), now: () => 700_000,
+      availability: async () => ({ eligible: false, reason: "no-turn-data", idleForMs: null }),
+      onAssignmentUnavailable,
+    });
+
+    await expect(request()).rejects.toThrow(/1 pending alert/u);
+    await expect(request()).rejects.toThrow(/1 pending alert/u);
+    expect(onAssignmentUnavailable).toHaveBeenCalledTimes(2);
+    const calls = onAssignmentUnavailable.mock.calls.map(([value]) => value);
+    expect(calls[0]).toMatchObject({ projectId: "source", target: { agent: "lsrc", pane: 4 },
+      state: { reason: "no-turn-data" }, ownerAckClockStarted: false,
+      alarmReason: "assignment-offer-never-attempted:no-turn-data" });
+    expect(calls[0].idempotencyKey).toMatch(/^suggestions-watchdog-availability:[a-f0-9]{64}$/u);
+    expect(calls[1].idempotencyKey).toBe(calls[0].idempotencyKey);
+    expect(calls[0].message).toContain("fick aldrig frågan");
+    expect(calls[0].message).toContain("ownerAckClockStarted=false");
   });
 
   it("defaults to registry discovery and keeps a bounded explicit project override", () => {

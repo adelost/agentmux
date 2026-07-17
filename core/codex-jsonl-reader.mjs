@@ -13,7 +13,7 @@
 // function_call events.
 
 import { readdirSync, readFileSync, statSync, existsSync, openSync, readSync, closeSync, fstatSync } from "fs";
-import { join } from "path";
+import { dirname, join } from "path";
 import { createHash } from "crypto";
 import { describeCustomExec, describeToolCall } from "./tool-display.mjs";
 import { codexSessionDirs } from "./codex-profiles.mjs";
@@ -206,26 +206,20 @@ function readSessionMeta(filePath) {
   return payload;
 }
 
-/**
- * Find the most specific codex rollout file matching a pane dir.
- *
- * Codex records `cwd` at session start. A pane may cd into subdirs later,
- * but the session file stays the same. Matching rules (in priority order):
- *
- *   1. Exact cwd == paneDir (most reliable)
- *   2. cwd is an ancestor of paneDir (pane cd'd deeper since start)
- *
- * When multiple ancestors match (e.g. both /foo and /foo/bar have sessions
- * for paneDir /foo/bar/sub), prefer the *closest* ancestor, the one with
- * the longest cwd prefix. That's the session that actually started in the
- * pane's directory tree, not some unrelated codex running in /foo.
- *
- * Ties on specificity break to newest mtime.
- *
- * We deliberately do NOT match sessions whose cwd is a *descendant* of
- * paneDir (e.g. paneDir=/foo/bar, cwd=/foo/bar/sub). That would pick up
- * any codex running inside our workspace, not our pane's own codex.
- */
+// Prefer exact pane/worktree sessions, then the closest cwd ancestor. Arbitrary
+// descendants stay rejected; an on-disk `.git` marker proves pane ownership.
+function isPaneWorktreeCwd(paneDir, cwd) {
+  if (!String(cwd).startsWith(`${paneDir}/`)) return false;
+  let current = cwd;
+  while (current !== paneDir && current.startsWith(`${paneDir}/`)) {
+    if (existsSync(join(current, ".git"))) return true;
+    const parent = dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
+  return false;
+}
+
 function latestSessionFor(paneDir, { sessionDirs = codexSessionDirs() } = {}) {
   // Profile 1 remains ~/.codex; profile 2 has its own CODEX_HOME.  Search
   // both so switching accounts does not make the watcher/context layer lose
@@ -239,17 +233,20 @@ function latestSessionFor(paneDir, { sessionDirs = codexSessionDirs() } = {}) {
     const cwd = meta?.cwd;
     if (!cwd) continue;
     if (paneDir === cwd) {
-      candidates.push({ path, mtime, specificity: cwd.length, exact: true });
+      candidates.push({ path, mtime, specificity: cwd.length, direct: true, exact: true });
+    } else if (isPaneWorktreeCwd(paneDir, cwd)) {
+      candidates.push({ path, mtime, specificity: cwd.length, direct: true, exact: false });
     } else if (paneDir.startsWith(cwd + "/")) {
-      candidates.push({ path, mtime, specificity: cwd.length, exact: false });
+      candidates.push({ path, mtime, specificity: cwd.length, direct: false, exact: false });
     }
   }
 
   if (candidates.length === 0) return null;
 
-  // Priority: exact > longest prefix > newest mtime
+  // Direct identities prefer newest activity; ancestors prefer closest cwd.
   candidates.sort((a, b) => {
-    if (a.exact !== b.exact) return a.exact ? -1 : 1;
+    if (a.direct !== b.direct) return a.direct ? -1 : 1;
+    if (a.direct && b.direct && a.mtime !== b.mtime) return b.mtime - a.mtime;
     if (a.specificity !== b.specificity) return b.specificity - a.specificity;
     return b.mtime - a.mtime;
   });
@@ -270,6 +267,8 @@ function codexPromptEventMatches(event, needle) {
  * prompt. A later receipt must contain a NEW event identity, so repeated
  * prompts remain distinguishable without comparing Discord's server clock to
  * the host clock used by Codex JSONL timestamps.
+ * WHAT: Builds an exact prompt-event identity cursor.
+ * WHY: Keeps repeated prompts from sharing one delivery receipt.
  */
 export function captureCodexPromptEchoCursor(paneDir, promptText) {
   const needle = promptText?.trim();
@@ -816,7 +815,8 @@ export function readLastTurnsCodex(paneDir, opts = {}) {
     : parseJsonl(file);
   if (events.length === 0) return { turns: [], compactions: [], jsonlFile: file };
 
-  let turns = groupCodexIntoTurns(events, { headless });
+  // A bounded tail can begin after user_message; reconstruct its visible suffix.
+  let turns = groupCodexIntoTurns(events, { headless: headless || Boolean(tailBytes) });
   const compactions = codexCompactions(events);
 
   if (since) {
