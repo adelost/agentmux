@@ -1903,7 +1903,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     promptTransportState,
     capturePane, captureScreen, capturePromptEchoCursor, captureSlashReceiptCursor, waitForSlashReceipt, sendEscape, sendTab, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
     dismissBlockingPrompt, waitForPromptEcho,
-    startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession,
+    startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession, paneProcessState: tuiRecovery.paneProcessState,
     sanitizeTmuxGlobalEnv, restartCodex, restartPaneExact, restartFleet,
   };
 }

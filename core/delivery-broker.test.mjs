@@ -379,6 +379,112 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
+  component("a submitted exact draft receives one bounded recovery Enter after one minute", {
+    given: ["a live idle Codex composer that retained the exact prompt after its first Enter", () => {
+      const rootDir = tempRoot();
+      let clock = 100_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const created = queue.enqueue({ agentName: "skydive", pane: 6, text: "round altimeter" });
+      const job = queue.update(created, {
+        status: "submitted", submittedAt: 1_000, nextAttemptAt: 0,
+        echoCursor: { kind: "test", positions: {} },
+      });
+      let enters = 0;
+      let echoed = false;
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => echoed;
+      agent.paneProcessState = async () => ({ running: true, shell: false, dead: false, command: "codex" });
+      agent.promptTransportState = async () => ({ state: "drafted", busy: false, dialect: "codex" });
+      agent.sendEnter = async () => { enters++; };
+      agent.restartPaneExact = async () => { throw new Error("must not restart a live process"); };
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
+      return { rootDir, queue, job, agent, broker, enters: () => enters,
+        receipt: () => { echoed = true; }, advance: () => { clock += 1_001; } };
+    }],
+    when: ["the broker revisits twice, then observes the receipt", async (ctx) => {
+      await ctx.broker.kickTarget("skydive", 6);
+      ctx.advance();
+      await ctx.broker.kickTarget("skydive", 6);
+      ctx.receipt();
+      ctx.advance();
+      await ctx.broker.kickTarget("skydive", 6);
+    }],
+    then: ["only Enter is retried and the durable job closes on JSONL", (_, ctx) => {
+      expect(ctx.enters()).toBe(1);
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.queue.read("skydive", 6, ctx.job.id)).toMatchObject({
+        status: "acknowledged",
+        metadata: { submittedRecoveryKind: "exact-draft-enter" },
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a submitted prompt is resent once when its coding process is proven dead", {
+    given: ["a cursor-backed submit fence followed by Codex returning to its shell", () => {
+      const rootDir = tempRoot();
+      let clock = 100_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const created = queue.enqueue({ agentName: "skydive", pane: 6, text: "keep altitude centered" });
+      const job = queue.update(created, {
+        status: "submitted", submittedAt: 1_000, nextAttemptAt: 0,
+        echoCursor: { kind: "test", positions: {} },
+      });
+      let restarts = 0;
+      const agent = acceptingAgent();
+      agent.paneProcessState = async () => ({ running: false, shell: true, dead: false, command: "bash" });
+      agent.promptTransportState = async () => ({ state: "hidden", busy: false, dialect: "codex" });
+      agent.restartPaneExact = async () => { restarts++; return { ok: true, dialect: "codex" }; };
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
+      return { rootDir, queue, job, agent, broker, restarts: () => restarts,
+        advance: () => { clock += 1_001; } };
+    }],
+    when: ["exact resume reopens the fence and the same durable job drains", async (ctx) => {
+      await ctx.broker.kickTarget("skydive", 6);
+      ctx.advance();
+      await ctx.broker.kickTarget("skydive", 6);
+      ctx.advance();
+      await ctx.broker.kickTarget("skydive", 6);
+    }],
+    then: ["one exact restart and one physical resend reach JSONL", (_, ctx) => {
+      expect(ctx.restarts()).toBe(1);
+      expect(ctx.agent.sends.map((send) => send.text)).toEqual(["keep altitude centered"]);
+      expect(ctx.queue.read("skydive", 6, ctx.job.id)).toMatchObject({
+        status: "acknowledged",
+        attempts: 1,
+        metadata: { submittedRecoveryKind: "dead-process-resend" },
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a live busy submitted turn is never recovered or resent", {
+    given: ["a missing receipt while the configured coding process is still working", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir, now: () => 100_000 });
+      const created = queue.enqueue({ agentName: "skydive", pane: 6, text: "do not duplicate" });
+      const job = queue.update(created, {
+        status: "submitted", submittedAt: 1_000, nextAttemptAt: 0,
+        echoCursor: { kind: "test", positions: {} },
+      });
+      let restarts = 0;
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      agent.paneProcessState = async () => ({ running: true, shell: false, dead: false, command: "codex" });
+      agent.promptTransportState = async () => ({ state: "hidden", busy: true, dialect: "codex" });
+      agent.restartPaneExact = async () => { restarts++; return { ok: true }; };
+      const broker = createDeliveryBroker({ agent, queue, now: () => 100_000, notify: async () => {} });
+      return { rootDir, queue, job, agent, broker, restarts: () => restarts };
+    }],
+    when: ["the broker reconciles the ambiguous live turn", ({ broker }) => broker.kickTarget("skydive", 6)],
+    then: ["the submit fence remains untouched", (_, ctx) => {
+      expect(ctx.restarts()).toBe(0);
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.queue.read("skydive", 6, ctx.job.id).status).toBe("submitted");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("an unverified disappearing paste stays provisional at the FIFO head", {
     given: ["a first attempt that pastes, then loses the composer", () => {
       const rootDir = tempRoot();

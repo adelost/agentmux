@@ -15,7 +15,7 @@ import {
   NOT_INGESTING_UNVERIFIED_STREAK, isNotSentDeliveryJob,
   isTargetProvenNotIngesting, waitForDeliveryJob,
 } from "./delivery-queue.mjs";
-import { recoverHiddenDeliveryTui } from "./tui-stall-recovery.mjs";
+import { recoverHiddenDeliveryTui, recoverSubmittedTui } from "./tui-stall-recovery.mjs";
 const ACTIVE_RETRY_MS = 1_000;
 const BLOCKED_RETRY_MS = 3_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
@@ -572,15 +572,15 @@ export function createDeliveryBroker({
       const compacted = await recoverCompactedClaudeSubmit({ job, agent, queue, exactEcho,
         acknowledge, now, onRecovered: (value) => queueEvent(value, "submit_superseded_by_compact") });
       if (compacted) return compacted;
+      const recoveredTui = await recoverSubmittedTui({ job, agent, queue, exactEcho, acknowledge, now, log,
+        onRecovered: (value) => queueEvent(value, "submit_recovered_after_stall") });
+      if (recoveredTui) return recoveredTui;
       const submittedAge = now() - Number(
         job.submittedAt || job.submitFenceAt || job.lastAttemptAt || job.createdAt || now(),
       );
       const submittedExpired = submittedAge >= STALE_SUBMITTED_TERMINAL_MS;
       if (submittedExpired) return terminalizeUnverified(job);
-      // The receipt wait is honest but must never be silent: a busy pane can
-      // hold the FIFO for a full turn, and every follower starves behind it.
-      // One durable notice tells the human what is stuck and how much waits;
-      // the existing noticeSentAt/recovered pair closes the loop on receipt.
+      // One durable notice reports a stalled FIFO and closes with recovered on receipt.
       if (!job.noticeSentAt && submittedAge >= SUBMITTED_STALL_NOTICE_MS) {
         const queuedBehind = queue.list(job.agentName, job.pane)
           .filter((other) => other.id !== job.id && !TERMINAL_DELIVERY_STATES.has(other.status))
