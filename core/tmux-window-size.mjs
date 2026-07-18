@@ -17,7 +17,8 @@ export async function settleTmuxWindowSize(tmux, name) {
   const attached = await tmux.sessionAttachedCount(name).catch(() => 0);
   if (attached > 0) {
     await tmux.setWindowSizeLatest(name).catch(() => {});
-    return;
+    return false;
   }
   await ensureHeadlessWindow(tmux, name);
+  return true;
 }

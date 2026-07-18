@@ -59,10 +59,6 @@ export function createTmuxAdapter({ socket, exec }) {
       await raw(`kill-pane -t ${q(target)}`);
     },
 
-    async sourceUserConf() {
-      await raw(`source-file ~/.tmux.conf`);
-    },
-
     // --- Global environment ---
 
     /** Names in tmux's global environment (for leak-scrubbing). */

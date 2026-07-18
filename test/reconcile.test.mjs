@@ -83,11 +83,12 @@ feature("reconcileSession, service panes", () => {
       ...ctx,
       summary: await ctx.reconcileSession("ai"),
     })],
-    then: ["the shared tiled default is still applied", (ctx) => {
+    then: ["the shared tiled default is applied again after headless sizing", (ctx) => {
       const layoutCalls = ctx.tmuxExec.mock.calls
         .map(([cmd]) => cmd)
         .filter((cmd) => cmd.includes("select-layout"));
       expect(layoutCalls).toEqual([
+        "tmux -S '/tmp/test.sock' select-layout -t 'ai' 'tiled'",
         "tmux -S '/tmp/test.sock' select-layout -t 'ai' 'tiled'",
       ]);
       ctx.cleanup();

@@ -15,16 +15,23 @@
 // silently downgraded to a fresh session. Only an explicitly authorized first
 // bootstrap may create a new session. `resume --last` is never used.
 
-import { readdirSync, readlinkSync } from "fs";
+import { readdirSync, readFileSync, readlinkSync } from "fs";
 import { join } from "path";
 
-/** WHAT: Live pids (other than self) whose fds point at a rollout file.
- *  WHY: A live writer means resuming that rollout would create a second one —
- *  defense-in-depth on top of the provenance check, never a substitute for it. */
+function writableFdInfo(content) {
+  const flags = /^flags:\s+([0-7]+)/mu.exec(String(content))?.[1];
+  if (!flags) return null;
+  const accessMode = Number.parseInt(flags, 8) & 0o3;
+  return accessMode === 0o1 || accessMode === 0o2;
+}
+
+/** WHAT: Returns writable rollout-holder process IDs.
+ *  WHY: Prevents read-only rollout scans from blocking pane resume. */
 export function liveRolloutWriters(rolloutPath, {
   procRoot = "/proc",
   selfPid = process.pid,
   listDir = readdirSync,
+  readFile = readFileSync,
   readLink = readlinkSync,
 } = {}) {
   const holders = [];
@@ -50,6 +57,14 @@ export function liveRolloutWriters(rolloutPath, {
         continue;
       }
       if (target === rolloutPath) {
+        // Codex scans rollout files while several panes boot in parallel.
+        // A matching O_RDONLY fd is only a reader, not a competing session
+        // writer. Unknown fd flags remain fail-closed and count as held.
+        let writable = null;
+        try {
+          writable = writableFdInfo(readFile(join(procRoot, pid, "fdinfo", fd), "utf8"));
+        } catch {}
+        if (writable === false) continue;
         holders.push(Number(pid));
         break;
       }
