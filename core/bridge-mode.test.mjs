@@ -101,7 +101,7 @@ feature("bridge ownership mode", () => {
       const root = join(dirname(fileURLToPath(import.meta.url)), "..");
       return {
         launch: readFileSync(join(root, "bin", "start.sh"), "utf-8"),
-        doctor: readFileSync(join(root, "cli", "commands.mjs"), "utf-8"),
+        doctor: readFileSync(join(root, "cli", "doctor.mjs"), "utf-8"),
         watchdog: readFileSync(join(root, "bin", "bridge-watchdog-cron.sh"), "utf-8"),
       };
     }],
