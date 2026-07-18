@@ -124,7 +124,7 @@ export function decideCodexStart({
 export function allowsFreshCodexBootstrap(pane, persisted) {
   if (!persisted) return true;
   return persisted.pane === pane
-    && persisted.status === "bootstrapping"
+    && (persisted.status === "bootstrapping" || persisted.status === "awaiting-first-rollout")
     && !persisted.sessionId;
 }
 

@@ -75,9 +75,13 @@ feature("codex session guard (never resume --last)", () => {
     }],
   });
 
-  unit("an interrupted fenced first bootstrap may retry only for the same pane/profile", {
-    given: ["durable receipts left before a rollout id was discovered", () => ({
-      ownInterrupted: {
+  unit("a fenced pre-rollout bootstrap may retry only for the same pane/profile", {
+    given: ["durable receipts from before Codex receives its first prompt", () => ({
+      ownWaiting: {
+        pane: "skybar:6@1", profileId: "1", sessionId: null,
+        status: "awaiting-first-rollout", startedAt: 1_784_400_511_340,
+      },
+      legacyInterrupted: {
         pane: "skybar:6@1", profileId: "1", sessionId: null,
         status: "bootstrapping", startedAt: 1_784_400_511_340,
       },
@@ -91,14 +95,16 @@ feature("codex session guard (never resume --last)", () => {
     })],
     when: ["fresh-launch authority is derived from each receipt", (receipts) => ({
       first: allowsFreshCodexBootstrap("skybar:6@1", null),
-      ownRetry: allowsFreshCodexBootstrap("skybar:6@1", receipts.ownInterrupted),
+      ownWaiting: allowsFreshCodexBootstrap("skybar:6@1", receipts.ownWaiting),
+      legacyInterrupted: allowsFreshCodexBootstrap("skybar:6@1", receipts.legacyInterrupted),
       foreignRetry: allowsFreshCodexBootstrap("skybar:6@1", receipts.foreignInterrupted),
       malformedReady: allowsFreshCodexBootstrap("skybar:6@1", receipts.readyWithoutIdentity),
     })],
-    then: ["only first launch and the exact interrupted bootstrap are authorized", (authority) => {
+    then: ["only first launch and exact pre-rollout receipts are authorized", (authority) => {
       expect(authority).toEqual({
         first: true,
-        ownRetry: true,
+        ownWaiting: true,
+        legacyInterrupted: true,
         foreignRetry: false,
         malformedReady: false,
       });

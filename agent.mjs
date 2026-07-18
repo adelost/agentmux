@@ -72,7 +72,6 @@ import { assertClaudeQuotaAvailable } from "./core/claude-quota-target.mjs";
 export { buildClaudeLaunchCommand, buildCodexLaunchCommand } from "./core/agent-launch-command.mjs";
 export { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence.mjs";
 const CODEX_SESSION_STATE_KEY = "codex_session_by_pane_profile_v1";
-const CODEX_BOOTSTRAP_ROLLOUT_TIMEOUT_MS = 30_000;
 const CODEX_PROMPT_READY_TIMEOUT_MS = 8_000;
 function codexDeliveryBlocked(message, { zoomRecoverable = false } = {}) {
   const error = new Error(message);
@@ -578,9 +577,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       });
     };
     if (decision.action === "fresh") {
-      // Fence before process creation: a failed bootstrap must not silently
-      // create another unrelated session on the next delivery.
-      persistSession({ sessionId: null, status: "bootstrapping", startedAt: Date.now() });
+      // Codex creates its rollout identity only when the first prompt is
+      // submitted, not when the empty TUI opens. Fence that legitimate
+      // pre-rollout state before process creation; a later restart may retry
+      // the still-empty pane, while any discovered rollout becomes the exact
+      // resume authority above.
+      persistSession({ sessionId: null, status: "awaiting-first-rollout", startedAt: Date.now() });
     } else {
       persistSession({ sessionId: decision.sessionId, status: "ready", rolloutPath: discovered.path });
     }
@@ -610,17 +612,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     });
     await t.runShell(target, `cd ${esc(dir)} && ${cmd}`);
     await wait(2000);
-
-    if (decision.action === "fresh") {
-      let created = null;
-      const deadline = Date.now() + CODEX_BOOTSTRAP_ROLLOUT_TIMEOUT_MS;
-      while (!created && Date.now() < deadline) {
-        created = latestCodexSessionIdentity(dir, { sessionDirs: [join(profile.home, "sessions")] });
-        if (!created) await wait(200);
-      }
-      if (!created) throw new Error(`Codex bootstrap for ${owner} produced no pane-owned rollout`);
-      persistSession({ sessionId: created.sessionId, status: "ready", rolloutPath: created.path });
-    }
   }
 
   /**
