@@ -270,6 +270,14 @@ async function cmdRuntime(args, ctx) {
     console.log(`Log: ${status.paths.logPath}`);
     return;
   }
+  if (action === "check") {
+    const status = await nativeRuntimeStatus(options);
+    if (!status.online) {
+      throw new Error(`native runtime :${status.port} health check failed; inspect ${status.paths.logPath}`);
+    }
+    console.log(`Native runtime healthy at ${status.url} (pid ${status.pid || "external"}).`);
+    return;
+  }
   if (action === "start") {
     const result = await startNativeRuntime({
       ...options,
@@ -292,7 +300,7 @@ async function cmdRuntime(args, ctx) {
     console.log(`Native runtime restarted at ${result.url} (pid ${result.pid}).`);
     return;
   }
-  throw new Error(`unknown runtime action '${action}' (use status|start|stop|restart)`);
+  throw new Error(`unknown runtime action '${action}' (use status|check|start|stop|restart)`);
 }
 
 function configuredServiceTargets(ctx, requested = null) {
@@ -3802,6 +3810,7 @@ Usage:
   agent stop                      Stop Discord bridge (no arg = bridge)
   agent stop --all                Stop bridge + all agent sessions
   agent runtime status            Every managed native runtime + engine health
+  agent runtime check             Exit non-zero unless the selected runtime answers health
   agent runtime start             Start native runtime detached (no tmux)
   agent runtime stop              Stop it only while idle (sessions persist)
   agent runtime restart           Controlled idle restart

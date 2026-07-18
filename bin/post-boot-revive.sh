@@ -16,7 +16,9 @@ flock -n 9 || exit 0
 [ "$(cat "$MARKER" 2>/dev/null || true)" = "$BOOT_ID" ] && exit 0
 
 echo "[$(date '+%F %T')] post-boot revive starting ($BOOT_ID)"
-if node "$DIR/bin/agent-cli.mjs" revive; then
+if node "$DIR/bin/agent-cli.mjs" runtime start \
+  && node "$DIR/bin/agent-cli.mjs" runtime check --port 8811 \
+  && node "$DIR/bin/agent-cli.mjs" revive; then
   printf '%s\n' "$BOOT_ID" > "$MARKER"
   echo "[$(date '+%F %T')] post-boot revive complete"
 else
