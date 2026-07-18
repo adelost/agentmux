@@ -45,7 +45,7 @@ export function checkSuggestionsBoard({
 } = {}) {
   if (!configured) {
     return check("suggestions board", WARN, "comment bridge is not configured",
-      "install it: bin/install-suggestions-comment-bridge.sh install");
+      "configure Suggestions, then run `amux suggest` in its own terminal");
   }
   const freshness = suggestionsSyncDetail(lastSuccessfulSyncAt, now);
   if (!probe?.ok) {
@@ -61,12 +61,12 @@ export function checkSuggestionsBoard({
   }
   if (!Number.isFinite(lastSuccessfulSyncAt)) {
     return check("suggestions board", FAIL, `HTTP ${probe.status || 200} · ${freshness}`,
-      "run bin/suggestions-comment-bridge-cron.sh once and inspect its log");
+      "run `amux suggest --once`; then keep `amux suggest` open in its own terminal");
   }
   const ageMs = Math.max(0, now - lastSuccessfulSyncAt);
   if (ageMs > staleAfterMs) {
     return check("suggestions board", FAIL, `HTTP ${probe.status || 200} · ${freshness}`,
-      "comment bridge is stale; inspect its cron entry/log and run it once");
+      "Suggestions polling is stale; run `amux suggest` and inspect its visible output");
   }
   return check("suggestions board", OK,
     `HTTP ${probe.status || 200} (${probe.projectId || "board"}) · ${freshness}`);
@@ -371,12 +371,15 @@ export function checkDeliveryQueue({ stats, bridgeRunning, now = Date.now() }) {
   return check("delivery queue", OK, `${parts}${oldest}; broker draining · inspect with amux queue`);
 }
 
-/** Scheduled guards fail silently unless their own successful sweeps are observable. */
+/**
+ * WHAT: Checks every scheduled guard loop heartbeat.
+ * WHY: Keeps a silent poller failure from looking like healthy background work.
+ */
 export function checkGuardCronHeartbeats({ heartbeats, now = Date.now() }) {
   const rows = heartbeats.map((entry) => classifyGuardHeartbeat(entry, { now }));
   if (!rows.length) {
-    return check("guard crons", FAIL, "RED 0/0: registry empty",
-      "restore the canonical guard registry before relying on cron liveness");
+    return check("guard loops", FAIL, "RED 0/0: registry empty",
+      "restore the canonical guard registry before relying on background liveness");
   }
   const red = rows.filter((entry) => entry.state !== "ok");
   if (red.length) {
@@ -385,11 +388,11 @@ export function checkGuardCronHeartbeats({ heartbeats, now = Date.now() }) {
       if (entry.state === "invalid") return `${entry.key} invalid`;
       return `${entry.key} ${Math.floor(entry.ageMs / 60000)}m > 2×${Math.ceil(entry.intervalSec / 60)}m`;
     }).join(", ");
-    return check("guard crons", FAIL, `RED ${red.length}/${rows.length}: ${detail}`,
-      "inspect cron/logs; a heartbeat is written only after a successful sweep");
+    return check("guard loops", FAIL, `RED ${red.length}/${rows.length}: ${detail}`,
+      "run `amux suggest` for Suggestions inputs; inspect the named loop's output or log");
   }
   const oldest = [...rows].sort((left, right) => right.ageMs - left.ageMs)[0];
-  return check("guard crons", OK,
+  return check("guard loops", OK,
     `${rows.length}/${rows.length} fresh · oldest ${oldest.key} ${Math.floor(oldest.ageMs / 60000)}m ago`);
 }
 

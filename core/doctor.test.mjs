@@ -102,17 +102,17 @@ feature("Suggestions board and comment-bridge health", () => {
       lastSuccessfulSyncAt: NOW - SUGGESTIONS_BRIDGE_STALE_MS - 60_000,
       now: NOW,
     })],
-    then: ["the row is red and points to cron", (result) => {
+    then: ["the row is red and points to the visible poller", (result) => {
       expect(result.status).toBe(FAIL);
-      expect(result.hint).toContain("cron");
+      expect(result.hint).toContain("amux suggest");
     }],
   });
 
   unit("an optional unconfigured installation warns without pretending to probe", {
     when: ["checking without bridge config", () => checkSuggestionsBoard({ configured: false })],
-    then: ["install direction is visible", (result) => {
+    then: ["foreground configuration direction is visible", (result) => {
       expect(result.status).toBe(WARN);
-      expect(result.hint).toContain("install-suggestions-comment-bridge");
+      expect(result.hint).toContain("amux suggest");
     }],
   });
 });
@@ -508,7 +508,7 @@ feature("scheduled guard heartbeats", () => {
       expect(result.status).toBe(FAIL);
       expect(result.detail).toContain("RED 1/2");
       expect(result.detail).toContain("comment-bridge");
-      expect(result.hint).toContain("successful sweep");
+      expect(result.hint).toContain("amux suggest");
     }],
   });
 

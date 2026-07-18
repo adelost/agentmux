@@ -198,6 +198,7 @@ watchdog exists so screenshots remain reliable, not so agents skip them.
 \`\`\`bash
 amux serve                           # run bridge visibly here; Ctrl+C stops it
 amux serve --detach                  # managed tmux-free bridge supervisor + watchdog
+amux suggest                         # poll Suggestions visibly here; Ctrl+C stops polling
 amux stop                            # stop bridge
 amux stop --all                      # stop bridge + every agent session
 \`\`\`

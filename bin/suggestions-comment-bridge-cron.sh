@@ -36,6 +36,7 @@ set -e
 
 if [ -n "$output" ]; then
   printf "%s %s\n" "$(date -Is)" "$output" >> "$LOG_PATH"
+  [ "${AMUX_FOREGROUND:-0}" = "1" ] && [ "$status" -eq 0 ] && printf "%s\n" "$output"
 fi
 if [ "$status" -ne 0 ]; then
   printf "%s ERROR exit=%s\n" "$(date -Is)" "$status" >> "$LOG_PATH"
