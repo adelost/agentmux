@@ -3,6 +3,7 @@
 // process rules live in hints-fleet-process.mjs, board coordination in the
 // suggestions repo (docs/AGENT-WORK-PROTOCOL.md), repo truths in each
 // repo. Assembled into the versioned hints block by agent.mjs.
+// WHAT: Tool-guide section of the generated agent policy. WHY: Teaches every pane the amux surface without mixing in process rules that live one layer up.
 export const TOOL_GUIDE_HINTS = `# agentmux
 
 You are running inside agentmux. You can orchestrate other agents from your terminal.

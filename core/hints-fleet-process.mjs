@@ -9,6 +9,7 @@
 // agent policy") and heading names by core/reminder-state.mjs
 // DRIFT_SECTIONS — conform edits to those gates or update both sides
 // deliberately.
+// WHAT: Fleet-process section of the generated agent policy. WHY: Owns cross-project process rules in one layer so no per-repo copy drifts.
 export const FLEET_PROCESS_HINTS = `## Rule layers — who owns what
 
 Rules live in exactly one layer; a rule restated across layers WILL drift,
