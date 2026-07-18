@@ -233,16 +233,6 @@ async function cmdReconcile(name, ctx) {
   }
 }
 
-/** WHAT: Starts the Discord bridge. WHY: Keeps command dispatch separate from bridge lifecycle policy. */
-async function cmdServe(flags, ctx) {
-  return bridgeLifecycle.serve(flags, ctx);
-}
-
-/** WHAT: Stops the Discord bridge. WHY: Keeps intentional shutdown consistent across CLI callers. */
-async function cmdUnserve(ctx) {
-  return bridgeLifecycle.stop(ctx);
-}
-
 async function cmdRuntime(args, ctx) {
   const { flags, positional } = parseFlags(args, FLAG_SPECS.runtime);
   const action = positional[0] || "status";
@@ -3798,6 +3788,8 @@ Usage:
                                    when only services died)
   agent serve                     Run Discord bridge here; Ctrl+C stops it
     --detach, -d                  Run under a managed tmux-free supervisor
+  agent suggest                   Poll Suggestions here; Ctrl+C stops all Suggestions polling
+    --once                        Run one diagnostic poll without changing legacy cron ownership
   agent stop                      Stop Discord bridge (no arg = bridge)
   agent stop --all                Stop bridge + all agent sessions
   agent runtime status            Every managed native runtime + engine health
@@ -4102,7 +4094,9 @@ export async function dispatch(argv, ctx) {
       // --all → stop bridge + every agent session.
       if (flags.all) return cmdStopAll(ctx);
       // No arg, or 'serve'/'bridge' → stop the bridge in either ownership mode.
-      if (!positional[0] || positional[0] === "serve" || positional[0] === "bridge") return cmdUnserve(ctx);
+      if (!positional[0] || positional[0] === "serve" || positional[0] === "bridge") {
+        return bridgeLifecycle.stop(ctx);
+      }
       const name = resolveAgent(positional[0], ctx.configPath);
       return cmdStop(name, ctx);
     }
@@ -4118,7 +4112,13 @@ export async function dispatch(argv, ctx) {
         fg: "boolean", f: "boolean", foreground: "boolean",
         detach: "boolean", d: "boolean",
       });
-      return cmdServe(flags, ctx);
+      return bridgeLifecycle.serve(flags, ctx);
+    }
+
+    case "suggest": {
+      const { flags } = parseFlags(rest, { once: "boolean" });
+      const { cmdSuggestions } = await import("./suggestions.mjs");
+      return cmdSuggestions({ bridgeDir: ctx.bridgeDir, once: Boolean(flags.once) });
     }
 
     case "runtime":

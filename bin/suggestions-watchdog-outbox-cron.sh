@@ -30,7 +30,10 @@ set +e
 output="$("$NODE_BIN" "$SCRIPT_DIR/suggestions-watchdog-outbox.mjs" "$@" 2>&1)"
 status=$?
 set -e
-if [ -n "$output" ]; then printf "%s %s\n" "$(date -Is)" "$output" >> "$LOG_PATH"; fi
+if [ -n "$output" ]; then
+  printf "%s %s\n" "$(date -Is)" "$output" >> "$LOG_PATH"
+  [ "${AMUX_FOREGROUND:-0}" = "1" ] && [ "$status" -eq 0 ] && printf "%s\n" "$output"
+fi
 if [ "$status" -ne 0 ]; then
   printf "%s ERROR exit=%s\n" "$(date -Is)" "$status" >> "$LOG_PATH"
   printf "%s\n" "$output" >&2
