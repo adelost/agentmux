@@ -8,6 +8,7 @@ import { esc, stripAnsi } from "./lib.mjs";
 import { TOOL_GUIDE_HINTS } from "./core/hints-tool-guide.mjs";
 import { FLEET_PROCESS_HINTS } from "./core/hints-fleet-process.mjs";
 import { createTmuxAdapter } from "./core/tmux.mjs";
+import { ensureHeadlessWindow, settleTmuxWindowSize } from "./core/tmux-window-size.mjs";
 import { stripPaneChrome } from "./core/pane-chrome.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments, extractMixedStream, extractTurnByPrompt } from "./core/extract.mjs";
 import { detectDialect, COMPOSER_LINE_RE, foreignComposerText } from "./core/dialects.mjs";
@@ -278,19 +279,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   // --- Pane setup ---
 
-  // Make room before split-window. Detached windows default to 80x24 and a
-  // partial tmux-resurrect restore can leave 1-column "sliver" panes; either
-  // makes `split-window` fail with "no space for new pane". Force a roomy
-  // manual size so splits always fit. Pair with restoreAutoSize() so an
-  // attaching client still drives the geometry afterwards.
-  async function ensureSplitRoom(name) {
-    await t.setWindowSizeManual(name).catch(() => {});
-    await t.resizeWindow(name, 240, 60).catch(() => {});
-  }
-
-  async function restoreAutoSize(name) {
-    await t.setWindowSizeLatest(name).catch(() => {});
-  }
+  // Detached windows need room for every split and composer; attached clients
+  // retain control of their own terminal geometry.
+  const ensureSplitRoom = (name) => ensureHeadlessWindow(t, name);
+  const settleWindowSize = (name) => settleTmuxWindowSize(t, name);
 
   async function setupPanes(name, dir) {
     const config = loadConfig();
@@ -350,7 +342,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
     await t.selectPane(`${name}:.0`).catch((err) =>
       console.warn(`setupPanes: select-pane 0 failed: ${err.message}`));
-    await restoreAutoSize(name);
+    await settleWindowSize(name);
   }
 
   async function countPanes(name) {
@@ -531,7 +523,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
 
     await applyLayout();
-    if (needsPanes) await restoreAutoSize(name);
+    await settleWindowSize(name);
     return summary;
   }
 
@@ -1580,6 +1572,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       await reconcileSession(agentName);
       await wait(1000);
     }
+    await settleWindowSize(agentName);
 
     const target = `${agentName}:.${pane}`;
     const paneCmd = config.panes?.[pane]?.cmd || "bash";

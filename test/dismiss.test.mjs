@@ -142,17 +142,15 @@ feature("dismissBlockingPrompt", () => {
     ],
   });
 
-  unit("accepts Claude's current summary-resume menu", {
+  unit("accepts Claude's height-clipped summary-resume menu", {
     given: [
-      "a large resumed session with the recommended first option selected",
+      "a one-row agent pane with only the recommended first option visible",
       () => setup({
         paneOutput:
           "This session is 7h 3m old and 234.3k tokens.\n\n" +
           "Resuming the full session will consume a substantial portion of your usage limits.\n\n" +
-          "❯ 1. Resume from summary (recommended)\n" +
-          "  2. Resume full session as-is\n" +
-          "  3. Don't ask me again\n\n" +
-          "Enter to confirm · Esc to cancel\n",
+          "We recommend resuming from a summary.\n\n" +
+          "❯ 1. Resume from summary (recommended)\n",
       }),
     ],
     when: [

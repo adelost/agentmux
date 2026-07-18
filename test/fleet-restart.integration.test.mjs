@@ -11,7 +11,7 @@ const exec = promisify(execCb);
 
 feature("fleet restart against an isolated tmux server", () => {
   component("kills and recreates the configured session and pane layout", {
-    given: ["a throwaway two-pane fleet", async () => {
+    given: ["a throwaway thirteen-pane headless fleet", async () => {
       const root = mkdtempSync(join(tmpdir(), "amux-fleet-integration-"));
       const workspace = join(root, "workspace");
       const socket = join(root, "tmux.sock");
@@ -20,11 +20,10 @@ feature("fleet restart against an isolated tmux server", () => {
       writeFileSync(configPath, yaml.dump({
         fleet: {
           dir: workspace,
-          layout: "even-horizontal",
-          panes: [
-            { name: "shell-0", cmd: "bash", defer: true },
-            { name: "shell-1", cmd: "bash", defer: true },
-          ],
+          layout: "tiled",
+          panes: Array.from({ length: 13 }, (_, index) => ({
+            name: `shell-${index}`, cmd: "bash", defer: true,
+          })),
         },
         "skybar-canary": {
           dir: workspace,
@@ -47,7 +46,12 @@ feature("fleet restart against an isolated tmux server", () => {
     }],
     when: ["the replacement bridge rebuilds the fleet", async ({ restartFleet, tmuxExec, socket }) => {
       const result = await restartFleet({ log: () => {} });
-      const panes = (await tmuxExec(`tmux -S '${socket}' list-panes -t fleet -F '#{pane_index}'`)).stdout.trim().split("\n");
+      const panes = (await tmuxExec(
+        `tmux -S '${socket}' list-panes -t fleet -F '#{pane_index}|#{pane_width}|#{pane_height}'`,
+      )).stdout.trim().split("\n").map((row) => {
+        const [index, width, height] = row.split("|").map(Number);
+        return { index, width, height };
+      });
       const after = (await tmuxExec(`tmux -S '${socket}' display-message -t fleet:.0 -p '#{pane_pid}'`)).stdout.trim();
       const nativeTmuxExists = await tmuxExec(`tmux -S '${socket}' has-session -t skybar-canary`)
         .then(() => true, () => false);
@@ -62,7 +66,8 @@ feature("fleet restart against an isolated tmux server", () => {
         codingPanes: 0,
         failures: [],
       });
-      expect(panes).toEqual(["0", "1"]);
+      expect(panes.map(({ index }) => index)).toEqual(Array.from({ length: 13 }, (_, index) => index));
+      expect(panes.every(({ width, height }) => width >= 60 && height >= 20)).toBe(true);
       expect(after).not.toBe(before);
       expect(nativeTmuxExists).toBe(false);
       await tmuxExec(`tmux -S '${socket}' kill-server`).catch(() => {});
