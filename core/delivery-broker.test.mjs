@@ -303,6 +303,82 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
+  component("an idle hidden TUI is escaped once, then exact-resumed if it stays wedged", {
+    given: ["a durable prompt blocked before paste by a hidden idle compositor", () => {
+      const rootDir = tempRoot();
+      let clock = 1_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "claw", pane: 6, text: "recover me" });
+      const agent = acceptingAgent();
+      agent.escapes = 0;
+      agent.restarts = 0;
+      agent.waitForPromptEcho = async () => false;
+      agent.sendOnly = async () => {
+        const error = new Error("Codex process started but its composer never became ready");
+        error.code = "AMUX_DELIVERY_BLOCKED";
+        throw error;
+      };
+      agent.promptTransportState = async () => ({ state: "hidden", busy: false, dialect: "codex" });
+      agent.sendEscape = async () => { agent.escapes++; };
+      agent.restartPaneExact = async () => { agent.restarts++; return { ok: true, dialect: "codex" }; };
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
+      return {
+        rootDir, queue, job, agent, broker,
+        advance: (ms) => { clock += ms; },
+      };
+    }],
+    when: ["the same pre-submit stall crosses the Escape and restart thresholds", async (ctx) => {
+      await ctx.broker.kickTarget("claw", 6);
+      ctx.advance(2 * 60_000 + 1);
+      await ctx.broker.kickTarget("claw", 6);
+      ctx.advance(3 * 60_000 + 1);
+      await ctx.broker.kickTarget("claw", 6);
+    }],
+    then: ["one non-destructive Escape precedes one exact lifecycle restart", (_, ctx) => {
+      expect(ctx.agent.escapes).toBe(1);
+      expect(ctx.agent.restarts).toBe(1);
+      expect(ctx.queue.read("claw", 6, ctx.job.id).metadata).toMatchObject({
+        tuiRecoveryEscapeAt: expect.any(Number),
+        tuiRecoveryRestartAt: expect.any(Number),
+        tuiRecoveryRestartResult: "resumed",
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a busy or drafted pane is never interrupted by TUI recovery", {
+    given: ["an old delivery blocked behind real active work", () => {
+      const rootDir = tempRoot();
+      let clock = 1_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "claw", pane: 5, text: "wait safely" });
+      const agent = acceptingAgent();
+      agent.escapes = 0;
+      agent.restarts = 0;
+      agent.waitForPromptEcho = async () => false;
+      agent.sendOnly = async () => {
+        const error = new Error("composer unavailable while turn works");
+        error.code = "AMUX_DELIVERY_BLOCKED";
+        throw error;
+      };
+      agent.promptTransportState = async () => ({ state: "hidden", busy: true, dialect: "codex" });
+      agent.sendEscape = async () => { agent.escapes++; };
+      agent.restartPaneExact = async () => { agent.restarts++; return { ok: true }; };
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
+      return { rootDir, queue, job, agent, broker, advance: (ms) => { clock += ms; } };
+    }],
+    when: ["the delivery has waited beyond both thresholds", async (ctx) => {
+      await ctx.broker.kickTarget("claw", 5);
+      ctx.advance(6 * 60_000);
+      await ctx.broker.kickTarget("claw", 5);
+    }],
+    then: ["the working pane receives no recovery keystroke or restart", (_, ctx) => {
+      expect(ctx.agent.escapes).toBe(0);
+      expect(ctx.agent.restarts).toBe(0);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("an unverified disappearing paste stays provisional at the FIFO head", {
     given: ["a first attempt that pastes, then loses the composer", () => {
       const rootDir = tempRoot();

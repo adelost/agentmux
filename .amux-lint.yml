@@ -1,7 +1,7 @@
 fileSize:
   caps:
-    agent.mjs: 1917
-    channels/jsonl-watcher.mjs: 954
+    agent.mjs: 1909
+    channels/jsonl-watcher.mjs: 953
     cli/commands.mjs: 4434
     core/codex-jsonl-reader.mjs: 840
     core/codex-tui.mjs: 553
@@ -13,7 +13,7 @@ fileSize:
     core/native-runtime-client.mjs: 578
     core/suggestions-comment-bridge.mjs: 1144
     core/worktree-deps.mjs: 675
-    handlers.mjs: 1249
+    handlers.mjs: 1248
     spikes/web-ui/app.js: 1660
     spikes/web-ui/server.mjs: 2725
     spikes/web-ui/tools/native-canary-gate.mjs: 534

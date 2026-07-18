@@ -3,8 +3,9 @@
 import { appendEvent } from "./events.mjs";
 import { buildClaudeLaunchCommand } from "./agent-launch-command.mjs";
 import { createTmuxAdapter } from "./tmux.mjs";
-import { findBlockingPrompt } from "./dismiss.mjs";
+import { findBlockingPrompt, hasEmptyClaudeComposer } from "./dismiss.mjs";
 import { persistedSessionIdentity } from "./native-session-identity.mjs";
+import { getContextPercent } from "./context.mjs";
 import {
   activeClaudeLimitForTarget,
   configuredClaudeTarget,
@@ -17,11 +18,6 @@ function sameReceipt(left, right) {
   return Boolean(left && right
     && left.sessionId === right.sessionId
     && left.limitEventId === right.limitEventId);
-}
-
-function hasEmptyClaudeComposer(screen) {
-  return String(screen || "").split("\n")
-    .some((line) => /^\s*❯\s*$/u.test(line));
 }
 
 function hasExactResumeLaunch(screen, sessionId) {
@@ -145,9 +141,13 @@ export function createClaudeQuotaLifecycle({
       return { ok: false, reason: "limit-receipt-superseded" };
     }
 
+    const previousModel = getContextPercent(targetConfig.cwd, "claude")?.model || null;
     await tmux.respawnPane(target, { kill: true, cwd: targetConfig.cwd });
     if (!await waitForShell(target)) return { ok: false, reason: "replacement-shell-not-ready" };
-    const launch = buildClaudeLaunchCommand({ resumeSessionId: expectedReceipt.sessionId });
+    const launch = buildClaudeLaunchCommand({
+      resumeSessionId: expectedReceipt.sessionId,
+      model: previousModel || undefined,
+    });
     await tmux.runShell(target, `cd '${targetConfig.cwd.replaceAll("'", "'\\''")}' && ${launch}`);
     if (!await waitForComposer(target)) return { ok: false, reason: "resumed-composer-not-ready" };
 

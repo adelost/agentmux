@@ -76,4 +76,50 @@ feature("durable fleet restart handoff", () => {
       expect(text).not.toContain("private path");
     }],
   });
+
+  unit("only interrupted exact sessions receive one durable continuation", {
+    given: ["a restart receipt with one active Fable pane", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-fleet-continuation-"));
+      const path = join(root, "request.json");
+      queueFleetRestart({ source: "cli", requestedAt: "2026-07-18T14:00:00.000Z", path });
+      const enqueued = [];
+      return {
+        root,
+        path,
+        enqueued,
+        agent: { restartFleet: async () => ({
+          ok: true,
+          configured: ["claw"],
+          stopped: ["claw"],
+          recreated: ["claw"],
+          codingPanes: 2,
+          failures: [],
+          resumeTargets: [{
+            agentName: "claw", pane: 6, dialect: "claude",
+            sessionId: "11111111-1111-4111-8111-111111111111",
+          }],
+        }) },
+      };
+    }],
+    when: ["the replacement bridge queues recovery before its broker starts", (ctx) =>
+      runPendingFleetRestart({
+        agent: ctx.agent,
+        path: ctx.path,
+        log: () => {},
+        enqueueContinuation: (request) => ctx.enqueued.push(request),
+      })],
+    then: ["the continuation is idempotent and bound to that pane session", (receipt, ctx) => {
+      expect(ctx.enqueued).toHaveLength(1);
+      expect(ctx.enqueued[0]).toMatchObject({
+        agentName: "claw",
+        pane: 6,
+        source: "fleet-restart-recovery",
+        metadata: { recoveredSessionId: "11111111-1111-4111-8111-111111111111" },
+      });
+      expect(ctx.enqueued[0].idempotencyKey).toContain("11111111-1111-4111-8111-111111111111");
+      expect(ctx.enqueued[0].text).toContain("Fortsätt den avbrutna uppgiften");
+      expect(formatFleetRestartResult(receipt)).toContain("1 avbrutna turns återköade");
+      rmSync(ctx.root, { recursive: true, force: true });
+    }],
+  });
 });

@@ -139,6 +139,9 @@ const tmuxAgent = createAgent({
 });
 const nativeRuntime = createNativeRuntimeClient({ configPath: AGENTS_YAML });
 const agent = createAgentRouter({ tmuxAgent, nativeRuntime });
+const validateDeliveryTarget = (agentName, pane) =>
+  validateAgentPane(AGENTS_YAML, agentName, pane);
+const deliveryQueue = createDeliveryQueue({ validateTarget: validateDeliveryTarget });
 
 // A fleet restart is deliberately executed by the replacement bridge, not
 // by the requesting CLI/pane: the requester may live inside the very tmux
@@ -147,6 +150,7 @@ const agent = createAgentRouter({ tmuxAgent, nativeRuntime });
 await runPendingFleetRestart({
   agent: tmuxAgent,
   state: appState,
+  enqueueContinuation: (request) => deliveryQueue.enqueue(request),
   log: (message) => console.log(`[fleet-restart] ${message}`),
 });
 const attachments = createAttachmentHandler({
@@ -172,9 +176,6 @@ function stampChannelMirror(channelId) {
 }
 
 const discord = createDiscordChannel({ token: TOKEN, onSent: stampChannelMirror });
-const validateDeliveryTarget = (agentName, pane) =>
-  validateAgentPane(AGENTS_YAML, agentName, pane);
-const deliveryQueue = createDeliveryQueue({ validateTarget: validateDeliveryTarget });
 const deliveryBroker = createDeliveryBroker({
   agent,
   queue: deliveryQueue,
