@@ -9,6 +9,7 @@ import {
   latestPaneSessionIdentity,
 } from "./native-session-identity.mjs";
 import { paneModelSelection, setPaneModelSelection } from "./pane-model-state.mjs";
+import { waitForProgressingUi } from "./progressing-ui.mjs";
 import { esc } from "../lib.mjs";
 
 const TUI_ESCAPE_AFTER_MS = 2 * 60_000;
@@ -63,25 +64,26 @@ export function createTuiStallRecovery({
   }
 
   /** WHAT: Waits for a live Claude composer. WHY: Keeps stale JSONL idle state from skipping summary confirmation. */
-  async function waitForClaudeReady(target, agentName, pane, timeoutMs = 30_000) {
+  async function waitForClaudeReady(target, agentName, pane, timeoutMs = 120_000) {
     for (let attempt = 0; attempt < 15; attempt++) {
       if (await isAlreadyRunning(target)) break;
       await delay(500);
     }
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const screen = await tmux.captureScreen(target).catch(() => "");
-      const blocker = findBlockingPrompt(screen);
-      if (blocker) {
-        await tmux.sendKeys(target, blocker.keys);
-        await delay(blocker.waitMs);
-        continue;
-      }
-      if (hasEmptyClaudeComposer(screen)) return true;
-      await delay(300);
-    }
-    console.warn(`waitForClaudeReady(${agentName}:${pane}) timed out after ${timeoutMs}ms`);
-    return false;
+    const ready = await waitForProgressingUi({
+      capture: () => tmux.captureScreen(target),
+      inspect: async (screen) => {
+        const blocker = findBlockingPrompt(screen);
+        if (blocker) {
+          await tmux.sendKeys(target, blocker.keys);
+          return { waitMs: blocker.waitMs };
+        }
+        return hasEmptyClaudeComposer(screen);
+      },
+      delay,
+      hardTimeoutMs: timeoutMs,
+    });
+    if (!ready) console.warn(`waitForClaudeReady(${agentName}:${pane}) stalled before ${timeoutMs}ms`);
+    return ready;
   }
 
   /** WHAT: Restarts one proven-idle pane exactly. WHY: Keeps watchdog recovery from guessing sessions or models. */
