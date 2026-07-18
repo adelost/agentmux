@@ -90,6 +90,16 @@ export function checkBridgeProcess({ pids, supervised }) {
         "a crash will not auto-restart; start via amux serve / bin/start.sh");
 }
 
+/** WHAT: Returns bridge pids rescued via the heartbeat when the cwd filter finds none. WHY: Keeps a live bridge visible after a release swap deletes its working directory. */
+export function rescueBridgePidFromHeartbeat({ pids, beat, pidAlive, cmdline }) {
+  const beatPid = Number(beat?.pid);
+  if (!Number.isFinite(beatPid) || beatPid <= 0) return pids;
+  if (pids.includes(beatPid)) return pids;
+  if (!pidAlive(beatPid)) return pids;
+  if (!/index\.mjs/.test(cmdline(beatPid) || "")) return pids;
+  return [...pids, beatPid];
+}
+
 /** WHAT: Describes who owns bridge restart policy. WHY: Keeps manual stops distinguishable from silent daemon failure. */
 export function checkBridgeMode({ mode, running }) {
   if (mode === "manual") {

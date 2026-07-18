@@ -38,7 +38,7 @@ import { assessRunningBridgeHints, syncConfiguredAgentHints } from "../core/hint
 import { ensureAgentHints, HINTS_VERSION } from "../agent.mjs";
 import { readGuardHeartbeats } from "../core/guard-heartbeat.mjs";
 import {
-  checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkReleaseIdentity, checkSupervisors, checkLedger,
+  checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkReleaseIdentity, checkSupervisors, checkLedger, rescueBridgePidFromHeartbeat,
   checkBridgeMode, checkContextBridge, checkTmux, checkTmuxVersion, checkConfig, overallStatus, formatDoctorReport, FAIL, WARN,
   checkTmuxClients, checkTmuxPaneGeometry, observeTmuxFleet,
   checkDeliveryQueue,
@@ -2659,6 +2659,15 @@ async function cmdDoctor(ctx) {
   try { repoVersion = JSON.parse(readFileSync(join(repoDir, "package.json"), "utf-8")).version; }
   catch {}
   const beat = readHeartbeat();
+  // A live bridge keeps the PREVIOUS install as cwd after a release swap
+  // (the staging dir is renamed away), so the cwd filter above goes blind
+  // right after every install. The heartbeat pid is the bridge's own
+  // testimony; trust it when the process is alive and runs the bridge entry.
+  pids = rescueBridgePidFromHeartbeat({
+    pids, beat,
+    pidAlive: isPidAlive,
+    cmdline: (pid) => { try { return readFileSync("/proc/" + pid + "/cmdline", "utf-8"); } catch { return ""; } },
+  });
   const guardHeartbeats = readGuardHeartbeats();
   // hooks
   let settings = null, hookFileExists = false;
