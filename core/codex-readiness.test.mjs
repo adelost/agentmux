@@ -30,4 +30,31 @@ feature("Codex startup readiness", () => {
       expect(escapes).toBe(3);
     }],
   });
+
+  unit("accepts a large exact-session replay whose screen stays static for forty-five seconds", {
+    given: ["a static replay screen and a fake clock", () => ({ clock: 0 })],
+    when: ["the exact session eventually paints its composer", async (ctx) => ({
+      ready: await waitForCodexUiReady({
+        tmux: {
+          captureScreen: async () => ctx.clock >= 45_000
+            ? "› Run /review on my current changes\n\n  gpt-5.6-sol xhigh · /workspace"
+            : "Resuming session…",
+          sendKeys: async () => {},
+          sendLiteral: async () => {},
+          sendEscape: async () => {},
+        },
+        target: "ai:.3",
+        agentName: "ai",
+        pane: 3,
+        delay: async (ms) => { ctx.clock += ms; },
+        now: () => ctx.clock,
+      }),
+      clock: ctx.clock,
+    })],
+    then: ["the old thirty-second false-stall cannot strand the healthy pane", ({ ready, clock }) => {
+      expect(ready).toBe(true);
+      expect(clock).toBeGreaterThanOrEqual(45_000);
+      expect(clock).toBeLessThan(90_000);
+    }],
+  });
 });
