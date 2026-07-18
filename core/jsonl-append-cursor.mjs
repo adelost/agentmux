@@ -9,6 +9,8 @@
 import { closeSync, fstatSync, openSync, readSync, statSync } from "fs";
 
 const DEFAULT_MAX_APPEND_BYTES = 8 * 1024 * 1024;
+const DEFAULT_SCAN_CHUNK_BYTES = 256 * 1024;
+const DEFAULT_MAX_EVENT_BYTES = 2 * 1024 * 1024;
 
 export function captureJsonlAppendCursor(kind, files) {
   const positions = {};
@@ -66,4 +68,106 @@ export function jsonlEventsAfterCursor(files, cursor, { maxBytes = DEFAULT_MAX_A
     }
   }
   return events;
+}
+
+/**
+ * WHAT: Checks appended JSONL events for one predicate match.
+ * WHY: Keeps oversized tool records from hiding later delivery receipts.
+ */
+export function hasJsonlEventAfterCursor(files, cursor, predicate, {
+  chunkBytes = DEFAULT_SCAN_CHUNK_BYTES,
+  maxEventBytes = DEFAULT_MAX_EVENT_BYTES,
+} = {}) {
+  if (typeof predicate !== "function") throw new TypeError("JSONL event predicate is required");
+  const positions = cursor?.positions && typeof cursor.positions === "object"
+    ? cursor.positions
+    : {};
+  const readChunkBytes = Math.max(1, Number(chunkBytes) || DEFAULT_SCAN_CHUNK_BYTES);
+  const eventLimit = Math.max(1, Number(maxEventBytes) || DEFAULT_MAX_EVENT_BYTES);
+
+  for (const file of new Set((files || []).filter(Boolean))) {
+    let fd;
+    try {
+      fd = openSync(file, "r");
+      const size = fstatSync(fd).size;
+      let position = Number(positions[file] ?? 0);
+      if (!Number.isFinite(position) || position < 0 || position > size) position = 0;
+
+      let discardPartial = false;
+      if (position > 0) {
+        const previous = Buffer.alloc(1);
+        readSync(fd, previous, 0, 1, position - 1);
+        discardPartial = previous[0] !== 0x0a;
+      }
+
+      let fragments = [];
+      let eventBytes = 0;
+      let oversized = false;
+      const consumeLine = () => {
+        if (discardPartial) {
+          discardPartial = false;
+        } else if (!oversized && eventBytes > 0) {
+          try {
+            const event = JSON.parse(Buffer.concat(fragments, eventBytes).toString("utf8"));
+            if (predicate(event)) return true;
+          } catch { /* a malformed/in-flight line is not a receipt */ }
+        }
+        fragments = [];
+        eventBytes = 0;
+        oversized = false;
+        return false;
+      };
+
+      while (position < size) {
+        const length = Math.min(readChunkBytes, size - position);
+        const buffer = Buffer.allocUnsafe(length);
+        const bytesRead = readSync(fd, buffer, 0, length, position);
+        if (bytesRead <= 0) break;
+        position += bytesRead;
+
+        let start = 0;
+        for (let index = 0; index < bytesRead; index++) {
+          if (buffer[index] !== 0x0a) continue;
+          const segment = buffer.subarray(start, index);
+          if (!discardPartial && !oversized && segment.length > 0) {
+            if (eventBytes + segment.length <= eventLimit) {
+              fragments.push(Buffer.from(segment));
+              eventBytes += segment.length;
+            } else {
+              fragments = [];
+              eventBytes = 0;
+              oversized = true;
+            }
+          }
+          if (consumeLine()) return true;
+          start = index + 1;
+        }
+
+        const remainder = buffer.subarray(start, bytesRead);
+        if (!discardPartial && !oversized && remainder.length > 0) {
+          if (eventBytes + remainder.length <= eventLimit) {
+            fragments.push(Buffer.from(remainder));
+            eventBytes += remainder.length;
+          } else {
+            fragments = [];
+            eventBytes = 0;
+            oversized = true;
+          }
+        }
+      }
+
+      // JSONL writers normally end events with a newline, but a complete last
+      // record is still a valid receipt if the process has not flushed '\n' yet.
+      if (!discardPartial && !oversized && eventBytes > 0) {
+        try {
+          const event = JSON.parse(Buffer.concat(fragments, eventBytes).toString("utf8"));
+          if (predicate(event)) return true;
+        } catch { /* final record is still in flight */ }
+      }
+    } catch { /* a rotating session may disappear between list and open */ }
+    finally {
+      if (fd !== undefined) { try { closeSync(fd); } catch {} }
+    }
+  }
+  return false;
 }

@@ -16,7 +16,7 @@ import { join } from "path";
 import { claudeProjectDir } from "./claude-paths.mjs";
 import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 import { describeToolCall } from "./tool-display.mjs";
-import { captureJsonlAppendCursor, jsonlEventsAfterCursor } from "./jsonl-append-cursor.mjs";
+import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { isSystemNoiseDirective } from "./system-noise.mjs";
 
 
@@ -261,8 +261,8 @@ export function isPromptInJsonl(paneDir, promptText, { notBeforeMs = 0, cursor =
   }
 
   if (cursor?.kind === CLAUDE_PROMPT_CURSOR_KIND) {
-    const events = jsonlEventsAfterCursor(files.map(({ path }) => path), cursor);
-    return events.some((event) => promptEventMatches(event, needle));
+    return hasJsonlEventAfterCursor(files.map(({ path }) => path), cursor,
+      (event) => promptEventMatches(event, needle));
   }
 
   // findJsonlAndEvents scans all files newest-first for the needle, so it
@@ -313,8 +313,8 @@ export function isSlashReceiptInJsonl(paneDir, commandText, {
     return cursor?.kind === CLAUDE_SLASH_CURSOR_KIND ? false : null;
   }
   if (cursor?.kind === CLAUDE_SLASH_CURSOR_KIND) {
-    return jsonlEventsAfterCursor(files.map(({ path }) => path), cursor)
-      .some((event) => slashReceiptEventMatches(event, commandText));
+    return hasJsonlEventAfterCursor(files.map(({ path }) => path), cursor,
+      (event) => slashReceiptEventMatches(event, commandText));
   }
   for (const { path } of files) {
     const events = parseJsonl(path).filter((event) => {

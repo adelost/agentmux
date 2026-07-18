@@ -5,9 +5,13 @@ const MODEL_ALIASES = {
   opus: "claude-opus-4-8",
 };
 
-/** Resolve and validate the process-local Claude model override. */
+/** WHAT: Resolves one Claude launch model. WHY: Keeps aliases and status metadata from changing recovery identity. */
 export function resolveClaudeModel(value = process.env.AMUX_CLAUDE_MODEL) {
-  const model = String(value || DEFAULT_CLAUDE_MODEL).trim();
+  const requested = String(value || DEFAULT_CLAUDE_MODEL).trim();
+  // The custom statusline may append a context annotation to the actual
+  // model id. It is display metadata, not accepted by Claude's --model flag.
+  const withoutContextSuffix = requested.replace(/\[1m\]$/iu, "");
+  const model = MODEL_ALIASES[withoutContextSuffix.toLowerCase()] || withoutContextSuffix;
   if (!/^[a-z0-9._-]+$/i.test(model)) {
     throw new Error(`invalid Claude model: ${model}`);
   }

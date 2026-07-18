@@ -92,3 +92,9 @@ export function findBlockingPrompt(paneText) {
   }
   return null;
 }
+
+/** WHAT: Checks for an empty Claude composer. WHY: Keeps stale JSONL idle state from faking readiness. */
+export function hasEmptyClaudeComposer(paneText) {
+  return String(paneText || "").split("\n")
+    .some((line) => /^\s*❯\s*$/u.test(line));
+}

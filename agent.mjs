@@ -56,6 +56,13 @@ import {
 } from "./core/codex-profiles.mjs";
 import { decideCodexStart, liveRolloutWriters } from "./core/codex-session-guard.mjs";
 import { buildClaudeLaunchCommand, buildCodexLaunchCommand } from "./core/agent-launch-command.mjs";
+import {
+  createTuiStallRecovery,
+  isClaudePaneCommand as isClaudeCmd,
+  isCodexPaneCommand as isCodexCmd,
+  isCodingPaneCommand as isAgentCmd,
+  isShellProcess as isShellProc,
+} from "./core/tui-stall-recovery.mjs";
 import { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence.mjs";
 import { assertClaudeQuotaAvailable } from "./core/claude-quota-target.mjs";
 export { buildClaudeLaunchCommand, buildCodexLaunchCommand } from "./core/agent-launch-command.mjs";
@@ -376,22 +383,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
   }
 
-  function isClaudeCmd(cmd) {
-    return cmd?.includes("claude") || false;
-  }
-
-  function isCodexCmd(cmd) {
-    return cmd?.includes("codex") || false;
-  }
-
-  function isAgentCmd(cmd) {
-    return isClaudeCmd(cmd) || isCodexCmd(cmd);
-  }
-
-  function isShellProc(cmd) {
-    return /^(bash|zsh|fish|sh|dash)$/.test(cmd);
-  }
-
   // True when a pane's current process matches the type expected by config.
   // Both claude and codex CLIs are node-based, so the live process name is
   // typically the binary name or "node". Services are matched loosely: any
@@ -547,18 +538,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   // --- Claude lifecycle ---
 
   async function startClaude(name, target, rootDir, pane = 0) {
-    if (await isPaneDead(target)) await respawnPane(target);
-    if (await isAlreadyRunning(target)) return;
-
-    const dir = paneDir(rootDir, pane);
-    const sessionFlag = await resolveSessionFlag(dir, name, pane);
-    const resumeSessionId = agentConfig(name).panes?.[pane]?.resumeSessionId || null;
-    const command = buildClaudeLaunchCommand({
-      resume: !resumeSessionId && sessionFlag === "--continue",
-      resumeSessionId,
-    });
-    await t.runShell(target, `cd ${esc(dir)} && ${command}`);
-    await wait(2000);
+    return tuiRecovery.startClaude(name, target, rootDir, pane);
   }
 
   async function startCodex(name, target, rootDir, pane = 0, launch = null) {
@@ -689,6 +669,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     throw new Error(`Codex did not start in ${agentName}:${pane}`);
   }
 
+  async function restartPaneExact(agentName, pane) {
+    return tuiRecovery.restartPaneExact(agentName, pane);
+  }
+
   async function isPaneDead(target) {
     try {
       return await t.paneDead(target);
@@ -755,7 +739,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       read = classifyHistoryRead(projectDir);
     }
     if (read.error) {
-      const detail = `readdir ${read.error.code || read.error.message} on ${projectDir} — spawning WITHOUT --continue, pane loses its session`;
+      const detail = `readdir ${read.error.code || read.error.message} on ${projectDir}; spawning WITHOUT --continue, pane loses its session`;
       console.error(`resolveSessionFlag: ${detail}`);
       try {
         appendEvent({
@@ -773,20 +757,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   }
 
   /** Wait for claude to load, dismiss any blocking prompts if they appear. */
-  async function waitForClaudeReady(target, agentName, pane) {
-    // Wait for claude process to appear
-    for (let i = 0; i < 15; i++) {
-      if (await isAlreadyRunning(target)) break;
-      await wait(500);
-    }
-
-    // Poll for resume/dismiss or idle (old sessions may prompt)
-    for (let j = 0; j < 8; j++) {
-      await wait(1000);
-      const dismissed = await dismissBlockingPrompt(target);
-      if (dismissed) return;
-      if (!(await isBusy(agentName, pane))) return;
-    }
+  async function waitForClaudeReady(target, agentName, pane, timeoutMs = 30_000) {
+    return tuiRecovery.waitForClaudeReady(target, agentName, pane, timeoutMs);
   }
 
   /**
@@ -1626,7 +1598,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // (1.20.52) — hook-context instead of a typed spawn prompt, so it
       // never wakes the pane with a false turn and never crosses panes.
       await startClaude(agentName, target, config.dir, pane);
-      if (!wasRunning) await waitForClaudeReady(target, agentName, pane);
+      if (!wasRunning && !await waitForClaudeReady(target, agentName, pane)) {
+        throw new Error(`Claude process started but its composer never became ready in ${agentName}:${pane}`);
+      }
     } else if (isCodexCmd(paneCmd)) {
       // Codex panes use the same wait-for-ready + dismiss pattern as
       // claude (both are interactive node-based CLIs that may surface
@@ -1667,6 +1641,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       recreated: [],
       codingPanes: 0,
       failures: [],
+      resumeTargets: [],
     };
     const stopFailed = new Set();
 
@@ -1688,6 +1663,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         return result;
       }
     }
+
+    result.resumeTargets = await tuiRecovery.interruptedFleetTargets(fleet, log);
 
     // Finish the destructive phase before creating anything. If one kill
     // fails, leave that session untouched and skip its rebuild rather than
@@ -1905,6 +1882,21 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (!(await isAlreadyRunning(`${agentName}:.0`))) throw new Error(`Claude not running in ${agentName}`);
   }
 
+  const tuiRecovery = createTuiStallRecovery({
+    tmux: t,
+    state,
+    delay: wait,
+    configFor: agentConfig,
+    paneDirectory: paneDir,
+    isPaneDead,
+    respawnPane,
+    isAlreadyRunning,
+    resolveSessionFlag,
+    isBusy,
+    promptTransportState,
+    restartCodex,
+  });
+
   return {
     ensureReady, sendAndWait, sendOnly,
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
@@ -1912,6 +1904,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     capturePane, captureScreen, capturePromptEchoCursor, captureSlashReceiptCursor, waitForSlashReceipt, sendEscape, sendTab, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
     dismissBlockingPrompt, waitForPromptEcho,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession,
-    sanitizeTmuxGlobalEnv, restartCodex, restartFleet,
+    sanitizeTmuxGlobalEnv, restartCodex, restartPaneExact, restartFleet,
   };
 }

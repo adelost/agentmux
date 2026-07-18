@@ -13,6 +13,7 @@ const TARGET_METHODS = new Set([
   "isBusy",
   "paneHistorySize",
   "sendEscape",
+  "restartPaneExact",
 ]);
 
 export function createAgentRouter({ tmuxAgent, nativeRuntime }) {
@@ -46,6 +47,11 @@ export function createAgentRouter({ tmuxAgent, nativeRuntime }) {
         return (name, pane = 0, options = {}) => nativeRuntime.isNativeTarget(name, pane)
           ? nativeRuntime.updateSettings(name, pane, options)
           : Reflect.get(target, property, receiver)(name, pane, options);
+      }
+      if (property === "restartPaneExact") {
+        return (name, pane = 0) => nativeRuntime.isNativeTarget(name, pane)
+          ? Promise.resolve({ ok: false, reason: "native-runtime-owns-session" })
+          : Reflect.get(target, property, receiver)(name, pane);
       }
       if (property === "startProgressTimer") {
         return (send, name, pane = 0, options = {}) => nativeRuntime.isNativeTarget(name, pane)

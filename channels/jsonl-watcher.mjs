@@ -58,6 +58,10 @@ import { parkPane, unparkPane } from "../core/pane-park.mjs";
 import { appendEvent } from "../core/events.mjs";
 import { notifyUser } from "../cli/send-notify.mjs";
 import { createPaneQueue } from "../core/pane-queue.mjs";
+import {
+  paneModelSelection,
+  setPaneModelSelection,
+} from "../core/pane-model-state.mjs";
 
 const DEFAULT_POLL_MS = 15_000;
 // Typing-indicator is event-driven via fs.watch (every jsonl write fires
@@ -211,7 +215,6 @@ export function createJsonlWatcher({
     state.set(STATE_KEY_RETRY_UNTIL, map);
   }
 
-  const STATE_KEY_LAST_MODEL = "watcher_last_model";
   const STATE_KEY_RECOVERY = MODEL_RECOVERY_STATE_KEY;
   // Auto-recovery drives `/model <prev>` to switch a downgraded pane back to
   // the model it held before. When that model is EXHAUSTED (Mattias 2026-07-12:
@@ -317,9 +320,7 @@ export function createJsonlWatcher({
       catch (err) { log(`${paneName} unpark after recovery failed: ${err.message}`); }
       // Sync the last-model map so the recovery itself is not re-classified
       // as yet another change on the next reading.
-      const models = state.get(STATE_KEY_LAST_MODEL, {}) || {};
-      models[key] = { model: prev.model, effort: prev.effort ?? null };
-      state.set(STATE_KEY_LAST_MODEL, models);
+      setPaneModelSelection(state, name, idx, prev.model, prev.effort ?? null);
       try {
         const text = resumeBrief(modelLabel(prev));
         if (deliveryBroker) deliveryBroker.enqueue({ agentName: name, pane: idx, text, source: "model-watch" });
@@ -346,11 +347,9 @@ export function createJsonlWatcher({
     // Acting on one parked two healthy panes (false downgrade, 2026-07-10).
     if (ctx.modelSource && ctx.modelSource !== "turn") return;
     const key = paneKey(name, idx);
-    const map = state.get(STATE_KEY_LAST_MODEL, {}) || {};
-    const prev = map[key];
+    const prev = paneModelSelection(state, name, idx);
     const next = { model: ctx.model, effort: ctx.effort ?? null };
-    map[key] = next;
-    state.set(STATE_KEY_LAST_MODEL, map);
+    setPaneModelSelection(state, name, idx, next.model, next.effort);
     if (!prev) return;
 
     const change = classifyModelChange(prev, next);

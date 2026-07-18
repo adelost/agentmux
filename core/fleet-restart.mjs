@@ -48,8 +48,10 @@ export function consumeFleetRestart({ path = null } = {}) {
   return request;
 }
 
-/** Execute a pending request and persist a compact startup/Discord receipt. */
-export async function runPendingFleetRestart({ agent, state, path = null, log = console.log } = {}) {
+/** WHAT: Routes one pending fleet restart. WHY: Keeps destructive restarts outside configured agent sessions. */
+export async function runPendingFleetRestart({
+  agent, state, path = null, log = console.log, enqueueContinuation = null,
+} = {}) {
   const request = consumeFleetRestart({ path });
   if (!request) return null;
 
@@ -67,6 +69,33 @@ export async function runPendingFleetRestart({ agent, state, path = null, log = 
       failures: [{ name: "fleet", stage: "run", error: err.message }],
     };
   }
+  if (typeof enqueueContinuation === "function") {
+    for (const target of fleet.resumeTargets || []) {
+      try {
+        enqueueContinuation({
+          agentName: target.agentName,
+          pane: target.pane,
+          text: "[AMUX AUTOMATIC CRASH RECOVERY · SAME SESSION]\n" +
+            "Fortsätt den avbrutna uppgiften från den återupptagna sammanfattningen. " +
+            "Kontrollera först vad som redan hann bli gjort och duplicera inget.",
+          source: "fleet-restart-recovery",
+          idempotencyKey: `fleet-restart:${request.requestedAt}:${target.agentName}:${target.pane}:${target.sessionId}`,
+          metadata: {
+            recoveredSessionId: target.sessionId,
+            recoveredDialect: target.dialect,
+          },
+        });
+      } catch (err) {
+        fleet.failures = fleet.failures || [];
+        fleet.failures.push({
+          name: `${target.agentName}:${target.pane}`,
+          stage: "continuation",
+          error: err.message,
+        });
+        fleet.ok = false;
+      }
+    }
+  }
   const receipt = {
     ...fleet,
     source: request.source,
@@ -78,9 +107,11 @@ export async function runPendingFleetRestart({ agent, state, path = null, log = 
   return receipt;
 }
 
+/** WHAT: Formats one fleet restart receipt. WHY: Keeps startup reporting compact and free from private error details. */
 export function formatFleetRestartResult(result) {
   if (!result) return "online";
-  const base = `${result.recreated?.length || 0}/${result.configured?.length || 0} tmux-sessioner, ${result.codingPanes || 0} agentpaneler`;
+  const base = `${result.recreated?.length || 0}/${result.configured?.length || 0} tmux-sessioner, ${result.codingPanes || 0} agentpaneler` +
+    `${result.resumeTargets?.length ? `, ${result.resumeTargets.length} avbrutna turns återköade` : ""}`;
   if (result.ok) return `online · helreset klar: ${base}`;
   const failed = (result.failures || [])
     .slice(0, 5)

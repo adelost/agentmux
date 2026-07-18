@@ -1,6 +1,7 @@
 import { feature, unit, expect } from "bdd-vitest";
 import { vi } from "vitest";
 import { createAgent } from "../agent.mjs";
+import { hasEmptyClaudeComposer } from "../core/dismiss.mjs";
 
 const noop = () => Promise.resolve();
 
@@ -21,6 +22,14 @@ function setup({ paneOutput = "" } = {}) {
 }
 
 feature("dismissBlockingPrompt", () => {
+  unit("historical idle is not readiness until Claude paints an empty composer", {
+    when: ["checking loading output and the live composer", () => ({
+      loading: hasEmptyClaudeComposer("Loading session…\n"),
+      ready: hasEmptyClaudeComposer("work complete\n❯ \n"),
+    })],
+    then: ["only the live composer is ready", (result) =>
+      expect(result).toEqual({ loading: false, ready: true })],
+  });
   unit("accepts Codex's trust prompt for a configured pane directory", {
     given: [
       "a fresh Codex pane waiting for directory trust",

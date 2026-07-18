@@ -27,10 +27,9 @@ import {
   setCodexProfile,
 } from "./core/codex-profiles.mjs";
 import { sendPromptVerified, sendSlashVerified } from "./core/delivery.mjs";
-import {
-  MODEL_RECOVERY_STATE_KEY, MODEL_RECOVERY_SETTLE_MS, resumeBrief,
-} from "./core/model-watch.mjs";
+import { MODEL_RECOVERY_STATE_KEY, MODEL_RECOVERY_SETTLE_MS, resumeBrief } from "./core/model-watch.mjs";
 import { queueFleetRestart } from "./core/fleet-restart.mjs";
+import { setPaneModelSelection } from "./core/pane-model-state.mjs";
 
 /**
  * Reconcile every configured agent's live tmux session against the
@@ -39,13 +38,12 @@ import { queueFleetRestart } from "./core/fleet-restart.mjs";
  * panes, respawns, mismatches) are returned so callers' summary lines
  * stay focused on what changed.
  *
- * Exported so the same flow can be tested in isolation and shared
- * between the /sync Discord handler and the CLI-triggered triggerSync.
- *
  * @param {object} agent - agent module with reconcileSession(name)
  * @param {Iterable<string>} agentNames - agents to reconcile, in order
  * @param {(msg: string) => void} [log=console.warn] - per-agent error logger
  * @returns {Promise<object[]>} summaries with at least one delta field set
+ * WHAT: Maps configured sessions to reconciliation summaries.
+ * WHY: Keeps partial layouts from surviving configuration changes.
  */
 export async function reconcileAllSessions(agent, agentNames, log = (msg) => console.warn(msg)) {
   const summaries = [];
@@ -650,12 +648,13 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
           : await withPaneSendLock(`${mapping.name}:${pane}`, () =>
               sendSlashVerified(agent, mapping.name, pane, `/model ${name}`));
         if (result.delivered) {
+          setPaneModelSelection(state, mapping.name, pane, name);
           const rescued = result.rescues ? ` (palette ate Enter, rescued x${result.rescues})` : "";
-          await msg.reply(`sent \`/model ${name}\`${rescued} — verify on the next turn's footer (or \`//model\`)`);
+          await msg.reply(`sent \`/model ${name}\`${rescued}; verify on the next turn's footer (or \`//model\`)`);
         } else {
           await msg.reply(result.pending
             ? `queued durably \`/model ${name}\``
-            : `⚠️ \`/model ${name}\` still sits unsubmitted in the composer — check \`/raw\``);
+            : `⚠️ \`/model ${name}\` still sits unsubmitted in the composer; check \`/raw\``);
         }
       } catch (err) {
         await msg.reply(`/model failed: ${err.message}`).catch(() => {});

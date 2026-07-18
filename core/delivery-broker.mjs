@@ -15,7 +15,7 @@ import {
   NOT_INGESTING_UNVERIFIED_STREAK, isNotSentDeliveryJob,
   isTargetProvenNotIngesting, waitForDeliveryJob,
 } from "./delivery-queue.mjs";
-
+import { recoverHiddenDeliveryTui } from "./tui-stall-recovery.mjs";
 const ACTIVE_RETRY_MS = 1_000;
 const BLOCKED_RETRY_MS = 3_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
@@ -26,7 +26,6 @@ const STALE_SUBMITTED_TERMINAL_MS = 60 * 60 * 1_000;
 const STALE_PRE_SUBMIT_TERMINAL_MS = 60 * 60 * 1_000;
 const MAX_PRE_SUBMIT_ATTEMPTS = 64;
 const PRE_SUBMIT_STATES = new Set(["pending", "delivering", "pasting", "drafted"]);
-
 function blockedRetryMs(job, { drafted = false } = {}) {
   const base = drafted ? 5_000 : BLOCKED_RETRY_MS;
   const exponent = Math.min(5, Math.max(0, Number(job.attempts || 1) - 1));
@@ -747,7 +746,8 @@ export function createDeliveryBroker({
       nextAttemptAt: now() + blockedRetryMs(job, { drafted: ownsPaneDraft }),
     });
     queueEvent(job, "pending", { reason: String(reason).slice(0, 160) });
-    return job;
+
+    return recoverHiddenDeliveryTui({ job, reason, agent, queue, now, queueEvent, log });
   }
 
   async function drainTarget(agentName, pane) {

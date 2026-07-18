@@ -17,7 +17,7 @@ import { dirname, join } from "path";
 import { createHash } from "crypto";
 import { describeCustomExec, describeToolCall } from "./tool-display.mjs";
 import { codexSessionDirs } from "./codex-profiles.mjs";
-import { captureJsonlAppendCursor, jsonlEventsAfterCursor } from "./jsonl-append-cursor.mjs";
+import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 
 // Content-addressed line identity for the watcher's posted-set dedupe. Codex
 // rollout events carry no stable id (no uuid, no payload.id), so we key on a
@@ -286,18 +286,18 @@ export function captureCodexPromptEchoCursor(paneDir, promptText) {
 export function isPromptInCodexJsonl(paneDir, promptText, { notBeforeMs = 0, cursor = null } = {}) {
   const needle = promptText?.trim();
   if (!needle) return null;
-
   const file = latestSessionFor(paneDir);
   if (!file) return null;
 
   const eventCursor = cursor?.kind === CODEX_PROMPT_CURSOR_KIND;
-  const events = eventCursor
-    ? jsonlEventsAfterCursor([file], cursor)
-    : parseOperationalJsonl(file);
+  if (eventCursor) {
+    return hasJsonlEventAfterCursor([file], cursor, (event) =>
+      codexPromptEventMatches(event, needle));
+  }
+  const events = parseOperationalJsonl(file);
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
     if (!codexPromptEventMatches(e, needle)) continue;
-    if (eventCursor) return true;
     if (notBeforeMs) {
       const eventMs = Date.parse(e.timestamp || "");
       if (!Number.isFinite(eventMs) || eventMs < notBeforeMs) continue;
