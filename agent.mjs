@@ -56,6 +56,7 @@ import {
   setCodexModelOverride,
 } from "./core/codex-profiles.mjs";
 import { decideCodexStart, liveRolloutWriters } from "./core/codex-session-guard.mjs";
+import { createTmuxServerHold } from "./core/tmux-server-hold.mjs";
 import { buildClaudeLaunchCommand, buildCodexLaunchCommand } from "./core/agent-launch-command.mjs";
 import {
   createTuiStallRecovery,
@@ -249,14 +250,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await sanitizeTmuxGlobalEnv();
     if (await hasSession(name)) return;
     await t.newSession(name);
-    await t.sourceUserConf().catch((err) =>
-      console.warn(`tmux: source-file .tmux.conf failed: ${err.message}`));
-    // Let tmux handle window sizing naturally. We used to force a minimum
-    // window width to prevent Claude's bottom bar from truncating
-    // "esc to interrupt", but busy-signal detection now matches the
-    // truncated form "esc to interrup" directly (see dialects.mjs), so
-    // the width-forcing was both useless (narrow panes still truncated)
-    // and harmful (fought the attached client's terminal geometry).
+    // The server loaded ~/.tmux.conf when it started. Re-sourcing it for every
+    // session reinitializes continuum/resurrect in the middle of this layout.
   }
 
   async function exitCopyMode(target) {
@@ -282,7 +277,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   // Detached windows need room for every split and composer; attached clients
   // retain control of their own terminal geometry.
   const ensureSplitRoom = (name) => ensureHeadlessWindow(t, name);
-  const settleWindowSize = (name) => settleTmuxWindowSize(t, name);
+  const settleWindowSize = async (name, layout) => {
+    if (await settleTmuxWindowSize(t, name)) await t.selectLayout(name, layout).catch(() => {});
+  };
 
   async function setupPanes(name, dir) {
     const config = loadConfig();
@@ -342,7 +339,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
     await t.selectPane(`${name}:.0`).catch((err) =>
       console.warn(`setupPanes: select-pane 0 failed: ${err.message}`));
-    await settleWindowSize(name);
+    await settleWindowSize(name, layout);
   }
 
   async function countPanes(name) {
@@ -523,7 +520,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
 
     await applyLayout();
-    await settleWindowSize(name);
+    await settleWindowSize(name, layout);
     return summary;
   }
 
@@ -1572,7 +1569,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       await reconcileSession(agentName);
       await wait(1000);
     }
-    await settleWindowSize(agentName);
+    await settleWindowSize(agentName, resolveTmuxLayout(config.layout));
 
     const target = `${agentName}:.${pane}`;
     const paneCmd = config.panes?.[pane]?.cmd || "bash";
@@ -1596,9 +1593,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       }
     } else if (isCodexCmd(paneCmd)) {
       // Codex panes use the same wait-for-ready + dismiss pattern as
-      // claude (both are interactive node-based CLIs that may surface
-      // a resume-prompt on cold start). Resume-hint is skipped because
-      // codex auto-resumes via `codex resume --last` in startCodex.
+      // claude. Resume-hint is skipped because startCodex resumes the exact
+      // provenance-matched pane session (global `resume --last` is forbidden).
       await startCodex(agentName, target, config.dir, pane);
       if (!wasRunning) {
         const ready = await waitForCodexUiReady(target, agentName, pane);
@@ -1658,6 +1654,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
 
     result.resumeTargets = await tuiRecovery.interruptedFleetTargets(fleet, log);
+    const serverHold = await createTmuxServerHold(t, result.configured);
 
     // Finish the destructive phase before creating anything. If one kill
     // fails, leave that session untouched and skip its rebuild rather than
@@ -1694,6 +1691,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         return { name, codingPanes: 0, error: err.message };
       }
     }));
+    await serverHold.release().catch((err) =>
+      log(`fleet restart: could not release ${serverHold.name}: ${err.message}`));
 
     for (const start of starts) {
       if (!start) continue;

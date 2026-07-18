@@ -88,13 +88,14 @@ feature("codex session guard (never resume --last)", () => {
     }],
   });
 
-  unit("liveRolloutWriters finds only the pids holding the exact rollout path, excluding self", {
-    given: ["a fake /proc where two pids hold the target and one holds another", () => {
+  unit("liveRolloutWriters counts writable rollout fds, not concurrent read-only scans", {
+    given: ["a fake /proc with read-only, writable, unknown and unrelated rollout fds", () => {
       const target = "/rollout/target.jsonl";
       const fds = {
-        "100": { "3": target },
+        "100": { "3": target, flags: "flags:\t0100000\n" },
         "200": { "5": "/rollout/other.jsonl" },
-        "300": { "7": target },
+        "300": { "7": target, flags: "flags:\t0100002\n" },
+        "400": { "8": target },
         "999": { "1": target }, // self, must be excluded
       };
       return {
@@ -107,12 +108,17 @@ feature("codex session guard (never resume --last)", () => {
             const [, , pid, , fd] = p.split("/");
             return fds[pid][fd];
           },
+          readFile: (p) => {
+            const [, , pid] = p.split("/");
+            if (!fds[pid].flags) throw new Error("fdinfo unreadable");
+            return fds[pid].flags;
+          },
         },
       };
     }],
     when: ["scanning for writers", ({ target, opts }) => liveRolloutWriters(target, opts)],
-    then: ["only the real, non-self holders are returned", (writers) => {
-      expect(writers.sort()).toEqual([100, 300]);
+    then: ["readers are ignored while writable and unprovable holders fail closed", (writers) => {
+      expect(writers.sort()).toEqual([300, 400]);
     }],
   });
 
