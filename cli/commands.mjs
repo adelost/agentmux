@@ -64,7 +64,7 @@ import {
   readBridgeMode,
 } from "../core/bridge-mode.mjs";
 import { createBridgeLifecycle } from "./bridge.mjs";
-import { cmdDream } from "./dream.mjs";
+import { cmdDream, isPidAlive } from "./dream.mjs";
 import {
   collectContextTelemetry, contextTelemetrySnapshot, nativeContextReading,
 } from "../core/suggestions-context-telemetry.mjs";

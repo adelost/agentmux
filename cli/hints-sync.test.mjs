@@ -66,3 +66,43 @@ feature("amux hints-sync", () => {
     }],
   });
 });
+
+feature("amux hints-sync without injected liveness", () => {
+  component("the command falls back to the real pid probe when ctx omits isPidAlive", {
+    given: ["one configured session and a dead-pid heartbeat", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-hints-cli-nopid-"));
+      const first = join(root, "solo");
+      mkdirSync(first, { recursive: true });
+      const configPath = join(root, "agents.yaml");
+      writeFileSync(configPath, [
+        "alpha:",
+        `  dir: ${first}`,
+        "  panes:",
+        "    - cmd: claude",
+        "",
+      ].join("\n"));
+      return {
+        root,
+        configPath,
+        logs: vi.spyOn(console, "log").mockImplementation(() => {}),
+        warnings: vi.spyOn(console, "warn").mockImplementation(() => {}),
+      };
+    }],
+    when: ["running hints-sync with no ctx.isPidAlive", async (fx) => ({
+      fx,
+      // pid -1 is never alive; the point is that the fallback probe is
+      // actually importable (it once lived module-local in dream.mjs and
+      // crashed this path with a ReferenceError).
+      result: await dispatch(["hints-sync"], {
+        configPath: fx.configPath,
+        readHeartbeat: () => ({ pid: -1, hintsVersion: "older" }),
+      }),
+    })],
+    then: ["the sync completes using the built-in probe", ({ fx, result }) => {
+      expect(result).toMatchObject({ configuredSessions: 1, errors: [] });
+      fx.logs.mockRestore();
+      fx.warnings.mockRestore();
+      rmSync(fx.root, { recursive: true, force: true });
+    }],
+  });
+});

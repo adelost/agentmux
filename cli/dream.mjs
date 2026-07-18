@@ -13,7 +13,9 @@ const DREAM_BLOCKING_STATUSES = new Set([
   "limited",
 ]);
 
-function isPidAlive(pid) {
+// WHAT: Checks whether a pid answers signal 0 on this host.
+// WHY: Keeps liveness probes from trusting stale heartbeat pids.
+export function isPidAlive(pid) {
   if (!Number.isFinite(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
