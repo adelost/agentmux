@@ -31,6 +31,14 @@ export function createTuiStallRecovery({
   tmux, state, delay, configFor, paneDirectory, isPaneDead, respawnPane,
   isAlreadyRunning, resolveSessionFlag, isBusy, promptTransportState, restartCodex,
 } = {}) {
+  /** WHAT: Observes one pane process. WHY: Proves whether a fenced submission can still be ingested. */
+  async function paneProcessState(agentName, pane) {
+    const target = `${agentName}:.${pane}`;
+    const dead = await isPaneDead(target);
+    const command = await tmux.currentCommand(target).catch(() => null);
+    return { command, dead, shell: isShellProcess(command), running: /^(claude|codex|node)$/u.test(command || "") };
+  }
+
   /** WHAT: Starts Claude with pane history and model. WHY: Keeps restarts from reverting Fable to fleet defaults. */
   async function startClaude(name, target, rootDir, pane = 0) {
     if (await isPaneDead(target)) await respawnPane(target);
@@ -140,8 +148,10 @@ export function createTuiStallRecovery({
     return targets;
   }
 
-  return { startClaude, waitForClaudeReady, restartPaneExact, interruptedFleetTargets };
+  return { startClaude, waitForClaudeReady, restartPaneExact, interruptedFleetTargets, paneProcessState };
 }
+
+export { recoverSubmittedTui } from "./submitted-tui-recovery.mjs";
 
 /**
  * WHAT: Routes one old hidden idle delivery TUI.
