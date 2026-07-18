@@ -79,6 +79,7 @@ import { groupNativeTurns, nativeHistoryRows } from "../channels/native-runtime-
 import {
   discoverNativeRuntimes,
   formatNativeRuntimeStatuses,
+  checkNativeRuntimeHealth,
   nativeRuntimeStatus,
   startNativeRuntime,
   stopNativeRuntime,
@@ -245,12 +246,9 @@ async function cmdUnserve(ctx) {
 async function cmdRuntime(args, ctx) {
   const { flags, positional } = parseFlags(args, FLAG_SPECS.runtime);
   const action = positional[0] || "status";
-  const options = {
-    port: flags.port || 8811,
-    stateDir: flags["state-dir"],
+  const options = { port: flags.port || 8811, stateDir: flags["state-dir"],
     dataDir: flags["data-dir"],
-    legacyDataDir: flags["no-legacy-migration"] ? null : undefined,
-  };
+    legacyDataDir: flags["no-legacy-migration"] ? null : undefined };
   if (action === "status") {
     const scoped = flags.port !== undefined
       || flags["state-dir"] !== undefined
@@ -270,6 +268,7 @@ async function cmdRuntime(args, ctx) {
     console.log(`Log: ${status.paths.logPath}`);
     return;
   }
+  if (action === "check") return console.log(await checkNativeRuntimeHealth(options));
   if (action === "start") {
     const result = await startNativeRuntime({
       ...options,
@@ -292,7 +291,7 @@ async function cmdRuntime(args, ctx) {
     console.log(`Native runtime restarted at ${result.url} (pid ${result.pid}).`);
     return;
   }
-  throw new Error(`unknown runtime action '${action}' (use status|start|stop|restart)`);
+  throw new Error(`unknown runtime action '${action}' (use status|check|start|stop|restart)`);
 }
 
 function configuredServiceTargets(ctx, requested = null) {
@@ -3802,6 +3801,7 @@ Usage:
   agent stop                      Stop Discord bridge (no arg = bridge)
   agent stop --all                Stop bridge + all agent sessions
   agent runtime status            Every managed native runtime + engine health
+  agent runtime check             Exit non-zero unless the selected runtime answers health
   agent runtime start             Start native runtime detached (no tmux)
   agent runtime stop              Stop it only while idle (sessions persist)
   agent runtime restart           Controlled idle restart
