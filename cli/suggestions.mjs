@@ -1,11 +1,11 @@
 import {
-  mkdirSync, readFileSync, rmSync, writeFileSync,
+  existsSync, mkdirSync, readFileSync, rmSync, writeFileSync,
 } from "fs";
 import { homedir } from "os";
 import { join, resolve } from "path";
 import { spawn } from "child_process";
 
-// WHAT: Defines the foreground poll cadence. WHY: Keeps server load bounded by one visible minute loop.
+// WHAT: Defines the foreground scheduler tick. WHY: Keeps minute pollers responsive while slower inputs retain their own cadence.
 export const SUGGESTIONS_POLL_INTERVAL_MS = 60_000;
 // WHAT: Names every Suggestions input component. WHY: Keeps foreground ownership complete and data-driven.
 export const SUGGESTIONS_COMPONENTS = Object.freeze([
@@ -13,11 +13,27 @@ export const SUGGESTIONS_COMPONENTS = Object.freeze([
     name: "comments",
     wrapper: "suggestions-comment-bridge-cron.sh",
     installer: "install-suggestions-comment-bridge.sh",
+    intervalMs: 60_000,
   }),
   Object.freeze({
     name: "outbox",
     wrapper: "suggestions-watchdog-outbox-cron.sh",
     installer: "install-suggestions-watchdog-outbox.sh",
+    intervalMs: 60_000,
+  }),
+  Object.freeze({
+    name: "context",
+    wrapper: "suggestions-context-push-cron.sh",
+    installer: "install-context-push.sh",
+    intervalMs: 60_000,
+    optionalConfig: "suggestions-quota-push.yaml",
+  }),
+  Object.freeze({
+    name: "quota",
+    wrapper: "suggestions-quota-push-cron.sh",
+    installer: "install-quota-push.sh",
+    intervalMs: 15 * 60_000,
+    optionalConfig: "suggestions-quota-push.yaml",
   }),
 ]);
 
@@ -80,6 +96,21 @@ const waitForNextCycle = (ms, signal) => new Promise((resolveWait) => {
   signal?.addEventListener("abort", done, { once: true });
 });
 
+/** WHAT: Resolves configured foreground inputs. WHY: Keeps optional telemetry absence separate from required poller failures. */
+export function configuredSuggestionsComponents({
+  components = SUGGESTIONS_COMPONENTS,
+  home = homedir(),
+  env = process.env,
+  exists = existsSync,
+} = {}) {
+  return components.map((component) => {
+    if (!component.optionalConfig) return { ...component, args: [], enabled: true };
+    const configPath = env.AMUX_QUOTA_PUSH_CONFIG
+      || join(home, ".config", "agent", component.optionalConfig);
+    return { ...component, args: [configPath], enabled: exists(configPath) };
+  });
+}
+
 /** WHAT: Filters legacy hidden schedulers out of crontab. WHY: Makes Ctrl+C stop all Suggestions polling. */
 export async function removeLegacySuggestionsCrons({
   bridgeDir,
@@ -106,6 +137,7 @@ export async function runSuggestionsForeground({
   runChild = childResult,
   removeLegacyCrons = removeLegacySuggestionsCrons,
   claim = claimSuggestionsPoller,
+  components = configuredSuggestionsComponents(),
   logger = console,
 } = {}) {
   if (!bridgeDir) throw new Error("Suggestions poller requires the agentmux release path");
@@ -115,20 +147,34 @@ export async function runSuggestionsForeground({
   const release = claim();
   try {
     if (!once) await removeLegacyCrons({ bridgeDir, runChild });
+    const enabled = components.filter((component) => component.enabled !== false);
+    const disabled = components.filter((component) => component.enabled === false);
     logger.log(`Suggestions polling ${once ? "once" : `in this terminal every ${intervalMs / 1_000}s`}.`
       + `${once ? "" : " Ctrl+C stops it."}`);
+    if (disabled.length) {
+      logger.log(`Suggestions inputs disabled (missing config): ${
+        disabled.map((component) => component.name).join(", ")}`);
+    }
+    const nextDueAt = new Map(enabled.map((component) => [component.name, 0]));
     do {
       const startedAt = now();
-      const results = await Promise.all(SUGGESTIONS_COMPONENTS.map(async (component) => ({
+      const due = enabled.filter((component) =>
+        once || startedAt >= (nextDueAt.get(component.name) ?? 0));
+      const results = await Promise.all(due.map(async (component) => ({
         name: component.name,
-        ...await runChild("bash", [resolve(bridgeDir, "bin", component.wrapper)], {
+        ...await runChild("bash", [
+          resolve(bridgeDir, "bin", component.wrapper), ...(component.args ?? []),
+        ], {
           stdio: "inherit",
           env: { ...process.env, AMUX_FOREGROUND: "1", NODE_BIN: process.execPath },
         }),
       })));
+      for (const component of due) {
+        nextDueAt.set(component.name, startedAt + component.intervalMs);
+      }
       const summary = results.map((result) =>
         `${result.name}=${result.code === 0 ? "ok" : `retry(exit ${result.code})`}`).join(" ");
-      logger.log(`[${new Date(now()).toISOString()}] ${summary}`);
+      if (summary) logger.log(`[${new Date(now()).toISOString()}] ${summary}`);
       if (once) return { exitCode: results.every((result) => result.code === 0) ? 0 : 1, results };
       if (signal?.aborted) break;
       await wait(Math.max(0, intervalMs - (now() - startedAt)), signal);

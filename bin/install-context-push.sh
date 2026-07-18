@@ -3,6 +3,18 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT="$DIR/bin/suggestions-context-push-cron.sh"
+ACTION="${1:-install}"
+if [ "$ACTION" = "remove" ] || [ "$ACTION" = "uninstall" ]; then
+  current=$(crontab -l 2>/dev/null || true)
+  without_old=$(printf '%s\n' "$current" | grep -vF "suggestions-context-push-cron.sh" || true)
+  if [ "$current" = "$without_old" ]; then
+    echo "context push NOT INSTALLED. Nothing to remove."
+    exit 0
+  fi
+  printf '%s\n' "$without_old" | sed '/^[[:space:]]*$/d' | crontab -
+  echo "removed Suggestions context push cron entry; config and state retained."
+  exit 0
+fi
 CONFIG="${1:-$HOME/.config/agent/suggestions-quota-push.yaml}"
 NODE_BIN="${NODE_BIN:-$(command -v node || true)}"
 

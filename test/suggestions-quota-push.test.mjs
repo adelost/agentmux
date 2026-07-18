@@ -1,7 +1,9 @@
 // Push-script contracts: config errors are loud and the log line names
 // exactly which engine data made it into the pushed snapshot.
 
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
+} from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -183,6 +185,36 @@ exit 2
     vitestExpect(installed).toContain(`NODE_BIN=${process.execPath}`);
     vitestExpect(installed).not.toContain("/old/suggestions-quota-push-cron.sh");
     vitestExpect(installed.match(/suggestions-quota-push-cron\.sh/gu)).toHaveLength(1);
+  });
+
+  it("uninstalls only the quota cron while retaining its config and unrelated rows", () => {
+    const root = mkdtempSync(join(tmpdir(), "quota-push-uninstall-"));
+    const bin = join(root, "bin");
+    const state = join(root, "crontab");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "crontab"), `#!/bin/sh
+if [ "$1" = "-l" ]; then cat "$CRONTAB_STATE"; exit 0; fi
+if [ "$1" = "-" ]; then cat > "$CRONTAB_STATE"; exit 0; fi
+exit 2
+`);
+    chmodSync(join(bin, "crontab"), 0o755);
+    writeFileSync(state, [
+      "*/15 * * * * /old/suggestions-quota-push-cron.sh",
+      "0 8 * * * /unrelated-job",
+      "",
+    ].join("\n"));
+    const result = spawnSync("bash", [
+      join(process.cwd(), "bin", "install-quota-push.sh"), "uninstall",
+    ], { encoding: "utf8", env: {
+      HOME: root,
+      PATH: `${bin}:/usr/bin:/bin`,
+      CRONTAB_STATE: state,
+    } });
+    const installed = readFileSync(state, "utf8");
+    vitestExpect(result.status).toBe(0);
+    vitestExpect(installed).not.toContain("suggestions-quota-push-cron.sh");
+    vitestExpect(installed).toContain("/unrelated-job");
+    rmSync(root, { recursive: true, force: true });
   });
 });
 
