@@ -145,6 +145,15 @@ export async function nativeRuntimeStatus({
   };
 }
 
+/** WHAT: Checks one runtime for health. WHY: Gives boot automation a red exit boundary instead of advisory status text. */
+export async function checkNativeRuntimeHealth(options = {}) {
+  const status = await nativeRuntimeStatus(options);
+  if (!status.online) {
+    throw new Error(`native runtime :${status.port} health check failed; inspect ${status.paths.logPath}`);
+  }
+  return `Native runtime healthy at ${status.url} (pid ${status.pid || "external"}).`;
+}
+
 /**
  * Discover every ownership-proven runtime below the agentmux state root.
  * Custom canary state directories remain visible when they live below that

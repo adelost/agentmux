@@ -79,6 +79,7 @@ import { groupNativeTurns, nativeHistoryRows } from "../channels/native-runtime-
 import {
   discoverNativeRuntimes,
   formatNativeRuntimeStatuses,
+  checkNativeRuntimeHealth,
   nativeRuntimeStatus,
   startNativeRuntime,
   stopNativeRuntime,
@@ -245,12 +246,9 @@ async function cmdUnserve(ctx) {
 async function cmdRuntime(args, ctx) {
   const { flags, positional } = parseFlags(args, FLAG_SPECS.runtime);
   const action = positional[0] || "status";
-  const options = {
-    port: flags.port || 8811,
-    stateDir: flags["state-dir"],
+  const options = { port: flags.port || 8811, stateDir: flags["state-dir"],
     dataDir: flags["data-dir"],
-    legacyDataDir: flags["no-legacy-migration"] ? null : undefined,
-  };
+    legacyDataDir: flags["no-legacy-migration"] ? null : undefined };
   if (action === "status") {
     const scoped = flags.port !== undefined
       || flags["state-dir"] !== undefined
@@ -270,14 +268,7 @@ async function cmdRuntime(args, ctx) {
     console.log(`Log: ${status.paths.logPath}`);
     return;
   }
-  if (action === "check") {
-    const status = await nativeRuntimeStatus(options);
-    if (!status.online) {
-      throw new Error(`native runtime :${status.port} health check failed; inspect ${status.paths.logPath}`);
-    }
-    console.log(`Native runtime healthy at ${status.url} (pid ${status.pid || "external"}).`);
-    return;
-  }
+  if (action === "check") return console.log(await checkNativeRuntimeHealth(options));
   if (action === "start") {
     const result = await startNativeRuntime({
       ...options,
