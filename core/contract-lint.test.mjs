@@ -358,7 +358,7 @@ feature("contract-lint helpers", () => {
     }],
   });
 
-  unit("baseline survives line shifts (fingerprint excludes line number)", {
+  component("baseline survives line shifts (fingerprint excludes line number)", {
     given: ["a baselined 2-class file, then a new class inserted above both", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-contract-shift-"));
       const f = join(root, "demo.py");

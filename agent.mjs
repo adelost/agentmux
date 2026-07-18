@@ -56,6 +56,8 @@ import {
   setCodexModelOverride,
 } from "./core/codex-profiles.mjs";
 import { decideCodexStart, liveRolloutWriters } from "./core/codex-session-guard.mjs";
+import { waitForCodexUiReady as waitForCodexReady } from "./core/codex-readiness.mjs";
+import { mapWithConcurrency } from "./core/concurrency.mjs";
 import { createTmuxServerHold } from "./core/tmux-server-hold.mjs";
 import { buildClaudeLaunchCommand, buildCodexLaunchCommand } from "./core/agent-launch-command.mjs";
 import {
@@ -70,6 +72,7 @@ import { assertClaudeQuotaAvailable } from "./core/claude-quota-target.mjs";
 export { buildClaudeLaunchCommand, buildCodexLaunchCommand } from "./core/agent-launch-command.mjs";
 export { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence.mjs";
 const CODEX_SESSION_STATE_KEY = "codex_session_by_pane_profile_v1";
+const CODEX_BOOTSTRAP_ROLLOUT_TIMEOUT_MS = 30_000;
 const CODEX_PROMPT_READY_TIMEOUT_MS = 8_000;
 function codexDeliveryBlocked(message, { zoomRecoverable = false } = {}) {
   const error = new Error(message);
@@ -610,7 +613,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     if (decision.action === "fresh") {
       let created = null;
-      const deadline = Date.now() + 6_000;
+      const deadline = Date.now() + CODEX_BOOTSTRAP_ROLLOUT_TIMEOUT_MS;
       while (!created && Date.now() < deadline) {
         created = latestCodexSessionIdentity(dir, { sessionDirs: [join(profile.home, "sessions")] });
         if (!created) await wait(200);
@@ -758,46 +761,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
    * neutral-state receipt. Never double-Escape after the receipt appears (the
    * second would edit the previous message).
    */
-  async function waitForCodexUiReady(target, agentName, pane, timeoutMs = 20_000) {
-    const deadline = Date.now() + timeoutMs;
-    let nextRevealAt = Date.now() + 2500;
-    let reveals = 0;
-    while (Date.now() < deadline) {
-      const content = await t.captureScreen(target).catch(() => "");
-      // Cold Codex panes can show the one-time directory-trust gate. The old
-      // loop mistook it for hidden composer chrome and sent Escape, which
-      // cancelled startup and dropped the pane back to bash. Handle every
-      // known active startup blocker before any reveal key is considered.
-      const blocker = findBlockingPrompt(content);
-      if (blocker) {
-        await t.sendKeys(target, blocker.keys);
-        await wait(blocker.waitMs);
-        continue;
-      }
-      if (isCodexFullscreenPager(content)) {
-        await t.sendLiteral(target, "q").catch(() => {});
-        await wait(300);
-        continue;
-      }
-      // A neutral Escape receipt can precede the actual input widget during
-      // resume. Only the real composer proves that typed commands have a safe
-      // destination.
-      // A restart cannot legitimately preserve an unsent draft (the caller
-      // proved the old composer empty before respawn). During transcript
-      // replay, however, an old human prompt can briefly occupy the last ›
-      // row above the footer and look like a draft. Require Codex's exact
-      // empty/placeholder composer so replayed history cannot end the wait.
-      if (codexComposerText(content) === "") return true;
-      if (Date.now() >= nextRevealAt && reveals < 3) {
-        await t.sendEscape(target).catch(() => {});
-        reveals++;
-        nextRevealAt = Date.now() + 2500;
-      }
-      await wait(300);
-    }
-    console.warn(`waitForCodexUiReady(${agentName}:${pane}) timed out after ${timeoutMs}ms`);
-    return false;
-  }
+  const waitForCodexUiReady = (target, agentName, pane, hardTimeoutMs) =>
+    waitForCodexReady({ tmux: t, target, agentName, pane, delay: wait, hardTimeoutMs });
 
   // --- Dismiss ---
 
@@ -1672,10 +1637,10 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       }
     }
 
-    // Different tmux sessions are independent, so recreate agents in
-    // parallel. Within one session the first ensureReady owns creation and
-    // layout; only after it succeeds may the remaining coding panes start.
-    const starts = await Promise.all(fleet.map(async ({ name, cfg }) => {
+    // Recreate independent sessions with bounded parallelism. Unbounded
+    // startup loaded every large transcript at once and made healthy panes
+    // miss their readiness deadlines on a saturated host.
+    const starts = await mapWithConcurrency(fleet, 2, async ({ name, cfg }) => {
       if (stopFailed.has(name)) return null;
       const codingPanes = cfg.panes
         .map((paneConfig, index) => isAgentCmd(paneConfig?.cmd) ? index : -1)
@@ -1683,14 +1648,14 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       try {
         await ensureReady(name, codingPanes[0] ?? 0);
         if (codingPanes.length > 1) {
-          await Promise.all(codingPanes.slice(1).map((pane) => ensureReady(name, pane)));
+          await mapWithConcurrency(codingPanes.slice(1), 4, (pane) => ensureReady(name, pane));
         }
         return { name, codingPanes: codingPanes.length };
       } catch (err) {
         log(`fleet restart: could not recreate ${name}: ${err.message}`);
         return { name, codingPanes: 0, error: err.message };
       }
-    }));
+    });
     await serverHold.release().catch((err) =>
       log(`fleet restart: could not release ${serverHold.name}: ${err.message}`));
 
