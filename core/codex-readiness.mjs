@@ -13,6 +13,7 @@ export async function waitForCodexUiReady({
   pane,
   delay,
   hardTimeoutMs = 120_000,
+  stallTimeoutMs = 90_000,
   now = Date.now,
   logger = console,
 }) {
@@ -41,7 +42,13 @@ export async function waitForCodexUiReady({
     delay,
     now,
     hardTimeoutMs,
+    stallTimeoutMs,
   });
-  if (!ready) logger.warn(`waitForCodexUiReady(${agentName}:${pane}) stalled before ${hardTimeoutMs}ms`);
+  if (!ready) {
+    logger.warn(
+      `waitForCodexUiReady(${agentName}:${pane}) not ready within startup bounds `
+      + `(hard ${hardTimeoutMs}ms, static ${stallTimeoutMs}ms)`,
+    );
+  }
   return ready;
 }

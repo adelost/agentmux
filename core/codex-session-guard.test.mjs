@@ -5,7 +5,7 @@
 
 import { feature, unit, expect } from "bdd-vitest";
 import {
-  decideCodexStart, liveRolloutWriters, modelOverrideAudit,
+  allowsFreshCodexBootstrap, decideCodexStart, liveRolloutWriters, modelOverrideAudit,
 } from "./codex-session-guard.mjs";
 
 const rolloutPathFor = (id) => (id ? `/home/x/.codex/sessions/rollout-${id}.jsonl` : null);
@@ -72,6 +72,36 @@ feature("codex session guard (never resume --last)", () => {
     })],
     then: ["fresh is explicit and auditable", (decision) => {
       expect(decision).toMatchObject({ action: "fresh", reason: "explicit-first-bootstrap" });
+    }],
+  });
+
+  unit("an interrupted fenced first bootstrap may retry only for the same pane/profile", {
+    given: ["durable receipts left before a rollout id was discovered", () => ({
+      ownInterrupted: {
+        pane: "skybar:6@1", profileId: "1", sessionId: null,
+        status: "bootstrapping", startedAt: 1_784_400_511_340,
+      },
+      foreignInterrupted: {
+        pane: "ai:3@1", profileId: "1", sessionId: null,
+        status: "bootstrapping", startedAt: 1_784_400_511_340,
+      },
+      readyWithoutIdentity: {
+        pane: "skybar:6@1", profileId: "1", sessionId: null, status: "ready",
+      },
+    })],
+    when: ["fresh-launch authority is derived from each receipt", (receipts) => ({
+      first: allowsFreshCodexBootstrap("skybar:6@1", null),
+      ownRetry: allowsFreshCodexBootstrap("skybar:6@1", receipts.ownInterrupted),
+      foreignRetry: allowsFreshCodexBootstrap("skybar:6@1", receipts.foreignInterrupted),
+      malformedReady: allowsFreshCodexBootstrap("skybar:6@1", receipts.readyWithoutIdentity),
+    })],
+    then: ["only first launch and the exact interrupted bootstrap are authorized", (authority) => {
+      expect(authority).toEqual({
+        first: true,
+        ownRetry: true,
+        foreignRetry: false,
+        malformedReady: false,
+      });
     }],
   });
 

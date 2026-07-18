@@ -119,9 +119,17 @@ export function decideCodexStart({
   });
 }
 
-/** WHAT: An auditable provenance record for a model-override / session-choice.
- *  WHY: The incident left no record of who/what changed a pane's model or which
- *  session a respawn attached to; provenance makes the change reconstructable. */
+/** WHAT: Returns whether an exact pane may retry its fenced first bootstrap.
+ *  WHY: Prevents interrupted bootstrap receipts from stranding panes or weakening ready-session continuity. */
+export function allowsFreshCodexBootstrap(pane, persisted) {
+  if (!persisted) return true;
+  return persisted.pane === pane
+    && persisted.status === "bootstrapping"
+    && !persisted.sessionId;
+}
+
+/** WHAT: Builds an auditable provenance record for a model and session choice.
+ *  WHY: Prevents session and model changes from losing actor and source attribution. */
 export function modelOverrideAudit({
   pane, fromModel, toModel, actor, source, sessionAction, sessionId, at,
 }) {

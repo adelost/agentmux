@@ -55,7 +55,7 @@ import {
   selectedCodexProfile,
   setCodexModelOverride,
 } from "./core/codex-profiles.mjs";
-import { decideCodexStart, liveRolloutWriters } from "./core/codex-session-guard.mjs";
+import { allowsFreshCodexBootstrap, decideCodexStart, liveRolloutWriters } from "./core/codex-session-guard.mjs";
 import { waitForCodexUiReady as waitForCodexReady } from "./core/codex-readiness.mjs";
 import { mapWithConcurrency } from "./core/concurrency.mjs";
 import { createTmuxServerHold } from "./core/tmux-server-hold.mjs";
@@ -563,7 +563,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       persisted,
       rolloutPathFor: (sessionId) => discovered?.sessionId === sessionId ? discovered.path : null,
       writersFor: liveRolloutWriters,
-      allowFreshBootstrap: !remembered && !discovered && !requestedSessionId,
+      allowFreshBootstrap: !discovered && !requestedSessionId && allowsFreshCodexBootstrap(owner, remembered),
     });
     if (decision.action === "blocked") {
       const holders = decision.heldBy?.length ? ` (live writer ${decision.heldBy.join(",")})` : "";
