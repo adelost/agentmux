@@ -191,6 +191,36 @@ exit 2
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("uninstalls only the context cron while retaining unrelated rows", () => {
+    const root = mkdtempSync(join(tmpdir(), "context-push-uninstall-"));
+    const bin = join(root, "bin");
+    const state = join(root, "crontab");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "crontab"), `#!/bin/sh
+if [ "$1" = "-l" ]; then cat "$CRONTAB_STATE"; exit 0; fi
+if [ "$1" = "-" ]; then cat > "$CRONTAB_STATE"; exit 0; fi
+exit 2
+`);
+    chmodSync(join(bin, "crontab"), 0o755);
+    writeFileSync(state, [
+      "* * * * * /old/suggestions-context-push-cron.sh",
+      "0 8 * * * /unrelated-job",
+      "",
+    ].join("\n"));
+    const result = spawnSync("bash", [
+      join(process.cwd(), "bin", "install-context-push.sh"), "uninstall",
+    ], { encoding: "utf8", env: {
+      HOME: root,
+      PATH: `${bin}:/usr/bin:/bin`,
+      CRONTAB_STATE: state,
+    } });
+    const installed = readFileSync(state, "utf8");
+    expect(result.status).toBe(0);
+    expect(installed).not.toContain("suggestions-context-push-cron.sh");
+    expect(installed).toContain("/unrelated-job");
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it("keeps incomplete ledger lines behind the cursor", () => {
     const root = mkdtempSync(join(tmpdir(), "amux-context-ledger-"));
     const path = join(root, "events.jsonl");
