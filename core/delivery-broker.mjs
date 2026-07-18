@@ -9,7 +9,7 @@
 import { appendEvent } from "./events.mjs";
 import { deliverToPane } from "./delivery.mjs";
 import { rewriteModelSlash } from "./claude-model.mjs";
-import { recoverCompactedClaudeSubmit } from "./claude-submit-boundary.mjs";
+import { recoverSupersededSubmit } from "./submit-boundary.mjs";
 import {
   DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES,
   NOT_INGESTING_UNVERIFIED_STREAK, isNotSentDeliveryJob,
@@ -569,9 +569,9 @@ export function createDeliveryBroker({
           return acknowledge(job, "slash-submit-recovery");
         }
       }
-      const compacted = await recoverCompactedClaudeSubmit({ job, agent, queue, exactEcho,
-        acknowledge, now, onRecovered: (value) => queueEvent(value, "submit_superseded_by_compact") });
-      if (compacted) return compacted;
+      const superseded = await recoverSupersededSubmit({ job, agent, queue, exactEcho,
+        acknowledge, now, onRecovered: (value, state) => queueEvent(value, state) });
+      if (superseded) return superseded;
       const recoveredTui = await recoverSubmittedTui({ job, agent, queue, exactEcho, acknowledge, now, log,
         onRecovered: (value) => queueEvent(value, "submit_recovered_after_stall") });
       if (recoveredTui) return recoveredTui;
