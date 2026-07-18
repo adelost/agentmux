@@ -54,10 +54,15 @@ export const BLOCKING_PROMPTS = [
       const last = lines.at(-1)?.trim() || "";
       if (last.includes("Resume from summary") && last.includes("Enter to confirm")) return true;
       const block = lines.join("\n");
-      return /^Enter to confirm\s*·\s*Esc to cancel$/u.test(last)
+      const fullMenu = /^Enter to confirm\s*·\s*Esc to cancel$/u.test(last)
           && /(?:❯\s*)?1\.\s*Resume from summary(?:\s*\(recommended\))?/u.test(block)
           && /2\.\s*Resume full session as-is/u.test(block)
           && /3\.\s*Don't ask me again/u.test(block);
+      const heightClippedMenu = /^❯\s*1\.\s*Resume from summary\s*\(recommended\)$/u.test(last)
+          && /This session is .+ tokens\./u.test(block)
+          && /Resuming the full session will consume a substantial portion of your usage limits\./u.test(block)
+          && /We recommend resuming from a summary\./u.test(block);
+      return fullMenu || heightClippedMenu;
     },
     keys: "Enter",
     waitMs: 3000,
