@@ -205,8 +205,9 @@ cron-friendly.
 
 The bridge writes a 30s heartbeat (`~/.agentmux/bridge-heartbeat.json`).
 `bin/bridge-watchdog-cron.sh` (install: `bash bin/install-bridge-watchdog.sh`,
-runs every 5 min) kills a hung bridge so the supervisor restarts it, and
-revives a fully dead stack only in explicit managed (`--detach`) mode.
+runs every minute) kills a bridge after its five-minute stale-heartbeat
+threshold, revives a fully dead stack only in explicit managed (`--detach`)
+mode, and rebuilds tmux only after three consecutive socket-probe failures.
 Manual and intentionally stopped bridges stay user-owned. Rate-limited, logged to
 `~/.agentmux/watchdog.log`, kill-switch `touch ~/.agentmux/watchdog-OFF`.
 

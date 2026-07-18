@@ -63,6 +63,25 @@ export const BLOCKING_PROMPTS = [
     waitMs: 3000,
   },
   {
+    name: "additional-safety-check",
+    // Codex can pause a long-running turn while the provider performs an
+    // additional safety review. Choosing "Keep waiting" preserves the same
+    // model and review; it does not relax or bypass the safety decision.
+    match: (text) => {
+      const lines = tailLines(text, 10);
+      const last = lines.at(-1)?.trim() || "";
+      const block = lines.join("\n");
+      return /^Press enter to confirm or esc to go back$/iu.test(last)
+        && /Additional safety checks/iu.test(block)
+        && /1\.\s*Retry with a faster model/iu.test(block)
+        && /2\.\s*Keep waiting/iu.test(block)
+        && /3\.\s*Learn more/iu.test(block);
+    },
+    // Option 1 is preselected in the observed menu.
+    keys: "Down Enter",
+    waitMs: 1000,
+  },
+  {
     name: "dismiss",
     // Codex feedback survey layout (active state):
     //   <prev row>

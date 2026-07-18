@@ -207,6 +207,12 @@ export function createBridgeLifecycle({ bridgeDir, env = process.env } = {}) {
     mkdirSync(serviceRoot(), { recursive: true, mode: 0o700 });
     mkdirSync(dirname(serviceLogPath()), { recursive: true, mode: 0o700 });
     const serviceId = `bridge:${randomUUID()}`;
+    // A detached bridge is deliberately independent of the terminal that
+    // launched it. Keeping these variables would make fleet-restart mistake
+    // the bridge for an occupant of the caller's tmux session.
+    const detachedEnv = { ...env, AMUX_BRIDGE_SUPERVISOR_ID: serviceId };
+    delete detachedEnv.TMUX;
+    delete detachedEnv.TMUX_PANE;
     const logFd = openSync(serviceLogPath(), "a", 0o600);
     let child;
     try {
@@ -215,7 +221,7 @@ export function createBridgeLifecycle({ bridgeDir, env = process.env } = {}) {
           cwd: resolvedBridgeDir,
           detached: true,
           stdio: ["ignore", logFd, logFd],
-          env: { ...env, AMUX_BRIDGE_SUPERVISOR_ID: serviceId },
+          env: detachedEnv,
         });
         candidate.once("error", rejectSpawn);
         candidate.once("spawn", () => resolveSpawn(candidate));

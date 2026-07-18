@@ -19,6 +19,9 @@ function setupCli({ managed = false } = {}) {
 set -u
 cleanup() { sleep "\${FAKE_STOP_DELAY:-0}"; rm -f "$PIDFILE" "$READY_FILE"; exit 0; }
 trap cleanup TERM INT
+if [[ -n "\${AMUX_TEST_ENV_CAPTURE:-}" ]]; then
+  printf 'TMUX=%s\\nTMUX_PANE=%s\\n' "\${TMUX-}" "\${TMUX_PANE-}" > "$AMUX_TEST_ENV_CAPTURE"
+fi
 echo $$ > "$PIDFILE"
 echo $$ > "$READY_FILE"
 while true; do sleep 1 & wait $! || true; done
@@ -83,17 +86,25 @@ feature("serve CLI ownership UX", () => {
   integration("detached serve is tmux-free, readiness-gated, and exactly stoppable", {
     given: ["an isolated long-running bridge launcher", () => setupCli({ managed: true })],
     when: ["starting then stopping detached ownership", (ctx) => {
+      const inheritedEnvironment = join(ctx.root, "detached-environment");
+      ctx.env.TMUX = "/tmp/caller-tmux.sock,123,0";
+      ctx.env.TMUX_PANE = "%42";
+      ctx.env.AMUX_TEST_ENV_CAPTURE = inheritedEnvironment;
       const started = ctx.run("serve", "--detach");
       const record = JSON.parse(readFileSync(join(ctx.env.AMUX_BRIDGE_SERVICE_DIR, "process.json"), "utf8"));
       const readyPid = Number(readFileSync(ctx.env.READY_FILE, "utf8").trim());
+      const detachedEnvironment = readFileSync(inheritedEnvironment, "utf8");
       const stopped = ctx.run("stop");
-      return { ctx, started, stopped, record, readyPid };
+      return { ctx, started, stopped, record, readyPid, detachedEnvironment };
     }],
-    then: ["the owned supervisor starts without tmux and stop removes it", ({ ctx, started, stopped, record, readyPid }) => {
+    then: ["the owned supervisor drops caller tmux identity and stop removes it", ({
+      ctx, started, stopped, record, readyPid, detachedEnvironment,
+    }) => {
       try {
         expect(started.status).toBe(0);
         expect(started.stdout).toContain("managed supervisor pid");
         expect(started.stdout).toContain("no tmux");
+        expect(detachedEnvironment).toBe("TMUX=\nTMUX_PANE=\n");
         expect(record.pid).toBe(readyPid);
         expect(readFileSync(ctx.env.AMUX_BRIDGE_MODE_FILE, "utf8").trim()).toBe("stopped");
         expect(stopped.status).toBe(0);
