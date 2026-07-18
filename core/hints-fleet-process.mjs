@@ -9,14 +9,14 @@
 // agent policy") and heading names by core/reminder-state.mjs
 // DRIFT_SECTIONS — conform edits to those gates or update both sides
 // deliberately.
-// WHAT: Fleet-process section of the generated agent policy. WHY: Owns cross-project process rules in one layer so no per-repo copy drifts.
-export const FLEET_PROCESS_HINTS = `## Rule layers — who owns what
+// WHAT: Defines the fleet-process section of the generated agent policy. WHY: Keeps cross-project process rules in one layer so no per-repo copy can drift.
+export const FLEET_PROCESS_HINTS = `## Rule layers: who owns what
 
 Rules live in exactly one layer; a rule restated across layers WILL drift,
 and the stale copy becomes a trap. When you meet a duplicate, fix the
 split instead of obeying the older text.
 
-1. **This file (amux layer):** fleet process — dispatch, ownership, merge
+1. **This file (amux layer):** fleet process: dispatch, ownership, merge
    and review policy, communication discipline, memory logging. Synced
    into every project by amux; edit it in the agentmux repo, never
    per-project.
@@ -24,8 +24,8 @@ split instead of obeying the older text.
    normative for ticket states and broker/worker/reviewer duties toward
    the board; \`docs/AGENT-API.md\` holds the wire contract. The broker
    *behavior* rules below defer to those documents on board mechanics.
-3. **Each code repo:** its own truths — data provenance, gates, commands,
-   deploy contracts — in the repo's \`AGENTS.md\` and linked docs. Repo
+3. **Each code repo:** its own truths (data provenance, gates, commands,
+   deploy contracts) in the repo's \`AGENTS.md\` and linked docs. Repo
    docs may pin merge-time INVARIANTS (what must be true); they never
    define process (who does it).
 
@@ -36,7 +36,7 @@ When presenting options or asking "what should we do?":
 - **Don't** defer with "let me know which you prefer" / "up to you" / "whichever"
 - **Do** pick one and give a one-line reason tied to the user's history/goals
 - Template: \`→ Rekommenderar B. Varför: [specific tie-in]\`
-- In doubt: still pick, then add "— säg till om du vill ha sanity check"
+- In doubt: still pick, then add "säg till om du vill ha sanity check"
 
 Drift-prone: the rule sits in system-context but attention weights tunnas
 after many turns. The bridge's drift-guard sends you a \`[drift-guard]\`
@@ -57,7 +57,7 @@ Always fix the cause, not the symptom. Before patching, ask *why* it's happening
 - ❌ Error in prod → wrap in try/catch and swallow
 - ✅ Error in prod → trace the path, fix the source
 
-Quick workaround is OK when deliberate (time pressure, experiment) — but
+Quick workaround is OK when deliberate (time pressure, experiment), but
 **call it out**: "patching surface, root cause is X, fix later."
 
 ## Verify before reporting
@@ -69,7 +69,7 @@ Especially on WSL 9p mounts where \`Path.exists()\` can lie. Combine e.g.
 ## You share this repo with other agents
 
 Multiple panes may be committing to the same repo in parallel, and so are
-past-you (from prior sessions). Git log is the ledger of who did what —
+past-you (from prior sessions). Git log is the ledger of who did what;
 treat it as your first source-of-truth when observing unexpected state.
 
 Before claiming "bug/race/data-loss" on any state anomaly:
@@ -87,10 +87,10 @@ Concrete pattern: a dedup commit landing between two deploys explains
 a "video count drop" without any race condition. Skipped git log +
 investigation spun up = noise to the user, wasted agent time.
 
-## Multi-agent edit protocol (Mattias 2026-07-16 — no file-claims)
+## Multi-agent edit protocol (Mattias 2026-07-16: no file-claims)
 
 You and other agents may be editing the same repo in parallel. Do NOT
-claim files or announce ownership before starting — that friction slowed
+claim files or announce ownership before starting; that friction slowed
 the fleet down more than the conflicts it prevented (Mattias 2026-07-16:
 "sluta med claim på filer.. man gör en feature.. och sen löser man
 konflikten"). Build the feature in your own branch/worktree, then resolve
@@ -98,13 +98,13 @@ any conflict at merge:
 
 1. **Build, don't claim.** Make the feature; don't \`git status\`-STOP on
    someone else's WIP and don't post a "claim handlers.mjs" announcement.
-   Two agents touching the same file is normal — the merge resolves it.
+   Two agents touching the same file is normal; the merge resolves it.
 2. **Resolve the conflict at merge, not upfront:** rebase onto fresh trunk
    immediately before merge, run the change-relevant gate green after the
    rebase, and flag any conflict-resolved hunks in code you did not write for
    the reviewer to read first. (Staffing rule 2 below is the full merge gate.)
 3. **Version bumps must be unique:** before \`package.json\` bump, check
-   \`git log --oneline -3\` — the version you're picking must NOT
+   \`git log --oneline -3\`: the version you're picking must NOT
    already exist there. Same minor twice (e.g. two 1.16.2 commits)
    confuses downstream tooling.
 
@@ -120,7 +120,7 @@ trees keyed by exact locks, installs pnpm roots locally via
 keeps Python \`.venv\` local with \`uv sync --locked\`; a skipped root or lock
 drift is a red gate, not a scoping excuse.
 
-## Kommunikationsdisciplin (Mattias 2026-07-10 — efter ledger-mätt token-svinn)
+## Kommunikationsdisciplin (Mattias 2026-07-10: efter ledger-mätt token-svinn)
 
 1. **Prata bara när (a) en STÖRRE uppgift är KLAR, (b) du genuint behöver
    feedback/beslut, eller (c) något blockerar mottagaren.** Inga "klar med X,
@@ -129,7 +129,7 @@ drift is a red gate, not a scoping excuse.
 2. **Ingen peer-review mellan agenter (Mattias 2026-07-16):** grön gate ÄR
    reviewn, ägaren mergar själv; review bara på Mattias-begäran eller röd gate.
 3. **Delade träd fryses i KORTA brokerade gate-fönster** (en utsedd
-   koordinator äger fönstret) — aldrig dagar-långa blanket-fences av en
+   koordinator äger fönstret), aldrig dagar-långa blanket-fences av en
    annan panels yta.
 
 ## Staffing and review economics (Mattias 2026-07-13)
@@ -144,7 +144,7 @@ drift is a red gate, not a scoping excuse.
    Never interrupt it or stack a new assignment. Once eligible, assign regardless of file overlap; no overlap warning
    in the brief, no INTENT-collision stacking, no overlap-gate split-ticket
    (Mattias 2026-07-16: stop claiming files; build the feature and resolve the
-   conflict at merge — the claim machinery slowed the fleet more than it
+   conflict at merge; the claim machinery slowed the fleet more than it
    helped). The hard gate is the merge: (a) \`git fetch && git rebase\` onto
    fresh trunk immediately before merge, (b) the repository's
    fast, change-relevant gate must be green AFTER the rebase
@@ -207,20 +207,20 @@ drift is a red gate, not a scoping excuse.
    \`blocked-by: <ticket/PR>\` and defer it) so watchdogs and humans can see
    and re-verify it. Declaring wave-close/full-stop requires a fresh board
    query with a disposition for every non-done ticket; a blocker you cannot
-   re-verify right then is stale — assign the ticket. Unowned-ready alerts
+   re-verify right then is stale: assign the ticket. Unowned-ready alerts
    escalate on a doubling ladder (30m/1h/3h/7h/15h/31h, \`escalation\` in
    payload); an escalated alert may not be dismissed without one of the two
    actions above. (SKY-0034 sat 22h HIGH+READY behind a blocker that only
    existed in the broker's ledger.) Dispatch precedes review: at every broker
    decision point, first drain the READY column to capable idle workers (or
    move tickets out of READY per rule 14) BEFORE the next review/merge/
-   deploy — assignment costs one message, review costs an hour, and a
+   deploy: assignment costs one message, review costs an hour, and a
    backlog must never queue behind the broker's other work. The starvation
    sweep enforces this: READY >= 1 with zero in_progress nudges the broker,
    then the human.
 10. **An assignment is delivered only at owner-ACK.** After briefing a pane,
    verify pickup within a few minutes (reply or visible plan); a silent pane
-   gets re-checked or the ticket reassigned immediately — don't wait for the
+   gets re-checked or the ticket reassigned immediately; don't wait for the
    30-min watchdog reminder. (The p4 and p3 dropped-balls on SKY-0034 cost
    30+ min each and were caught only by the reminder.)
 11. **Relay human decisions with the verbatim quote.** When passing a
@@ -230,42 +230,42 @@ drift is a red gate, not a scoping excuse.
    whipsaw 2026-07-14: 'använd Codex, spara Claude' arrived as its opposite
    and workers were flipped work→hold→work for nothing). Human language is UTF-8 end to end: never transliterate Swedish user-visible text (write \`åäö\`, never \`aao\`/\`ar\`/\`for\` substitutes), and preserve quoted human text byte-for-byte. English code identifiers, filenames and technical terms stay English. Suggestions mutations containing human language use \`amux-suggest\` with a UTF-8 body file; quoted text additionally uses \`--expect-file\` plus \`--read-path\`. Direct inline curl/Python mutations are blocked because the exact source has already been lost there. If a tool cannot carry the original Unicode, stop and fix that transport instead of rewriting the message.
 12. **A drained lane is a state, not a failure.** A broker whose backlog is
-   empty reports 'backlog tom, ge nya tickets' instead of inventing scope —
+   empty reports 'backlog tom, ge nya tickets' instead of inventing scope;
    honest idle beats fabricated motion, and night rules already forbid
    speculative dispatch. Proving drained (0 PRs, board empty) IS the
    deliverable in that case.
 13. **Broker DIY-escalation after repeated failed delegation.** Delegate
-   first, always — but when the same bounded item has failed ~3 delegations,
+   first, always; but when the same bounded item has failed ~3 delegations,
    the broker may take direct ownership, note it in its ledger, and root-fix.
    Delegate-don't-build yields to un-stick-the-fleet (ai:2's progress bar:
    ~20 failed delegations, then fixed DIY in an hour).
-14. **A disposition is an action ON the ticket, never a note to self —
+14. **A disposition is an action ON the ticket, never a note to self,
    day or night (Mattias 2026-07-15: "det går ju inte pausa när det finns
    taska att göra").** Valid dispositions for an unowned-READY alert are
    exactly three: (a) assign it now, (b) record \`blocked-by:\` on the ticket
    and defer it, or (c) flip it to needs-answer so the human decision lands
    in the morning queue while it LEAVES the ready pool. "Busy", "held for
-   morning", or a ledger/memory note are NOT dispositions — board tickets
+   morning", or a ledger/memory note are NOT dispositions; board tickets
    are already-sanctioned work, so night rules never pause dispatch (rule 7
    restricts speculative scope and paid deploys, not assignment; lsrc held
    24 READY behind "held for morning" while 7 workers idled, 2026-07-15).
-   Full re-prioritization still waits for the morning report — but the
+   Full re-prioritization still waits for the morning report, but the
    backlog keeps moving underneath it.
 15. **Expect the data→consumer seam.** Tickets whose data and consumer live
    in different files or repos (recipe vs renderer) get bounded cross-file
    amendment authority in the ORIGINAL brief instead of a mid-flight
    exception round-trip every time (skydive hit this on every such ticket).
-16. **Reversible calls are broker calls: decide, ship, show — don't ask
+16. **Reversible calls are broker calls: decide, ship, show; don't ask
    (Mattias 2026-07-15, on ai:2's parked design questions: the broker
    should have chosen itself and shown the result afterwards).** Never park
-   work on a human opinion when the choice is reversible — UI layout, color
+   work on a human opinion when the choice is reversible: UI layout, color
    variants, defaults, quality/speed tradeoffs: pick the option best
    supported by the user's history, implement it, and present the LIVE
    result with a one-line rationale and how to flip it. Ask FIRST only when
    the call is irreversible, external-facing, costs money, or carries real
    risk (then propose-first per rule 11 applies). An "awaiting your
    decision" pile is a bug: each item either ships with a chosen default or
-   becomes a needs-answer board item — never a chat-side blocker.
+   becomes a needs-answer board item, never a chat-side blocker.
 
 ## Minnesloggning
 

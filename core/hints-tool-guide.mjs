@@ -3,12 +3,12 @@
 // process rules live in hints-fleet-process.mjs, board coordination in the
 // suggestions repo (docs/AGENT-WORK-PROTOCOL.md), repo truths in each
 // repo. Assembled into the versioned hints block by agent.mjs.
-// WHAT: Tool-guide section of the generated agent policy. WHY: Teaches every pane the amux surface without mixing in process rules that live one layer up.
+// WHAT: Defines the tool-guide section of the generated agent policy. WHY: Separates the amux tool surface from the process rules that live one layer up.
 export const TOOL_GUIDE_HINTS = `# agentmux
 
 You are running inside agentmux. You can orchestrate other agents from your terminal.
 
-**Never use raw \`tmux ... capture-pane\`.** Everything is exposed via \`amux\` —
+**Never use raw \`tmux ... capture-pane\`.** Everything is exposed via \`amux\`:
 shorter, validated, mirrors to Discord so the user sees what you do.
 
 > Tip: \`ax\` is a shorter alias for \`amux\` (same script, both work). Use either.
@@ -21,7 +21,7 @@ amux <agent> -p <pane> "prompt"      # -p default 0
 amux claw -p 1 "run the full test suite"
 \`\`\`
 Mirrors to Discord channel automatically (user sees your briefs). Auto-prepends
-\`[from <sender-session>:<window>]\` when invoker is in tmux — receiver pane +
+\`[from <sender-session>:<window>]\` when invoker is in tmux; receiver pane +
 Discord mirror both see who briefed. Sender is invariant: provenance is never
 silently erased.
 
@@ -46,7 +46,7 @@ amux search "term" --fast            # lexical only (~1s, skips embedding load)
 \`\`\`
 One line per hit, best sources first (memory > digests > raw sessions).
 When the user references a person, project or decision you lack context on,
-search FIRST — the answer is usually already in memory. \`claw search\` is
+search FIRST: the answer is usually already in memory. \`claw search\` is
 the same engine.
 
 ### Understand state across panes
@@ -80,30 +80,30 @@ amux done --all                      # last 30d (max safety cap)
 amux done --since 30min              # explicit window: ISO or relative ("2h", "1d")
 \`\`\`
 
-\`amux done\` is **pure time-window** — no state, no checkpoint, fully
+\`amux done\` is **pure time-window**: no state, no checkpoint, fully
 idempotent. Call it as many times as you want; output is consistent.
 Multiple agents can run it in parallel without races.
 
 Output anatomy (same for all modes):
 
-1. **\`▸ DU = <agent>:<pane>\`** — only when you run \`done\` from inside a pane.
+1. **\`▸ DU = <agent>:<pane>\`**: only when you run \`done\` from inside a pane.
    Your own state first: what you were last asked, your last reply, your status,
    and \`amux log\` for your full history. If you just lost context (compact /
    fresh spawn), this re-anchors you before anything else.
-2. **\`Recent activity (top 20)\`** — last 20 events system-wide from a 7d
+2. **\`Recent activity (top 20)\`**: last 20 events system-wide from a 7d
    window, independent of cutoff. 📝 commits + 🔸 pane activity, newest first.
    "Where were we" at a glance.
-3. **Attention-first sections** — open loops over a WIDER window (old dropped
+3. **Attention-first sections**: open loops over a WIDER window (old dropped
    balls surface), live state over the cutoff:
-   - 📝 **Commits** — work shipped (strongest signal)
-   - 🔴 **väntar på DITT svar / needs you** — agent asked the human a question,
+   - 📝 **Commits**: work shipped (strongest signal)
+   - 🔴 **väntar på DITT svar / needs you**: agent asked the human a question,
      or a live modal. Ball is in the human's court.
-   - ⚠️ **kanske tappad / maybe dropped** — the human's directive is the most
+   - ⚠️ **kanske tappad / maybe dropped**: the human's directive is the most
      recent message and the agent never replied + isn't live (idle >30min). This
      is the "I asked X, it never got done" detector.
-   - 🟡 **jobbar / working** — live right now.
-   - ✅ **klar / done** — replied within the window.
-   - 💤 **idle** — counted.
+   - 🟡 **jobbar / working**: live right now.
+   - ✅ **klar / done**: replied within the window.
+   - 💤 **idle**: counted.
 
    Each pane shows a 2-line **thread block** (age tag on actionable sections):
    \`\`\`
@@ -114,13 +114,13 @@ Output anatomy (same for all modes):
    The coordination payload: what a pane was told + where it landed, WITHOUT a
    follow-up \`amux log\`. Read a pane's ← line to see if it's already on your
    task. Sections cap at 8 rows (\`… +N\` → \`amux done --week\`).
-4. **\`ℹ More:\`** footer — drill-down + send-to-pane + \`timeline --grep\` to find
+4. **\`ℹ More:\`** footer: drill-down + send-to-pane + \`timeline --grep\` to find
    which pane you asked about something.
 
 Use \`amux done\` at every decision point instead of 5× \`amux ps\` + per-pane
 \`amux log\`: the feed gives "where was I", the thread blocks give "what is
 everyone doing and what were they asked", 🔴/⚠️ give "what needs me / what got
-dropped" — enough to coordinate, or to recover a dropped ball by handing it to
+dropped": enough to coordinate, or to recover a dropped ball by handing it to
 another pane, from one call.
 
 ### Shrink context before hitting limit
@@ -143,9 +143,9 @@ marker block in the daily memory file, then writes a run sentinel.
 
 Dream also runs **session-file housekeeping** at the end of each nightly run:
 DEAD session jsonl (mtime older than 14d, Claude + Codex) get deleted. Live
-files are never matched — an active pane rewrites its jsonl continuously, so
+files are never matched: an active pane rewrites its jsonl continuously, so
 its mtime is always seconds old. This only reaps abandoned/rotated sessions;
-it does NOT and cannot shrink a live 100MB+ session (that's a \`/compact\` job —
+it does NOT and cannot shrink a live 100MB+ session (that's a \`/compact\` job;
 truncating a live file would corrupt resume). Inspect or run on demand:
 \`\`\`bash
 amux janitor --dry                   # what would be deleted (no changes)
@@ -207,12 +207,12 @@ the bridge does not need to live in tmux to be observable. Agents should not
 silently replace a manual bridge with a daemon: use \`--detach\` only when the
 user explicitly wants background ownership.
 
-### Health check — FIRST stop when something seems silent or wrong
+### Health check: FIRST stop when something seems silent or wrong
 \`\`\`bash
 amux doctor                          # bridge alive/hung/stale-code, hooks, ledger, tmux
 \`\`\`
 One table over every silent failure mode, each ⚠/❌ row comes with its fix.
-Key row: "bridge code" — the bridge is a long-lived process, so pushed amux
+Key row: "bridge code". The bridge is a long-lived process, so pushed amux
 fixes are NOT live until it restarts (\`/restart\` in Discord). doctor flags
 exactly that. A watchdog cron self-heals a hung bridge every 5 min and revives
 a dead stack only in explicit \`--detach\` managed mode
@@ -223,7 +223,7 @@ Panes report their own working/idle/needs-you transitions via Claude Code
 hooks to \`~/.agentmux/events.jsonl\`; \`ps\`/\`done\`/\`wait\`/auto-compact merge
 that with tmux scraping (pushed events only refine idle/unknown, never
 override a live modal). Permission asks + session starts show in
-\`amux timeline\` as 🔔 rows — check those when investigating "what blocked
+\`amux timeline\` as 🔔 rows; check those when investigating "what blocked
 this pane while I was away". Slash commands sent from Discord (\`/model\` etc)
 are delivery-verified: the reply says honestly whether the command was
 consumed or still sits in the composer.
@@ -237,7 +237,7 @@ consumed or still sits in the composer.
 | **ps/top** | Status indicator + context% | Quick overview |
 | **timeline** | Merge of all jsonl, chronological | Cross-pane post-mortem |
 | **done** | Commits + classified panes since last check | Daily orchestration (use first) |
-| **git log** | Via \`amux done\` — strongest work signal | Cross-repo "what shipped?" |
+| **git log** | Via \`amux done\`, strongest work signal | Cross-repo "what shipped?" |
 
 ## Discord integration (when bridge is running)
 
@@ -268,10 +268,10 @@ amux image /absolute/path/to/file.png
 
 Uploads the file to the bound Discord channel and prints the message ID.
 
-### When to post images — non-negotiable
+### When to post images: non-negotiable
 
 If the user asks for a screenshot, image, visual proof, "ge mig bilder",
-"show me", "kan du visa", or any synonym — **post the file via
+"show me", "kan du visa", or any synonym: **post the file via
 \`amux image <path>\` (or the inline \`[image: ...]\` syntax) immediately**.
 Do not just save the file to disk and describe what's in it. The user
 explicitly asked because they want to SEE.
@@ -291,7 +291,7 @@ playwright_take_screenshot → file at /path/to/foo.png
 \`\`\`
 
 Even if the screenshot doesn't perfectly demonstrate what you wanted to
-prove (e.g. browser auto-state changed, race window closed) — POST IT
+prove (e.g. browser auto-state changed, race window closed): POST IT
 ANYWAY. Let the user see what you saw and decide if it's enough. Saying
 "the screenshot didn't capture what I wanted" without posting it gives
 the user nothing to evaluate.
