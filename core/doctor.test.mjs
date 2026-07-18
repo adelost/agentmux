@@ -9,19 +9,17 @@ import {
   checkNativeRuntimeFleet,
   checkSuggestionsBoard,
   checkQuotaRecoveryHealth,
-  checkTmuxClients,
-  checkTmuxPaneGeometry,
   formatDoctorReport,
-  observeTmuxFleet,
   SUGGESTIONS_BRIDGE_STALE_MS,
-  TMUX_MIN_PANE_COLUMNS,
-  TMUX_MIN_PANE_ROWS,
-  checkTmuxVersion,
   FAIL, OK, WARN,
   checkBridgeMode, checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkReleaseIdentity, checkSupervisors,
   rescueBridgePidFromHeartbeat,
-  checkLedger, checkTmux, overallStatus,
+  checkLedger, overallStatus,
 } from "./doctor.mjs";
+import {
+  checkTmux, checkTmuxClients, checkTmuxPaneGeometry, checkTmuxVersion,
+  observeTmuxFleet, TMUX_MIN_PANE_COLUMNS, TMUX_MIN_PANE_ROWS,
+} from "./doctor-tmux.mjs";
 import { classifyHeartbeat, HEARTBEAT_STALE_MS } from "./heartbeat.mjs";
 
 const NOW = new Date("2026-07-08T12:00:00Z").getTime();
