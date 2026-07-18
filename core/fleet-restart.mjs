@@ -44,7 +44,7 @@ export function consumeFleetRestart({ path = null } = {}) {
     return null;
   }
   try { unlinkSync(requestPath); } catch {}
-  if (request?.version !== 1 || !["cli", "discord"].includes(request.source)) return null;
+  if (request?.version !== 1 || !["cli", "discord", "watchdog"].includes(request.source)) return null;
   return request;
 }
 

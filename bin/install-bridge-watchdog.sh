@@ -14,7 +14,7 @@ if command -v amux >/dev/null 2>&1; then
   fi
 fi
 printf -v WATCHDOG_PATH '%q' "$DIR/bin/bridge-watchdog-cron.sh"
-ENTRY="*/5 * * * * bash $WATCHDOG_PATH"
+ENTRY="* * * * * bash $WATCHDOG_PATH"
 
 current=$(crontab -l 2>/dev/null || true)
 installed=$(printf '%s\n' "$current" | grep -F "bridge-watchdog-cron.sh" || true)

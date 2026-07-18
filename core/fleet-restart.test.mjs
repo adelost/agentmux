@@ -32,6 +32,23 @@ feature("durable fleet restart handoff", () => {
     }],
   });
 
+  unit("the outside watchdog is an authorized fleet-restart source", {
+    given: ["an isolated watchdog request", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-fleet-watchdog-"));
+      return { root, path: join(root, "request.json") };
+    }],
+    when: ["the replacement bridge consumes it", ({ path }) => {
+      queueFleetRestart({ source: "watchdog", requestedAt: "2026-07-18T18:00:00.000Z", path });
+      return consumeFleetRestart({ path });
+    }],
+    then: ["the durable handoff preserves watchdog provenance", (request, { root }) => {
+      expect(request).toEqual({
+        version: 1, source: "watchdog", requestedAt: "2026-07-18T18:00:00.000Z",
+      });
+      rmSync(root, { recursive: true, force: true });
+    }],
+  });
+
   unit("replacement bridge executes and persists a compact receipt", {
     given: ["a Discord request, agent and state", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-fleet-run-"));

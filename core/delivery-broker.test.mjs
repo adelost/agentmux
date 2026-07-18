@@ -458,6 +458,95 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
+  component("a live idle pane is restarted once when a submitted prompt never reaches JSONL", {
+    given: ["a live coding process, an empty idle composer, and no authoritative receipt", () => {
+      const rootDir = tempRoot();
+      let clock = 130_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const created = queue.enqueue({ agentName: "lsrc", pane: 4, text: "continue the ticket" });
+      const job = queue.update(created, {
+        status: "submitted", submittedAt: 1_000, nextAttemptAt: 0,
+        echoCursor: { kind: "test", positions: {} },
+      });
+      let restarts = 0;
+      const restartOptions = [];
+      const agent = acceptingAgent();
+      agent.paneProcessState = async () => ({ running: true, shell: false, dead: false, command: "codex" });
+      agent.promptTransportState = async () => ({ state: "empty-idle", busy: false, dialect: "codex" });
+      agent.restartPaneExact = async (_name, _pane, options) => {
+        restarts++;
+        restartOptions.push(options);
+        return { ok: true, dialect: "codex" };
+      };
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
+      return { rootDir, queue, job, agent, broker, restarts: () => restarts, restartOptions,
+        advance: () => { clock += 1_001; } };
+    }],
+    when: ["the bounded idle timeout resumes the pane and the durable job drains", async (ctx) => {
+      await ctx.broker.kickTarget("lsrc", 4);
+      ctx.advance();
+      await ctx.broker.kickTarget("lsrc", 4);
+      ctx.advance();
+      await ctx.broker.kickTarget("lsrc", 4);
+    }],
+    then: ["one exact restart and one resend acknowledge the original job", (_, ctx) => {
+      expect(ctx.restarts()).toBe(1);
+      expect(ctx.restartOptions).toEqual([{ expectedDraft: null }]);
+      expect(ctx.agent.sends.map((send) => send.text)).toEqual(["continue the ticket"]);
+      expect(ctx.queue.read("lsrc", 4, ctx.job.id)).toMatchObject({
+        status: "acknowledged",
+        metadata: { submittedRecoveryKind: "live-idle-resend" },
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("one retained-draft Enter escalates to one exact pane restart", {
+    given: ["the exact draft remains after its bounded recovery Enter", () => {
+      const rootDir = tempRoot();
+      let clock = 100_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const created = queue.enqueue({ agentName: "skydive", pane: 6, text: "retry in order" });
+      const job = queue.update(created, {
+        status: "submitted", submittedAt: 1_000, nextAttemptAt: 0,
+        echoCursor: { kind: "test", positions: {} },
+      });
+      let enters = 0;
+      let restarts = 0;
+      const restartOptions = [];
+      const agent = acceptingAgent();
+      agent.paneProcessState = async () => ({ running: true, shell: false, dead: false, command: "codex" });
+      agent.promptTransportState = async () => ({ state: "drafted", busy: false, dialect: "codex" });
+      agent.sendEnter = async () => { enters++; };
+      agent.restartPaneExact = async (_name, _pane, options) => {
+        restarts++;
+        restartOptions.push(options);
+        return { ok: true, dialect: "codex" };
+      };
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
+      return { rootDir, queue, job, agent, broker, enters: () => enters, restarts: () => restarts,
+        restartOptions, advance: (ms) => { clock += ms; } };
+    }],
+    when: ["Enter remains unacknowledged past the pane restart threshold", async (ctx) => {
+      await ctx.broker.kickTarget("skydive", 6);
+      ctx.advance(22_000);
+      await ctx.broker.kickTarget("skydive", 6);
+      ctx.advance(1_001);
+      await ctx.broker.kickTarget("skydive", 6);
+    }],
+    then: ["the original draft is authorized for one exact restart and resend", (_, ctx) => {
+      expect(ctx.enters()).toBe(1);
+      expect(ctx.restarts()).toBe(1);
+      expect(ctx.restartOptions).toEqual([{ expectedDraft: "retry in order" }]);
+      expect(ctx.agent.sends.map((send) => send.text)).toEqual(["retry in order"]);
+      expect(ctx.queue.read("skydive", 6, ctx.job.id)).toMatchObject({
+        status: "acknowledged",
+        metadata: { submittedRecoveryKind: "live-idle-resend" },
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("a live busy submitted turn is never recovered or resent", {
     given: ["a missing receipt while the configured coding process is still working", () => {
       const rootDir = tempRoot();

@@ -92,7 +92,28 @@ feature("bridge ownership mode", () => {
       expect(script).toContain('QUOTA_STALE_SEC=900');
       expect(script).toContain('! grep -q \'"state":"disabled"\'');
       expect(script).toContain('STALE quota recovery');
-      expect(script).toContain('kill -9 $PIDS');
+      expect(script).toContain('for pid in $PIDS; do kill -9 "$pid"');
+    }],
+  });
+
+  unit("tmux recovery requires repeated socket failure and an identity-proven server", {
+    when: ["reading the outside watchdog contract", () => readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "bridge-watchdog-cron.sh"),
+      "utf-8",
+    )],
+    then: ["three probes precede exact server kill and a durable fleet handoff", (script) => {
+      const probe = script.indexOf('TMUX_FAILURE_THRESHOLD=3');
+      const identity = script.indexOf('tmux_server_pids()');
+      const refusal = script.indexOf('no identity-proven server pid; refusing broad kill');
+      const kill = script.indexOf('for pid in $TMUX_PIDS; do kill -9 "$pid"');
+      const handoff = script.indexOf('write_fleet_restart_request', kill);
+      expect(probe).toBeGreaterThan(0);
+      expect(identity).toBeGreaterThan(probe);
+      expect(refusal).toBeGreaterThan(identity);
+      expect(kill).toBeGreaterThan(refusal);
+      expect(handoff).toBeGreaterThan(kill);
+      expect(script).toContain('"source":"watchdog"');
+      expect(script).toContain('for pid in $PIDS; do kill -USR2 "$pid"');
     }],
   });
 

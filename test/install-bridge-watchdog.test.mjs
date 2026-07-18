@@ -35,7 +35,7 @@ cat > "$FAKE_CRONTAB"
       return { ...ctx, first, second: readFileSync(ctx.crontab, "utf8") };
     }],
     then: ["one stable release-pinned row survives beside unrelated cron work", (ctx) => {
-      const expected = `*/5 * * * * bash ${ctx.installed}/bin/bridge-watchdog-cron.sh`;
+      const expected = `* * * * * bash ${ctx.installed}/bin/bridge-watchdog-cron.sh`;
       expect(ctx.first).toBe(ctx.second);
       expect(ctx.second).toContain("11 * * * * keep-me");
       expect(ctx.second).toContain(expected);

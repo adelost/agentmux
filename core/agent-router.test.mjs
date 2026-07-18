@@ -7,6 +7,7 @@ describe("agent backend router", () => {
       capturePane: vi.fn(async () => "tmux"),
       getResponse: vi.fn(async () => "tmux-response"),
       sendEscape: vi.fn(async () => "tmux-escape"),
+      restartPaneExact: vi.fn(async () => "tmux-restart"),
       reconcileSession: vi.fn(async () => "tmux-reconcile"),
       ensureReady: vi.fn(async () => "tmux-ready"),
     };
@@ -26,6 +27,9 @@ describe("agent backend router", () => {
     await expect(agent.capturePane("claw", 3)).resolves.toBe("tmux");
     await expect(agent.getResponse("skybar-canary", 0)).resolves.toBe("native-response");
     await expect(agent.sendEscape("skybar-canary", 0)).resolves.toBe("native-interrupt");
+    await expect(agent.restartPaneExact("claw", 3, { expectedDraft: "owned" }))
+      .resolves.toBe("tmux-restart");
+    expect(tmuxAgent.restartPaneExact).toHaveBeenCalledWith("claw", 3, { expectedDraft: "owned" });
     await expect(agent.reconcileSession("skybar-canary")).resolves.toMatchObject({
       name: "skybar-canary", native: true, skipped: true, provisioned: 2,
     });

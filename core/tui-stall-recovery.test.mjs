@@ -87,4 +87,37 @@ feature("exact TUI crash recovery", () => {
       rmSync(ctx.root, { recursive: true, force: true });
     }],
   });
+
+  component("only the caller-proven exact draft may cross a pane restart", {
+    given: ["an idle Codex pane whose composer still contains the submitted job", () => {
+      const restarts = [];
+      const observedDrafts = [];
+      const recovery = createTuiStallRecovery({
+        tmux: {}, state: { get: (_key, fallback) => fallback, set: () => {} }, delay: async () => {},
+        configFor: () => ({ dir: "/workspace", panes: [{ cmd: "codex" }] }),
+        paneDirectory: (root) => root,
+        isPaneDead: async () => false,
+        respawnPane: async () => {},
+        isAlreadyRunning: async () => true,
+        resolveSessionFlag: async () => "",
+        isBusy: async () => false,
+        promptTransportState: async (_name, _pane, expected) => {
+          observedDrafts.push(expected);
+          return { state: "drafted", busy: false };
+        },
+        restartCodex: async (...args) => { restarts.push(args); },
+      });
+      return { recovery, restarts, observedDrafts };
+    }],
+    when: ["the generic path and then the exact-job path request restart", async (ctx) => {
+      ctx.generic = await ctx.recovery.restartPaneExact("claw", 0);
+      ctx.exact = await ctx.recovery.restartPaneExact("claw", 0, { expectedDraft: "owned prompt" });
+    }],
+    then: ["the foreign-looking draft blocks generic recovery but the exact draft resumes", (_, ctx) => {
+      expect(ctx.generic).toEqual({ ok: false, reason: "composer-drafted" });
+      expect(ctx.exact).toMatchObject({ ok: true, dialect: "codex" });
+      expect(ctx.observedDrafts).toEqual(["", "owned prompt"]);
+      expect(ctx.restarts).toHaveLength(1);
+    }],
+  });
 });
