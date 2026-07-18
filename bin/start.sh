@@ -39,6 +39,12 @@ if [ "${AMUX_AUTO_REVIVE:-true}" != "false" ]; then
 fi
 
 while true; do
+  # `npm install --global` atomically replaces the package directory. A
+  # long-lived supervisor keeps the deleted directory inode as its cwd, and
+  # the next Node spawn then dies in uv_cwd before user code can run. Re-enter
+  # the stable package path on every generation so /restart picks up the new
+  # release without requiring a manual supervisor replacement.
+  cd "$DIR"
   started=$(date +%s)
   node --import ./bin/quota-recovery-bootstrap.mjs index.mjs
   code=$?
