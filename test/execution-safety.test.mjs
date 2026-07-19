@@ -12,6 +12,8 @@ import {
   CODEX_AUTONOMOUS_THREAD_POLICY,
   CODEX_AUTONOMOUS_TURN_POLICY,
   CODEX_EXTERNAL_NAVIGATION_RULES,
+  KIMI_AUTONOMOUS_ARGS,
+  KIMI_AUTONOMOUS_FLAGS,
   renderShellArgs,
 } from "../core/execution-safety.mjs";
 import { ensureCodexExecutionSafety } from "../core/codex-profiles.mjs";
@@ -59,6 +61,17 @@ feature("shared autonomous execution contract", () => {
         sandboxPolicy: { type: "dangerFullAccess" },
         approvalPolicy: "never",
       });
+    }],
+  });
+
+  unit("Kimi uses the centrally managed autonomous policy", {
+    when: ["reading the canonical argv", () => ({
+      args: KIMI_AUTONOMOUS_ARGS,
+      flags: KIMI_AUTONOMOUS_FLAGS,
+    })],
+    then: ["the exact yolo flag is present once", ({ args, flags }) => {
+      expect(args).toEqual(["--yolo"]);
+      expect(flags).toBe("--yolo");
     }],
   });
 

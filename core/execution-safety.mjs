@@ -12,6 +12,10 @@ export const CODEX_AUTONOMOUS_ARGS = Object.freeze([
   "--yolo",
 ]);
 
+export const KIMI_AUTONOMOUS_ARGS = Object.freeze([
+  "--yolo",
+]);
+
 export const CODEX_APP_SERVER_ARGS = Object.freeze([
   "app-server",
   "--stdio",
@@ -49,3 +53,4 @@ export function renderShellArgs(args) {
 
 export const CLAUDE_AUTONOMOUS_FLAGS = renderShellArgs(CLAUDE_AUTONOMOUS_ARGS);
 export const CODEX_AUTONOMOUS_FLAGS = renderShellArgs(CODEX_AUTONOMOUS_ARGS);
+export const KIMI_AUTONOMOUS_FLAGS = renderShellArgs(KIMI_AUTONOMOUS_ARGS);

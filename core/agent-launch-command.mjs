@@ -2,7 +2,11 @@
 
 import { esc } from "../lib.mjs";
 import { resolveClaudeModel } from "./claude-model.mjs";
-import { CLAUDE_AUTONOMOUS_FLAGS, CODEX_AUTONOMOUS_FLAGS } from "./execution-safety.mjs";
+import {
+  CLAUDE_AUTONOMOUS_FLAGS,
+  CODEX_AUTONOMOUS_FLAGS,
+  KIMI_AUTONOMOUS_FLAGS,
+} from "./execution-safety.mjs";
 
 const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const KIMI_SESSION_ID_PATTERN = /^session_[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -91,5 +95,5 @@ export function buildKimiLaunchCommand({
     throw new Error("Kimi launch requires an exact pane session; fresh bootstrap was not authorized");
   }
   const sessionFlag = exactResume ? ` --session ${shellQuote(exactResume)}` : "";
-  return `${shellQuote(executable)} --model ${shellQuote(model)} --yolo${sessionFlag}`;
+  return `${shellQuote(executable)} --model ${shellQuote(model)} ${KIMI_AUTONOMOUS_FLAGS}${sessionFlag}`;
 }

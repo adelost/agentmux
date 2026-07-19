@@ -8,6 +8,7 @@ import { resolveClaudeModel } from "./core/claude-model.mjs";
 import {
   CLAUDE_AUTONOMOUS_FLAGS,
   CODEX_AUTONOMOUS_FLAGS,
+  KIMI_AUTONOMOUS_FLAGS,
 } from "./core/execution-safety.mjs";
 
 const DEFAULT_AGENT_CMD = `claude --continue ${CLAUDE_AUTONOMOUS_FLAGS} --model ${resolveClaudeModel()}`;
@@ -18,7 +19,7 @@ const DEFAULT_AGENT_CMD = `claude --continue ${CLAUDE_AUTONOMOUS_FLAGS} --model 
 // descriptor; startCodex resolves and resumes the exact pane-owned session.
 // A bare launch is allowed only for a profile's first explicit bootstrap.
 const DEFAULT_CODEX_CMD = `codex ${CODEX_AUTONOMOUS_FLAGS}`;
-const DEFAULT_KIMI_CMD = `${process.env.HOME}/.kimi-code/bin/kimi --model k3 --yolo`;
+const DEFAULT_KIMI_CMD = `${process.env.HOME}/.kimi-code/bin/kimi --model k3 ${KIMI_AUTONOMOUS_FLAGS}`;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const KIMI_MODEL_PATTERN = /^[a-z0-9._-]+$/iu;
 
