@@ -98,6 +98,7 @@ export const CODEX = {
 
 // --- Kimi Code ------------------------------------------------------------
 
+/** WHAT: Describes Kimi TUI markers. WHY: Keeps parsing independent from Claude and Codex rendering. */
 export const KIMI = {
   name: "kimi",
 
@@ -122,11 +123,12 @@ export const KIMI = {
 
 // --- Registry ------------------------------------------------------------
 
+/** WHAT: Defines supported TUI dialects. WHY: Keeps fallback detection aligned with every engine. */
 export const ALL_DIALECTS = [CLAUDE, CODEX, KIMI];
 
 /**
- * Identify which dialect produced this raw tmux buffer.
- * Checks the tail first (recent content) since scrollback may contain old banners.
+ * WHAT: Resolves the dialect producing a tmux buffer.
+ * WHY: Keeps scrollback parsing from applying another engine's markers.
  */
 export function detectDialect(raw) {
   if (raw.includes("Welcome to Kimi Code") || /\bSession\s+session_[0-9a-f-]+/iu.test(raw)) return KIMI;

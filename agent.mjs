@@ -1,6 +1,5 @@
 // Agent interaction: send prompts, wait for responses, track progress.
 // Manages tmux sessions directly. Single source of truth for claude startup + dismiss.
-
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
 import { load as loadYaml } from "js-yaml";
@@ -28,14 +27,8 @@ import {
   isPromptInCodexJsonl,
   latestCodexSessionIdentity,
 } from "./core/codex-jsonl-reader.mjs";
-import {
-  captureKimiPromptEchoCursor,
-  extractFromKimiJsonl,
-  getContextFromKimiJsonl,
-  isBusyFromKimiJsonl,
-  isPromptInKimiJsonl,
-  latestKimiSessionIdentity,
-} from "./core/kimi-jsonl-reader.mjs";
+import { createKimiAgentRuntime, kimiJournal } from "./core/kimi-agent-runtime.mjs";
+import { createClaudeSubmitRescue } from "./core/claude-submit-rescue.mjs";
 import { getContextPercent as getContextPercentByDialect, getContextFromPane } from "./core/context.mjs";
 import { findBlockingPrompt } from "./core/dismiss.mjs";
 import { claudeProjectDir, classifyHistoryRead } from "./core/claude-paths.mjs";
@@ -67,11 +60,7 @@ import { allowsFreshCodexBootstrap, decideCodexStart, liveRolloutWriters } from 
 import { waitForCodexUiReady as waitForCodexReady } from "./core/codex-readiness.mjs";
 import { mapWithConcurrency } from "./core/concurrency.mjs";
 import { createTmuxServerHold } from "./core/tmux-server-hold.mjs";
-import {
-  buildClaudeLaunchCommand,
-  buildCodexLaunchCommand,
-  buildKimiLaunchCommand,
-} from "./core/agent-launch-command.mjs";
+import { buildClaudeLaunchCommand, buildCodexLaunchCommand } from "./core/agent-launch-command.mjs";
 import {
   createTuiStallRecovery,
   isClaudePaneCommand as isClaudeCmd,
@@ -82,29 +71,17 @@ import {
 } from "./core/tui-stall-recovery.mjs";
 import { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence.mjs";
 import { assertClaudeQuotaAvailable } from "./core/claude-quota-target.mjs";
-export {
-  buildClaudeLaunchCommand,
-  buildCodexLaunchCommand,
-  buildKimiLaunchCommand,
-} from "./core/agent-launch-command.mjs";
+export { buildClaudeLaunchCommand, buildCodexLaunchCommand, buildKimiLaunchCommand } from "./core/agent-launch-command.mjs";
 export { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence.mjs";
 const CODEX_SESSION_STATE_KEY = "codex_session_by_pane_profile_v1";
 const CODEX_PROMPT_READY_TIMEOUT_MS = 8_000;
-const KIMI_PROMPT_READY_TIMEOUT_MS = 15_000;
 function codexDeliveryBlocked(message, { zoomRecoverable = false } = {}) {
   const error = new Error(message);
   error.code = "AMUX_DELIVERY_BLOCKED";
   if (zoomRecoverable) error.zoomRecoverable = true;
   return error;
 }
-function kimiDeliveryBlocked(message) {
-  const error = new Error(message);
-  error.code = "AMUX_DELIVERY_BLOCKED";
-  return error;
-}
-
 // --- Session isolation ---
-
 /** WHAT: Resolves one pane cwd. WHY: Keeps agent histories isolated across panes. */
 export function paneDir(rootDir, pane) {
   const dir = join(rootDir, ".agents", String(pane));
@@ -638,75 +615,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     await wait(2000);
   }
 
-  async function startKimi(name, target, rootDir, pane = 0, launch = null) {
-    if (await isPaneDead(target)) await respawnPane(target);
-    if (await isAlreadyRunning(target)) return;
-
-    const dir = paneDir(rootDir, pane);
-    const paneConfig = agentConfig(name).panes?.[pane] || {};
-    const discovered = latestKimiSessionIdentity(dir);
-    const resumeSessionId = launch?.resumeSessionId
-      || paneConfig.resumeSessionId
-      || discovered?.sessionId
-      || null;
-    const model = launch?.model || paneConfig.model || "k3";
-    const executable = process.env.KIMI_CODE_BIN
-      || `${process.env.HOME}/.kimi-code/bin/kimi`;
-    if (!existsSync(executable)) {
-      throw new Error(`Kimi Code CLI is not installed at ${executable}`);
-    }
-    const cmd = buildKimiLaunchCommand({
-      executable,
-      model,
-      resumeSessionId,
-      allowFreshBootstrap: !resumeSessionId,
-    });
-    await t.runShell(target, `cd ${esc(dir)} && ${cmd}`);
-    await wait(1500);
-  }
-
-  async function waitForKimiUiReady(target, agentName, pane, timeoutMs = KIMI_PROMPT_READY_TIMEOUT_MS) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const [command, screen] = await Promise.all([
-        t.currentCommand(target).catch(() => ""),
-        t.captureScreen(target).catch(() => ""),
-      ]);
-      if (/^(kimi|kimi-code)$/u.test(command) && /^\s*>\s*$/mu.test(stripAnsi(screen))) return true;
-      await wait(250);
-    }
-    console.warn(`waitForKimiUiReady(${agentName}:${pane}) stalled before ${timeoutMs}ms`);
-    return false;
-  }
-
-  async function restartKimi(agentName, pane) {
-    const config = agentConfig(agentName);
-    const paneCmd = config.panes?.[pane]?.cmd || "";
-    if (!isKimiCmd(paneCmd)) throw new Error(`${agentName}:${pane} is not a Kimi pane`);
-    if (await isBusy(agentName, pane)) throw new Error(`${agentName}:${pane} is still working`);
-
-    const target = `${agentName}:.${pane}`;
-    const dir = paneDir(config.dir, pane);
-    const identity = latestKimiSessionIdentity(dir);
-    if (!identity?.sessionId) {
-      throw new Error(`Kimi continuity blocked for ${agentName}:${pane}: exact persisted session not found`);
-    }
-    await t.respawnPane(target, { kill: true, cwd: dir });
-    const shellDeadline = Date.now() + 5_000;
-    while (Date.now() < shellDeadline) {
-      if (isShellProc(await t.currentCommand(target).catch(() => ""))) break;
-      await wait(100);
-    }
-    await startKimi(agentName, target, config.dir, pane, {
-      resumeSessionId: identity.sessionId,
-      model: config.panes?.[pane]?.model || "k3",
-    });
-    if (!await waitForKimiUiReady(target, agentName, pane)) {
-      throw new Error(`Kimi process started but its composer never became ready in ${agentName}:${pane}`);
-    }
-    return { ok: true, model: config.panes?.[pane]?.model || "k3", sessionId: identity.sessionId };
-  }
-
   /**
    * Restart one idle Codex pane under an explicit account/model selection.
    * The caller performs the draft gate and native /status verification; this
@@ -928,8 +836,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         const r = isBusyFromCodexJsonl(dir);
         if (r !== null) return r;
       } else if (dialect === "kimi") {
-        const r = isBusyFromKimiJsonl(dir);
-        if (r !== null) return r;
+        const r = kimiJournal.isBusy(dir); if (r !== null) return r;
       } else if (dialect === "claude") {
         const r = isBusyFromJsonl(dir, promptText);
         if (r !== null) return r;
@@ -967,6 +874,15 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return promptLine.slice(dialect.promptChar.length).trim().length > 0;
   }
 
+  const { maybeRescueKimiSubmit, restartKimi, startKimi,
+    waitForKimiPromptReady, waitForKimiUiReady } = createKimiAgentRuntime({
+    t, wait, paneDir, agentConfig, isBusy, isPaneDead, respawnPane,
+    isAlreadyRunning, isShellProcess: isShellProc, captureScreen, promptAlreadyInComposer,
+  });
+  const maybeRescueClaudeSubmit = createClaudeSubmitRescue({
+    t, wait, paneDir, agentConfig, paneDialectName, isBusy, capturePane,
+  });
+
   async function getResponseSegments(agentName, pane) {
     const raw = await capturePane(agentName, pane, 5000);
     return extractSegments(classifyLines(extractLastTurn(raw)));
@@ -1001,8 +917,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const codex = extractFromCodexJsonl(dir, promptText);
       if (codex && codex.items.length > 0) return codex;
     } else if (dialect === "kimi") {
-      const kimi = extractFromKimiJsonl(dir, promptText);
-      if (kimi && kimi.items.length > 0) return kimi;
+      const kimi = kimiJournal.extract(dir, promptText); if (kimi?.items.length) return kimi;
     } else if (dialect === "claude") {
       const claude = extractFromJsonl(dir, promptText);
       if (claude && claude.items.length > 0) return claude;
@@ -1052,10 +967,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const codex = extractFromCodexJsonl(dir, promptText);
       return Boolean(codex?.items?.length);
     }
-    if (dialect === "kimi") {
-      const kimi = extractFromKimiJsonl(dir, promptText);
-      return Boolean(kimi?.items?.length);
-    }
+    if (dialect === "kimi") return Boolean(kimiJournal.extract(dir, promptText)?.items?.length);
     if (dialect === "claude") {
       const claude = extractFromJsonl(dir, promptText);
       return Boolean(claude?.items?.length);
@@ -1109,7 +1021,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       else if (dialect === "codex") {
         found = isPromptInCodexJsonl(dir, promptText, { notBeforeMs, cursor });
       } else if (dialect === "kimi") {
-        found = isPromptInKimiJsonl(dir, promptText, { notBeforeMs, cursor });
+        found = kimiJournal.promptAccepted(dir, promptText, { notBeforeMs, cursor });
       }
       if (found === true) return true;
 
@@ -1129,7 +1041,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const dialect = paneDialectName(agentName, pane);
     if (dialect === "claude") return captureClaudePromptEchoCursor(dir, promptText);
     if (dialect === "codex") return captureCodexPromptEchoCursor(dir, promptText);
-    if (dialect === "kimi") return captureKimiPromptEchoCursor(dir, promptText);
+    if (dialect === "kimi") return kimiJournal.capturePromptCursor(dir, promptText);
     return null;
   }
 
@@ -1200,21 +1112,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     throw codexDeliveryBlocked(`Codex prompt delivery timed out: ${lastError}`, {
       zoomRecoverable: true,
     });
-  }
-
-  async function waitForKimiPromptReady(agentName, pane) {
-    const deadline = Date.now() + KIMI_PROMPT_READY_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      if (await isBusy(agentName, pane).catch(() => true)) {
-        throw kimiDeliveryBlocked(
-          "Kimi prompt delivery blocked: pane is working; wait for its current turn to finish",
-        );
-      }
-      const screen = await captureScreen(agentName, pane).catch(() => "");
-      if (/^\s*>\s*$/mu.test(screen)) return true;
-      await wait(250);
-    }
-    throw kimiDeliveryBlocked("Kimi prompt delivery timed out: composer is not ready");
   }
 
   async function recoverKnownCodexDraft(agentName, pane, prompt) {
@@ -1358,7 +1255,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     });
     await maybeSendCodexSubmitEnter(agentName, pane, target, prompt, { notBeforeMs });
     await maybeRescueClaudeSubmit(agentName, pane, target, prompt);
-    await maybeRescueKimiSubmit(agentName, pane, target, prompt, { notBeforeMs });
+    if (dialect === "kimi") {
+      await maybeRescueKimiSubmit(agentName, pane, target, prompt, { notBeforeMs });
+    }
 
     // Composer state is retained strictly as a transport hint for diagnostics
     // and bounded rescue. It never upgrades the submit attempt to delivery.
@@ -1600,68 +1499,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     }
   }
 
-  /**
-   * Claude twin of the codex submit-rescue. A long paste + immediate Enter
-   * can leave the text SITTING in the composer of an idle pane (paste still
-   * rendering when Enter lands, or claude restarting under a huge session
-   * jsonl — observed 2026-07-08: prompt pasted, echo-verified via composer
-   * tail, then lost). Composer text on a BUSY pane is a legitimately queued
-   * message and is left alone; only idle+still-in-composer gets rescued.
-   * jsonl is the source of truth for "actually submitted".
-   */
-  async function maybeRescueClaudeSubmit(agentName, pane, target, prompt) {
-    if (paneDialectName(agentName, pane) !== "claude") return;
-    let dir;
-    try { dir = paneDir(agentConfig(agentName).dir, pane); } catch { return; }
-
-    const submitted = () => {
-      try { return isPromptInJsonl(dir, prompt) === true; } catch { return false; }
-    };
-
-    await wait(750);
-    if (submitted()) return;
-
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (await isBusy(agentName, pane)) return;       // queued behind a turn: fine
-      const raw = await capturePane(agentName, pane, 15).catch(() => "");
-      const tail = raw.split("\n").slice(-5).join("\n");
-      if (!tail.includes(prompt.trim().slice(0, 20))) return; // not in composer
-      await t.sendEnter(target);
-      await wait(750);
-      if (submitted()) return;
-    }
-  }
-
-  /**
-   * Kimi's transport receipt is `turn.prompt` in Wire. Rescue an Enter only
-   * while the exact draft is still visible and Wire proves it was not
-   * accepted; never retype and never press Enter into a working pane.
-   */
-  async function maybeRescueKimiSubmit(agentName, pane, target, prompt, {
-    notBeforeMs = 0,
-  } = {}) {
-    if (paneDialectName(agentName, pane) !== "kimi") return;
-    let dir;
-    try { dir = paneDir(agentConfig(agentName).dir, pane); } catch { return; }
-    const submitted = () => {
-      try { return isPromptInKimiJsonl(dir, prompt, { notBeforeMs }) === true; }
-      catch { return false; }
-    };
-
-    await wait(600);
-    if (submitted()) return;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (await isBusy(agentName, pane).catch(() => true)) return;
-      if (!await promptAlreadyInComposer(agentName, pane, prompt)) return;
-      // Re-check the journal immediately before the physical key: a late Wire
-      // flush must not turn the rescue into a duplicate queued submission.
-      if (submitted()) return;
-      await t.sendEnter(target);
-      await wait(600);
-      if (submitted()) return;
-    }
-  }
-
   // --- Orchestration ---
 
   async function ensureReady(agentName, pane) {
@@ -1886,7 +1723,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       const config = agentConfig(agentName);
       const dir = paneDir(config.dir, pane);
       const dialect = paneDialectName(agentName, pane);
-      if (dialect === "kimi") return getContextFromKimiJsonl(dir);
+      if (dialect === "kimi") return kimiJournal.context(dir);
       return getContextPercentByDialect(dir, dialect);
     } catch (err) {
       console.warn(`getContextPercent(${agentName}) failed: ${err.message}`);

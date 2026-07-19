@@ -20,7 +20,7 @@ const TUI_RESTART_AFTER_MS = 5 * 60_000;
 export const isClaudePaneCommand = (command) => /(?:^|\s)claude(?:\s|$)/u.test(String(command || ""));
 /** WHAT: Checks whether a pane command starts Codex. WHY: Keeps lifecycle routing independent from display names. */
 export const isCodexPaneCommand = (command) => /(?:^|\s)codex(?:\s|$)/u.test(String(command || ""));
-/** WHAT: Checks whether a pane starts Kimi Code. WHY: Includes absolute installer paths. */
+/** WHAT: Checks whether a pane starts Kimi Code. WHY: Keeps absolute installer paths inside Kimi recovery. */
 export const isKimiPaneCommand = (command) => /(?:^|[\/\s])kimi(?:-code)?(?:\s|$)/u.test(String(command || ""));
 /** WHAT: Checks whether a pane runs a coding agent. WHY: Keeps service panes outside recovery boundaries. */
 export const isCodingPaneCommand = (command) =>

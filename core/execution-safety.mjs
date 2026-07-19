@@ -12,6 +12,7 @@ export const CODEX_AUTONOMOUS_ARGS = Object.freeze([
   "--yolo",
 ]);
 
+/** WHAT: Defines Kimi autonomous argv. WHY: Keeps Kimi launch surfaces from drifting. */
 export const KIMI_AUTONOMOUS_ARGS = Object.freeze([
   "--yolo",
 ]);
@@ -51,6 +52,9 @@ export function renderShellArgs(args) {
   }).join(" ");
 }
 
+/** WHAT: Formats Claude autonomous flags. WHY: Keeps shell boundaries centralized. */
 export const CLAUDE_AUTONOMOUS_FLAGS = renderShellArgs(CLAUDE_AUTONOMOUS_ARGS);
+/** WHAT: Formats Codex autonomous flags. WHY: Keeps shell boundaries centralized. */
 export const CODEX_AUTONOMOUS_FLAGS = renderShellArgs(CODEX_AUTONOMOUS_ARGS);
+/** WHAT: Formats Kimi autonomous flags. WHY: Keeps shell boundaries centralized. */
 export const KIMI_AUTONOMOUS_FLAGS = renderShellArgs(KIMI_AUTONOMOUS_ARGS);

@@ -70,19 +70,18 @@ export function buildCodexLaunchCommand({
 
 /**
  * WHAT: Builds a Kimi Code TUI launch with exact-session continuity.
- * WHY: Keeps pane restarts off the cwd-global `--continue` shortcut and makes
- *      the installed binary independent from the caller's stale shell PATH.
+ * WHY: Keeps restarts independent from cwd-global sessions and stale shell paths.
  */
 export function buildKimiLaunchCommand({
   executable = `${process.env.HOME}/.kimi-code/bin/kimi`,
-  model = "k3",
+  model = "kimi-code/k3",
   resumeSessionId = null,
   allowFreshBootstrap = false,
 } = {}) {
   if (!executable || !String(executable).startsWith("/")) {
     throw new Error("Kimi executable must be an absolute path");
   }
-  if (!/^[a-z0-9._-]+$/iu.test(String(model || ""))) {
+  if (!/^[a-z0-9._-]+(?:\/[a-z0-9._-]+)?$/iu.test(String(model || ""))) {
     throw new Error(`invalid Kimi model: ${model}`);
   }
   const exactResume = resumeSessionId == null || resumeSessionId === ""

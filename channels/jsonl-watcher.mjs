@@ -1,5 +1,4 @@
 // jsonl-watcher: event-driven mirror of agent replies → bound Discord channels.
-//
 // Replaces the old fan of ad-hoc forwarders (handlers.streamResponse,
 // drift-guard.forwardReplyAsync, resume-hint forwardHintReplyAsync,
 // mirror-loop). One watcher per claude/codex pane, fs.watch on its
@@ -39,13 +38,7 @@ import { loadConfig, findChannelForPane, channelForPane } from "../cli/config.mj
 import { paneDir } from "../agent.mjs";
 import { claudeProjectDir } from "../core/claude-paths.mjs";
 import { readLastTurns, latestJsonlMtime, latestJsonlInfo } from "../core/jsonl-reader.mjs";
-import { readLastTurnsCodex, latestCodexJsonlMtime, latestCodexJsonlInfo } from "../core/codex-jsonl-reader.mjs";
-import {
-  kimiWatchDir,
-  latestKimiJsonlInfo,
-  latestKimiJsonlMtime,
-  readLastTurnsKimi,
-} from "../core/kimi-jsonl-reader.mjs";
+import { alternateEngineForCommand, alternateSessionReader, alternateWatchDir, latestAlternateMtime } from "../core/alternate-session-reader.mjs";
 import { getContextFromPane, shortModelName } from "../core/context.mjs";
 import { isHarnessPlaceholder } from "../core/reply-forwarder.mjs";
 import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, planStartupAudit, itemKey } from "../core/watcher-engine.mjs";
@@ -596,13 +589,8 @@ export function createJsonlWatcher({
       }
       if (ctx) {
         const paneCmd = String(config?.[name]?.panes?.[idx]?.cmd || "");
-        // Kimi's model selector and quota semantics are independent from the
-        // Claude/Codex downgrade recovery state machine. Display its model,
-        // but never park/restart it through another engine's policy.
-        if (!/kimi(?:-code)?/iu.test(paneCmd)) {
-          await watchModelChange({ name, idx, channelId, ctx, config })
-            .catch((err) => log(`model-watch failed for ${name}:${idx}: ${err.message}`));
-        }
+        if (alternateEngineForCommand(paneCmd) !== "kimi") await watchModelChange({ name, idx, channelId, ctx, config })
+          .catch((err) => log(`model-watch failed for ${name}:${idx}: ${err.message}`));
         // tokens can be null when percent came from a custom statusline row.
         const suffix = ctx.tokens != null ? ` (${Math.round(ctx.tokens / 1000)}k)` : "";
         const model = shortModelName(ctx.model);
@@ -648,12 +636,8 @@ export function createJsonlWatcher({
   function readerFor(config, name, idx) {
     try {
       const cmd = config?.[name]?.panes?.[idx]?.cmd || "";
-      if (/codex/i.test(cmd)) {
-        return { readTurns: readLastTurnsCodex, latestMtime: latestCodexJsonlMtime, latestInfo: latestCodexJsonlInfo };
-      }
-      if (/kimi(?:-code)?/i.test(cmd)) {
-        return { readTurns: readLastTurnsKimi, latestMtime: latestKimiJsonlMtime, latestInfo: latestKimiJsonlInfo };
-      }
+      const alternate = alternateSessionReader(cmd);
+      if (alternate) return alternate;
     } catch { /* fall through to claude default */ }
     return { readTurns: readLastTurns, latestMtime: latestJsonlMtime, latestInfo: latestJsonlInfo };
   }
@@ -853,9 +837,7 @@ export function createJsonlWatcher({
 
   function projectDirFor(agentDir, idx, config, name) {
     const dir = paneDir(agentDir, idx);
-    const cmd = String(config?.[name]?.panes?.[idx]?.cmd || "");
-    if (/kimi(?:-code)?/iu.test(cmd)) return kimiWatchDir(dir);
-    return claudeProjectDir(dir);
+    return alternateWatchDir(config?.[name]?.panes?.[idx]?.cmd, dir) || claudeProjectDir(dir);
   }
 
   function attachFsWatch(name, idx, agentDir, config) {
@@ -940,11 +922,7 @@ export function createJsonlWatcher({
         // Dialect-dispatched mtime: codex sessions live under
         // ~/.codex/sessions, not ~/.claude/projects. Without this, codex
         // pane fs writes never show as fresh and typing-indicator stays off.
-        const mtimeMs = /codex/i.test(cmd)
-          ? latestCodexJsonlMtime(dir)
-          : /kimi(?:-code)?/i.test(cmd)
-            ? latestKimiJsonlMtime(dir)
-            : latestJsonlMtime(dir);
+        const mtimeMs = latestAlternateMtime(cmd, dir) || latestJsonlMtime(dir);
         if (!mtimeMs || now - mtimeMs > TYPING_FRESHNESS_MS) continue;
         maybeSendTyping(name, i, config);
       }

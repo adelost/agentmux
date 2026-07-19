@@ -33,13 +33,13 @@ function fixture() {
     workDir: cwd,
   })}\n`);
   writeFileSync(join(kimiHome, "config.toml"), [
-    "[models.k3]",
+    '[models."kimi-code/k3"]',
     "max_context_size = 200",
     "",
   ].join("\n"));
   const records = [
     { type: "metadata", protocol_version: "1.4" },
-    { type: "config.update", modelAlias: "k3", thinkingEffort: "off", time: 1_000 },
+    { type: "config.update", modelAlias: "kimi-code/k3", thinkingEffort: "max", time: 1_000 },
     { type: "turn.prompt", input: [{ type: "text", text: "first prompt" }], time: 2_000 },
     { type: "context.append_message", message: {
       role: "user",
@@ -92,7 +92,7 @@ describe("Kimi Wire journal", () => {
       });
       expect(isBusyFromKimiJsonl(fx.cwd, fx.options)).toBe(false);
       expect(getContextFromKimiJsonl(fx.cwd, fx.options)).toMatchObject({
-        model: "k3",
+        model: "kimi-code/k3",
         tokens: 100,
         max: 200,
         percent: 50,

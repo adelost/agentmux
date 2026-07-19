@@ -28,8 +28,8 @@ import { getContextFromPane, getContextPercent, shortModelName } from "../core/c
 import { loadSearchRoots, lexicalSearch, formatHits, saveLastResults, loadLastResults, expandHit, withScore, dedupeByFile } from "../core/search.mjs";
 import { codexInterruptionFromTurns, planRevive, reviveBrief, parseBootMs } from "../core/revive.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
-import { latestCodexJsonlMtime, readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
-import { latestKimiJsonlMtime, readLastTurnsKimi } from "../core/kimi-jsonl-reader.mjs";
+import { readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
+import { alternateEngineForCommand, latestAlternateMtime, readAlternateTurns } from "../core/alternate-session-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
 import { appendEvent, latestPaneStatesCached, mergeStatus, readEvents } from "../core/events.mjs";
 import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../core/pane-status.mjs";
@@ -841,9 +841,7 @@ function formatTurnsForDisplay(turns) {
 
 function readLastTurnsForPane(agent, paneIdx, paneDir, opts) {
   const cmd = agent?.panes?.[paneIdx]?.cmd || "";
-  if (/codex/i.test(cmd)) return readLastTurnsCodex(paneDir, opts);
-  if (/kimi(?:-code)?/i.test(cmd)) return readLastTurnsKimi(paneDir, opts);
-  return readLastTurns(paneDir, opts);
+  return readAlternateTurns(cmd, paneDir, opts) || readLastTurns(paneDir, opts);
 }
 
 async function cmdLog(name, flags, ctx) {
@@ -2132,12 +2130,7 @@ function formatDoneRow({ key, bucket, ageMs }, opts = {}) {
 // "node" in tmux pane_current_command (binary is `node bin/codex.js`),
 // so we resolve its dialect via agents.yaml cmd field instead — see
 // dialectFor().
-const CONTEXT_DIALECT = {
-  claude: "claude",
-  codex: "codex",
-  kimi: "kimi",
-  "kimi-code": "kimi",
-};
+const CONTEXT_DIALECT = { claude: "claude", codex: "codex", kimi: "kimi", "kimi-code": "kimi" };
 
 /**
  * Resolve a pane's coding-agent dialect.
@@ -2153,8 +2146,8 @@ function dialectFor(agent, pane) {
   const direct = CONTEXT_DIALECT[pane.command];
   if (direct) return direct;
   const cmd = agent?.panes?.[pane.index]?.cmd || "";
-  if (/codex/i.test(cmd)) return "codex";
-  if (/kimi(?:-code)?/i.test(cmd)) return "kimi";
+  const alternate = alternateEngineForCommand(cmd);
+  if (alternate) return alternate;
   if (/claude/i.test(cmd)) return "claude";
   return null;
 }
@@ -2240,10 +2233,8 @@ async function inspectPane(ctx, agent, pane) {
   let context = null;
   if (dialect === "claude") {
     context = getContextFromPane(content, paneDir);
-  } else if (dialect === "codex") {
-    context = getContextPercent(paneDir, "codex");
-  } else if (dialect === "kimi") {
-    context = getContextPercent(paneDir, "kimi");
+  } else if (dialect === "codex" || dialect === "kimi") {
+    context = getContextPercent(paneDir, dialect);
   }
 
   // Live-activity overlay: tmux-only detection can't tell an active spinner
@@ -2259,13 +2250,9 @@ async function inspectPane(ctx, agent, pane) {
   // `amux ps` because Claude regularly pauses 30-50s between assistant
   // text + tool calls + deep thinking; the pane is still working but
   // jsonl mtime falls outside the window.
-  if ((dialect === "claude" || dialect === "codex" || dialect === "kimi")
-      && (status === "idle" || status === "unknown")) {
-    const mtimeMs = dialect === "codex"
-      ? latestCodexJsonlMtime(paneDir)
-      : dialect === "kimi"
-        ? latestKimiJsonlMtime(paneDir)
-      : latestJsonlMtime(paneDir);
+  if (dialect && (status === "idle" || status === "unknown")) {
+    const mtimeMs = latestAlternateMtime(agent?.panes?.[pane.index]?.cmd, paneDir)
+      || latestJsonlMtime(paneDir);
     if (mtimeMs && Date.now() - mtimeMs < 60_000) {
       status = "working";
     }
@@ -2273,7 +2260,7 @@ async function inspectPane(ctx, agent, pane) {
   return { status, preview, context };
 }
 
-// Status priorities for sorting agents — agents with active panes first,
+// Status priorities for sorting agents: agents with active panes first,
 // then panes with claude session state, then plain shells last.
 const SHELL_CMDS = /^(bash|zsh|fish|sh|dash)$/;
 const ACTIVE_STATUS = (s) => statusTier(s) >= 2;
@@ -2662,14 +2649,11 @@ async function cmdPs(ctx, flags = {}) {
     // reports "node" — same as some transient claude states. Trust the
     // config for classification; it's the authoritative source of truth
     // for which pane is which dialect.
-    const isCodexPane = (p) => /codex/i.test(a.panes?.[p.index]?.cmd || "");
-    const isKimiPane = (p) => /kimi(?:-code)?/i.test(a.panes?.[p.index]?.cmd || "");
-    const isClaudePane = (p) => /claude/i.test(a.panes?.[p.index]?.cmd || "");
-    const claudeCount = panes.filter(isClaudePane).length;
-    const codexCount = panes.filter(isCodexPane).length;
-    const kimiCount = panes.filter(isKimiPane).length;
-    const shellCount = panes.filter((p) =>
-      SHELL_CMDS.test(p.command) && !isClaudePane(p) && !isCodexPane(p) && !isKimiPane(p)).length;
+    const engine = (p) => dialectFor(a, p);
+    const claudeCount = panes.filter((p) => engine(p) === "claude").length;
+    const codexCount = panes.filter((p) => engine(p) === "codex").length;
+    const kimiCount = panes.filter((p) => engine(p) === "kimi").length;
+    const shellCount = panes.filter((p) => SHELL_CMDS.test(p.command) && !engine(p)).length;
     const otherCount = panes.length - claudeCount - codexCount - kimiCount - shellCount;
     const summary = [
       claudeCount && `${claudeCount} claude`,
@@ -2683,8 +2667,7 @@ async function cmdPs(ctx, flags = {}) {
 
     // Quick path: agent has zero coding-agent panes (claude or codex)
     // AND none active → "all idle".
-    if (!showAll && claudeCount === 0 && codexCount === 0 && kimiCount === 0
-        && !panes.some((p) => ACTIVE_STATUS(p.status))) {
+    if (!showAll && claudeCount === 0 && codexCount === 0 && kimiCount === 0 && !panes.some((p) => ACTIVE_STATUS(p.status))) {
       console.log(`  ⚪ all idle (${panes.length})`);
       continue;
     }

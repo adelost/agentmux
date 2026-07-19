@@ -96,12 +96,7 @@ function readSessionIndex(options) {
   }
 }
 
-/**
- * Exact newest Kimi session owned by one pane cwd.
- *
- * Kimi's `--continue` is cwd-scoped, but an immutable session id is stronger:
- * restart paths always use `--session <id>` once a pane has created a journal.
- */
+/** WHAT: Resolves one pane's newest Kimi session. WHY: Keeps exact resume separate from cwd-global continuation. */
 export function latestKimiSessionIdentity(paneDir, options = {}) {
   const expected = resolve(paneDir);
   const candidates = [];
@@ -127,10 +122,12 @@ export function latestKimiSessionIdentity(paneDir, options = {}) {
   return Object.freeze(identity);
 }
 
+/** WHAT: Resolves one pane's Kimi Wire file. WHY: Keeps callers anchored to pane-owned session identity. */
 export function latestKimiSessionFor(paneDir, options = {}) {
   return latestKimiSessionIdentity(paneDir, options)?.path || null;
 }
 
+/** WHAT: Reads Kimi Wire file metadata. WHY: Keeps watcher freshness separate from screen rendering. */
 export function latestKimiJsonlInfo(paneDir, options = {}) {
   const path = latestKimiSessionFor(paneDir, options);
   if (!path) return null;
@@ -142,10 +139,12 @@ export function latestKimiJsonlInfo(paneDir, options = {}) {
   }
 }
 
+/** WHAT: Reads Kimi Wire modification time. WHY: Keeps activity detection on durable engine state. */
 export function latestKimiJsonlMtime(paneDir, options = {}) {
   return latestKimiJsonlInfo(paneDir, options)?.mtimeMs ?? null;
 }
 
+/** WHAT: Resolves the active Kimi Wire directory. WHY: Keeps filesystem watches scoped to one pane session. */
 export function kimiWatchDir(paneDir, options = {}) {
   const path = latestKimiSessionFor(paneDir, options);
   return path ? dirname(path) : null;
@@ -163,6 +162,7 @@ function promptMatches(event, needle) {
   return event?.type === "turn.prompt" && textFromParts(event.input).trim() === needle;
 }
 
+/** WHAT: Builds a Kimi prompt cursor. WHY: Keeps identical retries distinct across append boundaries. */
 export function captureKimiPromptEchoCursor(paneDir, promptText, options = {}) {
   const needle = promptText?.trim();
   if (!needle) return null;
@@ -170,7 +170,7 @@ export function captureKimiPromptEchoCursor(paneDir, promptText, options = {}) {
   return captureJsonlAppendCursor(KIMI_PROMPT_CURSOR_KIND, file ? [file] : []);
 }
 
-/** Exact prompt-intake receipt from Kimi's own append-only Wire journal. */
+/** WHAT: Checks exact Kimi prompt intake. WHY: Keeps screen echoes from becoming delivery receipts. */
 export function isPromptInKimiJsonl(paneDir, promptText, {
   notBeforeMs = 0,
   cursor = null,
@@ -204,6 +204,7 @@ function loopEvent(record) {
  * end_turn/stop terminal step closes the turn. Fresh sessions with no prompt
  * are idle.
  */
+/** WHAT: Reads Kimi turn activity. WHY: Keeps busy state grounded in durable Wire events. */
 export function isBusyFromKimiJsonl(paneDir, options = {}) {
   const file = latestKimiSessionFor(paneDir, options);
   if (!file) return null;
@@ -339,6 +340,7 @@ function compactions(records) {
     .filter((record) => record.id);
 }
 
+/** WHAT: Reads recent Kimi turns. WHY: Keeps CLI history independent from tmux scrollback. */
 export function readLastTurnsKimi(paneDir, opts = {}) {
   const {
     limit = 3,
@@ -365,6 +367,7 @@ export function readLastTurnsKimi(paneDir, opts = {}) {
   return { turns, compactions: compactions(records), jsonlFile: file };
 }
 
+/** WHAT: Extracts a Kimi response stream. WHY: Keeps delivery replies tied to exact Wire turns. */
 export function extractFromKimiJsonl(paneDir, promptText = null, options = {}) {
   const result = readLastTurnsKimi(paneDir, { ...options, limit: Number.MAX_SAFE_INTEGER });
   if (!result) return null;
@@ -411,7 +414,7 @@ function parseConfiguredContextLimit(modelAlias, options = {}) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-/** Latest exact current-context snapshot from Kimi Wire. */
+/** WHAT: Reads Kimi context usage. WHY: Keeps status bars grounded in engine-reported token state. */
 export function getContextFromKimiJsonl(paneDir, options = {}) {
   const file = latestKimiSessionFor(paneDir, options);
   if (!file) return null;
