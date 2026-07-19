@@ -149,12 +149,14 @@ function Invoke-ProcessBounded {
       stderr = "process timed out after ${TimeoutSeconds}s"
     }
   }
+  $stdoutText = $stdout.Result.Replace("`0", "").Trim()
+  $stderrText = $stderr.Result.Replace("`0", "").Trim()
   return [pscustomobject]@{
     ok = $process.ExitCode -eq 0
     timedOut = $false
     exitCode = $process.ExitCode
-    stdout = $stdout.Result.Trim()
-    stderr = $stderr.Result.Trim()
+    stdout = $stdoutText
+    stderr = $stderrText
   }
 }
 
@@ -167,7 +169,10 @@ function Invoke-WslScript {
   Assert-Identifier $Config.distro "distro"
   Assert-Identifier $Config.linuxUser "linux user"
   $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Script))
-  $arguments = "-d `"$($Config.distro)`" -u `"$($Config.linuxUser)`" -- bash -lc `"echo $encoded | base64 -d | bash`""
+  # WSL's Win32 argv parser keeps quotes around -d/-u values when launched
+  # through ProcessStartInfo.Arguments. The validated identifiers are safe to
+  # pass unquoted and match direct wsl.exe invocation semantics.
+  $arguments = "-d $($Config.distro) -u $($Config.linuxUser) -- bash -lc `"echo $encoded | base64 -d | bash`""
   return Invoke-ProcessBounded -FilePath $WslExe -Arguments $arguments -TimeoutSeconds $TimeoutSeconds
 }
 

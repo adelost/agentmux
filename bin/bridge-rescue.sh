@@ -43,7 +43,7 @@ bridge_owned() {
   cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
   command="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
   case "$cwd" in
-    */agentmux|*/agentmux\ \(deleted\)) ;;
+    */agentmux|*/agentmux\ \(deleted\)|*/node_modules/.agentmux-*\ \(deleted\)) ;;
     *) return 1 ;;
   esac
   case "$command" in
