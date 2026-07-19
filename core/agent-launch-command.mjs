@@ -94,5 +94,6 @@ export function buildKimiLaunchCommand({
     throw new Error("Kimi launch requires an exact pane session; fresh bootstrap was not authorized");
   }
   const sessionFlag = exactResume ? ` --session ${shellQuote(exactResume)}` : "";
-  return `${shellQuote(executable)} --model ${shellQuote(model)} ${KIMI_AUTONOMOUS_FLAGS}${sessionFlag}`;
+  return `KIMI_MODEL_THINKING_EFFORT=${shellQuote("max")} ${shellQuote(executable)} ` +
+    `--model ${shellQuote(model)} ${KIMI_AUTONOMOUS_FLAGS}${sessionFlag}`;
 }

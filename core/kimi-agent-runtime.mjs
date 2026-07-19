@@ -15,6 +15,11 @@ import { isKimiPaneCommand } from "./tui-stall-recovery.mjs";
 
 const PROMPT_READY_TIMEOUT_MS = 15_000;
 
+/** WHAT: Checks Kimi's empty plain or bordered composer. WHY: Prevents TUI box glyphs from hiding a ready input boundary. */
+export function isKimiComposerReady(snapshot) {
+  return /^\s*(?:[│┃]\s*)?>\s*(?:[│┃]\s*)?$/mu.test(stripAnsi(snapshot));
+}
+
 /** WHAT: Defines Kimi Wire operations. WHY: Keeps engine dispatch separate from journal internals. */
 export const kimiJournal = Object.freeze({
   capturePromptCursor: captureKimiPromptEchoCursor,
@@ -82,7 +87,7 @@ export function createKimiAgentRuntime({
         t.currentCommand(target).catch(() => ""),
         t.captureScreen(target).catch(() => ""),
       ]);
-      if (/^(kimi|kimi-code)$/u.test(command) && /^\s*>\s*$/mu.test(stripAnsi(screen))) return true;
+      if (/^(kimi|kimi-code)$/u.test(command) && isKimiComposerReady(screen)) return true;
       await wait(250);
     }
     console.warn(`waitForKimiUiReady(${agentName}:${pane}) stalled before ${timeoutMs}ms`);
@@ -123,7 +128,7 @@ export function createKimiAgentRuntime({
       if (await isBusy(agentName, pane).catch(() => true)) {
         throw blocked("Kimi prompt delivery blocked: pane is working; wait for its current turn to finish");
       }
-      if (/^\s*>\s*$/mu.test(await captureScreen(agentName, pane).catch(() => ""))) return true;
+      if (isKimiComposerReady(await captureScreen(agentName, pane).catch(() => ""))) return true;
       await wait(250);
     }
     throw blocked("Kimi prompt delivery timed out: composer is not ready");
