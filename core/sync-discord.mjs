@@ -108,23 +108,9 @@ export async function executeSync({ guild, configYaml, state, agentsYamlPath }) 
   for (const r of renamesSorted) channelMap.set(r.to, r.id);
   for (const c of created) channelMap.set(c.channelName, c.id);
 
-  // Position the legacy unsuffixed channels as before. Engine-suffixed
-  // channels are already created at the category tail in pane order; issuing
-  // one edit per existing Codex/Kimi channel exhausts Discord's edit bucket
-  // and stalls the whole sync before agents.yaml is written.
-  for (const name of agentNames) {
-    const ids = [];
-    for (let p = 0; p < config.agents.get(name).panes; p++) {
-      const id = channelMap.get(`${name}-${p}`);
-      if (id) ids.push(id);
-    }
-    for (let i = 0; i < ids.length; i++) {
-      try {
-        const ch = await guild.channels.fetch(ids[i]);
-        await ch.setPosition(i);
-      } catch {}
-    }
-  }
+  // Existing channels keep their position; newly-created pane channels land
+  // at the category tail in creation order. Repositioning unchanged channels
+  // consumes Discord's edit bucket and can stall before agents.yaml is written.
 
   // Reuse agent UUIDs across syncs.
   const prevSync = state.get("sync", {});
