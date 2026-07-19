@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildKimiLaunchCommand } from "./agent-launch-command.mjs";
-import { isKimiComposerReady } from "./kimi-agent-runtime.mjs";
+import { createKimiAgentRuntime, isKimiComposerReady } from "./kimi-agent-runtime.mjs";
 
 describe("Kimi launch continuity", () => {
   it("uses an absolute executable and exact persisted session", () => {
@@ -26,5 +26,29 @@ describe("Kimi launch continuity", () => {
   it("accepts the empty composer Kimi paints inside its TUI border", () => {
     expect(isKimiComposerReady(" ╭────╮\n │ >  │\n ╰────╯ ")).toBe(true);
     expect(isKimiComposerReady(" │ > manual draft │ ")).toBe(false);
+  });
+
+  it("keeps the composer writable while a Kimi turn is active and submits with steer", async () => {
+    const keys = [];
+    const runtime = createKimiAgentRuntime({
+      t: { sendKeys: async (target, key) => { keys.push([target, key]); } },
+      wait: async () => {},
+      paneDir: () => "/tmp/kimi-pane",
+      agentConfig: () => ({ dir: "/tmp", panes: [] }),
+      isBusy: async () => true,
+      isPaneDead: async () => false,
+      respawnPane: async () => {},
+      isAlreadyRunning: async () => true,
+      isShellProcess: () => false,
+      captureScreen: async () => " ╭────╮\n │ >  │\n ╰────╯ ",
+      promptAlreadyInComposer: async () => false,
+    });
+
+    await expect(runtime.waitForKimiPromptReady("ai", 7)).resolves.toMatchObject({
+      busy: true,
+    });
+    await runtime.submitKimiPromptNow("ai:.7");
+    await runtime.submitKimiPromptNow("ai:.7", { busy: true });
+    expect(keys).toEqual([["ai:.7", "Enter"], ["ai:.7", "C-s"]]);
   });
 });

@@ -102,7 +102,7 @@ describe("Kimi Wire journal", () => {
     }
   });
 
-  it("uses an append cursor so an identical retry needs a new prompt record", () => {
+  it("accepts a steered prompt after the append cursor and keeps the turn busy", () => {
     const fx = fixture();
     try {
       const cursor = captureKimiPromptEchoCursor(fx.cwd, "first prompt", fx.options);
@@ -111,7 +111,7 @@ describe("Kimi Wire journal", () => {
         cursor,
       })).toBe(false);
       appendFileSync(fx.wire, `${JSON.stringify({
-        type: "turn.prompt",
+        type: "turn.steer",
         input: [{ type: "text", text: "first prompt" }],
         time: 3_000,
       })}\n`);
@@ -119,6 +119,7 @@ describe("Kimi Wire journal", () => {
         ...fx.options,
         cursor,
       })).toBe(true);
+      expect(isBusyFromKimiJsonl(fx.cwd, fx.options)).toBe(true);
     } finally {
       fx.cleanup();
     }
