@@ -874,7 +874,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return promptLine.slice(dialect.promptChar.length).trim().length > 0;
   }
 
-  const { maybeRescueKimiSubmit, restartKimi, startKimi,
+  const { maybeRescueKimiSubmit, restartKimi, startKimi, submitKimiPromptNow,
     waitForKimiPromptReady, waitForKimiUiReady } = createKimiAgentRuntime({
     t, wait, paneDir, agentConfig, isBusy, isPaneDead, respawnPane,
     isAlreadyRunning, isShellProcess: isShellProc, captureScreen, promptAlreadyInComposer,
@@ -1213,7 +1213,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
         // call this an exact draft until the live composer proves it below.
         if (onPasteStarted) await onPasteStarted();
       } else if (dialect === "kimi") {
-        await waitForKimiPromptReady(agentName, pane);
+        busyAtSend = Boolean((await waitForKimiPromptReady(agentName, pane))?.busy);
         if (onPasteStarted) await onPasteStarted();
       }
       if (promptRequiresAtomicPaste(prompt)) {
@@ -1226,7 +1226,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // repaint. Composer scraping may help recovery, but it is never proof
       // that the payload was or was not delivered.
       if (onDrafted) await onDrafted();
-    } else if (dialect === "codex") {
+    } else if (dialect === "codex" || dialect === "kimi") {
       busyAtSend = Boolean(await isBusy(agentName, pane));
     }
 
@@ -1242,7 +1242,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     // A previously queued turn can start during the paste/paint interval.
     // Re-sample immediately before Enter so the delivery layer treats our
     // prompt as one queued steering write instead of retrying it as idle.
-    if (dialect === "codex" && !busyAtSend) {
+    if ((dialect === "codex" && !busyAtSend) || dialect === "kimi") {
       busyAtSend = Boolean(await isBusy(agentName, pane));
     }
     // The first callback persists an ambiguous at-most-once fence BEFORE the
@@ -1250,7 +1250,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     // callback, restart must never retype or claim NOT SENT.
     await submitWithDurableFence({
       onSubmitting,
-      sendEnter: () => t.sendEnter(target),
+      sendEnter: () => dialect === "kimi" ? submitKimiPromptNow(target, { busy: busyAtSend }) : t.sendEnter(target),
       onSubmitted,
     });
     await maybeSendCodexSubmitEnter(agentName, pane, target, prompt, { notBeforeMs });
@@ -1290,7 +1290,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       queued,
       exactDraft,
       submitted: true,
-      tuiHint: dialect === "codex" ? releaseHint : (stillComposed ? "draft-visible" : "composer-empty"),
+      tuiHint: dialect === "codex" ? releaseHint : (dialect === "kimi" && busyAtSend ? "steered" : (stillComposed ? "draft-visible" : "composer-empty")),
     };
   }
 

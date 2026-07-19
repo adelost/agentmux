@@ -5,8 +5,9 @@
 // and indexes it in ~/.kimi-code/session_index.jsonl.
 //
 // The Wire journal is the delivery/source-of-truth boundary. A prompt is
-// accepted only after `turn.prompt` with the exact text is appended; assistant
-// text and tool calls are reconstructed from `context.append_loop_event`.
+// accepted only after `turn.prompt` or `turn.steer` with the exact text is
+// appended; assistant text and tool calls are reconstructed from
+// `context.append_loop_event`.
 
 import {
   closeSync,
@@ -159,7 +160,8 @@ function textFromParts(parts) {
 }
 
 function promptMatches(event, needle) {
-  return event?.type === "turn.prompt" && textFromParts(event.input).trim() === needle;
+  return (event?.type === "turn.prompt" || event?.type === "turn.steer")
+    && textFromParts(event.input).trim() === needle;
 }
 
 /** WHAT: Builds a Kimi prompt cursor. WHY: Keeps identical retries distinct across append boundaries. */
@@ -200,9 +202,9 @@ function loopEvent(record) {
 /**
  * Kimi turn state from Wire.
  *
- * `turn.prompt` starts intake. Tool-call step endings remain busy; an
- * end_turn/stop terminal step closes the turn. Fresh sessions with no prompt
- * are idle.
+ * `turn.prompt` starts a turn and `turn.steer` injects into or starts one.
+ * Tool-call step endings remain busy; an end_turn/stop terminal step closes
+ * the turn. Fresh sessions with neither input record are idle.
  */
 /** WHAT: Reads Kimi turn activity. WHY: Keeps busy state grounded in durable Wire events. */
 export function isBusyFromKimiJsonl(paneDir, options = {}) {
@@ -214,7 +216,7 @@ export function isBusyFromKimiJsonl(paneDir, options = {}) {
   let sawPrompt = false;
   let busy = false;
   for (const record of events) {
-    if (record?.type === "turn.prompt") {
+    if (record?.type === "turn.prompt" || record?.type === "turn.steer") {
       sawPrompt = true;
       busy = true;
       continue;

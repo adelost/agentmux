@@ -125,13 +125,19 @@ export function createKimiAgentRuntime({
   async function waitForKimiPromptReady(agentName, pane) {
     const deadline = Date.now() + PROMPT_READY_TIMEOUT_MS;
     while (Date.now() < deadline) {
-      if (await isBusy(agentName, pane).catch(() => true)) {
-        throw blocked("Kimi prompt delivery blocked: pane is working; wait for its current turn to finish");
-      }
-      if (isKimiComposerReady(await captureScreen(agentName, pane).catch(() => ""))) return true;
+      const [busy, snapshot] = await Promise.all([
+        isBusy(agentName, pane).catch(() => true),
+        captureScreen(agentName, pane).catch(() => ""),
+      ]);
+      if (isKimiComposerReady(snapshot)) return { busy: Boolean(busy), snapshot };
       await wait(250);
     }
     throw blocked("Kimi prompt delivery timed out: composer is not ready");
+  }
+
+  /** WHAT: Submits through Kimi's live-turn command. WHY: Active turns need Ctrl-S; idle turns use ordinary Enter. */
+  async function submitKimiPromptNow(target, { busy = false } = {}) {
+    await t.sendKeys(target, busy ? "C-s" : "Enter");
   }
 
   async function maybeRescueKimiSubmit(agentName, pane, target, prompt, {
@@ -159,6 +165,7 @@ export function createKimiAgentRuntime({
     maybeRescueKimiSubmit,
     restartKimi,
     startKimi,
+    submitKimiPromptNow,
     waitForKimiPromptReady,
     waitForKimiUiReady,
   };
