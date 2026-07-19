@@ -108,13 +108,19 @@ export async function executeSync({ guild, configYaml, state, agentsYamlPath }) 
   for (const r of renamesSorted) channelMap.set(r.to, r.id);
   for (const c of created) channelMap.set(c.channelName, c.id);
 
-  // Position channels within each category (pane ascending).
+  // Position channels within each category (pane ascending). Use the planned
+  // records rather than rebuilding `${agent}-${pane}`: Codex and Kimi channel
+  // names carry engine suffixes and would otherwise be silently skipped.
+  const positioned = [
+    ...plan.keep.map((item) => ({ ...item, id: item.id })),
+    ...renamesSorted.map((item) => ({ ...item, id: item.id })),
+    ...created.map((item) => ({ ...item, id: item.id })),
+  ];
   for (const name of agentNames) {
-    const ids = [];
-    for (let p = 0; p < config.agents.get(name).panes; p++) {
-      const id = channelMap.get(`${name}-${p}`);
-      if (id) ids.push(id);
-    }
+    const ids = positioned
+      .filter((item) => item.agentName === name)
+      .sort((a, b) => a.pane - b.pane)
+      .map((item) => item.id);
     for (let i = 0; i < ids.length; i++) {
       try {
         const ch = await guild.channels.fetch(ids[i]);

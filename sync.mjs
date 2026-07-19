@@ -8,6 +8,7 @@ import { resolveClaudeModel } from "./core/claude-model.mjs";
 import {
   CLAUDE_AUTONOMOUS_FLAGS,
   CODEX_AUTONOMOUS_FLAGS,
+  KIMI_AUTONOMOUS_FLAGS,
 } from "./core/execution-safety.mjs";
 
 const DEFAULT_AGENT_CMD = `claude --continue ${CLAUDE_AUTONOMOUS_FLAGS} --model ${resolveClaudeModel()}`;
@@ -18,7 +19,17 @@ const DEFAULT_AGENT_CMD = `claude --continue ${CLAUDE_AUTONOMOUS_FLAGS} --model 
 // descriptor; startCodex resolves and resumes the exact pane-owned session.
 // A bare launch is allowed only for a profile's first explicit bootstrap.
 const DEFAULT_CODEX_CMD = `codex ${CODEX_AUTONOMOUS_FLAGS}`;
+const DEFAULT_KIMI_MODEL = "kimi-code/k3";
+const DEFAULT_KIMI_CMD = `${process.env.HOME}/.kimi-code/bin/kimi --model ${DEFAULT_KIMI_MODEL} ${KIMI_AUTONOMOUS_FLAGS}`;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const KIMI_MODEL_PATTERN = /^[a-z0-9._-]+(?:\/[a-z0-9._-]+)?$/iu;
+
+function paneCount(value, label, agentName) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`agentmux.yaml: agent '${agentName}' has invalid ${label} count`);
+  }
+  return value;
+}
 
 /** Expand ~ to $HOME in paths */
 export function expandTilde(p) {
@@ -26,10 +37,7 @@ export function expandTilde(p) {
   return p;
 }
 
-/**
- * Parse agentmux.yaml content into normalized config.
- * @returns {{ guild: string, category: string, agents: Map<string, { dir, claude, services, shells, layout }> }}
- */
+/** WHAT: Parses source configuration. WHY: Keeps generated pane metadata normalized across engines. */
 export function parseConfig(yamlContent) {
   const doc = yaml.load(yamlContent);
   if (!doc?.guild) throw new Error("agentmux.yaml: 'guild' is required");
@@ -45,7 +53,7 @@ export function parseConfig(yamlContent) {
     if (backend === "native" && (config.shells ?? 0) > 0) {
       throw new Error(`agentmux.yaml: native agent '${name}' cannot define tmux shell panes`);
     }
-    // `labels` keyed by absolute pane index (0 = first claude, then
+    // `labels` keyed by absolute pane index (Claude, Codex, Kimi, then
     // service panes, then shells). Coerce keys to numbers so writers
     // can use either numeric or string keys in yaml.
     //
@@ -69,13 +77,25 @@ export function parseConfig(yamlContent) {
     // Pane count breakdown:
     //   - claudeCount: claude-cli panes, indices [0, claudeCount)
     //   - codexCount:  codex-cli panes, indices [claudeCount, panes)
-    //   - panes:       total agent panes (claude + codex), excluding services/shells
-    // Channels for codex panes get a `-codex` suffix to make them visually
-    // distinct in Discord (e.g. ai-3-codex). The dialect is detected from the
-    // pane's cmd at runtime by agent.mjs (cmd contains "codex" → codex).
-    const claudeCount = config.panes ?? config.claude ?? (config.codex ? 0 : 1);
-    const codexCount = config.codex ?? 0;
-    if (backend === "native" && claudeCount + codexCount < 1) {
+    //   - kimiCount:   Kimi Code panes after Codex
+    //   - panes:       total agent panes, excluding services/shells
+    // Discord suffixes make non-Claude engines explicit at a glance.
+    const claudeCount = paneCount(
+      config.panes ?? config.claude ?? (config.codex || config.kimi ? 0 : 1),
+      "claude",
+      name,
+    );
+    const codexCount = paneCount(config.codex ?? 0, "codex", name);
+    const kimiCount = paneCount(config.kimi ?? 0, "kimi", name);
+    const kimiModel = config.kimiModel || DEFAULT_KIMI_MODEL;
+    if (!KIMI_MODEL_PATTERN.test(kimiModel)) {
+      throw new Error(`agentmux.yaml: agent '${name}' has invalid kimiModel '${kimiModel}'`);
+    }
+    const codingPaneCount = claudeCount + codexCount + kimiCount;
+    if (backend === "native" && kimiCount > 0) {
+      throw new Error(`agentmux.yaml: native agent '${name}' cannot define Kimi tmux panes`);
+    }
+    if (backend === "native" && codingPaneCount < 1) {
       throw new Error(`agentmux.yaml: native agent '${name}' needs at least one Claude or Codex pane`);
     }
     const nativeAgentIds = {};
@@ -86,7 +106,7 @@ export function parseConfig(yamlContent) {
       }
       for (const [rawIndex, rawId] of Object.entries(config.nativeAgentIds)) {
         const index = Number(rawIndex);
-        if (!Number.isSafeInteger(index) || index < 0 || index >= claudeCount + codexCount
+        if (!Number.isSafeInteger(index) || index < 0 || index >= codingPaneCount
             || typeof rawId !== "string" || !UUID_PATTERN.test(rawId)) {
           throw new Error(`agentmux.yaml: agent '${name}' has invalid nativeAgentIds entry '${rawIndex}'`);
         }
@@ -95,9 +115,10 @@ export function parseConfig(yamlContent) {
     }
     agents.set(name, {
       dir: expandTilde(config.dir),
-      panes: claudeCount + codexCount,
+      panes: codingPaneCount,
       claudeCount,
       codexCount,
+      kimiCount,
       services: config.services ?? [],
       shells: config.shells ?? 0,
       layout: resolveTmuxLayout(config.layout),
@@ -108,6 +129,7 @@ export function parseConfig(yamlContent) {
         : null,
       claudeModel: config.claudeModel || null,
       codexModel: config.codexModel || null,
+      kimiModel,
       effort: config.effort || null,
       nativeAgentIds,
     });
@@ -125,46 +147,44 @@ export function parseConfig(yamlContent) {
 }
 
 /**
- * Build the desired channel name for a pane, applying the codex suffix
- * when the pane index lands in the codex range.
+ * Build the desired channel name for a pane, applying the engine suffix
+ * when the pane index lands outside the Claude range.
  */
-function paneChannelName(name, pane, claudeCount) {
-  return pane >= claudeCount ? `${name}-${pane}-codex` : `${name}-${pane}`;
+function paneDialect(config, pane) {
+  const claudeCount = config.claudeCount ?? config.panes ?? 0;
+  const codexCount = config.codexCount ?? Math.max(0, (config.panes ?? 0) - claudeCount);
+  if (pane < claudeCount) return "claude";
+  if (pane < claudeCount + codexCount) return "codex";
+  return "kimi";
 }
 
-/**
- * Generate Discord channel names from agent config.
- * Returns a flat, alphabetically sorted list of { agentName, channelName, pane }.
- * Naming: #agent-0 (pane 0), #agent-1 (pane 1)... for claude panes;
- * #agent-{N}-codex for codex panes (visually distinct so orchestrators see
- * which panes run which agent dialect at a glance).
- */
+function paneChannelName(name, pane, config) {
+  const dialect = paneDialect(config, pane);
+  return dialect === "claude" ? `${name}-${pane}` : `${name}-${pane}-${dialect}`;
+}
+
+/** WHAT: Builds pane channel names. WHY: Keeps engine suffixes stable across Discord syncs. */
 export function generateChannelNames(agents) {
   const result = [];
   const sortedNames = [...agents.keys()].sort();
 
   for (const name of sortedNames) {
-    const { panes, claudeCount = panes } = agents.get(name);
+    const config = agents.get(name);
+    const { panes } = config;
     for (let i = 0; i < panes; i++) {
+      const dialect = paneDialect(config, i);
       result.push({
         agentName: name,
-        channelName: paneChannelName(name, i, claudeCount),
+        channelName: paneChannelName(name, i, config),
         pane: i,
-        dialect: i >= claudeCount ? "codex" : "claude",
+        dialect,
       });
     }
   }
   return result;
 }
 
-/**
- * Classify a Discord channel name against known agent names.
- * Legacy format: `{agent}` = pane 0, `{agent}-N` (N>=2) = pane N-1.
- * New format: `{agent}-N` = pane N (0-indexed).
- *
- * Legacy is detected per-agent by the presence of a bare `{agent}` channel in the guild.
- * @returns {{ agentName, pane, format: "new"|"legacy" } | null}
- */
+/** WHAT: Parses pane channel names. WHY: Keeps legacy migrations separate from engine suffix parsing. */
 export function classifyAgentChannel(channelName, agentNames, existingNamesLower) {
   const lower = channelName.toLowerCase();
   // Longest first so "api-proxy" wins over "api" when matching "api-proxy-0".
@@ -177,11 +197,11 @@ export function classifyAgentChannel(channelName, agentNames, existingNamesLower
     const prefix = nameLower + "-";
     if (!lower.startsWith(prefix)) continue;
     const rest = lower.slice(prefix.length);
-    // Match plain `{agent}-{N}` (claude) or `{agent}-{N}-codex` (codex).
-    const match = rest.match(/^(\d+)(-codex)?$/);
+    // Match plain `{agent}-{N}` (claude), `-codex`, or `-kimi`.
+    const match = rest.match(/^(\d+)(?:-(codex|kimi))?$/);
     if (!match) continue;
     const n = parseInt(match[1], 10);
-    const dialect = match[2] ? "codex" : "claude";
+    const dialect = match[2] || "claude";
     const isLegacyAgent = existingNamesLower.has(nameLower);
     if (isLegacyAgent && n >= 2 && dialect === "claude") {
       return { agentName: name, pane: n - 1, format: "legacy", dialect };
@@ -191,12 +211,7 @@ export function classifyAgentChannel(channelName, agentNames, existingNamesLower
   return null;
 }
 
-/**
- * Group existing Discord channels by the agent they belong to.
- * @param {Array<{ name, id, parentId }>} existing
- * @param {string[]} agentNames
- * @returns {{ byAgent: Map<string, Array>, orphans: Array }}
- */
+/** WHAT: Collects existing pane channels. WHY: Keeps orphan detection separate from migration planning. */
 export function classifyExistingChannels(existing, agentNames) {
   const existingNamesLower = new Set(existing.map((ch) => ch.name.toLowerCase()));
   const byAgent = new Map();
@@ -211,19 +226,7 @@ export function classifyExistingChannels(existing, agentNames) {
   return { byAgent, orphans };
 }
 
-/**
- * Build a migration-aware sync plan. For each agent, figure out which existing
- * channels to rename, which to create, and which are extras beyond configured panes.
- *
- * @param {Map<string, { panes: number }>} agents
- * @param {Array<{ name, id, parentId }>} existingChannels - all text channels in guild
- * @returns {{ renames, creates, keep, extras, orphans }}
- *   renames:  [{ id, from, to, agentName, pane }]      - legacy → new name
- *   creates:  [{ agentName, channelName, pane }]       - missing panes
- *   keep:     [{ id, channelName, agentName, pane }]   - already on new name
- *   extras:   [{ id, name, agentName, pane }]          - claimed but beyond configured panes
- *   orphans:  [{ name, id, parentId }]                 - unrelated to any agent
- */
+/** WHAT: Builds channel migration operations. WHY: Keeps renames and creates deterministic across retries. */
 export function buildMigrationPlan(agents, existingChannels) {
   const agentNames = [...agents.keys()];
   const { byAgent, orphans } = classifyExistingChannels(existingChannels, agentNames);
@@ -245,9 +248,8 @@ export function buildMigrationPlan(agents, existingChannels) {
       byPane.set(c.pane, c);
     }
 
-    const claudeCount = config.claudeCount ?? config.panes;
     for (let p = 0; p < config.panes; p++) {
-      const target = paneChannelName(name, p, claudeCount);
+      const target = paneChannelName(name, p, config);
       const ch = byPane.get(p);
       if (!ch) {
         creates.push({ agentName: name, channelName: target, pane: p });
@@ -262,12 +264,7 @@ export function buildMigrationPlan(agents, existingChannels) {
   return { renames, creates, keep, extras, orphans };
 }
 
-/**
- * Build a sync plan by comparing desired channels with existing Discord channels.
- * @param {Array<{ agentName, channelName, pane }>} desired
- * @param {Array<{ name: string, id: string }>} existing - channels in the target category
- * @returns {{ toCreate: Array, existing: Array, orphaned: Array }}
- */
+/** WHAT: Builds a channel sync plan. WHY: Keeps create and orphan operations deterministic. */
 export function buildSyncPlan(desired, existing) {
   const existingByName = new Map(existing.map((ch) => [ch.name.toLowerCase(), ch]));
   const desiredNames = new Set(desired.map((d) => d.channelName.toLowerCase()));
@@ -289,17 +286,7 @@ export function buildSyncPlan(desired, existing) {
   return { toCreate, existing: matched, orphaned };
 }
 
-/**
- * Generate legacy agents.yaml content for backward compat with `agent` CLI.
- * @param {Map<string, object>} agents - parsed agent configs
- * @param {Map<string, string>} channelMap - channelName → channelId
- * @param {Map<string, string>} agentIds - agentName → UUID
- * @param {object} [existingYaml] - previous agents.yaml parsed, for
- *   preserving user-set per-pane fields (label) across regenerations.
- *   agentmux.yaml (the sync source) has no slot for labels, so they
- *   only live in agents.yaml itself; without this merge they'd be
- *   wiped every /sync.
- */
+/** WHAT: Builds runtime pane configuration. WHY: Keeps labels and channel bindings stable across regeneration. */
 export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = null, search = null) {
   // `search:` is emitted first: it is fleet config, not an agent entry.
   // Consumers enumerate agents by filtering on `dir`, so the key is inert
@@ -318,12 +305,11 @@ export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = 
       entry.runtimeUrl = config.runtimeUrl;
     }
 
-    // Discord channel mapping (claude panes + codex panes; the codex
-    // suffix is part of the channel name, see paneChannelName).
+    // Discord channel mapping. Non-Claude suffixes are part of the name.
     const claudeCount = config.claudeCount ?? config.panes;
     const discord = {};
     for (let i = 0; i < config.panes; i++) {
-      const channelName = paneChannelName(name, i, claudeCount);
+      const channelName = paneChannelName(name, i, config);
       const channelId = channelMap.get(channelName);
       if (channelId) discord[channelId] = i;
     }
@@ -382,6 +368,20 @@ export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = 
       panes.push(pane);
       paneIdx++;
     }
+    const kimiCount = config.kimiCount ?? 0;
+    for (let i = 0; i < kimiCount; i++) {
+      const model = config.kimiModel || DEFAULT_KIMI_MODEL;
+      const pane = {
+        name: i === 0 ? "kimi" : `kimi-${i + 1}`,
+        cmd: DEFAULT_KIMI_CMD.replace(`--model ${DEFAULT_KIMI_MODEL}`, `--model ${model}`),
+        engine: "kimi",
+        model,
+      };
+      const label = labelFor(paneIdx);
+      if (label) pane.label = label;
+      panes.push(pane);
+      paneIdx++;
+    }
     // Native services are process-supervised outside tmux and therefore do
     // not consume an addressable agent pane. Interactive shell panes have no
     // native equivalent and are rejected above instead of disappearing.
@@ -409,19 +409,7 @@ export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = 
   return "# Auto-generated by agentmux /sync. Do not edit manually.\n" + yaml.dump(result, { lineWidth: -1, quotingType: '"' });
 }
 
-/**
- * Regenerate agents.yaml from agentmux.yaml without touching Discord.
- *
- * Used by local edits (e.g. `amux label`) to materialize changes without
- * requiring a full /sync (which needs the Discord bot online). The
- * channelMap and agentIds are carried over from the existing agents.yaml
- * so nothing about Discord bindings changes — we only rewrite the
- * per-agent pane metadata (dir, panes, labels, layout).
- *
- * @param {string} sourceYaml       - agentmux.yaml content (parsed as source)
- * @param {string|null} existingAgentsYaml - existing agents.yaml content, or null
- * @returns {string} regenerated agents.yaml content
- */
+/** WHAT: Builds local runtime configuration. WHY: Keeps Discord bindings unchanged during local edits. */
 export function regenerateAgentsYaml(sourceYaml, existingAgentsYaml) {
   const { agents, search } = parseConfig(sourceYaml);
   const existing = existingAgentsYaml ? yaml.load(existingAgentsYaml) : null;
@@ -435,18 +423,11 @@ export function regenerateAgentsYaml(sourceYaml, existingAgentsYaml) {
     for (const [name, entry] of Object.entries(existing)) {
       if (entry?.id) agentIds.set(name, entry.id);
       if (entry?.discord && typeof entry.discord === "object") {
-        // Determine claudeCount from the existing yaml's pane list so the
-        // channel key reconstructs with the same -codex suffix that
-        // paneChannelName() will look up. Without this, a regen triggered
-        // by `amux label` (which doesn't re-run /sync) would drop the
-        // discord mapping for codex panes — channelMap key "ai-3" would
-        // miss when generateAgentsYaml searches for "ai-3-codex".
-        const paneList = Array.isArray(entry?.panes) ? entry.panes : [];
-        let claudeCount = paneList.findIndex((p) => /codex/i.test(p?.cmd || ""));
-        if (claudeCount < 0) claudeCount = paneList.length;
+        const config = agents.get(name);
+        if (!config) continue;
         for (const [channelId, paneIdx] of Object.entries(entry.discord)) {
           const idx = Number(paneIdx);
-          channelMap.set(paneChannelName(name, idx, claudeCount), String(channelId));
+          channelMap.set(paneChannelName(name, idx, config), String(channelId));
         }
       }
     }

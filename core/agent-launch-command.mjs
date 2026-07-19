@@ -2,9 +2,14 @@
 
 import { esc } from "../lib.mjs";
 import { resolveClaudeModel } from "./claude-model.mjs";
-import { CLAUDE_AUTONOMOUS_FLAGS, CODEX_AUTONOMOUS_FLAGS } from "./execution-safety.mjs";
+import {
+  CLAUDE_AUTONOMOUS_FLAGS,
+  CODEX_AUTONOMOUS_FLAGS,
+  KIMI_AUTONOMOUS_FLAGS,
+} from "./execution-safety.mjs";
 
 const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const KIMI_SESSION_ID_PATTERN = /^session_[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const shellQuote = (value) => `'${esc(String(value))}'`;
 
 function exactSessionId(value, engine) {
@@ -61,4 +66,33 @@ export function buildCodexLaunchCommand({
     throw new Error("Codex launch requires an exact pane session; fresh bootstrap was not authorized");
   }
   return `${env} codex ${flags}`;
+}
+
+/**
+ * WHAT: Builds a Kimi Code TUI launch with exact-session continuity.
+ * WHY: Keeps restarts independent from cwd-global sessions and stale shell paths.
+ */
+export function buildKimiLaunchCommand({
+  executable = `${process.env.HOME}/.kimi-code/bin/kimi`,
+  model = "kimi-code/k3",
+  resumeSessionId = null,
+  allowFreshBootstrap = false,
+} = {}) {
+  if (!executable || !String(executable).startsWith("/")) {
+    throw new Error("Kimi executable must be an absolute path");
+  }
+  if (!/^[a-z0-9._-]+(?:\/[a-z0-9._-]+)?$/iu.test(String(model || ""))) {
+    throw new Error(`invalid Kimi model: ${model}`);
+  }
+  const exactResume = resumeSessionId == null || resumeSessionId === ""
+    ? null
+    : String(resumeSessionId);
+  if (exactResume && !KIMI_SESSION_ID_PATTERN.test(exactResume)) {
+    throw new Error(`invalid Kimi resume session id: ${exactResume}`);
+  }
+  if (!exactResume && !allowFreshBootstrap) {
+    throw new Error("Kimi launch requires an exact pane session; fresh bootstrap was not authorized");
+  }
+  const sessionFlag = exactResume ? ` --session ${shellQuote(exactResume)}` : "";
+  return `${shellQuote(executable)} --model ${shellQuote(model)} ${KIMI_AUTONOMOUS_FLAGS}${sessionFlag}`;
 }

@@ -14,7 +14,7 @@
 import { readdirSync, readFileSync, statSync, existsSync, openSync, fstatSync, readSync, closeSync } from "fs";
 import { join } from "path";
 import { claudeProjectDir } from "./claude-paths.mjs";
-import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
+import { readAlternateTurns } from "./alternate-session-reader.mjs";
 import { describeToolCall } from "./tool-display.mjs";
 import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { isSystemNoiseDirective } from "./system-noise.mjs";
@@ -943,27 +943,12 @@ function rowsFromTurns(turns) {
   return rows;
 }
 
-function isCodexPaneConfig(pane) {
-  return /codex/i.test(String(pane?.cmd || ""));
-}
-
 /** Compute the cwd for a given pane of an agent (matches agent.mjs:paneDir). */
 export function panePathFor(agent, paneIdx) {
   return join(agent.dir, ".agents", String(paneIdx));
 }
 
-/**
- * Read every pane's jsonl, merge-sort by timestamp, filter, and limit.
- *
- * @param {object} opts
- * @param {Array<object>} opts.agents  - agents from listAgents(): { name, dir, panes }
- * @param {Date|null}     [opts.since] - only rows at or after this time
- * @param {string|null}   [opts.agent] - filter to one agent by name
- * @param {number|null}   [opts.pane]  - filter to one pane index (pairs with agent)
- * @param {RegExp|null}   [opts.grep]  - filter rows by content regex
- * @param {number|null}   [opts.limit] - cap to the most recent N after filtering
- * @returns {Array<{timestamp:string, agent:string, pane:number, role:string, type:string, content:string}>}
- */
+/** WHAT: Reads merged pane history. WHY: Keeps timeline ordering independent from individual engine stores. */
 export function readAllTurnsAcrossPanes(opts = {}) {
   const { agents = [], since = null, agent: agentFilter = null, pane: paneFilter = null, grep = null, limit = null, tailBytes = null, tailFallback = true } = opts;
   const out = [];
@@ -980,8 +965,9 @@ export function readAllTurnsAcrossPanes(opts = {}) {
       // when given tailBytes without since/grep; the since-filter here runs
       // post-merge). Without it a 15MB codex session was full-parsed on
       // every timeline/done invocation.
-      const rows = isCodexPaneConfig(paneCfg)
-        ? rowsFromTurns(readLastTurnsCodex(paneDir, { limit: Number.MAX_SAFE_INTEGER, tailBytes })?.turns || [])
+      const turns = readAlternateTurns(paneCfg?.cmd, paneDir, { limit: Number.MAX_SAFE_INTEGER, tailBytes })?.turns;
+      const rows = turns
+        ? rowsFromTurns(turns)
         : eventsFromProjectDir(projectDirFor(paneDir), { tailBytes, sinceMs, tailFallback });
       for (const r of rows) {
         out.push({ ...r, agent: a.name, pane: paneIdx });

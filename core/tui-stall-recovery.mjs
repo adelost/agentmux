@@ -8,6 +8,7 @@ import {
   latestClaudeSessionIdentity,
   latestPaneSessionIdentity,
 } from "./native-session-identity.mjs";
+import { latestKimiSessionIdentity } from "./kimi-jsonl-reader.mjs";
 import { paneModelSelection, setPaneModelSelection } from "./pane-model-state.mjs";
 import { waitForProgressingUi } from "./progressing-ui.mjs";
 import { esc } from "../lib.mjs";
@@ -19,8 +20,11 @@ const TUI_RESTART_AFTER_MS = 5 * 60_000;
 export const isClaudePaneCommand = (command) => /(?:^|\s)claude(?:\s|$)/u.test(String(command || ""));
 /** WHAT: Checks whether a pane command starts Codex. WHY: Keeps lifecycle routing independent from display names. */
 export const isCodexPaneCommand = (command) => /(?:^|\s)codex(?:\s|$)/u.test(String(command || ""));
+/** WHAT: Checks whether a pane starts Kimi Code. WHY: Keeps absolute installer paths inside Kimi recovery. */
+export const isKimiPaneCommand = (command) => /(?:^|[\/\s])kimi(?:-code)?(?:\s|$)/u.test(String(command || ""));
 /** WHAT: Checks whether a pane runs a coding agent. WHY: Keeps service panes outside recovery boundaries. */
-export const isCodingPaneCommand = (command) => isClaudePaneCommand(command) || isCodexPaneCommand(command);
+export const isCodingPaneCommand = (command) =>
+  isClaudePaneCommand(command) || isCodexPaneCommand(command) || isKimiPaneCommand(command);
 /** WHAT: Checks whether a process is an interactive shell. WHY: Keeps restart commands behind a ready PTY. */
 export const isShellProcess = (command) => /^(bash|zsh|sh|fish|dash)$/u.test(String(command || ""));
 
@@ -30,14 +34,19 @@ export const isShellProcess = (command) => /^(bash|zsh|sh|fish|dash)$/u.test(Str
  */
 export function createTuiStallRecovery({
   tmux, state, delay, configFor, paneDirectory, isPaneDead, respawnPane,
-  isAlreadyRunning, resolveSessionFlag, isBusy, promptTransportState, restartCodex,
+  isAlreadyRunning, resolveSessionFlag, isBusy, promptTransportState, restartCodex, restartKimi,
 } = {}) {
   /** WHAT: Observes one pane process. WHY: Proves whether a fenced submission can still be ingested. */
   async function paneProcessState(agentName, pane) {
     const target = `${agentName}:.${pane}`;
     const dead = await isPaneDead(target);
     const command = await tmux.currentCommand(target).catch(() => null);
-    return { command, dead, shell: isShellProcess(command), running: /^(claude|codex|node)$/u.test(command || "") };
+    return {
+      command,
+      dead,
+      shell: isShellProcess(command),
+      running: /^(claude|codex|kimi|kimi-code|node)$/u.test(command || ""),
+    };
   }
 
   /** WHAT: Starts Claude with pane history and model. WHY: Keeps restarts from reverting Fable to fleet defaults. */
@@ -104,6 +113,10 @@ export function createTuiStallRecovery({
       });
       return { ok: true, dialect: "codex" };
     }
+    if (isKimiPaneCommand(paneCmd)) {
+      await restartKimi(agentName, pane);
+      return { ok: true, dialect: "kimi" };
+    }
     if (!isClaudePaneCommand(paneCmd)) return { ok: false, reason: "not-a-coding-pane" };
     const target = `${agentName}:.${pane}`;
     const dir = paneDirectory(config.dir, pane);
@@ -132,14 +145,17 @@ export function createTuiStallRecovery({
         if (!isCodingPaneCommand(command)) continue;
         try {
           if (!await isBusy(name, pane)) continue;
-          const identity = latestPaneSessionIdentity(
-            isClaudePaneCommand(command) ? "claude" : "codex",
-            paneDirectory(cfg.dir, pane),
-          );
+          const dialect = isClaudePaneCommand(command)
+            ? "claude"
+            : isCodexPaneCommand(command) ? "codex" : "kimi";
+          const cwd = paneDirectory(cfg.dir, pane);
+          const identity = dialect === "kimi"
+            ? latestKimiSessionIdentity(cwd)
+            : latestPaneSessionIdentity(dialect, cwd);
           if (identity?.sessionId) targets.push({
             agentName: name,
             pane,
-            dialect: isClaudePaneCommand(command) ? "claude" : "codex",
+            dialect,
             sessionId: identity.sessionId,
           });
         } catch (error) {

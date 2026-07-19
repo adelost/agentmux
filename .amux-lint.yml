@@ -5,11 +5,11 @@ fileSize:
     cli/commands.mjs: 4434
     core/codex-jsonl-reader.mjs: 840
     core/codex-tui.mjs: 553
-    core/context.mjs: 642
+    core/context.mjs: 639
     core/contract-lint.mjs: 640
     core/delivery-broker.mjs: 863
     core/delivery-queue.mjs: 617
-    core/jsonl-reader.mjs: 1098
+    core/jsonl-reader.mjs: 1084
     core/native-runtime-client.mjs: 578
     core/suggestions-comment-bridge.mjs: 1144
     core/worktree-deps.mjs: 675

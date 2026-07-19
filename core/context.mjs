@@ -12,6 +12,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { claudeProjectDir } from "./claude-paths.mjs";
 import { codexSessionDirs } from "./codex-profiles.mjs";
+import { getContextFromKimiJsonl } from "./kimi-jsonl-reader.mjs";
 
 /**
  * Read only the last `maxBytes` of a file and return its complete trailing
@@ -478,16 +479,12 @@ export function getContextPushed(paneDir) {
 // --- Public dispatcher -------------------------------------------------
 
 /**
- * Get { percent, tokens } context usage for a pane, routed to the right
- * source by dialect name. Returns null if no data is available.
- *
- * Claude precedence: pushed statusline truth → jsonl math.
- *
- * @param {string} paneDir   - The pane's working dir
- * @param {"claude"|"codex"|null} dialect - Which session store to read
+ * WHAT: Reads context usage from the selected engine store.
+ * WHY: Keeps cross-pane status from mixing unrelated session journals.
  */
 export function getContextPercent(paneDir, dialect) {
   if (dialect === "codex") return getContextFromCodexJsonl(paneDir);
+  if (dialect === "kimi") return getContextFromKimiJsonl(paneDir);
   if (dialect === "claude") return getContextPushed(paneDir) || getContextFromClaudeJsonl(paneDir);
   return null;
 }

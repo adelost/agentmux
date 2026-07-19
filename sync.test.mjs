@@ -308,6 +308,19 @@ feature("generateChannelNames", () => {
       ]);
     }],
   });
+
+  component("Kimi panes follow Claude and Codex with a visible suffix", {
+    given: ["agent with all three engines", () => new Map([
+      ["lsrc", { panes: 4, claudeCount: 1, codexCount: 2, kimiCount: 1 }],
+    ])],
+    when: ["generating names", (agents) => generateChannelNames(agents)],
+    then: ["Kimi gets pane 3 and a -kimi channel", (channels) => {
+      expect(channels.map((c) => c.channelName)).toEqual([
+        "lsrc-0", "lsrc-1-codex", "lsrc-2-codex", "lsrc-3-kimi",
+      ]);
+      expect(channels.at(-1).dialect).toBe("kimi");
+    }],
+  });
 });
 
 feature("classifyAgentChannel", () => {

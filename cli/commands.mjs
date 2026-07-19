@@ -28,7 +28,8 @@ import { getContextFromPane, getContextPercent, shortModelName } from "../core/c
 import { loadSearchRoots, lexicalSearch, formatHits, saveLastResults, loadLastResults, expandHit, withScore, dedupeByFile } from "../core/search.mjs";
 import { codexInterruptionFromTurns, planRevive, reviveBrief, parseBootMs } from "../core/revive.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
-import { latestCodexJsonlMtime, readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
+import { readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
+import { alternateEngineForCommand, latestAlternateMtime, readAlternateTurns } from "../core/alternate-session-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
 import { appendEvent, latestPaneStatesCached, mergeStatus, readEvents } from "../core/events.mjs";
 import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../core/pane-status.mjs";
@@ -840,9 +841,7 @@ function formatTurnsForDisplay(turns) {
 
 function readLastTurnsForPane(agent, paneIdx, paneDir, opts) {
   const cmd = agent?.panes?.[paneIdx]?.cmd || "";
-  return /codex/i.test(cmd)
-    ? readLastTurnsCodex(paneDir, opts)
-    : readLastTurns(paneDir, opts);
+  return readAlternateTurns(cmd, paneDir, opts) || readLastTurns(paneDir, opts);
 }
 
 async function cmdLog(name, flags, ctx) {
@@ -955,7 +954,7 @@ async function cmdLog(name, flags, ctx) {
   if (!jsonl) {
     console.error(
       `no jsonl found for '${paneDir}'. ` +
-      `Pane may not have run claude/codex yet, or session is in a different cwd. ` +
+      `Pane may not have run claude/codex/kimi yet, or session is in a different cwd. ` +
       `Try --tmux for raw capture.`,
     );
     process.exit(1);
@@ -1386,7 +1385,7 @@ async function cmdAsks(ctx, flags, positional = []) {
     for (let paneIdx = 0; paneIdx < (a.panes || []).length; paneIdx++) {
       if (paneFilter != null && paneIdx !== paneFilter) continue;
       const cmd = a.panes[paneIdx]?.cmd || "";
-      if (!/^(claude|codex)/.test(cmd)) continue;
+      if (!/(?:^|[/\s])(claude|codex|kimi(?:-code)?)(?:\s|$)/u.test(cmd)) continue;
       targets.push({ agent: a, pane: paneIdx });
     }
   }
@@ -2031,7 +2030,7 @@ async function cmdMorningDigest(ctx, args) {
   for (const agent of listAgents(ctx.configPath)) {
     for (let paneIdx = 0; paneIdx < (agent.panes || []).length; paneIdx++) {
       const cmd = agent.panes[paneIdx]?.cmd || "";
-      if (!/^(claude|codex)/.test(cmd)) continue;
+      if (!/(?:^|[/\s])(claude|codex|kimi(?:-code)?)(?:\s|$)/u.test(cmd)) continue;
       const paneDir = panePathFor(agent, paneIdx);
       const res = readLastTurnsForPane(agent, paneIdx, paneDir,
         { limit: 20, tailBytes: 4 * 1024 * 1024 });
@@ -2131,7 +2130,7 @@ function formatDoneRow({ key, bucket, ageMs }, opts = {}) {
 // "node" in tmux pane_current_command (binary is `node bin/codex.js`),
 // so we resolve its dialect via agents.yaml cmd field instead — see
 // dialectFor().
-const CONTEXT_DIALECT = { claude: "claude", codex: "codex" };
+const CONTEXT_DIALECT = { claude: "claude", codex: "codex", kimi: "kimi", "kimi-code": "kimi" };
 
 /**
  * Resolve a pane's coding-agent dialect.
@@ -2141,13 +2140,14 @@ const CONTEXT_DIALECT = { claude: "claude", codex: "codex" };
  * the configured cmd from agents.yaml when the process is generic node
  * or matches no dialect.
  *
- * Returns "claude", "codex", or null for non-agent panes (bash/services).
+ * Returns "claude", "codex", "kimi", or null for non-agent panes.
  */
 function dialectFor(agent, pane) {
   const direct = CONTEXT_DIALECT[pane.command];
   if (direct) return direct;
   const cmd = agent?.panes?.[pane.index]?.cmd || "";
-  if (/codex/i.test(cmd)) return "codex";
+  const alternate = alternateEngineForCommand(cmd);
+  if (alternate) return alternate;
   if (/claude/i.test(cmd)) return "claude";
   return null;
 }
@@ -2233,8 +2233,8 @@ async function inspectPane(ctx, agent, pane) {
   let context = null;
   if (dialect === "claude") {
     context = getContextFromPane(content, paneDir);
-  } else if (dialect === "codex") {
-    context = getContextPercent(paneDir, "codex");
+  } else if (dialect === "codex" || dialect === "kimi") {
+    context = getContextPercent(paneDir, dialect);
   }
 
   // Live-activity overlay: tmux-only detection can't tell an active spinner
@@ -2250,10 +2250,9 @@ async function inspectPane(ctx, agent, pane) {
   // `amux ps` because Claude regularly pauses 30-50s between assistant
   // text + tool calls + deep thinking; the pane is still working but
   // jsonl mtime falls outside the window.
-  if ((dialect === "claude" || dialect === "codex") && (status === "idle" || status === "unknown")) {
-    const mtimeMs = dialect === "codex"
-      ? latestCodexJsonlMtime(paneDir)
-      : latestJsonlMtime(paneDir);
+  if (dialect && (status === "idle" || status === "unknown")) {
+    const mtimeMs = latestAlternateMtime(agent?.panes?.[pane.index]?.cmd, paneDir)
+      || latestJsonlMtime(paneDir);
     if (mtimeMs && Date.now() - mtimeMs < 60_000) {
       status = "working";
     }
@@ -2261,7 +2260,7 @@ async function inspectPane(ctx, agent, pane) {
   return { status, preview, context };
 }
 
-// Status priorities for sorting agents — agents with active panes first,
+// Status priorities for sorting agents: agents with active panes first,
 // then panes with claude session state, then plain shells last.
 const SHELL_CMDS = /^(bash|zsh|fish|sh|dash)$/;
 const ACTIVE_STATUS = (s) => statusTier(s) >= 2;
@@ -2349,7 +2348,7 @@ async function cmdRevive(ctx, flags) {
   const panes = [];
   for (const a of agents) {
     (a.panes || []).forEach((p, i) => {
-      if (/claude|codex/.test(String(p?.cmd || ""))) {
+      if (/claude|codex|kimi(?:-code)?/.test(String(p?.cmd || ""))) {
         panes.push({ agent: a.name, pane: i, cmd: p.cmd, backend: a.backend });
       }
     });
@@ -2650,15 +2649,16 @@ async function cmdPs(ctx, flags = {}) {
     // reports "node" — same as some transient claude states. Trust the
     // config for classification; it's the authoritative source of truth
     // for which pane is which dialect.
-    const isCodexPane = (p) => /codex/i.test(a.panes?.[p.index]?.cmd || "");
-    const isClaudePane = (p) => /claude/i.test(a.panes?.[p.index]?.cmd || "");
-    const claudeCount = panes.filter(isClaudePane).length;
-    const codexCount = panes.filter(isCodexPane).length;
-    const shellCount = panes.filter((p) => SHELL_CMDS.test(p.command) && !isClaudePane(p) && !isCodexPane(p)).length;
-    const otherCount = panes.length - claudeCount - codexCount - shellCount;
+    const engine = (p) => dialectFor(a, p);
+    const claudeCount = panes.filter((p) => engine(p) === "claude").length;
+    const codexCount = panes.filter((p) => engine(p) === "codex").length;
+    const kimiCount = panes.filter((p) => engine(p) === "kimi").length;
+    const shellCount = panes.filter((p) => SHELL_CMDS.test(p.command) && !engine(p)).length;
+    const otherCount = panes.length - claudeCount - codexCount - kimiCount - shellCount;
     const summary = [
       claudeCount && `${claudeCount} claude`,
       codexCount && `${codexCount} codex`,
+      kimiCount && `${kimiCount} kimi`,
       otherCount && `${otherCount} svc`,
       shellCount && `${shellCount} shell`,
     ].filter(Boolean).join(" · ");
@@ -2667,7 +2667,7 @@ async function cmdPs(ctx, flags = {}) {
 
     // Quick path: agent has zero coding-agent panes (claude or codex)
     // AND none active → "all idle".
-    if (!showAll && claudeCount === 0 && codexCount === 0 && !panes.some((p) => ACTIVE_STATUS(p.status))) {
+    if (!showAll && claudeCount === 0 && codexCount === 0 && kimiCount === 0 && !panes.some((p) => ACTIVE_STATUS(p.status))) {
       console.log(`  ⚪ all idle (${panes.length})`);
       continue;
     }

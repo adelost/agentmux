@@ -19,6 +19,7 @@ import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
 import { sendSlashVerified } from "../core/delivery.mjs";
 import { readLastTurns, panePathFor } from "../core/jsonl-reader.mjs";
 import { readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
+import { readLastTurnsKimi } from "../core/kimi-jsonl-reader.mjs";
 import { statSync } from "fs";
 
 // Panes that have warnings pending (paneKey → { warned_at: ms }).
@@ -68,6 +69,7 @@ export function createAutoCompact({
     const pane = agentConfig.panes?.[paneIdx] || {};
     const cmd = String(pane.cmd || pane.name || "");
     if (/codex/i.test(cmd)) return "codex";
+    if (/kimi(?:-code)?/i.test(cmd)) return "kimi";
     if (/claude/i.test(cmd)) return "claude";
     return null;
   }
@@ -111,6 +113,8 @@ export function createAutoCompact({
     const dialect = paneDialect(agentConfig, paneIdx);
     const ctxInfo = dialect === "codex"
       ? getContextPercent(paneDir, "codex")
+      : dialect === "kimi"
+        ? getContextPercent(paneDir, "kimi")
       : dialect === "claude"
         ? getContextFromPane(content, paneDir) || getContextPercent(paneDir, "claude")
         : null;
@@ -148,7 +152,11 @@ export function createAutoCompact({
     // population. Two-part fix: escalate the tail until a turn is found, and
     // only let mtime stand in when the parse covered the WHOLE file.
     try {
-      const reader = dialect === "codex" ? readLastTurnsCodex : readLastTurns;
+      const reader = dialect === "codex"
+        ? readLastTurnsCodex
+        : dialect === "kimi"
+          ? readLastTurnsKimi
+          : readLastTurns;
       let usedTailBytes = 64 * 1024;
       let res = reader(paneDir, { limit: 1, tailBytes: usedTailBytes });
       let newest = res?.turns?.[res.turns.length - 1];
@@ -322,6 +330,15 @@ export function createAutoCompact({
             compactFloors.delete(paneKey);
             lastWarnPostAt.delete(paneKey);
           }
+          continue;
+        }
+        // Kimi compacts itself and its slash receipt is not yet part of the
+        // generic verified-slash transport. Track/display context, but never
+        // inject an unverified `/compact` into a Kimi pane.
+        if (paneDialect(a, i) === "kimi") {
+          warnings.delete(paneKey);
+          compactFloors.delete(paneKey);
+          lastWarnPostAt.delete(paneKey);
           continue;
         }
 

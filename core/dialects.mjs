@@ -96,15 +96,42 @@ export const CODEX = {
   ],
 };
 
+// --- Kimi Code ------------------------------------------------------------
+
+/** WHAT: Describes Kimi TUI markers. WHY: Keeps parsing independent from Claude and Codex rendering. */
+export const KIMI = {
+  name: "kimi",
+
+  promptChar: ">",
+  bullet: "◆",
+  toolResultPrefix: "│",
+  toolCallPattern: /^◆ (?:Run|Read|Write|Edit|Search|Fetch|Use)\b/u,
+
+  // The Kimi composer is an empty `> ` row while idle.
+  idleWhenPromptEmpty: true,
+  busySignals: ["esc to interrup", "Ctrl-C to interrupt"],
+
+  noise: [
+    /^Welcome to Kimi Code/u,
+    /^Session\s+session_[0-9a-f-]+/iu,
+    /^Model\s+/u,
+    /^Version\s+[\d.]+/u,
+    /^\s*(?:yolo|auto|plan)\s+\S+\s+~/iu,
+    /^\s*context:\s*\d+(?:\.\d+)?%/iu,
+  ],
+};
+
 // --- Registry ------------------------------------------------------------
 
-export const ALL_DIALECTS = [CLAUDE, CODEX];
+/** WHAT: Defines supported TUI dialects. WHY: Keeps fallback detection aligned with every engine. */
+export const ALL_DIALECTS = [CLAUDE, CODEX, KIMI];
 
 /**
- * Identify which dialect produced this raw tmux buffer.
- * Checks the tail first (recent content) since scrollback may contain old banners.
+ * WHAT: Resolves the dialect producing a tmux buffer.
+ * WHY: Keeps scrollback parsing from applying another engine's markers.
  */
 export function detectDialect(raw) {
+  if (raw.includes("Welcome to Kimi Code") || /\bSession\s+session_[0-9a-f-]+/iu.test(raw)) return KIMI;
   // Strong signal: Codex banner somewhere
   if (raw.includes(">_ OpenAI Codex")) return CODEX;
   // Last prompt char in the tail

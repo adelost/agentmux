@@ -1,5 +1,4 @@
 // jsonl-watcher: event-driven mirror of agent replies → bound Discord channels.
-//
 // Replaces the old fan of ad-hoc forwarders (handlers.streamResponse,
 // drift-guard.forwardReplyAsync, resume-hint forwardHintReplyAsync,
 // mirror-loop). One watcher per claude/codex pane, fs.watch on its
@@ -39,7 +38,7 @@ import { loadConfig, findChannelForPane, channelForPane } from "../cli/config.mj
 import { paneDir } from "../agent.mjs";
 import { claudeProjectDir } from "../core/claude-paths.mjs";
 import { readLastTurns, latestJsonlMtime, latestJsonlInfo } from "../core/jsonl-reader.mjs";
-import { readLastTurnsCodex, latestCodexJsonlMtime, latestCodexJsonlInfo } from "../core/codex-jsonl-reader.mjs";
+import { alternateEngineForCommand, alternateSessionReader, alternateWatchDir, latestAlternateMtime } from "../core/alternate-session-reader.mjs";
 import { getContextFromPane, shortModelName } from "../core/context.mjs";
 import { isHarnessPlaceholder } from "../core/reply-forwarder.mjs";
 import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, planStartupAudit, itemKey } from "../core/watcher-engine.mjs";
@@ -589,7 +588,8 @@ export function createJsonlWatcher({
         if (!ctx) ctx = agent.getContextPercent?.(name, idx);
       }
       if (ctx) {
-        await watchModelChange({ name, idx, channelId, ctx, config })
+        const paneCmd = String(config?.[name]?.panes?.[idx]?.cmd || "");
+        if (alternateEngineForCommand(paneCmd) !== "kimi") await watchModelChange({ name, idx, channelId, ctx, config })
           .catch((err) => log(`model-watch failed for ${name}:${idx}: ${err.message}`));
         // tokens can be null when percent came from a custom statusline row.
         const suffix = ctx.tokens != null ? ` (${Math.round(ctx.tokens / 1000)}k)` : "";
@@ -629,16 +629,15 @@ export function createJsonlWatcher({
 
   /**
    * Determine which jsonl reader to use for a pane.
-   * Codex panes have cmd containing "codex" in agents.yaml. Anything else
-   * (claude, claude-2, …) falls through to the Claude reader. Unknown
+   * Codex and Kimi panes are selected by their generated command. Anything
+   * else (claude, claude-2, …) falls through to the Claude reader. Unknown
    * panes default to Claude — same behavior as before this dispatch.
    */
   function readerFor(config, name, idx) {
     try {
       const cmd = config?.[name]?.panes?.[idx]?.cmd || "";
-      if (/codex/i.test(cmd)) {
-        return { readTurns: readLastTurnsCodex, latestMtime: latestCodexJsonlMtime, latestInfo: latestCodexJsonlInfo };
-      }
+      const alternate = alternateSessionReader(cmd);
+      if (alternate) return alternate;
     } catch { /* fall through to claude default */ }
     return { readTurns: readLastTurns, latestMtime: latestJsonlMtime, latestInfo: latestJsonlInfo };
   }
@@ -836,15 +835,16 @@ export function createJsonlWatcher({
 
   // --- fs.watch wiring -----------------------------------------------------
 
-  function projectDirFor(agentDir, idx) {
-    return claudeProjectDir(paneDir(agentDir, idx));
+  function projectDirFor(agentDir, idx, config, name) {
+    const dir = paneDir(agentDir, idx);
+    return alternateWatchDir(config?.[name]?.panes?.[idx]?.cmd, dir) || claudeProjectDir(dir);
   }
 
-  function attachFsWatch(name, idx, agentDir) {
+  function attachFsWatch(name, idx, agentDir, config) {
     const key = paneKey(name, idx);
     if (fsWatchers.has(key)) return;
-    const projectDir = projectDirFor(agentDir, idx);
-    if (!existsSync(projectDir)) return; // will be picked up by polling once jsonl appears
+    const projectDir = projectDirFor(agentDir, idx, config, name);
+    if (!projectDir || !existsSync(projectDir)) return; // picked up by polling once jsonl appears
 
     let debounceTimer = null;
     const trigger = () => {
@@ -891,8 +891,8 @@ export function createJsonlWatcher({
       if (entry.backend === "native") continue;
       for (let i = 0; i < entry.panes.length; i++) {
         const cmd = entry.panes[i]?.cmd || "";
-        if (!/^(claude|codex)/.test(cmd)) continue;
-        attachFsWatch(name, i, entry.dir);
+        if (!/(?:^|[/\s])(claude|codex|kimi(?:-code)?)(?:\s|$)/u.test(cmd)) continue;
+        attachFsWatch(name, i, entry.dir, config);
         enqueuePane(name, i, entry.dir, config);
       }
     }
@@ -917,12 +917,12 @@ export function createJsonlWatcher({
       if (entry.backend === "native") continue;
       for (let i = 0; i < entry.panes.length; i++) {
         const cmd = entry.panes[i]?.cmd || "";
-        if (!/^(claude|codex)/.test(cmd)) continue;
+        if (!/(?:^|[/\s])(claude|codex|kimi(?:-code)?)(?:\s|$)/u.test(cmd)) continue;
         const dir = paneDir(entry.dir, i);
         // Dialect-dispatched mtime: codex sessions live under
         // ~/.codex/sessions, not ~/.claude/projects. Without this, codex
         // pane fs writes never show as fresh and typing-indicator stays off.
-        const mtimeMs = /codex/i.test(cmd) ? latestCodexJsonlMtime(dir) : latestJsonlMtime(dir);
+        const mtimeMs = latestAlternateMtime(cmd, dir) || latestJsonlMtime(dir);
         if (!mtimeMs || now - mtimeMs > TYPING_FRESHNESS_MS) continue;
         maybeSendTyping(name, i, config);
       }

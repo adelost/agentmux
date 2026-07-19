@@ -1,6 +1,6 @@
 import { feature, unit, expect } from "bdd-vitest";
 import {
-  CLAUDE, CODEX, ALL_DIALECTS, detectDialect,
+  CLAUDE, CODEX, KIMI, ALL_DIALECTS, detectDialect,
   matchesAnyBullet, matchesAnyToolResult, matchesAnyToolCall,
   matchesAnyPromptPrefix, matchesAnyPromptWithText, stripBullet,
   COMPOSER_LINE_RE, foreignComposerText,
@@ -81,6 +81,12 @@ feature("detectDialect", () => {
     given: ["raw with ❯ prompt", () => " ▐▛███▜▌   Claude Code v2.1.96\n\n❯ hej"],
     when: ["detecting", (raw) => detectDialect(raw)],
     then: ["returns CLAUDE", (d) => expect(d).toBe(CLAUDE)],
+  });
+
+  unit("detects Kimi via its session banner", {
+    given: ["raw with Kimi banner", () => "Welcome to Kimi Code\nSession session_12345678-1234-4234-9234-123456789abc\n\n> "],
+    when: ["detecting", (raw) => detectDialect(raw)],
+    then: ["returns KIMI", (d) => expect(d).toBe(KIMI)],
   });
 
   unit("defaults to CLAUDE when nothing matches", {
