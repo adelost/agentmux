@@ -15,6 +15,7 @@ import { readdirSync, readFileSync, statSync, existsSync, openSync, fstatSync, r
 import { join } from "path";
 import { claudeProjectDir } from "./claude-paths.mjs";
 import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
+import { readLastTurnsKimi } from "./kimi-jsonl-reader.mjs";
 import { describeToolCall } from "./tool-display.mjs";
 import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { isSystemNoiseDirective } from "./system-noise.mjs";
@@ -947,6 +948,10 @@ function isCodexPaneConfig(pane) {
   return /codex/i.test(String(pane?.cmd || ""));
 }
 
+function isKimiPaneConfig(pane) {
+  return /kimi(?:-code)?/i.test(String(pane?.cmd || ""));
+}
+
 /** Compute the cwd for a given pane of an agent (matches agent.mjs:paneDir). */
 export function panePathFor(agent, paneIdx) {
   return join(agent.dir, ".agents", String(paneIdx));
@@ -982,7 +987,9 @@ export function readAllTurnsAcrossPanes(opts = {}) {
       // every timeline/done invocation.
       const rows = isCodexPaneConfig(paneCfg)
         ? rowsFromTurns(readLastTurnsCodex(paneDir, { limit: Number.MAX_SAFE_INTEGER, tailBytes })?.turns || [])
-        : eventsFromProjectDir(projectDirFor(paneDir), { tailBytes, sinceMs, tailFallback });
+        : isKimiPaneConfig(paneCfg)
+          ? rowsFromTurns(readLastTurnsKimi(paneDir, { limit: Number.MAX_SAFE_INTEGER, tailBytes })?.turns || [])
+          : eventsFromProjectDir(projectDirFor(paneDir), { tailBytes, sinceMs, tailFallback });
       for (const r of rows) {
         out.push({ ...r, agent: a.name, pane: paneIdx });
       }

@@ -12,6 +12,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { claudeProjectDir } from "./claude-paths.mjs";
 import { codexSessionDirs } from "./codex-profiles.mjs";
+import { getContextFromKimiJsonl } from "./kimi-jsonl-reader.mjs";
 
 /**
  * Read only the last `maxBytes` of a file and return its complete trailing
@@ -484,10 +485,11 @@ export function getContextPushed(paneDir) {
  * Claude precedence: pushed statusline truth → jsonl math.
  *
  * @param {string} paneDir   - The pane's working dir
- * @param {"claude"|"codex"|null} dialect - Which session store to read
+ * @param {"claude"|"codex"|"kimi"|null} dialect - Which session store to read
  */
 export function getContextPercent(paneDir, dialect) {
   if (dialect === "codex") return getContextFromCodexJsonl(paneDir);
+  if (dialect === "kimi") return getContextFromKimiJsonl(paneDir);
   if (dialect === "claude") return getContextPushed(paneDir) || getContextFromClaudeJsonl(paneDir);
   return null;
 }
