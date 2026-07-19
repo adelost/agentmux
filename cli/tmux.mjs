@@ -72,7 +72,10 @@ export function attachSession(socket, name) {
   execSync(`tmux -S '${esc(socket)}' attach-session -t '${esc(name)}'`, { stdio: "inherit" });
 }
 
-/** Ensure session exists with all panes set up and claude started. */
+/**
+ * WHAT: Builds or locates the tmux session, starts every configured coding pane, and reapplies layout.
+ * WHY: Keeps manual session recreation from leaving alternate engines such as Kimi as idle shells.
+ */
 export async function ensureAndAttach(ctx, name, configPath) {
   const { loadConfig, getLayout } = await import("./config.mjs");
   const config = loadConfig(configPath);
@@ -82,7 +85,9 @@ export async function ensureAndAttach(ctx, name, configPath) {
     return { native: true, runtimeUrl: config[name].runtimeUrl };
   }
   const agentPanes = panes
-    .map((p, i) => (/claude|codex/.test(p?.cmd || "") ? i : -1))
+    .map((p, i) => (
+      /(?:^|[/\s])(claude|codex|kimi(?:-code)?)(?:\s|$)/u.test(p?.cmd || "") ? i : -1
+    ))
     .filter((i) => i >= 0);
 
   // Step 1: create session + panes (sequential, once)

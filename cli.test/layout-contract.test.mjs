@@ -57,6 +57,11 @@ agents:
     shells: 1
 `;
 
+const sourceWithKimi = sourceWithoutLayout.replace(
+  "    codex: 1",
+  "    codex: 1\n    kimi: 1",
+);
+
 feature("tmux layout contract", () => {
   component("defaults the complete sync-to-attach path to tiled", {
     given: ["a mixed Claude, Codex, service and shell fleet without an explicit layout", () =>
@@ -86,6 +91,19 @@ feature("tmux layout contract", () => {
     }],
     then: ["the infrastructure error reaches the caller", (fixture) => {
       expect(fixture.error?.message).toContain("tmux rejected layout");
+      rmSync(fixture.root, { recursive: true, force: true });
+    }],
+  });
+
+  component("starts Kimi with the other coding panes when a session is recreated", {
+    given: ["a mixed fleet containing Claude, Codex and Kimi", () =>
+      layoutFixture({ source: sourceWithKimi })],
+    when: ["the recreated session is attached", async (fixture) => {
+      await ensureAndAttach(fixture.ctx, "skybar", fixture.configPath);
+      return fixture;
+    }],
+    then: ["all four coding panes are made ready, including Kimi", (fixture) => {
+      expect(fixture.readyPanes).toEqual([0, 1, 2, 3]);
       rmSync(fixture.root, { recursive: true, force: true });
     }],
   });
