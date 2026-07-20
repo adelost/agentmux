@@ -680,17 +680,17 @@ export async function cmdCutover(args, ctx) {
 
 async function cmdStopAll(ctx) {
   const agents = listAgents(ctx.configPath);
-  const stopped = [];
+  // Atomic: the full stop plan is resolved before the first kill, and only
+  // the maintained bridge-stop path is used (the cmdUnserve crash, 2026-07-20).
+  const plan = [];
   for (const a of agents) {
     if (a.backend === "native") continue;
-    if (await hasSession(ctx, a.name)) {
-      await killSession(ctx, a.name);
-      stopped.push(a.name);
-    }
+    if (await hasSession(ctx, a.name)) plan.push(a.name);
   }
-  if (await cmdUnserve(ctx)) stopped.push("bridge");
-  if (!stopped.length) console.log("Nothing to stop.");
-  else console.log(`Stopped: ${stopped.join(", ")}.`);
+  for (const name of plan) await killSession(ctx, name);
+  if (await bridgeLifecycle.stop(ctx)) plan.push("bridge");
+  if (!plan.length) console.log("Nothing to stop.");
+  else console.log(`Stopped: ${plan.join(", ")}.`);
 }
 
 async function cmdSend(name, prompt, flags, ctx) {
@@ -3216,7 +3216,7 @@ async function cmdSyncOffline({ allowManagedTakeover = false } = {}) {
   const bridgePlan = planOfflineSyncBridge({ wasRunning, mode: previousMode, allowManagedTakeover });
   if (bridgePlan.stop) {
     console.log("stopping bridge for offline sync...");
-    await cmdUnserve(bridgeCtx).catch(() => {});
+    await bridgeLifecycle.stop(bridgeCtx).catch(() => {});
     // Give Discord gateway a beat to release the token before reconnecting.
     await new Promise((r) => setTimeout(r, 1500));
   }
