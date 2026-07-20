@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, feature, unit } from "bdd-vitest";
+import { component, expect, feature, unit } from "bdd-vitest";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const readPowerShell = (name) => readFileSync(join(ROOT, "bin", name), "utf8");
@@ -82,7 +82,7 @@ feature("windows restarter source contract", () => {
     }],
   });
 
-  unit("the exact installed directory layout executes its self-check", {
+  component("the exact installed directory layout executes its self-check", {
     then: ["Node resolves core/windows-bridge.mjs and verifies both hashes", () => {
       const temporary = mkdtempSync(join(tmpdir(), "amux-windows-core-"));
       try {
