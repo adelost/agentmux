@@ -143,6 +143,15 @@ if ($RunManager) {
   if (!$node -or !(Test-Path $node)) { $node = "node.exe" }
   $discordEnv = $(if ($config.discordTokenEnv) { [string]$config.discordTokenEnv } else { "DISCORD_TOKEN" })
   if (![Environment]::GetEnvironmentVariable($discordEnv)) {
+    # Hydrate the token from the restarter's DPAPI credential store for this
+    # process only; at rest it stays inside the encrypted clixml, never printed.
+    $credPath = Join-Path $Root "discord-token.clixml"
+    if (Test-Path $credPath) {
+      $cred = Import-Clixml -Path $credPath
+      [Environment]::SetEnvironmentVariable($discordEnv, $cred.GetNetworkCredential().Password, "Process")
+    }
+  }
+  if (![Environment]::GetEnvironmentVariable($discordEnv)) {
     Write-Output "MANAGER_BLOCKED env-missing:$discordEnv"
     exit 1
   }
