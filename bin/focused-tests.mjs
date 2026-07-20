@@ -53,12 +53,18 @@ const TEST_ALIASES = {
   "bin/windows-manager-install.ps1": ["test/windows-manager-install-contract.test.mjs"],
   "bin/windows-rescue-tool.ps1": ["test/windows-manager-contract.test.mjs"],
   "core/windows-manager-discord.mjs": ["bin/windows-manager-smoke.test.mjs", "test/windows-manager-contract.test.mjs"],
+  ".npmignore": ["test/audio-inbox-android-contract.test.mjs"],
+  "channels/audio-feed.mjs": ["channels/voice.test.mjs"],
+  "index.mjs": ["test/audio-inbox-android-contract.test.mjs"],
   "package.json": ["core/release-install.test.mjs"],
   "package-lock.json": ["core/release-install.test.mjs"],
 };
 
 /** WHAT: Maps one changed file to its related fast test files. WHY: Keeps the PR gate focused instead of full-suite. */
 export function relatedTests(file, { exists = existsSync } = {}) {
+  if (file.startsWith("android/audio-inbox/")) {
+    return ["test/audio-inbox-android-contract.test.mjs"].filter(exists);
+  }
   if (TEST_ALIASES[file]) return TEST_ALIASES[file].filter(exists);
   if (/\.test\.mjs$/u.test(file)) return exists(file) ? [file] : [];
   if (!/\.mjs$/u.test(file)) return [];

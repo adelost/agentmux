@@ -150,4 +150,17 @@ feature("focused local tests", () => {
         .toEqual([]);
     }],
   });
+
+  unit("Android audio sources map to one fast source contract", {
+    then: ["Java, Gradle and Android metadata share the bounded contract", () => {
+      const contract = "test/audio-inbox-android-contract.test.mjs";
+      const exists = existsSet([contract]);
+      expect(relatedTests(
+        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/MainActivity.java",
+        { exists },
+      )).toEqual([contract]);
+      expect(relatedTests("android/audio-inbox/app/build.gradle.kts", { exists }))
+        .toEqual([contract]);
+    }],
+  });
 });
