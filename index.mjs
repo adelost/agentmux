@@ -36,7 +36,9 @@ import { createNativeRuntimeWatcher } from "./channels/native-runtime-watcher.mj
 import { createPlaywrightWatchdog } from "./channels/playwright-watchdog.mjs";
 import { parsePlaywrightWatchdogConfig } from "./core/playwright-watchdog.mjs";
 import { startHeartbeat } from "./core/heartbeat.mjs";
+import { startMemoryGuard } from "./core/memory-guard.mjs";
 import { readReleaseManifest } from "./core/release-identity.mjs";
+import { resolveConfigSources } from "./core/config-sources.mjs";
 import { syncConfiguredAgentHints } from "./core/hints-sync.mjs";
 import { runPendingFleetRestart } from "./core/fleet-restart.mjs";
 import { createDeliveryQueue } from "./core/delivery-queue.mjs";
@@ -49,9 +51,14 @@ import { createAgentRouter } from "./core/agent-router.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
+// Secrets/operator config resolve from the pinned external home first;
+// the package-directory copy is only the migration fallback (an
+// `npm install --global` replaces the whole package tree).
+const configSources = resolveConfigSources({ packageDir: __dir });
+
 function loadEnv() {
   try {
-    const vars = parseEnv(readFileSync(resolve(__dir, ".env"), "utf-8"));
+    const vars = parseEnv(readFileSync(configSources.envFile.path, "utf-8"));
     for (const [k, v] of Object.entries(vars)) {
       if (!process.env[k]) process.env[k] = v;
     }
@@ -62,7 +69,7 @@ loadEnv();
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const AGENTS_YAML = process.env.AGENTS_YAML || resolve(__dir, "agents.yaml");
-const AGENTMUX_YAML = process.env.AGENTMUX_YAML || resolve(__dir, "agentmux.yaml");
+const AGENTMUX_YAML = configSources.agentmuxYaml.path;
 const TIMEOUT = parseInt(process.env.TIMEOUT_S || "600") * 1000;
 const WHISPER_URL = process.env.WHISPER_URL || "http://localhost:2022/v1/audio/transcriptions";
 const SHELL_PATH = process.env.SHELL_PATH || `${process.env.HOME}/bin:${process.env.PATH}`;
@@ -80,7 +87,7 @@ const VOICE_PWA_HOST = process.env.VOICE_PWA_HOST || "127.0.0.1";
 const AMUX_REACTIVE_POKE = process.env.AMUX_REACTIVE_POKE === "1";
 
 if (!TOKEN) {
-  console.error("Set DISCORD_TOKEN in .env");
+  console.error(`Set DISCORD_TOKEN in ${configSources.envFile.path} (source: ${configSources.envFile.source})`);
   process.exit(1);
 }
 
@@ -176,6 +183,24 @@ function stampChannelMirror(channelId) {
 }
 
 const discord = createDiscordChannel({ token: TOKEN, onSent: stampChannelMirror });
+
+// Memory admission guard (T1): classifies host memory pressure into a
+// durable state file and alarms on transitions only. It never kills or
+// restarts anything — automatic heavy starters (post-boot revive first)
+// consult it before launching. Alarms go to AMUX_MEMORY_ALERT_CHANNEL when
+// configured, otherwise to the bridge log.
+const memoryAlertChannel = process.env.AMUX_MEMORY_ALERT_CHANNEL || null;
+startMemoryGuard({
+  onTransition: async ({ from, to, state }) => {
+    const text = `🧠 Minnesvakt: ${from} → ${to} (MemAvailable ${Math.round((state.sample?.memAvailableKb || 0) / 1024 / 1024 * 10) / 10} GiB, SwapFree ${Math.round((state.sample?.swapFreeKb || 0) / 1024 / 1024 * 10) / 10} GiB) — nya tunga automatjobb ${to === "blocked" || to === "critical" ? "stoppas" : "tillåts"}.`;
+    console.warn(`[memory-guard] ${text}`);
+    if (memoryAlertChannel) {
+      await discord.send(memoryAlertChannel, text).catch((error) =>
+        console.warn(`[memory-guard] Discord alarm failed: ${error.message}`));
+    }
+  },
+});
+
 const deliveryBroker = createDeliveryBroker({
   agent,
   queue: deliveryQueue,

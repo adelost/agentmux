@@ -16,9 +16,28 @@ import { isKimiPaneCommand } from "./tui-stall-recovery.mjs";
 const PROMPT_READY_TIMEOUT_MS = 15_000;
 const KIMI_STEER_QUEUE_TIMEOUT_MS = 5_000;
 
+/** Prefix of the bridge's internal ingest-probe prompts; watchers hide these turns from Discord. */
+export const AMUX_PROBE_PREFIX = "AMUX-PROBE ";
+
 /** WHAT: Checks Kimi's empty plain or bordered composer. WHY: Prevents TUI box glyphs from hiding a ready input boundary. */
 export function isKimiComposerReady(snapshot) {
   return /^\s*(?:[│┃]\s*)?>\s*(?:[│┃]\s*)?$/mu.test(stripAnsi(snapshot));
+}
+
+// A composer line holding only Kimi's collapsed atomic-paste marker. The
+// full pasted text is not visible in that state; the marker is. Mirrors the
+// TUI's `[paste #N]` / `+N lines` / `N chars` forms (see pi-tui editor).
+const KIMI_COLLAPSED_PASTE_COMPOSER_RE = /^\s*(?:[│┃]\s*)?>\s*\[paste #\d+(?: (?:\+\d+ lines|\d+ chars))?\]\s*(?:[│┃]\s*)?$/mu;
+
+/**
+ * WHAT: Detects Kimi's collapsed `[paste #…]` composer marker.
+ * WHY: An owned atomic paste whose text is no longer visible must still be
+ * recognizable as OUR draft, or recovery re-pastes it (duplicate) or fences
+ * it forever ("composer unsure"). Same contract as Codex's paste block:
+ * only ever trusted where delivery cleared foreign text before pasting.
+ */
+export function kimiComposerHasCollapsedPaste(snapshot) {
+  return KIMI_COLLAPSED_PASTE_COMPOSER_RE.test(stripAnsi(snapshot));
 }
 
 /** WHAT: Defines Kimi Wire operations. WHY: Keeps engine dispatch separate from journal internals. */

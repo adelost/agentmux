@@ -21,6 +21,7 @@ import {
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
+import { promptRequiresAtomicPaste } from "./prompt-paste.mjs";
 import { describeToolCall } from "./tool-display.mjs";
 
 const KIMI_PROMPT_CURSOR_KIND = "kimi-prompt-events-v1";
@@ -159,9 +160,24 @@ function textFromParts(parts) {
     .join("");
 }
 
-function promptMatches(event, needle) {
-  return (event?.type === "turn.prompt" || event?.type === "turn.steer")
-    && textFromParts(event.input).trim() === needle;
+/**
+ * Kimi's TUI collapses a large/multi-line bracketed paste to an atomic
+ * marker (`[paste #1]`, `[paste #1 +24 lines]`, `[paste #2 1234 chars]`) and
+ * the Wire journal can then hold only that marker as the prompt text.
+ * Mirrors PASTE_MARKER_REGEX in pi-tui's editor.
+ */
+export const KIMI_PASTE_PLACEHOLDER_RE = /^\[paste #\d+(?: (?:\+\d+ lines|\d+ chars))?\]$/u;
+
+function promptMatches(event, needle, { allowPastePlaceholder = false } = {}) {
+  if (event?.type !== "turn.prompt" && event?.type !== "turn.steer") return false;
+  const text = textFromParts(event.input).trim();
+  if (text === needle) return true;
+  // A placeholder event is only accepted as the receipt for a needle that
+  // would itself collapse (multi-line/>500 chars). Cursor/FIFO scoping by
+  // the caller makes this job's own paste the only one that can land there.
+  return allowPastePlaceholder
+    && promptRequiresAtomicPaste(needle)
+    && KIMI_PASTE_PLACEHOLDER_RE.test(text);
 }
 
 /** WHAT: Builds a Kimi prompt cursor. WHY: Keeps identical retries distinct across append boundaries. */
@@ -176,19 +192,21 @@ export function captureKimiPromptEchoCursor(paneDir, promptText, options = {}) {
 export function isPromptInKimiJsonl(paneDir, promptText, {
   notBeforeMs = 0,
   cursor = null,
+  allowPastePlaceholder = false,
   ...options
 } = {}) {
   const needle = promptText?.trim();
   if (!needle) return null;
   const file = latestKimiSessionFor(paneDir, options);
   if (!file) return null;
+  const matchOpts = { allowPastePlaceholder };
   if (cursor?.kind === KIMI_PROMPT_CURSOR_KIND) {
-    return hasJsonlEventAfterCursor([file], cursor, (event) => promptMatches(event, needle));
+    return hasJsonlEventAfterCursor([file], cursor, (event) => promptMatches(event, needle, matchOpts));
   }
   const events = readTail(file);
   for (let index = events.length - 1; index >= 0; index--) {
     const event = events[index];
-    if (!promptMatches(event, needle)) continue;
+    if (!promptMatches(event, needle, matchOpts)) continue;
     if (notBeforeMs && (!Number.isFinite(event.time) || event.time < notBeforeMs)) continue;
     return true;
   }

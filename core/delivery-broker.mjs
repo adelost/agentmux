@@ -20,6 +20,12 @@ const ACTIVE_RETRY_MS = 1_000;
 const BLOCKED_RETRY_MS = 3_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
 const NOTICE_AFTER_MS = 10_000;
+// Retries with no receipt re-prove pane liveness with a disposable nonce
+// probe at most this often, before committing the real payload again.
+const PROBE_INTERVAL_MS = 120_000;
+// A head that exhausts its pre-submit budget is never dropped: it parks this
+// long, then gets a fresh budget. The FIFO and the message are preserved.
+const PRE_SUBMIT_PARK_MS = 5 * 60_000;
 // Warn well before a legitimate long turn reaches the 60-minute verdict.
 const SUBMITTED_STALL_NOTICE_MS = 3 * 60_000;
 const STALE_SUBMITTED_TERMINAL_MS = 60 * 60 * 1_000;
@@ -338,6 +344,26 @@ export function createDeliveryBroker({
     cause = notSentCause(current);
     if (!cause) return settleCancellationOutsidePreSubmit(current);
 
+    if (cause === "pre-submit-timeout") {
+      // The message is never dropped on a dead/unsure pane: the head parks
+      // with a fresh attempt budget and keeps the FIFO. Retries resume
+      // probe-gated, one Discord notice per park cycle keeps the stall
+      // visible, and a late echo still acknowledges (and reports recovered).
+      const parked = queue.update(current, {
+        status: current.draftOwned ? "pasting" : "pending",
+        attempts: 0,
+        firstAttemptAt: null,
+        nextAttemptAt: now() + PRE_SUBMIT_PARK_MS,
+        noticeSentAt: now(),
+        lastReason: "composer stayed unsafe for a full receipt budget; message kept in queue, "
+          + `retry continues in ${Math.floor(PRE_SUBMIT_PARK_MS / 60_000)} min (park, not drop)`,
+      });
+      queueEvent(parked, "parked_pre_submit", { reason: cause });
+      await notify(parked, "blocked").catch((error) =>
+        log(`delivery broker park notice failed for ${parked.id}: ${error.message}`));
+      return parked;
+    }
+
     const firstAttemptAt = Number(current.firstAttemptAt || current.createdAt || now());
     const ageMinutes = Math.max(0, Math.floor((now() - firstAttemptAt) / 60_000));
     const requestedReason = String(current.cancelRequestedReason || "sender no longer needs this job");
@@ -621,6 +647,30 @@ export function createDeliveryBroker({
       nextAttemptAt: null,
     });
     queueEvent(job, "attempt", { attempt: job.attempts });
+
+    // A retry with no receipt so far re-proves pane liveness with a
+    // disposable nonce probe before the real payload is committed again.
+    // A pane that does not ingest even the probe keeps its FIFO parked —
+    // the message is never retyped into a pane that proves nothing lands.
+    if (job.kind === "prompt"
+        && job.metadata?.deliveryTransport !== "native"
+        && Number(job.attempts || 0) >= 2
+        && now() - Number(job.lastProbeAt || 0) >= PROBE_INTERVAL_MS
+        && typeof agent.probeIngest === "function") {
+      const probe = await agent.probeIngest(job.agentName, job.pane)
+        .catch((error) => ({ ok: false, reason: error.message }));
+      if (probe && probe.ok === false) {
+        job = queue.update(job, {
+          status: drafted ? "drafted" : (ownsPaneDraft ? "pasting" : "pending"),
+          lastProbeAt: now(),
+          nextAttemptAt: now() + blockedRetryMs(job),
+          lastReason: `ingest probe failed (${probe.reason || "no echo"}); FIFO kept, retry deferred`,
+        });
+        queueEvent(job, "ingest_probe_failed", { reason: String(probe.reason || "") });
+        return maybeNotifyBlocked(job);
+      }
+      job = queue.update(job, { lastProbeAt: now() });
+    }
 
     const attemptDelivery = async () => {
       try {

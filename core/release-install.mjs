@@ -58,18 +58,25 @@ function atomicJson(path, value) {
   renameSync(temporary, path);
 }
 
-function snapshotRuntimeConfig(repoRoot, installedRoot) {
+function snapshotRuntimeConfig(repoRoot, installedRoot, home) {
+  const homeDir = join(home, ".agentmux");
   return CONFIG_FILES.flatMap((name) => {
-    const source = [join(repoRoot, name), join(installedRoot, name)].find((path) => existsSync(path));
+    const source = [join(homeDir, name), join(repoRoot, name), join(installedRoot, name)]
+      .find((path) => existsSync(path));
     return source ? [{ name, bytes: readFileSync(source) }] : [];
   });
 }
 
-function restoreRuntimeConfig(files, installedRoot) {
+function restoreRuntimeConfig(files, installedRoot, home) {
+  const homeDir = join(home, ".agentmux");
+  mkdirSync(homeDir, { recursive: true });
   for (const file of files) {
-    const target = join(installedRoot, file.name);
-    writeFileSync(target, file.bytes, { mode: 0o600 });
-    chmodSync(target, 0o600);
+    // The external home is the pinned primary source; the package copy stays
+    // only as the migration fallback (npm replaces the package tree whole).
+    for (const target of [join(homeDir, file.name), join(installedRoot, file.name)]) {
+      writeFileSync(target, file.bytes, { mode: 0o600 });
+      chmodSync(target, 0o600);
+    }
   }
 }
 
@@ -217,7 +224,7 @@ export function installRelease({ repoRoot, sourceSha, home = homedir() }) {
 
   const globalNodeModules = run("npm", ["root", "--global"]).trim();
   const oldPackageRoot = join(globalNodeModules, "agentmux");
-  const configs = snapshotRuntimeConfig(root, oldPackageRoot);
+  const configs = snapshotRuntimeConfig(root, oldPackageRoot, home);
   const temporary = mkdtempSync(join(tmpdir(), "agentmux-release-"));
   try {
     const staged = stageReleaseArtifact({ repoRoot: root, sourceSha: target, outputRoot: join(temporary, "artifact") });
@@ -227,7 +234,7 @@ export function installRelease({ repoRoot, sourceSha, home = homedir() }) {
       || existsSync(join(packageRoot, ".git"))) {
       throw new Error("npm global agentmux still resolves to a mutable git checkout");
     }
-    restoreRuntimeConfig(configs, packageRoot);
+    restoreRuntimeConfig(configs, packageRoot, home);
     run(process.execPath, [join(packageRoot, "bin", "install-hooks.mjs")], {
       env: { ...process.env, HOME: home },
       stdio: "inherit",
@@ -258,6 +265,7 @@ export function installRelease({ repoRoot, sourceSha, home = homedir() }) {
         ...(key === "suggestionsGuard" ? { inlineMutationBlocked: true } : {}),
       }])),
       restoredConfig: configs.map((file) => file.name),
+      configHome: join(home, ".agentmux"),
     };
     const identity = observeReleaseIdentity({
       runtimeRoot: packageRoot,

@@ -1,6 +1,7 @@
 // Agent interaction: send prompts, wait for responses, track progress.
 // Manages tmux sessions directly. Single source of truth for claude startup + dismiss.
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync } from "fs";
+import { randomBytes } from "node:crypto";
 import { join, resolve } from "path";
 import { load as loadYaml } from "js-yaml";
 import { esc, stripAnsi } from "./lib.mjs";
@@ -27,7 +28,7 @@ import {
   isPromptInCodexJsonl,
   latestCodexSessionIdentity,
 } from "./core/codex-jsonl-reader.mjs";
-import { createKimiAgentRuntime, kimiJournal } from "./core/kimi-agent-runtime.mjs";
+import { createKimiAgentRuntime, isKimiComposerReady, kimiComposerHasCollapsedPaste, kimiJournal, AMUX_PROBE_PREFIX } from "./core/kimi-agent-runtime.mjs";
 import { createClaudeSubmitRescue } from "./core/claude-submit-rescue.mjs";
 import { getContextPercent as getContextPercentByDialect, getContextFromPane } from "./core/context.mjs";
 import { findBlockingPrompt } from "./core/dismiss.mjs";
@@ -1021,7 +1022,14 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       else if (dialect === "codex") {
         found = isPromptInCodexJsonl(dir, promptText, { notBeforeMs, cursor });
       } else if (dialect === "kimi") {
-        found = kimiJournal.promptAccepted(dir, promptText, { notBeforeMs, cursor });
+        // Cursor-scoped receipts may accept Kimi's collapsed `[paste #…]`
+        // journal marker for payloads that themselves collapse; the broker
+        // FIFO makes that job's paste the only one possible after the cursor.
+        found = kimiJournal.promptAccepted(dir, promptText, {
+          notBeforeMs,
+          cursor,
+          allowPastePlaceholder: Boolean(cursor),
+        });
       }
       if (found === true) return true;
 
@@ -1050,6 +1058,44 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return paneDialectName(agentName, pane) === "claude"
       ? captureClaudeSlashReceiptCursor(dir, commandText)
       : null;
+  }
+
+  const PROBE_INGEST_TIMEOUT_MS = 10_000;
+
+  /**
+   * Liveness probe for a silent Kimi pane: type a one-line nonce prompt and
+   * watch the Wire journal for it. The probe is short and single-line, so it
+   * can never collapse to a `[paste #…]` marker — an exact journal echo is
+   * therefore conclusive proof that the pane ingests. The broker calls this
+   * only on retries with no receipt, before committing the real payload
+   * again; a probe that gets no echo keeps the FIFO parked instead of
+   * feeding a dead pane. Non-Kimi targets are skipped as healthy.
+   */
+  async function probeIngest(agentName, pane) {
+    if (paneDialectName(agentName, pane) !== "kimi") return { ok: true, skipped: "dialect" };
+    if (await isBusy(agentName, pane).catch(() => true)) {
+      return { ok: false, reason: "agent busy" };
+    }
+    const snapshot = await captureScreen(agentName, pane).catch(() => "");
+    if (!isKimiComposerReady(snapshot)) {
+      return { ok: false, reason: "composer not empty" };
+    }
+    const nonce = `m-${randomBytes(4).toString("hex")}`;
+    const text = `${AMUX_PROBE_PREFIX}${nonce} (transporttest — ignorera, svara inget)`;
+    const dir = paneDir(agentConfig(agentName).dir, pane);
+    const cursor = await capturePromptEchoCursor(agentName, pane, text);
+    await typeLiteral(agentName, text, pane);
+    await sendEnter(agentName, pane);
+    const deadline = Date.now() + PROBE_INGEST_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      try {
+        if (kimiJournal.promptAccepted(dir, text, { cursor }) === true) {
+          return { ok: true, nonce };
+        }
+      } catch { /* journal not readable yet — keep polling within budget */ }
+      await wait(500);
+    }
+    return { ok: false, reason: `no Wire echo within ${PROBE_INGEST_TIMEOUT_MS / 1000}s` };
   }
 
   async function waitForSlashReceipt(agentName, pane, commandText, timeoutMs = 15_000, {
@@ -1298,7 +1344,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const head = prompt.trim().slice(0, 20);
     if (!head) return false;
     try {
-      if ((await livePaneDialectName(agentName, pane)) === "codex") {
+      const dialect = await livePaneDialectName(agentName, pane);
+      if (dialect === "codex") {
         const snapshot = await captureScreen(agentName, pane);
         return codexComposerContainsPrompt(snapshot, prompt)
           || (promptRequiresAtomicPaste(prompt)
@@ -1313,10 +1360,21 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // brief that was already sitting in the composer (ai:4 2026-07-08).
       // Requiring the marker keeps a prompt-head quoted in SCROLLBACK from
       // suppressing a legitimate first type-in.
-      return raw.split("\n").slice(-5).some((l) => {
+      const headVisible = raw.split("\n").slice(-5).some((l) => {
         const line = l.trim();
         return COMPOSER_LINE_RE.test(line) && line.includes(head);
       });
+      if (headVisible) return true;
+      // Kimi collapses an atomic paste to a `[paste #…]` composer marker
+      // whose full text is no longer visible. Only an OWNED draft may be
+      // claimed this way — same contract as the Codex paste block above.
+      if (dialect === "kimi"
+          && ownedDraft
+          && promptRequiresAtomicPaste(prompt)
+          && kimiComposerHasCollapsedPaste(raw)) {
+        return true;
+      }
+      return false;
     } catch {
       return false;
     }
@@ -1333,8 +1391,16 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const busy = Boolean(await isBusy(agentName, pane).catch(() => true));
     if (dialect !== "codex") {
       const drafted = await promptAlreadyInComposer(agentName, pane, prompt);
+      if (drafted) return { state: "drafted", busy, dialect };
+      // An owned Kimi atomic paste collapses to a `[paste #…]` composer
+      // marker; that IS the draft, submit it — never re-paste over it.
+      // Mirrors the Codex owned-paste-block acceptance below.
+      if (dialect === "kimi" && promptRequiresAtomicPaste(prompt)) {
+        const raw = await capturePane(agentName, pane, 15).catch(() => "");
+        if (kimiComposerHasCollapsedPaste(raw)) return { state: "drafted", busy, dialect };
+      }
       return {
-        state: drafted ? "drafted" : (busy ? "hidden" : "empty-idle"),
+        state: busy ? "hidden" : "empty-idle",
         busy,
         dialect,
       };
@@ -1850,7 +1916,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
     promptTransportState,
     capturePane, captureScreen, capturePromptEchoCursor, captureSlashReceiptCursor, waitForSlashReceipt, sendEscape, sendTab, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
-    dismissBlockingPrompt, waitForPromptEcho,
+    dismissBlockingPrompt, waitForPromptEcho, probeIngest,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession, paneProcessState: tuiRecovery.paneProcessState,
     sanitizeTmuxGlobalEnv, restartCodex, restartKimi, restartPaneExact, restartFleet,
   };

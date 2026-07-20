@@ -124,4 +124,51 @@ describe("Kimi Wire journal", () => {
       fx.cleanup();
     }
   });
+
+  it("accepts a collapsed paste marker as receipt for a collapsible prompt, cursor-scoped only", () => {
+    const fx = fixture();
+    try {
+      const longPrompt = `line one\n${"x".repeat(600)}`;
+      const cursor = captureKimiPromptEchoCursor(fx.cwd, longPrompt, fx.options);
+      const append = (text) => appendFileSync(fx.wire, `${JSON.stringify({
+        type: "turn.prompt",
+        input: [{ type: "text", text }],
+        time: 4_000,
+      })}\n`);
+
+      // Strict mode (default) never treats the marker as the receipt.
+      append("[paste #1 +2 lines]");
+      expect(isPromptInKimiJsonl(fx.cwd, longPrompt, {
+        ...fx.options,
+        cursor,
+      })).toBe(false);
+
+      // Relaxed mode accepts the marker for a needle that itself collapses…
+      expect(isPromptInKimiJsonl(fx.cwd, longPrompt, {
+        ...fx.options,
+        cursor,
+        allowPastePlaceholder: true,
+      })).toBe(true);
+
+      // …but never for a short needle that cannot collapse: a marker after
+      // the cursor then belongs to someone else's paste, not to this job.
+      const shortCursor = captureKimiPromptEchoCursor(fx.cwd, "short", fx.options);
+      append("[paste #2 900 chars]");
+      expect(isPromptInKimiJsonl(fx.cwd, "short", {
+        ...fx.options,
+        cursor: shortCursor,
+        allowPastePlaceholder: true,
+      })).toBe(false);
+
+      // And a marker already behind the cursor is not a new receipt.
+      const lateCursor = captureKimiPromptEchoCursor(fx.cwd, longPrompt, fx.options);
+      expect(isPromptInKimiJsonl(fx.cwd, longPrompt, {
+        ...fx.options,
+        cursor: lateCursor,
+        allowPastePlaceholder: true,
+      })).toBe(false);
+    } finally {
+      fx.cleanup();
+    }
+  });
 });
