@@ -469,6 +469,9 @@ feature("generated agent policy", () => {
       expect(content).toMatch(/one representative\s+screenshot/u);
       expect(content).toMatch(/scheduled\/manual CI/u);
       expect(content).toMatch(/Never render every historical golden/u);
+      expect(content).toMatch(/Heavy checks run ON DEMAND ONLY/u);
+      expect(content).toMatch(/The default loop is always TARGETED/u);
+      expect(content).toMatch(/Never fire slow sweeps on your own initiative/u);
     }],
   });
 
