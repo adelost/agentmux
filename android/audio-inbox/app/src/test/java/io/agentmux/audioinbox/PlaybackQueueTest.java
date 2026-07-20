@@ -14,7 +14,7 @@ public class PlaybackQueueTest {
         boolean grant = true;
 
         @Override
-        public boolean requestMayDuck() {
+        public boolean requestSpeechFocus() {
             requests++;
             return grant;
         }

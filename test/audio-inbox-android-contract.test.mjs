@@ -19,12 +19,17 @@ feature("Android audio inbox source contract", () => {
         "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/ServerDiscovery.java",
       );
       const startup = read("index.mjs");
+      const focus = read(
+        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/SpeechAudioFocus.java",
+      );
       expect(manifest).toContain('android:name=".AudioInboxService"');
       expect(manifest).toContain('android:exported="false"');
       expect(discovery).toContain('"agentmux-audio-inbox"');
       expect(discovery).toContain('"http://abyss-wsl.tail13cb13.ts.net:8080"');
       expect(startup).toContain("AUDIO_INBOX_SERVER_ID");
       expect(startup).toContain("AUDIO_INBOX_TARGET");
+      expect(focus).toContain("AUDIOFOCUS_GAIN_TRANSIENT");
+      expect(focus).not.toContain("AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK");
     }],
   });
 

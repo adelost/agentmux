@@ -6,7 +6,7 @@ import java.util.Set;
 
 final class PlaybackQueue {
     interface FocusPort {
-        boolean requestMayDuck();
+        boolean requestSpeechFocus();
         void abandon();
     }
 
@@ -50,7 +50,7 @@ final class PlaybackQueue {
     }
 
     synchronized boolean start(String eventId) {
-        if (!eventId.equals(candidate()) || !focus.requestMayDuck()) return false;
+        if (!eventId.equals(candidate()) || !focus.requestSpeechFocus()) return false;
         focusHeld = true;
         active = pending.removeFirst();
         return true;
@@ -59,13 +59,13 @@ final class PlaybackQueue {
     synchronized boolean ensureFocusForActive() {
         if (!handsFree || !connected || active == null) return false;
         if (focusHeld) return true;
-        focusHeld = focus.requestMayDuck();
+        focusHeld = focus.requestSpeechFocus();
         return focusHeld;
     }
 
     synchronized boolean replay(String eventId) {
         if (!handsFree || !connected || active != null || eventId == null) return false;
-        if (!focus.requestMayDuck()) return false;
+        if (!focus.requestSpeechFocus()) return false;
         focusHeld = true;
         active = eventId;
         known.add(eventId);

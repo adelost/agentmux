@@ -30,7 +30,6 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -54,13 +53,15 @@ public final class AudioInboxService extends MediaSessionService {
     private SharedPreferences preferences;
     private ExoPlayer player;
     private MediaSession mediaSession;
-    private DuckAudioFocus audioFocus;
+    private SpeechAudioFocus audioFocus;
     private PlaybackQueue playbackQueue;
     private AudioInboxHttpClient httpClient;
+    private AudioInboxStore store;
     private volatile boolean enabled;
     private volatile boolean connected;
     private volatile HttpURLConnection feedConnection;
     private String startingId;
+    private boolean replaying;
 
     private static final class AudioItem {
         final String eventId;
@@ -82,14 +83,15 @@ public final class AudioInboxService extends MediaSessionService {
     public void onCreate() {
         super.onCreate();
         preferences = getSharedPreferences(AppContract.PREFS, MODE_PRIVATE);
+        store = new AudioInboxStore(this, preferences);
         createNotificationChannel();
 
-        audioFocus = new DuckAudioFocus(this, change -> main.post(() -> {
+        audioFocus = new SpeechAudioFocus(this, change -> main.post(() -> {
             if (change <= 0 && player != null && player.isPlaying()) player.pause();
         }));
         playbackQueue = new PlaybackQueue(audioFocus);
         AudioAttributes attributes = new AudioAttributes.Builder()
-            .setUsage(C.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+            .setUsage(C.USAGE_ASSISTANT)
             .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
             .build();
         player = new ExoPlayer.Builder(this)
@@ -172,7 +174,7 @@ public final class AudioInboxService extends MediaSessionService {
         if (!ServerDiscovery.isAllowedServer(server)
             || target == null
             || !target.matches("^\\d{10,24}$")) {
-            updateConnection("Configuration required", false);
+            store.updateConnection("Configuration required", false);
             stopSelf();
             return;
         }
@@ -185,7 +187,7 @@ public final class AudioInboxService extends MediaSessionService {
         playbackQueue.setHandsFree(true);
         startStatusForeground();
         int generation = feedGeneration.incrementAndGet();
-        updateConnection("Connecting", false);
+        store.updateConnection("Connecting", false);
         feedExecutor.execute(() -> runFeed(generation, target));
     }
 
@@ -197,8 +199,9 @@ public final class AudioInboxService extends MediaSessionService {
         disconnectFeed();
         playbackQueue.setConnected(false);
         playbackQueue.setHandsFree(false);
+        replaying = false;
         player.stop();
-        updateConnection("Off", false);
+        store.updateConnection("Off", false);
         if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE);
         else stopForeground(true);
         stopSelf();
@@ -213,7 +216,7 @@ public final class AudioInboxService extends MediaSessionService {
                 readFeed(connection, generation);
             } catch (Exception error) {
                 if (enabled && generation == feedGeneration.get()) {
-                    updateConnection("Disconnected: " + safeDetail(error.getMessage()), false);
+                    store.updateConnection("Disconnected: " + safeDetail(error.getMessage()), false);
                 }
             } finally {
                 feedConnection = null;
@@ -265,7 +268,7 @@ public final class AudioInboxService extends MediaSessionService {
         }
         if (expiresAt <= System.currentTimeMillis()) return;
         synchronized (processing) {
-            String local = localState(eventId);
+            String local = store.localState(eventId);
             if ("playback-started".equals(local) || "played".equals(local)
                 || "failed".equals(local) || !processing.add(eventId)) return;
         }
@@ -273,11 +276,11 @@ public final class AudioInboxService extends MediaSessionService {
             try {
                 if (!canClaim()) return;
                 httpClient.postReceipt(eventId, "received", null);
-                saveLocalState(eventId, "received");
+                store.saveLocalState(eventId, "received");
                 File media = httpClient.fetchTts(getCacheDir(), eventId, text);
                 if (!canClaim()) return;
                 httpClient.postReceipt(eventId, "queued", null);
-                saveLocalState(eventId, "queued");
+                store.saveLocalState(eventId, "queued");
                 AudioItem item = new AudioItem(eventId, text, createdAt, expiresAt, media);
                 main.post(() -> queueItem(item));
             } catch (Exception error) {
@@ -294,7 +297,7 @@ public final class AudioInboxService extends MediaSessionService {
         if (!enabled || !connected || item.expiresAt <= System.currentTimeMillis()) return;
         if (!playbackQueue.offer(item.eventId)) return;
         items.put(item.eventId, item);
-        saveCurrent(item);
+        store.saveCurrent(item.text, item.createdAt);
         maybeStartNext();
     }
 
@@ -312,7 +315,7 @@ public final class AudioInboxService extends MediaSessionService {
             try {
                 if (!canClaim()) throw new IllegalStateException("disconnected before playback receipt");
                 httpClient.postReceipt(candidate, "playback-started", null);
-                saveLocalState(candidate, "playback-started");
+                store.saveLocalState(candidate, "playback-started");
                 main.post(() -> startReserved(item));
             } catch (Exception error) {
                 main.post(() -> {
@@ -326,6 +329,7 @@ public final class AudioInboxService extends MediaSessionService {
 
     private void startReserved(AudioItem item) {
         startingId = null;
+        replaying = false;
         if (!enabled || !connected || !playbackQueue.start(item.eventId)) {
             playbackQueue.discard(item.eventId);
             workExecutor.execute(() -> markFailed(item.eventId, "audio focus denied"));
@@ -344,32 +348,40 @@ public final class AudioInboxService extends MediaSessionService {
         player.setMediaItem(mediaItem);
         player.prepare();
         player.play();
-        updateConnection("Playing", true);
+        store.updateConnection("Playing", true);
     }
 
     private void finishActiveAsPlayed() {
         String eventId = playbackQueue.active();
         if (eventId == null) return;
+        boolean wasReplay = replaying;
+        replaying = false;
         AudioItem item = items.get(eventId);
         playbackQueue.complete(eventId);
         player.pause();
         player.seekTo(0);
-        if (item != null) saveHistory("Played · " + item.text);
+        if (!wasReplay && item != null) store.saveHistory("Played · " + item.text);
+        if (wasReplay) {
+            store.updateConnection(connected ? "Connected" : "Disconnected", connected);
+            return;
+        }
         workExecutor.execute(() -> {
             try {
                 if (connected) httpClient.postReceipt(eventId, "played", null);
-                saveLocalState(eventId, "played");
+                store.saveLocalState(eventId, "played");
             } catch (Exception ignored) {}
         });
-        updateConnection(connected ? "Connected" : "Disconnected", connected);
+        store.updateConnection(connected ? "Connected" : "Disconnected", connected);
         maybeStartNext();
     }
 
     private void failActive(String detail) {
         String eventId = playbackQueue.active();
         if (eventId == null) return;
+        boolean wasReplay = replaying;
+        replaying = false;
         playbackQueue.discard(eventId);
-        workExecutor.execute(() -> markFailed(eventId, detail));
+        if (!wasReplay) workExecutor.execute(() -> markFailed(eventId, detail));
         maybeStartNext();
     }
 
@@ -382,8 +394,8 @@ public final class AudioInboxService extends MediaSessionService {
         try {
             if (connected) httpClient.postReceipt(eventId, "failed", safeDetail(detail));
         } catch (Exception ignored) {}
-        saveLocalState(eventId, "failed");
-        saveHistory("Failed · " + eventId + " · " + safeDetail(detail));
+        store.saveLocalState(eventId, "failed");
+        store.saveHistory("Failed · " + eventId + " · " + safeDetail(detail));
     }
 
     private void setConnected(boolean value) {
@@ -392,13 +404,14 @@ public final class AudioInboxService extends MediaSessionService {
         main.post(() -> {
             playbackQueue.setConnected(value);
             if (!value && player.getPlayWhenReady()) player.pause();
-            updateConnection(value ? "Connected" : "Disconnected", value);
+            store.updateConnection(value ? "Connected" : "Disconnected", value);
             if (value) maybeStartNext();
         });
     }
 
     private void replayCurrent() {
         if (!enabled || !connected || player.getCurrentMediaItem() == null) return;
+        replaying = true;
         player.seekTo(0);
         player.play();
     }
@@ -417,48 +430,6 @@ public final class AudioInboxService extends MediaSessionService {
         if (connection != null) connection.disconnect();
         feedConnection = null;
     }
-    private void saveLocalState(String eventId, String state) {
-        preferences.edit().putString("event-state:" + eventId, state).apply();
-    }
-    private String localState(String eventId) {
-        return preferences.getString("event-state:" + eventId, "");
-    }
-
-    private void saveCurrent(AudioItem item) {
-        preferences.edit()
-            .putString(AppContract.KEY_CURRENT, item.text)
-            .putLong(AppContract.KEY_CURRENT_CREATED_AT, item.createdAt)
-            .apply();
-        broadcastStatus();
-    }
-
-    private void saveHistory(String line) {
-        String existing = preferences.getString(AppContract.KEY_HISTORY, "");
-        ArrayDeque<String> rows = new ArrayDeque<>();
-        rows.add(line);
-        if (existing != null) {
-            for (String row : existing.split("\n")) {
-                if (!row.isBlank() && rows.size() < 5) rows.add(row);
-            }
-        }
-        preferences.edit().putString(AppContract.KEY_HISTORY, String.join("\n", rows)).apply();
-        broadcastStatus();
-    }
-
-    private void updateConnection(String state, boolean isConnected) {
-        SharedPreferences.Editor edit = preferences.edit()
-            .putString(AppContract.KEY_CONNECTION, state);
-        if (isConnected) edit.putLong(AppContract.KEY_CONNECTED_AT, System.currentTimeMillis());
-        edit.apply();
-        broadcastStatus();
-    }
-
-    private void broadcastStatus() {
-        Intent status = new Intent(AppContract.ACTION_STATUS);
-        status.setPackage(getPackageName());
-        sendBroadcast(status);
-    }
-
     private void createNotificationChannel() {
         NotificationManager manager = getSystemService(NotificationManager.class);
         manager.createNotificationChannel(new NotificationChannel(
