@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildKimiLaunchCommand } from "./agent-launch-command.mjs";
-import { createKimiAgentRuntime, isKimiComposerReady } from "./kimi-agent-runtime.mjs";
+import { createKimiAgentRuntime, isKimiComposerReady, kimiComposerHasCollapsedPaste } from "./kimi-agent-runtime.mjs";
 
 describe("Kimi launch continuity", () => {
   it("uses an absolute executable and exact persisted session", () => {
@@ -26,6 +26,16 @@ describe("Kimi launch continuity", () => {
   it("accepts the empty composer Kimi paints inside its TUI border", () => {
     expect(isKimiComposerReady(" ╭────╮\n │ >  │\n ╰────╯ ")).toBe(true);
     expect(isKimiComposerReady(" │ > manual draft │ ")).toBe(false);
+  });
+
+  it("recognizes Kimi's collapsed paste composer marker in all TUI forms", () => {
+    expect(kimiComposerHasCollapsedPaste(" ╭──────────────╮\n │ > [paste #1] │\n ╰──────────────╯ ")).toBe(true);
+    expect(kimiComposerHasCollapsedPaste(" > [paste #1 +24 lines] ")).toBe(true);
+    expect(kimiComposerHasCollapsedPaste(" > [paste #2 900 chars] ")).toBe(true);
+    // A marker is never an empty composer, and never a manual draft.
+    expect(kimiComposerHasCollapsedPaste(" ╭────╮\n │ >  │\n ╰────╯ ")).toBe(false);
+    expect(kimiComposerHasCollapsedPaste(" │ > manual draft │ ")).toBe(false);
+    expect(isKimiComposerReady(" > [paste #1 +24 lines] ")).toBe(false);
   });
 
   it("uses ordinary Enter for an idle Kimi turn", async () => {

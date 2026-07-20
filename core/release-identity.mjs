@@ -192,6 +192,17 @@ export function observeReleaseIdentity({
   };
 }
 
+/** WHAT: Maps an observed release identity to the two recovery permissions. WHY: Prevents a failed identity from mutating panes while the bridge recovers. */
+export function identityDecision(identity) {
+  const ok = Boolean(identity?.ok);
+  return {
+    allowBridge: true,
+    allowRevive: ok,
+    reason: ok ? "ok" : (identity?.issues?.[0]?.code || "identity-unobservable"),
+    detail: ok ? "" : (identity?.issues?.[0]?.detail || "release identity could not be observed"),
+  };
+}
+
 /** WHAT: Formats installed release identity for doctor. WHY: Keeps mutable package and hook drift visible to operators. */
 export function checkReleaseIdentity(identity) {
   if (identity?.ok) {

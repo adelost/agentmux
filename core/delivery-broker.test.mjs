@@ -1512,10 +1512,10 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
-  component("an exhausted pending head becomes NOT SENT and releases a never-attempted follower", {
+  component("an exhausted pending head parks, keeps the FIFO, and drains in order when the pane heals", {
     given: ["the live ai:5 shape: one repeatedly blocked head and an old job waiting behind it", () => {
       const rootDir = tempRoot();
-      const clock = 3_700_000;
+      let clock = 3_700_000;
       const queue = createDeliveryQueue({ rootDir, now: () => clock });
       const first = queue.enqueue({
         agentName: "ai", pane: 5, text: "blocked by foreign q draft", createdAt: 1_000, orderKey: "001",
@@ -1536,27 +1536,29 @@ feature("single-writer delivery broker", () => {
       const broker = createDeliveryBroker({
         agent, queue, now: () => clock, notify: async (_job, kind) => notices.push(kind),
       });
-      return { rootDir, queue, first, second, notices, agent, broker };
+      return {
+        rootDir, queue, first, second, notices, agent, broker,
+        advance: (ms) => { clock += ms; },
+      };
     }],
-    when: ["the broker terminalizes the exhausted head, then polls the released lane", async ({ broker }) => {
+    when: ["the exhausted head is audited, the park window passes, and the pane heals", async ({ broker, advance }) => {
       await broker.kickTarget("ai", 5);
+      advance(6 * 60_000);
       await broker.kickTarget("ai", 5);
     }],
-    then: ["the first job is explicitly not sent while the follower receives its first real attempt", (_, ctx) => {
+    then: ["nothing is dropped: the head parks with one notice, then both jobs drain in FIFO order", (_, ctx) => {
+      expect(ctx.notices).toEqual(["blocked", "recovered"]);
+      expect(ctx.agent.sends.map((send) => send.text)).toEqual([
+        "blocked by foreign q draft",
+        "old but never attempted",
+      ]);
       expect(ctx.queue.read("ai", 5, ctx.first.id)).toMatchObject({
-        status: "cancelled",
-        terminalAt: 3_700_000,
-        nextAttemptAt: null,
-        metadata: { deliveryTimeout: "pre-submit" },
-        unverifiedNoticeSentAt: 3_700_000,
-        lastReason: expect.stringContaining("not sent:"),
+        status: "acknowledged",
+        acknowledgedAt: 3_700_000 + 6 * 60_000,
       });
-      expect(ctx.notices).toEqual(["not-sent"]);
-      expect(ctx.agent.sends.map((send) => send.text)).toEqual(["old but never attempted"]);
       expect(ctx.queue.read("ai", 5, ctx.second.id)).toMatchObject({
         status: "acknowledged",
         attempts: 1,
-        firstAttemptAt: 3_700_000,
       });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
@@ -1814,7 +1816,7 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
-  component("a stale provisional paste is dead-lettered without touching the foreign composer", {
+  component("a stale provisional paste parks without touching the foreign composer", {
     given: ["the live lsrc:8 shape: an old paste fence and a different visible compact command", () => {
       const rootDir = tempRoot();
       const clock = 4_000_000;
@@ -1841,16 +1843,18 @@ feature("single-writer delivery broker", () => {
       });
       return { rootDir, queue, job, notices, agent, broker, transportProbes: () => transportProbes };
     }],
-    when: ["the stale provisional owner reaches its terminal audit", ({ broker }) =>
+    when: ["the stale provisional owner reaches its budget audit", ({ broker }) =>
       broker.kickTarget("lsrc", 8)],
-    then: ["no paste, Enter, cleanup or permissive composer probe occurs", (_, ctx) => {
+    then: ["no paste, Enter, cleanup or composer probe occurs; the job parks with one notice", (_, ctx) => {
       expect(ctx.agent.sends).toHaveLength(0);
       expect(ctx.transportProbes()).toBe(0);
-      expect(ctx.notices).toEqual(["not-sent"]);
+      expect(ctx.notices).toEqual(["blocked"]);
       expect(ctx.queue.read("lsrc", 8, ctx.job.id)).toMatchObject({
-        status: "cancelled",
-        draftOwned: false,
-        metadata: { deliveryTimeout: "pre-submit" },
+        status: "pasting",
+        draftOwned: true,
+        attempts: 0,
+        noticeSentAt: 4_000_000,
+        nextAttemptAt: 4_000_000 + 5 * 60_000,
       });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
@@ -1931,13 +1935,13 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
-  component("a failed NOT SENT warning retries durably after broker restart", {
+  component("a failed park notice never terminalizes; the parked head survives a broker restart", {
     given: ["an exhausted pre-submit job and a transient Discord failure", () => {
       const rootDir = tempRoot();
       let clock = 4_000_000;
       const queue = createDeliveryQueue({ rootDir, now: () => clock });
       const job = queue.enqueue({
-        agentName: "watch", pane: 3, text: "warn that this was not sent", createdAt: 1_000,
+        agentName: "watch", pane: 3, text: "keep this queued until the pane heals", createdAt: 1_000,
         metadata: { channelId: "target-channel" },
       });
       queue.update(job, {
@@ -1948,7 +1952,7 @@ feature("single-writer delivery broker", () => {
       agent.waitForPromptEcho = async () => false;
       let notifyCalls = 0;
       const notify = async (_candidate, kind) => {
-        expect(kind).toBe("not-sent");
+        expect(kind).toBe("blocked");
         notifyCalls++;
         if (notifyCalls === 1) throw new Error("discord down");
       };
@@ -1960,7 +1964,7 @@ feature("single-writer delivery broker", () => {
         now: () => clock,
       };
     }],
-    when: ["one broker terminalizes and a replacement retries the notice", async (ctx) => {
+    when: ["one broker parks the head despite the failed notice and a replacement observes it", async (ctx) => {
       await ctx.broker.kickTarget("watch", 3);
       ctx.afterFailure = ctx.queue.read("watch", 3, ctx.job.id);
       ctx.targetsAfterFailure = ctx.queue.targets();
@@ -1972,21 +1976,22 @@ feature("single-writer delivery broker", () => {
       ctx.afterSuccess = reopened.read("watch", 3, ctx.job.id);
       ctx.targetsAfterSuccess = reopened.targets();
     }],
-    then: ["the terminal job never reopens while the notice becomes exactly-once durable", (_, ctx) => {
+    then: ["the parked job is never dropped or re-notified inside its window, across the restart", (_, ctx) => {
       expect(ctx.agent.sends).toHaveLength(0);
       expect(ctx.afterFailure).toMatchObject({
-        status: "cancelled",
-        unverifiedNoticeAttempts: 1,
-        unverifiedNoticeSentAt: null,
+        status: "pending",
+        attempts: 0,
+        noticeSentAt: 4_000_000,
+        nextAttemptAt: 4_000_000 + 5 * 60_000,
       });
       expect(ctx.targetsAfterFailure).toEqual([{ agentName: "watch", pane: 3 }]);
       expect(ctx.afterSuccess).toMatchObject({
-        status: "cancelled",
-        unverifiedNoticeAttempts: 2,
-        unverifiedNoticeSentAt: 4_060_000,
+        status: "pending",
+        attempts: 0,
+        noticeSentAt: 4_000_000,
       });
-      expect(ctx.calls()).toBe(2);
-      expect(ctx.targetsAfterSuccess).toEqual([]);
+      expect(ctx.calls()).toBe(1);
+      expect(ctx.targetsAfterSuccess).toEqual([{ agentName: "watch", pane: 3 }]);
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });
@@ -2290,6 +2295,83 @@ feature("single-writer delivery broker", () => {
       expect(byText["after-recovery"]).toBe("acknowledged");
       expect(byText["behind-recovery"]).toBe("acknowledged");
       expect(ctx.notices).not.toContain("behind-recovery:not-sent");
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a retry with no receipt is gated by an ingest probe before the payload is committed again", {
+    given: ["a head whose first attempt left no echo, and a pane that ignores even probes", () => {
+      const rootDir = tempRoot();
+      const clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "ai", pane: 5, text: "real payload", createdAt: 1_000, orderKey: "001",
+      });
+      queue.update(job, {
+        status: "pending", attempts: 1, firstAttemptAt: 3_999_000,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0,
+      });
+      const notices = [];
+      const probes = [];
+      const agent = acceptingAgent();
+      agent.probeIngest = async (name, pane) => {
+        probes.push([name, pane]);
+        return { ok: false, reason: "no Wire echo within 10s" };
+      };
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_job, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, notices, probes, agent, broker };
+    }],
+    when: ["the retry pass reaches the write path", ({ broker }) => broker.kickTarget("ai", 5)],
+    then: ["the probe fires once, the payload is never typed, and the head stays parked with a notice", (_, ctx) => {
+      expect(ctx.probes).toEqual([["ai", 5]]);
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.notices).toEqual(["blocked"]);
+      expect(ctx.queue.read("ai", 5, ctx.job.id)).toMatchObject({
+        status: "pending",
+        attempts: 2,
+        lastProbeAt: 4_000_000,
+        lastReason: expect.stringContaining("ingest probe failed"),
+      });
+      expect(ctx.queue.read("ai", 5, ctx.job.id).nextAttemptAt).toBeGreaterThan(4_000_000);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a healthy ingest probe lets the deferred retry through", {
+    given: ["a head whose first attempt left no echo, and a pane that answers probes", () => {
+      const rootDir = tempRoot();
+      const clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "ai", pane: 5, text: "real payload", createdAt: 1_000, orderKey: "001",
+      });
+      queue.update(job, {
+        status: "pending", attempts: 1, firstAttemptAt: 3_999_000,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0,
+      });
+      const notices = [];
+      const probes = [];
+      const agent = acceptingAgent();
+      agent.probeIngest = async (name, pane) => {
+        probes.push([name, pane]);
+        return { ok: true, nonce: "m-test" };
+      };
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async (_job, kind) => notices.push(kind),
+      });
+      return { rootDir, queue, job, notices, probes, agent, broker };
+    }],
+    when: ["the retry pass reaches the write path", ({ broker }) => broker.kickTarget("ai", 5)],
+    then: ["the payload is delivered and acknowledged after the successful probe", (_, ctx) => {
+      expect(ctx.probes).toEqual([["ai", 5]]);
+      expect(ctx.agent.sends.map((send) => send.text)).toEqual(["real payload"]);
+      expect(ctx.queue.read("ai", 5, ctx.job.id)).toMatchObject({
+        status: "acknowledged",
+        lastProbeAt: 4_000_000,
+      });
+      expect(ctx.notices).toEqual([]);
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });

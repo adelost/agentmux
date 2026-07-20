@@ -7,6 +7,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { AMUX_ENV_VAR } from "./config-sources.mjs";
 import {
   observeReleaseIdentity, readReleaseManifest, RELEASE_MANIFEST_NAME, releaseReceiptPath,
 } from "./release-identity.mjs";
@@ -58,18 +59,29 @@ function atomicJson(path, value) {
   renameSync(temporary, path);
 }
 
-function snapshotRuntimeConfig(repoRoot, installedRoot) {
+/** WHAT: Collects runtime config from explicit env paths, home, repo, or installed package. WHY: Separates credentials from the replaceable package tree. */
+export function snapshotRuntimeConfig(repoRoot, installedRoot, home, env = process.env) {
+  const homeDir = join(home, ".agentmux");
+  const explicit = { ".env": env[AMUX_ENV_VAR], "agentmux.yaml": env.AGENTMUX_YAML };
   return CONFIG_FILES.flatMap((name) => {
-    const source = [join(repoRoot, name), join(installedRoot, name)].find((path) => existsSync(path));
+    const source = [explicit[name], join(homeDir, name), join(repoRoot, name), join(installedRoot, name)]
+      .filter(Boolean)
+      .find((path) => existsSync(path));
     return source ? [{ name, bytes: readFileSync(source) }] : [];
   });
 }
 
-function restoreRuntimeConfig(files, installedRoot) {
+/** WHAT: Stores runtime config in the external home and package fallback. WHY: Prevents one package replacement from orphaning credentials. */
+export function restoreRuntimeConfig(files, installedRoot, home) {
+  const homeDir = join(home, ".agentmux");
+  mkdirSync(homeDir, { recursive: true });
   for (const file of files) {
-    const target = join(installedRoot, file.name);
-    writeFileSync(target, file.bytes, { mode: 0o600 });
-    chmodSync(target, 0o600);
+    // The external home is the pinned primary source; the package copy stays
+    // only as the migration fallback (npm replaces the package tree whole).
+    for (const target of [join(homeDir, file.name), join(installedRoot, file.name)]) {
+      writeFileSync(target, file.bytes, { mode: 0o600 });
+      chmodSync(target, 0o600);
+    }
   }
 }
 
@@ -87,6 +99,18 @@ function verifyInstallerMatchesTarget(repoRoot, sourceSha) {
     if (hashBuffer(current) !== hashBuffer(Buffer.from(committed))) {
       throw new Error(`${relative} differs from explicit target ${sourceSha}; run the installer from that revision`);
     }
+  }
+}
+
+/** WHAT: Checks that one release can recover its runtime config. WHY: Prevents installing a bridge that cannot start. */
+export function assertSnapshotRecoverable(configs) {
+  const names = new Set((configs || []).map((file) => file.name));
+  const missing = CONFIG_FILES.filter((name) => !names.has(name));
+  if (missing.length) {
+    throw new Error(
+      `refusing to install an unrecoverable release: no ${missing.join(" or ")} `
+      + "found in ~/.agentmux, the repository, or the installed package",
+    );
   }
 }
 
@@ -217,7 +241,8 @@ export function installRelease({ repoRoot, sourceSha, home = homedir() }) {
 
   const globalNodeModules = run("npm", ["root", "--global"]).trim();
   const oldPackageRoot = join(globalNodeModules, "agentmux");
-  const configs = snapshotRuntimeConfig(root, oldPackageRoot);
+  const configs = snapshotRuntimeConfig(root, oldPackageRoot, home);
+  assertSnapshotRecoverable(configs);
   const temporary = mkdtempSync(join(tmpdir(), "agentmux-release-"));
   try {
     const staged = stageReleaseArtifact({ repoRoot: root, sourceSha: target, outputRoot: join(temporary, "artifact") });
@@ -227,7 +252,7 @@ export function installRelease({ repoRoot, sourceSha, home = homedir() }) {
       || existsSync(join(packageRoot, ".git"))) {
       throw new Error("npm global agentmux still resolves to a mutable git checkout");
     }
-    restoreRuntimeConfig(configs, packageRoot);
+    restoreRuntimeConfig(configs, packageRoot, home);
     run(process.execPath, [join(packageRoot, "bin", "install-hooks.mjs")], {
       env: { ...process.env, HOME: home },
       stdio: "inherit",
@@ -258,6 +283,7 @@ export function installRelease({ repoRoot, sourceSha, home = homedir() }) {
         ...(key === "suggestionsGuard" ? { inlineMutationBlocked: true } : {}),
       }])),
       restoredConfig: configs.map((file) => file.name),
+      configHome: join(home, ".agentmux"),
     };
     const identity = observeReleaseIdentity({
       runtimeRoot: packageRoot,

@@ -4,6 +4,8 @@
 // DOES NOT: Read files, post messages, capture tmux, parse config, schedule work,
 //           or mutate the persistent state store directly.
 
+import { AMUX_PROBE_PREFIX } from "./kimi-agent-runtime.mjs";
+
 const DEFAULT_COMPLETION_GRACE_MS = 5_000;
 const DEFAULT_MAX_POST_ACTIONS = 3;
 const DEFAULT_RETRY_BACKOFF_MS = 30_000;
@@ -22,6 +24,12 @@ const DEFAULT_PARTIAL_TEXT_GRACE_MS = 60_000;
 export function itemKey(item, turnStartMs, idx) {
   if (item && typeof item.id === "string" && item.id) return item.id;
   return `${turnStartMs}#${idx}`;
+}
+
+/** WHAT: Filters bridge-internal ingest-probe turns out of mirror input. WHY: Keeps liveness probes and their replies off Discord. */
+export function withoutTransportProbeTurns(turns = []) {
+  if (!Array.isArray(turns)) return [];
+  return turns.filter((turn) => !String(turn?.userPrompt || "").trim().startsWith(AMUX_PROBE_PREFIX));
 }
 
 export function planPaneMirrorStep(input = {}) {
@@ -51,12 +59,14 @@ export function planPaneMirrorStep(input = {}) {
     return { actions: [], nextState, notes: [{ type: "retry-wait", untilMs: retryUntilMs }] };
   }
 
-  if (!Array.isArray(turns) || turns.length === 0) {
+  const visibleTurns = withoutTransportProbeTurns(turns);
+
+  if (visibleTurns.length === 0) {
     return { actions: [], nextState, notes };
   }
 
   if (lastPostedMs === null || lastPostedMs === undefined) {
-    const newest = newestTurnMs(turns);
+    const newest = newestTurnMs(visibleTurns);
     if (Number.isFinite(newest)) {
       nextState.lastPostedMs = newest;
       nextState.retryUntilMs = null;
@@ -68,7 +78,7 @@ export function planPaneMirrorStep(input = {}) {
   let cursorMs = Number.isFinite(lastPostedMs) ? lastPostedMs : 0;
   const actions = [];
 
-  turns.forEach((turn, index) => {
+  visibleTurns.forEach((turn, index) => {
     if (actions.length >= maxPostActions) return;
 
     const endMs = turnEndMs(turn);
@@ -214,7 +224,7 @@ export function planStartupAudit(input = {}) {
   let skippedItems = 0;
   let skippedTurns = 0;
 
-  const list = Array.isArray(turns) ? turns : [];
+  const list = withoutTransportProbeTurns(turns);
   // Newest-first: a bounded budget must keep the most recently completed items
   // (the genuinely lost final turn), not an hour-old backlog after a long
   // downtime. Actions are reversed back to chronological order before posting.
