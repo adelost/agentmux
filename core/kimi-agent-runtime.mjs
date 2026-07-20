@@ -14,6 +14,7 @@ import {
 import { isKimiPaneCommand } from "./tui-stall-recovery.mjs";
 
 const PROMPT_READY_TIMEOUT_MS = 15_000;
+const KIMI_STEER_QUEUE_TIMEOUT_MS = 5_000;
 
 /** WHAT: Checks Kimi's empty plain or bordered composer. WHY: Prevents TUI box glyphs from hiding a ready input boundary. */
 export function isKimiComposerReady(snapshot) {
@@ -135,9 +136,27 @@ export function createKimiAgentRuntime({
     throw blocked("Kimi prompt delivery timed out: composer is not ready");
   }
 
-  /** WHAT: Submits through Kimi's live-turn command. WHY: Active turns need Ctrl-S; idle turns use ordinary Enter. */
+  /**
+   * WHAT: Queues an active-turn draft through Enter before steering it with Ctrl-S.
+   * WHY: Kimi's Ctrl-S handler reads the editor's collapsed `[paste #…]` marker,
+   * while Enter expands the original bracketed paste into its internal queue.
+   */
   async function submitKimiPromptNow(target, { busy = false } = {}) {
-    await t.sendKeys(target, busy ? "C-s" : "Enter");
+    await t.sendKeys(target, "Enter");
+    if (!busy) return;
+
+    const deadline = Date.now() + KIMI_STEER_QUEUE_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const screen = await t.captureScreen(target).catch(() => "");
+      if (isKimiComposerReady(screen)) {
+        await t.sendKeys(target, "C-s");
+        return;
+      }
+      await wait(50);
+    }
+    throw blocked(
+      "Kimi prompt delivery blocked: Enter did not move the exact draft into Kimi's steer queue",
+    );
   }
 
   async function maybeRescueKimiSubmit(agentName, pane, target, prompt, {

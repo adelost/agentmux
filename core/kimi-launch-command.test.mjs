@@ -28,10 +28,39 @@ describe("Kimi launch continuity", () => {
     expect(isKimiComposerReady(" │ > manual draft │ ")).toBe(false);
   });
 
-  it("keeps the composer writable while a Kimi turn is active and submits with steer", async () => {
+  it("uses ordinary Enter for an idle Kimi turn", async () => {
     const keys = [];
     const runtime = createKimiAgentRuntime({
-      t: { sendKeys: async (target, key) => { keys.push([target, key]); } },
+      t: {
+        sendKeys: async (target, key) => { keys.push([target, key]); },
+      },
+      wait: async () => {},
+      paneDir: () => "/tmp/kimi-pane",
+      agentConfig: () => ({ dir: "/tmp", panes: [] }),
+      isBusy: async () => true,
+      isPaneDead: async () => false,
+      respawnPane: async () => {},
+      isAlreadyRunning: async () => true,
+      isShellProcess: () => false,
+      captureScreen: async () => " ╭────╮\n │ >  │\n ╰────╯ ",
+      promptAlreadyInComposer: async () => false,
+    });
+
+    await runtime.submitKimiPromptNow("ai:.7");
+    expect(keys).toEqual([["ai:.7", "Enter"]]);
+  });
+
+  it("expands a collapsed active-turn paste before steering its exact text", async () => {
+    const keys = [];
+    let composer = " ╭──────────────╮\n │ > [paste #1] │\n ╰──────────────╯ ";
+    const runtime = createKimiAgentRuntime({
+      t: {
+        sendKeys: async (target, key) => {
+          keys.push([target, key]);
+          if (key === "Enter") composer = " ╭────╮\n │ >  │\n ╰────╯ ";
+        },
+        captureScreen: async () => composer,
+      },
       wait: async () => {},
       paneDir: () => "/tmp/kimi-pane",
       agentConfig: () => ({ dir: "/tmp", panes: [] }),
@@ -47,8 +76,10 @@ describe("Kimi launch continuity", () => {
     await expect(runtime.waitForKimiPromptReady("ai", 7)).resolves.toMatchObject({
       busy: true,
     });
-    await runtime.submitKimiPromptNow("ai:.7");
     await runtime.submitKimiPromptNow("ai:.7", { busy: true });
-    expect(keys).toEqual([["ai:.7", "Enter"], ["ai:.7", "C-s"]]);
+    expect(keys).toEqual([
+      ["ai:.7", "Enter"],
+      ["ai:.7", "C-s"],
+    ]);
   });
 });
