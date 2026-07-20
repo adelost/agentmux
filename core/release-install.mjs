@@ -68,7 +68,7 @@ export function snapshotRuntimeConfig(repoRoot, installedRoot, home) {
   });
 }
 
-/** WHAT: Restores runtime config to the external home and package fallback. WHY: Prevents one package replacement from orphaning credentials. */
+/** WHAT: Stores runtime config in the external home and package fallback. WHY: Prevents one package replacement from orphaning credentials. */
 export function restoreRuntimeConfig(files, installedRoot, home) {
   const homeDir = join(home, ".agentmux");
   mkdirSync(homeDir, { recursive: true });
