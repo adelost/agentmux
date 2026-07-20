@@ -15,8 +15,8 @@
 // Reopening the session alone can leave Codex waiting at an interrupted
 // composer forever after a hard WSL stop.
 
-/** Return the timestamp of a Codex turn interrupted by boot, or null. */
-export function codexInterruptionFromTurns(turns = [], bootMs) {
+/** WHAT: Returns the timestamp of a journal turn interrupted by boot, or null. WHY: Keeps interruption evidence in the engine's own durable journal. */
+export function journalInterruptionFromTurns(turns = [], bootMs) {
   if (!Number.isFinite(bootMs)) return null;
   let latestPreBoot = null;
   for (const turn of turns) {
@@ -29,23 +29,24 @@ export function codexInterruptionFromTurns(turns = [], bootMs) {
   return latestPreBoot.ms;
 }
 
+/** WHAT: Returns the timestamp of a Codex turn interrupted by boot, or null. WHY: Keeps Codex recovery evidence in its own rollout. */
+export function codexInterruptionFromTurns(turns = [], bootMs) {
+  return journalInterruptionFromTurns(turns, bootMs);
+}
+
 /** Boot instant from /proc/stat's btime line (seconds → ms). */
 export function parseBootMs(procStat) {
   const m = String(procStat).match(/^btime (\d+)$/m);
   return m ? Number(m[1]) * 1000 : null;
 }
 
-/**
- * Decide which panes need a resume-brief.
- * events: ledger rows ({ts, event, session, pane}); panes: configured coding
- * panes [{agent, pane}]; statuses: Map "agent:pane" → current status.
- */
+/** WHAT: Maps ledger, statuses, and journals to the panes needing a resume-brief. WHY: Keeps recovery evidence-based, never age- or screen-based. */
 export function planRevive({
   events = [],
   bootMs,
   panes = [],
   statuses = new Map(),
-  codexInterruptions = [],
+  journalInterruptions = [],
 }) {
   if (!Number.isFinite(bootMs)) return { briefs: [], reason: "no boot time" };
 
@@ -87,15 +88,22 @@ export function planRevive({
     if (status === "working" || status === "resume") continue; // already back at it
     briefs.push({ agent: p.agent, pane: p.pane, interruptedAtMs: pre.ms });
   }
-  for (const interruption of codexInterruptions) {
+  for (const interruption of journalInterruptions) {
     const key = `${interruption.agent}:${interruption.pane}`;
     if (briefs.some((brief) => `${brief.agent}:${brief.pane}` === key)) continue;
     if ((revived.get(key) || 0) >= interruption.interruptedAtMs) continue;
     const status = statuses.get(key);
     if (status === "working" || status === "resume") continue;
-    briefs.push({ ...interruption, source: "codex-jsonl" });
+    briefs.push({ ...interruption });
   }
   return { briefs };
+}
+
+/** WHAT: Filters which panes to revive. WHY: Keeps selective recovery the default, never the storm. */
+export function selectRevivePanes(panes, briefs, { all = false } = {}) {
+  if (all) return panes;
+  const keys = new Set(briefs.map((b) => `${b.agent}:${b.pane}`));
+  return panes.filter((p) => keys.has(`${p.agent}:${p.pane}`));
 }
 
 export function reviveBrief(interruptedAtMs, bootMs) {

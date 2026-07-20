@@ -1,5 +1,7 @@
 import { unit, feature, expect } from "bdd-vitest";
-import { codexInterruptionFromTurns, planRevive, reviveBrief, parseBootMs } from "./revive.mjs";
+import {
+  journalInterruptionFromTurns, codexInterruptionFromTurns, planRevive, reviveBrief, parseBootMs, selectRevivePanes,
+} from "./revive.mjs";
 
 // The real 2026-07-10 18:58 WSL crash, straight from the ledger: three
 // panes had a trailing prompt (ai:0 18:36, ai:2 18:40, api:1 18:41), the
@@ -146,25 +148,67 @@ feature("Codex post-boot interruption detection", () => {
     then: ["neither is re-briefed", (result) => expect(result).toEqual([null, null])],
   });
 
-  unit("a Codex interruption joins the ledger-derived revive plan once", {
-    given: ["one Codex interruption", () => planRevive({
+  unit("a journal interruption joins the ledger-derived revive plan once", {
+    given: ["one Codex-sourced interruption", () => planRevive({
       events: [],
       bootMs: BOOT,
       panes: [{ agent: "ai", pane: 3 }],
       statuses: new Map([["ai:3", "interrupted"]]),
-      codexInterruptions: [{
+      journalInterruptions: [{
         agent: "ai",
         pane: 3,
         interruptedAtMs: Date.parse("2026-07-10T16:55:00Z"),
+        source: "codex-jsonl",
       }],
     })],
     when: ["planning", (plan) => plan],
-    then: ["one recovery brief", (plan) => {
+    then: ["one recovery brief carrying its evidence source", (plan) => {
       expect(plan.briefs).toMatchObject([{
         agent: "ai",
         pane: 3,
         source: "codex-jsonl",
       }]);
+    }],
+  });
+
+  unit("a Kimi-shaped interrupted turn classifies via the journal reader too", {
+    given: ["wire turns: one incomplete pre-boot turn, one complete", () => journalInterruptionFromTurns([
+      { timestamp: "2026-07-10T16:50:00Z", isComplete: true },
+      { timestamp: "2026-07-10T16:55:00Z", isComplete: false },
+    ], BOOT)],
+    when: ["reading the interruption", (result) => result],
+    then: ["the incomplete pre-boot turn is the interruption", (result) => {
+      expect(result).toBe(Date.parse("2026-07-10T16:55:00Z"));
+    }],
+  });
+
+  unit("a Kimi pane with only a completed turn stays silent", {
+    given: ["one complete pre-boot turn", () => journalInterruptionFromTurns([
+      { timestamp: "2026-07-10T16:55:00Z", isComplete: true },
+    ], BOOT)],
+    when: ["reading the interruption", (result) => result],
+    then: ["none", (result) => expect(result).toBeNull()],
+  });
+
+  unit("selective revive picks exactly the interrupted panes; --all picks the fleet", {
+    given: ["two interrupted of five panes", () => {
+      const panes = [
+        { agent: "skydive", pane: 10 }, { agent: "skydive", pane: 12 },
+        { agent: "skyvw", pane: 7 }, { agent: "lsrc", pane: 2 }, { agent: "lsrc", pane: 3 },
+      ];
+      const briefs = [
+        { agent: "skydive", pane: 10, interruptedAtMs: 1 },
+        { agent: "lsrc", pane: 2, interruptedAtMs: 2 },
+      ];
+      return { panes, briefs };
+    }],
+    when: ["selecting default and --all", ({ panes, briefs }) => ({
+      selective: selectRevivePanes(panes, briefs),
+      all: selectRevivePanes(panes, briefs, { all: true }),
+    })],
+    then: ["default revives exactly the two, --all revives all five", ({ selective, all }) => {
+      expect(selective.map((p) => `${p.agent}:${p.pane}`).sort()).toEqual(["lsrc:2", "skydive:10"]);
+      expect(all).toHaveLength(5);
     }],
   });
 });

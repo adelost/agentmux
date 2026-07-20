@@ -27,9 +27,10 @@ import { extractText, extractLastTurn, classifyLines, extractSegments } from "..
 import { stripAnsi, esc, extractActivity, formatDuration, validateImagePath } from "../lib.mjs";
 import { getContextFromPane, getContextPercent, shortModelName } from "../core/context.mjs";
 import { loadSearchRoots, lexicalSearch, formatHits, saveLastResults, loadLastResults, expandHit, withScore, dedupeByFile } from "../core/search.mjs";
-import { codexInterruptionFromTurns, planRevive, reviveBrief, parseBootMs } from "../core/revive.mjs";
+import { journalInterruptionFromTurns, planRevive, reviveBrief, parseBootMs } from "../core/revive.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
+import { readLastTurnsKimi } from "../core/kimi-jsonl-reader.mjs";
 import { alternateEngineForCommand, latestAlternateMtime, readAlternateTurns } from "../core/alternate-session-reader.mjs";
 import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
 import { appendEvent, latestPaneStatesCached, mergeStatus, readEvents } from "../core/events.mjs";
@@ -2331,100 +2332,6 @@ async function cmdSearch(ctx, query, flags) {
   console.log(`\n${top.length}/${hits.length} träffar, ${Date.now() - t0}ms  ·  expandera: amux search --show N`);
 }
 
-/**
- * amux revive — post-boot fleet recovery: respawn every configured coding
- * pane (ensureReady is idempotent; running panes untouched) and send a
- * resume-brief to panes whose ledger shows a prompt-without-stop from
- * before boot (= interrupted mid-turn), unless they are already working.
- * --dry prints the plan without acting.
- */
-async function cmdRevive(ctx, flags) {
-  const bootMs = parseBootMs(readFileSync("/proc/stat", "utf-8"));
-  if (!bootMs) { console.error("Kunde inte läsa boot-tid ur /proc/stat."); process.exit(1); }
-  console.log(`Boot: ${new Date(bootMs).toLocaleString("sv-SE")}`);
-
-  const agents = listAgents(ctx.configPath);
-  const nativeServiceTargets = configuredServiceTargets(ctx)
-    .filter((target) => target.backend === "native");
-  const panes = [];
-  for (const a of agents) {
-    (a.panes || []).forEach((p, i) => {
-      if (/claude|codex|kimi(?:-code)?/.test(String(p?.cmd || ""))) {
-        panes.push({ agent: a.name, pane: i, cmd: p.cmd, backend: a.backend });
-      }
-    });
-  }
-
-  const statuses = new Map();
-  const codexInterruptions = [];
-  for (const p of panes) {
-    try { statuses.set(`${p.agent}:${p.pane}`, await getPaneStatus(ctx, p.agent, p.pane)); }
-    catch { statuses.set(`${p.agent}:${p.pane}`, "unknown"); }
-    if (p.backend !== "native" && /codex/.test(String(p.cmd || ""))) {
-      try {
-        const agent = agents.find((item) => item.name === p.agent);
-        const paneDir = join(agent.dir, ".agents", String(p.pane));
-        const result = readLastTurnsCodex(paneDir, {
-          limit: 4,
-          tailBytes: 16 * 1024 * 1024,
-          headless: true,
-        });
-        const interruptedAtMs = codexInterruptionFromTurns(result?.turns || [], bootMs);
-        if (interruptedAtMs) codexInterruptions.push({
-          agent: p.agent,
-          pane: p.pane,
-          interruptedAtMs,
-        });
-      } catch { /* missing/partial rollout: coding-pane recovery still runs */ }
-    }
-  }
-
-  let events = [];
-  try { events = readEvents({ tailBytes: 0 }); } catch { /* empty ledger: respawn still runs */ }
-  const plan = planRevive({ events, bootMs, panes, statuses, codexInterruptions });
-
-  console.log(`Paneler: ${panes.length} konfigurerade coding-panes säkras (idempotent).`);
-  console.log(`Tjänster: ${nativeServiceTargets.reduce((sum, target) => sum + target.services.length, 0)} native-processer säkras (idempotent).`);
-  if (!plan.briefs.length) console.log("Avbrutna mitt i arbete: inga.");
-  for (const b of plan.briefs) {
-    console.log(`  ⚡ ${b.agent}:${b.pane}  avbruten ${new Date(b.interruptedAtMs).toTimeString().slice(0, 8)} → resume-brief${flags.dry ? " (dry)" : ""}`);
-  }
-  if (flags.dry) return;
-
-  for (const p of panes) {
-    try {
-      if (p.backend === "native") await ctx.agent.nativeRuntime.ensureTarget(p.agent, p.pane);
-      else await ctx.agent.ensureReady(p.agent, p.pane);
-    }
-    catch (err) { console.error(`  ensureReady ${p.agent}:${p.pane} misslyckades: ${err.message.split("\n")[0]}`); }
-  }
-  for (const target of nativeServiceTargets) {
-    try { await startNativeServices(target); }
-    catch (err) { console.error(`  services ${target.name} misslyckades: ${err.message.split("\n")[0]}`); }
-  }
-  for (const b of plan.briefs) {
-    const sent = await sendToPane(ctx, b.agent, b.pane, reviveBrief(b.interruptedAtMs, bootMs));
-    if (!sent?.delivered) {
-      console.error(`  INTE skickad: ${b.agent}:${b.pane} (${sent?.blocked ? "parkerad" : "leverans ej verifierad"})`);
-      continue;
-    }
-    try {
-      appendEvent({
-        ts: new Date().toISOString(),
-        event: "revive_brief",
-        session: b.agent,
-        pane: b.pane,
-        interruptedAtMs: b.interruptedAtMs,
-        detail: `boot ${new Date(bootMs).toISOString()}`,
-      });
-    } catch (err) {
-      console.error(`  revive receipt ${b.agent}:${b.pane} misslyckades: ${err.message}`);
-    }
-    console.log(`  skickad: ${b.agent}:${b.pane}`);
-  }
-  console.log("Revive klar.");
-}
-
 async function cmdMemory(_ctx, subcommand, flags = {}) {
   const workspace = flags.workspace || process.env.OPENCLAW_WORKSPACE
     || join(process.env.HOME, ".openclaw", "workspace");
@@ -3870,7 +3777,7 @@ Usage:
   agent dream                     Write/update nightly pane digest in workspace memory
     --since T                     Window to summarize (default: 24h)
     --dry                         Preview pane work, do nothing
-  agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)\n  agent doctor                    Health check: bridge, Suggestions board/sync, hooks, ledger, tmux (exit 0/1/2)\n  agent revive                    Post-boot: respawn all panes + resume-brief those interrupted mid-turn (--dry to preview)\n  agent memory status             Memory warnings, compact backlog, latest dream
+  agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)\n  agent doctor                    Health check: bridge, Suggestions board/sync, hooks, ledger, tmux (exit 0/1/2)\n  agent revive                    Post-boot: classify interrupted panes (ledger + Codex/Kimi journals) and selectively revive only them; --all for legacy whole-fleet respawn, --dry to preview\n  agent memory status             Memory warnings, compact backlog, latest dream
   agent queue                     List live durable delivery jobs (id, target, age, state, attempts, reason, preview)
     --all                         Include terminal delivery history retained on disk
     --limit N                     Maximum rows (default 100, max 1000)
@@ -4163,8 +4070,9 @@ export async function dispatch(argv, ctx) {
     }
 
     case "revive": {
-      const { flags } = parseFlags(rest, { dry: "boolean" });
-      return cmdRevive(ctx, flags);
+      const { flags } = parseFlags(rest, { dry: "boolean", all: "boolean" });
+      const { cmdRevive } = await import("./revive.mjs");
+      return cmdRevive(ctx, flags, { configuredServiceTargets });
     }
 
     case "memory": {
