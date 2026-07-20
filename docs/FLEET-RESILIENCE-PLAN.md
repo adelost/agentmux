@@ -106,28 +106,34 @@ Suggestions-boardets pull-modell som leveranskanal; gradvis cutover från TUI-in
 Kopplas till suggestions-bantningen (eget spår).
 
 ### T8 — Panel sleep/hibernate (från Adelost)
-60 paneler samtidigt är minnesbördan. Idle-paneler ska kunna sleepas: kör `/compact` först
-(resume from summary är kravet), sedan stoppas processen, och bryggan väcker on demand när ett
-meddelande adresserar panelen. Kräver: pålitlig idle-detektion (wire-journal, inte skärm),
-compact-som-funkar-kvittering, och väck-väg via befintlig durable queue. Även: tile/geometri —
-44/76 paneler är för små enligt doctor; färre/större aktiva fönster åt gången.
+60 paneler samtidigt är minnesbördan. Design (Mattias/lsrc:3): manager-AI får FÖRESLÅ
+long-idle/done-kandidater, men en deterministisk controller verifierar ensam: ingen aktiv
+turn/permission/input, ingen levande leverans, compact slutförd med exakt kvitto — först då
+sleepas panelen. Auto-sleep ALDRIG för dirty/rebasing/ambiguösa paneler. Nytt meddelande väcker
+exakt målpanelen via samma gated path som durable delivery (wake-admission). Även:
+tile/geometri — 44/76 paneler är för små enligt doctor; färre/större aktiva fönster åt gången.
 
 ### T12 — Bredare admission-integration
 T1:s canStartHeavy utökas från slice-1 (endast post-boot revive) till bevisade automatiska tunga
 starters: browser/visual-gates, emulator/QEMU, tunga CI-gates. En grov flock runt automatisk
 heavy-start om samtidighetsrace bevisas. Fortfarande: aldrig kill/restart från memory guard.
 
-### T13 — Recovery-slice efter `amux stop --all`-incidenten (NÄSTA)
+### T13 — Recovery-slice efter `amux stop --all`-incidenten (LEVERERAD i denna branch)
 Incident: `amux stop --all` dödade kodprocesserna och kraschade sedan med `cmdUnserve is not
 defined`; flottan revivades delvis felaktigt ("no tasks" trots sex verkligt avbrutna).
-- `amux stop --all` ska vara atomisk: validera ALLA steg före destruktivt arbete, fail före första
-  kill. (Krashen `cmdUnserve is not defined` visar att ordningen var omvänd.)
-- `amux revive --dry` ska klassificera verkligt avbrutna tasks (interrupted/uncheckpointed/dirty)
-  från durable historik — inte säga "none" när sex fanns.
-- Efter omstart: EN manager/recovery-agent startar först, härleder oavslutade tasks från durable
-  historik och revivar ENDAST exakt de avbrutna panelerna/sessionerna — inte alla ~70, inte
-  slutförda/reserve-paneler. Foreground bridge förblir normal väg.
-- Verifiera med engångsflotta; fokuserade tester.
+- `amux stop --all` atomisk: hela stop-planen resolvas före första kill, bryggan stoppas via
+  bridgeLifecycle.stop (cmdUnserve-dödssymbolen är borta även i offline-sync-pathen).
+- Klassificering: planRevive täcker nu alla engines — ledger (Claude) + Codex rollout +
+  Kimi Wire — via `journalInterruptionFromTurns`; `amux revive --dry` visar avbrutna med
+  evidenskälla istället för "inga".
+- Selektiv revive som default: endast klassificerade avbrutna paneler revivas; övriga startas
+  on demand; `--all` är legacy whole-fleet. cmdRevive flyttad till cli/revive.mjs.
+- Wake-admission (T8-sömmen): durable meddelande till stoppad pane väcker exakt målet, men
+  fail-closed — release-identity + minnesvakt måste passera först, annars ligger meddelandet
+  kvar köat med klassificerad `wake-refused:<orsak>`, aldrig falskt ACK. Körs i brokern
+  (`bridgeDir`-wiring), gatebar per test via `wakeAdmission`-option.
+- Kvar till T13-fortsättningen: manager/recovery-agent som konsumerar samma klassificering
+  (T10-spår), samt `amux triage` (T4).
 
 ### T9 — JSONL/log-trim (från Adelost)
 Stora json-filer (wire.jsonl, sessions, delivery-queue-arkiv, logs) växer utan tak:
