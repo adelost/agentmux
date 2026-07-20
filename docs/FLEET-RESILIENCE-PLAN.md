@@ -28,10 +28,13 @@ tmux var en liten process; Windows överlevde, WSL dog).
 `core/memory-guard.mjs`: observeMemory → classify(normal|warn|blocked|critical) → canStart(class,reserveMiB).
 Trösklar (relativa, 48 GiB-host): warn <17 % MemAvailable; blocked <11 %, eller <17 % + SwapFree <25 %;
 critical <6 % + SwapFree <10 % ×2 samplingar. Hysteres: clear efter 3 samplingar >21 % (swap ignoreras).
-Statefil `~/.agentmux/memory-guard.json` med bootId/observedAt, TTL 75 s; stale = fail closed för
-automatiska starters, manuell start = explicit override. Transition-only-larm (bryggan postar till
-`AMUX_MEMORY_ALERT_CHANNEL` om satt, annars logg). Post-boot revive är första integrerade automatiska
-heavy-startern (`bin/memory-guard.mjs check --class pane-revive --reserve-mib 8192`, live-sample).
+Statefil `~/.agentmux/memory-guard.json` med bootId/observedAt, TTL 75 s; stale/mismatchad bootId/future
+timestamp = fail closed för automatiska starters, manuell start = explicit override.
+Transition-only-larm (bryggan postar till `AMUX_MEMORY_ALERT_CHANNEL` om satt, annars logg) + ett
+synligt initial-larm om första verdicten är non-normal.
+**Slice-1-scope (ärligt):** endast post-boot pane-revive är gated idag (live-sample,
+`bin/memory-guard.mjs check --class pane-revive --reserve-mib 8192`). Det är INTE fullt OOM-skydd
+mot QEMU/Chrome/CUDA ännu — bredare admission-integration (browser/emulator/gate-starters) är T12.
 
 ### T2 — Pinned release + boot identity (LEVERERAD i denna branch)
 Återanvänder `core/release-install.mjs` + `bin/install-release.mjs` (git-archive → npm pack → embedded
@@ -44,11 +47,41 @@ migreringsfallback (en `npm install -g .` får aldrig mer vara enda vägen till 
 Heartbeat projicerar manifest-SHA (fanns redan; kräver manifest).
 
 ### T3 — Windows guardian (nästa)
-Bygg ut `bin/windows-discord-restarter.ps1`: ärlig sond (WSL offline vs bridge offline vs fleet
-degraded; timeout på ALLA wsl.exe-anrop — häng = WSL-degraded), bounded backoff-restart, senaste
-godkända agentöversikt på NTFS med observedAt/stale-markering. Tunn konsument av samma
-health-beslut (heartbeat + memory-guard state + release identity). Hard reset ENDAST när WSL-probe
-faktiskt är unresponsive.
+**Hård säkerhetsgräns (lsrc:3, bindande):** guardian är transport + observation + säker
+egenåterställning — ALDRIG autonom maskinåterställning.
+Tillåtet: observera, durable NTFS-kö, Windows-side `amux send`, svara via Discord/LLM, klassificera
+bridge-vs-WSL-vs-host-fel, starta om SIN EGEN lilla Windows-process.
+Aldrig automatiskt: `wsl --shutdown`, döda tmux/panes, reboota Windows, reparera diskar, retry av
+tvetydiga skrivningar. En timeout är bevis på okänt tillstånd, inte tillstånd att mutera det.
+WSL-reset kräver explicit mänskligt kommando (eller evidensbaserad LLM-rekommendation + explicit
+godkännande). Eventuell framtida automatisk återställningsåtgärd: separat opt-in, bounded ett
+försök, bevara diagnostik/arbete, eskalera vid osäkerhet. Host/disk död → mark OFFLINE/STALE +
+köa; påstå aldrig recovery.
+Bygg ut `bin/windows-discord-restarter.ps1` inom dessa ramar. Tunn konsument av samma
+health-beslut (heartbeat + memory-guard state + release identity).
+
+### T11 — Controlled WSL restart (nästa version, PLANERAD – ej påbörjad)
+Use case: en säker WSL-omstart som låter alla Codex-paneler ladda om delade credentials,
+utan att besöka paneler individuellt. Tre explicita faser, aldrig autonom vid timeout:
+1. `amux restart-ready` (WSL, non-destructive): inventera aktiva turer/leveranser/smutsiga
+   worktrees/auth-status; be aktiva paneler checkpointa durabelt; vänta bounded eller returnera
+   BLOCKED med exakta paneler. Persista redacted resume-manifest + färsk readiness-kvittens
+   (boot/fleet-generation-bunden, inga secrets). Dödar aldrig arbete.
+2. `amux-windows restart-wsl --receipt <id>` (Windows): validera kvittsen, exakt EN `wsl --shutdown`,
+   starta WSL med hårda timeouts, stoppa vid klassificerat fel. Inga loopar, inga retry av
+   tvetydiga skrivningar, ingen restart bara för att en heartbeat timat ut.
+3. Verifierad återställning: Windows-transport först, sedan `amux serve --detach`; identity-check
+   av installerad release; återskapa konfigurerade tmux-sessioner; resume från persistade
+   sessioner/journal; dränera durable meddelanden; publicera RECOVERED / PARTIAL / BLOCKED.
+   Påstå aldrig recovered från processexistens.
+Auth-kontrakt: `codex login` görs en gång explicit (delad `~/.codex/auth.json`); efter kontrollerad
+omstart laddar Codex-paneler om den. `codex login status` är observation, inte bevis att varje
+connector funkar — verifiera connector/app-auth separat; WSL-omstart lagar inte `codex_apps`-401.
+Acceptans: aktiva paneler/smutsiga worktrees blockerar restart-ready tills checkpointat; krasch
+mellan shutdown/start lämnar manifestet intakt + Windows rapporterar host/WSL offline; resume
+träffar exakta sessionsidentiteter utan dubblett; stale/fel-generation-kvittens refuseras;
+saknad release-identity vägrar panel-revive men håller recovery-kanalen vid liv; en manuell
+repetition med engångsflotta om 2 paneler; fokuserade unit-tester.
 
 ### T4 — `amux triage` overview
 Read-model över befintliga signaler (queue/asks/wire-aktivitet/worktree-dirt):
@@ -75,6 +108,23 @@ Kopplas till suggestions-bantningen (eget spår).
 meddelande adresserar panelen. Kräver: pålitlig idle-detektion (wire-journal, inte skärm),
 compact-som-funkar-kvittering, och väck-väg via befintlig durable queue. Även: tile/geometri —
 44/76 paneler är för små enligt doctor; färre/större aktiva fönster åt gången.
+
+### T12 — Bredare admission-integration
+T1:s canStartHeavy utökas från slice-1 (endast post-boot revive) till bevisade automatiska tunga
+starters: browser/visual-gates, emulator/QEMU, tunga CI-gates. En grov flock runt automatisk
+heavy-start om samtidighetsrace bevisas. Fortfarande: aldrig kill/restart från memory guard.
+
+### T13 — Recovery-slice efter `amux stop --all`-incidenten (NÄSTA)
+Incident: `amux stop --all` dödade kodprocesserna och kraschade sedan med `cmdUnserve is not
+defined`; flottan revivades delvis felaktigt ("no tasks" trots sex verkligt avbrutna).
+- `amux stop --all` ska vara atomisk: validera ALLA steg före destruktivt arbete, fail före första
+  kill. (Krashen `cmdUnserve is not defined` visar att ordningen var omvänd.)
+- `amux revive --dry` ska klassificera verkligt avbrutna tasks (interrupted/uncheckpointed/dirty)
+  från durable historik — inte säga "none" när sex fanns.
+- Efter omstart: EN manager/recovery-agent startar först, härleder oavslutade tasks från durable
+  historik och revivar ENDAST exakt de avbrutna panelerna/sessionerna — inte alla ~70, inte
+  slutförda/reserve-paneler. Foreground bridge förblir normal väg.
+- Verifiera med engångsflotta; fokuserade tester.
 
 ### T9 — JSONL/log-trim (från Adelost)
 Stora json-filer (wire.jsonl, sessions, delivery-queue-arkiv, logs) växer utan tak:

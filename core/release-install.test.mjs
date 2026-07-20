@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -9,6 +9,9 @@ import { component, expect, feature, integration, unit } from "bdd-vitest";
 import {
   assertMasterReleaseTarget,
   assertReleaseSha,
+  assertSnapshotRecoverable,
+  restoreRuntimeConfig,
+  snapshotRuntimeConfig,
   stageReleaseArtifact,
 } from "./release-install.mjs";
 import { RELEASE_MANIFEST_NAME } from "./release-identity.mjs";
@@ -109,6 +112,60 @@ feature("explicit-SHA release artifact", () => {
       expect(source).toContain("refs/remotes/origin/master");
       expect(source).toContain("bin/install-release.mjs");
       expect(source).not.toMatch(/npm\s+link/u);
+    }],
+  });
+
+  component("runtime config survives snapshot and restore with home precedence", {
+    given: ["a home, repo, and installed package each holding divergent config", () => {
+      const base = mkdtempSync(join(tmpdir(), "amux-release-config-"));
+      const home = join(base, "home");
+      const repo = join(base, "repo");
+      const installed = join(base, "installed");
+      mkdirSync(join(home, ".agentmux"), { recursive: true });
+      mkdirSync(repo, { recursive: true });
+      mkdirSync(installed, { recursive: true });
+      writeFileSync(join(home, ".agentmux", ".env"), "home-env\n");
+      writeFileSync(join(home, ".agentmux", "agentmux.yaml"), "home-yaml\n");
+      writeFileSync(join(repo, ".env"), "repo-env\n");
+      writeFileSync(join(repo, "agentmux.yaml"), "repo-yaml\n");
+      writeFileSync(join(installed, ".env"), "installed-env\n");
+      writeFileSync(join(installed, "agentmux.yaml"), "installed-yaml\n");
+      return { base, home, repo, installed, cleanup: () => rmSync(base, { recursive: true, force: true }) };
+    }],
+    when: ["snapshotting then restoring into a fresh package", (ctx) => {
+      const configs = snapshotRuntimeConfig(ctx.repo, ctx.installed, ctx.home);
+      const fresh = join(ctx.base, "fresh-package");
+      mkdirSync(fresh, { recursive: true });
+      restoreRuntimeConfig(configs, fresh, ctx.home);
+      return { ctx, configs, fresh };
+    }],
+    then: ["home bytes win and land in both the external home and the package fallback at 0600", ({ ctx, configs, fresh }) => {
+      try {
+        expect(assertSnapshotRecoverable(configs)).toBeUndefined();
+        expect(configs.map((file) => file.name).sort()).toEqual([".env", "agentmux.yaml"]);
+        const env = configs.find((file) => file.name === ".env");
+        expect(String(env.bytes)).toBe("home-env\n");
+        for (const target of [join(ctx.home, ".agentmux", ".env"), join(fresh, ".env")]) {
+          expect(readFileSync(target, "utf8")).toBe("home-env\n");
+          expect(statSync(target).mode & 0o777).toBe(0o600);
+        }
+        expect(readFileSync(join(fresh, "agentmux.yaml"), "utf8")).toBe("home-yaml\n");
+        ctx.cleanup();
+      } catch (error) { ctx.cleanup(); throw error; }
+    }],
+  });
+
+  component("an unsnapshotable runtime config refuses the release before any mutation", {
+    then: ["missing .env or agentmux.yaml is a classified refusal, both present passes", () => {
+      expect(() => assertSnapshotRecoverable([])).toThrow(/unrecoverable release/);
+      expect(() => assertSnapshotRecoverable([{ name: ".env", bytes: Buffer.from("x") }]))
+        .toThrow(/agentmux\.yaml/);
+      expect(() => assertSnapshotRecoverable([{ name: "agentmux.yaml", bytes: Buffer.from("x") }]))
+        .toThrow(/\.env/);
+      expect(assertSnapshotRecoverable([
+        { name: ".env", bytes: Buffer.from("x") },
+        { name: "agentmux.yaml", bytes: Buffer.from("y") },
+      ])).toBeUndefined();
     }],
   });
 });

@@ -58,7 +58,8 @@ function atomicJson(path, value) {
   renameSync(temporary, path);
 }
 
-function snapshotRuntimeConfig(repoRoot, installedRoot, home) {
+/** WHAT: Collects runtime config from home, repo, or installed package in that precedence. WHY: Separates credentials from the replaceable package tree. */
+export function snapshotRuntimeConfig(repoRoot, installedRoot, home) {
   const homeDir = join(home, ".agentmux");
   return CONFIG_FILES.flatMap((name) => {
     const source = [join(homeDir, name), join(repoRoot, name), join(installedRoot, name)]
@@ -67,7 +68,8 @@ function snapshotRuntimeConfig(repoRoot, installedRoot, home) {
   });
 }
 
-function restoreRuntimeConfig(files, installedRoot, home) {
+/** WHAT: Restores runtime config to the external home and package fallback. WHY: Prevents one package replacement from orphaning credentials. */
+export function restoreRuntimeConfig(files, installedRoot, home) {
   const homeDir = join(home, ".agentmux");
   mkdirSync(homeDir, { recursive: true });
   for (const file of files) {
@@ -94,6 +96,18 @@ function verifyInstallerMatchesTarget(repoRoot, sourceSha) {
     if (hashBuffer(current) !== hashBuffer(Buffer.from(committed))) {
       throw new Error(`${relative} differs from explicit target ${sourceSha}; run the installer from that revision`);
     }
+  }
+}
+
+/** WHAT: Checks that one release can recover its runtime config. WHY: Prevents installing a bridge that cannot start. */
+export function assertSnapshotRecoverable(configs) {
+  const names = new Set((configs || []).map((file) => file.name));
+  const missing = CONFIG_FILES.filter((name) => !names.has(name));
+  if (missing.length) {
+    throw new Error(
+      `refusing to install an unrecoverable release: no ${missing.join(" or ")} `
+      + "found in ~/.agentmux, the repository, or the installed package",
+    );
   }
 }
 
@@ -225,6 +239,7 @@ export function installRelease({ repoRoot, sourceSha, home = homedir() }) {
   const globalNodeModules = run("npm", ["root", "--global"]).trim();
   const oldPackageRoot = join(globalNodeModules, "agentmux");
   const configs = snapshotRuntimeConfig(root, oldPackageRoot, home);
+  assertSnapshotRecoverable(configs);
   const temporary = mkdtempSync(join(tmpdir(), "agentmux-release-"));
   try {
     const staged = stageReleaseArtifact({ repoRoot: root, sourceSha: target, outputRoot: join(temporary, "artifact") });
