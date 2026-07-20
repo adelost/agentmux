@@ -11,7 +11,7 @@ describe("Kimi launch continuity", () => {
     });
     expect(command).toBe(
       "KIMI_MODEL_THINKING_EFFORT='max' '/home/test/.kimi-code/bin/kimi' " +
-      "--model 'kimi-code/k3' --yolo --session " +
+      "--model 'kimi-code/k3' --auto --session " +
       "'session_12345678-1234-4234-9234-123456789abc'",
     );
   });

@@ -69,9 +69,10 @@ feature("shared autonomous execution contract", () => {
       args: KIMI_AUTONOMOUS_ARGS,
       flags: KIMI_AUTONOMOUS_FLAGS,
     })],
-    then: ["the exact yolo flag is present once", ({ args, flags }) => {
-      expect(args).toEqual(["--yolo"]);
-      expect(flags).toBe("--yolo");
+    then: ["the exact full-auto flag is present once without the conflicting yolo mode", ({ args, flags }) => {
+      expect(args).toEqual(["--auto"]);
+      expect(flags).toBe("--auto");
+      expect(flags).not.toContain("--yolo");
     }],
   });
 

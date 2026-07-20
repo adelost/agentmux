@@ -1,6 +1,6 @@
 {
   "name": "agentmux",
-  "version": "1.25.22",
+  "version": "1.25.23",
   "description": "Local bridge and native workspace for coding agents (Claude Code, Codex, Kimi Code)",
   "type": "module",
   "bin": {
