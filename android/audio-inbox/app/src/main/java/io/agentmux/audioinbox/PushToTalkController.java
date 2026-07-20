@@ -22,6 +22,7 @@ final class PushToTalkController {
         String serverUrl();
         String target();
         String consumerId();
+        void saveTranscript(String transcript);
     }
 
     private final Activity activity;
@@ -124,23 +125,25 @@ final class PushToTalkController {
 
     private void send(File audio, String turnId) {
         String message;
+        String transcript = null;
         try {
             AudioInboxHttpClient.PttResult result = new AudioInboxHttpClient(
                 environment.serverUrl(),
                 environment.consumerId()
             ).sendPushToTalk(audio, environment.target(), turnId);
-            message = result.echoQueued
-                ? "Heard: “" + result.transcript + "” · sent"
-                : "Heard: “" + result.transcript + "” · sent, spoken echo unavailable";
+            transcript = result.transcript;
+            message = "Sent · waiting for the agent's spoken reply";
         } catch (Exception error) {
             message = "Send failed or uncertain · not retried";
         } finally {
             if (audio != null) audio.delete();
         }
         String outcome = message;
+        String heard = transcript;
         activity.runOnUiThread(() -> {
             state.finish();
             resetButton();
+            if (heard != null) environment.saveTranscript(heard);
             status.setText(outcome);
         });
     }

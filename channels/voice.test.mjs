@@ -306,7 +306,7 @@ feature("POST /api/send: audio path", () => {
 });
 
 feature("POST /api/audio/send: native phone PTT", () => {
-  component("configured channel routes one transcript and one durable spoken echo", {
+  component("configured channel routes one transcript without synthesizing the user's own voice", {
     given: ["audio inbox target, broker and durable outbox", async () => {
       const root = mkdtempSync(join(tmpdir(), "voice-ptt-test-"));
       const journalPath = join(root, "audio.jsonl");
@@ -334,15 +334,15 @@ feature("POST /api/audio/send: native phone PTT", () => {
         request(`${url}/api/audio/send`, { method: "POST", headers: { "content-type": "application/json" }, body }),
       ]);
     }],
-    then: ["route is bound, broker key is stable and echo is represented once", async (responses, ctx) => {
+    then: ["route is bound, broker key is stable and only the agent reply enters audio", async (responses, ctx) => {
       expect(responses.map((response) => response.status)).toEqual([200, 200]);
-      expect(responses[0].body).toMatchObject({ transcript: "starta om bryggan", echoQueued: true });
+      expect(responses[0].body).toMatchObject({ transcript: "starta om bryggan" });
+      expect(responses[0].body).not.toHaveProperty("echoQueued");
       expect(ctx.enqueued).toHaveLength(2);
       expect(ctx.enqueued.every((job) => job.agentName === "claw" && job.pane === 0)).toBe(true);
       expect(ctx.enqueued.every((job) => job.idempotencyKey === "turn-phone-1")).toBe(true);
       expect(ctx.enqueued[0].text).toContain("answer normally");
-      expect(ctx.outbox.listPending({ consumerId: "phone", target: "chan-0" }))
-        .toMatchObject([{ eventId: "ptt-echo-turn-phone-1", text: "Du sa: starta om bryggan" }]);
+      expect(ctx.outbox.listPending({ consumerId: "phone", target: "chan-0" })).toEqual([]);
       await ctx.s.pwa.stop(); ctx.s.cleanup(); ctx.cleanup();
     }],
   });

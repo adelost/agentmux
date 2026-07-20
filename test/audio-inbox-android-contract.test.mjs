@@ -35,6 +35,13 @@ feature("Android audio inbox source contract", () => {
       expect(read(
         "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/PushToTalkController.java",
       )).toContain("MotionEvent.ACTION_UP");
+      expect(read(
+        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/AppContract.java",
+      )).toContain('KEY_LAST_TRANSCRIPT = "lastTranscript"');
+      expect(read(
+        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/MainActivity.java",
+      )).toContain('"You said\\n“" + transcript + "”"');
+      expect(read("channels/voice-input.mjs")).not.toContain("ptt-echo-");
     }],
   });
 

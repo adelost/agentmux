@@ -96,24 +96,10 @@ export function createVoiceInput({
       catch (error) { console.warn(`voice-pwa mirror ${name}:${pane}: ${error.message}`); }
     }
 
-    let echoQueued = false;
-    if (phoneTurn) {
-      try {
-        audioOutbox.publish({
-          eventId: `ptt-echo-${body.idempotencyKey}`,
-          target: phoneTarget,
-          text: `Du sa: ${parsed.transcript}`,
-        });
-        echoQueued = true;
-      } catch (error) {
-        console.warn(`voice-pwa PTT echo ${body.idempotencyKey}: ${error.message}`);
-      }
-    }
     return json(res, 200, {
       sent: parsed.text,
       transcript: parsed.transcript,
       queued: Boolean(deliveryBroker),
-      echoQueued,
     });
   }
 

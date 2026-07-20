@@ -15,6 +15,7 @@ final class AppContract {
     static final String KEY_CURRENT = "currentText";
     static final String KEY_CURRENT_CREATED_AT = "currentCreatedAt";
     static final String KEY_HISTORY = "history";
+    static final String KEY_LAST_TRANSCRIPT = "lastTranscript";
     static final String ACTION_START = "io.agentmux.audioinbox.START";
     static final String ACTION_STOP = "io.agentmux.audioinbox.STOP";
     static final String ACTION_STATUS = "io.agentmux.audioinbox.STATUS";

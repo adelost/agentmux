@@ -28,11 +28,9 @@ final class AudioInboxHttpClient {
 
     static final class PttResult {
         final String transcript;
-        final boolean echoQueued;
 
-        PttResult(String transcript, boolean echoQueued) {
+        PttResult(String transcript) {
             this.transcript = transcript;
-            this.echoQueued = echoQueued;
         }
     }
 
@@ -76,7 +74,7 @@ final class AudioInboxHttpClient {
             }
             String transcript = json.optString("transcript", "").trim();
             if (transcript.isEmpty()) throw new IllegalStateException("PTT response has no transcript");
-            return new PttResult(transcript, json.optBoolean("echoQueued", false));
+            return new PttResult(transcript);
         } finally {
             connection.disconnect();
         }

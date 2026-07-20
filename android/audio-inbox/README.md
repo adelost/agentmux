@@ -20,9 +20,9 @@ The client consumes:
 
 Push-to-talk records only while the foreground button is held. Releasing it
 sends one idempotent turn to the pane bound to the discovered Discord target.
-The UI shows the returned transcript, while a stable `Du sa: …` audio event
-provides the spoken receipt through the same durable inbox. There is no blind
-retry after an ambiguous write.
+The UI keeps the returned transcript under **You said**. It does not speak the
+user's own words back; the next audio event is the agent's explicit `amux say`
+reply. There is no blind retry after an ambiguous write.
 
 Receipt order is `received → queued → playback-started → played|failed`.
 Playback never begins unless the server has accepted `playback-started`.

@@ -7,7 +7,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
-import android.content.res.ColorStateList;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -32,15 +31,9 @@ import java.time.Instant;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-public final class MainActivity extends Activity {
-    private static final int BACKGROUND = Color.rgb(9, 13, 18);
-    private static final int SURFACE = Color.rgb(18, 25, 34);
-    private static final int PRIMARY = Color.rgb(238, 246, 243);
-    private static final int SECONDARY = Color.rgb(147, 164, 174);
-    private static final int ACCENT = Color.rgb(109, 227, 181);
-    private static final int WARNING = Color.rgb(255, 190, 92);
-    private static final int ERROR = Color.rgb(255, 112, 112);
+import static io.agentmux.audioinbox.AppPalette.*;
 
+public final class MainActivity extends Activity {
     private SharedPreferences preferences;
     private EditText server;
     private EditText target;
@@ -49,6 +42,7 @@ public final class MainActivity extends Activity {
     private LinearLayout advanced;
     private TextView connection;
     private TextView current;
+    private TextView lastTranscript;
     private TextView history;
     private Button replay;
     private PushToTalkController pushToTalk;
@@ -144,7 +138,7 @@ public final class MainActivity extends Activity {
         handsFree.setChecked(preferences.getBoolean(AppContract.KEY_ENABLED, false));
         handsFree.setEnabled(false);
         handsFree.setOnCheckedChangeListener((button, enabled) -> setHandsFree(enabled));
-        toggleColors(handsFree);
+        tintSwitch(handsFree);
         statusRow.addView(handsFree, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             dp(48)
@@ -185,6 +179,9 @@ public final class MainActivity extends Activity {
         LinearLayout talkCard = card();
         TextView talkStatus = text("Turn on hands-free listening first", 14, false, SECONDARY);
         talkCard.addView(talkStatus);
+        lastTranscript = text("No voice sent yet", 16, false, PRIMARY);
+        lastTranscript.setLineSpacing(0, 1.12f);
+        talkCard.addView(lastTranscript, blockMargins(14, 0));
         Button talkButton = primaryButton("Hold to talk");
         talkCard.addView(talkButton, blockMargins(16, 0));
         content.addView(talkCard, blockMargins(0, 22));
@@ -203,6 +200,10 @@ public final class MainActivity extends Activity {
                 }
                 public String consumerId() {
                     return AppContract.consumerId(preferences);
+                }
+                public void saveTranscript(String transcript) {
+                    preferences.edit().putString(AppContract.KEY_LAST_TRANSCRIPT, transcript).apply();
+                    renderStatus();
                 }
             });
 
@@ -330,21 +331,6 @@ public final class MainActivity extends Activity {
         return params;
     }
 
-    private void toggleColors(Switch toggle) {
-        int[][] states = new int[][]{
-            new int[]{android.R.attr.state_checked},
-            new int[]{}
-        };
-        toggle.setThumbTintList(new ColorStateList(states, new int[]{
-            ACCENT,
-            Color.rgb(126, 141, 150)
-        }));
-        toggle.setTrackTintList(new ColorStateList(states, new int[]{
-            Color.rgb(54, 115, 92),
-            Color.rgb(44, 55, 64)
-        }));
-    }
-
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
@@ -453,6 +439,11 @@ public final class MainActivity extends Activity {
         String items = preferences.getString(AppContract.KEY_HISTORY, "");
         history.setText(items == null || items.isBlank() ? "Nothing played yet" : items);
         history.setTextColor(items == null || items.isBlank() ? SECONDARY : PRIMARY);
+        String transcript = preferences.getString(AppContract.KEY_LAST_TRANSCRIPT, "");
+        lastTranscript.setText(transcript == null || transcript.isBlank()
+            ? "No voice sent yet"
+            : "You said\n“" + transcript + "”");
+        lastTranscript.setTextColor(transcript == null || transcript.isBlank() ? SECONDARY : PRIMARY);
         pushToTalk.refreshAvailability(enabled);
     }
 
