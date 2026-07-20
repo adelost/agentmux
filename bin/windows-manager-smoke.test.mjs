@@ -36,6 +36,7 @@ function makeHarness({ messages, scripted }) {
       sent.push(text);
     },
     provider: { name: "mock", chat: async (input) => { chats += 1; return base.chat(input); } },
+    transcribeMessage: async () => ({ ok: false, reason: "unexpected-voice" }),
   };
   return {
     deps,
@@ -148,6 +149,36 @@ feature("windows manager smoke", () => {
         expect(state.lastSeenId).toBe("103");
         expect(state.lastAction).toBeNull();
         expect(harness.writes).toHaveLength(3);
+      } finally {
+        harness.cleanup();
+      }
+    }],
+  });
+
+  unit("one Discord voice note is transcribed, echoed visibly, and answered once", {
+    then: ["the exact transcript enters the normal manager turn after a durable journal write", async () => {
+      const harness = makeHarness({
+        messages: [{
+          id: "104",
+          content: "",
+          flags: 8192,
+          attachments: [{
+            url: "https://cdn.discordapp.com/attachments/1/2/voice-message.ogg",
+            size: 3,
+            content_type: "audio/ogg",
+          }],
+          author: { id: CONFIG.authorizedUserId, bot: false },
+        }],
+        scripted: ["Jag hörde dig."],
+      });
+      harness.deps.transcribeMessage = async () => ({ ok: true, text: "Kan du kontrollera WSL?" });
+      try {
+        const state = { schemaVersion: 1, lastSeenId: null, lastAction: null, lastStatusMs: null };
+        expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(1);
+        expect(harness.sent).toEqual(["🎙️ Kan du kontrollera WSL?", "Jag hörde dig."]);
+        expect(harness.chats()).toBe(1);
+        expect(harness.writes[0].lastAction.command).toBe("manager-voice-turn");
+        expect(state.lastSeenId).toBe("104");
       } finally {
         harness.cleanup();
       }

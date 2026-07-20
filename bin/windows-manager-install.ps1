@@ -13,11 +13,9 @@ param(
   [Parameter(ParameterSetName = "Install", Mandatory = $true)]
   [string]$AuthorizedUserId,
   [Parameter(ParameterSetName = "Install")]
-  [string]$Endpoint = "https://api.openai.com/v1",
+  [string]$PythonPath = "E:\_Sdk\python\python.exe",
   [Parameter(ParameterSetName = "Install")]
-  [string]$Model = "manager-model",
-  [Parameter(ParameterSetName = "Install")]
-  [string]$ApiKeyEnv = "MANAGER_API_KEY",
+  [string]$WhisperModelPath = "",
   [Parameter(ParameterSetName = "Install")]
   [string]$DiscordTokenEnv = "DISCORD_TOKEN",
   [Parameter(ParameterSetName = "Install")]
@@ -49,31 +47,43 @@ function Get-LiveManagerProcess {
   return $process
 }
 
+function Get-AllManagerProcesses {
+  $entry = (Join-Path $ManagerCoreDir "bin\windows-manager.mjs").ToLowerInvariant()
+  return @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $_.Name -ieq "node.exe" -and [string]$_.CommandLine -and $_.CommandLine.ToLowerInvariant().Contains($entry)
+  })
+}
+
 function Stop-Manager {
-  $process = Get-LiveManagerProcess
-  if ($null -ne $process) { Stop-Process -Id $process.ProcessId -Force }
+  $processes = Get-AllManagerProcesses
+  foreach ($process in $processes) { Stop-Process -Id $process.ProcessId -Force }
   Remove-Item -Force -ErrorAction SilentlyContinue $ManagerPidPath
-  return $null -ne $process
+  return $processes.Count -gt 0
 }
 
 if ($Install) {
   if ($ChannelId -notmatch "^\d{17,20}$" -or $AuthorizedUserId -notmatch "^\d{17,20}$") {
     throw "channel and authorized user must be Discord snowflake ids"
   }
-  foreach ($envName in @($ApiKeyEnv, $DiscordTokenEnv)) {
+  foreach ($envName in @($DiscordTokenEnv)) {
     if ($envName -notmatch "^[A-Za-z_][A-Za-z0-9_]*$") {
-      throw "apiKeyEnv and discordTokenEnv must be environment variable names, never secrets"
+      throw "discordTokenEnv must be an environment variable name, never a secret"
     }
   }
-  if ($Endpoint -notmatch "^https://") { throw "provider endpoint must be an https URL" }
-  if (!$Model) { throw "provider model must be non-empty" }
   if ($PollSeconds -lt 2 -or $PollSeconds -gt 60) { throw "poll seconds must be 2..60" }
   $nodePath = ""
   $nodeCommand = Get-Command "node.exe" -ErrorAction SilentlyContinue
   if ($null -ne $nodeCommand) { $nodePath = $nodeCommand.Source }
   elseif (Test-Path "E:\_Sdk\nodejs\node.exe") { $nodePath = "E:\_Sdk\nodejs\node.exe" }
   if (!$nodePath) { throw "node.exe was not found" }
+  $codexJs = Join-Path $env:APPDATA "npm\node_modules\@openai\codex\bin\codex.js"
+  if (!(Test-Path $codexJs)) { throw "Windows-native Codex CLI was not found" }
+  if (!(Test-Path $PythonPath)) { throw "Windows Python was not found" }
   New-Item -ItemType Directory -Force -Path $Root | Out-Null
+  if (!$WhisperModelPath) { $WhisperModelPath = Join-Path $Root "models\faster-whisper-base" }
+  foreach ($modelFile in @("model.bin", "config.json", "tokenizer.json", "vocabulary.txt")) {
+    if (!(Test-Path (Join-Path $WhisperModelPath $modelFile))) { throw "offline Whisper model incomplete: $modelFile" }
+  }
   Copy-Item -Force $MyInvocation.MyCommand.Path $InstalledInstaller
   Copy-Item -Force $RuntimeIo (Join-Path $Root "windows-restarter-io.ps1")
   $config = [pscustomobject]@{
@@ -83,10 +93,16 @@ if ($Install) {
     pollSeconds = $PollSeconds
     nodePath = $nodePath
     provider = [pscustomobject]@{
-      kind = "http"
-      endpoint = $Endpoint
-      model = $Model
-      apiKeyEnv = $ApiKeyEnv
+      kind = "cli"
+      command = $nodePath
+      args = @($codexJs, "exec", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "-")
+      timeoutMs = 120000
+    }
+    transcription = [pscustomobject]@{
+      kind = "faster-whisper"
+      pythonPath = $PythonPath
+      modelPath = $WhisperModelPath
+      timeoutMs = 90000
     }
     discordTokenEnv = $DiscordTokenEnv
   }
@@ -100,10 +116,13 @@ if ($Install) {
   New-Item -ItemType Directory -Force -Path $coreModuleDir | Out-Null
   $sources = @(
     @{ from = (Join-Path $scriptDir "windows-manager.mjs"); name = "bin/windows-manager.mjs" },
+    @{ from = (Join-Path $scriptDir "windows-transcribe.py"); name = "bin/windows-transcribe.py" },
     @{ from = (Join-Path $scriptDir "windows-recovery.mjs"); name = "bin/windows-recovery.mjs" },
     @{ from = (Join-Path $scriptDir "windows-rescue-tool.ps1"); name = "bin/windows-rescue-tool.ps1" },
     @{ from = (Join-Path $scriptDir "windows-restarter-io.ps1"); name = "bin/windows-restarter-io.ps1" },
     @{ from = (Join-Path $repoRoot "core\windows-manager.mjs"); name = "core/windows-manager.mjs" },
+    @{ from = (Join-Path $repoRoot "core\windows-manager-discord.mjs"); name = "core/windows-manager-discord.mjs" },
+    @{ from = (Join-Path $repoRoot "core\windows-manager-input.mjs"); name = "core/windows-manager-input.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-bridge.mjs"); name = "core/windows-bridge.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-recovery.mjs"); name = "core/windows-recovery.mjs" }
   )
@@ -156,9 +175,18 @@ if ($RunManager) {
     exit 1
   }
   $env:MANAGER_CONFIG = $ManagerConfigPath
-  # The manager runtime writes manager-process.json itself; this wrapper only launches it.
-  & $node $entry
-  exit $LASTEXITCODE
+  $mutex = [Threading.Mutex]::new($false, "Local\AgentmuxWindowsManagerV1")
+  $acquired = $false
+  try { $acquired = $mutex.WaitOne(0) }
+  catch [Threading.AbandonedMutexException] { $acquired = $true }
+  if (!$acquired) { Write-Output "ALREADY_RUNNING"; exit 0 }
+  try {
+    & $node $entry
+    exit $LASTEXITCODE
+  } finally {
+    $mutex.ReleaseMutex()
+    $mutex.Dispose()
+  }
 }
 
 if ($Stop) {

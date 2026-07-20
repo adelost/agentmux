@@ -14,16 +14,15 @@ feature("windows manager install source contract", () => {
     }],
   });
 
-  unit("secrets enter only as environment variable names", {
-    then: ["env-name validation, no credential file, no stdin token read", () => {
-      expect(INSTALLER).toContain("apiKeyEnv");
+  unit("secrets never enter config or process arguments", {
+    then: ["env-name validation and DPAPI hydration stay inside the manager process", () => {
       expect(INSTALLER).toContain("discordTokenEnv");
       expect(INSTALLER).toContain("^[A-Za-z_][A-Za-z0-9_]*$");
-      expect(INSTALLER).toContain("environment variable names, never secrets");
+      expect(INSTALLER).toContain("environment variable name, never a secret");
       expect(INSTALLER).not.toContain("Export-Clixml");
-      expect(INSTALLER).not.toContain("Import-Clixml");
+      expect(INSTALLER).toContain("Import-Clixml");
       expect(INSTALLER).not.toContain("ReadToEnd");
-      expect(INSTALLER).not.toContain("discord-token.clixml");
+      expect(INSTALLER).toContain("discord-token.clixml");
       expect(INSTALLER).not.toContain("Get-Token");
     }],
   });
@@ -33,8 +32,11 @@ feature("windows manager install source contract", () => {
       expect(INSTALLER).toContain('Join-Path $ManagerCoreDir "bin"');
       expect(INSTALLER).toContain('Join-Path $ManagerCoreDir "core"');
       expect(INSTALLER).toContain('"bin/windows-manager.mjs"');
+      expect(INSTALLER).toContain('"bin/windows-transcribe.py"');
       expect(INSTALLER).toContain('"bin/windows-recovery.mjs"');
       expect(INSTALLER).toContain('"core/windows-manager.mjs"');
+      expect(INSTALLER).toContain('"core/windows-manager-input.mjs"');
+      expect(INSTALLER).toContain('"core/windows-manager-discord.mjs"');
       expect(INSTALLER).toContain('"core/windows-bridge.mjs"');
       expect(INSTALLER).toContain('"core/windows-recovery.mjs"');
       expect(INSTALLER).toContain("manifest.json");
@@ -56,12 +58,26 @@ feature("windows manager install source contract", () => {
     }],
   });
 
-  unit("the manager process record is separate and -Stop is exact", {
-    then: ["manager-process.json only, verified against the manager core path", () => {
+  unit("AI and speech are Windows-native and offline from WSL", {
+    then: ["Codex runs through Windows node and Whisper uses a pinned local model", () => {
+      expect(INSTALLER).toContain("npm\\node_modules\\@openai\\codex\\bin\\codex.js");
+      expect(INSTALLER).toContain('"--ephemeral", "--sandbox", "read-only"');
+      expect(INSTALLER).toContain('kind = "faster-whisper"');
+      expect(INSTALLER).toContain("offline Whisper model incomplete");
+      expect(INSTALLER).not.toContain('command = "wsl.exe"');
+    }],
+  });
+
+  unit("the manager process record is separate and duplicate managers are impossible", {
+    then: ["stop finds every exact runtime and run holds one named mutex", () => {
       expect(INSTALLER).toContain("manager-process.json");
       expect(INSTALLER).toContain("Get-LiveManagerProcess");
+      expect(INSTALLER).toContain("Get-AllManagerProcesses");
       expect(INSTALLER).toContain("*manager-core*");
       expect(INSTALLER).toContain("Stop-Manager");
+      expect(INSTALLER).toContain("Local\\AgentmuxWindowsManagerV1");
+      expect(INSTALLER).toContain("AbandonedMutexException");
+      expect(INSTALLER).toContain('"ALREADY_RUNNING"');
       expect(INSTALLER).toContain('"STOPPED"');
       expect(INSTALLER).toContain('"ALREADY_STOPPED"');
       expect(INSTALLER).not.toContain('"process.json"');

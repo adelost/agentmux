@@ -7,6 +7,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const MGR = readFileSync(join(ROOT, "bin", "windows-manager.mjs"), "utf8");
 const RESCUE = readFileSync(join(ROOT, "bin", "windows-rescue-tool.ps1"), "utf8");
 const CORE = readFileSync(join(ROOT, "core", "windows-manager.mjs"), "utf8");
+const DISCORD = readFileSync(join(ROOT, "core", "windows-manager-discord.mjs"), "utf8");
 const TURN = MGR.slice(
   MGR.indexOf("export async function runManagerTurn"),
   MGR.indexOf("export async function pollManagerChannel"),
@@ -16,10 +17,9 @@ const MAIN = MGR.slice(MGR.indexOf("async function main"));
 feature("windows manager source contract", () => {
   unit("bots, strangers, empty text, and restarter-owned commands are skipped", {
     then: ["all four skip conditions guard the accepted path", () => {
-      expect(MGR).toContain("message.author?.bot === true");
-      expect(MGR).toContain("String(message.author?.id) !== String(config.authorizedUserId)");
-      expect(MGR).toContain('content.startsWith("//")');
-      expect(MGR).toContain("|| !content");
+      expect(DISCORD).toContain("message.author?.bot === true");
+      expect(DISCORD).toContain("String(message.author?.id) !== String(config.authorizedUserId)");
+      expect(DISCORD).toContain("classifyManagerInput(message)");
     }],
   });
 
@@ -80,7 +80,7 @@ feature("windows manager source contract", () => {
       expect(combined).toContain("RECOVERED");
       expect(combined).toContain("PARTIAL");
       expect(combined).toContain("BLOCKED");
-      expect(MGR).toContain("redactSecrets(turn.answer)");
+      expect(DISCORD).toContain("redactSecrets(turn.answer)");
       expect(MGR).toContain("MAX_DISCORD_CHUNK = 1900");
       expect(MGR).toContain("allowed_mentions: { parse: [] }");
       expect(MGR).toContain("classifyManagerOutcome(toolResults)");
@@ -154,6 +154,7 @@ feature("windows manager source contract", () => {
     then: ["core and bin under 500, the loop under 300", () => {
       expect(CORE.trimEnd().split("\n").length).toBeLessThan(500);
       expect(MGR.trimEnd().split("\n").length).toBeLessThan(300);
+      expect(DISCORD.trimEnd().split("\n").length).toBeLessThan(300);
       expect(RESCUE.trimEnd().split("\n").length).toBeLessThan(500);
     }],
   });

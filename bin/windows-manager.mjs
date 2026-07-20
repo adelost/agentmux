@@ -23,14 +23,19 @@ import {
   trackManagerBootId,
 } from "../core/windows-manager.mjs";
 import { mapRecoveryChainResults } from "../core/windows-recovery.mjs";
+import { pollManagerDiscord } from "../core/windows-manager-discord.mjs";
+import {
+  claimManagerSingleton,
+  createVoiceTranscriber,
+} from "../core/windows-manager-input.mjs";
 
 const BIN_DIR = dirname(fileURLToPath(import.meta.url));
 const PROBE_PATH = join(BIN_DIR, "windows-wsl-probe.mjs");
 const RESCUE_PATH = join(BIN_DIR, "windows-rescue-tool.ps1");
+const TRANSCRIBE_PATH = join(BIN_DIR, "windows-transcribe.py");
 const SNOWFLAKE = /^\d{17,20}$/u;
 const MAX_DISCORD_CHUNK = 1900;
 const PROBE_TIMEOUT_MS = 20_000;
-const HISTORY_LIMIT = 10;
 
 function readJson(path) {
   try { return JSON.parse(readFileSync(path, "utf8")); } catch { return null; }
@@ -156,36 +161,7 @@ export async function runManagerTurn({ userText, messageId, state, history = [],
 
 /** WHAT: Routes one Discord poll through filters, journal, turn, and cursor. WHY: Keeps crash fencing and message ownership in one place. */
 export async function pollManagerChannel({ config, state, history = [], deps }) {
-  const incoming = await deps.listMessages(state.lastSeenId || null);
-  const sorted = [...incoming].sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
-  let handled = 0;
-  for (const message of sorted) {
-    const content = String(message.content || "").trim();
-    const skip = message.author?.bot === true
-      || String(message.author?.id) !== String(config.authorizedUserId)
-      || !content
-      || content.startsWith("//");
-    if (skip) {
-      state.lastSeenId = String(message.id);
-      deps.saveState(state);
-      continue;
-    }
-    state.lastAction = planAcceptedAction({ messageId: message.id, command: "manager-turn", generation: deps.generation, nowMs: deps.nowMs() });
-    deps.saveState(state);
-    deps.log?.(`accepted manager-turn message=${message.id} generation=${deps.generation}`);
-    const turn = await runManagerTurn({ userText: content, messageId: String(message.id), state, history, deps });
-    const answer = redactSecrets(turn.answer);
-    await deps.sendMessage(answer);
-    state.lastAction.status = "completed";
-    state.lastAction.completedAt = new Date(deps.nowMs()).toISOString();
-    state.lastAction.stage = turn.outcome;
-    state.lastSeenId = String(message.id);
-    deps.saveState(state);
-    history.push({ role: "user", content }, { role: "assistant", content: answer });
-    if (history.length > HISTORY_LIMIT) history.splice(0, history.length - HISTORY_LIMIT);
-    handled += 1;
-  }
-  return handled;
+  return pollManagerDiscord({ config, state, history, deps, runTurn: runManagerTurn });
 }
 
 /** WHAT: Turns a leftover started action into a blocked fence. WHY: Prevents any ambiguous manager action from running twice. */
@@ -232,6 +208,7 @@ async function discordRequest(token, method, route, body) {
 }
 
 async function main() {
+  const singleton = await claimManagerSingleton();
   const { config, rootDir } = loadConfig();
   const token = process.env[config.discordTokenEnv || "DISCORD_TOKEN"];
   if (!token) throw new Error(`Discord token env var ${config.discordTokenEnv || "DISCORD_TOKEN"} is not set`);
@@ -241,6 +218,7 @@ async function main() {
   mkdirSync(rootDir, { recursive: true });
   writeJsonAtomic(pidPath, { pid: process.pid, startedAt: new Date().toISOString() });
   process.on("exit", () => {
+    singleton.close();
     if (readJson(pidPath)?.pid === process.pid) rmSync(pidPath, { force: true });
   });
   const generation = randomUUID().replaceAll("-", "");
@@ -272,6 +250,7 @@ async function main() {
         });
       }
     },
+    transcribeMessage: createVoiceTranscriber({ config, rootDir, scriptPath: TRANSCRIBE_PATH }),
   };
   const pollSeconds = Math.min(Math.max(Number(config.pollSeconds) || 5, 2), 60);
   for (;;) {
