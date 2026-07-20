@@ -41,17 +41,14 @@ feature("windows restarter source contract", () => {
     }],
   });
 
-  unit("destructive commands are gated on the bridge-core verdict, never direct", {
-    then: ["Test-BridgeCore and destructive-check precede any Restart-Wsl invocation", () => {
-      const gate = PS1.indexOf("Test-BridgeCore -Config $Config");
-      const nodeCheck = PS1.indexOf("destructive-check --command");
-      const hardPath = PS1.indexOf("Invoke-Rescue -Config $Config -Hard:$true");
-      expect(gate).toBeGreaterThan(-1);
-      expect(nodeCheck).toBeGreaterThan(gate);
-      expect(hardPath).toBeGreaterThan(nodeCheck);
-      // The refusal path is always present with a classified reason.
-      expect(PS1).toContain("AMUX BLOCKED $reason");
-      expect(PS1).toContain("AMUX BLOCKED runtime-unavailable");
+  unit("an authorized restart command executes directly, bounded and journaled", {
+    then: ["no receipt gate blocks the owner; the observation feeds the report only", () => {
+      const dispatcher = PS1;
+      expect(dispatcher).not.toContain("restart-ready-receipt-missing");
+      expect(dispatcher).not.toContain("destructive-check --command");
+      expect(dispatcher).toContain("AMUX restart på kommando av auktoriserad användare");
+      expect(dispatcher).toContain("Invoke-Rescue -Config $Config -Hard:$true");
+      expect(dispatcher).toContain("AMUX RECOVERED stage=$($result.stage)");
     }],
   });
 
@@ -148,12 +145,17 @@ feature("windows restarter source contract", () => {
   });
 
   unit("PowerShell stays split into thin files and visible foreground is canonical", {
-    then: ["every file is below 500 lines and hidden supervision is opt-in", () => {
+    then: ["every file is below 500 lines and hidden launch is opt-in via -Hidden", () => {
       for (const source of [MAIN, IO, DISCORD]) {
         expect(source.trimEnd().split("\n").length).toBeLessThan(500);
       }
       expect(MAIN).toContain("persistence=hkcu-run-visible");
-      expect(MAIN).toContain('-WindowStyle $(if ($Supervised) { "Hidden" } else { "Normal" })');
+      expect(MAIN).toContain('-WindowStyle $(if ($Supervised -or $Hidden) { "Hidden" } else { "Normal" })');
+      expect(MAIN).not.toMatch(/-WindowStyle\s+"Hidden"/u);
+      expect(MAIN).toContain('[Parameter(ParameterSetName = "Run")]\n  [Parameter(ParameterSetName = "Start")]\n  [switch]$Hidden,');
+      expect(MAIN).toContain("Start-Restarter -Hidden:$Hidden");
+      expect(MAIN).toContain("if ($Hidden -and !$Supervised) { $arguments += \"-Hidden\" }");
+      expect(MAIN).toContain("schtasks stays hidden by OS nature");
       expect(IO).toContain('exec "$AMUX_BIN" serve');
       expect(IO).not.toContain("serve --detach");
     }],

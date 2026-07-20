@@ -109,32 +109,25 @@ function Invoke-WindowsCommand {
 
 function Invoke-FencedWslRestart {
   param([object]$Config, [object]$Plan)
-  $command = [string]$Plan.parsed.command
-  $receiptId = [string]$Plan.parsed.args.receipt
-  $verified = $(if ($receiptId) {
-    Get-VerifiedRestartReceipt -Config $Config -ReceiptId $receiptId
-  } else {
-    [pscustomobject]@{ ok = $false; reason = "restart-ready-receipt-missing"; path = $null; receipt = $null }
-  })
-  if (!$verified.ok) {
-    Send-DiscordReceipt -Config $Config -Message "AMUX BLOCKED $($verified.reason)"
-    return [pscustomobject]@{ ok = $false; stage = $verified.reason }
-  }
-  $observation = Get-WslObservation -Config $Config
-  $receipt = $verified.receipt
-  $check = Invoke-BridgeNode -Config $Config -NodeArguments (
-    "destructive-check --command $command --receipt `"$($verified.path)`" " +
-    "--receipt-id $receiptId --boot-id $($observation.bootId) " +
-    "--fleet-generation $($receipt.fleetGeneration) --source-sha $($observation.release.sourceSha)"
+  # The authorized human's explicit command IS the fence: exactly one bounded
+  # shutdown/start per command, journaled before execution. The observation
+  # feeds the report only, never a gate. No autonomous or timeout-triggered
+  # restarts exist on this path.
+  $before = Get-WslObservation -Config $Config
+  Send-DiscordReceipt -Config $Config -Message (
+    "AMUX restart på kommando av auktoriserad användare. Exakt en WSL shutdown/start körs. " +
+    "Före: $(Format-Status -Config $Config -Observation $before)"
   )
-  try { $verdict = $check.stdout | ConvertFrom-Json } catch { $verdict = $null }
-  if ($null -eq $verdict -or $verdict.allow -ne $true) {
-    $reason = $(if ($null -ne $verdict) { [string]$verdict.reason } else { "verdict-unreadable" })
-    Send-DiscordReceipt -Config $Config -Message "AMUX BLOCKED $reason"
-    return [pscustomobject]@{ ok = $false; stage = $reason }
-  }
-  Send-DiscordReceipt -Config $Config -Message "AMUX restart authorized by receipt $receiptId. Executing exactly one WSL shutdown/start."
   $result = Invoke-Rescue -Config $Config -Hard:$true
-  Send-DiscordReceipt -Config $Config -Message $(if ($result.ok) { "AMUX RECOVERED stage=$($result.stage)." } else { "AMUX PARTIAL stage=$($result.stage): $($result.detail)" })
+  $after = Get-WslObservation -Config $Config
+  if ($result.ok) {
+    Send-DiscordReceipt -Config $Config -Message (
+      "AMUX RECOVERED stage=$($result.stage). $(Format-Status -Config $Config -Observation $after)"
+    )
+  } else {
+    Send-DiscordReceipt -Config $Config -Message (
+      "AMUX PARTIAL stage=$($result.stage): $($result.detail). $(Format-Status -Config $Config -Observation $after)"
+    )
+  }
   return [pscustomobject]@{ ok = $result.ok; stage = $result.stage }
 }

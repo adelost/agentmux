@@ -20,6 +20,9 @@ param(
   [switch]$Supervise,
   [Parameter(ParameterSetName = "Start")]
   [switch]$Start,
+  [Parameter(ParameterSetName = "Run")]
+  [Parameter(ParameterSetName = "Start")]
+  [switch]$Hidden,
   [Parameter(ParameterSetName = "StartSupervised")]
   [switch]$StartSupervised,
   [Parameter(ParameterSetName = "Stop")]
@@ -91,16 +94,19 @@ function Stop-Restarter {
 }
 
 function Start-Restarter {
-  param([bool]$Supervised = $false)
+  param([bool]$Supervised = $false, [bool]$Hidden = $false)
   if ($null -ne (Get-LiveRestarterProcess)) { return }
   if (!(Test-Path $InstalledScript) -or !(Test-Path $ConfigPath) -or !(Test-Path $CredentialPath)) {
     throw "restarter is not installed"
   }
   Remove-Item -Force -ErrorAction SilentlyContinue $DisabledPath
+  # The visible terminal is the canonical operator path; -Hidden opts out of it.
+  # schtasks stays hidden by OS nature; scheduled task semantics are unchanged.
   $mode = $(if ($Supervised) { "-Supervise" } else { "-Run" })
-  Start-Process -FilePath "powershell.exe" -ArgumentList @(
-    "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$InstalledScript`"", $mode
-  ) -WindowStyle $(if ($Supervised) { "Hidden" } else { "Normal" })
+  $arguments = @("-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$InstalledScript`"", $mode)
+  if ($Hidden -and !$Supervised) { $arguments += "-Hidden" }
+  Start-Process -FilePath "powershell.exe" -ArgumentList $arguments `
+    -WindowStyle $(if ($Supervised -or $Hidden) { "Hidden" } else { "Normal" })
   for ($i = 0; $i -lt 100; $i++) {
     if ($null -ne (Get-LiveRestarterProcess)) { return }
     Start-Sleep -Milliseconds 100
@@ -199,7 +205,7 @@ if ($Install) {
 }
 
 if ($Start) {
-  Start-Restarter
+  Start-Restarter -Hidden:$Hidden
   Write-Output "STARTED"
   exit 0
 }

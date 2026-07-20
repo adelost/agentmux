@@ -32,6 +32,11 @@ const TEST_ALIASES = {
   "bin/windows-restarter-io.ps1": ["test/windows-restarter-contract.test.mjs"],
   "bin/windows-restarter-discord.ps1": ["test/windows-restarter-contract.test.mjs"],
   "bin/windows-wsl-probe.mjs": ["core/windows-wsl-probe.test.mjs"],
+  "bin/windows-manager.mjs": ["bin/windows-manager-smoke.test.mjs", "test/windows-manager-contract.test.mjs"],
+  "bin/windows-transcribe.py": ["core/windows-manager-input.test.mjs"],
+  "bin/windows-manager-install.ps1": ["test/windows-manager-install-contract.test.mjs"],
+  "bin/windows-rescue-tool.ps1": ["test/windows-manager-contract.test.mjs"],
+  "core/windows-manager-discord.mjs": ["bin/windows-manager-smoke.test.mjs", "test/windows-manager-contract.test.mjs"],
   "package.json": ["core/release-install.test.mjs"],
   "package-lock.json": ["core/release-install.test.mjs"],
 };

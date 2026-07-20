@@ -68,4 +68,21 @@ feature("focused PR tests", () => {
         .toEqual(["cli.test/commands.test.mjs"]);
     }],
   });
+
+  unit("the windows manager files map to their smoke and contract tests", {
+    then: ["the loop, the installer, and the rescue tool all land their focused tests", () => {
+      const exists = existsSet(["bin/windows-manager-smoke.test.mjs", "test/windows-manager-contract.test.mjs"]);
+      expect(relatedTests("bin/windows-manager.mjs", { exists }))
+        .toEqual(["bin/windows-manager-smoke.test.mjs", "test/windows-manager-contract.test.mjs"]);
+      expect(relatedTests("bin/windows-rescue-tool.ps1", { exists }))
+        .toEqual(["test/windows-manager-contract.test.mjs"]);
+      expect(unmappedExecutables(["bin/windows-manager.mjs", "bin/windows-rescue-tool.ps1"], { exists }))
+        .toEqual([]);
+      const installerExists = existsSet(["test/windows-manager-install-contract.test.mjs"]);
+      expect(relatedTests("bin/windows-manager-install.ps1", { exists: installerExists }))
+        .toEqual(["test/windows-manager-install-contract.test.mjs"]);
+      expect(unmappedExecutables(["bin/windows-manager-install.ps1"], { exists: installerExists }))
+        .toEqual([]);
+    }],
+  });
 });
