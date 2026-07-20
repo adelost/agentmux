@@ -209,9 +209,14 @@ function loadConfig() {
     throw new Error("manager config needs Discord snowflake channelId and authorizedUserId");
   }
   const kind = config.provider?.kind;
-  if (kind !== "http" && kind !== "mock") throw new Error("manager provider.kind must be http or mock");
+  if (kind !== "http" && kind !== "mock" && kind !== "cli") {
+    throw new Error("manager provider.kind must be http, mock, or cli");
+  }
   if (kind === "http" && (!config.provider.endpoint || !config.provider.model)) {
     throw new Error("manager http provider needs endpoint and model");
+  }
+  if (kind === "cli" && !config.provider.command) {
+    throw new Error("manager cli provider needs a command");
   }
   return { config, rootDir: dirname(configPath) };
 }
