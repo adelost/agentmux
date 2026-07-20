@@ -653,6 +653,30 @@ agents:
     }],
   });
 
+  component("all generated Kimi panes use the shared full-auto contract", {
+    given: ["an agent with one Kimi pane", () => ({
+      agents: new Map([["claw", {
+        dir: "/tmp/claw",
+        panes: 2,
+        claudeCount: 1,
+        codexCount: 0,
+        kimiCount: 1,
+        kimiModel: "kimi-code/k3",
+        services: [],
+        shells: 0,
+        layout: "tiled",
+      }]]),
+      channelMap: new Map(),
+      agentIds: new Map([["claw", "uuid"]]),
+    })],
+    when: ["generating the runtime config", ({ agents, channelMap, agentIds }) =>
+      generateAgentsYaml(agents, channelMap, agentIds)],
+    then: ["Kimi starts in auto mode without the mutually exclusive yolo flag", (yamlStr) => {
+      expect(yamlStr).toContain("/.kimi-code/bin/kimi --model kimi-code/k3 --auto");
+      expect(yamlStr).not.toContain("/.kimi-code/bin/kimi --model kimi-code/k3 --yolo");
+    }],
+  });
+
   component("generates correct structure", {
     given: ["agents with channels and IDs", () => {
       const agents = new Map([

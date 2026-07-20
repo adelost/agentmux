@@ -14,7 +14,7 @@ export const CODEX_AUTONOMOUS_ARGS = Object.freeze([
 
 /** WHAT: Defines Kimi autonomous argv. WHY: Keeps Kimi launch surfaces from drifting. */
 export const KIMI_AUTONOMOUS_ARGS = Object.freeze([
-  "--yolo",
+  "--auto",
 ]);
 
 export const CODEX_APP_SERVER_ARGS = Object.freeze([
