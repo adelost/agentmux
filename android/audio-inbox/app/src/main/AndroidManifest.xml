@@ -24,11 +24,7 @@
 
         <service
             android:name=".AudioInboxService"
-            android:exported="true"
-            android:foregroundServiceType="dataSync|mediaPlayback">
-            <intent-filter>
-                <action android:name="androidx.media3.session.MediaSessionService" />
-            </intent-filter>
-        </service>
+            android:exported="false"
+            android:foregroundServiceType="dataSync|mediaPlayback" />
     </application>
 </manifest>

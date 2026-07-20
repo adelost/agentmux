@@ -25,15 +25,20 @@ import android.widget.Toast;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
     private SharedPreferences preferences;
     private EditText server;
     private EditText target;
     private Switch handsFree;
+    private TextView provisioning;
+    private LinearLayout advanced;
     private TextView connection;
     private TextView current;
     private TextView history;
+    private final ExecutorService discoveryExecutor = Executors.newSingleThreadExecutor();
     private final Handler refreshHandler = new Handler(Looper.getMainLooper());
     private final Runnable refresher = new Runnable() {
         @Override
@@ -56,6 +61,7 @@ public final class MainActivity extends Activity {
         AppContract.consumerId(preferences);
         buildScreen();
         acceptLaunchConfiguration();
+        discoverConfiguration();
         requestNotificationPermission();
     }
 
@@ -78,6 +84,12 @@ public final class MainActivity extends Activity {
         super.onStop();
     }
 
+    @Override
+    protected void onDestroy() {
+        discoveryExecutor.shutdownNow();
+        super.onDestroy();
+    }
+
     private void buildScreen() {
         int pad = Math.round(20 * getResources().getDisplayMetrics().density);
         LinearLayout content = new LinearLayout(this);
@@ -94,20 +106,41 @@ public final class MainActivity extends Activity {
         explanation.setPadding(0, 4, 0, pad);
         content.addView(explanation);
 
+        provisioning = text("Finding Agentmux on Tailscale…", 15, true);
+        provisioning.setPadding(0, 0, 0, pad / 2);
+        content.addView(provisioning);
+
+        Button advancedToggle = new Button(this);
+        advancedToggle.setText("Advanced connection settings");
+        content.addView(advancedToggle);
+
+        advanced = new LinearLayout(this);
+        advanced.setOrientation(LinearLayout.VERTICAL);
+        advanced.setVisibility(LinearLayout.GONE);
+
         server = field("Voice server, e.g. http://100.x.y.z:8080");
         server.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         server.setText(preferences.getString(AppContract.KEY_SERVER, ""));
-        content.addView(server);
+        advanced.addView(server);
 
         target = field("Discord target channel id");
         target.setText(preferences.getString(AppContract.KEY_TARGET, ""));
-        content.addView(target);
+        advanced.addView(target);
+        content.addView(advanced);
+        advancedToggle.setOnClickListener(view -> {
+            advanced.setVisibility(
+                advanced.getVisibility() == LinearLayout.VISIBLE
+                    ? LinearLayout.GONE
+                    : LinearLayout.VISIBLE
+            );
+        });
 
         handsFree = new Switch(this);
         handsFree.setText("Hands-free");
         handsFree.setTextSize(20);
         handsFree.setPadding(0, pad, 0, pad);
         handsFree.setChecked(preferences.getBoolean(AppContract.KEY_ENABLED, false));
+        handsFree.setEnabled(false);
         handsFree.setOnCheckedChangeListener((button, enabled) -> setHandsFree(enabled));
         content.addView(handsFree);
 
@@ -162,19 +195,61 @@ public final class MainActivity extends Activity {
         if (launchTarget != null) target.setText(launchTarget);
     }
 
-    private void setHandsFree(boolean enabled) {
-        String serverValue = server.getText().toString().trim().replaceAll("/+$", "");
-        String targetValue = target.getText().toString().trim();
-        if (enabled && (!serverValue.matches("^https?://.+") || targetValue.isEmpty())) {
-            handsFree.setChecked(false);
-            Toast.makeText(this, "Set a server URL and target first", Toast.LENGTH_SHORT).show();
+    private void discoverConfiguration() {
+        String currentServer = server.getText().toString().trim().replaceAll("/+$", "");
+        String currentTarget = target.getText().toString().trim();
+        if (ServerDiscovery.isAllowedServer(currentServer)
+            && currentTarget.matches("^\\d{10,24}$")) {
+            saveConfiguration(currentServer, currentTarget);
+            provisioning.setText("Ready · saved connection");
+            handsFree.setEnabled(true);
             return;
         }
+        provisioning.setText("Finding Agentmux on Tailscale…");
+        discoveryExecutor.execute(() -> {
+            ServerDiscovery.Configuration found = ServerDiscovery.discover(
+                ServerDiscovery.DEFAULT_CANDIDATES
+            );
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (found == null) {
+                    provisioning.setText("Server not found · check Tailscale or use Advanced");
+                    advanced.setVisibility(LinearLayout.VISIBLE);
+                    handsFree.setEnabled(true);
+                    return;
+                }
+                server.setText(found.serverUrl);
+                target.setText(found.target);
+                saveConfiguration(found.serverUrl, found.target);
+                provisioning.setText("Ready via Tailscale · " + found.serverId);
+                handsFree.setEnabled(true);
+            });
+        });
+    }
+
+    private void saveConfiguration(String serverValue, String targetValue) {
         preferences.edit()
-            .putBoolean(AppContract.KEY_ENABLED, enabled)
             .putString(AppContract.KEY_SERVER, serverValue)
             .putString(AppContract.KEY_TARGET, targetValue)
             .apply();
+    }
+
+    private void setHandsFree(boolean enabled) {
+        String serverValue = server.getText().toString().trim().replaceAll("/+$", "");
+        String targetValue = target.getText().toString().trim();
+        if (enabled && (!ServerDiscovery.isAllowedServer(serverValue)
+            || !targetValue.matches("^\\d{10,24}$"))) {
+            handsFree.setChecked(false);
+            advanced.setVisibility(LinearLayout.VISIBLE);
+            Toast.makeText(
+                this,
+                "No verified Agentmux server is configured",
+                Toast.LENGTH_SHORT
+            ).show();
+            return;
+        }
+        saveConfiguration(serverValue, targetValue);
+        preferences.edit().putBoolean(AppContract.KEY_ENABLED, enabled).apply();
         Intent intent = new Intent(this, AudioInboxService.class);
         intent.setAction(enabled ? AppContract.ACTION_START : AppContract.ACTION_STOP);
         if (enabled && Build.VERSION.SDK_INT >= 26) startForegroundService(intent);

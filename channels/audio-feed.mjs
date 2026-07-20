@@ -4,10 +4,29 @@
  */
 export function createAudioFeedHandlers({
   audioOutbox,
+  discovery,
   json,
   parseJsonBody,
   pollIntervalMs,
 }) {
+  function configuration(_req, res) {
+    const serverId = typeof discovery?.serverId === "string"
+      ? discovery.serverId.trim()
+      : "";
+    const target = typeof discovery?.target === "string"
+      ? discovery.target.trim()
+      : "";
+    if (!serverId || !/^\d{10,24}$/.test(target)) {
+      return json(res, 503, { error: "audio inbox discovery is not configured" });
+    }
+    return json(res, 200, {
+      service: "agentmux-audio-inbox",
+      schemaVersion: 1,
+      serverId,
+      target,
+    });
+  }
+
   async function receipts(req, res, eventId) {
     if (!audioOutbox) return json(res, 503, { error: "audio outbox disabled" });
     try {
@@ -93,5 +112,5 @@ export function createAudioFeedHandlers({
     if (!res.writableEnded) res.end();
   }
 
-  return { events, receipts, receiptHistory };
+  return { configuration, events, receipts, receiptHistory };
 }

@@ -435,6 +435,10 @@ const voicePwa = createVoicePWA({
     ? ({ name, pane, dir }) => jsonlWatcher.enqueuePane(name, pane, dir)
     : null,
   audioOutbox,
+  audioDiscovery: {
+    serverId: process.env.AUDIO_INBOX_SERVER_ID,
+    target: process.env.AUDIO_INBOX_TARGET,
+  },
   staticDir: voicePwaStaticDir,
 });
 voicePwa.start()

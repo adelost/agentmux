@@ -25,13 +25,9 @@ import androidx.media3.session.MediaSessionService;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -47,7 +43,6 @@ public final class AudioInboxService extends MediaSessionService {
     static final String ACTION_REPLAY = "io.agentmux.audioinbox.REPLAY";
     private static final String STATUS_CHANNEL = "agent-audio-inbox-status";
     private static final int STATUS_NOTIFICATION_ID = 7301;
-    private static final int MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService feedExecutor = Executors.newSingleThreadExecutor();
@@ -61,6 +56,7 @@ public final class AudioInboxService extends MediaSessionService {
     private MediaSession mediaSession;
     private DuckAudioFocus audioFocus;
     private PlaybackQueue playbackQueue;
+    private AudioInboxHttpClient httpClient;
     private volatile boolean enabled;
     private volatile boolean connected;
     private volatile HttpURLConnection feedConnection;
@@ -173,18 +169,24 @@ public final class AudioInboxService extends MediaSessionService {
     private void startHandsFree() {
         String server = serverUrl();
         String target = preferences.getString(AppContract.KEY_TARGET, "");
-        if (server.isBlank() || target == null || target.isBlank()) {
+        if (!ServerDiscovery.isAllowedServer(server)
+            || target == null
+            || !target.matches("^\\d{10,24}$")) {
             updateConnection("Configuration required", false);
             stopSelf();
             return;
         }
+        httpClient = new AudioInboxHttpClient(
+            server,
+            AppContract.consumerId(preferences)
+        );
         enabled = true;
         preferences.edit().putBoolean(AppContract.KEY_ENABLED, true).apply();
         playbackQueue.setHandsFree(true);
         startStatusForeground();
         int generation = feedGeneration.incrementAndGet();
         updateConnection("Connecting", false);
-        feedExecutor.execute(() -> runFeed(generation, server, target));
+        feedExecutor.execute(() -> runFeed(generation, target));
     }
 
     private void stopHandsFree() {
@@ -202,21 +204,11 @@ public final class AudioInboxService extends MediaSessionService {
         stopSelf();
     }
 
-    private void runFeed(int generation, String server, String target) {
+    private void runFeed(int generation, String target) {
         while (enabled && generation == feedGeneration.get()) {
             try {
-                String consumer = AppContract.consumerId(preferences);
-                URL url = new URL(server + "/api/audio/events?consumerId="
-                    + encode(consumer) + "&target=" + encode(target) + "&limit=100");
-                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                HttpURLConnection connection = httpClient.openFeed(target);
                 feedConnection = connection;
-                connection.setRequestMethod("GET");
-                connection.setRequestProperty("Accept", "text/event-stream");
-                connection.setConnectTimeout(10_000);
-                connection.setReadTimeout(20_000);
-                if (connection.getResponseCode() != 200) {
-                    throw new IllegalStateException("feed HTTP " + connection.getResponseCode());
-                }
                 setConnected(true);
                 readFeed(connection, generation);
             } catch (Exception error) {
@@ -280,11 +272,11 @@ public final class AudioInboxService extends MediaSessionService {
         workExecutor.execute(() -> {
             try {
                 if (!canClaim()) return;
-                postReceipt(eventId, "received", null);
+                httpClient.postReceipt(eventId, "received", null);
                 saveLocalState(eventId, "received");
-                File media = fetchTts(eventId, text);
+                File media = httpClient.fetchTts(getCacheDir(), eventId, text);
                 if (!canClaim()) return;
-                postReceipt(eventId, "queued", null);
+                httpClient.postReceipt(eventId, "queued", null);
                 saveLocalState(eventId, "queued");
                 AudioItem item = new AudioItem(eventId, text, createdAt, expiresAt, media);
                 main.post(() -> queueItem(item));
@@ -319,7 +311,7 @@ public final class AudioInboxService extends MediaSessionService {
         workExecutor.execute(() -> {
             try {
                 if (!canClaim()) throw new IllegalStateException("disconnected before playback receipt");
-                postReceipt(candidate, "playback-started", null);
+                httpClient.postReceipt(candidate, "playback-started", null);
                 saveLocalState(candidate, "playback-started");
                 main.post(() -> startReserved(item));
             } catch (Exception error) {
@@ -365,7 +357,7 @@ public final class AudioInboxService extends MediaSessionService {
         if (item != null) saveHistory("Played · " + item.text);
         workExecutor.execute(() -> {
             try {
-                if (connected) postReceipt(eventId, "played", null);
+                if (connected) httpClient.postReceipt(eventId, "played", null);
                 saveLocalState(eventId, "played");
             } catch (Exception ignored) {}
         });
@@ -388,52 +380,10 @@ public final class AudioInboxService extends MediaSessionService {
 
     private void markFailed(String eventId, String detail) {
         try {
-            if (connected) postReceipt(eventId, "failed", detail);
+            if (connected) httpClient.postReceipt(eventId, "failed", safeDetail(detail));
         } catch (Exception ignored) {}
         saveLocalState(eventId, "failed");
         saveHistory("Failed · " + eventId + " · " + safeDetail(detail));
-    }
-
-    private File fetchTts(String eventId, String text) throws Exception {
-        URL url = new URL(serverUrl() + "/api/tts");
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setRequestMethod("POST");
-        connection.setRequestProperty("Content-Type", "application/json");
-        connection.setConnectTimeout(10_000);
-        connection.setReadTimeout(30_000);
-        connection.setDoOutput(true);
-        byte[] body = new JSONObject().put("text", text).toString().getBytes(StandardCharsets.UTF_8);
-        connection.getOutputStream().write(body);
-        if (connection.getResponseCode() != 200) {
-            throw new IllegalStateException("tts HTTP " + connection.getResponseCode());
-        }
-        byte[] audio = readBounded(connection.getInputStream(), MAX_AUDIO_BYTES);
-        File file = new File(getCacheDir(), "audio-" + eventId + ".mp3");
-        try (FileOutputStream output = new FileOutputStream(file)) {
-            output.write(audio);
-        }
-        connection.disconnect();
-        return file;
-    }
-
-    private void postReceipt(String eventId, String state, String detail) throws Exception {
-        URL url = new URL(serverUrl() + "/api/audio/events/" + encode(eventId) + "/receipts");
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setRequestMethod("POST");
-        connection.setRequestProperty("Content-Type", "application/json");
-        connection.setConnectTimeout(10_000);
-        connection.setReadTimeout(10_000);
-        connection.setDoOutput(true);
-        JSONObject body = new JSONObject()
-            .put("consumerId", AppContract.consumerId(preferences))
-            .put("state", state);
-        if (detail != null) body.put("detail", safeDetail(detail));
-        connection.getOutputStream().write(body.toString().getBytes(StandardCharsets.UTF_8));
-        int status = connection.getResponseCode();
-        connection.disconnect();
-        if (status != 200 && status != 201) {
-            throw new IllegalStateException("receipt " + state + " HTTP " + status);
-        }
     }
 
     private void setConnected(boolean value) {
@@ -467,11 +417,9 @@ public final class AudioInboxService extends MediaSessionService {
         if (connection != null) connection.disconnect();
         feedConnection = null;
     }
-
     private void saveLocalState(String eventId, String state) {
         preferences.edit().putString("event-state:" + eventId, state).apply();
     }
-
     private String localState(String eventId) {
         return preferences.getString("event-state:" + eventId, "");
     }
@@ -543,23 +491,6 @@ public final class AudioInboxService extends MediaSessionService {
         } else {
             startForeground(STATUS_NOTIFICATION_ID, notification);
         }
-    }
-
-    private static String encode(String value) {
-        return Uri.encode(value);
-    }
-
-    private static byte[] readBounded(InputStream input, int maxBytes) throws Exception {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        byte[] buffer = new byte[8192];
-        int total = 0;
-        int read;
-        while ((read = input.read(buffer)) != -1) {
-            total += read;
-            if (total > maxBytes) throw new IllegalStateException("audio clip exceeds 10 MiB");
-            output.write(buffer, 0, read);
-        }
-        return output.toByteArray();
     }
 
     private static String safeDetail(String value) {

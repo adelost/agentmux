@@ -173,6 +173,7 @@ export function createVoicePWA(deps) {
 
   const audioFeed = createAudioFeedHandlers({
     audioOutbox,
+    discovery: deps.audioDiscovery,
     json,
     parseJsonBody,
     pollIntervalMs,
@@ -422,8 +423,7 @@ export function createVoicePWA(deps) {
     const url = new URL(req.url, `http://${req.headers.host || "x"}`);
     const path = url.pathname;
 
-    // CORS for PWA served from different origin (legacy — same-origin deploy
-    // doesn't need this, but keep it permissive so external clients still work).
+    // Keep legacy cross-origin PWA clients working; the native app is same-tailnet.
     res.setHeader("access-control-allow-origin", "*");
     res.setHeader("access-control-allow-headers", "content-type, last-event-id");
     res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
@@ -442,6 +442,8 @@ export function createVoicePWA(deps) {
       if (req.method === "POST" && path === "/api/tts") {
         return await handleTts(req, res);
       }
+      if (req.method === "GET" && path === "/api/audio/config")
+        return audioFeed.configuration(req, res);
       if (req.method === "GET" && path === "/api/audio/events") {
         return await audioFeed.events(req, res, url);
       }

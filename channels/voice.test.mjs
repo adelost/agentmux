@@ -71,6 +71,7 @@ function setupServer(opts = {}) {
     mirror,
     reactivePoke,
     audioOutbox: opts.audioOutbox || null,
+    audioDiscovery: opts.audioDiscovery,
   });
 
   return {
@@ -419,6 +420,39 @@ feature("GET /api/events: SSE stream", () => {
 });
 
 feature("explicit audio phone feed", () => {
+  component("discovery returns one verified default target and fails closed when unconfigured", {
+    given: ["configured and unconfigured servers", async () => {
+      const configured = setupServer({
+        audioDiscovery: {
+          serverId: "abyss-wsl",
+          target: "1502949109491961917",
+        },
+      });
+      const missing = setupServer();
+      const configuredAddress = await configured.pwa.start();
+      const missingAddress = await missing.pwa.start();
+      return { configured, missing, configuredAddress, missingAddress };
+    }],
+    when: ["the phone requests both discovery documents", async (ctx) => ({
+      configured: await request(`${ctx.configuredAddress.url}/api/audio/config`),
+      missing: await request(`${ctx.missingAddress.url}/api/audio/config`),
+    })],
+    then: ["only the explicit versioned configuration is discoverable", async (result, ctx) => {
+      expect(result.configured.status).toBe(200);
+      expect(result.configured.body).toEqual({
+        service: "agentmux-audio-inbox",
+        schemaVersion: 1,
+        serverId: "abyss-wsl",
+        target: "1502949109491961917",
+      });
+      expect(result.missing.status).toBe(503);
+      await ctx.configured.pwa.stop();
+      await ctx.missing.pwa.stop();
+      ctx.configured.cleanup();
+      ctx.missing.cleanup();
+    }],
+  });
+
   component("SSE replays one event and receipts keep received distinct from played", {
     given: ["a restarted durable outbox and voice server", async () => {
       const root = mkdtempSync(join(tmpdir(), "voice-audio-feed-test-"));
