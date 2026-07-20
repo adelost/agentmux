@@ -1,5 +1,6 @@
 import { expect, feature, unit } from "bdd-vitest";
 import {
+  combinedPanelRestartState,
   nativePanelRestartState,
   panelRestartState,
   parseTmuxPaneRows,
@@ -54,6 +55,23 @@ feature("restart-ready inventory adapters", () => {
     then: ["session, pane, and exact cwd are parsed", () => {
       expect(parseTmuxPaneRows("lsrc\t3\t/home/adelost/lsrc/.agents/3\n"))
         .toEqual([{ agent: "lsrc", pane: 3, path: "/home/adelost/lsrc/.agents/3" }]);
+    }],
+  });
+
+  unit("old interrupted journals do not impersonate a current active turn", {
+    then: ["live non-idle status blocks while proven idle status remains restartable", () => {
+      expect(combinedPanelRestartState(
+        { state: "active", reason: "turn-incomplete" },
+        "idle",
+      )).toEqual({ state: "idle", reason: "prior-turn-interrupted" });
+      expect(combinedPanelRestartState(
+        { state: "idle", reason: "turn-complete" },
+        "working",
+      )).toEqual({ state: "active", reason: "pane-working" });
+      expect(combinedPanelRestartState(
+        { state: "idle", reason: "turn-complete" },
+        "unknown",
+      )).toEqual({ state: "unknown", reason: "pane-status-unknown" });
     }],
   });
 });

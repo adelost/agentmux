@@ -14,6 +14,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { listAgents } from "./config.mjs";
+import { getPaneStatus } from "./tmux.mjs";
 import { readLastTurns } from "../core/jsonl-reader.mjs";
 import { readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { readLastTurnsKimi } from "../core/kimi-jsonl-reader.mjs";
@@ -45,6 +46,21 @@ export function panelRestartState(turns) {
   if (latest.isComplete === true) return { state: "idle", reason: "turn-complete" };
   if (latest.isComplete === false) return { state: "active", reason: "turn-incomplete" };
   return { state: "unknown", reason: "completion-unclassified" };
+}
+
+/** WHAT: Maps durable turn completion with the live pane observation. WHY: Prevents old interrupted journals and current active panes from being conflated. */
+export function combinedPanelRestartState(journal, observedStatus) {
+  if (observedStatus === "unknown" || !observedStatus) {
+    return { state: "unknown", reason: "pane-status-unknown" };
+  }
+  if (observedStatus !== "idle") {
+    return { state: "active", reason: `pane-${observedStatus}` };
+  }
+  if (journal.state === "idle") return journal;
+  if (journal.state === "active") {
+    return { state: "idle", reason: "prior-turn-interrupted" };
+  }
+  return journal;
 }
 
 /** WHAT: Maps native history to restart safety. WHY: Prevents a resident native process from being mistaken for an active turn. */
@@ -103,6 +119,7 @@ function readTurns(engine, paneDir) {
 
 async function collectPanels(ctx, agents, liveNames) {
   const panels = [];
+  const tmuxTasks = [];
   for (const agent of agents) {
     if (agent.backend === "native") {
       for (let pane = 0; pane < agent.panes.length; pane++) {
@@ -127,14 +144,22 @@ async function collectPanels(ctx, agents, liveNames) {
       const engine = restartPaneEngine(agent.panes[pane]);
       if (!engine) continue;
       const paneDir = join(agent.dir, ".agents", String(pane));
-      try {
-        panels.push({ agent: agent.name, pane, engine, ...panelRestartState(readTurns(engine, paneDir)) });
-      } catch {
-        panels.push({ agent: agent.name, pane, engine, state: "unknown", reason: "journal-unreadable" });
-      }
+      tmuxTasks.push((async () => {
+        let journal;
+        try { journal = panelRestartState(readTurns(engine, paneDir)); }
+        catch { journal = { state: "unknown", reason: "journal-unreadable" }; }
+        let observedStatus = "unknown";
+        try { observedStatus = await getPaneStatus(ctx, agent.name, pane); } catch {}
+        return {
+          agent: agent.name,
+          pane,
+          engine,
+          ...combinedPanelRestartState(journal, observedStatus),
+        };
+      })());
     }
   }
-  return panels;
+  return [...panels, ...(await Promise.all(tmuxTasks))];
 }
 
 function collectDeliveries(queue) {
