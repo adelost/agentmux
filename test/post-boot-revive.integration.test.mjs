@@ -133,11 +133,12 @@ feature("post-boot revive launcher", () => {
     }],
   });
 
-  integration("start.sh launches it asynchronously and supports an explicit opt-out", {
+  integration("start.sh launches whole-fleet revive only on explicit opt-in", {
     given: ["the supervisor source", () => readFileSync(join(REPO, "bin", "start.sh"), "utf-8")],
     when: ["checking the startup contract", (source) => source],
-    then: ["background launch plus AMUX_AUTO_REVIVE=false gate", (source) => {
-      expect(source).toContain("AMUX_AUTO_REVIVE:-true");
+    then: ["default is no revive mutation; AMUX_AUTO_REVIVE=true enables the gated path", (source) => {
+      expect(source).toContain("AMUX_AUTO_REVIVE:-false");
+      expect(source).toContain('= "true" ]');
       expect(source).toContain("post-boot-revive.sh");
       expect(source).toMatch(/post-boot-revive\.sh.*&/);
     }],

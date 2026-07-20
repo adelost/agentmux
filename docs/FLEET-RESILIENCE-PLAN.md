@@ -59,6 +59,8 @@ försök, bevara diagnostik/arbete, eskalera vid osäkerhet. Host/disk död → 
 köa; påstå aldrig recovery.
 Bygg ut `bin/windows-discord-restarter.ps1` inom dessa ramar. Tunn konsument av samma
 health-beslut (heartbeat + memory-guard state + release identity).
+**Synligt foreground-läge är kanoniskt:** brygga och framtida Windows-räddning öppnas i en
+synlig terminal (`amux serve` i förgrunden); `--detach` är opt-in, aldrig default.
 
 ### T11 — Controlled WSL restart (nästa version, PLANERAD – ej påbörjad)
 Use case: en säker WSL-omstart som låter alla Codex-paneler ladda om delade credentials,
@@ -70,7 +72,8 @@ utan att besöka paneler individuellt. Tre explicita faser, aldrig autonom vid t
 2. `amux-windows restart-wsl --receipt <id>` (Windows): validera kvittsen, exakt EN `wsl --shutdown`,
    starta WSL med hårda timeouts, stoppa vid klassificerat fel. Inga loopar, inga retry av
    tvetydiga skrivningar, ingen restart bara för att en heartbeat timat ut.
-3. Verifierad återställning: Windows-transport först, sedan `amux serve --detach`; identity-check
+3. Verifierad återställning: Windows-transport först i synlig terminal, sedan `amux serve` i
+   förgrunden (kanoniskt; `--detach` är opt-in, aldrig default); identity-check
    av installerad release; återskapa konfigurerade tmux-sessioner; resume från persistade
    sessioner/journal; dränera durable meddelanden; publicera RECOVERED / PARTIAL / BLOCKED.
    Påstå aldrig recovered från processexistens.

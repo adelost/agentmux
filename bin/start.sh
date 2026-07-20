@@ -29,11 +29,12 @@ fi
 # will surface the failure rather than mask it.
 fast_crashes=0
 
-# `amux serve` is the explicit bring-the-stack-online action. After a WSL
-# reboot, restore configured coding panes and interrupted turns once in the
-# background while Discord becomes ready. A per-boot lock/marker makes bridge
-# restarts in the same boot no-ops.
-if [ "${AMUX_AUTO_REVIVE:-true}" != "false" ]; then
+# `amux serve` is the explicit bring-the-stack-online action. Whole-fleet
+# post-boot pane revive is OPT-IN (default off): the 2026-07-20 revive storm
+# launched ~70 panes at once into a low-memory host and missed the truly
+# interrupted tasks. Until manager-first selective revival lands (T13), only
+# the bridge/foreground recovery channel starts by default.
+if [ "${AMUX_AUTO_REVIVE:-false}" = "true" ]; then
   mkdir -p "$HOME/.agentmux"
   bash "$DIR/bin/post-boot-revive.sh" >> "$HOME/.agentmux/revive.log" 2>&1 &
 fi

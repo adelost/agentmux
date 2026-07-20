@@ -7,6 +7,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { AMUX_ENV_VAR } from "./config-sources.mjs";
 import {
   observeReleaseIdentity, readReleaseManifest, RELEASE_MANIFEST_NAME, releaseReceiptPath,
 } from "./release-identity.mjs";
@@ -58,11 +59,13 @@ function atomicJson(path, value) {
   renameSync(temporary, path);
 }
 
-/** WHAT: Collects runtime config from home, repo, or installed package in that precedence. WHY: Separates credentials from the replaceable package tree. */
-export function snapshotRuntimeConfig(repoRoot, installedRoot, home) {
+/** WHAT: Collects runtime config from explicit env paths, home, repo, or installed package. WHY: Separates credentials from the replaceable package tree. */
+export function snapshotRuntimeConfig(repoRoot, installedRoot, home, env = process.env) {
   const homeDir = join(home, ".agentmux");
+  const explicit = { ".env": env[AMUX_ENV_VAR], "agentmux.yaml": env.AGENTMUX_YAML };
   return CONFIG_FILES.flatMap((name) => {
-    const source = [join(homeDir, name), join(repoRoot, name), join(installedRoot, name)]
+    const source = [explicit[name], join(homeDir, name), join(repoRoot, name), join(installedRoot, name)]
+      .filter(Boolean)
       .find((path) => existsSync(path));
     return source ? [{ name, bytes: readFileSync(source) }] : [];
   });

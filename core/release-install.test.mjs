@@ -168,4 +168,45 @@ feature("explicit-SHA release artifact", () => {
       ])).toBeUndefined();
     }],
   });
+
+  component("explicit env-pinned config paths are accepted as the recoverable source", {
+    given: ["custom config files that exist ONLY outside home/repo/installed package", () => {
+      const base = mkdtempSync(join(tmpdir(), "amux-release-envpin-"));
+      const home = join(base, "home");
+      const repo = join(base, "repo");
+      const installed = join(base, "installed");
+      const pinned = join(base, "pinned");
+      mkdirSync(join(home, ".agentmux"), { recursive: true });
+      mkdirSync(repo, { recursive: true });
+      mkdirSync(installed, { recursive: true });
+      mkdirSync(pinned, { recursive: true });
+      writeFileSync(join(pinned, "secrets.env"), "pinned-env-bytes\n");
+      writeFileSync(join(pinned, "fleet.yaml"), "pinned-yaml-bytes\n");
+      const env = {
+        AMUX_DISCORD_ENV: join(pinned, "secrets.env"),
+        AGENTMUX_YAML: join(pinned, "fleet.yaml"),
+      };
+      return { base, home, repo, installed, env, cleanup: () => rmSync(base, { recursive: true, force: true }) };
+    }],
+    when: ["snapshotting and restoring with only env-pinned sources", (ctx) => {
+      const configs = snapshotRuntimeConfig(ctx.repo, ctx.installed, ctx.home, ctx.env);
+      const fresh = join(ctx.base, "fresh-package");
+      mkdirSync(fresh, { recursive: true });
+      restoreRuntimeConfig(configs, fresh, ctx.home);
+      return { ctx, configs, fresh };
+    }],
+    then: ["the exact pinned bytes are recoverable and land byte-exact in home and package", ({ ctx, configs, fresh }) => {
+      try {
+        expect(assertSnapshotRecoverable(configs)).toBeUndefined();
+        const env = configs.find((file) => file.name === ".env");
+        const yaml = configs.find((file) => file.name === "agentmux.yaml");
+        expect(String(env.bytes)).toBe("pinned-env-bytes\n");
+        expect(String(yaml.bytes)).toBe("pinned-yaml-bytes\n");
+        expect(readFileSync(join(ctx.home, ".agentmux", ".env"), "utf8")).toBe("pinned-env-bytes\n");
+        expect(readFileSync(join(fresh, ".env"), "utf8")).toBe("pinned-env-bytes\n");
+        expect(readFileSync(join(fresh, "agentmux.yaml"), "utf8")).toBe("pinned-yaml-bytes\n");
+        ctx.cleanup();
+      } catch (error) { ctx.cleanup(); throw error; }
+    }],
+  });
 });
