@@ -203,6 +203,18 @@ function Get-VerifiedRestartReceipt {
   $script = Get-AmuxScript "`"`$AMUX_BIN`" restart-ready verify $ReceiptId --json"
   $result = Invoke-WslScript -Config $Config -Script $script -TimeoutSeconds 90
   if (!$result.ok) {
+    $blocked = $null
+    try { $blocked = $result.stdout | ConvertFrom-Json } catch {}
+    if ($null -ne $blocked -and @($blocked.blockers).Count -gt 0) {
+      $first = @($blocked.blockers)[0]
+      $extra = @($blocked.blockers).Count - 1
+      return [pscustomobject]@{
+        ok = $false
+        reason = "restart-ready-blocked:$($first.kind):$($first.id):$($first.reason):+$extra"
+        path = $null
+        receipt = $null
+      }
+    }
     return [pscustomobject]@{
       ok = $false
       reason = $(if ($result.timedOut) { "restart-ready-verify-timeout" } else { "restart-ready-verify-failed" })

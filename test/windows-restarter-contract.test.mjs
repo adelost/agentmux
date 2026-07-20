@@ -129,6 +129,13 @@ feature("windows restarter source contract", () => {
     }],
   });
 
+  unit("a changed readiness inventory reports an exact blocker", {
+    then: ["the Windows refusal preserves blocker kind, id, reason, and remaining count", () => {
+      expect(IO).toContain("restart-ready-blocked:$($first.kind):$($first.id):$($first.reason):+$extra");
+      expect(IO).toContain("@($blocked.blockers).Count");
+    }],
+  });
+
   unit("PowerShell stays split into thin files and visible foreground is canonical", {
     then: ["every file is below 500 lines and hidden supervision is opt-in", () => {
       for (const source of [MAIN, IO, DISCORD]) {
