@@ -7,13 +7,17 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.res.ColorStateList;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
+import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
@@ -29,6 +33,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
+    private static final int BACKGROUND = Color.rgb(9, 13, 18);
+    private static final int SURFACE = Color.rgb(18, 25, 34);
+    private static final int PRIMARY = Color.rgb(238, 246, 243);
+    private static final int SECONDARY = Color.rgb(147, 164, 174);
+    private static final int ACCENT = Color.rgb(109, 227, 181);
+    private static final int WARNING = Color.rgb(255, 190, 92);
+    private static final int ERROR = Color.rgb(255, 112, 112);
+
     private SharedPreferences preferences;
     private EditText server;
     private EditText target;
@@ -38,6 +50,7 @@ public final class MainActivity extends Activity {
     private TextView connection;
     private TextView current;
     private TextView history;
+    private Button replay;
     private final ExecutorService discoveryExecutor = Executors.newSingleThreadExecutor();
     private final Handler refreshHandler = new Handler(Looper.getMainLooper());
     private final Runnable refresher = new Runnable() {
@@ -57,6 +70,8 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        getWindow().setStatusBarColor(BACKGROUND);
+        getWindow().setNavigationBarColor(BACKGROUND);
         preferences = getSharedPreferences(AppContract.PREFS, MODE_PRIVATE);
         AppContract.consumerId(preferences);
         buildScreen();
@@ -91,31 +106,61 @@ public final class MainActivity extends Activity {
     }
 
     private void buildScreen() {
-        int pad = Math.round(20 * getResources().getDisplayMetrics().density);
+        int pad = dp(20);
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(pad, pad, pad, pad);
+        content.setPadding(pad, dp(24), pad, dp(32));
+        content.setBackgroundColor(BACKGROUND);
 
-        TextView title = text("Agent Audio Inbox", 26, true);
-        content.addView(title);
+        content.addView(sectionLabel("PRIVATE TAILNET AUDIO"));
+        TextView title = text("Audio Inbox", 34, true, PRIMARY);
+        title.setLetterSpacing(-0.02f);
+        content.addView(title, blockMargins(2, 4));
         TextView explanation = text(
-            "Explicit amux say updates only. Tailscale is the network boundary.",
+            "Hear deliberate Agentmux updates without keeping Discord open.",
             15,
-            false
+            false,
+            SECONDARY
         );
-        explanation.setPadding(0, 4, 0, pad);
-        content.addView(explanation);
+        explanation.setLineSpacing(0, 1.15f);
+        content.addView(explanation, blockMargins(0, 22));
 
-        provisioning = text("Finding Agentmux on Tailscale…", 15, true);
-        provisioning.setPadding(0, 0, 0, pad / 2);
-        content.addView(provisioning);
+        LinearLayout statusCard = card();
+        LinearLayout statusRow = new LinearLayout(this);
+        statusRow.setOrientation(LinearLayout.HORIZONTAL);
+        statusRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout statusCopy = new LinearLayout(this);
+        statusCopy.setOrientation(LinearLayout.VERTICAL);
+        statusCopy.addView(text("Hands-free listening", 19, true, PRIMARY));
+        statusCopy.addView(text("Only explicit audio updates", 13, false, SECONDARY));
+        statusRow.addView(statusCopy, new LinearLayout.LayoutParams(0,
+            ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
-        Button advancedToggle = new Button(this);
-        advancedToggle.setText("Advanced connection settings");
-        content.addView(advancedToggle);
+        handsFree = new Switch(this);
+        handsFree.setContentDescription("Hands-free listening");
+        handsFree.setChecked(preferences.getBoolean(AppContract.KEY_ENABLED, false));
+        handsFree.setEnabled(false);
+        handsFree.setOnCheckedChangeListener((button, enabled) -> setHandsFree(enabled));
+        toggleColors(handsFree);
+        statusRow.addView(handsFree, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            dp(48)
+        ));
+        statusCard.addView(statusRow);
+
+        connection = text("Off", 15, true, SECONDARY);
+        statusCard.addView(connection, blockMargins(18, 3));
+        provisioning = text("Finding Agentmux on Tailscale…", 13, false, WARNING);
+        statusCard.addView(provisioning);
+        content.addView(statusCard, blockMargins(0, 12));
+
+        Button advancedToggle = quietButton("Advanced settings");
+        content.addView(advancedToggle, blockMargins(0, 12));
 
         advanced = new LinearLayout(this);
         advanced.setOrientation(LinearLayout.VERTICAL);
+        advanced.setPadding(dp(14), dp(14), dp(14), 0);
+        advanced.setBackground(rounded(Color.rgb(12, 18, 25), dp(16), Color.rgb(41, 54, 65)));
         advanced.setVisibility(LinearLayout.GONE);
 
         server = field("Voice server, e.g. http://100.x.y.z:8080");
@@ -126,42 +171,47 @@ public final class MainActivity extends Activity {
         target = field("Discord target channel id");
         target.setText(preferences.getString(AppContract.KEY_TARGET, ""));
         advanced.addView(target);
-        content.addView(advanced);
+        content.addView(advanced, blockMargins(0, 14));
         advancedToggle.setOnClickListener(view -> {
-            advanced.setVisibility(
-                advanced.getVisibility() == LinearLayout.VISIBLE
-                    ? LinearLayout.GONE
-                    : LinearLayout.VISIBLE
-            );
+            boolean show = advanced.getVisibility() != LinearLayout.VISIBLE;
+            advanced.setVisibility(show ? LinearLayout.VISIBLE : LinearLayout.GONE);
+            advancedToggle.setText(show ? "Hide advanced settings" : "Advanced settings");
         });
 
-        handsFree = new Switch(this);
-        handsFree.setText("Hands-free");
-        handsFree.setTextSize(20);
-        handsFree.setPadding(0, pad, 0, pad);
-        handsFree.setChecked(preferences.getBoolean(AppContract.KEY_ENABLED, false));
-        handsFree.setEnabled(false);
-        handsFree.setOnCheckedChangeListener((button, enabled) -> setHandsFree(enabled));
-        content.addView(handsFree);
-
-        connection = text("Off", 16, true);
-        content.addView(connection);
-        current = text("Current: —", 16, false);
-        current.setPadding(0, pad, 0, pad);
-        content.addView(current);
-        history = text("History: —", 14, false);
-        content.addView(history);
-
-        Button replay = new Button(this);
-        replay.setText("Replay current");
+        content.addView(sectionLabel("LATEST UPDATE"), blockMargins(8, 8));
+        LinearLayout latestCard = card();
+        current = text("No update yet", 17, false, PRIMARY);
+        current.setLineSpacing(0, 1.12f);
+        latestCard.addView(current);
+        replay = primaryButton("Replay current");
         replay.setOnClickListener(view -> {
             Intent intent = new Intent(this, AudioInboxService.class);
             intent.setAction(AudioInboxService.ACTION_REPLAY);
             startService(intent);
         });
-        content.addView(replay);
+        latestCard.addView(replay, blockMargins(18, 0));
+        content.addView(latestCard, blockMargins(0, 22));
+
+        content.addView(sectionLabel("RECENT"), blockMargins(0, 8));
+        LinearLayout historyCard = card();
+        history = text("Nothing played yet", 14, false, SECONDARY);
+        history.setLineSpacing(dp(3), 1f);
+        historyCard.addView(history);
+        content.addView(historyCard, blockMargins(0, 18));
+
+        TextView privacy = text(
+            "Audio is explicit. This app never listens to your microphone in the background.",
+            12,
+            false,
+            SECONDARY
+        );
+        privacy.setGravity(Gravity.CENTER);
+        privacy.setLineSpacing(0, 1.12f);
+        content.addView(privacy, blockMargins(0, 0));
 
         ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BACKGROUND);
         scroll.addView(content, new ScrollView.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
@@ -169,23 +219,106 @@ public final class MainActivity extends Activity {
         setContentView(scroll);
     }
 
-    private TextView text(String value, int size, boolean bold) {
+    private TextView text(String value, int size, boolean bold, int color) {
         TextView view = new TextView(this);
         view.setText(value);
         view.setTextSize(size);
+        view.setTextColor(color);
         if (bold) view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         return view;
+    }
+
+    private TextView sectionLabel(String value) {
+        TextView label = text(value, 11, true, ACCENT);
+        label.setLetterSpacing(0.16f);
+        return label;
+    }
+
+    private LinearLayout card() {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(18), dp(17), dp(18), dp(17));
+        card.setBackground(rounded(SURFACE, dp(18), Color.rgb(34, 46, 57)));
+        return card;
+    }
+
+    private Button primaryButton(String value) {
+        Button button = new Button(this);
+        button.setText(value);
+        button.setTextSize(14);
+        button.setTextColor(Color.rgb(5, 20, 15));
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setAllCaps(false);
+        button.setMinHeight(dp(48));
+        button.setBackground(rounded(ACCENT, dp(14), ACCENT));
+        return button;
+    }
+
+    private Button quietButton(String value) {
+        Button button = new Button(this);
+        button.setText(value);
+        button.setTextSize(13);
+        button.setTextColor(SECONDARY);
+        button.setAllCaps(false);
+        button.setMinHeight(dp(46));
+        button.setBackground(rounded(Color.TRANSPARENT, dp(14), Color.rgb(41, 54, 65)));
+        return button;
     }
 
     private EditText field(String hint) {
         EditText field = new EditText(this);
         field.setHint(hint);
+        field.setHintTextColor(Color.rgb(107, 126, 137));
+        field.setTextColor(PRIMARY);
+        field.setTextSize(14);
+        field.setPadding(dp(13), 0, dp(13), 0);
+        field.setMinHeight(dp(50));
+        field.setBackground(rounded(BACKGROUND, dp(12), Color.rgb(41, 54, 65)));
         field.setSingleLine(true);
-        field.setLayoutParams(new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
+        );
+        params.bottomMargin = dp(14);
+        field.setLayoutParams(params);
         return field;
+    }
+
+    private GradientDrawable rounded(int fill, int radius, int stroke) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(fill);
+        shape.setCornerRadius(radius);
+        shape.setStroke(dp(1), stroke);
+        return shape;
+    }
+
+    private LinearLayout.LayoutParams blockMargins(int top, int bottom) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        params.topMargin = dp(top);
+        params.bottomMargin = dp(bottom);
+        return params;
+    }
+
+    private void toggleColors(Switch toggle) {
+        int[][] states = new int[][]{
+            new int[]{android.R.attr.state_checked},
+            new int[]{}
+        };
+        toggle.setThumbTintList(new ColorStateList(states, new int[]{
+            ACCENT,
+            Color.rgb(126, 141, 150)
+        }));
+        toggle.setTrackTintList(new ColorStateList(states, new int[]{
+            Color.rgb(54, 115, 92),
+            Color.rgb(44, 55, 64)
+        }));
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
     private void acceptLaunchConfiguration() {
@@ -202,10 +335,13 @@ public final class MainActivity extends Activity {
             && currentTarget.matches("^\\d{10,24}$")) {
             saveConfiguration(currentServer, currentTarget);
             provisioning.setText("Ready · saved connection");
+            provisioning.setTextColor(ACCENT);
             handsFree.setEnabled(true);
+            resumeHandsFreeIfEnabled();
             return;
         }
         provisioning.setText("Finding Agentmux on Tailscale…");
+        provisioning.setTextColor(WARNING);
         discoveryExecutor.execute(() -> {
             ServerDiscovery.Configuration found = ServerDiscovery.discover(
                 ServerDiscovery.DEFAULT_CANDIDATES
@@ -214,6 +350,7 @@ public final class MainActivity extends Activity {
                 if (isFinishing() || isDestroyed()) return;
                 if (found == null) {
                     provisioning.setText("Server not found · check Tailscale or use Advanced");
+                    provisioning.setTextColor(ERROR);
                     advanced.setVisibility(LinearLayout.VISIBLE);
                     handsFree.setEnabled(true);
                     return;
@@ -222,9 +359,19 @@ public final class MainActivity extends Activity {
                 target.setText(found.target);
                 saveConfiguration(found.serverUrl, found.target);
                 provisioning.setText("Ready via Tailscale · " + found.serverId);
+                provisioning.setTextColor(ACCENT);
                 handsFree.setEnabled(true);
+                resumeHandsFreeIfEnabled();
             });
         });
+    }
+
+    private void resumeHandsFreeIfEnabled() {
+        if (!preferences.getBoolean(AppContract.KEY_ENABLED, false)) return;
+        Intent intent = new Intent(this, AudioInboxService.class);
+        intent.setAction(AppContract.ACTION_START);
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent);
+        else startService(intent);
     }
 
     private void saveConfiguration(String serverValue, String targetValue) {
@@ -261,15 +408,31 @@ public final class MainActivity extends Activity {
         if (handsFree.isChecked() != enabled) handsFree.setChecked(enabled);
         String state = preferences.getString(AppContract.KEY_CONNECTION, enabled ? "Connecting" : "Off");
         long connectedAt = preferences.getLong(AppContract.KEY_CONNECTED_AT, 0);
-        String connectionAge = connectedAt == 0 ? "" : " · " + age(connectedAt);
+        String connectionAge = connectedAt == 0 || "Off".equals(state)
+            ? ""
+            : " · " + age(connectedAt);
         connection.setText(state + connectionAge);
+        connection.setTextColor(connectionColor(state));
         String currentText = preferences.getString(AppContract.KEY_CURRENT, "");
         long currentAt = preferences.getLong(AppContract.KEY_CURRENT_CREATED_AT, 0);
-        current.setText(currentText == null || currentText.isBlank()
-            ? "Current: —"
-            : "Current (" + age(currentAt) + "): " + currentText);
+        boolean hasCurrent = currentText != null && !currentText.isBlank();
+        current.setText(hasCurrent
+            ? currentText + "\n" + age(currentAt) + " ago"
+            : "No update yet");
+        current.setTextColor(hasCurrent ? PRIMARY : SECONDARY);
+        replay.setEnabled(hasCurrent);
+        replay.setAlpha(hasCurrent ? 1f : 0.38f);
         String items = preferences.getString(AppContract.KEY_HISTORY, "");
-        history.setText(items == null || items.isBlank() ? "History: —" : "History:\n" + items);
+        history.setText(items == null || items.isBlank() ? "Nothing played yet" : items);
+        history.setTextColor(items == null || items.isBlank() ? SECONDARY : PRIMARY);
+    }
+
+    private int connectionColor(String state) {
+        String normalized = state == null ? "" : state.toLowerCase();
+        if (normalized.startsWith("connected") || normalized.startsWith("playing")) return ACCENT;
+        if (normalized.startsWith("connecting")) return WARNING;
+        if (normalized.startsWith("off")) return SECONDARY;
+        return ERROR;
     }
 
     private String age(long epochMillis) {
