@@ -192,7 +192,7 @@ const discord = createDiscordChannel({ token: TOKEN, onSent: stampChannelMirror 
 const memoryAlertChannel = process.env.AMUX_MEMORY_ALERT_CHANNEL || null;
 startMemoryGuard({
   onTransition: async ({ from, to, state }) => {
-    const text = `🧠 Minnesvakt: ${from} → ${to} (MemAvailable ${Math.round((state.sample?.memAvailableKb || 0) / 1024 / 1024 * 10) / 10} GiB, SwapFree ${Math.round((state.sample?.swapFreeKb || 0) / 1024 / 1024 * 10) / 10} GiB) — nya tunga automatjobb ${to === "blocked" || to === "critical" ? "stoppas" : "tillåts"}.`;
+    const text = `🧠 Minnesvakt: ${from} → ${to} (MemAvailable ${Math.round((state.sample?.memAvailableKb || 0) / 1024 / 1024 * 10) / 10} GiB, SwapFree ${Math.round((state.sample?.swapFreeKb || 0) / 1024 / 1024 * 10) / 10} GiB): nya tunga automatjobb ${to === "blocked" || to === "critical" ? "stoppas" : "tillåts"}.`;
     console.warn(`[memory-guard] ${text}`);
     if (memoryAlertChannel) {
       await discord.send(memoryAlertChannel, text).catch((error) =>

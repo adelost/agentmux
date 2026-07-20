@@ -14,6 +14,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
+/** WHAT: Defines relative memory thresholds for a 48 GiB host. WHY: Keeps guard tuning separate from decision logic. */
 export const MEMORY_GUARDRAIL_DEFAULTS = Object.freeze({
   warnAvailableRatio: 0.17,
   blockAvailableRatio: 0.11,
@@ -29,7 +30,7 @@ export const MEMORY_GUARDRAIL_DEFAULTS = Object.freeze({
 const LEVELS = ["normal", "warn", "blocked", "critical"];
 const HEAVY_CLASSES = new Set(["browser", "emulator", "heavy-gate", "pane-revive"]);
 
-/** WHAT: Parses /proc/meminfo into the four counters the guard uses. WHY: One snapshot, one truth source. */
+/** WHAT: Parses /proc/meminfo into the four counters the guard uses. WHY: Prevents mixed-snapshot decisions from skewing thresholds. */
 export function parseMeminfo(text) {
   const read = (key) => {
     const match = String(text).match(new RegExp(`^${key}:\\s+(\\d+)\\s*kB`, "mu"));
@@ -54,7 +55,7 @@ function ratios(sample) {
   };
 }
 
-/** WHAT: Classifies one memory snapshot. WHY: Pure decision, tested at every boundary. */
+/** WHAT: Maps one memory snapshot to a pressure level. WHY: Prevents callers from re-implementing threshold rules. */
 export function classifyMemory(sample, t = MEMORY_GUARDRAIL_DEFAULTS) {
   const { available, swapFree } = ratios(sample);
   if (available < t.criticalAvailableRatio && swapFree < t.criticalSwapFreeRatio) return "critical";
@@ -64,13 +65,7 @@ export function classifyMemory(sample, t = MEMORY_GUARDRAIL_DEFAULTS) {
   return "normal";
 }
 
-/**
- * WHAT: Advances the guard level with hysteresis.
- * WHY: Escalation is fast but never flappy: critical needs consecutive
- * critical samples, and recovery needs consecutive clear samples — a swap
- * that Linux keeps allocated must not hold the guard down (clear looks only
- * at MemAvailable).
- */
+/** WHAT: Turns each sample into a hysteresis-filtered guard level. WHY: Prevents flapping from dropping protection during brief dips. */
 export function transitionGuard(prev, sample, t = MEMORY_GUARDRAIL_DEFAULTS) {
   const cls = classifyMemory(sample, t);
   const { available } = ratios(sample);
@@ -88,6 +83,7 @@ export function transitionGuard(prev, sample, t = MEMORY_GUARDRAIL_DEFAULTS) {
   return { level: next, critStreak, clearStreak, classified: cls };
 }
 
+/** WHAT: Resolves the durable guard state path. WHY: Keeps state location separate from guard logic. */
 export function memoryGuardStatePath() {
   return process.env.AMUX_MEMORY_GUARD_PATH
     || join(homedir(), ".agentmux", "memory-guard.json");
@@ -98,7 +94,7 @@ function currentBootId(readFile = (p) => readFileSync(p, "utf8")) {
   catch { return null; }
 }
 
-/** WHAT: Persists the guard state atomically with boot and freshness identity. WHY: Consumers must never act on another boot's or a dead guard's verdict. */
+/** WHAT: Stores the guard state atomically with boot identity. WHY: Prevents consumers from acting on a dead boot's verdict. */
 export function writeGuardState(state, { path = memoryGuardStatePath() } = {}) {
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.${process.pid}.tmp`;
@@ -107,29 +103,25 @@ export function writeGuardState(state, { path = memoryGuardStatePath() } = {}) {
   return state;
 }
 
+/** WHAT: Reads the persisted guard state. WHY: Separates corrupt state from a valid verdict. */
 export function readGuardState({ path = memoryGuardStatePath() } = {}) {
   try { return JSON.parse(readFileSync(path, "utf8")); }
   catch { return null; }
 }
 
-/** WHAT: Decides whether a persisted state is usable right now. WHY: A stale or foreign-boot guard proves nothing; automatic starters fail closed on it. */
+/** WHAT: Checks whether a persisted state is usable right now. WHY: Prevents a stale or foreign-boot guard from proving safety. */
 export function isGuardStateStale(state, {
   nowMs = Date.now(),
   bootId = currentBootId(),
   ttlMs = MEMORY_GUARDRAIL_DEFAULTS.stateTtlMs,
 } = {}) {
-  if (!state || typeof state.observedAt !== "number") return true;
-  if (bootId && state.bootId && state.bootId !== bootId) return true;
+  if (!state || !Number.isFinite(state.observedAt)) return true;
+  if (state.observedAt > nowMs) return true;
+  if (bootId && state.bootId !== bootId) return true;
   return nowMs - state.observedAt > ttlMs;
 }
 
-/**
- * WHAT: Admission decision for a heavy start.
- * WHY: Automatic heavy starters (browser/emulator/heavy-gate/pane-revive)
- * never launch into memory pressure; the projected post-reserve headroom
- * must stay above the block floor. Manual starts are always allowed — the
- * human is the override, and the guard never pretends otherwise.
- */
+/** WHAT: Checks admission for one automatic heavy start. WHY: Prevents automatic heavy jobs from launching into memory pressure. */
 export function canStartHeavy(state, {
   class: heavyClass,
   reserveMiB = 0,
@@ -159,10 +151,7 @@ export function canStartHeavy(state, {
   return { ok: true, reason: state.level === "warn" ? "memory-warn-allowed" : "ok" };
 }
 
-/**
- * WHAT: One guard poll: sample, transition, persist.
- * WHY: The single writer path used by the bridge interval and by tests.
- */
+/** WHAT: Tracks one guard poll: sample, transition, persist. WHY: Keeps the writer path identical from bridge to tests. */
 export function pollMemoryGuardOnce({
   path = memoryGuardStatePath(),
   readMeminfo = () => readFileSync("/proc/meminfo", "utf8"),
@@ -187,7 +176,7 @@ export function pollMemoryGuardOnce({
   return { state, previousLevel: prev?.level || null, changed: prev?.level !== state.level };
 }
 
-/** WHAT: Runs the guard on an interval, alarming only on transitions and recovery. WHY: Alarms are events, not a cron drip. */
+/** WHAT: Schedules the guard and alarms on transitions only. WHY: Keeps alarms as events, separate from a polling drip. */
 export function startMemoryGuard({
   intervalMs = 30_000,
   onTransition = () => {},
@@ -197,7 +186,10 @@ export function startMemoryGuard({
   const tick = () => {
     try {
       const { state, previousLevel, changed } = pollMemoryGuardOnce(pollOptions);
-      if (changed && previousLevel) {
+      // A first-ever non-normal verdict is one visible alert, not a silent
+      // boot; the next poll carries previousLevel and stays quiet again.
+      const initialAlert = !previousLevel && state.level !== "normal";
+      if ((changed && previousLevel) || initialAlert) {
         Promise.resolve(onTransition({ from: previousLevel, to: state.level, state }))
           .catch((error) => log(`memory-guard alarm failed: ${error.message}`));
       }

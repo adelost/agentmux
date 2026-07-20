@@ -41,7 +41,6 @@ import { readLastTurns, latestJsonlMtime, latestJsonlInfo } from "../core/jsonl-
 import { alternateEngineForCommand, alternateSessionReader, alternateWatchDir, latestAlternateMtime } from "../core/alternate-session-reader.mjs";
 import { getContextFromPane, shortModelName } from "../core/context.mjs";
 import { isHarnessPlaceholder } from "../core/reply-forwarder.mjs";
-import { AMUX_PROBE_PREFIX } from "../core/kimi-agent-runtime.mjs";
 import { applyPostFailure, applyPostSuccess, planPaneMirrorStep, planStartupAudit, itemKey } from "../core/watcher-engine.mjs";
 import {
   classifyModelChange, changeMessage, stopBrief, shouldStopPane, label as modelLabel,
@@ -519,12 +518,6 @@ export function createJsonlWatcher({
   }
 
   async function postTurn({ name, idx, channelId, turn, config = null }) {
-    // Ingest probes are bridge-internal liveness checks, never conversation;
-    // the agent's (non-)answer to one is pure Discord noise. Hide the turn.
-    if (typeof turn?.userPrompt === "string"
-        && turn.userPrompt.trim().startsWith(AMUX_PROBE_PREFIX)) {
-      return { ok: true };
-    }
     const { fullText, validFiles, hasNarrative } = renderTurn(turn);
     if (!fullText && validFiles.length === 0) return { ok: true };
     // "No response requested." is Claude Code answering a harness-injected

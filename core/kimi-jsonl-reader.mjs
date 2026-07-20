@@ -160,12 +160,7 @@ function textFromParts(parts) {
     .join("");
 }
 
-/**
- * Kimi's TUI collapses a large/multi-line bracketed paste to an atomic
- * marker (`[paste #1]`, `[paste #1 +24 lines]`, `[paste #2 1234 chars]`) and
- * the Wire journal can then hold only that marker as the prompt text.
- * Mirrors PASTE_MARKER_REGEX in pi-tui's editor.
- */
+/** WHAT: Names Kimi's collapsed paste marker forms (bare, +N lines, N chars). WHY: Keeps journal receipt grammar separate from the TUI's own. */
 export const KIMI_PASTE_PLACEHOLDER_RE = /^\[paste #\d+(?: (?:\+\d+ lines|\d+ chars))?\]$/u;
 
 function promptMatches(event, needle, { allowPastePlaceholder = false } = {}) {

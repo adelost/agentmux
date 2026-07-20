@@ -9,9 +9,10 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
+/** WHAT: Names the env var that pins the secrets file path. WHY: Separates credential location from the replaceable package tree. */
 export const AMUX_ENV_VAR = "AMUX_DISCORD_ENV";
 
-/** WHAT: Resolves the .env and agentmux.yaml source paths. WHY: One pinned contract; package copies are fallback, never the only path to credentials. */
+/** WHAT: Resolves the .env and agentmux.yaml source paths. WHY: Separates secrets and operator config from the replaceable package tree. */
 export function resolveConfigSources({
   env = process.env,
   home = homedir(),

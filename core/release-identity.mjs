@@ -192,11 +192,7 @@ export function observeReleaseIdentity({
   };
 }
 
-/**
- * WHAT: Maps an observed release identity to the two recovery permissions.
- * WHY: The bridge is the recovery channel and always starts; only PANEL
- * revive is refused on a failed identity, with the exact reason attached.
- */
+/** WHAT: Maps an observed release identity to the two recovery permissions. WHY: Prevents a failed identity from mutating panes while the bridge recovers. */
 export function identityDecision(identity) {
   const ok = Boolean(identity?.ok);
   return {

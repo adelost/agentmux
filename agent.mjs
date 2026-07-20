@@ -1,7 +1,6 @@
 // Agent interaction: send prompts, wait for responses, track progress.
 // Manages tmux sessions directly. Single source of truth for claude startup + dismiss.
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync } from "fs";
-import { randomBytes } from "node:crypto";
 import { join, resolve } from "path";
 import { load as loadYaml } from "js-yaml";
 import { esc, stripAnsi } from "./lib.mjs";
@@ -28,7 +27,9 @@ import {
   isPromptInCodexJsonl,
   latestCodexSessionIdentity,
 } from "./core/codex-jsonl-reader.mjs";
-import { createKimiAgentRuntime, isKimiComposerReady, kimiComposerHasCollapsedPaste, kimiJournal, AMUX_PROBE_PREFIX } from "./core/kimi-agent-runtime.mjs";
+import { createKimiAgentRuntime, kimiComposerHasCollapsedPaste, kimiJournal } from "./core/kimi-agent-runtime.mjs";
+import { createKimiIngestProbe } from "./core/kimi-ingest-probe.mjs";
+import { createPromptEcho } from "./core/prompt-echo.mjs";
 import { createClaudeSubmitRescue } from "./core/claude-submit-rescue.mjs";
 import { getContextPercent as getContextPercentByDialect, getContextFromPane } from "./core/context.mjs";
 import { findBlockingPrompt } from "./core/dismiss.mjs";
@@ -990,54 +991,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return stripAnsi(stdout).trimEnd() || "(empty)";
   }
 
-  /**
-   * Poll the pane until the user's prompt text appears in session jsonl,
-   * confirming the agent has actually received the input.
-   *
-   * Source of truth: the agent's own session jsonl. When the user prompt
-   * appears there, we know for certain the agent received it. No tmux
-   * pane width tricks, no wordwrap to fight, and no generic busy signal
-   * pretending that unrelated keystrokes were accepted.
-   *
-   * @returns true if echo seen, false on timeout
-   */
-  async function waitForPromptEcho(agentName, pane, promptText, timeoutMs = 15000, {
-    notBeforeMs = 0,
-    cursor = null,
-  } = {}) {
-    const needle = promptText?.trim();
-    if (!needle) return true;
-
-    const dir = paneDir(agentConfig(agentName).dir, pane);
-    const dialect = paneDialectName(agentName, pane);
-
-    const deadline = Date.now() + Math.max(0, timeoutMs);
-    // Always inspect once. A zero-timeout check is used by durable Discord
-    // replay to prove that an earlier attempt eventually reached JSONL before
-    // it considers typing the same message again.
-    while (true) {
-      // Try jsonl first (width-independent, reliable)
-      let found = null;
-      if (dialect === "claude") found = isPromptInJsonl(dir, promptText, { notBeforeMs, cursor });
-      else if (dialect === "codex") {
-        found = isPromptInCodexJsonl(dir, promptText, { notBeforeMs, cursor });
-      } else if (dialect === "kimi") {
-        // Cursor-scoped receipts may accept Kimi's collapsed `[paste #…]`
-        // journal marker for payloads that themselves collapse; the broker
-        // FIFO makes that job's paste the only one possible after the cursor.
-        found = kimiJournal.promptAccepted(dir, promptText, {
-          notBeforeMs,
-          cursor,
-          allowPastePlaceholder: Boolean(cursor),
-        });
-      }
-      if (found === true) return true;
-
-      if (Date.now() >= deadline) break;
-      await wait(200);
-    }
-    return false;
-  }
+  const waitForPromptEcho = createPromptEcho({
+    paneDir, agentConfig, paneDialectName, isPromptInJsonl, isPromptInCodexJsonl, kimiJournal, wait,
+  });
 
   /**
    * Snapshot exact prompt-event identities before a pane write. The returned
@@ -1060,43 +1016,11 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       : null;
   }
 
-  const PROBE_INGEST_TIMEOUT_MS = 10_000;
-
-  /**
-   * Liveness probe for a silent Kimi pane: type a one-line nonce prompt and
-   * watch the Wire journal for it. The probe is short and single-line, so it
-   * can never collapse to a `[paste #…]` marker — an exact journal echo is
-   * therefore conclusive proof that the pane ingests. The broker calls this
-   * only on retries with no receipt, before committing the real payload
-   * again; a probe that gets no echo keeps the FIFO parked instead of
-   * feeding a dead pane. Non-Kimi targets are skipped as healthy.
-   */
-  async function probeIngest(agentName, pane) {
-    if (paneDialectName(agentName, pane) !== "kimi") return { ok: true, skipped: "dialect" };
-    if (await isBusy(agentName, pane).catch(() => true)) {
-      return { ok: false, reason: "agent busy" };
-    }
-    const snapshot = await captureScreen(agentName, pane).catch(() => "");
-    if (!isKimiComposerReady(snapshot)) {
-      return { ok: false, reason: "composer not empty" };
-    }
-    const nonce = `m-${randomBytes(4).toString("hex")}`;
-    const text = `${AMUX_PROBE_PREFIX}${nonce} (transporttest — ignorera, svara inget)`;
-    const dir = paneDir(agentConfig(agentName).dir, pane);
-    const cursor = await capturePromptEchoCursor(agentName, pane, text);
-    await typeLiteral(agentName, text, pane);
-    await sendEnter(agentName, pane);
-    const deadline = Date.now() + PROBE_INGEST_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      try {
-        if (kimiJournal.promptAccepted(dir, text, { cursor }) === true) {
-          return { ok: true, nonce };
-        }
-      } catch { /* journal not readable yet — keep polling within budget */ }
-      await wait(500);
-    }
-    return { ok: false, reason: `no Wire echo within ${PROBE_INGEST_TIMEOUT_MS / 1000}s` };
-  }
+  const probeIngest = createKimiIngestProbe({
+    paneDialectName, isBusy, captureScreen, paneDir, agentConfig,
+    capturePromptEchoCursor, typeLiteral, sendEnter,
+    promptAccepted: kimiJournal.promptAccepted, wait,
+  });
 
   async function waitForSlashReceipt(agentName, pane, commandText, timeoutMs = 15_000, {
     notBeforeMs = 0,

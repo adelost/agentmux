@@ -10,6 +10,8 @@ import { appendEvent } from "./events.mjs";
 import { deliverToPane } from "./delivery.mjs";
 import { rewriteModelSlash } from "./claude-model.mjs";
 import { recoverSupersededSubmit } from "./submit-boundary.mjs";
+import { createDeliveryNotSent, PRE_SUBMIT_STATES } from "./delivery-not-sent.mjs";
+import { createIngestProbeGate } from "./ingest-probe-gate.mjs";
 import {
   DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES,
   NOT_INGESTING_UNVERIFIED_STREAK, isNotSentDeliveryJob,
@@ -20,18 +22,9 @@ const ACTIVE_RETRY_MS = 1_000;
 const BLOCKED_RETRY_MS = 3_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
 const NOTICE_AFTER_MS = 10_000;
-// Retries with no receipt re-prove pane liveness with a disposable nonce
-// probe at most this often, before committing the real payload again.
-const PROBE_INTERVAL_MS = 120_000;
-// A head that exhausts its pre-submit budget is never dropped: it parks this
-// long, then gets a fresh budget. The FIFO and the message are preserved.
-const PRE_SUBMIT_PARK_MS = 5 * 60_000;
 // Warn well before a legitimate long turn reaches the 60-minute verdict.
 const SUBMITTED_STALL_NOTICE_MS = 3 * 60_000;
 const STALE_SUBMITTED_TERMINAL_MS = 60 * 60 * 1_000;
-const STALE_PRE_SUBMIT_TERMINAL_MS = 60 * 60 * 1_000;
-const MAX_PRE_SUBMIT_ATTEMPTS = 64;
-const PRE_SUBMIT_STATES = new Set(["pending", "delivering", "pasting", "drafted"]);
 function blockedRetryMs(job, { drafted = false } = {}) {
   const base = drafted ? 5_000 : BLOCKED_RETRY_MS;
   const exponent = Math.min(5, Math.max(0, Number(job.attempts || 1) - 1));
@@ -201,6 +194,13 @@ export function createDeliveryBroker({
     }
   }
 
+  const { stalePreSubmit, terminalizeNotSent } = createDeliveryNotSent({
+    queue, agent, now, notify, log, queueEvent, exactEcho, acknowledge, notifyTerminal,
+  });
+  const gateIngestProbe = createIngestProbeGate({
+    agent, queue, queueEvent, now, blockedRetryMs,
+  });
+
   async function terminalizeUnverified(job, {
     skipEcho = false,
     reason = null,
@@ -238,18 +238,6 @@ export function createDeliveryBroker({
     return notifyTerminal(terminal);
   }
 
-  function stalePreSubmit(job) {
-    if (!PRE_SUBMIT_STATES.has(job.status) || Number(job.attempts || 0) <= 0) return false;
-    const firstAttemptAt = Number(job.firstAttemptAt || job.createdAt || 0);
-    const age = firstAttemptAt ? Math.max(0, now() - firstAttemptAt) : 0;
-    return age >= STALE_PRE_SUBMIT_TERMINAL_MS
-      || Number(job.attempts || 0) >= MAX_PRE_SUBMIT_ATTEMPTS;
-  }
-
-  function targetProvenNotIngesting(job) {
-    return isTargetProvenNotIngesting(queue.list(job.agentName, job.pane));
-  }
-
   /**
    * A target proven not to ingest answers its whole backlog now rather than one
    * receipt budget at a time, which is what let a single wedged pane drain one
@@ -269,133 +257,6 @@ export function createDeliveryBroker({
   }
 
   const cancellationRequested = (job) => job.cancelRequestStatus === "requested";
-
-  function settleCancellation(initialJob, status, reason) {
-    const current = queue.read(initialJob.agentName, initialJob.pane, initialJob.id) || initialJob;
-    if (!cancellationRequested(current)) return current;
-    const settled = queue.update(current, {
-      cancelRequestStatus: status,
-      cancelRequestResolvedAt: now(),
-      cancelRequestLastReason: reason,
-    });
-    queueEvent(settled, `cancel_${status}`, { reason: String(reason).slice(0, 160) });
-    return settled;
-  }
-
-  function settleCancellationOutsidePreSubmit(job) {
-    if (!cancellationRequested(job)) return job;
-    if (isNotSentDeliveryJob(job)) {
-      return settleCancellation(job, "completed", "job is terminal and was not sent");
-    }
-    if (job.status === "acknowledged") {
-      return settleCancellation(job, "refused", "authoritative receipt already exists; cancellation cannot be called NOT SENT");
-    }
-    if (job.status === "submitting"
-        || job.status === "submitted"
-        || job.status === DELIVERED_UNVERIFIED_STATE) {
-      return settleCancellation(job, "refused", "submit may already have been attempted; cancellation cannot be called NOT SENT");
-    }
-    if (TERMINAL_DELIVERY_STATES.has(job.status)) {
-      return settleCancellation(job, "refused", `job already ended as ${job.status}; cancellation was not applied`);
-    }
-    return settleCancellation(job, "refused", `state ${job.status} is not safe for pre-submit cancellation`);
-  }
-
-  function notSentCause(job) {
-    if (!PRE_SUBMIT_STATES.has(job.status)) return null;
-    let nativeAttemptMayHaveLeft = false;
-    if (Number(job.attempts || 0) > 0 && typeof agent.isNativeTarget === "function") {
-      try {
-        nativeAttemptMayHaveLeft = Boolean(agent.isNativeTarget(job.agentName, job.pane));
-      } catch {
-        // Unknown routing is ambiguity, never proof that nothing was sent.
-        nativeAttemptMayHaveLeft = true;
-      }
-    }
-    if (nativeAttemptMayHaveLeft) return null;
-    if (cancellationRequested(job)) return "sender-cancel";
-    if (stalePreSubmit(job)) return "pre-submit-timeout";
-    if (targetProvenNotIngesting(job)) return "target-not-ingesting";
-    return null;
-  }
-
-  async function terminalizeNotSent(job) {
-    let current = queue.read(job.agentName, job.pane, job.id) || job;
-    let cause = notSentCause(current);
-    if (!cause) return settleCancellationOutsidePreSubmit(current);
-
-    // A late authoritative receipt always wins. Re-read the durable state at
-    // the transition boundary so an acknowledgement or submit fence cannot
-    // be overwritten by a stale pre-submit observer.
-    if (await exactEcho(current)) {
-      return settleCancellationOutsidePreSubmit(
-        await acknowledge(current, "late-echo-before-not-sent"),
-      );
-    }
-    current = queue.read(current.agentName, current.pane, current.id) || current;
-    cause = notSentCause(current);
-    if (!cause) return settleCancellationOutsidePreSubmit(current);
-    if (await exactEcho(current)) {
-      return settleCancellationOutsidePreSubmit(
-        await acknowledge(current, "late-echo-before-not-sent"),
-      );
-    }
-    current = queue.read(current.agentName, current.pane, current.id) || current;
-    cause = notSentCause(current);
-    if (!cause) return settleCancellationOutsidePreSubmit(current);
-
-    if (cause === "pre-submit-timeout") {
-      // The message is never dropped on a dead/unsure pane: the head parks
-      // with a fresh attempt budget and keeps the FIFO. Retries resume
-      // probe-gated, one Discord notice per park cycle keeps the stall
-      // visible, and a late echo still acknowledges (and reports recovered).
-      const parked = queue.update(current, {
-        status: current.draftOwned ? "pasting" : "pending",
-        attempts: 0,
-        firstAttemptAt: null,
-        nextAttemptAt: now() + PRE_SUBMIT_PARK_MS,
-        noticeSentAt: now(),
-        lastReason: "composer stayed unsafe for a full receipt budget; message kept in queue, "
-          + `retry continues in ${Math.floor(PRE_SUBMIT_PARK_MS / 60_000)} min (park, not drop)`,
-      });
-      queueEvent(parked, "parked_pre_submit", { reason: cause });
-      await notify(parked, "blocked").catch((error) =>
-        log(`delivery broker park notice failed for ${parked.id}: ${error.message}`));
-      return parked;
-    }
-
-    const firstAttemptAt = Number(current.firstAttemptAt || current.createdAt || now());
-    const ageMinutes = Math.max(0, Math.floor((now() - firstAttemptAt) / 60_000));
-    const requestedReason = String(current.cancelRequestedReason || "sender no longer needs this job");
-    const requestedBy = String(current.cancelRequestedBy || "unknown sender");
-    const terminalReason = cause === "sender-cancel"
-      ? `not sent: cancellation requested by ${requestedBy} before submit (${requestedReason}); composer preserved`
-      : cause === "target-not-ingesting"
-        ? `not sent: ${current.agentName}:${current.pane} let ${NOT_INGESTING_UNVERIFIED_STREAK} consecutive receipt budgets expire without ingesting a prompt; resend once that pane acknowledges again`
-        : `not sent: composer remained unsafe for ${ageMinutes} minute(s) across ${Number(current.attempts || 0)} attempt(s); automatic retries stopped`;
-    const terminal = queue.update(current, {
-      status: "cancelled",
-      draftOwned: false,
-      terminalAt: now(),
-      nextAttemptAt: null,
-      unverifiedNoticeSentAt: null,
-      unverifiedNoticeNextAttemptAt: now(),
-      metadata: {
-        deliveryOutcome: "not-sent",
-        ...(cause === "pre-submit-timeout" ? { deliveryTimeout: "pre-submit" } : {}),
-        ...(cause === "sender-cancel" ? { deliveryCancellation: "sender-request" } : {}),
-        ...(cause === "target-not-ingesting" ? { deliveryTarget: "not-ingesting" } : {}),
-      },
-      ...(cause === "sender-cancel" ? {
-        cancelRequestStatus: "completed",
-        cancelRequestResolvedAt: now(),
-        cancelRequestLastReason: "cancelled before submit; job was not sent",
-      } : {}),
-      lastReason: terminalReason,
-    });
-    queueEvent(terminal, "cancelled", { reason: cause });
-    return notifyTerminal(terminal);
-  }
 
   async function processJob(initialJob) {
     let job = queue.read(initialJob.agentName, initialJob.pane, initialJob.id) || initialJob;
@@ -648,29 +509,11 @@ export function createDeliveryBroker({
     });
     queueEvent(job, "attempt", { attempt: job.attempts });
 
-    // A retry with no receipt so far re-proves pane liveness with a
-    // disposable nonce probe before the real payload is committed again.
-    // A pane that does not ingest even the probe keeps its FIFO parked —
-    // the message is never retyped into a pane that proves nothing lands.
-    if (job.kind === "prompt"
-        && job.metadata?.deliveryTransport !== "native"
-        && Number(job.attempts || 0) >= 2
-        && now() - Number(job.lastProbeAt || 0) >= PROBE_INTERVAL_MS
-        && typeof agent.probeIngest === "function") {
-      const probe = await agent.probeIngest(job.agentName, job.pane)
-        .catch((error) => ({ ok: false, reason: error.message }));
-      if (probe && probe.ok === false) {
-        job = queue.update(job, {
-          status: drafted ? "drafted" : (ownsPaneDraft ? "pasting" : "pending"),
-          lastProbeAt: now(),
-          nextAttemptAt: now() + blockedRetryMs(job),
-          lastReason: `ingest probe failed (${probe.reason || "no echo"}); FIFO kept, retry deferred`,
-        });
-        queueEvent(job, "ingest_probe_failed", { reason: String(probe.reason || "") });
-        return maybeNotifyBlocked(job);
-      }
-      job = queue.update(job, { lastProbeAt: now() });
-    }
+    // A receiptless retry re-proves pane liveness before the payload is
+    // committed again; a silent pane keeps the FIFO parked, never retyped.
+    const gated = await gateIngestProbe(job, { drafted, ownsPaneDraft });
+    job = gated.job;
+    if (!gated.proceed) return maybeNotifyBlocked(job);
 
     const attemptDelivery = async () => {
       try {
