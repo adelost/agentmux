@@ -51,7 +51,9 @@ export function panelRestartState(turns) {
 /** WHAT: Maps durable turn completion with the live pane observation. WHY: Prevents old interrupted journals and current active panes from being conflated. */
 export function combinedPanelRestartState(journal, observedStatus) {
   if (observedStatus === "unknown" || !observedStatus) {
-    return { state: "unknown", reason: "pane-status-unknown" };
+    return journal.state === "idle"
+      ? { state: "idle", reason: "journal-complete-status-unknown" }
+      : { state: "unknown", reason: "pane-status-unknown" };
   }
   if (observedStatus !== "idle") {
     return { state: "active", reason: `pane-${observedStatus}` };

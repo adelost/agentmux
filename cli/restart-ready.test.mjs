@@ -71,6 +71,10 @@ feature("restart-ready inventory adapters", () => {
       expect(combinedPanelRestartState(
         { state: "idle", reason: "turn-complete" },
         "unknown",
+      )).toEqual({ state: "idle", reason: "journal-complete-status-unknown" });
+      expect(combinedPanelRestartState(
+        { state: "active", reason: "turn-incomplete" },
+        "unknown",
       )).toEqual({ state: "unknown", reason: "pane-status-unknown" });
     }],
   });
