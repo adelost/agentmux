@@ -1,0 +1,8 @@
+node_modules/
+.env
+agents.yaml
+agentmux.yaml
+*.pid
+test/recordings/
+spikes/web-ui/artifacts/
+android/
