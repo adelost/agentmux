@@ -177,20 +177,23 @@ function worktreeOperation(path) {
 
 function discoverGitRoots(seeds, { maxDepth = 3, maxEntries = 2_000 } = {}) {
   const roots = new Set();
+  const seen = new Set();
   let visited = 0;
   const walk = (path, depth) => {
-    if (depth > maxDepth || visited >= maxEntries || !existsSync(path)) return;
+    const absolute = resolve(path);
+    if (depth > maxDepth || visited >= maxEntries || seen.has(absolute) || !existsSync(absolute)) return;
+    seen.add(absolute);
     visited++;
-    if (existsSync(join(path, ".git"))) {
-      roots.add(path);
+    if (existsSync(join(absolute, ".git"))) {
+      roots.add(absolute);
       return;
     }
     let entries;
-    try { entries = readdirSync(path, { withFileTypes: true }); }
+    try { entries = readdirSync(absolute, { withFileTypes: true }); }
     catch { return; }
     for (const entry of entries) {
       if (!entry.isDirectory() || ["node_modules", ".git", "build", "dist", ".cache"].includes(entry.name)) continue;
-      walk(join(path, entry.name), depth + 1);
+      walk(join(absolute, entry.name), depth + 1);
     }
   };
   for (const seed of seeds) walk(seed, 0);

@@ -227,8 +227,8 @@ function Get-VerifiedRestartReceipt {
 }
 
 function Get-WslObservation {
-  param([object]$Config)
-  $result = Invoke-WslScript -Config $Config -Script (Get-WslProbeScript) -TimeoutSeconds 35
+  param([object]$Config, [int]$TimeoutSeconds = 35)
+  $result = Invoke-WslScript -Config $Config -Script (Get-WslProbeScript) -TimeoutSeconds $TimeoutSeconds
   if ($result.ok) {
     try { return $result.stdout | ConvertFrom-Json }
     catch {
@@ -282,9 +282,10 @@ function Start-BridgeForeground {
     "pause"
   ) | Set-Content -Encoding ASCII -Path $launcher
   Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", "`"$launcher`"") -WindowStyle Normal
-  for ($attempt = 0; $attempt -lt 45; $attempt++) {
+  $deadline = [DateTime]::UtcNow.AddSeconds(50)
+  while ([DateTime]::UtcNow -lt $deadline) {
     Start-Sleep -Seconds 1
-    $observation = Get-WslObservation -Config $Config
+    $observation = Get-WslObservation -Config $Config -TimeoutSeconds 10
     if ($observation.wslReachable -and $observation.bridge.state -eq "ok") {
       return [pscustomobject]@{ ok = $true; stage = "start-bridge"; detail = "heartbeat-ok" }
     }
@@ -350,7 +351,9 @@ function Get-BoundedLogs {
   $combined = "== windows ==`n$windows`n== wsl ==`n$(if ($wsl.ok) { $wsl.stdout } else { "unavailable: $($wsl.stderr)" })"
   $redacted = $combined `
     -replace "(?i)(authorization|token|secret|password)\s*[:=]\s*\S+", '$1=[REDACTED]' `
-    -replace "[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{20,}", "[REDACTED_DISCORD_TOKEN]"
+    -replace "[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{20,}", "[REDACTED_DISCORD_TOKEN]" `
+    -replace "(?i)\b(?:sk|ghp|github_pat)_[A-Za-z0-9_-]{16,}\b", "[REDACTED_API_TOKEN]" `
+    -replace "(?i)\bBearer\s+[A-Za-z0-9._-]{16,}\b", "Bearer [REDACTED]"
   if ($redacted.Length -gt 1750) { return "…" + $redacted.Substring($redacted.Length - 1749) }
   return $redacted
 }

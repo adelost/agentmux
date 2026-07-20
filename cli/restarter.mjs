@@ -2,7 +2,7 @@
 // recover the bridge, or deliberately recycle WSL, from one authenticated channel.
 
 import { spawn, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { loadConfig } from "./config.mjs";
 
@@ -77,6 +77,18 @@ export function rescueChannelOwners(config, channelId) {
   });
 }
 
+/** WHAT: Checks one rescue channel against readable WSL fleet config. WHY: Prevents missing config from silently bypassing channel isolation. */
+export function assertRescueChannelIsolation(config, channelId, { sourceExists = true } = {}) {
+  if (!sourceExists || !Object.values(config || {}).some((entry) => entry?.dir)) {
+    throw new Error("could not verify Windows channel isolation");
+  }
+  const owners = rescueChannelOwners(config, channelId);
+  if (owners.length) {
+    throw new Error(`Windows rescue channel ${channelId} is already mapped to WSL agent(s): ${owners.join(", ")}`);
+  }
+  return true;
+}
+
 async function runPowerShell(script, parameters, { stdin = "" } = {}) {
   const args = [
     "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -115,9 +127,13 @@ export async function cmdRestarter(args, { bridgeDir }) {
     }
     const generatedConfig = process.env.AGENT_CONFIG
       || resolve(process.env.HOME || "", ".config/agent/agents.yaml");
-    const owners = rescueChannelOwners(loadConfig(generatedConfig), channel);
-    if (owners.length) {
-      throw new Error(`Windows rescue channel ${channel} is already mapped to WSL agent(s): ${owners.join(", ")}`);
+    const fleetConfig = loadConfig(generatedConfig);
+    try {
+      assertRescueChannelIsolation(fleetConfig, channel, {
+        sourceExists: existsSync(generatedConfig),
+      });
+    } catch (error) {
+      throw new Error(`${error.message}: ${generatedConfig}`);
     }
     const distro = flags.distro || "Ubuntu-22.04";
     const linuxUser = flags["linux-user"] || process.env.USER || "adelost";
