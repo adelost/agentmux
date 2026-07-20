@@ -1,0 +1,126 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { expect, feature, unit } from "bdd-vitest";
+
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const MGR = readFileSync(join(ROOT, "bin", "windows-manager.mjs"), "utf8");
+const RESCUE = readFileSync(join(ROOT, "bin", "windows-rescue-tool.ps1"), "utf8");
+const CORE = readFileSync(join(ROOT, "core", "windows-manager.mjs"), "utf8");
+const TURN = MGR.slice(
+  MGR.indexOf("export async function runManagerTurn"),
+  MGR.indexOf("export async function pollManagerChannel"),
+);
+const MAIN = MGR.slice(MGR.indexOf("async function main"));
+
+feature("windows manager source contract", () => {
+  unit("bots, strangers, empty text, and restarter-owned commands are skipped", {
+    then: ["all four skip conditions guard the accepted path", () => {
+      expect(MGR).toContain("message.author?.bot === true");
+      expect(MGR).toContain("String(message.author?.id) !== String(config.authorizedUserId)");
+      expect(MGR).toContain('content.startsWith("//")');
+      expect(MGR).toContain("|| !content");
+    }],
+  });
+
+  unit("the journal is written before any tool executes", {
+    then: ["planAcceptedAction, then saveState, then executeTool", () => {
+      const action = TURN.indexOf("planAcceptedAction");
+      const save = TURN.indexOf("deps.saveState(state)");
+      const execute = TURN.indexOf("deps.executeTool");
+      expect(action).toBeGreaterThan(-1);
+      expect(save).toBeGreaterThan(action);
+      expect(execute).toBeGreaterThan(save);
+      expect(TURN).toContain('status = result.ok ? "completed" : "failed"');
+    }],
+  });
+
+  unit("no destructive WSL shutdown exists anywhere in the manager runtime", {
+    then: ["neither the loop nor the rescue tool carries the shutdown switch", () => {
+      expect(MGR).not.toContain("--shutdown");
+      expect(RESCUE).not.toContain("--shutdown");
+      expect(RESCUE).not.toContain("Restart-Wsl");
+      expect(RESCUE).not.toContain("Invoke-Rescue");
+      expect(RESCUE).not.toContain("Invoke-FencedWslRestart");
+    }],
+  });
+
+  unit("secrets only enter through environment variable names", {
+    then: ["no literal keys or tokens, config is read-only, detail output is redacted", () => {
+      expect(MGR).toContain("process.env[");
+      expect(MGR).toContain("apiKeyEnv");
+      expect(MGR).toContain("discordTokenEnv");
+      expect(MGR).not.toMatch(/apiKey\s*:\s*"[^"]{6,}/u);
+      expect(MGR).not.toMatch(/Bearer\s+[A-Za-z0-9._-]{8,}/u);
+      expect(MGR).not.toContain("writeJsonAtomic(configPath");
+      expect(CORE).toContain("apiKeyProvider()");
+      expect(RESCUE).toContain("[REDACTED_DISCORD_TOKEN]");
+      expect(RESCUE).toContain("[REDACTED_API_TOKEN]");
+      expect(RESCUE).not.toContain("$token");
+      expect(RESCUE).not.toContain("Get-Token");
+    }],
+  });
+
+  unit("manager state and pid records stay separate from the restarter", {
+    then: ["manager-state and manager-process only, never the restarter files", () => {
+      expect(MGR).toContain('"manager-state.json"');
+      expect(MGR).toContain('"manager-process.json"');
+      expect(MGR).toContain('"manager.log"');
+      expect(MGR).not.toContain('"state.json"');
+      expect(MGR).not.toContain('"process.json"');
+      expect(MGR.match(/restarter\.log/gu)).toHaveLength(1);
+      expect(MGR).toContain('tailFile(join(rootDir, "restarter.log"), 24)');
+    }],
+  });
+
+  unit("outcomes are exact and outbound Discord text is redacted and chunked", {
+    then: ["RECOVERED/PARTIAL/BLOCKED, redactSecrets before send, 1900 chunks, no mentions", () => {
+      const combined = `${CORE}\n${MGR}\n${RESCUE}`;
+      expect(combined).toContain("RECOVERED");
+      expect(combined).toContain("PARTIAL");
+      expect(combined).toContain("BLOCKED");
+      expect(MGR).toContain("redactSecrets(turn.answer)");
+      expect(MGR).toContain("MAX_DISCORD_CHUNK = 1900");
+      expect(MGR).toContain("allowed_mentions: { parse: [] }");
+      expect(MGR).toContain("classifyManagerOutcome(toolResults)");
+    }],
+  });
+
+  unit("a crashed leftover is fenced at startup before the poll loop runs", {
+    then: ["reconcileManagerStartup marks blocked crashed-mid-action and precedes polling", () => {
+      expect(MGR).toContain("crashed-mid-action");
+      const reconcile = MAIN.indexOf("reconcileManagerStartup(state)");
+      const poll = MAIN.indexOf("pollManagerChannel({");
+      expect(reconcile).toBeGreaterThan(-1);
+      expect(poll).toBeGreaterThan(reconcile);
+      expect(MGR).toContain('action.status = "blocked"');
+      expect(MGR).toContain("state.lastSeenId = String(action.messageId)");
+    }],
+  });
+
+  unit("the rescue tool dot-sources the shared io and stays bounded and redacted", {
+    then: ["io dot-sourced, three commands, JSON shape, job timeout, redaction", () => {
+      expect(RESCUE).toContain("windows-restarter-io.ps1");
+      expect(RESCUE).toContain(". $RuntimeIo");
+      expect(RESCUE).toContain('ValidateSet("start-wsl", "start-bridge", "recover")');
+      expect(RESCUE).toContain("Start-WslBounded");
+      expect(RESCUE).toContain("Start-BridgeForeground");
+      expect(RESCUE).toContain("Invoke-Recovery");
+      expect(RESCUE).toContain("ConvertTo-Json -Compress");
+      expect(RESCUE).toContain("ok = $");
+      expect(RESCUE).toContain("stage = $");
+      expect(RESCUE).toContain("Wait-Job -Job $job -Timeout $TimeoutSeconds");
+      expect(RESCUE).toContain("Stop-Job");
+      expect(RESCUE).toContain("-replace");
+      expect(RESCUE.trimEnd().split("\n").length).toBeLessThan(200);
+    }],
+  });
+
+  unit("every manager file stays under its line cap", {
+    then: ["core and bin under 500, the loop under 300", () => {
+      expect(CORE.trimEnd().split("\n").length).toBeLessThan(500);
+      expect(MGR.trimEnd().split("\n").length).toBeLessThan(300);
+      expect(RESCUE.trimEnd().split("\n").length).toBeLessThan(500);
+    }],
+  });
+});

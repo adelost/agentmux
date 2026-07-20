@@ -1,0 +1,293 @@
+#!/usr/bin/env node
+// Thin Windows-native manager loop for the _windows_ channel. All prompt text
+// and decisions live in core/windows-manager.mjs; this file only does Discord
+// I/O, bounded process runs, journaling, and the poll loop. Deterministic
+// //commands stay owned by the restarter poller and are always skipped here.
+
+import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { formatWindowsStatus, planAcceptedAction } from "../core/windows-bridge.mjs";
+import {
+  MANAGER_CONTRACT_VERSION,
+  MANAGER_TOOLS,
+  classifyManagerOutcome,
+  createHttpProvider,
+  createMockProvider,
+  parseToolCalls,
+  planManagerTurn,
+  planToolCall,
+  redactSecrets,
+} from "../core/windows-manager.mjs";
+
+const BIN_DIR = dirname(fileURLToPath(import.meta.url));
+const PROBE_PATH = join(BIN_DIR, "windows-wsl-probe.mjs");
+const RESCUE_PATH = join(BIN_DIR, "windows-rescue-tool.ps1");
+const SNOWFLAKE = /^\d{17,20}$/u;
+const MAX_DISCORD_CHUNK = 1900;
+const PROBE_TIMEOUT_MS = 20_000;
+const HISTORY_LIMIT = 10;
+
+function readJson(path) {
+  try { return JSON.parse(readFileSync(path, "utf8")); } catch { return null; }
+}
+
+function writeJsonAtomic(path, value) {
+  const temporary = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  renameSync(temporary, path);
+}
+
+function logLine(logPath, message) {
+  try {
+    mkdirSync(dirname(logPath), { recursive: true });
+    appendFileSync(logPath, `${new Date().toISOString()} ${String(message).replace(/[\r\n]+/gu, " ")}\n`, "utf8");
+  } catch { /* logging must never kill the rescue channel */ }
+}
+
+function runBounded(file, args, timeoutMs) {
+  return new Promise((resolvePromise) => {
+    execFile(file, args, { timeout: timeoutMs, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
+      resolvePromise({
+        ok: !error,
+        timedOut: Boolean(error) && (error.killed === true || error.code === "ETIMEDOUT"),
+        stdout: String(stdout || "").trim(),
+        stderr: String(stderr || "").trim(),
+      });
+    });
+  });
+}
+
+async function observeDefault() {
+  const result = await runBounded(process.execPath, [PROBE_PATH], PROBE_TIMEOUT_MS);
+  if (!result.ok) return { wsl: "unknown", wslReachable: false, timedOut: result.timedOut, error: "probe-unavailable" };
+  try {
+    const parsed = JSON.parse(result.stdout);
+    return { ...parsed, wsl: parsed.wslReachable ? "online" : "offline" };
+  } catch {
+    return { wsl: "unknown", wslReachable: false, error: "probe-json-invalid" };
+  }
+}
+
+function tailFile(path, maxLines) {
+  try {
+    return existsSync(path) ? readFileSync(path, "utf8").trimEnd().split(/\r?\n/u).slice(-maxLines).join("\n") : "";
+  } catch { return ""; }
+}
+
+async function executeToolDefault(name, { rootDir, logPath }) {
+  const tool = MANAGER_TOOLS.find((entry) => entry.name === name);
+  if (name === "get_status") {
+    const observation = await observeDefault();
+    return { ok: true, stage: "get_status", detail: formatWindowsStatus(observation), observation };
+  }
+  if (name === "get_logs") {
+    const combined = `== restarter ==\n${tailFile(join(rootDir, "restarter.log"), 24)}\n== manager ==\n${tailFile(logPath, 24)}`;
+    const redacted = redactSecrets(combined);
+    return { ok: true, stage: "get_logs", detail: redacted.length > 1750 ? redacted.slice(-1749) : redacted };
+  }
+  const command = name.replaceAll("_", "-");
+  const bounded = await runBounded("powershell.exe", [
+    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", RESCUE_PATH,
+    "-Command", command, "-TimeoutSeconds", String(Math.ceil(tool.timeoutMs / 1000)),
+  ], tool.timeoutMs + 10_000);
+  if (bounded.timedOut) return { ok: false, stage: command, detail: `timeout-${tool.timeoutMs}ms` };
+  try {
+    const parsed = JSON.parse(bounded.stdout);
+    return { ok: parsed.ok === true, stage: String(parsed.stage || command), detail: redactSecrets(String(parsed.detail || "")) };
+  } catch {
+    return { ok: false, stage: command, detail: "rescue-output-invalid" };
+  }
+}
+
+/** WHAT: Dispatches one user turn through provider, tools, and final answer. WHY: Separates turn flow from Discord and process I/O. */
+export async function runManagerTurn({ userText, messageId, state, history = [], deps }) {
+  let observation = await deps.observe();
+  const messages = planManagerTurn({ userText, observation, history, contractVersion: MANAGER_CONTRACT_VERSION });
+  const reply = await deps.provider.chat(messages);
+  if (!reply?.ok) {
+    const answer = `AMUX BLOCKED provider-${reply?.reason || "unavailable"}`;
+    return { answer, toolResults: [], outcome: "BLOCKED", observation };
+  }
+  const toolResults = [];
+  for (const name of parseToolCalls(reply.text)) {
+    const verdict = planToolCall({ name, observation, lastStatusMs: state.lastStatusMs, nowMs: deps.nowMs() });
+    if (!verdict.allow) {
+      toolResults.push({ ok: false, stage: name, detail: `refused:${verdict.reason}` });
+      continue;
+    }
+    state.lastAction = planAcceptedAction({ messageId, command: name, generation: deps.generation, nowMs: deps.nowMs() });
+    deps.saveState(state);
+    const result = await deps.executeTool(name, { observation });
+    toolResults.push(result);
+    if (result.observation) {
+      observation = result.observation;
+      state.lastStatusMs = deps.nowMs();
+    }
+    state.lastAction.status = result.ok ? "completed" : "failed";
+    state.lastAction.completedAt = new Date(deps.nowMs()).toISOString();
+    state.lastAction.stage = result.stage;
+    deps.saveState(state);
+  }
+  let answer = reply.text;
+  let outcome = "ANSWERED";
+  if (toolResults.length) {
+    outcome = classifyManagerOutcome(toolResults).outcome;
+    const resultsText = redactSecrets(JSON.stringify(toolResults.map(({ observation: drop, ...rest }) => rest)));
+    const followup = await deps.provider.chat([
+      ...messages,
+      { role: "assistant", content: reply.text },
+      { role: "user", content: `Verktygsresultat (JSON):\n${resultsText}\nSvara kort på svenska med exakt utfall.` },
+    ]);
+    answer = followup?.ok
+      ? followup.text
+      : `AMUX ${outcome}: ${toolResults.map((result) => `${result.stage}=${result.ok ? "ok" : "fail"}`).join(" ")}`;
+  }
+  return { answer, toolResults, outcome, observation };
+}
+
+/** WHAT: Routes one Discord poll through filters, journal, turn, and cursor. WHY: Keeps crash fencing and message ownership in one place. */
+export async function pollManagerChannel({ config, state, history = [], deps }) {
+  const incoming = await deps.listMessages(state.lastSeenId || null);
+  const sorted = [...incoming].sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+  let handled = 0;
+  for (const message of sorted) {
+    const content = String(message.content || "").trim();
+    const skip = message.author?.bot === true
+      || String(message.author?.id) !== String(config.authorizedUserId)
+      || !content
+      || content.startsWith("//");
+    if (skip) {
+      state.lastSeenId = String(message.id);
+      deps.saveState(state);
+      continue;
+    }
+    state.lastAction = planAcceptedAction({ messageId: message.id, command: "manager-turn", generation: deps.generation, nowMs: deps.nowMs() });
+    deps.saveState(state);
+    deps.log?.(`accepted manager-turn message=${message.id} generation=${deps.generation}`);
+    const turn = await runManagerTurn({ userText: content, messageId: String(message.id), state, history, deps });
+    const answer = redactSecrets(turn.answer);
+    await deps.sendMessage(answer);
+    state.lastAction.status = "completed";
+    state.lastAction.completedAt = new Date(deps.nowMs()).toISOString();
+    state.lastAction.stage = turn.outcome;
+    state.lastSeenId = String(message.id);
+    deps.saveState(state);
+    history.push({ role: "user", content }, { role: "assistant", content: answer });
+    if (history.length > HISTORY_LIMIT) history.splice(0, history.length - HISTORY_LIMIT);
+    handled += 1;
+  }
+  return handled;
+}
+
+/** WHAT: Turns a leftover started action into a blocked fence. WHY: Prevents any ambiguous manager action from running twice. */
+export function reconcileManagerStartup(state, { nowMs = Date.now() } = {}) {
+  const action = state?.lastAction;
+  if (!action || action.status !== "started") return { state, fenced: false };
+  action.status = "blocked";
+  action.completedAt = new Date(nowMs).toISOString();
+  action.stage = "crashed-mid-action";
+  state.lastAction = action;
+  state.lastSeenId = String(action.messageId);
+  return { state, fenced: true, fencedMessageId: String(action.messageId) };
+}
+
+function loadConfig() {
+  const configPath = process.env.MANAGER_CONFIG
+    || join(process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local"), "AgentmuxRestarter", "manager.json");
+  const config = readJson(configPath);
+  if (!config) throw new Error(`manager config missing at ${configPath}`);
+  if (!SNOWFLAKE.test(String(config.channelId)) || !SNOWFLAKE.test(String(config.authorizedUserId))) {
+    throw new Error("manager config needs Discord snowflake channelId and authorizedUserId");
+  }
+  const kind = config.provider?.kind;
+  if (kind !== "http" && kind !== "mock") throw new Error("manager provider.kind must be http or mock");
+  if (kind === "http" && (!config.provider.endpoint || !config.provider.model)) {
+    throw new Error("manager http provider needs endpoint and model");
+  }
+  return { config, rootDir: dirname(configPath) };
+}
+
+function buildProvider(config) {
+  const spec = config.provider || {};
+  if (spec.kind === "mock") return createMockProvider(spec.responses || []);
+  const apiKeyEnv = spec.apiKeyEnv || "MANAGER_API_KEY";
+  return createHttpProvider({
+    endpoint: spec.endpoint,
+    model: spec.model,
+    apiKeyProvider: () => process.env[apiKeyEnv] || "",
+  });
+}
+
+async function discordRequest(token, method, route, body) {
+  const headers = { authorization: `Bot ${token}`, "user-agent": "agentmux-windows-manager/1" };
+  if (body) headers["content-type"] = "application/json";
+  const response = await fetch(`https://discord.com/api/v10${route}`, {
+    method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) throw new Error(`discord-${response.status}`);
+  return response.status === 204 ? null : response.json();
+}
+
+async function main() {
+  const { config, rootDir } = loadConfig();
+  const token = process.env[config.discordTokenEnv || "DISCORD_TOKEN"];
+  if (!token) throw new Error(`Discord token env var ${config.discordTokenEnv || "DISCORD_TOKEN"} is not set`);
+  const statePath = join(rootDir, "manager-state.json");
+  const pidPath = join(rootDir, "manager-process.json");
+  const logPath = join(rootDir, "manager.log");
+  mkdirSync(rootDir, { recursive: true });
+  writeJsonAtomic(pidPath, { pid: process.pid, startedAt: new Date().toISOString() });
+  process.on("exit", () => {
+    if (readJson(pidPath)?.pid === process.pid) rmSync(pidPath, { force: true });
+  });
+  const generation = randomUUID().replaceAll("-", "");
+  const state = readJson(statePath) || { schemaVersion: 1, lastSeenId: null, lastAction: null, lastStatusMs: null };
+  const startup = reconcileManagerStartup(state);
+  if (startup.fenced) logLine(logPath, `leftover action ${startup.fencedMessageId} fenced BLOCKED crashed-mid-action`);
+  state.generation = generation;
+  writeJsonAtomic(statePath, state);
+  logLine(logPath, `manager started pid=${process.pid} channel=${config.channelId} generation=${generation}`);
+  const history = [];
+  const deps = {
+    generation,
+    provider: buildProvider(config),
+    nowMs: () => Date.now(),
+    saveState: (next) => writeJsonAtomic(statePath, next),
+    observe: observeDefault,
+    executeTool: (name) => executeToolDefault(name, { rootDir, logPath }),
+    log: (line) => logLine(logPath, line),
+    listMessages: async (after) => {
+      const route = `/channels/${config.channelId}/messages?limit=50${after ? `&after=${after}` : ""}`;
+      return (await discordRequest(token, "GET", route)) ?? [];
+    },
+    sendMessage: async (text) => {
+      const clean = redactSecrets(String(text)).slice(0, 4 * MAX_DISCORD_CHUNK) || "AMUX BLOCKED empty-answer";
+      for (let index = 0; index < clean.length; index += MAX_DISCORD_CHUNK) {
+        await discordRequest(token, "POST", `/channels/${config.channelId}/messages`, {
+          content: clean.slice(index, index + MAX_DISCORD_CHUNK),
+          allowed_mentions: { parse: [] },
+        });
+      }
+    },
+  };
+  const pollSeconds = Math.min(Math.max(Number(config.pollSeconds) || 5, 2), 60);
+  for (;;) {
+    try {
+      await pollManagerChannel({ config, state, history, deps });
+    } catch (error) {
+      logLine(logPath, `poll failed: ${error?.message || error}`);
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, pollSeconds * 1000));
+  }
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error(`manager fatal: ${error?.message || error}`);
+    process.exitCode = 1;
+  });
+}
