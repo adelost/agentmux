@@ -11,6 +11,8 @@ param(
   [Parameter(ParameterSetName = "Install")]
   [string]$LinuxUser = "adelost",
   [Parameter(ParameterSetName = "Install")]
+  [string]$NodePath = "E:\_Sdk\nodejs\node.exe",
+  [Parameter(ParameterSetName = "Install")]
   [int]$PollSeconds = 3,
   [Parameter(ParameterSetName = "Run")]
   [switch]$Run,
@@ -189,6 +191,29 @@ AMUX_BIN="$AMUX_BIN" timeout 85s bash "$ROOT/bin/bridge-rescue.sh"
 '@
 }
 
+function Test-BridgeCore {
+  param([object]$Config)
+  $script:BridgeCoreError = $null
+  if (!(Test-Path $Config.nodePath)) {
+    $script:BridgeCoreError = "node-missing:$($Config.nodePath)"
+    return $false
+  }
+  $bridgeCoreDir = Join-Path $Root "bridge-core"
+  $result = Invoke-ProcessBounded -FilePath $Config.nodePath -Arguments "`"$(Join-Path $bridgeCoreDir "windows-bridge.mjs")`" self-check --manifest `"$(Join-Path $bridgeCoreDir "manifest.json")`" --files-root `"$bridgeCoreDir`"" -TimeoutSeconds 30
+  if (!$result.ok) {
+    $script:BridgeCoreError = (($result.stdout, $result.stderr) -join " ").Trim()
+    if (!$script:BridgeCoreError) { $script:BridgeCoreError = "self-check-failed" }
+    return $false
+  }
+  return $true
+}
+
+function Invoke-BridgeNode {
+  param([object]$Config, [string]$NodeArguments)
+  $bridgeCoreDir = Join-Path $Root "bridge-core"
+  return Invoke-ProcessBounded -FilePath $Config.nodePath -Arguments "`"$(Join-Path $bridgeCoreDir "windows-bridge.mjs")`" $NodeArguments" -TimeoutSeconds 45
+}
+
 function Get-BridgeStartScript {
   return @'
 set -u
@@ -248,39 +273,82 @@ function Process-DiscordMessages {
   $messages = @(Invoke-Discord -Method Get -Route $route)
   if ($messages.Count -eq 0) { return }
   $messages = @($messages | Sort-Object { [uint64]($_.id) })
+  $allowed = @("status", "logs", "start-wsl", "start-bridge", "recover", "restart", "restart-wsl", "hardrestart")
   foreach ($message in $messages) {
-    $State.Value.lastSeenId = [string]$message.id
-    $State.Value.lastPollAt = [DateTime]::UtcNow.ToString("o")
-    Write-JsonAtomic -Path $StatePath -Value $State.Value
-    if ([string]$message.author.id -ne [string]$Config.authorizedUserId) { continue }
-    $command = ([string]$message.content).Trim().ToLowerInvariant()
-    if ($command -ne "//restart" -and $command -ne "//hardrestart") { continue }
-    $hard = $command -eq "//hardrestart"
-    $State.Value.lastAction = [pscustomobject]@{
+    # Skip bookkeeping first: anything not an accepted command advances the cursor.
+    if ($message.author.bot -eq $true -or
+        [string]$message.author.id -ne [string]$Config.authorizedUserId -or
+        !([string]$message.content).Trim().StartsWith("//")) {
+      $State.Value.lastSeenId = [string]$message.id
+      Write-JsonAtomic -Path $StatePath -Value $State.Value
+      continue
+    }
+    $raw = ([string]$message.content).Trim().ToLowerInvariant()
+    $command = $raw.Split(" ")[0].TrimStart("/")
+    if ($allowed -notcontains $command) {
+      $State.Value.lastSeenId = [string]$message.id
+      Write-JsonAtomic -Path $StatePath -Value $State.Value
+      continue
+    }
+
+    # Journal BEFORE action: a crash must never silently lose an accepted command.
+    $action = [pscustomobject]@{
+      schemaVersion = 1
       messageId = [string]$message.id
       command = $command
+      generation = $script:Generation
       status = "started"
       startedAt = [DateTime]::UtcNow.ToString("o")
       completedAt = $null
       stage = $null
     }
+    $State.Value.lastAction = $action
     Write-JsonAtomic -Path $StatePath -Value $State.Value
-    Write-Log "authorized $command message=$($message.id)"
-    Send-DiscordReceipt -Config $Config -Message (
-      "AMUX rescue mottagen av Windows-restartern. Försöker {0} återställning…" -f
-      $(if ($hard) { "full WSL" } else { "bridge" })
-    )
-    $result = Invoke-Rescue -Config $Config -Hard:$hard
-    $State.Value.lastAction.status = $(if ($result.ok) { "completed" } else { "failed" })
-    $State.Value.lastAction.completedAt = [DateTime]::UtcNow.ToString("o")
-    $State.Value.lastAction.stage = $result.stage
-    Write-JsonAtomic -Path $StatePath -Value $State.Value
-    Write-Log "rescue status=$($State.Value.lastAction.status) stage=$($result.stage)"
-    if ($result.ok) {
-      Send-DiscordReceipt -Config $Config -Message "AMUX rescue klar via $($result.stage). Bryggan är startad."
+    Write-Log "accepted $command message=$($message.id) generation=$($script:Generation)"
+
+    $outcome = $null
+    if ($command -eq "restart") {
+      Send-DiscordReceipt -Config $Config -Message "AMUX rescue mottagen av Windows-restartern. Försöker bridge-återställning…"
+      $result = Invoke-Rescue -Config $Config -Hard:$false
+      $outcome = [pscustomobject]@{ ok = $result.ok; stage = $result.stage }
+      if ($result.ok) {
+        Send-DiscordReceipt -Config $Config -Message "AMUX rescue klar via $($result.stage). Bryggan är startad."
+      } else {
+        Send-DiscordReceipt -Config $Config -Message "AMUX rescue misslyckades vid $($result.stage). Kontrollera Windows-loggen."
+      }
+    } elseif ($command -eq "hardrestart" -or $command -eq "restart-wsl") {
+      # Destructive: only a fresh restart-ready receipt may pass. None exist
+      # until the receipt slice lands, so today this is always a classified refusal.
+      if (!(Test-BridgeCore -Config $Config)) {
+        Send-DiscordReceipt -Config $Config -Message "AMUX BLOCKED runtime-unavailable: $($script:BridgeCoreError)"
+        $outcome = [pscustomobject]@{ ok = $false; stage = "runtime-unavailable" }
+      } else {
+        $check = Invoke-BridgeNode -Config $Config -NodeArguments "destructive-check --command $command --generation $($script:Generation)"
+        $verdict = $null
+        try { $verdict = $check.stdout | ConvertFrom-Json } catch { $verdict = $null }
+        if ($null -ne $verdict -and $verdict.allow -eq $true) {
+          $result = Invoke-Rescue -Config $Config -Hard:$true
+          $outcome = [pscustomobject]@{ ok = $result.ok; stage = $result.stage }
+          Send-DiscordReceipt -Config $Config -Message $(if ($result.ok) { "AMUX rescue klar via $($result.stage)." } else { "AMUX rescue misslyckades vid $($result.stage)." })
+        } else {
+          $reason = $(if ($null -ne $verdict) { [string]$verdict.reason } else { "verdict-unreadable" })
+          Send-DiscordReceipt -Config $Config -Message "AMUX BLOCKED $reason"
+          $outcome = [pscustomobject]@{ ok = $false; stage = $reason }
+        }
+      }
     } else {
-      Send-DiscordReceipt -Config $Config -Message "AMUX rescue misslyckades vid $($result.stage). Kontrollera Windows-loggen."
+      Send-DiscordReceipt -Config $Config -Message "AMUX $command kommer i nästa slice (SRC-0123)."
+      $outcome = [pscustomobject]@{ ok = $true; stage = "placeholder" }
     }
+
+    $action.status = $(if ($outcome.ok) { "completed" } else { "failed" })
+    $action.completedAt = [DateTime]::UtcNow.ToString("o")
+    $action.stage = $outcome.stage
+    $State.Value.lastAction = $action
+    $State.Value.lastSeenId = [string]$message.id
+    $State.Value.lastPollAt = [DateTime]::UtcNow.ToString("o")
+    Write-JsonAtomic -Path $StatePath -Value $State.Value
+    Write-Log "action $command status=$($action.status) stage=$($action.stage)"
   }
 }
 
@@ -344,10 +412,12 @@ function Initialize-State {
   $messages = @(Invoke-Discord -Method Get -Route "/channels/$($Config.channelId)/messages?limit=1")
   $latest = $(if ($messages.Count -gt 0) { [string]$messages[0].id } else { "" })
   Write-JsonAtomic -Path $StatePath -Value ([pscustomobject]@{
+    schemaVersion = 1
     lastSeenId = $latest
     lastPollAt = $null
     lastError = $null
     lastAction = $null
+    generation = $null
   })
 }
 
@@ -372,9 +442,32 @@ if ($Install) {
     authorizedUserId = $AuthorizedUserId
     distro = $Distro
     linuxUser = $LinuxUser
+    nodePath = $NodePath
     pollSeconds = $PollSeconds
   }
   Write-JsonAtomic -Path $ConfigPath -Value $config
+  # Bridge core (Node logic) is installed next to the script with a byte-hash
+  # manifest; the poller verifies it before every Node dispatch so a broken
+  # runtime becomes BLOCKED runtime-unavailable, never a silent dead path.
+  $bridgeCoreDir = Join-Path $Root "bridge-core"
+  New-Item -ItemType Directory -Force -Path $bridgeCoreDir | Out-Null
+  $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+  $repoCore = Join-Path (Split-Path -Parent $scriptDir) "core\windows-bridge.mjs"
+  $repoBin = Join-Path $scriptDir "windows-bridge.mjs"
+  if (!(Test-Path $repoCore) -or !(Test-Path $repoBin)) {
+    throw "bridge core sources not found next to the installer (core/windows-bridge.mjs, bin/windows-bridge.mjs)"
+  }
+  Copy-Item -Force $repoBin (Join-Path $bridgeCoreDir "windows-bridge.mjs")
+  Copy-Item -Force $repoCore (Join-Path $bridgeCoreDir "core-windows-bridge.mjs")
+  $manifest = [pscustomobject]@{
+    schemaVersion = 1
+    contractVersion = 1
+    files = [pscustomobject]@{
+      "windows-bridge.mjs" = (Get-FileHash -Algorithm SHA256 (Join-Path $bridgeCoreDir "windows-bridge.mjs")).Hash.ToLowerInvariant()
+      "core-windows-bridge.mjs" = (Get-FileHash -Algorithm SHA256 (Join-Path $bridgeCoreDir "core-windows-bridge.mjs")).Hash.ToLowerInvariant()
+    }
+  }
+  Write-JsonAtomic -Path (Join-Path $bridgeCoreDir "manifest.json") -Value $manifest
   Initialize-State -Config $config
   Stop-Restarter | Out-Null
   Remove-Item -Force -ErrorAction SilentlyContinue $DisabledPath
@@ -481,11 +574,27 @@ if ($Run -or $PSCmdlet.ParameterSetName -eq "Run") {
       script = $InstalledScript
     })
     Write-Log "listener started pid=$PID channel=$($config.channelId)"
+    $script:Generation = [guid]::NewGuid().ToString("N")
     $state = Read-Json $StatePath
     if ($null -eq $state) {
       Initialize-State -Config $config
       $state = Read-Json $StatePath
     }
+    $state.generation = $script:Generation
+    # A leftover started action is evidence of a mid-action crash: destructive
+    # actions become BLOCKED and are never retried; read-only ones may resume.
+    if ($null -ne $state.lastAction -and $state.lastAction.status -eq "started") {
+      $leftover = [string]$state.lastAction.command
+      if ($leftover -eq "status" -or $leftover -eq "logs") {
+        Write-Log "leftover read-only action $leftover resumes idempotently"
+      } else {
+        $state.lastAction.status = "blocked"
+        $state.lastAction.completedAt = [DateTime]::UtcNow.ToString("o")
+        $state.lastAction.stage = "crashed-mid-action"
+        Write-Log "leftover destructive action $leftover marked BLOCKED crashed-mid-action; never retried"
+      }
+    }
+    Write-JsonAtomic -Path $StatePath -Value $state
     while ($true) {
       try {
         Process-DiscordMessages -Config $config -State ([ref]$state)
