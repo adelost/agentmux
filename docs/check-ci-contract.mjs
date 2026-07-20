@@ -13,6 +13,14 @@ assert.match(pullRequestWorkflow, /AMUX_LINT_BASE_REF:[^\n]*(?:pull_request\.bas
   "pull requests and merge groups must bind lint to their exact base SHA");
 assert.match(pullRequestWorkflow, /run:\s*amux lint --changed --strict/,
   "every PR must run the strict changed-file ratchet");
+assert.match(pullRequestWorkflow, /run:\s*node bin\/focused-tests\.mjs/,
+  "every PR runs only the tests related to its changed files");
+assert.doesNotMatch(pullRequestWorkflow, /npm\s+(?:run\s+)?test\b/,
+  "the PR gate must never invoke the full test suite");
+assert.doesNotMatch(pullRequestWorkflow, /npm\s+run\s+ci\b/,
+  "the PR gate must never invoke the full ci suite");
+assert.doesNotMatch(pullRequestWorkflow, /vitest/,
+  "the PR workflow must not reference vitest directly; focused-tests.mjs owns it");
 
 const SHA = "a".repeat(40);
 const NEXT_SHA = "b".repeat(40);
