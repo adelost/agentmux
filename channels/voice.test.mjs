@@ -70,6 +70,7 @@ function setupServer(opts = {}) {
     run,
     mirror,
     reactivePoke,
+    deliveryBroker: opts.deliveryBroker || null,
     audioOutbox: opts.audioOutbox || null,
     audioDiscovery: opts.audioDiscovery,
   });
@@ -300,6 +301,71 @@ feature("POST /api/send: audio path", () => {
       expect(r.status).toBe(422);
       expect(s.calls.sendOnly).toEqual([]);
       await s.pwa.stop(); s.cleanup();
+    }],
+  });
+});
+
+feature("POST /api/audio/send: native phone PTT", () => {
+  component("configured channel routes one transcript and one durable spoken echo", {
+    given: ["audio inbox target, broker and durable outbox", async () => {
+      const root = mkdtempSync(join(tmpdir(), "voice-ptt-test-"));
+      const journalPath = join(root, "audio.jsonl");
+      const outbox = createAudioOutbox({ journalPath });
+      const enqueued = [];
+      const s = setupServer({
+        transcription: "starta om bryggan",
+        audioOutbox: outbox,
+        audioDiscovery: { serverId: "test", target: "chan-0" },
+        deliveryBroker: { enqueue: (job) => enqueued.push(job) },
+      });
+      const { url } = await s.pwa.start();
+      return { s, url, outbox, enqueued, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+    }],
+    when: ["same phone turn is posted twice after an ambiguous HTTP result", async ({ url }) => {
+      const body = JSON.stringify({
+        audio: Buffer.from("PHONE-AUDIO").toString("base64"),
+        filename: "ptt.m4a",
+        lang: "sv",
+        target: "chan-0",
+        idempotencyKey: "turn-phone-1",
+      });
+      return Promise.all([
+        request(`${url}/api/audio/send`, { method: "POST", headers: { "content-type": "application/json" }, body }),
+        request(`${url}/api/audio/send`, { method: "POST", headers: { "content-type": "application/json" }, body }),
+      ]);
+    }],
+    then: ["route is bound, broker key is stable and echo is represented once", async (responses, ctx) => {
+      expect(responses.map((response) => response.status)).toEqual([200, 200]);
+      expect(responses[0].body).toMatchObject({ transcript: "starta om bryggan", echoQueued: true });
+      expect(ctx.enqueued).toHaveLength(2);
+      expect(ctx.enqueued.every((job) => job.agentName === "claw" && job.pane === 0)).toBe(true);
+      expect(ctx.enqueued.every((job) => job.idempotencyKey === "turn-phone-1")).toBe(true);
+      expect(ctx.enqueued[0].text).toContain("answer normally");
+      expect(ctx.outbox.listPending({ consumerId: "phone", target: "chan-0" }))
+        .toMatchObject([{ eventId: "ptt-echo-turn-phone-1", text: "Du sa: starta om bryggan" }]);
+      await ctx.s.pwa.stop(); ctx.s.cleanup(); ctx.cleanup();
+    }],
+  });
+
+  component("unconfigured target is rejected before transcription or delivery", {
+    given: ["server configured for another channel", async () => {
+      const root = mkdtempSync(join(tmpdir(), "voice-ptt-reject-"));
+      const s = setupServer({
+        audioOutbox: createAudioOutbox({ journalPath: join(root, "audio.jsonl") }),
+        audioDiscovery: { serverId: "test", target: "chan-1" },
+      });
+      const { url } = await s.pwa.start();
+      return { s, url, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+    }],
+    when: ["phone requests another target", async ({ url }) => request(`${url}/api/audio/send`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ audio: "YQ==", target: "chan-0", idempotencyKey: "turn-wrong" }),
+    })],
+    then: ["request is refused without a pane write", async (response, ctx) => {
+      expect(response.status).toBe(403);
+      expect(ctx.s.calls.sendOnly).toEqual([]);
+      await ctx.s.pwa.stop(); ctx.s.cleanup(); ctx.cleanup();
     }],
   });
 });

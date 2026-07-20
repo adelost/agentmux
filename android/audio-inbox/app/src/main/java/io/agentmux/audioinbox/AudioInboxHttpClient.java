@@ -1,11 +1,13 @@
 package io.agentmux.audioinbox;
 
 import android.net.Uri;
+import android.util.Base64;
 
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -22,6 +24,62 @@ final class AudioInboxHttpClient {
     AudioInboxHttpClient(String serverUrl, String consumerId) {
         this.serverUrl = serverUrl.replaceAll("/+$", "");
         this.consumerId = consumerId;
+    }
+
+    static final class PttResult {
+        final String transcript;
+        final boolean echoQueued;
+
+        PttResult(String transcript, boolean echoQueued) {
+            this.transcript = transcript;
+            this.echoQueued = echoQueued;
+        }
+    }
+
+    PttResult sendPushToTalk(File audioFile, String target, String turnId) throws Exception {
+        byte[] audio;
+        try (InputStream input = new FileInputStream(audioFile)) {
+            audio = readBounded(input, MAX_AUDIO_BYTES);
+        }
+        HttpURLConnection connection = (HttpURLConnection) new URL(
+            serverUrl + "/api/audio/send"
+        ).openConnection();
+        try {
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setConnectTimeout(10_000);
+            connection.setReadTimeout(75_000);
+            connection.setDoOutput(true);
+            byte[] body = new JSONObject()
+                .put("audio", Base64.encodeToString(audio, Base64.NO_WRAP))
+                .put("filename", "ptt.m4a")
+                .put("lang", "sv")
+                .put("target", target)
+                .put("idempotencyKey", turnId)
+                .toString()
+                .getBytes(StandardCharsets.UTF_8);
+            connection.setFixedLengthStreamingMode(body.length);
+            try (OutputStream output = connection.getOutputStream()) {
+                output.write(body);
+            }
+            int status = connection.getResponseCode();
+            InputStream responseStream = status >= 200 && status < 300
+                ? connection.getInputStream()
+                : connection.getErrorStream();
+            String response = responseStream == null ? "" : new String(
+                readBounded(responseStream, 64 * 1024),
+                StandardCharsets.UTF_8
+            );
+            JSONObject json = response.isBlank() ? new JSONObject() : new JSONObject(response);
+            if (status != 200) {
+                throw new IllegalStateException(json.optString("error", "PTT HTTP " + status));
+            }
+            String transcript = json.optString("transcript", "").trim();
+            if (transcript.isEmpty()) throw new IllegalStateException("PTT response has no transcript");
+            return new PttResult(transcript, json.optBoolean("echoQueued", false));
+        } finally {
+            connection.disconnect();
+        }
     }
 
     HttpURLConnection openFeed(String target) throws Exception {

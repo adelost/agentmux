@@ -10,6 +10,7 @@
 //   POST /api/tts                         text → MP3 audio (edge-tts)
 //   GET  /api/audio/events                SSE explicit-audio feed + bounded replay
 //   POST /api/audio/events/:id/receipts   durable phone playback receipt
+//   POST /api/audio/send                  native phone push-to-talk
 //
 // Auth: none. Backend binds 127.0.0.1 by default; tailnet exposure goes via
 // Tailscale Serve so the network IS the auth boundary. Same-origin static
@@ -17,12 +18,13 @@
 
 import http from "http";
 import { stripPaneChrome } from "../core/pane-chrome.mjs";
-import { writeFileSync, unlinkSync, readFileSync, existsSync, statSync } from "fs";
+import { unlinkSync, readFileSync, existsSync, statSync } from "fs";
 import { randomBytes } from "crypto";
 import { join, resolve, extname } from "path";
 import yaml from "js-yaml";
 import { esc } from "../lib.mjs";
 import { createAudioFeedHandlers } from "./audio-feed.mjs";
+import { createVoiceInput } from "./voice-input.mjs";
 
 // Minimal mime map for the static PWA bundle. Anything not listed gets
 // application/octet-stream (browsers handle it; this is only for the
@@ -47,8 +49,6 @@ const MIME = {
 };
 
 const DEFAULT_POLL_INTERVAL_MS = 1500;
-const MAX_AUDIO_BYTES = 25 * 1024 * 1024; // 25 MB (matches OpenAI Whisper limit)
-const TRANSCRIPT_PREFIX = "[transcribed voice, may contain speech-to-text errors — interpret intent]";
 
 /**
  * Create (but don't start) the Voice PWA HTTP server.
@@ -185,76 +185,11 @@ export function createVoicePWA(deps) {
     json(res, 200, listAgentsForResponse());
   }
 
-  async function handleSend(req, res, name, paneStr) {
-    const pane = parseInt(paneStr);
-    if (Number.isNaN(pane)) return json(res, 400, { error: "pane must be an integer" });
-    const v = validatePane(name, pane);
-    if (!v.ok) return json(res, 400, { error: v.error });
-
-    let body;
-    try { body = await parseJsonBody(req, MAX_AUDIO_BYTES + 1024 * 1024); }
-    catch (err) { return json(res, 400, { error: err.message }); }
-
-    let text = null;
-    let transcript = null;
-    if (typeof body.text === "string" && body.text.trim()) {
-      text = body.text;
-    } else if (typeof body.audio === "string" && body.audio.length > 0) {
-      // base64 audio blob → tmp file → whisper transcript
-      const ext = (body.filename?.split(".").pop() || "webm").toLowerCase().replace(/[^a-z0-9]/g, "") || "webm";
-      const tmpPath = join("/tmp", `voice-pwa-${randomBytes(8).toString("hex")}.${ext}`);
-      try {
-        writeFileSync(tmpPath, Buffer.from(body.audio, "base64"));
-      } catch (err) {
-        return json(res, 400, { error: `invalid base64 audio: ${err.message}` });
-      }
-      try {
-        const lang = (body.lang || "sv").replace(/[^a-z]/g, "");
-        const { stdout } = await run(`'${esc(transcribeScript)}' '${esc(tmpPath)}' '${esc(lang)}'`, 60000);
-        const raw = String(stdout || "").trim();
-        if (!raw) {
-          return json(res, 422, { error: "transcription empty — audio may have been silent or unintelligible" });
-        }
-        transcript = raw;
-        text = `${TRANSCRIPT_PREFIX} ${raw}`;
-      } catch (err) {
-        return json(res, 500, { error: `transcription failed: ${err.message}` });
-      } finally {
-        try { unlinkSync(tmpPath); } catch {}
-      }
-    } else {
-      return json(res, 400, { error: "body must contain either 'text' or 'audio' (base64)" });
-    }
-
-    // Persist before acknowledging the HTTP request. Production uses the
-    // bridge broker; the direct path remains only for isolated tests.
-    try {
-      if (deliveryBroker) {
-        deliveryBroker.enqueue({
-          agentName: name,
-          pane,
-          text,
-          source: "voice-pwa",
-          idempotencyKey: body.idempotencyKey || null,
-        });
-      } else {
-        await agent.sendOnly(name, text, pane);
-      }
-    } catch (err) { return json(res, 500, { error: `send failed: ${err.message}` }); }
-
-    // Best-effort mirror to Discord for channel parity (see 57b927b, b6c3107).
-    // Failure here is a transparency degradation, not a correctness issue:
-    // the pane already received the input.
-    if (mirror?.send) {
-      const channelId = findChannelIdForPane(name, pane);
-      if (channelId) {
-        try { await mirror.send(channelId, `[voice-pwa] ${text}`); }
-        catch (err) { console.warn(`voice-pwa mirror ${name}:${pane}: ${err.message}`); }
-      }
-    }
-
-    json(res, 200, { sent: text, transcript, queued: Boolean(deliveryBroker) });
-  }
+  const voiceInput = createVoiceInput({
+    agent, audioDiscovery: deps.audioDiscovery, audioOutbox, deliveryBroker,
+    findChannelIdForPane, json, loadAgents, mirror, parseJsonBody, run,
+    transcribeScript, validatePane,
+  });
 
   async function handlePoke(req, res, name, paneStr) {
     if (typeof reactivePoke !== "function") return json(res, 404, { error: "reactive poke disabled" });
@@ -456,7 +391,10 @@ export function createVoicePWA(deps) {
       }
       const mSend = path.match(/^\/api\/send\/([^/]+)\/(\d+)$/);
       if (mSend && req.method === "POST") {
-        return await handleSend(req, res, decodeURIComponent(mSend[1]), mSend[2]);
+        return await voiceInput.pane(req, res, decodeURIComponent(mSend[1]), mSend[2]);
+      }
+      if (req.method === "POST" && path === "/api/audio/send") {
+        return await voiceInput.phone(req, res);
       }
       const mPoke = path.match(/^\/api\/poke\/([^/]+)\/(\d+)$/);
       if (mPoke && req.method === "POST") {

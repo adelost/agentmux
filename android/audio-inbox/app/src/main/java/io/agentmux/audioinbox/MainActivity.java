@@ -51,6 +51,7 @@ public final class MainActivity extends Activity {
     private TextView current;
     private TextView history;
     private Button replay;
+    private PushToTalkController pushToTalk;
     private final ExecutorService discoveryExecutor = Executors.newSingleThreadExecutor();
     private final Handler refreshHandler = new Handler(Looper.getMainLooper());
     private final Runnable refresher = new Runnable() {
@@ -95,12 +96,14 @@ public final class MainActivity extends Activity {
     @Override
     protected void onStop() {
         refreshHandler.removeCallbacks(refresher);
+        pushToTalk.cancelForBackground();
         unregisterReceiver(statusReceiver);
         super.onStop();
     }
 
     @Override
     protected void onDestroy() {
+        pushToTalk.close();
         discoveryExecutor.shutdownNow();
         super.onDestroy();
     }
@@ -178,6 +181,31 @@ public final class MainActivity extends Activity {
             advancedToggle.setText(show ? "Hide advanced settings" : "Advanced settings");
         });
 
+        content.addView(sectionLabel("PUSH TO TALK"), blockMargins(8, 8));
+        LinearLayout talkCard = card();
+        TextView talkStatus = text("Turn on hands-free listening first", 14, false, SECONDARY);
+        talkCard.addView(talkStatus);
+        Button talkButton = primaryButton("Hold to talk");
+        talkCard.addView(talkButton, blockMargins(16, 0));
+        content.addView(talkCard, blockMargins(0, 22));
+        pushToTalk = new PushToTalkController(this, talkButton, talkStatus,
+            new PushToTalkController.Environment() {
+                public boolean ready() {
+                    return preferences.getBoolean(AppContract.KEY_ENABLED, false)
+                        && ServerDiscovery.isAllowedServer(serverUrl())
+                        && target().matches("^\\d{10,24}$");
+                }
+                public String serverUrl() {
+                    return preferences.getString(AppContract.KEY_SERVER, "");
+                }
+                public String target() {
+                    return preferences.getString(AppContract.KEY_TARGET, "");
+                }
+                public String consumerId() {
+                    return AppContract.consumerId(preferences);
+                }
+            });
+
         content.addView(sectionLabel("LATEST UPDATE"), blockMargins(8, 8));
         LinearLayout latestCard = card();
         current = text("No update yet", 17, false, PRIMARY);
@@ -200,7 +228,7 @@ public final class MainActivity extends Activity {
         content.addView(historyCard, blockMargins(0, 18));
 
         TextView privacy = text(
-            "Audio is explicit. This app never listens to your microphone in the background.",
+            "The microphone is active only while you hold Talk. Audio stays on your private tailnet.",
             12,
             false,
             SECONDARY
@@ -425,6 +453,7 @@ public final class MainActivity extends Activity {
         String items = preferences.getString(AppContract.KEY_HISTORY, "");
         history.setText(items == null || items.isBlank() ? "Nothing played yet" : items);
         history.setTextColor(items == null || items.isBlank() ? SECONDARY : PRIMARY);
+        pushToTalk.refreshAvailability(enabled);
     }
 
     private int connectionColor(String state) {
@@ -451,6 +480,16 @@ public final class MainActivity extends Activity {
             && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == PushToTalkController.MICROPHONE_PERMISSION_REQUEST) {
+            pushToTalk.permissionResult(
+                results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED
+            );
         }
     }
 }
