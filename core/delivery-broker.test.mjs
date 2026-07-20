@@ -2375,4 +2375,73 @@ feature("single-writer delivery broker", () => {
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });
+
+  component("a stopped pane is woken only after admission; refusal keeps the message queued classified", {
+    given: ["a head for a stopped pane and a refusing wake gate", () => {
+      const rootDir = tempRoot();
+      const clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "ai", pane: 5, text: "wake the stopped pane", createdAt: 1_000, orderKey: "001",
+      });
+      queue.update(job, {
+        status: "pending", attempts: 0, firstAttemptAt: null,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0,
+      });
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.paneProcessState = async () => ({ command: "bash", dead: false, shell: true, running: false });
+      const broker = createDeliveryBroker({
+        agent,
+        queue,
+        now: () => clock,
+        notify: async (_job, kind) => notices.push(kind),
+        wakeAdmission: async () => ({ ok: false, reason: "memory-blocked" }),
+      });
+      return { rootDir, queue, job, notices, agent, broker };
+    }],
+    when: ["the delivery pass reaches the write path", ({ broker }) => broker.kickTarget("ai", 5)],
+    then: ["nothing is typed, the job stays queued with the classified reason and one notice", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.notices).toEqual(["blocked"]);
+      expect(ctx.queue.read("ai", 5, ctx.job.id)).toMatchObject({
+        status: "pending",
+        lastReason: "wake-refused:memory-blocked",
+      });
+      expect(ctx.queue.read("ai", 5, ctx.job.id).nextAttemptAt).toBeGreaterThan(0);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("a passing wake gate lets the durable message start exactly its target pane", {
+    given: ["a head for a stopped pane and an accepting wake gate", () => {
+      const rootDir = tempRoot();
+      const clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "ai", pane: 5, text: "wake and deliver", createdAt: 1_000, orderKey: "001",
+      });
+      queue.update(job, {
+        status: "pending", attempts: 0, firstAttemptAt: null,
+        echoCursor: { kind: "test", positions: {} }, nextAttemptAt: 0,
+      });
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.paneProcessState = async () => ({ command: "bash", dead: false, shell: true, running: false });
+      const broker = createDeliveryBroker({
+        agent,
+        queue,
+        now: () => clock,
+        notify: async (_job, kind) => notices.push(kind),
+        wakeAdmission: async () => ({ ok: true }),
+      });
+      return { rootDir, queue, job, notices, agent, broker };
+    }],
+    when: ["the delivery pass reaches the write path", ({ broker }) => broker.kickTarget("ai", 5)],
+    then: ["the payload is delivered and acknowledged through the normal path", (_, ctx) => {
+      expect(ctx.agent.sends.map((send) => send.text)).toEqual(["wake and deliver"]);
+      expect(ctx.queue.read("ai", 5, ctx.job.id)).toMatchObject({ status: "acknowledged" });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
 });

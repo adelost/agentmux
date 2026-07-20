@@ -205,6 +205,7 @@ const deliveryBroker = createDeliveryBroker({
   agent,
   queue: deliveryQueue,
   validateTarget: validateDeliveryTarget,
+  bridgeDir: __dir,
   resolveNotificationChannel: (job) =>
     findChannelForPane(AGENTS_YAML, job.agentName, job.pane),
   notify: async (job, state, extra = {}) => {

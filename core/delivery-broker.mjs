@@ -11,17 +11,17 @@ import { deliverToPane } from "./delivery.mjs";
 import { rewriteModelSlash } from "./claude-model.mjs";
 import { recoverSupersededSubmit } from "./submit-boundary.mjs";
 import { createDeliveryNotSent, PRE_SUBMIT_STATES } from "./delivery-not-sent.mjs";
+import { createDeliveryNotices } from "./delivery-notices.mjs";
 import { createIngestProbeGate } from "./ingest-probe-gate.mjs";
+import { createWakeAdmissionGate, paneNeedsWake } from "./wake-admission.mjs";
 import {
   DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES,
-  NOT_INGESTING_UNVERIFIED_STREAK, isNotSentDeliveryJob,
-  isTargetProvenNotIngesting, waitForDeliveryJob,
+  NOT_INGESTING_UNVERIFIED_STREAK, isTargetProvenNotIngesting, waitForDeliveryJob,
 } from "./delivery-queue.mjs";
 import { recoverHiddenDeliveryTui, recoverSubmittedTui } from "./tui-stall-recovery.mjs";
 const ACTIVE_RETRY_MS = 1_000;
 const BLOCKED_RETRY_MS = 3_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
-const NOTICE_AFTER_MS = 10_000;
 // Warn well before a legitimate long turn reaches the 60-minute verdict.
 const SUBMITTED_STALL_NOTICE_MS = 3 * 60_000;
 const STALE_SUBMITTED_TERMINAL_MS = 60 * 60 * 1_000;
@@ -51,9 +51,7 @@ function queueEvent(job, state, extra = {}) {
   } catch { /* diagnostics must never stop the queue */ }
 }
 
-/**
- * @param {{agent: object, queue: object, notify?: Function, resolveNotificationChannel?: Function, validateTarget?: Function, intervalMs?: number, now?: Function, log?: Function}} options
- */
+/** WHAT: Builds the single-writer delivery broker over the durable queue. WHY: Keeps every pane write serialized, receipt-gated, and restart-safe. */
 export function createDeliveryBroker({
   agent,
   queue,
@@ -63,9 +61,18 @@ export function createDeliveryBroker({
   intervalMs = 500,
   now = () => Date.now(),
   log = (message) => console.warn(message),
+  wakeAdmission = null,
+  bridgeDir = null,
 } = {}) {
   if (!agent) throw new Error("delivery broker requires agent");
   if (!queue) throw new Error("delivery broker requires queue");
+
+  // A durable message may wake exactly its target pane, but only after
+  // admission proves release identity and memory headroom; otherwise the
+  // message stays queued with a classified reason, never false-ACKed.
+  const wakeGate = typeof wakeAdmission === "function"
+    ? wakeAdmission
+    : (bridgeDir ? createWakeAdmissionGate({ runtimeRoot: bridgeDir, reserveMiB: 512 }) : null);
 
   const lanes = new Map();
   let timer = null;
@@ -135,65 +142,9 @@ export function createDeliveryBroker({
     }
   }
 
-  async function maybeNotifyBlocked(job) {
-    if (job.noticeSentAt || now() - Number(job.createdAt || 0) < NOTICE_AFTER_MS) return job;
-    const noticed = queue.update(job, { noticeSentAt: now() });
-    await notify(noticed, "blocked").catch((error) =>
-      log(`delivery broker blocked notice failed for ${noticed.id}: ${error.message}`));
-    return noticed;
-  }
-
-  function terminalNoticeKind(job) {
-    if (job.status === DELIVERED_UNVERIFIED_STATE) return "unverified";
-    if (isNotSentDeliveryJob(job)) return "not-sent";
-    return null;
-  }
-
-  async function notifyTerminal(initialJob) {
-    let current = queue.read(initialJob.agentName, initialJob.pane, initialJob.id) || initialJob;
-    const noticeKind = terminalNoticeKind(current);
-    if (!noticeKind || current.unverifiedNoticeSentAt) return current;
-    current = queue.update(current, {
-      unverifiedNoticeAttempts: Number(current.unverifiedNoticeAttempts || 0) + 1,
-      unverifiedNoticeNextAttemptAt: null,
-    });
-    if (!current.metadata?.channelId && typeof resolveNotificationChannel === "function") {
-      let channelId = null;
-      try {
-        channelId = await resolveNotificationChannel(current);
-      } catch (error) {
-        log(`delivery broker notification channel lookup failed for ${current.id}: ${error.message}`);
-      }
-      if (!channelId) {
-        const unavailable = queue.update(current, {
-          unverifiedNoticeNextAttemptAt: now() + blockedRetryMs(current),
-          unverifiedNoticeLastReason: "no Discord channel is currently bound to the target pane",
-        });
-        log(`delivery broker terminal notice pending for ${unavailable.id}: no bound Discord channel`);
-        return unavailable;
-      }
-      current = queue.update(current, {
-        metadata: { channelId: String(channelId) },
-        unverifiedNoticeLastReason: null,
-      });
-    }
-    try {
-      await notify(current, noticeKind);
-      return queue.update(current, {
-        unverifiedNoticeSentAt: now(),
-        unverifiedNoticeNextAttemptAt: null,
-        unverifiedNoticeLastReason: null,
-      });
-    } catch (error) {
-      const failed = queue.update(current, {
-        unverifiedNoticeNextAttemptAt: now() + blockedRetryMs(current),
-        unverifiedNoticeLastReason: error.message,
-      });
-      log(`delivery broker terminal notice failed for ${failed.id}: ${error.message}`);
-      return failed;
-    }
-  }
-
+  const { maybeNotifyBlocked, notifyTerminal } = createDeliveryNotices({
+    queue, now, notify, log, blockedRetryMs, resolveNotificationChannel,
+  });
   const { stalePreSubmit, terminalizeNotSent } = createDeliveryNotSent({
     queue, agent, now, notify, log, queueEvent, exactEcho, acknowledge, notifyTerminal,
   });
@@ -508,6 +459,24 @@ export function createDeliveryBroker({
       nextAttemptAt: null,
     });
     queueEvent(job, "attempt", { attempt: job.attempts });
+
+    // A stopped pane is woken only through admission; refusal keeps the
+    // message queued with a classified reason, never a false ack.
+    if (wakeGate && typeof agent.paneProcessState === "function") {
+      const processState = await agent.paneProcessState(job.agentName, job.pane).catch(() => null);
+      if (paneNeedsWake(processState)) {
+        const verdict = await wakeGate();
+        if (!verdict.ok) {
+          job = queue.update(job, {
+            status: drafted ? "drafted" : (ownsPaneDraft ? "pasting" : "pending"),
+            nextAttemptAt: now() + blockedRetryMs(job),
+            lastReason: `wake-refused:${verdict.reason}`,
+          });
+          queueEvent(job, "wake_refused", { reason: String(verdict.reason) });
+          return maybeNotifyBlocked(job);
+        }
+      }
+    }
 
     // A receiptless retry re-proves pane liveness before the payload is
     // committed again; a silent pane keeps the FIFO parked, never retyped.
