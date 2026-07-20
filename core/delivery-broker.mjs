@@ -70,8 +70,7 @@ export function createDeliveryBroker({
   // A durable message may wake exactly its target pane, but only after
   // admission proves release identity and memory headroom; otherwise the
   // message stays queued with a classified reason, never false-ACKed.
-  const wakeGate = typeof wakeAdmission === "function"
-    ? wakeAdmission
+  const wakeGate = typeof wakeAdmission === "function" ? wakeAdmission
     : (bridgeDir ? createWakeAdmissionGate({ runtimeRoot: bridgeDir, reserveMiB: 512 }) : null);
 
   const lanes = new Map();

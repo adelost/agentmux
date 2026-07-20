@@ -4,40 +4,32 @@
 // pane when a durable message targets it. This gate makes that wake
 // fail-closed: the message stays durably queued with a classified reason
 // when the host cannot prove a verified release, memory headroom, or a live
-// session provenance. A wake is only gated when the pane's agent process is
-// not already running; delivery to a running pane is never gated.
+// session provenance. Identity truth comes from the single existing
+// contract (observeReleaseIdentity + identityDecision) — never a parallel
+// weaker copy. A wake is only gated when the pane's agent process is not
+// already running; delivery to a running pane is never gated.
 
-import { lstatSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { RELEASE_MANIFEST_NAME, releaseReceiptPath } from "./release-identity.mjs";
+import { identityDecision, observeReleaseIdentity } from "./release-identity.mjs";
 import { canStartHeavy, memoryGuardStatePath, readGuardState } from "./memory-guard.mjs";
 
-const COMMIT_SHA = /^[0-9a-f]{40}$/u;
-
-/** WHAT: Checks release identity locally enough to trust a pane wake. WHY: Prevents an unverified install from starting panes. */
-export function localReleaseIdentity({
+/** WHAT: Checks the installed release identity for one wake decision. WHY: Keeps wake trust on the single identity contract. */
+export function observeWakeIdentity({
   runtimeRoot,
+  entryPath,
   home = homedir(),
-  lstat = lstatSync,
-  readJson = (path) => JSON.parse(readFileSync(path, "utf8")),
+  observe = observeReleaseIdentity,
 } = {}) {
-  try {
-    if (lstat(runtimeRoot).isSymbolicLink()) return { ok: false, reason: "linked-checkout" };
-  } catch {
-    return { ok: false, reason: "runtime-missing" };
-  }
-  let manifest = null;
-  try { manifest = readJson(join(runtimeRoot, RELEASE_MANIFEST_NAME)); }
-  catch { return { ok: false, reason: "manifest" }; }
-  if (!manifest || !COMMIT_SHA.test(manifest.sourceSha || "")) {
-    return { ok: false, reason: "manifest" };
-  }
-  let receipt = null;
-  try { receipt = readJson(releaseReceiptPath(home)); }
-  catch { return { ok: false, reason: "receipt" }; }
-  if (receipt?.sourceSha !== manifest.sourceSha) return { ok: false, reason: "source-sha" };
-  return { ok: true, sourceSha: manifest.sourceSha };
+  const identity = observe({
+    runtimeRoot,
+    entryPath,
+    home,
+    // Remote master may warn, never block a wake: offline proof stays local.
+    readRemoteMaster: () => { throw new Error("offline: wake identity is local-only"); },
+  });
+  return identityDecision(identity);
 }
 
 /** WHAT: Maps identity and memory state to one on-demand pane wake decision. WHY: Keeps durable delivery from starting panes into an unverified or pressured host. */
@@ -50,7 +42,7 @@ export function checkWakeAdmission({
   reserveMiB = 0,
 } = {}) {
   if (!automatic) return { ok: true, reason: "manual-override" };
-  if (!identity?.ok) return { ok: false, reason: `identity-${identity?.reason || "unverified"}` };
+  if (!identity?.allowRevive) return { ok: false, reason: `identity-${identity?.reason || "unverified"}` };
   const verdict = canStartHeavy(guardState, {
     class: "pane-revive",
     reserveMiB,
@@ -71,9 +63,11 @@ export function paneNeedsWake(processState) {
 /** WHAT: Builds the broker's wake gate over identity and memory state. WHY: Keeps wake checks out of the delivery loop. */
 export function createWakeAdmissionGate({
   runtimeRoot,
+  entryPath = null,
   home = homedir(),
   now = () => Date.now(),
   readFile = (path) => readFileSync(path, "utf8"),
+  observe,
   reserveMiB = 0,
 } = {}) {
   const currentBootId = () => {
@@ -81,7 +75,12 @@ export function createWakeAdmissionGate({
     catch { return null; }
   };
   return async () => checkWakeAdmission({
-    identity: localReleaseIdentity({ runtimeRoot, home }),
+    identity: observeWakeIdentity({
+      runtimeRoot,
+      entryPath: entryPath || join(runtimeRoot, "bin", "agent-cli.mjs"),
+      home,
+      observe,
+    }),
     guardState: readGuardState({ path: memoryGuardStatePath() }),
     nowMs: now(),
     bootId: currentBootId(),

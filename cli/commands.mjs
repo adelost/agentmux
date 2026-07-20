@@ -49,6 +49,7 @@ import {
   readBridgeMode,
 } from "../core/bridge-mode.mjs";
 import { createBridgeLifecycle } from "./bridge.mjs";
+import { createStopAll } from "./stop-all.mjs";
 import { cmdDream, isPidAlive } from "./dream.mjs";
 import { cmdDoctor } from "./doctor.mjs";
 import {
@@ -680,16 +681,11 @@ export async function cmdCutover(args, ctx) {
 }
 
 async function cmdStopAll(ctx) {
-  const agents = listAgents(ctx.configPath);
-  // Atomic: the full stop plan is resolved before the first kill, and only
-  // the maintained bridge-stop path is used (the cmdUnserve crash, 2026-07-20).
-  const plan = [];
-  for (const a of agents) {
-    if (a.backend === "native") continue;
-    if (await hasSession(ctx, a.name)) plan.push(a.name);
-  }
-  for (const name of plan) await killSession(ctx, name);
-  if (await bridgeLifecycle.stop(ctx)) plan.push("bridge");
+  // Bridge first: a refused/timeout bridge stop aborts before any kill
+  // (the cmdUnserve crash left a half-stopped fleet on 2026-07-20).
+  const plan = await createStopAll({
+    listAgents, hasSession, killSession, stopBridge: (c) => bridgeLifecycle.stop(c),
+  })(ctx);
   if (!plan.length) console.log("Nothing to stop.");
   else console.log(`Stopped: ${plan.join(", ")}.`);
 }
