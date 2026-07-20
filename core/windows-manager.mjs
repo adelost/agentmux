@@ -3,6 +3,7 @@
 // so they are vitest-able; bin/windows-manager.mjs only does Discord I/O,
 // bounded process runs, and journaling.
 
+import { spawn } from "node:child_process";
 import { classifyRecovery } from "./windows-bridge.mjs";
 
 /** WHAT: Names the manager contract version. WHY: Keeps runbook, tools, and runtime on one explicit contract. */
@@ -225,3 +226,83 @@ export function createHttpProvider({
     },
   };
 }
+
+/** WHAT: Builds the configured manager provider. WHY: Keeps provider selection out of the poll loop. */
+export function createManagerProvider(config) {
+  const spec = config.provider || {};
+  if (spec.kind === "mock") return createMockProvider(spec.responses || []);
+  if (spec.kind === "cli") {
+    return createCliProvider({
+      command: spec.command,
+      args: Array.isArray(spec.args) ? spec.args : [],
+      timeoutMs: Number(spec.timeoutMs) || 120_000,
+    });
+  }
+  const apiKeyEnv = spec.apiKeyEnv || "MANAGER_API_KEY";
+  return createHttpProvider({
+    endpoint: spec.endpoint,
+    model: spec.model,
+    apiKeyProvider: () => process.env[apiKeyEnv] || "",
+  });
+}
+
+/** WHAT: Extracts the answer body from a codex exec transcript. WHY: Separates engine chrome from the reply text. */
+export function extractCliAnswer(stdout) {
+  const body = [];
+  for (const line of String(stdout || "").split("\n")) {
+    if (/^tokens used\s*$/u.test(line.trim())) break;
+    body.push(line);
+  }
+  if (body.length && body[0].trim() === "codex") body.shift();
+  const text = body.join("\n").trim();
+  return text || null;
+}
+
+/** WHAT: Builds a CLI-backed chat provider such as codex exec. WHY: Keeps the engine replaceable and secrets inside the CLI session. */
+export function createCliProvider({
+  command,
+  args = [],
+  timeoutMs = 120_000,
+  execImpl = null,
+} = {}) {
+  const defaultExec = (cmd, cmdArgs, input, timeout) => new Promise((resolvePromise) => {
+    const child = spawn(cmd, cmdArgs, { stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (result) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        resolvePromise(result);
+      }
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish({ code: null, stdout, stderr, timedOut: true });
+    }, timeout);
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", (error) => finish({ code: -1, stdout, stderr: String(error?.message || error), timedOut: false }));
+    child.on("close", (code) => finish({ code, stdout, stderr, timedOut: false }));
+    child.stdin.end(input);
+  });
+  return {
+    name: "cli",
+    chat: async (messages) => {
+      const prompt = (messages || []).map((message) => {
+        const role = message.role === "system" ? "SYSTEM" : (message.role === "assistant" ? "ASSISTANT" : "USER");
+        return `[${role}]\n${typeof message.content === "string" ? message.content : ""}`;
+      }).join("\n\n");
+      if (!command || !prompt.trim()) return { ok: false, reason: "usage" };
+      const run = execImpl || defaultExec;
+      const result = await run(command, args, prompt, timeoutMs);
+      if (result.timedOut) return { ok: false, reason: "timeout" };
+      if (result.code !== 0) return { ok: false, reason: `exit-${result.code}` };
+      const text = extractCliAnswer(result.stdout);
+      if (!text) return { ok: false, reason: "empty-response" };
+      return { ok: true, text };
+    },
+  };
+}
+

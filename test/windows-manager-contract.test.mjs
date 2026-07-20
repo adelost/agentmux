@@ -48,10 +48,11 @@ feature("windows manager source contract", () => {
   unit("secrets only enter through environment variable names", {
     then: ["no literal keys or tokens, config is read-only, detail output is redacted", () => {
       expect(MGR).toContain("process.env[");
-      expect(MGR).toContain("apiKeyEnv");
+      expect(CORE).toContain("apiKeyEnv");
       expect(MGR).toContain("discordTokenEnv");
       expect(MGR).not.toMatch(/apiKey\s*:\s*"[^"]{6,}/u);
       expect(MGR).not.toMatch(/Bearer\s+[A-Za-z0-9._-]{8,}/u);
+      expect(CORE).not.toMatch(/Bearer\s+[A-Za-z0-9._-]{8,}/u);
       expect(MGR).not.toContain("writeJsonAtomic(configPath");
       expect(CORE).toContain("apiKeyProvider()");
       expect(RESCUE).toContain("[REDACTED_DISCORD_TOKEN]");

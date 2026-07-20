@@ -14,8 +14,7 @@ import {
   MANAGER_CONTRACT_VERSION,
   MANAGER_TOOLS,
   classifyManagerOutcome,
-  createHttpProvider,
-  createMockProvider,
+  createManagerProvider,
   parseToolCalls,
   planManagerTurn,
   planRescueCommand,
@@ -217,17 +216,6 @@ function loadConfig() {
   return { config, rootDir: dirname(configPath) };
 }
 
-function buildProvider(config) {
-  const spec = config.provider || {};
-  if (spec.kind === "mock") return createMockProvider(spec.responses || []);
-  const apiKeyEnv = spec.apiKeyEnv || "MANAGER_API_KEY";
-  return createHttpProvider({
-    endpoint: spec.endpoint,
-    model: spec.model,
-    apiKeyProvider: () => process.env[apiKeyEnv] || "",
-  });
-}
-
 async function discordRequest(token, method, route, body) {
   const headers = { authorization: `Bot ${token}`, "user-agent": "agentmux-windows-manager/1" };
   if (body) headers["content-type"] = "application/json";
@@ -260,7 +248,7 @@ async function main() {
   const history = [];
   const deps = {
     generation,
-    provider: buildProvider(config),
+    provider: createManagerProvider(config),
     nowMs: () => Date.now(),
     saveState: (next) => writeJsonAtomic(statePath, next),
     observe: observeDefault,

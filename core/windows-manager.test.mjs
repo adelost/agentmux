@@ -4,8 +4,10 @@ import {
   MANAGER_TOOLS,
   buildRunbookContext,
   classifyManagerOutcome,
+  createCliProvider,
   createHttpProvider,
   createMockProvider,
+  extractCliAnswer,
   parseToolCalls,
   planManagerTurn,
   planRescueCommand,
@@ -276,6 +278,59 @@ feature("windows manager core", () => {
       const networkResult = await leaky.chat([]);
       expect(networkResult).toEqual({ ok: false, reason: "request-failed" });
       expect(JSON.stringify(networkResult)).not.toContain(key);
+    }],
+  });
+
+  unit("extractCliAnswer strips the codex header and token trailer", {
+    then: ["the body survives, chrome is gone", () => {
+      expect(extractCliAnswer("codex\nHej Mattias, WSL mår bra.\ntokens used\n1,951\n"))
+        .toBe("Hej Mattias, WSL mår bra.");
+      expect(extractCliAnswer("codex\nCODEX OK\ntokens used\n12\nCODEX OK\n"))
+        .toBe("CODEX OK");
+      expect(extractCliAnswer("codex\ntokens used\n1\n")).toBeNull();
+      expect(extractCliAnswer("")).toBeNull();
+      expect(extractCliAnswer("tokens used\n5\n")).toBeNull();
+    }],
+  });
+
+  unit("the cli provider flattens messages, times out bounded, and never leaks the engine", {
+    then: ["prompt shape, exit codes and timeout are classified", async () => {
+      const seen = [];
+      const fake = (cmd, args, input, timeout) => {
+        seen.push({ cmd, args, input, timeout });
+        return Promise.resolve({ code: 0, stdout: "codex\nSvar från codex.\ntokens used\n9\n", timedOut: false });
+      };
+      const provider = createCliProvider({ command: "wsl.exe", args: ["--", "codex", "exec", "-"], timeoutMs: 5_000, execImpl: fake });
+      const result = await provider.chat([
+        { role: "system", content: "Runbook." },
+        { role: "user", content: "status?" },
+      ]);
+      expect(result).toEqual({ ok: true, text: "Svar från codex." });
+      expect(seen[0].cmd).toBe("wsl.exe");
+      expect(seen[0].input).toContain("[SYSTEM]\nRunbook.");
+      expect(seen[0].input).toContain("[USER]\nstatus?");
+      expect(seen[0].timeout).toBe(5_000);
+
+      const timeoutProvider = createCliProvider({
+        command: "x",
+        execImpl: () => Promise.resolve({ code: null, stdout: "", timedOut: true }),
+      });
+      expect(await timeoutProvider.chat([{ role: "user", content: "hej" }]))
+        .toEqual({ ok: false, reason: "timeout" });
+
+      const failProvider = createCliProvider({
+        command: "x",
+        execImpl: () => Promise.resolve({ code: 3, stdout: "codex\n", timedOut: false }),
+      });
+      expect(await failProvider.chat([{ role: "user", content: "hej" }]))
+        .toEqual({ ok: false, reason: "exit-3" });
+
+      const emptyProvider = createCliProvider({
+        command: "x",
+        execImpl: () => Promise.resolve({ code: 0, stdout: "codex\ntokens used\n1\n", timedOut: false }),
+      });
+      expect(await emptyProvider.chat([{ role: "user", content: "hej" }]))
+        .toEqual({ ok: false, reason: "empty-response" });
     }],
   });
 });
