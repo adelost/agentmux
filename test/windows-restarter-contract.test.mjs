@@ -1,23 +1,35 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  copyFileSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, feature, unit } from "bdd-vitest";
 
-const PS1 = readFileSync(
-  join(new URL("..", import.meta.url).pathname, "bin", "windows-discord-restarter.ps1"),
-  "utf8",
-);
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const readPowerShell = (name) => readFileSync(join(ROOT, "bin", name), "utf8");
+const MAIN = readPowerShell("windows-discord-restarter.ps1");
+const IO = readPowerShell("windows-restarter-io.ps1");
+const DISCORD = readPowerShell("windows-restarter-discord.ps1");
+const PS1 = `${MAIN}\n${IO}\n${DISCORD}`;
 
 feature("windows restarter source contract", () => {
-  unit("the journal entry is written before any command executes", {
-    then: ["the started write precedes the rescue call and the cursor moves after the outcome", () => {
-      const journal = PS1.indexOf('status = "started"');
-      const rescue = PS1.indexOf("Invoke-Rescue -Config $Config -Hard:$false");
+  unit("the shared core plans and journals before any command executes", {
+    then: ["plan-message precedes the state write and the rescue call", () => {
+      const planner = DISCORD.indexOf('-Command "plan-message"');
+      const journal = DISCORD.indexOf("$State.Value.lastAction = $action");
+      const rescue = DISCORD.indexOf("Invoke-WindowsCommand -Config $Config -Plan $plan");
+      expect(planner).toBeGreaterThan(-1);
       expect(journal).toBeGreaterThan(-1);
+      expect(journal).toBeGreaterThan(planner);
       expect(rescue).toBeGreaterThan(journal);
-      // lastSeenId may only be assigned after an outcome write for accepted commands.
-      const earlyCursor = PS1.indexOf("$State.Value.lastSeenId = [string]$message.id");
-      expect(earlyCursor).toBeGreaterThan(-1);
-      expect(earlyCursor).toBeLessThan(journal); // skip-bookkeeping only
     }],
   });
 
@@ -43,21 +55,69 @@ feature("windows restarter source contract", () => {
     }],
   });
 
-  unit("install ships the bridge core with a sha256 manifest and node verification", {
-    then: ["copy, manifest, hashes, and Test-BridgeCore are all wired", () => {
+  unit("install preserves the bridge module layout with a sha256 manifest", {
+    then: ["bin and core paths match the runtime import", () => {
       expect(PS1).toContain('Join-Path $Root "bridge-core"');
+      expect(PS1).toContain('Join-Path $bridgeCoreDir "bin"');
+      expect(PS1).toContain('Join-Path $bridgeCoreDir "core"');
+      expect(PS1).toContain('"bin/windows-bridge.mjs"');
+      expect(PS1).toContain('"core/windows-bridge.mjs"');
       expect(PS1).toContain("manifest.json");
       expect(PS1).toContain("Get-FileHash -Algorithm SHA256");
       expect(PS1).toContain("function Test-BridgeCore");
       expect(PS1).toContain("nodePath");
+      expect(MAIN).toContain(". $RuntimeIo");
+      expect(MAIN).toContain(". $RuntimeDiscord");
+      expect(MAIN).toContain('Copy-Item -Force $RuntimeIo');
+      expect(MAIN).toContain('Copy-Item -Force $RuntimeDiscord');
     }],
   });
 
-  unit("a leftover started destructive action becomes blocked and is never retried", {
-    then: ["the startup path marks it crashed-mid-action", () => {
+  unit("a leftover started action is reconciled by core and permanently fenced", {
+    then: ["the startup path advances the exact message cursor", () => {
       expect(PS1).toContain('status -eq "started"');
-      expect(PS1).toContain("crashed-mid-action");
+      expect(PS1).toContain('-Command "reconcile-state"');
+      expect(PS1).toContain("$state.lastSeenId = [string]$state.lastAction.messageId");
       expect(PS1).toContain("$script:Generation = [guid]::NewGuid()");
+    }],
+  });
+
+  unit("the exact installed directory layout executes its self-check", {
+    then: ["Node resolves core/windows-bridge.mjs and verifies both hashes", () => {
+      const temporary = mkdtempSync(join(tmpdir(), "amux-windows-core-"));
+      try {
+        mkdirSync(join(temporary, "bin"), { recursive: true });
+        mkdirSync(join(temporary, "core"), { recursive: true });
+        copyFileSync(join(ROOT, "bin", "windows-bridge.mjs"), join(temporary, "bin", "windows-bridge.mjs"));
+        copyFileSync(join(ROOT, "core", "windows-bridge.mjs"), join(temporary, "core", "windows-bridge.mjs"));
+        const files = {};
+        for (const name of ["bin/windows-bridge.mjs", "core/windows-bridge.mjs"]) {
+          files[name] = createHash("sha256").update(readFileSync(join(temporary, name))).digest("hex");
+        }
+        const manifest = join(temporary, "manifest.json");
+        writeFileSync(manifest, JSON.stringify({
+          schemaVersion: 1,
+          contractVersion: 1,
+          sourceSha: "a".repeat(40),
+          files,
+        }));
+        expect(execFileSync(process.execPath, [
+          join(temporary, "bin", "windows-bridge.mjs"),
+          "self-check",
+          "--manifest", manifest,
+          "--files-root", temporary,
+        ], { encoding: "utf8" }).trim()).toBe("SELF_CHECK_OK");
+        writeFileSync(join(temporary, "core", "windows-bridge.mjs"), "\n// tampered after install\n", { flag: "a" });
+        expect(() => execFileSync(process.execPath, [
+          join(temporary, "bin", "windows-bridge.mjs"),
+          "self-check",
+          "--manifest", manifest,
+          "--files-root", temporary,
+        ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }))
+          .toThrow(/SELF_CHECK_FAILED reason=hash-mismatch:core\/windows-bridge\.mjs/u);
+      } finally {
+        rmSync(temporary, { recursive: true, force: true });
+      }
     }],
   });
 
@@ -66,6 +126,18 @@ feature("windows restarter source contract", () => {
       const receiptLines = PS1.split("\n").filter((line) =>
         line.includes("Send-DiscordReceipt") || line.includes("Write-Output"));
       expect(receiptLines.every((line) => !line.includes("$token"))).toBe(true);
+    }],
+  });
+
+  unit("PowerShell stays split into thin files and visible foreground is canonical", {
+    then: ["every file is below 500 lines and hidden supervision is opt-in", () => {
+      for (const source of [MAIN, IO, DISCORD]) {
+        expect(source.trimEnd().split("\n").length).toBeLessThan(500);
+      }
+      expect(MAIN).toContain("persistence=hkcu-run-visible");
+      expect(MAIN).toContain('-WindowStyle $(if ($Supervised) { "Hidden" } else { "Normal" })');
+      expect(IO).toContain('exec "$AMUX_BIN" serve');
+      expect(IO).not.toContain("serve --detach");
     }],
   });
 });

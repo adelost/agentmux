@@ -14,25 +14,33 @@ import { existsSync } from "node:fs";
 const ZERO_TEST_ALLOWLIST = [
   /\.md$/u, // documentation
   /^docs\/(?!check-ci-contract\.mjs$)/u, // docs tree (the CI contract itself is a check, not docs)
+  /^docs\/check-ci-contract\.mjs$/u, // executed directly by the adjacent workflow step
   /\.(?:png|jpe?g|gif|webp|ico|mp4)$/u, // assets
   /^\.gitignore$/u,
   /^LICENSE$/u,
-  /^package(?:-lock)?\.json$/u, // npm metadata: covered by npm ci + the release machinery
   /^\.amux-lint\.yml$/u, // lint policy: covered by the strict lint step itself
   /^\.github\/workflows\/[^/]+\.ya?ml$/u, // covered by docs/check-ci-contract.mjs
 ];
 
 const TEST_ALIASES = {
+  "bin/agent-cli.mjs": ["cli/restart-ready.test.mjs"],
   "cli/commands.mjs": ["cli.test/commands.test.mjs"],
   "bin/start.sh": ["test/post-boot-revive.integration.test.mjs"],
   "bin/post-boot-revive.sh": ["test/post-boot-revive.integration.test.mjs"],
+  "bin/windows-bridge.mjs": ["core/windows-bridge.test.mjs", "test/windows-restarter-contract.test.mjs"],
   "bin/windows-discord-restarter.ps1": ["test/windows-restarter-contract.test.mjs"],
+  "bin/windows-restarter-io.ps1": ["test/windows-restarter-contract.test.mjs"],
+  "bin/windows-restarter-discord.ps1": ["test/windows-restarter-contract.test.mjs"],
+  "bin/windows-wsl-probe.mjs": ["core/windows-wsl-probe.test.mjs"],
+  "package.json": ["core/release-install.test.mjs"],
+  "package-lock.json": ["core/release-install.test.mjs"],
 };
 
 /** WHAT: Maps one changed file to its related fast test files. WHY: Keeps the PR gate focused instead of full-suite. */
 export function relatedTests(file, { exists = existsSync } = {}) {
   if (TEST_ALIASES[file]) return TEST_ALIASES[file].filter(exists);
   if (/\.test\.mjs$/u.test(file)) return exists(file) ? [file] : [];
+  if (!/\.mjs$/u.test(file)) return [];
   const candidate = file.replace(/\.mjs$/u, ".test.mjs");
   return exists(candidate) ? [candidate] : [];
 }

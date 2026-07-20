@@ -28,6 +28,14 @@ feature("focused PR tests", () => {
     }],
   });
 
+  unit("non-JavaScript metadata never becomes a Vitest input by filename accident", {
+    then: ["workflow YAML is allowlisted but maps to no test file", () => {
+      const exists = existsSet([".github/workflows/pull-request.yml"]);
+      expect(relatedTests(".github/workflows/pull-request.yml", { exists })).toEqual([]);
+      expect(unmappedExecutables([".github/workflows/pull-request.yml"], { exists })).toEqual([]);
+    }],
+  });
+
   unit("the PS1 maps to its source-contract test", {
     then: ["the alias lands the contract file", () => {
       const exists = existsSet(["test/windows-restarter-contract.test.mjs"]);
@@ -36,16 +44,18 @@ feature("focused PR tests", () => {
     }],
   });
 
-  unit("docs, assets and build metadata may carry zero tests; nothing else", {
-    then: ["allowlist holds, arbitrary config fails", () => {
+  unit("docs and assets may carry zero tests; executable metadata maps or fails", {
+    then: ["allowlist stays narrow and package metadata runs the release contract", () => {
       const exists = existsSet([]);
       expect(unmappedExecutables([
         "docs/FLEET-RESILIENCE-PLAN.md",
         "screenshot.png",
-        "package.json",
         ".github/workflows/pull-request.yml",
         ".gitignore",
       ], { exists })).toEqual([]);
+      const packageExists = existsSet(["core/release-install.test.mjs"]);
+      expect(relatedTests("package.json", { exists: packageExists }))
+        .toEqual(["core/release-install.test.mjs"]);
       expect(unmappedExecutables(["agentmux.yaml", "bin/other-cron.sh"], { exists }))
         .toEqual(["agentmux.yaml", "bin/other-cron.sh"]);
     }],

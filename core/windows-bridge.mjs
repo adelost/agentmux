@@ -45,19 +45,31 @@ export function destructiveVerdict({
   command,
   restartReadyReceipt = null,
   nowMs = Date.now(),
-  generation = null,
-  ttlMs = 15 * 60_000,
+  receiptId = null,
+  bootId = null,
+  fleetGeneration = null,
+  sourceSha = null,
 } = {}) {
   if (command !== "hardrestart" && command !== "restart-wsl") {
     return { allow: true, reason: "not-destructive" };
   }
   if (!restartReadyReceipt) return { allow: false, reason: "restart-ready-receipt-missing" };
-  const createdAtMs = Number(restartReadyReceipt.createdAtMs);
-  if (!Number.isFinite(createdAtMs) || createdAtMs > nowMs || nowMs - createdAtMs > ttlMs) {
+  if (restartReadyReceipt.ready !== true
+    || restartReadyReceipt.receiptId !== receiptId
+    || !Number.isFinite(restartReadyReceipt.createdAtMs)
+    || !Number.isFinite(restartReadyReceipt.expiresAtMs)
+    || restartReadyReceipt.createdAtMs > nowMs
+    || restartReadyReceipt.expiresAtMs < nowMs) {
     return { allow: false, reason: "restart-ready-receipt-stale" };
   }
-  if (generation && restartReadyReceipt.generation !== generation) {
+  if (bootId && restartReadyReceipt.bootId !== bootId) {
+    return { allow: false, reason: "restart-ready-receipt-boot" };
+  }
+  if (fleetGeneration && restartReadyReceipt.fleetGeneration !== fleetGeneration) {
     return { allow: false, reason: "restart-ready-receipt-generation" };
+  }
+  if (sourceSha && restartReadyReceipt.sourceSha !== sourceSha) {
+    return { allow: false, reason: "restart-ready-receipt-source" };
   }
   return { allow: true, reason: "ok" };
 }
@@ -95,4 +107,99 @@ export function resumeLeftoverAction(action) {
     return { disposition: "retry-read", reason: "read-only-idempotent" };
   }
   return { disposition: "blocked", reason: "crashed-mid-action" };
+}
+
+/** WHAT: Builds one authorized Discord-message plan through the shared parser. WHY: Keeps PowerShell from maintaining a second command allowlist. */
+export function planDiscordMessage({
+  messageId,
+  text,
+  generation,
+  nowMs = Date.now(),
+} = {}) {
+  const parsed = parseBridgeCommand(text);
+  if (!parsed) return { accepted: false, reason: "not-command" };
+  return {
+    accepted: true,
+    parsed,
+    action: planAcceptedAction({
+      messageId,
+      command: parsed.command,
+      generation,
+      nowMs,
+    }),
+  };
+}
+
+/** WHAT: Maps a state journal after process restart. WHY: Prevents the exact ambiguous non-read message from executing twice. */
+export function reconcileInterruptedState(state, { nowMs = Date.now() } = {}) {
+  const next = structuredClone(state || {});
+  const action = next.lastAction;
+  const resume = resumeLeftoverAction(action);
+  if (resume.disposition !== "blocked") {
+    return { state: next, ...resume };
+  }
+  action.status = "blocked";
+  action.completedAt = new Date(nowMs).toISOString();
+  action.stage = resume.reason;
+  next.lastAction = action;
+  next.lastSeenId = String(action.messageId);
+  return {
+    state: next,
+    disposition: "blocked",
+    reason: resume.reason,
+    fencedMessageId: String(action.messageId),
+  };
+}
+
+/** WHAT: Maps one bounded WSL observation for the Windows control plane. WHY: Keeps health meaning out of the PowerShell transport. */
+export function classifyWindowsObservation(observation) {
+  if (!observation?.wslReachable) {
+    return {
+      outcome: "PARTIAL",
+      reason: observation?.timedOut ? "wsl-timeout" : "wsl-offline",
+      nextStep: "start-wsl",
+    };
+  }
+  const bridgeState = observation.bridge?.state || "missing";
+  if (bridgeState === "hung" || bridgeState === "stale-code") {
+    return { outcome: "BLOCKED", reason: `bridge-${bridgeState}`, nextStep: "none" };
+  }
+  if (bridgeState !== "ok") {
+    return { outcome: "PARTIAL", reason: `bridge-${bridgeState}`, nextStep: "start-bridge" };
+  }
+  if (!observation.release?.allowRevive) {
+    return {
+      outcome: "PARTIAL",
+      reason: `release-${observation.release?.reason || "unverified"}`,
+      nextStep: "none",
+    };
+  }
+  if (observation.memory?.stale) {
+    return { outcome: "PARTIAL", reason: "memory-state-stale", nextStep: "none" };
+  }
+  if (["blocked", "critical"].includes(observation.memory?.level)) {
+    return {
+      outcome: "PARTIAL",
+      reason: `memory-${observation.memory.level}`,
+      nextStep: "none",
+    };
+  }
+  return { outcome: "READY", reason: "ok", nextStep: "none" };
+}
+
+/** WHAT: Formats one bounded observation without secrets or raw process output. WHY: Keeps Discord status concise and deterministic. */
+export function formatWindowsStatus(observation) {
+  const verdict = classifyWindowsObservation(observation);
+  const bridge = observation?.bridge?.state || "unknown";
+  const release = observation?.release?.allowRevive
+    ? `ok:${String(observation.release.sourceSha || "unknown").slice(0, 12)}`
+    : `blocked:${observation?.release?.reason || "unverified"}`;
+  const memory = observation?.memory?.stale
+    ? "stale"
+    : (observation?.memory?.level || "unknown");
+  return [
+    `AMUX ${verdict.outcome} reason=${verdict.reason}`,
+    `windows=online wsl=${observation?.wslReachable ? "online" : "offline"} boot=${observation?.bootId || "unknown"}`,
+    `bridge=${bridge} release=${release} memory=${memory}`,
+  ].join("\n");
 }
