@@ -29,6 +29,10 @@ function decodeInput() {
   return JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
 }
 
+function readJsonFile(path) {
+  return JSON.parse(readFileSync(path, "utf8").replace(/^\uFEFF/u, ""));
+}
+
 function selfCheck() {
   const manifestPath = argValue("--manifest");
   const filesRoot = argValue("--files-root");
@@ -42,7 +46,7 @@ function selfCheck() {
   }
   let manifest;
   try {
-    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest = readJsonFile(manifestPath);
   } catch {
     console.error("SELF_CHECK_FAILED reason=manifest-unreadable");
     process.exit(1);
@@ -94,7 +98,7 @@ function destructiveCheck() {
   let receipt = null;
   if (receiptPath) {
     try {
-      receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
+      receipt = readJsonFile(receiptPath);
     } catch {
       receipt = null;
     }

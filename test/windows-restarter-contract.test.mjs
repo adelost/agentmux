@@ -73,6 +73,17 @@ feature("windows restarter source contract", () => {
     }],
   });
 
+  unit("Windows writes Node-readable JSON without a PowerShell 5.1 BOM", {
+    then: ["the atomic writer explicitly selects BOM-free UTF-8", () => {
+      const writerStart = IO.indexOf("function Write-JsonAtomic");
+      const writerEnd = IO.indexOf("function Read-Json", writerStart);
+      const writer = IO.slice(writerStart, writerEnd);
+      expect(writer).toContain("System.Text.UTF8Encoding($false)");
+      expect(writer).toContain("[System.IO.File]::WriteAllText");
+      expect(writer).not.toContain("Set-Content -Encoding UTF8");
+    }],
+  });
+
   unit("a leftover started action is reconciled by core and permanently fenced", {
     then: ["the startup path advances the exact message cursor", () => {
       expect(PS1).toContain('status -eq "started"');
@@ -95,12 +106,12 @@ feature("windows restarter source contract", () => {
           files[name] = createHash("sha256").update(readFileSync(join(temporary, name))).digest("hex");
         }
         const manifest = join(temporary, "manifest.json");
-        writeFileSync(manifest, JSON.stringify({
+        writeFileSync(manifest, `\uFEFF${JSON.stringify({
           schemaVersion: 1,
           contractVersion: 1,
           sourceSha: "a".repeat(40),
           files,
-        }));
+        })}`);
         expect(execFileSync(process.execPath, [
           join(temporary, "bin", "windows-bridge.mjs"),
           "self-check",
