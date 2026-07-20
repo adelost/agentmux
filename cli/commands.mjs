@@ -77,6 +77,7 @@ import { runOneshot, showRunLog } from "./run.mjs";
 import { executePlan, showPlanLog } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
 import { synthesizeSpeech } from "./speech.mjs";
+import { createAudioOutbox } from "../core/audio-outbox.mjs";
 import { groupNativeTurns, nativeHistoryRows } from "../channels/native-runtime-watcher.mjs";
 import { cmdRuntime } from "./runtime.mjs";
 import {
@@ -3017,11 +3018,16 @@ async function cmdSay(args, ctx) {
   }
 
   const voice = flags.voice || flags.v || process.env.TTS_VOICE || "sv-SE-MattiasNeural";
+  let audioEvent;
   let speech;
   try {
+    audioEvent = createAudioOutbox().publish({
+      text,
+      target: { type: "discord-channel", id: channelId },
+    }).event;
     speech = synthesizeSpeech(text, { voice });
     await sendFileToChannelId(channelId, speech.mediaPath, speech.clean);
-    console.log(`spoken (${speech.clean.length} chars) → ${channelId}`);
+    console.log(`spoken (${speech.clean.length} chars) → ${channelId} · audio event ${audioEvent.eventId}`);
   } catch (err) {
     console.error(`amux say failed: ${err.message}`);
     process.exitCode = 1;

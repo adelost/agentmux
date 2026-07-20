@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createVoicePWA } from "./voice.mjs";
+import { createAudioOutbox } from "../core/audio-outbox.mjs";
 
 // --- Helpers ---------------------------------------------------------------
 
@@ -69,6 +70,7 @@ function setupServer(opts = {}) {
     run,
     mirror,
     reactivePoke,
+    audioOutbox: opts.audioOutbox || null,
   });
 
   return {
@@ -412,6 +414,105 @@ feature("GET /api/events: SSE stream", () => {
       expect(r.status).toBe(400);
       expect(r.body.error).toContain("pane 9");
       await s.pwa.stop(); s.cleanup();
+    }],
+  });
+});
+
+feature("explicit audio phone feed", () => {
+  component("SSE replays one event and receipts keep received distinct from played", {
+    given: ["a restarted durable outbox and voice server", async () => {
+      const root = mkdtempSync(join(tmpdir(), "voice-audio-feed-test-"));
+      const journalPath = join(root, "audio.jsonl");
+      const publisher = createAudioOutbox({
+        journalPath,
+        now: () => new Date("2026-07-20T15:00:00.000Z"),
+        id: () => "evt-phone-1",
+      });
+      publisher.publish({ text: "Hej i lurarna", target: "chan-0" });
+      const s = setupServer({
+        audioOutbox: createAudioOutbox({
+          journalPath,
+          now: () => new Date("2026-07-20T15:00:01.000Z"),
+        }),
+      });
+      const { url } = await s.pwa.start();
+      return { root, s, url };
+    }],
+    when: ["the phone receives the SSE item then posts received and queued", async ({ url }) => {
+      const controller = new AbortController();
+      const response = await fetch(
+        `${url}/api/audio/events?consumerId=phone-1&target=chan-0`,
+        { signal: controller.signal },
+      );
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let stream = "";
+      while (!stream.includes("event: audio")) {
+        const chunk = await reader.read();
+        stream += decoder.decode(chunk.value || new Uint8Array());
+      }
+      controller.abort();
+      const received = await request(`${url}/api/audio/events/evt-phone-1/receipts`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ consumerId: "phone-1", state: "received" }),
+      });
+      const queued = await request(`${url}/api/audio/events/evt-phone-1/receipts`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ consumerId: "phone-1", state: "queued" }),
+      });
+      const history = await request(
+        `${url}/api/audio/events/evt-phone-1/receipts?consumerId=phone-1`,
+      );
+      return { stream, received, queued, history };
+    }],
+    then: ["the event has a stable SSE id and no played receipt was synthesized", async (result, ctx) => {
+      expect(result.stream).toContain("id: evt-phone-1");
+      expect(result.stream).toContain("Hej i lurarna");
+      expect(result.received.status).toBe(201);
+      expect(result.queued.status).toBe(201);
+      expect(result.history.body.receipts.map((entry) => entry.state))
+        .toEqual(["received", "queued"]);
+      await ctx.s.pwa.stop();
+      ctx.s.cleanup();
+      rmSync(ctx.root, { recursive: true, force: true });
+    }],
+  });
+
+  component("playback-started makes restart replay-safe and receipt retries are idempotent", {
+    given: ["one event with received and queued receipts", async () => {
+      const root = mkdtempSync(join(tmpdir(), "voice-audio-receipt-test-"));
+      const journalPath = join(root, "audio.jsonl");
+      const outbox = createAudioOutbox({
+        journalPath,
+        now: () => new Date("2026-07-20T15:00:00.000Z"),
+        id: () => "evt-phone-2",
+      });
+      outbox.publish({ text: "En gång", target: "chan-0" });
+      outbox.receipt({ eventId: "evt-phone-2", consumerId: "phone-1", state: "received" });
+      outbox.receipt({ eventId: "evt-phone-2", consumerId: "phone-1", state: "queued" });
+      const s = setupServer({ audioOutbox: createAudioOutbox({ journalPath }) });
+      const { url } = await s.pwa.start();
+      return { root, journalPath, s, url };
+    }],
+    when: ["playback-started is posted twice", async ({ url }) => {
+      const post = () => request(`${url}/api/audio/events/evt-phone-2/receipts`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ consumerId: "phone-1", state: "playback-started" }),
+      });
+      return { first: await post(), retry: await post() };
+    }],
+    then: ["the retry is accepted without a second row and the event is no longer pending", async (result, ctx) => {
+      expect(result.first.status).toBe(201);
+      expect(result.retry.status).toBe(200);
+      expect(result.retry.body.duplicate).toBe(true);
+      await ctx.s.pwa.stop();
+      ctx.s.cleanup();
+      const restarted = createAudioOutbox({ journalPath: ctx.journalPath });
+      expect(restarted.listPending({ consumerId: "phone-1", target: "chan-0" })).toEqual([]);
+      rmSync(ctx.root, { recursive: true, force: true });
     }],
   });
 });

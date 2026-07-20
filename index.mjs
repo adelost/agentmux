@@ -49,6 +49,7 @@ import { findChannelForPane, listAgents, validateAgentPane } from "./cli/config.
 import { createNativeRuntimeClient } from "./core/native-runtime-client.mjs";
 import { createAgentRouter } from "./core/agent-router.mjs";
 import { cmdSleepWatch } from "./cli/sleep.mjs";
+import { createAudioOutbox } from "./core/audio-outbox.mjs";
 
 // --- Config ---
 
@@ -131,6 +132,7 @@ startHeartbeat({
 });
 
 const appState = createState(STATE_FILE);
+const audioOutbox = createAudioOutbox();
 if (appState.get("tts") === undefined) appState.set("tts", process.env.TTS === "1");
 if (appState.get("thinking") === undefined) appState.set("thinking", true);
 // Clear transient flags that should never survive a bridge restart.
@@ -432,6 +434,7 @@ const voicePwa = createVoicePWA({
   reactivePoke: AMUX_REACTIVE_POKE
     ? ({ name, pane, dir }) => jsonlWatcher.enqueuePane(name, pane, dir)
     : null,
+  audioOutbox,
   staticDir: voicePwaStaticDir,
 });
 voicePwa.start()

@@ -8,6 +8,8 @@
 //                                         disclaimer, then feeds the pane)
 //   GET  /api/events/:agent/:pane         SSE stream: status + response text
 //   POST /api/tts                         text → MP3 audio (edge-tts)
+//   GET  /api/audio/events                SSE explicit-audio feed + bounded replay
+//   POST /api/audio/events/:id/receipts   durable phone playback receipt
 //
 // Auth: none. Backend binds 127.0.0.1 by default; tailnet exposure goes via
 // Tailscale Serve so the network IS the auth boundary. Same-origin static
@@ -81,6 +83,7 @@ export function createVoicePWA(deps) {
     reactivePoke = null,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     staticDir = null,
+    audioOutbox = null,
   } = deps;
 
   if (!agent) throw new Error("voice pwa: agent dep missing");
@@ -303,6 +306,93 @@ export function createVoicePWA(deps) {
     }
   }
 
+  async function handleAudioReceipts(req, res, eventId) {
+    if (!audioOutbox) return json(res, 503, { error: "audio outbox disabled" });
+    try {
+      const body = await parseJsonBody(req, 16 * 1024);
+      const result = audioOutbox.receipt({
+        eventId,
+        consumerId: body.consumerId,
+        state: body.state,
+        detail: body.detail,
+      });
+      return json(res, result.duplicate ? 200 : 201, result);
+    } catch (error) {
+      const status = error.message === "audio event not found" ? 404 : 409;
+      return json(res, status, { error: error.message });
+    }
+  }
+
+  async function handleAudioReceiptHistory(req, res, eventId, url) {
+    if (!audioOutbox) return json(res, 503, { error: "audio outbox disabled" });
+    try {
+      return json(res, 200, {
+        eventId,
+        receipts: audioOutbox.receiptsFor({
+          eventId,
+          consumerId: url.searchParams.get("consumerId"),
+        }),
+      });
+    } catch (error) {
+      return json(res, 400, { error: error.message });
+    }
+  }
+
+  async function handleAudioEvents(req, res, url) {
+    if (!audioOutbox) return json(res, 503, { error: "audio outbox disabled" });
+    const consumerId = url.searchParams.get("consumerId");
+    const target = url.searchParams.get("target");
+    const limit = url.searchParams.get("limit");
+    try {
+      audioOutbox.listPending({ consumerId, target, limit });
+    } catch (error) {
+      return json(res, 400, { error: error.message });
+    }
+
+    res.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      "connection": "keep-alive",
+      "x-accel-buffering": "no",
+    });
+    const write = (event, data, id = null) => {
+      if (id) res.write(`id: ${id}\n`);
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+    write("open", {
+      schemaVersion: 1,
+      consumerId,
+      target,
+      replayLimit: Math.min(100, Math.max(1, Number(limit) || 100)),
+      lastEventId: req.headers["last-event-id"] || null,
+    });
+
+    let closed = false;
+    let lastHeartbeatAt = Date.now();
+    const sent = new Set();
+    req.on("close", () => { closed = true; });
+
+    while (!closed) {
+      try {
+        const pending = audioOutbox.listPending({ consumerId, target, limit });
+        for (const event of pending) {
+          if (sent.has(event.eventId)) continue;
+          write("audio", event, event.eventId);
+          sent.add(event.eventId);
+        }
+      } catch (error) {
+        write("error", { message: error.message });
+        break;
+      }
+      if (Date.now() - lastHeartbeatAt >= 15_000) {
+        write("heartbeat", { at: new Date().toISOString() });
+        lastHeartbeatAt = Date.now();
+      }
+      await new Promise((resolvePoll) => setTimeout(resolvePoll, Math.min(pollIntervalMs, 1000)));
+    }
+    if (!res.writableEnded) res.end();
+  }
+
   /**
    * SSE stream of pane status + text response. Polls pane on POLL_INTERVAL_MS.
    * Emits a status event whenever status transitions, and when going
@@ -417,7 +507,7 @@ export function createVoicePWA(deps) {
     // CORS for PWA served from different origin (legacy — same-origin deploy
     // doesn't need this, but keep it permissive so external clients still work).
     res.setHeader("access-control-allow-origin", "*");
-    res.setHeader("access-control-allow-headers", "content-type");
+    res.setHeader("access-control-allow-headers", "content-type, last-event-id");
     res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
     if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
@@ -433,6 +523,16 @@ export function createVoicePWA(deps) {
       }
       if (req.method === "POST" && path === "/api/tts") {
         return await handleTts(req, res);
+      }
+      if (req.method === "GET" && path === "/api/audio/events") {
+        return await handleAudioEvents(req, res, url);
+      }
+      const mAudioReceipts = path.match(/^\/api\/audio\/events\/([^/]+)\/receipts$/);
+      if (mAudioReceipts && req.method === "POST") {
+        return await handleAudioReceipts(req, res, decodeURIComponent(mAudioReceipts[1]));
+      }
+      if (mAudioReceipts && req.method === "GET") {
+        return await handleAudioReceiptHistory(req, res, decodeURIComponent(mAudioReceipts[1]), url);
       }
       const mSend = path.match(/^\/api\/send\/([^/]+)\/(\d+)$/);
       if (mSend && req.method === "POST") {
