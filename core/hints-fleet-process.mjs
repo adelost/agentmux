@@ -158,6 +158,17 @@ drift is a red gate, not a scoping excuse.
    matrix only when its underlying behavior changed, before a relevant
    release, or in scheduled/manual CI. Never render every historical golden
    for an unrelated feature.
+   ⚠ Heavy checks run ON DEMAND ONLY, never as a habit (Mattias 2026-07-20).
+   The default loop is always TARGETED: the smallest unit/contract test that
+   covers YOUR change, plus your own cheap proof that the feature works (a
+   probe capture or one bounded browser scenario), following the repo's code
+   standard. Never fire slow sweeps on your own initiative: full-repo vitest
+   runs, browser harnesses, golden matrices, perf benches. Features turn over
+   too fast for slow coverage to pay off, and code that may be dropped
+   tomorrow earns no five-minute sweep today. Run a heavy check only when
+   the human explicitly asks for that specific check, when your change IS
+   the underlying behavior it covers (one targeted run), or when
+   scheduled/manual CI owns it.
 3. **Green gate IS the review; owners self-merge pinned (Mattias 2026-07-16:
    "sluta review åt varandra, ni är typ lika smarta, merga istället").** No
    peer reviews between agents; when CI, lint, and repo gates are green the
