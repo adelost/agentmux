@@ -81,6 +81,18 @@ Stora json-filer (wire.jsonl, sessions, delivery-queue-arkiv, logs) växer utan 
 rotation/bounded tail per fil, arkivering av terminala jobb, storleksbudget per session.
 Mät först vilka filer som faktiskt växer (kandidater: ~/.kimi-code/sessions, ~/.agentmux logs).
 
+### T10 — Fleet-overseer + kanalnamn (från Adelost)
+En manager-kanal per modell man kan prata med i Discord: `_mgr-kimi`, `_mgr-codex`, `_mgr-claude`
+(underscore sorterar överst). Overseern är en vanlig agentpane med fleet-manager-prompt i sin
+workspace (AGENTS.md): hur man läser `amux triage/done/asks/doctor`, hur man petar en panel
+(`amux <agent> -p N`), vad den ALDRIG får (merge/deploy/kill utan eskalation till människan),
+och eskalationsväg. Den är INTE T3-guardianen: guardian på Windows är dum och överlever allt,
+overseern är en LLM i WSL som dör med resten — olika lager, olika jobb.
+Kanalnamn retroaktivt: bindningen i agents.yaml sker via channel-ID, inte namn, så rename är
+säkert. Schema: `<modell>-<flotta>-<pane>` (kimi-lsrc-10, codex-skyvw-4, claude-claw-1) +
+`_mgr-*` överst. Engångsscript via Discord API som läser agents.yaml och döper om, torr körning
+först. Nuvarande läge: mix av suffix (`lsrc-10-kimi`) och inget alls — rörigt men billigt att fixa.
+
 ## Nuvarande driftstatus (2026-07-20)
 
 - Brygga: 1.25.25 live med probe+nonce-fix (paste-placeholder-kvitto, collapsed-composer-draft,
