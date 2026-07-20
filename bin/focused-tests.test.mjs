@@ -1,5 +1,5 @@
 import { expect, feature, unit } from "bdd-vitest";
-import { relatedTests } from "./focused-tests.mjs";
+import { relatedTests, unmappedExecutables } from "./focused-tests.mjs";
 
 const existsSet = (paths) => (path) => paths.includes(path);
 
@@ -20,11 +20,34 @@ feature("focused PR tests", () => {
     }],
   });
 
-  unit("a changed file without a related test maps to nothing", {
-    then: ["docs and scripts stay uncovered by tests, not widened", () => {
-      const exists = existsSet(["core/other.test.mjs"]);
-      expect(relatedTests("docs/FLEET-RESILIENCE-PLAN.md", { exists })).toEqual([]);
-      expect(relatedTests("core/no-such-test.mjs", { exists })).toEqual([]);
+  unit("an unmapped executable is a gate failure with the exact path", {
+    then: ["core/foo.mjs without core/foo.test.mjs is unmapped", () => {
+      const exists = existsSet([]);
+      expect(relatedTests("core/foo.mjs", { exists })).toEqual([]);
+      expect(unmappedExecutables(["core/foo.mjs"], { exists })).toEqual(["core/foo.mjs"]);
+    }],
+  });
+
+  unit("the PS1 maps to its source-contract test", {
+    then: ["the alias lands the contract file", () => {
+      const exists = existsSet(["test/windows-restarter-contract.test.mjs"]);
+      expect(relatedTests("bin/windows-discord-restarter.ps1", { exists }))
+        .toEqual(["test/windows-restarter-contract.test.mjs"]);
+    }],
+  });
+
+  unit("docs, assets and build metadata may carry zero tests; nothing else", {
+    then: ["allowlist holds, arbitrary config fails", () => {
+      const exists = existsSet([]);
+      expect(unmappedExecutables([
+        "docs/FLEET-RESILIENCE-PLAN.md",
+        "screenshot.png",
+        "package.json",
+        ".github/workflows/pull-request.yml",
+        ".gitignore",
+      ], { exists })).toEqual([]);
+      expect(unmappedExecutables(["agentmux.yaml", "bin/other-cron.sh"], { exists }))
+        .toEqual(["agentmux.yaml", "bin/other-cron.sh"]);
     }],
   });
 
