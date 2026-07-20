@@ -99,10 +99,10 @@ feature("windows manager source contract", () => {
   });
 
   unit("the rescue tool dot-sources the shared io and stays bounded and redacted", {
-    then: ["io dot-sourced, three commands, JSON shape, job timeout, redaction", () => {
+    then: ["io dot-sourced, four commands, JSON shape, job timeout, redaction", () => {
       expect(RESCUE).toContain("windows-restarter-io.ps1");
       expect(RESCUE).toContain(". $RuntimeIo");
-      expect(RESCUE).toContain('ValidateSet("start-wsl", "start-bridge", "recover")');
+      expect(RESCUE).toContain('ValidateSet("start-wsl", "start-bridge", "recover", "recover-verify")');
       expect(RESCUE).toContain("Start-WslBounded");
       expect(RESCUE).toContain("Start-BridgeForeground");
       expect(RESCUE).toContain("Invoke-Recovery");
@@ -113,6 +113,39 @@ feature("windows manager source contract", () => {
       expect(RESCUE).toContain("Stop-Job");
       expect(RESCUE).toContain("-replace");
       expect(RESCUE.trimEnd().split("\n").length).toBeLessThan(200);
+    }],
+  });
+
+  unit("recover-verify runs the bounded chain and defers every decision to core", {
+    then: ["boot id, release check, bridge, drain, selective revive, plan CLI, chain JSON", () => {
+      expect(RESCUE).toContain("[string]$BeforeBootId");
+      expect(RESCUE).toContain("^[0-9a-fA-F-]{8,64}$");
+      expect(RESCUE).toContain("cat /proc/sys/kernel/random/boot_id");
+      expect(RESCUE).toContain("verify-release-identity.mjs");
+      expect(RESCUE).toContain("memory-guard.mjs");
+      expect(RESCUE).toContain('"$AMUX_BIN" queue --json');
+      expect(RESCUE).toContain('"$AMUX_BIN" revive --dry');
+      expect(RESCUE).toContain("$RecoveryCli");
+      expect(RESCUE).toContain("windows-recovery.mjs");
+      expect(RESCUE).toContain('Invoke-RecoveryNode $node "plan" $measured');
+      expect(RESCUE).toContain("classify-auth");
+      expect(RESCUE).toContain("$result.json");
+      expect(RESCUE).toContain("revive --dry");
+      expect(RESCUE.indexOf("$dry = Invoke-WslScript")).toBeLessThan(RESCUE.indexOf("$revive = Invoke-WslScript"));
+      expect(RESCUE).not.toContain("revive --all");
+    }],
+  });
+
+  unit("the manager routes recover through the exact chain when a pre-boot id is stored", {
+    then: ["planRescueCommand picks recover-verify, plain recover stays degraded PARTIAL", () => {
+      expect(CORE).toContain("trackManagerBootId");
+      expect(CORE).toContain("planRescueCommand");
+      expect(MGR).toContain("planRescueCommand({ name, beforeBootId })");
+      expect(MGR).toContain("mapRecoveryChainResults");
+      expect(MGR).toContain("trackManagerBootId(state, observation)");
+      expect(MGR).toContain("beforeBootId: state.prevBootId || null");
+      expect(MGR).toContain("skipped:before-boot-unknown");
+      expect(MGR).toContain('"-BeforeBootId", plan.beforeBootId');
     }],
   });
 

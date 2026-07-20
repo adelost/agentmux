@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-// Thin Windows-native manager loop for the _windows_ channel. All prompt text
-// and decisions live in core/windows-manager.mjs; this file only does Discord
-// I/O, bounded process runs, journaling, and the poll loop. Deterministic
-// //commands stay owned by the restarter poller and are always skipped here.
+// Thin Windows-native manager loop for the _windows_ channel. Prompt text and
+// decisions live in core/; this file only does Discord I/O, bounded process
+// runs, journaling, and the poll loop. //commands stay owned by the restarter.
 
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -19,9 +18,12 @@ import {
   createMockProvider,
   parseToolCalls,
   planManagerTurn,
+  planRescueCommand,
   planToolCall,
   redactSecrets,
+  trackManagerBootId,
 } from "../core/windows-manager.mjs";
+import { mapRecoveryChainResults } from "../core/windows-recovery.mjs";
 
 const BIN_DIR = dirname(fileURLToPath(import.meta.url));
 const PROBE_PATH = join(BIN_DIR, "windows-wsl-probe.mjs");
@@ -78,34 +80,36 @@ function tailFile(path, maxLines) {
   } catch { return ""; }
 }
 
-async function executeToolDefault(name, { rootDir, logPath }) {
+async function executeToolDefault(name, { rootDir, logPath, beforeBootId = null }) {
   const tool = MANAGER_TOOLS.find((entry) => entry.name === name);
   if (name === "get_status") {
     const observation = await observeDefault();
     return { ok: true, stage: "get_status", detail: formatWindowsStatus(observation), observation };
   }
   if (name === "get_logs") {
-    const combined = `== restarter ==\n${tailFile(join(rootDir, "restarter.log"), 24)}\n== manager ==\n${tailFile(logPath, 24)}`;
-    const redacted = redactSecrets(combined);
+    const redacted = redactSecrets(`== restarter ==\n${tailFile(join(rootDir, "restarter.log"), 24)}\n== manager ==\n${tailFile(logPath, 24)}`);
     return { ok: true, stage: "get_logs", detail: redacted.length > 1750 ? redacted.slice(-1749) : redacted };
   }
-  const command = name.replaceAll("_", "-");
-  const bounded = await runBounded("powershell.exe", [
-    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", RESCUE_PATH,
-    "-Command", command, "-TimeoutSeconds", String(Math.ceil(tool.timeoutMs / 1000)),
-  ], tool.timeoutMs + 10_000);
-  if (bounded.timedOut) return { ok: false, stage: command, detail: `timeout-${tool.timeoutMs}ms` };
+  const plan = planRescueCommand({ name, beforeBootId });
+  const args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", RESCUE_PATH,
+    "-Command", plan.command, "-TimeoutSeconds", String(Math.ceil(tool.timeoutMs / 1000))];
+  if (plan.beforeBootId) args.push("-BeforeBootId", plan.beforeBootId);
+  const bounded = await runBounded("powershell.exe", args, tool.timeoutMs + 10_000);
+  if (bounded.timedOut) return { ok: false, stage: plan.command, detail: `timeout-${tool.timeoutMs}ms` };
   try {
     const parsed = JSON.parse(bounded.stdout);
-    return { ok: parsed.ok === true, stage: String(parsed.stage || command), detail: redactSecrets(String(parsed.detail || "")) };
+    if (plan.command === "recover-verify") return mapRecoveryChainResults(parsed);
+    const result = { ok: parsed.ok === true, stage: String(parsed.stage || plan.command), detail: redactSecrets(String(parsed.detail || "")) };
+    return plan.degraded ? [result, { ok: false, stage: "recover-verify", detail: "skipped:before-boot-unknown" }] : result;
   } catch {
-    return { ok: false, stage: command, detail: "rescue-output-invalid" };
+    return { ok: false, stage: plan.command, detail: "rescue-output-invalid" };
   }
 }
 
 /** WHAT: Dispatches one user turn through provider, tools, and final answer. WHY: Separates turn flow from Discord and process I/O. */
 export async function runManagerTurn({ userText, messageId, state, history = [], deps }) {
   let observation = await deps.observe();
+  trackManagerBootId(state, observation);
   const messages = planManagerTurn({ userText, observation, history, contractVersion: MANAGER_CONTRACT_VERSION });
   const reply = await deps.provider.chat(messages);
   if (!reply?.ok) {
@@ -121,10 +125,12 @@ export async function runManagerTurn({ userText, messageId, state, history = [],
     }
     state.lastAction = planAcceptedAction({ messageId, command: name, generation: deps.generation, nowMs: deps.nowMs() });
     deps.saveState(state);
-    const result = await deps.executeTool(name, { observation });
-    toolResults.push(result);
+    const executed = await deps.executeTool(name, { observation, beforeBootId: state.prevBootId || null });
+    toolResults.push(...(Array.isArray(executed) ? executed : [executed]));
+    const result = toolResults[toolResults.length - 1];
     if (result.observation) {
       observation = result.observation;
+      trackManagerBootId(state, observation);
       state.lastStatusMs = deps.nowMs();
     }
     state.lastAction.status = result.ok ? "completed" : "failed";
@@ -258,7 +264,7 @@ async function main() {
     nowMs: () => Date.now(),
     saveState: (next) => writeJsonAtomic(statePath, next),
     observe: observeDefault,
-    executeTool: (name) => executeToolDefault(name, { rootDir, logPath }),
+    executeTool: (name, context = {}) => executeToolDefault(name, { rootDir, logPath, beforeBootId: context.beforeBootId }),
     log: (line) => logLine(logPath, line),
     listMessages: async (after) => {
       const route = `/channels/${config.channelId}/messages?limit=50${after ? `&after=${after}` : ""}`;

@@ -36,8 +36,8 @@ export const MANAGER_TOOLS = Object.freeze([
   }),
   Object.freeze({
     name: "recover",
-    description: "Kör den bundna återställningsloopen med färsk status som krav.",
-    timeoutMs: 300_000,
+    description: "Kör verifieringskedjan efter WSL-retur; degraderad loop utan känt boot-id.",
+    timeoutMs: 570_000,
     destructive: false,
   }),
 ]);
@@ -64,7 +64,7 @@ VERKTYG (max 3 anrop per tur, exakt ett JSON-objekt per rad)
 {"tool":"get_logs"} 30s: hämtar avskalade loggsvansar.
 {"tool":"start_bridge"} 45s: startar bryggen när WSL svarar.
 {"tool":"start_wsl"} 120s: startar WSL, endast när WSL bevisat är offline.
-{"tool":"recover"} 300s: kör den bundna återställningsloopen.
+{"tool":"recover"} 570s: kör verifieringskedjan efter WSL-retur, degraderad loop utan känt boot-id.
 
 SÄKERHETSREGLER
 Begär alltid en färsk observation med get_status innan någon åtgärd.
@@ -73,6 +73,8 @@ Destruktiv omstart kräver ett uttryckligt och färskt mänskligt kommando plus 
 restart-ready-kvittens med matchande fleet generation. Det äger restarter-pollern, aldrig du.
 start_wsl är tillåtet endast när observationen visar wsl=offline. Vid wsl=unknown läser du status igen.
 recover kräver en statusläsning som är yngre än 60 sekunder.
+Efter WSL-retur verifierar recover ny boot-identitet och release-identitet före revive;
+utan ett lagrat boot-id före omstarten är utfallet degraderat PARTIAL.
 Journalföring sker före varje exekvering; en krasch ger BLOCKED vid nästa start, aldrig en tyst omkörning.
 Rapportera exakt RECOVERED, PARTIAL eller BLOCKED. RECOVERED betyder att varje steg lyckades.
 Ge aldrig ett falskt ACK. Om ett verktyg nekades eller misslyckades, säg det med exakt orsak.
@@ -137,6 +139,23 @@ export function planToolCall({ name, observation = null, lastStatusMs = null, no
     return { allow: true, reason: "ok" };
   }
   return { allow: true, reason: "ok" };
+}
+
+/** WHAT: Tracks the latest and previous WSL boot ids in manager state. WHY: Keeps the pre-boot identity available for the exact recovery chain. */
+export function trackManagerBootId(state, observation = null) {
+  const bootId = typeof observation?.bootId === "string" && observation.bootId ? observation.bootId : null;
+  if (!state || !bootId || bootId === state.lastBootId) return state;
+  state.prevBootId = state.lastBootId || state.prevBootId || null;
+  state.lastBootId = bootId;
+  return state;
+}
+
+/** WHAT: Routes one manager tool to its rescue command and arguments. WHY: Separates recover-verify selection from bounded process execution. */
+export function planRescueCommand({ name, beforeBootId = null } = {}) {
+  if (name !== "recover") return { command: String(name).replaceAll("_", "-"), beforeBootId: null, degraded: false };
+  const bootId = typeof beforeBootId === "string" && /^[0-9a-fA-F-]{8,64}$/u.test(beforeBootId) ? beforeBootId : null;
+  if (bootId) return { command: "recover-verify", beforeBootId: bootId, degraded: false };
+  return { command: "recover", beforeBootId: null, degraded: true };
 }
 
 /** WHAT: Maps tool results to one recovery outcome. WHY: Keeps RECOVERED, PARTIAL, and BLOCKED honest through the bridge classifier. */

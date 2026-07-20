@@ -148,12 +148,17 @@ feature("windows restarter source contract", () => {
   });
 
   unit("PowerShell stays split into thin files and visible foreground is canonical", {
-    then: ["every file is below 500 lines and hidden supervision is opt-in", () => {
+    then: ["every file is below 500 lines and hidden launch is opt-in via -Hidden", () => {
       for (const source of [MAIN, IO, DISCORD]) {
         expect(source.trimEnd().split("\n").length).toBeLessThan(500);
       }
       expect(MAIN).toContain("persistence=hkcu-run-visible");
-      expect(MAIN).toContain('-WindowStyle $(if ($Supervised) { "Hidden" } else { "Normal" })');
+      expect(MAIN).toContain('-WindowStyle $(if ($Supervised -or $Hidden) { "Hidden" } else { "Normal" })');
+      expect(MAIN).not.toMatch(/-WindowStyle\s+"Hidden"/u);
+      expect(MAIN).toContain('[Parameter(ParameterSetName = "Run")]\n  [Parameter(ParameterSetName = "Start")]\n  [switch]$Hidden,');
+      expect(MAIN).toContain("Start-Restarter -Hidden:$Hidden");
+      expect(MAIN).toContain("if ($Hidden -and !$Supervised) { $arguments += \"-Hidden\" }");
+      expect(MAIN).toContain("schtasks stays hidden by OS nature");
       expect(IO).toContain('exec "$AMUX_BIN" serve');
       expect(IO).not.toContain("serve --detach");
     }],

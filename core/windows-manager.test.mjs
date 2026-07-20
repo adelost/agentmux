@@ -8,8 +8,10 @@ import {
   createMockProvider,
   parseToolCalls,
   planManagerTurn,
+  planRescueCommand,
   planToolCall,
   redactSecrets,
+  trackManagerBootId,
 } from "./windows-manager.mjs";
 
 feature("windows manager core", () => {
@@ -53,7 +55,7 @@ feature("windows manager core", () => {
       ]);
       const byName = Object.fromEntries(MANAGER_TOOLS.map((tool) => [tool.name, tool]));
       expect(byName.start_wsl.timeoutMs).toBe(120_000);
-      expect(byName.recover.timeoutMs).toBe(300_000);
+      expect(byName.recover.timeoutMs).toBe(570_000);
       for (const name of ["get_status", "get_logs", "start_bridge"]) {
         expect(byName[name].timeoutMs).toBeGreaterThanOrEqual(30_000);
         expect(byName[name].timeoutMs).toBeLessThanOrEqual(45_000);
@@ -154,6 +156,37 @@ feature("windows manager core", () => {
         { stage: "start_wsl", ok: false },
         { stage: "start_bridge", ok: false },
       ])).toEqual({ outcome: "BLOCKED", failedStage: "start_wsl" });
+    }],
+  });
+
+  unit("boot tracking keeps the boot id before the current one", {
+    then: ["first sighting stores last, each change moves it to prev, repeats are no-ops", () => {
+      const state = {};
+      expect(trackManagerBootId(state, { bootId: "a" })).toBe(state);
+      expect(state).toEqual({ prevBootId: null, lastBootId: "a" });
+      trackManagerBootId(state, { bootId: "a" });
+      expect(state).toEqual({ prevBootId: null, lastBootId: "a" });
+      trackManagerBootId(state, { bootId: "b" });
+      expect(state).toEqual({ prevBootId: "a", lastBootId: "b" });
+      trackManagerBootId(state, {});
+      trackManagerBootId(state, { wsl: "offline" });
+      expect(state).toEqual({ prevBootId: "a", lastBootId: "b" });
+      trackManagerBootId(state, { bootId: "c" });
+      expect(state).toEqual({ prevBootId: "b", lastBootId: "c" });
+    }],
+  });
+
+  unit("planRescueCommand routes recover by the stored pre-boot identity", {
+    then: ["a known boot id runs recover-verify, an unknown one stays degraded", () => {
+      expect(planRescueCommand({ name: "get_status" }))
+        .toEqual({ command: "get-status", beforeBootId: null, degraded: false });
+      expect(planRescueCommand({ name: "start_wsl" }).command).toBe("start-wsl");
+      expect(planRescueCommand({ name: "recover", beforeBootId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }))
+        .toEqual({ command: "recover-verify", beforeBootId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", degraded: false });
+      expect(planRescueCommand({ name: "recover", beforeBootId: null }))
+        .toEqual({ command: "recover", beforeBootId: null, degraded: true });
+      expect(planRescueCommand({ name: "recover", beforeBootId: "not a boot id" }).degraded).toBe(true);
+      expect(planRescueCommand({ name: "recover" }).degraded).toBe(true);
     }],
   });
 
