@@ -15,9 +15,13 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
+/** WHAT: Defines every audio journal record version. WHY: Keeps old readers from guessing new record shapes. */
 export const AUDIO_EVENT_SCHEMA_VERSION = 1;
+/** WHAT: Defines spoken-update expiry at ten minutes. WHY: Keeps stale status from reaching headphones. */
 export const AUDIO_EVENT_TTL_MS = 10 * 60 * 1000;
+/** WHAT: Defines one phone replay page limit. WHY: Keeps reconnect memory and latency predictable. */
 export const AUDIO_REPLAY_LIMIT = 100;
+/** WHAT: Names durable phone delivery states. WHY: Keeps receiving distinct from verified playback. */
 export const AUDIO_RECEIPT_STATES = Object.freeze([
   "received",
   "queued",
@@ -40,6 +44,10 @@ const MAX_TEXT_CHARS = 1500;
 const LOCK_TIMEOUT_MS = 2000;
 const STALE_LOCK_MS = 30_000;
 
+/**
+ * WHAT: Resolves the versioned journal in operator-owned storage.
+ * WHY: Keeps npm replacement and bridge restart from deleting queued audio.
+ */
 export function defaultAudioOutboxPath() {
   return process.env.AMUX_AUDIO_OUTBOX_PATH
     || join(homedir(), ".agentmux", "audio-outbox-v1.jsonl");
@@ -162,6 +170,10 @@ function targetId(target) {
   return validateIdentity(target?.id, "target.id");
 }
 
+/**
+ * WHAT: Stores, replays and receipts explicit spoken-update events.
+ * WHY: Keeps CLI and phone processes consistent through one fsynced journal.
+ */
 export function createAudioOutbox({
   journalPath = defaultAudioOutboxPath(),
   now = () => new Date(),

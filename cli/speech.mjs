@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createAudioOutbox } from "../core/audio-outbox.mjs";
 
 /**
  * WHAT: Names the Swedish voice used when no explicit voice is requested.
@@ -21,6 +22,17 @@ export const MAX_SPEECH_CHARS = 1500;
  */
 export function cleanSpeechText(text) {
   return String(text ?? "").replace(/[`*_~|]/g, "").trim().slice(0, MAX_SPEECH_CHARS);
+}
+
+/**
+ * WHAT: Stores the one durable phone event authorized by an explicit say.
+ * WHY: Keeps CLI dispatch from growing a second outbox implementation.
+ */
+export function publishSpeechEvent(text, channelId, outbox = createAudioOutbox()) {
+  return outbox.publish({
+    text,
+    target: { type: "discord-channel", id: channelId },
+  }).event;
 }
 
 /**

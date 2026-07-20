@@ -76,8 +76,7 @@ import { spawn, execSync } from "child_process";
 import { runOneshot, showRunLog } from "./run.mjs";
 import { executePlan, showPlanLog } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
-import { synthesizeSpeech } from "./speech.mjs";
-import { createAudioOutbox } from "../core/audio-outbox.mjs";
+import { publishSpeechEvent, synthesizeSpeech } from "./speech.mjs";
 import { groupNativeTurns, nativeHistoryRows } from "../channels/native-runtime-watcher.mjs";
 import { cmdRuntime } from "./runtime.mjs";
 import {
@@ -3016,15 +3015,10 @@ async function cmdSay(args, ctx) {
       if (!channelId) { console.error(`No Discord channel bound to ${sender}`); process.exit(1); }
     }
   }
-
   const voice = flags.voice || flags.v || process.env.TTS_VOICE || "sv-SE-MattiasNeural";
-  let audioEvent;
   let speech;
   try {
-    audioEvent = createAudioOutbox().publish({
-      text,
-      target: { type: "discord-channel", id: channelId },
-    }).event;
+    const audioEvent = publishSpeechEvent(text, channelId);
     speech = synthesizeSpeech(text, { voice });
     await sendFileToChannelId(channelId, speech.mediaPath, speech.clean);
     console.log(`spoken (${speech.clean.length} chars) → ${channelId} · audio event ${audioEvent.eventId}`);

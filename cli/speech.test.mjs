@@ -5,6 +5,7 @@ import { component, expect, feature } from "bdd-vitest";
 import {
   cleanSpeechText,
   MAX_SPEECH_CHARS,
+  publishSpeechEvent,
   synthesizeSpeech,
 } from "./speech.mjs";
 
@@ -64,6 +65,29 @@ feature("explicit speech synthesis", () => {
       expect(existsSync(mediaPath)).toBe(false);
       expect(existsSync(mediaPath.slice(0, -"/speech.mp3".length))).toBe(false);
       rmSync(tempRoot, { recursive: true, force: true });
+    }],
+  });
+
+  component("one explicit say publishes one target-bound event", {
+    given: ["an injected outbox", () => ({
+      calls: [],
+      outbox: {
+        publish(event) {
+          this.calls?.push(event);
+          return { event: { ...event, eventId: "event-1" } };
+        },
+      },
+    })],
+    when: ["the CLI speech seam publishes", (ctx) => {
+      ctx.outbox.calls = ctx.calls;
+      return { ctx, event: publishSpeechEvent("Hej", "channel-1", ctx.outbox) };
+    }],
+    then: ["exactly one event carries the resolved target", ({ ctx, event }) => {
+      expect(ctx.calls).toEqual([{
+        text: "Hej",
+        target: { type: "discord-channel", id: "channel-1" },
+      }]);
+      expect(event.eventId).toBe("event-1");
     }],
   });
 });
