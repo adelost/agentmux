@@ -46,7 +46,7 @@ identity, recovery-kanalen lever. Externa config/secrets pinnas: `~/.agentmux/.e
 migreringsfallback (en `npm install -g .` får aldrig mer vara enda vägen till credentials).
 Heartbeat projicerar manifest-SHA (fanns redan; kräver manifest).
 
-### T3 — Windows guardian (nästa)
+### T3 — Windows guardian (SRC-0123, implementation pågår)
 **Hård säkerhetsgräns (lsrc:3, bindande):** guardian är transport + observation + säker
 egenåterställning — ALDRIG autonom maskinåterställning.
 Tillåtet: observera, durable NTFS-kö, Windows-side `amux send`, svara via Discord/LLM, klassificera
@@ -61,6 +61,10 @@ Bygg ut `bin/windows-discord-restarter.ps1` inom dessa ramar. Tunn konsument av 
 health-beslut (heartbeat + memory-guard state + release identity).
 **Synligt foreground-läge är kanoniskt:** brygga och framtida Windows-räddning öppnas i en
 synlig terminal (`amux serve` i förgrunden); `--detach` är opt-in, aldrig default.
+
+Det versionerade kommandot, threat model och operatörsflödet finns i
+[`docs/WINDOWS-RESCUE-BRIDGE.md`](./WINDOWS-RESCUE-BRIDGE.md). `_windows_` är en separat
+Windows-ägd Discord-kanal och får inte förekomma i WSL:s genererade kanalmap.
 
 ### T11 — Controlled WSL restart (nästa version, PLANERAD – ej påbörjad)
 Use case: en säker WSL-omstart som låter alla Codex-paneler ladda om delade credentials,

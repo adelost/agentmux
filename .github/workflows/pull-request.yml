@@ -43,5 +43,9 @@ jobs:
         env:
           AMUX_LINT_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: amux lint --changed --strict
-      - name: Run the fast repository gate
-        run: npm run ci
+      - name: Run only the tests related to the changed files
+        env:
+          AMUX_TEST_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: node bin/focused-tests.mjs
+      - name: Verify the CI contract itself
+        run: node docs/check-ci-contract.mjs

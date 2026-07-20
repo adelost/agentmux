@@ -2,8 +2,9 @@
 // recover the bridge, or deliberately recycle WSL, from one authenticated channel.
 
 import { spawn, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { loadConfig } from "./config.mjs";
 
 const WINDOWS_CWD = "/mnt/c/Windows/System32";
 
@@ -12,12 +13,18 @@ function usage() {
   amux restarter install --channel ID --user ID [--distro NAME] [--linux-user NAME]
   amux restarter status
   amux restarter start
+  amux restarter start-supervised
   amux restarter stop
   amux restarter rescue-test
 
 Discord commands in the configured channel:
-  //restart       Restart only the AMUX bridge; never escalates.
-  //hardrestart   Run wsl.exe --shutdown, then start WSL and the bridge.`;
+  //status        Report Windows, WSL, bridge, release, and memory truth.
+  //logs          Return bounded redacted Windows and WSL logs.
+  //start-wsl     Start WSL once without shutting anything down.
+  //start-bridge  Open the WSL bridge in a visible Windows terminal.
+  //recover       Start only components proven missing; never kills unknown state.
+  //restart-wsl --receipt ID
+                  One fenced WSL restart after a fresh restart-ready receipt.`;
 }
 
 function parse(args) {
@@ -58,6 +65,30 @@ function windowsPath(linuxPath) {
   return result.stdout.trim();
 }
 
+/** WHAT: Resolves WSL agents that already consume one Discord channel. WHY: Prevents two bridges from replying in the Windows rescue channel. */
+export function rescueChannelOwners(config, channelId) {
+  const target = String(channelId);
+  return Object.entries(config || {}).flatMap(([name, value]) => {
+    if (!value?.dir || !value.discord) return [];
+    if (typeof value.discord === "string") {
+      return value.discord === target ? [name] : [];
+    }
+    return Object.hasOwn(value.discord, target) ? [name] : [];
+  });
+}
+
+/** WHAT: Checks one rescue channel against readable WSL fleet config. WHY: Prevents missing config from silently bypassing channel isolation. */
+export function assertRescueChannelIsolation(config, channelId, { sourceExists = true } = {}) {
+  if (!sourceExists || !Object.values(config || {}).some((entry) => entry?.dir)) {
+    throw new Error("could not verify Windows channel isolation");
+  }
+  const owners = rescueChannelOwners(config, channelId);
+  if (owners.length) {
+    throw new Error(`Windows rescue channel ${channelId} is already mapped to WSL agent(s): ${owners.join(", ")}`);
+  }
+  return true;
+}
+
 async function runPowerShell(script, parameters, { stdin = "" } = {}) {
   const args = [
     "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -94,6 +125,16 @@ export async function cmdRestarter(args, { bridgeDir }) {
     if (!/^\d{17,20}$/u.test(channel || "") || !/^\d{17,20}$/u.test(user || "")) {
       throw new Error("install requires Discord snowflakes via --channel ID --user ID");
     }
+    const generatedConfig = process.env.AGENT_CONFIG
+      || resolve(process.env.HOME || "", ".config/agent/agents.yaml");
+    const fleetConfig = loadConfig(generatedConfig);
+    try {
+      assertRescueChannelIsolation(fleetConfig, channel, {
+        sourceExists: existsSync(generatedConfig),
+      });
+    } catch (error) {
+      throw new Error(`${error.message}: ${generatedConfig}`);
+    }
     const distro = flags.distro || "Ubuntu-22.04";
     const linuxUser = flags["linux-user"] || process.env.USER || "adelost";
     const poll = flags.poll || "3";
@@ -111,6 +152,7 @@ export async function cmdRestarter(args, { bridgeDir }) {
   const switches = {
     status: "-Status",
     start: "-Start",
+    "start-supervised": "-StartSupervised",
     stop: "-Stop",
     "rescue-test": "-RescueTest",
   };

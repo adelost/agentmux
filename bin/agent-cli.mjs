@@ -8,6 +8,7 @@ import { ensureConfig } from "../cli/config.mjs";
 import { createTmuxContext } from "../cli/tmux.mjs";
 import { dispatch } from "../cli/commands.mjs";
 import { cmdRestarter } from "../cli/restarter.mjs";
+import { cmdRestartReady } from "../cli/restart-ready.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 // BRIDGE_DIR = agentmux package root. agentmux.yaml (the user-editable
@@ -31,6 +32,7 @@ const ctx = {
 try {
   const argv = process.argv.slice(2);
   if (argv[0] === "restarter") await cmdRestarter(argv.slice(1), ctx);
+  else if (argv[0] === "restart-ready") await cmdRestartReady(argv.slice(1), ctx);
   else await dispatch(argv, ctx);
 } catch (err) {
   console.error(`Error: ${err.message}`);
