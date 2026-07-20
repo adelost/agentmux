@@ -8,6 +8,7 @@ import { join } from "path";
 import { createHash } from "crypto";
 import { loadConfig, listAgents, getAgent, addAgent, removeAgent, resolveAgent, saveLast, getLast, getPaneCount, findChannelForPane } from "./config.mjs";
 import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens, detectPaneStatus } from "./format.mjs";
+import { paneRuntimeLabel } from "./pane-runtime-label.mjs";
 import {
   clearPaneComposer,
   escapePaneComposer,
@@ -2644,12 +2645,9 @@ async function cmdPs(ctx, flags = {}) {
   // Step 3: render with grouping. Idle/unknown panes of the same command
   // collapse into a single line; active panes always shown in full.
   for (const { agent: a, panes } of agentData) {
-    // Per-pane dialect comes from the configured cmd (agents.yaml), not
-    // the live process name: codex runs as `node bin/codex.js` so tmux
-    // reports "node" — same as some transient claude states. Trust the
-    // config for classification; it's the authoritative source of truth
-    // for which pane is which dialect.
+    // The configured cmd is authoritative; live Codex can merely report "node".
     const engine = (p) => dialectFor(a, p);
+    const runtime = (p) => paneRuntimeLabel(engine(p), a.backend, SHELL_CMDS.test(p.command));
     const claudeCount = panes.filter((p) => engine(p) === "claude").length;
     const codexCount = panes.filter((p) => engine(p) === "codex").length;
     const kimiCount = panes.filter((p) => engine(p) === "kimi").length;
@@ -2682,8 +2680,7 @@ async function cmdPs(ctx, flags = {}) {
       if (expand) {
         const icon = statusIcon(p.status);
         const ctxCell = formatContextCell(p.context);
-        // "vilken modell kör den?" — the model IS the interesting name of a
-        // coding pane; the generic cmd ("codex") only says the harness.
+        // Show both explicit engine/backend identity and the concrete model.
         const modelLabel = p.context?.model
           ? shortModelName(p.context.model) + (p.context.effort ? `·${p.context.effort}` : "")
           : null;
@@ -2701,7 +2698,7 @@ async function cmdPs(ctx, flags = {}) {
           display = truncate(jsonl || p.preview, 70);
         }
         const selfTag = selfKey === `${a.name}:${p.index}` ? "  ◀ du" : "";
-        console.log(`  ${icon} p${p.index}  ${cmd} ${ctxCell}  ${display}${selfTag}`);
+        console.log(`  ${icon} p${p.index}  ${runtime(p).padEnd(13)} ${cmd} ${ctxCell}  ${display}${selfTag}`);
         i++;
         continue;
       }
@@ -2721,7 +2718,7 @@ async function cmdPs(ctx, flags = {}) {
       const end = panes[j - 1].index;
       const range = j - i === 1 ? `p${start}` : `p${start}-p${end}`;
       const icon = statusIcon(groupStatus);
-      console.log(`  ${icon} ${range.padEnd(7)} ${groupCmd.padEnd(6)} ${groupStatus} (${j - i})`);
+      console.log(`  ${icon} ${range.padEnd(7)} ${runtime(p).padEnd(13)} ${groupCmd.padEnd(6)} ${groupStatus} (${j - i})`);
       i = j;
     }
   }
