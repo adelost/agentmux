@@ -14,7 +14,9 @@ function Write-Log {
 function Write-JsonAtomic {
   param([string]$Path, [object]$Value)
   $temporary = "$Path.$PID.tmp"
-  $Value | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 -Path $temporary
+  $json = ($Value | ConvertTo-Json -Depth 8) + [Environment]::NewLine
+  $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($temporary, $json, $utf8WithoutBom)
   Move-Item -Force $temporary $Path
 }
 
