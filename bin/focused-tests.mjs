@@ -55,6 +55,7 @@ const TEST_ALIASES = {
   "core/windows-manager-discord.mjs": ["bin/windows-manager-smoke.test.mjs", "test/windows-manager-contract.test.mjs"],
   ".npmignore": ["test/audio-inbox-android-contract.test.mjs"],
   "channels/audio-feed.mjs": ["channels/voice.test.mjs"],
+  "channels/voice-input.mjs": ["channels/voice.test.mjs"],
   "index.mjs": ["test/audio-inbox-android-contract.test.mjs"],
   "package.json": ["core/release-install.test.mjs"],
   "package-lock.json": ["core/release-install.test.mjs"],
