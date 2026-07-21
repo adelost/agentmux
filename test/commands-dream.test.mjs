@@ -86,15 +86,30 @@ feature("amux dream command target selection", () => {
         getMtime: (dir) => mtimes.get(dir) || 0,
         getStatus: async (_ctx, agent, pane) => statuses.get(`${agent}:${pane}`) || "unknown",
         getLivePanes: async () => livePanes,
+        getTurns: () => ({ count: 20, latest: "2026-07-21T05:00:00.000Z" }),
+        getContext: () => ({ percent: 72 }),
       })],
     then: ["only the recent idle Claude pane is targeted", (result) => {
       expect(result.targets).toEqual([
-        { agent: "claw", pane: 0, lastMs: 2_000, status: "idle", liveCommand: "claude" },
+        {
+          agent: "claw", pane: 0, lastMs: 2_000, turns: 20,
+          activityCursor: "2026-07-21T05:00:00.000Z", receiptDateKey: null,
+          status: "idle", liveCommand: "claude", contextPercent: 72, compact: true,
+        },
       ]);
       expect(result.skipped).toEqual([
-        { agent: "claw", pane: 1, lastMs: 2_100, status: "working", liveCommand: "claude" },
-        { agent: "claw", pane: 4, lastMs: 2_300, status: "not-live-claude", liveCommand: "bash" },
+        {
+          agent: "claw", pane: 1, lastMs: 2_100, turns: 20,
+          activityCursor: "2026-07-21T05:00:00.000Z", receiptDateKey: null,
+          status: "working", liveCommand: "claude",
+        },
+        {
+          agent: "claw", pane: 4, lastMs: 2_300, turns: 20,
+          activityCursor: "2026-07-21T05:00:00.000Z", receiptDateKey: null,
+          status: "not-live-claude", liveCommand: "bash",
+        },
       ]);
+      expect(result.ineligible).toEqual([]);
     }],
   });
 

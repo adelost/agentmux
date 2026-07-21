@@ -139,7 +139,11 @@ amux dream --since 24h
 bin/dream-cron.sh                    # cron wrapper: run + validate output
 \`\`\`
 Meant for cron at 04:00. It asks each active pane to update only its own
-marker block in the daily memory file, then writes a run sentinel.
+marker block in the daily memory file, then writes a run sentinel. A pane is
+never woken until it has at least 10 new real work turns after its last durable
+dream receipt. At that boundary, context >=50% adds a compact first; lower or
+unknown context still writes memory without compacting. Dream and compact
+plumbing count as zero new turns, so maintenance cannot wake itself tomorrow.
 
 Dream also runs **session-file housekeeping** at the end of each nightly run:
 DEAD session jsonl (mtime older than 14d, Claude + Codex) get deleted. Live
