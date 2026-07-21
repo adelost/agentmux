@@ -32,7 +32,12 @@ function setupFakeCodex(events, paneDir = "/fake/workspace") {
   const sessionDir = join(fakeHome, ".codex", "sessions", "2026", "04", "09");
   mkdirSync(sessionDir, { recursive: true });
   const file = join(sessionDir, "rollout-2026-04-09T10-00-00-abc.jsonl");
-  writeFileSync(file, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  const normalized = events.map((event) => event.type === "session_meta"
+    ? { ...event, payload: {
+      source: "cli", originator: "codex-tui", ...event.payload,
+    } }
+    : event);
+  writeFileSync(file, normalized.map((e) => JSON.stringify(e)).join("\n") + "\n");
 
   return {
     paneDir,
@@ -50,11 +55,17 @@ function setupFakeCodex(events, paneDir = "/fake/workspace") {
  * different cwd, and set its mtime to be either older or newer than the
  * original. Used for specificity-priority tests.
  */
-function addExtraRollout(fakeHome, cwd, name, { mtime, turnId = "T", prompt = "extra" } = {}) {
+function addExtraRollout(fakeHome, cwd, name, {
+  mtime,
+  turnId = "T",
+  prompt = "extra",
+  source = "cli",
+  originator = "codex-tui",
+} = {}) {
   const sessionDir = join(fakeHome, ".codex", "sessions", "2026", "04", "09");
   const path = join(sessionDir, name);
   const events = [
-    { type: "session_meta", payload: { cwd } },
+    { type: "session_meta", payload: { cwd, source, originator } },
     { type: "event_msg", payload: { type: "task_started", turn_id: turnId } },
     { type: "event_msg", payload: { type: "user_message", message: prompt } },
     { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: `response from ${cwd}` }] } },
@@ -147,7 +158,9 @@ feature("Codex profile session roots", () => {
       mkdirSync(day, { recursive: true });
       const file = join(day, "rollout-profile-2.jsonl");
       writeFileSync(file, [
-        { type: "session_meta", payload: { cwd: paneDir } },
+        { type: "session_meta", payload: {
+          cwd: paneDir, source: "cli", originator: "codex-tui",
+        } },
         { type: "event_msg", payload: { type: "task_started", turn_id: "P2" } },
         { type: "event_msg", payload: { type: "user_message", message: "profile two prompt" } },
         { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "profile two reply" }] } },
@@ -771,6 +784,38 @@ feature("latestCodexSessionFor", () => {
       cleanup();
     }],
   });
+
+  unit("ignores a newer guardian rollout sharing the pane cwd", {
+    given: ["one interactive TUI and one newer internal approval reviewer", () => {
+      const context = setupFakeCodex([
+        { type: "session_meta", payload: {
+          id: "44444444-4444-4444-8444-444444444444",
+          cwd: "/fake/workspace",
+        } },
+      ]);
+      const old = new Date("2026-07-15T19:40:00Z");
+      const recent = new Date("2026-07-21T11:02:00Z");
+      utimesSync(context.file, old, old);
+      const guardian = addExtraRollout(
+        context.fakeHome,
+        context.paneDir,
+        "rollout-guardian.jsonl",
+        {
+          mtime: recent,
+          source: { subagent: { other: "guardian" } },
+          originator: "codex-auto-review",
+          prompt: "Assess the exact planned action",
+        },
+      );
+      return { ...context, guardian };
+    }],
+    when: ["resolving the pane journal", ({ paneDir }) => latestCodexSessionFor(paneDir)],
+    then: ["the TUI wins even though guardian is newer with exact cwd", (path, context) => {
+      expect(path).toBe(context.file);
+      expect(path).not.toBe(context.guardian);
+      context.cleanup();
+    }],
+  });
 });
 
 feature("latestCodexSessionIdentity", () => {
@@ -801,6 +846,22 @@ feature("latestCodexSessionIdentity", () => {
     ], "/fake/workspace")],
     when: ["resolving resume ownership", ({ paneDir }) => latestCodexSessionIdentity(paneDir)],
     then: ["no pane-owned identity is fabricated", (identity, { cleanup }) => {
+      expect(identity).toBeNull();
+      cleanup();
+    }],
+  });
+
+  unit("refuses guardian-only exact-cwd history as pane ownership", {
+    given: ["an internal approval-review rollout in the pane directory", () => setupFakeCodex([
+      { type: "session_meta", payload: {
+        id: "55555555-5555-4555-8555-555555555555",
+        cwd: "/fake/workspace",
+        source: { subagent: { other: "guardian" } },
+        originator: "codex-auto-review",
+      } },
+    ])],
+    when: ["resolving resume ownership", ({ paneDir }) => latestCodexSessionIdentity(paneDir)],
+    then: ["no interactive ownership is fabricated", (identity, { cleanup }) => {
       expect(identity).toBeNull();
       cleanup();
     }],

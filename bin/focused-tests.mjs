@@ -30,6 +30,7 @@ const TEST_ALIASES = {
   "cli/config.mjs": ["cli.test/config.test.mjs"],
   "cli/tmux.mjs": ["cli.test/layout-contract.test.mjs"],
   "cli/dream.mjs": ["core/dream-eligibility.test.mjs", "test/commands-dream.test.mjs"],
+  "core/codex-jsonl-reader.mjs": ["test/codex-jsonl-reader.test.mjs"],
   "core/jsonl-reader.mjs": ["core/dream-summarizer.test.mjs"],
   "bin/dream-cron.sh": ["test/morning-cron-logs.test.mjs"],
   "bin/start.sh": ["test/post-boot-revive.integration.test.mjs"],
