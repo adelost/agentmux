@@ -44,9 +44,9 @@ Manual reminders are available through `amux remind`:
 
 ```bash
 amux remind <agent> -p <pane>    # single pane, unconditional
-amux remind --all                # every Claude pane, unconditional
+amux remind --all                # every live, recently used Claude pane; never wakes sleepers
 amux remind --stale              # only panes past the threshold
-amux remind --all --threshold 30 # override threshold for this run
+amux remind --stale --threshold 30 # override threshold for stale active panes
 ```
 
 `remind` updates the shared state file so the auto-poll does not re-fire the
@@ -58,6 +58,7 @@ same pane until another threshold window has passed.
 |---|---:|---|
 | `AMUX_REMIND_ENABLED` | `true` | Set `false` to disable the poll |
 | `AMUX_REMIND_TURN_THRESHOLD` | `40` | Turns since refresh before reminder fires |
+| `AMUX_REMIND_ACTIVE_WINDOW_MS` | `3600000` | Recent-work window; maintenance never qualifies a pane |
 | `AMUX_REMIND_POLL_MS` | `60000` | Milliseconds between poll ticks, minimum 10s |
 | `AMUX_REMINDER_STATE_PATH` | `/tmp/agentmux-reminder-state.json` | Per-pane reminder state |
 

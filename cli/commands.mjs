@@ -2744,34 +2744,26 @@ async function compactOnePane(ctx, name, flags, compactText) {
  *
  * Modes:
  *   amux remind <agent> -p N        — one pane, unconditional
- *   amux remind --all               — every claude pane, unconditional
+ *   amux remind --all               — every live, recently used Claude pane
  *   amux remind --stale             — only panes past the turn threshold
  *
- * Updates the shared reminder-state file so the bridge's auto poll sees
- * the new timestamp and won't re-fire for another full threshold-worth
- * of turns.
  */
 async function cmdRemind(ctx, flags = {}, positional = []) {
-  const { loadReminderState, saveReminderState, parseReminderConfig, formatReminderMessage, cutoffFor } =
+  const { loadReminderState, saveReminderState, parseReminderConfig, formatReminderMessage, cutoffFor, isReminderTargetActive } =
     await import("../core/reminder-state.mjs");
-  const { countTurnsSince, panePathFor } = await import("../core/jsonl-reader.mjs");
+  const { countWorkTurnsSince, panePathFor } = await import("../core/jsonl-reader.mjs");
   const { readParkState } = await import("../core/pane-park.mjs");
 
   const config = parseReminderConfig();
   const threshold = Number.isFinite(flags.threshold) ? flags.threshold : config.turnThreshold;
   const state = loadReminderState(config.statePath);
   const nowMs = Date.now();
-
   const agents = listAgents(ctx.configPath);
-
-  // Resolve target set from flags/positionals.
   const targets = [];
   if (flags.all || flags.stale) {
     for (const a of agents) {
       const panes = Array.isArray(a.panes) ? a.panes : [];
       for (let i = 0; i < panes.length; i++) {
-        // Claude panes have cmd starting with "claude" (name can be
-        // claude / claude-2 / claude-3 etc per config convention).
         if (!String(panes[i]?.cmd || "").startsWith("claude")) continue;
         targets.push({ agent: a, paneIdx: i });
       }
@@ -2780,7 +2772,7 @@ async function cmdRemind(ctx, flags = {}, positional = []) {
     if (!positional[0]) {
       console.error(`Usage:
   amux remind <agent> -p <pane>    # one pane
-  amux remind --all                # every claude pane
+  amux remind --all                # all live, recently used Claude panes
   amux remind --stale              # only panes past threshold (${threshold} turns)`);
       process.exit(1);
     }
@@ -2800,15 +2792,23 @@ async function cmdRemind(ctx, flags = {}, positional = []) {
     const paneState = state[paneKey] || { lastReminderTsMs: null, lastCompactTsMs: null };
 
     let turnCount = 0;
+    let latestWorkTsMs = NaN;
     try {
       const paneDir = panePathFor(a, paneIdx);
       const cutoffMs = cutoffFor(paneState);
-      const res = countTurnsSince(paneDir, cutoffMs != null ? new Date(cutoffMs) : null);
+      const res = countWorkTurnsSince(paneDir, cutoffMs != null ? new Date(cutoffMs) : null);
       turnCount = res?.count ?? 0;
+      latestWorkTsMs = Date.parse(res?.latest || "");
     } catch {}
 
-    // --stale mode: require turnCount above threshold. Single-pane and
-    // --all modes send regardless (explicit user intent).
+    if (flags.all || flags.stale) {
+      const runtimeState = await ctx.agent.paneProcessState(a.name, paneIdx).catch(() => null);
+      const active = isReminderTargetActive({
+        latestWorkTsMs, nowMs, activeWindowMs: config.activeWindowMs, runtimeState,
+      }).active;
+      if (!active) { skipped++; continue; }
+    }
+
     if (flags.stale && turnCount < threshold) {
       skipped++;
       continue;

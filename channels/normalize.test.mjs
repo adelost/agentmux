@@ -42,15 +42,15 @@ feature("normalizeDiscordMessage", () => {
   unit("flattens attachments from Map to array", {
     given: ["a message with two attachments", () => fakeDiscordMsg({
       attachments: new Map([
-        ["a1", { id: "a1", name: "photo.jpg", url: "http://cdn/photo.jpg", contentType: "image/jpeg" }],
+        ["a1", { id: "a1", name: "photo.jpg", url: "http://cdn/photo.jpg", proxyURL: "http://proxy/photo.jpg", contentType: "image/jpeg" }],
         ["a2", { id: "a2", name: "log.txt", url: "http://cdn/log.txt", contentType: "text/plain" }],
       ]),
     })],
     when: ["normalizing", (msg) => normalizeDiscordMessage(msg)],
     then: ["attachments is a plain array with correct fields", (m) => {
       expect(m.attachments).toEqual([
-        { id: "a1", name: "photo.jpg", url: "http://cdn/photo.jpg", contentType: "image/jpeg" },
-        { id: "a2", name: "log.txt", url: "http://cdn/log.txt", contentType: "text/plain" },
+        { id: "a1", name: "photo.jpg", url: "http://cdn/photo.jpg", proxyUrl: "http://proxy/photo.jpg", contentType: "image/jpeg" },
+        { id: "a2", name: "log.txt", url: "http://cdn/log.txt", proxyUrl: null, contentType: "text/plain" },
       ]);
     }],
   });

@@ -20,6 +20,7 @@ const NOISE_PATTERNS = [
   /^\[amux (resume|compact) hint\]/i,
   /^\[AMUX AUTOMATIC QUOTA RECOVERY\b/i,
   /^\[AMUX AUTOMATIC CRASH RECOVERY\b/i,
+  /^\[drift-guard\]/i,
   /^Caveat:/,
   // Post-compact continuation preamble injected by the harness, not typed.
   /^This session is being continued from a previous conversation/,
@@ -36,4 +37,10 @@ export function isSystemNoiseDirective(text) {
   const head = String(text || "").trimStart();
   if (!head) return true;
   return NOISE_PATTERNS.some((pattern) => pattern.test(head));
+}
+
+/** WHAT: Checks whether a directive proves active work. WHY: Prevents maintenance from waking an otherwise sleeping pane. */
+export function isWorkDirective(text) {
+  const head = String(text || "").trimStart();
+  return !isSystemNoiseDirective(head) && !/^\[dream\b/i.test(head);
 }

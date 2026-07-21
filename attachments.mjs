@@ -20,7 +20,34 @@ import { splitMessage } from "./lib.mjs";
  * WHAT: Builds agent prompts from text, voice, images, and files.
  * WHY: Keeps platform attachment handling outside the message delivery path.
  */
-export function createAttachmentHandler({ run, transcribeScript, downloadBuffer, writeTmp = writeFileSync }) {
+export function createAttachmentHandler({
+  run, transcribeScript, downloadBuffer, writeTmp = writeFileSync,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+}) {
+
+  const retryableDownload = (error) => error?.retryable === true
+    || /(?:Download failed:\s*(?:408|429|5\d\d)|fetch failed|ECONN|ETIMEDOUT|timeout)/iu.test(String(error?.message || error));
+
+  /** WHAT: Retries safe GETs and alternates Discord CDN/proxy endpoints. WHY: A transient 525 must not discard user evidence. */
+  async function downloadAttachment(att) {
+    const urls = [...new Set([att.url, att.proxyUrl].filter(Boolean))];
+    let lastError = new Error("attachment has no download URL");
+    const permanentlyFailed = new Set();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const candidates = urls.filter((url) => !permanentlyFailed.has(url));
+      if (!candidates.length) break;
+      const url = candidates[attempt % candidates.length];
+      try { return await downloadBuffer(url); }
+      catch (error) {
+        lastError = error;
+        if (!retryableDownload(error)) permanentlyFailed.add(url);
+        if (attempt < 2 && urls.some((candidate) => !permanentlyFailed.has(candidate))) {
+          await sleep(attempt === 0 ? 200 : 600);
+        }
+      }
+    }
+    throw lastError;
+  }
 
   /** WHAT: Posts a readable Discord transcript in bounded chunks. WHY: Keeps long voice notes visible without markdown noise or 2000-character failures. */
   async function replyWithTranscript(msg, text, viaFallback) {
@@ -65,12 +92,11 @@ export function createAttachmentHandler({ run, transcribeScript, downloadBuffer,
         else rawText = `${rawText}\n${tagged}`;
       } else {
         const path = await downloadToTmp(msg, att, tmpFiles);
-        if (path) {
-          const label = isImage ? "image" : "file";
-          rawText = rawText
-            ? `${rawText}\n[${label} attached: ${path}]`
-            : `[${label} attached: ${path}]`;
-        }
+        if (!path) return null;
+        const label = isImage ? "image" : "file";
+        rawText = rawText
+          ? `${rawText}\n[${label} attached: ${path}]`
+          : `[${label} attached: ${path}]`;
       }
     }
 
@@ -79,7 +105,7 @@ export function createAttachmentHandler({ run, transcribeScript, downloadBuffer,
 
   async function transcribeAudio(msg, att, tmpFiles) {
     try {
-      const buffer = await downloadBuffer(att.url);
+      const buffer = await downloadAttachment(att);
       const ext = (att.name || "voice.ogg").split(".").pop();
       const tmpPath = `/tmp/discord-voice-${msg.id}.${ext}`;
       writeTmp(tmpPath, buffer);
@@ -109,7 +135,7 @@ export function createAttachmentHandler({ run, transcribeScript, downloadBuffer,
 
   async function downloadToTmp(msg, att, tmpFiles) {
     try {
-      const buffer = await downloadBuffer(att.url);
+      const buffer = await downloadAttachment(att);
       const ext = extname(att.name || ".bin") || ".bin";
       const tmpPath = `/tmp/discord-media-${msg.id}-${att.id}${ext}`;
       writeTmp(tmpPath, buffer);

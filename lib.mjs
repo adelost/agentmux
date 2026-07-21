@@ -260,12 +260,15 @@ export function validateImagePath(path, statFn) {
   }
 }
 
-/**
- * Download a URL to a Buffer.
- */
+/** WHAT: Fetches URL bytes. WHY: Keeps HTTP status classification inside the shared read transport. */
 export async function downloadBuffer(url) {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+  if (!res.ok) {
+    const error = new Error(`Download failed: ${res.status}`);
+    error.status = res.status;
+    error.retryable = res.status === 408 || res.status === 429 || res.status >= 500;
+    throw error;
+  }
   return Buffer.from(await res.arrayBuffer());
 }
 

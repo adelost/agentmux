@@ -38,44 +38,43 @@ export function saveReminderState(state, path = REMINDER_STATE_PATH) {
   writeFileSync(path, JSON.stringify(state, null, 2) + "\n");
 }
 
-/**
- * Parse drift-guard config from env with sensible defaults. Kept pure
- * (takes env as arg) so tests can inject.
- *
- * @param {Record<string,string>} env - process.env or a fake
- */
+/** WHAT: Parses drift-guard environment settings. WHY: Keeps configuration separate from reminder decisions. */
 export function parseReminderConfig(env = process.env) {
   const isDisabled = env.AMUX_REMIND_ENABLED === "false";
   const threshold = parseInt(env.AMUX_REMIND_TURN_THRESHOLD || "40", 10);
   const pollMs = parseInt(env.AMUX_REMIND_POLL_MS || "60000", 10);
+  const activeWindowMs = parseInt(env.AMUX_REMIND_ACTIVE_WINDOW_MS || "3600000", 10);
   return {
     enabled: !isDisabled,
     turnThreshold: Number.isFinite(threshold) && threshold > 0 ? threshold : 40,
     pollMs: Number.isFinite(pollMs) && pollMs >= 10_000 ? pollMs : 60_000,
+    activeWindowMs: Number.isFinite(activeWindowMs) && activeWindowMs >= 60_000
+      ? activeWindowMs : 3_600_000,
     statePath: env.AMUX_REMINDER_STATE_PATH || REMINDER_STATE_PATH,
   };
 }
 
-/**
- * Decide whether to send a reminder to a pane right now.
- *
- * The caller is responsible for state UPDATE — this function only returns
- * an action. That keeps the decision pure and testable without filesystem.
- *
- * Inputs:
- *  - turnsSinceCutoff: user-turn count since max(lastReminderTs, lastCompactTs)
- *  - status: live pane status ("working"|"idle"|"permission"|"menu"|"unknown")
- *
- * Actions:
- *  - "send"  → fire reminder, caller updates state.lastReminderTs to now
- *  - "none"  → nothing needed
- *
- * Rules:
- *  - Never interrupt working/permission/menu — wait for idle
- *  - threshold crossed → send
- *  - unknown status → conservative, treat as working (no send)
- */
-export function decideReminderAction({ turnsSinceCutoff, status, turnThreshold }) {
+/** WHAT: Checks whether a reminder target is live and recently used. WHY: Prevents maintenance from waking sleeping or abandoned panes. */
+export function isReminderTargetActive({ latestWorkTsMs, nowMs, activeWindowMs, runtimeState }) {
+  if (!runtimeState || runtimeState.dead || runtimeState.shell || runtimeState.running !== true) {
+    return { active: false, reason: "pane is sleeping or unavailable" };
+  }
+  if (!Number.isFinite(latestWorkTsMs) || !Number.isFinite(nowMs)
+      || !Number.isFinite(activeWindowMs) || activeWindowMs < 0) {
+    return { active: false, reason: "no recent work activity" };
+  }
+  const ageMs = nowMs - latestWorkTsMs;
+  if (ageMs < 0 || ageMs > activeWindowMs) {
+    return { active: false, reason: "work activity is stale" };
+  }
+  return { active: true, reason: "pane is live with recent work" };
+}
+
+/** WHAT: Returns reminder eligibility. WHY: Keeps delivery effects separate from eligibility. */
+export function decideReminderAction({
+  turnsSinceCutoff, status, turnThreshold,
+  latestWorkTsMs, nowMs, activeWindowMs, runtimeState,
+}) {
   if (!Number.isFinite(turnsSinceCutoff) || turnsSinceCutoff < 0) {
     return { action: "none", reason: "invalid turn count" };
   }
@@ -85,6 +84,8 @@ export function decideReminderAction({ turnsSinceCutoff, status, turnThreshold }
   if (status === "unknown") {
     return { action: "none", reason: "unknown status (conservative)" };
   }
+  const activity = isReminderTargetActive({ latestWorkTsMs, nowMs, activeWindowMs, runtimeState });
+  if (!activity.active) return { action: "none", reason: activity.reason };
   if (turnsSinceCutoff < turnThreshold) {
     return { action: "none", reason: `${turnsSinceCutoff} < ${turnThreshold}` };
   }

@@ -3,7 +3,7 @@ import { appendFileSync, mkdtempSync, mkdirSync, copyFileSync, rmSync, writeFile
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
-import { captureClaudePromptEchoCursor, captureClaudeSlashReceiptCursor, extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl, isPromptInJsonl, isSlashReceiptInJsonl, readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, countTurnsSince } from "../core/jsonl-reader.mjs";
+import { captureClaudePromptEchoCursor, captureClaudeSlashReceiptCursor, extractFromJsonl, formatJsonlToolCall, isBusyFromJsonl, isPromptInJsonl, isSlashReceiptInJsonl, readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, countTurnsSince, countWorkTurnsSince } from "../core/jsonl-reader.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const fixtureFile = (name) => join(__dir, "fixtures/jsonl", name);
@@ -728,7 +728,7 @@ function setupCodexTimeline() {
   const sessionDir = join(fakeHome, ".codex", "sessions", "2026", "05", "10");
   mkdirSync(sessionDir, { recursive: true });
   const events = [
-    { type: "session_meta", payload: { cwd: paneDir } },
+    { type: "session_meta", payload: { cwd: paneDir, source: "cli", originator: "codex-tui" } },
     { type: "event_msg", timestamp: "2026-05-10T10:00:00Z", payload: { type: "task_started", turn_id: "C1" } },
     { type: "event_msg", timestamp: "2026-05-10T10:00:01Z", payload: { type: "user_message", message: "codex prompt" } },
     { type: "response_item", timestamp: "2026-05-10T10:00:02Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "codex answer" }] } },
@@ -1083,6 +1083,19 @@ feature("countTurnsSince: counts user turns after a cutoff", () => {
     when: ["counting all apparent user-role rows", ({ paneDir }) => countTurnsSince(paneDir, null)],
     then: ["only the human message contributes to count and latest", (r, { cleanup }) => {
       expect(r).toMatchObject({ count: 1, latest: "2026-04-22T10:00:00Z", capped: false });
+      cleanup();
+    }],
+  });
+
+  unit("reminder activity excludes Dream and drift-guard maintenance", {
+    given: ["one work turn followed by two maintenance turns", () => buildTurnsFixture([
+      { timestamp: "2026-04-22T10:00:00Z", content: "fix the real bug" },
+      { timestamp: "2026-04-22T10:01:00Z", content: "[dream 2026-04-22 04:00] summarize" },
+      { timestamp: "2026-04-22T10:02:00Z", content: "[drift-guard] re-read the rules" },
+    ])],
+    when: ["counting work only", ({ paneDir }) => countWorkTurnsSince(paneDir, null)],
+    then: ["only actual work proves activity", (r, { cleanup }) => {
+      expect(r).toMatchObject({ count: 1, latest: "2026-04-22T10:00:00Z" });
       cleanup();
     }],
   });

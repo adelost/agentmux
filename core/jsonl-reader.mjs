@@ -6,9 +6,7 @@ import { claudeProjectDir } from "./claude-paths.mjs";
 import { readAlternateTurns } from "./alternate-session-reader.mjs";
 import { describeToolCall } from "./tool-display.mjs";
 import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
-import { isSystemNoiseDirective } from "./system-noise.mjs";
-
-
+import { isSystemNoiseDirective, isWorkDirective } from "./system-noise.mjs";
 // Long sessions require bounded tail reads to stay below Node string limits.
 const DEFAULT_JSONL_WINDOW_BYTES = 8 * 1024 * 1024; // 8 MiB tail: thousands of turns
 const MAX_JSONL_WINDOW_BYTES = 128 * 1024 * 1024; // hard cap, well under the string limit
@@ -999,23 +997,8 @@ export function readAllTurnsAcrossPanes(opts = {}) {
   return filtered;
 }
 
-/**
- * Count turns written to the pane's jsonl after a given cutoff timestamp.
- *
- * Used for the Discord catch-up notice: when the user returns to a channel
- * and posts a message, the bridge checks how much activity happened in the
- * pane since the last time the channel saw a message. If count > 0 we post
- * a short info line before forwarding.
- *
- * Reverse-walks the newest jsonl file for the pane and stops at the first
- * user-event with timestamp ≤ cutoff. Caps at 51 (caller renders "50+").
- *
- * @param {string} paneDir - The pane's cwd (e.g. panePathFor(agent, 1))
- * @param {string|Date|null} sinceTs - ISO string or Date; null = no cutoff (count all)
- * @returns {{ count: number, latest: string|null, capped: boolean } | null}
- *   null when no jsonl exists for the pane (fail silent — caller skips notice)
- */
-export function countTurnsSince(paneDir, sinceTs) {
+/** WHAT: Reads pane JSONL turns after a cutoff. WHY: Keeps consumers separate from raw journals. */
+export function countTurnsSince(paneDir, sinceTs, { workOnly = false, tailBytes = null } = {}) {
   const projectDir = projectDirFor(paneDir);
   if (!existsSync(projectDir)) return null;
   const files = listJsonlFiles(projectDir);
@@ -1030,7 +1013,7 @@ export function countTurnsSince(paneDir, sinceTs) {
   // Forward-read the file (jsonl is small enough in practice), then
   // reverse-iterate to short-circuit once we pass the cutoff. Malformed
   // lines are already filtered by parseJsonl.
-  const events = parseJsonl(files[0].path);
+  const events = tailBytes ? parseJsonlTail(files[0].path, tailBytes) : parseJsonl(files[0].path);
   let count = 0;
   let latest = null;
   let capped = false;
@@ -1043,6 +1026,7 @@ export function countTurnsSince(paneDir, sinceTs) {
     if (Number.isNaN(t)) continue;
     if (cutoffMs !== null && t <= cutoffMs) break; // hit the cutoff, stop
     if (isSystemNoiseDirective(e.message.content)) continue;
+    if (workOnly && !isWorkDirective(e.message.content)) continue;
     count++;
     if (!latest) latest = e.timestamp; // first hit in reverse = newest
     if (count >= 51) { capped = true; break; }
@@ -1051,28 +1035,17 @@ export function countTurnsSince(paneDir, sinceTs) {
   return { count, latest, capped };
 }
 
-/**
- * Find the timestamp of the most recent compact summary in the pane's
- * newest jsonl file. Returns null if no compact event exists (pane never
- * /compact'ed since session start) or jsonl is missing.
- *
- * Compact events are user-role rows with `isCompactSummary: true`. Reverse
- * scan the newest file and return first match.
- *
- * Used by the drift-guard poll: when we see a compact newer than our
- * stored `lastCompactTsMs`, reset the turn counter because /compact
- * reloads CLAUDE.md as system context with full prominence again.
- *
- * @param {string} paneDir - The pane's cwd
- * @returns {number|null} epoch ms of latest compact, or null
- */
+/** WHAT: Reads work from a bounded tail. WHY: Keeps huge journals from exhausting the reminder poll. */
+export function countWorkTurnsSince(paneDir, sinceTs) { return countTurnsSince(paneDir, sinceTs, { workOnly: true, tailBytes: DEFAULT_JSONL_WINDOW_BYTES }); }
+
+/** WHAT: Reads the latest compact timestamp. WHY: Keeps reminder resets separate from compact storage. */
 export function findLatestCompactTs(paneDir) {
   const projectDir = projectDirFor(paneDir);
   if (!existsSync(projectDir)) return null;
   const files = listJsonlFiles(projectDir);
   if (files.length === 0) return null;
 
-  const events = parseJsonl(files[0].path);
+  const events = parseJsonlTail(files[0].path, DEFAULT_JSONL_WINDOW_BYTES);
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
     if (!e || e.isCompactSummary !== true) continue;

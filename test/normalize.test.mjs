@@ -82,7 +82,7 @@ feature("normalizeDiscordMessage: attachments", () => {
   unit("maps a single attachment to the channel-agnostic shape", {
     when: ["normalizing a message with a voice note", () => normalizeDiscordMessage(fakeDiscordMsg({
       attachments: [
-        { id: "a1", name: "voice.ogg", url: "https://cdn/voice.ogg", contentType: "audio/ogg" },
+        { id: "a1", name: "voice.ogg", url: "https://cdn/voice.ogg", proxyURL: "https://proxy/voice.ogg", contentType: "audio/ogg" },
       ],
     }))],
     then: ["one attachment with id/name/url/contentType", (n) => {
@@ -91,6 +91,7 @@ feature("normalizeDiscordMessage: attachments", () => {
         id: "a1",
         name: "voice.ogg",
         url: "https://cdn/voice.ogg",
+        proxyUrl: "https://proxy/voice.ogg",
         contentType: "audio/ogg",
       });
     }],
