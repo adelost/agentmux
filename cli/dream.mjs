@@ -4,8 +4,24 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { dirname, join } from "path";
 import { listAgents } from "./config.mjs";
 import { sendToPane } from "./tmux.mjs";
-import { latestJsonlMtime, panePathFor, parseSinceArg } from "../core/jsonl-reader.mjs";
+import { parseSinceArg } from "../core/jsonl-reader.mjs";
 import { formatJanitorResult, pruneOldSessions } from "../core/janitor.mjs";
+import {
+  collectDreamTargets,
+  DEFAULT_DREAM_COMPACT_PERCENT,
+  DEFAULT_DREAM_MIN_TURNS,
+  defaultDreamReceiptPath,
+  isDreamLiveClaudePane,
+  isDreamRunnableStatus,
+  readDreamReceipts,
+  recordDreamReceipt,
+} from "../core/dream-eligibility.mjs";
+
+export {
+  collectDreamTargets,
+  isDreamLiveClaudePane,
+  isDreamRunnableStatus,
+} from "../core/dream-eligibility.mjs";
 
 const DREAM_LOCK_PATH = () => join(process.env.HOME, ".openclaw", ".dream.lock");
 const DREAM_BLOCKING_STATUSES = new Set([
@@ -174,69 +190,17 @@ async function waitForPaneIdle(ctx, agentName, paneIdx, getStatus,
   return { idle: false, status: last };
 }
 
-function isDreamClaudePane(cmd) {
-  return String(cmd || "").trim().startsWith("claude");
-}
-
-/** WHAT: Checks whether one pane status permits dream work. WHY: Keeps maintenance from interrupting active panes. */
-export function isDreamRunnableStatus(status) {
-  return status === "idle";
-}
-
-/** WHAT: Checks whether one live pane runs Claude. WHY: Keeps incompatible prompt formats out of dream delivery. */
-export function isDreamLiveClaudePane(pane) {
-  return pane?.command === "claude";
-}
-
-/** WHAT: Collects recent idle Claude panes. WHY: Keeps stale or active sessions out of the dream run. */
-export async function collectDreamTargets(ctx, agents, sinceMs, opts = {}) {
-  const getStatus = opts.getStatus;
-  const getMtime = opts.getMtime || latestJsonlMtime;
-  const getLivePanes = opts.getLivePanes;
-  if (typeof getStatus !== "function" || typeof getLivePanes !== "function") {
-    throw new Error("dream target collection requires getStatus and getLivePanes");
-  }
-  const targets = [];
-  const skipped = [];
-
-  for (const a of agents) {
-    let livePanes = [];
-    try {
-      livePanes = await getLivePanes(ctx, a.name);
-    } catch {}
-    const liveByIndex = new Map((livePanes || []).map((p) => [p.index, p]));
-    const panes = Array.isArray(a.panes) ? a.panes : [];
-    for (let i = 0; i < panes.length; i++) {
-      const cmd = String(panes[i]?.cmd || "");
-      if (!isDreamClaudePane(cmd)) continue; // Codex prompt-format differs; claude-only for MVP.
-      let lastMs = 0;
-      try {
-        lastMs = getMtime(panePathFor(a, i)) || 0;
-      } catch {}
-      if (lastMs < sinceMs) continue;
-
-      const livePane = liveByIndex.get(i);
-      const liveCommand = livePane?.command || "missing";
-      if (!isDreamLiveClaudePane(livePane)) {
-        skipped.push({ agent: a.name, pane: i, lastMs, status: "not-live-claude", liveCommand });
-        continue;
-      }
-
-      let status = "unknown";
-      try {
-        status = await getStatus(ctx, a.name, i);
-      } catch {}
-      const target = { agent: a.name, pane: i, lastMs, status, liveCommand };
-      if (isDreamRunnableStatus(status)) targets.push(target);
-      else skipped.push(target);
-    }
-  }
-
-  return { targets, skipped };
-}
-
 /** WHAT: Dispatches sequential dream maintenance. WHY: Keeps shared memory writes ordered across eligible panes. */
-export async function cmdDream(ctx, flags = {}, { getStatus, getLivePanes } = {}) {
+export async function cmdDream(ctx, flags = {}, dependencies = {}) {
+  const {
+    getStatus,
+    getLivePanes,
+    getTurns,
+    getContext,
+    readReceipts = readDreamReceipts,
+    recordReceipt = recordDreamReceipt,
+    receiptPath = defaultDreamReceiptPath(),
+  } = dependencies;
   if (typeof getStatus !== "function" || typeof getLivePanes !== "function") {
     throw new Error("dream command requires getStatus and getLivePanes");
   }
@@ -260,11 +224,13 @@ export async function cmdDream(ctx, flags = {}, { getStatus, getLivePanes } = {}
   const since = parseSinceArg(sinceArg);
   const sinceMs = since instanceof Date ? since.getTime() : Date.now() - 24 * 3600 * 1000;
 
-  // Window: panes with recent activity qualify, but only exact `idle` panes
-  // are safe to touch. Dream writes a shared memory file and should never send
-  // /compact or a follow-up prompt into a pane that is already working.
-  let { targets, skipped } = await collectDreamTargets(ctx, agents, sinceMs,
-    { getStatus, getLivePanes });
+  const receipts = readReceipts(receiptPath);
+  const minTurns = DEFAULT_DREAM_MIN_TURNS;
+  const compactPercent = DEFAULT_DREAM_COMPACT_PERCENT;
+  let receiptState = receipts;
+  const { targets, skipped, ineligible } = await collectDreamTargets(ctx, agents, sinceMs, {
+    getStatus, getLivePanes, getTurns, getContext, receipts, minTurns, compactPercent,
+  });
 
   const promptFor = (t) => [
     `[dream ${dateKey} ${timeStr}]`,
@@ -282,7 +248,7 @@ export async function cmdDream(ctx, flags = {}, { getStatus, getLivePanes } = {}
     `Blocket ska ha exakt denna struktur:`,
     `<!-- amux-dream-${t.agent}-${t.pane}:${dateKey} -->`,
     `## ${t.agent}:${t.pane}`,
-    `- Sammanfatta vad vi jobbat med sen sist (senaste ~24h).`,
+    `- Sammanfatta arbetet sedan senaste lyckade dream (${t.turns} nya riktiga användarturer).`,
     `- Inkludera viktiga beslut, gotchas och kodändringar.`,
     `- Skanbart med bullets, max ~10 rader totalt.`,
     `<!-- /amux-dream-${t.agent}-${t.pane}:${dateKey} -->`,
@@ -293,13 +259,10 @@ export async function cmdDream(ctx, flags = {}, { getStatus, getLivePanes } = {}
     `När allt är klart: svara med exakt en kort rad: DREAM_OK <din 1-rads summary>.`,
   ].join("\n");
 
-  const existingContent = existsSync(memPath) ? readFileSync(memPath, "utf-8") : "";
-  const allRecent = [...targets, ...skipped];
+  const completedThisRunDay = ineligible.filter((target) => target.receiptDateKey === dateKey);
+  const allRecent = [...targets, ...skipped, ...completedThisRunDay];
   const reportableRecent = allRecent.filter((target) =>
     target.status !== "not-live-claude" && target.status !== "unknown");
-  if (flags.retry) {
-    targets = targets.filter((target) => !hasDreamPaneBlock(existingContent, target, dateKey));
-  }
 
   const finalizeSentinel = (passOk, passFailed) => {
     if (flags.deferSentinel || flags["defer-sentinel"]) return { ok: passOk, failed: passFailed };
@@ -315,8 +278,13 @@ export async function cmdDream(ctx, flags = {}, { getStatus, getLivePanes } = {}
     console.log(`Dream would process ${targets.length} idle pane(s) sequentially:\n`);
     for (const t of targets) {
       console.log(`--- ${t.agent}:${t.pane} (last activity ${new Date(t.lastMs).toISOString().slice(11, 16)} UTC) ---`);
-      console.log(`  send: /compact`);
-      console.log(`  wait: pane idle (≤180s)`);
+      console.log(`  activity: ${t.turns} new real turn(s); receipt cursor ${t.activityCursor}`);
+      if (t.compact) {
+        console.log(`  send: /compact (context ${t.contextPercent}% ≥ ${compactPercent}%)`);
+        console.log(`  wait: pane idle (≤180s)`);
+      } else {
+        console.log(`  compact: skipped (context ${t.contextPercent ?? "unknown"}% < ${compactPercent}% or unknown)`);
+      }
       console.log(`  send: dream prompt (${promptFor(t).length} chars)`);
       console.log(`  wait: pane idle (≤300s)`);
     }
@@ -325,6 +293,12 @@ export async function cmdDream(ctx, flags = {}, { getStatus, getLivePanes } = {}
       for (const t of skipped) {
         const live = t.liveCommand ? `; live=${t.liveCommand}` : "";
         console.log(`--- ${t.agent}:${t.pane} (${t.status}${live}; last activity ${new Date(t.lastMs).toISOString().slice(11, 16)} UTC) ---`);
+      }
+    }
+    if (ineligible.length) {
+      console.log(`\nIneligible ${ineligible.length} pane(s), no wake or compact:`);
+      for (const t of ineligible) {
+        console.log(`--- ${t.agent}:${t.pane} (${t.turns}/${t.minTurns} new real turns) ---`);
       }
     }
     runDreamJanitor(flags); // preview the housekeeping pass too (no lock needed for dry)
@@ -366,20 +340,22 @@ export async function cmdDream(ctx, flags = {}, { getStatus, getLivePanes } = {}
         continue;
       }
 
-      if (!flags.quiet && !flags.q) console.log(`${tag} ${key} → /compact`);
-      try {
-        const sent = await sendToPane(ctx, t.agent, t.pane, "/compact", { mirror: false });
-        if (!sent?.delivered) throw new Error(sent?.blocked ? "blocked by park-guard" : "delivery not acknowledged");
-      } catch (err) {
-        failedCount++;
-        console.warn(`${tag} ${key} /compact failed: ${err.message}`);
-        continue;
-      }
-      const cRes = await waitForPaneIdle(ctx, t.agent, t.pane, getStatus, 180_000, 3);
-      if (!cRes.idle) {
-        failedCount++;
-        console.warn(`${tag} ${key} did not idle after /compact (180s; last=${cRes.status}) \u2014 skipping`);
-        continue;
+      if (t.compact) {
+        if (!flags.quiet && !flags.q) console.log(`${tag} ${key} → /compact (${t.contextPercent}%)`);
+        try {
+          const sent = await sendToPane(ctx, t.agent, t.pane, "/compact", { mirror: false });
+          if (!sent?.delivered) throw new Error(sent?.blocked ? "blocked by park-guard" : "delivery not acknowledged");
+        } catch (err) {
+          failedCount++;
+          console.warn(`${tag} ${key} /compact failed: ${err.message}`);
+          continue;
+        }
+        const cRes = await waitForPaneIdle(ctx, t.agent, t.pane, getStatus, 180_000, 3);
+        if (!cRes.idle) {
+          failedCount++;
+          console.warn(`${tag} ${key} did not idle after /compact (180s; last=${cRes.status}) \u2014 skipping`);
+          continue;
+        }
       }
 
       const prompt = promptFor(t);
@@ -428,6 +404,14 @@ export async function cmdDream(ctx, flags = {}, { getStatus, getLivePanes } = {}
       );
       if (!block.ok) {
         console.warn(`${tag} ${key} wrote an oversized dream block: ${block.reason}`);
+      }
+
+      try {
+        receiptState = recordReceipt(receiptState, t, { path: receiptPath, dateKey });
+      } catch (err) {
+        failedCount++;
+        console.warn(`${tag} ${key} memory block exists but receipt failed: ${err.message}`);
+        continue;
       }
 
       okCount++;
