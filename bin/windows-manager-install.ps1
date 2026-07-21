@@ -24,6 +24,8 @@ param(
   [switch]$Hidden,
   [Parameter(ParameterSetName = "RunManager", Mandatory = $true)]
   [switch]$RunManager,
+  [Parameter(ParameterSetName = "SuperviseManager", Mandatory = $true)]
+  [switch]$SuperviseManager,
   [Parameter(ParameterSetName = "Stop", Mandatory = $true)]
   [switch]$Stop
 )
@@ -32,8 +34,13 @@ $ErrorActionPreference = "Stop"
 $Root = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "AgentmuxRestarter"
 $ManagerConfigPath = Join-Path $Root "manager.json"
 $ManagerPidPath = Join-Path $Root "manager-process.json"
+$ManagerSupervisorPidPath = Join-Path $Root "manager-supervisor.json"
+$ManagerDisabledPath = Join-Path $Root "manager-disabled"
+$ManagerLogPath = Join-Path $Root "manager.log"
 $ManagerCoreDir = Join-Path $Root "manager-core"
 $InstalledInstaller = Join-Path $Root "manager-install.ps1"
+$ManagerRunName = "AgentmuxWindowsManager"
+$RunKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $RuntimeIo = Join-Path $PSScriptRoot "windows-restarter-io.ps1"
 if (!(Test-Path $RuntimeIo)) { throw "windows-restarter-io.ps1 is missing next to the manager installer" }
 . $RuntimeIo
@@ -54,11 +61,39 @@ function Get-AllManagerProcesses {
   })
 }
 
+function Get-LiveManagerSupervisor {
+  $record = Read-Json $ManagerSupervisorPidPath
+  if ($null -eq $record -or $null -eq $record.pid) { return $null }
+  $process = Get-CimInstance Win32_Process -Filter "ProcessId = $($record.pid)" -ErrorAction SilentlyContinue
+  if ($null -eq $process) { return $null }
+  if ([string]$process.CommandLine -notlike "*$InstalledInstaller*" -or
+      [string]$process.CommandLine -notlike "*-SuperviseManager*") { return $null }
+  return $process
+}
+
+function Start-ManagerSupervisor {
+  param([bool]$Hidden = $false)
+  if ($null -ne (Get-LiveManagerSupervisor)) { return }
+  Remove-Item -Force -ErrorAction SilentlyContinue $ManagerDisabledPath
+  Start-Process -FilePath "powershell.exe" -WorkingDirectory $Root -ArgumentList @(
+    "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$InstalledInstaller`"", "-SuperviseManager"
+  ) -WindowStyle $(if ($Hidden) { "Hidden" } else { "Normal" })
+  for ($i = 0; $i -lt 100; $i++) {
+    if ($null -ne (Get-LiveManagerSupervisor)) { return }
+    Start-Sleep -Milliseconds 100
+  }
+  throw "manager supervisor did not start"
+}
+
 function Stop-Manager {
+  New-Item -ItemType File -Force -Path $ManagerDisabledPath | Out-Null
   $processes = Get-AllManagerProcesses
   foreach ($process in $processes) { Stop-Process -Id $process.ProcessId -Force }
+  $supervisor = Get-LiveManagerSupervisor
+  if ($null -ne $supervisor) { Stop-Process -Id $supervisor.ProcessId -Force }
   Remove-Item -Force -ErrorAction SilentlyContinue $ManagerPidPath
-  return $processes.Count -gt 0
+  Remove-Item -Force -ErrorAction SilentlyContinue $ManagerSupervisorPidPath
+  return $processes.Count -gt 0 -or $null -ne $supervisor
 }
 
 if ($Install) {
@@ -146,10 +181,46 @@ if ($Install) {
   Write-JsonAtomic -Path (Join-Path $ManagerCoreDir "manifest.json") -Value $manifest
 
   Stop-Manager | Out-Null
-  Start-Process -FilePath "powershell.exe" -ArgumentList @(
-    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$InstalledInstaller`"", "-RunManager"
-  ) -WindowStyle $(if ($Hidden) { "Hidden" } else { "Normal" })
-  Write-Output "INSTALLED channel=$ChannelId user=$AuthorizedUserId launch=$(if ($Hidden) { "hidden" } else { "visible" })"
+  Remove-Item -Force -ErrorAction SilentlyContinue $ManagerDisabledPath
+  $runCommand = "powershell.exe -NoExit -NoProfile -ExecutionPolicy Bypass $(if ($Hidden) { '-WindowStyle Hidden ' } else { '' })-File `"$InstalledInstaller`" -SuperviseManager"
+  New-Item -Force -Path $RunKey | Out-Null
+  Set-ItemProperty -Path $RunKey -Name $ManagerRunName -Value $runCommand
+  Start-ManagerSupervisor -Hidden:$Hidden
+  Write-Output "INSTALLED channel=$ChannelId user=$AuthorizedUserId launch=$(if ($Hidden) { 'hidden-supervised' } else { 'visible-supervised' })"
+  exit 0
+}
+
+if ($SuperviseManager) {
+  $mutex = [Threading.Mutex]::new($false, "Local\AgentmuxWindowsManagerSupervisorV1")
+  $acquired = $false
+  try { $acquired = $mutex.WaitOne(0) }
+  catch [Threading.AbandonedMutexException] { $acquired = $true }
+  if (!$acquired) { Write-Output "SUPERVISOR_ALREADY_RUNNING"; exit 0 }
+  try {
+    Write-JsonAtomic -Path $ManagerSupervisorPidPath -Value ([pscustomobject]@{
+      pid = $PID; startedAt = [DateTime]::UtcNow.ToString("o"); script = $InstalledInstaller
+    })
+    $backoff = 5
+    while (!(Test-Path $ManagerDisabledPath)) {
+      $startedAt = [DateTime]::UtcNow
+      $child = Start-Process -FilePath "powershell.exe" -WorkingDirectory $Root -ArgumentList @(
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$InstalledInstaller`"", "-RunManager"
+      ) -WindowStyle Hidden -PassThru
+      $child.WaitForExit()
+      if (!(Test-Path $ManagerDisabledPath)) {
+        Add-Content -Encoding UTF8 -Path $ManagerLogPath -Value (
+          "{0:o} manager exited code={1}; restarting in {2}s" -f [DateTime]::UtcNow, $child.ExitCode, $backoff
+        )
+        Start-Sleep -Seconds $backoff
+        $ranFor = ([DateTime]::UtcNow - $startedAt).TotalSeconds
+        $backoff = $(if ($ranFor -ge 60) { 5 } else { [Math]::Min(60, $backoff * 2) })
+      }
+    }
+  } finally {
+    Remove-Item -Force -ErrorAction SilentlyContinue $ManagerSupervisorPidPath
+    $mutex.ReleaseMutex()
+    $mutex.Dispose()
+  }
   exit 0
 }
 
@@ -174,6 +245,7 @@ if ($RunManager) {
     Write-Output "MANAGER_BLOCKED env-missing:$discordEnv"
     exit 1
   }
+  Set-Location $Root
   $env:MANAGER_CONFIG = $ManagerConfigPath
   $mutex = [Threading.Mutex]::new($false, "Local\AgentmuxWindowsManagerV1")
   $acquired = $false

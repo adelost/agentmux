@@ -15,7 +15,10 @@ import {
   MANAGER_TOOLS,
   classifyManagerOutcome,
   createManagerProvider,
+  formatLocalRescueAnswer,
+  formatProviderFallback,
   parseToolCalls,
+  planLocalRescueTurn,
   planManagerTurn,
   planRescueCommand,
   planToolCall,
@@ -131,13 +134,13 @@ export async function runManagerTurn({ userText, messageId, state, history = [],
   let observation = await deps.observe();
   trackManagerBootId(state, observation);
   const messages = planManagerTurn({ userText, observation, history, contractVersion: MANAGER_CONTRACT_VERSION });
-  const reply = await deps.provider.chat(messages);
+  const local = planLocalRescueTurn(userText);
+  const reply = local ? { ok: true, text: "local-rescue" } : await deps.provider.chat(messages);
   if (!reply?.ok) {
-    const answer = `AMUX BLOCKED provider-${reply?.reason || "unavailable"}`;
-    return { answer, toolResults: [], outcome: "BLOCKED", observation };
+    return { answer: formatProviderFallback(reply?.reason), toolResults: [], outcome: "PARTIAL", observation };
   }
   const toolResults = [];
-  for (const name of parseToolCalls(reply.text)) {
+  for (const name of (local?.tools || parseToolCalls(reply.text))) {
     const verdict = planToolCall({ name, observation, lastStatusMs: state.lastStatusMs, nowMs: deps.nowMs() });
     if (!verdict.allow) {
       toolResults.push({ ok: false, stage: name, detail: `refused:${verdict.reason}` });
@@ -162,6 +165,7 @@ export async function runManagerTurn({ userText, messageId, state, history = [],
   let outcome = "ANSWERED";
   if (toolResults.length) {
     outcome = classifyManagerOutcome(toolResults).outcome;
+    if (local) return { answer: formatLocalRescueAnswer(local, toolResults, outcome), toolResults, outcome, observation };
     const resultsText = redactSecrets(JSON.stringify(toolResults.map(({ observation: drop, ...rest }) => rest)));
     const followup = await deps.provider.chat([
       ...messages,
@@ -225,6 +229,7 @@ async function discordRequest(token, method, route, body) {
 async function main() {
   const singleton = await claimManagerSingleton();
   const { config, rootDir } = loadConfig();
+  process.chdir(rootDir);
   const token = process.env[config.discordTokenEnv || "DISCORD_TOKEN"];
   if (!token) throw new Error(`Discord token env var ${config.discordTokenEnv || "DISCORD_TOKEN"} is not set`);
   const statePath = join(rootDir, "manager-state.json");
