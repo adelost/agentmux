@@ -134,6 +134,10 @@ export async function runManagerTurn({ userText, messageId, state, history = [],
   const messages = planManagerTurn({ userText, observation, history, contractVersion: MANAGER_CONTRACT_VERSION });
   const local = planLocalRescueTurn(userText);
   const reply = local ? { ok: true, text: "local-rescue" } : await deps.provider.chat(messages);
+  if (reply?.sessionId) {
+    state.codexSessionId = reply.sessionId;
+    deps.saveState(state);
+  }
   if (!reply?.ok) {
     return { answer: formatProviderFallback(reply?.reason), toolResults: [], outcome: "PARTIAL", observation };
   }
@@ -179,6 +183,10 @@ export async function runManagerTurn({ userText, messageId, state, history = [],
     answer = followup?.ok
       ? followup.text
       : `AMUX ${outcome}: ${toolResults.map((result) => `${result.stage}=${result.ok ? "ok" : "fail"}`).join(" ")}`;
+    if (followup?.sessionId) {
+      state.codexSessionId = followup.sessionId;
+      deps.saveState(state);
+    }
   }
   return { answer, toolResults, outcome, observation };
 }
@@ -256,7 +264,10 @@ async function main() {
   const serializeTurn = createSerialTurnLane();
   const deps = {
     generation,
-    provider: createManagerProvider(config),
+    provider: createManagerProvider({
+      ...config,
+      provider: { ...config.provider, initialSessionId: state.codexSessionId || null },
+    }),
     nowMs: () => Date.now(),
     saveState: (next) => writeJsonAtomic(statePath, next),
     observe: observeDefault,

@@ -438,4 +438,31 @@ feature("windows manager core", () => {
       expect(calls[1].input).not.toContain("RUNBOOK TEXT");
     }],
   });
+
+  unit("a restarted manager resumes its persisted session without a full re-send", {
+    then: ["the first turn after restart already uses resume args and the small prompt", async () => {
+      const calls = [];
+      const sessionId = "019f82e7-21bd-7b62-9eaa-eb2719207962";
+      const execImpl = (cmd, callArgs, input) => {
+        calls.push({ callArgs, input });
+        return Promise.resolve({ code: 0, stdout: "codex\nSvar.\ntokens used\n5\n", timedOut: false });
+      };
+      const provider = createCliProvider({
+        command: "wsl.exe",
+        args: ["base-args"],
+        resumeArgs: (id) => ["resume", id],
+        initialSessionId: sessionId,
+        execImpl,
+      });
+      const result = await provider.chat([
+        { role: "system", content: "RUNBOOK TEXT\n\nAktuell observation (JSON):\n{\"wsl\":\"online\"}" },
+        { role: "user", content: "tillbaka nu" },
+      ]);
+      expect(result).toMatchObject({ ok: true, sessionId });
+      expect(calls).toHaveLength(1);
+      expect(calls[0].callArgs).toEqual(["resume", sessionId]);
+      expect(calls[0].input).toContain("[USER]\ntillbaka nu");
+      expect(calls[0].input).not.toContain("RUNBOOK TEXT");
+    }],
+  });
 });

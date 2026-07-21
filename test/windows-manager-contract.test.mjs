@@ -26,7 +26,7 @@ feature("windows manager source contract", () => {
   unit("the journal is written before any tool executes", {
     then: ["planAcceptedAction, then saveState, then executeTool", () => {
       const action = TURN.indexOf("planAcceptedAction");
-      const save = TURN.indexOf("deps.saveState(state)");
+      const save = TURN.indexOf("deps.saveState(state)", action);
       const execute = TURN.indexOf("deps.executeTool");
       expect(action).toBeGreaterThan(-1);
       expect(save).toBeGreaterThan(action);

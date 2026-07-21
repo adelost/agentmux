@@ -297,6 +297,7 @@ export function createManagerProvider(config) {
         `codex exec resume --skip-git-repo-check ${sessionId} -`,
       ],
       sessionsDir: spec.sessionsDir || null,
+      initialSessionId: spec.initialSessionId || null,
       timeoutMs: Number(spec.timeoutMs) || 120_000,
     });
   }
@@ -346,6 +347,7 @@ export function createCliProvider({
   args = [],
   resumeArgs = null,
   sessionsDir = null,
+  initialSessionId = null,
   timeoutMs = 120_000,
   execImpl = null,
   readdirImpl = null,
@@ -378,7 +380,7 @@ export function createCliProvider({
     return `[${role}]\n${typeof message.content === "string" ? message.content : ""}`;
   }).join("\n\n");
 
-  let sessionId = null;
+  let sessionId = initialSessionId || null;
   return {
     name: "cli",
     chat: async (messages) => {
