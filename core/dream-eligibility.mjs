@@ -7,7 +7,7 @@ import { randomUUID } from "crypto";
 import { homedir } from "os";
 import { dirname, join } from "path";
 import { getContextPercent } from "./context.mjs";
-import { countTurnsSince, latestJsonlMtime, panePathFor } from "./jsonl-reader.mjs";
+import { latestJsonlMtime, panePathFor, readLastTurns } from "./jsonl-reader.mjs";
 import { isSystemNoiseDirective } from "./system-noise.mjs";
 
 /** WHAT: Defines the dream cursor schema version. WHY: Keeps incompatible state from silently authorizing wakes. */
@@ -90,6 +90,25 @@ export function isDreamActivityTurn(text) {
   return !isSystemNoiseDirective(head) && !/^\[dream\b/i.test(head);
 }
 
+/** WHAT: Collects real dream activity after a cursor. WHY: Keeps the generic catch-up counter contract unchanged. */
+export function countDreamTurnsSince(paneDir, sinceTs) {
+  const cutoffMs = sinceTs ? new Date(sinceTs).getTime() : null;
+  const since = Number.isFinite(cutoffMs) ? new Date(cutoffMs) : null;
+  const result = readLastTurns(paneDir, { since, limit: Number.MAX_SAFE_INTEGER });
+  if (!result) return null;
+  const turns = result.turns.filter((turn) => {
+    const timestamp = Date.parse(turn.timestamp || "");
+    return Number.isFinite(timestamp)
+      && (cutoffMs === null || timestamp > cutoffMs)
+      && isDreamActivityTurn(turn.userPrompt);
+  });
+  return {
+    count: Math.min(turns.length, 51),
+    latest: turns.at(-1)?.timestamp ?? null,
+    capped: turns.length > 51,
+  };
+}
+
 /** WHAT: Maps activity and context to dream actions. WHY: Keeps low context from suppressing meaningful memory writes. */
 export function planDreamActions({
   turns,
@@ -128,9 +147,7 @@ export async function collectDreamTargets(ctx, agents, sinceMs, opts = {}) {
   const getStatus = opts.getStatus;
   const getMtime = opts.getMtime || latestJsonlMtime;
   const getLivePanes = opts.getLivePanes;
-  const getTurns = opts.getTurns || ((paneDir, cutoff) => countTurnsSince(paneDir, cutoff, {
-    isCountable: isDreamActivityTurn,
-  }));
+  const getTurns = opts.getTurns || countDreamTurnsSince;
   const getContext = opts.getContext || ((paneDir) => getContextPercent(paneDir, "claude"));
   const receipts = opts.receipts || emptyDreamReceipts();
   const minTurns = opts.minTurns ?? DEFAULT_DREAM_MIN_TURNS;

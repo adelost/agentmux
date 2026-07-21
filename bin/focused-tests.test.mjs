@@ -69,6 +69,14 @@ feature("focused PR tests", () => {
     }],
   });
 
+  unit("dream orchestration maps to policy and command tests", {
+    then: ["the alias covers both the pure boundary and delivery orchestration", () => {
+      const exists = existsSet(["core/dream-eligibility.test.mjs", "test/commands-dream.test.mjs"]);
+      expect(relatedTests("cli/dream.mjs", { exists }))
+        .toEqual(["core/dream-eligibility.test.mjs", "test/commands-dream.test.mjs"]);
+    }],
+  });
+
   unit("the windows manager files map to their smoke and contract tests", {
     then: ["the loop, the installer, and the rescue tool all land their focused tests", () => {
       const exists = existsSet(["bin/windows-manager-smoke.test.mjs", "test/windows-manager-contract.test.mjs"]);

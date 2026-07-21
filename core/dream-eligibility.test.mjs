@@ -4,13 +4,13 @@ import { tmpdir } from "os";
 import { join } from "path";
 import {
   collectDreamTargets,
+  countDreamTurnsSince,
   emptyDreamReceipts,
   isDreamActivityTurn,
   planDreamActions,
   readDreamReceipts,
   recordDreamReceipt,
 } from "./dream-eligibility.mjs";
-import { countTurnsSince } from "./jsonl-reader.mjs";
 
 feature("nightly dream activity boundary", () => {
   unit("ten new real turns gate memory while context only gates compact", {
@@ -63,7 +63,7 @@ feature("nightly dream activity boundary", () => {
       return { root, previousHome, paneDir };
     }],
     when: ["counting through the production predicate", ({ paneDir }) =>
-      countTurnsSince(paneDir, null, { isCountable: isDreamActivityTurn })],
+      countDreamTurnsSince(paneDir, null)],
     then: ["only the real instruction contributes", (result, fx) => {
       expect(result).toMatchObject({ count: 1, capped: false });
       process.env.HOME = fx.previousHome;

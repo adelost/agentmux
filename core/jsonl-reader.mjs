@@ -999,22 +999,23 @@ export function readAllTurnsAcrossPanes(opts = {}) {
   return filtered;
 }
 
-// Used for Discord catch-up and consumer-specific activity gates.
-// Reverse-walks the newest JSONL and stops at the cutoff.
-// Caps at 51 because catch-up renders "50+".
-//
-// paneDir: pane cwd, such as panePathFor(agent, 1).
-// sinceTs: ISO string or Date; null counts all turns.
-// isCountable: optional consumer-specific activity predicate.
-// Returns count, newest included timestamp, and cap state.
-// A missing project store returns null so observers can fail silently.
-// Tool-result arrays never enter this string-only user-turn boundary.
-// The cutoff comparison is exclusive to match durable cursors.
 /**
- * WHAT: Collects qualifying user-turn counts after a cutoff.
- * WHY: Keeps consumers from inferring activity from file freshness alone.
+ * Count turns written to the pane's jsonl after a given cutoff timestamp.
+ *
+ * Used for the Discord catch-up notice: when the user returns to a channel
+ * and posts a message, the bridge checks how much activity happened in the
+ * pane since the last time the channel saw a message. If count > 0 we post
+ * a short info line before forwarding.
+ *
+ * Reverse-walks the newest jsonl file for the pane and stops at the first
+ * user-event with timestamp ≤ cutoff. Caps at 51 (caller renders "50+").
+ *
+ * @param {string} paneDir - The pane's cwd (e.g. panePathFor(agent, 1))
+ * @param {string|Date|null} sinceTs - ISO string or Date; null = no cutoff (count all)
+ * @returns {{ count: number, latest: string|null, capped: boolean } | null}
+ *   null when no jsonl exists for the pane (fail silent — caller skips notice)
  */
-export function countTurnsSince(paneDir, sinceTs, { isCountable } = {}) {
+export function countTurnsSince(paneDir, sinceTs) {
   const projectDir = projectDirFor(paneDir);
   if (!existsSync(projectDir)) return null;
   const files = listJsonlFiles(projectDir);
@@ -1041,7 +1042,7 @@ export function countTurnsSince(paneDir, sinceTs, { isCountable } = {}) {
     const t = Date.parse(e.timestamp);
     if (Number.isNaN(t)) continue;
     if (cutoffMs !== null && t <= cutoffMs) break; // hit the cutoff, stop
-    if (!(isCountable ? isCountable(e.message.content, e) : !isSystemNoiseDirective(e.message.content))) continue;
+    if (isSystemNoiseDirective(e.message.content)) continue;
     count++;
     if (!latest) latest = e.timestamp; // first hit in reverse = newest
     if (count >= 51) { capped = true; break; }
