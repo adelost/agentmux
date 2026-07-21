@@ -9,6 +9,43 @@ import { classifyRecovery } from "./windows-bridge.mjs";
 /** WHAT: Names the manager contract version. WHY: Keeps runbook, tools, and runtime on one explicit contract. */
 export const MANAGER_CONTRACT_VERSION = 1;
 
+const LOCAL_STATUS = /^(?:status|hur\s+m[aå]r\s+(?:wsl|bryggan|l[aä]get)|[aä]r\s+(?:wsl|bryggan)\s+(?:uppe|online|nere|offline))\??$/iu;
+const LOCAL_LOGS = /^(?:logg(?:ar(?:na)?|en)?|visa\s+logg(?:ar(?:na)?|en)?|vad\s+gick\s+fel)\??$/iu;
+const LOCAL_RECOVERY = /(?:\bwsl\b.*\b(?:krasch\w*|nere|offline|h[aä]ng\w*|starta|restart\w*|[aå]terst[aä]ll\w*|recover\w*)\b|\b(?:starta|restart\w*|[aå]terst[aä]ll\w*|recover\w*)\b.*\b(?:wsl|bryggan)\b)/iu;
+
+/** WHAT: Maps a tiny unambiguous rescue vocabulary without an LLM. WHY: Keeps WSL recovery independent from optional provider authentication and availability. */
+export function planLocalRescueTurn(userText) {
+  const text = String(userText || "").trim().replace(/\s+/gu, " ");
+  if (!text) return null;
+  if (LOCAL_STATUS.test(text)) return { kind: "status", tools: ["get_status"] };
+  if (LOCAL_LOGS.test(text)) return { kind: "logs", tools: ["get_logs"] };
+  if (LOCAL_RECOVERY.test(text)) return { kind: "recovery", tools: ["get_status", "recover"] };
+  return null;
+}
+
+/** WHAT: Formats local rescue results without provider prose. WHY: Keeps measured recovery separate from opaque provider errors. */
+export function formatLocalRescueAnswer(plan, toolResults, outcome) {
+  const results = Array.isArray(toolResults) ? toolResults : [];
+  if (plan?.kind === "status" || plan?.kind === "logs") {
+    return String(results.at(-1)?.detail || `AMUX BLOCKED ${plan.kind}-unavailable`);
+  }
+  const failed = results.filter((result) => result?.ok !== true);
+  const finalDetail = String(results.at(-1)?.detail || "recovery-unavailable");
+  return [
+    `AMUX ${outcome} lokal recovery`,
+    `steg=${results.length} fel=${failed.length}`,
+    finalDetail,
+  ].join("\n");
+}
+
+/** WHAT: Formats a provider-independent handoff when general chat fails. WHY: Keeps rescue commands available while the optional manager brain is unavailable. */
+export function formatProviderFallback(reason) {
+  return [
+    `AMUX PARTIAL manager-ai=${String(reason || "unavailable")}`,
+    "Rescue fungerar utan AI: skriv status, WSL har kraschat, //recover eller //restart-wsl.",
+  ].join("\n");
+}
+
 /** WHAT: Defines the allowlisted manager tools with bounds. WHY: Prevents arbitrary model text from becoming an unbounded action. */
 export const MANAGER_TOOLS = Object.freeze([
   Object.freeze({

@@ -85,6 +85,20 @@ feature("windows manager install source contract", () => {
     }],
   });
 
+  unit("the Windows control plane survives WSL loss and manager child crashes", {
+    then: ["the supervisor runs from NTFS, restarts only the manager child with backoff, and persists at logon", () => {
+      expect(INSTALLER).toContain("manager-supervisor.json");
+      expect(INSTALLER).toContain("Local\\AgentmuxWindowsManagerSupervisorV1");
+      expect(INSTALLER).toContain("-WorkingDirectory $Root");
+      expect(INSTALLER).toContain('"-SuperviseManager"');
+      expect(INSTALLER).toContain('"-RunManager"');
+      expect(INSTALLER).toContain("manager exited code=");
+      expect(INSTALLER).toContain("[Math]::Min(60, $backoff * 2)");
+      expect(INSTALLER).toContain("HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+      expect(INSTALLER).not.toContain("wsl --shutdown");
+    }],
+  });
+
   unit("no token or secret is ever echoed", {
     then: ["output lines never reference token variables or values", () => {
       const outputLines = INSTALLER.split("\n").filter((line) => line.includes("Write-Output"));

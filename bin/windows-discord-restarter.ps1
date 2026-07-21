@@ -95,7 +95,8 @@ function Stop-Restarter {
 
 function Start-Restarter {
   param([bool]$Supervised = $false, [bool]$Hidden = $false)
-  if ($null -ne (Get-LiveRestarterProcess)) { return }
+  if (($Supervised -and $null -ne (Get-LiveSupervisorProcess)) -or
+      (!$Supervised -and $null -ne (Get-LiveRestarterProcess))) { return }
   if (!(Test-Path $InstalledScript) -or !(Test-Path $ConfigPath) -or !(Test-Path $CredentialPath)) {
     throw "restarter is not installed"
   }
@@ -105,7 +106,7 @@ function Start-Restarter {
   $mode = $(if ($Supervised) { "-Supervise" } else { "-Run" })
   $arguments = @("-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$InstalledScript`"", $mode)
   if ($Hidden -and !$Supervised) { $arguments += "-Hidden" }
-  Start-Process -FilePath "powershell.exe" -ArgumentList $arguments `
+  Start-Process -FilePath "powershell.exe" -WorkingDirectory $Root -ArgumentList $arguments `
     -WindowStyle $(if ($Supervised -or $Hidden) { "Hidden" } else { "Normal" })
   for ($i = 0; $i -lt 100; $i++) {
     if ($null -ne (Get-LiveRestarterProcess)) { return }
@@ -196,11 +197,11 @@ if ($Install) {
   $ErrorActionPreference = "Continue"
   & schtasks.exe /Delete /TN $TaskName /F 2>$null | Out-Null
   $ErrorActionPreference = $previousErrorAction
-  $runCommand = "powershell.exe -NoExit -NoProfile -ExecutionPolicy Bypass -File `"$InstalledScript`" -Run"
+  $runCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$InstalledScript`" -Supervise"
   New-Item -Force -Path $RunKey | Out-Null
   Set-ItemProperty -Path $RunKey -Name $TaskName -Value $runCommand
-  Start-Restarter
-  Write-Output "INSTALLED channel=$ChannelId user=$AuthorizedUserId persistence=hkcu-run-visible"
+  Start-Restarter -Supervised:$true -Hidden:$true
+  Write-Output "INSTALLED channel=$ChannelId user=$AuthorizedUserId persistence=hkcu-run-supervised"
   exit 0
 }
 
@@ -261,7 +262,12 @@ if ($Supervise) {
     })
     Write-Log "supervisor started pid=$PID"
     while (!(Test-Path $DisabledPath)) {
-      $child = Start-Process -FilePath "powershell.exe" -ArgumentList @(
+      $existing = Get-LiveRestarterProcess
+      if ($null -ne $existing) {
+        Start-Sleep -Seconds 2
+        continue
+      }
+      $child = Start-Process -FilePath "powershell.exe" -WorkingDirectory $Root -ArgumentList @(
         "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$InstalledScript`"", "-Run"
       ) -WindowStyle Hidden -PassThru
       $child.WaitForExit()

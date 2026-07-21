@@ -144,12 +144,14 @@ feature("windows restarter source contract", () => {
     }],
   });
 
-  unit("PowerShell stays split into thin files and visible foreground is canonical", {
-    then: ["every file is below 500 lines and hidden launch is opt-in via -Hidden", () => {
+  unit("PowerShell stays split and the transport is supervised outside WSL", {
+    then: ["every file is below 500 lines and the child inherits only an NTFS working directory", () => {
       for (const source of [MAIN, IO, DISCORD]) {
         expect(source.trimEnd().split("\n").length).toBeLessThan(500);
       }
-      expect(MAIN).toContain("persistence=hkcu-run-visible");
+      expect(MAIN).toContain("persistence=hkcu-run-supervised");
+      expect(MAIN).toContain("Start-Restarter -Supervised:$true -Hidden:$true");
+      expect(MAIN).toContain('-WorkingDirectory $Root');
       expect(MAIN).toContain('-WindowStyle $(if ($Supervised -or $Hidden) { "Hidden" } else { "Normal" })');
       expect(MAIN).not.toMatch(/-WindowStyle\s+"Hidden"/u);
       expect(MAIN).toContain('[Parameter(ParameterSetName = "Run")]\n  [Parameter(ParameterSetName = "Start")]\n  [switch]$Hidden,');

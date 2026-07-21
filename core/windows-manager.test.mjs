@@ -8,7 +8,10 @@ import {
   createHttpProvider,
   createMockProvider,
   extractCliAnswer,
+  formatLocalRescueAnswer,
+  formatProviderFallback,
   parseToolCalls,
+  planLocalRescueTurn,
   planManagerTurn,
   planRescueCommand,
   planToolCall,
@@ -17,6 +20,31 @@ import {
 } from "./windows-manager.mjs";
 
 feature("windows manager core", () => {
+  unit("critical rescue language is local and provider-independent", {
+    then: ["status, logs, and WSL failure map narrowly while general chat stays with the manager AI", () => {
+      expect(planLocalRescueTurn("status")).toEqual({ kind: "status", tools: ["get_status"] });
+      expect(planLocalRescueTurn("Hur mår WSL?")).toEqual({ kind: "status", tools: ["get_status"] });
+      expect(planLocalRescueTurn("visa loggarna")).toEqual({ kind: "logs", tools: ["get_logs"] });
+      expect(planLocalRescueTurn("WSL har kraschat")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
+      expect(planLocalRescueTurn("hur restartar vi WSL?")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
+      expect(planLocalRescueTurn("hej")).toBeNull();
+      expect(planLocalRescueTurn("kan du skriva kod?")).toBeNull();
+    }],
+  });
+
+  unit("local answers and provider fallback remain actionable", {
+    then: ["measurements survive provider failure without claiming a false recovery", () => {
+      expect(formatLocalRescueAnswer({ kind: "status" }, [{ ok: true, detail: "AMUX READY" }], "RECOVERED"))
+        .toBe("AMUX READY");
+      expect(formatLocalRescueAnswer({ kind: "recovery" }, [
+        { ok: true, detail: "status" },
+        { ok: false, detail: "bridge-timeout" },
+      ], "PARTIAL")).toBe("AMUX PARTIAL lokal recovery\nsteg=2 fel=1\nbridge-timeout");
+      expect(formatProviderFallback("http-401")).toContain("manager-ai=http-401");
+      expect(formatProviderFallback("http-401")).toContain("Rescue fungerar utan AI");
+    }],
+  });
+
   unit("the runbook carries the manager identity, failure classes, and every safety rule", {
     then: ["all required statements are present and the prompt stays compact", () => {
       const runbook = buildRunbookContext({ contractVersion: MANAGER_CONTRACT_VERSION });

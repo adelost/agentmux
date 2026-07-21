@@ -29,7 +29,12 @@ function makeHarness({ messages, scripted }) {
       expect(onDisk.lastAction.status).toBe("started");
       expect(onDisk.lastAction.command).toBe(name);
       executed.push(name);
-      return { ok: true, stage: name, detail: "AMUX READY reason=ok" };
+      return {
+        ok: true,
+        stage: name,
+        detail: "AMUX READY reason=ok",
+        ...(name === "get_status" ? { observation: { wsl: "offline", wslReachable: false } } : {}),
+      };
     },
     listMessages: async () => messages,
     sendMessage: async (text) => {
@@ -65,22 +70,19 @@ feature("windows manager smoke", () => {
     }],
   });
 
-  unit("a full turn journals before each tool run and advances the cursor once", {
-    then: ["user text to tool plan to executor to final answer, fenced all the way", async () => {
+  unit("status is local, journals before the tool, and advances the cursor once", {
+    then: ["rescue text never needs a provider turn", async () => {
       const harness = makeHarness({
         messages: [{ id: "100", content: "hur mår läget?", author: { id: CONFIG.authorizedUserId, bot: false } }],
-        scripted: [
-          "Jag läser status först.\n{\"tool\":\"get_status\"}",
-          "WSL är offline, bryggen nås inte. Jag startar inget utan din begäran.",
-        ],
+        scripted: [],
       });
       try {
         const state = { schemaVersion: 1, lastSeenId: null, lastAction: null, lastStatusMs: null };
         const handled = await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps });
         expect(handled).toBe(1);
         expect(harness.executed).toEqual(["get_status"]);
-        expect(harness.chats()).toBe(2);
-        expect(harness.sent).toEqual(["WSL är offline, bryggen nås inte. Jag startar inget utan din begäran."]);
+        expect(harness.chats()).toBe(0);
+        expect(harness.sent).toEqual(["AMUX READY reason=ok"]);
         expect(state.lastSeenId).toBe("100");
         expect(state.lastAction.status).toBe("completed");
         expect(state.lastAction.stage).toBe("RECOVERED");
@@ -91,6 +93,45 @@ feature("windows manager smoke", () => {
           "get_status",
           "get_status",
         ]);
+      } finally {
+        harness.cleanup();
+      }
+    }],
+  });
+
+  unit("a WSL crash runs the bounded local recovery even when the provider has no replies", {
+    then: ["status precedes recover and no model call is made", async () => {
+      const harness = makeHarness({
+        messages: [{ id: "105", content: "WSL har kraschat", author: { id: CONFIG.authorizedUserId, bot: false } }],
+        scripted: [],
+      });
+      try {
+        const state = { schemaVersion: 1, lastSeenId: null, lastAction: null, lastStatusMs: null };
+        expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(1);
+        expect(harness.executed).toEqual(["get_status", "recover"]);
+        expect(harness.chats()).toBe(0);
+        expect(harness.sent[0]).toContain("AMUX RECOVERED lokal recovery");
+        expect(state.lastSeenId).toBe("105");
+      } finally {
+        harness.cleanup();
+      }
+    }],
+  });
+
+  unit("general chat degrades to actionable rescue help when the provider fails", {
+    then: ["a provider error never claims the Windows rescue channel itself is blocked", async () => {
+      const harness = makeHarness({
+        messages: [{ id: "106", content: "hej", author: { id: CONFIG.authorizedUserId, bot: false } }],
+        scripted: [{ ok: false, reason: "exit-127" }],
+      });
+      try {
+        const state = { schemaVersion: 1, lastSeenId: null, lastAction: null, lastStatusMs: null };
+        expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(1);
+        expect(harness.chats()).toBe(1);
+        expect(harness.executed).toEqual([]);
+        expect(harness.sent[0]).toContain("AMUX PARTIAL manager-ai=exit-127");
+        expect(harness.sent[0]).toContain("Rescue fungerar utan AI");
+        expect(state.lastAction.stage).toBe("PARTIAL");
       } finally {
         harness.cleanup();
       }
