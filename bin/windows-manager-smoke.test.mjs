@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, feature, unit } from "bdd-vitest";
 import { createMockProvider } from "../core/windows-manager.mjs";
-import { pollManagerChannel, reconcileManagerStartup } from "./windows-manager.mjs";
+import { pollManagerChannel, readManagerConfig, reconcileManagerStartup } from "./windows-manager.mjs";
 
 const CONFIG = { channelId: "123456789012345678", authorizedUserId: "111111111111111111" };
 const NOW = 1_000_000;
@@ -49,6 +49,22 @@ function makeHarness({ messages, scripted }) {
 }
 
 feature("windows manager smoke", () => {
+  unit("required config reports missing, invalid and valid files distinctly", {
+    then: ["operator output never calls malformed JSON missing", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-manager-config-"));
+      const path = join(root, "manager.json");
+      try {
+        expect(() => readManagerConfig(path)).toThrow(/config missing/u);
+        writeFileSync(path, "{broken", "utf8");
+        expect(() => readManagerConfig(path)).toThrow(/config invalid JSON/u);
+        writeFileSync(path, `\uFEFF${JSON.stringify(CONFIG)}`, "utf8");
+        expect(readManagerConfig(path)).toEqual(CONFIG);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
   unit("a full turn journals before each tool run and advances the cursor once", {
     then: ["user text to tool plan to executor to final answer, fenced all the way", async () => {
       const harness = makeHarness({

@@ -95,15 +95,15 @@ feature("tmux layout contract", () => {
     }],
   });
 
-  component("starts Kimi with the other coding panes when a session is recreated", {
+  component("starts only the primary coding pane when a session is attached", {
     given: ["a mixed fleet containing Claude, Codex and Kimi", () =>
       layoutFixture({ source: sourceWithKimi })],
     when: ["the recreated session is attached", async (fixture) => {
       await ensureAndAttach(fixture.ctx, "skybar", fixture.configPath);
       return fixture;
     }],
-    then: ["all four coding panes are made ready, including Kimi", (fixture) => {
-      expect(fixture.readyPanes).toEqual([0, 1, 2, 3]);
+    then: ["Claude zero is ready while later Claude, Codex and Kimi panes stay sleeping", (fixture) => {
+      expect(fixture.readyPanes).toEqual([0]);
       rmSync(fixture.root, { recursive: true, force: true });
     }],
   });
