@@ -742,11 +742,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return read.history ? "--continue" : "";
   }
 
-  /** Wait for claude to load, dismiss any blocking prompts if they appear. */
-  async function waitForClaudeReady(target, agentName, pane, timeoutMs = 30_000) {
-    return tuiRecovery.waitForClaudeReady(target, agentName, pane, timeoutMs);
-  }
-
   /**
    * Codex resume can replay a large transcript for several seconds while its
    * process is already `node` and the old jsonl correctly says idle.  Process
@@ -1527,7 +1522,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       // (1.20.52) — hook-context instead of a typed spawn prompt, so it
       // never wakes the pane with a false turn and never crosses panes.
       await startClaude(agentName, target, config.dir, pane);
-      if (!wasRunning && !await waitForClaudeReady(target, agentName, pane)) {
+      if (!wasRunning && !await tuiRecovery.waitForClaudeReady(target, agentName, pane)) {
         throw new Error(`Claude process started but its composer never became ready in ${agentName}:${pane}`);
       }
     } else if (isCodexCmd(paneCmd)) {

@@ -37,6 +37,7 @@ import { createPlaywrightWatchdog } from "./channels/playwright-watchdog.mjs";
 import { parsePlaywrightWatchdogConfig } from "./core/playwright-watchdog.mjs";
 import { startHeartbeat } from "./core/heartbeat.mjs";
 import { startMemoryGuard } from "./core/memory-guard.mjs";
+import { blockedDeliveryNotice } from "./core/delivery-notices.mjs";
 import { readReleaseManifest } from "./core/release-identity.mjs";
 import { resolveConfigSources } from "./core/config-sources.mjs";
 import { syncConfiguredAgentHints } from "./core/hints-sync.mjs";
@@ -222,11 +223,7 @@ const deliveryBroker = createDeliveryBroker({
         (behind > 0 ? ` ${behind} meddelande(n) väntar i kö bakom det.` : ""),
       );
     } else if (state === "blocked") {
-      await discord.send(
-        channelId,
-        "⚠️ Meddelandet är säkert köat men panelen kan inte ta emot det ännu. " +
-        "Det ligger kvar över omstarter och skickas i ordning när Codex-composern är tillgänglig.",
-      );
+      await discord.send(channelId, blockedDeliveryNotice(job));
     } else if (state === "recovered") {
       await discord.send(channelId, "✅ Det tidigare blockerade kömeddelandet har nu levererats.");
     } else if (state === "unverified") {
