@@ -870,6 +870,40 @@ agents:
   });
 });
 
+feature("parseConfig: inter-agent send policy", () => {
+  component("round-trips an explicit fleet freeze into generated runtime config", {
+    given: ["a source fleet with inter-agent sends disabled", () => `
+guild: guild-1
+agents:
+  skyvw:
+    dir: /tmp/skyvw
+    claude: 1
+    interAgentSend: false
+`],
+    when: ["parsing and regenerating", (source) => {
+      const parsed = parseConfig(source);
+      const generated = yaml.load(generateAgentsYaml(parsed.agents, new Map(), new Map()));
+      return { parsed: parsed.agents.get("skyvw"), generated: generated.skyvw };
+    }],
+    then: ["both source and runtime policy stay frozen", ({ parsed, generated }) => {
+      expect(parsed.interAgentSend).toBe(false);
+      expect(generated.interAgentSend).toBe(false);
+    }],
+  });
+
+  component("rejects a string that could silently look enabled", {
+    given: ["an invalid source policy", () => `
+guild: guild-1
+agents:
+  skyvw:
+    dir: /tmp/skyvw
+    interAgentSend: "false"
+`],
+    when: ["building the parser action", (source) => () => parseConfig(source)],
+    then: ["fails loudly", (action) => expect(action).toThrow("invalid interAgentSend policy")],
+  });
+});
+
 feature("regenerateAgentsYaml", () => {
   component("writes source labels into agents.yaml without needing Discord", {
     given: ["source yaml + existing agents.yaml with channel mappings", () => {

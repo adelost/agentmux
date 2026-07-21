@@ -53,6 +53,9 @@ export function parseConfig(yamlContent) {
     if (backend === "native" && (config.shells ?? 0) > 0) {
       throw new Error(`agentmux.yaml: native agent '${name}' cannot define tmux shell panes`);
     }
+    if (config.interAgentSend !== undefined && typeof config.interAgentSend !== "boolean") {
+      throw new Error(`agentmux.yaml: agent '${name}' has invalid interAgentSend policy`);
+    }
     // `labels` keyed by absolute pane index (Claude, Codex, Kimi, then
     // service panes, then shells). Coerce keys to numbers so writers
     // can use either numeric or string keys in yaml.
@@ -123,6 +126,7 @@ export function parseConfig(yamlContent) {
       shells: config.shells ?? 0,
       layout: resolveTmuxLayout(config.layout),
       labels,
+      interAgentSend: config.interAgentSend,
       backend,
       runtimeUrl: backend === "native"
         ? String(config.runtime || "http://127.0.0.1:8811").replace(/\/+$/, "")
@@ -300,6 +304,7 @@ export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = 
       dir: config.dir,
       id: agentIds.get(name) || randomUUID(),
     };
+    if (typeof config.interAgentSend === "boolean") entry.interAgentSend = config.interAgentSend;
     if (config.backend === "native") {
       entry.backend = "native";
       entry.runtimeUrl = config.runtimeUrl;
