@@ -1,44 +1,27 @@
-// Dream command subsystem: target selection, sequential pane processing, and housekeeping.
+// Dream command: one bounded stateless fleet summary plus session housekeeping.
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import {
+  existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync,
+} from "fs";
 import { dirname, join } from "path";
 import { listAgents } from "./config.mjs";
-import { sendToPane } from "./tmux.mjs";
 import { parseSinceArg } from "../core/jsonl-reader.mjs";
 import { formatJanitorResult, pruneOldSessions } from "../core/janitor.mjs";
 import {
-  collectDreamTargets,
-  DEFAULT_DREAM_COMPACT_PERCENT,
-  DEFAULT_DREAM_MIN_TURNS,
-  defaultDreamReceiptPath,
-  isDreamLiveClaudePane,
-  isDreamRunnableStatus,
-  readDreamReceipts,
-  recordDreamReceipt,
+  defaultDreamReceiptPath, readDreamReceipts, recordDreamReceipts,
 } from "../core/dream-eligibility.mjs";
-
-export {
-  collectDreamTargets,
-  isDreamLiveClaudePane,
-  isDreamRunnableStatus,
-} from "../core/dream-eligibility.mjs";
+import {
+  buildDreamBatch, collectDreamSources, dreamSummaryBlock, runDreamSummarizer,
+  upsertDreamSummary, validateDreamSummary,
+} from "../core/dream-summarizer.mjs";
 
 const DREAM_LOCK_PATH = () => join(process.env.HOME, ".openclaw", ".dream.lock");
-const DREAM_BLOCKING_STATUSES = new Set([
-  "working", "permission", "menu", "resume", "dismiss", "unknown",
-  "limited",
-]);
 
-// WHAT: Checks whether a pid answers signal 0 on this host.
-// WHY: Keeps liveness probes from trusting stale heartbeat pids.
+/** WHAT: Checks whether a pid answers signal 0. WHY: Keeps stale locks from suppressing future nights. */
 export function isPidAlive(pid) {
   if (!Number.isFinite(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err?.code === "EPERM";
-  }
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return error?.code === "EPERM"; }
 }
 
 function acquireDreamLock() {
@@ -46,22 +29,19 @@ function acquireDreamLock() {
   mkdirSync(dirname(lockPath), { recursive: true });
   const startedAt = new Date().toISOString();
   const token = `${process.pid}|${startedAt}`;
-
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       writeFileSync(lockPath, token, { flag: "wx" });
       return {
         acquired: true,
         release() {
-          try {
-            if (readFileSync(lockPath, "utf-8") === token) unlinkSync(lockPath);
-          } catch {}
+          try { if (readFileSync(lockPath, "utf8") === token) unlinkSync(lockPath); } catch {}
         },
       };
-    } catch (err) {
-      if (err?.code !== "EEXIST") throw err;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
       let owner = "";
-      try { owner = readFileSync(lockPath, "utf-8").trim(); } catch {}
+      try { owner = readFileSync(lockPath, "utf8").trim(); } catch {}
       const [pidText, ownerStartedAt = "unknown"] = owner.split("|");
       const ownerPid = Number(pidText);
       if (isPidAlive(ownerPid)) {
@@ -71,7 +51,6 @@ function acquireDreamLock() {
       try { unlinkSync(lockPath); } catch {}
     }
   }
-
   console.log("Dream skipped: lock-held pid=unknown started=unknown");
   return { acquired: false, release() {} };
 }
@@ -80,11 +59,15 @@ function dailyMemoryHeader(dateKey) {
   return [
     "<!-- template: daily -->",
     `> summary: Daily notes for ${dateKey}, maintained by amux dream.`,
-    "> why: Session continuity and nightly pane activity digest.",
+    "> why: Session continuity and nightly fleet activity digest.",
     "",
     `# ${dateKey}`,
     "",
   ].join("\n");
+}
+
+function escapeRegExp(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function ensureDreamDailyFile(memPath, dateKey) {
@@ -93,361 +76,114 @@ function ensureDreamDailyFile(memPath, dateKey) {
     writeFileSync(memPath, dailyMemoryHeader(dateKey));
     return;
   }
-
-  const current = readFileSync(memPath, "utf-8");
-  if (
-    current.includes("<!-- template: daily -->") &&
-    /^> summary:/m.test(current) &&
-    /^> why:/m.test(current) &&
-    new RegExp(`^# ${escapeRegExp(dateKey)}$`, "m").test(current)
-  ) {
-    return;
-  }
-
-  const body = current.trimStart().replace(new RegExp(`^# ${escapeRegExp(dateKey)}\\s*\\n*`), "");
+  const current = readFileSync(memPath, "utf8");
+  if (current.includes("<!-- template: daily -->")
+      && /^> summary:/m.test(current) && /^> why:/m.test(current)
+      && new RegExp(`^# ${escapeRegExp(dateKey)}$`, "m").test(current)) return;
+  const body = current.trimStart().replace(new RegExp(`^# ${escapeRegExp(dateKey)}\s*\n*`), "");
   writeFileSync(memPath, dailyMemoryHeader(dateKey) + body);
 }
 
-function escapeRegExp(text) {
-  return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function atomicWrite(path, content) {
+  const temporary = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporary, content.endsWith("\n") ? content : `${content}\n`);
+  renameSync(temporary, path);
 }
 
 function writeDreamRunSentinel(memPath, dateKey, timeStr, okCount, failedCount) {
   ensureDreamDailyFile(memPath, dateKey);
   const sentinel = `<!-- amux-dream-run:${dateKey} ${timeStr} (${okCount} panes ok / ${failedCount} failed) -->`;
-  const sentinelRe = new RegExp(`\\n?<!-- amux-dream-run:${escapeRegExp(dateKey)} [^\\n]*-->\\n?`, "g");
-  let content = readFileSync(memPath, "utf-8").replace(sentinelRe, "\n");
-
+  const re = new RegExp(`\n?<!-- amux-dream-run:${escapeRegExp(dateKey)} [^\n]*-->\n?`, "g");
+  let content = readFileSync(memPath, "utf8").replace(re, "\n");
   const heading = `# ${dateKey}`;
-  const headingIdx = content.indexOf(heading);
-  if (headingIdx >= 0) {
-    const lineEnd = content.indexOf("\n", headingIdx);
-    const insertAt = lineEnd >= 0 ? lineEnd + 1 : content.length;
-    content = `${content.slice(0, insertAt)}${sentinel}\n${content.slice(insertAt).replace(/^\n+/, "\n")}`;
-  } else {
-    content = `${dailyMemoryHeader(dateKey)}${sentinel}\n\n${content.trimStart()}`;
-  }
-  writeFileSync(memPath, content);
+  const lineEnd = content.indexOf("\n", content.indexOf(heading));
+  const at = lineEnd >= 0 ? lineEnd + 1 : content.length;
+  content = `${content.slice(0, at)}${sentinel}\n${content.slice(at).replace(/^\n+/, "\n")}`;
+  atomicWrite(memPath, content);
 }
 
-function dreamBlockMarkers(t, dateKey) {
-  return {
-    start: `<!-- amux-dream-${t.agent}-${t.pane}:${dateKey} -->`,
-    end: `<!-- /amux-dream-${t.agent}-${t.pane}:${dateKey} -->`,
-  };
-}
-
-/** WHAT: Checks for one complete pane marker block. WHY: Keeps partial writes from counting as dream output. */
-export function hasDreamPaneBlock(content, t, dateKey) {
-  const { start, end } = dreamBlockMarkers(t, dateKey);
-  const startIdx = content.indexOf(start);
-  const endIdx = content.indexOf(end);
-  return startIdx >= 0 && endIdx > startIdx;
-}
-
-/** WHAT: Checks one pane block against its line budget. WHY: Keeps oversized summaries from passing unnoticed. */
-export function validateDreamPaneBlock(content, t, dateKey, maxLines = 10) {
-  const { start, end } = dreamBlockMarkers(t, dateKey);
-  const startIdx = content.indexOf(start);
-  const endIdx = content.indexOf(end, startIdx + start.length);
-  if (startIdx < 0 || endIdx < 0) return { ok: false, lines: 0, reason: "marker block missing" };
-  const body = content.slice(startIdx + start.length, endIdx);
-  const lines = body.split(/\r?\n/).filter((line) => line.trim()).length;
-  return lines <= maxLines
-    ? { ok: true, lines, reason: null }
-    : { ok: false, lines, reason: `${lines} non-empty lines exceeds budget ${maxLines}` };
-}
-
-/** WHAT: Tracks one pane block until its bounded deadline. WHY: Keeps delayed writes from being misclassified as missing. */
-export async function waitForDreamPaneBlock(memPath, t, dateKey, maxMs = 15_000, pollMs = 1_000) {
-  const start = Date.now();
-  while (Date.now() - start < maxMs) {
-    if (hasDreamPaneBlock(readFileSync(memPath, "utf-8"), t, dateKey)) return true;
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
-  }
-  return false;
-}
-
-/**
- * Poll a pane's status until it has been idle for `idleStreak` consecutive
- * polls, or until maxMs elapses. Returns { idle: bool, status: last }.
- * Only exact `idle` advances: modal/permission/resume/unknown states are
- * blockers because dream sends follow-up prompts and writes shared memory.
- */
-async function waitForPaneIdle(ctx, agentName, paneIdx, getStatus,
-  maxMs = 300_000, idleStreak = 3, pollMs = 5000) {
-  const start = Date.now();
-  let streak = 0;
-  let last = "unknown";
-  while (Date.now() - start < maxMs) {
-    last = await getStatus(ctx, agentName, paneIdx).catch(() => "unknown");
-    if (last === "idle") streak++;
-    else if (DREAM_BLOCKING_STATUSES.has(last)) streak = 0;
-    else streak = 0;
-    if (streak >= idleStreak) return { idle: true, status: last };
-    await new Promise((r) => setTimeout(r, pollMs));
-  }
-  return { idle: false, status: last };
-}
-
-/** WHAT: Dispatches sequential dream maintenance. WHY: Keeps shared memory writes ordered across eligible panes. */
+/** WHAT: Builds one fleet summary. WHY: Keeps Dream from resuming, compacting, sending to, or inspecting tmux panes. */
 export async function cmdDream(ctx, flags = {}, dependencies = {}) {
-  const {
-    getStatus,
-    getLivePanes,
-    getTurns,
-    getContext,
-    readReceipts = readDreamReceipts,
-    recordReceipt = recordDreamReceipt,
-    receiptPath = defaultDreamReceiptPath(),
-  } = dependencies;
-  if (typeof getStatus !== "function" || typeof getLivePanes !== "function") {
-    throw new Error("dream command requires getStatus and getLivePanes");
-  }
+  const readReceipts = dependencies.readReceipts || readDreamReceipts;
+  const collectSources = dependencies.collectSources || collectDreamSources;
+  const summarize = dependencies.summarize || runDreamSummarizer;
+  const recordReceipts = dependencies.recordReceipts || recordDreamReceipts;
+  const receiptPath = dependencies.receiptPath || defaultDreamReceiptPath();
   const sinceArg = flags.since || "24h";
-  const agents = listAgents(ctx.configPath);
-  const workspaceDir = flags.workspace || process.env.OPENCLAW_WORKSPACE
-    || join(process.env.HOME, ".openclaw", "workspace");
+  const since = parseSinceArg(sinceArg);
+  if (!since) throw new Error(`invalid --since '${sinceArg}'. Use ISO or relative ("24h", "2h", "30min").`);
 
-  const now = new Date();
+  const now = dependencies.now || new Date();
   const dateKey = new Intl.DateTimeFormat("sv-SE", {
-    timeZone: "Europe/Stockholm",
-    year: "numeric", month: "2-digit", day: "2-digit",
+    timeZone: "Europe/Stockholm", year: "numeric", month: "2-digit", day: "2-digit",
   }).format(now);
   const timeStr = new Intl.DateTimeFormat("sv-SE", {
-    timeZone: "Europe/Stockholm",
-    hour: "2-digit", minute: "2-digit", hour12: false,
+    timeZone: "Europe/Stockholm", hour: "2-digit", minute: "2-digit", hour12: false,
   }).format(now);
+  const workspaceDir = flags.workspace || process.env.OPENCLAW_WORKSPACE
+    || join(process.env.HOME, ".openclaw", "workspace");
   const memPath = join(workspaceDir, "memory", `${dateKey}.md`);
-
-  // Window: panes with any jsonl activity in the last `sinceArg` qualify.
-  const since = parseSinceArg(sinceArg);
-  const sinceMs = since instanceof Date ? since.getTime() : Date.now() - 24 * 3600 * 1000;
-
+  const agents = dependencies.agents || listAgents(ctx.configPath);
   const receipts = readReceipts(receiptPath);
-  const minTurns = DEFAULT_DREAM_MIN_TURNS;
-  const compactPercent = DEFAULT_DREAM_COMPACT_PERCENT;
-  let receiptState = receipts;
-  const { targets, skipped, ineligible } = await collectDreamTargets(ctx, agents, sinceMs, {
-    getStatus, getLivePanes, getTurns, getContext, receipts, minTurns, compactPercent,
-  });
-
-  const promptFor = (t) => [
-    `[dream ${dateKey} ${timeStr}]`,
-    ``,
-    `Läs filen först:`,
-    `  ${memPath}`,
-    ``,
-    `Ändra ENDAST ditt markerade block. Alla andra rader i filen ska vara byte-identiska efter din edit.`,
-    `Om blocket finns: ersätt bara innehållet mellan start- och slutmarkören.`,
-    `Om blocket saknas: append:a blocket längst ned i filen.`,
-    ``,
-    `Startmarkör: ${dreamBlockMarkers(t, dateKey).start}`,
-    `Slutmarkör:  ${dreamBlockMarkers(t, dateKey).end}`,
-    ``,
-    `Blocket ska ha exakt denna struktur:`,
-    `<!-- amux-dream-${t.agent}-${t.pane}:${dateKey} -->`,
-    `## ${t.agent}:${t.pane}`,
-    `- Sammanfatta arbetet sedan senaste lyckade dream (${t.turns} nya riktiga användarturer).`,
-    `- Inkludera viktiga beslut, gotchas och kodändringar.`,
-    `- Skanbart med bullets, max ~10 rader totalt.`,
-    `<!-- /amux-dream-${t.agent}-${t.pane}:${dateKey} -->`,
-    ``,
-    `Kör sen detta i shellet för att uppdatera Discord-topicen:`,
-    `   amux topic ${t.agent} -p ${t.pane} "[${t.agent}:${t.pane}] dreamed ${timeStr} | <din 1-rads summary>"`,
-    ``,
-    `När allt är klart: svara med exakt en kort rad: DREAM_OK <din 1-rads summary>.`,
-  ].join("\n");
-
-  const completedThisRunDay = ineligible.filter((target) => target.receiptDateKey === dateKey);
-  const allRecent = [...targets, ...skipped, ...completedThisRunDay];
-  const reportableRecent = allRecent.filter((target) =>
-    target.status !== "not-live-claude" && target.status !== "unknown");
-
-  const finalizeSentinel = (passOk, passFailed) => {
-    if (flags.deferSentinel || flags["defer-sentinel"]) return { ok: passOk, failed: passFailed };
-    const content = readFileSync(memPath, "utf-8");
-    const totalOk = reportableRecent.filter((target) => hasDreamPaneBlock(content, target, dateKey)).length;
-    const pending = reportableRecent.filter((target) => !hasDreamPaneBlock(content, target, dateKey)).length;
-    const totalFailed = Math.max(passFailed, pending);
-    writeDreamRunSentinel(memPath, dateKey, timeStr, totalOk, totalFailed);
-    return { ok: totalOk, failed: totalFailed };
-  };
+  const observed = collectSources(agents, since.getTime(), { receipts });
+  const batch = buildDreamBatch(observed.sources, dateKey, dependencies.batchOptions);
 
   if (flags.dry) {
-    console.log(`Dream would process ${targets.length} idle pane(s) sequentially:\n`);
-    for (const t of targets) {
-      console.log(`--- ${t.agent}:${t.pane} (last activity ${new Date(t.lastMs).toISOString().slice(11, 16)} UTC) ---`);
-      console.log(`  activity: ${t.turns} new real turn(s); receipt cursor ${t.activityCursor}`);
-      if (t.compact) {
-        console.log(`  send: /compact (context ${t.contextPercent}% ≥ ${compactPercent}%)`);
-        console.log(`  wait: pane idle (≤180s)`);
-      } else {
-        console.log(`  compact: skipped (context ${t.contextPercent ?? "unknown"}% < ${compactPercent}% or unknown)`);
-      }
-      console.log(`  send: dream prompt (${promptFor(t).length} chars)`);
-      console.log(`  wait: pane idle (≤300s)`);
+    console.log(`Dream would run one stateless summarizer for ${batch.included.length} pane(s).`);
+    console.log(`Prompt: ${Buffer.byteLength(batch.prompt)} bytes; no pane wake; no /compact.`);
+    for (const source of batch.included) {
+      console.log(`- ${source.agent}:${source.pane} ${source.engine}, ${source.turns} recent real turn(s), cursor ${source.activityCursor}`);
     }
-    if (skipped.length) {
-      console.log(`\nSkipped ${skipped.length} non-runnable pane(s):`);
-      for (const t of skipped) {
-        const live = t.liveCommand ? `; live=${t.liveCommand}` : "";
-        console.log(`--- ${t.agent}:${t.pane} (${t.status}${live}; last activity ${new Date(t.lastMs).toISOString().slice(11, 16)} UTC) ---`);
-      }
-    }
-    if (ineligible.length) {
-      console.log(`\nIneligible ${ineligible.length} pane(s), no wake or compact:`);
-      for (const t of ineligible) {
-        console.log(`--- ${t.agent}:${t.pane} (${t.turns}/${t.minTurns} new real turns) ---`);
-      }
-    }
-    runDreamJanitor(flags); // preview the housekeeping pass too (no lock needed for dry)
-    return;
+    for (const source of batch.omitted) console.log(`- OMIT ${source.agent}:${source.pane}: ${source.omitReason}`);
+    for (const source of observed.unreadable) console.log(`- UNREADABLE ${source.agent}:${source.pane}: ${source.reason}`);
+    runDreamJanitor(flags);
+    return { ...observed, ...batch, dryRun: true };
   }
 
   const lock = acquireDreamLock();
-  if (!lock.acquired) return;
-
-  let okCount = 0;
-  let failedCount = 0;
-
+  if (!lock.acquired) return { skipped: "lock-held" };
   try {
+    if (!batch.included.length) {
+      if (!flags.quiet && !flags.q) console.log("Dream: no new journal-backed work; no model invoked.");
+      if (!flags.deferSentinel && !flags["defer-sentinel"]) {
+        writeDreamRunSentinel(memPath, dateKey, timeStr, 0, observed.unreadable.length);
+      }
+      if (observed.unreadable.length) process.exitCode = 1;
+      return { included: [], omitted: batch.omitted, unreadable: observed.unreadable };
+    }
+
+    if (!flags.quiet && !flags.q) {
+      console.log(`Dream: one stateless summary from ${batch.included.length} pane(s), ${Buffer.byteLength(batch.prompt)} prompt bytes.`);
+    }
+    const generated = await summarize(batch.prompt, { dateKey });
+    const valid = validateDreamSummary(generated);
+    if (!valid.ok) throw new Error(`dream summary rejected: ${valid.reason}`);
     ensureDreamDailyFile(memPath, dateKey);
+    const block = dreamSummaryBlock(valid.content, dateKey, batch.included, batch.omitted);
+    atomicWrite(memPath, upsertDreamSummary(readFileSync(memPath, "utf8"), dateKey, block));
+    recordReceipts(receipts, batch.included, { path: receiptPath, dateKey, now });
 
-    if (!targets.length) {
-      if (!flags.quiet && !flags.q) {
-        if (skipped.length) console.log(`Dream: no runnable claude panes with activity since ${sinceArg}; skipped ${skipped.length} non-runnable pane(s).`);
-        else console.log(`Dream: no claude panes with activity since ${sinceArg}.`);
-      }
-      const totals = finalizeSentinel(0, 0);
-      if (totals.failed > 0) process.exitCode = 1;
-      return;
+    if (!flags.deferSentinel && !flags["defer-sentinel"]) {
+      writeDreamRunSentinel(memPath, dateKey, timeStr, batch.included.length, observed.unreadable.length);
     }
-
-    if (!flags.quiet && !flags.q) {
-      console.log(`Dream: processing ${targets.length} pane(s) sequentially…`);
-      if (skipped.length) console.log(`Dream: skipped ${skipped.length} non-runnable pane(s).`);
+    if (batch.omitted.length) console.warn(`Dream: ${batch.omitted.length} pane(s) omitted by fixed limits; receipts unchanged.`);
+    if (observed.unreadable.length) {
+      console.warn(`Dream: ${observed.unreadable.length} pane journal(s) unreadable; receipts unchanged.`);
+      process.exitCode = 1;
     }
-
-    for (let idx = 0; idx < targets.length; idx++) {
-      const t = targets[idx];
-      const key = `${t.agent}:${t.pane}`;
-      const tag = `[dream ${idx + 1}/${targets.length}]`;
-
-      const preStatus = await getStatus(ctx, t.agent, t.pane).catch(() => "unknown");
-      if (!isDreamRunnableStatus(preStatus)) {
-        if (!flags.quiet && !flags.q) console.log(`${tag} ${key} became ${preStatus} before send \u2014 skipping`);
-        continue;
-      }
-
-      if (t.compact) {
-        if (!flags.quiet && !flags.q) console.log(`${tag} ${key} → /compact (${t.contextPercent}%)`);
-        try {
-          const sent = await sendToPane(ctx, t.agent, t.pane, "/compact", { mirror: false });
-          if (!sent?.delivered) throw new Error(sent?.blocked ? "blocked by park-guard" : "delivery not acknowledged");
-        } catch (err) {
-          failedCount++;
-          console.warn(`${tag} ${key} /compact failed: ${err.message}`);
-          continue;
-        }
-        const cRes = await waitForPaneIdle(ctx, t.agent, t.pane, getStatus, 180_000, 3);
-        if (!cRes.idle) {
-          failedCount++;
-          console.warn(`${tag} ${key} did not idle after /compact (180s; last=${cRes.status}) \u2014 skipping`);
-          continue;
-        }
-      }
-
-      const prompt = promptFor(t);
-      if (!flags.quiet && !flags.q) console.log(`${tag} ${key} → dream prompt`);
-      try {
-        // Background maintenance should not dump the full internal prompt into
-        // Discord. The agent still updates the memory file and channel topic.
-        const sent = await sendToPane(ctx, t.agent, t.pane, prompt, { source: "dream", mirror: false });
-        if (!sent?.delivered) throw new Error(sent?.blocked ? "blocked by park-guard" : "delivery not acknowledged");
-      } catch (err) {
-        failedCount++;
-        console.warn(`${tag} ${key} prompt failed: ${err.message}`);
-        continue;
-      }
-
-      // Pane-local failures skip THIS pane and continue: an unresponsive or
-      // slow pane must not starve the rest of the fleet's digests. Observed
-      // cost of the old abort-on-first-failure: one 15s echo-timeout (ai:2)
-      // cancelled three healthy panes' blocks in the same night (2026-07-10).
-      const accepted = await ctx.agent.waitForPromptEcho(t.agent, t.pane, prompt, 15_000).catch(() => false);
-      if (!accepted) {
-        failedCount++;
-        console.warn(`${tag} ${key} did not record dream prompt within 15s \u2014 Escape + skipping this pane`);
-        await ctx.agent.sendEscape(t.agent, t.pane).catch(() => {});
-        continue;
-      }
-
-      const pRes = await waitForPaneIdle(ctx, t.agent, t.pane, getStatus, 300_000, 3);
-      if (!pRes.idle) {
-        failedCount++;
-        console.warn(`${tag} ${key} did not finish dream prompt within 5min (last=${pRes.status}) \u2014 Escape + skipping this pane`);
-        await ctx.agent.sendEscape(t.agent, t.pane).catch(() => {});
-        continue;
-      }
-
-      const wroteBlock = await waitForDreamPaneBlock(memPath, t, dateKey);
-      if (!wroteBlock) {
-        failedCount++;
-        console.warn(`${tag} ${key} finished but did not write its dream marker block within 15s \u2014 skipping this pane`);
-        continue;
-      }
-
-      const block = validateDreamPaneBlock(
-        readFileSync(memPath, "utf-8"), t, dateKey,
-        Number(process.env.AMUX_DREAM_BLOCK_MAX_LINES) || 10,
-      );
-      if (!block.ok) {
-        console.warn(`${tag} ${key} wrote an oversized dream block: ${block.reason}`);
-      }
-
-      try {
-        receiptState = recordReceipt(receiptState, t, { path: receiptPath, dateKey });
-      } catch (err) {
-        failedCount++;
-        console.warn(`${tag} ${key} memory block exists but receipt failed: ${err.message}`);
-        continue;
-      }
-
-      okCount++;
-      if (!flags.quiet && !flags.q) console.log(`${tag} ${key} done`);
-    }
-
-    const totals = finalizeSentinel(okCount, failedCount);
-    if (!flags.quiet && !flags.q) {
-      console.log(`Dream complete: ${totals.ok} pane block(s) present, ${totals.failed} pending/failed.`);
-    }
-
-    if (totals.failed > 0) process.exitCode = 1;
+    return { included: batch.included, omitted: batch.omitted, unreadable: observed.unreadable, path: memPath };
   } finally {
-    // Housekeeping runs under the dream lock (before release) so two racing
-    // dream runs can't gzip the same file concurrently. Reached on every
-    // non-dry path: normal completion, no-targets return, and aborts.
     runDreamJanitor(flags);
     lock.release();
   }
 }
 
-/**
- * Nightly session-file housekeeping, folded into `amux dream` so there's one
- * maintenance pass instead of a second cron. Deletes jsonl no agent has
- * touched in the retention window (default 14d) — dead sessions only; live
- * files have fresh mtime and are never matched. Quiet unless something
- * happened (or non-quiet). Never throws — a janitor failure must not affect
- * dream's outcome. Disable with AMUX_JANITOR_ENABLED=false.
- */
 function runDreamJanitor(flags = {}) {
   if (process.env.AMUX_JANITOR_ENABLED === "false") return;
   try {
-    const jr = pruneOldSessions({ dryRun: !!flags.dry });
-    const verbose = !flags.quiet && !flags.q;
-    if (verbose || jr.deleted || jr.failed) console.log(formatJanitorResult(jr));
-  } catch (err) {
-    console.warn(`janitor skipped: ${err.message}`);
+    const result = pruneOldSessions({ dryRun: !!flags.dry });
+    if ((!flags.quiet && !flags.q) || result.deleted || result.failed) console.log(formatJanitorResult(result));
+  } catch (error) {
+    console.warn(`janitor skipped: ${error.message}`);
   }
 }

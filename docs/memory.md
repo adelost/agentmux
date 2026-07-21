@@ -20,7 +20,7 @@
 
 Minnesunderhållet är idag splittrat över tre halvor som inte pratar med varandra:
 
-1. `amux dream` (i amux): nattlig digest per panel till dagfilen. Funkar, har radbudget.
+1. `amux dream` (i amux): en nattlig fleet-digest från paneljournaler till dagfilen.
 2. `scripts/memory/lint.sh` (workspace-bash): varnar korrekt för stora filer,
    men outputen har ingen konsument — varningar från MARS står obesvarade i juli.
 3. Manuella konventioner ("dagfiler >30d → ~5 rader"): ingen mekanism kör dem.
@@ -85,16 +85,13 @@ Lint-resultatet routas till en YTA SOM LÄSES: en rad i dagens dagfil,
 `memory: X varningar, backlog Y filer, komprimerade Z inatt`. Det stänger
 "varning utan aktör"-hålet från båda håll: natten agerar, morgonen ser resten.
 
-## Följdförbättringar (ingår i paketet)
+## Dream-summarizer
 
-- **Dream retry-pass**: 04-passet kör med deferred sentinel och släpper locken.
-  Cron-processen väntar till ~05, kör `dream --retry` bara för markerblock som
-  saknas och skriver därefter den kumulativa sentineln.
-- **Dream block-validering**: warn när ett panelblock överskrider
-  ~10-radersbudgeten som prompten redan kräver.
-- **Loggnings-konvention i AGENT_HINTS**: bullets inte stycken, max ~10 rader
-  per manuell sektion. Mätningen visar att bloat-källan är panelernas manuella
-  loggning, INTE dream-blocken (dream har redan budget).
+Dream kör en enda stateless, verktygslös summarizer över begränsade journalutdrag
+från Claude, Codex och Kimi. Den väcker aldrig paneler och kör aldrig `/compact`.
+En körning ersätter dagens enda fleet-summary-block; en gammal timslång retry för
+pane-lokala svar behövs därför inte längre. Exakta budgetar och kvittogränser
+finns i `docs/DREAM-POLICY.md`.
 
 ## Migration
 
@@ -106,5 +103,5 @@ Lint-resultatet routas till en YTA SOM LÄSES: en rad i dagens dagfil,
 
 ## Status
 
-Implementerad i 1.20.77 efter oberoende kritisk review. Dream-abort-buggen
-(en trög panel avbröt resterande paneler) var redan fixad separat.
+Memory-kedjan är implementerad; Dream producerar nu ett validerat fleet-block
+utan beroende på pane-liveness.
