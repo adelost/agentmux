@@ -1,5 +1,11 @@
 import { unit, feature, expect } from "bdd-vitest";
-import { detectSenderFromEnv, parseSenderHeader, prependSenderHeader } from "./sender-detect.mjs";
+import {
+  assertConfiguredSender,
+  detectSenderFromEnv,
+  parseSenderAddress,
+  parseSenderHeader,
+  prependSenderHeader,
+} from "./sender-detect.mjs";
 
 // Helper: build an exec mock that returns different values for #S / #P queries.
 // `paneById` lets tests assert the mock saw the calling pane id (%17, %18, ...)
@@ -182,6 +188,42 @@ feature("prependSenderHeader", () => {
     then: ["header with trailing blank line", (result) => {
       expect(result).toBe("[from claw:0]\n\n");
     }],
+  });
+});
+
+feature("configured sender fence", () => {
+  unit("parses a double-digit pane without treating it as configured", {
+    given: ["a detected sender address", () => "skyvw:13"],
+    when: ["parsing the address", (sender) => parseSenderAddress(sender)],
+    then: ["returns exact provenance", (address) => expect(address).toEqual({
+      session: "skyvw", pane: 13, key: "skyvw:13",
+    })],
+  });
+
+  unit("rejects a stale surplus pane before it can act as an agent", {
+    given: ["an out-of-config sender and canonical validator", () => ({
+      sender: "skyvw:13",
+      validate: (_session, pane) => {
+        if (pane >= 10) throw new Error(`Pane ${pane} is not configured for agent 'skyvw'`);
+      },
+    })],
+    when: ["building the guarded action", ({ sender, validate }) => (
+      () => assertConfiguredSender(sender, validate)
+    )],
+    then: ["fails with the exact sender and config reason", (action) => expect(action).toThrow(
+      "Sender 'skyvw:13' is outside the configured fleet: Pane 13 is not configured for agent 'skyvw'",
+    )],
+  });
+
+  unit("keeps raw-terminal invocations valid", {
+    given: ["no detected sender", () => ({
+      sender: null,
+      validate: () => { throw new Error("must not validate"); },
+    })],
+    when: ["checking the optional sender", ({ sender, validate }) => (
+      assertConfiguredSender(sender, validate)
+    )],
+    then: ["allows the non-agent caller", (address) => expect(address).toBeNull()],
   });
 });
 

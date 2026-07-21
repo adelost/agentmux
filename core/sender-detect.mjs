@@ -45,15 +45,41 @@ export function detectSenderFromEnv(env, execFn) {
 }
 
 /**
- * Structured form of detectSenderFromEnv: { session, pane } or null.
- * Used by the event-ledger hook (bin/amux-hook.mjs) so pane addressing has
- * exactly one implementation carrying the %pane-id-not-active-pane fix.
+ * WHAT: Returns structured provenance for the calling pane.
+ * WHY: Keeps event hooks from reimplementing tmux's caller-vs-active-pane distinction.
  */
 export function detectPaneAddress(env, execFn) {
   const sender = detectSenderFromEnv(env, execFn);
+  return parseSenderAddress(sender);
+}
+
+/**
+ * WHAT: Parses the exact address format emitted by sender detection.
+ * WHY: Keeps double-digit panes and invalid identities out of ad-hoc string splitting.
+ */
+export function parseSenderAddress(sender) {
+  const match = String(sender || "").match(/^([a-zA-Z0-9_-]{1,64}):(\d+)$/);
+  if (!match) return null;
+  const pane = Number(match[2]);
+  if (!Number.isSafeInteger(pane)) return null;
+  return { session: match[1], pane, key: `${match[1]}:${pane}` };
+}
+
+/**
+ * WHAT: Checks a detected pane against the injected fleet policy.
+ * WHY: Keeps stale surplus panes from acting as configured agents or dispatchers.
+ */
+export function assertConfiguredSender(sender, validate) {
   if (!sender) return null;
-  const cut = sender.lastIndexOf(":");
-  return { session: sender.slice(0, cut), pane: parseInt(sender.slice(cut + 1), 10) };
+  const address = parseSenderAddress(sender);
+  if (!address) throw new Error(`Invalid sender identity '${sender}'`);
+  try {
+    validate(address.session, address.pane);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Sender '${sender}' is outside the configured fleet: ${reason}`);
+  }
+  return address;
 }
 
 /**
