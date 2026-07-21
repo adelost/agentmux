@@ -73,8 +73,8 @@ export function attachSession(socket, name) {
 }
 
 /**
- * WHAT: Builds or locates the tmux session, starts every configured coding pane, and reapplies layout.
- * WHY: Keeps manual session recreation from leaving alternate engines such as Kimi as idle shells.
+ * WHAT: Builds or locates the tmux session, starts only its primary coding pane, and reapplies layout.
+ * WHY: Keeps an attach from waking every sleeping engine while targeted delivery owns later pane wakes.
  */
 export async function ensureAndAttach(ctx, name, configPath) {
   const { loadConfig, getLayout } = await import("./config.mjs");
@@ -95,9 +95,6 @@ export async function ensureAndAttach(ctx, name, configPath) {
 
   const existingPanes = await listPanes(ctx, name);
   const existingCount = existingPanes.length;
-  const runnableAgentPanes = existingCount
-    ? agentPanes.filter((i) => i < existingCount)
-    : agentPanes;
   const missingAgentPanes = existingCount
     ? agentPanes.filter((i) => i >= existingCount)
     : [];
@@ -109,16 +106,11 @@ export async function ensureAndAttach(ctx, name, configPath) {
     );
   }
 
-  // Step 2: start remaining coding-agent panes in parallel (session already exists)
-  if (runnableAgentPanes.length > 1) {
-    await Promise.all(runnableAgentPanes.slice(1).map((i) => ctx.agent.ensureReady(name, i)));
-  }
-
-  // Step 3: re-apply the configured layout on EVERY `amux <agent>`, not only at
+  // Step 2: re-apply the configured layout on EVERY `amux <agent>`, not only at
   // creation. A session made before tiled was the default (or manually reshaped
   // into a cramped column) lands back on an even grid where each pane — Codex
   // especially — has the rows it needs to render its composer.
-  if (existingCount || runnableAgentPanes.length) {
+  if (existingCount || agentPanes.length) {
     const layout = getLayout(configPath, name);
     await ctx.tmux(`select-layout -t '${esc(name)}' '${esc(layout)}'`);
   }

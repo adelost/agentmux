@@ -69,6 +69,14 @@ feature("focused PR tests", () => {
     }],
   });
 
+  unit("tmux attach maps to the layout and selective-start contract", {
+    then: ["the alias lands the real component test", () => {
+      const exists = existsSet(["cli.test/layout-contract.test.mjs"]);
+      expect(relatedTests("cli/tmux.mjs", { exists }))
+        .toEqual(["cli.test/layout-contract.test.mjs"]);
+    }],
+  });
+
   unit("bridge entrypoints map to their extracted focused contracts", {
     then: ["agent startup and Discord notices run the exact owning tests", () => {
       const exists = existsSet([

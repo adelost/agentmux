@@ -41,6 +41,22 @@ function readJson(path) {
   try { return JSON.parse(readFileSync(path, "utf8")); } catch { return null; }
 }
 
+/** WHAT: Reads the required Windows manager config with an exact failure class. WHY: Prevents invalid or unreadable JSON from masquerading as a missing installation. */
+export function readManagerConfig(path) {
+  if (!existsSync(path)) throw new Error(`manager config missing at ${path}`);
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    throw new Error(`manager config unreadable at ${path}: ${error.code || error.message}`);
+  }
+  try {
+    return JSON.parse(text.replace(/^\uFEFF/u, ""));
+  } catch (error) {
+    throw new Error(`manager config invalid JSON at ${path}: ${error.message}`);
+  }
+}
+
 function writeJsonAtomic(path, value) {
   const temporary = `${path}.${process.pid}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
@@ -179,8 +195,7 @@ export function reconcileManagerStartup(state, { nowMs = Date.now() } = {}) {
 function loadConfig() {
   const configPath = process.env.MANAGER_CONFIG
     || join(process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local"), "AgentmuxRestarter", "manager.json");
-  const config = readJson(configPath);
-  if (!config) throw new Error(`manager config missing at ${configPath}`);
+  const config = readManagerConfig(configPath);
   if (!SNOWFLAKE.test(String(config.channelId)) || !SNOWFLAKE.test(String(config.authorizedUserId))) {
     throw new Error("manager config needs Discord snowflake channelId and authorizedUserId");
   }
