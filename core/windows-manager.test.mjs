@@ -26,7 +26,10 @@ feature("windows manager core", () => {
       expect(planLocalRescueTurn("Hur mår WSL?")).toEqual({ kind: "status", tools: ["get_status"] });
       expect(planLocalRescueTurn("visa loggarna")).toEqual({ kind: "logs", tools: ["get_logs"] });
       expect(planLocalRescueTurn("WSL har kraschat")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
+      expect(planLocalRescueTurn("WSL krash")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
+      expect(planLocalRescueTurn("WSL svarar inte")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
       expect(planLocalRescueTurn("hur restartar vi WSL?")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
+      expect(planLocalRescueTurn("Hej! Hur restartar vi?")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
       expect(planLocalRescueTurn("hej")).toBeNull();
       expect(planLocalRescueTurn("kan du skriva kod?")).toBeNull();
     }],
