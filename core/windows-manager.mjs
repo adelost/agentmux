@@ -4,6 +4,7 @@
 // bounded process runs, and journaling.
 
 import { spawn } from "node:child_process";
+import { readdirSync } from "node:fs";
 import { classifyRecovery } from "./windows-bridge.mjs";
 
 /** WHAT: Names the manager contract version. WHY: Keeps runbook, tools, and runtime on one explicit contract. */
@@ -287,9 +288,15 @@ export function createManagerProvider(config) {
   const spec = config.provider || {};
   if (spec.kind === "mock") return createMockProvider(spec.responses || []);
   if (spec.kind === "cli") {
+    const wslPrefix = Array.isArray(spec.resumeArgs) ? spec.resumeArgs : [];
     return createCliProvider({
       command: spec.command,
       args: Array.isArray(spec.args) ? spec.args : [],
+      resumeArgs: (sessionId) => [
+        ...wslPrefix,
+        `codex exec resume --skip-git-repo-check ${sessionId} -`,
+      ],
+      sessionsDir: spec.sessionsDir || null,
       timeoutMs: Number(spec.timeoutMs) || 120_000,
     });
   }
@@ -313,12 +320,36 @@ export function extractCliAnswer(stdout) {
   return text || null;
 }
 
+/** WHAT: Reads the newest codex session id created after one instant. WHY: Keeps resume targeting exact sessions, never a guess. */
+export function newestCodexSessionId(sessionsDir, { afterMs = 0, entries = null } = {}) {
+  const list = entries || (() => {
+    try { return readdirSync(sessionsDir, { recursive: true }); }
+    catch { return []; }
+  })();
+  let best = null;
+  for (const entry of list) {
+    const name = String(entry).split(/[\\/]/u).pop();
+    const match = name.match(/^rollout-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-([0-9a-f-]{36})\.jsonl$/u);
+    if (!match) continue;
+    const ms = Date.parse(`${match[1]}T${match[2]}:${match[3]}:${match[4]}Z`);
+    if (!Number.isFinite(ms) || ms < afterMs) continue;
+    if (!best || ms > best.ms) best = { ms, sessionId: match[5] };
+  }
+  return best?.sessionId || null;
+}
+
+const OBSERVATION_MARKER = "Aktuell observation (JSON):";
+
 /** WHAT: Builds a CLI-backed chat provider such as codex exec. WHY: Keeps the engine replaceable and secrets inside the CLI session. */
 export function createCliProvider({
   command,
   args = [],
+  resumeArgs = null,
+  sessionsDir = null,
   timeoutMs = 120_000,
   execImpl = null,
+  readdirImpl = null,
+  nowMs = () => Date.now(),
 } = {}) {
   const defaultExec = (cmd, cmdArgs, input, timeout) => new Promise((resolvePromise) => {
     const child = spawn(cmd, cmdArgs, { stdio: ["pipe", "pipe", "pipe"] });
@@ -342,21 +373,50 @@ export function createCliProvider({
     child.on("close", (code) => finish({ code, stdout, stderr, timedOut: false }));
     child.stdin.end(input);
   });
+  const flatten = (messages) => (messages || []).map((message) => {
+    const role = message.role === "system" ? "SYSTEM" : (message.role === "assistant" ? "ASSISTANT" : "USER");
+    return `[${role}]\n${typeof message.content === "string" ? message.content : ""}`;
+  }).join("\n\n");
+
+  let sessionId = null;
   return {
     name: "cli",
     chat: async (messages) => {
-      const prompt = (messages || []).map((message) => {
-        const role = message.role === "system" ? "SYSTEM" : (message.role === "assistant" ? "ASSISTANT" : "USER");
-        return `[${role}]\n${typeof message.content === "string" ? message.content : ""}`;
-      }).join("\n\n");
-      if (!command || !prompt.trim()) return { ok: false, reason: "usage" };
+      const all = messages || [];
       const run = execImpl || defaultExec;
-      const result = await run(command, args, prompt, timeoutMs);
+      let prompt;
+      if (sessionId) {
+        // Resume: the runbook and history live in the codex session already;
+        // only the fresh observation and the new user text are worth tokens.
+        const latestUser = [...all].reverse().find((message) => message.role === "user");
+        const system = all.find((message) => message.role === "system");
+        const markerIndex = typeof system?.content === "string" ? system.content.indexOf(OBSERVATION_MARKER) : -1;
+        const observation = markerIndex >= 0 ? `[SYSTEM]\n${system.content.slice(markerIndex)}\n\n` : "";
+        prompt = `${observation}[USER]\n${typeof latestUser?.content === "string" ? latestUser.content : ""}`;
+      } else {
+        prompt = flatten(all);
+      }
+      if (!command || !prompt.trim()) return { ok: false, reason: "usage" };
+
+      const startedMs = nowMs();
+      let result = await run(command, sessionId && resumeArgs ? resumeArgs(sessionId) : args, prompt, timeoutMs);
       if (result.timedOut) return { ok: false, reason: "timeout" };
+      if (result.code !== 0 && sessionId) {
+        // Session lost or compacted: one fresh full turn, then re-capture.
+        sessionId = null;
+        result = await run(command, args, flatten(all), timeoutMs);
+        if (result.timedOut) return { ok: false, reason: "timeout" };
+      }
       if (result.code !== 0) return { ok: false, reason: `exit-${result.code}` };
       const text = extractCliAnswer(result.stdout);
       if (!text) return { ok: false, reason: "empty-response" };
-      return { ok: true, text };
+      if (!sessionId && sessionsDir) {
+        sessionId = newestCodexSessionId(sessionsDir, {
+          afterMs: startedMs - 5_000,
+          entries: readdirImpl ? readdirImpl(sessionsDir) : null,
+        });
+      }
+      return { ok: true, text, ...(sessionId ? { sessionId } : {}) };
     },
   };
 }

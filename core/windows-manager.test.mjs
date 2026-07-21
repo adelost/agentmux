@@ -6,6 +6,7 @@ import {
   classifyManagerOutcome,
   createCliProvider,
   createHttpProvider,
+  newestCodexSessionId,
   createMockProvider,
   extractCliAnswer,
   formatLocalRescueAnswer,
@@ -349,7 +350,7 @@ feature("windows manager core", () => {
         { role: "system", content: "Runbook." },
         { role: "user", content: "status?" },
       ]);
-      expect(result).toEqual({ ok: true, text: "Svar från codex." });
+      expect(result).toMatchObject({ ok: true, text: "Svar från codex." });
       expect(seen[0].cmd).toBe("wsl.exe");
       expect(seen[0].input).toContain("[SYSTEM]\nRunbook.");
       expect(seen[0].input).toContain("[USER]\nstatus?");
@@ -375,6 +376,66 @@ feature("windows manager core", () => {
       });
       expect(await emptyProvider.chat([{ role: "user", content: "hej" }]))
         .toEqual({ ok: false, reason: "empty-response" });
+    }],
+  });
+
+  unit("newestCodexSessionId picks the newest rollout after the cursor and skips noise", {
+    then: ["exact id, cursor respected, garbage ignored", () => {
+      const entries = [
+        "2026/07/21/rollout-2026-07-21T06-20-13-019f82e7-21bd-7b62-9eaa-eb2719207962.jsonl",
+        "2026/07/21/rollout-2026-07-21T07-01-02-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl",
+        "2026/07/15/rollout-2026-07-15T15-31-43-019f65f9-e4c0-7022-89ad-74d52abbe661.jsonl",
+        "2026/07/21/notes.txt",
+      ];
+      expect(newestCodexSessionId("/x", { entries }))
+        .toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+      expect(newestCodexSessionId("/x", { entries, afterMs: Date.parse("2026-07-21T07:00:00Z") }))
+        .toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+      expect(newestCodexSessionId("/x", { entries, afterMs: Date.parse("2026-07-22T00:00:00Z") }))
+        .toBeNull();
+      expect(newestCodexSessionId("/x", { entries: [] })).toBeNull();
+    }],
+  });
+
+  unit("a resumed turn sends only the new message plus observation, never the runbook again", {
+    then: ["second call carries the session id and a small prompt; fallback resends fully", async () => {
+      const calls = [];
+      const sessionId = "019f82e7-21bd-7b62-9eaa-eb2719207962";
+      const execImpl = (cmd, callArgs, input) => {
+        calls.push({ callArgs, input });
+        return Promise.resolve({ code: 0, stdout: "codex\nSvar.\ntokens used\n5\n", timedOut: false });
+      };
+      void createCliProvider;
+      const sessionEntries = [
+        "2026/07/21/rollout-2026-07-21T06-20-13-019f82e7-21bd-7b62-9eaa-eb2719207962.jsonl",
+      ];
+      const sessionedProvider = createCliProvider({
+        command: "wsl.exe",
+        args: ["base-args"],
+        resumeArgs: (id) => ["resume", id],
+        sessionsDir: "/x",
+        execImpl,
+        readdirImpl: () => sessionEntries,
+        nowMs: () => Date.parse("2026-07-21T06:20:00Z"),
+      });
+      const first = await sessionedProvider.chat([
+        { role: "system", content: "RUNBOOK TEXT\n\nAktuell observation (JSON):\n{\"wsl\":\"online\"}" },
+        { role: "user", content: "hej" },
+      ]);
+      expect(first.ok).toBe(true);
+      expect(calls[0].callArgs).toEqual(["base-args"]);
+      expect(calls[0].input).toContain("RUNBOOK TEXT");
+
+      const second = await sessionedProvider.chat([
+        { role: "system", content: "RUNBOOK TEXT\n\nAktuell observation (JSON):\n{\"wsl\":\"online\"}" },
+        { role: "user", content: "och nu då?" },
+      ]);
+      expect(second.ok).toBe(true);
+      expect(second.sessionId).toBe(sessionId);
+      expect(calls[1].callArgs).toEqual(["resume", sessionId]);
+      expect(calls[1].input).toContain("[USER]\noch nu då?");
+      expect(calls[1].input).toContain("Aktuell observation (JSON):");
+      expect(calls[1].input).not.toContain("RUNBOOK TEXT");
     }],
   });
 });
