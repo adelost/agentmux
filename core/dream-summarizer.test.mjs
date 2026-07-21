@@ -4,7 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { readRecentTurnsAcrossClaudeSessions } from "./jsonl-reader.mjs";
 import {
-  buildDreamBatch, collectDreamSources, dreamPaneEngine, upsertDreamSummary,
+  buildDreamBatch, collectDreamSources, dreamPaneEngine, dreamSummarizerFailure, upsertDreamSummary,
   validateDreamSummary,
 } from "./dream-summarizer.mjs";
 
@@ -121,6 +121,16 @@ feature("stateless fleet dream input", () => {
       expect(result.empty.reason).toBe("empty-summary");
       expect(result.tooMany.reason).toBe("summary-line-limit");
       expect(result.marker.reason).toBe("reserved-marker");
+    }],
+  });
+
+  unit("structured CLI failures remain diagnosable when stderr is empty", {
+    when: ["formatting a JSON-on-stdout error", () => dreamSummarizerFailure(JSON.stringify([{
+      type: "result", is_error: true, result: "Max budget exceeded",
+    }]), "", 1)],
+    then: ["the provider reason survives", (error) => {
+      expect(error.message).toContain("Max budget exceeded");
+      expect(error.message).not.toMatch(/exited 1:\s*$/u);
     }],
   });
 
