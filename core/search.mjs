@@ -62,7 +62,7 @@ export function expandTilde(p) {
   return p?.startsWith("~") ? join(process.env.HOME, p.slice(1)) : p;
 }
 
-/** Normalize config.search.roots; [] when unconfigured (caller hints). */
+/** WHAT: Normalizes configured search roots. WHY: Keeps path/default handling out of every search caller. */
 export function loadSearchRoots(config) {
   const roots = config?.search?.roots;
   if (!Array.isArray(roots)) return [];
@@ -76,7 +76,36 @@ export function loadSearchRoots(config) {
       semanticExclude: anchorGlobs(r.semanticExclude),
       weight: Number(r.weight) || 1,
       semantic: Boolean(r.semantic),
+      kind: r.kind || null,
     }));
+}
+
+/**
+ * The event ledger is AMUX's durable receipt for Discord/user deliveries.
+ * It is infrastructure state, not personal search configuration, so search
+ * must include it even when an older agentmux.yaml only lists memory and
+ * session roots. Keep an explicit configured copy instead of duplicating it.
+ * WHAT: Returns normalized roots containing the durable event ledger.
+ * WHY: Prevents older personal configs from omitting delivered prompts.
+ */
+export function withEventLedgerRoot(roots, ledgerPath) {
+  const path = expandTilde(ledgerPath);
+  if (!path) return roots;
+  if (roots.some((root) => root.path === path)) {
+    return roots.map((root) => root.path === path
+      ? { ...root, kind: "event-ledger", semantic: false }
+      : root);
+  }
+  return [...roots, {
+    name: "ledger",
+    path,
+    glob: null,
+    exclude: [],
+    semanticExclude: [],
+    weight: 2,
+    semantic: false,
+    kind: "event-ledger",
+  }];
 }
 
 // rg anchors slash-containing globs to the CWD, not the search root, so a
@@ -186,15 +215,88 @@ export function scoreHit(hit, now = Date.now()) {
   return hit.weight * 3 + layerBoost + recency + Math.min(hit.matches || 1, 3) * 0.2;
 }
 
-/** One hit per file (the best), so ten matches in one transcript don't push
- *  nine other sources off the overview. */
+/** One hit per source identity, so repeated transcript or delivery matches
+ * do not push other sources off the overview.
+ * WHAT: Filters repeated hits by file or explicit delivery identity.
+ * WHY: Prevents duplicate matches from crowding out distinct sources.
+ */
 export function dedupeByFile(hits) {
   const best = new Map();
   for (const h of hits) {
-    const prev = best.get(h.path);
-    if (!prev || h.score > prev.score) best.set(h.path, { ...h, matches: (prev?.matches || 0) + (h.matches || 1) });
+    const key = h.dedupeKey || h.path;
+    const prev = best.get(key);
+    if (!prev || h.score > prev.score) best.set(key, { ...h, matches: (prev?.matches || 0) + (h.matches || 1) });
   }
   return [...best.values()].sort((a, b) => b.score - a.score);
+}
+
+const QUERY_STOP_WORDS = new Set([
+  "att", "den", "det", "du", "en", "ett", "för", "har", "i", "in", "kan", "med", "och", "om", "på", "som", "till",
+  "a", "an", "and", "for", "in", "of", "on", "the", "to",
+]);
+
+function searchTokens(text) {
+  return String(text).toLocaleLowerCase("sv-SE")
+    .match(/[\p{L}\p{N}]+/gu)?.filter((word) => word.length >= 3 && !QUERY_STOP_WORDS.has(word)) || [];
+}
+
+function tokenMatches(queryToken, candidateToken) {
+  if (queryToken === candidateToken) return true;
+  const shortest = Math.min(queryToken.length, candidateToken.length);
+  return shortest >= 4 && (queryToken.startsWith(candidateToken) || candidateToken.startsWith(queryToken));
+}
+
+/**
+ * Search delivery receipts as individual events, not as one giant JSONL
+ * document. File-level word-AND makes unrelated messages satisfy a query and
+ * repeated queue states otherwise drown the one human message they represent.
+ * WHAT: Returns ranked delivery receipts matching one user query.
+ * WHY: Prevents unrelated turns and queue states from creating false hits.
+ */
+export function searchEventLedger(query, path, { max = 12 } = {}) {
+  let lines;
+  try { lines = readFileSync(path, "utf-8").split("\n"); }
+  catch { return []; }
+
+  const queryWords = [...new Set(searchTokens(query))];
+  if (!queryWords.length) return [];
+  const normalizedQuery = queryWords.join(" ");
+  const threshold = queryWords.length === 1 ? 1 : Math.min(2, queryWords.length);
+  const seen = new Set();
+  const hits = [];
+
+  for (let index = lines.length - 1; index >= 0; index--) {
+    let event;
+    try { event = JSON.parse(lines[index]); } catch { continue; }
+    if (event?.event !== "delivery_queue" || !event.detail) continue;
+    // The same job is journaled through attempt/paste/submit/ack. Search the
+    // original durable enqueue receipt, not whichever duplicate came last.
+    if (event.state && event.state !== "enqueued") continue;
+    const dedupeKey = event.jobId || event.detail;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    const candidateWords = searchTokens(event.detail);
+    const matched = queryWords.filter((word) => candidateWords.some((candidate) => tokenMatches(word, candidate)));
+    if (matched.length < threshold) continue;
+    const normalizedDetail = candidateWords.join(" ");
+    const exact = normalizedDetail.includes(normalizedQuery);
+    const date = String(event.ts || "").slice(0, 10) || null;
+    const hit = {
+      path,
+      line: index + 1,
+      snippet: cleanSnippet(event.detail),
+      root: "ledger",
+      weight: 2,
+      layer: exact ? "L1" : "L2",
+      date,
+      matches: matched.length,
+      dedupeKey: `${path}#${dedupeKey}`,
+    };
+    hit.score = scoreHit(hit) + (matched.length / queryWords.length) * 4;
+    hits.push(hit);
+  }
+  return hits.sort((a, b) => b.score - a.score || b.line - a.line).slice(0, max);
 }
 
 const LAST_RESULTS = () => join(process.env.HOME, ".agentmux", "search-last.json");
@@ -267,8 +369,10 @@ export function renderJsonlLine(raw) {
 /**
  * The full lexical pipeline over all roots. Returns ranked, deduped hits
  * with layer tags. Semantic layer is merged by the caller (optional dep).
+ * WHAT: Returns ranked lexical hits across normalized corpus roots.
+ * WHY: Keeps retrieval consistent across memory and session sources.
  */
-export function lexicalSearch(query, roots, { maxPerRoot = 12 } = {}) {
+export function lexicalSearch(query, roots, { maxPerRoot = 12, includeFileAnd = true } = {}) {
   const now = Date.now();
   const words = query.split(/\s+/).filter(Boolean);
   const all = [];
@@ -280,7 +384,7 @@ export function lexicalSearch(query, roots, { maxPerRoot = 12 } = {}) {
       all.push(withScore({ ...h, root: root.name, weight: root.weight, layer: "L1" }, now));
     }
     // L2: multi-word AND at file level (skip when L1 already found plenty)
-    if (words.length > 1 && l1.length < 3) {
+    if (includeFileAnd && words.length > 1 && l1.length < 3) {
       const files = filesWithAllWords(words, root).slice(0, 40);
       if (files.length) {
         const rarest = words.reduce((a, b) => (a.length >= b.length ? a : b));

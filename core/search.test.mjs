@@ -3,8 +3,9 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
-  loadSearchRoots, escapeRegex, snippetPattern, cleanSnippet, dateFromPath, anchorGlobs,
+  loadSearchRoots, withEventLedgerRoot, escapeRegex, snippetPattern, cleanSnippet, dateFromPath, anchorGlobs,
   scoreHit, dedupeByFile, runRg, filesWithAllWords, lexicalSearch,
+  searchEventLedger,
   renderJsonlLine, expandHit, formatHits, withScore,
 } from "./search.mjs";
 import { chunkMarkdown } from "./search-semantic.mjs";
@@ -29,6 +30,19 @@ feature("search config — roots from agents.yaml", () => {
     given: ["an agents-only config", () => ({ claw: { dir: "/x" } })],
     when: ["loading", (c) => loadSearchRoots(c)],
     then: ["empty", (roots) => { expect(roots).toEqual([]); }],
+  });
+
+  unit("durable event ledger is added once even when old config omits it", {
+    given: ["one configured root and a ledger path", () => ({
+      roots: loadSearchRoots({ search: { roots: [{ name: "memory", path: "/memory" }] } }),
+      ledger: "/state/events.jsonl",
+    })],
+    when: ["adding the infrastructure root twice", ({ roots, ledger }) =>
+      withEventLedgerRoot(withEventLedgerRoot(roots, ledger), ledger)],
+    then: ["one non-semantic ledger root is present", (roots) => {
+      expect(roots.filter((root) => root.name === "ledger")).toHaveLength(1);
+      expect(roots.at(-1)).toMatchObject({ path: "/state/events.jsonl", weight: 2, semantic: false });
+    }],
   });
 });
 
@@ -249,5 +263,52 @@ feature("end-to-end lexical over a real temp corpus (rg integration)", () => {
       expect(out).toContain("▶ TRÄFFEN");
       expect(out).toContain("  rad1");
     }],
+  });
+});
+
+feature("durable delivery-ledger search", () => {
+  component("finds inflected terms and ranks one human message above repeated queue states", {
+    given: ["a ledger containing an unrelated clock and the requested sundial change", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-ledger-search-"));
+      const path = join(dir, "events.jsonl");
+      const row = (over) => JSON.stringify({
+        ts: "2026-07-20T21:41:47Z", event: "delivery_queue", session: "skyvw", pane: 6,
+        source: "discord", ...over,
+      });
+      writeFileSync(path, [
+        row({ jobId: "other", state: "enqueued", detail: "Klockan har en annan layout på Android." }),
+        row({ jobId: "wanted", state: "enqueued", detail: "Skriv klockan ovanför soluret så tiden blir kompakt." }),
+        row({ jobId: "wanted", state: "attempt", detail: "Skriv klockan ovanför soluret så tiden blir kompakt." }),
+      ].join("\n"));
+      return { dir, path };
+    }],
+    when: ["searching with the user's paraphrase", ({ dir, path }) => {
+      const hits = searchEventLedger("flytta in klockan i soluret", path);
+      rmSync(dir, { recursive: true, force: true });
+      return hits;
+    }],
+    then: ["the relevant delivery is first and appears only once", (hits) => {
+      expect(hits).toHaveLength(1);
+      expect(hits[0].snippet).toContain("soluret");
+      expect(hits[0].line).toBe(2);
+    }],
+  });
+
+  unit("a stem query finds a Swedish inflection", {
+    given: ["one ledger row", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-ledger-search-"));
+      const path = join(dir, "events.jsonl");
+      writeFileSync(path, JSON.stringify({
+        ts: "2026-07-21T06:52:12Z", event: "delivery_queue", jobId: "one",
+        detail: "Tiden ska vara inuti soluret.",
+      }));
+      return { dir, path };
+    }],
+    when: ["searching solur", ({ dir, path }) => {
+      const hits = searchEventLedger("solur", path);
+      rmSync(dir, { recursive: true, force: true });
+      return hits;
+    }],
+    then: ["the soluret event is returned", (hits) => expect(hits[0]?.snippet).toContain("soluret")],
   });
 });

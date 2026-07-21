@@ -26,7 +26,7 @@ import {
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
 import { stripAnsi, esc, extractActivity, formatDuration, validateImagePath } from "../lib.mjs";
 import { getContextFromPane, getContextPercent, shortModelName } from "../core/context.mjs";
-import { loadSearchRoots, lexicalSearch, formatHits, saveLastResults, loadLastResults, expandHit, withScore, dedupeByFile } from "../core/search.mjs";
+import { cmdSearch } from "./search.mjs";
 import { journalInterruptionFromTurns, planRevive, reviveBrief, parseBootMs } from "../core/revive.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
 import { readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
@@ -1328,6 +1328,10 @@ function formatAskEntry(e) {
 }
 
 async function cmdAsks(ctx, flags, positional = []) {
+  if (flags.help || flags.h) {
+    console.log(`Usage: amux asks [agent] [--pane N] [--since 2h] [--grep REGEX] [--full] [--open]\n\n--open shows only unresolved asks; omit it to search answered/done history.\n--full scans exact session history instead of only the bounded recent tail.\nExample: amux asks skyvw --since 2d --grep 'solur|klock' --full`);
+    return;
+  }
   const nowMs = Date.now();
   const agentFilter = flags.agent || positional[0] || null;
   const paneFilter = flags.pane ?? flags.p ?? null;
@@ -2264,65 +2268,6 @@ const ACTIVE_STATUS = (s) => statusTier(s) >= 2;
  * bridge, broken hooks, dead ledger, unreachable tmux, broken config.
  * Exit code: 0 ok, 1 warnings, 2 failures (cron-friendly).
  */
-/**
- * amux search — overview-first search over the configured corpora
- * (agents.yaml `search.roots`). One line per hit; `--show N` expands the
- * Nth hit from the LAST search (results persisted to ~/.agentmux/).
- * Semantic layer joins in when the optional embedding index exists.
- */
-async function cmdSearch(ctx, query, flags) {
-  if (flags.show != null) {
-    const last = loadLastResults();
-    if (!last) { console.error("Ingen tidigare sökning att expandera."); process.exit(1); }
-    const picks = String(flags.show).split(",").map((n) => parseInt(n, 10)).filter(Boolean);
-    for (const n of picks) {
-      const hit = last.hits[n - 1];
-      if (!hit) { console.error(`#${n} finns inte (senaste sökningen gav ${last.hits.length} träffar).`); continue; }
-      console.log(`── #${n} ${hit.path}:${hit.line}  (sökning: "${last.query}")`);
-      console.log(expandHit(hit, { context: flags.context ?? 10 }));
-      console.log("");
-    }
-    return;
-  }
-
-  if (!query) { console.error('Usage: amux search "term" [--max N] [--source NAME] [--fast] | --show N [--context N] | --reindex'); process.exit(1); }
-  const config = loadConfig(ctx.configPath);
-  let roots = loadSearchRoots(config);
-  if (!roots.length) {
-    console.error("Inga sökrötter. Lägg till i agentmux.yaml (KÄLLAN — agents.yaml är genererad och skrivs över):\n  search:\n    roots:\n      - { name: memory, path: ~/pathtill/memory, glob: \"*.md\", weight: 3, semantic: true }\nKör sen: amux label <agent> 0 --clear (eller /sync) för att materialisera.");
-    process.exit(1);
-  }
-  if (flags.source) roots = roots.filter((r) => r.name.includes(flags.source));
-
-  const t0 = Date.now();
-  let hits = lexicalSearch(query, roots);
-
-  // Semantic layer: optional. Missing dep/index = lexical-only + one hint.
-  if (!flags.fast) {
-    try {
-      const sem = await import("../core/search-semantic.mjs");
-      const semHits = await sem.semanticSearch(query, { k: 8 });
-      // The index is global; honor --source here too or filtered searches
-      // leak hits from other roots (observed: bibliotek query answered by
-      // memory chunks).
-      const allowedRoots = new Set(roots.map((r) => r.name));
-      const scoped = (semHits || []).filter((h) => allowedRoots.has(h.root));
-      if (scoped.length) {
-        hits = dedupeByFile([...hits, ...scoped.map((h) => withScore({ ...h, layer: "sem" }))]);
-      }
-    } catch (err) {
-      if (process.env.AMUX_DEBUG) console.error(`semantic layer off: ${err.message}`);
-    }
-  }
-
-  const max = flags.max ?? 12;
-  const top = hits.slice(0, max);
-  if (!top.length) { console.log(`0 träffar för "${query}" (${Date.now() - t0}ms)`); return; }
-  saveLastResults(query, top);
-  console.log(formatHits(top));
-  console.log(`\n${top.length}/${hits.length} träffar, ${Date.now() - t0}ms  ·  expandera: amux search --show N`);
-}
-
 async function cmdMemory(_ctx, subcommand, flags = {}) {
   const workspace = flags.workspace || process.env.OPENCLAW_WORKSPACE
     || join(process.env.HOME, ".openclaw", "workspace");
@@ -3872,6 +3817,8 @@ const FLAG_SPECS = {
     full: "boolean",
     all: "boolean",
     "per-pane": "number",
+    help: "boolean",
+    h: "boolean",
   },
   compact: { dry: "boolean", force: "boolean", "min-tokens": "number", p: "number", m: "string", message: "string" },
   dream: {
@@ -4079,12 +4026,8 @@ export async function dispatch(argv, ctx) {
     case "search": {
       const { flags, positional } = parseFlags(rest, {
         max: "number", show: "string", context: "number",
-        source: "string", fast: "boolean", reindex: "boolean",
+        source: "string", fast: "boolean", reindex: "boolean", help: "boolean", h: "boolean",
       });
-      if (flags.reindex) {
-        const sem = await import("../core/search-semantic.mjs");
-        return sem.reindex(loadSearchRoots(loadConfig(ctx.configPath)), { log: console.log });
-      }
       return cmdSearch(ctx, positional.join(" "), flags);
     }
 
