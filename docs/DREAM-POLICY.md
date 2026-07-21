@@ -1,51 +1,51 @@
 # Dream activity policy
 
-`amux dream` preserves meaningful work without turning nightly maintenance into
-a self-waking loop. Context pressure and new work are separate signals.
+`amux dream` is one bounded, stateless nightly summarizer. It reads durable
+session journals and never sends to, resumes, compacts, sleeps or wakes a coding
+pane. Auto-compact and sleep remain independent controllers.
 
 ## Exact algorithm
 
-For each configured Claude pane:
+1. Inspect configured Claude, Codex and Kimi panes through their journal
+   readers. Pane liveness, tmux screen text and current context percentage are
+   not inputs.
+2. Inspect at most the latest 24 hours by default and only turns newer than the
+   pane's last successful Dream receipt. Dream prompts, `/compact`, recovery
+   plumbing and canonical system noise are not work.
+3. For Claude, read a bounded tail from up to six recently active session
+   files. This preserves work on both sides of a compact rotation without ever
+   parsing an unbounded historical session.
+4. Keep at most eight recent real turns and 5 KiB of source per pane. Sort panes
+   by latest activity, include at most 48, and cap the complete prompt at 96
+   KiB. Every omitted or unreadable pane is reported with an exact reason.
+5. Invoke one no-tools, no-session-persistence summarizer process. Source text
+   is explicitly untrusted data. Validate the response at 12 KiB and 60
+   non-empty lines before it can enter memory.
+6. The controller, not the model, atomically writes one marked fleet-summary
+   block in the daily memory file.
+7. Atomically advance receipts only for panes actually included, and only after
+   the validated memory block is durable. Model, validation or write failure
+   advances no receipt; fixed-limit omissions retain their old receipts.
 
-1. Treat recent JSONL mtime only as a cheap prefilter. It never authorizes a
-   wake because maintenance also touches JSONL.
-2. Read the pane's last successful receipt from
-   `~/.agentmux/dream-receipts.json`. On first use, inspect the requested
-   `--since` window; afterwards inspect everything after the receipt cursor.
-3. Count meaningful user-role turns. Bare `/compact`, dream prompts, recovery
-   plumbing and other canonical system noise count as zero. Real human and
-   delegated work directives count.
-4. Fewer than 10 new turns means no pane write at all: no compact, no dream
-   prompt and no wake.
-5. At least 10 new turns authorizes a memory update, but only while the live
-   pane is exactly idle. Working, modal, missing and unknown panes are skipped.
-6. Context at or above 50% adds `/compact` before the memory prompt. Context
-   below 50%, or an unreadable context observation, skips compact but still
-   writes the memory summary.
-7. Advance the durable receipt only after the pane finished and its complete
-   bounded marker block exists. The receipt records the newest real turn that
-   the run was authorized to summarize. Failures never advance it.
+`amux dream --dry` executes collection and budgeting, but invokes no model and
+writes nothing. With no new real work Dream writes only its run sentinel and
+does not invoke a model.
 
-This lets ten turns accumulate across days after a receipt. The same turns can
-never authorize another dream, while a heavily used pane still writes memory
-after an earlier compact reduced its current context below 50%.
+## Separate controllers
 
-## Sleep boundary
-
-Dream does not stop panes. A sleep controller may consume a successful dream
-receipt later, but it must independently prove long idle, no active turn or
-modal, an empty delivery queue and safe worktree state. It must never wake a
-pane merely to sleep it. Suspected stalls are reported, not killed.
+- `amux memory compact` still compacts daily memory according to its own policy.
+- Pane auto-compact still responds to context pressure independently of Dream.
+- Sleep may consume durable evidence, but must independently prove idle, empty
+  delivery queue and safe worktree state. It never wakes a pane merely to sleep
+  it, and suspected stalls are reported rather than killed.
 
 ## Rejected alternatives
 
-- Context-only eligibility loses important work after manual or automatic
-  compaction.
-- A rolling 24-hour turn count can reuse yesterday's same ten turns forever.
-- Always compacting every eligible pane wastes time and context when usage is
-  low.
-- Folding sleep into dream gives one maintenance command destructive authority
-  and makes false-idle classification needlessly dangerous.
-
-The V1 boundaries are deliberately fixed at 10 turns and 50% context. A future
-change must update this contract and its boundary tests in the same commit.
+- Waking every pane makes nightly bookkeeping consume each pane's context and
+  turns inactive runtimes into unnecessary failure points.
+- Context-percentage eligibility loses heavily used work after a prior compact.
+- Reading only Claude's newest JSONL loses work when compact rotates the file.
+- A permanent summarizer pane accumulates its own context. A fresh one-shot gets
+  the same bounded cross-fleet view every night.
+- Silent truncation creates a false receipt. Omitted material is explicit and
+  never receipted.

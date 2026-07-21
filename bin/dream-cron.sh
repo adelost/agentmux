@@ -26,31 +26,8 @@ notify_failure() {
 }
 trap notify_failure EXIT
 
-run_dream_pass() {
-  local output status=0
-  output="$("$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" dream --quiet --workspace "$OPENCLAW_WORKSPACE" "$@" 2>&1)" || status=$?
-  [ -n "$output" ] && printf "%s\n" "$output" >> "$AGENTMUX_DREAM_LOG"
-  printf "%s" "$status"
-}
-
-# Pass 1 deliberately leaves the sentinel open. Panes busy at 04:00 get a
-# second chance around 05:00; the process sleeps, but no dream lock is held.
-first_status="$(run_dream_pass --defer-sentinel)"
-if [ "$first_status" -ne 0 ]; then
-  printf "%s WARN first dream pass exit=%s; retry will handle pane-local misses\n" "$(date -Is)" "$first_status" >> "$AGENTMUX_DREAM_LOG"
-fi
-
-if [ "${AMUX_DREAM_RETRY_ENABLED:-true}" != "false" ]; then
-  retry_delay="${AMUX_DREAM_RETRY_DELAY_SECONDS:-3600}"
-  if ! [[ "$retry_delay" =~ ^[0-9]+$ ]]; then
-    echo "AMUX_DREAM_RETRY_DELAY_SECONDS must be a non-negative integer" >&2
-    exit 2
-  fi
-  sleep "$retry_delay"
-fi
-
 dream_status=0
-dream_output="$("$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" dream --quiet --workspace "$OPENCLAW_WORKSPACE" --retry 2>&1)" || dream_status=$?
+dream_output="$("$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" dream --quiet --workspace "$OPENCLAW_WORKSPACE" 2>&1)" || dream_status=$?
 if [ -n "$dream_output" ]; then
   printf "%s\n" "$dream_output" >> "$AGENTMUX_DREAM_LOG"
 fi
@@ -69,7 +46,8 @@ grep -q "^> why:" "$daily_file"
 grep -q "<!-- amux-dream-run:$date_key " "$daily_file"
 
 if [ "$dream_status" -ne 0 ]; then
-  printf "%s WARN retry dream pass exit=%s; sentinel records pending panes\n" "$(date -Is)" "$dream_status" >> "$AGENTMUX_DREAM_LOG"
+  printf "%s ERROR dream pass exit=%s\n" "$(date -Is)" "$dream_status" >> "$AGENTMUX_DREAM_LOG"
+  exit "$dream_status"
 fi
 
 # Actor chain: bank+compact bounded daily backlog, then lint and route the

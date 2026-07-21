@@ -56,12 +56,7 @@ import {
   collectContextTelemetry, contextTelemetrySnapshot, nativeContextReading,
 } from "../core/suggestions-context-telemetry.mjs";
 export {
-  collectDreamTargets,
-  hasDreamPaneBlock,
-  isDreamLiveClaudePane,
-  isDreamRunnableStatus,
-  validateDreamPaneBlock,
-  waitForDreamPaneBlock,
+  cmdDream,
 } from "./dream.mjs";
 import { consumeFleetRestart, queueFleetRestart } from "../core/fleet-restart.mjs";
 import {
@@ -4130,7 +4125,7 @@ export async function dispatch(argv, ctx) {
 
     case "dream": {
       const { flags } = parseFlags(rest, FLAG_SPECS.dream);
-      return cmdDream(ctx, flags, { getStatus: getPaneStatus, getLivePanes: listPanes });
+      return cmdDream(ctx, flags);
     }
 
     case "janitor": {

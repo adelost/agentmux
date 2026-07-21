@@ -26,6 +26,8 @@ const TEST_ALIASES = {
   "bin/agent-cli.mjs": ["cli/restart-ready.test.mjs"],
   "cli/commands.mjs": ["cli.test/commands.test.mjs"],
   "cli/dream.mjs": ["core/dream-eligibility.test.mjs", "test/commands-dream.test.mjs"],
+  "core/jsonl-reader.mjs": ["core/dream-summarizer.test.mjs"],
+  "bin/dream-cron.sh": ["test/morning-cron-logs.test.mjs"],
   "bin/start.sh": ["test/post-boot-revive.integration.test.mjs"],
   "bin/post-boot-revive.sh": ["test/post-boot-revive.integration.test.mjs"],
   "bin/windows-bridge.mjs": ["core/windows-bridge.test.mjs", "test/windows-restarter-contract.test.mjs"],

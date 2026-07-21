@@ -1,15 +1,4 @@
-// Read Claude Code's session jsonl as the source of truth for responses.
-//
-// Claude Code writes every interaction to ~/.claude/projects/{encoded-dir}/{uuid}.jsonl
-// as a stream of JSON events. Each line is one event: user message, assistant
-// message, system hook, file snapshot, etc. The assistant messages contain
-// structured content arrays with text (including code fences), tool_use entries,
-// and thinking blocks. *Exactly* what Claude produced, before any UI rendering
-// stripped it down to indented plaintext for tmux.
-//
-// This module reads that structured data and returns items in the same shape
-// as our tmux extract pipeline: [{ type: "text"|"tool", content: string }].
-// Downstream code (handlers, recorder, Discord send) doesn't know the difference.
+// Read Claude Code session JSONL as the structured source of truth.
 
 import { readdirSync, readFileSync, statSync, existsSync, openSync, fstatSync, readSync, closeSync } from "fs";
 import { join } from "path";
@@ -20,12 +9,7 @@ import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-appe
 import { isSystemNoiseDirective } from "./system-noise.mjs";
 
 
-// Bounded tail-window reading for session jsonl. Long-running panes grow these
-// files past Node's max string length (~0x1fffffe8 ≈ 512 MB); reading one whole
-// as a string throws "Cannot create a string longer than...", which broke
-// `amux log`, ALL of `amux timeline`, and jsonl isBusy-dispatch for the whole
-// fleet. No consumer needs the whole file: recent turns, the needle, the
-// since-window and the last lines all live in the tail.
+// Long sessions require bounded tail reads to stay below Node string limits.
 const DEFAULT_JSONL_WINDOW_BYTES = 8 * 1024 * 1024; // 8 MiB tail: thousands of turns
 const MAX_JSONL_WINDOW_BYTES = 128 * 1024 * 1024; // hard cap, well under the string limit
 
@@ -805,11 +789,27 @@ export function readLastTurns(paneDir, opts = {}) {
   return { turns, compactions, jsonlFile: files[0].path };
 }
 
-// ---------------------------------------------------------------------------
-// Cross-pane event stream for `amux timeline` and `amux watch`.
-// Unlike readLastTurns (per-pane, grouped into turns), this reads every
-// configured pane's jsonl store and returns a flat, merge-sorted stream of
-// events so an orchestrator can follow all sessions in one view.
+/** WHAT: Reads bounded recent turns across compact-rotated Claude sessions. WHY: Keeps compact rotation from hiding recent work. */
+export function readRecentTurnsAcrossClaudeSessions(paneDir, opts = {}) {
+  const { since = null, limit = 8, maxFiles = 6, tailBytes = 512 * 1024 } = opts;
+  const files = listJsonlFiles(claudeProjectDir(paneDir));
+  const sinceMs = since ? new Date(since).getTime() : null;
+  const recent = files.filter((file, index) => index === 0
+    || !Number.isFinite(sinceMs) || file.mtime >= sinceMs);
+  const selected = recent.slice(0, Math.max(1, maxFiles));
+  const turns = selected.flatMap(({ path }) =>
+    groupIntoTurns(parseJsonlTail(path, Math.max(1024, tailBytes)), { headless: true }))
+    .filter((turn) => {
+      const timestamp = Date.parse(turn.timestamp || "");
+      return Number.isFinite(timestamp) && (!Number.isFinite(sinceMs) || timestamp >= sinceMs);
+    })
+    .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
+  const unique = [...new Map(turns.map((turn) => [
+    `${turn.timestamp}\u0000${turn.userPrompt}`, turn,
+  ])).values()];
+  return { turns: unique.slice(-Math.max(1, limit)), filesRead: selected.length,
+    filesOmitted: Math.max(0, recent.length - selected.length) };
+}
 
 /** Project dir for a pane (where Claude Code stores the session jsonl). */
 function projectDirFor(paneDir) {
