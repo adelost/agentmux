@@ -18,9 +18,10 @@ pane. Auto-compact and sleep remain independent controllers.
 4. Keep at most eight recent real turns and 5 KiB of source per pane. Sort panes
    by latest activity, include at most 48, and cap the complete prompt at 96
    KiB. Every omitted or unreadable pane is reported with an exact reason.
-5. Invoke one no-tools, no-session-persistence summarizer process. Source text
-   is explicitly untrusted data. Validate the response at 12 KiB and 60
-   non-empty lines before it can enter memory.
+5. Invoke one no-tools, no-session-persistence summarizer process with a 0.20
+   USD hard budget (overridable downward). Source text is explicitly untrusted
+   data. Validate the response at 12 KiB and 60 non-empty lines before it can
+   enter memory.
 6. The controller, not the model, atomically writes one marked fleet-summary
    block in the daily memory file.
 7. Atomically advance receipts only for panes actually included, and only after

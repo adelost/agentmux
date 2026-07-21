@@ -175,12 +175,28 @@ export function validateDreamSummary(content, options = {}) {
   return { ok: true, content: text, lines };
 }
 
+/** WHAT: Formats a bounded process failure. WHY: Keeps JSON-on-stdout CLI errors from becoming blank diagnostics. */
+export function dreamSummarizerFailure(stdout, stderr, code) {
+  let detail = String(stderr || "").trim();
+  if (!detail) {
+    try {
+      parseClaudeResult(stdout);
+      detail = "process failed after returning a successful result envelope";
+    } catch (error) {
+      detail = error.message;
+      const tail = String(stdout || "").trim().slice(-1_500);
+      if (tail) detail = `${detail}; stdout-tail=${tail}`;
+    }
+  }
+  return new Error(`dream summarizer exited ${code}: ${clipUtf8(detail, 1_000)}`);
+}
+
 /** WHAT: Dispatches one no-tools, no-session Claude process. WHY: Prevents summarization from growing persistent agent context. */
 export function runDreamSummarizer(prompt, options = {}) {
   const command = options.command || process.env.AMUX_DREAM_SUMMARIZER_BIN || "claude";
   const model = options.model || process.env.AMUX_DREAM_SUMMARIZER_MODEL || "haiku";
   const timeoutMs = options.timeoutMs || Number(process.env.AMUX_DREAM_SUMMARIZER_TIMEOUT_MS) || 180_000;
-  const maxBudgetUsd = options.maxBudgetUsd || Number(process.env.AMUX_DREAM_MAX_BUDGET_USD) || 0.10;
+  const maxBudgetUsd = options.maxBudgetUsd || Number(process.env.AMUX_DREAM_MAX_BUDGET_USD) || 0.20;
   const schema = JSON.stringify({
     type: "object", additionalProperties: false,
     properties: { content: { type: "string" } }, required: ["content"],
@@ -203,7 +219,7 @@ export function runDreamSummarizer(prompt, options = {}) {
     child.on("error", (error) => { clearTimeout(timer); reject(error); });
     child.on("close", (code) => {
       clearTimeout(timer);
-      if (code !== 0) return reject(new Error(`dream summarizer exited ${code}: ${stderr.trim()}`));
+      if (code !== 0) return reject(dreamSummarizerFailure(stdout, stderr, code));
       try { resolve(parseClaudeResult(stdout)); } catch (error) { reject(error); }
     });
     child.stdin.end(prompt);
