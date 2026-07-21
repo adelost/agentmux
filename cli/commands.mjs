@@ -6,7 +6,7 @@ import { dirname, resolve } from "path";
 import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, statSync } from "fs";
 import { join } from "path";
 import { createHash } from "crypto";
-import { loadConfig, listAgents, getAgent, addAgent, removeAgent, resolveAgent, saveLast, getLast, getPaneCount, findChannelForPane } from "./config.mjs";
+import { loadConfig, listAgents, getAgent, addAgent, removeAgent, resolveAgent, saveLast, getLast, getPaneCount, findChannelForPane, validateAgentSender } from "./config.mjs";
 import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens, detectPaneStatus } from "./format.mjs";
 import { paneRuntimeLabel } from "./pane-runtime-label.mjs";
 import {
@@ -32,7 +32,7 @@ import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, lat
 import { readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { readLastTurnsKimi } from "../core/kimi-jsonl-reader.mjs";
 import { alternateEngineForCommand, latestAlternateMtime, readAlternateTurns } from "../core/alternate-session-reader.mjs";
-import { detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
+import { assertConfiguredSender, detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
 import { appendEvent, latestPaneStatesCached, mergeStatus, readEvents } from "../core/events.mjs";
 import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../core/pane-status.mjs";
 import { readHeartbeat } from "../core/heartbeat.mjs";
@@ -695,8 +695,8 @@ async function cmdSend(name, prompt, flags, ctx) {
   // Sender is invariant — provenance must never be silently erased.
   const exec = (cmd) => execSync(cmd, { encoding: "utf8", timeout: 2000 });
   const sender = detectSenderFromEnv(process.env, exec);
+  assertConfiguredSender(sender, (session, senderPane) => validateAgentSender(ctx.configPath, session, senderPane));
   const finalPrompt = prependSenderHeader(prompt, sender);
-
   const idempotencyKey = flags["idempotency-key"];
   if (idempotencyKey != null
       && (typeof idempotencyKey !== "string" || Buffer.byteLength(idempotencyKey, "utf8") > 256

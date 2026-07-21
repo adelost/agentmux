@@ -5,7 +5,7 @@ import { tmpdir } from "os";
 import {
   ensureConfig, loadConfig, saveConfig, getAgent, listAgents,
   addAgent, removeAgent, resolveAgent, saveLast, getLast,
-  findChannelForPane,
+  findChannelForPane, validateAgentSender,
 } from "../cli/config.mjs";
 import { writeFileSync } from "fs";
 
@@ -90,6 +90,34 @@ feature("getAgent", () => {
     }],
     when: ["getting nonexistent", (path) => () => getAgent(path, "nope")],
     then: ["throws", (fn) => expect(fn).toThrow("not found")],
+  });
+});
+
+feature("validateAgentSender", () => {
+  component("allows a configured pane when inter-agent sends are not frozen", {
+    given: ["the default agent policy", () => {
+      const path = setup();
+      writeFileSync(path, SAMPLE_YAML);
+      return path;
+    }],
+    when: ["validating a sender", (path) => validateAgentSender(path, "claw", 1)],
+    then: ["returns the configured address", (address) => {
+      expect(address).toEqual({ agentName: "claw", pane: 1 });
+      cleanup();
+    }],
+  });
+
+  component("rejects every pane in a human-frozen session", {
+    given: ["an agent with inter-agent sends disabled", () => {
+      const path = setup();
+      writeFileSync(path, SAMPLE_YAML.replace("ai:\n", "ai:\n  interAgentSend: false\n"));
+      return path;
+    }],
+    when: ["building the validation", (path) => () => validateAgentSender(path, "ai", 0)],
+    then: ["fails with an explicit policy reason", (action) => {
+      expect(action).toThrow("Inter-agent sends are disabled for agent 'ai'");
+      cleanup();
+    }],
   });
 });
 

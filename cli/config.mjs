@@ -56,6 +56,19 @@ export function validateAgentPane(configPath, name, pane) {
 }
 
 /**
+ * WHAT: Checks sender identity and the session's inter-agent send policy.
+ * WHY: Keeps a human-frozen fleet from continuing to fan out autonomous orders.
+ */
+export function validateAgentSender(configPath, name, pane) {
+  const address = validateAgentPane(configPath, name, pane);
+  const agent = getAgent(configPath, name);
+  if (agent.interAgentSend === false) {
+    throw new Error(`Inter-agent sends are disabled for agent '${name}'`);
+  }
+  return address;
+}
+
+/**
  * Find the Discord channel bound to a specific pane of an agent.
  *
  * Agent config shape:

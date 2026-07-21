@@ -27,6 +27,7 @@ const TEST_ALIASES = {
   "index.mjs": ["core/delivery-notices.test.mjs"],
   "bin/agent-cli.mjs": ["cli/restart-ready.test.mjs"],
   "cli/commands.mjs": ["cli.test/commands.test.mjs"],
+  "cli/config.mjs": ["cli.test/config.test.mjs"],
   "cli/tmux.mjs": ["cli.test/layout-contract.test.mjs"],
   "cli/dream.mjs": ["core/dream-eligibility.test.mjs", "test/commands-dream.test.mjs"],
   "core/jsonl-reader.mjs": ["core/dream-summarizer.test.mjs"],

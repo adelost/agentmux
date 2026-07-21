@@ -69,6 +69,14 @@ feature("focused PR tests", () => {
     }],
   });
 
+  unit("config.mjs maps to its split CLI suite", {
+    then: ["the alias lands the sender-policy tests", () => {
+      const exists = existsSet(["cli.test/config.test.mjs"]);
+      expect(relatedTests("cli/config.mjs", { exists }))
+        .toEqual(["cli.test/config.test.mjs"]);
+    }],
+  });
+
   unit("tmux attach maps to the layout and selective-start contract", {
     then: ["the alias lands the real component test", () => {
       const exists = existsSet(["cli.test/layout-contract.test.mjs"]);
