@@ -43,7 +43,15 @@ export function checkWakeAdmission({
 } = {}) {
   if (!automatic) return { ok: true, reason: "manual-override" };
   if (!identity?.allowRevive) return { ok: false, reason: `identity-${identity?.reason || "unverified"}` };
-  const verdict = canStartHeavy(guardState, {
+  // Alert hysteresis deliberately holds a prior critical level until the host
+  // has substantial clear headroom.  A single-pane message wake is narrower:
+  // when the latest persisted sample itself classifies normal, use that fresh
+  // truth plus the reserve floor instead of stranding the pane behind an old
+  // alert level.  Blocked/warn samples and stale state remain fail-closed.
+  const admissionState = guardState?.classified === "normal"
+    ? { ...guardState, level: "normal" }
+    : guardState;
+  const verdict = canStartHeavy(admissionState, {
     class: "pane-revive",
     reserveMiB,
     automatic: true,
@@ -51,7 +59,10 @@ export function checkWakeAdmission({
     bootId,
   });
   if (!verdict.ok) return { ok: false, reason: verdict.reason };
-  return { ok: true, reason: "ok" };
+  return {
+    ok: true,
+    reason: admissionState !== guardState ? "current-memory-normal" : "ok",
+  };
 }
 
 /** WHAT: Maps one pane process snapshot to whether a wake is needed. WHY: Separates waking a stopped pane from delivering to a live one. */

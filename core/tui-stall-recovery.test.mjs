@@ -59,6 +59,31 @@ function fixture() {
 }
 
 feature("exact TUI crash recovery", () => {
+  component("a progressing large Claude resume is not cut off at the old 30 second wrapper timeout", {
+    given: ["a replay that keeps painting until its composer appears after 35 seconds", () => {
+      let clock = 0;
+      const recovery = createTuiStallRecovery({
+        tmux: {
+          captureScreen: async () => clock >= 35_000 ? "❯ \n" : `loading-${clock}`,
+          sendKeys: async () => {},
+        },
+        delay: async (ms) => { clock += ms; },
+        now: () => clock,
+        isAlreadyRunning: async () => true,
+      });
+      return { recovery, clock: () => clock };
+    }],
+    when: ["waiting through the single canonical Claude readiness path", async (ctx) => ({
+      ready: await ctx.recovery.waitForClaudeReady("skyvw:.0", "skyvw", 0),
+      elapsed: ctx.clock(),
+    })],
+    then: ["the progressing session reaches its composer before the 120 second bound", ({ ready, elapsed }) => {
+      expect(ready).toBe(true);
+      expect(elapsed).toBeGreaterThanOrEqual(35_000);
+      expect(elapsed).toBeLessThan(120_000);
+    }],
+  });
+
   component("Claude keeps pane Fable, exact session, and accepts summary resume", {
     given: ["an interrupted Fable pane with persisted session identity", () => fixture()],
     when: ["starting and proving the live summary dialog", async (ctx) => {

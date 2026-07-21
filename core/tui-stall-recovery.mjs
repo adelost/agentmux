@@ -35,6 +35,7 @@ export const isShellProcess = (command) => /^(bash|zsh|sh|fish|dash)$/u.test(Str
 export function createTuiStallRecovery({
   tmux, state, delay, configFor, paneDirectory, isPaneDead, respawnPane,
   isAlreadyRunning, resolveSessionFlag, isBusy, promptTransportState, restartCodex, restartKimi,
+  now = Date.now,
 } = {}) {
   /** WHAT: Observes one pane process. WHY: Proves whether a fenced submission can still be ingested. */
   async function paneProcessState(agentName, pane) {
@@ -89,6 +90,7 @@ export function createTuiStallRecovery({
         return hasEmptyClaudeComposer(screen);
       },
       delay,
+      now,
       hardTimeoutMs: timeoutMs,
     });
     if (!ready) console.warn(`waitForClaudeReady(${agentName}:${pane}) stalled before ${timeoutMs}ms`);

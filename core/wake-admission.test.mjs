@@ -166,6 +166,31 @@ feature("wake admission", () => {
     }],
   });
 
+  unit("a fresh normal sample releases one targeted wake while alert hysteresis catches up", {
+    then: ["the old critical alert level cannot strand a safe single-pane delivery", () => {
+      const recovering = {
+        bootId: "b1",
+        observedAt: 1_000,
+        level: "critical",
+        classified: "normal",
+        sample: {
+          memTotalKb: 48 * 1024 * 1024,
+          memAvailableKb: 8.5 * 1024 * 1024,
+          swapTotalKb: 4 * 1024 * 1024,
+          swapFreeKb: 0,
+        },
+      };
+      expect(checkWakeAdmission({
+        identity: { allowRevive: true }, guardState: recovering,
+        reserveMiB: 512, nowMs: 1_000, bootId: "b1",
+      })).toEqual({ ok: true, reason: "current-memory-normal" });
+      expect(checkWakeAdmission({
+        identity: { allowRevive: true }, guardState: { ...recovering, classified: "blocked" },
+        reserveMiB: 512, nowMs: 1_000, bootId: "b1",
+      })).toMatchObject({ ok: false, reason: "memory-critical" });
+    }],
+  });
+
   unit("a live agent process never needs a wake", {
     then: ["running stays delivery, stopped/shell/dead is a wake", () => {
       expect(paneNeedsWake({ command: "kimi-code", shell: false, running: true })).toBe(false);

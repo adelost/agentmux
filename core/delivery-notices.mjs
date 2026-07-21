@@ -8,6 +8,22 @@ import { DELIVERED_UNVERIFIED_STATE, isNotSentDeliveryJob } from "./delivery-que
 
 const NOTICE_AFTER_MS = 10_000;
 
+/** WHAT: Maps one durable blocked delivery to engine-neutral copy. WHY: Prevents a Claude wake from being mislabeled as a Codex composer wait. */
+export function blockedDeliveryNotice(job) {
+  const reason = String(job?.lastReason || "").replace(/^wake-refused:/u, "");
+  const detail = reason === "memory-critical"
+    ? "värden har kritisk minnespress"
+    : reason === "memory-blocked" || reason === "memory-reserve-floor"
+      ? "värden saknar säker minnesmarginal"
+      : reason === "guard-state-stale"
+        ? "minnesvaktens mätning är för gammal"
+        : reason.startsWith("identity-")
+          ? "den installerade release-identiteten kan inte verifieras"
+          : "panelen är inte redo för säker leverans";
+  return "⚠️ Meddelandet är säkert köat men panelen kan inte ta emot det ännu: "
+    + `${detail}. Det ligger kvar över omstarter och skickas i ordning när spärren har släppt.`;
+}
+
 /** WHAT: Builds the broker's blocked/terminal notice operations. WHY: Keeps Discord reporting out of the delivery loop. */
 export function createDeliveryNotices({
   queue,

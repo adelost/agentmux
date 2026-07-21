@@ -23,6 +23,8 @@ const ZERO_TEST_ALLOWLIST = [
 ];
 
 const TEST_ALIASES = {
+  "agent.mjs": ["core/tui-stall-recovery.test.mjs"],
+  "index.mjs": ["core/delivery-notices.test.mjs"],
   "bin/agent-cli.mjs": ["cli/restart-ready.test.mjs"],
   "cli/commands.mjs": ["cli.test/commands.test.mjs"],
   "cli/dream.mjs": ["core/dream-eligibility.test.mjs", "test/commands-dream.test.mjs"],

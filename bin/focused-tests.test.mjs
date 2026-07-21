@@ -69,6 +69,20 @@ feature("focused PR tests", () => {
     }],
   });
 
+  unit("bridge entrypoints map to their extracted focused contracts", {
+    then: ["agent startup and Discord notices run the exact owning tests", () => {
+      const exists = existsSet([
+        "core/tui-stall-recovery.test.mjs",
+        "core/delivery-notices.test.mjs",
+      ]);
+      expect(relatedTests("agent.mjs", { exists }))
+        .toEqual(["core/tui-stall-recovery.test.mjs"]);
+      expect(relatedTests("index.mjs", { exists }))
+        .toEqual(["core/delivery-notices.test.mjs"]);
+      expect(unmappedExecutables(["agent.mjs", "index.mjs"], { exists })).toEqual([]);
+    }],
+  });
+
   unit("dream orchestration maps to policy and command tests", {
     then: ["the alias covers both the pure boundary and delivery orchestration", () => {
       const exists = existsSet(["core/dream-eligibility.test.mjs", "test/commands-dream.test.mjs"]);
