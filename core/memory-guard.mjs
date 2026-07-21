@@ -22,6 +22,8 @@ export const MEMORY_GUARDRAIL_DEFAULTS = Object.freeze({
   criticalAvailableRatio: 0.06,
   criticalSwapFreeRatio: 0.10,
   clearAvailableRatio: 0.21,
+  exhaustedSwapBlockAvailableRatio: 0.25,
+  exhaustedSwapClearAvailableRatio: 0.30,
   criticalSamples: 2,
   clearSamples: 3,
   stateTtlMs: 75_000, // > 2 poll intervals at the 30 s default cadence
@@ -59,6 +61,7 @@ function ratios(sample) {
 export function classifyMemory(sample, t = MEMORY_GUARDRAIL_DEFAULTS) {
   const { available, swapFree } = ratios(sample);
   if (available < t.criticalAvailableRatio && swapFree < t.criticalSwapFreeRatio) return "critical";
+  if (available < t.exhaustedSwapBlockAvailableRatio && swapFree < t.criticalSwapFreeRatio) return "blocked";
   if (available < t.blockAvailableRatio) return "blocked";
   if (available < t.warnAvailableRatio && swapFree < t.blockSwapFreeRatio) return "blocked";
   if (available < t.warnAvailableRatio) return "warn";
@@ -68,10 +71,13 @@ export function classifyMemory(sample, t = MEMORY_GUARDRAIL_DEFAULTS) {
 /** WHAT: Turns each sample into a hysteresis-filtered guard level. WHY: Prevents flapping from dropping protection during brief dips. */
 export function transitionGuard(prev, sample, t = MEMORY_GUARDRAIL_DEFAULTS) {
   const cls = classifyMemory(sample, t);
-  const { available } = ratios(sample);
+  const { available, swapFree } = ratios(sample);
   const level = prev?.level || "normal";
   const critStreak = cls === "critical" ? (prev?.critStreak || 0) + 1 : 0;
-  const clearStreak = available > t.clearAvailableRatio ? (prev?.clearStreak || 0) + 1 : 0;
+  const enoughWithoutSwap = available > t.exhaustedSwapClearAvailableRatio;
+  const swapCanAbsorbPressure = swapFree >= t.blockSwapFreeRatio;
+  const clear = available > t.clearAvailableRatio && (swapCanAbsorbPressure || enoughWithoutSwap);
+  const clearStreak = clear ? (prev?.clearStreak || 0) + 1 : 0;
   let next = level;
   if (cls === "critical") {
     if (critStreak >= t.criticalSamples) next = "critical";

@@ -63,10 +63,11 @@ feature("parseReminderConfig", () => {
   unit("defaults when env is empty", {
     given: ["empty env", () => ({ env: {} })],
     when: ["parsing", ({ env }) => parseReminderConfig(env)],
-    then: ["enabled=true, threshold=40, pollMs=60000", (result) => {
+    then: ["enabled=true, threshold=40, pollMs=60000, activeWindowMs=1h", (result) => {
       expect(result.enabled).toBe(true);
       expect(result.turnThreshold).toBe(40);
       expect(result.pollMs).toBe(60_000);
+      expect(result.activeWindowMs).toBe(3_600_000);
     }],
   });
 
@@ -97,7 +98,13 @@ feature("parseReminderConfig", () => {
 });
 
 feature("decideReminderAction", () => {
-  const base = { turnThreshold: 40 };
+  const base = {
+    turnThreshold: 40,
+    latestWorkTsMs: 9_000,
+    nowMs: 10_000,
+    activeWindowMs: 60_000,
+    runtimeState: { running: true, shell: false, dead: false },
+  };
 
   unit("no send when below threshold", {
     given: ["30 turns", () => ({ turnsSinceCutoff: 30, status: "idle", ...base })],
@@ -154,6 +161,24 @@ feature("decideReminderAction", () => {
     given: ["-1 turns (impossible but defensive)", () => ({ turnsSinceCutoff: -1, status: "idle", ...base })],
     when: ["deciding", (args) => decideReminderAction(args)],
     then: ["none", (r) => expect(r.action).toBe("none")],
+  });
+
+  unit("no send when work is stale even if the historical turn count is high", {
+    given: ["an idle pane last used two hours ago", () => ({
+      turnsSinceCutoff: 100, status: "idle", ...base,
+      latestWorkTsMs: 1_000, nowMs: 7_201_000, activeWindowMs: 3_600_000,
+    })],
+    when: ["deciding", (args) => decideReminderAction(args)],
+    then: ["none with an honest reason", (r) => expect(r).toEqual({ action: "none", reason: "work activity is stale" })],
+  });
+
+  unit("no send when the coding process is sleeping", {
+    given: ["recent work but a shell-only pane", () => ({
+      turnsSinceCutoff: 100, status: "idle", ...base,
+      runtimeState: { running: false, shell: true, dead: false },
+    })],
+    when: ["deciding", (args) => decideReminderAction(args)],
+    then: ["none without waking", (r) => expect(r).toEqual({ action: "none", reason: "pane is sleeping or unavailable" })],
   });
 });
 

@@ -30,6 +30,7 @@ export function normalizeDiscordMessage(msg, opts = {}) {
       id: att.id,
       name: att.name,
       url: att.url,
+      proxyUrl: att.proxyURL || null,
       contentType: att.contentType,
     })),
 

@@ -9,7 +9,7 @@
 
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { detectPaneStatus } from "../cli/format.mjs";
-import { panePathFor, countTurnsSince, findLatestCompactTs } from "../core/jsonl-reader.mjs";
+import { panePathFor, countWorkTurnsSince, findLatestCompactTs } from "../core/jsonl-reader.mjs";
 import {
   loadReminderState,
   saveReminderState,
@@ -45,8 +45,7 @@ export function createDriftGuard({
     // For our threshold of ~40 we just care "≥ threshold?" — capped at
     // 51 is fine because 51 > 40 → action=send still fires.
     const d = cutoffMs != null ? new Date(cutoffMs) : null;
-    const res = countTurnsSince(paneDir, d);
-    return res?.count ?? 0;
+    return countWorkTurnsSince(paneDir, d) || { count: 0, latest: null };
   }
 
   async function sendReminder(agentConfig, paneIdx, paneKey, turnCount, reminderCount) {
@@ -130,15 +129,21 @@ export function createDriftGuard({
 
         // Step 2: compute effective cutoff (later of reminder/compact).
         const cutoffMs = cutoffFor(paneState);
-        const turnsSinceCutoff = readTurnsSinceCutoff(paneDir, cutoffMs);
+        const turnActivity = readTurnsSinceCutoff(paneDir, cutoffMs);
 
         // Step 3: check pane status so we don't interrupt active work.
         const status = await paneStatus(a, i);
+        const runtimeState = typeof agent.paneProcessState === "function"
+          ? await agent.paneProcessState(a.name, i).catch(() => null) : null;
 
         const decision = decideReminderAction({
-          turnsSinceCutoff,
+          turnsSinceCutoff: turnActivity.count,
           status,
           turnThreshold: config.turnThreshold,
+          latestWorkTsMs: Date.parse(turnActivity.latest || ""),
+          nowMs: now,
+          activeWindowMs: config.activeWindowMs,
+          runtimeState,
         });
 
         if (decision.action === "send") {
@@ -151,7 +156,7 @@ export function createDriftGuard({
           // reminderCount picks the DRIFT_SECTIONS rotation slot; legacy
           // state entries without it start at 0 (highest-priority rule).
           const reminderCount = paneState.reminderCount || 0;
-          const sent = await sendReminder(a, i, paneKey, turnsSinceCutoff, reminderCount);
+          const sent = await sendReminder(a, i, paneKey, turnActivity.count, reminderCount);
           if (recordReminderDelivery(paneState, { delivered: sent, nowMs: now, reminderCount })) {
             stateChanged = true;
           }
@@ -171,7 +176,7 @@ export function createDriftGuard({
       return;
     }
     if (intervalId) return;
-    log(`enabled | threshold=${config.turnThreshold} turns poll=${Math.round(config.pollMs / 1000)}s`);
+    log(`enabled | threshold=${config.turnThreshold} turns active=${Math.round(config.activeWindowMs / 60000)}m poll=${Math.round(config.pollMs / 1000)}s`);
     intervalId = setInterval(() => {
       tick().catch((err) => log(`tick failed: ${err.message}`));
     }, config.pollMs);

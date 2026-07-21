@@ -24,7 +24,7 @@ function fakeMsg({ id = "msg1", text = "", attachments = [] } = {}) {
  * Build a handler with every side-effect (exec, download, fs write)
  * faked out. Returns the handler + all spies so tests can assert.
  */
-function setup({ transcribeOutput = "hello world", downloadFails = false } = {}) {
+function setup({ transcribeOutput = "hello world", downloadFails = false, downloadSequence = null } = {}) {
   const runCalls = [];
   const writtenFiles = [];
   const downloadCalls = [];
@@ -36,6 +36,11 @@ function setup({ transcribeOutput = "hello world", downloadFails = false } = {})
 
   const downloadBuffer = vi.fn(async (url) => {
     downloadCalls.push(url);
+    if (downloadSequence?.length) {
+      const next = downloadSequence.shift();
+      if (next instanceof Error) throw next;
+      return Buffer.from(next);
+    }
     if (downloadFails) throw new Error("HTTP 403");
     return Buffer.from("fake audio bytes");
   });
@@ -49,6 +54,7 @@ function setup({ transcribeOutput = "hello world", downloadFails = false } = {})
     transcribeScript: "/fake/transcribe.sh",
     downloadBuffer,
     writeTmp,
+    sleep: async () => {},
   });
 
   return { handler, run, downloadBuffer, writeTmp, runCalls, writtenFiles, downloadCalls };
@@ -254,6 +260,60 @@ feature("buildPrompt: image and text file attachments", () => {
       expect(result).toBeNull();
       expect(msg.reply).toHaveBeenCalledWith(expect.stringContaining("Failed to download"));
     }],
+  });
+
+  unit("recovers a transient 525 without losing the image", {
+    given: ["a 525 followed by a successful safe GET", () => {
+      const transient = new Error("Download failed: 525");
+      transient.status = 525;
+      transient.retryable = true;
+      return {
+        ctx: setup({ downloadSequence: [transient, "image bytes"] }),
+        msg: fakeMsg({
+          id: "m525", text: "inspect this",
+          attachments: [{ id: "a1", name: "photo.png", url: "cdn", contentType: "image/png" }],
+        }),
+        tmpFiles: [],
+      };
+    }],
+    when: ["building the prompt", async ({ ctx, msg, tmpFiles }) => ({
+      prompt: await ctx.handler.buildPrompt(msg, tmpFiles), calls: ctx.downloadCalls,
+    })],
+    then: ["the GET is retried and evidence is attached exactly once", ({ prompt, calls }) => {
+      expect(calls).toEqual(["cdn", "cdn"]);
+      expect(prompt).toMatch(/^inspect this\n\[image attached:/u);
+    }],
+  });
+
+  unit("uses Discord's proxy URL when the primary CDN URL is unavailable", {
+    given: ["a permanent primary failure and a healthy proxy", () => ({
+      ctx: setup({ downloadSequence: [new Error("HTTP 403"), "proxy bytes"] }),
+      msg: fakeMsg({
+        id: "mproxy", text: "inspect",
+        attachments: [{ id: "a1", name: "photo.png", url: "cdn", proxyUrl: "proxy", contentType: "image/png" }],
+      }),
+      tmpFiles: [],
+    })],
+    when: ["building the prompt", async ({ ctx, msg, tmpFiles }) => ({
+      prompt: await ctx.handler.buildPrompt(msg, tmpFiles), calls: ctx.downloadCalls,
+    })],
+    then: ["the independent read endpoint preserves the evidence", ({ prompt, calls }) => {
+      expect(calls).toEqual(["cdn", "proxy"]);
+      expect(prompt).toContain("[image attached:");
+    }],
+  });
+
+  unit("does not deliver text without its failed attachment", {
+    given: ["text plus a permanently unavailable image", () => ({
+      ctx: setup({ downloadFails: true }),
+      msg: fakeMsg({
+        id: "mpartial", text: "judge the screenshot",
+        attachments: [{ id: "a1", name: "photo.png", url: "cdn", contentType: "image/png" }],
+      }),
+      tmpFiles: [],
+    })],
+    when: ["building the prompt", async ({ ctx, msg, tmpFiles }) => ctx.handler.buildPrompt(msg, tmpFiles)],
+    then: ["the whole prompt fails closed", (prompt) => expect(prompt).toBeNull()],
   });
 });
 

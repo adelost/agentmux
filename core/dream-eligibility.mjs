@@ -6,7 +6,7 @@ import {
 import { randomUUID } from "crypto";
 import { homedir } from "os";
 import { dirname, join } from "path";
-import { isSystemNoiseDirective } from "./system-noise.mjs";
+import { isWorkDirective } from "./system-noise.mjs";
 
 export const DREAM_RECEIPTS_SCHEMA_VERSION = 1;
 
@@ -79,6 +79,5 @@ export function recordDreamReceipt(state, target, options = {}) {
 
 /** WHAT: Checks whether a user-role turn represents real work. WHY: Prevents maintenance from feeding Dream itself. */
 export function isDreamActivityTurn(text) {
-  const head = String(text || "").trimStart();
-  return !isSystemNoiseDirective(head) && !/^\[dream\b/i.test(head);
+  return isWorkDirective(text);
 }

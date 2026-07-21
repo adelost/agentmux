@@ -1,5 +1,5 @@
 import { unit, feature, expect } from "bdd-vitest";
-import { isSystemNoiseDirective } from "./system-noise.mjs";
+import { isSystemNoiseDirective, isWorkDirective } from "./system-noise.mjs";
 
 feature("isSystemNoiseDirective", () => {
   unit("slash-command wrappers are noise", {
@@ -44,5 +44,14 @@ feature("isSystemNoiseDirective", () => {
       isSystemNoiseDirective("[dream 2026-07-15 04:00] Läs filen först: memory/2026-07-15.md"),
     ])],
     then: ["none are noise", (result) => expect(result).toEqual([false, false, false])],
+  });
+
+  unit("maintenance is not work even when Dream remains a readable directive", {
+    when: ["classifying activity eligibility", () => ([
+      isWorkDirective("fixa den riktiga buggen"),
+      isWorkDirective("[dream 2026-07-21 04:00] sammanfatta"),
+      isWorkDirective("[drift-guard] re-read rules"),
+    ])],
+    then: ["only actual work proves recent use", (result) => expect(result).toEqual([true, false, false])],
   });
 });

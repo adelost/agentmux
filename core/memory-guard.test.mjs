@@ -50,6 +50,8 @@ feature("memory admission guard", () => {
       expect(classifyMemory(sample(2.5, 2))).toBe("blocked"); // critical needs BOTH
       expect(classifyMemory(sample(7, 0.5))).toBe("blocked"); // <17% available AND swap <25%
       expect(classifyMemory(sample(7, 3))).toBe("warn"); // <17% but swap healthy
+      expect(classifyMemory(sample(11, 0))).toBe("blocked"); // zero swap + <25% cannot absorb another heavy start
+      expect(classifyMemory(sample(14, 0))).toBe("normal"); // ample RAM can safely carry old swapped pages
     }],
   });
 
@@ -65,14 +67,18 @@ feature("memory admission guard", () => {
     }],
   });
 
-  unit("recovers only after three clear samples, ignoring still-allocated swap", {
-    then: ["hysteresis holds, and a warn dip re-escalates immediately", () => {
+  unit("recovers only after three samples with swap headroom or ample RAM", {
+    then: ["exhausted swap cannot clear at 25%, but >30% RAM can", () => {
       let state = { level: "blocked", critStreak: 0, clearStreak: 0 };
       state = transitionGuard(state, sample(12, 0.2));
       expect(state.level).toBe("blocked");
       state = transitionGuard(state, sample(12, 0.2));
       expect(state.level).toBe("blocked");
       state = transitionGuard(state, sample(12, 0.2));
+      expect(state.level).toBe("blocked");
+      state = transitionGuard(state, sample(16, 0.2));
+      state = transitionGuard(state, sample(16, 0.2));
+      state = transitionGuard(state, sample(16, 0.2));
       expect(state.level).toBe("normal");
       state = transitionGuard(state, sample(8));
       expect(state.level).toBe("warn");
