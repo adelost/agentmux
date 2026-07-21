@@ -24,6 +24,7 @@ import {
   resolveServeMode,
   writeBridgeMode,
 } from "../core/bridge-mode.mjs";
+import { formatStartupHousekeeping, runStartupHousekeeping } from "../core/startup-housekeeping.mjs";
 
 const LEGACY_BRIDGE_SESSION = "amux";
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -32,7 +33,11 @@ const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
  * WHAT: Routes foreground, detached, readiness, and stop behavior for the Discord bridge.
  * WHY: Keeps bridge process policy out of the general command dispatcher.
  */
-export function createBridgeLifecycle({ bridgeDir, env = process.env } = {}) {
+export function createBridgeLifecycle({
+  bridgeDir,
+  env = process.env,
+  startupHousekeeping = runStartupHousekeeping,
+} = {}) {
   const resolvedBridgeDir = resolve(bridgeDir);
   const pidfile = () => env.PIDFILE || "/tmp/agentmux.pid";
   const readyFile = () => env.READY_FILE || "/tmp/agentmux.ready";
@@ -285,6 +290,12 @@ export function createBridgeLifecycle({ bridgeDir, env = process.env } = {}) {
     if (hadLegacySession) {
       console.log("Legacy managed tmux session detected. Cleaning it up before tmux-free launch...");
       await killSession(ctx, LEGACY_BRIDGE_SESSION);
+    }
+    try {
+      const storage = await startupHousekeeping({ env, bridgeLogPath: serviceLogPath() });
+      console.log(formatStartupHousekeeping(storage));
+    } catch (error) {
+      console.warn(`storage: housekeeping failed; bridge startup continues (${error.message})`);
     }
     return mode === BRIDGE_MODE_MANUAL ? startForeground(ctx) : startManaged(ctx);
   }

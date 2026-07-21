@@ -2,7 +2,7 @@ import { unit, component, feature, expect } from "bdd-vitest";
 import { mkdtempSync, writeFileSync, rmSync, existsSync, utimesSync, mkdirSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { pruneOldSessions, formatJanitorResult } from "./janitor.mjs";
+import { defaultSessionRoots, pruneOldSessions, formatJanitorResult } from "./janitor.mjs";
 
 const DAY = 24 * 3600 * 1000;
 
@@ -22,6 +22,18 @@ function makeRoot(specs) {
 }
 
 feature("pruneOldSessions", () => {
+  unit("covers Claude, Codex, and Kimi session roots", {
+    given: ["an isolated home", () => "/tmp/amux-home"],
+    when: ["resolving defaults", (home) => defaultSessionRoots(home)],
+    then: ["all three provider journals are included", (roots) => {
+      expect(roots).toEqual([
+        "/tmp/amux-home/.claude/projects",
+        "/tmp/amux-home/.codex/sessions",
+        "/tmp/amux-home/.kimi-code/sessions",
+      ]);
+    }],
+  });
+
   unit("keeps everything when all files are fresh", {
     given: ["two recent files (1d, 5d)", () => makeRoot([["a.jsonl", 1], ["b.jsonl", 5]])],
     when: ["pruning with 14d retention", ({ root, nowMs }) =>
@@ -102,6 +114,28 @@ feature("pruneOldSessions", () => {
       expect(r.deleted).toBe(1);
     }],
   });
+
+  unit("reports a recent oversized journal without changing it", {
+    given: ["one recent journal over a small test threshold", () => makeRoot([
+      ["large.jsonl", 1, "important resumable state\n".repeat(20)],
+    ])],
+    when: ["scanning it", ({ root, nowMs }) => ({
+      root,
+      result: pruneOldSessions({
+        roots: [root], nowMs, oversizedThresholdBytes: 100,
+      }),
+    })],
+    then: ["it is reported and remains byte-for-byte present", ({ root, result }) => {
+      try {
+        expect(result.oversized).toBe(1);
+        expect(result.oversizedBytes).toBeGreaterThan(100);
+        expect(result.oversizedFiles).toEqual([join(root, "large.jsonl")]);
+        expect(readFileSync(join(root, "large.jsonl"), "utf8")).toContain("resumable state");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
 });
 
 feature("formatJanitorResult", () => {
@@ -120,6 +154,18 @@ feature("formatJanitorResult", () => {
     then: ["shows deleted count + MB", (s) => {
       expect(s).toContain("deleted 4/4");
       expect(s).toContain("5.0MB");
+    }],
+  });
+
+  unit("oversized summary says the journal was left untouched", {
+    given: ["an oversized-only result", () => ({
+      scanned: 1, candidates: 0, deleted: 0, failed: 0, freedBytes: 0,
+      retentionDays: 14, dryRun: false, oversized: 1, oversizedBytes: 70 * 1024 * 1024,
+    })],
+    when: ["formatting", (r) => formatJanitorResult(r)],
+    then: ["the safety outcome is explicit", (s) => {
+      expect(s).toContain("1 recent oversized");
+      expect(s).toContain("left untouched");
     }],
   });
 });
