@@ -1,5 +1,6 @@
-// Session-file housekeeping. Claude Code (~/.claude/projects) and Codex
-// (~/.codex/sessions) write append-only jsonl logs. Two distinct problems:
+// Session-file housekeeping. Claude Code (~/.claude/projects), Codex
+// (~/.codex/sessions), and Kimi (~/.kimi-code/sessions) write append-only
+// jsonl logs. Two distinct problems:
 //
 //   1. DEAD sessions pile up forever (Codex keeps every past rollout). These
 //      are safe to DELETE once old enough — nobody reads them except a rare
@@ -15,20 +16,23 @@
 //      via auto-compact. After a compact the old file goes stale and THIS
 //      module reaps it once it ages out.
 //
-// Safety is mtime-based and needs no tmux cross-reference: an active pane
-// rewrites its jsonl continuously, so its mtime is always seconds old —
-// provably below any multi-day cutoff. The failure mode is one-directional:
-// worst case we keep a file we could have deleted, never delete a live one.
+// Retention is mtime-based. Deletion deliberately remains a coarse archival
+// policy; it never rewrites a session in place. Recent oversized files are
+// reported separately and left byte-for-byte intact so resume state cannot be
+// corrupted just to reclaim space.
 
 import { readdirSync, statSync, existsSync, unlinkSync, appendFileSync } from "fs";
 import { join } from "path";
 
 const DEFAULT_RETENTION_DAYS = 14;
+const DEFAULT_OVERSIZED_BYTES = 64 * 1024 * 1024;
 
-function defaultRoots() {
+/** WHAT: Returns provider session roots covered by housekeeping. WHY: Keeps Claude, Codex, and Kimi retention behavior aligned. */
+export function defaultSessionRoots(home = process.env.HOME) {
   return [
-    join(process.env.HOME, ".claude", "projects"),
-    join(process.env.HOME, ".codex", "sessions"),
+    join(home, ".claude", "projects"),
+    join(home, ".codex", "sessions"),
+    join(home, ".kimi-code", "sessions"),
   ];
 }
 
@@ -46,24 +50,15 @@ function findJsonlRecursive(dir, depth = 0, acc = []) {
   return acc;
 }
 
-/**
- * Delete session jsonl files older than the retention window. Never throws —
- * per-file failures are collected so one bad file can't abort a nightly run.
- * On a real run, appends a manifest line per deleted file to a log alongside
- * the first root, so deletions stay auditable/recoverable-from-knowledge.
- *
- * @param {object} opts
- * @param {string[]} [opts.roots]         - dirs to scan (default: claude + codex)
- * @param {number}   [opts.retentionDays] - delete files older than this (default 14)
- * @param {boolean}  [opts.dryRun]        - report only, delete nothing
- * @param {number}   [opts.nowMs]         - injectable clock for tests
- * @param {string|null} [opts.manifestPath] - override manifest log location
- * @returns {{ scanned, candidates, deleted, failed, freedBytes, retentionDays, dryRun, errors }}
- */
+// Per-file failures are collected so one bad file cannot abort a nightly run.
+// Real runs append an auditable manifest line beside the first root.
+/** WHAT: Saves storage by deleting expired session journals. WHY: Keeps archival cleanup from rewriting recent resumable provider state. */
 export function pruneOldSessions(opts = {}) {
   const {
-    roots = defaultRoots(),
+    roots = defaultSessionRoots(),
     retentionDays = Number(process.env.AMUX_JANITOR_RETENTION_DAYS) || DEFAULT_RETENTION_DAYS,
+    oversizedThresholdBytes = Number(process.env.AMUX_JANITOR_OVERSIZED_BYTES) || DEFAULT_OVERSIZED_BYTES,
+    maxOversizedPaths = 10,
     dryRun = false,
     nowMs = Date.now(),
     manifestPath = null,
@@ -74,6 +69,7 @@ export function pruneOldSessions(opts = {}) {
   const result = {
     scanned: 0, candidates: 0, deleted: 0, failed: 0,
     freedBytes: 0, retentionDays, dryRun, errors: [],
+    oversized: 0, oversizedBytes: 0, oversizedFiles: [],
   };
 
   for (const root of roots) {
@@ -81,7 +77,14 @@ export function pruneOldSessions(opts = {}) {
       result.scanned++;
       let st;
       try { st = statSync(path); } catch { continue; }
-      if (st.mtimeMs >= cutoffMs) continue; // touched recently → live, keep
+      if (st.mtimeMs >= cutoffMs) {
+        if (st.size >= oversizedThresholdBytes) {
+          result.oversized++;
+          result.oversizedBytes += st.size;
+          if (result.oversizedFiles.length < maxOversizedPaths) result.oversizedFiles.push(path);
+        }
+        continue;
+      }
       result.candidates++;
       result.freedBytes += st.size;
 
@@ -106,15 +109,18 @@ export function pruneOldSessions(opts = {}) {
   return result;
 }
 
-/** Human one-liner for logs / dream output. */
+/** WHAT: Formats the janitor result for logs and dream output. WHY: Keeps deletion and untouched oversized state visible together. */
 export function formatJanitorResult(r) {
   const mb = (b) => (b / (1024 * 1024)).toFixed(1);
+  const oversized = r.oversized
+    ? `; ${r.oversized} recent oversized file(s) (${mb(r.oversizedBytes)}MB) left untouched`
+    : "";
   if (r.candidates === 0) {
-    return `janitor: nothing older than ${r.retentionDays}d (${r.scanned} files scanned)`;
+    return `janitor: nothing older than ${r.retentionDays}d (${r.scanned} files scanned)${oversized}`;
   }
   if (r.dryRun) {
-    return `janitor (dry): would delete ${r.candidates} file(s) older than ${r.retentionDays}d, freeing ${mb(r.freedBytes)}MB`;
+    return `janitor (dry): would delete ${r.candidates} file(s) older than ${r.retentionDays}d, freeing ${mb(r.freedBytes)}MB${oversized}`;
   }
   const tail = r.failed ? `, ${r.failed} failed` : "";
-  return `janitor: deleted ${r.deleted}/${r.candidates} file(s) older than ${r.retentionDays}d, freed ${mb(r.freedBytes)}MB${tail}`;
+  return `janitor: deleted ${r.deleted}/${r.candidates} file(s) older than ${r.retentionDays}d, freed ${mb(r.freedBytes)}MB${tail}${oversized}`;
 }
