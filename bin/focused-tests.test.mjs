@@ -107,6 +107,14 @@ feature("focused PR tests", () => {
     }],
   });
 
+  unit("the Codex rollout reader maps to its split component suite", {
+    then: ["the alias lands the actual test path", () => {
+      const exists = existsSet(["test/codex-jsonl-reader.test.mjs"]);
+      expect(relatedTests("core/codex-jsonl-reader.mjs", { exists }))
+        .toEqual(["test/codex-jsonl-reader.test.mjs"]);
+    }],
+  });
+
   unit("the windows manager files map to their smoke and contract tests", {
     then: ["the loop, the installer, and the rescue tool all land their focused tests", () => {
       const exists = existsSet(["bin/windows-manager-smoke.test.mjs", "test/windows-manager-contract.test.mjs"]);

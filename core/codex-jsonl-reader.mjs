@@ -206,8 +206,7 @@ function readSessionMeta(filePath) {
   return payload;
 }
 
-// Prefer exact pane/worktree sessions, then the closest cwd ancestor. Arbitrary
-// descendants stay rejected; an on-disk `.git` marker proves pane ownership.
+// Prefer exact pane/worktree sessions; reject arbitrary descendants unless an on-disk `.git` proves ownership.
 function isPaneWorktreeCwd(paneDir, cwd) {
   if (!String(cwd).startsWith(`${paneDir}/`)) return false;
   let current = cwd;
@@ -230,6 +229,7 @@ function latestSessionFor(paneDir, { sessionDirs = codexSessionDirs() } = {}) {
   const candidates = [];
   for (const { path, mtime } of files) {
     const meta = readSessionMeta(path);
+    if (meta?.source !== "cli" || meta?.originator !== "codex-tui") continue;
     const cwd = meta?.cwd;
     if (!cwd) continue;
     if (paneDir === cwd) {
