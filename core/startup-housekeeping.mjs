@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { defaultSessionRoots, formatJanitorResult, pruneOldSessions } from "./janitor.mjs";
+import { formatTrimResult, trimOversizedSessions } from "./session-trim.mjs";
 
 const DEFAULT_MAX_LOG_BYTES = 8 * 1024 * 1024;
 const DEFAULT_KEEP_LOG_BYTES = 2 * 1024 * 1024;
@@ -77,14 +78,21 @@ export function runStartupHousekeeping({
     retentionDays: Number(env.AMUX_JANITOR_RETENTION_DAYS) || undefined,
     oversizedThresholdBytes: Number(env.AMUX_JANITOR_OVERSIZED_BYTES) || undefined,
   });
-  return { log, sessions };
+  const trim = trimOversizedSessions({
+    roots,
+    nowMs,
+    thresholdBytes: Number(env.AMUX_JANITOR_OVERSIZED_BYTES) || undefined,
+    minStableMs: Number(env.AMUX_TRIM_MIN_STABLE_MS) || undefined,
+    maxFiles: Number(env.AMUX_STARTUP_TRIM_MAX_FILES) || 8,
+  });
+  return { log, sessions, trim };
 }
 
 /** WHAT: Formats one concise startup receipt. WHY: Keeps changed and intentionally untouched storage visible to operators. */
-export function formatStartupHousekeeping({ log, sessions }) {
+export function formatStartupHousekeeping({ log, sessions, trim }) {
   const mib = (bytes) => (bytes / (1024 * 1024)).toFixed(1);
   const logSummary = log.rotated
     ? `bridge.log ${mib(log.beforeBytes)}→${mib(log.afterBytes)}MB`
     : `bridge.log ${mib(log.beforeBytes)}MB`;
-  return `storage: ${logSummary}; ${formatJanitorResult(sessions)}`;
+  return `storage: ${logSummary}; ${formatJanitorResult(sessions)}${trim ? `; ${formatTrimResult(trim)}` : ""}`;
 }
