@@ -18,11 +18,12 @@
 //
 // Retention is mtime-based. Deletion deliberately remains a coarse archival
 // policy; it never rewrites a session in place. Recent oversized files are
-// reported separately and left byte-for-byte intact so resume state cannot be
-// corrupted just to reclaim space.
+// reported separately. The distinct checkpoint-aware trim module may reclaim
+// only bytes the provider has already replaced with a compact summary.
 
-import { readdirSync, statSync, existsSync, unlinkSync, appendFileSync } from "fs";
+import { statSync, unlinkSync, appendFileSync } from "fs";
 import { join } from "path";
+import { findSessionJsonl } from "./session-trim.mjs";
 
 const DEFAULT_RETENTION_DAYS = 14;
 const DEFAULT_OVERSIZED_BYTES = 64 * 1024 * 1024;
@@ -34,20 +35,6 @@ export function defaultSessionRoots(home = process.env.HOME) {
     join(home, ".codex", "sessions"),
     join(home, ".kimi-code", "sessions"),
   ];
-}
-
-/** Recursively collect every *.jsonl path under `dir`. */
-function findJsonlRecursive(dir, depth = 0, acc = []) {
-  if (depth > 6 || !existsSync(dir)) return acc;
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); }
-  catch { return acc; }
-  for (const e of entries) {
-    const path = join(dir, e.name);
-    if (e.isDirectory()) findJsonlRecursive(path, depth + 1, acc);
-    else if (e.name.endsWith(".jsonl")) acc.push(path);
-  }
-  return acc;
 }
 
 // Per-file failures are collected so one bad file cannot abort a nightly run.
@@ -73,7 +60,7 @@ export function pruneOldSessions(opts = {}) {
   };
 
   for (const root of roots) {
-    for (const path of findJsonlRecursive(root)) {
+    for (const path of findSessionJsonl(root)) {
       result.scanned++;
       let st;
       try { st = statSync(path); } catch { continue; }
@@ -113,7 +100,7 @@ export function pruneOldSessions(opts = {}) {
 export function formatJanitorResult(r) {
   const mb = (b) => (b / (1024 * 1024)).toFixed(1);
   const oversized = r.oversized
-    ? `; ${r.oversized} recent oversized file(s) (${mb(r.oversizedBytes)}MB) left untouched`
+    ? `; ${r.oversized} recent oversized file(s) (${mb(r.oversizedBytes)}MB) not age-deleted`
     : "";
   if (r.candidates === 0) {
     return `janitor: nothing older than ${r.retentionDays}d (${r.scanned} files scanned)${oversized}`;

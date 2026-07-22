@@ -66,7 +66,7 @@ import {
 import { isSystemNoiseDirective } from "../core/system-noise.mjs";
 import { composeMorningDigest, digestProjects, boardDecisionItem } from "../core/morning-digest.mjs";
 import { collectCommitsSince, reposFromAgents } from "../core/commit-log.mjs";
-import { pruneOldSessions, formatJanitorResult } from "../core/janitor.mjs";
+import { cmdJanitor, cmdTrim } from "./trim.mjs";
 import { reapStalePlaywrightProcesses, formatPlaywrightReapResult } from "../core/playwright-watchdog.mjs";
 import { regenerateAgentsYaml } from "../sync.mjs";
 import yaml from "js-yaml";
@@ -3682,7 +3682,7 @@ Usage:
   agent dream                     Write/update nightly pane digest in workspace memory
     --since T                     Window to summarize (default: 24h)
     --dry                         Preview pane work, do nothing
-  agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)\n  agent doctor                    Health check: bridge, Suggestions board/sync, hooks, ledger, tmux (exit 0/1/2)\n  agent revive                    Post-boot: classify interrupted panes (ledger + Codex/Kimi journals) and selectively revive only them; --all for legacy whole-fleet respawn, --dry to preview\n  agent memory status             Memory warnings, compact backlog, latest dream
+  agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)\n  agent trim [--dry]              Reclaim pre-checkpoint bytes from inactive oversized Claude/Codex sessions\n  agent doctor                    Health check: bridge, Suggestions board/sync, hooks, ledger, tmux (exit 0/1/2)\n  agent revive                    Post-boot: classify interrupted panes (ledger + Codex/Kimi journals) and selectively revive only them; --all for legacy whole-fleet respawn, --dry to preview\n  agent memory status             Memory warnings, compact backlog, latest dream
   agent queue                     List live durable delivery jobs (id, target, age, state, attempts, reason, preview)
     --all                         Include terminal delivery history retained on disk
     --limit N                     Maximum rows (default 100, max 1000)
@@ -3801,6 +3801,7 @@ const FLAG_SPECS = {
     retry: "boolean", "defer-sentinel": "boolean", deferSentinel: "boolean",
   },
   janitor: { dry: "boolean", days: "number" },
+  trim: { dry: "boolean", "max-files": "number", "min-stable-minutes": "number" },
   "playwright-reap": { dry: "boolean", minutes: "number" },
   notifyuser: { level: "string", l: "string", title: "string", user: "string", u: "string", channel: "string", c: "string", force: "boolean", f: "boolean", dry: "boolean", test: "boolean", "idempotency-key": "string" },
   remind: {
@@ -4047,16 +4048,13 @@ export async function dispatch(argv, ctx) {
     }
 
     case "janitor": {
-      // Manual entry point for the housekeeping that also runs nightly inside
-      // `amux dream`. Mainly useful for `--dry` inspection / one-off reclaim.
       const { flags } = parseFlags(rest, FLAG_SPECS.janitor);
-      const r = pruneOldSessions({
-        dryRun: !!flags.dry,
-        ...(flags.days ? { retentionDays: flags.days } : {}),
-      });
-      console.log(formatJanitorResult(r));
-      for (const e of r.errors) console.warn(`  ! ${e}`);
-      return;
+      return cmdJanitor(flags);
+    }
+
+    case "trim": {
+      const { flags } = parseFlags(rest, FLAG_SPECS.trim);
+      return cmdTrim(flags);
     }
 
     case "playwright-reap":

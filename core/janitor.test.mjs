@@ -157,7 +157,7 @@ feature("formatJanitorResult", () => {
     }],
   });
 
-  unit("oversized summary says the journal was left untouched", {
+  unit("oversized summary separates age deletion from physical trim", {
     given: ["an oversized-only result", () => ({
       scanned: 1, candidates: 0, deleted: 0, failed: 0, freedBytes: 0,
       retentionDays: 14, dryRun: false, oversized: 1, oversizedBytes: 70 * 1024 * 1024,
@@ -165,7 +165,7 @@ feature("formatJanitorResult", () => {
     when: ["formatting", (r) => formatJanitorResult(r)],
     then: ["the safety outcome is explicit", (s) => {
       expect(s).toContain("1 recent oversized");
-      expect(s).toContain("left untouched");
+      expect(s).toContain("not age-deleted");
     }],
   });
 });
