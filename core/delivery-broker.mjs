@@ -20,6 +20,7 @@ import {
   NOT_INGESTING_UNVERIFIED_STREAK, isTargetProvenNotIngesting, waitForDeliveryJob,
 } from "./delivery-queue.mjs";
 import { recoverHiddenDeliveryTui, recoverSubmittedTui } from "./tui-stall-recovery.mjs";
+import { needsZoomFallback, terminalizeSlashRejection } from "./slash-ingest-guard.mjs";
 const ACTIVE_RETRY_MS = 1_000;
 const BLOCKED_RETRY_MS = 3_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
@@ -30,10 +31,6 @@ function blockedRetryMs(job, { drafted = false } = {}) {
   const base = drafted ? 5_000 : BLOCKED_RETRY_MS;
   const exponent = Math.min(5, Math.max(0, Number(job.attempts || 1) - 1));
   return Math.min(MAX_BLOCKED_RETRY_MS, base * (2 ** exponent));
-}
-
-function needsZoomFallback(result, submitted) {
-  return Boolean(result?.zoomRecoverable && !result.delivered && !submitted);
 }
 
 function queueEvent(job, state, extra = {}) {
@@ -565,6 +562,9 @@ export function createDeliveryBroker({
     job = queue.read(job.agentName, job.pane, job.id) || job;
     if (result.delivered && job.kind === "slash") return acknowledge(job, "slash");
     if (result.delivered && result.via === "echo") return acknowledge(job, "echo");
+    // An explicit engine rejection closes terminally: never blind-retried,
+    // never allowed into the fail-open submitted lane (slash-submit-recovery).
+    if (result.failed === "not-ingested") return terminalizeSlashRejection({ job, queue, now, queueEvent, notifyTerminal, reason: result.reason });
     if (cancellationRequested(job) && PRE_SUBMIT_STATES.has(job.status)) {
       return terminalizeNotSent(job);
     }

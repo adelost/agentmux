@@ -17,6 +17,7 @@
 
 import { appendEvent } from "./events.mjs";
 import { rewriteModelSlash } from "./claude-model.mjs";
+import { detectSlashTerminalRejection } from "./slash-ingest-guard.mjs";
 
 /**
  * Delivery receipt: every verified send leaves a ledger row, so "did my
@@ -227,7 +228,17 @@ async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
       if (attempt < maxRescues) await agent.sendEnter(agentName, pane);
       continue;
     }
-    if (!(await stuckInComposer(agent, agentName, pane, claudeCmd))) {
+    const paneTail = await captureComposerTail(agent, agentName, pane);
+    // An explicit engine rejection is terminal truth: the command left the
+    // composer and was refused. Checking it before the needle match matters,
+    // because the refusal line itself echoes the needle ("Unrecognized
+    // command: /compat. Did you mean /compact?") and fed 24 blind retries
+    // in the 2026-07-22 incident.
+    const rejection = detectSlashTerminalRejection(paneTail, claudeCmd);
+    if (rejection) {
+      return { delivered: false, rescues: attempt, failed: "not-ingested", reason: rejection.reason };
+    }
+    if (!stuckInComposer(paneTail, claudeCmd)) {
       return { delivered: true, rescues: attempt };
     }
     if (attempt < maxRescues) await agent.sendEnter(agentName, pane);
@@ -235,16 +246,19 @@ async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
   return { delivered: false, rescues: maxRescues };
 }
 
-/** The command text still sits in the composer region (last few lines). */
-async function stuckInComposer(agent, agentName, pane, claudeCmd) {
-  let text = "";
+/** Capture the composer tail once per rescue decision; unreadable stays fail-open. */
+async function captureComposerTail(agent, agentName, pane) {
   try {
-    text = await agent.capturePane(agentName, pane, 12);
+    return await agent.capturePane(agentName, pane, 12);
   } catch {
-    return false; // pane unreadable: nothing more a rescue-Enter could do
+    return ""; // pane unreadable: nothing more a rescue-Enter could do
   }
+}
+
+/** The command text still sits in the composer region (last few lines). */
+function stuckInComposer(text, claudeCmd) {
   const needle = claudeCmd.slice(0, 30);
   // Only the tail (composer region): scrollback legitimately echoes the
   // command as transcript output after successful execution.
-  return text.split("\n").slice(-4).some((line) => line.includes(needle));
+  return String(text).split("\n").slice(-4).some((line) => line.includes(needle));
 }

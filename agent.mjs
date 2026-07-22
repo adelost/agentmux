@@ -43,7 +43,6 @@ import {
   confirmCodexDraftReleased,
   codexComposerContainsPrompt,
   codexComposerEndsWithPrompt,
-  codexComposerHasPasteBlock,
   codexComposerMatchesOwnedDraft,
   codexComposerText,
   codexOffersQueueComposer,
@@ -73,6 +72,7 @@ import {
 } from "./core/tui-stall-recovery.mjs";
 import { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence.mjs";
 import { assertClaudeQuotaAvailable } from "./core/claude-quota-target.mjs";
+import { classifyCodexSlashEcho, waitForExactCodexDraftEcho } from "./core/slash-ingest-guard.mjs";
 export { buildClaudeLaunchCommand, buildCodexLaunchCommand, buildKimiLaunchCommand } from "./core/agent-launch-command.mjs";
 export { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence.mjs";
 const CODEX_SESSION_STATE_KEY = "codex_session_by_pane_profile_v1";
@@ -1198,6 +1198,15 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (dialect === "codex" && !exactDraft) {
       exactDraft = await waitForExactCodexDraft(agentName, pane, prompt);
       if (!exactDraft) {
+        // A short slash command has no JSONL receipt, so a composer whose
+        // bytes differ from the intended command must veto Enter here. The
+        // /compat incident submitted a torn echo and the engine refused it;
+        // neither the corrupted nor a foreign draft is ever cleared by us.
+        const echo = classifyCodexSlashEcho({
+          prompt,
+          snapshot: await captureScreen(agentName, pane).catch(() => ""),
+        });
+        if (echo.blocked) throw codexDeliveryBlocked(echo.reason, { zoomRecoverable: true });
         // Ratatui paint is advisory. The exact pane write above completed, so
         // a missing/torn composer frame cannot veto the submit attempt. JSONL
         // remains the only delivery acknowledgement after Enter.
@@ -1336,22 +1345,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     return { state: "foreign", busy, dialect, detail: composer.slice(0, 60) };
   }
 
-  async function waitForExactCodexDraft(agentName, pane, prompt, timeoutMs = 2_500) {
-    const deadline = Date.now() + timeoutMs;
-    // An atomic paste can collapse to a "[Pasted Content N chars]" block whose
-    // literal text is never visible. Delivery clears any foreign draft before
-    // pasting, so once that block appears it is OUR prompt; accept it so Enter
-    // submits (Codex expands the block on send).
-    const mayCollapse = promptRequiresAtomicPaste(prompt);
-    while (true) {
-      const snapshot = await captureScreen(agentName, pane).catch(() => "");
-      if (codexComposerContainsPrompt(snapshot, prompt)) return true;
-      if (mayCollapse && codexComposerEndsWithPrompt(snapshot, prompt)) return true;
-      if (mayCollapse && codexComposerHasPasteBlock(snapshot)) return true;
-      if (Date.now() >= deadline) return false;
-      await wait(200);
-    }
-  }
+  const waitForExactCodexDraft = (agentName, pane, prompt, timeoutMs = 2_500) =>
+    waitForExactCodexDraftEcho({
+      prompt,
+      timeoutMs,
+      captureScreen: () => captureScreen(agentName, pane),
+      sleep: wait,
+    });
 
   /**
    * A previous failed delivery can leave ITS text sitting in the composer.
