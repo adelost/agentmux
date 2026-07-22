@@ -431,10 +431,17 @@ feature("single-writer delivery broker", () => {
         echoCursor: { kind: "test", positions: {} },
       });
       let restarts = 0;
+      let running = false;
       const agent = acceptingAgent();
-      agent.paneProcessState = async () => ({ running: false, shell: true, dead: false, command: "bash" });
+      agent.paneProcessState = async () => running
+        ? ({ running: true, shell: false, dead: false, command: "codex" })
+        : ({ running: false, shell: true, dead: false, command: "bash" });
       agent.promptTransportState = async () => ({ state: "hidden", busy: false, dialect: "codex" });
-      agent.restartPaneExact = async () => { restarts++; return { ok: true, dialect: "codex" }; };
+      agent.restartPaneExact = async () => {
+        restarts++;
+        running = true;
+        return { ok: true, dialect: "codex" };
+      };
       const broker = createDeliveryBroker({ agent, queue, now: () => clock, notify: async () => {} });
       return { rootDir, queue, job, agent, broker, restarts: () => restarts,
         advance: () => { clock += 1_001; } };
@@ -2413,6 +2420,34 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
+  component("a dead CLI without a wake policy is queued instead of typed into bash", {
+    given: ["one durable directive targeting a shell-only pane", () => {
+      const rootDir = tempRoot();
+      const clock = 4_000_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({
+        agentName: "skyvw", pane: 4, text: "direktivet får inte slukas av bash",
+        createdAt: 1_000, orderKey: "001",
+      });
+      const agent = acceptingAgent();
+      agent.paneProcessState = async () => ({
+        command: "bash", dead: false, shell: true, running: false,
+      });
+      const broker = createDeliveryBroker({
+        agent, queue, now: () => clock, notify: async () => {},
+      });
+      return { rootDir, queue, job, agent, broker };
+    }],
+    when: ["the broker reaches the dead target", ({ broker }) => broker.kickTarget("skyvw", 4)],
+    then: ["no keystrokes are sent and the exact job remains pending", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.queue.read("skyvw", 4, ctx.job.id)).toMatchObject({
+        status: "pending", lastReason: "wake-refused:target CLI is not running",
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("a passing wake gate lets the durable message start exactly its target pane", {
     given: ["a head for a stopped pane and an accepting wake gate", () => {
       const rootDir = tempRoot();
@@ -2428,8 +2463,11 @@ feature("single-writer delivery broker", () => {
       const notices = [];
       const agent = acceptingAgent();
       agent.readyCalls = 0;
-      agent.ensureReady = async () => { agent.readyCalls += 1; };
-      agent.paneProcessState = async () => ({ command: "bash", dead: false, shell: true, running: false });
+      let running = false;
+      agent.ensureReady = async () => { agent.readyCalls += 1; running = true; };
+      agent.paneProcessState = async () => running
+        ? ({ command: "codex", dead: false, shell: false, running: true })
+        : ({ command: "bash", dead: false, shell: true, running: false });
       const broker = createDeliveryBroker({
         agent,
         queue,

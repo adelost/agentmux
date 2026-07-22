@@ -9,6 +9,7 @@ import { isLiveStatus } from "./pane-status.mjs";
 import { isSystemNoiseDirective } from "./system-noise.mjs";
 
 const OPEN_STATUSES = new Set(["open", "working", "partial", "needs-you"]);
+const LIVE_MATCH_WINDOW_MS = 15 * 60 * 1000;
 
 export function classifyAskTurn(turn = {}, opts = {}) {
   const {
@@ -106,6 +107,94 @@ export function filterAskEntries(entries = [], opts = {}) {
     out = out.slice(0, limit);
   }
   return out;
+}
+
+/**
+ * The durable ledger owns identity and retention; provider history only adds
+ * an observed answer/status while its session still exists. Legacy live turns
+ * remain visible until every producer has emitted durable rows at least once.
+ */
+export function joinAskLedgerEntries({
+  ledgerEntries = [],
+  liveEntries = [],
+  nowMs = Date.now(),
+  matchWindowMs = LIVE_MATCH_WINDOW_MS,
+} = {}) {
+  const byPrompt = new Map();
+  for (const live of liveEntries) {
+    const key = askPromptKey(live.agent, live.pane, live.prompt);
+    if (!byPrompt.has(key)) byPrompt.set(key, []);
+    byPrompt.get(key).push(live);
+  }
+  const claimed = new Set();
+  const rows = [];
+
+  for (const ledger of ledgerEntries) {
+    if (!ledger?.verbatim || isSystemNoiseDirective(ledger.verbatim)) continue;
+    const tsMs = parseTs(ledger.ts);
+    const candidates = byPrompt.get(askPromptKey(ledger.agent, ledger.pane, ledger.verbatim)) || [];
+    const live = candidates
+      .filter((candidate) => !claimed.has(candidate)
+        && ledgerMatchesLive(ledger, candidate, tsMs, matchWindowMs))
+      .sort((left, right) => Math.abs(left.tsMs - tsMs) - Math.abs(right.tsMs - tsMs))[0];
+    if (live) claimed.add(live);
+
+    rows.push({
+      ...(live || {}),
+      agent: ledger.agent,
+      pane: ledger.pane,
+      key: `${ledger.agent}:${ledger.pane}`,
+      timestamp: ledger.ts || live?.timestamp || null,
+      tsMs,
+      ageMs: Number.isFinite(tsMs) ? nowMs - tsMs : Infinity,
+      prompt: ledger.verbatim,
+      promptPreview: previewText(ledger.verbatim, 120),
+      reply: live?.reply || "",
+      replyPreview: live?.replyPreview || "",
+      status: live?.status || "archived",
+      open: live?.open || false,
+      jsonlFile: live?.jsonlFile || null,
+      sessionFile: ledger.sessionFile || live?.jsonlFile || null,
+      sessionId: ledger.sessionId || null,
+      source: ledger.source || "unknown",
+      repo: ledger.repo || ledger.agent,
+      ledgerPath: ledger.ledgerPath || null,
+      ledgerId: ledger.id || null,
+    });
+  }
+
+  for (const live of liveEntries) {
+    if (!claimed.has(live)) rows.push({ ...live, repo: live.repo || live.agent, legacyLiveOnly: true });
+  }
+  return rows;
+}
+
+export function summarizeAskEntries(entries = []) {
+  const groups = new Map();
+  for (const entry of entries) {
+    const repo = entry.repo || entry.agent || "unknown";
+    const group = groups.get(repo) || {
+      repo, total: 0, open: 0, archived: 0, answered: 0, newestTsMs: 0,
+    };
+    group.total++;
+    if (entry.open) group.open++;
+    if (entry.status === "archived") group.archived++;
+    else if (!entry.open) group.answered++;
+    if (Number.isFinite(entry.tsMs)) group.newestTsMs = Math.max(group.newestTsMs, entry.tsMs);
+    groups.set(repo, group);
+  }
+  return [...groups.values()].sort((left, right) =>
+    right.open - left.open || right.newestTsMs - left.newestTsMs || left.repo.localeCompare(right.repo));
+}
+
+function askPromptKey(agent, pane, prompt) {
+  return `${agent || ""}\u0000${Number(pane) || 0}\u0000${prompt || ""}`;
+}
+
+function ledgerMatchesLive(ledger, live, ledgerTsMs, matchWindowMs) {
+  if (ledger.sessionFile && live.jsonlFile && ledger.sessionFile === live.jsonlFile) return true;
+  if (!Number.isFinite(ledgerTsMs) || !Number.isFinite(live.tsMs)) return false;
+  return Math.abs(ledgerTsMs - live.tsMs) <= matchWindowMs;
 }
 
 function latestTextItem(items) {

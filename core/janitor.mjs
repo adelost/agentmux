@@ -24,6 +24,10 @@
 import { statSync, unlinkSync, appendFileSync } from "fs";
 import { join } from "path";
 import { findSessionJsonl } from "./session-trim.mjs";
+import {
+  appendSessionHousekeepingAudit,
+  defaultSessionHousekeepingAuditPath,
+} from "./session-housekeeping-audit.mjs";
 
 const DEFAULT_RETENTION_DAYS = 14;
 const DEFAULT_OVERSIZED_BYTES = 64 * 1024 * 1024;
@@ -49,10 +53,17 @@ export function pruneOldSessions(opts = {}) {
     dryRun = false,
     nowMs = Date.now(),
     manifestPath = null,
+    auditPath = null,
   } = opts;
 
   const cutoffMs = nowMs - retentionDays * 24 * 3600 * 1000;
   const manifest = manifestPath || join(roots[0] || ".", ".janitor-deleted.log");
+  const defaultRoots = defaultSessionRoots();
+  const usesDefaultRoots = roots.length === defaultRoots.length
+    && roots.every((root, index) => root === defaultRoots[index]);
+  const audit = auditPath || (usesDefaultRoots
+    ? defaultSessionHousekeepingAuditPath()
+    : `${manifest}.audit`);
   const result = {
     scanned: 0, candidates: 0, deleted: 0, failed: 0,
     freedBytes: 0, retentionDays, dryRun, errors: [],
@@ -78,14 +89,30 @@ export function pruneOldSessions(opts = {}) {
       if (dryRun) continue;
 
       try {
+        appendSessionHousekeepingAudit({
+          operation: "delete", phase: "intent", path, bytes: st.size,
+          reason: `retention>${retentionDays}d`,
+        }, { path: audit, now: () => nowMs });
         unlinkSync(path);
         result.deleted++;
         try {
+          appendSessionHousekeepingAudit({
+            operation: "delete", phase: "completed", path, bytes: st.size,
+            reason: `retention>${retentionDays}d`,
+          }, { path: audit, now: () => nowMs });
           const iso = new Date(nowMs).toISOString();
           const ageDays = Math.round((nowMs - st.mtimeMs) / (24 * 3600 * 1000));
           appendFileSync(manifest, `${iso}\t${st.size}\t${ageDays}d\t${path}\n`);
-        } catch {}
+        } catch (auditError) {
+          result.errors.push(`${path}: deletion completed but audit append failed: ${auditError.message}`);
+        }
       } catch (err) {
+        try {
+          appendSessionHousekeepingAudit({
+            operation: "delete", phase: "failed", path, bytes: st.size,
+            reason: `retention>${retentionDays}d`, error: err.message,
+          }, { path: audit, now: () => nowMs });
+        } catch {}
         result.failed++;
         result.freedBytes -= st.size; // didn't actually free it
         result.errors.push(`${path}: ${err.message}`);

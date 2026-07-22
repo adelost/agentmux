@@ -50,7 +50,7 @@ feature("pruneOldSessions", () => {
     given: ["one old (20d) + one fresh (2d)", () => makeRoot([["old.jsonl", 20], ["live.jsonl", 2]])],
     when: ["pruning with 14d retention", ({ root, nowMs }) =>
       pruneOldSessions({ roots: [root], retentionDays: 14, nowMs })],
-    then: ["old gone, live kept, bytes freed, manifest written", (r, { root, paths }) => {
+    then: ["old gone, live kept, bytes freed, and intent/completion audited", (r, { root, paths }) => {
       try {
         expect(r.candidates).toBe(1);
         expect(r.deleted).toBe(1);
@@ -59,9 +59,30 @@ feature("pruneOldSessions", () => {
         expect(r.freedBytes).toBeGreaterThan(0);
         const manifest = readFileSync(join(root, ".janitor-deleted.log"), "utf-8");
         expect(manifest).toContain("old.jsonl");
+        const audit = readFileSync(join(root, ".janitor-deleted.log.audit"), "utf8")
+          .trim().split("\n").map(JSON.parse);
+        expect(audit.map((row) => row.phase)).toEqual(["intent", "completed"]);
+        expect(audit.every((row) => row.path === paths["old.jsonl"])).toBe(true);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
+    }],
+  });
+
+  unit("refuses deletion when its durable intent cannot be recorded", {
+    given: ["one expired session and an invalid audit destination", () => {
+      const ctx = makeRoot([["old.jsonl", 30]]);
+      const blocker = join(ctx.root, "not-a-directory");
+      writeFileSync(blocker, "file");
+      return { ...ctx, auditPath: join(blocker, "audit.jsonl") };
+    }],
+    when: ["janitor attempts the deletion", ({ root, nowMs, auditPath }) =>
+      pruneOldSessions({ roots: [root], retentionDays: 14, nowMs, auditPath })],
+    then: ["the session remains and the operation is reported failed", (result, ctx) => {
+      try {
+        expect(result).toMatchObject({ deleted: 0, failed: 1 });
+        expect(existsSync(ctx.paths["old.jsonl"])).toBe(true);
+      } finally { rmSync(ctx.root, { recursive: true, force: true }); }
     }],
   });
 

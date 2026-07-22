@@ -20,7 +20,7 @@ export async function wakeDeliveryTarget({
   queueEvent,
   notifyBlocked,
 }) {
-  if (!wakeGate || typeof agent.paneProcessState !== "function") return { proceed: true, job };
+  if (typeof agent.paneProcessState !== "function") return { proceed: true, job };
   const processState = await agent.paneProcessState(job.agentName, job.pane).catch(() => null);
   if (!paneNeedsWake(processState)) return { proceed: true, job };
 
@@ -34,6 +34,9 @@ export async function wakeDeliveryTarget({
     return { proceed: false, job: await notifyBlocked(pending) };
   };
 
+  // Never type a prompt into a shell merely because this producer omitted
+  // the optional wake policy. The durable queue can wait for a real CLI.
+  if (!wakeGate) return refuse("target CLI is not running");
   const admission = await wakeGate({ agentName: job.agentName, pane: job.pane });
   if (!admission?.ok) return refuse(admission?.reason || "admission");
   const token = typeof wakeLifecycle?.prepare === "function"
@@ -43,8 +46,9 @@ export async function wakeDeliveryTarget({
 
   try {
     await agent.ensureReady(job.agentName, job.pane);
+    const ready = await agent.paneProcessState(job.agentName, job.pane).catch(() => null);
+    if (paneNeedsWake(ready)) throw new Error("target CLI did not start");
     if (typeof wakeLifecycle?.complete === "function") {
-      const ready = await agent.paneProcessState(job.agentName, job.pane).catch(() => null);
       const completed = await wakeLifecycle.complete({
         agentName: job.agentName,
         pane: job.pane,

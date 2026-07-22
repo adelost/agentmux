@@ -5,6 +5,8 @@ import {
   buildAskEntries,
   classifyAskTurn,
   filterAskEntries,
+  joinAskLedgerEntries,
+  summarizeAskEntries,
 } from "./ask-history.mjs";
 
 const turn = (overrides = {}) => ({
@@ -164,6 +166,74 @@ feature("ask-history: build and filter entries", () => {
     when: ["attaching anchors", ({ entry, anchors }) => attachAskLineAnchors([entry], anchors)],
     then: ["the entry gets its jsonl line", (entries) => {
       expect(entries[0].jsonlLine).toBe(42);
+    }],
+  });
+});
+
+feature("ask-history: durable ledger join", () => {
+  unit("live provider history enriches the durable ask instead of duplicating it", {
+    given: ["one ledger row and its answered live turn", () => ({
+      ledgerEntries: [{
+        id: "ask-1", ts: "2026-07-22T10:00:00.000Z",
+        agent: "skyvw", pane: 4, verbatim: "granska arkitekturen",
+        sessionFile: "/sessions/live.jsonl", repo: "skydive-altimeter",
+        ledgerPath: "/home/u/.agentmux/ask-ledger.jsonl",
+      }],
+      liveEntries: [{
+        agent: "skyvw", pane: 4, prompt: "granska arkitekturen",
+        timestamp: "2026-07-22T10:00:03.000Z", tsMs: Date.parse("2026-07-22T10:00:03Z"),
+        reply: "Klart.", replyPreview: "Klart.", status: "done", open: false,
+        jsonlFile: "/sessions/live.jsonl",
+      }],
+    })],
+    when: ["joining ledger identity with live status", (input) => joinAskLedgerEntries({
+      ...input, nowMs: Date.parse("2026-07-22T10:05:00Z"),
+    })],
+    then: ["one durable row carries the live result", (rows) => {
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        ledgerId: "ask-1", status: "done", reply: "Klart.",
+        repo: "skydive-altimeter", jsonlFile: "/sessions/live.jsonl",
+      });
+    }],
+  });
+
+  unit("a missing provider session is shown honestly as archived", {
+    when: ["joining an orphaned durable row", () => joinAskLedgerEntries({
+      ledgerEntries: [{
+        id: "ask-dead", ts: "2026-07-21T10:00:00.000Z",
+        agent: "skyvw", pane: 0, verbatim: "flytta in klockan i soluret",
+        sessionFile: "/deleted/session.jsonl", source: "pane-hook",
+      }],
+      liveEntries: [], nowMs: Date.parse("2026-07-22T10:00:00Z"),
+    })],
+    then: ["the ask remains searchable with its dead pointer", (rows) => {
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        status: "archived", open: false,
+        sessionFile: "/deleted/session.jsonl", jsonlFile: null,
+        prompt: "flytta in klockan i soluret",
+      });
+    }],
+  });
+
+  unit("legacy live-only asks survive migration and summaries group every repo", {
+    given: ["one archived ledger ask plus one old live-only ask", () => joinAskLedgerEntries({
+      ledgerEntries: [{
+        id: "a", ts: "2026-07-22T09:00:00Z", agent: "lsrc", pane: 3,
+        verbatim: "arkiverad", repo: "agentmux",
+      }],
+      liveEntries: [{
+        agent: "skyvw", pane: 4, prompt: "pågående", status: "working", open: true,
+        tsMs: Date.parse("2026-07-22T10:00:00Z"), timestamp: "2026-07-22T10:00:00Z",
+      }],
+    })],
+    when: ["summarizing all repositories", (rows) => summarizeAskEntries(rows)],
+    then: ["both repos and their honest states are counted", (summary) => {
+      expect(summary).toEqual([
+        expect.objectContaining({ repo: "skyvw", total: 1, open: 1, archived: 0 }),
+        expect.objectContaining({ repo: "agentmux", total: 1, open: 0, archived: 1 }),
+      ]);
     }],
   });
 });

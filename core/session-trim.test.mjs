@@ -48,6 +48,10 @@ feature("checkpoint-aware provider session trim", () => {
         expect(after).not.toContain("discard-me");
         expect(after.trim().split("\n").every((line) => Boolean(JSON.parse(line)))).toBe(true);
         expect(statSync(ctx.path).size).toBeLessThan(Buffer.byteLength(ctx.before));
+        const audit = readFileSync(join(ctx.path, "..", ".amux-session-housekeeping.audit"), "utf8")
+          .trim().split("\n").map(JSON.parse);
+        expect(audit.map((row) => row.phase)).toEqual(["intent", "completed"]);
+        expect(audit.every((row) => row.operation === "replace" && row.path === ctx.path)).toBe(true);
       } finally { rmSync(ctx.root, { recursive: true, force: true }); }
     }],
   });
