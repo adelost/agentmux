@@ -41,6 +41,11 @@ import {
   sleepingWakeDecision,
   writePaneSleepState,
 } from "../core/pane-sleep.mjs";
+import {
+  blockedWakeDecision,
+  planSleepRepair,
+  sleepProcessTruth,
+} from "../core/pane-sleep-repair.mjs";
 
 const ROLLUP_THROTTLE_MS = 30 * 60 * 1000;
 const MAX_SLEEPS_PER_SWEEP = 2;
@@ -81,7 +86,19 @@ export async function cmdSleep(ctx, agentName, pane, _opts = {}, deps = {}) {
   };
 
   try {
-    const previous = readPaneSleepState(agentName, pane, stateOptions);
+    let previous = readPaneSleepState(agentName, pane, stateOptions);
+    if (previous && (previous.status === "arming" || previous.status === "wake_pending")) {
+      // A bridge stop can strand an interrupted attempt. Stale records are
+      // re-judged against live truth first; fresh ones still fail closed.
+      const probe = await ctx.agent.paneProcessState(agentName, pane).catch(() => null);
+      const plan = planSleepRepair({
+        state: previous,
+        truth: sleepProcessTruth(probe, latestIdentity(paneDirectory(agent, pane))),
+        nowMs: now(),
+        ttlMs: deps.repairTtlMs,
+      });
+      if (plan.action !== "hold") previous = writePaneSleepState(plan.state, stateOptions);
+    }
     if (previous && previous.status !== "awake" && previous.status !== "blocked") {
       return fail(`sleep-state-${previous.status}`);
     }
@@ -262,7 +279,21 @@ export async function cmdWake(ctx, agentName, pane, { force = false } = {}, deps
     }
     let state = readPaneSleepState(agentName, pane, stateOptions);
     const identity = latestIdentity(paneDirectory(agent, pane));
-    const decision = sleepingWakeDecision({ state, sessionId: identity?.sessionId || null });
+    let decision = sleepingWakeDecision({ state, sessionId: identity?.sessionId || null });
+    if (!decision.ok && force && state?.status === "blocked") {
+      // `--force` is the documented way out of a blocked record: never blind,
+      // always the same process and session truth as a normal wake.
+      const probe = await ctx.agent.paneProcessState(agentName, pane).catch(() => null);
+      const verdict = blockedWakeDecision({
+        state,
+        truth: sleepProcessTruth(probe, identity),
+      });
+      if (!verdict.ok || verdict.action !== "wake") {
+        console.error(`wake-refused:${verdict.ok ? "sleep-state-blocked-pane-awake" : verdict.reason}`);
+        return exit(1);
+      }
+      decision = { ok: true, tracked: true, reason: verdict.reason };
+    }
     if (!decision.ok) {
       console.error(`wake-refused:${decision.reason}`);
       return exit(1);

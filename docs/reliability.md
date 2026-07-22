@@ -99,6 +99,17 @@ gracefully. A later durable message wakes only that recorded pane and session
 through the release-identity and memory-admission gates. Codex and Kimi sleep
 remain disabled until they expose equivalent exact receipts.
 
+Interrupted attempts recover instead of parking a pane. A bridge stop between
+arming and asleep, or between wake prepare and complete, leaves a durable
+record that is re-judged against live process and session truth once it is
+older than 15 minutes, both at bridge start and at the next sleep or wake
+attempt on that pane. A proven exited process with its recorded session still
+on disk becomes `asleep`; a proven running pane clears to `awake`; unclear
+evidence stays parked and the repair pass never stops or starts a process. A
+`blocked` record never recovers silently: `amux wake <agent> -p <pane>
+--force` re-verifies it against the same truth and wakes only a pane that is
+provably stopped with its exact recorded session on disk.
+
 ```bash
 amux sleep-watch --dry       # inspect decisions; never changes a pane
 amux sleep-watch --apply     # run the conservative controller
