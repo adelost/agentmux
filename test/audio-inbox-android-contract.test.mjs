@@ -41,6 +41,9 @@ feature("Android audio inbox source contract", () => {
         "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/ConversationPanel.java",
       )).toContain('"Read replies aloud"');
       expect(read(
+        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/ConversationPanel.java",
+      )).toContain('KEY_CONVERSATION_TARGET, "lsrc:3"');
+      expect(read(
         "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/ConversationController.java",
       )).toContain("awaitAgentReply");
       expect(read("channels/voice-input.mjs")).not.toContain("answer normally, then send");
