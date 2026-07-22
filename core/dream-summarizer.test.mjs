@@ -71,6 +71,21 @@ feature("stateless fleet dream input", () => {
     }],
   });
 
+  unit("native backend aliases never duplicate legacy filesystem journals", {
+    when: ["collecting a native-configured alias", () => collectDreamSources(
+      [{ name: "sky-native", backend: "native", dir: "/work", panes: [{ cmd: "claude" }] }],
+      Date.parse("2026-07-21T08:00:00Z"),
+      { readHistory: () => { throw new Error("must not read legacy aliases"); } },
+    )],
+    then: ["it is skipped explicitly until the runtime adapter contributes history", (result) => {
+      expect(result.sources).toEqual([]);
+      expect(result.unreadable).toEqual([]);
+      expect(result.skipped).toEqual([{
+        agent: "sky-native", pane: 0, reason: "native-history-adapter-required",
+      }]);
+    }],
+  });
+
   component("reads work before and after a Claude compact rotation", {
     given: ["two recently modified session files for one pane", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-dream-rotated-"));

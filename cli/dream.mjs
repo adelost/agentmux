@@ -136,6 +136,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
     }
     for (const source of batch.omitted) console.log(`- OMIT ${source.agent}:${source.pane}: ${source.omitReason}`);
     for (const source of observed.unreadable) console.log(`- UNREADABLE ${source.agent}:${source.pane}: ${source.reason}`);
+    for (const source of observed.skipped || []) console.log(`- SKIP ${source.agent}:${source.pane}: ${source.reason}`);
     runDreamJanitor(flags);
     return { ...observed, ...batch, dryRun: true };
   }

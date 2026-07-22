@@ -53,7 +53,14 @@ export function collectDreamSources(agents, sinceMs, options = {}) {
   const limit = options.limit || DREAM_SOURCE_TURNS;
   const sources = [];
   const unreadable = [];
+  const skipped = [];
   for (const agent of agents) {
+    if (agent.backend === "native") {
+      for (let pane = 0; pane < (agent.panes || []).length; pane++) {
+        skipped.push({ agent: agent.name, pane, reason: "native-history-adapter-required" });
+      }
+      continue;
+    }
     for (let pane = 0; pane < (agent.panes || []).length; pane++) {
       const engine = dreamPaneEngine(agent.panes[pane]);
       if (!engine) continue;
@@ -88,7 +95,7 @@ export function collectDreamSources(agents, sinceMs, options = {}) {
   }
   sources.sort((left, right) => right.latestMs - left.latestMs
     || left.agent.localeCompare(right.agent) || left.pane - right.pane);
-  return { sources, unreadable };
+  return { sources, unreadable, skipped };
 }
 
 function clipUtf8(value, maxBytes) {
