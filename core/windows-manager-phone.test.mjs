@@ -22,7 +22,10 @@ function setup(overrides = {}) {
     processTurn: async ({ text, turnId }) => {
       turns.push({ text, turnId, state: structuredClone(state) });
       if (overrides.fail) throw new Error("provider-down");
-      return { answer: `Svar: ${text}`, outcome: "ANSWERED" };
+      return {
+        answer: overrides.answer || `Svar: ${text}`,
+        outcome: overrides.outcome || "ANSWERED",
+      };
     },
     transcribeAudio: async () => ({ ok: true, text: "starta bryggan" }),
     nowMs: () => 1234,
@@ -84,6 +87,25 @@ feature("Windows manager phone endpoint", () => {
       expect(result.replay).toMatchObject({ status: 409, body: { error: "turn-failed" } });
       expect(context.turns).toHaveLength(1);
       expect(context.turns[0].text).toBe("starta bryggan");
+      await context.server.close();
+    }],
+  });
+
+  component("status metadata agrees with the measured answer", {
+    given: ["a healthy request whose observation reports a blocked subsystem", async () => {
+      const context = setup({ answer: "AMUX PARTIAL reason=memory-blocked", outcome: "RECOVERED" });
+      const address = await context.server.start();
+      return { ...context, url: `http://127.0.0.1:${address.port}` };
+    }],
+    when: ["the phone asks for status", ({ url }) => post(url, {
+      text: "status",
+      idempotencyKey: "phone-status",
+    })],
+    then: ["the API never contradicts the user-visible measured outcome", async (result, context) => {
+      expect(result).toMatchObject({
+        status: 200,
+        body: { answer: "AMUX PARTIAL reason=memory-blocked", outcome: "PARTIAL" },
+      });
       await context.server.close();
     }],
   });
