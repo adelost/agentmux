@@ -1,7 +1,7 @@
 import { expect, feature, unit } from "bdd-vitest";
 import { createStopAll } from "./stop-all.mjs";
 
-function fleet({ bridgeError = null } = {}) {
+function fleet({ bridgeError = null, receiptError = null } = {}) {
   const calls = [];
   const stopAll = createStopAll({
     listAgents: () => [
@@ -16,6 +16,14 @@ function fleet({ bridgeError = null } = {}) {
       if (bridgeError) throw bridgeError;
       return true;
     },
+    collectRecoveryCandidates: async () => {
+      calls.push("inventory");
+      return [{ agent: "ai", pane: 0, interruptedAtMs: 10, evidence: "ask-partial" }];
+    },
+    recordRecovery: (candidates) => {
+      calls.push(`receipt:${candidates.length}`);
+      if (receiptError) throw receiptError;
+    },
   });
   return { calls, stopAll };
 }
@@ -24,12 +32,13 @@ feature("atomic fleet stop", () => {
   unit("the bridge stops before any session is killed", {
     given: ["a fleet with two live sessions and one dead", () => fleet()],
     when: ["stopping everything", async (f) => {
-      const plan = await f.stopAll({ configPath: "/cfg" });
-      return { calls: f.calls, plan };
+      const result = await f.stopAll({ configPath: "/cfg" });
+      return { calls: f.calls, result };
     }],
-    then: ["bridge precedes kills, dead/native entries stay untouched", ({ calls, plan }) => {
-      expect(calls).toEqual(["bridge", "kill:ai"]);
-      expect(plan).toEqual(["ai", "bridge"]);
+    then: ["inventory and receipt precede kills; dead/native entries stay untouched", ({ calls, result }) => {
+      expect(calls).toEqual(["inventory", "bridge", "receipt:1", "kill:ai"]);
+      expect(result.stopped).toEqual(["ai", "bridge"]);
+      expect(result.recovery).toHaveLength(1);
     }],
   });
 
@@ -41,8 +50,21 @@ feature("atomic fleet stop", () => {
     }],
     then: ["the error propagates and no kill happened", ({ calls, error }) => {
       expect(error.message).toBe("did not stop cleanly");
-      expect(calls).toEqual(["bridge"]);
+      expect(calls).toEqual(["inventory", "bridge"]);
       expect(calls.filter((call) => call.startsWith("kill:"))).toHaveLength(0);
+    }],
+  });
+
+  unit("an unwritable recovery receipt kills zero sessions", {
+    given: ["a durable event append failure", () => fleet({ receiptError: new Error("ledger unavailable") })],
+    when: ["attempting the stop", async (f) => {
+      const error = await f.stopAll({ configPath: "/cfg" }).catch((err) => err);
+      return { calls: f.calls, error };
+    }],
+    then: ["the failure is loud and no session is killed", ({ calls, error }) => {
+      expect(error.message).toBe("ledger unavailable");
+      expect(calls).toEqual(["inventory", "bridge", "receipt:1"]);
+      expect(calls.some((call) => call.startsWith("kill:"))).toBe(false);
     }],
   });
 });

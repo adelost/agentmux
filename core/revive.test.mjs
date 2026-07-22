@@ -100,6 +100,59 @@ feature("planRevive — the 2026-07-10 crash as known-answer fixture", () => {
       expect(p.reason).toContain("boot");
     }],
   });
+
+  unit("same-boot stop receipts recover only panes without later activity", {
+    given: ["two deliberate-stop candidates, one already resumed", () => planRevive({
+      events: [
+        {
+          ts: "2026-07-22T06:40:00Z",
+          event: "fleet_stop_recovery",
+          stopId: "s1",
+          panes: [
+            { agent: "skyvw", pane: 0, interruptedAtMs: Date.parse("2026-07-22T06:20:00Z"), evidence: "ask-partial" },
+            { agent: "skydive", pane: 1, interruptedAtMs: Date.parse("2026-07-22T06:21:00Z"), evidence: "pane-working" },
+          ],
+        },
+        { ts: "2026-07-22T06:45:00Z", event: "prompt", session: "skyvw", pane: 0 },
+      ],
+      bootMs: BOOT,
+      panes: [{ agent: "skyvw", pane: 0 }, { agent: "skydive", pane: 1 }],
+      statuses: new Map([["skyvw:0", "idle"], ["skydive:1", "idle"]]),
+    })],
+    when: ["planning in the unchanged boot", (plan) => plan],
+    then: ["only the still-unhandled pane is briefed", (plan) => {
+      expect(plan.briefs).toMatchObject([{
+        agent: "skydive",
+        pane: 1,
+        source: "stop-all:pane-working",
+      }]);
+    }],
+  });
+
+  unit("a same-boot stop receipt is idempotent after its revive brief", {
+    given: ["one candidate and its exact recovery receipt", () => planRevive({
+      events: [
+        {
+          ts: "2026-07-22T06:40:00Z",
+          event: "fleet_stop_recovery",
+          stopId: "s1",
+          panes: [{ agent: "skydive", pane: 1, interruptedAtMs: 100, evidence: "ask-open" }],
+        },
+        {
+          ts: "2026-07-22T06:45:00Z",
+          event: "revive_brief",
+          session: "skydive",
+          pane: 1,
+          interruptedAtMs: 100,
+        },
+      ],
+      bootMs: BOOT,
+      panes: [{ agent: "skydive", pane: 1 }],
+      statuses: new Map([["skydive:1", "idle"]]),
+    })],
+    when: ["planning again", (plan) => plan],
+    then: ["no duplicate recovery is emitted", (plan) => expect(plan.briefs).toEqual([])],
+  });
 });
 
 feature("boot time + brief text", () => {
@@ -116,6 +169,14 @@ feature("boot time + brief text", () => {
       expect(b).toContain("[krasch-recovery]");
       expect(b).toContain("amux done");
       expect(b).toContain("återuppta");
+    }],
+  });
+
+  unit("manual-stop brief does not falsely call the event a host crash", {
+    then: ["the receipt source determines honest wording", () => {
+      const brief = reviveBrief(BOOT - 1_000, BOOT, "stop-all:ask-partial");
+      expect(brief).toContain("[stop-all-recovery]");
+      expect(brief).not.toContain("Värden startade om");
     }],
   });
 });
