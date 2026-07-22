@@ -1,6 +1,7 @@
 // One bounded, stateless nightly summarizer over recent fleet journals.
 
 import { spawn } from "child_process";
+import { delimiter, join } from "path";
 import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 import { readLastTurnsKimi } from "./kimi-jsonl-reader.mjs";
 import {
@@ -192,6 +193,12 @@ export function dreamSummarizerFailure(stdout, stderr, code) {
 }
 
 /** WHAT: Dispatches one no-tools, no-session Claude process. WHY: Prevents summarization from growing persistent agent context. */
+export function dreamSummarizerEnvironment(env = process.env) {
+  const homeBin = env.HOME ? join(env.HOME, ".local", "bin") : null;
+  return { ...env, PATH: [homeBin, env.PATH].filter(Boolean).join(delimiter) };
+}
+
+/** WHAT: Dispatches one no-tools, no-session Claude process. WHY: Uses the same Claude Code installation as interactive agents without persistent context. */
 export function runDreamSummarizer(prompt, options = {}) {
   const command = options.command || process.env.AMUX_DREAM_SUMMARIZER_BIN || "claude";
   const model = options.model || process.env.AMUX_DREAM_SUMMARIZER_MODEL || "haiku";
@@ -206,8 +213,10 @@ export function runDreamSummarizer(prompt, options = {}) {
     "--output-format", "json", "--json-schema", schema,
     "--model", model, "--effort", "low", "--max-budget-usd", String(maxBudgetUsd),
   ];
+  const spawnProcess = options.spawn || spawn;
+  const env = dreamSummarizerEnvironment();
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawnProcess(command, args, { stdio: ["pipe", "pipe", "pipe"], env });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {

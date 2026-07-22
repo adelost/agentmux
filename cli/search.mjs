@@ -9,21 +9,29 @@ import {
   searchEventLedger,
   lexicalSearch,
   formatHits,
-  saveLastResults,
-  loadLastResults,
   expandHit,
   withScore,
   dedupeByFile,
 } from "../core/search.mjs";
+import { defaultSearchStatePath, loadLastResults, saveLastResults } from "../core/search-state.mjs";
 
 /** WHAT: Describes the search CLI contract. WHY: Keeps actual flags and user guidance in one place. */
 export const SEARCH_HELP = `Usage:
-  amux search "term" [--max N] [--source NAME] [--fast]
+  amux search "term" [--max N] [--source NAME]
+  amux search "term" --semantic     Add the slower local semantic layer
   amux search "term" --show N       Search, then expand result N
   amux search --show N [--context N] Expand the last search result
   amux search --reindex              Rebuild the optional semantic index
 
-Searches configured memory/session roots plus the durable AMUX delivery ledger.`;
+Lexical search is the fast, current default. --semantic adds the local embedding
+index and always reports its age. Searches configured memory/session roots plus
+the durable AMUX delivery ledger.`;
+
+function formatAge(ms) {
+  if (!Number.isFinite(ms)) return "unknown age";
+  const hours = Math.floor(ms / 3_600_000);
+  return hours < 48 ? `${hours}h old` : `${Math.floor(hours / 24)}d old`;
+}
 
 function showResults(last, show, context) {
   if (!last) {
@@ -45,7 +53,8 @@ function showResults(last, show, context) {
 }
 
 /** WHAT: Routes search, expansion and reindex requests. WHY: Keeps search state and source selection out of the command router. */
-export async function cmdSearch(ctx, query, flags) {
+export async function cmdSearch(ctx, query, flags, dependencies = {}) {
+  const statePath = dependencies.statePath || defaultSearchStatePath();
   if (flags.help || flags.h) {
     console.log(SEARCH_HELP);
     return;
@@ -60,7 +69,7 @@ export async function cmdSearch(ctx, query, flags) {
   }
 
   if (!query && flags.show != null) {
-    showResults(loadLastResults(), flags.show, flags.context);
+    showResults(loadLastResults(statePath), flags.show, flags.context);
     return;
   }
   if (!query) {
@@ -87,9 +96,15 @@ export async function cmdSearch(ctx, query, flags) {
     includeFileAnd: ledgerHits.length === 0,
   });
   if (ledgerHits.length) hits = dedupeByFile([...hits, ...ledgerHits]);
-  if (!flags.fast) {
+  if (flags.semantic && !flags.fast) {
     try {
       const sem = await import("../core/search-semantic.mjs");
+      const status = sem.semanticIndexStatus();
+      if (!status.available) {
+        console.warn("⚠ semantic index missing; showing current lexical results. Run: amux search --reindex");
+      } else {
+        console.warn(`${status.stale ? "⚠" : "ℹ"} semantic index ${formatAge(status.ageMs)} · built ${status.builtAt}`);
+      }
       const semanticHits = await sem.semanticSearch(query, { k: 8 });
       const allowedRoots = new Set(roots.map((root) => root.name));
       const scoped = (semanticHits || []).filter((hit) => allowedRoots.has(hit.root));
@@ -107,7 +122,7 @@ export async function cmdSearch(ctx, query, flags) {
     return;
   }
   const current = { query, ts: new Date().toISOString(), hits: top };
-  saveLastResults(query, top);
+  saveLastResults(query, top, statePath);
   console.log(formatHits(top));
   console.log(`\n${top.length}/${hits.length} träffar, ${Date.now() - startedAt}ms  ·  expandera: amux search --show N`);
   if (flags.show != null) showResults(current, flags.show, flags.context);

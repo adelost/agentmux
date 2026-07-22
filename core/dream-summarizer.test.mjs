@@ -5,7 +5,7 @@ import { join } from "path";
 import { readRecentTurnsAcrossClaudeSessions } from "./jsonl-reader.mjs";
 import {
   buildDreamBatch, collectDreamSources, dreamPaneEngine, dreamSummarizerFailure, upsertDreamSummary,
-  validateDreamSummary,
+  validateDreamSummary, dreamSummarizerEnvironment,
 } from "./dream-summarizer.mjs";
 
 const turn = (timestamp, userPrompt, assistant = "done") => ({
@@ -19,6 +19,16 @@ const source = (agent, pane, latestMs, text = "work") => ({
 });
 
 feature("stateless fleet dream input", () => {
+  unit("headless Dream sees the same user-local Claude Code binary as interactive agents", {
+    when: ["building the cron-safe process environment", () => dreamSummarizerEnvironment({
+      HOME: "/home/test", PATH: "/usr/bin:/bin", SENTINEL: "kept",
+    })],
+    then: ["the existing PATH is preserved after ~/.local/bin", (env) => {
+      expect(env.PATH.split(":")).toEqual(["/home/test/.local/bin", "/usr/bin", "/bin"]);
+      expect(env.SENTINEL).toBe("kept");
+    }],
+  });
+
   unit("recognizes all supported coding engines", {
     when: ["classifying configured panes", () => [
       dreamPaneEngine({ cmd: "claude --continue" }),

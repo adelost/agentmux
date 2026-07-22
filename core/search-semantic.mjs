@@ -87,16 +87,37 @@ function listMarkdownFiles(root) {
   return execRg(args).split("\n").filter(Boolean);
 }
 
-function loadIndex() {
-  const dir = INDEX_DIR();
+function loadIndex(dir = INDEX_DIR()) {
   try {
-    const meta = JSON.parse(readFileSync(join(dir, "meta.json"), "utf-8"));
+    const raw = JSON.parse(readFileSync(join(dir, "meta.json"), "utf-8"));
+    const meta = Array.isArray(raw) ? raw : raw.files;
+    if (!Array.isArray(meta)) return null;
     const buf = readFileSync(join(dir, "vectors.bin"));
     const vectors = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
-    return { meta, vectors };
+    const builtAt = Array.isArray(raw)
+      ? new Date(statSync(join(dir, "meta.json")).mtimeMs).toISOString()
+      : raw.builtAt;
+    return { meta, vectors, builtAt, schemaVersion: raw.schemaVersion || 1 };
   } catch {
     return null;
   }
+}
+
+/** WHAT: Reports semantic-index provenance. WHY: Prevents old embeddings from masquerading as current search truth. */
+export function semanticIndexStatus({ now = Date.now(), maxAgeMs = 36 * 60 * 60 * 1000, indexDir = INDEX_DIR() } = {}) {
+  const index = loadIndex(indexDir);
+  if (!index) return { available: false, stale: true, reason: "missing" };
+  const builtMs = Date.parse(index.builtAt || "");
+  const ageMs = Number.isFinite(builtMs) ? Math.max(0, now - builtMs) : Number.POSITIVE_INFINITY;
+  return {
+    available: true,
+    stale: !Number.isFinite(ageMs) || ageMs > maxAgeMs,
+    builtAt: index.builtAt || null,
+    ageMs,
+    files: index.meta.length,
+    chunks: index.meta.reduce((sum, file) => sum + (file.chunks?.length || 0), 0),
+    schemaVersion: index.schemaVersion,
+  };
 }
 
 /**
@@ -153,7 +174,13 @@ export async function reindex(roots, { log = () => {} } = {}) {
   const flat = new Float32Array(rows.length * DIM);
   rows.forEach((r, i) => flat.set(r, i * DIM));
   writeFileSync(join(dir, "vectors.bin"), Buffer.from(flat.buffer));
-  writeFileSync(join(dir, "meta.json"), JSON.stringify(meta));
+  writeFileSync(join(dir, "meta.json"), JSON.stringify({
+    schemaVersion: 2,
+    builtAt: new Date().toISOString(),
+    model: MODEL,
+    dimension: DIM,
+    files: meta,
+  }));
   log(`Index klart: ${meta.length} filer, ${rows.length} chunks (${embedded} nya, ${reused} återanvända).`);
   return { files: meta.length, chunks: rows.length };
 }

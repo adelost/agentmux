@@ -19,8 +19,8 @@
 // just config.
 
 import { execFileSync } from "child_process";
-import { readFileSync, writeFileSync, statSync, mkdirSync, existsSync } from "fs";
-import { join, dirname, delimiter } from "path";
+import { readFileSync, statSync, existsSync } from "fs";
+import { join, delimiter } from "path";
 
 const MAX_FILESIZE = "8M"; // session jsonl lines can be huge; caps rg memory
 const SNIPPET_AROUND = 60;
@@ -297,23 +297,6 @@ export function searchEventLedger(query, path, { max = 12 } = {}) {
     hits.push(hit);
   }
   return hits.sort((a, b) => b.score - a.score || b.line - a.line).slice(0, max);
-}
-
-const LAST_RESULTS = () => join(process.env.HOME, ".agentmux", "search-last.json");
-
-export function saveLastResults(query, hits, path = LAST_RESULTS()) {
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify({ query, ts: new Date().toISOString(), hits }, null, 1));
-  } catch { /* --show just won't work; search output already printed */ }
-}
-
-export function loadLastResults(path = LAST_RESULTS()) {
-  try {
-    return JSON.parse(readFileSync(path, "utf-8"));
-  } catch {
-    return null;
-  }
 }
 
 /**

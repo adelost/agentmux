@@ -35,7 +35,7 @@ feature("search CLI contract", () => {
         jobId: "sundial-request",
         detail: "Skriv klockan ovanför soluret så tiden blir kompakt.",
       }));
-      return { root, configPath, eventsPath };
+      return { root, configPath, eventsPath, statePath: join(root, "search-state.json") };
     }],
     when: ["searching a paraphrase with --show", async (fixture) => {
       const previous = process.env.AMUX_EVENTS_PATH;
@@ -45,7 +45,7 @@ feature("search CLI contract", () => {
         await cmdSearch({ configPath: fixture.configPath }, "flytta in klockan i soluret", {
           fast: true,
           show: "1",
-        });
+        }, { statePath: fixture.statePath });
         return { fixture, text: output.mock.calls.flat().join("\n") };
       } finally {
         output.mockRestore();
