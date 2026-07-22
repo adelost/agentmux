@@ -111,7 +111,8 @@ feature("focused PR tests", () => {
     then: ["runtime, generated hints, and semantic index all have explicit coverage", () => {
       const exists = existsSet([
         "cli.test/commands.test.mjs", "test/native-runtime-service.test.mjs",
-        "cli/hints-sync.test.mjs", "core/search.test.mjs",
+        "cli/hints-sync.test.mjs", "core/search.test.mjs", "core/doctor.test.mjs",
+        "core/windows-wsl-probe.test.mjs",
       ]);
       expect(relatedTests("cli/runtime.mjs", { exists })).toEqual([
         "cli.test/commands.test.mjs", "test/native-runtime-service.test.mjs",
@@ -120,6 +121,8 @@ feature("focused PR tests", () => {
         .toEqual(["test/native-runtime-service.test.mjs"]);
       expect(relatedTests("core/hints-tool-guide.mjs", { exists })).toEqual(["cli/hints-sync.test.mjs"]);
       expect(relatedTests("core/search-semantic.mjs", { exists })).toEqual(["core/search.test.mjs"]);
+      expect(relatedTests("core/heartbeat.mjs", { exists }))
+        .toEqual(["core/doctor.test.mjs", "core/windows-wsl-probe.test.mjs"]);
     }],
   });
 
