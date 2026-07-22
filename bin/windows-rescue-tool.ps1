@@ -1,14 +1,13 @@
 # Thin rescue entry point for the Windows manager AI on the _windows_ channel.
 # Dot-sources the shared restarter I/O, runs exactly one bounded rescue
 # function, and prints the result as one JSON line: {"ok":..,"stage":..,"detail":..}
-# recover-verify prints the full chain JSON {"stages":..,"outcome":..,"report":..}
-# built by bin/windows-recovery.mjs; its stage details are fixed strings and
+# recover-verify prints the chain JSON built by bin/windows-recovery.mjs; its stage details are fixed strings and
 # pane names, never raw command output. restart-wsl is reachable only through
 # the manager's authenticated, deterministic local-command parser.
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet("start-wsl", "start-bridge", "restart-wsl", "recover", "recover-verify")]
+  [ValidateSet("get-status", "start-wsl", "start-bridge", "restart-wsl", "recover", "recover-verify")]
   [string]$Command,
   [string]$BeforeBootId = "",
   [int]$TimeoutSeconds = 300
@@ -59,6 +58,7 @@ $invokeRescue = {
   if ($null -eq $config) {
     return [pscustomobject]@{ ok = $false; stage = $Name; detail = "restarter-config-missing" }
   }
+  if ($Name -eq "get-status") { return Get-WslObservation -Config $config }
   if ($Name -eq "start-wsl") { return Start-WslBounded -Config $config }
   if ($Name -eq "start-bridge") { return Start-BridgeForeground -Config $config }
   if ($Name -eq "restart-wsl") { return Restart-Wsl -Config $config }
@@ -189,10 +189,10 @@ try {
   Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
 }
 
+if ($Command -eq "get-status" -and $null -ne $result) { $result | ConvertTo-Json -Depth 8 -Compress; exit 0 }
 if ($Command -eq "recover-verify" -and $null -ne $result -and $null -ne $result.json) {
   Write-Output $result.json
-  if ($result.ok) { exit 0 }
-  exit 1
+  exit $(if ($result.ok) { 0 } else { 1 })
 }
 Write-Result -Ok ([bool]$result.ok) -Stage ([string]$result.stage) -Detail ([string]$result.detail)
 if ($result.ok) { exit 0 }

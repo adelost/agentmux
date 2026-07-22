@@ -33,7 +33,6 @@ import {
 } from "../core/windows-manager-input.mjs";
 
 const BIN_DIR = dirname(fileURLToPath(import.meta.url));
-const PROBE_PATH = join(BIN_DIR, "windows-wsl-probe.mjs");
 const RESCUE_PATH = join(BIN_DIR, "windows-rescue-tool.ps1");
 const TRANSCRIBE_PATH = join(BIN_DIR, "windows-transcribe.py");
 const SNOWFLAKE = /^\d{17,20}$/u;
@@ -87,7 +86,8 @@ function runBounded(file, args, timeoutMs) {
 }
 
 async function observeDefault() {
-  const result = await runBounded(process.execPath, [PROBE_PATH], PROBE_TIMEOUT_MS);
+  const result = await runBounded("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", RESCUE_PATH,
+    "-Command", "get-status", "-TimeoutSeconds", "30"], PROBE_TIMEOUT_MS + 10_000);
   if (!result.ok) return { wsl: "unknown", wslReachable: false, timedOut: result.timedOut, error: "probe-unavailable" };
   try {
     const parsed = JSON.parse(result.stdout);
