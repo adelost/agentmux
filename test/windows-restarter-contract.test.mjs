@@ -97,6 +97,18 @@ feature("windows restarter source contract", () => {
     }],
   });
 
+  unit("the Windows-started non-login shell can execute the NVM amux binary", {
+    then: ["the resolved binary directory enters PATH before its env-node shebang runs", () => {
+      const resolverStart = IO.indexOf("function Get-AmuxScript");
+      const resolverEnd = IO.indexOf("function Test-BridgeCore", resolverStart);
+      const resolver = IO.slice(resolverStart, resolverEnd);
+      const requireBinary = resolver.indexOf("AMUX_FAILED reason=amux-not-found");
+      const exportNodePath = resolver.indexOf('export PATH="`$(dirname "`$AMUX_BIN"):`$PATH"');
+      expect(requireBinary).toBeGreaterThan(-1);
+      expect(exportNodePath).toBeGreaterThan(requireBinary);
+    }],
+  });
+
   unit("a leftover started action is reconciled by core and permanently fenced", {
     then: ["the startup path advances the exact message cursor", () => {
       expect(PS1).toContain('status -eq "started"');

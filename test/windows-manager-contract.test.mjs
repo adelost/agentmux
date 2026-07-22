@@ -103,10 +103,13 @@ feature("windows manager source contract", () => {
   });
 
   unit("the rescue tool dot-sources the shared io and stays bounded and redacted", {
-    then: ["io dot-sourced, five commands, JSON shape, job timeout, redaction", () => {
+    then: ["io dot-sourced, six commands, JSON shape, job timeout, redaction", () => {
       expect(RESCUE).toContain("windows-restarter-io.ps1");
       expect(RESCUE).toContain(". $RuntimeIo");
-      expect(RESCUE).toContain('ValidateSet("start-wsl", "start-bridge", "restart-wsl", "recover", "recover-verify")');
+      expect(RESCUE).toContain('ValidateSet("get-status", "start-wsl", "start-bridge", "restart-wsl", "recover", "recover-verify")');
+      expect(MGR).toContain('"-Command", "get-status"');
+      expect(MGR).not.toContain("PROBE_PATH");
+      expect(RESCUE).toContain('if ($Name -eq "get-status")');
       expect(RESCUE).toContain("Start-WslBounded");
       expect(RESCUE).toContain("Start-BridgeForeground");
       expect(RESCUE).toContain("Invoke-Recovery");

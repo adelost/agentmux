@@ -129,6 +129,7 @@ if [ -z "`$AMUX_BIN" ]; then
   AMUX_BIN="`$(find "`$HOME/.nvm/versions/node" -path '*/bin/amux' -type l 2>/dev/null | sort -V | tail -n 1)"
 fi
 [ -n "`$AMUX_BIN" ] || { echo 'AMUX_FAILED reason=amux-not-found'; exit 1; }
+export PATH="`$(dirname "`$AMUX_BIN"):`$PATH"
 ROOT="`$(dirname "`$(dirname "`$(readlink -f "`$AMUX_BIN")")")"
 $Body
 "@
