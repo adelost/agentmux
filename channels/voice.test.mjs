@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createVoicePWA } from "./voice.mjs";
+import { createAudioOutbox } from "../core/audio-outbox.mjs";
 
 // --- Helpers ---------------------------------------------------------------
 
@@ -36,8 +37,17 @@ function setupServer(opts = {}) {
   const calls = { sendOnly: [], isBusy: [], getResponse: [] };
   const agent = {
     sendOnly: async (name, text, pane) => { calls.sendOnly.push({ name, text, pane }); },
-    isBusy: async (name, pane) => { calls.isBusy.push({ name, pane }); return opts.busy ?? false; },
+    isBusy: async (name, pane) => {
+      calls.isBusy.push({ name, pane });
+      return opts.busyFunction ? opts.busyFunction() : (opts.busy ?? false);
+    },
     getResponse: async (name, pane) => { calls.getResponse.push({ name, pane }); return opts.response ?? "the answer"; },
+    hasResponseForPrompt: () => opts.responseReady
+      ? opts.responseReady()
+      : Boolean(opts.responseForPrompt),
+    getResponseStreamWithRaw: async () => ({
+      items: [{ type: "text", content: opts.responseForPrompt || "the exact answer" }],
+    }),
   };
 
   // Fake run() that returns canned transcription/tts output
@@ -69,6 +79,9 @@ function setupServer(opts = {}) {
     run,
     mirror,
     reactivePoke,
+    deliveryBroker: opts.deliveryBroker || null,
+    audioOutbox: opts.audioOutbox || null,
+    audioDiscovery: opts.audioDiscovery,
   });
 
   return {
@@ -301,6 +314,74 @@ feature("POST /api/send: audio path", () => {
   });
 });
 
+feature("POST /api/audio/send: native phone PTT", () => {
+  component("configured channel routes one transcript without synthesizing the user's own voice", {
+    given: ["audio inbox target, broker and durable outbox", async () => {
+      const root = mkdtempSync(join(tmpdir(), "voice-ptt-test-"));
+      const journalPath = join(root, "audio.jsonl");
+      const outbox = createAudioOutbox({ journalPath });
+      const enqueued = [];
+      const s = setupServer({
+        transcription: "starta om bryggan",
+        audioOutbox: outbox,
+        audioDiscovery: { serverId: "test", target: "chan-0" },
+        deliveryBroker: { enqueue: (job) => enqueued.push(job) },
+      });
+      const { url } = await s.pwa.start();
+      return { s, url, outbox, enqueued, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+    }],
+    when: ["same phone turn is posted twice after an ambiguous HTTP result", async ({ url }) => {
+      const body = JSON.stringify({
+        audio: Buffer.from("PHONE-AUDIO").toString("base64"),
+        filename: "ptt.m4a",
+        lang: "sv",
+        target: "chan-0",
+        idempotencyKey: "turn-phone-1",
+      });
+      return Promise.all([
+        request(`${url}/api/audio/send`, { method: "POST", headers: { "content-type": "application/json" }, body }),
+        request(`${url}/api/audio/send`, { method: "POST", headers: { "content-type": "application/json" }, body }),
+      ]);
+    }],
+    then: ["route is bound, broker key is stable and only the agent reply enters audio", async (responses, ctx) => {
+      expect(responses.map((response) => response.status)).toEqual([200, 200]);
+      expect(responses[0].body).toMatchObject({ transcript: "starta om bryggan" });
+      expect(responses[0].body).not.toHaveProperty("echoQueued");
+      expect(ctx.enqueued).toHaveLength(2);
+      expect(ctx.enqueued.every((job) => job.agentName === "claw" && job.pane === 0)).toBe(true);
+      expect(ctx.enqueued.every((job) => job.idempotencyKey === "turn-phone-1")).toBe(true);
+      expect(ctx.enqueued[0].text).not.toContain("amux say");
+      expect(ctx.enqueued[0].text).toContain("[amux-phone-turn:turn-phone-1]");
+      expect(responses[0].body.replyPrompt).toBe(ctx.enqueued[0].text);
+      expect(responses[0].body.destination).toEqual({ agent: "claw", pane: 0 });
+      expect(ctx.outbox.listPending({ consumerId: "phone", target: "chan-0" })).toEqual([]);
+      await ctx.s.pwa.stop(); ctx.s.cleanup(); ctx.cleanup();
+    }],
+  });
+
+  component("unconfigured target is rejected before transcription or delivery", {
+    given: ["server configured for another channel", async () => {
+      const root = mkdtempSync(join(tmpdir(), "voice-ptt-reject-"));
+      const s = setupServer({
+        audioOutbox: createAudioOutbox({ journalPath: join(root, "audio.jsonl") }),
+        audioDiscovery: { serverId: "test", target: "chan-1" },
+      });
+      const { url } = await s.pwa.start();
+      return { s, url, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+    }],
+    when: ["phone requests another target", async ({ url }) => request(`${url}/api/audio/send`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ audio: "YQ==", target: "chan-0", idempotencyKey: "turn-wrong" }),
+    })],
+    then: ["request is refused without a pane write", async (response, ctx) => {
+      expect(response.status).toBe(403);
+      expect(ctx.s.calls.sendOnly).toEqual([]);
+      await ctx.s.pwa.stop(); ctx.s.cleanup(); ctx.cleanup();
+    }],
+  });
+});
+
 // --- /api/tts --------------------------------------------------------------
 
 feature("POST /api/tts", () => {
@@ -412,6 +493,179 @@ feature("GET /api/events: SSE stream", () => {
       expect(r.status).toBe(400);
       expect(r.body.error).toContain("pane 9");
       await s.pwa.stop(); s.cleanup();
+    }],
+  });
+
+  component("an exact prompt closes the race when the turn finished before the first busy poll", {
+    given: ["an already completed structured reply", async () => {
+      const s = setupServer({ responseForPrompt: "reply for this phone turn" });
+      const { url } = await s.pwa.start();
+      return { s, url };
+    }],
+    when: ["the phone opens the reply stream with the submitted prompt", async ({ url }) => {
+      const response = await fetch(`${url}/api/events/claw/0?prompt=${encodeURIComponent("hej exakt")}`);
+      return response.text();
+    }],
+    then: ["the exact response is emitted even though working was never observed", async (stream, { s }) => {
+      expect(stream).toContain("reply for this phone turn");
+      expect(stream).toContain("event: done");
+      await s.pwa.stop(); s.cleanup();
+    }],
+  });
+
+  component("an unrelated active turn cannot be mistaken for the requested phone reply", {
+    given: ["another turn finishes before the requested prompt appears", async () => {
+      let busyPoll = 0;
+      let responsePoll = 0;
+      const s = setupServer({
+        responseForPrompt: "only the correlated reply",
+        busyFunction: () => busyPoll++ === 0,
+        responseReady: () => responsePoll++ >= 2,
+      });
+      const { url } = await s.pwa.start();
+      return { s, url };
+    }],
+    when: ["the exact reply stream observes both turns", async ({ url }) => {
+      const response = await fetch(`${url}/api/events/claw/0?prompt=${encodeURIComponent("phone prompt")}`);
+      return response.text();
+    }],
+    then: ["it waits for exact prompt evidence", async (stream, { s }) => {
+      expect(stream).toContain("only the correlated reply");
+      await s.pwa.stop(); s.cleanup();
+    }],
+  });
+});
+
+feature("explicit audio phone feed", () => {
+  component("discovery returns one verified default target and fails closed when unconfigured", {
+    given: ["configured and unconfigured servers", async () => {
+      const configured = setupServer({
+        audioDiscovery: {
+          serverId: "abyss-wsl",
+          target: "1502949109491961917",
+        },
+      });
+      const missing = setupServer();
+      const configuredAddress = await configured.pwa.start();
+      const missingAddress = await missing.pwa.start();
+      return { configured, missing, configuredAddress, missingAddress };
+    }],
+    when: ["the phone requests both discovery documents", async (ctx) => ({
+      configured: await request(`${ctx.configuredAddress.url}/api/audio/config`),
+      missing: await request(`${ctx.missingAddress.url}/api/audio/config`),
+    })],
+    then: ["only the explicit versioned configuration is discoverable", async (result, ctx) => {
+      expect(result.configured.status).toBe(200);
+      expect(result.configured.body).toEqual({
+        service: "agentmux-audio-inbox",
+        schemaVersion: 2,
+        serverId: "abyss-wsl",
+        target: "1502949109491961917",
+        defaultTarget: null,
+        targets: [],
+      });
+      expect(result.missing.status).toBe(503);
+      await ctx.configured.pwa.stop();
+      await ctx.missing.pwa.stop();
+      ctx.configured.cleanup();
+      ctx.missing.cleanup();
+    }],
+  });
+
+  component("SSE replays one event and receipts keep received distinct from played", {
+    given: ["a restarted durable outbox and voice server", async () => {
+      const root = mkdtempSync(join(tmpdir(), "voice-audio-feed-test-"));
+      const journalPath = join(root, "audio.jsonl");
+      const publisher = createAudioOutbox({
+        journalPath,
+        now: () => new Date("2026-07-20T15:00:00.000Z"),
+        id: () => "evt-phone-1",
+      });
+      publisher.publish({ text: "Hej i lurarna", target: "chan-0" });
+      const s = setupServer({
+        audioOutbox: createAudioOutbox({
+          journalPath,
+          now: () => new Date("2026-07-20T15:00:01.000Z"),
+        }),
+      });
+      const { url } = await s.pwa.start();
+      return { root, s, url };
+    }],
+    when: ["the phone receives the SSE item then posts received and queued", async ({ url }) => {
+      const controller = new AbortController();
+      const response = await fetch(
+        `${url}/api/audio/events?consumerId=phone-1&target=chan-0`,
+        { signal: controller.signal },
+      );
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let stream = "";
+      while (!stream.includes("event: audio")) {
+        const chunk = await reader.read();
+        stream += decoder.decode(chunk.value || new Uint8Array());
+      }
+      controller.abort();
+      const received = await request(`${url}/api/audio/events/evt-phone-1/receipts`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ consumerId: "phone-1", state: "received" }),
+      });
+      const queued = await request(`${url}/api/audio/events/evt-phone-1/receipts`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ consumerId: "phone-1", state: "queued" }),
+      });
+      const history = await request(
+        `${url}/api/audio/events/evt-phone-1/receipts?consumerId=phone-1`,
+      );
+      return { stream, received, queued, history };
+    }],
+    then: ["the event has a stable SSE id and no played receipt was synthesized", async (result, ctx) => {
+      expect(result.stream).toContain("id: evt-phone-1");
+      expect(result.stream).toContain("Hej i lurarna");
+      expect(result.received.status).toBe(201);
+      expect(result.queued.status).toBe(201);
+      expect(result.history.body.receipts.map((entry) => entry.state))
+        .toEqual(["received", "queued"]);
+      await ctx.s.pwa.stop();
+      ctx.s.cleanup();
+      rmSync(ctx.root, { recursive: true, force: true });
+    }],
+  });
+
+  component("playback-started makes restart replay-safe and receipt retries are idempotent", {
+    given: ["one event with received and queued receipts", async () => {
+      const root = mkdtempSync(join(tmpdir(), "voice-audio-receipt-test-"));
+      const journalPath = join(root, "audio.jsonl");
+      const outbox = createAudioOutbox({
+        journalPath,
+        now: () => new Date("2026-07-20T15:00:00.000Z"),
+        id: () => "evt-phone-2",
+      });
+      outbox.publish({ text: "En gång", target: "chan-0" });
+      outbox.receipt({ eventId: "evt-phone-2", consumerId: "phone-1", state: "received" });
+      outbox.receipt({ eventId: "evt-phone-2", consumerId: "phone-1", state: "queued" });
+      const s = setupServer({ audioOutbox: createAudioOutbox({ journalPath }) });
+      const { url } = await s.pwa.start();
+      return { root, journalPath, s, url };
+    }],
+    when: ["playback-started is posted twice", async ({ url }) => {
+      const post = () => request(`${url}/api/audio/events/evt-phone-2/receipts`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ consumerId: "phone-1", state: "playback-started" }),
+      });
+      return { first: await post(), retry: await post() };
+    }],
+    then: ["the retry is accepted without a second row and the event is no longer pending", async (result, ctx) => {
+      expect(result.first.status).toBe(201);
+      expect(result.retry.status).toBe(200);
+      expect(result.retry.body.duplicate).toBe(true);
+      await ctx.s.pwa.stop();
+      ctx.s.cleanup();
+      const restarted = createAudioOutbox({ journalPath: ctx.journalPath });
+      expect(restarted.listPending({ consumerId: "phone-1", target: "chan-0" })).toEqual([]);
+      rmSync(ctx.root, { recursive: true, force: true });
     }],
   });
 });

@@ -76,6 +76,7 @@ import { spawn, execSync } from "child_process";
 import { runOneshot, showRunLog } from "./run.mjs";
 import { executePlan, showPlanLog } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
+import { publishSpeechEvent, synthesizeSpeech } from "./speech.mjs";
 import { groupNativeTurns, nativeHistoryRows } from "../channels/native-runtime-watcher.mjs";
 import { cmdRuntime } from "./runtime.mjs";
 import {
@@ -2957,10 +2958,8 @@ async function cmdSyncOffline({ allowManagedTakeover = false } = {}) {
 }
 
 /**
- * Speak a short string into the calling pane's bound Discord channel
- * via edge-tts + REST file-upload. The CLI alternative to the auto-tts
- * watcher, useful when an agent wants to fire a crafted spoken summary
- * that's distinct from the full written reply.
+ * Speak a short string into the calling pane's bound Discord channel.
+ * This is an explicit one-shot action and is never called automatically.
  *
  * Usage:
  *   amux say "Klart, deploy uppe."         # post to current pane's channel
@@ -2968,8 +2967,7 @@ async function cmdSyncOffline({ allowManagedTakeover = false } = {}) {
  *   amux say -p claw:2 "..."                # explicit agent:pane
  *   amux say --voice 'sv-SE-SofieNeural' "..."  # different voice
  *
- * Truncates at 1500 chars to keep the clip under ~90 sec — same cap as
- * the auto-tts watcher, set per the in-car listener brief.
+ * Truncates at 1500 chars to keep the clip under about 90 seconds.
  */
 async function cmdSay(args, ctx) {
   const { execSync: execSyncFn } = await import("child_process");
@@ -3017,28 +3015,19 @@ async function cmdSay(args, ctx) {
       if (!channelId) { console.error(`No Discord channel bound to ${sender}`); process.exit(1); }
     }
   }
-
-  // Generate TTS — match the bridge's edge-tts call shape.
   const voice = flags.voice || flags.v || process.env.TTS_VOICE || "sv-SE-MattiasNeural";
-  const clean = text.replace(/[`*_~|]/g, "").slice(0, 1500);
-  const ttsPath = `/tmp/amux-say-${Date.now()}.mp3`;
+  let speech;
   try {
-    execSyncFn(
-      `edge-tts --voice '${voice}' --text '${esc(clean)}' --write-media '${ttsPath}'`,
-      { timeout: 30000, stdio: ["ignore", "ignore", "pipe"] }
-    );
+    const audioEvent = publishSpeechEvent(text, channelId);
+    speech = synthesizeSpeech(text, { voice });
+    await sendFileToChannelId(channelId, speech.mediaPath, speech.clean);
+    console.log(`spoken (${speech.clean.length} chars) → ${channelId} · audio event ${audioEvent.eventId}`);
   } catch (err) {
-    console.error(`edge-tts failed: ${err.message}`);
-    process.exit(1);
+    console.error(`amux say failed: ${err.message}`);
+    process.exitCode = 1;
+  } finally {
+    speech?.cleanup();
   }
-
-  // Post the text alongside the mp3 so Discord shows a readable summary
-  // — tool calls get truncated, but a plain message body doesn't.
-  await sendFileToChannelId(channelId, ttsPath, clean);
-  console.log(`spoken (${clean.length} chars) → ${channelId}`);
-
-  // Cleanup the local mp3 — Discord has it now.
-  try { (await import("fs")).unlinkSync(ttsPath); } catch {}
 }
 
 /**
@@ -3622,6 +3611,10 @@ Usage:
     -c <channelId>                Explicit Discord channel ID
     -p <agent>:<pane>             Explicit agent:pane channel mapping
     --dry                         Print target without posting
+  agent say "text"                Explicitly send one spoken MP3; never automatic
+    -c <channelId>                Explicit Discord channel ID
+    -p <agent>:<pane>             Explicit agent:pane channel mapping
+    --voice <name>                Override the configured edge-tts voice
   agent quota                     Shared account quota: Claude session/week/Fable + Codex week
   agent r                         Resume last agent
   agent help                      Show this message
@@ -3637,7 +3630,7 @@ Bridge controls (talk to the running bridge):
   agent thinking [on|off|toggle|status]
                                   Real-time text streaming flag (default on)
   agent tts [on|off|toggle|status]
-                                  Text-to-speech flag
+                                  Legacy preference only; never triggers automatic speech
 
 Config source: ~/.agentmux/agentmux.yaml (generated runtime config stays internal)
 Socket: /tmp/openclaw-claude.sock`;

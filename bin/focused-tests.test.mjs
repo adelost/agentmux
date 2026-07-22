@@ -90,11 +90,12 @@ feature("focused local tests", () => {
       const exists = existsSet([
         "core/tui-stall-recovery.test.mjs",
         "core/delivery-notices.test.mjs",
+        "test/audio-inbox-android-contract.test.mjs",
       ]);
       expect(relatedTests("agent.mjs", { exists }))
         .toEqual(["core/tui-stall-recovery.test.mjs"]);
       expect(relatedTests("index.mjs", { exists }))
-        .toEqual(["core/delivery-notices.test.mjs"]);
+        .toEqual(["core/delivery-notices.test.mjs", "test/audio-inbox-android-contract.test.mjs"]);
       expect(unmappedExecutables(["agent.mjs", "index.mjs"], { exists })).toEqual([]);
     }],
   });
@@ -148,6 +149,19 @@ feature("focused local tests", () => {
         .toEqual(["test/windows-manager-install-contract.test.mjs"]);
       expect(unmappedExecutables(["bin/windows-manager-install.ps1"], { exists: installerExists }))
         .toEqual([]);
+    }],
+  });
+
+  unit("Android audio sources map to one fast source contract", {
+    then: ["Java, Gradle and Android metadata share the bounded contract", () => {
+      const contract = "test/audio-inbox-android-contract.test.mjs";
+      const exists = existsSet([contract]);
+      expect(relatedTests(
+        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/MainActivity.java",
+        { exists },
+      )).toEqual([contract]);
+      expect(relatedTests("android/audio-inbox/app/build.gradle.kts", { exists }))
+        .toEqual([contract]);
     }],
   });
 });

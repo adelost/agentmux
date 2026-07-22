@@ -8,6 +8,9 @@
 //                                         disclaimer, then feeds the pane)
 //   GET  /api/events/:agent/:pane         SSE stream: status + response text
 //   POST /api/tts                         text → MP3 audio (edge-tts)
+//   GET  /api/audio/events                SSE explicit-audio feed + bounded replay
+//   POST /api/audio/events/:id/receipts   durable phone playback receipt
+//   POST /api/audio/send                  native phone push-to-talk
 //
 // Auth: none. Backend binds 127.0.0.1 by default; tailnet exposure goes via
 // Tailscale Serve so the network IS the auth boundary. Same-origin static
@@ -15,11 +18,13 @@
 
 import http from "http";
 import { stripPaneChrome } from "../core/pane-chrome.mjs";
-import { writeFileSync, unlinkSync, readFileSync, existsSync, statSync } from "fs";
+import { unlinkSync, readFileSync, existsSync, statSync } from "fs";
 import { randomBytes } from "crypto";
 import { join, resolve, extname } from "path";
 import yaml from "js-yaml";
 import { esc } from "../lib.mjs";
+import { createAudioFeedHandlers } from "./audio-feed.mjs";
+import { createVoiceInput } from "./voice-input.mjs";
 
 // Minimal mime map for the static PWA bundle. Anything not listed gets
 // application/octet-stream (browsers handle it; this is only for the
@@ -44,12 +49,9 @@ const MIME = {
 };
 
 const DEFAULT_POLL_INTERVAL_MS = 1500;
-const MAX_AUDIO_BYTES = 25 * 1024 * 1024; // 25 MB (matches OpenAI Whisper limit)
-const TRANSCRIPT_PREFIX = "[transcribed voice, may contain speech-to-text errors — interpret intent]";
 
 /**
  * Create (but don't start) the Voice PWA HTTP server.
- *
  * @param {object} deps
  * @param {number} deps.port                      TCP port to bind
  * @param {string} deps.host                      interface to bind (default 127.0.0.1)
@@ -67,6 +69,7 @@ const TRANSCRIPT_PREFIX = "[transcribed voice, may contain speech-to-text errors
  * @returns {{ start: () => Promise<{url}>, stop: () => Promise<void>, _handler: Function }}
  *   _handler is exposed for tests that wire their own http.Server.
  */
+/** WHAT: Builds the tailnet-local voice and explicit-audio server. WHY: Keeps phone transport behind one configured network boundary. */
 export function createVoicePWA(deps) {
   const {
     port = 8080,
@@ -81,6 +84,7 @@ export function createVoicePWA(deps) {
     reactivePoke = null,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     staticDir = null,
+    audioOutbox = null,
   } = deps;
 
   if (!agent) throw new Error("voice pwa: agent dep missing");
@@ -124,6 +128,27 @@ export function createVoicePWA(deps) {
     return null;
   }
 
+  function listPhoneTargets() {
+    const configured = String(deps.audioDiscovery?.target || "").trim();
+    if (!configured) return [];
+    for (const [name, entry] of Object.entries(loadAgents())) {
+      const mapping = entry?.discord;
+      if (!mapping || typeof mapping !== "object" || !Object.hasOwn(mapping, configured)) continue;
+      const pane = Number(mapping[configured]);
+      if (!Number.isInteger(pane)) continue;
+      return [{
+        id: `${name}:${pane}`,
+        label: entry?.panes?.[pane]?.label || `${name}:${pane}`,
+        kind: "agent",
+        agent: name,
+        pane,
+        audioTarget: configured,
+        favorite: true,
+      }];
+    }
+    return [];
+  }
+
   function validatePane(name, pane) {
     const doc = loadAgents();
     const entry = doc[name];
@@ -141,14 +166,11 @@ export function createVoicePWA(deps) {
   function agentEntry(name) {
     return loadAgents()[name] || null;
   }
-
   // ---------- HTTP plumbing ---------------------------------------------
-
   function json(res, status, body) {
     res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
     res.end(JSON.stringify(body));
   }
-
   function readBody(req, limit = 1024 * 1024) {
     return new Promise((resolve, reject) => {
       const chunks = [];
@@ -170,82 +192,26 @@ export function createVoicePWA(deps) {
     catch { throw new Error("invalid JSON body"); }
   }
 
+  const audioFeed = createAudioFeedHandlers({
+    audioOutbox,
+    discovery: deps.audioDiscovery,
+    json,
+    parseJsonBody,
+    pollIntervalMs,
+    targets: listPhoneTargets,
+  });
+
   // ---------- Route handlers --------------------------------------------
 
   async function handleAgents(req, res) {
     json(res, 200, listAgentsForResponse());
   }
 
-  async function handleSend(req, res, name, paneStr) {
-    const pane = parseInt(paneStr);
-    if (Number.isNaN(pane)) return json(res, 400, { error: "pane must be an integer" });
-    const v = validatePane(name, pane);
-    if (!v.ok) return json(res, 400, { error: v.error });
-
-    let body;
-    try { body = await parseJsonBody(req, MAX_AUDIO_BYTES + 1024 * 1024); }
-    catch (err) { return json(res, 400, { error: err.message }); }
-
-    let text = null;
-    let transcript = null;
-    if (typeof body.text === "string" && body.text.trim()) {
-      text = body.text;
-    } else if (typeof body.audio === "string" && body.audio.length > 0) {
-      // base64 audio blob → tmp file → whisper transcript
-      const ext = (body.filename?.split(".").pop() || "webm").toLowerCase().replace(/[^a-z0-9]/g, "") || "webm";
-      const tmpPath = join("/tmp", `voice-pwa-${randomBytes(8).toString("hex")}.${ext}`);
-      try {
-        writeFileSync(tmpPath, Buffer.from(body.audio, "base64"));
-      } catch (err) {
-        return json(res, 400, { error: `invalid base64 audio: ${err.message}` });
-      }
-      try {
-        const lang = (body.lang || "sv").replace(/[^a-z]/g, "");
-        const { stdout } = await run(`'${esc(transcribeScript)}' '${esc(tmpPath)}' '${esc(lang)}'`, 60000);
-        const raw = String(stdout || "").trim();
-        if (!raw) {
-          return json(res, 422, { error: "transcription empty — audio may have been silent or unintelligible" });
-        }
-        transcript = raw;
-        text = `${TRANSCRIPT_PREFIX} ${raw}`;
-      } catch (err) {
-        return json(res, 500, { error: `transcription failed: ${err.message}` });
-      } finally {
-        try { unlinkSync(tmpPath); } catch {}
-      }
-    } else {
-      return json(res, 400, { error: "body must contain either 'text' or 'audio' (base64)" });
-    }
-
-    // Persist before acknowledging the HTTP request. Production uses the
-    // bridge broker; the direct path remains only for isolated tests.
-    try {
-      if (deliveryBroker) {
-        deliveryBroker.enqueue({
-          agentName: name,
-          pane,
-          text,
-          source: "voice-pwa",
-          idempotencyKey: body.idempotencyKey || null,
-        });
-      } else {
-        await agent.sendOnly(name, text, pane);
-      }
-    } catch (err) { return json(res, 500, { error: `send failed: ${err.message}` }); }
-
-    // Best-effort mirror to Discord for channel parity (see 57b927b, b6c3107).
-    // Failure here is a transparency degradation, not a correctness issue:
-    // the pane already received the input.
-    if (mirror?.send) {
-      const channelId = findChannelIdForPane(name, pane);
-      if (channelId) {
-        try { await mirror.send(channelId, `[voice-pwa] ${text}`); }
-        catch (err) { console.warn(`voice-pwa mirror ${name}:${pane}: ${err.message}`); }
-      }
-    }
-
-    json(res, 200, { sent: text, transcript, queued: Boolean(deliveryBroker) });
-  }
+  const voiceInput = createVoiceInput({
+    agent, audioDiscovery: deps.audioDiscovery, audioOutbox, deliveryBroker,
+    findChannelIdForPane, json, loadAgents, mirror, parseJsonBody, run,
+    transcribeScript, validatePane,
+  });
 
   async function handlePoke(req, res, name, paneStr) {
     if (typeof reactivePoke !== "function") return json(res, 404, { error: "reactive poke disabled" });
@@ -310,7 +276,7 @@ export function createVoicePWA(deps) {
    * reads jsonl when available) and emits text + done. The client can
    * reopen the stream for the next turn.
    */
-  async function handleEvents(req, res, name, paneStr) {
+  async function handleEvents(req, res, name, paneStr, url) {
     const pane = parseInt(paneStr);
     if (Number.isNaN(pane)) return json(res, 400, { error: "pane must be an integer" });
     const v = validatePane(name, pane);
@@ -329,6 +295,7 @@ export function createVoicePWA(deps) {
     let sawWorking = false;
     let closed = false;
     let doneEmitted = false;
+    const prompt = String(url.searchParams.get("prompt") || "").slice(0, 5000) || null;
 
     req.on("close", () => { closed = true; });
 
@@ -343,9 +310,23 @@ export function createVoicePWA(deps) {
       }
       if (status === "working") sawWorking = true;
 
-      if (status === "idle" && sawWorking && !doneEmitted) {
+      const responseReady = prompt && typeof agent.hasResponseForPrompt === "function"
+        ? agent.hasResponseForPrompt(name, pane, prompt)
+        : false;
+      const completedRequestedTurn = prompt ? responseReady : sawWorking;
+      if (status === "idle" && completedRequestedTurn && !doneEmitted) {
         try {
-          const text = await agent.getResponse(name, pane);
+          let text;
+          if (prompt && typeof agent.getResponseStreamWithRaw === "function") {
+            const result = await agent.getResponseStreamWithRaw(name, pane, prompt);
+            text = result.items
+              .filter((item) => item.type === "text")
+              .map((item) => item.content)
+              .join("\n\n")
+              .trim();
+          } else {
+            text = await agent.getResponse(name, pane);
+          }
           if (text && text !== "(empty response)") write("text", { content: text });
         } catch (err) {
           write("error", { message: `response extract failed: ${err.message}` });
@@ -414,10 +395,9 @@ export function createVoicePWA(deps) {
     const url = new URL(req.url, `http://${req.headers.host || "x"}`);
     const path = url.pathname;
 
-    // CORS for PWA served from different origin (legacy — same-origin deploy
-    // doesn't need this, but keep it permissive so external clients still work).
+    // Keep legacy cross-origin PWA clients working; the native app is same-tailnet.
     res.setHeader("access-control-allow-origin", "*");
-    res.setHeader("access-control-allow-headers", "content-type");
+    res.setHeader("access-control-allow-headers", "content-type, last-event-id");
     res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
     if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
@@ -434,9 +414,24 @@ export function createVoicePWA(deps) {
       if (req.method === "POST" && path === "/api/tts") {
         return await handleTts(req, res);
       }
+      if (req.method === "GET" && path === "/api/audio/config")
+        return audioFeed.configuration(req, res);
+      if (req.method === "GET" && path === "/api/audio/events") {
+        return await audioFeed.events(req, res, url);
+      }
+      const mAudioReceipts = path.match(/^\/api\/audio\/events\/([^/]+)\/receipts$/);
+      if (mAudioReceipts && req.method === "POST") {
+        return await audioFeed.receipts(req, res, decodeURIComponent(mAudioReceipts[1]));
+      }
+      if (mAudioReceipts && req.method === "GET") {
+        return await audioFeed.receiptHistory(req, res, decodeURIComponent(mAudioReceipts[1]), url);
+      }
       const mSend = path.match(/^\/api\/send\/([^/]+)\/(\d+)$/);
       if (mSend && req.method === "POST") {
-        return await handleSend(req, res, decodeURIComponent(mSend[1]), mSend[2]);
+        return await voiceInput.pane(req, res, decodeURIComponent(mSend[1]), mSend[2]);
+      }
+      if (req.method === "POST" && path === "/api/audio/send") {
+        return await voiceInput.phone(req, res);
       }
       const mPoke = path.match(/^\/api\/poke\/([^/]+)\/(\d+)$/);
       if (mPoke && req.method === "POST") {
@@ -444,7 +439,7 @@ export function createVoicePWA(deps) {
       }
       const mEvents = path.match(/^\/api\/events\/([^/]+)\/(\d+)$/);
       if (mEvents && req.method === "GET") {
-        return await handleEvents(req, res, decodeURIComponent(mEvents[1]), mEvents[2]);
+        return await handleEvents(req, res, decodeURIComponent(mEvents[1]), mEvents[2], url);
       }
       return json(res, 404, { error: `no route for ${req.method} ${path}` });
     } catch (err) {

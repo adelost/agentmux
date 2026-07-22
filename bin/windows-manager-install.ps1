@@ -21,6 +21,8 @@ param(
   [Parameter(ParameterSetName = "Install")]
   [int]$PollSeconds = 5,
   [Parameter(ParameterSetName = "Install")]
+  [int]$PhonePort = 8081,
+  [Parameter(ParameterSetName = "Install")]
   [switch]$Hidden,
   [Parameter(ParameterSetName = "RunManager", Mandatory = $true)]
   [switch]$RunManager,
@@ -106,6 +108,7 @@ if ($Install) {
     }
   }
   if ($PollSeconds -lt 2 -or $PollSeconds -gt 60) { throw "poll seconds must be 2..60" }
+  if ($PhonePort -lt 1024 -or $PhonePort -gt 65535) { throw "phone port must be 1024..65535" }
   $nodePath = ""
   $nodeCommand = Get-Command "node.exe" -ErrorAction SilentlyContinue
   if ($null -ne $nodeCommand) { $nodePath = $nodeCommand.Source }
@@ -114,6 +117,13 @@ if ($Install) {
   $codexJs = Join-Path $env:APPDATA "npm\node_modules\@openai\codex\bin\codex.js"
   if (!(Test-Path $codexJs)) { throw "Windows-native Codex CLI was not found" }
   if (!(Test-Path $PythonPath)) { throw "Windows Python was not found" }
+  $tailscale = Get-Command "tailscale.exe" -ErrorAction SilentlyContinue
+  if ($null -eq $tailscale) { throw "tailscale.exe was not found" }
+  $phoneHost = [string](& $tailscale.Source "ip" "-4" | Select-Object -First 1)
+  $phoneHost = $phoneHost.Trim()
+  if ($phoneHost -notmatch "^100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])(?:\.\d{1,3}){2}$") {
+    throw "a Tailscale IPv4 address was not found"
+  }
   New-Item -ItemType Directory -Force -Path $Root | Out-Null
   if (!$WhisperModelPath) { $WhisperModelPath = Join-Path $Root "models\faster-whisper-base" }
   foreach ($modelFile in @("model.bin", "config.json", "tokenizer.json", "vocabulary.txt")) {
@@ -126,6 +136,9 @@ if ($Install) {
     channelId = $ChannelId
     authorizedUserId = $AuthorizedUserId
     pollSeconds = $PollSeconds
+    phoneHost = $phoneHost
+    phonePort = $PhonePort
+    phoneServerId = "abyss-windows"
     nodePath = $nodePath
     provider = [pscustomobject]@{
       kind = "cli"
@@ -158,6 +171,8 @@ if ($Install) {
     @{ from = (Join-Path $repoRoot "core\windows-manager.mjs"); name = "core/windows-manager.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-manager-discord.mjs"); name = "core/windows-manager-discord.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-manager-input.mjs"); name = "core/windows-manager-input.mjs" },
+    @{ from = (Join-Path $repoRoot "core\windows-manager-phone.mjs"); name = "core/windows-manager-phone.mjs" },
+    @{ from = (Join-Path $repoRoot "core\windows-manager-phone-runtime.mjs"); name = "core/windows-manager-phone-runtime.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-bridge.mjs"); name = "core/windows-bridge.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-recovery.mjs"); name = "core/windows-recovery.mjs" }
   )
