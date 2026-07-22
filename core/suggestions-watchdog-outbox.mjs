@@ -423,7 +423,8 @@ function alertPrompt(projectId, alert, bootstrap) {
       throw new Error("schema: pull_claim_attention_due question is missing");
     }
     const prompt = `[BOARD CHECK · ${alert.ticketId}] ${question.trim()}\n`
-      + "Reply exactly: working, waiting, blocked, or done.";
+      + `Fetch /api/agent/overview?project=${projectId}&recent=5 and submit its exact `
+      + "pendingActions response. Chat text alone is not a board acknowledgement.";
     if (bytes(prompt) > MAX_PROMPT_BYTES) {
       throw new Error("schema: pull_claim_attention_due question is oversized");
     }
