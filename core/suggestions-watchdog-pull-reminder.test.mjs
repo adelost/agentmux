@@ -23,12 +23,13 @@ feature("pull claim owner reminders", () => {
     })],
     when: ["the watchdog resolves its delivery", ({ alert, broker }) =>
       watchdogAlertDelivery("ai", alert, {}, broker)],
-    then: ["the owner pane and bounded answer contract are returned", (delivery) => {
+    then: ["the owner pane and durable board contract are returned", (delivery) => {
       expect(delivery).toEqual({
         agent: "ai",
         pane: 4,
         prompt: "[BOARD CHECK · AI-0042] Are you still working on this ticket?\n"
-          + "Reply exactly: working, waiting, blocked, or done.",
+          + "Fetch /api/agent/overview?project=ai&recent=5 and submit its exact "
+          + "pendingActions response. Chat text alone is not a board acknowledgement.",
       });
     }],
   });
