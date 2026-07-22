@@ -15,7 +15,7 @@ process.on("uncaughtException", (err) => {
 import { exec as execCb } from "child_process";
 import { promisify } from "util";
 import { readFileSync, existsSync } from "fs";
-import { resolve, dirname } from "path";
+import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { parseEnv, downloadBuffer } from "./lib.mjs";
 import { createAgent, ensureAgentHints, HINTS_VERSION } from "./agent.mjs";
@@ -44,9 +44,11 @@ import { syncConfiguredAgentHints } from "./core/hints-sync.mjs";
 import { runPendingFleetRestart } from "./core/fleet-restart.mjs";
 import { createDeliveryQueue } from "./core/delivery-queue.mjs";
 import { createDeliveryBroker } from "./core/delivery-broker.mjs";
+import { createPaneSleepWakeLifecycle } from "./core/pane-sleep-wake.mjs";
 import { findChannelForPane, listAgents, validateAgentPane } from "./cli/config.mjs";
 import { createNativeRuntimeClient } from "./core/native-runtime-client.mjs";
 import { createAgentRouter } from "./core/agent-router.mjs";
+import { cmdSleepWatch } from "./cli/sleep.mjs";
 
 // --- Config ---
 
@@ -202,11 +204,25 @@ startMemoryGuard({
   },
 });
 
+const paneSleepWakeLifecycle = createPaneSleepWakeLifecycle({
+  resolvePane: (agentName, pane) => {
+    const configured = listAgents(AGENTS_YAML).find((entry) => entry.name === agentName);
+    const definition = configured?.panes?.[Number(pane)] || null;
+    return configured && definition
+      ? {
+        paneDir: join(configured.dir, ".agents", String(Number(pane))),
+        engine: /(?:^|\s)claude(?:\s|$)/u.test(String(definition.cmd || "")) ? "claude" : "unsupported",
+      }
+      : null;
+  },
+});
+
 const deliveryBroker = createDeliveryBroker({
   agent,
   queue: deliveryQueue,
   validateTarget: validateDeliveryTarget,
   bridgeDir: __dir,
+  wakeLifecycle: paneSleepWakeLifecycle,
   resolveNotificationChannel: (job) =>
     findChannelForPane(AGENTS_YAML, job.agentName, job.pane),
   notify: async (job, state, extra = {}) => {
@@ -370,6 +386,30 @@ if (legacyRecovery.recovered || legacyRecovery.remaining) {
 deliveryBroker.start();
 jsonlWatcher.start();
 nativeRuntimeWatcher.start();
+
+// Compact-then-sleep controller. It starts after the transport and watchers,
+// waits through bridge startup, and then re-gates every candidate locally.
+// Only proven-done, clean, unattached Claude panes idle for 24h are eligible;
+// each sleep has an exact compact boundary + nonce receipt. New durable input
+// wakes exactly its recorded session through the broker lifecycle above.
+if (process.env.AMUX_PANE_SLEEP_ENABLED !== "false") {
+  setTimeout(() => {
+    void cmdSleepWatch({
+      agent,
+      deliveryQueue,
+      socket: TMUX_SOCKET,
+      configPath: AGENTS_YAML,
+      bridgeDir: __dir,
+    }, { once: false, apply: true }, {
+      queue: deliveryQueue,
+      // A refused automatic candidate is expected and must not set the
+      // foreground bridge's eventual process exit code.
+      exit: () => {},
+    })
+      .catch((error) => console.error(`pane-sleep | controller failed: ${error.message}`));
+  }, 60_000);
+  console.log("pane-sleep | enabled | idle=24h | compact receipt required | max=2/5m");
+}
 
 // Static PWA bundle is served from the same Node process so the whole
 // app lives behind one Tailscale Serve tunnel. Override with

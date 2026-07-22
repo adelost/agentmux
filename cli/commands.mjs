@@ -39,11 +39,13 @@ import { readHeartbeat } from "../core/heartbeat.mjs";
 import { assessRunningBridgeHints, syncConfiguredAgentHints } from "../core/hints-sync.mjs";
 import { ensureAgentHints, HINTS_VERSION } from "../agent.mjs";
 import { expandHome } from "../core/suggestions-comment-bridge.mjs";
+import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import {
-  createDeliveryQueue,
-  needsDeliveryTerminalNotice,
-  TERMINAL_DELIVERY_STATES,
-} from "../core/delivery-queue.mjs";
+  deliveryQueueDisplayRows,
+  formatDeliveryQueueTable,
+  listDeliveryQueueJobs,
+  requestDeliveryQueueCancellation,
+} from "./queue-format.mjs";
 import {
   planOfflineSyncBridge,
   readBridgeMode,
@@ -2270,92 +2272,7 @@ async function cmdMemory(_ctx, subcommand, flags = {}) {
   process.exitCode = 1;
 }
 
-function queueAge(createdAt, now = Date.now()) {
-  const seconds = Math.max(0, Math.floor((now - Number(createdAt || now)) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours}h ${minutes % 60}m`;
-  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
-}
-
-function queueDisplayState(job) {
-  const state = job.status === "acknowledged" ? "delivered" : String(job.status || "unknown");
-  return job.cancelRequestStatus === "requested" ? `${state}+cancel_requested` : state;
-}
-
-function queueReason(job) {
-  if (job.cancelRequestStatus === "requested") {
-    return `cancel requested: ${job.cancelRequestedReason || "reason unavailable"}`;
-  }
-  return job.lastReason || job.cancelRequestLastReason || "";
-}
-
-function queueCell(value, max) {
-  const printable = stripAnsi(String(value || ""))
-    .replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return truncate(printable, max);
-}
-
-/** Operational queue truth: unfinished jobs plus terminal receipts still awaiting notice. */
-export function listDeliveryQueueJobs(queue, { includeTerminal = false } = {}) {
-  const targets = includeTerminal ? queue.allTargets() : queue.targets();
-  return targets.flatMap(({ agentName, pane }) => queue.list(agentName, pane))
-    .filter((job) => includeTerminal
-      || !TERMINAL_DELIVERY_STATES.has(job.status)
-      || needsDeliveryTerminalNotice(job)
-      || job.cancelRequestStatus === "requested")
-    .sort((a, b) => {
-      const byCreated = Number(a.createdAt || 0) - Number(b.createdAt || 0);
-      return byCreated || String(a.id).localeCompare(String(b.id));
-    });
-}
-
-export function deliveryQueueDisplayRows(jobs, { now = Date.now() } = {}) {
-  return jobs.map((job) => ({
-    jobId: String(job.id),
-    target: `${job.agentName}:${job.pane}`,
-    age: queueAge(job.createdAt, now),
-    state: queueDisplayState(job),
-    attempts: Number(job.attempts || 0),
-    reason: queueCell(queueReason(job), 52),
-    preview: queueCell(job.text, 60),
-  }));
-}
-
-export function formatDeliveryQueueTable(rows, { total = rows.length } = {}) {
-  if (!rows.length) return "Delivery queue is empty.";
-  const headers = {
-    jobId: "jobId",
-    target: "target",
-    age: "age",
-    state: "state",
-    attempts: "attempts",
-    reason: "reason",
-    preview: "preview",
-  };
-  const keys = Object.keys(headers);
-  const widths = Object.fromEntries(keys.map((key) => [
-    key,
-    Math.max(headers[key].length, ...rows.map((row) => String(row[key]).length)),
-  ]));
-  const line = (row) => keys.map((key) => String(row[key]).padEnd(widths[key])).join("  ").trimEnd();
-  const output = [line(headers), ...rows.map(line)];
-  if (total > rows.length) output.push(`… ${total - rows.length} more; raise --limit to show them.`);
-  return output.join("\n");
-}
-
-/** Durable request only. The delivery broker remains the sole cancellation adjudicator. */
-export function requestDeliveryQueueCancellation(queue, { id, reason, requestedBy = "cli" }) {
-  const before = queue.findById(id);
-  if (!before) throw new Error(`delivery job ${id} not found`);
-  const job = queue.requestCancellation(id, { reason, requestedBy });
-  const newlyRequested = !before.cancelRequestStatus && job.cancelRequestStatus === "requested";
-  return { job, newlyRequested };
-}
+export { deliveryQueueDisplayRows, formatDeliveryQueueTable, listDeliveryQueueJobs, requestDeliveryQueueCancellation } from "./queue-format.mjs";
 
 function cmdQueue(positional, flags, ctx) {
   const queue = ctx.deliveryQueue || createDeliveryQueue();
@@ -3678,6 +3595,9 @@ Usage:
     --dry                         Preview pane work, do nothing
   agent janitor                   Delete dead session jsonl older than 14d (also runs nightly in dream)\n  agent trim [--dry]              Reclaim pre-checkpoint bytes from inactive oversized Claude/Codex sessions\n  agent doctor                    Health check: bridge, Suggestions board/sync, hooks, ledger, tmux (exit 0/1/2)\n  agent revive                    Post-boot: classify interrupted panes (ledger + Codex/Kimi journals) and selectively revive only them; --all for legacy whole-fleet respawn, --dry to preview\n  agent memory status             Memory warnings, compact backlog, latest dream
   agent queue                     List live durable delivery jobs (id, target, age, state, attempts, reason, preview)
+  agent sleep <name|:nr> [-p N]   Sleep one 24h-idle Claude pane after exact compact, nonce, and clean-state receipts
+  agent wake <name|:nr> [-p N]    Wake the exact recorded session through release and memory admission
+  agent sleep-watch [--dry]       Report conservative candidates; --apply sleeps at most two after re-gating
     --all                         Include terminal delivery history retained on disk
     --limit N                     Maximum rows (default 100, max 1000)
     --json                        Machine-readable output
@@ -3981,6 +3901,32 @@ export async function dispatch(argv, ctx) {
       const { flags } = parseFlags(rest, { dry: "boolean", all: "boolean" });
       const { cmdRevive } = await import("./revive.mjs");
       return cmdRevive(ctx, flags, { configuredServiceTargets });
+    }
+
+    case "sleep": {
+      if (!rest[0]) { console.error("Usage: agent sleep <name|:nr> [-p N] [--force]"); process.exit(1); }
+      const name = resolveAgent(rest[0], ctx.configPath);
+      const { flags } = parseFlags(rest.slice(1), { p: "number", pane: "number", force: "boolean" });
+      const { cmdSleep } = await import("./sleep.mjs");
+      return cmdSleep(ctx, name, Number(flags.p || flags.pane || 0), { force: Boolean(flags.force) });
+    }
+
+    case "wake": {
+      if (!rest[0]) { console.error("Usage: agent wake <name|:nr> [-p N] [--force]"); process.exit(1); }
+      const name = resolveAgent(rest[0], ctx.configPath);
+      const { flags } = parseFlags(rest.slice(1), { p: "number", pane: "number", force: "boolean" });
+      const { cmdWake } = await import("./sleep.mjs");
+      return cmdWake(ctx, name, Number(flags.p || flags.pane || 0), { force: Boolean(flags.force) });
+    }
+
+    case "sleep-watch": {
+      const { flags } = parseFlags(rest, { once: "boolean", dry: "boolean", apply: "boolean" });
+      const { cmdSleepWatch } = await import("./sleep.mjs");
+      return cmdSleepWatch(ctx, {
+        once: flags.once !== false,
+        dry: Boolean(flags.dry),
+        apply: Boolean(flags.apply),
+      });
     }
 
     case "memory": {

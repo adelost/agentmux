@@ -13,7 +13,8 @@ import { recoverSupersededSubmit } from "./submit-boundary.mjs";
 import { createDeliveryNotSent, PRE_SUBMIT_STATES } from "./delivery-not-sent.mjs";
 import { createDeliveryNotices } from "./delivery-notices.mjs";
 import { createIngestProbeGate } from "./ingest-probe-gate.mjs";
-import { createWakeAdmissionGate, paneNeedsWake } from "./wake-admission.mjs";
+import { createWakeAdmissionGate } from "./wake-admission.mjs";
+import { wakeDeliveryTarget } from "./delivery-wake.mjs";
 import {
   DELIVERED_UNVERIFIED_STATE, TERMINAL_DELIVERY_STATES,
   NOT_INGESTING_UNVERIFIED_STREAK, isTargetProvenNotIngesting, waitForDeliveryJob,
@@ -62,6 +63,7 @@ export function createDeliveryBroker({
   now = () => Date.now(),
   log = (message) => console.warn(message),
   wakeAdmission = null,
+  wakeLifecycle = null,
   bridgeDir = null,
 } = {}) {
   if (!agent) throw new Error("delivery broker requires agent");
@@ -459,23 +461,11 @@ export function createDeliveryBroker({
     });
     queueEvent(job, "attempt", { attempt: job.attempts });
 
-    // A stopped pane is woken only through admission; refusal keeps the
-    // message queued with a classified reason, never a false ack.
-    if (wakeGate && typeof agent.paneProcessState === "function") {
-      const processState = await agent.paneProcessState(job.agentName, job.pane).catch(() => null);
-      if (paneNeedsWake(processState)) {
-        const verdict = await wakeGate();
-        if (!verdict.ok) {
-          job = queue.update(job, {
-            status: drafted ? "drafted" : (ownsPaneDraft ? "pasting" : "pending"),
-            nextAttemptAt: now() + blockedRetryMs(job),
-            lastReason: `wake-refused:${verdict.reason}`,
-          });
-          queueEvent(job, "wake_refused", { reason: String(verdict.reason) });
-          return maybeNotifyBlocked(job);
-        }
-      }
-    }
+    const wake = await wakeDeliveryTarget({ agent, job, wakeGate, wakeLifecycle,
+      drafted, ownsPaneDraft, queue, now, retryMs: blockedRetryMs,
+      queueEvent, notifyBlocked: maybeNotifyBlocked });
+    job = wake.job;
+    if (!wake.proceed) return job;
 
     // A receiptless retry re-proves pane liveness before the payload is
     // committed again; a silent pane keeps the FIFO parked, never retyped.
