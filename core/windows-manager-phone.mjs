@@ -53,6 +53,11 @@ function remember(state, turnId, receipt) {
   state.phoneTurns = Object.fromEntries(retained);
 }
 
+function visibleOutcome(answer, fallback) {
+  const measured = String(answer || "").match(/^AMUX\s+(READY|RECOVERED|PARTIAL|BLOCKED)\b/u)?.[1];
+  return measured || fallback || "ANSWERED";
+}
+
 /** WHAT: Builds the Windows-native tailnet phone endpoint. WHY: Keeps rescue chat reachable when WSL and tmux are completely offline. */
 export function createWindowsManagerPhoneServer({
   host,
@@ -97,7 +102,7 @@ export function createWindowsManagerPhoneServer({
         sent: text,
         transcript,
         answer: String(result.answer || "").trim(),
-        outcome: result.outcome || "ANSWERED",
+        outcome: visibleOutcome(result.answer, result.outcome),
         destination: { manager: "windows" },
       };
       if (!response.answer) throw new Error("manager-answer-empty");
