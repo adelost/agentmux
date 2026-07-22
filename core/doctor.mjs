@@ -381,7 +381,7 @@ export function checkGuardCronHeartbeats({ heartbeats, now = Date.now() }) {
     return check("guard loops", FAIL, "RED 0/0: registry empty",
       "restore the canonical guard registry before relying on background liveness");
   }
-  const red = rows.filter((entry) => entry.state !== "ok");
+  const red = rows.filter((entry) => !["ok", "disabled"].includes(entry.state));
   if (red.length) {
     const detail = red.map((entry) => {
       if (entry.state === "missing") return `${entry.key} missing`;
@@ -390,6 +390,12 @@ export function checkGuardCronHeartbeats({ heartbeats, now = Date.now() }) {
     }).join(", ");
     return check("guard loops", FAIL, `RED ${red.length}/${rows.length}: ${detail}`,
       "run `amux suggest` for Suggestions inputs; inspect the named loop's output or log");
+  }
+  const disabled = rows.filter((entry) => entry.state === "disabled");
+  if (disabled.length) {
+    return check("guard loops", WARN,
+      `${rows.length - disabled.length}/${rows.length} active · disabled: ${disabled.map((entry) => entry.key).join(", ")}`,
+      "disabled guards are not protection; remove the intentional OFF state when their coverage is required");
   }
   const oldest = [...rows].sort((left, right) => right.ageMs - left.ageMs)[0];
   return check("guard loops", OK,

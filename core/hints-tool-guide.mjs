@@ -40,14 +40,27 @@ need to see live terminal state (progress bars, modal prompts, etc).
 ### Search memory + history (use this BEFORE asking the human "what was X?")
 \`\`\`bash
 amux search "Tess"                   # ranked overview: memory, sessions, ledger
-amux search "vad bestämdes om X"     # semantic layer catches paraphrases
+amux search "vad bestämdes om X"     # fast lexical search is the current default
+amux search "vad bestämdes om X" --semantic # optional paraphrase layer
 amux search --show 3                 # expand hit #3 with context
-amux search "term" --fast            # lexical only (~1s, skips embedding load)
+amux search "term" --deep           # include large raw session archives
+amux search --reindex                # explicitly rebuild the semantic index
 \`\`\`
 One line per hit, best sources first (memory > digests > raw sessions).
 When the user references a person, project or decision you lack context on,
 search FIRST: the answer is usually already in memory. \`claw search\` is
 the same engine.
+
+### Find asks and unfinished human directives
+\`\`\`bash
+amux asks                            # recent asks, every status (bounded and fast)
+amux asks --open                     # unresolved only
+amux asks <agent> --pane N --since 2d
+amux asks --full --since 30d         # exact older scan; intentionally slower
+\`\`\`
+Use \`asks\` for "what did Mattias ask, where, and did it close?". Default
+mode never full-reads giant journals; \`--full\` adds exact file/line anchors
+for an older forensic lookup.
 
 ### Understand state across panes
 \`\`\`bash
@@ -237,7 +250,7 @@ consumed or still sits in the composer.
 | **tmux** (\`amux log --tmux\`) | Live terminal content | "Is the pane hung? Showing a modal?" |
 | **ps/top** | Status indicator + context% | Quick overview |
 | **timeline** | Merge of all jsonl, chronological | Cross-pane post-mortem |
-| **done** | Commits + classified panes since last check | Daily orchestration (use first) |
+| **done** | Commits + classified panes in a time window | Daily orchestration (use first) |
 | **git log** | Via \`amux done\`, strongest work signal | Cross-repo "what shipped?" |
 
 ## Discord integration (when bridge is running)

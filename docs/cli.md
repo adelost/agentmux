@@ -21,6 +21,7 @@ amux lint
 | `amux watch` | Follow the timeline live |
 | `amux done` | Summarize commits, active panes, finished panes, and waiters |
 | `amux asks` | Show recent human asks/directives with status and jsonl location |
+| `amux search` | Search memory, sessions, and the durable delivery ledger |
 | `amux lint` | Run default repo linters, starting with WHAT/WHY/DTO/debt contracts |
 | `amux churn` | Show WARN-only young-test and rewrite-hotspot signals from git history |
 
@@ -42,6 +43,23 @@ doctor` rather than assuming the bridge must exist inside tmux.
 For a manually owned bridge, standalone sync refuses to stop the foreground
 process. Passing `amux sync --offline --detach` is the explicit instruction to
 transfer it to managed background ownership.
+
+## Search and drill-down
+
+```bash
+amux search "restart WSL"
+amux search --show 2
+amux search "old raw pane detail" --deep
+amux search "recovery contract" --semantic
+amux search --reindex
+```
+
+Lexical search over memory and the durable ledger is the fast, current default.
+`--deep` adds the much larger raw session archives. Result state is isolated per
+terminal or tmux pane, so one agent cannot replace another agent's `--show N`
+list. `--semantic` is explicit because loading the embedding layer is slower;
+it always reports the index build time and warns when the index is stale.
+Reindexing is never an implicit side effect of a query.
 
 ## Native cutover
 
@@ -135,7 +153,9 @@ amux asks --full --since 30d
 ```
 
 Default mode is a bounded-tail scan so it is safe as an orientation command.
-Use `--full` only when you need exact older history beyond the recent tail.
+It supports native-runtime history through that backend's API and does not
+read stale tmux aliases. Use `--full` only when you need exact older history
+and file/line anchors beyond the recent tail.
 
 ## Orchestrator Summary
 

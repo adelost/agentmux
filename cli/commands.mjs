@@ -75,14 +75,7 @@ import { runOneshot, showRunLog } from "./run.mjs";
 import { executePlan, showPlanLog } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
 import { groupNativeTurns, nativeHistoryRows } from "../channels/native-runtime-watcher.mjs";
-import {
-  discoverNativeRuntimes,
-  formatNativeRuntimeStatuses,
-  checkNativeRuntimeHealth,
-  nativeRuntimeStatus,
-  startNativeRuntime,
-  stopNativeRuntime,
-} from "./native-runtime-service.mjs";
+import { cmdRuntime } from "./runtime.mjs";
 import {
   nativeServiceStatus,
   startNativeServices,
@@ -230,57 +223,6 @@ async function cmdReconcile(name, ctx) {
   for (const m of result.mismatches || []) {
     console.log(`  pane ${m.pane}: has ${m.has}, expected ${m.expected} (left alone)`);
   }
-}
-
-async function cmdRuntime(args, ctx) {
-  const { flags, positional } = parseFlags(args, FLAG_SPECS.runtime);
-  const action = positional[0] || "status";
-  const options = { port: flags.port || 8811, stateDir: flags["state-dir"],
-    dataDir: flags["data-dir"],
-    legacyDataDir: flags["no-legacy-migration"] ? null : undefined };
-  if (action === "status") {
-    const scoped = flags.port !== undefined
-      || flags["state-dir"] !== undefined
-      || flags["data-dir"] !== undefined;
-    if (!scoped) {
-      const statuses = await discoverNativeRuntimes();
-      console.log(formatNativeRuntimeStatuses(statuses));
-      if (!statuses.length) {
-        const fallback = await nativeRuntimeStatus(options);
-        console.log(`No managed runtime discovered. Default :${fallback.port} is ${fallback.online ? "online but unmanaged" : "offline"}.`);
-      }
-      return;
-    }
-    const status = await nativeRuntimeStatus(options);
-    console.log(formatNativeRuntimeStatuses(status.managed ? [status] : []));
-    if (!status.managed) console.log(`❌ :${status.port} · ${status.online ? "online but unmanaged" : "offline"} · data ${status.paths.dataDir}`);
-    console.log(`Log: ${status.paths.logPath}`);
-    return;
-  }
-  if (action === "check") return console.log(await checkNativeRuntimeHealth(options));
-  if (action === "start") {
-    const result = await startNativeRuntime({
-      ...options,
-      serverPath: resolve(ctx.bridgeDir, "spikes/web-ui/server.mjs"),
-    });
-    console.log(`Native runtime ${result.alreadyRunning ? "already" : "now"} online at ${result.url} (pid ${result.pid || "external"}).`);
-    return;
-  }
-  if (action === "stop") {
-    const result = await stopNativeRuntime({ ...options, force: Boolean(flags.force) });
-    console.log(result.alreadyStopped ? "Native runtime already stopped." : "Native runtime stopped; sessions remain persisted.");
-    return;
-  }
-  if (action === "restart") {
-    await stopNativeRuntime({ ...options, force: Boolean(flags.force) });
-    const result = await startNativeRuntime({
-      ...options,
-      serverPath: resolve(ctx.bridgeDir, "spikes/web-ui/server.mjs"),
-    });
-    console.log(`Native runtime restarted at ${result.url} (pid ${result.pid}).`);
-    return;
-  }
-  throw new Error(`unknown runtime action '${action}' (use status|check|start|stop|restart)`);
 }
 
 function configuredServiceTargets(ctx, requested = null) {
@@ -1394,12 +1336,31 @@ async function cmdAsks(ctx, flags, positional = []) {
 
   const perPaneLimit = flags["per-pane"] || (flags.full ? 200 : 20);
   const entries = [];
+  const unavailableNative = [];
   for (const { agent, pane } of targets) {
-    const paneDir = panePathFor(agent, pane);
-    const readOpts = flags.full
-      ? { limit: perPaneLimit, since, grep }
-      : { limit: perPaneLimit, tailBytes: 4 * 1024 * 1024 };
-    const res = readLastTurnsForPane(agent, pane, paneDir, readOpts);
+    let res;
+    if (agent.backend === "native") {
+      try {
+        const snapshot = await ctx.agent.nativeRuntime.history(agent.name, pane);
+        const turns = groupNativeTurns(snapshot.events).slice(-perPaneLimit).map((turn) => ({
+          userPrompt: turn.user,
+          timestamp: new Date(turn.userAt || turn.endAt).toISOString(),
+          endTimestamp: new Date(turn.endAt).toISOString(),
+          items: turn.items,
+          isComplete: true,
+        }));
+        res = { turns, jsonlFile: null };
+      } catch {
+        unavailableNative.push(`${agent.name}:${pane}`);
+        continue;
+      }
+    } else {
+      const paneDir = panePathFor(agent, pane);
+      const readOpts = flags.full
+        ? { limit: perPaneLimit, since, grep }
+        : { limit: perPaneLimit, tailBytes: 4 * 1024 * 1024 };
+      res = readLastTurnsForPane(agent, pane, paneDir, readOpts);
+    }
     if (!res?.turns?.length) continue;
     entries.push(...buildAskEntries({
       agent: agent.name,
@@ -1411,12 +1372,13 @@ async function cmdAsks(ctx, flags, positional = []) {
     }));
   }
 
-  const rows = attachDisplayedAskLineAnchors(filterAskEntries(entries, {
+  const filteredRows = filterAskEntries(entries, {
     sinceMs: since ? since.getTime() : null,
     grep,
     openOnly: !!flags.open,
     limit: flags.n || 40,
-  }));
+  });
+  const rows = flags.full ? attachDisplayedAskLineAnchors(filteredRows) : filteredRows;
 
   const mode = flags.full ? "full scan" : "bounded tail";
   const filter = [
@@ -1426,6 +1388,7 @@ async function cmdAsks(ctx, flags, positional = []) {
     paneFilter != null ? `pane=${paneFilter}` : null,
   ].filter(Boolean).join(", ");
   console.log(`\nAsks (${mode}, ${filter})`);
+  if (unavailableNative.length) console.log(`⚠ native history unavailable: ${unavailableNative.join(", ")}`);
   if (!rows.length) {
     console.log("(no asks match)");
     if (!flags.full) console.log("Try: amux asks --full --since 30d");
@@ -1485,6 +1448,10 @@ function renderSelfBlock(selfKey, widerBuckets, statuses, nowMs) {
 }
 
 async function cmdDone(ctx, flags) {
+  if (flags.help || flags.h) {
+    console.log(`Usage: amux done [--since 2h | --day | --week | --all]\n\nAttention-first fleet overview: needs-you, stalled, working, recently done, and idle.\nThe command is read-only and has no shared checkpoint; default window is 1h.`);
+    return;
+  }
   const nowMs = Date.now();
   let sinceMs = null;
   let sinceSource = "";
@@ -3606,7 +3573,7 @@ export function cmdScopedGate(args) {
 }
 
 function cmdHelp() {
-  console.log(`agent - Manage Claude Code/Codex tmux sessions
+  const help = `agent: Manage Claude Code/Codex tmux sessions
 
 Usage:
   agent                           List agents (● = running)
@@ -3686,6 +3653,8 @@ Usage:
     --agent NAME --pane N         Filter to one pane
     --grep PAT                    Regex filter over ask/reply text
     --full                        Exact older scan (slower); default is bounded tail
+  agent done                      Attention-first fleet overview (default: last 1h)
+    --since T | --day | --week    Select a time window; --all is capped at 30d
   agent edit                      Open agentmux.yaml in $EDITOR (source config)
   agent label <agent> <pane> <text> Set per-pane label (shown in amux ps/top)
     --clear                       Remove the label instead of setting one
@@ -3722,7 +3691,10 @@ Usage:
                                   Request pre-submit cancellation; broker decides safely
   agent memory lint               Structured memory lint (--json, exit 1 on warnings)
   agent memory compact            Bank + compact oldest daily files (--dry, --max N)
-  agent search "term"             Search configured corpora (memory/sessions/ledger); --show N expands, --reindex rebuilds semantic index
+  agent search "term"             Fast lexical search of memory + ledger; --show N expands
+    --deep                        Include large raw session archives
+    --semantic                    Opt into slower semantic search (index age is always shown)
+    --reindex                     Rebuild the semantic index explicitly
     --dry                         List deletion candidates, change nothing
     --days N                      Retention window (default: 14)
   agent playwright-reap           Reap stale Playwright-MCP/browser processes
@@ -3753,8 +3725,9 @@ Bridge controls (talk to the running bridge):
   agent tts [on|off|toggle|status]
                                   Text-to-speech flag
 
-Config: ~/.config/agent/agents.yaml
-Socket: /tmp/openclaw-claude.sock`);
+Config source: ~/.agentmux/agentmux.yaml (generated runtime config stays internal)
+Socket: /tmp/openclaw-claude.sock`;
+  console.log(help.replace(/^agent/u, "amux").replace(/^  agent/gmu, "  amux"));
 }
 
 // --- Dispatch ---
@@ -3800,6 +3773,7 @@ const FLAG_SPECS = {
     day: "boolean",
     week: "boolean",
     all: "boolean",
+    help: "boolean", h: "boolean",
   },
   watch: {
     agent: "string",
@@ -3815,6 +3789,7 @@ const FLAG_SPECS = {
     grep: "string",
     open: "boolean",
     full: "boolean",
+    help: "boolean", h: "boolean",
     all: "boolean",
     "per-pane": "number",
     help: "boolean",
@@ -3964,7 +3939,7 @@ export async function dispatch(argv, ctx) {
     }
 
     case "runtime":
-      return cmdRuntime(rest, ctx);
+      return cmdRuntime(parseFlags(rest, FLAG_SPECS.runtime), ctx);
 
     case "services":
       return cmdServices(rest, ctx);
@@ -4026,7 +4001,7 @@ export async function dispatch(argv, ctx) {
     case "search": {
       const { flags, positional } = parseFlags(rest, {
         max: "number", show: "string", context: "number",
-        source: "string", fast: "boolean", reindex: "boolean", help: "boolean", h: "boolean",
+        source: "string", fast: "boolean", deep: "boolean", semantic: "boolean", reindex: "boolean", help: "boolean", h: "boolean",
       });
       return cmdSearch(ctx, positional.join(" "), flags);
     }

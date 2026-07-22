@@ -948,11 +948,11 @@ export function panePathFor(agent, paneIdx) {
 
 /** WHAT: Reads merged pane history. WHY: Keeps timeline ordering independent from individual engine stores. */
 export function readAllTurnsAcrossPanes(opts = {}) {
-  const { agents = [], since = null, agent: agentFilter = null, pane: paneFilter = null, grep = null, limit = null, tailBytes = null, tailFallback = true } = opts;
+  const { agents = [], since = null, agent: agentFilter = null, pane: paneFilter = null, grep = null, limit = null, tailBytes = null, tailFallback = true, includeNativeLegacy = false } = opts;
   const out = [];
   const sinceMs = since ? since.getTime() : null;
 
-  for (const a of agents) {
+  for (const a of agents) { if (a.backend === "native" && !includeNativeLegacy) continue;
     if (agentFilter && a.name !== agentFilter) continue;
     const panes = Array.isArray(a.panes) ? a.panes : [];
     for (let paneIdx = 0; paneIdx < panes.length; paneIdx++) {

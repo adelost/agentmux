@@ -59,6 +59,20 @@ describe("guard heartbeat ledger", () => {
     }).state).toBe("stale");
   });
 
+  it("classifies a fresh intentional no-op as disabled instead of healthy", () => {
+    const entry = {
+      key: "fleet-progress",
+      intervalSec: 1200,
+      beat: {
+        schemaVersion: 1, key: "fleet-progress", intervalSec: 1200,
+        ts: "2026-07-15T04:00:00.000Z", metrics: { disabled: true },
+      },
+    };
+    expect(classifyGuardHeartbeat(entry, {
+      now: new Date("2026-07-15T04:01:00.000Z").getTime(),
+    }).state).toBe("disabled");
+  });
+
   it("fails closed on interval inflation and future-dated snapshots", () => {
     const canonical = GUARD_CRON_REGISTRY.find((entry) => entry.key === "comment-bridge");
     const beat = {

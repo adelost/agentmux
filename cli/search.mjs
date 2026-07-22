@@ -18,14 +18,15 @@ import { defaultSearchStatePath, loadLastResults, saveLastResults } from "../cor
 /** WHAT: Describes the search CLI contract. WHY: Keeps actual flags and user guidance in one place. */
 export const SEARCH_HELP = `Usage:
   amux search "term" [--max N] [--source NAME]
+  amux search "term" --deep         Include large raw session archives
   amux search "term" --semantic     Add the slower local semantic layer
   amux search "term" --show N       Search, then expand result N
   amux search --show N [--context N] Expand the last search result
   amux search --reindex              Rebuild the optional semantic index
 
-Lexical search is the fast, current default. --semantic adds the local embedding
-index and always reports its age. Searches configured memory/session roots plus
-the durable AMUX delivery ledger.`;
+Lexical search over memory and the durable AMUX delivery ledger is the fast, current default.
+--deep adds large raw session archives. --semantic adds the local embedding
+index and always reports its age.`;
 
 function formatAge(ms) {
   if (!Number.isFinite(ms)) return "unknown age";
@@ -91,7 +92,7 @@ export async function cmdSearch(ctx, query, flags, dependencies = {}) {
   // giant transcripts, and avoids a multi-second scan through unrelated
   // words in different turns. Exact phrase search still runs everywhere.
   const lexicalRoots = roots.filter((root) => root.kind !== "event-ledger"
-    && (!ledgerHits.length || root.semantic));
+    && (flags.deep || root.semantic));
   let hits = lexicalSearch(query, lexicalRoots, {
     includeFileAnd: ledgerHits.length === 0,
   });

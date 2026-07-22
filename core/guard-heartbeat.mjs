@@ -102,12 +102,13 @@ export function classifyGuardHeartbeat(entry, { now = Date.now() } = {}) {
   }
   const ageMs = Math.max(0, now - at);
   const staleAfterMs = entry.intervalSec * 2 * 1000;
+  const disabled = beat.metrics?.disabled === true || beat.metrics?.outcome === "disabled";
   return Object.freeze({
     ...entry,
     beat,
     intervalSec,
     ageMs,
     staleAfterMs,
-    state: ageMs > staleAfterMs ? "stale" : "ok",
+    state: ageMs > staleAfterMs ? "stale" : disabled ? "disabled" : "ok",
   });
 }

@@ -9,6 +9,7 @@ import {
   formatNativeRuntimeStatuses,
   nativeRuntimeEnvironment,
   nativeRuntimeStatus,
+  observeConfiguredNativeRuntimes,
   startNativeRuntime,
   stopNativeRuntime,
 } from "../cli/native-runtime-service.mjs";
@@ -28,6 +29,26 @@ const availablePort = () => new Promise((resolvePort, rejectPort) => {
 });
 
 describe("native runtime detached lifecycle", () => {
+  it("observes configured runtimes even when they have no managed process record", async () => {
+    const statusImpl = vi.fn(async ({ host, port }) => ({
+      host, port, online: false, managed: false, pid: null, health: null,
+      paths: { dataDir: `/data/${port}`, logPath: `/log/${port}` },
+    }));
+    const statuses = await observeConfiguredNativeRuntimes({
+      agents: [
+        { backend: "tmux", runtimeUrl: "http://127.0.0.1:9999" },
+        { backend: "native", runtimeUrl: "http://127.0.0.1:8813" },
+        { backend: "native", runtimeUrl: "http://127.0.0.1:8813" },
+      ],
+      statusImpl,
+    });
+    expect(statusImpl).toHaveBeenCalledOnce();
+    expect(statuses).toEqual([expect.objectContaining({
+      configured: true, runtimeUrl: "http://127.0.0.1:8813", host: "127.0.0.1", port: 8813, online: false,
+    })]);
+    expect(formatNativeRuntimeStatuses(statuses, { label: "configured" })).toContain("1 configured");
+  });
+
   it("enumerates every managed runtime data directory and formats one truthful row each", async () => {
     const root = mkdtempSync(join(tmpdir(), "amux-native-discovery-"));
     const firstState = join(root, "web-runtime-8811");
