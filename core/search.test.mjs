@@ -8,7 +8,26 @@ import {
   searchEventLedger,
   renderJsonlLine, expandHit, formatHits, withScore,
 } from "./search.mjs";
-import { chunkMarkdown } from "./search-semantic.mjs";
+import { chunkMarkdown, semanticIndexStatus } from "./search-semantic.mjs";
+
+feature("semantic index freshness", () => {
+  component("legacy semantic metadata reports its real file age", {
+    given: ["an old v1 index", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-search-index-"));
+      writeFileSync(join(root, "meta.json"), "[]");
+      writeFileSync(join(root, "vectors.bin"), "");
+      return root;
+    }],
+    when: ["checking freshness two days later", (root) => {
+      const builtAt = Date.parse(semanticIndexStatus({ indexDir: root }).builtAt);
+      return { root, status: semanticIndexStatus({ indexDir: root, now: builtAt + 48 * 3_600_000 }) };
+    }],
+    then: ["the index is explicitly stale", ({ root, status }) => {
+      expect(status).toMatchObject({ available: true, stale: true, schemaVersion: 1 });
+      rmSync(root, { recursive: true, force: true });
+    }],
+  });
+});
 
 feature("search config — roots from agents.yaml", () => {
   unit("normalizes paths, weights and flags", {

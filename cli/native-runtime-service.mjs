@@ -187,8 +187,30 @@ export async function discoverNativeRuntimes({
     || left.paths.dataDir.localeCompare(right.paths.dataDir));
 }
 
-export function formatNativeRuntimeStatuses(statuses = []) {
-  const lines = [`Native runtimes: ${statuses.length} managed`];
+/** WHAT: Returns status for every configured native runtime URL. WHY: Keeps unmanaged or offline configured runtimes visible to operators. */
+export async function observeConfiguredNativeRuntimes({ agents = [], statusImpl = nativeRuntimeStatus } = {}) {
+  const urls = [...new Set(agents
+    .filter((agent) => agent.backend === "native")
+    .map((agent) => agent.runtimeUrl || "http://127.0.0.1:8811"))];
+  return Promise.all(urls.map(async (runtimeUrl) => {
+    try {
+      const parsed = new URL(runtimeUrl);
+      const port = Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80));
+      const status = await statusImpl({ host: parsed.hostname, port });
+      return { ...status, configured: true, runtimeUrl };
+    } catch (error) {
+      return {
+        configured: true, runtimeUrl, host: "invalid", port: 0, online: false,
+        managed: false, pid: null, health: null, paths: { dataDir: "unavailable", logPath: "unavailable" },
+        error: `invalid-runtime-url:${error.message}`,
+      };
+    }
+  }));
+}
+
+/** WHAT: Formats native runtime status rows. WHY: Keeps configured and process-owned endpoint truth in one rendering contract. */
+export function formatNativeRuntimeStatuses(statuses = [], { label = "managed" } = {}) {
+  const lines = [`Native runtimes: ${statuses.length} ${label}`];
   for (const status of statuses) {
     const health = status.health ?? {};
     const state = status.online ? "✅" : "❌";

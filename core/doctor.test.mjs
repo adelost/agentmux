@@ -512,6 +512,23 @@ feature("scheduled guard heartbeats", () => {
     }],
   });
 
+  unit("an intentional disabled sweep is visible and never called healthy", {
+    when: ["checking", () => {
+      const disabled = fresh("fleet-progress", 1200);
+      disabled.beat.metrics.disabled = true;
+      return checkGuardCronHeartbeats({
+        heartbeats: [fresh("comment-bridge", 60), disabled],
+        now: NOW,
+      });
+    }],
+    then: ["warn with exact disabled guard", (result) => {
+      expect(result.status).toBe(WARN);
+      expect(result.detail).toContain("1/2 active");
+      expect(result.detail).toContain("fleet-progress");
+      expect(result.detail).not.toContain("fresh");
+    }],
+  });
+
   unit("a guard that never wrote is not omitted from doctor", {
     when: ["checking", () => checkGuardCronHeartbeats({
       heartbeats: [{ key: "board-curator", intervalSec: 3600, beat: null }],

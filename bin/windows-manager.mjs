@@ -141,7 +141,13 @@ export async function runManagerTurn({ userText, messageId, state, history = [],
   }
   const toolResults = [];
   for (const name of (local?.tools || parseToolCalls(reply.text))) {
-    const verdict = planToolCall({ name, observation, lastStatusMs: state.lastStatusMs, nowMs: deps.nowMs() });
+    const verdict = planToolCall({
+      name,
+      observation,
+      lastStatusMs: state.lastStatusMs,
+      nowMs: deps.nowMs(),
+      explicitHumanRestart: local?.kind === "restart-wsl",
+    });
     if (!verdict.allow) {
       toolResults.push({ ok: false, stage: name, detail: `refused:${verdict.reason}` });
       continue;

@@ -874,6 +874,18 @@ feature("readAllTurnsAcrossPanes: merges events from multiple panes in timestamp
       cleanup();
     }],
   });
+
+  unit("native backends never leak stale legacy aliases into fleet history", {
+    given: ["one native-configured pane with a legacy JSONL alias", () => setupTwoPaneTimeline(["multi-turn.jsonl"])],
+    when: ["reading canonical history", ({ agents }) => {
+      agents[0].backend = "native";
+      return readAllTurnsAcrossPanes({ agents });
+    }],
+    then: ["the backend adapter contributes no legacy rows", (rows, { cleanup }) => {
+      expect(rows).toEqual([]);
+      cleanup();
+    }],
+  });
 });
 
 feature("Claude slash-command receipts", () => {

@@ -5,7 +5,7 @@ import { join } from "path";
 import { readRecentTurnsAcrossClaudeSessions } from "./jsonl-reader.mjs";
 import {
   buildDreamBatch, collectDreamSources, dreamPaneEngine, dreamSummarizerFailure, upsertDreamSummary,
-  validateDreamSummary,
+  validateDreamSummary, dreamSummarizerEnvironment,
 } from "./dream-summarizer.mjs";
 
 const turn = (timestamp, userPrompt, assistant = "done") => ({
@@ -19,6 +19,16 @@ const source = (agent, pane, latestMs, text = "work") => ({
 });
 
 feature("stateless fleet dream input", () => {
+  unit("headless Dream sees the same user-local Claude Code binary as interactive agents", {
+    when: ["building the cron-safe process environment", () => dreamSummarizerEnvironment({
+      HOME: "/home/test", PATH: "/usr/bin:/bin", SENTINEL: "kept",
+    })],
+    then: ["the existing PATH is preserved after ~/.local/bin", (env) => {
+      expect(env.PATH.split(":")).toEqual(["/home/test/.local/bin", "/usr/bin", "/bin"]);
+      expect(env.SENTINEL).toBe("kept");
+    }],
+  });
+
   unit("recognizes all supported coding engines", {
     when: ["classifying configured panes", () => [
       dreamPaneEngine({ cmd: "claude --continue" }),
@@ -58,6 +68,21 @@ feature("stateless fleet dream input", () => {
         { engine: "kimi", turns: 3 },
       ]);
       expect(result.sources[0].activityCursor).toBe("2026-07-21T11:00:00Z");
+    }],
+  });
+
+  unit("native backend aliases never duplicate legacy filesystem journals", {
+    when: ["collecting a native-configured alias", () => collectDreamSources(
+      [{ name: "sky-native", backend: "native", dir: "/work", panes: [{ cmd: "claude" }] }],
+      Date.parse("2026-07-21T08:00:00Z"),
+      { readHistory: () => { throw new Error("must not read legacy aliases"); } },
+    )],
+    then: ["it is skipped explicitly until the runtime adapter contributes history", (result) => {
+      expect(result.sources).toEqual([]);
+      expect(result.unreadable).toEqual([]);
+      expect(result.skipped).toEqual([{
+        agent: "sky-native", pane: 0, reason: "native-history-adapter-required",
+      }]);
     }],
   });
 

@@ -5,7 +5,7 @@ if [ -z "${HOME:-}" ]; then
   HOME="$(getent passwd "$(id -un)" | cut -d: -f6)"
   export HOME
 fi
-export PATH="/usr/bin:/bin:${PATH:-}"
+export PATH="$HOME/.local/bin:/usr/bin:/bin:${PATH:-}"
 export TMUX_SOCKET="${TMUX_SOCKET:-/tmp/openclaw-claude.sock}"
 export AGENT_CONFIG="${AGENT_CONFIG:-$HOME/.config/agent/agents.yaml}"
 
@@ -15,16 +15,23 @@ OPENCLAW_WORKSPACE="${OPENCLAW_WORKSPACE:-$HOME/.openclaw/workspace}"
 AGENTMUX_DREAM_LOG="${AGENTMUX_DREAM_LOG:-$HOME/.cache/agentmux-dream.log}"
 mkdir -p "$(dirname "$AGENTMUX_DREAM_LOG")"
 
-notify_failure() {
+finalize() {
   local status=$?
+  trap - EXIT
+  # Search freshness is independent from Dream/compaction success. Keep the
+  # incremental index moving even when today's summary or backlog fails.
+  "$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" search --reindex \
+    >> "$AGENTMUX_DREAM_LOG" 2>&1 \
+    || printf "%s WARN search reindex failed (lexical search remains current)\n" "$(date -Is)" >> "$AGENTMUX_DREAM_LOG"
   if [ "$status" -ne 0 ]; then
     "$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" notifyuser \
       --level error \
       --title "amux dream" \
       "Nightly dream failed with exit $status. Check $AGENTMUX_DREAM_LOG" || true
   fi
+  exit "$status"
 }
-trap notify_failure EXIT
+trap finalize EXIT
 
 dream_status=0
 dream_output="$("$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" dream --quiet --workspace "$OPENCLAW_WORKSPACE" 2>&1)" || dream_status=$?
@@ -82,10 +89,3 @@ if [ "$lint_status" -gt 1 ]; then
 fi
 
 printf "%s OK amux dream %s\n" "$(date -Is)" "$daily_file" >> "$AGENTMUX_DREAM_LOG"
-
-# Search-index refresh: incremental (mtime), so the nightly cost is just the
-# day's changed memory files. Failure is non-fatal — search degrades to
-# lexical-only, and the next night catches up.
-"$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" search --reindex \
-  >> "$AGENTMUX_DREAM_LOG" 2>&1 \
-  || printf "%s WARN search reindex failed (lexical-only until next run)\n" "$(date -Is)" >> "$AGENTMUX_DREAM_LOG"

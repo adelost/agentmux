@@ -51,6 +51,27 @@ describe("cron scripts never write logs to the HOME root", () => {
     expect(script).toContain('AGENTMUX_DREAM_LOG:-$HOME/.cache/agentmux-dream.log');
     expect(script).toMatch(/mkdir -p "\$\(dirname "\$AGENTMUX_DREAM_LOG"\)"/u);
     expect(script).not.toContain("$HOME/agentmux-dream.log");
+    expect(script).toContain('export PATH="$HOME/.local/bin:/usr/bin:/bin:${PATH:-}"');
+  });
+
+  it("dream failure still invokes the independent incremental search refresh", () => {
+    const calls = join(fx.home, "node-calls.log");
+    writeFileSync(fx.node, [
+      "#!/usr/bin/env bash",
+      'printf "%s\\n" "$*" >> "$CALLS"',
+      'case "$*" in *" dream "*) exit 1;; esac',
+      "exit 0",
+      "",
+    ].join("\n"));
+    const result = run("dream-cron.sh", {
+      CALLS: calls,
+      AGENTMUX_DREAM_LOG: join(fx.home, "dream.log"),
+      OPENCLAW_WORKSPACE: join(fx.home, "workspace"),
+    });
+    expect(result.status).not.toBe(0);
+    const invoked = readFileSync(calls, "utf8");
+    expect(invoked).toContain("search --reindex");
+    expect(invoked.indexOf("search --reindex")).toBeGreaterThan(invoked.indexOf("dream --quiet"));
   });
 
   it("morning-digest-cron logs under .cache", () => {
