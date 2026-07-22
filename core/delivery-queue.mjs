@@ -23,6 +23,7 @@ import {
 import { createHash, randomUUID } from "crypto";
 import { homedir } from "os";
 import { basename, dirname, join } from "path";
+import { appendAskLedger, defaultAskLedgerPath } from "./ask-ledger.mjs";
 
 export const DELIVERY_QUEUE_VERSION = 1;
 export const DELIVERED_UNVERIFIED_STATE = "delivered_unverified";
@@ -93,6 +94,10 @@ function atomicReplace(path, value) {
  */
 export function createDeliveryQueue({
   rootDir = defaultDeliveryQueueDir(),
+  askLedgerPath = rootDir === defaultDeliveryQueueDir()
+    ? defaultAskLedgerPath()
+    : join(rootDir, "ask-ledger.jsonl"),
+  recordAsk = appendAskLedger,
   now = () => Date.now(),
   uuid = () => randomUUID(),
   validateTarget = null,
@@ -187,6 +192,24 @@ export function createDeliveryQueue({
     const paneNumber = Number(pane) || 0;
     const dir = dirFor(agentName, paneNumber);
     const path = pathFor(agentName, paneNumber, id);
+
+    // The ask archive is the first durable artifact. Keep this before kind
+    // classification and target spool creation so a crash cannot deliver a
+    // prompt that durable history never observed.
+    recordAsk({
+      id: `delivery:${id}`,
+      ts: new Date(createdAtMs).toISOString(),
+      agent: agentName,
+      pane: paneNumber,
+      source,
+      verbatim: String(text),
+      sessionFile: metadata?.sessionFile || null,
+      sessionId: metadata?.sessionId || null,
+      cwd: metadata?.cwd || null,
+      repo: metadata?.repo || agentName,
+      deliveryId: id,
+    }, { path: askLedgerPath, now });
+
     ensurePrivateDir(dir);
 
     const job = {
