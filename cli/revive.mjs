@@ -99,7 +99,7 @@ export async function cmdRevive(ctx, flags, { configuredServiceTargets }) {
     catch (err) { console.error(`  services ${target.name} misslyckades: ${err.message.split("\n")[0]}`); }
   }
   for (const b of plan.briefs) {
-    const sent = await sendToPane(ctx, b.agent, b.pane, reviveBrief(b.interruptedAtMs, bootMs));
+    const sent = await sendToPane(ctx, b.agent, b.pane, reviveBrief(b.interruptedAtMs, bootMs, b.source));
     if (!sent?.delivered) {
       console.error(`  INTE skickad: ${b.agent}:${b.pane} (${sent?.blocked ? "parkerad" : "leverans ej verifierad"})`);
       continue;

@@ -54,10 +54,33 @@ export function planRevive({
   const last = new Map();
   const revived = new Map();
   const activeAfterBoot = new Set();
+  const manualStops = new Map();
+  const activity = new Map();
   for (const e of events) {
     const ms = Date.parse(e.ts);
     if (!Number.isFinite(ms)) continue;
+    if (e?.event === "fleet_stop_recovery" && Array.isArray(e.panes)) {
+      for (const pane of e.panes) {
+        const key = `${pane?.agent}:${pane?.pane}`;
+        const interruptedAtMs = Number(pane?.interruptedAtMs);
+        if (!pane?.agent || !Number.isSafeInteger(Number(pane?.pane)) || !Number.isFinite(interruptedAtMs)) continue;
+        const current = manualStops.get(key);
+        if (!current || ms >= current.receiptMs) {
+          manualStops.set(key, {
+            agent: pane.agent,
+            pane: Number(pane.pane),
+            interruptedAtMs,
+            receiptMs: ms,
+            source: `stop-all:${pane.evidence || "unfinished"}`,
+          });
+        }
+      }
+      continue;
+    }
     const key = `${e.session}:${e.pane}`;
+    if (e?.event === "prompt" || e?.event === "stop") {
+      activity.set(key, Math.max(activity.get(key) || 0, ms));
+    }
     if (e?.event === "revive_brief" && ms >= bootMs) {
       const interruptedAtMs = Number(e.interruptedAtMs);
       if (Number.isFinite(interruptedAtMs)) {
@@ -96,6 +119,15 @@ export function planRevive({
     if (status === "working" || status === "resume") continue;
     briefs.push({ ...interruption });
   }
+  for (const interruption of manualStops.values()) {
+    const key = `${interruption.agent}:${interruption.pane}`;
+    if (briefs.some((brief) => `${brief.agent}:${brief.pane}` === key)) continue;
+    if ((activity.get(key) || 0) > interruption.receiptMs) continue;
+    if ((revived.get(key) || 0) >= interruption.interruptedAtMs) continue;
+    const status = statuses.get(key);
+    if (status === "working" || status === "resume") continue;
+    briefs.push(interruption);
+  }
   return { briefs };
 }
 
@@ -106,8 +138,14 @@ export function selectRevivePanes(panes, briefs, { all = false } = {}) {
   return panes.filter((p) => keys.has(`${p.agent}:${p.pane}`));
 }
 
-export function reviveBrief(interruptedAtMs, bootMs) {
+/** WHAT: Formats one source-honest recovery brief. WHY: Prevents deliberate stops from being reported as host crashes. */
+export function reviveBrief(interruptedAtMs, bootMs, source = "") {
   const hhmm = (ms) => new Date(ms).toTimeString().slice(0, 5);
+  if (String(source).startsWith("stop-all:")) {
+    return `[stop-all-recovery] Din ofärdiga turn ${hhmm(interruptedAtMs)} journalfördes innan flottan stoppades. ` +
+      "Återanchra dig via amux done + din jsonl-historik, identifiera exakt vad som blev hängande och återuppta det. " +
+      "Om inget faktiskt hängde: en rad status, sen standby.";
+  }
   return `[krasch-recovery] Värden startade om ${hhmm(bootMs)} mitt i din pågående turn ` +
     `(din prompt ${hhmm(interruptedAtMs)} fick aldrig avslut). ` +
     "Återanchra dig via amux done + din jsonl-historik, identifiera vad som blev hängande och återuppta det. " +

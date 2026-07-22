@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Focused PR tests: maps files changed vs the base ref to their related fast
-// test files and runs exactly those. The PR gate never invokes the full
-// Vitest suite; a full repository run requires explicit owner authorization.
+// Focused local tests: maps files changed vs the base ref to their related fast
+// test files and runs exactly those. GitHub never invokes this selector; a
+// full repository run requires explicit owner authorization.
 //
 // Fail-closed: every changed executable source/config/script must map to a
 // focused test, or the gate fails with the exact unmapped paths. Only the
@@ -93,7 +93,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(1);
   }
   if (!tests.length) {
-    console.log("focused-tests: no related test files for this change; strict lint + CI contract cover it");
+    console.log("focused-tests: no related test files for this change; use strict local lint + manual review");
     process.exit(0);
   }
   console.log(`focused-tests: running ${tests.length} related file(s): ${tests.join(", ")}`);
