@@ -13,14 +13,10 @@ import { isLiveStatus, isCompactUnsafe } from "./pane-status.mjs";
 /** WHAT: Defines automatic compaction defaults. WHY: Keeps every caller on one safety policy. */
 export const DEFAULT_CONFIG = {
   enabled: true,
-  codexEnabled: false,    // Auto-compact is OFF for codex panes by default.
-                          // Codex enforces its own server-side context cap and
-                          // runs native auto-compaction, and amux's "/compact"
-                          // is a Claude command that doesn't drive codex — so
-                          // amux would only spam warnings at a pane it can't
-                          // actually shrink. Let codex run on auto. Flip with
-                          // AUTO_COMPACT_CODEX=true.
-  threshold: 70,          // percent context; lower only via explicit runtime config
+  codexEnabled: true,     // Codex supports /compact. Its journal watcher is
+                          // the completion truth; the composer only proves the
+                          // request left input, so no premature success notice.
+  threshold: 60,          // compact idle panes before large histories keep taxing input
   graceMs: 60_000,        // 1 minute between warn and fire
   pollMs: 60_000,         // poll cadence in the bridge.
                           // Matched to graceMs so each pane gets one decide
@@ -60,10 +56,11 @@ export const DEFAULT_CONFIG = {
                           // AUTO_COMPACT_WARN_COOLDOWN_MS.
 };
 
+/** WHAT: Parses auto-compact runtime policy. WHY: Keeps environment overrides consistent across bridge starts. */
 export function parseAutoCompactConfig(env = process.env) {
   return {
     enabled: env.AUTO_COMPACT_ENABLED !== "false",
-    codexEnabled: env.AUTO_COMPACT_CODEX === "true",
+    codexEnabled: env.AUTO_COMPACT_CODEX !== "false",
     threshold: parseInt(env.AUTO_COMPACT_WARN_THRESHOLD || DEFAULT_CONFIG.threshold, 10),
     graceMs: parseInt(env.AUTO_COMPACT_GRACE_MS || DEFAULT_CONFIG.graceMs, 10),
     pollMs: parseInt(env.AUTO_COMPACT_POLL_MS || DEFAULT_CONFIG.pollMs, 10),
@@ -202,6 +199,14 @@ export function decideAutoCompactAction({
     return { action: "none" };
   }
 
+  // Production requires a real recent-turn clock before compacting. A giant
+  // or unreadable journal must not turn "unknown" into "idle"; bounded test
+  // harnesses may set minIdleMs=0 to exercise the state machine without files.
+  if (config.minIdleMs > 0 && !Number.isFinite(lastActivityMs)) {
+    if (existing) return { action: "cancel", reason: "conversation activity unknown" };
+    return { action: "none", reason: "conversation activity unknown" };
+  }
+
   // Verify-before-refire: if we already fired /compact and context has NOT
   // dropped below the level we fired at, the compact isn't reducing context.
   // Firing again does nothing but queue another /compact into the pane (the
@@ -216,9 +221,8 @@ export function decideAutoCompactAction({
   // Min-idle gate: the pane might show the idle prompt char in tmux, but
   // if there's been a conversation turn in the last few minutes the
   // operator is probably mid-thought between turns. Skip entirely until
-  // the conversation has actually stalled. Null lastActivityMs means the
-  // jsonl is unreadable or empty — fall through since we can't prove
-  // freshness; the grace period still protects fires.
+  // the conversation has actually stalled. Production has already refused
+  // an unreadable activity clock above.
   if (lastActivityMs != null && Number.isFinite(lastActivityMs)) {
     const idleMs = now - lastActivityMs;
     if (idleMs < config.minIdleMs) {

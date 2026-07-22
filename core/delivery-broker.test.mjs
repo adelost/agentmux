@@ -2427,6 +2427,8 @@ feature("single-writer delivery broker", () => {
       });
       const notices = [];
       const agent = acceptingAgent();
+      agent.readyCalls = 0;
+      agent.ensureReady = async () => { agent.readyCalls += 1; };
       agent.paneProcessState = async () => ({ command: "bash", dead: false, shell: true, running: false });
       const broker = createDeliveryBroker({
         agent,
@@ -2439,6 +2441,7 @@ feature("single-writer delivery broker", () => {
     }],
     when: ["the delivery pass reaches the write path", ({ broker }) => broker.kickTarget("ai", 5)],
     then: ["the payload is delivered and acknowledged through the normal path", (_, ctx) => {
+      expect(ctx.agent.readyCalls).toBe(1);
       expect(ctx.agent.sends.map((send) => send.text)).toEqual(["wake and deliver"]);
       expect(ctx.queue.read("ai", 5, ctx.job.id)).toMatchObject({ status: "acknowledged" });
       rmSync(ctx.rootDir, { recursive: true, force: true });

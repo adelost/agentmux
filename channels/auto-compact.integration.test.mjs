@@ -11,6 +11,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { createAutoCompact, enteredLimited } from "./auto-compact.mjs";
 import { DEFAULT_CONFIG } from "../core/auto-compact.mjs";
+import { resetCodexSessionIndexForTests } from "../core/context.mjs";
 
 const yield_ = () => new Promise((r) => setTimeout(r, 5));
 
@@ -176,36 +177,55 @@ feature("auto-compact tick — runaway prevention (the real bug)", () => {
     }],
   });
 
-  // Codex panes run on AUTO — amux must not touch them (codex has a server-
-  // enforced cap + native auto-compaction; /compact is a Claude command). The
-  // skip happens BEFORE inspect(), so a codex pane is never even captured.
-  component("codex panes are inspected (quota watch) but never warned or compacted", {
+  component("Codex panes use the same 60%-by-default compact request without a false completion notice", {
     given: ["an agent with a claude pane (0) and a codex pane (1), both reading 100%", () => {
       const dir = mkdtempSync(join(tmpdir(), "amux-ac-codex-"));
+      const fakeHome = mkdtempSync(join(tmpdir(), "amux-ac-codex-home-"));
+      const oldHome = process.env.HOME;
       const path = join(dir, "agents.yaml");
       writeFileSync(path, `test:\n  dir: ${dir}\n  id: 00000000-0000-0000-0000-000000000099\n  panes:\n    - name: claude\n      cmd: claude\n    - name: codex\n      cmd: codex\n`);
-      const state = { content: CONTENT.full100, captures: [], fires: 0 };
+      const codexPane = join(dir, ".agents", "1");
+      const codexDay = join(fakeHome, ".codex", "sessions", "2026", "07", "22");
+      mkdirSync(codexPane, { recursive: true });
+      mkdirSync(codexDay, { recursive: true });
+      writeFileSync(join(codexDay, "rollout-auto-compact.jsonl"), [
+        JSON.stringify({ type: "session_meta", payload: { cwd: codexPane } }),
+        JSON.stringify({ timestamp: "2026-07-22T12:00:00Z", type: "event_msg", payload: {
+          type: "token_count",
+          info: { model_context_window: 256_000,
+            last_token_usage: { input_tokens: 255_000, output_tokens: 1_000 } },
+        } }),
+      ].join("\n") + "\n");
+      process.env.HOME = fakeHome;
+      resetCodexSessionIndexForTests();
+      const state = { content: CONTENT.full100, captures: [], fires: [] };
       const agent = {
         capturePane: async (name, idx) => { state.captures.push(`${name}:${idx}`); return state.content; },
-        sendOnly: async (_n, cmd) => { if (cmd === "/compact") state.fires++; },
+        sendOnly: async (name, cmd, pane) => {
+          if (cmd === "/compact") state.fires.push(`${name}:${pane}`);
+        },
         dismissBlockingPrompt: async () => null,
         sendEnter: async () => {},
       };
       const tmux = async () => ({ stdout: `0 50` });
       const discord = { send: async () => {} };
-      // codexEnabled defaults to false in DEFAULT_CONFIG → codex is skipped.
       const config = { ...DEFAULT_CONFIG, threshold: 70, graceMs: 0, compactLockMs: 0, minIdleMs: 0, slashSettleMs: 0 };
       const ac = createAutoCompact({ agent, agentsYamlPath: path, discord, tmux, config, log: () => {} });
-      return { ac, state };
+      return { ac, state, oldHome, fakeHome };
     }],
-    when: ["running 3 poll ticks", async ({ ac, state }) => { await ticks(ac, 3); return state; }],
-    then: ["codex pane read-only: inspected for the limited-watch, zero compact fires from it", (state) => {
-      // Inspection is REQUIRED since 1.20.65: the quota-silence alert must see
-      // codex panes (they are the classic "limited" producer). The compact
-      // machinery still never touches them — at 100% on both panes, only the
-      // claude pane can account for fires.
+    when: ["running 3 poll ticks", async ({ ac, state, oldHome, fakeHome }) => {
+      try {
+        await ticks(ac, 3);
+        return state;
+      } finally {
+        process.env.HOME = oldHome;
+        resetCodexSessionIndexForTests();
+        rmSync(fakeHome, { recursive: true, force: true });
+      }
+    }],
+    then: ["both panes are inspected and receive one bounded compact request", (state) => {
       expect(state.captures).toContain("test:1");
-      expect(state.fires).toBeLessThanOrEqual(3);
+      expect(state.fires).toEqual(["test:0", "test:1"]);
     }],
   });
 });

@@ -64,9 +64,10 @@ same pane until another threshold window has passed.
 
 ## Auto-Compact
 
-The bridge can warn and compact idle panes before they approach context-limit
-failure. Activity cancels a pending compact, so the feature targets idle panes
-rather than active work.
+The bridge can warn and compact idle Claude and Codex panes before they
+approach context-limit failure. Activity cancels a pending compact, so the
+feature targets idle panes rather than active work. Codex completion is only
+announced after its journal emits the authoritative `compacted` event.
 
 ```text
 Auto-compact in 60s: claw:3 is at 78% context and idle. Type anything to cancel.
@@ -78,10 +79,35 @@ Auto-compacting claw:3 (was 78%). Summary preserves recent context.
 | Variable | Default | Description |
 |---|---:|---|
 | `AUTO_COMPACT_ENABLED` | `true` | Set `false` to disable the poll |
-| `AUTO_COMPACT_WARN_THRESHOLD` | `70` | Context percentage that triggers a warning |
+| `AUTO_COMPACT_WARN_THRESHOLD` | `60` | Context percentage that triggers a warning |
+| `AUTO_COMPACT_CODEX` | `true` | Set `false` to opt Codex panes out |
 | `AUTO_COMPACT_GRACE_MS` | `60000` | Milliseconds between warning and compact |
 | `AUTO_COMPACT_POLL_MS` | `60000` | Milliseconds between poll ticks |
 | `AUTO_COMPACT_MIN_IDLE_MS` | `300000` | Required conversation silence before warning |
+
+## Compact then sleep
+
+The optional pane-sleep controller conserves runtime memory without losing
+inspectable tmux sessions. It considers only Claude coding processes that have
+been silent for 24 hours and are provably done: idle composer, no active turn,
+no durable delivery, clean non-rebasing worktree, and an unattached tmux
+session. Unknown evidence refuses sleep.
+
+Before a process is stopped, agentmux records an exact `/compact` boundary,
+checks the resumed session with a nonce, observes it idle twice, and exits it
+gracefully. A later durable message wakes only that recorded pane and session
+through the release-identity and memory-admission gates. Codex and Kimi sleep
+remain disabled until they expose equivalent exact receipts.
+
+```bash
+amux sleep-watch --dry       # inspect decisions; never changes a pane
+amux sleep-watch --apply     # run the conservative controller
+amux wake <agent> -p <pane>  # explicit exact-pane wake
+```
+
+| Variable | Default | Description |
+|---|---:|---|
+| `AMUX_PANE_SLEEP_ENABLED` | `true` | Set `false` to disable the bridge controller |
 
 ### Claude quota recovery
 

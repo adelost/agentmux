@@ -18,6 +18,7 @@ const base = {
   warnings: new Map(),
   config: cfg(),
   now: 1_700_000_000_000,
+  lastActivityMs: 1_700_000_000_000 - 10 * 60_000,
 };
 
 feature("decideAutoCompactAction — disabled config", () => {
@@ -39,13 +40,13 @@ feature("decideAutoCompactAction — first crossing (warn)", () => {
   });
 
   unit("exactly at threshold → warn", {
-    given: ["70% idle", () => ({ ...base, contextPercent: 70 })],
+    given: ["60% idle", () => ({ ...base, contextPercent: 60 })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=warn", (r) => expect(r.action).toBe("warn")],
   });
 
   unit("1% below threshold → none", {
-    given: ["69% idle", () => ({ ...base, contextPercent: 69 })],
+    given: ["59% idle", () => ({ ...base, contextPercent: 59 })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
     then: ["action=none", (r) => expect(r.action).toBe("none")],
   });
@@ -172,10 +173,12 @@ feature("decideAutoCompactAction — min-idle gate (conversation freshness)", ()
     then: ["action=warn", (r) => expect(r.action).toBe("warn")],
   });
 
-  unit("null lastActivityMs skips gate (can't prove freshness)", {
+  unit("null lastActivityMs fails closed because freshness is unknown", {
     given: ["no jsonl data", () => ({ ...base, lastActivityMs: null })],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
-    then: ["action=warn (fall through)", (r) => expect(r.action).toBe("warn")],
+    then: ["action=none with a classified reason", (r) => {
+      expect(r).toEqual({ action: "none", reason: "conversation activity unknown" });
+    }],
   });
 
   unit("fresh turn cancels existing warning", {
@@ -349,23 +352,23 @@ feature("resolveActivityMs — partial tail must not fabricate freshness (the 8t
   });
 });
 
-feature("regression: giant-turn pane (empty tail) matures to compact, not endless re-warn", () => {
-  // End-to-end of the claw:1 flood: 77% idle, warning posted, next poll's tail
-  // parse finds no turn (giant turn > tailBytes) while mtime is seconds old.
-  // With fileFullyRead:false the activity signal is null → min-idle gate is
-  // skipped → the aged warning FIRES instead of being cancelled by phantom
-  // freshness. (Observed: 3 warnings over 35 min, zero compacts.)
+feature("regression: an unreadable giant-turn pane fails closed", () => {
+  // A bounded reader may still meet a record larger than its entire safety
+  // window. Unknown cannot prove idle, so an old warning is cancelled rather
+  // than compacting active context or re-warning forever.
   const now = 1_700_000_000_000;
   const cfgIdle = cfg();
 
-  unit("warn matures to compact when tail has no turn and mtime is fresh", {
+  unit("an aged warning is cancelled when no real activity clock is readable", {
     given: ["77% idle, warned 60s ago, no turn readable, mtime 8s old, partial tail", () => {
       const lastActivityMs = resolveActivityMs({ turnMs: NaN, fileMtimeMs: now - 8_000, fileFullyRead: false });
       const warnings = new Map([[key, { warned_at: now - 60_000 }]]);
       return { ...base, contextPercent: 77, warnings, lastActivityMs, config: cfgIdle, now };
     }],
     when: ["deciding", (args) => decideAutoCompactAction(args)],
-    then: ["action=compact (NOT cancel)", (r) => expect(r.action).toBe("compact")],
+    then: ["action=cancel with the classified reason", (r) => {
+      expect(r).toEqual({ action: "cancel", reason: "conversation activity unknown" });
+    }],
   });
 });
 
@@ -435,7 +438,8 @@ feature("parseAutoCompactConfig", () => {
     when: ["parsing", ({ env }) => parseAutoCompactConfig(env)],
     then: ["matches DEFAULT_CONFIG", (r) => {
       expect(r.enabled).toBe(true);
-      expect(r.threshold).toBe(70);
+      expect(r.codexEnabled).toBe(true);
+      expect(r.threshold).toBe(60);
       expect(r.threshold).toBe(DEFAULT_CONFIG.threshold);
       expect(r.graceMs).toBe(DEFAULT_CONFIG.graceMs);
       expect(r.pollMs).toBe(DEFAULT_CONFIG.pollMs);
@@ -446,6 +450,12 @@ feature("parseAutoCompactConfig", () => {
     given: ["env with disable", () => ({ env: { AUTO_COMPACT_ENABLED: "false" } })],
     when: ["parsing", ({ env }) => parseAutoCompactConfig(env)],
     then: ["enabled=false", (r) => expect(r.enabled).toBe(false)],
+  });
+
+  unit("AUTO_COMPACT_CODEX=false explicitly disables Codex compaction", {
+    given: ["env with the Codex opt-out", () => ({ env: { AUTO_COMPACT_CODEX: "false" } })],
+    when: ["parsing", ({ env }) => parseAutoCompactConfig(env)],
+    then: ["codexEnabled=false", (r) => expect(r.codexEnabled).toBe(false)],
   });
 
   unit("custom threshold + grace from env", {
