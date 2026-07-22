@@ -1,26 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { publishSelfReportedVerdict, STATUS_CONTEXT } from
   "../.github/scripts/publish-self-reported-verdict.mjs";
 
-const pullRequestWorkflow = readFileSync(
-  new URL("../.github/workflows/pull-request.yml", import.meta.url),
-  "utf-8",
+assert.equal(
+  existsSync(new URL("../.github/workflows/pull-request.yml", import.meta.url)),
+  false,
+  "GitHub pull-request CI must stay absent; verification is local and targeted",
 );
-assert.match(pullRequestWorkflow, /fetch-depth:\s*0/,
-  "changed-file lint requires trunk history in the PR checkout");
-assert.match(pullRequestWorkflow, /AMUX_LINT_BASE_REF:[^\n]*(?:pull_request\.base\.sha)[^\n]*(?:merge_group\.base_sha)/,
-  "pull requests and merge groups must bind lint to their exact base SHA");
-assert.match(pullRequestWorkflow, /run:\s*amux lint --changed --strict/,
-  "every PR must run the strict changed-file ratchet");
-assert.match(pullRequestWorkflow, /run:\s*node bin\/focused-tests\.mjs/,
-  "every PR runs only the tests related to its changed files");
-assert.doesNotMatch(pullRequestWorkflow, /npm\s+(?:run\s+)?test\b/,
-  "the PR gate must never invoke the full test suite");
-assert.doesNotMatch(pullRequestWorkflow, /npm\s+run\s+ci\b/,
-  "the PR gate must never invoke the full ci suite");
-assert.doesNotMatch(pullRequestWorkflow, /vitest/,
-  "the PR workflow must not reference vitest directly; focused-tests.mjs owns it");
 
 const SHA = "a".repeat(40);
 const NEXT_SHA = "b".repeat(40);
@@ -123,4 +110,4 @@ await assert.rejects(publishSelfReportedVerdict({ github: closed.github, context
   /not open/);
 assert.equal(closed.statuses.length, 0);
 
-console.log("CI contract: changed-file lint plus current-head PASS/HOLD receipts verified");
+console.log("Verification contract: GitHub PR CI absent; current-head PASS/HOLD receipts verified");

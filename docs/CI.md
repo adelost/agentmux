@@ -1,28 +1,25 @@
-# Pull request gate
+# Local verification policy
 
-Every pull request to `master` runs the repository-owned `Pull request gate` on
-a GitHub-hosted runner. The stable required-check name is `Required test`. It
-installs exactly `package-lock.json` and runs the Vitest suite through
-`npm run ci`. Before the suite it runs `amux lint --changed --strict` against
-the exact pull-request or merge-group base SHA. The workflow fetches full Git
-history so a clean checkout cannot turn changed-file lint into a zero-file
-pass. The workflow installs ripgrep for the real search integration;
-the exact Codex CLI used by the execpolicy contract is a locked dev dependency.
-Agentmux has no compile/typecheck build step; setup, native runtime canaries,
-and visual gates are intentionally not smuggled into the fast default PR gate.
+GitHub does not run tests, lint, builds, or merge-group CI for this repository.
+The former `Pull request gate` workflow is intentionally absent and
+`Required test` is not a protected-branch context. This avoids remote runner
+latency and duplicate validation across a large agent fleet.
 
-The workflow has only `contents: read` permission. It receives no Suggestions,
-Discord, model-provider, or deployment credentials and cannot mutate fleet
-state.
+The implementing agent owns verification before push:
 
-Repository rules must require both `Required test` and `broker-verdict
-(self-reported)` for `master`. Until that rule is enabled, the checks are
-machine evidence but not a merge fence.
+1. run the named unit/component test files related to the change;
+2. run `amux lint --changed --strict` locally;
+3. perform the smallest relevant manual rehearsal;
+4. record the exact commands and outcomes in the pull request.
 
-Enable the two required contexts for administrators as well as ordinary
-writers. Do not enable a required native approval count until a distinct
-authenticated reviewer principal exists; otherwise every pull request becomes
-unmergeable by construction.
+`bin/focused-tests.mjs` remains an optional local selector. It never authorizes
+a full suite and is not called by GitHub. Full `npm test`, `npm run ci`, native
+runtime canaries, browser fleets, and visual gates require explicit owner
+direction.
+
+The separately dispatched `broker-verdict (self-reported)` workflow publishes
+a SHA-freshness status only when explicitly requested. It does not run code or
+tests and is not an automatic pull-request trigger.
 
 ## Review identity
 

@@ -3,7 +3,7 @@ import { relatedTests, unmappedExecutables } from "./focused-tests.mjs";
 
 const existsSet = (paths) => (path) => paths.includes(path);
 
-feature("focused PR tests", () => {
+feature("focused local tests", () => {
   unit("a changed source file maps to its sibling test file", {
     then: ["exact mapping, nothing else", () => {
       const exists = existsSet(["core/memory-guard.test.mjs"]);
