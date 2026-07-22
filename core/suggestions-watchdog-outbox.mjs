@@ -186,9 +186,10 @@ export async function pollWatchdogOutboxes({ config, readToken, adminToken,
       const alerts = validateAlerts(outbox, projectId);
       for (const alert of alerts) {
         try {
-          const target = alertTarget(alert, broker);
+          const delivery = watchdogAlertDelivery(projectId, alert, bootstrap, broker);
+          const target = { agent: delivery.agent, pane: delivery.pane };
           const idempotencyKey = watchdogDeliveryKey(projectId, alert.dedupeKey);
-          const prompt = alertPrompt(projectId, alert, bootstrap);
+          const prompt = delivery.prompt;
           const request = { ...target, prompt, idempotencyKey, projectId, alert };
           const alreadyAttempted = typeof deliver.wasAttempted === "function"
             && await deliver.wasAttempted(request);
@@ -353,13 +354,15 @@ function brokerTarget(value, projectId) {
 }
 
 function alertTarget(alert, broker) {
-  if (alert.kind !== "assignment_offer_delivery") return broker;
-  const targetAgent = alert.payload.targetAgent;
+  const field = alert.kind === "assignment_offer_delivery" ? "targetAgent"
+    : alert.kind === "pull_claim_attention_due" ? "targetAgentId" : null;
+  if (!field) return broker;
+  const targetAgent = alert.payload[field];
   const match = typeof targetAgent === "string"
     ? targetAgent.match(/^([a-z][a-z0-9-]{0,31}):([0-9]{1,3})$/u) : null;
   const pane = Number(match?.[2]);
   if (!match || !Number.isSafeInteger(pane) || pane < 0 || pane > 128) {
-    throw new Error("schema: assignment offer targetAgent is not an agentmux target");
+    throw new Error(`schema: ${alert.kind} ${field} is not an agentmux target`);
   }
   return { agent: match[1], pane };
 }
@@ -414,6 +417,18 @@ function alertPrompt(projectId, alert, bootstrap) {
     }
     return alert.payload.resolvedPrompt;
   }
+  if (alert.kind === "pull_claim_attention_due") {
+    const question = alert.payload.question;
+    if (typeof question !== "string" || !question.trim()) {
+      throw new Error("schema: pull_claim_attention_due question is missing");
+    }
+    const prompt = `[BOARD CHECK · ${alert.ticketId}] ${question.trim()}\n`
+      + "Reply exactly: working, waiting, blocked, or done.";
+    if (bytes(prompt) > MAX_PROMPT_BYTES) {
+      throw new Error("schema: pull_claim_attention_due question is oversized");
+    }
+    return prompt;
+  }
   const prompt = `WATCHDOG ALERT — ${projectId}/${alert.ticketId} — ${alert.kind}\n${JSON.stringify({
     id: alert.id,
     ticketId: alert.ticketId,
@@ -424,6 +439,11 @@ function alertPrompt(projectId, alert, bootstrap) {
   })}`;
   if (bytes(prompt) > MAX_PROMPT_BYTES) throw new Error("schema: watchdog alert prompt is oversized");
   return prompt;
+}
+
+/** WHAT: Resolves one alert to its exact pane and bounded prompt. WHY: Prevents owner reminders from silently falling back to the broker. */
+export function watchdogAlertDelivery(projectId, alert, bootstrap, broker) {
+  return { ...alertTarget(alert, broker), prompt: alertPrompt(projectId, alert, bootstrap) };
 }
 
 function recoverLegacyBrokerCheckPrompt(alert, bootstrap) {
