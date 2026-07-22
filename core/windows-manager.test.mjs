@@ -2,6 +2,7 @@ import { expect, feature, unit } from "bdd-vitest";
 import {
   MANAGER_CONTRACT_VERSION,
   MANAGER_TOOLS,
+  buildCodexResumeArgs,
   buildRunbookContext,
   classifyManagerOutcome,
   createCliProvider,
@@ -463,6 +464,46 @@ feature("windows manager core", () => {
       expect(calls[0].callArgs).toEqual(["resume", sessionId]);
       expect(calls[0].input).toContain("[USER]\ntillbaka nu");
       expect(calls[0].input).not.toContain("RUNBOOK TEXT");
+    }],
+  });
+
+  unit("manager resume args are a real argv array, never one joined string", {
+    then: ["codex.js, exec, resume, the id, and the stdin dash stay separate elements", () => {
+      const codexJs = "C:\\Users\\claw\\npm\\node_modules\\@openai\\codex\\bin\\codex.js";
+      const execArgs = [codexJs, "exec", "--sandbox", "read-only", "--skip-git-repo-check", "-"];
+      const resume = buildCodexResumeArgs(execArgs);
+      expect(typeof resume).toBe("function");
+      const sessionId = "019f82e7-21bd-7b62-9eaa-eb2719207962";
+      const argv = resume(sessionId);
+      expect(argv).toEqual([codexJs, "exec", "resume", "--skip-git-repo-check", sessionId, "-"]);
+      expect(argv.every((entry) => !entry.includes(" "))).toBe(true);
+      expect(buildCodexResumeArgs(["exec", "-"])).toBeInstanceOf(Function);
+      expect(buildCodexResumeArgs(["--help"])).toBeNull();
+      expect(buildCodexResumeArgs(null)).toBeNull();
+    }],
+  });
+
+  unit("a configured session id without resume args falls back to full turns", {
+    then: ["the small resume prompt is never sent as a fresh session", async () => {
+      const calls = [];
+      const execImpl = (cmd, callArgs, input) => {
+        calls.push({ callArgs, input });
+        return Promise.resolve({ code: 0, stdout: "codex\nSvar.\ntokens used\n5\n", timedOut: false });
+      };
+      const provider = createCliProvider({
+        command: "node.exe",
+        args: ["codex.js", "exec", "-"],
+        initialSessionId: "019f82e7-21bd-7b62-9eaa-eb2719207962",
+        execImpl,
+      });
+      const result = await provider.chat([
+        { role: "system", content: "RUNBOOK TEXT" },
+        { role: "user", content: "hej" },
+      ]);
+      expect(result.ok).toBe(true);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].callArgs).toEqual(["codex.js", "exec", "-"]);
+      expect(calls[0].input).toContain("RUNBOOK TEXT");
     }],
   });
 });

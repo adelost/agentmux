@@ -283,19 +283,25 @@ export function createHttpProvider({
   };
 }
 
+/** WHAT: Builds the codex resume argv from the configured exec argv. WHY: Separate argv elements are load-bearing; one joined string exits non-zero and continuity dies silently. */
+export function buildCodexResumeArgs(args) {
+  const list = Array.isArray(args) ? args : [];
+  const execIndex = list.indexOf("exec");
+  if (execIndex < 0) return null;
+  const head = list.slice(0, execIndex);
+  return (sessionId) => [...head, "exec", "resume", "--skip-git-repo-check", sessionId, "-"];
+}
+
 /** WHAT: Builds the configured manager provider. WHY: Keeps provider selection out of the poll loop. */
 export function createManagerProvider(config) {
   const spec = config.provider || {};
   if (spec.kind === "mock") return createMockProvider(spec.responses || []);
   if (spec.kind === "cli") {
-    const wslPrefix = Array.isArray(spec.resumeArgs) ? spec.resumeArgs : [];
+    const args = Array.isArray(spec.args) ? spec.args : [];
     return createCliProvider({
       command: spec.command,
-      args: Array.isArray(spec.args) ? spec.args : [],
-      resumeArgs: (sessionId) => [
-        ...wslPrefix,
-        `codex exec resume --skip-git-repo-check ${sessionId} -`,
-      ],
+      args,
+      resumeArgs: buildCodexResumeArgs(args),
       sessionsDir: spec.sessionsDir || null,
       initialSessionId: spec.initialSessionId || null,
       timeoutMs: Number(spec.timeoutMs) || 120_000,
@@ -381,13 +387,14 @@ export function createCliProvider({
   }).join("\n\n");
 
   let sessionId = initialSessionId || null;
+  const canResume = typeof resumeArgs === "function";
   return {
     name: "cli",
     chat: async (messages) => {
       const all = messages || [];
       const run = execImpl || defaultExec;
       let prompt;
-      if (sessionId) {
+      if (sessionId && canResume) {
         // Resume: the runbook and history live in the codex session already;
         // only the fresh observation and the new user text are worth tokens.
         const latestUser = [...all].reverse().find((message) => message.role === "user");
@@ -401,9 +408,9 @@ export function createCliProvider({
       if (!command || !prompt.trim()) return { ok: false, reason: "usage" };
 
       const startedMs = nowMs();
-      let result = await run(command, sessionId && resumeArgs ? resumeArgs(sessionId) : args, prompt, timeoutMs);
+      let result = await run(command, sessionId && canResume ? resumeArgs(sessionId) : args, prompt, timeoutMs);
       if (result.timedOut) return { ok: false, reason: "timeout" };
-      if (result.code !== 0 && sessionId) {
+      if (result.code !== 0 && sessionId && canResume) {
         // Session lost or compacted: one fresh full turn, then re-capture.
         sessionId = null;
         result = await run(command, args, flatten(all), timeoutMs);

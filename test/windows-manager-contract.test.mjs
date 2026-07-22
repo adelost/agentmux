@@ -156,6 +156,14 @@ feature("windows manager source contract", () => {
     }],
   });
 
+  unit("codex resume args stay a derived argv array, never a joined string", {
+    then: ["the provider wiring derives the resume argv from the exec argv", () => {
+      expect(CORE).toContain("resumeArgs: buildCodexResumeArgs(args)");
+      expect(CORE).toContain('"exec", "resume", "--skip-git-repo-check", sessionId, "-"');
+      expect(CORE).not.toContain("codex exec resume");
+    }],
+  });
+
   unit("every manager file stays under its line cap", {
     then: ["core and bin under 500, the loop under 300", () => {
       expect(CORE.trimEnd().split("\n").length).toBeLessThan(500);
