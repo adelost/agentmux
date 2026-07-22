@@ -107,6 +107,22 @@ feature("focused PR tests", () => {
     }],
   });
 
+  unit("split orientation modules map to their owning focused contracts", {
+    then: ["runtime, generated hints, and semantic index all have explicit coverage", () => {
+      const exists = existsSet([
+        "cli.test/commands.test.mjs", "test/native-runtime-service.test.mjs",
+        "cli/hints-sync.test.mjs", "core/search.test.mjs",
+      ]);
+      expect(relatedTests("cli/runtime.mjs", { exists })).toEqual([
+        "cli.test/commands.test.mjs", "test/native-runtime-service.test.mjs",
+      ]);
+      expect(relatedTests("cli/native-runtime-service.mjs", { exists }))
+        .toEqual(["test/native-runtime-service.test.mjs"]);
+      expect(relatedTests("core/hints-tool-guide.mjs", { exists })).toEqual(["cli/hints-sync.test.mjs"]);
+      expect(relatedTests("core/search-semantic.mjs", { exists })).toEqual(["core/search.test.mjs"]);
+    }],
+  });
+
   unit("the Codex rollout reader maps to its split component suite", {
     then: ["the alias lands the actual test path", () => {
       const exists = existsSet(["test/codex-jsonl-reader.test.mjs"]);
