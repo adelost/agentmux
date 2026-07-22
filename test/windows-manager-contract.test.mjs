@@ -35,11 +35,14 @@ feature("windows manager source contract", () => {
     }],
   });
 
-  unit("no destructive WSL shutdown exists anywhere in the manager runtime", {
-    then: ["neither the loop nor the rescue tool carries the shutdown switch", () => {
+  unit("destructive restart is reachable only through authenticated local intent", {
+    then: ["the model cannot request it and the rescue tool reuses the shared one-shot restart", () => {
       expect(MGR).not.toContain("--shutdown");
       expect(RESCUE).not.toContain("--shutdown");
-      expect(RESCUE).not.toContain("Restart-Wsl");
+      expect(CORE).toContain("MODEL_TOOL_NAMES");
+      expect(CORE).toContain("explicitHumanRestart");
+      expect(CORE).toContain('modelCallable: false');
+      expect(RESCUE).toContain('if ($Name -eq "restart-wsl") { return Restart-Wsl -Config $config }');
       expect(RESCUE).not.toContain("Invoke-Rescue");
       expect(RESCUE).not.toContain("Invoke-FencedWslRestart");
     }],
@@ -100,10 +103,10 @@ feature("windows manager source contract", () => {
   });
 
   unit("the rescue tool dot-sources the shared io and stays bounded and redacted", {
-    then: ["io dot-sourced, four commands, JSON shape, job timeout, redaction", () => {
+    then: ["io dot-sourced, five commands, JSON shape, job timeout, redaction", () => {
       expect(RESCUE).toContain("windows-restarter-io.ps1");
       expect(RESCUE).toContain(". $RuntimeIo");
-      expect(RESCUE).toContain('ValidateSet("start-wsl", "start-bridge", "recover", "recover-verify")');
+      expect(RESCUE).toContain('ValidateSet("start-wsl", "start-bridge", "restart-wsl", "recover", "recover-verify")');
       expect(RESCUE).toContain("Start-WslBounded");
       expect(RESCUE).toContain("Start-BridgeForeground");
       expect(RESCUE).toContain("Invoke-Recovery");

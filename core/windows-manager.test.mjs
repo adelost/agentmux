@@ -27,6 +27,10 @@ feature("windows manager core", () => {
       expect(planLocalRescueTurn("visa loggarna")).toEqual({ kind: "logs", tools: ["get_logs"] });
       expect(planLocalRescueTurn("WSL har kraschat")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
       expect(planLocalRescueTurn("WSL krash")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
+      expect(planLocalRescueTurn("Ok, WSL har kraschat och behöver startas om"))
+        .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl"] });
+      expect(planLocalRescueTurn("Kan du starta om WSL?"))
+        .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl"] });
       expect(planLocalRescueTurn("WSL svarar inte")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
       expect(planLocalRescueTurn("hur restartar vi WSL?")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
       expect(planLocalRescueTurn("Hej! Hur restartar vi?")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
@@ -59,8 +63,8 @@ feature("windows manager core", () => {
       expect(runbook).toContain("Bara bryggen nere");
       expect(runbook).toContain("Värden död");
       expect(runbook).toContain("wsl --shutdown");
-      expect(runbook).toContain("restart-ready-kvittens");
-      expect(runbook).toContain("fleet generation");
+      expect(runbook).toContain("autentiserat och uttryckligt");
+      expect(runbook).toContain("modellen kan aldrig");
       expect(runbook).toContain("wsl=offline");
       expect(runbook).toContain("60 sekunder");
       expect(runbook).toContain("Journalföring sker före varje exekvering");
@@ -77,24 +81,27 @@ feature("windows manager core", () => {
     }],
   });
 
-  unit("the tool allowlist is bounded, Swedish, and non-destructive", {
-    then: ["five tools with exact timeouts and flags", () => {
+  unit("the tool allowlist is bounded and keeps destructive restart local-only", {
+    then: ["six tools with exact timeouts and only restart_wsl destructive", () => {
       expect(MANAGER_TOOLS.map((tool) => tool.name)).toEqual([
         "get_status",
         "get_logs",
         "start_bridge",
         "start_wsl",
         "recover",
+        "restart_wsl",
       ]);
       const byName = Object.fromEntries(MANAGER_TOOLS.map((tool) => [tool.name, tool]));
       expect(byName.start_wsl.timeoutMs).toBe(120_000);
       expect(byName.recover.timeoutMs).toBe(570_000);
+      expect(byName.restart_wsl.timeoutMs).toBe(570_000);
+      expect(byName.restart_wsl).toMatchObject({ destructive: true, modelCallable: false });
       for (const name of ["get_status", "get_logs", "start_bridge"]) {
         expect(byName[name].timeoutMs).toBeGreaterThanOrEqual(30_000);
         expect(byName[name].timeoutMs).toBeLessThanOrEqual(45_000);
       }
       for (const tool of MANAGER_TOOLS) {
-        expect(tool.destructive).toBe(false);
+        if (tool.name !== "restart_wsl") expect(tool.destructive).toBe(false);
         expect(tool.description.length).toBeGreaterThan(10);
       }
     }],
@@ -136,6 +143,7 @@ feature("windows manager core", () => {
         .toEqual(["get_status", "recover"]);
       expect(parseToolCalls("{\"tool\":\"wipe\"}")).toEqual([]);
       expect(parseToolCalls("{\"tool\":\"restart\"}")).toEqual([]);
+      expect(parseToolCalls("{\"tool\":\"restart_wsl\"}")).toEqual([]);
       expect(parseToolCalls("not json at all")).toEqual([]);
       expect(parseToolCalls("{\"tool\":123}")).toEqual([]);
       expect(parseToolCalls("[{\"tool\":\"get_status\"}]")).toEqual([]);
@@ -163,6 +171,10 @@ feature("windows manager core", () => {
         .toEqual({ allow: false, reason: "wsl-not-proven-offline" });
       expect(planToolCall({ name: "start_wsl", observation: null }))
         .toEqual({ allow: false, reason: "wsl-not-proven-offline" });
+      expect(planToolCall({ name: "restart_wsl", observation: { wsl: "unknown" } }))
+        .toEqual({ allow: false, reason: "explicit-human-restart-required" });
+      expect(planToolCall({ name: "restart_wsl", observation: { wsl: "unknown" }, explicitHumanRestart: true }))
+        .toEqual({ allow: true, reason: "explicit-human-restart" });
       const nowMs = 1_000_000;
       expect(planToolCall({ name: "recover", lastStatusMs: nowMs - 59_000, nowMs }))
         .toEqual({ allow: true, reason: "ok" });
@@ -214,6 +226,7 @@ feature("windows manager core", () => {
       expect(planRescueCommand({ name: "get_status" }))
         .toEqual({ command: "get-status", beforeBootId: null, degraded: false });
       expect(planRescueCommand({ name: "start_wsl" }).command).toBe("start-wsl");
+      expect(planRescueCommand({ name: "restart_wsl" }).command).toBe("restart-wsl");
       expect(planRescueCommand({ name: "recover", beforeBootId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }))
         .toEqual({ command: "recover-verify", beforeBootId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", degraded: false });
       expect(planRescueCommand({ name: "recover", beforeBootId: null }))

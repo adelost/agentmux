@@ -99,16 +99,16 @@ feature("windows manager smoke", () => {
     }],
   });
 
-  unit("a WSL crash runs the bounded local recovery even when the provider has no replies", {
-    then: ["status precedes recover and no model call is made", async () => {
+  unit("an explicit WSL restart request runs the local restart even when the provider has no replies", {
+    then: ["status precedes one restart and no model call is made", async () => {
       const harness = makeHarness({
-        messages: [{ id: "105", content: "WSL har kraschat", author: { id: CONFIG.authorizedUserId, bot: false } }],
+        messages: [{ id: "105", content: "Ok, WSL har kraschat och behöver startas om", author: { id: CONFIG.authorizedUserId, bot: false } }],
         scripted: [],
       });
       try {
         const state = { schemaVersion: 1, lastSeenId: null, lastAction: null, lastStatusMs: null };
         expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(1);
-        expect(harness.executed).toEqual(["get_status", "recover"]);
+        expect(harness.executed).toEqual(["get_status", "restart_wsl"]);
         expect(harness.chats()).toBe(0);
         expect(harness.sent[0]).toContain("AMUX RECOVERED lokal recovery");
         expect(state.lastSeenId).toBe("105");

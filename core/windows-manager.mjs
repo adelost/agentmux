@@ -11,6 +11,7 @@ export const MANAGER_CONTRACT_VERSION = 1;
 
 const LOCAL_STATUS = /^(?:status|hur\s+m[aå]r\s+(?:wsl|bryggan|l[aä]get)|[aä]r\s+(?:wsl|bryggan)\s+(?:uppe|online|nere|offline))\??$/iu;
 const LOCAL_LOGS = /^(?:logg(?:ar(?:na)?|en)?|visa\s+logg(?:ar(?:na)?|en)?|vad\s+gick\s+fel)\??$/iu;
+const LOCAL_RESTART_WSL = /(?:\b(?:wsl|bryggan)\b.{0,120}\b(?:beh[oö]ver\s+)?(?:startas?\s+om|restart\w*)\b|\b(?:starta\s+om|restart\w*)\b.{0,80}\b(?:wsl|bryggan)\b)/iu;
 const LOCAL_RECOVERY = /(?:\bwsl\b.*(?:\bkra(?:sch|sh)\w*|\b(?:nere|offline|dog|d[oö]d|h[aä]ng\w*|starta|restart\w*|[aå]terst[aä]ll\w*|recover\w*)\b|svarar\s+inte)|\b(?:starta|restart\w*|[aå]terst[aä]ll\w*|recover\w*)\b.*\b(?:wsl|bryggan)\b|^(?:hej[!,.]?\s+)?hur\s+(?:startar|restartar|[aå]terst[aä]ller)\s+vi\??$)/iu;
 
 /** WHAT: Maps a tiny unambiguous rescue vocabulary without an LLM. WHY: Keeps WSL recovery independent from optional provider authentication and availability. */
@@ -19,6 +20,9 @@ export function planLocalRescueTurn(userText) {
   if (!text) return null;
   if (LOCAL_STATUS.test(text)) return { kind: "status", tools: ["get_status"] };
   if (LOCAL_LOGS.test(text)) return { kind: "logs", tools: ["get_logs"] };
+  if (!/^(?:hej[!,.]?\s+)?hur\b/iu.test(text) && LOCAL_RESTART_WSL.test(text)) {
+    return { kind: "restart-wsl", tools: ["get_status", "restart_wsl"] };
+  }
   if (LOCAL_RECOVERY.test(text)) return { kind: "recovery", tools: ["get_status", "recover"] };
   return null;
 }
@@ -78,9 +82,17 @@ export const MANAGER_TOOLS = Object.freeze([
     timeoutMs: 570_000,
     destructive: false,
   }),
+  Object.freeze({
+    name: "restart_wsl",
+    description: "Startar om hängt WSL exakt en gång efter ett autentiserat uttryckligt människokommando.",
+    timeoutMs: 570_000,
+    destructive: true,
+    modelCallable: false,
+  }),
 ]);
 
 const TOOL_NAMES = new Set(MANAGER_TOOLS.map((tool) => tool.name));
+const MODEL_TOOL_NAMES = new Set(MANAGER_TOOLS.filter((tool) => tool.modelCallable !== false).map((tool) => tool.name));
 const MAX_TOOL_CALLS_PER_TURN = 3;
 const RECOVER_STATUS_FRESH_MS = 60_000;
 
@@ -103,12 +115,13 @@ VERKTYG (max 3 anrop per tur, exakt ett JSON-objekt per rad)
 {"tool":"start_bridge"} 45s: startar bryggen när WSL svarar.
 {"tool":"start_wsl"} 120s: startar WSL, endast när WSL bevisat är offline.
 {"tool":"recover"} 570s: kör verifieringskedjan efter WSL-retur, degraderad loop utan känt boot-id.
+restart_wsl är ett lokalt nödverktyg och kan aldrig begäras av modellen.
 
 SÄKERHETSREGLER
 Begär alltid en färsk observation med get_status innan någon åtgärd.
 Kör aldrig wsl --shutdown vid ett rent timeout. Ett tyst svar bevisar inte att WSL är skadat.
-Destruktiv omstart kräver ett uttryckligt och färskt mänskligt kommando plus en färsk
-restart-ready-kvittens med matchande fleet generation. Det äger restarter-pollern, aldrig du.
+Destruktiv omstart kräver ett autentiserat och uttryckligt mänskligt "starta om WSL".
+Den lokala parsern journalför exakt ett försök; modellen kan aldrig begära eller repetera det.
 start_wsl är tillåtet endast när observationen visar wsl=offline. Vid wsl=unknown läser du status igen.
 recover kräver en statusläsning som är yngre än 60 sekunder.
 Efter WSL-retur verifierar recover ny boot-identitet och release-identitet före revive;
@@ -154,7 +167,7 @@ export function parseToolCalls(text) {
       continue;
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
-    if (typeof parsed.tool !== "string" || !TOOL_NAMES.has(parsed.tool)) continue;
+    if (typeof parsed.tool !== "string" || !MODEL_TOOL_NAMES.has(parsed.tool)) continue;
     calls.push(parsed.tool);
     if (calls.length >= MAX_TOOL_CALLS_PER_TURN) break;
   }
@@ -162,8 +175,13 @@ export function parseToolCalls(text) {
 }
 
 /** WHAT: Checks one tool request against freshness bounds. WHY: Prevents actions without a fresh proven observation. */
-export function planToolCall({ name, observation = null, lastStatusMs = null, nowMs = Date.now() } = {}) {
+export function planToolCall({ name, observation = null, lastStatusMs = null, nowMs = Date.now(), explicitHumanRestart = false } = {}) {
   if (!TOOL_NAMES.has(name)) return { allow: false, reason: "unknown-tool" };
+  if (name === "restart_wsl") {
+    return explicitHumanRestart
+      ? { allow: true, reason: "explicit-human-restart" }
+      : { allow: false, reason: "explicit-human-restart-required" };
+  }
   if (name === "start_wsl") {
     if (observation?.wsl !== "offline") return { allow: false, reason: "wsl-not-proven-offline" };
     return { allow: true, reason: "ok" };

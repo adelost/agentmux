@@ -3,12 +3,12 @@
 # function, and prints the result as one JSON line: {"ok":..,"stage":..,"detail":..}
 # recover-verify prints the full chain JSON {"stages":..,"outcome":..,"report":..}
 # built by bin/windows-recovery.mjs; its stage details are fixed strings and
-# pane names, never raw command output. Destructive restarts are not exposed
-# here; the restarter poller owns those.
+# pane names, never raw command output. restart-wsl is reachable only through
+# the manager's authenticated, deterministic local-command parser.
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet("start-wsl", "start-bridge", "recover", "recover-verify")]
+  [ValidateSet("start-wsl", "start-bridge", "restart-wsl", "recover", "recover-verify")]
   [string]$Command,
   [string]$BeforeBootId = "",
   [int]$TimeoutSeconds = 300
@@ -61,6 +61,7 @@ $invokeRescue = {
   }
   if ($Name -eq "start-wsl") { return Start-WslBounded -Config $config }
   if ($Name -eq "start-bridge") { return Start-BridgeForeground -Config $config }
+  if ($Name -eq "restart-wsl") { return Restart-Wsl -Config $config }
   if ($Name -eq "recover") {
     $recovery = Invoke-Recovery -Config $config
     return [pscustomobject]@{

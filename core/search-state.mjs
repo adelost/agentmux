@@ -8,7 +8,7 @@ function safeScope(value) {
   return String(value || "").replace(/[^a-zA-Z0-9_.-]+/gu, "-").replace(/^-+|-+$/gu, "") || "unknown";
 }
 
-/** WHAT: Selects drill-down state for one invoking pane or terminal. WHY: Prevents concurrent agents from replacing each other's `--show N` result list. */
+/** WHAT: Returns drill-down state for one invoking pane or terminal. WHY: Prevents concurrent agents from replacing each other's `--show N` result list. */
 export function defaultSearchStatePath({ env = process.env, parentPid = process.ppid } = {}) {
   const explicit = env.AMUX_SEARCH_SCOPE;
   const scope = explicit
