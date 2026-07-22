@@ -281,20 +281,29 @@ function Start-WslBounded {
   }
 }
 
-function Start-BridgeForeground {
+function Write-BridgeForegroundLauncher {
   param([object]$Config)
   Assert-Identifier $Config.distro "distro"
   Assert-Identifier $Config.linuxUser "linux user"
-  $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-BridgeStartScript)))
+  $payload = Join-Path $Root "start-wsl-bridge.sh"
   $launcher = Join-Path $Root "start-wsl-bridge.cmd"
+  $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
+  $script = (Get-BridgeStartScript).Replace("`r`n", "`n")
+  [System.IO.File]::WriteAllText($payload, "$script`n", $utf8WithoutBom)
   @(
     "@echo off",
     "title Agentmux WSL Bridge",
-    "`"$WslExe`" -d $($Config.distro) -u $($Config.linuxUser) -- bash -lc `"echo $encoded ^| base64 -d ^| bash`"",
+    "`"$WslExe`" -d $($Config.distro) -u $($Config.linuxUser) -- bash < `"$payload`"",
     "echo.",
     "echo Bridge process exited. This window stays open for diagnosis.",
     "pause"
   ) | Set-Content -Encoding ASCII -Path $launcher
+  return $launcher
+}
+
+function Start-BridgeForeground {
+  param([object]$Config)
+  $launcher = Write-BridgeForegroundLauncher -Config $Config
   Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", "`"$launcher`"") -WindowStyle Normal
   $deadline = [DateTime]::UtcNow.AddSeconds(50)
   while ([DateTime]::UtcNow -lt $deadline) {

@@ -81,6 +81,22 @@ feature("windows restarter source contract", () => {
     }],
   });
 
+  unit("the visible WSL bridge launcher feeds an immutable script over stdin", {
+    then: ["cmd never parses or forwards shell pipes and the payload is BOM-free", () => {
+      const writerStart = IO.indexOf("function Write-BridgeForegroundLauncher");
+      const writerEnd = IO.indexOf("function Start-BridgeForeground", writerStart);
+      const writer = IO.slice(writerStart, writerEnd);
+      expect(writerStart).toBeGreaterThan(-1);
+      expect(writer).toContain('Join-Path $Root "start-wsl-bridge.sh"');
+      expect(writer).toContain("System.Text.UTF8Encoding($false)");
+      expect(writer).toContain("-- bash < `\"$payload`\"");
+      expect(writer).not.toContain("base64");
+      expect(writer).not.toContain("^|");
+      expect(IO.slice(writerEnd, IO.indexOf("function Invoke-PostBootRevive", writerEnd)))
+        .toContain("Write-BridgeForegroundLauncher -Config $Config");
+    }],
+  });
+
   unit("a leftover started action is reconciled by core and permanently fenced", {
     then: ["the startup path advances the exact message cursor", () => {
       expect(PS1).toContain('status -eq "started"');
