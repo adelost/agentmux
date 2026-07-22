@@ -16,6 +16,7 @@ import { readFileSync } from "fs";
 import { appendEvent, buildEvent } from "../core/events.mjs";
 import { detectPaneAddress } from "../core/sender-detect.mjs";
 import { buildResumeHint, shouldEmitResumeHint } from "../core/resume-hint.mjs";
+import { capturePaneHookAsk } from "../core/ask-ledger.mjs";
 
 try {
   const exec = (cmd) => execSync(cmd, { timeout: 3000, encoding: "utf-8" });
@@ -27,6 +28,7 @@ try {
     } catch (err) {
       console.error(`[amux-hook] stdin payload unparseable: ${err.message}`);
     }
+    capturePaneHookAsk(payload, pane);
     const evt = buildEvent(payload, pane);
     if (evt) appendEvent(evt);
 

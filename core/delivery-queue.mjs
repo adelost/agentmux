@@ -23,51 +23,20 @@ import {
 import { createHash, randomUUID } from "crypto";
 import { homedir } from "os";
 import { basename, dirname, join } from "path";
+import { appendAskLedger, captureDeliveryAsk, defaultAskLedgerPath } from "./ask-ledger.mjs";
 
+export * from "./delivery-queue-policy.mjs";
+import {
+  DELIVERED_UNVERIFIED_STATE,
+  TERMINAL_DELIVERY_STATES,
+  isNotSentDeliveryJob,
+  needsDeliveryTerminalNotice,
+  NOT_INGESTING_UNVERIFIED_STREAK,
+  unverifiedStreakSinceLastReceipt,
+} from "./delivery-queue-policy.mjs";
+
+/** WHAT: Defines the persisted delivery schema. WHY: Keeps queue readers compatible across releases. */
 export const DELIVERY_QUEUE_VERSION = 1;
-export const DELIVERED_UNVERIFIED_STATE = "delivered_unverified";
-export const TERMINAL_DELIVERY_STATES = new Set([
-  "acknowledged", "cancelled", DELIVERED_UNVERIFIED_STATE,
-]);
-
-export function isNotSentDeliveryJob(job) {
-  return job?.status === "cancelled"
-    && (job.metadata?.deliveryOutcome === "not-sent"
-      || job.metadata?.deliveryTimeout === "pre-submit");
-}
-
-/** A terminal job remains operationally live until its sender saw the receipt. */
-export function needsDeliveryTerminalNotice(job) {
-  return (job?.status === DELIVERED_UNVERIFIED_STATE || isNotSentDeliveryJob(job))
-    && !job?.unverifiedNoticeSentAt;
-}
-
-// Each unacknowledged receipt budget costs a full hour, so a target that cannot
-// ingest drains one message per hour while producers enqueue many more. Two
-// budgets burned back to back is two hours of proof; one is not, because a long
-// turn can legitimately hold a prompt in the composer past a single budget.
-export const NOT_INGESTING_UNVERIFIED_STREAK = 2;
-
-/**
- * Evidence about a delivery target rather than any single job: receipt budgets
- * that expired with nothing ingested since the last acknowledgement. Only an
- * acknowledgement ends the streak, so NOT SENT terminals raised in response to
- * the streak cannot mask it, and a pane that starts consuming again clears its
- * own state with no operator action.
- */
-export function unverifiedStreakSinceLastReceipt(jobs) {
-  const lastReceiptAt = jobs.reduce((latest, job) => (job.status === "acknowledged"
-    ? Math.max(latest, Number(job.acknowledgedAt || job.terminalAt || 0))
-    : latest), 0);
-  return jobs.filter((job) => job.status === DELIVERED_UNVERIFIED_STATE
-    && Number(job.terminalAt || 0) > lastReceiptAt).length;
-}
-
-/** A target that has re-proven the same failure is not a target that is draining. */
-export function isTargetProvenNotIngesting(jobs) {
-  return unverifiedStreakSinceLastReceipt(jobs) >= NOT_INGESTING_UNVERIFIED_STREAK;
-}
-
 export function defaultDeliveryQueueDir() {
   return process.env.AMUX_DELIVERY_QUEUE_DIR
     || join(homedir(), ".agentmux", "delivery-queue");
@@ -88,11 +57,13 @@ function atomicReplace(path, value) {
   renameSync(tmp, path);
 }
 
-/**
- * Create a durable queue store. Storage only: it never touches tmux.
- */
+/** WHAT: Builds a durable queue store. WHY: Keeps spool persistence independent from tmux transport. */
 export function createDeliveryQueue({
   rootDir = defaultDeliveryQueueDir(),
+  askLedgerPath = rootDir === defaultDeliveryQueueDir()
+    ? defaultAskLedgerPath()
+    : join(rootDir, "ask-ledger.jsonl"),
+  recordAsk = appendAskLedger,
   now = () => Date.now(),
   uuid = () => randomUUID(),
   validateTarget = null,
@@ -187,6 +158,14 @@ export function createDeliveryQueue({
     const paneNumber = Number(pane) || 0;
     const dir = dirFor(agentName, paneNumber);
     const path = pathFor(agentName, paneNumber, id);
+
+    // The ask archive is the first durable artifact. Keep this before kind
+    // classification and target spool creation so a crash cannot deliver a
+    // prompt that durable history never observed.
+    captureDeliveryAsk({ agentName, pane: paneNumber, text, source, metadata, id, createdAtMs }, {
+      recordAsk, path: askLedgerPath, now,
+    });
+
     ensurePrivateDir(dir);
 
     const job = {

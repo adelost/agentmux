@@ -115,7 +115,11 @@ import {
   attachAskLineAnchors,
   buildAskEntries,
   filterAskEntries,
+  joinAskLedgerEntries,
+  summarizeAskEntries,
 } from "../core/ask-history.mjs";
+import { readAskLedger } from "../core/ask-ledger.mjs";
+import { formatAskEntry } from "./ask-format.mjs";
 import {
   formatWorktreeDeps,
   provisionWorktreeDependencies,
@@ -1186,14 +1190,6 @@ async function cmdWatch(ctx, flags) {
 
 // --- Asks: human directive ledger -----------------------------------------
 
-function shellQuote(s) {
-  return `'${String(s).replace(/'/g, `'\\''`)}'`;
-}
-
-function escapeRegexLiteral(s) {
-  return String(s).replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
-}
-
 function promptFromJsonlLine(event) {
   if (event?.type === "user" && typeof event.message?.content === "string") {
     return { timestamp: event.timestamp || null, prompt: event.message.content };
@@ -1235,43 +1231,17 @@ function attachDisplayedAskLineAnchors(rows) {
   });
 }
 
-function formatAskStatus(status) {
-  switch (status) {
-    case "open": return "⚠️ open";
-    case "working": return "🟡 working";
-    case "partial": return "⚠️ partial";
-    case "needs-you": return "🔴 needs-you";
-    case "done": return "✅ done";
-    case "answered": return "☑️ answered";
-    default: return status || "unknown";
-  }
-}
-
-function formatAskEntry(e) {
-  const ts = e.timestamp ? new Date(e.tsMs).toISOString().slice(5, 16).replace("T", " ") : "-- --:--";
-  const age = Number.isFinite(e.ageMs) ? formatRelMin(Math.round(e.ageMs / 60000)) : "?";
-  const status = formatAskStatus(e.status).padEnd(13);
-  const head = `${status}  ${ts}  ${e.key.padEnd(10)}  ${age}`;
-  const needle = oneLine(e.prompt).slice(0, 70);
-  const lines = [
-    head,
-    `    > ${e.promptPreview}`,
-  ];
-  if (e.replyPreview) lines.push(`    → ${e.replyPreview}`);
-  if (e.jsonlFile) {
-    const loc = e.jsonlLine ? `${e.jsonlFile}:${e.jsonlLine}` : e.jsonlFile;
-    lines.push(`    jsonl: ${loc}${e.timestamp ? ` @ ${e.timestamp}` : ""}`);
-  }
-  lines.push(`    log: amux log ${e.agent} -p ${e.pane} --grep ${shellQuote(escapeRegexLiteral(needle))} -n 5`);
-  return lines.join("\n");
-}
-
 async function cmdAsks(ctx, flags, positional = []) {
   if (flags.help || flags.h) {
-    console.log(`Usage: amux asks [agent] [--pane N] [--since 2h] [--grep REGEX] [--full] [--open]\n\n--open shows only unresolved asks; omit it to search answered/done history.\n--full scans exact session history instead of only the bounded recent tail.\nExample: amux asks skyvw --since 2d --grep 'solur|klock' --full`);
+    console.log(`Usage: amux asks [agent] [--pane N] [--since 2h] [--grep REGEX] [--full] [--open] [--all-repos] [--summary]\n\nThe durable ask ledger is authoritative; live session history adds reply/status while available.\n--open shows only unresolved asks; omit it to search answered/done/archived history.\n--full scans exact live session history instead of only its bounded recent tail.\n--all-repos includes archived agents no longer present in the active config.\n--summary groups the selected rows by repository.\nExample: amux asks --all-repos --summary --since 30d`);
     return;
   }
   const nowMs = Date.now();
+  // Read durable identity first. Provider histories below are an optional
+  // status join and may disappear on respawn, clear, rotation, or janitor.
+  const ledgerEntries = typeof ctx.readAskLedger === "function"
+    ? ctx.readAskLedger()
+    : readAskLedger();
   const agentFilter = flags.agent || positional[0] || null;
   const paneFilter = flags.pane ?? flags.p ?? null;
   let resolvedAgent = null;
@@ -1279,7 +1249,7 @@ async function cmdAsks(ctx, flags, positional = []) {
   if (agentFilter) {
     resolvedAgent = resolveAgent(agentFilter, ctx.configPath);
     const known = listAgents(ctx.configPath).map((a) => a.name);
-    if (!known.includes(resolvedAgent)) {
+    if (!known.includes(resolvedAgent) && !flags["all-repos"]) {
       console.error(`unknown agent '${agentFilter}'. Known: ${known.join(", ") || "(none)"}`);
       process.exit(1);
     }
@@ -1369,15 +1339,25 @@ async function cmdAsks(ctx, flags, positional = []) {
     }));
   }
 
-  const filteredRows = filterAskEntries(entries, {
+  const configuredAgents = new Set(agents.map((agent) => agent.name));
+  const selectedLedger = ledgerEntries.filter((entry) =>
+    (!resolvedAgent || entry.agent === resolvedAgent)
+      && (paneFilter == null || entry.pane === paneFilter)
+      && (flags["all-repos"] || configuredAgents.has(entry.agent)));
+  const joinedEntries = joinAskLedgerEntries({
+    ledgerEntries: selectedLedger,
+    liveEntries: entries,
+    nowMs,
+  });
+  const filteredRows = filterAskEntries(joinedEntries, {
     sinceMs: since ? since.getTime() : null,
     grep,
     openOnly: !!flags.open,
-    limit: flags.n || 40,
+    limit: flags.summary ? null : (flags.n || 40),
   });
   const rows = flags.full ? attachDisplayedAskLineAnchors(filteredRows) : filteredRows;
 
-  const mode = flags.full ? "full scan" : "bounded tail";
+  const mode = `durable ledger + ${flags.full ? "full" : "bounded"} live status`;
   const filter = [
     `since=${sinceLabel}`,
     flags.open ? "open-only" : "all statuses",
@@ -1388,13 +1368,16 @@ async function cmdAsks(ctx, flags, positional = []) {
   if (unavailableNative.length) console.log(`⚠ native history unavailable: ${unavailableNative.join(", ")}`);
   if (!rows.length) {
     console.log("(no asks match)");
-    if (!flags.full) console.log("Try: amux asks --full --since 30d");
+    return;
+  }
+  if (flags.summary) {
+    console.log("\nrepo                           total  open  archived  answered");
+    for (const group of summarizeAskEntries(rows)) {
+      console.log(`${group.repo.slice(0, 30).padEnd(30)} ${String(group.total).padStart(5)} ${String(group.open).padStart(5)} ${String(group.archived).padStart(9)} ${String(group.answered).padStart(9)}`);
+    }
     return;
   }
   for (const e of rows) console.log("\n" + formatAskEntry(e));
-  if (!flags.full) {
-    console.log(`\nℹ bounded tail view. For exact older history: amux asks --full --since 30d`);
-  }
 }
 
 /**
@@ -3553,6 +3536,8 @@ Usage:
     --agent NAME --pane N         Filter to one pane
     --grep PAT                    Regex filter over ask/reply text
     --full                        Exact older scan (slower); default is bounded tail
+    --all-repos                   Include archived agents outside active config
+    --summary                     Group matching durable asks by repository
   agent done                      Attention-first fleet overview (default: last 1h)
     --since T | --day | --week    Select a time window; --all is capped at 30d
   agent edit                      Open agentmux.yaml in $EDITOR (source config)
@@ -3698,6 +3683,8 @@ const FLAG_SPECS = {
     full: "boolean",
     help: "boolean", h: "boolean",
     all: "boolean",
+    "all-repos": "boolean",
+    summary: "boolean",
     "per-pane": "number",
     help: "boolean",
     h: "boolean",

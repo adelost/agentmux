@@ -8,6 +8,10 @@ import {
   readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync, writeSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import {
+  appendSessionHousekeepingAudit,
+  defaultSessionHousekeepingAuditPath,
+} from "./session-housekeeping-audit.mjs";
 
 const MIB = 1024 * 1024;
 const UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/iu;
@@ -152,6 +156,7 @@ function copyRange(sourcePath, targetFd, start, end) {
 export function trimCheckpointedSession(path, {
   nowMs = Date.now(), minStableMs = DEFAULT_STABLE_MS, dryRun = false,
   liveIds = liveNativeSessionIds(), refreshLiveIds = liveNativeSessionIds,
+  auditPath = join(dirname(path), ".amux-session-housekeeping.audit"),
 } = {}) {
   const strategy = strategyFor(path);
   if (!strategy) return { path, status: "protected", reason: "unsupported-provider" };
@@ -193,13 +198,27 @@ export function trimCheckpointedSession(path, {
     unlinkSync(temporary);
     return { path, provider: strategy.provider, status: "protected", reason: "changed-during-trim" };
   }
+  appendSessionHousekeepingAudit({
+    operation: "replace", phase: "intent", path, bytes: before.size,
+    reason: "provider-checkpoint-trim", provider: strategy.provider,
+  }, { path: auditPath, now: () => nowMs });
   try { renameSync(temporary, path); }
   catch (error) {
     try { unlinkSync(temporary); } catch {}
+    try {
+      appendSessionHousekeepingAudit({
+        operation: "replace", phase: "failed", path, bytes: before.size,
+        reason: "provider-checkpoint-trim", provider: strategy.provider, error: error.message,
+      }, { path: auditPath, now: () => nowMs });
+    } catch {}
     throw error;
   }
   const directoryFd = openSync(dirname(path), "r");
   try { fsyncSync(directoryFd); } finally { closeSync(directoryFd); }
+  appendSessionHousekeepingAudit({
+    operation: "replace", phase: "completed", path, bytes: before.size,
+    reason: "provider-checkpoint-trim", provider: strategy.provider,
+  }, { path: auditPath, now: () => nowMs });
   return result;
 }
 
@@ -207,6 +226,7 @@ export function trimCheckpointedSession(path, {
 export function trimOversizedSessions({
   roots, thresholdBytes = DEFAULT_THRESHOLD, minStableMs = DEFAULT_STABLE_MS,
   maxFiles = Infinity, nowMs = Date.now(), dryRun = false, trimOne = trimCheckpointedSession,
+  auditPath = defaultSessionHousekeepingAuditPath(),
 } = {}) {
   const liveIds = liveNativeSessionIds();
   const result = { scanned: 0, oversized: 0, trimmed: 0, wouldTrim: 0, reclaimedBytes: 0, protected: 0, reasons: {}, files: [] };
@@ -222,7 +242,7 @@ export function trimOversizedSessions({
       continue;
     }
     let item;
-    try { item = trimOne(path, { nowMs, minStableMs, dryRun, liveIds }); }
+    try { item = trimOne(path, { nowMs, minStableMs, dryRun, liveIds, auditPath }); }
     catch (error) { item = { path, status: "protected", reason: `error:${error.message}` }; }
     result.files.push(item);
     if (item.status === "trimmed") result.trimmed++;

@@ -502,3 +502,41 @@ ai:
     }],
   });
 });
+
+feature("amux asks durable archive", () => {
+  unit("--all-repos --summary includes a pane whose config and session are gone", {
+    given: ["an empty active fleet and one orphaned durable ask", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-asks-summary-"));
+      const configPath = join(root, "agents.yaml");
+      writeFileSync(configPath, "{}\n");
+      return {
+        root,
+        ctx: {
+          configPath,
+          readAskLedger: () => [{
+            id: "archived-1", ts: "2026-07-21T10:00:00.000Z",
+            agent: "retired", pane: 7, repo: "old-repository",
+            verbatim: "detta måste gå att hitta i morgon",
+            sessionFile: "/deleted/provider-session.jsonl",
+            ledgerPath: "/home/u/.agentmux/ask-ledger.jsonl",
+          }],
+        },
+      };
+    }],
+    when: ["the cross-repository summary is rendered", async ({ ctx, root }) => {
+      const logs = [];
+      const original = console.log;
+      console.log = (...args) => logs.push(args.join(" "));
+      try { await dispatch(["asks", "--all-repos", "--summary", "--all"], ctx); }
+      finally { console.log = original; }
+      return { root, output: logs.join("\n") };
+    }],
+    then: ["the archived repository remains in the overview", ({ root, output }) => {
+      try {
+        expect(output).toContain("durable ledger");
+        expect(output).toContain("old-repository");
+        expect(output).toMatch(/\b1\s+0\s+1\s+0\b/u);
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }],
+  });
+});
