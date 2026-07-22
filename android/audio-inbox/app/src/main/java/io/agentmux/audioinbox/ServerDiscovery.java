@@ -14,8 +14,7 @@ import java.util.List;
 
 final class ServerDiscovery {
     static final List<String> WSL_CANDIDATES = List.of(
-        "http://abyss-wsl.tail13cb13.ts.net:8080",
-        "http://100.73.86.55:8080",
+        "https://abyss-wsl.tail13cb13.ts.net:8443",
         "http://agentmux.local:8080"
     );
     static final List<String> WINDOWS_CANDIDATES = List.of(
@@ -93,8 +92,11 @@ final class ServerDiscovery {
                     int pane = row.optInt("pane", -1);
                     if (!id.matches("^[A-Za-z0-9_.:@-]{1,80}$") || agent.isEmpty()
                         || pane < 0 || !audioTarget.matches("^\\d{10,24}$")) continue;
+                    String displayLabel = "lsrc:3".equals(id)
+                        ? "L-source 3"
+                        : (label.isEmpty() ? id : label);
                     targets.add(new ConversationTarget(
-                        id, label.isEmpty() ? id : label, ConversationTarget.Kind.AGENT,
+                        id, displayLabel, ConversationTarget.Kind.AGENT,
                         normalized, audioTarget, agent, pane
                     ));
                 }

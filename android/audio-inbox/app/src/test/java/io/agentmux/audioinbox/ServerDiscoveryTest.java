@@ -11,7 +11,7 @@ public class ServerDiscoveryTest {
     @Test
     public void acceptsVersionedAgentmuxConfigurationOnTailnet() {
         ServerDiscovery.Configuration result = ServerDiscovery.parse(
-            "http://abyss-wsl.tail13cb13.ts.net:8080/",
+            "https://abyss-wsl.tail13cb13.ts.net:8443/",
             "{\"service\":\"agentmux-audio-inbox\",\"schemaVersion\":2,"
                 + "\"serverId\":\"abyss-wsl\",\"target\":\"1502949109491961917\","
                 + "\"targets\":[{\"id\":\"lsrc:3\",\"label\":\"L-source 3\","
@@ -19,11 +19,12 @@ public class ServerDiscoveryTest {
                 + "\"audioTarget\":\"1502949109491961917\"}]}"
         );
 
-        assertEquals("http://abyss-wsl.tail13cb13.ts.net:8080", result.serverUrl);
+        assertEquals("https://abyss-wsl.tail13cb13.ts.net:8443", result.serverUrl);
         assertEquals("abyss-wsl", result.serverId);
         assertEquals("1502949109491961917", result.target);
         assertEquals(1, result.conversationTargets.size());
         assertEquals("lsrc:3", result.conversationTargets.get(0).id);
+        assertEquals("L-source 3", result.conversationTargets.get(0).label);
         assertEquals(3, result.conversationTargets.get(0).pane);
     }
 
