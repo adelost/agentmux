@@ -109,11 +109,9 @@ export function filterAskEntries(entries = [], opts = {}) {
   return out;
 }
 
-/**
- * The durable ledger owns identity and retention; provider history only adds
- * an observed answer/status while its session still exists. Legacy live turns
- * remain visible until every producer has emitted durable rows at least once.
- */
+// The ledger owns identity/retention; provider history only adds an observed
+// answer. Legacy live turns remain visible during migration.
+/** WHAT: Maps durable ask identity to optional live provider status. WHY: Keeps session loss from deleting searchable directives. */
 export function joinAskLedgerEntries({
   ledgerEntries = [],
   liveEntries = [],
@@ -169,6 +167,7 @@ export function joinAskLedgerEntries({
   return rows;
 }
 
+/** WHAT: Maps selected asks to repository status totals. WHY: Keeps fleet overview independent from per-pane rendering. */
 export function summarizeAskEntries(entries = []) {
   const groups = new Map();
   for (const entry of entries) {

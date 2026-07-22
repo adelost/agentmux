@@ -20,10 +20,13 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { parseJsonlText } from "./jsonl-reader.mjs";
 
+/** WHAT: Defines the on-disk ask row schema. WHY: Keeps future readers from guessing incompatible records. */
 export const ASK_LEDGER_VERSION = 1;
+/** WHAT: Defines one active ask journal limit. WHY: Keeps history in archives instead of one giant file. */
 export const DEFAULT_ASK_LEDGER_MAX_BYTES = 32 * 1024 * 1024;
 const ROTATION_LOCK_SUFFIX = ".rotate.lock";
 
+/** WHAT: Resolves the durable ask journal. WHY: Keeps every producer on one user-scoped archive. */
 export function defaultAskLedgerPath(home = homedir()) {
   return process.env.AMUX_ASK_LEDGER_PATH || join(home, ".agentmux", "ask-ledger.jsonl");
 }
@@ -70,11 +73,8 @@ function rotateBeforeAppend(path, { nowMs, maxBytes }) {
   }
 }
 
-/**
- * Append one exact prompt observation. A write failure is intentionally
- * visible to the caller: delivery must not proceed when its memory write did
- * not, otherwise the very failure this ledger exists for returns silently.
- */
+// Failure remains visible to the caller so transport cannot outrun memory.
+/** WHAT: Stores one exact prompt observation. WHY: Keeps delivery from proceeding after a failed memory write. */
 export function appendAskLedger(entry, {
   path = defaultAskLedgerPath(),
   now = () => Date.now(),
@@ -112,7 +112,7 @@ export function appendAskLedger(entry, {
   return { ...normalized, ledgerPath: path };
 }
 
-/** Capture the provider's exact submitted prompt before event classification. */
+/** WHAT: Stores a provider's exact submitted prompt. WHY: Keeps event classification from discarding ask identity. */
 export function capturePaneHookAsk(payload, pane, options = {}) {
   if (payload?.hook_event_name !== "UserPromptSubmit" || !pane) return null;
   if (typeof payload.prompt !== "string" || !payload.prompt.trim()) return null;
@@ -129,6 +129,26 @@ export function capturePaneHookAsk(payload, pane, options = {}) {
   }, options);
 }
 
+/** WHAT: Stores one brokered delivery before queue classification. WHY: Keeps transport retries from creating unremembered prompts. */
+export function captureDeliveryAsk({
+  agentName, pane, text, source, metadata, id, createdAtMs,
+}, { recordAsk = appendAskLedger, path = defaultAskLedgerPath(), now = () => Date.now() } = {}) {
+  return recordAsk({
+    id: `delivery:${id}`,
+    ts: new Date(createdAtMs).toISOString(),
+    agent: agentName,
+    pane,
+    source,
+    verbatim: String(text),
+    sessionFile: metadata?.sessionFile || null,
+    sessionId: metadata?.sessionId || null,
+    cwd: metadata?.cwd || null,
+    repo: metadata?.repo || agentName,
+    deliveryId: id,
+  }, { path, now });
+}
+
+/** WHAT: Resolves current and renamed ask journals. WHY: Keeps rotation from hiding old directives. */
 export function askLedgerFiles(path = defaultAskLedgerPath()) {
   const dir = dirname(path);
   const current = basename(path);
@@ -141,7 +161,7 @@ export function askLedgerFiles(path = defaultAskLedgerPath()) {
     .map((name) => join(dir, name));
 }
 
-/** Read current + archived rows, tolerating torn/corrupt lines. */
+/** WHAT: Reads current and archived ask rows. WHY: Keeps one torn line from hiding healthy history. */
 export function readAskLedger({ path = defaultAskLedgerPath(), readFile = null } = {}) {
   const load = readFile || ((file) => readFileSync(file, "utf8"));
   const rows = [];
@@ -157,11 +177,9 @@ export function readAskLedger({ path = defaultAskLedgerPath(), readFile = null }
   return coalesceAskLedger(rows);
 }
 
-/**
- * Delivery and pane-hook both see brokered prompts. Keep the delivery record
- * as identity and fold the hook's concrete transcript pointer into it. Direct
- * typed prompts have no delivery twin and remain standalone hook records.
- */
+// Delivery owns identity; the matching hook contributes its concrete session
+// pointer. Direct typed prompts remain standalone hook rows.
+/** WHAT: Maps duplicate producer observations to one ask. WHY: Keeps delivery and pane-hook capture from rendering duplicates. */
 export function coalesceAskLedger(entries, { hookMatchMs = 15 * 60 * 1000 } = {}) {
   const unique = new Map();
   for (const row of [...entries].sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts))) {

@@ -119,6 +119,7 @@ import {
   summarizeAskEntries,
 } from "../core/ask-history.mjs";
 import { readAskLedger } from "../core/ask-ledger.mjs";
+import { formatAskEntry } from "./ask-format.mjs";
 import {
   formatWorktreeDeps,
   provisionWorktreeDependencies,
@@ -1189,14 +1190,6 @@ async function cmdWatch(ctx, flags) {
 
 // --- Asks: human directive ledger -----------------------------------------
 
-function shellQuote(s) {
-  return `'${String(s).replace(/'/g, `'\\''`)}'`;
-}
-
-function escapeRegexLiteral(s) {
-  return String(s).replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
-}
-
 function promptFromJsonlLine(event) {
   if (event?.type === "user" && typeof event.message?.content === "string") {
     return { timestamp: event.timestamp || null, prompt: event.message.content };
@@ -1236,40 +1229,6 @@ function attachDisplayedAskLineAnchors(rows) {
     }
     return attachAskLineAnchors([row], cache.get(row.jsonlFile))[0];
   });
-}
-
-function formatAskStatus(status) {
-  switch (status) {
-    case "open": return "⚠️ open";
-    case "working": return "🟡 working";
-    case "partial": return "⚠️ partial";
-    case "needs-you": return "🔴 needs-you";
-    case "done": return "✅ done";
-    case "answered": return "☑️ answered";
-    case "archived": return "🗄 archived";
-    default: return status || "unknown";
-  }
-}
-
-function formatAskEntry(e) {
-  const ts = e.timestamp ? new Date(e.tsMs).toISOString().slice(5, 16).replace("T", " ") : "-- --:--";
-  const age = Number.isFinite(e.ageMs) ? formatRelMin(Math.round(e.ageMs / 60000)) : "?";
-  const status = formatAskStatus(e.status).padEnd(13);
-  const head = `${status}  ${ts}  ${e.key.padEnd(10)}  ${age}`;
-  const needle = oneLine(e.prompt).slice(0, 70);
-  const lines = [
-    head,
-    `    > ${e.promptPreview}`,
-  ];
-  if (e.replyPreview) lines.push(`    → ${e.replyPreview}`);
-  if (e.jsonlFile) {
-    const loc = e.jsonlLine ? `${e.jsonlFile}:${e.jsonlLine}` : e.jsonlFile;
-    lines.push(`    jsonl: ${loc}${e.timestamp ? ` @ ${e.timestamp}` : ""}`);
-  }
-  if (!e.jsonlFile && e.sessionFile) lines.push(`    session: ${e.sessionFile} (archived)`);
-  if (e.ledgerPath) lines.push(`    ledger: ${e.ledgerPath}`);
-  lines.push(`    log: amux log ${e.agent} -p ${e.pane} --grep ${shellQuote(escapeRegexLiteral(needle))} -n 5`);
-  return lines.join("\n");
 }
 
 async function cmdAsks(ctx, flags, positional = []) {

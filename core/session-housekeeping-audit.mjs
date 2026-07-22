@@ -5,13 +5,16 @@ import { appendFileSync, chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
+/** WHAT: Defines the destructive-housekeeping row schema. WHY: Keeps forensic readers compatible across releases. */
 export const SESSION_HOUSEKEEPING_AUDIT_VERSION = 1;
 
+/** WHAT: Resolves the global session-housekeeping journal. WHY: Keeps every destructive path in one durable audit. */
 export function defaultSessionHousekeepingAuditPath(home = homedir()) {
   return process.env.AMUX_SESSION_HOUSEKEEPING_AUDIT_PATH
     || join(home, ".agentmux", "session-housekeeping.jsonl");
 }
 
+/** WHAT: Stores one deletion or replacement phase. WHY: Keeps destructive session changes from happening without a prior trace. */
 export function appendSessionHousekeepingAudit(entry, {
   path = defaultSessionHousekeepingAuditPath(),
   now = () => Date.now(),
