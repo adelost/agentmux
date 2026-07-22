@@ -26,7 +26,7 @@ feature("Android audio inbox source contract", () => {
       expect(manifest).toContain('android:exported="false"');
       expect(manifest).toContain("android.permission.RECORD_AUDIO");
       expect(discovery).toContain('"agentmux-audio-inbox"');
-      expect(discovery).toContain('"http://abyss-wsl.tail13cb13.ts.net:8080"');
+      expect(discovery).toContain('"https://abyss-wsl.tail13cb13.ts.net:8443"');
       expect(startup).toContain("AUDIO_INBOX_SERVER_ID");
       expect(startup).toContain("AUDIO_INBOX_TARGET");
       expect(focus).toContain("AUDIOFOCUS_GAIN_TRANSIENT");
