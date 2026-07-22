@@ -10,7 +10,7 @@
     <application
         android:allowBackup="false"
         android:icon="@android:drawable/ic_lock_silent_mode_off"
-        android:label="Agent Audio Inbox"
+        android:label="Agentmux Link"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="true">

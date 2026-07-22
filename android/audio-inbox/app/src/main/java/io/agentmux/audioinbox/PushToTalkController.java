@@ -11,25 +11,19 @@ import android.widget.TextView;
 
 import java.io.File;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 final class PushToTalkController {
     static final int MICROPHONE_PERMISSION_REQUEST = 702;
 
     interface Environment {
         boolean ready();
-        String serverUrl();
-        String target();
-        String consumerId();
-        void saveTranscript(String transcript);
+        boolean send(File audio, String turnId);
     }
 
     private final Activity activity;
     private final Button button;
     private final TextView status;
     private final Environment environment;
-    private final ExecutorService sender = Executors.newSingleThreadExecutor();
     private final PushToTalkState state = new PushToTalkState();
     private MediaRecorder recorder;
     private File recording;
@@ -62,7 +56,7 @@ final class PushToTalkController {
     private void begin() {
         if (state.phase() != PushToTalkState.Phase.IDLE) return;
         if (!environment.ready()) {
-            status.setText("Turn on hands-free listening first");
+            status.setText("Select an available favorite first");
             return;
         }
         if (activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
@@ -120,32 +114,12 @@ final class PushToTalkController {
         button.setText("Sending…");
         status.setText("Transcribing securely over Tailscale…");
         button.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
-        sender.execute(() -> send(audio, turnId));
-    }
-
-    private void send(File audio, String turnId) {
-        String message;
-        String transcript = null;
-        try {
-            AudioInboxHttpClient.PttResult result = new AudioInboxHttpClient(
-                environment.serverUrl(),
-                environment.consumerId()
-            ).sendPushToTalk(audio, environment.target(), turnId);
-            transcript = result.transcript;
-            message = "Sent · waiting for the agent's spoken reply";
-        } catch (Exception error) {
-            message = "Send failed or uncertain · not retried";
-        } finally {
-            if (audio != null) audio.delete();
-        }
-        String outcome = message;
-        String heard = transcript;
-        activity.runOnUiThread(() -> {
+        if (!environment.send(audio, turnId)) {
+            audio.delete();
             state.finish();
             resetButton();
-            if (heard != null) environment.saveTranscript(heard);
-            status.setText(outcome);
-        });
+            status.setText("Another message is still running");
+        }
     }
 
     void permissionResult(boolean granted) {
@@ -158,7 +132,9 @@ final class PushToTalkController {
         if (state.phase() != PushToTalkState.Phase.IDLE) return;
         if (available != null && available == ready) return;
         available = ready;
-        if (!ready) status.setText("Turn on hands-free listening first");
+        button.setEnabled(ready);
+        button.setAlpha(ready ? 1f : 0.42f);
+        if (!ready) status.setText("Select an available favorite first");
         else status.setText("Hold while speaking · release to send");
     }
 
@@ -170,7 +146,13 @@ final class PushToTalkController {
 
     void close() {
         cancelForBackground();
-        sender.shutdownNow();
+    }
+
+    void complete(String message) {
+        if (state.phase() != PushToTalkState.Phase.SENDING) return;
+        state.finish();
+        resetButton();
+        status.setText(message);
     }
 
     private void cancel(String reason) {
@@ -205,6 +187,8 @@ final class PushToTalkController {
 
     private void resetButton() {
         button.setText("Hold to talk");
-        button.setEnabled(true);
+        boolean ready = Boolean.TRUE.equals(available);
+        button.setEnabled(ready);
+        button.setAlpha(ready ? 1f : 0.42f);
     }
 }

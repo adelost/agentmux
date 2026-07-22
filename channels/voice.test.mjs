@@ -37,8 +37,17 @@ function setupServer(opts = {}) {
   const calls = { sendOnly: [], isBusy: [], getResponse: [] };
   const agent = {
     sendOnly: async (name, text, pane) => { calls.sendOnly.push({ name, text, pane }); },
-    isBusy: async (name, pane) => { calls.isBusy.push({ name, pane }); return opts.busy ?? false; },
+    isBusy: async (name, pane) => {
+      calls.isBusy.push({ name, pane });
+      return opts.busyFunction ? opts.busyFunction() : (opts.busy ?? false);
+    },
     getResponse: async (name, pane) => { calls.getResponse.push({ name, pane }); return opts.response ?? "the answer"; },
+    hasResponseForPrompt: () => opts.responseReady
+      ? opts.responseReady()
+      : Boolean(opts.responseForPrompt),
+    getResponseStreamWithRaw: async () => ({
+      items: [{ type: "text", content: opts.responseForPrompt || "the exact answer" }],
+    }),
   };
 
   // Fake run() that returns canned transcription/tts output
@@ -341,7 +350,10 @@ feature("POST /api/audio/send: native phone PTT", () => {
       expect(ctx.enqueued).toHaveLength(2);
       expect(ctx.enqueued.every((job) => job.agentName === "claw" && job.pane === 0)).toBe(true);
       expect(ctx.enqueued.every((job) => job.idempotencyKey === "turn-phone-1")).toBe(true);
-      expect(ctx.enqueued[0].text).toContain("answer normally");
+      expect(ctx.enqueued[0].text).not.toContain("amux say");
+      expect(ctx.enqueued[0].text).toContain("[amux-phone-turn:turn-phone-1]");
+      expect(responses[0].body.replyPrompt).toBe(ctx.enqueued[0].text);
+      expect(responses[0].body.destination).toEqual({ agent: "claw", pane: 0 });
       expect(ctx.outbox.listPending({ consumerId: "phone", target: "chan-0" })).toEqual([]);
       await ctx.s.pwa.stop(); ctx.s.cleanup(); ctx.cleanup();
     }],
@@ -483,6 +495,45 @@ feature("GET /api/events: SSE stream", () => {
       await s.pwa.stop(); s.cleanup();
     }],
   });
+
+  component("an exact prompt closes the race when the turn finished before the first busy poll", {
+    given: ["an already completed structured reply", async () => {
+      const s = setupServer({ responseForPrompt: "reply for this phone turn" });
+      const { url } = await s.pwa.start();
+      return { s, url };
+    }],
+    when: ["the phone opens the reply stream with the submitted prompt", async ({ url }) => {
+      const response = await fetch(`${url}/api/events/claw/0?prompt=${encodeURIComponent("hej exakt")}`);
+      return response.text();
+    }],
+    then: ["the exact response is emitted even though working was never observed", async (stream, { s }) => {
+      expect(stream).toContain("reply for this phone turn");
+      expect(stream).toContain("event: done");
+      await s.pwa.stop(); s.cleanup();
+    }],
+  });
+
+  component("an unrelated active turn cannot be mistaken for the requested phone reply", {
+    given: ["another turn finishes before the requested prompt appears", async () => {
+      let busyPoll = 0;
+      let responsePoll = 0;
+      const s = setupServer({
+        responseForPrompt: "only the correlated reply",
+        busyFunction: () => busyPoll++ === 0,
+        responseReady: () => responsePoll++ >= 2,
+      });
+      const { url } = await s.pwa.start();
+      return { s, url };
+    }],
+    when: ["the exact reply stream observes both turns", async ({ url }) => {
+      const response = await fetch(`${url}/api/events/claw/0?prompt=${encodeURIComponent("phone prompt")}`);
+      return response.text();
+    }],
+    then: ["it waits for exact prompt evidence", async (stream, { s }) => {
+      expect(stream).toContain("only the correlated reply");
+      await s.pwa.stop(); s.cleanup();
+    }],
+  });
 });
 
 feature("explicit audio phone feed", () => {
@@ -507,9 +558,11 @@ feature("explicit audio phone feed", () => {
       expect(result.configured.status).toBe(200);
       expect(result.configured.body).toEqual({
         service: "agentmux-audio-inbox",
-        schemaVersion: 1,
+        schemaVersion: 2,
         serverId: "abyss-wsl",
         target: "1502949109491961917",
+        defaultTarget: null,
+        targets: [],
       });
       expect(result.missing.status).toBe(503);
       await ctx.configured.pwa.stop();

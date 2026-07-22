@@ -42,11 +42,10 @@ public final class MainActivity extends Activity {
     private LinearLayout advanced;
     private TextView connection;
     private TextView current;
-    private TextView lastTranscript;
     private TextView history;
     private Button replay;
-    private PushToTalkController pushToTalk;
-    private final ExecutorService discoveryExecutor = Executors.newSingleThreadExecutor();
+    private ConversationPanel conversationPanel;
+    private final ExecutorService discoveryExecutor = Executors.newFixedThreadPool(2);
     private final Handler refreshHandler = new Handler(Looper.getMainLooper());
     private final Runnable refresher = new Runnable() {
         @Override
@@ -90,14 +89,14 @@ public final class MainActivity extends Activity {
     @Override
     protected void onStop() {
         refreshHandler.removeCallbacks(refresher);
-        pushToTalk.cancelForBackground();
+        conversationPanel.cancelForBackground();
         unregisterReceiver(statusReceiver);
         super.onStop();
     }
 
     @Override
     protected void onDestroy() {
-        pushToTalk.close();
+        conversationPanel.close();
         discoveryExecutor.shutdownNow();
         super.onDestroy();
     }
@@ -109,12 +108,12 @@ public final class MainActivity extends Activity {
         content.setPadding(pad, dp(24), pad, dp(32));
         content.setBackgroundColor(BACKGROUND);
 
-        content.addView(sectionLabel("PRIVATE TAILNET AUDIO"));
-        TextView title = text("Audio Inbox", 34, true, PRIMARY);
+        content.addView(sectionLabel("PRIVATE AGENT LINK"));
+        TextView title = text("Agentmux Link", 34, true, PRIMARY);
         title.setLetterSpacing(-0.02f);
         content.addView(title, blockMargins(2, 4));
         TextView explanation = text(
-            "Hear deliberate Agentmux updates without keeping Discord open.",
+            "Talk to your agents, or hear explicit updates, over your private tailnet.",
             15,
             false,
             SECONDARY
@@ -175,37 +174,9 @@ public final class MainActivity extends Activity {
             advancedToggle.setText(show ? "Hide advanced settings" : "Advanced settings");
         });
 
-        content.addView(sectionLabel("PUSH TO TALK"), blockMargins(8, 8));
-        LinearLayout talkCard = card();
-        TextView talkStatus = text("Turn on hands-free listening first", 14, false, SECONDARY);
-        talkCard.addView(talkStatus);
-        lastTranscript = text("No voice sent yet", 16, false, PRIMARY);
-        lastTranscript.setLineSpacing(0, 1.12f);
-        talkCard.addView(lastTranscript, blockMargins(14, 0));
-        Button talkButton = primaryButton("Hold to talk");
-        talkCard.addView(talkButton, blockMargins(16, 0));
-        content.addView(talkCard, blockMargins(0, 22));
-        pushToTalk = new PushToTalkController(this, talkButton, talkStatus,
-            new PushToTalkController.Environment() {
-                public boolean ready() {
-                    return preferences.getBoolean(AppContract.KEY_ENABLED, false)
-                        && ServerDiscovery.isAllowedServer(serverUrl())
-                        && target().matches("^\\d{10,24}$");
-                }
-                public String serverUrl() {
-                    return preferences.getString(AppContract.KEY_SERVER, "");
-                }
-                public String target() {
-                    return preferences.getString(AppContract.KEY_TARGET, "");
-                }
-                public String consumerId() {
-                    return AppContract.consumerId(preferences);
-                }
-                public void saveTranscript(String transcript) {
-                    preferences.edit().putString(AppContract.KEY_LAST_TRANSCRIPT, transcript).apply();
-                    renderStatus();
-                }
-            });
+        content.addView(sectionLabel("CONVERSATION"), blockMargins(8, 8));
+        conversationPanel = new ConversationPanel(this, preferences);
+        content.addView(conversationPanel, blockMargins(0, 22));
 
         content.addView(sectionLabel("LATEST UPDATE"), blockMargins(8, 8));
         LinearLayout latestCard = card();
@@ -345,38 +316,55 @@ public final class MainActivity extends Activity {
     private void discoverConfiguration() {
         String currentServer = server.getText().toString().trim().replaceAll("/+$", "");
         String currentTarget = target.getText().toString().trim();
-        if (ServerDiscovery.isAllowedServer(currentServer)
-            && currentTarget.matches("^\\d{10,24}$")) {
+        boolean savedConnection = ServerDiscovery.isAllowedServer(currentServer)
+            && currentTarget.matches("^\\d{10,24}$");
+        if (savedConnection) {
             saveConfiguration(currentServer, currentTarget);
             provisioning.setText("Ready · saved connection");
             provisioning.setTextColor(ACCENT);
             handsFree.setEnabled(true);
             resumeHandsFreeIfEnabled();
-            return;
         }
-        provisioning.setText("Finding Agentmux on Tailscale…");
-        provisioning.setTextColor(WARNING);
-        discoveryExecutor.execute(() -> {
-            ServerDiscovery.Configuration found = ServerDiscovery.discover(
-                ServerDiscovery.DEFAULT_CANDIDATES
-            );
-            runOnUiThread(() -> {
-                if (isFinishing() || isDestroyed()) return;
-                if (found == null) {
+        if (!savedConnection) {
+            provisioning.setText("Finding Agentmux on Tailscale…");
+            provisioning.setTextColor(WARNING);
+        }
+        discoveryExecutor.execute(() -> applyWslDiscovery(
+            ServerDiscovery.discover(ServerDiscovery.WSL_CANDIDATES), savedConnection
+        ));
+        discoveryExecutor.execute(() -> applyConversationDiscovery(
+            ServerDiscovery.discover(ServerDiscovery.WINDOWS_CANDIDATES)
+        ));
+    }
+
+    private void applyWslDiscovery(ServerDiscovery.Configuration found, boolean savedConnection) {
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (found == null) {
+                if (!savedConnection) {
                     provisioning.setText("Server not found · check Tailscale or use Advanced");
                     provisioning.setTextColor(ERROR);
                     advanced.setVisibility(LinearLayout.VISIBLE);
                     handsFree.setEnabled(true);
-                    return;
                 }
-                server.setText(found.serverUrl);
-                target.setText(found.target);
-                saveConfiguration(found.serverUrl, found.target);
-                provisioning.setText("Ready via Tailscale · " + found.serverId);
-                provisioning.setTextColor(ACCENT);
-                handsFree.setEnabled(true);
-                resumeHandsFreeIfEnabled();
-            });
+                return;
+            }
+            server.setText(found.serverUrl);
+            target.setText(found.target);
+            saveConfiguration(found.serverUrl, found.target);
+            provisioning.setText("Ready via Tailscale · " + found.serverId);
+            provisioning.setTextColor(ACCENT);
+            handsFree.setEnabled(true);
+            resumeHandsFreeIfEnabled();
+            conversationPanel.addDiscoveredTargets(found.conversationTargets);
+        });
+    }
+
+    private void applyConversationDiscovery(ServerDiscovery.Configuration found) {
+        runOnUiThread(() -> {
+            if (!isFinishing() && !isDestroyed() && found != null) {
+                conversationPanel.addDiscoveredTargets(found.conversationTargets);
+            }
         });
     }
 
@@ -439,12 +427,6 @@ public final class MainActivity extends Activity {
         String items = preferences.getString(AppContract.KEY_HISTORY, "");
         history.setText(items == null || items.isBlank() ? "Nothing played yet" : items);
         history.setTextColor(items == null || items.isBlank() ? SECONDARY : PRIMARY);
-        String transcript = preferences.getString(AppContract.KEY_LAST_TRANSCRIPT, "");
-        lastTranscript.setText(transcript == null || transcript.isBlank()
-            ? "No voice sent yet"
-            : "You said\n“" + transcript + "”");
-        lastTranscript.setTextColor(transcript == null || transcript.isBlank() ? SECONDARY : PRIMARY);
-        pushToTalk.refreshAvailability(enabled);
     }
 
     private int connectionColor(String state) {
@@ -478,7 +460,7 @@ public final class MainActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
         if (requestCode == PushToTalkController.MICROPHONE_PERMISSION_REQUEST) {
-            pushToTalk.permissionResult(
+            conversationPanel.permissionResult(
                 results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED
             );
         }

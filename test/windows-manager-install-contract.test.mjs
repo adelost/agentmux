@@ -36,6 +36,8 @@ feature("windows manager install source contract", () => {
       expect(INSTALLER).toContain('"bin/windows-recovery.mjs"');
       expect(INSTALLER).toContain('"core/windows-manager.mjs"');
       expect(INSTALLER).toContain('"core/windows-manager-input.mjs"');
+      expect(INSTALLER).toContain('"core/windows-manager-phone.mjs"');
+      expect(INSTALLER).toContain('"core/windows-manager-phone-runtime.mjs"');
       expect(INSTALLER).toContain('"core/windows-manager-discord.mjs"');
       expect(INSTALLER).toContain('"core/windows-bridge.mjs"');
       expect(INSTALLER).toContain('"core/windows-recovery.mjs"');
@@ -44,6 +46,16 @@ feature("windows manager install source contract", () => {
       expect(INSTALLER).toContain(".agentmux-release.json");
       expect(INSTALLER).toContain("sourceSha");
       expect(INSTALLER).toContain("manager.json");
+    }],
+  });
+
+  unit("the phone rescue endpoint binds only to the measured Tailscale address", {
+    then: ["install fails closed without Tailscale and persists no credential", () => {
+      expect(INSTALLER).toContain('Get-Command "tailscale.exe"');
+      expect(INSTALLER).toContain('"ip" "-4"');
+      expect(INSTALLER).toContain("a Tailscale IPv4 address was not found");
+      expect(INSTALLER).toContain("phoneHost = $phoneHost");
+      expect(INSTALLER).toContain("phonePort = $PhonePort");
     }],
   });
 

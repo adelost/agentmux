@@ -90,11 +90,12 @@ feature("focused local tests", () => {
       const exists = existsSet([
         "core/tui-stall-recovery.test.mjs",
         "core/delivery-notices.test.mjs",
+        "test/audio-inbox-android-contract.test.mjs",
       ]);
       expect(relatedTests("agent.mjs", { exists }))
         .toEqual(["core/tui-stall-recovery.test.mjs"]);
       expect(relatedTests("index.mjs", { exists }))
-        .toEqual(["core/delivery-notices.test.mjs"]);
+        .toEqual(["core/delivery-notices.test.mjs", "test/audio-inbox-android-contract.test.mjs"]);
       expect(unmappedExecutables(["agent.mjs", "index.mjs"], { exists })).toEqual([]);
     }],
   });

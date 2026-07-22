@@ -70,9 +70,12 @@ export function createVoiceInput({
     } catch (error) {
       return json(res, error.status || 400, { error: error.message });
     }
-    const phoneTurn = phoneTarget && parsed.transcript;
-    const deliveryText = phoneTurn
-      ? `${parsed.text}\n\n[Audio Inbox PTT ${body.idempotencyKey}: answer normally, then send one concise spoken completion with amux say.]`
+    // Correlate the eventual pane response with this exact phone turn. The
+    // marker changes no response policy (and notably does not request voice),
+    // but prevents repeated prompts such as "status" from returning an older
+    // structured response.
+    const deliveryText = phoneTarget
+      ? `${parsed.text}\n\n[amux-phone-turn:${body.idempotencyKey}]`
       : parsed.text;
     try {
       if (deliveryBroker) {
@@ -92,14 +95,16 @@ export function createVoiceInput({
 
     const channelId = findChannelIdForPane(name, pane);
     if (mirror?.send && channelId) {
-      try { await mirror.send(channelId, `[voice-pwa] ${phoneTurn ? parsed.text : deliveryText}`); }
+      try { await mirror.send(channelId, `[voice-pwa] ${parsed.text}`); }
       catch (error) { console.warn(`voice-pwa mirror ${name}:${pane}: ${error.message}`); }
     }
 
     return json(res, 200, {
       sent: parsed.text,
+      replyPrompt: phoneTarget ? deliveryText : null,
       transcript: parsed.transcript,
       queued: Boolean(deliveryBroker),
+      destination: { agent: name, pane },
     });
   }
 
@@ -119,7 +124,7 @@ export function createVoiceInput({
     let body;
     try { body = await parseJsonBody(req, MAX_AUDIO_BYTES + 1024 * 1024); }
     catch (error) { return json(res, 400, { error: error.message }); }
-    const target = String(body.target || "").trim();
+    const target = String(body.audioTarget || body.target || "").trim();
     const configured = String(audioDiscovery?.target || "").trim();
     if (!configured || target !== configured) {
       return json(res, 403, { error: "PTT target is not the configured audio inbox" });

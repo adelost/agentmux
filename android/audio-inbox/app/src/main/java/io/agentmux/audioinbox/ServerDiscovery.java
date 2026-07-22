@@ -1,6 +1,7 @@
 package io.agentmux.audioinbox;
 
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -8,24 +9,36 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 final class ServerDiscovery {
-    static final List<String> DEFAULT_CANDIDATES = List.of(
+    static final List<String> WSL_CANDIDATES = List.of(
         "http://abyss-wsl.tail13cb13.ts.net:8080",
         "http://100.73.86.55:8080",
         "http://agentmux.local:8080"
+    );
+    static final List<String> WINDOWS_CANDIDATES = List.of(
+        "http://abyss-win.tail13cb13.ts.net:8081",
+        "http://100.115.225.24:8081"
     );
 
     static final class Configuration {
         final String serverUrl;
         final String serverId;
         final String target;
+        final List<ConversationTarget> conversationTargets;
 
-        Configuration(String serverUrl, String serverId, String target) {
+        Configuration(
+            String serverUrl,
+            String serverId,
+            String target,
+            List<ConversationTarget> conversationTargets
+        ) {
             this.serverUrl = serverUrl;
             this.serverId = serverId;
             this.target = target;
+            this.conversationTargets = conversationTargets;
         }
     }
 
@@ -47,12 +60,46 @@ final class ServerDiscovery {
         if (!isAllowedServer(serverUrl)) return null;
         try {
             JSONObject json = new JSONObject(body);
-            if (!"agentmux-audio-inbox".equals(json.optString("service"))) return null;
-            if (json.optInt("schemaVersion", 0) != 1) return null;
+            String service = json.optString("service");
+            int schema = json.optInt("schemaVersion", 0);
             String serverId = json.optString("serverId", "").trim();
+            if (serverId.isEmpty()) return null;
+            if ("agentmux-windows-manager-audio".equals(service) && schema == 1) {
+                ConversationTarget manager = new ConversationTarget(
+                    "windows",
+                    "Windows rescue",
+                    ConversationTarget.Kind.WINDOWS,
+                    serverUrl.replaceAll("/+$", ""),
+                    null,
+                    null,
+                    -1
+                );
+                return new Configuration(manager.serverUrl, serverId, "", List.of(manager));
+            }
+            if (!"agentmux-audio-inbox".equals(service) || (schema != 1 && schema != 2)) return null;
             String target = json.optString("target", "").trim();
-            if (serverId.isEmpty() || !target.matches("^\\d{10,24}$")) return null;
-            return new Configuration(serverUrl.replaceAll("/+$", ""), serverId, target);
+            if (!target.matches("^\\d{10,24}$")) return null;
+            String normalized = serverUrl.replaceAll("/+$", "");
+            List<ConversationTarget> targets = new ArrayList<>();
+            if (schema == 2) {
+                JSONArray rows = json.optJSONArray("targets");
+                for (int index = 0; rows != null && index < rows.length(); index++) {
+                    JSONObject row = rows.optJSONObject(index);
+                    if (row == null || !"agent".equals(row.optString("kind"))) continue;
+                    String id = row.optString("id", "").trim();
+                    String label = row.optString("label", id).trim();
+                    String agent = row.optString("agent", "").trim();
+                    String audioTarget = row.optString("audioTarget", "").trim();
+                    int pane = row.optInt("pane", -1);
+                    if (!id.matches("^[A-Za-z0-9_.:@-]{1,80}$") || agent.isEmpty()
+                        || pane < 0 || !audioTarget.matches("^\\d{10,24}$")) continue;
+                    targets.add(new ConversationTarget(
+                        id, label.isEmpty() ? id : label, ConversationTarget.Kind.AGENT,
+                        normalized, audioTarget, agent, pane
+                    ));
+                }
+            }
+            return new Configuration(normalized, serverId, target, targets);
         } catch (Exception ignored) {
             return null;
         }

@@ -12,13 +12,32 @@ public class ServerDiscoveryTest {
     public void acceptsVersionedAgentmuxConfigurationOnTailnet() {
         ServerDiscovery.Configuration result = ServerDiscovery.parse(
             "http://abyss-wsl.tail13cb13.ts.net:8080/",
-            "{\"service\":\"agentmux-audio-inbox\",\"schemaVersion\":1,"
-                + "\"serverId\":\"abyss-wsl\",\"target\":\"1502949109491961917\"}"
+            "{\"service\":\"agentmux-audio-inbox\",\"schemaVersion\":2,"
+                + "\"serverId\":\"abyss-wsl\",\"target\":\"1502949109491961917\","
+                + "\"targets\":[{\"id\":\"lsrc:3\",\"label\":\"L-source 3\","
+                + "\"kind\":\"agent\",\"agent\":\"lsrc\",\"pane\":3,"
+                + "\"audioTarget\":\"1502949109491961917\"}]}"
         );
 
         assertEquals("http://abyss-wsl.tail13cb13.ts.net:8080", result.serverUrl);
         assertEquals("abyss-wsl", result.serverId);
         assertEquals("1502949109491961917", result.target);
+        assertEquals(1, result.conversationTargets.size());
+        assertEquals("lsrc:3", result.conversationTargets.get(0).id);
+        assertEquals(3, result.conversationTargets.get(0).pane);
+    }
+
+    @Test
+    public void acceptsWindowsRescueAsASeparateFavorite() {
+        ServerDiscovery.Configuration result = ServerDiscovery.parse(
+            "http://100.115.225.24:8081",
+            "{\"service\":\"agentmux-windows-manager-audio\",\"schemaVersion\":1,"
+                + "\"serverId\":\"abyss-windows\"}"
+        );
+
+        assertEquals(1, result.conversationTargets.size());
+        assertEquals(ConversationTarget.Kind.WINDOWS, result.conversationTargets.get(0).kind);
+        assertEquals("windows", result.conversationTargets.get(0).id);
     }
 
     @Test

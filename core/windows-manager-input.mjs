@@ -42,11 +42,12 @@ function runTranscriber(file, args, timeoutMs) {
 
 /** WHAT: Builds a bounded Discord voice transcriber. WHY: Keeps voice rescue independent from WSL. */
 export function createVoiceTranscriber({ config, rootDir, scriptPath, fetchImpl = fetch, runImpl = runTranscriber }) {
+  const spec = config.transcription || {};
+  if (spec.kind !== "faster-whisper" || !spec.pythonPath || !spec.modelPath) {
+    return async () => ({ ok: false, reason: "not-configured" });
+  }
+  const transcribeBytes = createAudioBytesTranscriber({ config, rootDir, scriptPath, runImpl });
   return async ({ attachment }) => {
-    const spec = config.transcription || {};
-    if (spec.kind !== "faster-whisper" || !spec.pythonPath || !spec.modelPath) {
-      return { ok: false, reason: "not-configured" };
-    }
     let response;
     try {
       response = await fetchImpl(attachment.url, { signal: AbortSignal.timeout(30_000) });
@@ -61,11 +62,25 @@ export function createVoiceTranscriber({ config, rootDir, scriptPath, fetchImpl 
     if (!bytes.length || bytes.length > MAX_VOICE_BYTES || bytes.length > attachment.size) {
       return { ok: false, reason: "download-size-mismatch" };
     }
+    return transcribeBytes({ bytes, filename: "discord.ogg" });
+  };
+}
+
+/** WHAT: Builds the shared bounded byte-to-text seam. WHY: Lets Discord and the tailnet phone endpoint use one offline transcription contract. */
+export function createAudioBytesTranscriber({ config, rootDir, scriptPath, runImpl = runTranscriber }) {
+  return async ({ bytes, filename = "voice.m4a" }) => {
+    const spec = config.transcription || {};
+    if (spec.kind !== "faster-whisper" || !spec.pythonPath || !spec.modelPath) {
+      return { ok: false, reason: "not-configured" };
+    }
+    const input = Buffer.from(bytes || []);
+    if (!input.length || input.length > MAX_VOICE_BYTES) return { ok: false, reason: "audio-size-invalid" };
+    const extension = String(filename).split(".").at(-1)?.toLowerCase().replace(/[^a-z0-9]/gu, "") || "m4a";
     const tempDir = join(rootDir, "tmp");
-    const inputPath = join(tempDir, `voice_${process.pid}_${Date.now()}.ogg`);
+    const inputPath = join(tempDir, `voice_${process.pid}_${Date.now()}.${extension}`);
     try {
       mkdirSync(tempDir, { recursive: true });
-      writeFileSync(inputPath, bytes, { flag: "wx" });
+      writeFileSync(inputPath, input, { flag: "wx" });
       const timeoutMs = Math.min(Math.max(Number(spec.timeoutMs) || 90_000, 10_000), 180_000);
       const result = await runImpl(spec.pythonPath, [scriptPath, "--model", spec.modelPath, inputPath], timeoutMs);
       if (result.timedOut) return { ok: false, reason: "timeout" };

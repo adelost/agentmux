@@ -128,6 +128,27 @@ export function createVoicePWA(deps) {
     return null;
   }
 
+  function listPhoneTargets() {
+    const configured = String(deps.audioDiscovery?.target || "").trim();
+    if (!configured) return [];
+    for (const [name, entry] of Object.entries(loadAgents())) {
+      const mapping = entry?.discord;
+      if (!mapping || typeof mapping !== "object" || !Object.hasOwn(mapping, configured)) continue;
+      const pane = Number(mapping[configured]);
+      if (!Number.isInteger(pane)) continue;
+      return [{
+        id: `${name}:${pane}`,
+        label: entry?.panes?.[pane]?.label || `${name}:${pane}`,
+        kind: "agent",
+        agent: name,
+        pane,
+        audioTarget: configured,
+        favorite: true,
+      }];
+    }
+    return [];
+  }
+
   function validatePane(name, pane) {
     const doc = loadAgents();
     const entry = doc[name];
@@ -177,6 +198,7 @@ export function createVoicePWA(deps) {
     json,
     parseJsonBody,
     pollIntervalMs,
+    targets: listPhoneTargets,
   });
 
   // ---------- Route handlers --------------------------------------------
@@ -254,7 +276,7 @@ export function createVoicePWA(deps) {
    * reads jsonl when available) and emits text + done. The client can
    * reopen the stream for the next turn.
    */
-  async function handleEvents(req, res, name, paneStr) {
+  async function handleEvents(req, res, name, paneStr, url) {
     const pane = parseInt(paneStr);
     if (Number.isNaN(pane)) return json(res, 400, { error: "pane must be an integer" });
     const v = validatePane(name, pane);
@@ -273,6 +295,7 @@ export function createVoicePWA(deps) {
     let sawWorking = false;
     let closed = false;
     let doneEmitted = false;
+    const prompt = String(url.searchParams.get("prompt") || "").slice(0, 5000) || null;
 
     req.on("close", () => { closed = true; });
 
@@ -287,9 +310,23 @@ export function createVoicePWA(deps) {
       }
       if (status === "working") sawWorking = true;
 
-      if (status === "idle" && sawWorking && !doneEmitted) {
+      const responseReady = prompt && typeof agent.hasResponseForPrompt === "function"
+        ? agent.hasResponseForPrompt(name, pane, prompt)
+        : false;
+      const completedRequestedTurn = prompt ? responseReady : sawWorking;
+      if (status === "idle" && completedRequestedTurn && !doneEmitted) {
         try {
-          const text = await agent.getResponse(name, pane);
+          let text;
+          if (prompt && typeof agent.getResponseStreamWithRaw === "function") {
+            const result = await agent.getResponseStreamWithRaw(name, pane, prompt);
+            text = result.items
+              .filter((item) => item.type === "text")
+              .map((item) => item.content)
+              .join("\n\n")
+              .trim();
+          } else {
+            text = await agent.getResponse(name, pane);
+          }
           if (text && text !== "(empty response)") write("text", { content: text });
         } catch (err) {
           write("error", { message: `response extract failed: ${err.message}` });
@@ -402,7 +439,7 @@ export function createVoicePWA(deps) {
       }
       const mEvents = path.match(/^\/api\/events\/([^/]+)\/(\d+)$/);
       if (mEvents && req.method === "GET") {
-        return await handleEvents(req, res, decodeURIComponent(mEvents[1]), mEvents[2]);
+        return await handleEvents(req, res, decodeURIComponent(mEvents[1]), mEvents[2], url);
       }
       return json(res, 404, { error: `no route for ${req.method} ${path}` });
     } catch (err) {

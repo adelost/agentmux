@@ -35,12 +35,15 @@ feature("Android audio inbox source contract", () => {
       expect(read(
         "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/PushToTalkController.java",
       )).toContain("MotionEvent.ACTION_UP");
+      expect(discovery).toContain('"agentmux-windows-manager-audio"');
+      expect(discovery).toContain('"http://abyss-win.tail13cb13.ts.net:8081"');
       expect(read(
-        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/AppContract.java",
-      )).toContain('KEY_LAST_TRANSCRIPT = "lastTranscript"');
+        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/ConversationPanel.java",
+      )).toContain('"Read replies aloud"');
       expect(read(
-        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/MainActivity.java",
-      )).toContain('"You said\\n“" + transcript + "”"');
+        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/ConversationController.java",
+      )).toContain("awaitAgentReply");
+      expect(read("channels/voice-input.mjs")).not.toContain("answer normally, then send");
       expect(read("channels/voice-input.mjs")).not.toContain("ptt-echo-");
     }],
   });
@@ -64,6 +67,7 @@ feature("Android audio inbox source contract", () => {
         "AudioInboxHttpClient.java": expect.any(Number),
         "AudioInboxService.java": expect.any(Number),
         "MainActivity.java": expect.any(Number),
+        "ConversationPanel.java": expect.any(Number),
         "ServerDiscovery.java": expect.any(Number),
       }));
       expect(Math.max(...Object.values(counts))).toBeLessThanOrEqual(500);

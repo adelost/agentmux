@@ -27,10 +27,8 @@ import {
 } from "../core/windows-manager.mjs";
 import { mapRecoveryChainResults } from "../core/windows-recovery.mjs";
 import { pollManagerDiscord } from "../core/windows-manager-discord.mjs";
-import {
-  claimManagerSingleton,
-  createVoiceTranscriber,
-} from "../core/windows-manager-input.mjs";
+import { claimManagerSingleton, createVoiceTranscriber } from "../core/windows-manager-input.mjs";
+import { createSerialTurnLane, startWindowsManagerPhone } from "../core/windows-manager-phone-runtime.mjs";
 
 const BIN_DIR = dirname(fileURLToPath(import.meta.url));
 const RESCUE_PATH = join(BIN_DIR, "windows-rescue-tool.ps1");
@@ -255,6 +253,7 @@ async function main() {
   writeJsonAtomic(statePath, state);
   logLine(logPath, `manager started pid=${process.pid} channel=${config.channelId} generation=${generation}`);
   const history = [];
+  const serializeTurn = createSerialTurnLane();
   const deps = {
     generation,
     provider: createManagerProvider(config),
@@ -278,10 +277,12 @@ async function main() {
     },
     transcribeMessage: createVoiceTranscriber({ config, rootDir, scriptPath: TRANSCRIBE_PATH }),
   };
+  await startWindowsManagerPhone({ config, rootDir, transcribePath: TRANSCRIBE_PATH,
+    state, deps, history, serializeTurn, runManagerTurn, log: (line) => logLine(logPath, line) });
   const pollSeconds = Math.min(Math.max(Number(config.pollSeconds) || 5, 2), 60);
   for (;;) {
     try {
-      await pollManagerChannel({ config, state, history, deps });
+      await serializeTurn(() => pollManagerChannel({ config, state, history, deps }));
     } catch (error) {
       logLine(logPath, `poll failed: ${error?.message || error}`);
     }
