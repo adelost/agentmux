@@ -132,7 +132,6 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
             targets.removeIf(existing -> existing.id.equals(target.id));
             targets.add(target);
         }
-        if (selectedTarget() == null && !targets.isEmpty()) selectedId = targets.get(0).id;
         renderTargets();
     }
 
