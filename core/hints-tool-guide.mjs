@@ -53,14 +53,16 @@ the same engine.
 
 ### Find asks and unfinished human directives
 \`\`\`bash
-amux asks                            # recent asks, every status (bounded and fast)
+amux asks                            # durable asks + bounded live status
 amux asks --open                     # unresolved only
 amux asks <agent> --pane N --since 2d
-amux asks --full --since 30d         # exact older scan; intentionally slower
+amux asks --all-repos --summary      # durable overview across removed/current repos
+amux asks --full --since 30d         # exact live reply/line join; prompts are already durable
 \`\`\`
-Use \`asks\` for "what did Mattias ask, where, and did it close?". Default
-mode never full-reads giant journals; \`--full\` adds exact file/line anchors
-for an older forensic lookup.
+Use \`asks\` for "what did Mattias ask, where, and did it close?". The
+append-only ask ledger survives respawn, clear, rotation, and janitor; missing
+provider history is shown honestly as archived. \`--full\` only expands the
+optional live-session status/line join.
 
 ### Understand state across panes
 \`\`\`bash

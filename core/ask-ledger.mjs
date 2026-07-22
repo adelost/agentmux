@@ -15,7 +15,7 @@ import {
   rmSync,
   statSync,
 } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { parseJsonlText } from "./jsonl-reader.mjs";
@@ -59,7 +59,10 @@ function rotateBeforeAppend(path, { nowMs, maxBytes }) {
     try { size = statSync(path).size; } catch { return null; }
     if (size < maxBytes) return null;
     const stamp = new Date(nowMs).toISOString().replace(/[:.]/gu, "-");
-    const archive = join(dirname(path), `${basename(path, ".jsonl")}.${stamp}.${process.pid}.jsonl`);
+    const archive = join(
+      dirname(path),
+      `${basename(path, ".jsonl")}.${stamp}.${process.pid}.${randomUUID()}.jsonl`,
+    );
     renameSync(path, archive);
     return archive;
   } finally {
