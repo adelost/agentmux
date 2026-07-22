@@ -429,6 +429,15 @@ feature("heartbeat classification", () => {
     then: ["dead", (hb) => expect(hb.state).toBe("dead")],
   });
 
+  unit("a fresh orphaned heartbeat is dead, never a successful start receipt", {
+    given: ["a fresh beat whose recorded pid is gone", () => beatAt("2026-07-08T11:59:55Z")],
+    when: ["classifying with pid gone", (beat) =>
+      classifyHeartbeat(beat, { repoVersion: "1.20.37", pidAlive: false, now: NOW })],
+    then: ["dead with its measured age", (heartbeat) => {
+      expect(heartbeat).toEqual({ state: "dead", ageMs: 5_000 });
+    }],
+  });
+
   unit("hung heartbeat renders as a doctor FAIL with a kill hint", {
     given: ["a hung classification input", () => ({
       beat: beatAt(new Date(NOW - HEARTBEAT_STALE_MS - 60000).toISOString()),

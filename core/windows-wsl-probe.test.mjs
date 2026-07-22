@@ -62,4 +62,24 @@ feature("Windows WSL observation", () => {
       });
     }],
   });
+
+  unit("a fresh heartbeat from a dead pid never acknowledges bridge startup", {
+    then: ["the Windows observation reports dead immediately", () => {
+      const nowMs = Date.parse("2026-07-20T15:00:00Z");
+      expect(buildWslObservation({
+        bootId: "boot-3",
+        heartbeat: {
+          ts: new Date(nowMs - 1_000).toISOString(), pid: 42,
+          version: "1.2.3", sourceSha: "a".repeat(40),
+        },
+        pidAlive: false,
+        identity: {
+          ok: true, packageVersion: "1.2.3", sourceSha: "a".repeat(40), issues: [],
+        },
+        memoryState: { level: "normal", observedAt: nowMs },
+        memoryStale: false,
+        nowMs,
+      })).toMatchObject({ bridge: { state: "dead", ageMs: 1_000 } });
+    }],
+  });
 });

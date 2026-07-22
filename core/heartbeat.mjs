@@ -55,6 +55,7 @@ export function classifyHeartbeat(beat, {
   if (!beat) return { state: "missing" };
   const age = now - new Date(beat.ts || 0).getTime();
   const fresh = Number.isFinite(age) && age <= HEARTBEAT_STALE_MS;
+  if (pidAlive === false) return { state: "dead", ageMs: age };
   if (!fresh) return { state: pidAlive ? "hung" : "dead", ageMs: age };
   if (repoSourceSha && beat.sourceSha !== repoSourceSha) {
     return {
