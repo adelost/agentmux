@@ -229,6 +229,35 @@ feature("ask-history: durable ledger join", () => {
     }],
   });
 
+  unit("persisted completion evidence stays closed after provider history disappears", {
+    when: ["joining a completed ledger row without live history", () => joinAskLedgerEntries({
+      ledgerEntries: [{
+        id: "ask-complete",
+        ts: "2026-07-21T10:00:00.000Z",
+        agent: "skydive",
+        pane: 8,
+        source: "discord",
+        verbatim: "fixa uppdraget",
+        completionStatus: "done",
+        completionReply: "Klart och live.",
+        completionAt: "2026-07-21T10:03:00.000Z",
+        completionSessionFile: "/trimmed/session.jsonl",
+      }],
+      liveEntries: [],
+      nowMs: Date.parse("2026-07-22T10:00:00Z"),
+    })],
+    then: ["the ask remains done instead of regressing to unverified", (rows) => {
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        status: "done",
+        open: false,
+        replyPreview: "Klart och live.",
+        jsonlFile: "/trimmed/session.jsonl",
+        completionAt: "2026-07-21T10:03:00.000Z",
+      });
+    }],
+  });
+
   unit("legacy live-only asks survive migration and summaries group every repo", {
     given: ["one unverified ledger ask plus one old live-only ask", () => joinAskLedgerEntries({
       ledgerEntries: [{

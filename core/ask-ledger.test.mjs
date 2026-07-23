@@ -5,7 +5,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  appendAskLedger, askLedgerFiles, capturePaneHookAsk, readAskLedger,
+  appendAskLedger,
+  askLedgerFiles,
+  capturePaneHookAsk,
+  persistAskCompletionEvidence,
+  readAskLedger,
 } from "./ask-ledger.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 
@@ -110,6 +114,58 @@ feature("durable ask ledger", () => {
         verbatim: "det här får aldrig glömmas", sessionFile: ctx.sessionFile,
       });
       rmSync(ctx.root, { recursive: true, force: true });
+    }],
+  });
+
+  unit("a verified live completion becomes durable before its session is trimmed", {
+    given: ["one durable ask joined to a finished provider turn", () => {
+      const root = freshRoot();
+      const path = join(root, "ask-ledger.jsonl");
+      appendAskLedger({
+        id: "delivery:done-1",
+        ts: "2026-07-22T10:00:00Z",
+        agent: "skydive",
+        pane: 8,
+        source: "discord",
+        verbatim: "fixa uppdraget",
+      }, { path });
+      return {
+        root,
+        path,
+        ledgerEntries: readAskLedger({ path }),
+        joinedEntries: [{
+          ledgerId: "delivery:done-1",
+          status: "done",
+          reply: "Klart och live.",
+          replyPreview: "Klart och live.",
+          timestamp: "2026-07-22T10:00:00Z",
+          endTimestamp: "2026-07-22T10:03:00Z",
+          jsonlFile: "/sessions/proof.jsonl",
+        }],
+      };
+    }],
+    when: ["completion evidence is persisted", (ctx) => ({
+      count: persistAskCompletionEvidence({
+        ledgerEntries: ctx.ledgerEntries,
+        joinedEntries: ctx.joinedEntries,
+        path: ctx.path,
+      }),
+      rows: readAskLedger({ path: ctx.path }),
+    })],
+    then: ["the same ask carries a terminal receipt independent of provider history", ({ count, rows }, ctx) => {
+      try {
+        expect(count).toBe(1);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+          id: "delivery:done-1",
+          completionStatus: "done",
+          completionReply: "Klart och live.",
+          completionAt: "2026-07-22T10:03:00Z",
+          completionSessionFile: "/sessions/proof.jsonl",
+        });
+      } finally {
+        rmSync(ctx.root, { recursive: true, force: true });
+      }
     }],
   });
 });

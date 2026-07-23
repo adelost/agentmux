@@ -64,6 +64,8 @@ Use \`asks\` for "what did Mattias ask, where, and did it close?". The first
 run after upgrade imports older durable delivery jobs once. The append-only ask
 ledger survives respawn, clear, rotation, and janitor; missing completion
 history is shown honestly as unresolved \`unverified\`, never silently closed.
+Observed \`done\`/\`answered\` receipts are persisted before rendering, so a
+later session trim cannot reopen known-complete work.
 Human/operator asks are the default; \`--all-sources\` includes agent traffic.
 \`--full\` only expands the optional live-session status/line join.
 

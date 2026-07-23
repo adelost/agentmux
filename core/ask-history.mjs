@@ -61,6 +61,7 @@ export function buildAskEntries({
       pane,
       key: `${agent}:${pane}`,
       timestamp: turn.timestamp || null,
+      endTimestamp: turn.endTimestamp || null,
       tsMs,
       ageMs: Number.isFinite(tsMs) ? nowMs - tsMs : Infinity,
       prompt: turn.userPrompt,
@@ -141,6 +142,8 @@ export function joinAskLedgerEntries({
       .sort((left, right) => Math.abs(left.tsMs - tsMs) - Math.abs(right.tsMs - tsMs))[0];
     if (live) claimed.add(live);
 
+    const persistedStatus = ledger.completionStatus || null;
+    const status = live?.status || persistedStatus || "unverified";
     rows.push({
       ...(live || {}),
       agent: ledger.agent,
@@ -151,11 +154,11 @@ export function joinAskLedgerEntries({
       ageMs: Number.isFinite(tsMs) ? nowMs - tsMs : Infinity,
       prompt: ledger.verbatim,
       promptPreview: previewText(ledger.verbatim, 120),
-      reply: live?.reply || "",
-      replyPreview: live?.replyPreview || "",
-      status: live?.status || "unverified",
-      open: live ? live.open : true,
-      jsonlFile: live?.jsonlFile || null,
+      reply: live?.reply || ledger.completionReply || "",
+      replyPreview: live?.replyPreview || ledger.completionReply || "",
+      status,
+      open: live ? live.open : askStatusIsOpen(status),
+      jsonlFile: live?.jsonlFile || ledger.completionSessionFile || null,
       sessionFile: ledger.sessionFile || live?.jsonlFile || null,
       sessionId: ledger.sessionId || null,
       source: ledger.source || "unknown",
@@ -171,6 +174,9 @@ export function joinAskLedgerEntries({
       deliveryPath: ledger.deliveryPath || null,
       deliveryStatus: ledger.deliveryStatus || null,
       backfilled: ledger.backfilled === true,
+      completionAt: ledger.completionAt || null,
+      completionSessionFile: ledger.completionSessionFile || null,
+      completionStatus: ledger.completionStatus || null,
     });
   }
 
