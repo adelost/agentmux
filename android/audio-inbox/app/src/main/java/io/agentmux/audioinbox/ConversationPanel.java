@@ -296,20 +296,17 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
         messagesView.removeAllViews();
         List<ConversationStore.Message> messages = store.read();
         Set<String> voiceKeys = new HashSet<>();
-        // The eager image budget favors the newest messages in the history.
-        Set<String> imageBudget = new HashSet<>();
-        for (int index = messages.size() - 1; index >= 0 && imageBudget.size() < 12; index--) {
-            for (String url : MessageMedia.imageUrls(messages.get(index).text)) {
-                if (imageBudget.size() >= 12) break;
-                imageBudget.add(url);
-            }
-        }
+        // The eager image budget favors the newest messages, capped in rows.
+        List<String> texts = new ArrayList<>();
+        for (ConversationStore.Message message : messages) texts.add(message.text);
+        java.util.Set<String> imageBudget = MessageMedia.imageBudget(texts, 12);
         if (messages.isEmpty()) {
             TextView empty = text("No conversation yet", 15, false, SECONDARY);
             messagesView.addView(empty);
             return;
         }
-        for (ConversationStore.Message message : messages) {
+        for (int index = 0; index < messages.size(); index++) {
+            ConversationStore.Message message = messages.get(index);
             boolean mine = "user".equals(message.role);
             TextView header = text(mine ? "You → " + message.target : message.target, 12, true, ACCENT);
             messagesView.addView(header, margins(10, 0));
@@ -318,7 +315,7 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
             body.setTextIsSelectable(true);
             messagesView.addView(body, margins(2, 0));
             for (String url : MessageMedia.imageUrls(message.text)) {
-                if (imageBudget.contains(url)) {
+                if (imageBudget.contains(index + "|" + url)) {
                     messagesView.addView(imageRow(url), margins(6, 0));
                 }
             }

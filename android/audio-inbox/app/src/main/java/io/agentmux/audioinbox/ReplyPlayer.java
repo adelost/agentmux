@@ -23,10 +23,9 @@ final class ReplyPlayer implements AutoCloseable {
     private final PlaybackQueue.FocusPort focus;
     private final Listener listener;
     private final ExecutorService work = Executors.newSingleThreadExecutor();
+    private final GenerationFence fence = new GenerationFence();
     private MediaPlayer player;
     private String activeKey;
-    private int generation;
-    private boolean closed;
 
     ReplyPlayer(Activity activity, PlaybackQueue.FocusPort focus, Listener listener) {
         this.activity = activity;
@@ -38,13 +37,13 @@ final class ReplyPlayer implements AutoCloseable {
         return key != null && key.equals(activeKey);
     }
 
-    /** Ensures the voice file exists, then plays it. */
+    /** Ensures the voice file exists, then plays it. Last request wins. */
     void play(AudioInboxHttpClient client, String key, String text) {
-        final int expected = generation;
+        final int expected = fence.next();
         work.execute(() -> {
             File file = ensure(client, key, text);
             activity.runOnUiThread(() -> {
-                if (closed || expected != generation) return; // stale completion
+                if (fence.isStale(expected)) return; // superseded or closed
                 if (file == null) {
                     post(key, false, "Röstljudet kunde inte hämtas");
                     return;
@@ -64,7 +63,7 @@ final class ReplyPlayer implements AutoCloseable {
     }
 
     void stopPlayback() {
-        generation += 1;
+        fence.invalidate();
         if (player != null) {
             try { if (player.isPlaying()) player.stop(); } catch (Exception ignored) {}
             player.release();
@@ -136,7 +135,7 @@ final class ReplyPlayer implements AutoCloseable {
 
     @Override
     public void close() {
-        closed = true;
+        fence.close();
         work.shutdownNow();
         stopPlayback();
     }

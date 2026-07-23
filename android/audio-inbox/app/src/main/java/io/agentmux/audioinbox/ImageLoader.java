@@ -107,15 +107,9 @@ final class ImageLoader {
             bounds.inJustDecodeBounds = true;
             BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
-            int sample = 1;
-            // Test the CURRENT sample: the decoded bitmap must fit the pixel
-            // budget and the target width before the loop may stop.
-            while ((bounds.outWidth / sample) * (long) (bounds.outHeight / sample) > MAX_DECODED_PIXELS
-                || bounds.outWidth / sample > maxWidthPx) {
-                sample *= 2;
-            }
             BitmapFactory.Options decode = new BitmapFactory.Options();
-            decode.inSampleSize = sample;
+            decode.inSampleSize = MessageMedia.sampleSize(
+                bounds.outWidth, bounds.outHeight, maxWidthPx, MAX_DECODED_PIXELS);
             return BitmapFactory.decodeByteArray(bytes, 0, bytes.length, decode);
         } finally {
             connection.disconnect();

@@ -28,6 +28,32 @@ final class MessageMedia {
         return urls;
     }
 
+    /**
+     * Allocates the eager image row budget over a history (oldest first),
+     * favoring the newest messages. Keys are "messageIndex|url" so the same
+     * URL in many rows still consumes one budget slot per rendered row.
+     */
+    static java.util.Set<String> imageBudget(List<String> texts, int maxRows) {
+        java.util.Set<String> budget = new java.util.HashSet<>();
+        for (int index = texts.size() - 1; index >= 0 && budget.size() < maxRows; index--) {
+            for (String url : imageUrls(texts.get(index))) {
+                if (budget.size() >= maxRows) break;
+                budget.add(index + "|" + url);
+            }
+        }
+        return budget;
+    }
+
+    /** Decides the decode sample size; the CURRENT sample must fit both budgets. */
+    static int sampleSize(int width, int height, int maxWidthPx, int maxPixels) {
+        int sample = 1;
+        while ((width / sample) * (long) (height / sample) > maxPixels
+            || width / sample > maxWidthPx) {
+            sample *= 2;
+        }
+        return sample;
+    }
+
     static String voiceKey(String target, String text) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
