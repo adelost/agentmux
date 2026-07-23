@@ -6,9 +6,10 @@
 
 import { isAskToHuman, looksDone, previewText } from "./orchestrator-checkpoint.mjs";
 import { isLiveStatus } from "./pane-status.mjs";
+import { inferAskOrigin } from "./ask-origin.mjs";
 import { isSystemNoiseDirective } from "./system-noise.mjs";
 
-const OPEN_STATUSES = new Set(["open", "working", "partial", "needs-you"]);
+const OPEN_STATUSES = new Set(["open", "working", "partial", "needs-you", "unverified"]);
 const LIVE_MATCH_WINDOW_MS = 15 * 60 * 1000;
 
 export function classifyAskTurn(turn = {}, opts = {}) {
@@ -69,6 +70,7 @@ export function buildAskEntries({
       status,
       open: askStatusIsOpen(status),
       jsonlFile,
+      origin: inferAskOrigin({ source: "pane-hook", prompt: turn.userPrompt }),
     });
   }
   return out;
@@ -90,6 +92,7 @@ export function filterAskEntries(entries = [], opts = {}) {
     sinceMs = null,
     grep = null,
     openOnly = false,
+    humanOnly = false,
     limit = null,
   } = opts;
 
@@ -100,6 +103,7 @@ export function filterAskEntries(entries = [], opts = {}) {
   if (grep instanceof RegExp) {
     out = out.filter((e) => grep.test(e.prompt) || grep.test(e.reply || ""));
   }
+  if (humanOnly) out = out.filter((e) => (e.origin || "human") === "human");
   if (openOnly) out = out.filter((e) => e.open);
 
   out = [...out].sort((a, b) => (b.tsMs || 0) - (a.tsMs || 0));
@@ -149,20 +153,38 @@ export function joinAskLedgerEntries({
       promptPreview: previewText(ledger.verbatim, 120),
       reply: live?.reply || "",
       replyPreview: live?.replyPreview || "",
-      status: live?.status || "archived",
-      open: live?.open || false,
+      status: live?.status || "unverified",
+      open: live ? live.open : true,
       jsonlFile: live?.jsonlFile || null,
       sessionFile: ledger.sessionFile || live?.jsonlFile || null,
       sessionId: ledger.sessionId || null,
       source: ledger.source || "unknown",
+      origin: ledger.origin || inferAskOrigin({
+        source: ledger.source,
+        sender: ledger.sender,
+        prompt: ledger.verbatim,
+      }),
+      sender: ledger.sender || null,
       repo: ledger.repo || ledger.agent,
       ledgerPath: ledger.ledgerPath || null,
       ledgerId: ledger.id || null,
+      deliveryPath: ledger.deliveryPath || null,
+      deliveryStatus: ledger.deliveryStatus || null,
+      backfilled: ledger.backfilled === true,
     });
   }
 
   for (const live of liveEntries) {
-    if (!claimed.has(live)) rows.push({ ...live, repo: live.repo || live.agent, legacyLiveOnly: true });
+    if (!claimed.has(live)) rows.push({
+      ...live,
+      origin: live.origin || inferAskOrigin({
+        source: live.source || "pane-hook",
+        sender: live.sender,
+        prompt: live.prompt,
+      }),
+      repo: live.repo || live.agent,
+      legacyLiveOnly: true,
+    });
   }
   return rows;
 }
@@ -173,12 +195,12 @@ export function summarizeAskEntries(entries = []) {
   for (const entry of entries) {
     const repo = entry.repo || entry.agent || "unknown";
     const group = groups.get(repo) || {
-      repo, total: 0, open: 0, archived: 0, answered: 0, newestTsMs: 0,
+      repo, total: 0, open: 0, unverified: 0, closed: 0, newestTsMs: 0,
     };
     group.total++;
     if (entry.open) group.open++;
-    if (entry.status === "archived") group.archived++;
-    else if (!entry.open) group.answered++;
+    if (entry.status === "unverified") group.unverified++;
+    if (!entry.open) group.closed++;
     if (Number.isFinite(entry.tsMs)) group.newestTsMs = Math.max(group.newestTsMs, entry.tsMs);
     groups.set(repo, group);
   }

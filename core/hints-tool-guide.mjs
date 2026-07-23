@@ -55,14 +55,17 @@ the same engine.
 \`\`\`bash
 amux asks                            # durable asks + bounded live status
 amux asks --open                     # unresolved only
+amux asks --open --all-sources       # include inter-agent/automation directives
 amux asks <agent> --pane N --since 2d
 amux asks --all-repos --summary      # durable overview across removed/current repos
 amux asks --full --since 30d         # exact live reply/line join; prompts are already durable
 \`\`\`
-Use \`asks\` for "what did Mattias ask, where, and did it close?". The
-append-only ask ledger survives respawn, clear, rotation, and janitor; missing
-provider history is shown honestly as archived. \`--full\` only expands the
-optional live-session status/line join.
+Use \`asks\` for "what did Mattias ask, where, and did it close?". The first
+run after upgrade imports older durable delivery jobs once. The append-only ask
+ledger survives respawn, clear, rotation, and janitor; missing completion
+history is shown honestly as unresolved \`unverified\`, never silently closed.
+Human/operator asks are the default; \`--all-sources\` includes agent traffic.
+\`--full\` only expands the optional live-session status/line join.
 
 ### Understand state across panes
 \`\`\`bash

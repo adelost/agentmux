@@ -9,6 +9,7 @@ export function formatAskStatus(status) {
     case "needs-you": return "🔴 needs-you";
     case "done": return "✅ done";
     case "answered": return "☑️ answered";
+    case "unverified": return "❔ unverified";
     case "archived": return "🗄 archived";
     default: return status || "unknown";
   }
@@ -48,8 +49,11 @@ export function formatAskEntry(entry) {
     : "?";
   const status = formatAskStatus(entry.status).padEnd(13);
   const needle = compactText(entry.prompt).slice(0, 70);
+  const origin = entry.origin === "agent" ? "agent"
+    : entry.origin === "system" ? "system"
+      : "human";
   const lines = [
-    `${status}  ${ts}  ${entry.key.padEnd(10)}  ${age}`,
+    `${status}  ${ts}  ${entry.key.padEnd(10)}  ${age}  [${origin}]`,
     `    > ${entry.promptPreview}`,
   ];
   if (entry.replyPreview) lines.push(`    → ${entry.replyPreview}`);
@@ -60,8 +64,13 @@ export function formatAskEntry(entry) {
     lines.push(`    jsonl: ${location}${entry.timestamp ? ` @ ${entry.timestamp}` : ""}`);
   }
   if (!entry.jsonlFile && entry.sessionFile) {
-    lines.push(`    session: ${entry.sessionFile} (archived)`);
+    lines.push(`    session: ${entry.sessionFile} (no matching completion found)`);
   }
+  if (entry.status === "unverified") {
+    const delivery = entry.deliveryStatus ? `delivery ${entry.deliveryStatus}` : "delivery recorded";
+    lines.push(`    evidence: ${delivery}; no completion evidence`);
+  }
+  if (entry.deliveryPath) lines.push(`    delivery: ${entry.deliveryPath}`);
   if (entry.ledgerPath) lines.push(`    ledger: ${entry.ledgerPath}`);
   lines.push(`    log: amux log ${entry.agent} -p ${entry.pane} --grep ${shellQuote(escapeRegexLiteral(needle))} -n 5`);
   return lines.join("\n");

@@ -504,7 +504,7 @@ ai:
 });
 
 feature("amux asks durable archive", () => {
-  unit("--all-repos --summary includes a pane whose config and session are gone", {
+  unit("--all-repos --summary keeps a lost-session ask visibly unresolved", {
     given: ["an empty active fleet and one orphaned durable ask", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-asks-summary-"));
       const configPath = join(root, "agents.yaml");
@@ -531,11 +531,55 @@ feature("amux asks durable archive", () => {
       finally { console.log = original; }
       return { root, output: logs.join("\n") };
     }],
-    then: ["the archived repository remains in the overview", ({ root, output }) => {
+    then: ["the repository remains in the overview without pretending completion", ({ root, output }) => {
       try {
         expect(output).toContain("durable ledger");
         expect(output).toContain("old-repository");
-        expect(output).toMatch(/\b1\s+0\s+1\s+0\b/u);
+        expect(output).toContain("unresolved");
+        expect(output).toMatch(/\b1\s+1\s+1\s+0\b/u);
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }],
+  });
+
+  unit("default output is human-only while --all-sources restores agent briefs", {
+    given: ["one human ask and one inter-agent directive", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-asks-origin-"));
+      const configPath = join(root, "agents.yaml");
+      writeFileSync(configPath, "{}\n");
+      const rows = [
+        {
+          id: "human", ts: "2026-07-22T10:00:00.000Z",
+          agent: "retired", pane: 3, repo: "game", source: "discord",
+          verbatim: "lägg till människor som går mellan städerna",
+        },
+        {
+          id: "agent", ts: "2026-07-22T10:01:00.000Z",
+          agent: "retired", pane: 3, repo: "game", source: "cli",
+          sender: "skydive:2", verbatim: "[from skydive:2] deploya trunk",
+        },
+      ];
+      return { root, ctx: { configPath, readAskLedger: () => rows } };
+    }],
+    when: ["rendering default and all-source views", async ({ ctx, root }) => {
+      const capture = async (args) => {
+        const logs = [];
+        const original = console.log;
+        console.log = (...values) => logs.push(values.join(" "));
+        try { await dispatch(args, ctx); } finally { console.log = original; }
+        return logs.join("\n");
+      };
+      return {
+        root,
+        human: await capture(["asks", "--all-repos", "--all"]),
+        everySource: await capture(["asks", "--all-repos", "--all", "--all-sources"]),
+      };
+    }],
+    then: ["the simple command answers what the human asked", ({ root, human, everySource }) => {
+      try {
+        expect(human).toContain("människor som går");
+        expect(human).not.toContain("deploya trunk");
+        expect(everySource).toContain("människor som går");
+        expect(everySource).toContain("deploya trunk");
       } finally { rmSync(root, { recursive: true, force: true }); }
     }],
   });
