@@ -6,8 +6,9 @@
 //
 // The Wire journal is the delivery/source-of-truth boundary. A prompt is
 // accepted only after `turn.prompt` or `turn.steer` with the exact text is
-// appended; assistant text and tool calls are reconstructed from
-// `context.append_loop_event`.
+// appended. A steered prompt does not become a response boundary until Kimi
+// appends the matching user message to its context; events between those two
+// records still belong to the interrupted step.
 
 import {
   closeSync,
@@ -274,12 +275,17 @@ function markPreviousComplete(turns, current) {
   turns.push(current);
 }
 
+function contextUserPrompt(record) {
+  const message = record?.type === "context.append_message" ? record.message : null;
+  return message?.role === "user" && (!message.origin?.kind || message.origin.kind === "user")
+    ? textFromParts(message.content) : null;
+}
 function groupKimiIntoTurns(records, { headless = false } = {}) {
   const turns = [];
   let current = null;
 
   for (const record of records) {
-    if (record?.type === "turn.prompt" || record?.type === "turn.steer") {
+    if (record?.type === "turn.prompt") {
       markPreviousComplete(turns, current);
       current = {
         timestamp: isoTime(record.time),
@@ -291,7 +297,27 @@ function groupKimiIntoTurns(records, { headless = false } = {}) {
       };
       continue;
     }
-
+    const steeredPrompt = contextUserPrompt(record);
+    if (steeredPrompt != null) {
+      // A regular prompt is mirrored into context; do not split it twice.
+      // A steer can land while the old model step is still finishing, so only
+      // this context append starts its response boundary.
+      const duplicatePromptStart = current
+        && current.items.length === 0
+        && current.userPrompt.trim() === steeredPrompt.trim();
+      if (!duplicatePromptStart) {
+        markPreviousComplete(turns, current);
+        current = {
+          timestamp: isoTime(record.time),
+          userPrompt: steeredPrompt,
+          items: [],
+          endTimestamp: null,
+          isComplete: false,
+          turnId: null,
+        };
+      }
+      continue;
+    }
     if (!current && headless && record?.type === "context.append_loop_event") {
       current = {
         timestamp: isoTime(record.time),
@@ -303,7 +329,6 @@ function groupKimiIntoTurns(records, { headless = false } = {}) {
       };
     }
     if (!current) continue;
-
     if (record?.type === "context.append_message" && record.message?.role === "assistant") {
       addText(current.items, textFromParts(record.message.content), itemId(record));
       current.endTimestamp = isoTime(record.time) || current.endTimestamp;

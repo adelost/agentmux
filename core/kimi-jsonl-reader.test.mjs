@@ -102,35 +102,60 @@ describe("Kimi Wire journal", () => {
     }
   });
 
-  it("accepts a steered prompt after the append cursor and keeps the turn busy", () => {
+  it("accepts a steer immediately but binds its reply only after context intake", () => {
     const fx = fixture();
     try {
-      const cursor = captureKimiPromptEchoCursor(fx.cwd, "first prompt", fx.options);
-      expect(isPromptInKimiJsonl(fx.cwd, "first prompt", {
+      const prompt = "steered prompt";
+      const cursor = captureKimiPromptEchoCursor(fx.cwd, prompt, fx.options);
+      expect(isPromptInKimiJsonl(fx.cwd, prompt, {
         ...fx.options,
         cursor,
       })).toBe(false);
       appendFileSync(fx.wire, `${JSON.stringify({
         type: "turn.steer",
-        input: [{ type: "text", text: "first prompt" }],
+        input: [{ type: "text", text: prompt }],
         time: 3_000,
       })}\n`);
-      expect(isPromptInKimiJsonl(fx.cwd, "first prompt", {
+      expect(isPromptInKimiJsonl(fx.cwd, prompt, {
         ...fx.options,
         cursor,
       })).toBe(true);
       expect(isBusyFromKimiJsonl(fx.cwd, fx.options)).toBe(true);
+
+      // Kimi can finish the old model step after recording turn.steer but
+      // before it appends the steer to context. That text must remain with
+      // the old turn and must never unblock the phone response stream.
       appendFileSync(fx.wire, `${JSON.stringify({
+        type: "context.append_loop_event",
+        event: {
+          type: "content.part",
+          turnId: 2,
+          part: { type: "text", text: "OLD_STEP_CONTINUATION" },
+        },
+        time: 3_100,
+      })}\n`);
+      expect(readLastTurnsKimi(fx.cwd, fx.options).turns
+        .some((turn) => turn.userPrompt === prompt)).toBe(false);
+
+      appendFileSync(fx.wire, `${JSON.stringify({
+        type: "context.append_message",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: prompt }],
+          origin: { kind: "user" },
+        },
+        time: 3_200,
+      })}\n${JSON.stringify({
         type: "context.append_loop_event",
         event: {
           type: "content.part",
           turnId: 2,
           part: { type: "text", text: "STEER_REPLY" },
         },
-        time: 3_100,
+        time: 3_300,
       })}\n`);
       expect(readLastTurnsKimi(fx.cwd, fx.options).turns.at(-1)).toMatchObject({
-        userPrompt: "first prompt",
+        userPrompt: prompt,
         items: [{ type: "text", content: "STEER_REPLY" }],
       });
     } finally {
