@@ -64,4 +64,23 @@ public class ServerDiscoveryTest {
         assertFalse(ServerDiscovery.isAllowedServer("ftp://100.73.86.55/file"));
         assertTrue(ServerDiscovery.isAllowedServer("https://example.com"));
     }
+
+    @Test
+    public void parsesMultipleAgentTargetsWithFriendlyLabels() {
+        ServerDiscovery.Configuration result = ServerDiscovery.parse(
+            "https://abyss-wsl.tail13cb13.ts.net:8443",
+            "{\"service\":\"agentmux-audio-inbox\",\"schemaVersion\":2,"
+                + "\"serverId\":\"abyss-wsl\",\"target\":\"1502949109491961917\","
+                + "\"targets\":["
+                + "{\"id\":\"lsrc:3\",\"label\":\"broker\",\"kind\":\"agent\",\"agent\":\"lsrc\",\"pane\":3,\"audioTarget\":\"1502949109491961917\"},"
+                + "{\"id\":\"lsrc:10\",\"label\":\"worker\",\"kind\":\"agent\",\"agent\":\"lsrc\",\"pane\":10,\"audioTarget\":\"1528238682744557598\"}"
+                + "]}"
+        );
+        assertEquals(2, result.conversationTargets.size());
+        assertEquals("L-source 3", result.conversationTargets.get(0).label);
+        assertEquals("L-source 10", result.conversationTargets.get(1).label);
+        assertEquals(10, result.conversationTargets.get(1).pane);
+        assertEquals("1528238682744557598", result.conversationTargets.get(1).audioTarget);
+        assertEquals("lsrc", result.conversationTargets.get(1).agent);
+    }
 }

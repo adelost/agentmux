@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { esc } from "../lib.mjs";
+import { paneForChannel, phoneTargetChannels } from "./audio-targets.mjs";
 
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const TRANSCRIPT_PREFIX = "[transcribed voice, may contain speech-to-text errors; interpret intent]";
@@ -23,13 +24,7 @@ export function createVoiceInput({
   validatePane,
 }) {
   function paneForTarget(target) {
-    for (const [name, entry] of Object.entries(loadAgents())) {
-      const mapping = entry?.discord;
-      if (mapping && typeof mapping === "object" && Object.hasOwn(mapping, target)) {
-        return { name, pane: Number(mapping[target]) };
-      }
-    }
-    return null;
+    return paneForChannel(loadAgents(), target);
   }
 
   async function transcribe(body) {
@@ -125,9 +120,10 @@ export function createVoiceInput({
     try { body = await parseJsonBody(req, MAX_AUDIO_BYTES + 1024 * 1024); }
     catch (error) { return json(res, 400, { error: error.message }); }
     const target = String(body.audioTarget || body.target || "").trim();
-    const configured = String(audioDiscovery?.target || "").trim();
-    if (!configured || target !== configured) {
-      return json(res, 403, { error: "PTT target is not the configured audio inbox" });
+    // Any explicitly listed phone channel is addressable; the primary target
+    // stays first in discovery. Unknown channels keep the hard refusal.
+    if (!phoneTargetChannels(audioDiscovery).includes(target)) {
+      return json(res, 403, { error: "PTT target is not a configured audio inbox" });
     }
     if (!TURN_ID_PATTERN.test(String(body.idempotencyKey || ""))) {
       return json(res, 400, { error: "PTT idempotencyKey is required" });

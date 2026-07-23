@@ -30,10 +30,6 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -47,8 +43,7 @@ public final class AudioInboxService extends MediaSessionService {
     private final ExecutorService feedExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService workExecutor = Executors.newSingleThreadExecutor();
     private final AtomicInteger feedGeneration = new AtomicInteger();
-    private final Map<String, AudioItem> items = new HashMap<>();
-    private final Set<String> processing = new HashSet<>();
+    private final AudioEventClaims claims = new AudioEventClaims();
 
     private SharedPreferences preferences;
     private ExoPlayer player;
@@ -62,22 +57,6 @@ public final class AudioInboxService extends MediaSessionService {
     private volatile HttpURLConnection feedConnection;
     private String startingId;
     private boolean replaying;
-
-    private static final class AudioItem {
-        final String eventId;
-        final String text;
-        final long createdAt;
-        final long expiresAt;
-        final File mediaFile;
-
-        AudioItem(String eventId, String text, long createdAt, long expiresAt, File mediaFile) {
-            this.eventId = eventId;
-            this.text = text;
-            this.createdAt = createdAt;
-            this.expiresAt = expiresAt;
-            this.mediaFile = mediaFile;
-        }
-    }
 
     @Override
     public void onCreate() {
@@ -119,6 +98,10 @@ public final class AudioInboxService extends MediaSessionService {
                     MediaItem current = player.getCurrentMediaItem();
                     if (current == null || !playbackQueue.replay(current.mediaId)) {
                         player.pause();
+                    } else {
+                        // A media-button resume is a replay: never a second
+                        // "played" receipt or history row for the same event.
+                        replaying = true;
                     }
                 } else if (!playbackQueue.ensureFocusForActive()) {
                     player.pause();
@@ -163,6 +146,7 @@ public final class AudioInboxService extends MediaSessionService {
         playbackQueue.setHandsFree(false);
         workExecutor.shutdownNow();
         feedExecutor.shutdownNow();
+        claims.clear();
         mediaSession.release();
         player.release();
         super.onDestroy();
@@ -201,6 +185,7 @@ public final class AudioInboxService extends MediaSessionService {
         playbackQueue.setHandsFree(false);
         replaying = false;
         player.stop();
+        claims.clear();
         store.updateConnection("Off", false);
         if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE);
         else stopForeground(true);
@@ -267,36 +252,46 @@ public final class AudioInboxService extends MediaSessionService {
             return;
         }
         if (expiresAt <= System.currentTimeMillis()) return;
-        synchronized (processing) {
-            String local = store.localState(eventId);
-            if ("playback-started".equals(local) || "played".equals(local)
-                || "failed".equals(local) || !processing.add(eventId)) return;
-        }
+        String local = store.localState(eventId);
+        if ("playback-started".equals(local) || "played".equals(local) || "failed".equals(local)) return;
+        // Runtime reservation before any fetch: a replayed SSE event must
+        // never overwrite the file the queued entry already uses. Held only
+        // while in flight, queued, or active; terminal paths release it.
+        if (!claims.reserve(eventId)) return;
         workExecutor.execute(() -> {
             try {
-                if (!canClaim()) return;
+                if (!canClaim()) {
+                    claims.release(eventId);
+                    return;
+                }
                 httpClient.postReceipt(eventId, "received", null);
                 store.saveLocalState(eventId, "received");
                 File media = httpClient.fetchTts(getCacheDir(), eventId, text);
-                if (!canClaim()) return;
+                if (!canClaim()) {
+                    if (media != null) media.delete();
+                    claims.release(eventId);
+                    return;
+                }
                 httpClient.postReceipt(eventId, "queued", null);
                 store.saveLocalState(eventId, "queued");
-                AudioItem item = new AudioItem(eventId, text, createdAt, expiresAt, media);
+                AudioEventClaims.Entry item = new AudioEventClaims.Entry(eventId, text, createdAt, expiresAt, media);
                 main.post(() -> queueItem(item));
             } catch (Exception error) {
                 failBeforePlayback(eventId, error);
-            } finally {
-                synchronized (processing) {
-                    processing.remove(eventId);
-                }
             }
         });
     }
 
-    private void queueItem(AudioItem item) {
-        if (!enabled || !connected || item.expiresAt <= System.currentTimeMillis()) return;
-        if (!playbackQueue.offer(item.eventId)) return;
-        items.put(item.eventId, item);
+    private void queueItem(AudioEventClaims.Entry item) {
+        if (!enabled || !connected || item.expiresAt <= System.currentTimeMillis()) {
+            claims.releaseAndDelete(getCacheDir(), item.eventId);
+            return;
+        }
+        if (!playbackQueue.offer(item.eventId)) {
+            claims.releaseAndDelete(getCacheDir(), item.eventId);
+            return;
+        }
+        claims.putQueued(item);
         store.saveCurrent(item.text, item.createdAt);
         maybeStartNext();
     }
@@ -305,9 +300,17 @@ public final class AudioInboxService extends MediaSessionService {
         if (!enabled || !connected || startingId != null) return;
         String candidate = playbackQueue.candidate();
         if (candidate == null) return;
-        AudioItem item = items.get(candidate);
+        AudioEventClaims.Entry item = claims.queued(candidate);
         if (item == null) {
             playbackQueue.discard(candidate);
+            return;
+        }
+        if (item.expiresAt <= System.currentTimeMillis()) {
+            // An item that expired while queued must never play stale audio.
+            playbackQueue.discard(candidate);
+            claims.releaseAndDelete(getCacheDir(), candidate);
+            workExecutor.execute(() -> markFailed(candidate, "expired before playback"));
+            maybeStartNext();
             return;
         }
         startingId = candidate;
@@ -321,17 +324,20 @@ public final class AudioInboxService extends MediaSessionService {
                 main.post(() -> {
                     startingId = null;
                     playbackQueue.discard(candidate);
+                    claims.releaseAndDelete(getCacheDir(), candidate);
+                    workExecutor.execute(() -> markFailed(candidate, safeDetail(error.getMessage())));
                     maybeStartNext();
                 });
             }
         });
     }
 
-    private void startReserved(AudioItem item) {
+    private void startReserved(AudioEventClaims.Entry item) {
         startingId = null;
         replaying = false;
         if (!enabled || !connected || !playbackQueue.start(item.eventId)) {
             playbackQueue.discard(item.eventId);
+            claims.releaseAndDelete(getCacheDir(), item.eventId);
             workExecutor.execute(() -> markFailed(item.eventId, "audio focus denied"));
             maybeStartNext();
             return;
@@ -356,7 +362,8 @@ public final class AudioInboxService extends MediaSessionService {
         if (eventId == null) return;
         boolean wasReplay = replaying;
         replaying = false;
-        AudioItem item = items.get(eventId);
+        AudioEventClaims.Entry item = claims.removeQueued(eventId);
+        claims.release(eventId);
         playbackQueue.complete(eventId);
         player.pause();
         player.seekTo(0);
@@ -365,6 +372,7 @@ public final class AudioInboxService extends MediaSessionService {
             store.updateConnection(connected ? "Connected" : "Disconnected", connected);
             return;
         }
+        if (item != null) claims.rotateReplayFile(item.mediaFile);
         workExecutor.execute(() -> {
             try {
                 if (connected) httpClient.postReceipt(eventId, "played", null);
@@ -381,16 +389,26 @@ public final class AudioInboxService extends MediaSessionService {
         boolean wasReplay = replaying;
         replaying = false;
         playbackQueue.discard(eventId);
-        if (!wasReplay) workExecutor.execute(() -> markFailed(eventId, detail));
+        if (!wasReplay) {
+            claims.releaseAndDelete(getCacheDir(), eventId);
+            workExecutor.execute(() -> markFailed(eventId, detail));
+        } else {
+            claims.release(eventId);
+        }
         maybeStartNext();
     }
 
     private void failBeforePlayback(String eventId, Exception error) {
-        if (!connected) return;
+        if (!connected) {
+            claims.release(eventId);
+            return;
+        }
+        claims.releaseAndDelete(getCacheDir(), eventId);
         markFailed(eventId, safeDetail(error.getMessage()));
     }
 
     private void markFailed(String eventId, String detail) {
+        claims.release(eventId);
         try {
             if (connected) httpClient.postReceipt(eventId, "failed", safeDetail(detail));
         } catch (Exception ignored) {}

@@ -25,6 +25,7 @@ import yaml from "js-yaml";
 import { esc } from "../lib.mjs";
 import { createAudioFeedHandlers } from "./audio-feed.mjs";
 import { createVoiceInput } from "./voice-input.mjs";
+import { paneForChannel, phoneTargetChannels } from "./audio-targets.mjs";
 
 // Minimal mime map for the static PWA bundle. Anything not listed gets
 // application/octet-stream (browsers handle it; this is only for the
@@ -129,24 +130,23 @@ export function createVoicePWA(deps) {
   }
 
   function listPhoneTargets() {
-    const configured = String(deps.audioDiscovery?.target || "").trim();
-    if (!configured) return [];
-    for (const [name, entry] of Object.entries(loadAgents())) {
-      const mapping = entry?.discord;
-      if (!mapping || typeof mapping !== "object" || !Object.hasOwn(mapping, configured)) continue;
-      const pane = Number(mapping[configured]);
-      if (!Number.isInteger(pane)) continue;
-      return [{
-        id: `${name}:${pane}`,
-        label: entry?.panes?.[pane]?.label || `${name}:${pane}`,
+    const primary = String(deps.audioDiscovery?.target || "").trim();
+    const targets = [];
+    for (const channel of phoneTargetChannels(deps.audioDiscovery)) {
+      const owner = paneForChannel(loadAgents(), channel);
+      if (!owner) continue;
+      const entry = loadAgents()[owner.name];
+      targets.push({
+        id: `${owner.name}:${owner.pane}`,
+        label: entry?.panes?.[owner.pane]?.label || `${owner.name}:${owner.pane}`,
         kind: "agent",
-        agent: name,
-        pane,
-        audioTarget: configured,
-        favorite: true,
-      }];
+        agent: owner.name,
+        pane: owner.pane,
+        audioTarget: channel,
+        favorite: channel === primary,
+      });
     }
-    return [];
+    return targets;
   }
 
   function validatePane(name, pane) {

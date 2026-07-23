@@ -11,8 +11,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class ConversationController implements AutoCloseable {
     interface Listener {
         void onSending();
-        void onTranscript(String text);
-        void onReply(String text);
+        void onTranscript(ConversationTarget target, String text);
+        void onReply(ConversationTarget target, String text);
         void onFailure(String message);
     }
 
@@ -54,7 +54,7 @@ final class ConversationController implements AutoCloseable {
             AudioInboxHttpClient client = new AudioInboxHttpClient(target.serverUrl, consumerId);
             AudioInboxHttpClient.TurnResult sent = client.sendTurn(target, text, audio, turnId);
             String visibleUserText = sent.transcript.isEmpty() ? sent.sent : sent.transcript;
-            activity.runOnUiThread(() -> listener.onTranscript(visibleUserText));
+            activity.runOnUiThread(() -> listener.onTranscript(target, visibleUserText));
             String answer = sent.answer;
             if (answer.isEmpty() && target.kind == ConversationTarget.Kind.AGENT) {
                 answer = client.awaitAgentReply(target, sent.replyPrompt);
@@ -62,7 +62,7 @@ final class ConversationController implements AutoCloseable {
             if (answer.isEmpty()) throw new IllegalStateException("empty agent reply");
             String finalAnswer = answer;
             busy.set(false);
-            activity.runOnUiThread(() -> listener.onReply(finalAnswer));
+            activity.runOnUiThread(() -> listener.onReply(target, finalAnswer));
         } catch (Exception error) {
             String message = safeMessage(error);
             busy.set(false);
