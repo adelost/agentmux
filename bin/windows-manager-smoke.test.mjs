@@ -138,6 +138,28 @@ feature("windows manager smoke", () => {
     }],
   });
 
+  unit("a session id from the tool followup overwrites the persisted one", {
+    then: ["the newer exact id wins across the whole turn", async () => {
+      const harness = makeHarness({
+        messages: [{ id: "110", content: "hej", author: { id: CONFIG.authorizedUserId, bot: false } }],
+        scripted: [
+          { ok: true, text: '{"tool":"get_status"}', sessionId: "old-session" },
+          { ok: true, text: "Läget är stabilt.", sessionId: "new-session" },
+        ],
+      });
+      try {
+        const state = { schemaVersion: 1, lastSeenId: null, lastAction: null, lastStatusMs: null, codexSessionId: "seed-session" };
+        expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(1);
+        expect(harness.chats()).toBe(2);
+        expect(harness.executed).toEqual(["get_status"]);
+        expect(state.codexSessionId).toBe("new-session");
+        expect(harness.writes.at(-1).codexSessionId).toBe("new-session");
+      } finally {
+        harness.cleanup();
+      }
+    }],
+  });
+
   unit("a leftover started action is fenced and never re-executed", {
     then: ["startup marks blocked crashed-mid-action and the cursor skips the message", async () => {
       const state = {
