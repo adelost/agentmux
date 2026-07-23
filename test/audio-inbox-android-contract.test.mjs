@@ -30,6 +30,7 @@ feature("Android audio inbox source contract", () => {
       expect(startup).toContain("AUDIO_INBOX_SERVER_ID");
       expect(startup).toContain("AUDIO_INBOX_TARGET");
       expect(startup).toContain("AUDIO_INBOX_TARGETS");
+      expect(startup).toContain("${process.env.HOME}/.local/bin");
       expect(focus).toContain("AUDIOFOCUS_GAIN_TRANSIENT");
       expect(focus).not.toContain("AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK");
       expect(read("channels/voice.mjs")).toContain('path === "/api/audio/send"');
