@@ -1,6 +1,7 @@
 package io.agentmux.audioinbox;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -9,33 +10,45 @@ import android.view.Gravity;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.Switch;
 import android.widget.TextView;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static io.agentmux.audioinbox.AppPalette.*;
 
 final class ConversationPanel extends LinearLayout implements AutoCloseable {
+    private static final List<String> FAVORITE_ORDER = List.of("lsrc:3", "lsrc:10", "windows");
+
     private final Activity activity;
     private final SharedPreferences preferences;
     private final ConversationStore store;
     private final DirectReplySpeaker speaker;
     private final ConversationController controller;
     private final List<ConversationTarget> targets = new ArrayList<>();
-    private final Button agentTarget;
-    private final Button windowsTarget;
-    private final TextView history;
+    private final Map<String, Button> favoriteButtons = new HashMap<>();
+    private final Map<String, AudioInboxHttpClient> clients = new HashMap<>();
+    private final LinearLayout favoritesRow;
+    private final Button restartWsl;
+    private final LinearLayout messagesView;
     private final TextView status;
     private final EditText composer;
     private final Button send;
     private final Switch speakReplies;
     private final PushToTalkController pushToTalk;
+    private final ImageLoader images = new ImageLoader();
+    private ReplyPlayer replyPlayer;
     private String selectedId;
     private String pendingText;
+    private String playingKey;
 
     ConversationPanel(Activity activity, SharedPreferences preferences) {
         super(activity);
@@ -62,18 +75,18 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
         heading.addView(speakReplies);
         addView(heading);
 
-        LinearLayout favorites = new LinearLayout(activity);
-        favorites.setOrientation(HORIZONTAL);
-        favorites.setPadding(0, dp(14), 0, 0);
-        agentTarget = targetButton("★ L-source 3", "lsrc:3");
-        windowsTarget = targetButton("★ Windows rescue", "windows");
-        favorites.addView(agentTarget, weightedButton(0));
-        favorites.addView(windowsTarget, weightedButton(8));
-        addView(favorites);
+        favoritesRow = new LinearLayout(activity);
+        favoritesRow.setOrientation(HORIZONTAL);
+        favoritesRow.setPadding(0, dp(14), 0, 0);
+        addView(favoritesRow);
 
-        history = text("No conversation yet", 15, false, SECONDARY);
-        history.setLineSpacing(dp(4), 1f);
-        addView(history, margins(18, 14));
+        restartWsl = quietButton("Starta om WSL via Windows rescue");
+        restartWsl.setOnClickListener(view -> confirmRestart());
+        addView(restartWsl, margins(8, 0));
+
+        messagesView = new LinearLayout(activity);
+        messagesView.setOrientation(VERTICAL);
+        addView(messagesView, margins(18, 14));
 
         LinearLayout composeRow = new LinearLayout(activity);
         composeRow.setOrientation(HORIZONTAL);
@@ -90,12 +103,12 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
         composer.setImeOptions(EditorInfo.IME_ACTION_SEND);
         composer.setOnEditorActionListener((view, actionId, event) -> {
             if (actionId != EditorInfo.IME_ACTION_SEND) return false;
-            sendText();
+            sendText(null, composer.getText().toString());
             return true;
         });
         composeRow.addView(composer, new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1));
         send = button("Send", ACCENT, Color.rgb(5, 20, 15));
-        send.setOnClickListener(view -> sendText());
+        send.setOnClickListener(view -> sendText(null, composer.getText().toString()));
         LayoutParams sendParams = new LayoutParams(dp(82), dp(48));
         sendParams.leftMargin = dp(8);
         composeRow.addView(send, sendParams);
@@ -123,7 +136,12 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
                 return controller.sendAudio(selectedTarget(), audio, turnId);
             }
         });
-        renderHistory();
+        replyPlayer = new ReplyPlayer(activity, (key, playing, error) -> {
+            playingKey = playing ? key : null;
+            if (error != null) status.setText(error);
+            renderMessages();
+        });
+        renderMessages();
         renderTargets();
     }
 
@@ -135,9 +153,9 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
         renderTargets();
     }
 
-    private void sendText() {
-        ConversationTarget target = selectedTarget();
-        String value = composer.getText().toString().trim();
+    private void sendText(ConversationTarget forcedTarget, String rawValue) {
+        ConversationTarget target = forcedTarget != null ? forcedTarget : selectedTarget();
+        String value = rawValue == null ? "" : rawValue.trim();
         if (target == null) {
             status.setText("That favorite is offline");
             return;
@@ -147,7 +165,18 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
         if (!controller.sendText(target, value)) return;
         composer.setText("");
         store.append("user", target.label, value);
-        renderHistory();
+        renderMessages();
+    }
+
+    private void confirmRestart() {
+        ConversationTarget windows = find("windows");
+        if (windows == null || controller.isBusy()) return;
+        new AlertDialog.Builder(activity)
+            .setTitle("Starta om WSL?")
+            .setMessage("Windows rescue får instruktionen att starta om WSL och bryggan. Pågående arbete kan avbrytas.")
+            .setPositiveButton("Starta om", (dialog, which) -> sendText(windows, "Starta om WSL nu"))
+            .setNegativeButton("Avbryt", null)
+            .show();
     }
 
     private void acceptTranscript(ConversationTarget turnTarget, String value) {
@@ -155,7 +184,7 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
             // A turn is always labeled by its recipient, never by whichever
             // favorite happens to be selected when the answer lands.
             store.append("user", turnTarget.label, value);
-            renderHistory();
+            renderMessages();
         }
         pendingText = null;
         status.setText("Message delivered · waiting for reply…");
@@ -163,10 +192,10 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
 
     private void acceptReply(ConversationTarget turnTarget, String value) {
         store.append("assistant", turnTarget.label, value);
-        renderHistory();
+        renderMessages();
         setBusy(false, "Ready");
         pushToTalk.complete("Reply received");
-        if (speakReplies.isChecked()) speaker.speak(value);
+        if (speakReplies.isChecked()) playVoice(turnTarget, value, true);
     }
 
     private void fail(String value) {
@@ -176,14 +205,28 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
         pushToTalk.complete("Send failed or uncertain · not retried");
     }
 
+    private void playVoice(ConversationTarget target, String text, boolean autoplay) {
+        if (target.kind == ConversationTarget.Kind.WINDOWS) {
+            // The Windows rescue service has no TTS route; the phone reads it.
+            speaker.speak(text);
+            return;
+        }
+        AudioInboxHttpClient client = clients.computeIfAbsent(
+            target.serverUrl,
+            url -> new AudioInboxHttpClient(url, AppContract.consumerId(preferences))
+        );
+        String key = MessageMedia.voiceKey(target.label, text);
+        if (autoplay) replyPlayer.play(client, key, text);
+        else replyPlayer.toggle(client, key, text);
+    }
+
     private void setBusy(boolean busy, String message) {
-        send.setEnabled(!busy);
+        send.setEnabled(!busy && selectedTarget() != null);
         send.setAlpha(busy ? 0.42f : 1f);
         composer.setEnabled(!busy);
-        agentTarget.setEnabled(!busy && find("lsrc:3") != null);
-        windowsTarget.setEnabled(!busy && find("windows") != null);
         status.setText(message);
         status.setTextColor(busy ? WARNING : ACCENT);
+        refreshFavorites();
         pushToTalk.refreshAvailability(!busy && selectedTarget() != null);
     }
 
@@ -196,20 +239,47 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
         return null;
     }
 
-    private Button targetButton(String label, String id) {
-        Button button = button(label, Color.rgb(12, 18, 25), SECONDARY);
-        button.setOnClickListener(view -> {
-            if (controller.isBusy() || find(id) == null) return;
-            selectedId = id;
-            preferences.edit().putString(AppContract.KEY_CONVERSATION_TARGET, id).apply();
-            renderTargets();
-        });
-        return button;
+    private void renderTargets() {
+        favoritesRow.removeAllViews();
+        favoriteButtons.clear();
+        List<ConversationTarget> ordered = new ArrayList<>(targets);
+        ordered.sort((a, b) -> Integer.compare(orderOf(a.id), orderOf(b.id)));
+        boolean first = true;
+        for (ConversationTarget target : ordered) {
+            Button button = button("★ " + target.label, Color.rgb(12, 18, 25), SECONDARY);
+            button.setOnClickListener(view -> {
+                if (controller.isBusy()) return;
+                selectedId = target.id;
+                preferences.edit().putString(AppContract.KEY_CONVERSATION_TARGET, target.id).apply();
+                refreshFavorites();
+            });
+            favoriteButtons.put(target.id, button);
+            LayoutParams params = new LayoutParams(0, dp(46), 1);
+            params.leftMargin = first ? 0 : dp(8);
+            favoritesRow.addView(button, params);
+            first = false;
+        }
+        refreshFavorites();
     }
 
-    private void renderTargets() {
-        styleTarget(agentTarget, "lsrc:3");
-        styleTarget(windowsTarget, "windows");
+    private int orderOf(String id) {
+        int index = FAVORITE_ORDER.indexOf(id);
+        return index >= 0 ? index : FAVORITE_ORDER.size();
+    }
+
+    private void refreshFavorites() {
+        for (Map.Entry<String, Button> entry : favoriteButtons.entrySet()) {
+            boolean available = true;
+            boolean selected = entry.getKey().equals(selectedId);
+            entry.getValue().setEnabled(!controller.isBusy());
+            entry.getValue().setTextColor(selected ? Color.rgb(5, 20, 15) : SECONDARY);
+            entry.getValue().setBackground(rounded(selected ? ACCENT : Color.rgb(12, 18, 25), 12,
+                selected ? ACCENT : Color.rgb(41, 54, 65)));
+            entry.getValue().setAlpha(available ? 1f : 0.42f);
+        }
+        ConversationTarget windows = find("windows");
+        restartWsl.setEnabled(windows != null && !controller.isBusy());
+        restartWsl.setAlpha(windows != null ? 1f : 0.42f);
         boolean ready = selectedTarget() != null && !controller.isBusy();
         send.setEnabled(ready);
         send.setAlpha(ready ? 1f : 0.42f);
@@ -220,33 +290,69 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
         pushToTalk.refreshAvailability(ready);
     }
 
-    private void styleTarget(Button button, String id) {
-        boolean available = find(id) != null;
-        boolean selected = id.equals(selectedId) && available;
-        button.setEnabled(available && !controller.isBusy());
-        button.setTextColor(selected ? Color.rgb(5, 20, 15) : SECONDARY);
-        button.setBackground(rounded(selected ? ACCENT : Color.rgb(12, 18, 25), 12,
-            selected ? ACCENT : Color.rgb(41, 54, 65)));
-        button.setAlpha(available ? 1f : 0.42f);
-    }
-
-    private void renderHistory() {
+    private void renderMessages() {
+        messagesView.removeAllViews();
         List<ConversationStore.Message> messages = store.read();
+        Set<String> voiceKeys = new HashSet<>();
         if (messages.isEmpty()) {
-            history.setText("No conversation yet");
-            history.setTextColor(SECONDARY);
+            TextView empty = text("No conversation yet", 15, false, SECONDARY);
+            messagesView.addView(empty);
             return;
         }
-        StringBuilder value = new StringBuilder();
         for (ConversationStore.Message message : messages) {
-            if (value.length() > 0) value.append("\n\n");
-            value.append("user".equals(message.role)
-                    ? "You → " + message.target + "\n"
-                    : message.target + "\n")
-                .append(message.text);
+            boolean mine = "user".equals(message.role);
+            TextView header = text(mine ? "You → " + message.target : message.target, 12, true, ACCENT);
+            messagesView.addView(header, margins(10, 0));
+            TextView body = text(message.text, 15, false, PRIMARY);
+            body.setLineSpacing(dp(3), 1f);
+            body.setTextIsSelectable(true);
+            messagesView.addView(body, margins(2, 0));
+            for (String url : MessageMedia.imageUrls(message.text)) {
+                messagesView.addView(imageRow(url), margins(6, 0));
+            }
+            if (!mine) {
+                ConversationTarget origin = findByLabel(message.target);
+                if (origin != null) {
+                    String key = MessageMedia.voiceKey(message.target, message.text);
+                    voiceKeys.add(key);
+                    Button play = quietButton(key.equals(playingKey) ? "Stoppa rösten" : "Spela upp röstsvar");
+                    play.setOnClickListener(view -> playVoice(origin, message.text, false));
+                    messagesView.addView(play, margins(4, 0));
+                }
+            }
         }
-        history.setText(value.toString());
-        history.setTextColor(PRIMARY);
+        replyPlayer.prune(activity.getCacheDir(), voiceKeys);
+    }
+
+    private ConversationTarget findByLabel(String label) {
+        for (ConversationTarget target : targets) if (target.label.equals(label)) return target;
+        return null;
+    }
+
+    private LinearLayout imageRow(String url) {
+        LinearLayout row = new LinearLayout(activity);
+        row.setOrientation(VERTICAL);
+        TextView placeholder = text("Loading image…", 12, false, SECONDARY);
+        row.addView(placeholder);
+        images.load(url, dp(280), new ImageLoader.Callback() {
+            public void onBitmap(android.graphics.Bitmap bitmap) {
+                row.removeAllViews();
+                ImageView view = new ImageView(activity);
+                view.setImageBitmap(bitmap);
+                view.setAdjustViewBounds(true);
+                view.setOnClickListener(clicked -> {
+                    try {
+                        activity.startActivity(new android.content.Intent(
+                            android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)));
+                    } catch (Exception ignored) {}
+                });
+                row.addView(view, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+            }
+            public void onError() {
+                placeholder.setText("Image could not be loaded · " + url);
+            }
+        });
+        return row;
     }
 
     void cancelForBackground() { pushToTalk.cancelForBackground(); }
@@ -257,6 +363,8 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
         pushToTalk.close();
         controller.close();
         speaker.close();
+        replyPlayer.close();
+        images.close();
     }
 
     private Button button(String label, int fill, int color) {
@@ -268,6 +376,17 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
         button.setAllCaps(false);
         button.setMinHeight(dp(46));
         button.setBackground(rounded(fill, 12, fill));
+        return button;
+    }
+
+    private Button quietButton(String value) {
+        Button button = new Button(activity);
+        button.setText(value);
+        button.setTextSize(12);
+        button.setTextColor(SECONDARY);
+        button.setAllCaps(false);
+        button.setMinHeight(dp(42));
+        button.setBackground(rounded(Color.TRANSPARENT, dp(12), Color.rgb(41, 54, 65)));
         return button;
     }
 
@@ -292,12 +411,6 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
         LayoutParams params = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
         params.topMargin = dp(top);
         params.bottomMargin = dp(bottom);
-        return params;
-    }
-
-    private LayoutParams weightedButton(int left) {
-        LayoutParams params = new LayoutParams(0, dp(46), 1);
-        params.leftMargin = dp(left);
         return params;
     }
 

@@ -21,7 +21,7 @@ final class ConversationStore {
         }
     }
 
-    private static final int MAX_MESSAGES = 24;
+    private static final int MAX_MESSAGES = 100;
     private final SharedPreferences preferences;
 
     ConversationStore(SharedPreferences preferences) {
