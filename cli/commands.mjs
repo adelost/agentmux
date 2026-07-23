@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, statSyn
 import { join } from "path";
 import { createHash } from "crypto";
 import { loadConfig, listAgents, getAgent, addAgent, removeAgent, resolveAgent, saveLast, getLast, getPaneCount, findChannelForPane, validateAgentSender } from "./config.mjs";
-import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens, detectPaneStatus } from "./format.mjs";
+import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens } from "./format.mjs";
 import { paneRuntimeLabel } from "./pane-runtime-label.mjs";
 import {
   clearPaneComposer,
@@ -25,15 +25,16 @@ import {
 } from "./tmux.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
 import { stripAnsi, esc, extractActivity, formatDuration, validateImagePath } from "../lib.mjs";
-import { getContextFromPane, getContextPercent, shortModelName } from "../core/context.mjs";
+import { shortModelName } from "../core/context.mjs";
 import { cmdSearch } from "./search.mjs";
 import { journalInterruptionFromTurns, planRevive, reviveBrief, parseBootMs } from "../core/revive.mjs";
-import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor, latestJsonlMtime } from "../core/jsonl-reader.mjs";
+import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor } from "../core/jsonl-reader.mjs";
 import { readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { readLastTurnsKimi } from "../core/kimi-jsonl-reader.mjs";
-import { alternateEngineForCommand, latestAlternateMtime, readAlternateTurns } from "../core/alternate-session-reader.mjs";
+import { dialectFor, inspectPane } from "./inspect-pane.mjs";
+import { readAlternateTurns } from "../core/alternate-session-reader.mjs";
 import { assertConfiguredSender, detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
-import { appendEvent, latestPaneStatesCached, mergeStatus, readEvents } from "../core/events.mjs";
+import { appendEvent, readEvents } from "../core/events.mjs";
 import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../core/pane-status.mjs";
 import { readHeartbeat } from "../core/heartbeat.mjs";
 import { assessRunningBridgeHints, syncConfiguredAgentHints } from "../core/hints-sync.mjs";
@@ -55,7 +56,7 @@ import { runStopAll } from "./stop-all.mjs";
 import { cmdDream, isPidAlive } from "./dream.mjs";
 import { cmdDoctor } from "./doctor.mjs";
 import {
-  collectContextTelemetry, contextTelemetrySnapshot, nativeContextReading,
+  collectContextTelemetry, contextTelemetrySnapshot,
 } from "../core/suggestions-context-telemetry.mjs";
 export {
   cmdDream,
@@ -2093,28 +2094,7 @@ function formatDoneRow({ key, bucket, ageMs }, opts = {}) {
 // Bash/other commands get a blank context cell. Codex CLI shows up as
 // "node" in tmux pane_current_command (binary is `node bin/codex.js`),
 // so we resolve its dialect via agents.yaml cmd field instead — see
-// dialectFor().
-const CONTEXT_DIALECT = { claude: "claude", codex: "codex", kimi: "kimi", "kimi-code": "kimi" };
-
-/**
- * Resolve a pane's coding-agent dialect.
- *
- * Direct match via tmux process name catches `claude`. Codex shows up
- * as `node` (because its binary is node-based), so we cross-reference
- * the configured cmd from agents.yaml when the process is generic node
- * or matches no dialect.
- *
- * Returns "claude", "codex", "kimi", or null for non-agent panes.
- */
-function dialectFor(agent, pane) {
-  const direct = CONTEXT_DIALECT[pane.command];
-  if (direct) return direct;
-  const cmd = agent?.panes?.[pane.index]?.cmd || "";
-  const alternate = alternateEngineForCommand(cmd);
-  if (alternate) return alternate;
-  if (/claude/i.test(cmd)) return "claude";
-  return null;
-}
+// dialectFor() in inspect-pane.mjs.
 
 /** Gather status + preview + context for one pane. Safe: never throws. */
 /**
@@ -2145,84 +2125,6 @@ function lastAssistantPreview(agent, paneIdx, paneDir) {
   return "";
 }
 
-// WHAT: Reads one pane's canonical context and preview.
-// WHY: Keeps native and tmux engines behind one top-row contract.
-async function inspectPane(ctx, agent, pane) {
-  if (agent.backend === "native") {
-    try {
-      const snapshot = await ctx.agent.nativeRuntime.history(agent.name, pane.index);
-      const turns = groupNativeTurns(snapshot.events);
-      const latest = turns.at(-1);
-      const preview = latest?.items?.filter((item) => item.type === "text").at(-1)?.content || "";
-      const context = nativeContextReading(snapshot);
-      return {
-        status: snapshot.agent.running ? "working" : "idle",
-        preview: preview.replace(/\s+/g, " ").trim(),
-        context,
-      };
-    } catch {
-      return { status: "unknown", preview: "native runtime offline", context: null };
-    }
-  }
-  // Single capture per pane. We used to call getPaneStatus (a 30-line
-  // capture-pane) AND capturePane(100) — two round-trips to the SINGLE-
-  // THREADED tmux server, which serializes them server-side no matter how
-  // parallel the client is. detectPaneStatus only inspects the last ~15
-  // lines, so deriving status from the same 100-line capture is identical
-  // output for half the tmux calls — the actual lever for `amux ps` latency.
-  let content = "";
-  try { content = await ctx.agent.capturePane(agent.name, pane.index, 100); }
-  catch {}
-  // Same scrape+hook merge as getPaneStatus, applied to the one capture we
-  // already have. Capture failure (dead pane) stays "unknown" unmerged.
-  let status = content
-    ? mergeStatus(detectPaneStatus(stripAnsi(content)),
-                  latestPaneStatesCached().get(`${agent.name}:${pane.index}`)).status
-    : "unknown";
-  const lines = stripAnsi(content).split("\n").filter((l) => l.trim());
-  const dialect = dialectFor(agent, pane);
-  // Use the worktree pane dir, not agent.dir — same fix as cmdLog (399915f).
-  // Claude Code stores its session jsonl per-cwd; each pane runs in
-  // .agents/N, so getContextFromPane's max-tokens fallback must read from
-  // the worktree slug, not the parent project slug.
-  const paneDir = panePathFor(agent, pane.index);
-  // Cheap tmux-tail preview as a fallback. The meaningful jsonl-based preview
-  // is read lazily in the render loop, but ONLY for panes that get expanded
-  // (active / has-context) — readLastTurns is a synchronous full-file parse,
-  // so reading it for all ~40 panes here would serialize and dwarf the
-  // parallel tmux probes. Reserve it for the handful that actually display.
-  const preview = (lines[lines.length - 1] || "").trim();
-  // Claude: status-bar parser (capture-pane already in `content`).
-  // Codex: read directly from codex jsonl (no status-bar equivalent).
-  let context = null;
-  if (dialect === "claude") {
-    context = getContextFromPane(content, paneDir);
-  } else if (dialect === "codex" || dialect === "kimi") {
-    context = getContextPercent(paneDir, dialect);
-  }
-
-  // Live-activity overlay: tmux-only detection can't tell an active spinner
-  // ("✻ Sautéed for X" still counting up) from a frozen one (post-turn
-  // residue) — same shape, same regex match. Cross-check jsonl mtime: a
-  // jsonl event written recently means the agent is generating right now,
-  // regardless of what the prompt-line looks like. Only override when the
-  // tmux-detection said idle/unknown so we don't shadow real permission/
-  // menu/resume modals.
-  //
-  // Window: 60s (matches `amux done`'s isRunningNow default). Earlier
-  // values (10s, then 30s) caused visible "pendling" between 💤/🟢 in
-  // `amux ps` because Claude regularly pauses 30-50s between assistant
-  // text + tool calls + deep thinking; the pane is still working but
-  // jsonl mtime falls outside the window.
-  if (dialect && (status === "idle" || status === "unknown")) {
-    const mtimeMs = latestAlternateMtime(agent?.panes?.[pane.index]?.cmd, paneDir)
-      || latestJsonlMtime(paneDir);
-    if (mtimeMs && Date.now() - mtimeMs < 60_000) {
-      status = "working";
-    }
-  }
-  return { status, preview, context };
-}
 
 // Status priorities for sorting agents: agents with active panes first,
 // then panes with claude session state, then plain shells last.
