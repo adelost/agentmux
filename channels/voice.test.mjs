@@ -46,7 +46,8 @@ function setupServer(opts = {}) {
       ? opts.responseReady()
       : Boolean(opts.responseForPrompt),
     getResponseStreamWithRaw: async () => ({
-      items: [{ type: "text", content: opts.responseForPrompt || "the exact answer" }],
+      items: opts.responseItems
+        || [{ type: "text", content: opts.responseForPrompt || "the exact answer" }],
     }),
   };
 
@@ -555,6 +556,35 @@ feature("GET /api/events: SSE stream", () => {
     }],
     then: ["the exact response is emitted even though working was never observed", async (stream, { s }) => {
       expect(stream).toContain("reply for this phone turn");
+      expect(stream).toContain("event: done");
+      await s.pwa.stop(); s.cleanup();
+    }],
+  });
+
+  component("a correlated steered reply returns while the pane continues other work", {
+    given: ["a busy pane with structured text for the exact phone prompt", async () => {
+      const s = setupServer({
+        busy: true,
+        responseForPrompt: "reply before the long turn ends",
+        responseItems: [
+          { type: "text", content: "reply before the long turn ends" },
+          { type: "tool", content: "continued unrelated work" },
+          { type: "text", content: "later progress from the long turn" },
+        ],
+      });
+      const { url } = await s.pwa.start();
+      return { s, url };
+    }],
+    when: ["the phone waits for that reply", async ({ url }) => {
+      const response = await fetch(
+        `${url}/api/events/claw/0?prompt=${encodeURIComponent("steered phone prompt")}`,
+        { signal: AbortSignal.timeout(1_000) },
+      );
+      return response.text();
+    }],
+    then: ["the exact text completes without waiting for pane idle", async (stream, { s }) => {
+      expect(stream).toContain("reply before the long turn ends");
+      expect(stream).not.toContain("later progress from the long turn");
       expect(stream).toContain("event: done");
       await s.pwa.stop(); s.cleanup();
     }],

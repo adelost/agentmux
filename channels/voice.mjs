@@ -314,16 +314,18 @@ export function createVoicePWA(deps) {
         ? agent.hasResponseForPrompt(name, pane, prompt)
         : false;
       const completedRequestedTurn = prompt ? responseReady : sawWorking;
-      if (status === "idle" && completedRequestedTurn && !doneEmitted) {
+      if ((status === "idle" || responseReady) && completedRequestedTurn && !doneEmitted) {
         try {
           let text;
           if (prompt && typeof agent.getResponseStreamWithRaw === "function") {
             const result = await agent.getResponseStreamWithRaw(name, pane, prompt);
-            text = result.items
+            const textItems = result.items
               .filter((item) => item.type === "text")
-              .map((item) => item.content)
-              .join("\n\n")
-              .trim();
+              .map((item) => item.content.trim())
+              .filter(Boolean);
+            text = status === "working" && responseReady
+              ? textItems[0] || ""
+              : textItems.join("\n\n");
           } else {
             text = await agent.getResponse(name, pane);
           }
