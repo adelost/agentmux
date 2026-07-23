@@ -144,17 +144,24 @@ feature("durable ask ledger", () => {
         }],
       };
     }],
-    when: ["completion evidence is persisted", (ctx) => ({
-      count: persistAskCompletionEvidence({
+    when: ["completion evidence is persisted twice", (ctx) => {
+      const first = persistAskCompletionEvidence({
         ledgerEntries: ctx.ledgerEntries,
         joinedEntries: ctx.joinedEntries,
         path: ctx.path,
-      }),
-      rows: readAskLedger({ path: ctx.path }),
-    })],
-    then: ["the same ask carries a terminal receipt independent of provider history", ({ count, rows }, ctx) => {
+      });
+      const reloaded = readAskLedger({ path: ctx.path });
+      const second = persistAskCompletionEvidence({
+        ledgerEntries: reloaded,
+        joinedEntries: ctx.joinedEntries,
+        path: ctx.path,
+      });
+      return { first, second, rows: readAskLedger({ path: ctx.path }) };
+    }],
+    then: ["the same ask carries exactly one terminal receipt independent of provider history", ({ first, second, rows }, ctx) => {
       try {
-        expect(count).toBe(1);
+        expect(first).toBe(1);
+        expect(second).toBe(0);
         expect(rows).toHaveLength(1);
         expect(rows[0]).toMatchObject({
           id: "delivery:done-1",
