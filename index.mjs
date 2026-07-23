@@ -457,6 +457,9 @@ const voicePwa = createVoicePWA({
   audioDiscovery: {
     serverId: process.env.AUDIO_INBOX_SERVER_ID,
     target: process.env.AUDIO_INBOX_TARGET,
+    // Extra phone-addressable Discord channels, e.g. lsrc:3 + lsrc:10.
+    targets: String(process.env.AUDIO_INBOX_TARGETS || "")
+      .split(",").map((value) => value.trim()).filter(Boolean),
   },
   staticDir: voicePwaStaticDir,
 });

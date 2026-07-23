@@ -31,7 +31,7 @@ ai:
 function setupServer(opts = {}) {
   const root = mkdtempSync(join(tmpdir(), "voice-pwa-test-"));
   const agentsYamlPath = join(root, "agents.yaml");
-  writeFileSync(agentsYamlPath, AGENTS_YAML);
+  writeFileSync(agentsYamlPath, opts.agentsYaml || AGENTS_YAML);
 
   // Fake agent with recordable calls
   const calls = { sendOnly: [], isBusy: [], getResponse: [] };
@@ -377,6 +377,53 @@ feature("POST /api/audio/send: native phone PTT", () => {
     then: ["request is refused without a pane write", async (response, ctx) => {
       expect(response.status).toBe(403);
       expect(ctx.s.calls.sendOnly).toEqual([]);
+      await ctx.s.pwa.stop(); ctx.s.cleanup(); ctx.cleanup();
+    }],
+  });
+
+  component("every listed phone target is discoverable and routes to its own pane", {
+    given: ["a server listing two snowflake phone targets", async () => {
+      const root = mkdtempSync(join(tmpdir(), "voice-ptt-multi-"));
+      const enqueued = [];
+      const s = setupServer({
+        agentsYaml: `
+claw:
+  dir: /tmp/claw
+  discord:
+    "11111111111111111111": 0
+    "22222222222222222222": 1
+  panes:
+    - name: claude
+      cmd: claude --continue
+      label: orchestration driver
+    - name: claude-2
+      cmd: claude --continue
+`,
+        audioOutbox: createAudioOutbox({ journalPath: join(root, "audio.jsonl") }),
+        audioDiscovery: { serverId: "test", target: "11111111111111111111", targets: ["11111111111111111111", "22222222222222222222"] },
+        deliveryBroker: { enqueue: (job) => enqueued.push(job) },
+      });
+      const { url } = await s.pwa.start();
+      return { s, url, enqueued, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+    }],
+    when: ["discovery is fetched and a turn targets the secondary channel", async ({ url }) => {
+      const config = await request(`${url}/api/audio/config`);
+      const sent = await request(`${url}/api/audio/send`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "hej lsrc:10", target: "22222222222222222222", idempotencyKey: "turn-multi-1" }),
+      });
+      return { config, sent };
+    }],
+    then: ["both panes are targets, the primary is favorite, and pane 1 receives the turn", async ({ config, sent }, ctx) => {
+      expect(config.status).toBe(200);
+      expect(config.body.targets).toHaveLength(2);
+      expect(config.body.targets[0]).toMatchObject({ id: "claw:0", agent: "claw", pane: 0, audioTarget: "11111111111111111111", favorite: true });
+      expect(config.body.targets[1]).toMatchObject({ id: "claw:1", agent: "claw", pane: 1, audioTarget: "22222222222222222222", favorite: false });
+      expect(sent.status).toBe(200);
+      expect(sent.body.destination).toEqual({ agent: "claw", pane: 1 });
+      expect(ctx.enqueued).toHaveLength(1);
+      expect(ctx.enqueued[0]).toMatchObject({ agentName: "claw", pane: 1 });
       await ctx.s.pwa.stop(); ctx.s.cleanup(); ctx.cleanup();
     }],
   });
