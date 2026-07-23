@@ -14,9 +14,13 @@ export function phoneTargetChannels(discovery) {
 export function paneForChannel(agents, channel) {
   for (const [name, entry] of Object.entries(agents || {})) {
     const mapping = entry?.discord;
-    if (mapping && typeof mapping === "object" && Object.hasOwn(mapping, channel)) {
-      return { name, pane: Number(mapping[channel]) };
-    }
+    if (!mapping || typeof mapping !== "object" || !Object.hasOwn(mapping, channel)) continue;
+    const pane = Number(mapping[channel]);
+    // A malformed or out-of-range mapping is unowned, never a delivery hint.
+    if (!Number.isInteger(pane) || pane < 0) continue;
+    const panes = Array.isArray(entry?.panes) ? entry.panes.length : null;
+    if (panes !== null && pane >= panes) continue;
+    return { name, pane };
   }
   return null;
 }

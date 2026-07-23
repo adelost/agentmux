@@ -136,7 +136,9 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
                 return controller.sendAudio(selectedTarget(), audio, turnId);
             }
         });
-        replyPlayer = new ReplyPlayer(activity, (key, playing, error) -> {
+        replyPlayer = new ReplyPlayer(activity, new SpeechAudioFocus(activity, change -> {
+            if (change <= 0 && replyPlayer != null) replyPlayer.stopPlayback();
+        }), (key, playing, error) -> {
             playingKey = playing ? key : null;
             if (error != null) status.setText(error);
             renderMessages();
@@ -294,6 +296,14 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
         messagesView.removeAllViews();
         List<ConversationStore.Message> messages = store.read();
         Set<String> voiceKeys = new HashSet<>();
+        // The eager image budget favors the newest messages in the history.
+        Set<String> imageBudget = new HashSet<>();
+        for (int index = messages.size() - 1; index >= 0 && imageBudget.size() < 12; index--) {
+            for (String url : MessageMedia.imageUrls(messages.get(index).text)) {
+                if (imageBudget.size() >= 12) break;
+                imageBudget.add(url);
+            }
+        }
         if (messages.isEmpty()) {
             TextView empty = text("No conversation yet", 15, false, SECONDARY);
             messagesView.addView(empty);
@@ -308,7 +318,9 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
             body.setTextIsSelectable(true);
             messagesView.addView(body, margins(2, 0));
             for (String url : MessageMedia.imageUrls(message.text)) {
-                messagesView.addView(imageRow(url), margins(6, 0));
+                if (imageBudget.contains(url)) {
+                    messagesView.addView(imageRow(url), margins(6, 0));
+                }
             }
             if (!mine) {
                 ConversationTarget origin = findByLabel(message.target);

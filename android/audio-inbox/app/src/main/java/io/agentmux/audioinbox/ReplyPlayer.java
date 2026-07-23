@@ -9,8 +9,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Fetches and plays reply voice files. One shared MediaPlayer; a voice file
- * belongs to exactly one message key and stays on disk for Replay.
+ * Fetches and plays reply voice files. One shared MediaPlayer behind the
+ * speech focus port; a voice file belongs to one message key and stays for
+ * Replay. Async fetches are fenced by a generation so stale completions
+ * never start playback after a stop or close.
  */
 final class ReplyPlayer implements AutoCloseable {
     interface Listener {
@@ -18,13 +20,17 @@ final class ReplyPlayer implements AutoCloseable {
     }
 
     private final Activity activity;
+    private final PlaybackQueue.FocusPort focus;
     private final Listener listener;
     private final ExecutorService work = Executors.newSingleThreadExecutor();
     private MediaPlayer player;
     private String activeKey;
+    private int generation;
+    private boolean closed;
 
-    ReplyPlayer(Activity activity, Listener listener) {
+    ReplyPlayer(Activity activity, PlaybackQueue.FocusPort focus, Listener listener) {
         this.activity = activity;
+        this.focus = focus;
         this.listener = listener;
     }
 
@@ -34,13 +40,17 @@ final class ReplyPlayer implements AutoCloseable {
 
     /** Ensures the voice file exists, then plays it. */
     void play(AudioInboxHttpClient client, String key, String text) {
+        final int expected = generation;
         work.execute(() -> {
             File file = ensure(client, key, text);
-            if (file == null) {
-                post(key, false, "Röstljudet kunde inte hämtas");
-                return;
-            }
-            activity.runOnUiThread(() -> startFile(key, file));
+            activity.runOnUiThread(() -> {
+                if (closed || expected != generation) return; // stale completion
+                if (file == null) {
+                    post(key, false, "Röstljudet kunde inte hämtas");
+                    return;
+                }
+                startFile(key, file);
+            });
         });
     }
 
@@ -54,26 +64,28 @@ final class ReplyPlayer implements AutoCloseable {
     }
 
     void stopPlayback() {
+        generation += 1;
         if (player != null) {
             try { if (player.isPlaying()) player.stop(); } catch (Exception ignored) {}
             player.release();
             player = null;
         }
+        focus.abandon(); // idempotent: SpeechAudioFocus no-ops when nothing is held
         activeKey = null;
     }
 
     /** Deletes cached voice files that no current message references. */
     void prune(File cacheDir, Set<String> keepKeys) {
-        File[] files = cacheDir.listFiles((dir, name) -> name.startsWith("tts-") && name.endsWith(".mp3"));
+        File[] files = cacheDir.listFiles((dir, name) -> name.startsWith("audio-tts-") && name.endsWith(".mp3"));
         if (files == null) return;
         for (File file : files) {
-            String key = file.getName().replace(".mp3", "");
+            String key = file.getName().substring("audio-".length(), file.getName().length() - ".mp3".length());
             if (!keepKeys.contains(key)) file.delete();
         }
     }
 
     private File ensure(AudioInboxHttpClient client, String key, String text) {
-        File file = new File(activity.getCacheDir(), key + ".mp3");
+        File file = new File(activity.getCacheDir(), "audio-" + key + ".mp3");
         if (file.exists() && file.length() > 0) return file;
         try {
             return client.fetchTts(activity.getCacheDir(), key, text);
@@ -84,8 +96,18 @@ final class ReplyPlayer implements AutoCloseable {
 
     private void startFile(String key, File file) {
         stopPlayback();
+        if (!focus.requestSpeechFocus()) {
+            post(key, false, "Ljudfokus nekades");
+            return;
+        }
         try {
             player = new MediaPlayer();
+            player.setAudioAttributes(
+                new android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            );
             player.setDataSource(file.getAbsolutePath());
             player.setOnCompletionListener(done -> {
                 String finished = activeKey;
@@ -114,6 +136,7 @@ final class ReplyPlayer implements AutoCloseable {
 
     @Override
     public void close() {
+        closed = true;
         work.shutdownNow();
         stopPlayback();
     }

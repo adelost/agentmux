@@ -9,9 +9,9 @@ const AGENTS = {
   lsrc: {
     dir: "/tmp/lsrc",
     discord: { "1502949109491961917": 3, "1528238682744557598": 10 },
-    panes: [],
+    panes: Array.from({ length: 11 }, () => ({})),
   },
-  claw: { dir: "/tmp/claw", discord: { "1495818918592249896": 3 }, panes: [] },
+  claw: { dir: "/tmp/claw", discord: { "1495818918592249896": 3 }, panes: [{}, {}, {}, {}] },
 };
 
 feature("phone target channels", () => {
@@ -35,6 +35,21 @@ feature("phone target channels", () => {
       expect(paneForChannel(AGENTS, "1495818918592249896")).toEqual({ name: "claw", pane: 3 });
       expect(paneForChannel(AGENTS, "9999999999999999999")).toBeNull();
       expect(paneForChannel(null, "1528238682744557598")).toBeNull();
+    }],
+  });
+
+  unit("paneForChannel refuses malformed or out-of-range pane mappings", {
+    then: ["non-integer, negative, and beyond-array panes are unowned", () => {
+      const broken = {
+        a: { dir: "/x", discord: { "11111111111111111111": "tre" }, panes: [{}] },
+        b: { dir: "/x", discord: { "22222222222222222222": -2 }, panes: [{}] },
+        c: { dir: "/x", discord: { "33333333333333333333": 7 }, panes: [{}] },
+        d: { dir: "/x", discord: { "44444444444444444444": 0 }, panes: [{}] },
+      };
+      expect(paneForChannel(broken, "11111111111111111111")).toBeNull();
+      expect(paneForChannel(broken, "22222222222222222222")).toBeNull();
+      expect(paneForChannel(broken, "33333333333333333333")).toBeNull();
+      expect(paneForChannel(broken, "44444444444444444444")).toEqual({ name: "d", pane: 0 });
     }],
   });
 });

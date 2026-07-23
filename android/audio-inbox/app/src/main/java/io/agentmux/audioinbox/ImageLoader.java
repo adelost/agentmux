@@ -9,44 +9,86 @@ import android.util.LruCache;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Bounded async image fetch with a small in-memory bitmap cache. */
+/**
+ * Bounded async image fetch: 8 MiB compressed cap, a decoded pixel budget
+ * on both dimensions, in-flight dedupe per URL, and a generation fence so
+ * stale work never calls back after close. Small in-memory bitmap cache.
+ */
 final class ImageLoader {
     interface Callback {
         void onBitmap(Bitmap bitmap);
         void onError();
     }
 
-    private static final LruCache<String, Bitmap> CACHE = new LruCache<String, Bitmap>(12 * 1024 * 1024) {
+    private static final int MAX_DECODED_PIXELS = 4_000_000;
+
+    private final LruCache<String, Bitmap> cache = new LruCache<String, Bitmap>(12 * 1024 * 1024) {
         @Override
         protected int sizeOf(String key, Bitmap value) {
             return value.getByteCount();
         }
     };
 
+    private final Map<String, List<Callback>> inFlight = new HashMap<>();
     private final ExecutorService work = Executors.newFixedThreadPool(2);
     private final Handler main = new Handler(Looper.getMainLooper());
+    private int generation;
+    private boolean closed;
 
     void close() {
+        closed = true;
+        generation += 1;
         work.shutdownNow();
     }
 
     void load(String url, int maxWidthPx, Callback callback) {
-        Bitmap cached = CACHE.get(url);
+        Bitmap cached = cache.get(url);
         if (cached != null) {
             callback.onBitmap(cached);
             return;
         }
+        synchronized (inFlight) {
+            if (closed) return;
+            // Fanout dedupe: every caller is registered and always answered.
+            List<Callback> waiters = inFlight.get(url);
+            if (waiters != null) {
+                waiters.add(callback);
+                return;
+            }
+            waiters = new ArrayList<>();
+            waiters.add(callback);
+            inFlight.put(url, waiters);
+        }
+        final int expected = generation;
         work.execute(() -> {
             try {
                 Bitmap bitmap = fetch(url, maxWidthPx);
                 if (bitmap == null) throw new IllegalStateException("empty image");
-                CACHE.put(url, bitmap);
-                main.post(() -> callback.onBitmap(bitmap));
+                cache.put(url, bitmap);
+                finish(url, expected, true, bitmap);
             } catch (Exception error) {
-                main.post(callback::onError);
+                finish(url, expected, false, null);
+            }
+        });
+    }
+
+    private void finish(String url, int expected, boolean ok, Bitmap bitmap) {
+        main.post(() -> {
+            List<Callback> waiters;
+            synchronized (inFlight) {
+                waiters = inFlight.remove(url);
+            }
+            if (closed || expected != generation || waiters == null) return;
+            for (Callback callback : waiters) {
+                if (ok) callback.onBitmap(bitmap);
+                else callback.onError();
             }
         });
     }
@@ -65,8 +107,15 @@ final class ImageLoader {
             bounds.inJustDecodeBounds = true;
             BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+            int sample = 1;
+            // Test the CURRENT sample: the decoded bitmap must fit the pixel
+            // budget and the target width before the loop may stop.
+            while ((bounds.outWidth / sample) * (long) (bounds.outHeight / sample) > MAX_DECODED_PIXELS
+                || bounds.outWidth / sample > maxWidthPx) {
+                sample *= 2;
+            }
             BitmapFactory.Options decode = new BitmapFactory.Options();
-            decode.inSampleSize = Math.max(1, bounds.outWidth / Math.max(1, maxWidthPx));
+            decode.inSampleSize = sample;
             return BitmapFactory.decodeByteArray(bytes, 0, bytes.length, decode);
         } finally {
             connection.disconnect();
