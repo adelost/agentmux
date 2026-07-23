@@ -111,8 +111,8 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
             AppContract.consumerId(preferences),
             new ConversationController.Listener() {
                 public void onSending() { setBusy(true, "Sending securely over Tailscale…"); }
-                public void onTranscript(String value) { acceptTranscript(value); }
-                public void onReply(String value) { acceptReply(value); }
+                public void onTranscript(ConversationTarget target, String value) { acceptTranscript(target, value); }
+                public void onReply(ConversationTarget target, String value) { acceptReply(target, value); }
                 public void onFailure(String value) { fail(value); }
             }
         );
@@ -150,19 +150,19 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
         renderHistory();
     }
 
-    private void acceptTranscript(String value) {
+    private void acceptTranscript(ConversationTarget turnTarget, String value) {
         if (pendingText == null) {
-            ConversationTarget target = selectedTarget();
-            store.append("user", target == null ? "Agent" : target.label, value);
+            // A turn is always labeled by its recipient, never by whichever
+            // favorite happens to be selected when the answer lands.
+            store.append("user", turnTarget.label, value);
             renderHistory();
         }
         pendingText = null;
         status.setText("Message delivered · waiting for reply…");
     }
 
-    private void acceptReply(String value) {
-        ConversationTarget target = selectedTarget();
-        store.append("assistant", target == null ? "Agent" : target.label, value);
+    private void acceptReply(ConversationTarget turnTarget, String value) {
+        store.append("assistant", turnTarget.label, value);
         renderHistory();
         setBusy(false, "Ready");
         pushToTalk.complete("Reply received");

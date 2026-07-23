@@ -62,6 +62,7 @@ public final class AudioInboxService extends MediaSessionService {
     private volatile HttpURLConnection feedConnection;
     private String startingId;
     private boolean replaying;
+    private File replayFile;
 
     private static final class AudioItem {
         final String eventId;
@@ -119,6 +120,10 @@ public final class AudioInboxService extends MediaSessionService {
                     MediaItem current = player.getCurrentMediaItem();
                     if (current == null || !playbackQueue.replay(current.mediaId)) {
                         player.pause();
+                    } else {
+                        // A media-button resume is a replay: never a second
+                        // "played" receipt or history row for the same event.
+                        replaying = true;
                     }
                 } else if (!playbackQueue.ensureFocusForActive()) {
                     player.pause();
@@ -310,6 +315,15 @@ public final class AudioInboxService extends MediaSessionService {
             playbackQueue.discard(candidate);
             return;
         }
+        if (item.expiresAt <= System.currentTimeMillis()) {
+            // An item that expired while queued must never play stale audio.
+            playbackQueue.discard(candidate);
+            items.remove(candidate);
+            if (item.mediaFile != null) item.mediaFile.delete();
+            workExecutor.execute(() -> markFailed(candidate, "expired before playback"));
+            maybeStartNext();
+            return;
+        }
         startingId = candidate;
         workExecutor.execute(() -> {
             try {
@@ -356,7 +370,7 @@ public final class AudioInboxService extends MediaSessionService {
         if (eventId == null) return;
         boolean wasReplay = replaying;
         replaying = false;
-        AudioItem item = items.get(eventId);
+        AudioItem item = items.remove(eventId);
         playbackQueue.complete(eventId);
         player.pause();
         player.seekTo(0);
@@ -364,6 +378,11 @@ public final class AudioInboxService extends MediaSessionService {
         if (wasReplay) {
             store.updateConnection(connected ? "Connected" : "Disconnected", connected);
             return;
+        }
+        if (item != null) {
+            // Keep only the just-played file for Replay; older audio is gone.
+            if (replayFile != null && !replayFile.equals(item.mediaFile)) replayFile.delete();
+            replayFile = item.mediaFile;
         }
         workExecutor.execute(() -> {
             try {
@@ -381,12 +400,19 @@ public final class AudioInboxService extends MediaSessionService {
         boolean wasReplay = replaying;
         replaying = false;
         playbackQueue.discard(eventId);
-        if (!wasReplay) workExecutor.execute(() -> markFailed(eventId, detail));
+        AudioItem item = items.remove(eventId);
+        if (!wasReplay) {
+            if (item != null && item.mediaFile != null) item.mediaFile.delete();
+            workExecutor.execute(() -> markFailed(eventId, detail));
+        }
         maybeStartNext();
     }
 
     private void failBeforePlayback(String eventId, Exception error) {
         if (!connected) return;
+        AudioItem item = items.remove(eventId);
+        if (item != null && item.mediaFile != null) item.mediaFile.delete();
+        else new File(getCacheDir(), "audio-" + eventId + ".mp3").delete();
         markFailed(eventId, safeDetail(error.getMessage()));
     }
 
