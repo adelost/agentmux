@@ -17,6 +17,7 @@
 
 import { appendEvent } from "./events.mjs";
 import { rewriteModelSlash } from "./claude-model.mjs";
+import { detectSlashTerminalRejection } from "./slash-ingest-guard.mjs";
 
 /**
  * Delivery receipt: every verified send leaves a ledger row, so "did my
@@ -210,6 +211,12 @@ async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
   );
   const receiptOptions = receiptCursor ? { cursor: receiptCursor } : { notBeforeMs };
   await agent.dismissBlockingPrompt(target).catch(() => {});
+  // Fingerprint the tail before our submit so a stale refusal line already on
+  // screen can never be attributed to this attempt. The authoritative Claude
+  // receipt path never scrapes the pane, so it takes no fingerprint.
+  const beforeTail = hasAuthoritativeReceipt
+    ? { ok: true, text: "" }
+    : await captureComposerTail(agent, agentName, pane);
   await agent.sendOnly(agentName, claudeCmd, pane,
     { knownDrafted, onPasteStarted, onDrafted, onSubmitting, onSubmitted });
 
@@ -227,7 +234,22 @@ async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
       if (attempt < maxRescues) await agent.sendEnter(agentName, pane);
       continue;
     }
-    if (!(await stuckInComposer(agent, agentName, pane, claudeCmd))) {
+    const paneTail = await captureComposerTail(agent, agentName, pane);
+    // An explicit engine rejection is terminal truth: the command left the
+    // composer and was refused. Checking it before the needle match matters,
+    // because the refusal line itself echoes the needle ("Unrecognized
+    // command: /compat. Did you mean /compact?") and fed 24 blind retries
+    // in the 2026-07-22 incident. The before-submit fingerprint binds the
+    // verdict to a refusal line that is new for this attempt; without a
+    // readable fingerprint the classifier never terminalizes.
+    const rejection = detectSlashTerminalRejection(paneTail.text, claudeCmd, {
+      beforeText: beforeTail.text,
+      fingerprintOk: beforeTail.ok,
+    });
+    if (rejection) {
+      return { delivered: false, rescues: attempt, failed: "not-ingested", reason: rejection.reason };
+    }
+    if (!stuckInComposer(paneTail.text, claudeCmd)) {
       return { delivered: true, rescues: attempt };
     }
     if (attempt < maxRescues) await agent.sendEnter(agentName, pane);
@@ -235,16 +257,19 @@ async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
   return { delivered: false, rescues: maxRescues };
 }
 
-/** The command text still sits in the composer region (last few lines). */
-async function stuckInComposer(agent, agentName, pane, claudeCmd) {
-  let text = "";
+/** Capture the composer tail once per rescue decision; unreadable is explicit, never a silent empty string. */
+async function captureComposerTail(agent, agentName, pane) {
   try {
-    text = await agent.capturePane(agentName, pane, 12);
+    return { ok: true, text: await agent.capturePane(agentName, pane, 12) };
   } catch {
-    return false; // pane unreadable: nothing more a rescue-Enter could do
+    return { ok: false, text: "" }; // pane unreadable: nothing more a rescue-Enter could do
   }
+}
+
+/** The command text still sits in the composer region (last few lines). */
+function stuckInComposer(text, claudeCmd) {
   const needle = claudeCmd.slice(0, 30);
   // Only the tail (composer region): scrollback legitimately echoes the
   // command as transcript output after successful execution.
-  return text.split("\n").slice(-4).some((line) => line.includes(needle));
+  return String(text).split("\n").slice(-4).some((line) => line.includes(needle));
 }
