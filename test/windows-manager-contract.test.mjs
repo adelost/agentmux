@@ -26,7 +26,7 @@ feature("windows manager source contract", () => {
   unit("the journal is written before any tool executes", {
     then: ["planAcceptedAction, then saveState, then executeTool", () => {
       const action = TURN.indexOf("planAcceptedAction");
-      const save = TURN.indexOf("deps.saveState(state)");
+      const save = TURN.indexOf("deps.saveState(state)", action);
       const execute = TURN.indexOf("deps.executeTool");
       expect(action).toBeGreaterThan(-1);
       expect(save).toBeGreaterThan(action);
@@ -153,6 +153,14 @@ feature("windows manager source contract", () => {
       expect(MGR).toContain("beforeBootId: state.prevBootId || null");
       expect(MGR).toContain("skipped:before-boot-unknown");
       expect(MGR).toContain('"-BeforeBootId", plan.beforeBootId');
+    }],
+  });
+
+  unit("codex resume args stay a derived argv array, never a joined string", {
+    then: ["the provider wiring derives the resume argv from the exec argv", () => {
+      expect(CORE).toContain("resumeArgs: buildCodexResumeArgs(args)");
+      expect(CORE).toContain('"exec", "resume", "--skip-git-repo-check", sessionId, "-"');
+      expect(CORE).not.toContain("codex exec resume");
     }],
   });
 

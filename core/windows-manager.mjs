@@ -282,14 +282,26 @@ export function createHttpProvider({
   };
 }
 
+/** WHAT: Builds the codex resume argv from the configured exec argv. WHY: Separate argv elements are load-bearing; one joined string exits non-zero and continuity dies silently. */
+export function buildCodexResumeArgs(args) {
+  const list = Array.isArray(args) ? args : [];
+  const execIndex = list.indexOf("exec");
+  if (execIndex < 0) return null;
+  const head = list.slice(0, execIndex);
+  return (sessionId) => [...head, "exec", "resume", "--skip-git-repo-check", sessionId, "-"];
+}
+
 /** WHAT: Builds the configured manager provider. WHY: Keeps provider selection out of the poll loop. */
 export function createManagerProvider(config) {
   const spec = config.provider || {};
   if (spec.kind === "mock") return createMockProvider(spec.responses || []);
   if (spec.kind === "cli") {
+    const args = Array.isArray(spec.args) ? spec.args : [];
     return createCliProvider({
       command: spec.command,
-      args: Array.isArray(spec.args) ? spec.args : [],
+      args,
+      resumeArgs: buildCodexResumeArgs(args),
+      initialSessionId: spec.initialSessionId || null,
       timeoutMs: Number(spec.timeoutMs) || 120_000,
     });
   }
@@ -313,10 +325,39 @@ export function extractCliAnswer(stdout) {
   return text || null;
 }
 
+/** WHAT: Extracts thread id and answer from codex exec --json events. WHY: Prevents a concurrent foreign session from ever being captured. */
+export function parseCodexJsonlTurn(stdout) {
+  let threadId = null;
+  let answer = null;
+  for (const line of String(stdout || "").split("\n")) {
+    if (!line.trim()) continue;
+    let event;
+    try { event = JSON.parse(line); } catch { return { threadId: null, answer: null, malformed: true }; }
+    if (event?.type === "thread.started" && typeof event.thread_id === "string") threadId = event.thread_id;
+    if (event?.type === "item.completed"
+      && event.item?.type === "agent_message"
+      && typeof event.item.text === "string") answer = event.item.text;
+  }
+  return { threadId, answer, malformed: false };
+}
+
+/** WHAT: Builds the --json codex exec argv from the configured one. WHY: Prevents session capture from depending on scrapeable transcript text. */
+export function withCodexJsonFlag(args) {
+  const list = Array.isArray(args) ? [...args] : [];
+  const dashIndex = list.lastIndexOf("-");
+  if (dashIndex >= 0) list.splice(dashIndex, 0, "--json");
+  else list.push("--json");
+  return list;
+}
+
+const OBSERVATION_MARKER = "Aktuell observation (JSON):";
+
 /** WHAT: Builds a CLI-backed chat provider such as codex exec. WHY: Keeps the engine replaceable and secrets inside the CLI session. */
 export function createCliProvider({
   command,
   args = [],
+  resumeArgs = null,
+  initialSessionId = null,
   timeoutMs = 120_000,
   execImpl = null,
 } = {}) {
@@ -342,21 +383,56 @@ export function createCliProvider({
     child.on("close", (code) => finish({ code, stdout, stderr, timedOut: false }));
     child.stdin.end(input);
   });
+  const flatten = (messages) => (messages || []).map((message) => {
+    const role = message.role === "system" ? "SYSTEM" : (message.role === "assistant" ? "ASSISTANT" : "USER");
+    return `[${role}]\n${typeof message.content === "string" ? message.content : ""}`;
+  }).join("\n\n");
+
+  let sessionId = initialSessionId || null;
+  const canResume = typeof resumeArgs === "function";
   return {
     name: "cli",
     chat: async (messages) => {
-      const prompt = (messages || []).map((message) => {
-        const role = message.role === "system" ? "SYSTEM" : (message.role === "assistant" ? "ASSISTANT" : "USER");
-        return `[${role}]\n${typeof message.content === "string" ? message.content : ""}`;
-      }).join("\n\n");
-      if (!command || !prompt.trim()) return { ok: false, reason: "usage" };
+      const all = messages || [];
       const run = execImpl || defaultExec;
-      const result = await run(command, args, prompt, timeoutMs);
+      let resuming = Boolean(sessionId && canResume);
+      let prompt;
+      if (resuming) {
+        // Resume: the runbook and history live in the codex session already;
+        // only the fresh observation and the new user text are worth tokens.
+        const latestUser = [...all].reverse().find((message) => message.role === "user");
+        const system = all.find((message) => message.role === "system");
+        const markerIndex = typeof system?.content === "string" ? system.content.indexOf(OBSERVATION_MARKER) : -1;
+        const observation = markerIndex >= 0 ? `[SYSTEM]\n${system.content.slice(markerIndex)}\n\n` : "";
+        prompt = `${observation}[USER]\n${typeof latestUser?.content === "string" ? latestUser.content : ""}`;
+      } else {
+        prompt = flatten(all);
+      }
+      if (!command || !prompt.trim()) return { ok: false, reason: "usage" };
+
+      let result = await run(command, resuming ? resumeArgs(sessionId) : withCodexJsonFlag(args), prompt, timeoutMs);
       if (result.timedOut) return { ok: false, reason: "timeout" };
+      if (result.code !== 0 && resuming) {
+        // Session lost or compacted: one fresh full turn, then re-capture.
+        sessionId = null;
+        resuming = false;
+        result = await run(command, withCodexJsonFlag(args), flatten(all), timeoutMs);
+        if (result.timedOut) return { ok: false, reason: "timeout" };
+      }
       if (result.code !== 0) return { ok: false, reason: `exit-${result.code}` };
-      const text = extractCliAnswer(result.stdout);
+      if (resuming) {
+        const resumed = extractCliAnswer(result.stdout);
+        if (!resumed) return { ok: false, reason: "empty-response" };
+        return { ok: true, text: resumed, sessionId };
+      }
+      const parsed = parseCodexJsonlTurn(result.stdout);
+      if (parsed.malformed) return { ok: false, reason: "json-invalid" };
+      const text = typeof parsed.answer === "string" ? parsed.answer.trim() : "";
       if (!text) return { ok: false, reason: "empty-response" };
-      return { ok: true, text };
+      // Exact engine-issued identity: a concurrent foreign session can never
+      // be captured. A missing thread id degrades to full turns, honestly.
+      if (parsed.threadId) sessionId = parsed.threadId;
+      return { ok: true, text, ...(sessionId ? { sessionId } : {}) };
     },
   };
 }

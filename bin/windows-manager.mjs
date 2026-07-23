@@ -134,9 +134,9 @@ export async function runManagerTurn({ userText, messageId, state, history = [],
   const messages = planManagerTurn({ userText, observation, history, contractVersion: MANAGER_CONTRACT_VERSION });
   const local = planLocalRescueTurn(userText);
   const reply = local ? { ok: true, text: "local-rescue" } : await deps.provider.chat(messages);
-  if (!reply?.ok) {
-    return { answer: formatProviderFallback(reply?.reason), toolResults: [], outcome: "PARTIAL", observation };
-  }
+  const persistSession = (r) => { if (r?.sessionId) { state.codexSessionId = r.sessionId; deps.saveState(state); } };
+  persistSession(reply);
+  if (!reply?.ok) return { answer: formatProviderFallback(reply?.reason), toolResults: [], outcome: "PARTIAL", observation };
   const toolResults = [];
   for (const name of (local?.tools || parseToolCalls(reply.text))) {
     const verdict = planToolCall({
@@ -176,6 +176,7 @@ export async function runManagerTurn({ userText, messageId, state, history = [],
       { role: "assistant", content: reply.text },
       { role: "user", content: `Verktygsresultat (JSON):\n${resultsText}\nSvara kort på svenska med exakt utfall.` },
     ]);
+    persistSession(followup);
     answer = followup?.ok
       ? followup.text
       : `AMUX ${outcome}: ${toolResults.map((result) => `${result.stage}=${result.ok ? "ok" : "fail"}`).join(" ")}`;
@@ -256,7 +257,7 @@ async function main() {
   const serializeTurn = createSerialTurnLane();
   const deps = {
     generation,
-    provider: createManagerProvider(config),
+    provider: createManagerProvider({ ...config, provider: { ...config.provider, initialSessionId: state.codexSessionId || null } }),
     nowMs: () => Date.now(),
     saveState: (next) => writeJsonAtomic(statePath, next),
     observe: observeDefault,

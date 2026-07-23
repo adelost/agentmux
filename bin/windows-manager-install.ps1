@@ -143,7 +143,9 @@ if ($Install) {
     provider = [pscustomobject]@{
       kind = "cli"
       command = $nodePath
-      args = @($codexJs, "exec", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "-")
+      # resume needs the rollout file persisted, so ephemeral mode stays off;
+      # the exact thread id comes from codex exec --json, never the directory
+      args = @($codexJs, "exec", "--sandbox", "read-only", "--skip-git-repo-check", "-")
       timeoutMs = 120000
     }
     transcription = [pscustomobject]@{

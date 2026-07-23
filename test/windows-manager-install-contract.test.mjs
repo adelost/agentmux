@@ -71,9 +71,11 @@ feature("windows manager install source contract", () => {
   });
 
   unit("AI and speech are Windows-native and offline from WSL", {
-    then: ["Codex runs through Windows node and Whisper uses a pinned local model", () => {
+    then: ["Codex runs through Windows node with persisted sessions and Whisper uses a pinned local model", () => {
       expect(INSTALLER).toContain("npm\\node_modules\\@openai\\codex\\bin\\codex.js");
-      expect(INSTALLER).toContain('"--ephemeral", "--sandbox", "read-only"');
+      expect(INSTALLER).not.toContain("--ephemeral");
+      expect(INSTALLER).toContain('"--sandbox", "read-only"');
+      expect(INSTALLER).toContain("the exact thread id comes from codex exec --json, never the directory");
       expect(INSTALLER).toContain('kind = "faster-whisper"');
       expect(INSTALLER).toContain("offline Whisper model incomplete");
       expect(INSTALLER).not.toContain('command = "wsl.exe"');

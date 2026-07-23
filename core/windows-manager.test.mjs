@@ -2,6 +2,7 @@ import { expect, feature, unit } from "bdd-vitest";
 import {
   MANAGER_CONTRACT_VERSION,
   MANAGER_TOOLS,
+  buildCodexResumeArgs,
   buildRunbookContext,
   classifyManagerOutcome,
   createCliProvider,
@@ -10,12 +11,14 @@ import {
   extractCliAnswer,
   formatLocalRescueAnswer,
   formatProviderFallback,
+  parseCodexJsonlTurn,
   parseToolCalls,
   planLocalRescueTurn,
   planManagerTurn,
   planRescueCommand,
   planToolCall,
   redactSecrets,
+  withCodexJsonFlag,
   trackManagerBootId,
 } from "./windows-manager.mjs";
 
@@ -342,14 +345,18 @@ feature("windows manager core", () => {
       const seen = [];
       const fake = (cmd, args, input, timeout) => {
         seen.push({ cmd, args, input, timeout });
-        return Promise.resolve({ code: 0, stdout: "codex\nSvar från codex.\ntokens used\n9\n", timedOut: false });
+        return Promise.resolve({
+          code: 0,
+          stdout: JSON.stringify({ type: "item.completed", item: { id: "i", type: "agent_message", text: "Svar från codex." } }),
+          timedOut: false,
+        });
       };
       const provider = createCliProvider({ command: "wsl.exe", args: ["--", "codex", "exec", "-"], timeoutMs: 5_000, execImpl: fake });
       const result = await provider.chat([
         { role: "system", content: "Runbook." },
         { role: "user", content: "status?" },
       ]);
-      expect(result).toEqual({ ok: true, text: "Svar från codex." });
+      expect(result).toMatchObject({ ok: true, text: "Svar från codex." });
       expect(seen[0].cmd).toBe("wsl.exe");
       expect(seen[0].input).toContain("[SYSTEM]\nRunbook.");
       expect(seen[0].input).toContain("[USER]\nstatus?");
@@ -371,10 +378,191 @@ feature("windows manager core", () => {
 
       const emptyProvider = createCliProvider({
         command: "x",
-        execImpl: () => Promise.resolve({ code: 0, stdout: "codex\ntokens used\n1\n", timedOut: false }),
+        execImpl: () => Promise.resolve({
+          code: 0,
+          stdout: JSON.stringify({ type: "turn.completed", usage: {} }),
+          timedOut: false,
+        }),
       });
       expect(await emptyProvider.chat([{ role: "user", content: "hej" }]))
         .toEqual({ ok: false, reason: "empty-response" });
+
+      const malformedProvider = createCliProvider({
+        command: "x",
+        execImpl: () => Promise.resolve({ code: 0, stdout: "codex\ntokens used\n1\n", timedOut: false }),
+      });
+      expect(await malformedProvider.chat([{ role: "user", content: "hej" }]))
+        .toEqual({ ok: false, reason: "json-invalid" });
+    }],
+  });
+
+  unit("parseCodexJsonlTurn reads the engine-issued thread id and the last agent message", {
+    then: ["exact identity, last answer wins, malformed and silent turns classified", () => {
+      const jsonl = [
+        JSON.stringify({ type: "thread.started", thread_id: "019f8d7e-39e1-72e3-8afa-a2f7347226d6" }),
+        JSON.stringify({ type: "turn.started" }),
+        JSON.stringify({ type: "item.completed", item: { id: "item_0", type: "agent_message", text: "första" } }),
+        JSON.stringify({ type: "item.completed", item: { id: "item_1", type: "agent_message", text: "andra" } }),
+        JSON.stringify({ type: "turn.completed", usage: {} }),
+      ].join("\n");
+      expect(parseCodexJsonlTurn(jsonl)).toEqual({
+        threadId: "019f8d7e-39e1-72e3-8afa-a2f7347226d6",
+        answer: "andra",
+        malformed: false,
+      });
+      expect(parseCodexJsonlTurn("codex\ntokens used\n")).toMatchObject({ malformed: true });
+      expect(parseCodexJsonlTurn(JSON.stringify({ type: "turn.started" })))
+        .toEqual({ threadId: null, answer: null, malformed: false });
+    }],
+  });
+
+  unit("withCodexJsonFlag inserts --json before the stdin dash without mutating the config", {
+    then: ["argv shape stays separate elements", () => {
+      const configured = ["codex.js", "exec", "--sandbox", "read-only", "--skip-git-repo-check", "-"];
+      expect(withCodexJsonFlag(configured))
+        .toEqual(["codex.js", "exec", "--sandbox", "read-only", "--skip-git-repo-check", "--json", "-"]);
+      expect(withCodexJsonFlag(["exec"])).toEqual(["exec", "--json"]);
+      expect(configured).not.toContain("--json");
+    }],
+  });
+
+  unit("a full turn without thread.started captures nothing, so a foreign session is never resumed", {
+    then: ["the answer is served but the next turn stays a full turn", async () => {
+      const calls = [];
+      const execImpl = (cmd, callArgs, input) => {
+        calls.push({ callArgs, input });
+        return Promise.resolve({
+          code: 0,
+          stdout: JSON.stringify({ type: "item.completed", item: { id: "i", type: "agent_message", text: "Svar." } }),
+          timedOut: false,
+        });
+      };
+      const provider = createCliProvider({
+        command: "node.exe",
+        args: ["codex.js", "exec", "-"],
+        resumeArgs: (id) => ["resume", id],
+        execImpl,
+      });
+      const first = await provider.chat([{ role: "user", content: "hej" }]);
+      expect(first).toEqual({ ok: true, text: "Svar." });
+      const second = await provider.chat([{ role: "user", content: "igen" }]);
+      expect(second.ok).toBe(true);
+      expect(calls).toHaveLength(2);
+      expect(calls[1].callArgs).toEqual(["codex.js", "exec", "--json", "-"]);
+    }],
+  });
+
+  unit("a resumed turn sends only the new message plus observation, never the runbook again", {
+    then: ["second call carries the session id and a small prompt; fallback resends fully", async () => {
+      const calls = [];
+      const sessionId = "019f82e7-21bd-7b62-9eaa-eb2719207962";
+      const execImpl = (cmd, callArgs, input) => {
+        calls.push({ callArgs, input });
+        const resuming = callArgs.includes("resume");
+        return Promise.resolve({
+          code: 0,
+          stdout: resuming
+            ? "codex\nSvar.\ntokens used\n5\n"
+            : `${JSON.stringify({ type: "thread.started", thread_id: sessionId })}\n${JSON.stringify({ type: "item.completed", item: { id: "i", type: "agent_message", text: "Svar." } })}`,
+          timedOut: false,
+        });
+      };
+      const sessionedProvider = createCliProvider({
+        command: "wsl.exe",
+        args: ["base-args"],
+        resumeArgs: (id) => ["resume", id],
+        execImpl,
+      });
+      const first = await sessionedProvider.chat([
+        { role: "system", content: "RUNBOOK TEXT\n\nAktuell observation (JSON):\n{\"wsl\":\"online\"}" },
+        { role: "user", content: "hej" },
+      ]);
+      expect(first.ok).toBe(true);
+      expect(first.sessionId).toBe(sessionId);
+      expect(calls[0].callArgs).toEqual(["base-args", "--json"]);
+      expect(calls[0].input).toContain("RUNBOOK TEXT");
+
+      const second = await sessionedProvider.chat([
+        { role: "system", content: "RUNBOOK TEXT\n\nAktuell observation (JSON):\n{\"wsl\":\"online\"}" },
+        { role: "user", content: "och nu då?" },
+      ]);
+      expect(second.ok).toBe(true);
+      expect(second.sessionId).toBe(sessionId);
+      expect(calls[1].callArgs).toEqual(["resume", sessionId]);
+      expect(calls[1].input).toContain("[USER]\noch nu då?");
+      expect(calls[1].input).toContain("Aktuell observation (JSON):");
+      expect(calls[1].input).not.toContain("RUNBOOK TEXT");
+    }],
+  });
+
+  unit("a restarted manager resumes its persisted session without a full re-send", {
+    then: ["the first turn after restart already uses resume args and the small prompt", async () => {
+      const calls = [];
+      const sessionId = "019f82e7-21bd-7b62-9eaa-eb2719207962";
+      const execImpl = (cmd, callArgs, input) => {
+        calls.push({ callArgs, input });
+        return Promise.resolve({ code: 0, stdout: "codex\nSvar.\ntokens used\n5\n", timedOut: false });
+      };
+      const provider = createCliProvider({
+        command: "wsl.exe",
+        args: ["base-args"],
+        resumeArgs: (id) => ["resume", id],
+        initialSessionId: sessionId,
+        execImpl,
+      });
+      const result = await provider.chat([
+        { role: "system", content: "RUNBOOK TEXT\n\nAktuell observation (JSON):\n{\"wsl\":\"online\"}" },
+        { role: "user", content: "tillbaka nu" },
+      ]);
+      expect(result).toMatchObject({ ok: true, sessionId });
+      expect(calls).toHaveLength(1);
+      expect(calls[0].callArgs).toEqual(["resume", sessionId]);
+      expect(calls[0].input).toContain("[USER]\ntillbaka nu");
+      expect(calls[0].input).not.toContain("RUNBOOK TEXT");
+    }],
+  });
+
+  unit("manager resume args are a real argv array, never one joined string", {
+    then: ["codex.js, exec, resume, the id, and the stdin dash stay separate elements", () => {
+      const codexJs = "C:\\Users\\claw\\npm\\node_modules\\@openai\\codex\\bin\\codex.js";
+      const execArgs = [codexJs, "exec", "--sandbox", "read-only", "--skip-git-repo-check", "-"];
+      const resume = buildCodexResumeArgs(execArgs);
+      expect(typeof resume).toBe("function");
+      const sessionId = "019f82e7-21bd-7b62-9eaa-eb2719207962";
+      const argv = resume(sessionId);
+      expect(argv).toEqual([codexJs, "exec", "resume", "--skip-git-repo-check", sessionId, "-"]);
+      expect(argv.every((entry) => !entry.includes(" "))).toBe(true);
+      expect(buildCodexResumeArgs(["exec", "-"])).toBeInstanceOf(Function);
+      expect(buildCodexResumeArgs(["--help"])).toBeNull();
+      expect(buildCodexResumeArgs(null)).toBeNull();
+    }],
+  });
+
+  unit("a configured session id without resume args falls back to full turns", {
+    then: ["the small resume prompt is never sent as a fresh session", async () => {
+      const calls = [];
+      const execImpl = (cmd, callArgs, input) => {
+        calls.push({ callArgs, input });
+        return Promise.resolve({
+          code: 0,
+          stdout: JSON.stringify({ type: "item.completed", item: { id: "i", type: "agent_message", text: "Svar." } }),
+          timedOut: false,
+        });
+      };
+      const provider = createCliProvider({
+        command: "node.exe",
+        args: ["codex.js", "exec", "-"],
+        initialSessionId: "019f82e7-21bd-7b62-9eaa-eb2719207962",
+        execImpl,
+      });
+      const result = await provider.chat([
+        { role: "system", content: "RUNBOOK TEXT" },
+        { role: "user", content: "hej" },
+      ]);
+      expect(result.ok).toBe(true);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].callArgs).toEqual(["codex.js", "exec", "--json", "-"]);
+      expect(calls[0].input).toContain("RUNBOOK TEXT");
     }],
   });
 });
