@@ -7,17 +7,18 @@ import {
   classifyManagerOutcome,
   createCliProvider,
   createHttpProvider,
-  newestCodexSessionId,
   createMockProvider,
   extractCliAnswer,
   formatLocalRescueAnswer,
   formatProviderFallback,
+  parseCodexJsonlTurn,
   parseToolCalls,
   planLocalRescueTurn,
   planManagerTurn,
   planRescueCommand,
   planToolCall,
   redactSecrets,
+  withCodexJsonFlag,
   trackManagerBootId,
 } from "./windows-manager.mjs";
 
@@ -344,7 +345,11 @@ feature("windows manager core", () => {
       const seen = [];
       const fake = (cmd, args, input, timeout) => {
         seen.push({ cmd, args, input, timeout });
-        return Promise.resolve({ code: 0, stdout: "codex\nSvar från codex.\ntokens used\n9\n", timedOut: false });
+        return Promise.resolve({
+          code: 0,
+          stdout: JSON.stringify({ type: "item.completed", item: { id: "i", type: "agent_message", text: "Svar från codex." } }),
+          timedOut: false,
+        });
       };
       const provider = createCliProvider({ command: "wsl.exe", args: ["--", "codex", "exec", "-"], timeoutMs: 5_000, execImpl: fake });
       const result = await provider.chat([
@@ -373,28 +378,77 @@ feature("windows manager core", () => {
 
       const emptyProvider = createCliProvider({
         command: "x",
-        execImpl: () => Promise.resolve({ code: 0, stdout: "codex\ntokens used\n1\n", timedOut: false }),
+        execImpl: () => Promise.resolve({
+          code: 0,
+          stdout: JSON.stringify({ type: "turn.completed", usage: {} }),
+          timedOut: false,
+        }),
       });
       expect(await emptyProvider.chat([{ role: "user", content: "hej" }]))
         .toEqual({ ok: false, reason: "empty-response" });
+
+      const malformedProvider = createCliProvider({
+        command: "x",
+        execImpl: () => Promise.resolve({ code: 0, stdout: "codex\ntokens used\n1\n", timedOut: false }),
+      });
+      expect(await malformedProvider.chat([{ role: "user", content: "hej" }]))
+        .toEqual({ ok: false, reason: "json-invalid" });
     }],
   });
 
-  unit("newestCodexSessionId picks the newest rollout after the cursor and skips noise", {
-    then: ["exact id, cursor respected, garbage ignored", () => {
-      const entries = [
-        "2026/07/21/rollout-2026-07-21T06-20-13-019f82e7-21bd-7b62-9eaa-eb2719207962.jsonl",
-        "2026/07/21/rollout-2026-07-21T07-01-02-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl",
-        "2026/07/15/rollout-2026-07-15T15-31-43-019f65f9-e4c0-7022-89ad-74d52abbe661.jsonl",
-        "2026/07/21/notes.txt",
-      ];
-      expect(newestCodexSessionId("/x", { entries }))
-        .toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
-      expect(newestCodexSessionId("/x", { entries, afterMs: Date.parse("2026-07-21T07:00:00Z") }))
-        .toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
-      expect(newestCodexSessionId("/x", { entries, afterMs: Date.parse("2026-07-22T00:00:00Z") }))
-        .toBeNull();
-      expect(newestCodexSessionId("/x", { entries: [] })).toBeNull();
+  unit("parseCodexJsonlTurn reads the engine-issued thread id and the last agent message", {
+    then: ["exact identity, last answer wins, malformed and silent turns classified", () => {
+      const jsonl = [
+        JSON.stringify({ type: "thread.started", thread_id: "019f8d7e-39e1-72e3-8afa-a2f7347226d6" }),
+        JSON.stringify({ type: "turn.started" }),
+        JSON.stringify({ type: "item.completed", item: { id: "item_0", type: "agent_message", text: "första" } }),
+        JSON.stringify({ type: "item.completed", item: { id: "item_1", type: "agent_message", text: "andra" } }),
+        JSON.stringify({ type: "turn.completed", usage: {} }),
+      ].join("\n");
+      expect(parseCodexJsonlTurn(jsonl)).toEqual({
+        threadId: "019f8d7e-39e1-72e3-8afa-a2f7347226d6",
+        answer: "andra",
+        malformed: false,
+      });
+      expect(parseCodexJsonlTurn("codex\ntokens used\n")).toMatchObject({ malformed: true });
+      expect(parseCodexJsonlTurn(JSON.stringify({ type: "turn.started" })))
+        .toEqual({ threadId: null, answer: null, malformed: false });
+    }],
+  });
+
+  unit("withCodexJsonFlag inserts --json before the stdin dash without mutating the config", {
+    then: ["argv shape stays separate elements", () => {
+      const configured = ["codex.js", "exec", "--sandbox", "read-only", "--skip-git-repo-check", "-"];
+      expect(withCodexJsonFlag(configured))
+        .toEqual(["codex.js", "exec", "--sandbox", "read-only", "--skip-git-repo-check", "--json", "-"]);
+      expect(withCodexJsonFlag(["exec"])).toEqual(["exec", "--json"]);
+      expect(configured).not.toContain("--json");
+    }],
+  });
+
+  unit("a full turn without thread.started captures nothing, so a foreign session is never resumed", {
+    then: ["the answer is served but the next turn stays a full turn", async () => {
+      const calls = [];
+      const execImpl = (cmd, callArgs, input) => {
+        calls.push({ callArgs, input });
+        return Promise.resolve({
+          code: 0,
+          stdout: JSON.stringify({ type: "item.completed", item: { id: "i", type: "agent_message", text: "Svar." } }),
+          timedOut: false,
+        });
+      };
+      const provider = createCliProvider({
+        command: "node.exe",
+        args: ["codex.js", "exec", "-"],
+        resumeArgs: (id) => ["resume", id],
+        execImpl,
+      });
+      const first = await provider.chat([{ role: "user", content: "hej" }]);
+      expect(first).toEqual({ ok: true, text: "Svar." });
+      const second = await provider.chat([{ role: "user", content: "igen" }]);
+      expect(second.ok).toBe(true);
+      expect(calls).toHaveLength(2);
+      expect(calls[1].callArgs).toEqual(["codex.js", "exec", "--json", "-"]);
     }],
   });
 
@@ -404,27 +458,28 @@ feature("windows manager core", () => {
       const sessionId = "019f82e7-21bd-7b62-9eaa-eb2719207962";
       const execImpl = (cmd, callArgs, input) => {
         calls.push({ callArgs, input });
-        return Promise.resolve({ code: 0, stdout: "codex\nSvar.\ntokens used\n5\n", timedOut: false });
+        const resuming = callArgs.includes("resume");
+        return Promise.resolve({
+          code: 0,
+          stdout: resuming
+            ? "codex\nSvar.\ntokens used\n5\n"
+            : `${JSON.stringify({ type: "thread.started", thread_id: sessionId })}\n${JSON.stringify({ type: "item.completed", item: { id: "i", type: "agent_message", text: "Svar." } })}`,
+          timedOut: false,
+        });
       };
-      void createCliProvider;
-      const sessionEntries = [
-        "2026/07/21/rollout-2026-07-21T06-20-13-019f82e7-21bd-7b62-9eaa-eb2719207962.jsonl",
-      ];
       const sessionedProvider = createCliProvider({
         command: "wsl.exe",
         args: ["base-args"],
         resumeArgs: (id) => ["resume", id],
-        sessionsDir: "/x",
         execImpl,
-        readdirImpl: () => sessionEntries,
-        nowMs: () => Date.parse("2026-07-21T06:20:00Z"),
       });
       const first = await sessionedProvider.chat([
         { role: "system", content: "RUNBOOK TEXT\n\nAktuell observation (JSON):\n{\"wsl\":\"online\"}" },
         { role: "user", content: "hej" },
       ]);
       expect(first.ok).toBe(true);
-      expect(calls[0].callArgs).toEqual(["base-args"]);
+      expect(first.sessionId).toBe(sessionId);
+      expect(calls[0].callArgs).toEqual(["base-args", "--json"]);
       expect(calls[0].input).toContain("RUNBOOK TEXT");
 
       const second = await sessionedProvider.chat([
@@ -488,7 +543,11 @@ feature("windows manager core", () => {
       const calls = [];
       const execImpl = (cmd, callArgs, input) => {
         calls.push({ callArgs, input });
-        return Promise.resolve({ code: 0, stdout: "codex\nSvar.\ntokens used\n5\n", timedOut: false });
+        return Promise.resolve({
+          code: 0,
+          stdout: JSON.stringify({ type: "item.completed", item: { id: "i", type: "agent_message", text: "Svar." } }),
+          timedOut: false,
+        });
       };
       const provider = createCliProvider({
         command: "node.exe",
@@ -502,7 +561,7 @@ feature("windows manager core", () => {
       ]);
       expect(result.ok).toBe(true);
       expect(calls).toHaveLength(1);
-      expect(calls[0].callArgs).toEqual(["codex.js", "exec", "-"]);
+      expect(calls[0].callArgs).toEqual(["codex.js", "exec", "--json", "-"]);
       expect(calls[0].input).toContain("RUNBOOK TEXT");
     }],
   });

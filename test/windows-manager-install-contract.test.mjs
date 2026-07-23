@@ -75,7 +75,7 @@ feature("windows manager install source contract", () => {
       expect(INSTALLER).toContain("npm\\node_modules\\@openai\\codex\\bin\\codex.js");
       expect(INSTALLER).not.toContain("--ephemeral");
       expect(INSTALLER).toContain('"--sandbox", "read-only"');
-      expect(INSTALLER).toContain('Join-Path $env:USERPROFILE ".codex\\sessions"');
+      expect(INSTALLER).toContain("the exact thread id comes from codex exec --json, never the directory");
       expect(INSTALLER).toContain('kind = "faster-whisper"');
       expect(INSTALLER).toContain("offline Whisper model incomplete");
       expect(INSTALLER).not.toContain('command = "wsl.exe"');

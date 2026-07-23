@@ -4,7 +4,6 @@
 // bounded process runs, and journaling.
 
 import { spawn } from "node:child_process";
-import { readdirSync } from "node:fs";
 import { classifyRecovery } from "./windows-bridge.mjs";
 
 /** WHAT: Names the manager contract version. WHY: Keeps runbook, tools, and runtime on one explicit contract. */
@@ -302,7 +301,6 @@ export function createManagerProvider(config) {
       command: spec.command,
       args,
       resumeArgs: buildCodexResumeArgs(args),
-      sessionsDir: spec.sessionsDir || null,
       initialSessionId: spec.initialSessionId || null,
       timeoutMs: Number(spec.timeoutMs) || 120_000,
     });
@@ -327,22 +325,29 @@ export function extractCliAnswer(stdout) {
   return text || null;
 }
 
-/** WHAT: Reads the newest codex session id created after one instant. WHY: Keeps resume targeting exact sessions, never a guess. */
-export function newestCodexSessionId(sessionsDir, { afterMs = 0, entries = null } = {}) {
-  const list = entries || (() => {
-    try { return readdirSync(sessionsDir, { recursive: true }); }
-    catch { return []; }
-  })();
-  let best = null;
-  for (const entry of list) {
-    const name = String(entry).split(/[\\/]/u).pop();
-    const match = name.match(/^rollout-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-([0-9a-f-]{36})\.jsonl$/u);
-    if (!match) continue;
-    const ms = Date.parse(`${match[1]}T${match[2]}:${match[3]}:${match[4]}Z`);
-    if (!Number.isFinite(ms) || ms < afterMs) continue;
-    if (!best || ms > best.ms) best = { ms, sessionId: match[5] };
+/** WHAT: Extracts thread id and answer from codex exec --json events. WHY: Prevents a concurrent foreign session from ever being captured. */
+export function parseCodexJsonlTurn(stdout) {
+  let threadId = null;
+  let answer = null;
+  for (const line of String(stdout || "").split("\n")) {
+    if (!line.trim()) continue;
+    let event;
+    try { event = JSON.parse(line); } catch { return { threadId: null, answer: null, malformed: true }; }
+    if (event?.type === "thread.started" && typeof event.thread_id === "string") threadId = event.thread_id;
+    if (event?.type === "item.completed"
+      && event.item?.type === "agent_message"
+      && typeof event.item.text === "string") answer = event.item.text;
   }
-  return best?.sessionId || null;
+  return { threadId, answer, malformed: false };
+}
+
+/** WHAT: Builds the --json codex exec argv from the configured one. WHY: Prevents session capture from depending on scrapeable transcript text. */
+export function withCodexJsonFlag(args) {
+  const list = Array.isArray(args) ? [...args] : [];
+  const dashIndex = list.lastIndexOf("-");
+  if (dashIndex >= 0) list.splice(dashIndex, 0, "--json");
+  else list.push("--json");
+  return list;
 }
 
 const OBSERVATION_MARKER = "Aktuell observation (JSON):";
@@ -352,12 +357,9 @@ export function createCliProvider({
   command,
   args = [],
   resumeArgs = null,
-  sessionsDir = null,
   initialSessionId = null,
   timeoutMs = 120_000,
   execImpl = null,
-  readdirImpl = null,
-  nowMs = () => Date.now(),
 } = {}) {
   const defaultExec = (cmd, cmdArgs, input, timeout) => new Promise((resolvePromise) => {
     const child = spawn(cmd, cmdArgs, { stdio: ["pipe", "pipe", "pipe"] });
@@ -393,8 +395,9 @@ export function createCliProvider({
     chat: async (messages) => {
       const all = messages || [];
       const run = execImpl || defaultExec;
+      let resuming = Boolean(sessionId && canResume);
       let prompt;
-      if (sessionId && canResume) {
+      if (resuming) {
         // Resume: the runbook and history live in the codex session already;
         // only the fresh observation and the new user text are worth tokens.
         const latestUser = [...all].reverse().find((message) => message.role === "user");
@@ -407,24 +410,28 @@ export function createCliProvider({
       }
       if (!command || !prompt.trim()) return { ok: false, reason: "usage" };
 
-      const startedMs = nowMs();
-      let result = await run(command, sessionId && canResume ? resumeArgs(sessionId) : args, prompt, timeoutMs);
+      let result = await run(command, resuming ? resumeArgs(sessionId) : withCodexJsonFlag(args), prompt, timeoutMs);
       if (result.timedOut) return { ok: false, reason: "timeout" };
-      if (result.code !== 0 && sessionId && canResume) {
+      if (result.code !== 0 && resuming) {
         // Session lost or compacted: one fresh full turn, then re-capture.
         sessionId = null;
-        result = await run(command, args, flatten(all), timeoutMs);
+        resuming = false;
+        result = await run(command, withCodexJsonFlag(args), flatten(all), timeoutMs);
         if (result.timedOut) return { ok: false, reason: "timeout" };
       }
       if (result.code !== 0) return { ok: false, reason: `exit-${result.code}` };
-      const text = extractCliAnswer(result.stdout);
-      if (!text) return { ok: false, reason: "empty-response" };
-      if (!sessionId && sessionsDir) {
-        sessionId = newestCodexSessionId(sessionsDir, {
-          afterMs: startedMs - 5_000,
-          entries: readdirImpl ? readdirImpl(sessionsDir) : null,
-        });
+      if (resuming) {
+        const resumed = extractCliAnswer(result.stdout);
+        if (!resumed) return { ok: false, reason: "empty-response" };
+        return { ok: true, text: resumed, sessionId };
       }
+      const parsed = parseCodexJsonlTurn(result.stdout);
+      if (parsed.malformed) return { ok: false, reason: "json-invalid" };
+      const text = typeof parsed.answer === "string" ? parsed.answer.trim() : "";
+      if (!text) return { ok: false, reason: "empty-response" };
+      // Exact engine-issued identity: a concurrent foreign session can never
+      // be captured. A missing thread id degrades to full turns, honestly.
+      if (parsed.threadId) sessionId = parsed.threadId;
       return { ok: true, text, ...(sessionId ? { sessionId } : {}) };
     },
   };
