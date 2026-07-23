@@ -214,7 +214,9 @@ async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
   // Fingerprint the tail before our submit so a stale refusal line already on
   // screen can never be attributed to this attempt. The authoritative Claude
   // receipt path never scrapes the pane, so it takes no fingerprint.
-  const beforeTail = hasAuthoritativeReceipt ? "" : await captureComposerTail(agent, agentName, pane);
+  const beforeTail = hasAuthoritativeReceipt
+    ? { ok: true, text: "" }
+    : await captureComposerTail(agent, agentName, pane);
   await agent.sendOnly(agentName, claudeCmd, pane,
     { knownDrafted, onPasteStarted, onDrafted, onSubmitting, onSubmitted });
 
@@ -238,12 +240,16 @@ async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
     // because the refusal line itself echoes the needle ("Unrecognized
     // command: /compat. Did you mean /compact?") and fed 24 blind retries
     // in the 2026-07-22 incident. The before-submit fingerprint binds the
-    // verdict to a refusal line that is new for this attempt.
-    const rejection = detectSlashTerminalRejection(paneTail, claudeCmd, { beforeText: beforeTail });
+    // verdict to a refusal line that is new for this attempt; without a
+    // readable fingerprint the classifier never terminalizes.
+    const rejection = detectSlashTerminalRejection(paneTail.text, claudeCmd, {
+      beforeText: beforeTail.text,
+      fingerprintOk: beforeTail.ok,
+    });
     if (rejection) {
       return { delivered: false, rescues: attempt, failed: "not-ingested", reason: rejection.reason };
     }
-    if (!stuckInComposer(paneTail, claudeCmd)) {
+    if (!stuckInComposer(paneTail.text, claudeCmd)) {
       return { delivered: true, rescues: attempt };
     }
     if (attempt < maxRescues) await agent.sendEnter(agentName, pane);
@@ -251,12 +257,12 @@ async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
   return { delivered: false, rescues: maxRescues };
 }
 
-/** Capture the composer tail once per rescue decision; unreadable stays fail-open. */
+/** Capture the composer tail once per rescue decision; unreadable is explicit, never a silent empty string. */
 async function captureComposerTail(agent, agentName, pane) {
   try {
-    return await agent.capturePane(agentName, pane, 12);
+    return { ok: true, text: await agent.capturePane(agentName, pane, 12) };
   } catch {
-    return ""; // pane unreadable: nothing more a rescue-Enter could do
+    return { ok: false, text: "" }; // pane unreadable: nothing more a rescue-Enter could do
   }
 }
 

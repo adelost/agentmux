@@ -238,6 +238,14 @@ feature("detectSlashTerminalRejection: explicit engine refusal", () => {
       expect(hit.reason).toContain("not-ingested");
     }],
   });
+
+  component("an unreadable fingerprint disables terminalization entirely", {
+    given: ["a fresh-looking refusal but a failed pre-submit capture", () => rejectionTail],
+    when: ["scanning with fingerprintOk false", (tail) =>
+      detectSlashTerminalRejection(tail, "/compact", { fingerprintOk: false })],
+    then: ["no terminal verdict without a trustworthy baseline", (hit) =>
+      expect(hit).toBeNull()],
+  });
 });
 
 feature("slash delivery with the rejection classifier", () => {
@@ -272,6 +280,38 @@ feature("slash delivery with the rejection classifier", () => {
       agent,
     })],
     then: ["the attempt is not terminalized by somebody else's rejection", ({ result, agent }) => {
+      expect(result.failed).toBeUndefined();
+      expect(result.delivered).toBe(true);
+      expect(agent.sends).toEqual(["/compact"]);
+      expect(agent.enters).toEqual([]);
+    }],
+  });
+
+  component("a failed pre-submit capture never lets a stale refusal terminalize", {
+    given: ["an agent whose fingerprint capture throws, then shows an old refusal", () => {
+      const agent = rejectingAgent([
+        "✖ Unrecognized command: /old",
+        "",
+        "› ",
+        "  gpt-5.1 high · 92% context left",
+      ].join("\n"));
+      const base = agent.capturePane;
+      let attempted = false;
+      agent.capturePane = async () => {
+        if (!attempted) {
+          attempted = true;
+          throw new Error("pane unreadable");
+        }
+        return base();
+      };
+      return agent;
+    }],
+    when: ["delivering /compact", async (agent) => ({
+      result: await sendSlashVerified(agent, "claw", 1, "/compact",
+        { settleMs: 0, sleep: async () => {} }),
+      agent,
+    })],
+    then: ["ordinary verification continues and the stale line closes nothing", ({ result, agent }) => {
       expect(result.failed).toBeUndefined();
       expect(result.delivered).toBe(true);
       expect(agent.sends).toEqual(["/compact"]);

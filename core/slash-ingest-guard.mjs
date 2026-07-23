@@ -90,14 +90,16 @@ export function classifyCodexSlashEcho({ prompt, snapshot }) {
  * counts only when it occurs more often after submit than before. A stale
  * "Unrecognized command: /old" already on screen can never close a fresh
  * /compact, and an identical refusal repeated by this attempt still counts
- * (occurrences increase). Without a fingerprint the check degenerates to
- * presence-only, so the delivery path always captures one.
+ * (occurrences increase). Without a READABLE fingerprint (capture failed)
+ * the classifier never terminalizes: an unverifiable baseline must not
+ * close a fresh attempt on stale bytes.
  *
  * WHAT: Checks the post-submit pane tail for a fresh explicit engine rejection.
  * WHY: Closes refused commands as not-ingested without ever trusting stale scrollback.
  */
-export function detectSlashTerminalRejection(paneText, command, { beforeText = "" } = {}) {
+export function detectSlashTerminalRejection(paneText, command, { beforeText = "", fingerprintOk = true } = {}) {
   if (!isShortSlashCommand(command)) return null;
+  if (!fingerprintOk) return null;
   const afterText = String(paneText || "");
   const before = String(beforeText || "");
   const occurrences = (text, line) => {
