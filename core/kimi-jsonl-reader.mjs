@@ -279,7 +279,7 @@ function groupKimiIntoTurns(records, { headless = false } = {}) {
   let current = null;
 
   for (const record of records) {
-    if (record?.type === "turn.prompt") {
+    if (record?.type === "turn.prompt" || record?.type === "turn.steer") {
       markPreviousComplete(turns, current);
       current = {
         timestamp: isoTime(record.time),

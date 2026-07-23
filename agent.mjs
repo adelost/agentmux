@@ -962,12 +962,12 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
     if (dialect === "codex") {
       const codex = extractFromCodexJsonl(dir, promptText);
-      return Boolean(codex?.items?.length);
+      return Boolean(codex?.items?.some((item) => item.type === "text" && item.content?.trim()));
     }
-    if (dialect === "kimi") return Boolean(kimiJournal.extract(dir, promptText)?.items?.length);
+    if (dialect === "kimi") return Boolean(kimiJournal.extract(dir, promptText)?.items?.some((item) => item.type === "text" && item.content?.trim()));
     if (dialect === "claude") {
       const claude = extractFromJsonl(dir, promptText);
-      return Boolean(claude?.items?.length);
+      return Boolean(claude?.items?.some((item) => item.type === "text" && item.content?.trim()));
     }
     return false;
   }

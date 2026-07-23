@@ -120,6 +120,19 @@ describe("Kimi Wire journal", () => {
         cursor,
       })).toBe(true);
       expect(isBusyFromKimiJsonl(fx.cwd, fx.options)).toBe(true);
+      appendFileSync(fx.wire, `${JSON.stringify({
+        type: "context.append_loop_event",
+        event: {
+          type: "content.part",
+          turnId: 2,
+          part: { type: "text", text: "STEER_REPLY" },
+        },
+        time: 3_100,
+      })}\n`);
+      expect(readLastTurnsKimi(fx.cwd, fx.options).turns.at(-1)).toMatchObject({
+        userPrompt: "first prompt",
+        items: [{ type: "text", content: "STEER_REPLY" }],
+      });
     } finally {
       fx.cleanup();
     }
