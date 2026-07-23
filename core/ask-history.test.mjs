@@ -154,6 +154,17 @@ feature("ask-history: build and filter entries", () => {
     }],
   });
 
+  unit("humanOnly removes inter-agent directives without hiding operator asks", {
+    given: ["one human ask and one agent brief", () => [
+      { prompt: "fixa NPC:erna", origin: "human", open: true, tsMs: 20 },
+      { prompt: "[from skydive:2] deploya", origin: "agent", open: true, tsMs: 10 },
+    ]],
+    when: ["filtering the default human view", (entries) =>
+      filterAskEntries(entries, { humanOnly: true, openOnly: true })],
+    then: ["only the user's ask remains", (entries) =>
+      expect(entries.map((entry) => entry.prompt)).toEqual(["fixa NPC:erna"])],
+  });
+
   unit("attachAskLineAnchors adds jsonl line numbers by timestamp + prompt", {
     given: ["one ask entry and a line map", () => {
       const entry = {
@@ -198,7 +209,7 @@ feature("ask-history: durable ledger join", () => {
     }],
   });
 
-  unit("a missing provider session is shown honestly as archived", {
+  unit("a missing provider session is shown honestly as unverified and unresolved", {
     when: ["joining an orphaned durable row", () => joinAskLedgerEntries({
       ledgerEntries: [{
         id: "ask-dead", ts: "2026-07-21T10:00:00.000Z",
@@ -207,18 +218,19 @@ feature("ask-history: durable ledger join", () => {
       }],
       liveEntries: [], nowMs: Date.parse("2026-07-22T10:00:00Z"),
     })],
-    then: ["the ask remains searchable with its dead pointer", (rows) => {
+    then: ["the ask remains in --open candidates with its dead pointer", (rows) => {
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({
-        status: "archived", open: false,
+        status: "unverified", open: true,
         sessionFile: "/deleted/session.jsonl", jsonlFile: null,
         prompt: "flytta in klockan i soluret",
+        origin: "human",
       });
     }],
   });
 
   unit("legacy live-only asks survive migration and summaries group every repo", {
-    given: ["one archived ledger ask plus one old live-only ask", () => joinAskLedgerEntries({
+    given: ["one unverified ledger ask plus one old live-only ask", () => joinAskLedgerEntries({
       ledgerEntries: [{
         id: "a", ts: "2026-07-22T09:00:00Z", agent: "lsrc", pane: 3,
         verbatim: "arkiverad", repo: "agentmux",
@@ -231,8 +243,8 @@ feature("ask-history: durable ledger join", () => {
     when: ["summarizing all repositories", (rows) => summarizeAskEntries(rows)],
     then: ["both repos and their honest states are counted", (summary) => {
       expect(summary).toEqual([
-        expect.objectContaining({ repo: "skyvw", total: 1, open: 1, archived: 0 }),
-        expect.objectContaining({ repo: "agentmux", total: 1, open: 0, archived: 1 }),
+        expect.objectContaining({ repo: "skyvw", total: 1, open: 1, unverified: 0 }),
+        expect.objectContaining({ repo: "agentmux", total: 1, open: 1, unverified: 1 }),
       ]);
     }],
   });

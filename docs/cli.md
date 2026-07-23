@@ -143,12 +143,20 @@ Use `--by-pane` when you want a post-mortem grouped by pane. Use plain
 open?" Delivery and pane hooks first append the exact UTF-8 prompt to
 `~/.agentmux/ask-ledger.jsonl`; provider session history is then joined only
 to enrich that durable identity with reply/status and line anchors. If a
-provider session was cleared, respawned, rotated, or reaped, the ask remains
-visible as `archived` with its former session pointer.
+provider session was cleared, respawned, rotated, or reaped before completion
+was observed, the ask remains visible as `unverified` and is included by
+`--open`; absence of history never pretends that work was completed.
+
+The first invocation after upgrading imports pre-ledger prompts from the
+existing durable delivery queue, writes a versioned migration marker, and
+prints the measured one-time cost. Later invocations read only the ask ledger.
+Human/operator asks are the default view. Use `--all-sources` when auditing
+inter-agent and automation directives too.
 
 ```bash
 amux asks
 amux asks --open
+amux asks --open --all-sources
 amux asks --since 2h
 amux asks claw --pane 3
 amux asks --grep "bridge"
@@ -156,9 +164,10 @@ amux asks --full --since 30d
 amux asks --all-repos --summary --since 30d
 ```
 
-The ledger and its renamed rotation archives are append-only and are not
-janitor inputs. Default mode joins only a bounded provider tail, so it is safe
-as an orientation command. Use `--full` only when you need exact live-history
+The ledger itself is append-only. Its renamed rotation archives and the
+delivery-backfill marker are not janitor inputs. Default mode joins only a
+bounded provider tail, so it is safe as an orientation command. Use `--full`
+when you need exact live-history
 answers or line anchors beyond that tail; it is no longer required to retain
 old prompts. `--all-repos` includes removed agents and `--summary` groups the
 selection for a fleet-wide overview.

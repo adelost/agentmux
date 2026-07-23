@@ -103,6 +103,11 @@ export function appendAskLedger(entry, {
     cwd: entry.cwd ? String(entry.cwd) : null,
     repo: entry.repo ? String(entry.repo) : String(entry.agent),
     deliveryId: entry.deliveryId ? String(entry.deliveryId) : null,
+    deliveryPath: entry.deliveryPath ? String(entry.deliveryPath) : null,
+    deliveryStatus: entry.deliveryStatus ? String(entry.deliveryStatus) : null,
+    origin: entry.origin ? String(entry.origin) : null,
+    sender: entry.sender ? String(entry.sender) : null,
+    backfilled: entry.backfilled === true,
   };
   normalized.id = String(entry.id || entryId(normalized));
 
@@ -190,6 +195,11 @@ export function coalesceAskLedger(entries, { hookMatchMs = 15 * 60 * 1000 } = {}
       sessionId: previous.sessionId || row.sessionId || null,
       cwd: previous.cwd || row.cwd || null,
       repo: previous.repo || row.repo || previous.agent,
+      deliveryPath: previous.deliveryPath || row.deliveryPath || null,
+      deliveryStatus: previous.deliveryStatus || row.deliveryStatus || null,
+      origin: previous.origin || row.origin || null,
+      sender: previous.sender || row.sender || null,
+      backfilled: previous.backfilled || row.backfilled || false,
     } : { ...row });
   }
 

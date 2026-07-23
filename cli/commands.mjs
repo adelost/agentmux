@@ -119,6 +119,7 @@ import {
   summarizeAskEntries,
 } from "../core/ask-history.mjs";
 import { readAskLedger } from "../core/ask-ledger.mjs";
+import { backfillAskLedgerFromDeliveryQueue } from "../core/ask-ledger-backfill.mjs";
 import { formatAskEntry } from "./ask-format.mjs";
 import {
   formatWorktreeDeps,
@@ -1233,10 +1234,16 @@ function attachDisplayedAskLineAnchors(rows) {
 
 async function cmdAsks(ctx, flags, positional = []) {
   if (flags.help || flags.h) {
-    console.log(`Usage: amux asks [agent] [--pane N] [--since 2h] [--grep REGEX] [--full] [--open] [--all-repos] [--summary]\n\nThe durable ask ledger is authoritative; live session history adds reply/status while available.\n--open shows only unresolved asks; omit it to search answered/done/archived history.\n--full scans exact live session history instead of only its bounded recent tail.\n--all-repos includes archived agents no longer present in the active config.\n--summary groups the selected rows by repository.\nExample: amux asks --all-repos --summary --since 30d`);
+    console.log(`Usage: amux asks [agent] [--pane N] [--since 2h] [--grep REGEX] [--full] [--open] [--all-sources] [--all-repos] [--summary]\n\nThe durable ask ledger is authoritative; live session history adds reply/status while available.\nHistorical delivery jobs are indexed automatically once, so pre-ledger asks remain visible.\nHuman/operator asks are the default; --all-sources also includes inter-agent and automation directives.\n--open shows open, working, partial, needs-you, and unverified asks.\n--full scans exact live session history instead of only its bounded recent tail.\n--all-repos includes archived agents no longer present in the active config.\n--summary groups the selected rows by repository.\nExample: amux asks --open --full --since 30d`);
     return;
   }
   const nowMs = Date.now();
+  let backfill = null;
+  if (typeof ctx.backfillAskLedger === "function") {
+    backfill = await ctx.backfillAskLedger();
+  } else if (typeof ctx.readAskLedger !== "function") {
+    backfill = backfillAskLedgerFromDeliveryQueue();
+  }
   // Read durable identity first. Provider histories below are an optional
   // status join and may disappear on respawn, clear, rotation, or janitor.
   const ledgerEntries = typeof ctx.readAskLedger === "function"
@@ -1353,6 +1360,7 @@ async function cmdAsks(ctx, flags, positional = []) {
     sinceMs: since ? since.getTime() : null,
     grep,
     openOnly: !!flags.open,
+    humanOnly: !flags["all-sources"],
     limit: flags.summary ? null : (flags.n || 40),
   });
   const rows = flags.full ? attachDisplayedAskLineAnchors(filteredRows) : filteredRows;
@@ -1361,19 +1369,23 @@ async function cmdAsks(ctx, flags, positional = []) {
   const filter = [
     `since=${sinceLabel}`,
     flags.open ? "open-only" : "all statuses",
+    flags["all-sources"] ? "all sources" : "human/operator",
     resolvedAgent ? `agent=${resolvedAgent}` : null,
     paneFilter != null ? `pane=${paneFilter}` : null,
   ].filter(Boolean).join(", ");
   console.log(`\nAsks (${mode}, ${filter})`);
+  if (backfill && !backfill.skipped && (backfill.imported || backfill.enriched)) {
+    console.log(`↻ indexed ${backfill.imported} historical asks + ${backfill.enriched} evidence updates once (${backfill.elapsedMs} ms); future runs use the ledger`);
+  }
   if (unavailableNative.length) console.log(`⚠ native history unavailable: ${unavailableNative.join(", ")}`);
   if (!rows.length) {
     console.log("(no asks match)");
     return;
   }
   if (flags.summary) {
-    console.log("\nrepo                           total  open  archived  answered");
+    console.log("\nrepo                           total  unresolved  unverified  closed");
     for (const group of summarizeAskEntries(rows)) {
-      console.log(`${group.repo.slice(0, 30).padEnd(30)} ${String(group.total).padStart(5)} ${String(group.open).padStart(5)} ${String(group.archived).padStart(9)} ${String(group.answered).padStart(9)}`);
+      console.log(`${group.repo.slice(0, 30).padEnd(30)} ${String(group.total).padStart(5)} ${String(group.open).padStart(11)} ${String(group.unverified).padStart(11)} ${String(group.closed).padStart(7)}`);
     }
     return;
   }
@@ -3684,6 +3696,7 @@ const FLAG_SPECS = {
     help: "boolean", h: "boolean",
     all: "boolean",
     "all-repos": "boolean",
+    "all-sources": "boolean",
     summary: "boolean",
     "per-pane": "number",
     help: "boolean",
