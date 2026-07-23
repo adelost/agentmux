@@ -45,6 +45,7 @@ import { runPendingFleetRestart } from "./core/fleet-restart.mjs";
 import { createDeliveryQueue } from "./core/delivery-queue.mjs";
 import { createDeliveryBroker } from "./core/delivery-broker.mjs";
 import { createPaneSleepWakeLifecycle } from "./core/pane-sleep-wake.mjs";
+import { createPaneSleepRepair } from "./core/pane-sleep-repair.mjs";
 import { findChannelForPane, listAgents, validateAgentPane } from "./cli/config.mjs";
 import { createNativeRuntimeClient } from "./core/native-runtime-client.mjs";
 import { createAgentRouter } from "./core/agent-router.mjs";
@@ -206,18 +207,36 @@ startMemoryGuard({
   },
 });
 
+const resolveSleepPane = (agentName, pane) => {
+  const configured = listAgents(AGENTS_YAML).find((entry) => entry.name === agentName);
+  const definition = configured?.panes?.[Number(pane)] || null;
+  return configured && definition
+    ? {
+      paneDir: join(configured.dir, ".agents", String(Number(pane))),
+      engine: /(?:^|\s)claude(?:\s|$)/u.test(String(definition.cmd || "")) ? "claude" : "unsupported",
+    }
+    : null;
+};
+
 const paneSleepWakeLifecycle = createPaneSleepWakeLifecycle({
-  resolvePane: (agentName, pane) => {
-    const configured = listAgents(AGENTS_YAML).find((entry) => entry.name === agentName);
-    const definition = configured?.panes?.[Number(pane)] || null;
-    return configured && definition
-      ? {
-        paneDir: join(configured.dir, ".agents", String(Number(pane))),
-        engine: /(?:^|\s)claude(?:\s|$)/u.test(String(definition.cmd || "")) ? "claude" : "unsupported",
-      }
-      : null;
-  },
+  resolvePane: resolveSleepPane,
+  processState: (agentName, pane) => tmuxAgent.paneProcessState(agentName, pane),
 });
+
+// Startup housekeeping for interrupted sleep records. A bridge stop mid-sleep
+// or mid-wake used to park the pane until its state file was deleted by hand.
+// Only records older than the repair TTL are re-judged, always against live
+// process and session truth; unclear panes stay parked and no process is ever
+// stopped or started here.
+const paneSleepRepairs = await createPaneSleepRepair({
+  resolvePane: resolveSleepPane,
+  processState: (agentName, pane) => tmuxAgent.paneProcessState(agentName, pane),
+}).sweep().catch(() => []);
+const repairedSleeps = paneSleepRepairs.filter((result) => result.action !== "hold");
+if (repairedSleeps.length) {
+  console.log(`[pane-sleep-repair] ${repairedSleeps.map((result) =>
+    `${result.state.agentName}:${result.state.pane} ${result.state.status} (${result.reason})`).join(", ")}`);
+}
 
 const deliveryBroker = createDeliveryBroker({
   agent,

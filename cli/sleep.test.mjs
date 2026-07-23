@@ -346,3 +346,146 @@ feature("candidate watch", () => {
     }],
   });
 });
+
+const STALE = NOW - 20 * 60 * 1000;
+
+function interruptedRecord(status, overrides = {}) {
+  return {
+    version: 1,
+    agentName: "lsrc",
+    pane: 3,
+    status,
+    stage: status,
+    sleepGeneration: 3,
+    sessionId: "after",
+    processGeneration: "pane:pid:start",
+    armedAt: STALE,
+    updatedAt: STALE,
+    ...overrides,
+  };
+}
+
+feature("interrupted sleep recovery", () => {
+  unit("a stale arming record over a live working pane clears and sleep refuses", {
+    given: ["a stale arming record and a busy pane", () => {
+      const fixture = successFixture();
+      writePaneSleepState(interruptedRecord("arming", {
+        stage: "pre-compact",
+        sleepGeneration: 1,
+      }), { rootDir: fixture.stateRoot });
+      fixture.deps.observe = vi.fn(async () => ({
+        ok: false,
+        reason: "active-or-unknown-turn",
+        facts: {},
+        identity: null,
+        processGeneration: null,
+        lastActivityMs: null,
+      }));
+      return fixture;
+    }],
+    when: ["attempting sleep", async (fixture) => {
+      await cmdSleep(fixture.ctx, "lsrc", 3, {}, fixture.deps);
+      return fixture;
+    }],
+    then: ["the record is awake, nothing was sent, and the pane was never slept", (fixture) => {
+      expect(readPaneSleepState("lsrc", 3, { rootDir: fixture.stateRoot })).toMatchObject({
+        status: "awake",
+        repairedFrom: "arming",
+      });
+      expect(fixture.slashCalls).toEqual([]);
+      expect(fixture.deps.exit).toHaveBeenCalledWith(1);
+      expect(errorSpy).toHaveBeenCalledWith("active-or-unknown-turn");
+      rmSync(fixture.stateRoot, { recursive: true, force: true });
+    }],
+  });
+
+  unit("a blocked pane that is provably asleep wakes under force", {
+    given: ["a blocked record and a stopped pane behind a refusing gate", () => {
+      const fixture = successFixture();
+      writePaneSleepState(interruptedRecord("blocked", {
+        blockedReason: "sleep-shell-unverified",
+      }), { rootDir: fixture.stateRoot });
+      fixture.deps.gate = async () => ({ ok: false, reason: "memory-critical" });
+      let started = false;
+      fixture.ctx.agent.ensureReady = vi.fn(async () => { started = true; });
+      fixture.ctx.agent.paneProcessState = vi.fn(async () => (started
+        ? { running: true, shell: false, command: "node" }
+        : { running: false, shell: true, command: "bash" }));
+      return fixture;
+    }],
+    when: ["force waking", async (fixture) => {
+      await cmdWake(fixture.ctx, "lsrc", 3, { force: true }, fixture.deps);
+      return fixture;
+    }],
+    then: ["the exact session starts and the record ends awake", (fixture) => {
+      expect(fixture.ctx.agent.ensureReady).toHaveBeenCalledOnce();
+      expect(readPaneSleepState("lsrc", 3, { rootDir: fixture.stateRoot })).toMatchObject({
+        status: "awake",
+        sleepGeneration: 3,
+      });
+      expect(fixture.deps.exit).not.toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalledWith("WAKE lsrc:3 generation=3");
+      rmSync(fixture.stateRoot, { recursive: true, force: true });
+    }],
+  });
+
+  unit("a blocked pane with a live active process stays refused under force", {
+    given: ["a blocked record and a running pane", () => {
+      const fixture = successFixture();
+      writePaneSleepState(interruptedRecord("blocked", {
+        blockedReason: "sleep-shell-unverified",
+      }), { rootDir: fixture.stateRoot });
+      fixture.deps.gate = async () => ({ ok: true });
+      fixture.ctx.agent.paneProcessState = vi.fn(async () => ({
+        running: true,
+        shell: false,
+        command: "node",
+      }));
+      return fixture;
+    }],
+    when: ["force waking", async (fixture) => {
+      await cmdWake(fixture.ctx, "lsrc", 3, { force: true }, fixture.deps);
+      return fixture;
+    }],
+    then: ["wake refuses and the record stays blocked", (fixture) => {
+      expect(fixture.ctx.agent.ensureReady).not.toHaveBeenCalled();
+      expect(fixture.deps.exit).toHaveBeenCalledWith(1);
+      expect(errorSpy).toHaveBeenCalledWith("wake-refused:sleep-state-blocked-pane-awake");
+      expect(readPaneSleepState("lsrc", 3, { rootDir: fixture.stateRoot })).toMatchObject({
+        status: "blocked",
+        blockedReason: "sleep-shell-unverified",
+      });
+      rmSync(fixture.stateRoot, { recursive: true, force: true });
+    }],
+  });
+
+  unit("a stale wake_pending record over a stopped pane re-arms as asleep", {
+    given: ["a stuck wake_pending record and a stopped pane", () => {
+      const fixture = successFixture();
+      writePaneSleepState(interruptedRecord("wake_pending", {
+        stage: "wake-intent",
+        wakeRequestedAt: STALE,
+      }), { rootDir: fixture.stateRoot });
+      fixture.ctx.agent.paneProcessState = vi.fn(async () => ({
+        running: false,
+        shell: true,
+        command: "bash",
+      }));
+      return fixture;
+    }],
+    when: ["attempting sleep", async (fixture) => {
+      await cmdSleep(fixture.ctx, "lsrc", 3, {}, fixture.deps);
+      return fixture;
+    }],
+    then: ["the record lands asleep and sleep refuses without pane writes", (fixture) => {
+      expect(readPaneSleepState("lsrc", 3, { rootDir: fixture.stateRoot })).toMatchObject({
+        status: "asleep",
+        repairedFrom: "wake_pending",
+      });
+      expect(fixture.slashCalls).toEqual([]);
+      expect(fixture.deps.exit).toHaveBeenCalledWith(1);
+      expect(errorSpy).toHaveBeenCalledWith("sleep-state-asleep");
+      rmSync(fixture.stateRoot, { recursive: true, force: true });
+    }],
+  });
+});
