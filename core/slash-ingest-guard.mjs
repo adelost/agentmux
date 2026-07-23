@@ -44,18 +44,26 @@ export function isShortSlashCommand(text) {
 }
 
 /**
- * Fail-open for anything but a proven non-empty mismatch: a hidden or empty
- * composer cannot disprove the paste (Ratatui repaints tear), so only
- * visible differing bytes veto the submit. The verdict never clears or edits
- * composer text; ownership stays with the durable delivery fence.
+ * Fail-closed for short slash commands: their composer rendering fits the
+ * exact scraper, so no exact visible echo means no submit. A hidden or empty
+ * composer blocks with kind "unverifiable" and the job stays pending for a
+ * zoomed re-read instead of gambling Enter on unproven bytes. The verdict
+ * never clears or edits composer text; ownership stays with the durable
+ * delivery fence.
  *
  * WHAT: Compares the visible Codex composer against intended slash bytes.
- * WHY: Prevents a corrupted or foreign draft from ever reaching Enter.
+ * WHY: Prevents a corrupted, foreign, or unproven draft from reaching Enter.
  */
 export function classifyCodexSlashEcho({ prompt, snapshot }) {
   if (!isShortSlashCommand(prompt)) return { blocked: false, kind: "not-applicable" };
   const composer = codexComposerText(snapshot);
-  if (composer === null || composer.trim() === "") return { blocked: false, kind: "unverifiable" };
+  if (composer === null || composer.trim() === "") {
+    return {
+      blocked: true,
+      kind: "unverifiable",
+      reason: `Codex slash echo unverifiable: no exact visible echo of "${prompt.trim().slice(0, 60)}" in the composer; submit refused (no Enter), draft left untouched`,
+    };
+  }
   const intended = normalizeIdentity(prompt.trim());
   const visible = normalizeIdentity(composer);
   if (visible === intended) return { blocked: false, kind: "match" };
@@ -77,26 +85,38 @@ export function classifyCodexSlashEcho({ prompt, snapshot }) {
 }
 
 /**
- * The composer region is scraped right after our submit, so a fresh refusal
- * line ("Unrecognized command: /compat") belongs to this attempt. It is
- * terminal truth: the engine parsed and refused the payload, which no rescue
- * Enter or composer re-match can undo.
+ * A refusal line is terminal truth only when it is NEW for this attempt: the
+ * caller fingerprints the pane tail before submit, and a candidate line
+ * counts only when it occurs more often after submit than before. A stale
+ * "Unrecognized command: /old" already on screen can never close a fresh
+ * /compact, and an identical refusal repeated by this attempt still counts
+ * (occurrences increase). Without a fingerprint the check degenerates to
+ * presence-only, so the delivery path always captures one.
  *
- * WHAT: Checks the post-submit pane tail for an explicit engine rejection.
- * WHY: Closes refused commands as not-ingested instead of triggering blind rescue.
+ * WHAT: Checks the post-submit pane tail for a fresh explicit engine rejection.
+ * WHY: Closes refused commands as not-ingested without ever trusting stale scrollback.
  */
-export function detectSlashTerminalRejection(paneText, command) {
+export function detectSlashTerminalRejection(paneText, command, { beforeText = "" } = {}) {
   if (!isShortSlashCommand(command)) return null;
-  const lines = String(paneText || "")
+  const afterText = String(paneText || "");
+  const before = String(beforeText || "");
+  const occurrences = (text, line) => {
+    let count = 0;
+    for (const row of text.split("\n")) if (row.trim() === line) count += 1;
+    return count;
+  };
+  const hit = afterText
     .split("\n")
     .slice(-REJECTION_WINDOW_LINES)
-    .filter((line) => line.trim());
-  const hit = lines.find((line) => ENGINE_REJECTION_RE.test(line));
+    .map((line) => line.trim())
+    .filter((line) => line
+      && ENGINE_REJECTION_RE.test(line)
+      && occurrences(afterText, line) > occurrences(before, line))[0];
   if (!hit) return null;
   return {
     rejected: true,
-    line: hit.trim().slice(0, 160),
-    reason: `engine rejected the slash command after submit (pane shows "${hit.trim().slice(0, 80)}"); classified not-ingested, no blind retry of the same payload`,
+    line: hit.slice(0, 160),
+    reason: `engine rejected the slash command after submit (pane shows "${hit.slice(0, 80)}"); classified not-ingested, no blind retry of the same payload`,
   };
 }
 

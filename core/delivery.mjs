@@ -211,6 +211,10 @@ async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
   );
   const receiptOptions = receiptCursor ? { cursor: receiptCursor } : { notBeforeMs };
   await agent.dismissBlockingPrompt(target).catch(() => {});
+  // Fingerprint the tail before our submit so a stale refusal line already on
+  // screen can never be attributed to this attempt. The authoritative Claude
+  // receipt path never scrapes the pane, so it takes no fingerprint.
+  const beforeTail = hasAuthoritativeReceipt ? "" : await captureComposerTail(agent, agentName, pane);
   await agent.sendOnly(agentName, claudeCmd, pane,
     { knownDrafted, onPasteStarted, onDrafted, onSubmitting, onSubmitted });
 
@@ -233,8 +237,9 @@ async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
     // composer and was refused. Checking it before the needle match matters,
     // because the refusal line itself echoes the needle ("Unrecognized
     // command: /compat. Did you mean /compact?") and fed 24 blind retries
-    // in the 2026-07-22 incident.
-    const rejection = detectSlashTerminalRejection(paneTail, claudeCmd);
+    // in the 2026-07-22 incident. The before-submit fingerprint binds the
+    // verdict to a refusal line that is new for this attempt.
+    const rejection = detectSlashTerminalRejection(paneTail, claudeCmd, { beforeText: beforeTail });
     if (rejection) {
       return { delivered: false, rescues: attempt, failed: "not-ingested", reason: rejection.reason };
     }

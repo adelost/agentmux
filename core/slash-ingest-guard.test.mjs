@@ -40,9 +40,10 @@ const rejectionTail = [
   "  gpt-5.1 high · 92% context left",
 ].join("\n");
 
-function rejectingAgent(tail) {
+function rejectingAgent(tail, { before } = {}) {
   const sends = [];
   const enters = [];
+  let captures = 0;
   return {
     sends,
     enters,
@@ -56,7 +57,12 @@ function rejectingAgent(tail) {
       return { submitted: true };
     },
     sendEnter: async () => { enters.push("enter"); },
-    capturePane: async () => tail,
+    // The first capture is the pre-submit fingerprint; model it separately
+    // when the refusal only appears after our submit.
+    capturePane: async () => {
+      captures += 1;
+      return captures === 1 && before !== undefined ? before : tail;
+    },
   };
 }
 
@@ -105,22 +111,34 @@ feature("classifyCodexSlashEcho: hard pre-submit echo gate", () => {
     }],
   });
 
-  component("unverifiable and matching composers never veto", {
+  component("an unverifiable composer vetoes Enter; only an exact match passes", {
     given: ["hidden, empty, and exact composer frames", () => ({
       prompt: "/compact",
       hidden: "codex transcript\n• Working on it\n  no composer glyph here",
       empty: codexScreen(""),
       exact: codexScreen("/compact"),
     })],
-    when: ["classifying each frame", (ctx) => ({
-      hidden: classifyCodexSlashEcho({ prompt: ctx.prompt, snapshot: ctx.hidden }),
-      empty: classifyCodexSlashEcho({ prompt: ctx.prompt, snapshot: ctx.empty }),
-      exact: classifyCodexSlashEcho({ prompt: ctx.prompt, snapshot: ctx.exact }),
-    })],
-    then: ["only a proven non-empty mismatch may block", ({ hidden, empty, exact }) => {
-      expect(hidden).toEqual({ blocked: false, kind: "unverifiable" });
-      expect(empty).toEqual({ blocked: false, kind: "unverifiable" });
-      expect(exact).toEqual({ blocked: false, kind: "match" });
+    when: ["running the exact pre-submit sequence for each frame", async (ctx) => {
+      const run = async (snapshot) => {
+        const exactDraft = await waitForExactCodexDraftEcho({
+          prompt: ctx.prompt,
+          captureScreen: async () => snapshot,
+          sleep: async () => {},
+          timeoutMs: 0,
+        });
+        const echo = classifyCodexSlashEcho({ prompt: ctx.prompt, snapshot });
+        return { exactDraft, echo, entered: exactDraft || !echo.blocked ? ["Enter"] : [] };
+      };
+      return { hidden: await run(ctx.hidden), empty: await run(ctx.empty), exact: await run(ctx.exact) };
+    }],
+    then: ["no exact visible echo means no submit", ({ hidden, empty, exact }) => {
+      expect(hidden.echo).toMatchObject({ blocked: true, kind: "unverifiable" });
+      expect(hidden.echo.reason).toContain("no Enter");
+      expect(hidden.entered).toEqual([]);
+      expect(empty.echo).toMatchObject({ blocked: true, kind: "unverifiable" });
+      expect(empty.entered).toEqual([]);
+      expect(exact.echo).toEqual({ blocked: false, kind: "match" });
+      expect(exact.entered).toEqual(["Enter"]);
     }],
   });
 
@@ -170,12 +188,62 @@ feature("detectSlashTerminalRejection: explicit engine refusal", () => {
     when: ["scanning", (tail) => detectSlashTerminalRejection(tail, "/compact")],
     then: ["stale scrollback cannot close a fresh attempt", (hit) => expect(hit).toBeNull()],
   });
+
+  component("a stale rejection already on screen cannot close a fresh attempt", {
+    given: ["a tail whose visible refusal predates this submit (the review repro)", () => ({
+      before: [
+        "✖ Unrecognized command: /old",
+        "",
+        "› ",
+        "  gpt-5.1 high · 92% context left",
+      ].join("\n"),
+      after: [
+        "✖ Unrecognized command: /old",
+        "",
+        "› /compact",
+        "  gpt-5.1 high · 92% context left",
+      ].join("\n"),
+    })],
+    when: ["scanning with the pre-submit fingerprint", (ctx) =>
+      detectSlashTerminalRejection(ctx.after, "/compact", { beforeText: ctx.before })],
+    then: ["the already-present line is never attributed to this attempt", (hit) =>
+      expect(hit).toBeNull()],
+  });
+
+  component("an identical refusal from a previous job does not reclose, but a fresh repeat does", {
+    given: ["the same refusal text seen once before submit", () => ({
+      before: rejectionTail,
+      onceAfter: rejectionTail,
+      twiceAfter: `${rejectionTail}\n✖ Unrecognized command: /compat. Did you mean /compact?`,
+    })],
+    when: ["scanning both after-frames against the fingerprint", (ctx) => ({
+      same: detectSlashTerminalRejection(ctx.onceAfter, "/compact", { beforeText: ctx.before }),
+      repeated: detectSlashTerminalRejection(ctx.twiceAfter, "/compact", { beforeText: ctx.before }),
+    })],
+    then: ["occurrences must increase for this attempt to own the refusal", ({ same, repeated }) => {
+      expect(same).toBeNull();
+      expect(repeated.rejected).toBe(true);
+    }],
+  });
+
+  component("a fresh rejection after a clean fingerprint is still terminal", {
+    given: ["a pane that showed a plain composer before submit", () => ({
+      before: codexScreen("/compact"),
+      after: rejectionTail,
+    })],
+    when: ["scanning", (ctx) =>
+      detectSlashTerminalRejection(ctx.after, "/compact", { beforeText: ctx.before })],
+    then: ["the new refusal line closes the attempt as not-ingested", (hit) => {
+      expect(hit.rejected).toBe(true);
+      expect(hit.reason).toContain("not-ingested");
+    }],
+  });
 });
 
 feature("slash delivery with the rejection classifier", () => {
   component("a terminal rejection closes the attempt without any rescue Enter", {
     given: ["an agent whose engine refuses the submitted command", () =>
-      rejectingAgent(rejectionTail)],
+      rejectingAgent(rejectionTail, { before: codexScreen("/compact") })],
     when: ["delivering /compact", async (agent) => ({
       result: await sendSlashVerified(agent, "claw", 1, "/compact",
         { settleMs: 0, sleep: async () => {} }),
@@ -185,6 +253,27 @@ feature("slash delivery with the rejection classifier", () => {
       expect(result.delivered).toBe(false);
       expect(result.failed).toBe("not-ingested");
       expect(result.reason).toContain("engine rejected");
+      expect(agent.sends).toEqual(["/compact"]);
+      expect(agent.enters).toEqual([]);
+    }],
+  });
+
+  component("a stale refusal on screen never closes a fresh delivery", {
+    given: ["an agent whose pane shows an old unrelated refusal before and after submit", () =>
+      rejectingAgent([
+        "✖ Unrecognized command: /old",
+        "",
+        "› ",
+        "  gpt-5.1 high · 92% context left",
+      ].join("\n"))],
+    when: ["delivering /compact", async (agent) => ({
+      result: await sendSlashVerified(agent, "claw", 1, "/compact",
+        { settleMs: 0, sleep: async () => {} }),
+      agent,
+    })],
+    then: ["the attempt is not terminalized by somebody else's rejection", ({ result, agent }) => {
+      expect(result.failed).toBeUndefined();
+      expect(result.delivered).toBe(true);
       expect(agent.sends).toEqual(["/compact"]);
       expect(agent.enters).toEqual([]);
     }],
@@ -236,7 +325,7 @@ feature("broker closure and restart safety", () => {
       const queue = createDeliveryQueue({ rootDir });
       const job = queue.enqueue({ agentName: "ai", pane: 5, text: "/compact" });
       const notices = [];
-      const agent = rejectingAgent(rejectionTail);
+      const agent = rejectingAgent(rejectionTail, { before: codexScreen("/compact") });
       const broker = createDeliveryBroker({
         agent,
         queue,
