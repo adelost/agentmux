@@ -79,7 +79,8 @@ const AGENTS_YAML = process.env.AGENTS_YAML || resolve(__dir, "agents.yaml");
 const AGENTMUX_YAML = configSources.agentmuxYaml.path;
 const TIMEOUT = parseInt(process.env.TIMEOUT_S || "600") * 1000;
 const WHISPER_URL = process.env.WHISPER_URL || "http://localhost:2022/v1/audio/transcriptions";
-const SHELL_PATH = process.env.SHELL_PATH || `${process.env.HOME}/bin:${process.env.PATH}`;
+const SHELL_PATH = process.env.SHELL_PATH
+  || `${process.env.HOME}/bin:${process.env.HOME}/.local/bin:${process.env.PATH}`;
 // Keep the bridge on the same canonical server as the amux CLI. A divergent
 // default made model-watch observe Codex through jsonl but send Escape/model
 // keystrokes to a nonexistent socket.
