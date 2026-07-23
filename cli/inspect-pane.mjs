@@ -101,7 +101,7 @@ export async function inspectPane(ctx, agent, pane) {
       // Kimi's Wire journal lives in the Kimi home, not the pane dir, so the
       // mtime overlay below can never see a quiet thinking phase. The Wire
       // busy state is the same truth delivery uses — ps agrees by construction.
-      status = kimiObservedStatus(status, paneDir);
+      status = kimiObservedStatus(status, paneDir, { liveCommand: pane.command });
     } else {
       const mtimeMs = latestAlternateMtime(agent?.panes?.[pane.index]?.cmd, paneDir)
         || latestJsonlMtime(paneDir);

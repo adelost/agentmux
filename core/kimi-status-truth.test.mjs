@@ -14,13 +14,13 @@ import { kimiObservedStatus } from "./kimi-status-truth.mjs";
 
 const root = () => join(tmpdir(), `amux-kimi-status-${process.pid}-${Math.random().toString(36).slice(2)}`);
 
-// A frozen skydive:10 frame: thinking footer, no Claude/Codex working anchor.
+// A frozen skydive:10 frame: thinking footer, no Claude/Codex working anchor
+// and no readable composer prompt, exactly the incident's unknown read.
 const FROZEN_THINKING = [
   "  some earlier answer text",
   "",
   "⠦ thinking...",
   "K3 thinking: max",
-  "> ",
 ].join("\n");
 
 function harness(wireEvents) {
@@ -60,14 +60,31 @@ feature("kimi observed status: one busy truth for ps and delivery", () => {
     given: ["a frozen thinking frame and a busy Wire journal", () => harness(BUSY_WIRE)],
     when: ["reading the screen status and the observed status", (ctx) => ({
       screen: detectPaneStatus(FROZEN_THINKING),
-      observed: kimiObservedStatus(detectPaneStatus(FROZEN_THINKING), ctx.paneDir, ctx.options),
+      observed: kimiObservedStatus(detectPaneStatus(FROZEN_THINKING), ctx.paneDir, {
+        ...ctx.options,
+        liveCommand: "kimi-code",
+      }),
       delivery: isBusyFromKimiJsonl(ctx.paneDir, ctx.options),
       cleanup: () => rmSync(ctx.home, { recursive: true, force: true }),
     })],
-    then: ["the screen fails as in the incident, the journal truth agrees with delivery", (r) => {
-      expect(r.screen).not.toBe("working"); // the genuine incident failure, proven
+    then: ["the screen reads exactly unknown as in the incident, the journal agrees with delivery", (r) => {
+      expect(r.screen).toBe("unknown"); // the genuine incident failure, proven
       expect(r.delivery).toBe(true);
       expect(r.observed).toBe("working");
+      r.cleanup();
+    }],
+  });
+
+  component("a crashed Kimi with a busy journal and a bash pane is never working", {
+    given: ["a busy leftover Wire journal but a pane that fell back to bash", () => harness(BUSY_WIRE)],
+    when: ["observing with the shell process as live command", (ctx) => ({
+      observed: kimiObservedStatus("unknown", ctx.paneDir, { ...ctx.options, liveCommand: "bash" }),
+      delivery: isBusyFromKimiJsonl(ctx.paneDir, ctx.options),
+      cleanup: () => rmSync(ctx.home, { recursive: true, force: true }),
+    })],
+    then: ["no live Kimi process may borrow the journal busy state", (r) => {
+      expect(r.delivery).toBe(true); // the leftover journal really is busy
+      expect(r.observed).toBe("unknown");
       r.cleanup();
     }],
   });

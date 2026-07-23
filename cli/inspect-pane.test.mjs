@@ -107,4 +107,31 @@ feature("inspectPane kimi overlay", () => {
       expect(result.status).not.toBe("working");
     }],
   });
+
+  component("a crashed kimi pane (bash process) with a busy leftover journal is not working", {
+    given: ["a configured kimi pane whose process died to bash", () => {
+      const agentDir = join(root(), "agent");
+      const workDir = join(agentDir, ".agents", "0");
+      const { home } = kimiHome(workDir, [
+        { type: "turn.prompt", prompt: "jobba" },
+        { type: "context.append_loop_event", event: { type: "step.begin" } },
+      ]);
+      process.env.KIMI_CODE_HOME = home;
+      return { home, agentDir };
+    }],
+    when: ["inspecting the pane", async (ctx) => {
+      const agent = { name: "skydive", dir: ctx.agentDir, panes: [{ cmd: "kimi --resume" }] };
+      const pane = { index: 0, command: "bash" };
+      const ctxFake = { agent: { capturePane: async () => "$ " } };
+      try {
+        return await inspectPane(ctxFake, agent, pane);
+      } finally {
+        delete process.env.KIMI_CODE_HOME;
+        rmSync(ctx.home, { recursive: true, force: true });
+      }
+    }],
+    then: ["the leftover busy journal cannot resurrect a dead pane", (result) => {
+      expect(result.status).not.toBe("working");
+    }],
+  });
 });
