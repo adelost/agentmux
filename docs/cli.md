@@ -153,6 +153,13 @@ prints the measured one-time cost. Later invocations read only the ask ledger.
 Human/operator asks are the default view. Use `--all-sources` when auditing
 inter-agent and automation directives too.
 
+Whenever the live-history join proves an ask `done` or `answered`, that
+terminal receipt and its short reply evidence are appended to the ledger
+before rendering. Later compaction, respawn, and janitor passes therefore
+cannot turn known-complete work back into `unverified`. Pre-ledger sessions
+whose reply bytes were already trimmed remain honestly `unverified`; the
+migration never fabricates completion.
+
 ```bash
 amux asks
 amux asks --open

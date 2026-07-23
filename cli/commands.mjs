@@ -118,7 +118,7 @@ import {
   joinAskLedgerEntries,
   summarizeAskEntries,
 } from "../core/ask-history.mjs";
-import { readAskLedger } from "../core/ask-ledger.mjs";
+import { persistAskCompletionEvidence, readAskLedger } from "../core/ask-ledger.mjs";
 import { backfillAskLedgerFromDeliveryQueue } from "../core/ask-ledger-backfill.mjs";
 import { formatAskEntry } from "./ask-format.mjs";
 import {
@@ -1356,6 +1356,14 @@ async function cmdAsks(ctx, flags, positional = []) {
     liveEntries: entries,
     nowMs,
   });
+  if (typeof ctx.persistAskResolutions === "function") {
+    await ctx.persistAskResolutions({ ledgerEntries: selectedLedger, joinedEntries });
+  } else if (typeof ctx.readAskLedger !== "function") {
+    persistAskCompletionEvidence({
+      ledgerEntries: selectedLedger,
+      joinedEntries,
+    });
+  }
   const filteredRows = filterAskEntries(joinedEntries, {
     sinceMs: since ? since.getTime() : null,
     grep,

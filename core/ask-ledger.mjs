@@ -108,6 +108,12 @@ export function appendAskLedger(entry, {
     origin: entry.origin ? String(entry.origin) : null,
     sender: entry.sender ? String(entry.sender) : null,
     backfilled: entry.backfilled === true,
+    completionStatus: entry.completionStatus ? String(entry.completionStatus) : null,
+    completionReply: entry.completionReply ? String(entry.completionReply) : null,
+    completionAt: entry.completionAt ? String(entry.completionAt) : null,
+    completionSessionFile: entry.completionSessionFile
+      ? String(entry.completionSessionFile)
+      : null,
   };
   normalized.id = String(entry.id || entryId(normalized));
 
@@ -182,6 +188,38 @@ export function readAskLedger({ path = defaultAskLedgerPath(), readFile = null }
   return coalesceAskLedger(rows);
 }
 
+const PERSISTABLE_COMPLETION_STATUSES = new Set(["done", "answered"]);
+
+/** WHAT: Freezes live terminal ask evidence into the durable ledger. WHY: A later compact/respawn must not turn known-complete work back into unknown history. */
+export function persistAskCompletionEvidence({
+  ledgerEntries = [],
+  joinedEntries = [],
+  path = defaultAskLedgerPath(),
+  recordAsk = appendAskLedger,
+  now = () => Date.now(),
+} = {}) {
+  const byId = new Map(ledgerEntries.map((entry) => [entry.id, entry]));
+  let persisted = 0;
+  for (const row of joinedEntries) {
+    if (!row?.ledgerId
+        || !row.jsonlFile
+        || !PERSISTABLE_COMPLETION_STATUSES.has(row.status)) continue;
+    const ledger = byId.get(row.ledgerId);
+    if (!ledger || ledger.completionStatus) continue;
+    recordAsk({
+      ...ledger,
+      id: ledger.id,
+      completionStatus: row.status,
+      completionReply: row.replyPreview || row.reply || "",
+      completionAt: row.endTimestamp || row.timestamp || new Date(now()).toISOString(),
+      completionSessionFile: row.jsonlFile,
+    }, { path, now });
+    ledger.completionStatus = row.status;
+    persisted++;
+  }
+  return persisted;
+}
+
 // Delivery owns identity; the matching hook contributes its concrete session
 // pointer. Direct typed prompts remain standalone hook rows.
 /** WHAT: Maps duplicate producer observations to one ask. WHY: Keeps delivery and pane-hook capture from rendering duplicates. */
@@ -200,6 +238,12 @@ export function coalesceAskLedger(entries, { hookMatchMs = 15 * 60 * 1000 } = {}
       origin: previous.origin || row.origin || null,
       sender: previous.sender || row.sender || null,
       backfilled: previous.backfilled || row.backfilled || false,
+      completionStatus: previous.completionStatus || row.completionStatus || null,
+      completionReply: previous.completionReply || row.completionReply || null,
+      completionAt: previous.completionAt || row.completionAt || null,
+      completionSessionFile: previous.completionSessionFile
+        || row.completionSessionFile
+        || null,
     } : { ...row });
   }
 
