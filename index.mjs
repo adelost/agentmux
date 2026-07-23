@@ -17,6 +17,7 @@ import { promisify } from "util";
 import { readFileSync, existsSync } from "fs";
 import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { homedir } from "os";
 import { parseEnv, downloadBuffer } from "./lib.mjs";
 import { createAgent, ensureAgentHints, HINTS_VERSION } from "./agent.mjs";
 import { createAttachmentHandler } from "./attachments.mjs";
@@ -49,6 +50,7 @@ import { createPaneSleepRepair } from "./core/pane-sleep-repair.mjs";
 import { findChannelForPane, listAgents, validateAgentPane } from "./cli/config.mjs";
 import { createNativeRuntimeClient } from "./core/native-runtime-client.mjs";
 import { createAgentRouter } from "./core/agent-router.mjs";
+import { pinRuntimeExecutable } from "./core/runtime-helper.mjs";
 import { cmdSleepWatch } from "./cli/sleep.mjs";
 import { createAudioOutbox } from "./core/audio-outbox.mjs";
 
@@ -90,6 +92,10 @@ const STATE_FILE = process.env.STATE_FILE || "/tmp/agentmux-state.json";
 const VOICE_PWA_PORT = parseInt(process.env.VOICE_PWA_PORT || "8080");
 const VOICE_PWA_HOST = process.env.VOICE_PWA_HOST || "127.0.0.1";
 const AMUX_REACTIVE_POKE = process.env.AMUX_REACTIVE_POKE === "1";
+const TRANSCRIBE_SCRIPT = pinRuntimeExecutable({
+  sourcePath: process.env.TRANSCRIBE_SCRIPT || resolve(__dir, "bin/transcribe-whisper.sh"),
+  runtimeRoot: resolve(homedir(), ".agentmux/runtime/helpers"),
+}).path;
 
 if (!TOKEN) {
   console.error(`Set DISCORD_TOKEN in ${configSources.envFile.path} (source: ${configSources.envFile.source})`);
@@ -168,7 +174,7 @@ await runPendingFleetRestart({
 });
 const attachments = createAttachmentHandler({
   run,
-  transcribeScript: process.env.TRANSCRIBE_SCRIPT || resolve(__dir, "bin/transcribe-whisper.sh"),
+  transcribeScript: TRANSCRIBE_SCRIPT,
   downloadBuffer,
 });
 const tts = createTTS({ run, state: appState, voice: TTS_VOICE });
@@ -446,7 +452,7 @@ const voicePwa = createVoicePWA({
   agent,
   deliveryBroker,
   agentsYamlPath: AGENTS_YAML,
-  transcribeScript: process.env.TRANSCRIBE_SCRIPT || resolve(__dir, "bin/transcribe-whisper.sh"),
+  transcribeScript: TRANSCRIBE_SCRIPT,
   run,
   ttsVoice: TTS_VOICE,
   mirror: { send: (channelId, text) => discord.send(channelId, text) },
