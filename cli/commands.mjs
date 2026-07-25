@@ -308,7 +308,7 @@ const cutoverModelAndEffort = async (ctx, target, paneSpec) => {
   return {
     model: context?.model || commandModel
       || (paneSpec.engine === "claude" ? source.claudeModel : source.codexModel)
-      || (paneSpec.engine === "claude" ? "claude-opus-4-8" : "gpt-5.6-sol"),
+      || (paneSpec.engine === "claude" ? "claude-opus-5" : "gpt-5.6-sol"),
     effort: context?.effort || source.effort || (paneSpec.engine === "codex" ? "xhigh" : "medium"),
     inferred: !context?.model || !context?.effort,
   };

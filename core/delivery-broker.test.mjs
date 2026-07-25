@@ -2136,7 +2136,7 @@ feature("single-writer delivery broker", () => {
       const agent = acceptingAgent();
       agent.waitForSlashReceipt = async (_name, _pane, text) => {
         receiptTexts.push(text);
-        return text === "/model claude-opus-4-8";
+        return text === "/model claude-opus-5";
       };
       const broker = createDeliveryBroker({ agent, queue, notify: async () => {} });
       return { rootDir, queue, job, agent, receiptTexts, broker };
@@ -2144,7 +2144,7 @@ feature("single-writer delivery broker", () => {
     when: ["the replacement broker checks the authoritative receipt", ({ broker }) =>
       broker.kickTarget("claw", 2)],
     then: ["the rewritten command identity acknowledges without a duplicate write", (_, ctx) => {
-      expect(ctx.receiptTexts).toEqual(["/model claude-opus-4-8"]);
+      expect(ctx.receiptTexts).toEqual(["/model claude-opus-5"]);
       expect(ctx.agent.sends).toHaveLength(0);
       expect(ctx.queue.read("claw", 2, ctx.job.id).status).toBe("acknowledged");
       rmSync(ctx.rootDir, { recursive: true, force: true });

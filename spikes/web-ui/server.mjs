@@ -71,7 +71,7 @@ const MESSAGE_QUEUE_MAX_PER_AGENT = 100;
 const QUOTA_CACHE_MS = 60 * 1_000;
 
 const DEFAULT_MODELS = Object.freeze({
-  claude: ["claude-opus-4-8", "fable", "sonnet", "haiku"],
+  claude: ["claude-opus-5", "fable", "sonnet", "haiku"],
   codex: ["gpt-5.6-sol"],
 });
 const DEFAULT_EFFORTS = Object.freeze({

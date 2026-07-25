@@ -1,8 +1,8 @@
-/** Exact fleet default. Never use the moving `opus` alias here. */
-export const DEFAULT_CLAUDE_MODEL = "claude-opus-4-8";
+/** WHAT: Defines the fleet default as an exact Claude model. WHY: Prevents upstream alias drift across pane recovery. */
+export const DEFAULT_CLAUDE_MODEL = "claude-opus-5";
 
 const MODEL_ALIASES = {
-  opus: "claude-opus-4-8",
+  opus: "claude-opus-5",
 };
 
 /** WHAT: Resolves one Claude launch model. WHY: Keeps aliases and status metadata from changing recovery identity. */
