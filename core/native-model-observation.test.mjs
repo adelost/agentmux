@@ -10,7 +10,7 @@ import {
 describe("native model observation", () => {
   it("treats Claude aliases as the requested model, not as a fallback", () => {
     expect(modelMatchesRequest("fable", "claude-fable-5")).toBe(true);
-    expect(modelMatchesRequest("opus", "claude-opus-4-8")).toBe(true);
+    expect(modelMatchesRequest("opus", "claude-opus-5")).toBe(true);
     expect(modelMatchesRequest("fable", "claude-sonnet-4-6")).toBe(false);
     expect(modelMatchesRequest("claude-opus-4-1", "claude-opus-4-1-20250805")).toBe(true);
     expect(modelMatchesRequest("claude-opus-4-1", "claude-opus-4-10-20250805")).toBe(false);

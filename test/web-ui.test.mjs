@@ -476,7 +476,14 @@ describe("AMUX Code project and agent registry", () => {
     expect(concurrent.map((response) => response.status).sort()).toEqual([200, 201]);
     expect(new Set(concurrent.map((response) => response.body.id))).toHaveLength(1);
 
-    const agent = await createAgent(url, project, "claude");
+    const createdAgent = await postJson(`${url}/api/projects/${project.id}/agents`, {
+      name: "Claude agent",
+      engine: "claude",
+      idempotencyKey: "claude-default-model",
+    });
+    expect(createdAgent.status).toBe(201);
+    const agent = createdAgent.body;
+    expect(agent.model).toBe("claude-opus-5");
     expect(agent.cwd).toBe(workspace);
     const list = await request(`${url}/api/projects`);
     expect(list.body.projects[0].agents[0].id).toBe(agent.id);

@@ -65,14 +65,14 @@ feature("durable draft paste fence", () => {
 });
 
 feature("Claude pane model pin", () => {
-  unit("fresh and resumed launches use exact Opus 4.8 instead of the moving alias", {
+  unit("fresh and resumed launches use exact Opus 5 instead of the moving alias", {
     when: ["building both launch forms", () => ({
       fresh: buildClaudeLaunchCommand(),
       resumed: buildClaudeLaunchCommand({ resume: true }),
     })],
     then: ["both commands pin the full model id", ({ fresh, resumed }) => {
-      expect(fresh).toContain("--model 'claude-opus-4-8'");
-      expect(resumed).toContain("--model 'claude-opus-4-8'");
+      expect(fresh).toContain("--model 'claude-opus-5'");
+      expect(resumed).toContain("--model 'claude-opus-5'");
       expect(fresh).toContain("--dangerously-skip-permissions");
       expect(resumed).toContain("--dangerously-skip-permissions");
       expect(fresh).not.toMatch(/--model ['\"]?opus['\"]?(?:\s|$)/);
@@ -98,7 +98,7 @@ feature("Claude pane model pin", () => {
     then: ["display metadata is stripped while Fable and the exact session stay pinned", (command) => {
       expect(command).toContain("--model 'claude-fable-5'");
       expect(command).toContain("--resume '11111111-1111-4111-8111-111111111111'");
-      expect(command).not.toContain("claude-opus-4-8");
+      expect(command).not.toContain("claude-opus-5");
       expect(command).not.toContain("[1m]");
     }],
   });
