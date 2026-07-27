@@ -1,0 +1,160 @@
+// Link connector cycle: journal-before-ack, restart safety, honest failure.
+
+import { expect, feature, component } from "bdd-vitest";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import {
+  linkTurnPrompt,
+  planClaimedMessage,
+  runLinkConnectorCycle,
+  waitForLinkReply,
+} from "./link-connector.mjs";
+
+const NOW = Date.now();
+const message = (over = {}) => ({
+  clientMessageId: "m-1",
+  target: "lsrc:3",
+  kind: "text",
+  body: "hej från telefonen",
+  ...over,
+});
+
+function harness({ responses = {}, replyText = "svar från pane" } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "amux-link-conn-"));
+  const statePath = join(root, "connector.json");
+  const calls = { posts: [], enqueued: [] };
+  const fetchImpl = async (url, init) => {
+    calls.posts.push({ url, body: JSON.parse(init.body || "{}") });
+    const route = url.replace("https://link.v1d.io", "");
+    const payload = responses[route] ?? (route.startsWith("/api/link/connector/poll") ? { messages: [] } : {});
+    if (payload instanceof Error) throw payload;
+    return { ok: true, json: async () => payload };
+  };
+  const agent = {
+    hasResponseForPrompt: () => true,
+    getResponseStreamWithRaw: async () => ({ items: [{ type: "text", content: replyText }] }),
+  };
+  const deliveryBroker = {
+    enqueue: (job) => { calls.enqueued.push(job); return { id: "job-1" }; },
+  };
+  return {
+    root,
+    statePath,
+    calls,
+    deps: {
+      fetchImpl,
+      linkBase: "https://link.v1d.io",
+      token: "wsl-token",
+      targets: ["lsrc:3"],
+      agent,
+      deliveryBroker,
+      statePath,
+      sleep: async () => {},
+    },
+    cleanup: () => rmSync(root, { recursive: true, force: true }),
+  };
+}
+
+feature("link connector cycle", () => {
+  component("claim to reply is journaled before every ack and idempotent on restart", {
+    given: ["one claimed message and a working pane", () => harness({
+      responses: { "/api/link/connector/poll?source=wsl": { messages: [message()] } },
+    })],
+    when: ["running the cycle twice (second one simulates a restart)", async (ctx) => {
+      const first = await runLinkConnectorCycle(ctx.deps);
+      const second = await runLinkConnectorCycle(ctx.deps);
+      return { first, second, ctx };
+    }],
+    then: ["exactly one enqueue, one ack, one reply across both runs", (r) => {
+      expect(r.first).toEqual({ claimed: 1, handled: 1 });
+      expect(r.second).toEqual({ claimed: 1, handled: 0 });
+      expect(r.ctx.calls.enqueued).toHaveLength(1);
+      expect(r.ctx.calls.enqueued[0]).toMatchObject({
+        agentName: "lsrc",
+        pane: 3,
+        idempotencyKey: "link:m-1",
+      });
+      expect(r.ctx.calls.enqueued[0].text).toBe("[amux-link-turn:m-1]\nhej från telefonen");
+      const acks = r.ctx.calls.posts.filter((p) => p.url.includes("/ack"));
+      const replies = r.ctx.calls.posts.filter((p) => p.url.includes("/reply"));
+      expect(acks).toHaveLength(1);
+      expect(replies).toHaveLength(1);
+      expect(replies[0].body).toMatchObject({ clientMessageId: "m-1", body: "svar från pane" });
+      const journal = JSON.parse(readFileSync(r.ctx.statePath, "utf8"));
+      expect(journal.messages["m-1"].stage).toBe("replied");
+      r.ctx.cleanup();
+    }],
+  });
+
+  component("a claimed message redelivers after a mid-flight crash using the journal", {
+    given: ["a journal that already delivered but never replied", () => {
+      const ctx = harness({
+        responses: { "/api/link/connector/poll?source=wsl": { messages: [message()] } },
+      });
+      const { writeFileSync } = require("node:fs");
+      writeFileSync(ctx.statePath, JSON.stringify({
+        version: 1,
+        messages: { "m-1": { stage: "delivered", at: NOW, target: "lsrc:3", prompt: linkTurnPrompt(message()) } },
+      }, null, 2));
+      return ctx;
+    }],
+    when: ["running the cycle", async (ctx) => runLinkConnectorCycle(ctx.deps)],
+    then: ["no second enqueue and no second ack, reply still lands exactly once", (result, ctx) => {
+      expect(result).toEqual({ claimed: 1, handled: 1 });
+      expect(ctx.calls.enqueued).toHaveLength(0);
+      expect(ctx.calls.posts.filter((p) => p.url.includes("/ack"))).toHaveLength(0);
+      expect(ctx.calls.posts.filter((p) => p.url.includes("/reply"))).toHaveLength(1);
+      ctx.cleanup();
+    }],
+  });
+
+  component("mailbox down is an honest empty cycle, never a crash loop", {
+    given: ["a link that refuses the poll", () => harness({
+      responses: { "/api/link/connector/poll?source=wsl": new Error("link-poll-503") },
+    })],
+    when: ["running the cycle", async (ctx) => {
+      try {
+        return await runLinkConnectorCycle(ctx.deps);
+      } catch (error) {
+        return { error: String(error.message) };
+      }
+    }],
+    then: ["the failure is classified, nothing enqueued", (result, ctx) => {
+      expect(result).toBeDefined();
+      expect(ctx.calls.enqueued).toHaveLength(0);
+      ctx.cleanup();
+    }],
+  });
+
+  component("planClaimedMessage stages", {
+    given: ["three journal shapes", () => ({})],
+    when: ["planning", () => [
+      planClaimedMessage({ message: message(), journalEntry: null }),
+      planClaimedMessage({ message: message(), journalEntry: { stage: "delivered" } }),
+      planClaimedMessage({ message: message(), journalEntry: { stage: "replied" } }),
+    ]],
+    then: ["deliver, await-reply, skip", (plans) => {
+      expect(plans.map((p) => p.action)).toEqual(["deliver", "await-reply", "skip"]);
+    }],
+  });
+});
+
+feature("waitForLinkReply", () => {
+  component("times out honestly when the pane never answers", {
+    given: ["a pane with no response", () => ({
+      agent: { hasResponseForPrompt: () => false, getResponseStreamWithRaw: async () => ({ items: [] }) },
+    })],
+    when: ["waiting with a tiny bound", async ({ agent }) => {
+      try {
+        await waitForLinkReply({ agent, target: "lsrc:3", prompt: "x", replyTimeoutMs: 1, sleep: async () => {} });
+        return { ok: true };
+      } catch (error) {
+        return { error: String(error.message) };
+      }
+    }],
+    then: ["reply-timeout, never a fabricated answer", (result) => {
+      expect(result).toEqual({ error: "reply-timeout" });
+    }],
+  });
+});

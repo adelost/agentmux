@@ -149,6 +149,7 @@ export default {
       const connector = requireConnector({ env, request, source });
       if (!connector) return json(null, 401, { error: "connector-auth-required" });
       await store.reclaimExpiredLeases(nowMs);
+      await store.reclaimStaleDelivered(nowMs - (Number(env.REPLY_TIMEOUT_SECONDS) || 600) * 1000);
       const messages = await store.claimQueued({
         connectorId: connector.connectorId,
         targets: connector.targets,

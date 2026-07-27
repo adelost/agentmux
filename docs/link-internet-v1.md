@@ -63,8 +63,14 @@ heartbeats(connectorId TEXT, target TEXT, seenAt, source TEXT) -- wsl|windows
 - Tappat svar återlevererar samma messageId vid nästa poll; aldrig nytt jobb (D).
 - `GET /api/link/events` (session): SSE eller bounded poll (`?after=<seq>`);
   återanslutning med samma `after` dubblerar inte playback/kvitton.
+  Ordningen är äldst först för exakt-en-gång; vid återanslutning spelar
+  appen alltid NYASTA väntande svar/ljud först (latest-first), aldrig en
+  kö av gamla svar före dagens.
 - Heartbeat per connector/target var 30:e s → appen visar online/offline
   ärligt (target offline = queued, inte failed).
+- Delivered-utan-reply är inte terminal: äldre än `REPLY_TIMEOUT_MS` (10 min)
+  återgår meddelandet till queued. Pane-jobbet dedupliceras av samma
+  idempotency key, och reply är idempotent per clientMessageId.
 
 ## Voice (S3)
 

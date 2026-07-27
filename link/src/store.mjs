@@ -25,6 +25,13 @@ export function createLinkStore(db) {
         nowMs,
       ),
 
+    reclaimStaleDelivered: (staleBeforeMs) =>
+      run(
+        `UPDATE messages SET state = 'queued', leaseOwner = NULL, leaseExpiresAt = NULL, deliveredAt = NULL
+         WHERE state = 'delivered' AND deliveredAt < ?`,
+        staleBeforeMs,
+      ),
+
     claimQueued: ({ connectorId, targets, leaseMs, nowMs }) => {
       const marks = targets.map(() => "?").join(",");
       return all(

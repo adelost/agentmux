@@ -117,6 +117,24 @@ feature("store over the real schema: one exact journey and a connector crash", (
     }],
   });
 
+  component("a delivered message with no reply returns to the queue once, never duplicated", {
+    given: ["one delivered message owned by a dead connector", async () => {
+      const store = createLinkStore(createTestDb());
+      await store.insertMessage({ clientMessageId: "m-1", target: "lsrc:3", kind: "text", body: "hej", nowMs: NOW });
+      await store.claimQueued({ connectorId: "wsl-A", targets: ["lsrc:3"], leaseMs: 60_000, nowMs: NOW });
+      await store.markDelivered({ clientMessageId: "m-1", connectorId: "wsl-A", nowMs: NOW });
+      return { store };
+    }],
+    when: ["the reply timeout passes and another connector polls", async ({ store }) => {
+      await store.reclaimStaleDelivered(NOW + 600_001);
+      return store.claimQueued({ connectorId: "wsl-B", targets: ["lsrc:3"], leaseMs: 60_000, nowMs: NOW + 600_001 });
+    }],
+    then: ["the same message is claimable again with a fresh owner", (rows) => {
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ state: "leased", leaseOwner: "wsl-B", attempts: 2 });
+    }],
+  });
+
   component("claim respects target ownership and the five-message bound", {
     given: ["messages for two targets plus one foreign", async () => {
       const store = createLinkStore(createTestDb());
