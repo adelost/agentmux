@@ -73,6 +73,7 @@ internal class LinkStateRepository(
                 val reply = ReplyPhase.valueOf(row.getString("replyPhase"))
                 val playback = PlaybackPhase.valueOf(row.getString("playbackPhase"))
                 val restoredPlayback = when (playback) {
+                    PlaybackPhase.QUEUED -> PlaybackPhase.IDLE
                     PlaybackPhase.PLAYING, PlaybackPhase.PAUSED -> PlaybackPhase.STOPPED
                     else -> playback
                 }
