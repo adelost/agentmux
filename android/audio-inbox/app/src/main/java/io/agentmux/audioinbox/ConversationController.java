@@ -8,6 +8,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 final class ConversationController implements AutoCloseable {
+    static final int REPLY_WORKERS = 8;
+
     interface Listener {
         void onSending(String turnId, ConversationTarget target, String draft);
         void onAccepted(String turnId, ConversationTarget target, String visibleText);
@@ -23,7 +25,7 @@ final class ConversationController implements AutoCloseable {
     private final UiDispatcher ui;
     private final Listener listener;
     private final ExecutorService accepts = Executors.newFixedThreadPool(4);
-    private final ExecutorService replies = Executors.newCachedThreadPool();
+    private final ExecutorService replies = Executors.newFixedThreadPool(REPLY_WORKERS);
     private final List<ConversationTransport> transports;
 
     ConversationController(Activity activity, String consumerId, Listener listener) {

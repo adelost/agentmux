@@ -7,7 +7,6 @@ import android.os.Build
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.LinkAction
-import io.agentmux.linkcore.LinkReducer
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTarget
 import io.agentmux.linkcore.LinkTurn
@@ -15,9 +14,7 @@ import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.RecoveredReply
 import io.agentmux.linkcore.RecoveredReplyPolicy
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -33,7 +30,7 @@ internal class LinkCoordinator(
     private val preferences: SharedPreferences =
         activity.getSharedPreferences(AppContract.PREFS, Activity.MODE_PRIVATE)
     private val repository = LinkStateRepository(preferences)
-    private val mutableState = MutableStateFlow(repository.load())
+    private val ledger = LinkStateLedger(repository.load(), repository::save)
     private val mutableAccepted = MutableSharedFlow<AcceptedDraft>(extraBufferCapacity = 16)
     private val targets = ConcurrentHashMap<String, ConversationTarget>()
     private val discovery: ExecutorService = Executors.newFixedThreadPool(2)
@@ -59,7 +56,7 @@ internal class LinkCoordinator(
                 dispatch(LinkAction.Accepted(turnId, visibleText))
                 mutableAccepted.tryEmit(AcceptedDraft(turnId, drafts.remove(turnId).orEmpty()))
                 if (voiceTurns.remove(turnId) &&
-                    mutableState.value.capture == CapturePhase.FINALIZING
+                    ledger.value.capture == CapturePhase.FINALIZING
                 ) {
                     dispatch(LinkAction.Capture(CapturePhase.IDLE))
                 }
@@ -92,7 +89,7 @@ internal class LinkCoordinator(
                 drafts.remove(turnId)
                 dispatch(LinkAction.DeliveryFailed(turnId, message))
                 if (voiceTurns.remove(turnId) &&
-                    mutableState.value.capture == CapturePhase.FINALIZING
+                    ledger.value.capture == CapturePhase.FINALIZING
                 ) {
                     dispatch(LinkAction.Capture(CapturePhase.FAILED))
                 }
@@ -113,7 +110,7 @@ internal class LinkCoordinator(
             if (key == AppContract.KEY_CONNECTION) syncConnection()
         }
 
-    val state = mutableState.asStateFlow()
+    val state = ledger.state
     val acceptedDrafts = mutableAccepted.asSharedFlow()
 
     init {
@@ -123,7 +120,7 @@ internal class LinkCoordinator(
     }
 
     fun selectedTarget(): LinkTarget? =
-        mutableState.value.targets.firstOrNull { it.id == mutableState.value.selectedTargetId }
+        ledger.value.targets.firstOrNull { it.id == ledger.value.selectedTargetId }
 
     fun selectTarget(id: String) {
         dispatch(LinkAction.SelectTarget(id))
@@ -211,7 +208,7 @@ internal class LinkCoordinator(
         preferences.getBoolean(AppContract.KEY_SPEAK_REPLIES, false)
 
     fun playReply(turnId: String, explicitReplay: Boolean = true) {
-        val turn = mutableState.value.turns.firstOrNull { it.turnId == turnId } ?: return
+        val turn = ledger.value.turns.firstOrNull { it.turnId == turnId } ?: return
         val target = targets[turn.targetId] ?: return
         if (turn.replyText.isBlank()) return
         val intent = Intent(activity, AudioInboxService::class.java).apply {
@@ -313,7 +310,7 @@ internal class LinkCoordinator(
 
     private fun recoverReplyPlayback() {
         val now = System.currentTimeMillis()
-        val eligible = mutableState.value.turns.filter {
+        val eligible = ledger.value.turns.filter {
             it.replyPhase == io.agentmux.linkcore.ReplyPhase.READY &&
                 it.playbackPhase == PlaybackPhase.IDLE &&
                 it.replyText.isNotBlank()
@@ -338,12 +335,10 @@ internal class LinkCoordinator(
     }
 
     private fun targetForSelection(): ConversationTarget? =
-        targets[mutableState.value.selectedTargetId]
+        targets[ledger.value.selectedTargetId]
 
     private fun dispatch(action: LinkAction) {
-        val next = LinkReducer.reduce(mutableState.value, action)
-        mutableState.value = next
-        repository.save(next)
+        ledger.dispatch(action)
     }
 
     private fun syncConnection() {
