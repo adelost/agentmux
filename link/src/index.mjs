@@ -141,8 +141,15 @@ export default {
       const existing = await store.getMessage(clientMessageId);
       const decision = sendDecision({ existing, clientMessageId, target, kind, body: rawText });
       if (decision.action === "reject") return json(null, decision.status, { error: decision.reason });
+      let voiceRef = null;
+      if (kind === "voice") {
+        voiceRef = String(body.voiceRef || "");
+        if (!/^voice\/[\w-]{8,80}\.m4a$/u.test(voiceRef)) return json(null, 400, { error: "voiceRef-invalid" });
+        const object = await env.LINK_VOICE.get(voiceRef);
+        if (!object) return json(null, 404, { error: "voice-not-found" });
+      }
       if (decision.action === "insert") {
-        await store.insertMessage({ clientMessageId, target, kind, body: rawText, nowMs });
+        await store.insertMessage({ clientMessageId, target, kind, body: rawText, voiceRef, nowMs });
       }
       return json(null, decision.status, {
         state: "queued",
@@ -165,6 +172,37 @@ export default {
     }
 
     // --- Connector API -------------------------------------------------------
+    // --- Voice objects (bounded upload, connector download) ----------------
+    if (url.pathname === "/api/link/voice/upload" && request.method === "POST") {
+      const session = await requireSession({ store, request, nowMs });
+      if (!session) return json(null, 401, { error: "session-required" });
+      const body = await request.json().catch(() => ({}));
+      const audioB64 = String(body.audio || "");
+      const maxBytes = Number(env.MAX_AUDIO_BYTES) || 5 * 1024 * 1024;
+      if (audioB64.length < 16 || audioB64.length > Math.ceil(maxBytes * 1.4)) {
+        return json(null, 400, { error: "audio-size-out-of-bounds" });
+      }
+      const bytes = Uint8Array.from(atob(audioB64), (c) => c.charCodeAt(0));
+      if (bytes.length > maxBytes) return json(null, 400, { error: "audio-size-out-of-bounds" });
+      const voiceRef = `voice/${crypto.randomUUID()}.m4a`;
+      await env.LINK_VOICE.put(voiceRef, bytes, {
+        httpMetadata: { contentType: "audio/mp4" },
+        customMetadata: { identityId: session.identityId, uploadedAt: new Date(nowMs).toISOString() },
+      });
+      return json(null, 201, { voiceRef, sizeBytes: bytes.length });
+    }
+
+    if (url.pathname.startsWith("/api/link/voice/") && request.method === "GET") {
+      const source = url.searchParams.get("source") === "windows" ? "windows" : "wsl";
+      const connector = requireConnector({ env, request, source });
+      if (!connector) return json(null, 401, { error: "connector-auth-required" });
+      const voiceRef = url.pathname.slice("/api/link/voice/".length);
+      if (!/^voice\/[\w-]{8,80}\.m4a$/u.test(voiceRef)) return json(null, 400, { error: "voiceRef-invalid" });
+      const object = await env.LINK_VOICE.get(voiceRef);
+      if (!object) return json(null, 404, { error: "voice-not-found" });
+      return new Response(object.body, { headers: { "content-type": "audio/mp4", "cache-control": "no-store" } });
+    }
+
     if (url.pathname === "/api/link/connector/poll" && request.method === "POST") {
       const source = url.searchParams.get("source") === "windows" ? "windows" : "wsl";
       const connector = requireConnector({ env, request, source });
@@ -210,6 +248,7 @@ export default {
           replyBody: text(body.body, Number(env.MAX_TEXT_CHARS) || 4000),
           nowMs,
         });
+        if (message.voiceRef) await env.LINK_VOICE.delete(message.voiceRef).catch(() => {});
       }
       return json(null, 200, { state: "replied", reason: decision.reason });
     }
@@ -224,6 +263,7 @@ export default {
       if (!decision.ok) return json(null, 409, { error: decision.reason });
       if (!decision.idempotent) {
         await store.markFailed({ clientMessageId: message.clientMessageId, connectorId, error: body.error, nowMs });
+        if (message.voiceRef) await env.LINK_VOICE.delete(message.voiceRef).catch(() => {});
       }
       return json(null, 200, { state: "failed", reason: decision.reason });
     }
