@@ -43,8 +43,9 @@ export function validLinkPrincipal(value) {  if (!value || typeof value !== "obj
   const row = value;
   if (typeof row.id !== "string"
     || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(row.id)) return null;
-  const email = typeof row.email === "string" && /^[^\s@]{1,80}@[^\s@]{1,80}$/u.test(row.email)
-    ? row.email
+  const email = typeof row.verifiedEmail === "string"
+    && /^[^\s@]{1,80}@[^\s@]{1,80}$/u.test(row.verifiedEmail)
+    ? row.verifiedEmail
     : null;
   return { identityId: row.id, name: typeof row.name === "string" ? row.name.slice(0, 80) : "", email };
 }
