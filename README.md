@@ -512,14 +512,12 @@ amux log frontend -p 1
 
 Generated `.agents/CLAUDE.md` and `.agents/AGENTS.md` files teach Claude Code
 and Codex how to use these commands from inside project panes. They also carry
-the shared ownership policy: one active ticket per agent, one end-to-end owner
-per feature, and at most one risk-appropriate review before the merge broker
-lands the PR and advances capacity to independent READY work. Project-specific
-authority fences are generated there too: pane `2` is the sole Claude
-manager/broker for each configured fleet and may manage only the same
-session's Codex implementation workers on panes `3+`. Panes `0`–`1` remain
-reserved, require an explicit per-task instruction from Mattias, and never
-count as idle capacity.
+the shared ownership policy: one active feature per agent, one end-to-end owner
+per feature, self-claim from READY work, targeted checks and owner-driven
+merge/deploy. A project manager is an optional sidecar that watches capacity,
+blockers, dropped work and duplicates; it is not a mandatory route for tasks,
+review, merge or delivery. Dormant coding panes stay dormant until a real task
+targets them.
 
 `amux hints-sync` refreshes that generated block across every configured
 workspace immediately; the bridge performs the same fleet sync at startup.

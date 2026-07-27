@@ -132,7 +132,16 @@ export function recordReminderDelivery(paneState, { delivered, nowMs, reminderCo
  * first-edit-per-session) that fire at the sharp moments; the rotation
  * entry covers slow decay BETWEEN those moments in long coding sessions.
  */
+/** WHAT: Defines the rotating drift reminders. WHY: Re-anchors long-lived panes without waking dormant ones. */
 export const DRIFT_SECTIONS = [
+  {
+    file: ".agents/CLAUDE.md",
+    section: "Staffing and review economics",
+    label: "self-directed fleet (manager sidecar, aldrig gateway)",
+    directive: "own direct or self-claimed work end to end. Managers only " +
+      "watch capacity, blockers, dropped work and duplicates; normal tasks, " +
+      "reviews, merges and deploys never route through a mandatory broker.",
+  },
   {
     file: ".agents/CLAUDE.md",
     section: "Kommunikationsdisciplin",

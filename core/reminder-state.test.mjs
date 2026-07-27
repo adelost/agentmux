@@ -280,13 +280,14 @@ feature("formatReminderMessage", () => {
   });
 });
 
-feature("formatReminderMessage rotation (1.20.69 behavior)", () => {
-  unit("first reminder targets Kommunikationsdisciplin (highest-priority rule at index 0)", {
+feature("formatReminderMessage rotation (1.25.2 behavior)", () => {
+  unit("first reminder targets self-directed fleet ownership", {
     given: ["reminderCount 0", () => ({ n: 45, count: 0 })],
     when: ["formatting", ({ n, count }) => formatReminderMessage(n, count)],
-    then: ["names the comms rule and its core directive", (r) => {
-      expect(r).toMatch(/Kommunikationsdisciplin/);
-      expect(r).toMatch(/commits \+ ledger ARE the status/);
+    then: ["names the staffing rule and keeps managers outside normal delivery", (r) => {
+      expect(r).toMatch(/Staffing and review economics/);
+      expect(r).toMatch(/Managers only watch capacity/);
+      expect(r).toMatch(/never route through a mandatory broker/);
     }],
   });
 
@@ -298,12 +299,13 @@ feature("formatReminderMessage rotation (1.20.69 behavior)", () => {
   });
 
   unit("count advances through the section list", {
-    given: ["counts 1..3", () => ({ n: 45 })],
-    when: ["formatting each", ({ n }) => [1, 2, 3].map((c) => formatReminderMessage(n, c))],
-    then: ["coding-philosophy, recommendation, root-cause in order", ([r1, r2, r3]) => {
-      expect(r1).toMatch(/coding-philosophy\.md/);
-      expect(r2).toMatch(/Always lead with a recommendation/);
-      expect(r3).toMatch(/Root cause > symptoms/);
+    given: ["counts 1..4", () => ({ n: 45 })],
+    when: ["formatting each", ({ n }) => [1, 2, 3, 4].map((c) => formatReminderMessage(n, c))],
+    then: ["comms, coding-philosophy, recommendation, root-cause in order", ([r1, r2, r3, r4]) => {
+      expect(r1).toMatch(/Kommunikationsdisciplin/);
+      expect(r2).toMatch(/coding-philosophy\.md/);
+      expect(r3).toMatch(/Always lead with a recommendation/);
+      expect(r4).toMatch(/Root cause > symptoms/);
     }],
   });
 
@@ -314,7 +316,7 @@ feature("formatReminderMessage rotation (1.20.69 behavior)", () => {
   });
 
   unit("whole-file entries (section: null) point at the file without a section clause", {
-    given: ["the coding-philosophy slot", () => ({ n: 45, count: 1 })],
+    given: ["the coding-philosophy slot", () => ({ n: 45, count: 2 })],
     when: ["formatting", ({ n, count }) => formatReminderMessage(n, count)],
     then: ["re-read targets the file itself", (r) => {
       expect(r).toMatch(/Re-read ~\/\.claude\/coding-philosophy\.md:/);
@@ -344,9 +346,10 @@ feature("formatReminderMessage mention-all (1.20.90 behavior)", () => {
   unit("every reminder mentions ALL drift rules, regardless of rotation slot", {
     given: ["all rotation indices", () => ({ indices: DRIFT_SECTIONS.map((_, i) => i) })],
     when: ["formatting each", ({ indices }) => indices.map((i) => formatReminderMessage(40, i))],
-    then: ["each message carries 'Also still in force' + alla fyra reglernas nyckelord", (msgs) => {
+    then: ["each message carries 'Also still in force' + alla fem reglernas nyckelord", (msgs) => {
       for (const msg of msgs) {
         expect(msg).toMatch(/Also still in force/);
+        expect(msg).toMatch(/Staffing and review economics|self-directed fleet/i);
         expect(msg).toMatch(/kommunikationsdisciplin|Kommunikationsdisciplin/);
         expect(msg).toMatch(/coding-philosophy\.md/);
         expect(msg).toMatch(/lead with a recommendation|Always lead with a recommendation/i);

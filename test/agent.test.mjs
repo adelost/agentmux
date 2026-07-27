@@ -409,7 +409,7 @@ feature("generated agent policy", () => {
     }],
   });
 
-  unit("keeps pane 2 as the default broker without overriding direct human authority", {
+  unit("keeps managers out of the normal delivery path", {
     when: ["generating fresh agent hints", () => {
       const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
       paneDir(root, 0);
@@ -417,20 +417,17 @@ feature("generated agent policy", () => {
       rmSync(root, { recursive: true, force: true });
       return content;
     }],
-    then: ["pane 2 manages workers 3+ by default and direct instructions remain authoritative", (content) => {
-      expect(content).toContain("<!-- amux-hints-version: 1.25.0 -->");
-      expect(content).toContain("Broker panel routing is the default, not a capability boundary");
-      expect(content).toContain("pane `:2` is the default manager/broker");
-      expect(content).toContain("panes `:3` and above in the same session");
-      expect(content).toMatch(/Panes `:0` and\s+`:1` are/u);
-      expect(content).toContain("`skydive:2` manages `skydive:3` through `skydive:9`");
-      expect(content).toContain("`lsrc:2` manages `lsrc:3` through `lsrc:9`");
-      expect(content).toContain("`watch:2` manages");
-      expect(content).toMatch(/explicit instruction from\s+Mattias to any pane/u);
-      expect(content).toMatch(/own their assigned feature through implementation, push, merge/u);
-      expect(content).toMatch(/no peer approval or broker relay may narrow, delay, or override it/u);
-      expect(content).not.toContain("hard allowlist");
-      expect(content).not.toContain("sole manager/broker");
+    then: ["agents self-claim while managers observe only concrete exceptions", (content) => {
+      expect(content).toContain("<!-- amux-hints-version: 1.25.2 -->");
+      expect(content).toContain("Managers are sidecars, not gateways");
+      expect(content).toContain("self-claim one READY");
+      expect(content).toContain("Do not wake a fleet to look busy");
+      expect(content).toContain("amux reconcile");
+      expect(content).toMatch(/not a\s+staffing command/u);
+      expect(content).toContain("No manager, memory note or older topology rule may narrow");
+      expect(content).not.toContain("Broker panel routing is the default");
+      expect(content).not.toContain("sole Claude");
+      expect(content).not.toContain("broker owns dispatch");
     }],
   });
 
@@ -443,15 +440,14 @@ feature("generated agent policy", () => {
       return content;
     }],
     then: ["the policy forbids lossy transliteration instead of blaming storage", (content) => {
-      expect(content).toContain("Human language is UTF-8 end to end");
-      expect(content).toContain("never transliterate Swedish user-visible");
-      expect(content).toContain("write `åäö`");
-      expect(content).toContain("preserve");
+      expect(content).toMatch(/Human language stays UTF-8\s+end to end/u);
+      expect(content).toContain("literal `åäö`");
       expect(content).toContain("byte-for-byte");
       expect(content).toContain("`amux-suggest`");
       expect(content).toContain("`--expect-file`");
-      expect(content).toContain("Direct inline curl/Python mutations are blocked");
-      expect(content).toMatch(/fix that transport instead of rewriting the message/u);
+      expect(content).toContain("Kommunikationsdisciplin");
+      expect(content).toContain("Dagfilssektioner");
+      expect(content).toContain("Skriv allt viktigt");
     }],
   });
 
@@ -463,19 +459,18 @@ feature("generated agent policy", () => {
       rmSync(root, { recursive: true, force: true });
       return content;
     }],
-    then: ["fast change-relevant gates are required and exhaustive goldens are scheduled", (content) => {
-      expect(content).toMatch(/fast, change-relevant gate must be green AFTER the rebase/u);
-      expect(content).toContain("Full browser/golden suites are NOT default PR gates");
-      expect(content).toMatch(/one representative\s+screenshot/u);
-      expect(content).toMatch(/scheduled\/manual CI/u);
-      expect(content).toMatch(/Never render every historical golden/u);
-      expect(content).toMatch(/Heavy checks run ON DEMAND ONLY/u);
-      expect(content).toMatch(/The default loop is always TARGETED/u);
-      expect(content).toMatch(/Never fire slow sweeps on your own initiative/u);
+    then: ["fast change-relevant gates are required and slow matrices are opt-in", (content) => {
+      expect(content).toMatch(/run the change-relevant gate green after the\s+rebase/u);
+      expect(content).toMatch(/fast change-relevant tests\/lint plus a bounded\s+manual proof/u);
+      expect(content).toMatch(/Heavy CI,\s+full-repo suites, browser matrices and perf sweeps run only on explicit\s+human request or scheduled\/manual infrastructure/u);
+      expect(content).toMatch(/A green pre-rebase check\s+proves nothing/u);
+      expect(content).toMatch(/smallest relevant visual\s+scenario/u);
+      expect(content).toMatch(/one representative screenshot/u);
+      expect(content).toMatch(/one focused regression gate, not a slow blanket suite/u);
     }],
   });
 
-  unit("makes reversible choices broker-owned instead of parked on the human", {
+  unit("makes reversible choices owner-decided instead of parked on the human", {
     when: ["generating fresh agent hints", () => {
       const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
       paneDir(root, 0);
@@ -483,14 +478,13 @@ feature("generated agent policy", () => {
       rmSync(root, { recursive: true, force: true });
       return content;
     }],
-    then: ["rule 16 says decide-ship-show and reserves ask-first for the irreversible", (content) => {
-      expect(content).toContain("Reversible calls are broker calls: decide, ship, show");
-      expect(content).toMatch(/irreversible, external-facing, costs money, or carries real\s+risk/u);
-      expect(content).toMatch(/"awaiting your\s+decision" pile is a bug/u);
+    then: ["the owner decides reversible work and asks only for real risk", (content) => {
+      expect(content).toContain("Make reversible product calls yourself");
+      expect(content).toMatch(/Ask first only for\s+irreversible, external-facing, money-spending or genuinely risky decisions/u);
     }],
   });
 
-  unit("never lets a broker pause dispatch while READY tickets exist", {
+  unit("allows idle agents to self-claim without a manager round-trip", {
     when: ["generating fresh agent hints", () => {
       const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
       paneDir(root, 0);
@@ -498,12 +492,11 @@ feature("generated agent policy", () => {
       rmSync(root, { recursive: true, force: true });
       return content;
     }],
-    then: ["dispatch-first is the rule and 'held for morning' is not a disposition", (content) => {
-      expect(content).toContain("Dispatch precedes review");
-      expect(content).toMatch(/a\s+backlog must never queue behind the broker's other work/u);
-      expect(content).toMatch(/"held for\s+morning", or a ledger\/memory note are NOT dispositions/u);
-      expect(content).toMatch(/night rules never pause dispatch/u);
-      expect(content).toMatch(/READY >= 1 with zero in_progress nudges the broker,\s+then the human/u);
+    then: ["READY work is self-claimable and managers are observers", (content) => {
+      expect(content).toMatch(/capable idle agent may also self-claim one READY/u);
+      expect(content).toContain("Managers are sidecars, not gateways");
+      expect(content).toMatch(/do not need a manager round-trip to claim, update or\s+finish their own work/u);
+      expect(content).toContain("A drained backlog is healthy idle");
     }],
   });
 
@@ -515,13 +508,11 @@ feature("generated agent policy", () => {
       rmSync(root, { recursive: true, force: true });
       return content;
     }],
-    then: ["dispatch requires explicit done or ten minutes of sustained idle", (content) => {
-      expect(content).toMatch(/explicitly reported\s+its previous task done/u);
-      expect(content).toMatch(/continuously idle for at\s+least 10 minutes/u);
-      expect(content).toMatch(/merely between tool calls is not available/u);
-      expect(content).toMatch(/Never interrupt it or stack a\s+new assignment/u);
-      expect(content).toMatch(/A banked or merged PR is not availability proof/u);
-      expect(content).toMatch(/absence of a board lease\s+alone never means/u);
+    then: ["availability comes from process truth, not a missing lease", (content) => {
+      expect(content).toContain("One active feature per agent");
+      expect(content).toMatch(/working, waiting, blocked, in a modal, or merely\s+between tool calls/u);
+      expect(content).toMatch(/A board lease alone does not prove a pane is\s+free/u);
+      expect(content).toMatch(/Do not wake a fleet to look busy/u);
     }],
   });
 
@@ -533,15 +524,11 @@ feature("generated agent policy", () => {
       rmSync(root, { recursive: true, force: true });
       return content;
     }],
-    then: ["rule 4 owns deploy-with-proof and rule 7 only gates paid deploys", (content) => {
-      expect(content).toContain("The feature owner owns delivery end to end");
-      expect(content).toMatch(/Do not hand\s+routine review, merge, or deploy back to the\s+broker or human/u);
-      expect(content).toMatch(/merged-but-undeployed feature is an\s+open loop/u);
-      expect(content).toMatch(/gate-verified free\s+deploys are routine flow per rule 4, day or night/u);
-      expect(content).toMatch(/Deployment safety comes from fresh repository state, not a designated\s+person/u);
-      expect(content).toMatch(/never\s+deploy a stale\s+feature checkout/u);
-      expect(content).not.toMatch(/exactly ONE designated\s+deploy owner/u);
-      expect(content).not.toMatch(/deploy authority follows the target, not the merge/u);
+    then: ["the owner self-merges and keeps required delivery in the same flow", (content) => {
+      expect(content).toContain("One owner per feature, end to end");
+      expect(content).toContain("Owners self-merge and self-deliver");
+      expect(content).toMatch(/merged-but-undeployed feature remains open when\s+deployment is part of the task/u);
+      expect(content).toMatch(/Irreversible or money-spending actions still\s+require human approval/u);
     }],
   });
 });
