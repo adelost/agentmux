@@ -63,9 +63,15 @@ heartbeats(connectorId TEXT, target TEXT, seenAt, source TEXT) -- wsl|windows
 - Tappat svar återlevererar samma messageId vid nästa poll; aldrig nytt jobb (D).
 - `GET /api/link/events` (session): SSE eller bounded poll (`?after=<seq>`);
   återanslutning med samma `after` dubblerar inte playback/kvitton.
-  Ordningen är äldst först för exakt-en-gång; vid återanslutning spelar
-  appen alltid NYASTA väntande svar/ljud först (latest-first), aldrig en
-  kö av gamla svar före dagens.
+  Mailboxens sekvens-sanning är alltid äldst först i seq-ordning (exact-once)
+  och ändras aldrig.
+- Uppspelningsprioritet är en app-nivå-regel ovanpå sekvensen, inte en
+  mailbox-ändring: (a) levande direkta svar spelas FIFO inom sin klass,
+  (b) generiskt amux-say/broadcast har lägre prioritet, (c) vid
+  återanslutning/recovery spelas ALDRIG ett gammalt backlog automatiskt —
+  varje svar bevaras i tidslinjens event-ordning, äldre återfunnet ljud
+  markeras ärligt som tillgängligt/skippat, och högst det nyaste giltiga
+  (icke-utgångna) direkta svaret spelas upp automatiskt.
 - Heartbeat per connector/target var 30:e s → appen visar online/offline
   ärligt (target offline = queued, inte failed).
 - Delivered-utan-reply är inte terminal: äldre än `REPLY_TIMEOUT_MS` (10 min)
