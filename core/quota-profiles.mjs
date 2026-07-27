@@ -3,7 +3,7 @@
 // Only paths and operator labels live here. Tokens remain in Codex, Claude
 // Code and Kimi Code's own homes.
 
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -30,10 +30,27 @@ const windowsProviderHome = (provider, {
 
 const envPrefix = (provider, id) => `AMUX_${provider.toUpperCase()}_PROFILE_${id}`;
 
-const profile = (provider, id, home, env, source) => {
+const readOperatorLabels = (env, home, readFile) => {
+  const path = resolve(env.AMUX_ACCOUNT_LABELS_FILE
+    || join(home, ".agentmux", "account-profiles.json"));
+  try {
+    const document = JSON.parse(readFile(path, "utf8"));
+    if (document?.version !== 1 || !document.profiles
+      || typeof document.profiles !== "object" || Array.isArray(document.profiles)) return {};
+    return Object.fromEntries(Object.entries(document.profiles).flatMap(([key, value]) => {
+      const label = typeof value?.label === "string" ? value.label.trim() : "";
+      return label && label.length <= 254 ? [[key.toLowerCase(), label]] : [];
+    }));
+  } catch {
+    return {};
+  }
+};
+
+const profile = (provider, id, home, env, source, labels) => {
   const prefix = envPrefix(provider, id);
   const resolvedHome = resolve(env[`${prefix}_HOME`] || home);
-  const label = String(env[`${prefix}_LABEL`] || `${provider} ${id}`).trim();
+  const key = `${provider}:${id}`;
+  const label = String(env[`${prefix}_LABEL`] || labels[key] || `${provider} ${id}`).trim();
   const base = { provider, id: String(id), key: `${provider}:${id}`,
     label, home: resolvedHome, source };
   if (provider === "codex") return { ...base, credentialsPath: join(resolvedHome, "auth.json") };
@@ -54,17 +71,18 @@ export function quotaProfileCatalog(env = process.env, options = {}) {
   const home = resolve(env.HOME || homedir());
   const roots = resolve(env.AMUX_ACCOUNT_PROFILES_DIR
     || join(home, ".config", "agent", "account-profiles"));
+  const labels = readOperatorLabels(env, home, options.readFile || readFileSync);
   const windows = Object.fromEntries(PROVIDERS.map((provider) =>
     [provider, windowsProviderHome(provider, options)]));
   return [
-    profile("codex", 1, join(home, ".codex"), env, "primary"),
-    profile("codex", 2, join(home, ".config", "agent", "codex-profiles", "2"), env, "isolated"),
-    profile("claude", 1, join(home, ".claude"), env, "primary"),
+    profile("codex", 1, join(home, ".codex"), env, "primary", labels),
+    profile("codex", 2, join(home, ".config", "agent", "codex-profiles", "2"), env, "isolated", labels),
+    profile("claude", 1, join(home, ".claude"), env, "primary", labels),
     profile("claude", 2, windows.claude || join(roots, "claude", "2"), env,
-      windows.claude ? "windows" : "isolated"),
-    profile("kimi", 1, join(home, ".kimi-code"), env, "primary"),
+      windows.claude ? "windows" : "isolated", labels),
+    profile("kimi", 1, join(home, ".kimi-code"), env, "primary", labels),
     profile("kimi", 2, windows.kimi || join(roots, "kimi", "2"), env,
-      windows.kimi ? "windows" : "isolated"),
+      windows.kimi ? "windows" : "isolated", labels),
   ];
 }
 
