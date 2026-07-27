@@ -6,7 +6,7 @@ import {
 import { dirname, join } from "path";
 import { listAgents } from "./config.mjs";
 import { parseSinceArg } from "../core/jsonl-reader.mjs";
-import { formatJanitorResult, pruneOldSessions } from "../core/janitor.mjs";
+import { formatJanitorResult, trimAgedSessions } from "../core/janitor.mjs";
 import {
   defaultDreamReceiptPath, readDreamReceipts, recordDreamReceipts,
 } from "../core/dream-eligibility.mjs";
@@ -182,8 +182,8 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
 function runDreamJanitor(flags = {}) {
   if (process.env.AMUX_JANITOR_ENABLED === "false") return;
   try {
-    const result = pruneOldSessions({ dryRun: !!flags.dry });
-    if ((!flags.quiet && !flags.q) || result.deleted || result.failed) console.log(formatJanitorResult(result));
+    const result = trimAgedSessions({ dryRun: !!flags.dry });
+    if ((!flags.quiet && !flags.q) || result.trimmed || result.failed) console.log(formatJanitorResult(result));
   } catch (error) {
     console.warn(`janitor skipped: ${error.message}`);
   }

@@ -62,7 +62,8 @@ feature("bridge startup housekeeping seam", () => {
         return {
           log: { rotated: false, beforeBytes: 0, afterBytes: 0 },
           sessions: {
-            scanned: 0, candidates: 0, deleted: 0, failed: 0, freedBytes: 0,
+            scanned: 0, candidates: 0, trimmed: 0, unchanged: 0, failed: 0,
+            reclaimedBytes: 0,
             retentionDays: 14, dryRun: false, oversized: 0, oversizedBytes: 0,
           },
         };

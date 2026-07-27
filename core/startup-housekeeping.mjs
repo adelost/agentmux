@@ -16,7 +16,7 @@ import {
   writeSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { defaultSessionRoots, formatJanitorResult, pruneOldSessions } from "./janitor.mjs";
+import { defaultSessionRoots, formatJanitorResult, trimAgedSessions } from "./janitor.mjs";
 import { formatTrimResult, trimOversizedSessions } from "./session-trim.mjs";
 
 const DEFAULT_MAX_LOG_BYTES = 8 * 1024 * 1024;
@@ -72,7 +72,7 @@ export function runStartupHousekeeping({
     maxBytes: Number(env.AMUX_BRIDGE_LOG_MAX_BYTES) || DEFAULT_MAX_LOG_BYTES,
     keepBytes: Number(env.AMUX_BRIDGE_LOG_KEEP_BYTES) || DEFAULT_KEEP_LOG_BYTES,
   });
-  const sessions = pruneOldSessions({
+  const sessions = trimAgedSessions({
     roots,
     nowMs,
     retentionDays: Number(env.AMUX_JANITOR_RETENTION_DAYS) || undefined,

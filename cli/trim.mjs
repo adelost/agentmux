@@ -1,12 +1,12 @@
 // Manual storage housekeeping. Deletion and semantic checkpoint trim remain
 // distinct so an operator can see exactly which guarantee authorizes each byte.
 
-import { formatJanitorResult, pruneOldSessions, defaultSessionRoots } from "../core/janitor.mjs";
+import { formatJanitorResult, trimAgedSessions, defaultSessionRoots } from "../core/janitor.mjs";
 import { formatTrimResult, trimOversizedSessions } from "../core/session-trim.mjs";
 
-/** WHAT: Dispatches retention deletion from the CLI. WHY: Keeps age-based deletion separate from checkpoint trim. */
+/** WHAT: Dispatches aged field trim from the CLI. WHY: Keeps archival memory searchable without touching recent journals. */
 export function cmdJanitor(flags = {}) {
-  const result = pruneOldSessions({
+  const result = trimAgedSessions({
     dryRun: Boolean(flags.dry),
     ...(flags.days ? { retentionDays: flags.days } : {}),
   });
