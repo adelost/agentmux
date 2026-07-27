@@ -5,7 +5,12 @@
 export function createLinkStore(db) {
   const run = (sql, ...args) => db.prepare(sql).bind(...args).run();
   const first = (sql, ...args) => db.prepare(sql).bind(...args).first();
-  const all = (sql, ...args) => db.prepare(sql).bind(...args).all();
+  const all = async (sql, ...args) => {
+    const result = await db.prepare(sql).bind(...args).all();
+    if (Array.isArray(result)) return result;
+    if (Array.isArray(result?.results)) return result.results;
+    throw new Error("d1-results-invalid");
+  };
 
   return {
     getMessage: (clientMessageId) =>

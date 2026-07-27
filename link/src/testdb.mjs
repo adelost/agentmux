@@ -18,7 +18,7 @@ export function createTestDb() {
         bind: (...args) => ({
           run: async () => stmt.run(...args),
           first: async () => stmt.get(...args) ?? null,
-          all: async () => stmt.all(...args),
+          all: async () => ({ success: true, results: stmt.all(...args) }),
         }),
       };
     },
