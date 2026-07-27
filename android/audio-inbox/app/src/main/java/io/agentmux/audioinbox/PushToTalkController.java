@@ -39,18 +39,27 @@ final class PushToTalkController {
 
     private boolean onTouch(MotionEvent event) {
         if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            holdTouchOwnership(true);
             begin();
             return true;
         }
         if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+            holdTouchOwnership(false);
             release();
             return true;
         }
         if (event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+            holdTouchOwnership(false);
             cancel("Recording cancelled");
             return true;
         }
         return true;
+    }
+
+    private void holdTouchOwnership(boolean held) {
+        if (button.getParent() != null) {
+            button.getParent().requestDisallowInterceptTouchEvent(held);
+        }
     }
 
     private void begin() {
@@ -129,13 +138,19 @@ final class PushToTalkController {
     }
 
     void refreshAvailability(boolean ready) {
+        refreshAvailability(ready, true);
+    }
+
+    void refreshAvailability(boolean ready, boolean announce) {
         if (state.phase() != PushToTalkState.Phase.IDLE) return;
         if (available != null && available == ready) return;
         available = ready;
         button.setEnabled(ready);
         button.setAlpha(ready ? 1f : 0.42f);
-        if (!ready) status.setText("Select an available favorite first");
-        else status.setText("Hold while speaking · release to send");
+        if (announce) {
+            if (!ready) status.setText("Select an available favorite first");
+            else status.setText("Hold while speaking · release to send");
+        }
     }
 
     void cancelForBackground() {
@@ -153,6 +168,12 @@ final class PushToTalkController {
         state.finish();
         resetButton();
         status.setText(message);
+    }
+
+    void markDelivered() {
+        if (state.phase() == PushToTalkState.Phase.SENDING) {
+            button.setText("Waiting for reply…");
+        }
     }
 
     private void cancel(String reason) {

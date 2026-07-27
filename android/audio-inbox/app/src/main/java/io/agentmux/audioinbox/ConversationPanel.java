@@ -189,6 +189,7 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
             renderMessages();
         }
         pendingText = null;
+        pushToTalk.markDelivered();
         status.setText("Message delivered · waiting for reply…");
     }
 
@@ -229,7 +230,7 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
         status.setText(message);
         status.setTextColor(busy ? WARNING : ACCENT);
         refreshFavorites();
-        pushToTalk.refreshAvailability(!busy && selectedTarget() != null);
+        pushToTalk.refreshAvailability(!busy && selectedTarget() != null, !busy);
     }
 
     private ConversationTarget selectedTarget() {
@@ -270,26 +271,30 @@ final class ConversationPanel extends LinearLayout implements AutoCloseable {
     }
 
     private void refreshFavorites() {
+        boolean busy = controller.isBusy();
         for (Map.Entry<String, Button> entry : favoriteButtons.entrySet()) {
             boolean available = true;
             boolean selected = entry.getKey().equals(selectedId);
-            entry.getValue().setEnabled(!controller.isBusy());
+            entry.getValue().setEnabled(!busy);
             entry.getValue().setTextColor(selected ? Color.rgb(5, 20, 15) : SECONDARY);
             entry.getValue().setBackground(rounded(selected ? ACCENT : Color.rgb(12, 18, 25), 12,
                 selected ? ACCENT : Color.rgb(41, 54, 65)));
             entry.getValue().setAlpha(available ? 1f : 0.42f);
         }
         ConversationTarget windows = find("windows");
-        restartWsl.setEnabled(windows != null && !controller.isBusy());
+        restartWsl.setEnabled(windows != null && !busy);
         restartWsl.setAlpha(windows != null ? 1f : 0.42f);
-        boolean ready = selectedTarget() != null && !controller.isBusy();
+        boolean selectedAvailable = selectedTarget() != null;
+        boolean ready = selectedAvailable && !busy;
         send.setEnabled(ready);
         send.setAlpha(ready ? 1f : 0.42f);
-        if (ready) status.setText("Ready for " + selectedTarget().label);
-        else if (targets.isEmpty()) status.setText("Finding your favorites…");
-        else status.setText("Selected favorite is offline");
-        status.setTextColor(ready ? ACCENT : WARNING);
-        pushToTalk.refreshAvailability(ready);
+        if (!busy) {
+            if (ready) status.setText("Ready for " + selectedTarget().label);
+            else if (targets.isEmpty()) status.setText("Finding your favorites…");
+            else status.setText("Selected favorite is offline");
+            status.setTextColor(ready ? ACCENT : WARNING);
+            pushToTalk.refreshAvailability(ready);
+        }
     }
 
     private void renderMessages() {
