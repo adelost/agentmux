@@ -51,6 +51,17 @@ export function quotaPushSummary(snapshot) {
     + `${engineState("gemini")}${accounts})`;
 }
 
+/** WHAT: Returns one push-health notice. WHY: Keeps recovered delivery from rendering as a live alert. */
+export function quotaPushHealthNotice(result) {
+  if (result.health?.state === "alert") {
+    return { level: "alert", message: `ALERT suggestions quota delivery stale (${result.health.ageMs}ms)` };
+  }
+  if (result.ok && result.previousHealth?.state === "alert") {
+    return { level: "recovered", message: "RECOVERED suggestions quota delivery" };
+  }
+  return null;
+}
+
 const PUSH_OUTCOMES = new Set(["success", "failure", "lock_skip"]);
 const classifiedReason = (value) => typeof value === "string"
   && /^[a-z0-9_:-]{2,80}$/u.test(value) ? value : null;
@@ -201,9 +212,8 @@ async function main() {
     return;
   }
   const result = await runQuotaPush({ configPath: process.argv[2] || DEFAULT_CONFIG_PATH });
-  if (result.health?.state === "alert" || result.previousHealth?.state === "alert") {
-    console.error(`ALERT suggestions quota delivery stale (${result.health?.ageMs ?? result.previousHealth.ageMs}ms)`);
-  }
+  const notice = quotaPushHealthNotice(result);
+  if (notice) console.error(notice.message);
   if (!result.ok) throw new Error(result.error);
   console.log(quotaPushSummary(result.snapshot));
 }

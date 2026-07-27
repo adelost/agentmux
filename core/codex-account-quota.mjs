@@ -47,7 +47,7 @@ export function normalizeCodexAppServerQuota(profile, accountResult, rateLimitRe
       planType: snapshot.planType || account.planType || null,
       windows,
     }] : [];
-  });
+  }).sort((left, right) => Number(right.limitId === "codex") - Number(left.limitId === "codex"));
   if (!limits.length) {
     return { ok: false, engine: "codex", provider: "codex",
       profile: { id: profile.id, key: profile.key, label: profile.label, source: profile.source },

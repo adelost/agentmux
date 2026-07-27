@@ -13,6 +13,7 @@ import { feature, unit, expect } from "bdd-vitest";
 import {
   loadPushConfig,
   quotaPushDeliveryHealth,
+  quotaPushHealthNotice,
   quotaPushSummary,
   pushQuotaSnapshot,
   readQuotaPushEvents,
@@ -67,6 +68,20 @@ feature("suggestions-quota-push summary", () => {
 });
 
 feature("suggestions quota delivery ledger", () => {
+  unit("reports a stale-to-success transition as recovered instead of a current alert", {
+    when: ["classifying a successful push after a stale prior state", () => quotaPushHealthNotice({
+      ok: true,
+      previousHealth: { state: "alert", ageMs: 86_400_000 },
+      health: { state: "nominal", ageMs: 3 },
+    })],
+    then: ["the notice is recovered and contains no alert claim", (notice) => {
+      expect(notice).toEqual({
+        level: "recovered", message: "RECOVERED suggestions quota delivery",
+      });
+      expect(notice.message).not.toContain("ALERT");
+    }],
+  });
+
   unit("survives restart and alerts after more than two intervals without delivery", {
     given: ["a durable ledger with success, failure and lock-skip outcomes", () => {
       const statePath = join(mkdtempSync(join(tmpdir(), "quota-push-state-")), "events.jsonl");
