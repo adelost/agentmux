@@ -32,10 +32,20 @@ feature("Android audio inbox source contract", () => {
       expect(startup).toContain("AUDIO_INBOX_TARGETS");
       expect(startup).toContain("${process.env.HOME}/.local/bin");
       expect(focus).toContain("AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK");
+      const notifier = read(
+        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/AudioServiceNotifier.java",
+      );
+      expect(notifier).toContain("Notification.MediaStyle");
+      expect(notifier).toContain("session.getPlatformToken()");
+      expect(notifier).toContain('"Stop"');
+      expect(notifier).toContain("AppContract.ACTION_STOP_AUDIO");
       expect(read("channels/voice.mjs")).toContain('path === "/api/audio/send"');
-      expect(read(
+      const ptt = read(
         "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/PttDisc.kt",
-      )).toContain("awaitEachGesture");
+      );
+      expect(ptt).toContain("awaitEachGesture");
+      expect(ptt).toContain(".pointerInput(enabled)");
+      expect(ptt).not.toContain(".pointerInput(enabled, phase)");
       expect(discovery).toContain('"agentmux-windows-manager-audio"');
       expect(discovery).toContain('"http://abyss-win.tail13cb13.ts.net:8081"');
       expect(read(

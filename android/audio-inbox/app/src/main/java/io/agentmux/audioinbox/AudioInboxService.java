@@ -132,6 +132,7 @@ public final class AudioInboxService extends MediaSessionService {
             .setId("agent-audio-inbox")
             .setCallback(new AudioSessionCallback(this::stopAllAudio))
             .build();
+        notifier.attach(mediaSession, player);
     }
 
     @Override
@@ -158,6 +159,7 @@ public final class AudioInboxService extends MediaSessionService {
             if (player.isPlaying()) player.pause();
             return START_STICKY;
         }
+        if (AppContract.ACTION_RESUME_AUDIO.equals(action)) { player.play(); return START_STICKY; }
         if (AppContract.ACTION_STOP_AUDIO.equals(action)) {
             stopAllAudio();
             return START_STICKY;
@@ -171,9 +173,7 @@ public final class AudioInboxService extends MediaSessionService {
     }
 
     @Override
-    public MediaSession onGetSession(MediaSession.ControllerInfo controllerInfo) {
-        return mediaSession;
-    }
+    public MediaSession onGetSession(MediaSession.ControllerInfo controllerInfo) { return mediaSession; }
 
     @Override
     public void onDestroy() {
@@ -435,8 +435,8 @@ public final class AudioInboxService extends MediaSessionService {
         startingId = null;
         audioFocus.abandon();
         refreshDirectAvailability();
+        store.updateConnection(connected ? "Connected" : "Disconnected", connected);
     }
-
     private void discardBroadcastItems() {
         for (AudioEventClaims.Entry item : claims.queuedEntries()) {
             if (item.direct) continue;

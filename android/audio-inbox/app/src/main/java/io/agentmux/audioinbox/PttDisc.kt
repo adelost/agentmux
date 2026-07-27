@@ -51,7 +51,7 @@ internal fun PttDisc(
                 contentDescription =
                     "Hold to talk. Release to send. Recording has no hidden time limit."
             }
-            .pointerInput(enabled, phase) {
+            .pointerInput(enabled) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     down.consume()
