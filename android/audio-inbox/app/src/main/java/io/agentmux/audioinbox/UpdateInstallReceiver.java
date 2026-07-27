@@ -7,6 +7,10 @@ import android.content.pm.PackageInstaller;
 
 /** Surfaces Android's required installer confirmation without bypassing it. */
 public final class UpdateInstallReceiver extends BroadcastReceiver {
+    static boolean isFailure(int status) {
+        return status > PackageInstaller.STATUS_SUCCESS;
+    }
+
     @Override
     public void onReceive(Context context, Intent intent) {
         int status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, -1);

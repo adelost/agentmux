@@ -74,7 +74,7 @@ internal class AppUpdater(
             AppContract.KEY_UPDATE_INSTALL_STATUS,
             PackageInstaller.STATUS_SUCCESS,
         )
-        if (status <= PackageInstaller.STATUS_FAILURE && candidate != null && readyFile != null) {
+        if (UpdateInstallReceiver.isFailure(status) && candidate != null && readyFile != null) {
             preferences.edit().remove(AppContract.KEY_UPDATE_INSTALL_STATUS).apply()
             publish(
                 "ready-to-install",
