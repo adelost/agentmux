@@ -230,6 +230,31 @@ feature("end-to-end lexical over a real temp corpus (rg integration)", () => {
     }],
   });
 
+  // Regression gate for the 1.20.57 `--max-filesize 8M`: rg SKIPS an oversized
+  // file whole, so the search reported "0 träffar" instead of admitting it
+  // never read the file. On this machine that hid 43 of 253 session jsonl —
+  // 1.6 of 1.7 GB, i.e. 91.6% of all searchable history, and precisely the
+  // long-running panes where the decisions live.
+  component("a session past any size cap is searched, not silently skipped", {
+    given: ["a ~9 MB jsonl of MB-long lines with the needle at the end", () => {
+      const dir = mkdtempSync(join(tmpdir(), "amux-search-big-"));
+      const longLine = `{"role":"assistant","text":"${"x".repeat(1_000_000)}"}\n`;
+      writeFileSync(join(dir, "huge.jsonl"),
+        longLine.repeat(9) + '{"role":"user","text":"RaycastVehicle"}\n');
+      return dir;
+    }],
+    when: ["searching for the needle", (dir) => {
+      const hits = lexicalSearch("RaycastVehicle",
+        [{ name: "sessions", path: dir, glob: "*.jsonl", exclude: [], weight: 1 }]);
+      rmSync(dir, { recursive: true, force: true });
+      return hits;
+    }],
+    then: ["the hit is found, in that file", (hits) => {
+      expect(hits.length).toBe(1);
+      expect(hits[0].path.endsWith("huge.jsonl")).toBe(true);
+    }],
+  });
+
   component("multi-word query falls back to file-level AND (L2)", {
     given: ["corpus where words never share a line", () => {
       const dir = mkdtempSync(join(tmpdir(), "amux-search-"));
