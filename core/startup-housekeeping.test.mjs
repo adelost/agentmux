@@ -1,5 +1,8 @@
 import { component, expect, feature, unit } from "bdd-vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -43,7 +46,7 @@ feature("startup storage housekeeping", () => {
       const oldPath = join(sessions, "old.jsonl");
       const livePath = join(sessions, "live.jsonl");
       const logPath = join(root, "bridge.log");
-      writeFileSync(oldPath, "old\n".repeat(20));
+      writeFileSync(oldPath, `${JSON.stringify({ message: "old-data ".repeat(20_000) })}\n`);
       writeFileSync(livePath, "resumable\n".repeat(40));
       writeFileSync(logPath, "bridge output\n".repeat(30));
       const nowMs = Date.parse("2026-07-21T12:00:00Z");
@@ -70,10 +73,12 @@ feature("startup storage housekeeping", () => {
     then: ["old state is archived while recent resumable state is untouched", (ctx) => {
       try {
         expect(ctx.result.log.rotated).toBe(true);
-        expect(ctx.result.sessions.deleted).toBe(1);
+        expect(ctx.result.sessions.trimmed).toBe(1);
         expect(ctx.result.sessions.oversized).toBe(1);
+        expect(existsSync(ctx.oldPath)).toBe(true);
+        expect(readFileSync(ctx.oldPath, "utf8")).toContain("AMUX_TRIMMED");
         expect(readFileSync(ctx.livePath, "utf8")).toContain("resumable");
-        expect(formatStartupHousekeeping(ctx.result)).toContain("not age-deleted");
+        expect(formatStartupHousekeeping(ctx.result)).toContain("untouched by aged trim");
         expect(formatStartupHousekeeping(ctx.result)).toContain("trim:");
       } finally {
         rmSync(ctx.root, { recursive: true, force: true });

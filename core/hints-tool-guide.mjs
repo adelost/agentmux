@@ -162,20 +162,20 @@ Meant for cron at 04:00. It asks each active pane to update only its own
 marker block in the daily memory file, then writes a run sentinel.
 
 Dream also runs **session-file housekeeping** at the end of each nightly run:
-DEAD session jsonl (mtime older than 14d, Claude + Codex) get deleted. Live
-files are never matched: an active pane rewrites its jsonl continuously, so
-its mtime is always seconds old. This only reaps abandoned/rotated sessions;
-it does NOT and cannot shrink a live 100MB+ session (that's a \`/compact\` job;
-truncating a live file would corrupt resume). Inspect or run on demand:
+inactive session jsonl (mtime older than 14d) keep every record but shorten
+oversized string fields to an explicit \`AMUX_TRIMMED\` marker. Live files are
+never matched: an active pane rewrites its jsonl continuously, so its mtime is
+always seconds old. Fresh 100MB+ sessions remain a checkpoint-aware \`amux
+trim\` concern. Inspect or run aged housekeeping on demand:
 \`\`\`bash
-amux janitor --dry                   # what would be deleted (no changes)
+amux janitor --dry                   # projected aged-field reclaim
 amux janitor --days 30               # custom retention window
-amux janitor                         # delete now
+amux janitor                         # atomically trim aged journals
 \`\`\`
-Deletions are logged to \`~/.claude/projects/.janitor-deleted.log\`. Disable the
-nightly pass with \`AMUX_JANITOR_ENABLED=false\`; tune with
-\`AMUX_JANITOR_RETENTION_DAYS\`. Note: \`claw search\` then only covers the last
-14d of sessions.
+Reclaimed bytes are logged per file in
+\`~/.claude/projects/.janitor-deleted.log\` (the legacy filename is retained as
+the existing audit location). Disable the nightly pass with
+\`AMUX_JANITOR_ENABLED=false\`; tune with \`AMUX_JANITOR_RETENTION_DAYS\`.
 
 ### Auto-compact (background, bridge-driven)
 Idle panes >=70% context get warned (Discord channel), then /compact:ed

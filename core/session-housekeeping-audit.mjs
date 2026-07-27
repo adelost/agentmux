@@ -35,6 +35,8 @@ export function appendSessionHousekeepingAudit(entry, {
     phase: entry.phase,
     path: String(entry.path),
     bytes: Number.isFinite(Number(entry.bytes)) ? Number(entry.bytes) : null,
+    afterBytes: Number.isFinite(Number(entry.afterBytes)) ? Number(entry.afterBytes) : null,
+    reclaimedBytes: Number.isFinite(Number(entry.reclaimedBytes)) ? Number(entry.reclaimedBytes) : null,
     reason: String(entry.reason || "unspecified"),
     provider: entry.provider ? String(entry.provider) : null,
     error: entry.error ? String(entry.error) : null,
