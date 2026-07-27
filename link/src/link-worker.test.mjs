@@ -1,0 +1,215 @@
+// Link worker integration: auth legs, session lifecycle, mailbox journey,
+// connector scoping, and exact-once over the real router and schema.
+
+import { expect, feature, component } from "bdd-vitest";
+import worker from "./index.mjs";
+import { createTestDb } from "./testdb.mjs";
+import { openState, sealState } from "./auth.mjs";
+import { pkceChallenge, sha256Hex } from "./util.mjs";
+
+const SECRET = "ab".repeat(32);
+const NOW = Date.now();
+
+function makeEnv(overrides = {}) {
+  return {
+    LINK_DB: createTestDb(),
+    V1D_AUTH_ORIGIN: "https://auth.v1d.io",
+    V1D_AUTH_APP_ID: "agentmux-link",
+    V1D_AUTH_CLIENT_SECRET: "client-secret",
+    V1D_AUTH_STATE_SECRET: SECRET,
+    V1D_AUTH_CALLBACK_URL: "https://link.v1d.io/auth/callback",
+    CONNECTOR_TOKEN_WSL: "wsl-token",
+    CONNECTOR_TOKEN_WINDOWS: "win-token",
+    CONNECTOR_TARGETS_WSL: "lsrc:3,lsrc:10",
+    CONNECTOR_LEASE_SECONDS: "60",
+    SESSION_TTL_SECONDS: "2592000",
+    EXCHANGE_CODE_TTL_SECONDS: "60",
+    MAX_TEXT_CHARS: "4000",
+    ...overrides,
+  };
+}
+
+const req = (url, { method = "GET", token = null, body = null } = {}) =>
+  new Request(url, {
+    method,
+    headers: {
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(body ? { "content-type": "application/json" } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+
+const uuid = () => crypto.randomUUID();
+
+async function seedIdentity(store, { identityId, email }) {
+  await store.insertExchangeCode({
+    codeHash: await sha256Hex("xch_test"),
+    challenge: await pkceChallenge("v".repeat(64)),
+    identityId,
+    verifiedEmail: email,
+    nowMs: NOW,
+    ttlSeconds: 60,
+  });
+  // identities allowlist row goes straight into the table via a message-less path
+  await store.insertMessage({ clientMessageId: uuid(), target: "lsrc:3", kind: "text", body: "seed", nowMs: NOW });
+}
+
+feature("sealed login state", () => {
+  component("round-trips and refuses tampering", {
+    given: ["a sealed transaction", async () => ({
+      state: await sealState(SECRET, { verifier: "v", challenge: "c", expiresAt: NOW + 1000 }),
+    })],
+    when: ["opening intact and forged", async (ctx) => ({
+      intact: await openState(SECRET, ctx.state),
+      forged: await openState(SECRET, `${ctx.state.slice(0, -4)}AAAA`),
+      wrongKey: await openState("cd".repeat(32), ctx.state),
+    })],
+    then: ["only the untampered original opens", (r) => {
+      expect(r.intact).toMatchObject({ verifier: "v", challenge: "c" });
+      expect(r.forged).toBeNull();
+      expect(r.wrongKey).toBeNull();
+    }],
+  });
+});
+
+feature("mailbox journey over the real router", () => {
+  component("send to reply with replay, conflict, and scoped connector auth", {
+    given: ["an env and one connector token", () => ({ env: makeEnv(), session: "lnk_test" })],
+    when: ["driving a full journey", async ({ env, session }) => {
+      const id = uuid();
+      const auth = { token: session };
+      // sessions are hashed in store; seed one directly
+      const store = (await import("./store.mjs")).createLinkStore(env.LINK_DB);
+      await store.insertSession({ tokenHash: await sha256Hex(session), identityId: "p-1", nowMs: NOW, ttlSeconds: 3600 });
+
+      const send = await worker.fetch(req("https://link.v1d.io/api/link/send", {
+        method: "POST", ...auth, body: { clientMessageId: id, target: "lsrc:3", kind: "text", text: "hej" },
+      }), env);
+      const replay = await worker.fetch(req("https://link.v1d.io/api/link/send", {
+        method: "POST", ...auth, body: { clientMessageId: id, target: "lsrc:3", kind: "text", text: "hej" },
+      }), env);
+      const conflict = await worker.fetch(req("https://link.v1d.io/api/link/send", {
+        method: "POST", ...auth, body: { clientMessageId: id, target: "lsrc:3", kind: "text", text: "annat" },
+      }), env);
+      const badTarget = await worker.fetch(req("https://link.v1d.io/api/link/send", {
+        method: "POST", ...auth, body: { clientMessageId: uuid(), target: "claw:3", kind: "text", text: "x" },
+      }), env);
+      const noSession = await worker.fetch(req("https://link.v1d.io/api/link/send", {
+        method: "POST", body: { clientMessageId: uuid(), target: "lsrc:3", kind: "text", text: "x" },
+      }), env);
+
+      const badConnector = await worker.fetch(req("https://link.v1d.io/api/link/connector/poll", {
+        method: "POST", token: "wrong", body: {},
+      }), env);
+      const windowsScope = await worker.fetch(req("https://link.v1d.io/api/link/connector/poll?source=wsl", {
+        method: "POST", token: "wsl-token", body: {},
+      }), env);
+      const ack = await worker.fetch(req("https://link.v1d.io/api/link/connector/ack", {
+        method: "POST", token: "wsl-token", body: { clientMessageId: id, connectorId: "wsl-1" },
+      }), env);
+      const reply = await worker.fetch(req("https://link.v1d.io/api/link/connector/reply", {
+        method: "POST", token: "wsl-token", body: { clientMessageId: id, connectorId: "wsl-1", body: "svar tillbaka" },
+      }), env);
+      const events = await worker.fetch(req("https://link.v1d.io/api/link/events?after=0", auth), env);
+      return {
+        send, replay, conflict, badTarget, noSession,
+        badConnector, windowsScope, ack, reply,
+        events: await events.json(),
+      };
+    }],
+    then: ["exactly one delivery, honest rejections everywhere", async (r) => {
+      expect(r.send.status).toBe(201);
+      expect(r.replay.status).toBe(200);
+      expect((await r.replay.json()).replayed).toBe(true);
+      expect(r.conflict.status).toBe(409);
+      expect(r.badTarget.status).toBe(403);
+      expect(r.noSession.status).toBe(401);
+      expect(r.badConnector.status).toBe(401);
+      expect(r.windowsScope.status).toBe(200);
+      const claimed = (await r.windowsScope.json()).messages;
+      expect(claimed).toHaveLength(1);
+      expect(claimed[0]).toMatchObject({ clientMessageId: claimed[0].clientMessageId, target: "lsrc:3", state: "leased" });
+      expect(claimed.every((m) => ["lsrc:3", "lsrc:10"].includes(m.target))).toBe(true);
+      expect(r.ack.status).toBe(200);
+      expect(r.reply.status).toBe(200);
+      const states = r.events.events.map((event) => [event.clientMessageId, event.state]);
+      expect(states).toContainEqual([expect.any(String), "replied"]);
+      expect(r.events.heartbeats["lsrc:3"]).toBe(true);
+    }],
+  });
+});
+
+feature("auth exchange leg", () => {
+  component("single-use code, verifier check, bind-once, revoke", {
+    given: ["an env with a pending exchange code", async () => {
+      const env = makeEnv();
+      const { createLinkStore } = await import("./store.mjs");
+      const store = createLinkStore(env.LINK_DB);
+      const verifier = "v".repeat(64);
+      await store.insertExchangeCode({
+        codeHash: await sha256Hex("xch_1"),
+        challenge: await pkceChallenge(verifier),
+        identityId: "3f7c2a1e-1111-4111-8111-aaaaaaaaaaaa",
+        verifiedEmail: "m@example.se",
+        nowMs: NOW,
+        ttlSeconds: 60,
+      });
+      return { env, verifier };
+    }],
+    when: ["exchanging twice, with a wrong verifier, then revoking", async ({ env, verifier }) => {
+      const exchange = () => worker.fetch(req("https://link.v1d.io/auth/exchange", {
+        method: "POST", body: { code: "xch_1", verifier },
+      }), env);
+      const first = await exchange();
+      const firstBody = await first.json();
+      const second = await exchange();
+      const wrongVerifier = await worker.fetch(req("https://link.v1d.io/auth/exchange", {
+        method: "POST", body: { code: "xch_1", verifier: "w".repeat(64) },
+      }), env);
+      const session = firstBody.session;
+      const targets = await worker.fetch(req("https://link.v1d.io/api/link/targets", { token: session }), env);
+      await worker.fetch(req("https://link.v1d.io/auth/revoke", { method: "POST", token: session }), env);
+      const afterRevoke = await worker.fetch(req("https://link.v1d.io/api/link/targets", { token: session }), env);
+      return { first, firstBody, second, wrongVerifier, targets, afterRevoke };
+    }],
+    then: ["exactly one session, dead after use and after revoke", async (r) => {
+      expect(r.first.status).toBe(200);
+      expect(r.firstBody.session).toMatch(/^lnk_/u);
+      expect(r.firstBody.targets.map((t) => t.id)).toEqual(["lsrc:3", "lsrc:10", "windows"]);
+      expect(r.second.status).toBe(403);
+      expect(r.wrongVerifier.status).toBe(403);
+      expect(r.targets.status).toBe(200);
+      expect(r.afterRevoke.status).toBe(401);
+    }],
+  });
+
+  component("a valid login for a non-allowlisted identity is refused (E)", {
+    given: ["a sealed callback for a stranger and a mocked broker", async () => {
+      const env = makeEnv();
+      const verifier = "broker-verifier";
+      const state = await sealState(SECRET, {
+        verifier,
+        challenge: "c",
+        client: "android",
+        expiresAt: Date.now() + 60_000,
+      });
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = async () => new Response(JSON.stringify({
+        principal: { id: "9e7c2a1e-9999-4111-8111-bbbbbbbbbbbb", name: "Stranger" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+      return { env, state, restore: () => { globalThis.fetch = realFetch; } };
+    }],
+    when: ["hitting the callback", async ({ env, state, restore }) => {
+      const response = await worker.fetch(
+        req(`https://link.v1d.io/auth/callback?code=once&state=${encodeURIComponent(state)}`),
+        env,
+      );
+      restore();
+      return response;
+    }],
+    then: ["identity-not-allowed, no session minted", async (response) => {
+      expect(response.status).toBe(403);
+      expect((await response.json()).error).toBe("identity-not-allowed");
+    }],
+  });
+});

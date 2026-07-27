@@ -1,0 +1,26 @@
+name = "agentmux-link"
+main = "src/index.mjs"
+compatibility_date = "2026-07-20"
+
+# Public mailbox for Agentmux Link Internet V1 (docs/link-internet-v1.md).
+# Secrets (never in source): V1D_AUTH_CLIENT_SECRET, V1D_AUTH_STATE_SECRET,
+# CONNECTOR_TOKEN_WSL, CONNECTOR_TOKEN_WINDOWS.
+
+[[d1_databases]]
+binding = "LINK_DB"
+database_name = "link_mailbox"
+database_id = "REPLACE_WITH_D1_ID"
+
+[[r2_buckets]]
+binding = "LINK_VOICE"
+bucket_name = "link-voice"
+
+[vars]
+V1D_AUTH_ORIGIN = "https://auth.v1d.io"
+V1D_AUTH_CALLBACK_URL = "https://link.v1d.io/auth/callback"
+V1D_AUTH_APP_ID = "agentmux-link"
+SESSION_TTL_SECONDS = "2592000"
+EXCHANGE_CODE_TTL_SECONDS = "60"
+CONNECTOR_LEASE_SECONDS = "60"
+MAX_TEXT_CHARS = "4000"
+MAX_AUDIO_BYTES = "5242880"
