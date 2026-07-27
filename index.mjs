@@ -45,6 +45,7 @@ import { syncConfiguredAgentHints } from "./core/hints-sync.mjs";
 import { runPendingFleetRestart } from "./core/fleet-restart.mjs";
 import { createDeliveryQueue } from "./core/delivery-queue.mjs";
 import { createDeliveryBroker } from "./core/delivery-broker.mjs";
+import { startLinkConnectorIfConfigured } from "./channels/link-connector-start.mjs";
 import { createPaneSleepWakeLifecycle } from "./core/pane-sleep-wake.mjs";
 import { createPaneSleepRepair } from "./core/pane-sleep-repair.mjs";
 import { findChannelForPane, listAgents, validateAgentPane } from "./cli/config.mjs";
@@ -476,3 +477,7 @@ voicePwa.start()
     console.log(`voice-pwa | listening at ${url}${staticNote}`);
   })
   .catch((err) => console.error(`voice-pwa | failed to start: ${err.message}`));
+
+// Outbound Link connector (docs/link-internet-v1.md): polls the public
+// mailbox for the panes this bridge owns and carries replies back.
+startLinkConnectorIfConfigured({ agent, deliveryBroker, deliveryQueue });
