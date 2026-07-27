@@ -10,6 +10,10 @@ import androidx.compose.ui.graphics.toArgb
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.LinkAction
 
+/**
+ * WHAT: Builds the phone Compose surface and its lifecycle-owned controllers.
+ * WHY: Keeps presentation setup separate from durable transport and playback services.
+ */
 class MainActivity : ComponentActivity() {
     private lateinit var coordinator: LinkCoordinator
     private lateinit var recorder: PushToTalkRecorder

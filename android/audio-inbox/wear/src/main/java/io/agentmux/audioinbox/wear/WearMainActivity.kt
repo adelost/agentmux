@@ -9,6 +9,10 @@ import io.agentmux.linkcore.LinkReducer
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTarget
 
+/**
+ * WHAT: Builds the deliberately small round-watch presentation surface.
+ * WHY: Keeps Wear navigation independent from the phone timeline implementation.
+ */
 class WearMainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

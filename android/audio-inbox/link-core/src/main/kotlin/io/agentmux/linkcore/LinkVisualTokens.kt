@@ -1,6 +1,9 @@
 package io.agentmux.linkcore
 
-/** Android-free Graphite visual contract consumed by phone and round-watch hosts. */
+/**
+ * WHAT: Defines the Android-free Graphite visual contract for phone and watch hosts.
+ * WHY: Keeps both surfaces coherent without creating a cross-repository UI framework.
+ */
 object LinkVisualTokens {
     const val CANVAS_ARGB = 0xFF111315L
     const val SURFACE_ARGB = 0xFF1A1D20L

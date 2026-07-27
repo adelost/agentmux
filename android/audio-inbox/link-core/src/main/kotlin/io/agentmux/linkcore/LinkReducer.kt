@@ -27,6 +27,10 @@ sealed interface LinkAction {
     data class Update(val value: UpdatePresentation) : LinkAction
 }
 
+/**
+ * WHAT: Maps typed Link actions into immutable cross-device presentation state.
+ * WHY: Keeps phone and watch behavior identical without sharing Android UI code.
+ */
 object LinkReducer {
     private const val MAX_TURNS = 100
 

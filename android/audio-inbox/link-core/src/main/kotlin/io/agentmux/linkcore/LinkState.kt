@@ -1,5 +1,9 @@
 package io.agentmux.linkcore
 
+/**
+ * WHAT: Tracks transport connectivity independently from work or playback state.
+ * WHY: Keeps a busy target from being mislabeled offline.
+ */
 enum class ConnectionState {
     OFF,
     CONNECTING,
@@ -8,6 +12,10 @@ enum class ConnectionState {
     CONFIGURATION_REQUIRED,
 }
 
+/**
+ * WHAT: Tracks the lifecycle of one user-owned push-to-talk capture.
+ * WHY: Keeps recording gestures independent from send and reply jobs.
+ */
 enum class CapturePhase {
     IDLE,
     LISTENING,
@@ -15,12 +23,20 @@ enum class CapturePhase {
     FAILED,
 }
 
+/**
+ * WHAT: Tracks durable acceptance for one outbound turn.
+ * WHY: Keeps delivery failures distinct from reply and playback failures.
+ */
 enum class DeliveryPhase {
     SENDING,
     QUEUED,
     FAILED,
 }
 
+/**
+ * WHAT: Tracks correlated model-response progress for one accepted turn.
+ * WHY: Keeps slow replies from locking unrelated sends.
+ */
 enum class ReplyPhase {
     NONE,
     THINKING,
@@ -28,6 +44,10 @@ enum class ReplyPhase {
     FAILED,
 }
 
+/**
+ * WHAT: Tracks user-controlled audio playback for one ready reply.
+ * WHY: Keeps stop and failure receipts from erasing successful reply delivery.
+ */
 enum class PlaybackPhase {
     IDLE,
     QUEUED,
@@ -39,12 +59,20 @@ enum class PlaybackPhase {
     FAILED,
 }
 
+/**
+ * WHAT: Describes one selectable agent target and its current availability.
+ * WHY: Keeps favorite selection independent from transport implementation details.
+ */
 data class LinkTarget(
     val id: String,
     val label: String,
     val available: Boolean = true,
 )
 
+/**
+ * WHAT: Stores one conversation turn with independent delivery, reply, and playback axes.
+ * WHY: Keeps concurrent turn truth from collapsing into one global busy phase.
+ */
 data class LinkTurn(
     val turnId: String,
     val targetId: String,
@@ -62,6 +90,10 @@ data class LinkTurn(
     val playbackError: String = "",
 )
 
+/**
+ * WHAT: Stores the immutable presentation state shared by phone and watch reducers.
+ * WHY: Keeps Android surfaces from inventing divergent interaction state.
+ */
 data class LinkState(
     val connection: ConnectionState = ConnectionState.OFF,
     val connectionDetail: String = "Off",
@@ -77,6 +109,10 @@ data class LinkState(
     val update: UpdatePresentation = UpdatePresentation(),
 )
 
+/**
+ * WHAT: Tracks signed-update progress and actionable installer state.
+ * WHY: Keeps updater security machinery out of presentation code.
+ */
 data class UpdatePresentation(
     val currentVersion: String = "",
     val availableVersion: String = "",

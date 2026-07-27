@@ -1,5 +1,9 @@
 package io.agentmux.linkcore
 
+/**
+ * WHAT: Describes a strictly parsed three-part semantic application version.
+ * WHY: Keeps update ordering from relying on ambiguous string comparison.
+ */
 data class SemanticVersion(val major: Int, val minor: Int, val patch: Int) :
     Comparable<SemanticVersion> {
     override fun compareTo(other: SemanticVersion): Int =
@@ -21,6 +25,10 @@ data class SemanticVersion(val major: Int, val minor: Int, val patch: Int) :
     }
 }
 
+/**
+ * WHAT: Checks that a release's numeric code and semantic name both advance.
+ * WHY: Keeps rollback or mislabeled release manifests from reaching installation.
+ */
 object UpdatePolicy {
     fun isStrictUpgrade(
         currentCode: Int,
