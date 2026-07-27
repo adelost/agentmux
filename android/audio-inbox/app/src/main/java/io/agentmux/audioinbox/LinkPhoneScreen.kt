@@ -49,12 +49,12 @@ internal fun LinkPhoneScreen(
     updater: AppUpdater,
 ) {
     val state by coordinator.state.collectAsStateWithLifecycle()
-    var composer by remember { mutableStateOf("") }
+    var composer by remember { mutableStateOf(ComposerDraft()) }
     var speakReplies by remember { mutableStateOf(coordinator.speaksReplies()) }
-    val canSend = composer.isNotBlank() && coordinator.selectedTarget()?.available == true
+    val canSend = composer.text.isNotBlank() && coordinator.selectedTarget()?.available == true
     LaunchedEffect(coordinator) {
         coordinator.acceptedDrafts.collect { accepted ->
-            if (composer == accepted.draft) composer = ""
+            composer = composer.accepted(accepted.turnId, accepted.draft)
         }
     }
     Column(
@@ -101,8 +101,10 @@ internal fun LinkPhoneScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedTextField(
-                        value = composer,
-                        onValueChange = { if (it.length <= 4000) composer = it },
+                        value = composer.text,
+                        onValueChange = {
+                            if (it.length <= 4000) composer = composer.edited(it)
+                        },
                         label = { Text("Type another message") },
                         minLines = 1,
                         maxLines = 4,
@@ -112,7 +114,11 @@ internal fun LinkPhoneScreen(
                         diameter = 52.dp,
                         active = canSend,
                         modifier = Modifier
-                            .clickable(enabled = canSend) { coordinator.submitText(composer) }
+                            .clickable(enabled = canSend) {
+                                coordinator.submitText(composer.text)?.let {
+                                    composer = composer.submitted(it)
+                                }
+                            }
                             .semantics { contentDescription = "Send message" },
                     ) {
                         Icon(
