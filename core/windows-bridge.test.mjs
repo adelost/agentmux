@@ -203,6 +203,11 @@ feature("windows bridge contract", () => {
         .toEqual({ outcome: "READY", reason: "ok", nextStep: "none" });
       expect(formatWindowsStatus(healthy)).toContain("AMUX READY reason=ok");
       expect(formatWindowsStatus(healthy)).toContain("release=ok:aaaaaaaaaaaa");
+      // The bounded wsl.exe timeout renders as the hang signature, not offline.
+      expect(formatWindowsStatus({ wslReachable: false, timedOut: true }))
+        .toContain("wsl=unresponsive");
+      expect(formatWindowsStatus({ wslReachable: false, timedOut: false }))
+        .toContain("wsl=offline");
     }],
   });
 });

@@ -48,6 +48,14 @@ feature("windows manager source contract", () => {
     }],
   });
 
+  unit("a bounded wsl.exe timeout is the hang signature, never probe-unavailable", {
+    then: ["the inner probe fits the manager envelope and maps to unresponsive", () => {
+      expect(RESCUE).toContain('Get-WslObservation -Config $config -TimeoutSeconds 15');
+      expect(MGR).toContain('parsed.timedOut ? "unresponsive" : "offline"');
+      expect(CORE).toContain("häng-signaturen");
+    }],
+  });
+
   unit("secrets only enter through environment variable names", {
     then: ["no literal keys or tokens, config is read-only, detail output is redacted", () => {
       expect(MGR).toContain("process.env[");

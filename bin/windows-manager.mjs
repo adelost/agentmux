@@ -89,7 +89,7 @@ async function observeDefault() {
   if (!result.ok) return { wsl: "unknown", wslReachable: false, timedOut: result.timedOut, error: "probe-unavailable" };
   try {
     const parsed = JSON.parse(result.stdout);
-    return { ...parsed, wsl: parsed.wslReachable ? "online" : "offline" };
+    return { ...parsed, wsl: parsed.wslReachable ? "online" : (parsed.timedOut ? "unresponsive" : "offline") };
   } catch {
     return { wsl: "unknown", wslReachable: false, error: "probe-json-invalid" };
   }

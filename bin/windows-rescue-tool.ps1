@@ -58,7 +58,7 @@ $invokeRescue = {
   if ($null -eq $config) {
     return [pscustomobject]@{ ok = $false; stage = $Name; detail = "restarter-config-missing" }
   }
-  if ($Name -eq "get-status") { return Get-WslObservation -Config $config }
+  if ($Name -eq "get-status") { return Get-WslObservation -Config $config -TimeoutSeconds 15 }
   if ($Name -eq "start-wsl") { return Start-WslBounded -Config $config }
   if ($Name -eq "start-bridge") { return Start-BridgeForeground -Config $config }
   if ($Name -eq "restart-wsl") { return Restart-Wsl -Config $config }
