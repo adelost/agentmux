@@ -69,6 +69,86 @@ feature("trimJsonlBuffer", () => {
       expect(run).toThrow(/line-2:invalid-jsonl-line/u);
     }],
   });
+
+  unit("trims tool payloads before ordinary conversation text", {
+    given: ["one mixed assistant row with prose and a much larger tool result", () => {
+      const prose = `human-visible-answer ${"important dialogue ".repeat(700)}`;
+      return {
+        prose,
+        source: Buffer.from(jsonl([{
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              { type: "text", text: prose },
+              { type: "tool_result", content: `tool-head ${"raw-output ".repeat(8_000)} tool-tail` },
+            ],
+          },
+        }])),
+      };
+    }],
+    when: ["trimming the mixed row", ({ prose, source }) => ({
+      prose,
+      result: trimJsonlBuffer(source, { maxLineBytes: 24 * 1_024 }),
+    })],
+    then: ["the dialogue is byte-identical while the tool payload is marked", ({ prose, result }) => {
+      const [row] = result.buffer.toString("utf8").trimEnd().split("\n").map(JSON.parse);
+      expect(row.message.content[0].text).toBe(prose);
+      expect(row.message.content[1].content).toContain(`${JSONL_TRIM_MARKER} kind=tool`);
+      expect(row.message.content[1].content).toContain("tool-head");
+      expect(row.message.content[1].content).toContain("tool-tail");
+    }],
+  });
+
+  unit("still bounds a conversation-only wall of text as a last resort", {
+    given: ["one oversized user paste without tool data", () => Buffer.from(jsonl([{
+      type: "user",
+      message: { role: "user", content: `question ${"pasted-file ".repeat(8_000)} conclusion` },
+    }]))],
+    when: ["trimming the conversation-only row", (source) =>
+      trimJsonlBuffer(source, { maxLineBytes: 8 * 1_024 })],
+    then: ["the row remains searchable and explicitly shortened", (result) => {
+      const [row] = result.buffer.toString("utf8").trimEnd().split("\n").map(JSON.parse);
+      expect(row.message.content).toContain("question");
+      expect(row.message.content).toContain("conclusion");
+      expect(row.message.content).toContain(`${JSONL_TRIM_MARKER} kind=conversation`);
+    }],
+  });
+
+  unit("recognizes Codex response-item tool output without clipping its assistant reply", {
+    given: ["Codex-style tool output followed by a normal assistant message", () => {
+      const reply = `short answer ${"worth keeping ".repeat(200)}`;
+      return {
+        reply,
+        source: Buffer.from(jsonl([
+          {
+            type: "response_item",
+            payload: {
+              type: "function_call_output",
+              output: `command output ${"diagnostic bytes ".repeat(8_000)}`,
+            },
+          },
+          {
+            type: "response_item",
+            payload: {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: reply }],
+            },
+          },
+        ])),
+      };
+    }],
+    when: ["trimming the provider journal", ({ reply, source }) => ({
+      reply,
+      result: trimJsonlBuffer(source, { maxLineBytes: 8 * 1_024 }),
+    })],
+    then: ["only the tool row is shortened", ({ reply, result }) => {
+      const rows = result.buffer.toString("utf8").trimEnd().split("\n").map(JSON.parse);
+      expect(rows[0].payload.output).toContain(`${JSONL_TRIM_MARKER} kind=tool`);
+      expect(rows[1].payload.content[0].text).toBe(reply);
+    }],
+  });
 });
 
 feature("trimAgedSessions", () => {
