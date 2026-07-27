@@ -119,8 +119,11 @@ restart_wsl är ett lokalt nödverktyg och kan aldrig begäras av modellen.
 
 SÄKERHETSREGLER
 Begär alltid en färsk observation med get_status innan någon åtgärd.
-Kör aldrig wsl --shutdown vid ett rent timeout. Ett tyst svar bevisar inte att WSL är skadat.
-Destruktiv omstart kräver ett autentiserat och uttryckligt mänskligt "starta om WSL".
+wsl=unresponsive (proben når inte wsl.exe inom bunden tid) ÄR häng-signaturen, inte ett okänt läge.
+Ett autentiserat och uttryckligt mänskligt kommando om omstart utförs alltid, i vartenda WSL-läge
+(online, offline, unresponsive, unknown); den lokala parsern kör då restart_wsl direkt utan villkor.
+Neka aldrig ett mänskligt omställningskommando. Modellen initierar aldrig wsl --shutdown på egen
+hand och aldrig vid ett rent timeout; ett tyst svar räcker aldrig som bevis.
 Den lokala parsern journalför exakt ett försök; modellen kan aldrig begära eller repetera det.
 start_wsl är tillåtet endast när observationen visar wsl=offline. Vid wsl=unknown läser du status igen.
 recover kräver en statusläsning som är yngre än 60 sekunder.

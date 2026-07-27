@@ -199,7 +199,7 @@ export function formatWindowsStatus(observation) {
     : (observation?.memory?.level || "unknown");
   return [
     `AMUX ${verdict.outcome} reason=${verdict.reason}`,
-    `windows=online wsl=${observation?.wslReachable ? "online" : "offline"} boot=${observation?.bootId || "unknown"}`,
+    `windows=online wsl=${observation?.wslReachable ? "online" : (observation?.timedOut ? "unresponsive" : "offline")} boot=${observation?.bootId || "unknown"}`,
     `bridge=${bridge} release=${release} memory=${memory}`,
   ].join("\n");
 }
