@@ -29,13 +29,16 @@ export function buildClaudeLaunchCommand({
   resume = false,
   resumeSessionId = null,
   model = resolveClaudeModel(),
+  profileHome = null,
 } = {}) {
   const exactModel = resolveClaudeModel(model);
   const exactResume = exactSessionId(resumeSessionId, "Claude");
   const sessionFlag = exactResume
     ? ` --resume ${shellQuote(exactResume)}`
     : resume ? " --continue" : "";
-  return `ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_AUTONOMOUS_FLAGS} --model ${shellQuote(exactModel)}${sessionFlag}`;
+  const profile = profileHome ? `CLAUDE_CONFIG_DIR=${shellQuote(profileHome)} ` : "";
+  return `${profile}ANTHROPIC_DISABLE_SURVEY=1 claude ${CLAUDE_AUTONOMOUS_FLAGS} ` +
+    `--model ${shellQuote(exactModel)}${sessionFlag}`;
 }
 
 /**
@@ -77,6 +80,7 @@ export function buildKimiLaunchCommand({
   model = "kimi-code/k3",
   resumeSessionId = null,
   allowFreshBootstrap = false,
+  profileHome = null,
 } = {}) {
   if (!executable || !String(executable).startsWith("/")) {
     throw new Error("Kimi executable must be an absolute path");
@@ -94,6 +98,7 @@ export function buildKimiLaunchCommand({
     throw new Error("Kimi launch requires an exact pane session; fresh bootstrap was not authorized");
   }
   const sessionFlag = exactResume ? ` --session ${shellQuote(exactResume)}` : "";
-  return `KIMI_MODEL_THINKING_EFFORT=${shellQuote("max")} ${shellQuote(executable)} ` +
+  const profile = profileHome ? `KIMI_CODE_HOME=${shellQuote(profileHome)} ` : "";
+  return `${profile}KIMI_MODEL_THINKING_EFFORT=${shellQuote("max")} ${shellQuote(executable)} ` +
     `--model ${shellQuote(model)} ${KIMI_AUTONOMOUS_FLAGS}${sessionFlag}`;
 }

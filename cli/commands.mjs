@@ -3524,7 +3524,7 @@ Usage:
     --voice <name>                Override the configured edge-tts voice
   agent quota [--all] [--json]    Subscription quota for every configured coding account
   agent accounts                  Same account overview, grouped by provider profile
-  agent accounts login TYPE:ID    Print a provider-scoped login command; never exposes tokens
+  agent accounts login TYPE:ID    Print a provider-scoped login command; never exposes tokens\n  agent accounts rotate claude:ID Safely compact, switch, and exact-resume Claude panes (--dry to inspect)
   agent r                         Resume last agent
   agent help                      Show this message
 
@@ -3793,7 +3793,7 @@ export async function dispatch(argv, ctx) {
     case "quota":
       return (await import("./accounts.mjs")).runQuotaCommand(rest);
     case "account": case "accounts":
-      return (await import("./accounts.mjs")).cmdAccounts(rest);
+      return (await import("./accounts.mjs")).cmdAccounts(rest, ctx);
 
     case "queue": {
       const { flags, positional } = parseFlags(rest, FLAG_SPECS.queue);

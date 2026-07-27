@@ -11,6 +11,7 @@ import {
 import { latestKimiSessionIdentity } from "./kimi-jsonl-reader.mjs";
 import { paneModelSelection, setPaneModelSelection } from "./pane-model-state.mjs";
 import { waitForProgressingUi } from "./progressing-ui.mjs";
+import { createRuntimeProfileResolver } from "./runtime-account-profiles.mjs";
 import { esc } from "../lib.mjs";
 
 const TUI_ESCAPE_AFTER_MS = 2 * 60_000;
@@ -37,6 +38,7 @@ export function createTuiStallRecovery({
   isAlreadyRunning, resolveSessionFlag, isBusy, promptTransportState, restartCodex, restartKimi,
   now = Date.now,
 } = {}) {
+  const runtimeProfileFor = createRuntimeProfileResolver({ state, configFor });
   /** WHAT: Observes one pane process. WHY: Proves whether a fenced submission can still be ingested. */
   async function paneProcessState(agentName, pane) {
     const target = `${agentName}:.${pane}`;
@@ -51,13 +53,17 @@ export function createTuiStallRecovery({
   }
 
   /** WHAT: Starts Claude with pane history and model. WHY: Keeps restarts from reverting Fable to fleet defaults. */
-  async function startClaude(name, target, rootDir, pane = 0) {
+  async function startClaude(name, target, rootDir, pane = 0, launch = null) {
     if (await isPaneDead(target)) await respawnPane(target);
     if (await isAlreadyRunning(target)) return;
     const dir = paneDirectory(rootDir, pane);
+    const profile = launch?.profile || runtimeProfileFor?.(name, pane, "claude") || null;
     const configuredSessionId = configFor(name).panes?.[pane]?.resumeSessionId || null;
     const discovered = configuredSessionId ? null : latestClaudeSessionIdentity(dir);
-    const resumeSessionId = configuredSessionId || discovered?.sessionId || null;
+    const resumeSessionId = launch?.resumeSessionId
+      || configuredSessionId
+      || discovered?.sessionId
+      || null;
     const sessionFlag = resumeSessionId ? "" : await resolveSessionFlag(dir, name, pane);
     let rememberedModel = paneModelSelection(state, name, pane)?.model || null;
     if (!rememberedModel) {
@@ -68,9 +74,51 @@ export function createTuiStallRecovery({
       resume: !resumeSessionId && sessionFlag === "--continue",
       resumeSessionId,
       model: rememberedModel || undefined,
+      profileHome: profile?.home || null,
     });
     await tmux.runShell(target, `cd ${esc(dir)} && ${command}`);
     await delay(2000);
+  }
+
+  /** WHAT: Restarts one idle Claude pane under an explicit account. WHY: Keeps account rotation exact and rollbackable. */
+  async function restartClaudeAccount(agentName, pane, launch = {}) {
+    const config = configFor(agentName);
+    const paneCmd = config.panes?.[pane]?.cmd || "";
+    if (!isClaudePaneCommand(paneCmd)) {
+      throw new Error(`${agentName}:${pane} is not a Claude pane`);
+    }
+    if (await isBusy(agentName, pane)) {
+      throw new Error(`${agentName}:${pane} is still working`);
+    }
+    const transport = await promptTransportState(agentName, pane, "").catch(() => null);
+    if (transport?.state !== "empty-idle") {
+      throw new Error(`${agentName}:${pane} composer is not provably empty`);
+    }
+    const dir = paneDirectory(config.dir, pane);
+    const identity = latestClaudeSessionIdentity(dir);
+    const resumeSessionId = launch.resumeSessionId || identity?.sessionId || null;
+    if (!resumeSessionId) {
+      throw new Error(`Claude continuity blocked for ${agentName}:${pane}: exact persisted session not found`);
+    }
+    const target = `${agentName}:.${pane}`;
+    await tmux.respawnPane(target, { kill: true, cwd: dir });
+    const shellDeadline = now() + 5_000;
+    while (now() < shellDeadline) {
+      if (isShellProcess(await tmux.currentCommand(target).catch(() => ""))) break;
+      await delay(100);
+    }
+    await startClaude(agentName, target, config.dir, pane, {
+      ...launch,
+      resumeSessionId,
+    });
+    if (!await waitForClaudeReady(target, agentName, pane)) {
+      throw new Error(`Claude process started but its composer never became ready in ${agentName}:${pane}`);
+    }
+    return {
+      ok: true,
+      profile: launch.profile?.id || null,
+      sessionId: resumeSessionId,
+    };
   }
 
   /** WHAT: Waits for a live Claude composer. WHY: Keeps stale JSONL idle state from skipping summary confirmation. */
@@ -120,22 +168,12 @@ export function createTuiStallRecovery({
       return { ok: true, dialect: "kimi" };
     }
     if (!isClaudePaneCommand(paneCmd)) return { ok: false, reason: "not-a-coding-pane" };
-    const target = `${agentName}:.${pane}`;
-    const dir = paneDirectory(config.dir, pane);
-    await tmux.respawnPane(target, { kill: true, cwd: dir });
-    const shellDeadline = Date.now() + 5_000;
-    while (Date.now() < shellDeadline) {
-      if (isShellProcess(await tmux.currentCommand(target).catch(() => ""))) break;
-      await delay(100);
+    try {
+      await restartClaudeAccount(agentName, pane);
+      return { ok: true, dialect: "claude" };
+    } catch (error) {
+      return { ok: false, reason: error.message };
     }
-    await startClaude(agentName, target, config.dir, pane);
-    if (!await waitForClaudeReady(target, agentName, pane)) {
-      return { ok: false, reason: "claude-composer-not-ready" };
-    }
-    const command = await tmux.currentCommand(target).catch(() => "");
-    return /^(claude|node)$/u.test(command)
-      ? { ok: true, dialect: "claude" }
-      : { ok: false, reason: "claude-process-not-ready" };
   }
 
   /** WHAT: Captures active pane session identities. WHY: Keeps fleet restarts from waking idle panes. */
@@ -168,7 +206,14 @@ export function createTuiStallRecovery({
     return targets;
   }
 
-  return { startClaude, waitForClaudeReady, restartPaneExact, interruptedFleetTargets, paneProcessState };
+  return {
+    startClaude,
+    waitForClaudeReady,
+    restartClaudeAccount,
+    restartPaneExact,
+    interruptedFleetTargets,
+    paneProcessState,
+  };
 }
 
 export { recoverSubmittedTui } from "./submitted-tui-recovery.mjs";

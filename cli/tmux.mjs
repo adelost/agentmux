@@ -25,16 +25,25 @@ import { findChannelForPane, validateAgentPane } from "./config.mjs";
 import { loadConfig } from "./config.mjs";
 import { createNativeRuntimeClient } from "../core/native-runtime-client.mjs";
 import { createAgentRouter } from "../core/agent-router.mjs";
+import { createState } from "../core/state.mjs";
 
 const exec = promisify(execCb);
 
-/** Create tmux execution helpers bound to a socket. */
+/** WHAT: Builds tmux execution helpers bound to one socket. WHY: Keeps CLI process and pane state on the bridge's shared boundaries. */
 export function createTmuxContext(socket, configPath) {
   const tmuxExec = (cmd) => exec(cmd, { timeout: 5000 });
   const run = (cmd, t = 30000) => exec(cmd, { timeout: t, maxBuffer: 1024 * 1024 });
   const tmux = (cmd) => tmuxExec(`tmux -S '${esc(socket)}' ${cmd}`);
 
-  const tmuxAgent = createAgent({ tmuxSocket: socket, configPath, timeout: 600000, run, tmuxExec });
+  const state = createState(process.env.STATE_FILE || "/tmp/agentmux-state.json");
+  const tmuxAgent = createAgent({
+    tmuxSocket: socket,
+    configPath,
+    timeout: 600000,
+    run,
+    tmuxExec,
+    state,
+  });
   const nativeRuntime = createNativeRuntimeClient({ configPath });
   const agent = createAgentRouter({ tmuxAgent, nativeRuntime });
 
@@ -45,6 +54,7 @@ export function createTmuxContext(socket, configPath) {
     agent,
     tmuxAgent,
     nativeRuntime,
+    state,
     socket,
     configPath,
     deliveryQueue: createDeliveryQueue({
