@@ -172,6 +172,13 @@ drift is a red gate, not a scoping excuse.
    proves nothing. For a visual change, run the smallest relevant visual
    scenario and attach one representative screenshot when useful. Turn a
    recurring defect into one focused regression gate, not a slow blanket suite.
+   GitHub-hosted CI is optional evidence, never release authority: unavailable
+   workers, billing limits, skipped workflows or provider outages do not block
+   a clean locally gated change. Every deployable repo keeps a documented
+   local-first release path that starts from the exact source SHA, records the
+   rollback SHA, runs the targeted gate and relevant build on this host,
+   deploys, then verifies the live outcome. Hosted automation may mirror that
+   proof, but the release must not depend on it.
 7. **Owners self-merge and self-deliver.** A normal green change does not need
    peer review. Review only on explicit human request, a red gate, or a
    clearly high-risk seam. A merged-but-undeployed feature remains open when

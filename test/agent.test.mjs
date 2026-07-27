@@ -467,6 +467,10 @@ feature("generated agent policy", () => {
       expect(content).toMatch(/smallest relevant visual\s+scenario/u);
       expect(content).toMatch(/one representative screenshot/u);
       expect(content).toMatch(/one focused regression gate, not a slow blanket suite/u);
+      expect(content).toMatch(/GitHub-hosted CI is optional evidence, never release authority/u);
+      expect(content).toMatch(/billing limits, skipped workflows or provider outages do not block\s+a clean locally gated change/u);
+      expect(content).toMatch(/local-first release path that starts from the exact source SHA/u);
+      expect(content).toMatch(/Hosted automation may mirror that\s+proof, but the release must not depend on it/u);
     }],
   });
 
