@@ -144,7 +144,7 @@ feature("readClaudeQuota() credential handling", () => {
 feature("multi-account subscription snapshot", () => {
   unit("collects two profiles per provider and keeps backward-compatible headlines", {
     given: ["six provider-owned profiles and sterile collectors", () => {
-      const profiles = ["codex", "claude", "gemini"].flatMap((provider) =>
+      const profiles = ["codex", "claude", "kimi"].flatMap((provider) =>
         ["1", "2"].map((id) => ({
           provider, id, key: `${provider}:${id}`, label: `${provider} ${id}`,
           home: `/profiles/${provider}/${id}`, credentialsPath: `/profiles/${provider}/${id}/credentials`,
@@ -157,7 +157,7 @@ feature("multi-account subscription snapshot", () => {
           ...(profile.id === "2" ? { limits: [] } : { error: "login_required" }) };
       };
       return { profiles, readers: {
-        codex: read("codex"), claude: read("claude"), gemini: read("gemini"),
+        codex: read("codex"), claude: read("claude"), kimi: read("kimi"),
       } };
     }],
     when: ["collecting one shared snapshot", (ctx) => readQuotaSnapshot({
@@ -166,11 +166,11 @@ feature("multi-account subscription snapshot", () => {
     then: ["all six rows remain and healthy profile 2 is each provider headline", (snapshot) => {
       expect(snapshot.schemaVersion).toBe(2);
       expect(snapshot.accounts.map((row) => row.profile.key)).toEqual([
-        "codex:1", "codex:2", "claude:1", "claude:2", "gemini:1", "gemini:2",
+        "codex:1", "codex:2", "claude:1", "claude:2", "kimi:1", "kimi:2",
       ]);
       expect(snapshot.codex.profile.id).toBe("2");
       expect(snapshot.claude.profile.id).toBe("2");
-      expect(snapshot.gemini.profile.id).toBe("2");
+      expect(snapshot.kimi.profile.id).toBe("2");
     }],
   });
 });

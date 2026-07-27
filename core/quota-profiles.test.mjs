@@ -3,8 +3,8 @@ import { profileLoginInstruction, quotaProfileCatalog } from "./quota-profiles.m
 
 feature("subscription account profile catalog", () => {
   unit("keeps tokens provider-owned and discovers one Windows profile", {
-    given: ["one Windows user with Claude and Gemini homes", () => {
-      const dirs = new Set(["/mnt/c/Users/matt/.claude", "/mnt/c/Users/matt/.gemini"]);
+    given: ["one Windows user with Claude and Kimi homes", () => {
+      const dirs = new Set(["/mnt/c/Users/matt/.claude", "/mnt/c/Users/matt/.kimi-code"]);
       return quotaProfileCatalog({ HOME: "/home/matt" }, {
         readDir: () => [{ name: "matt", isDirectory: () => true }],
         exists: (path) => dirs.has(path),
@@ -15,8 +15,8 @@ feature("subscription account profile catalog", () => {
       expect(catalog.find((row) => row.key === "claude:2")).toMatchObject({
         home: "/mnt/c/Users/matt/.claude", source: "windows",
       });
-      expect(catalog.find((row) => row.key === "gemini:2")).toMatchObject({
-        home: "/mnt/c/Users/matt/.gemini", source: "windows",
+      expect(catalog.find((row) => row.key === "kimi:2")).toMatchObject({
+        home: "/mnt/c/Users/matt/.kimi-code", source: "windows",
       });
       expect(JSON.stringify(catalog)).not.toMatch(/accessToken|refreshToken|apiKey/u);
     }],
@@ -42,7 +42,8 @@ feature("subscription account profile catalog", () => {
     then: ["each command binds the provider's native home", (profiles) => {
       expect(profileLoginInstruction(profiles[0])).toContain("CODEX_HOME=");
       expect(profileLoginInstruction(profiles[1])).toContain("CLAUDE_CONFIG_DIR=");
-      expect(profileLoginInstruction(profiles[2])).toContain("GEMINI_CLI_HOME=");
+      expect(profileLoginInstruction(profiles[2])).toContain("KIMI_CODE_HOME=");
+      expect(profileLoginInstruction(profiles[2])).toContain("kimi login");
     }],
   });
 });

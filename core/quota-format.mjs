@@ -68,14 +68,14 @@ const codexLine = (codex) => {
   return `Codex   ${cells.join(" · ")}`;
 };
 
-const geminiLine = (gemini) => {
-  if (!gemini?.ok) return `Gemini  otillgänglig (${gemini?.error ?? "okänt fel"})`;
-  const tightest = gemini.limits.reduce((current, limit) =>
+const kimiLine = (kimi) => {
+  if (!kimi?.ok) return `Kimi    otillgänglig (${kimi?.error ?? "okänt fel"})`;
+  const tightest = kimi.limits.reduce((current, limit) =>
     !current || limit.usedPercent > current.usedPercent ? limit : current, null);
-  if (!tightest) return "Gemini  otillgänglig (inga modellgränser)";
+  if (!tightest) return "Kimi    otillgänglig (inga kvotgränser)";
   const reset = formatReset(tightest.resetsAt);
-  const count = gemini.limits.length === 1 ? "" : ` · ${gemini.limits.length} modeller`;
-  return `Gemini  ${percentCell(tightest.scopeName || tightest.id, tightest.usedPercent)}`
+  const count = kimi.limits.length === 1 ? "" : ` · ${kimi.limits.length} gränser`;
+  return `Kimi    ${percentCell(tightest.scopeName || tightest.id, tightest.usedPercent)}`
     + `${reset ? ` (${reset})` : ""}${count}`;
 };
 
@@ -89,24 +89,25 @@ const accountSuffix = (account, duplicate) => {
 
 const accountLine = (account, duplicates = new Set()) => {
   const rendered = account?.provider === "claude" ? claudeLine(account)
-    : account?.provider === "gemini" ? geminiLine(account)
+    : account?.provider === "kimi" ? kimiLine(account)
       : codexLine(account);
   const id = account?.profile?.id;
   if (!id) return rendered;
   const providerName = account.provider === "claude" ? "Claude"
-    : account.provider === "gemini" ? "Gemini" : "Codex";
+    : account.provider === "kimi" ? "Kimi" : "Codex";
   return `${providerName} ${id}${accountSuffix(account, duplicates.has(account.profile?.key))}  `
     + rendered.replace(/^\S+\s+/u, "");
 };
 
 const snapshotLines = (snapshot) => {
   if (Array.isArray(snapshot?.accounts) && snapshot.accounts.length) {
-    const order = ["codex", "claude", "gemini"];
+    const order = ["codex", "claude", "kimi"];
     const identities = new Map();
     for (const account of snapshot.accounts) {
-      const email = account?.account?.email?.toLowerCase();
-      if (!email) continue;
-      const key = `${account.provider}:${email}`;
+      const identity = account?.account?.email?.toLowerCase()
+        || account?.account?.identityKey;
+      if (!identity) continue;
+      const key = `${account.provider}:${identity}`;
       identities.set(key, [...(identities.get(key) || []), account.profile?.key]);
     }
     const duplicates = new Set([...identities.values()]

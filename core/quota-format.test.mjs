@@ -93,21 +93,21 @@ feature("quota text render for bridge and CLI", () => {
     }],
   });
 
-  unit("marks duplicate profile identities and keeps Gemini compact", {
-    when: ["rendering two Gemini profiles logged into the same account", () => formatQuotaSnapshot({
+  unit("marks duplicate profile identities and keeps Kimi compact", {
+    when: ["rendering two Kimi profiles logged into the same account", () => formatQuotaSnapshot({
       accounts: ["1", "2"].map((id) => ({
-        ok: true, provider: "gemini", profile: { id, key: `gemini:${id}` },
-        account: { email: "same@example.com", plan: "Free" },
+        ok: true, provider: "kimi", profile: { id, key: `kimi:${id}` },
+        account: { identityKey: "same-account", plan: "Allegretto" },
         limits: [
-          { id: "pro", scopeName: "pro", usedPercent: 100, resetsAt: null },
-          { id: "flash", scopeName: "flash", usedPercent: 0, resetsAt: null },
+          { id: "weekly", scopeName: "Vecka", usedPercent: 100, resetsAt: null },
+          { id: "rolling", scopeName: "5 h", usedPercent: 20, resetsAt: null },
         ],
       })),
     })],
-    then: ["both rows tell the truth without dumping every model bucket", (text) => {
+    then: ["both rows tell the truth without dumping every allowance", (text) => {
       expect(text.match(/⚠ samma inloggning/gu)).toHaveLength(2);
-      expect(text).toContain("pro 100% 🔴 · 2 modeller");
-      expect(text).not.toContain("flash 0%");
+      expect(text).toContain("Vecka 100% 🔴 · 2 gränser");
+      expect(text).not.toContain("5 h 20%");
     }],
   });
 });
