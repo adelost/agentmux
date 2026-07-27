@@ -64,7 +64,7 @@ internal fun LinkPhoneScreen(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = LinkTokens.PageGutter, vertical = 20.dp),
     ) {
-        Header(state.connection, state.connectionDetail)
+        Header(state.connection, state.connectionDetail, state.connectionObservedAtMs)
         if (state.recoveryError.isNotBlank()) {
             Surface(shape = RoundedCornerShape(12.dp), color = LinkTokens.SurfaceStrong) {
                 Text(
@@ -136,7 +136,8 @@ internal fun LinkPhoneScreen(
             PttDisc(
                 phase = state.capture,
                 startedAtMs = state.captureStartedAtMs,
-                enabled = coordinator.selectedTarget()?.available == true,
+                enabled = coordinator.selectedTarget()?.available == true &&
+                    state.capture != CapturePhase.FINALIZING,
                 onBegin = {
                     val capture = recorder.begin()
                     if (capture == null) false
@@ -148,9 +149,7 @@ internal fun LinkPhoneScreen(
                 onRelease = {
                     coordinator.capture(CapturePhase.FINALIZING)
                     val capture = recorder.release()
-                    if (capture != null && coordinator.submitAudio(capture)) {
-                        coordinator.capture(CapturePhase.IDLE)
-                    } else {
+                    if (capture == null || !coordinator.submitAudio(capture)) {
                         coordinator.capture(CapturePhase.FAILED)
                     }
                 },
@@ -159,7 +158,15 @@ internal fun LinkPhoneScreen(
                     coordinator.capture(CapturePhase.FAILED)
                 },
             )
-            Text(captureStatus(state.capture), color = LinkTokens.Muted)
+            Text(
+                captureStatus(
+                    state.capture,
+                    state.turns.any {
+                        it.replyPhase == io.agentmux.linkcore.ReplyPhase.THINKING
+                    },
+                ),
+                color = LinkTokens.Muted,
+            )
         }
         val audioActive = state.activePlaybackTurnId != null ||
             state.connectionDetail.startsWith("Playing", ignoreCase = true)
@@ -194,7 +201,14 @@ internal fun LinkPhoneScreen(
 }
 
 @Composable
-private fun Header(connection: ConnectionState, detail: String) {
+private fun Header(connection: ConnectionState, detail: String, observedAtMs: Long) {
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(observedAtMs) {
+        while (true) {
+            now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(30_000)
+        }
+    }
     Row(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
@@ -212,7 +226,12 @@ private fun Header(connection: ConnectionState, detail: String) {
             )
         }
     }
-    Text(detail, color = LinkTokens.Muted, fontSize = 12.sp)
+    val age = (now - observedAtMs).coerceAtLeast(0)
+    Text(
+        if (observedAtMs > 0) "$detail · ${relativeAge(age)}" else detail,
+        color = LinkTokens.Muted,
+        fontSize = 12.sp,
+    )
 }
 
 @Composable
@@ -268,8 +287,9 @@ private fun ToggleRow(label: String, checked: Boolean, onChecked: (Boolean) -> U
     }
 }
 
-private fun captureStatus(phase: CapturePhase): String = when (phase) {
-    CapturePhase.IDLE -> "Hold while speaking · release sends"
+private fun captureStatus(phase: CapturePhase, waiting: Boolean): String = when (phase) {
+    CapturePhase.IDLE -> if (waiting) "Waiting for reply · hold to send another"
+    else "Hold while speaking · release sends"
     CapturePhase.LISTENING -> "Listening"
     CapturePhase.FINALIZING -> "Sending"
     CapturePhase.FAILED -> "Recording or send failed"
@@ -288,4 +308,10 @@ private fun connectionColor(state: ConnectionState) = when (state) {
     ConnectionState.CONNECTING -> LinkTokens.Warning
     ConnectionState.DISCONNECTED, ConnectionState.CONFIGURATION_REQUIRED -> LinkTokens.Error
     ConnectionState.OFF -> LinkTokens.Muted
+}
+
+private fun relativeAge(ageMs: Long): String = when {
+    ageMs < 60_000 -> "now"
+    ageMs < 3_600_000 -> "${ageMs / 60_000}m"
+    else -> "${ageMs / 3_600_000}h"
 }

@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Agent Audio Inbox"
-include(":app", ":link-core")
+include(":app", ":link-core", ":wear")

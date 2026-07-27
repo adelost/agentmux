@@ -12,6 +12,8 @@ import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTarget
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
+import io.agentmux.linkcore.RecoveredReply
+import io.agentmux.linkcore.RecoveredReplyPolicy
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -21,6 +23,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 internal class LinkCoordinator(
     private val activity: Activity,
@@ -34,7 +37,10 @@ internal class LinkCoordinator(
     private val mutableAccepted = MutableSharedFlow<AcceptedDraft>(extraBufferCapacity = 16)
     private val targets = ConcurrentHashMap<String, ConversationTarget>()
     private val discovery: ExecutorService = Executors.newFixedThreadPool(2)
+    private val pendingDiscovery = AtomicInteger(2)
     private val drafts = ConcurrentHashMap<String, String>()
+    private val voiceTurns = ConcurrentHashMap.newKeySet<String>()
+    @Volatile private var recoveredPlaybackApplied = false
     private val controller = ConversationController(
         activity,
         AppContract.consumerId(preferences),
@@ -52,6 +58,11 @@ internal class LinkCoordinator(
             ) {
                 dispatch(LinkAction.Accepted(turnId, visibleText))
                 mutableAccepted.tryEmit(AcceptedDraft(turnId, drafts.remove(turnId).orEmpty()))
+                if (voiceTurns.remove(turnId) &&
+                    mutableState.value.capture == CapturePhase.FINALIZING
+                ) {
+                    dispatch(LinkAction.Capture(CapturePhase.IDLE))
+                }
             }
 
             override fun onReply(
@@ -60,7 +71,14 @@ internal class LinkCoordinator(
                 respondingTarget: String,
                 text: String,
             ) {
-                dispatch(LinkAction.Reply(turnId, respondingTarget, text))
+                dispatch(
+                    LinkAction.Reply(
+                        turnId,
+                        respondingTarget,
+                        text,
+                        System.currentTimeMillis(),
+                    ),
+                )
                 if (preferences.getBoolean(AppContract.KEY_SPEAK_REPLIES, false)) {
                     playReply(turnId, explicitReplay = false)
                 }
@@ -73,6 +91,11 @@ internal class LinkCoordinator(
             ) {
                 drafts.remove(turnId)
                 dispatch(LinkAction.DeliveryFailed(turnId, message))
+                if (voiceTurns.remove(turnId) &&
+                    mutableState.value.capture == CapturePhase.FINALIZING
+                ) {
+                    dispatch(LinkAction.Capture(CapturePhase.FAILED))
+                }
             }
 
             override fun onReplyFailure(
@@ -132,6 +155,7 @@ internal class LinkCoordinator(
 
     fun submitAudio(capture: PushToTalkRecorder.Capture): Boolean {
         val target = targetForSelection() ?: return false
+        voiceTurns.add(capture.turnId)
         dispatch(
             LinkAction.Submit(
                 LinkTurn(
@@ -145,6 +169,7 @@ internal class LinkCoordinator(
         )
         return controller.sendAudio(target, capture.file, capture.turnId).also { accepted ->
             if (!accepted) {
+                voiceTurns.remove(capture.turnId)
                 dispatch(LinkAction.DeliveryFailed(capture.turnId, "Target is unavailable"))
             }
         }
@@ -164,6 +189,7 @@ internal class LinkCoordinator(
                 LinkAction.Connection(
                     ConnectionState.CONFIGURATION_REQUIRED,
                     "Tailscale configuration required",
+                    System.currentTimeMillis(),
                 ),
             )
             return
@@ -222,20 +248,38 @@ internal class LinkCoordinator(
             LinkAction.Connection(
                 if (saved) ConnectionState.CONNECTING else ConnectionState.DISCONNECTED,
                 if (saved) "Connecting via Tailscale" else "Finding Agentmux on Tailscale",
+                System.currentTimeMillis(),
             ),
         )
         discovery.execute {
-            applyDiscovery(ServerDiscovery.discover(ServerDiscovery.WSL_CANDIDATES), save = true)
+            try {
+                applyDiscovery(ServerDiscovery.discover(ServerDiscovery.WSL_CANDIDATES), save = true)
+            } finally {
+                discoveryFinished()
+            }
         }
         discovery.execute {
-            applyDiscovery(ServerDiscovery.discover(ServerDiscovery.WINDOWS_CANDIDATES), save = false)
+            try {
+                applyDiscovery(
+                    ServerDiscovery.discover(ServerDiscovery.WINDOWS_CANDIDATES),
+                    save = false,
+                )
+            } finally {
+                discoveryFinished()
+            }
         }
     }
 
     private fun applyDiscovery(found: ServerDiscovery.Configuration?, save: Boolean) {
         if (found == null) {
             if (targets.isEmpty()) {
-                dispatch(LinkAction.Connection(ConnectionState.DISCONNECTED, "Tailscale server not found"))
+                dispatch(
+                    LinkAction.Connection(
+                        ConnectionState.DISCONNECTED,
+                        "Tailscale server not found",
+                        System.currentTimeMillis(),
+                    ),
+                )
             }
             return
         }
@@ -250,8 +294,46 @@ internal class LinkCoordinator(
             LinkTarget(it.id, it.label, true)
         }
         dispatch(LinkAction.Targets(ordered))
-        dispatch(LinkAction.Connection(ConnectionState.CONNECTED, "Connected via Tailscale"))
+        dispatch(
+            LinkAction.Connection(
+                ConnectionState.CONNECTED,
+                "Connected via Tailscale",
+                System.currentTimeMillis(),
+            ),
+        )
         if (save && preferences.getBoolean(AppContract.KEY_ENABLED, false)) setHandsFree(true)
+    }
+
+    private fun discoveryFinished() {
+        if (pendingDiscovery.decrementAndGet() != 0 || recoveredPlaybackApplied) return
+        recoveredPlaybackApplied = true
+        activity.runOnUiThread(::recoverReplyPlayback)
+    }
+
+    private fun recoverReplyPlayback() {
+        val now = System.currentTimeMillis()
+        val eligible = mutableState.value.turns.filter {
+            it.replyPhase == io.agentmux.linkcore.ReplyPhase.READY &&
+                it.playbackPhase == PlaybackPhase.IDLE &&
+                it.replyText.isNotBlank()
+        }
+        val newest = RecoveredReplyPolicy.autoplayTurnId(
+            eligible.map {
+                RecoveredReply(
+                    it.turnId,
+                    it.replyReceivedAtMs,
+                    it.replyReceivedAtMs + RECOVERED_AUDIO_TTL_MS,
+                    targets.containsKey(it.targetId),
+                )
+            },
+            now,
+        )
+        eligible.forEach { turn ->
+            if (turn.turnId != newest || !speaksReplies()) {
+                dispatch(LinkAction.Playback(turn.turnId, PlaybackPhase.SKIPPED))
+            }
+        }
+        if (newest != null && speaksReplies()) playReply(newest, explicitReplay = false)
     }
 
     private fun targetForSelection(): ConversationTarget? =
@@ -274,7 +356,7 @@ internal class LinkCoordinator(
                 ConnectionState.CONFIGURATION_REQUIRED
             else -> ConnectionState.DISCONNECTED
         }
-        dispatch(LinkAction.Connection(state, raw))
+        dispatch(LinkAction.Connection(state, raw, System.currentTimeMillis()))
     }
 
     private fun syncPlayback(key: String) {
@@ -296,5 +378,9 @@ internal class LinkCoordinator(
         "lsrc:10" -> 1
         "_windows_" -> 2
         else -> 3
+    }
+
+    private companion object {
+        const val RECOVERED_AUDIO_TTL_MS = 10 * 60_000L
     }
 }

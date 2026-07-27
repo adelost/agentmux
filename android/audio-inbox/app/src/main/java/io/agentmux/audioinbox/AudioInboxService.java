@@ -28,7 +28,6 @@ public final class AudioInboxService extends MediaSessionService {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService workExecutor = Executors.newSingleThreadExecutor();
     private final AudioEventClaims claims = new AudioEventClaims();
-
     private SharedPreferences preferences;
     private ExoPlayer player;
     private MediaSession mediaSession;
@@ -131,6 +130,7 @@ public final class AudioInboxService extends MediaSessionService {
         });
         mediaSession = new MediaSession.Builder(this, player)
             .setId("agent-audio-inbox")
+            .setCallback(new AudioSessionCallback(this::stopAllAudio))
             .build();
     }
 

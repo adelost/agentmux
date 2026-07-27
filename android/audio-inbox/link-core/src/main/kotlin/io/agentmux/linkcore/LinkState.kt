@@ -53,6 +53,7 @@ data class LinkTurn(
     val replyText: String = "",
     val respondingTarget: String = "",
     val createdAtMs: Long,
+    val replyReceivedAtMs: Long = 0,
     val deliveryPhase: DeliveryPhase = DeliveryPhase.SENDING,
     val replyPhase: ReplyPhase = ReplyPhase.NONE,
     val playbackPhase: PlaybackPhase = PlaybackPhase.IDLE,
@@ -64,6 +65,7 @@ data class LinkTurn(
 data class LinkState(
     val connection: ConnectionState = ConnectionState.OFF,
     val connectionDetail: String = "Off",
+    val connectionObservedAtMs: Long = 0,
     val targets: List<LinkTarget> = emptyList(),
     val selectedTargetId: String = "lsrc:3",
     val capture: CapturePhase = CapturePhase.IDLE,

@@ -143,8 +143,8 @@ There is no global busy flag.
 | Capture | `idle`, `listening`, `finalizing`, `failed` | Finger release finalizes once. Pointer movement and ancestor scrolling do not cancel an owned hold. Backgrounding is an explicit visible cancellation. |
 | Upload/send, per turn | `sending`, `sent`/`queued`, `failed` | Durable transport acceptance clears the composer and releases capture/send capacity. An ambiguous write is never retried under a new id. |
 | Model wait, per turn | `thinking`, `reply-ready`, `failed` | Each accepted turn has its own correlation id and wait job. Target selection changes never relabel a reply. |
-| Incoming reply, per turn | `reply-ready`, `playing`, `paused`, `stopped`, `played`, `failed` | Reply text/transcript/attachments are persisted before optional playback. |
-| Playback | `idle`, `preparing`, `playing`, `paused`, `stopped`, `played`, `failed` | Stop is immediate and terminal for automatic delivery. Only an explicit Replay can start a stopped/played item again. |
+| Reply wait, per turn | `none`, `thinking`, `reply-ready`, `failed` | Reply text/transcript/attachments and their actual responding target are persisted before optional playback. |
+| Playback, per turn | `idle`, `queued`, `playing`, `paused`, `stopped`, `played`, `skipped`, `failed` | Stop/skip are terminal for automatic delivery and do not erase reply-ready truth. Only an explicit Replay can start a terminal item again. |
 | Connection | `off`, `connecting`, `connected`, `disconnected`, `configuration-required` | Busy or thinking never means offline. Connection state is transport health only. |
 | Update | `idle`, `checking`, `up-to-date`, `available`, `downloading`, `ready-to-install`, `installing`, `failed` | Malformed, stale, untrusted, oversized, hash-mismatched, signer-mismatched, or non-monotonic releases leave the installed version untouched. |
 
@@ -241,7 +241,7 @@ contains the detached base64 signature. The payload has exactly:
   "versionCode": 2,
   "versionName": "1.1.0",
   "apk": {
-    "url": "https://link.v1d.io/releases/agentmux-link/phone/agentmux-link-1.1.0.apk",
+    "url": "https://link.v1d.io/releases/agentmux-link/phone/app-2.apk",
     "sizeBytes": 1,
     "sha256": "64 lowercase hexadecimal characters"
   },

@@ -15,6 +15,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import io.agentmux.linkcore.LinkVisualTokens
 
 /**
  * App-local adaptation of Skyvw designkit Graphite tokens. Values and circular
@@ -22,19 +23,19 @@ import androidx.compose.ui.unit.dp
  * dependency is introduced.
  */
 internal object LinkTokens {
-    val Canvas = Color(0xFF111315)
-    val Surface = Color(0xFF1A1D20)
-    val SurfaceStrong = Color(0xFF1D2023)
+    val Canvas = Color(LinkVisualTokens.CANVAS_ARGB)
+    val Surface = Color(LinkVisualTokens.SURFACE_ARGB)
+    val SurfaceStrong = Color(LinkVisualTokens.SURFACE_STRONG_ARGB)
     val Border = Color(0x2EF1EFE9)
-    val Ink = Color(0xFFF1EFE9)
-    val Muted = Color(0xFFA4A49F)
+    val Ink = Color(LinkVisualTokens.INK_ARGB)
+    val Muted = Color(LinkVisualTokens.MUTED_ARGB)
     val Faint = Color(0xFF727579)
-    val Accent = Color(0xFF6DE3B5)
-    val AccentInk = Color(0xFF121719)
-    val Warning = Color(0xFFE2AF32)
-    val Error = Color(0xFFED6863)
-    val PageGutter = 16.dp
-    val Control = 48.dp
+    val Accent = Color(LinkVisualTokens.ACCENT_ARGB)
+    val AccentInk = Color(LinkVisualTokens.ACCENT_INK_ARGB)
+    val Warning = Color(LinkVisualTokens.WARNING_ARGB)
+    val Error = Color(LinkVisualTokens.ERROR_ARGB)
+    val PageGutter = LinkVisualTokens.PAGE_GUTTER_DP.dp
+    val Control = LinkVisualTokens.MIN_TOUCH_DP.dp
 }
 
 @Composable

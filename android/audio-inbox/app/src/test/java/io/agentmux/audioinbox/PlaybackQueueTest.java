@@ -91,4 +91,35 @@ public class PlaybackQueueTest {
         assertEquals("event-1", queue.candidate());
         assertNull(queue.active());
     }
+
+    @Test
+    public void directRepliesOutrankBroadcastsAndRemainFifoWithinEachClass() {
+        FakeFocus focus = new FakeFocus();
+        PlaybackQueue queue = new PlaybackQueue(focus);
+        queue.setHandsFree(true);
+        queue.setConnected(true);
+        queue.offer("broadcast-1", PlaybackQueue.Priority.BROADCAST);
+        queue.offer("direct-1", PlaybackQueue.Priority.DIRECT);
+        queue.offer("direct-2", PlaybackQueue.Priority.DIRECT);
+        queue.offer("broadcast-2", PlaybackQueue.Priority.BROADCAST);
+
+        assertEquals("direct-1", queue.candidate());
+        assertTrue(queue.start("direct-1"));
+        assertEquals("direct-2", queue.complete("direct-1"));
+        assertTrue(queue.start("direct-2"));
+        assertEquals("broadcast-1", queue.complete("direct-2"));
+        assertTrue(queue.start("broadcast-1"));
+        assertEquals("broadcast-2", queue.complete("broadcast-1"));
+    }
+
+    @Test
+    public void directReplyCanPlayWhileHandsFreeBroadcastsAreOff() {
+        FakeFocus focus = new FakeFocus();
+        PlaybackQueue queue = new PlaybackQueue(focus);
+        queue.setConnected(true);
+
+        assertFalse(queue.offer("broadcast", PlaybackQueue.Priority.BROADCAST));
+        assertTrue(queue.offer("direct", PlaybackQueue.Priority.DIRECT));
+        assertEquals("direct", queue.candidate());
+    }
 }

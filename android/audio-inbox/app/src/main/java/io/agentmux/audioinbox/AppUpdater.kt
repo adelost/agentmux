@@ -2,6 +2,7 @@ package io.agentmux.audioinbox
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.pm.PackageInstaller
 import io.agentmux.linkcore.UpdatePolicy
 import io.agentmux.linkcore.UpdatePresentation
 import org.json.JSONObject
@@ -65,6 +66,23 @@ internal class AppUpdater(
             } finally {
                 running = false
             }
+        }
+    }
+
+    fun resumeInstallerStatus() {
+        val status = preferences.getInt(
+            AppContract.KEY_UPDATE_INSTALL_STATUS,
+            PackageInstaller.STATUS_SUCCESS,
+        )
+        if (status <= PackageInstaller.STATUS_FAILURE && candidate != null && readyFile != null) {
+            preferences.edit().remove(AppContract.KEY_UPDATE_INSTALL_STATUS).apply()
+            publish(
+                "ready-to-install",
+                candidate?.versionName().orEmpty(),
+                "Install was not completed · tap Install to retry",
+                1f,
+                canInstall = true,
+            )
         }
     }
 

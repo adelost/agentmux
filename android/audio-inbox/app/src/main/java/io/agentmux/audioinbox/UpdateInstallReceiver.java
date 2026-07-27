@@ -19,7 +19,7 @@ public final class UpdateInstallReceiver extends BroadcastReceiver {
         }
         context.getSharedPreferences(AppContract.PREFS, Context.MODE_PRIVATE)
             .edit()
-            .putString("update-install-status", String.valueOf(status))
+            .putInt(AppContract.KEY_UPDATE_INSTALL_STATUS, status)
             .apply();
     }
 }

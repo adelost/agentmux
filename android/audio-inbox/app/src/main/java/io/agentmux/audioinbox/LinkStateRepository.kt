@@ -44,6 +44,7 @@ internal class LinkStateRepository(
                     .put("replyText", turn.replyText)
                     .put("respondingTarget", turn.respondingTarget)
                     .put("createdAtMs", turn.createdAtMs)
+                    .put("replyReceivedAtMs", turn.replyReceivedAtMs)
                     .put("deliveryPhase", turn.deliveryPhase.name)
                     .put("replyPhase", turn.replyPhase.name)
                     .put("playbackPhase", turn.playbackPhase.name)
@@ -84,6 +85,10 @@ internal class LinkStateRepository(
                         replyText = row.optString("replyText"),
                         respondingTarget = row.optString("respondingTarget"),
                         createdAtMs = row.optLong("createdAtMs"),
+                        replyReceivedAtMs = row.optLong(
+                            "replyReceivedAtMs",
+                            row.optLong("createdAtMs"),
+                        ),
                         deliveryPhase = delivery,
                         replyPhase = reply,
                         playbackPhase = restoredPlayback,
@@ -136,6 +141,7 @@ internal class LinkStateRepository(
                 turns += user.copy(
                     replyText = text,
                     respondingTarget = target,
+                    replyReceivedAtMs = 0,
                     deliveryPhase = DeliveryPhase.QUEUED,
                     replyPhase = ReplyPhase.READY,
                 )

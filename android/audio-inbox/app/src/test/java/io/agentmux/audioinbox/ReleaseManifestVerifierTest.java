@@ -61,6 +61,15 @@ public class ReleaseManifestVerifierTest {
             Instant.parse("2026-07-27T20:00:00Z").toEpochMilli(),
             publicKey
         ));
+
+        JSONObject extra = payload();
+        extra.put("notes", "not part of schema v1");
+        assertThrows(SecurityException.class, () -> ReleaseManifestVerifier.verify(
+            extra.toString(),
+            sign(pair, extra, spec),
+            Instant.parse("2026-07-27T20:00:00Z").toEpochMilli(),
+            publicKey
+        ));
     }
 
     private static JSONObject payload() throws Exception {

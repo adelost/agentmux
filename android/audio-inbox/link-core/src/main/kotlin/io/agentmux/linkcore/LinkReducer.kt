@@ -4,6 +4,7 @@ sealed interface LinkAction {
     data class Connection(
         val state: ConnectionState,
         val detail: String,
+        val observedAtMs: Long = 0,
     ) : LinkAction
 
     data class Targets(val targets: List<LinkTarget>) : LinkAction
@@ -15,6 +16,7 @@ sealed interface LinkAction {
         val turnId: String,
         val respondingTarget: String,
         val text: String,
+        val receivedAtMs: Long = 0,
     ) : LinkAction
 
     data class Playback(val turnId: String, val phase: PlaybackPhase) : LinkAction
@@ -32,6 +34,7 @@ object LinkReducer {
         is LinkAction.Connection -> state.copy(
             connection = action.state,
             connectionDetail = action.detail,
+            connectionObservedAtMs = action.observedAtMs,
         )
         is LinkAction.Targets -> {
             val next = action.targets.distinctBy(LinkTarget::id)
@@ -65,6 +68,7 @@ object LinkReducer {
             it.copy(
                 respondingTarget = action.respondingTarget,
                 replyText = action.text,
+                replyReceivedAtMs = action.receivedAtMs,
                 replyPhase = ReplyPhase.READY,
                 replyError = "",
             )

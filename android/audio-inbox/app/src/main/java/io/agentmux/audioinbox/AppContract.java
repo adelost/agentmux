@@ -21,6 +21,7 @@ final class AppContract {
     static final String KEY_LINK_STATE_V2 = "linkStateV2";
     static final String KEY_LINK_STATE_V2_QUARANTINE = "linkStateV2Quarantine";
     static final String KEY_UPDATE_READY = "updateReadyV1";
+    static final String KEY_UPDATE_INSTALL_STATUS = "updateInstallStatus";
     static final String ACTION_START = "io.agentmux.audioinbox.START";
     static final String ACTION_STOP = "io.agentmux.audioinbox.STOP";
     static final String ACTION_STATUS = "io.agentmux.audioinbox.STATUS";

@@ -65,10 +65,15 @@ feature("Android audio inbox source contract", () => {
         "android/audio-inbox/link-core/src/main/kotlin/io/agentmux/linkcore/",
         ROOT,
       );
+      const wearDirectory = new URL(
+        "android/audio-inbox/wear/src/main/java/io/agentmux/audioinbox/wear/",
+        ROOT,
+      );
       const counts = Object.fromEntries(
         [
           ...readdirSync(appDirectory).map((name) => [appDirectory, name]),
           ...readdirSync(coreDirectory).map((name) => [coreDirectory, name]),
+          ...readdirSync(wearDirectory).map((name) => [wearDirectory, name]),
         ]
           .filter(([, name]) => name.endsWith(".java") || name.endsWith(".kt"))
           .map(([directory, name]) => {
@@ -83,6 +88,7 @@ feature("Android audio inbox source contract", () => {
         "MainActivity.kt": expect.any(Number),
         "LinkPhoneScreen.kt": expect.any(Number),
         "LinkState.kt": expect.any(Number),
+        "WearLinkScreen.kt": expect.any(Number),
         "ServerDiscovery.java": expect.any(Number),
       }));
       expect(Math.max(...Object.values(counts))).toBeLessThanOrEqual(500);

@@ -31,7 +31,7 @@ class MainActivity : ComponentActivity() {
                 LinkPhoneScreen(coordinator, recorder, updater)
             }
         }
-        requestNotificationPermission()
+        requestRuntimePermissions()
         updater.start()
     }
 
@@ -43,6 +43,11 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (::updater.isInitialized) updater.resumeInstallerStatus()
+    }
+
     override fun onDestroy() {
         updater.close()
         recorder.cancel()
@@ -50,12 +55,19 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun requestNotificationPermission() {
+    private fun requestRuntimePermissions() {
+        val permissions = mutableListOf<String>()
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            permissions += Manifest.permission.RECORD_AUDIO
+        }
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
         ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+            permissions += Manifest.permission.POST_NOTIFICATIONS
         }
+        if (permissions.isNotEmpty()) requestPermissions(permissions.toTypedArray(), 1)
     }
 }

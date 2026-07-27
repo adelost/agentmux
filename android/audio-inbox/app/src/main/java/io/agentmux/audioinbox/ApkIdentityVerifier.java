@@ -25,10 +25,25 @@ final class ApkIdentityVerifier {
         Identity installed = installed(context);
         Identity archive = archive(context, apk);
         if (installed == null || archive == null) return "APK identity unavailable";
-        String pinned = BuildConfig.UPDATE_SIGNER_SHA256;
-        if (!installed.packageName().equals(context.getPackageName())
-            || !installed.signers().equals(Set.of(pinned))) return "installed signer mismatch";
-        if (!archive.packageName().equals(context.getPackageName())) return "package mismatch";
+        return rejection(
+            installed,
+            archive,
+            context.getPackageName(),
+            BuildConfig.UPDATE_SIGNER_SHA256,
+            candidate
+        );
+    }
+
+    static String rejection(
+        Identity installed,
+        Identity archive,
+        String expectedPackage,
+        String pinnedSigner,
+        ReleaseCandidate candidate
+    ) {
+        if (!installed.packageName().equals(expectedPackage)
+            || !installed.signers().equals(Set.of(pinnedSigner))) return "installed signer mismatch";
+        if (!archive.packageName().equals(expectedPackage)) return "package mismatch";
         if (!archive.versionName().equals(candidate.versionName())
             || archive.versionCode() != candidate.versionCode()) return "version metadata mismatch";
         if (archive.versionCode() <= installed.versionCode()) return "version is not newer";
