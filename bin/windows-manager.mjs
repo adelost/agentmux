@@ -132,7 +132,7 @@ export async function runManagerTurn({ userText, messageId, state, history = [],
   let observation = await deps.observe();
   trackManagerBootId(state, observation);
   const messages = planManagerTurn({ userText, observation, history, contractVersion: MANAGER_CONTRACT_VERSION });
-  const local = planLocalRescueTurn(userText);
+  const local = planLocalRescueTurn(userText, { previousTurnText: state.lastAnswerText || "" });
   const reply = local ? { ok: true, text: "local-rescue" } : await deps.provider.chat(messages);
   const persistSession = (r) => { if (r?.sessionId) { state.codexSessionId = r.sessionId; deps.saveState(state); } };
   persistSession(reply);

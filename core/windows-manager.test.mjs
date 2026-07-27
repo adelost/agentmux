@@ -42,6 +42,16 @@ feature("windows manager core", () => {
       }
       expect(planLocalRescueTurn("starta projektet")).toBeNull();
       expect(planLocalRescueTurn("kan du starta om datorn")).toBeNull();
+      // The exact 2026-07-27 incident string carries no WSL/bryggan object;
+      // only the immediately previous manager turn may supply the reference.
+      const incident = "Men förhelvet.. starata om du omedelbums..";
+      expect(planLocalRescueTurn(incident)).toBeNull();
+      expect(planLocalRescueTurn(incident, { previousTurnText: "windows=online wsl=unknown boot=unknown" }))
+        .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl"] });
+      expect(planLocalRescueTurn(incident, { previousTurnText: "hej mamma, allt lugnt här" })).toBeNull();
+      // An explicit other object is never a WSL restart, context or not.
+      expect(planLocalRescueTurn("starta om datorn nu", { previousTurnText: "wsl=unknown" })).toBeNull();
+      expect(planLocalRescueTurn("starta om projektet", { previousTurnText: "bryggan svarar inte" })).toBeNull();
       expect(planLocalRescueTurn("WSL svarar inte")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
       expect(planLocalRescueTurn("hur restartar vi WSL?")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
       expect(planLocalRescueTurn("Hej! Hur restartar vi?")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });

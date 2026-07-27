@@ -19,15 +19,27 @@ const LOCAL_RESTART_WSL = new RegExp(
   String.raw`(?:\b(?:wsl|bryggan)\b.{0,120}\b(?:beh[oö]ver\s+)?${RESTART_VERB}|\b${RESTART_VERB}.{0,80}\b(?:wsl|bryggan)\b)`,
   "iu",
 );
+// An objectless slurred restart verb is a WSL restart order only when the
+// immediately previous manager turn already named WSL/bryggan. An explicit
+// other object ("datorn", "projektet") is never a WSL restart, context or not.
+const RESTART_VERB_ONLY = new RegExp(`\\b${RESTART_VERB}`, "iu");
+const RESCUE_CONTEXT = /\b(?:wsl|bryggan)\b/iu;
+const OTHER_OBJECT = /\b(?:datorn?|projekt\w*|telefon\w*|appen?|bilen?|routern?)\b/iu;
 const LOCAL_RECOVERY = /(?:\bwsl\b.*(?:\bkra(?:sch|sh)\w*|\b(?:nere|offline|dog|d[oö]d|h[aä]ng\w*|starta|restart\w*|[aå]terst[aä]ll\w*|recover\w*)\b|svarar\s+inte)|\b(?:starta|restart\w*|[aå]terst[aä]ll\w*|recover\w*)\b.*\b(?:wsl|bryggan)\b|^(?:hej[!,.]?\s+)?hur\s+(?:startar|restartar|[aå]terst[aä]ller)\s+vi\??$)/iu;
 
 /** WHAT: Maps a tiny unambiguous rescue vocabulary without an LLM. WHY: Keeps WSL recovery independent from optional provider authentication and availability. */
-export function planLocalRescueTurn(userText) {
+export function planLocalRescueTurn(userText, { previousTurnText = "" } = {}) {
   const text = String(userText || "").trim().replace(/\s+/gu, " ");
   if (!text) return null;
   if (LOCAL_STATUS.test(text)) return { kind: "status", tools: ["get_status"] };
   if (LOCAL_LOGS.test(text)) return { kind: "logs", tools: ["get_logs"] };
-  if (!/^(?:hej[!,.]?\s+)?hur\b/iu.test(text) && LOCAL_RESTART_WSL.test(text)) {
+  if (/^(?:hej[!,.]?\s+)?hur\b/iu.test(text)) {
+    if (LOCAL_RECOVERY.test(text)) return { kind: "recovery", tools: ["get_status", "recover"] };
+    return null;
+  }
+  const restartOrdered = LOCAL_RESTART_WSL.test(text)
+    || (RESTART_VERB_ONLY.test(text) && RESCUE_CONTEXT.test(previousTurnText));
+  if (restartOrdered && !OTHER_OBJECT.test(text)) {
     return { kind: "restart-wsl", tools: ["get_status", "restart_wsl"] };
   }
   if (LOCAL_RECOVERY.test(text)) return { kind: "recovery", tools: ["get_status", "recover"] };

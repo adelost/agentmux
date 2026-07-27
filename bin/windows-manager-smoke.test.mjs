@@ -160,6 +160,48 @@ feature("windows manager smoke", () => {
     }],
   });
 
+  unit("a slurred restart order borrows only the immediately previous turn's WSL reference", {
+    then: ["incident string restarts after a status answer, not after an intervening chat", async () => {
+      const harness = makeHarness({
+        messages: [],
+        scripted: [{ ok: true, text: "Allt lugnt, ingen rescue här." }],
+      });
+      harness.deps.executeTool = async (name) => {
+        harness.executed.push(name);
+        return {
+          ok: true,
+          stage: name,
+          detail: name === "get_status" ? "windows=online wsl=unknown boot=unknown" : "AMUX RECOVERED lokal recovery",
+          ...(name === "get_status" ? { observation: { wsl: "unknown", wslReachable: false } } : {}),
+        };
+      };
+      try {
+        const state = { schemaVersion: 1, lastSeenId: null, lastAction: null, lastStatusMs: null };
+        harness.deps.listMessages = async () => [
+          { id: "201", content: "status", author: { id: CONFIG.authorizedUserId, bot: false } },
+        ];
+        expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(1);
+        expect(state.lastAnswerText).toContain("wsl=");
+        harness.deps.listMessages = async () => [
+          { id: "202", content: "Men förhelvet.. starata om du omedelbums..", author: { id: CONFIG.authorizedUserId, bot: false } },
+        ];
+        expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(1);
+        expect(harness.executed).toEqual(["get_status", "get_status", "restart_wsl"]);
+        // An intervening non-rescue answer replaces the context: the same
+        // slurred order without a fresh WSL reference goes to the model.
+        harness.deps.listMessages = async () => [
+          { id: "203", content: "hej", author: { id: CONFIG.authorizedUserId, bot: false } },
+          { id: "204", content: "starata om igen du", author: { id: CONFIG.authorizedUserId, bot: false } },
+        ];
+        expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(2);
+        expect(harness.executed).toEqual(["get_status", "get_status", "restart_wsl"]);
+        expect(harness.chats()).toBe(2); // both non-restart turns used the provider
+      } finally {
+        harness.cleanup();
+      }
+    }],
+  });
+
   unit("a leftover started action is fenced and never re-executed", {
     then: ["startup marks blocked crashed-mid-action and the cursor skips the message", async () => {
       const state = {

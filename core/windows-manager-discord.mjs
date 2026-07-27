@@ -42,6 +42,9 @@ export async function pollManagerDiscord({ config, state, history = [], deps, ru
     const turn = await runTurn({ userText: content, messageId: String(message.id), state, history, deps });
     const answer = redactSecrets(turn.answer);
     await deps.sendMessage(answer);
+    // Bounded one-turn rescue context: the next turn may borrow this answer's
+    // WSL/bryggan reference, never anything older.
+    state.lastAnswerText = String(answer || "").slice(0, 500);
     finishAction(state, message, { status: "completed", stage: turn.outcome, nowMs: deps.nowMs() });
     deps.saveState(state);
     history.push({ role: "user", content }, { role: "assistant", content: answer });
