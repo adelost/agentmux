@@ -15,6 +15,10 @@ database_id = "REPLACE_WITH_D1_ID"
 binding = "LINK_VOICE"
 bucket_name = "link-voice"
 
+[[r2_buckets]]
+binding = "LINK_RELEASES"
+bucket_name = "link-releases"
+
 [vars]
 V1D_AUTH_ORIGIN = "https://auth.v1d.io"
 V1D_AUTH_CALLBACK_URL = "https://link.v1d.io/auth/callback"
