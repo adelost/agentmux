@@ -483,8 +483,8 @@ public final class AudioInboxService extends MediaSessionService {
     }
 
     private void replayCurrent() {
-        if (!enabled || !connected || player.getCurrentMediaItem() == null) return;
-        replaying = true;
+        if ((!connected && !directAvailable) || player.getCurrentMediaItem() == null) return;
+        replaying = playbackQueue.active() == null;
         player.seekTo(0);
         player.play();
     }
