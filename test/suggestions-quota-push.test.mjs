@@ -55,13 +55,13 @@ feature("suggestions-quota-push summary", () => {
     when: ["summarizing a mixed snapshot", () => quotaPushSummary({
       claude: { ok: true, limits: [] },
       codex: { ok: false, error: "no_rate_limit_events" },
-      gemini: { ok: false, error: "login_required" },
+      kimi: { ok: false, error: "login_required" },
       accounts: Array.from({ length: 6 }, () => ({})),
     })],
     then: ["both engines and the codex error are visible", (summary) => {
       expect(summary).toContain("claude ok");
       expect(summary).toContain("codex no_rate_limit_events");
-      expect(summary).toContain("gemini login_required");
+      expect(summary).toContain("kimi login_required");
       expect(summary).toContain("6 accounts");
     }],
   });

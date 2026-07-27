@@ -1,13 +1,16 @@
 // Provider-owned login profiles used by the quota dashboard.
 //
 // Only paths and operator labels live here. Tokens remain in Codex, Claude
-// Code and Gemini/Antigravity's own homes.
+// Code and Kimi Code's own homes.
 
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-const PROVIDERS = Object.freeze(["codex", "claude", "gemini"]);
+const PROVIDERS = Object.freeze(["codex", "claude", "kimi"]);
+
+const providerDirectory = (provider) =>
+  provider === "kimi" ? ".kimi-code" : `.${provider}`;
 
 const windowsProviderHome = (provider, {
   usersRoot = "/mnt/c/Users",
@@ -19,7 +22,7 @@ const windowsProviderHome = (provider, {
   catch { return null; }
   const candidates = users
     .filter((entry) => entry.isDirectory())
-    .map((entry) => join(usersRoot, entry.name, `.${provider}`))
+    .map((entry) => join(usersRoot, entry.name, providerDirectory(provider)))
     .filter((path) => exists(path))
     .sort();
   return candidates.length === 1 ? candidates[0] : null;
@@ -34,9 +37,9 @@ const profile = (provider, id, home, env, source) => {
   const base = { provider, id: String(id), key: `${provider}:${id}`,
     label, home: resolvedHome, source };
   if (provider === "codex") return { ...base, credentialsPath: join(resolvedHome, "auth.json") };
-  if (provider === "gemini") {
-    return { ...base, credentialsPath: join(resolvedHome, "oauth_creds.json"),
-      identityPath: join(resolvedHome, "google_accounts.json") };
+  if (provider === "kimi") {
+    return { ...base, credentialsPath: join(resolvedHome, "credentials", "kimi-code.json"),
+      configPath: join(resolvedHome, "config.toml") };
   }
   const defaultIdentity = source === "windows"
     ? join(dirname(resolvedHome), ".claude.json")
@@ -59,9 +62,9 @@ export function quotaProfileCatalog(env = process.env, options = {}) {
     profile("claude", 1, join(home, ".claude"), env, "primary"),
     profile("claude", 2, windows.claude || join(roots, "claude", "2"), env,
       windows.claude ? "windows" : "isolated"),
-    profile("gemini", 1, join(home, ".gemini"), env, "primary"),
-    profile("gemini", 2, windows.gemini || join(roots, "gemini", "2"), env,
-      windows.gemini ? "windows" : "isolated"),
+    profile("kimi", 1, join(home, ".kimi-code"), env, "primary"),
+    profile("kimi", 2, windows.kimi || join(roots, "kimi", "2"), env,
+      windows.kimi ? "windows" : "isolated"),
   ];
 }
 
@@ -81,5 +84,5 @@ export function profileLoginInstruction(item) {
   if (item.provider === "claude") {
     return `CLAUDE_CONFIG_DIR=${shellQuote(item.home)} claude auth login`;
   }
-  return `GEMINI_CLI_HOME=${shellQuote(item.home)} gemini`;
+  return `KIMI_CODE_HOME=${shellQuote(item.home)} kimi login`;
 }

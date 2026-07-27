@@ -48,7 +48,7 @@ export function quotaPushSummary(snapshot) {
     snapshot[engine]?.ok ? `${engine} ok` : `${engine} ${snapshot[engine]?.error || "missing"}`;
   const accounts = Array.isArray(snapshot?.accounts) ? `, ${snapshot.accounts.length} accounts` : "";
   return `pushed quota snapshot (${engineState("claude")}, ${engineState("codex")}, `
-    + `${engineState("gemini")}${accounts})`;
+    + `${engineState("kimi")}${accounts})`;
 }
 
 /** WHAT: Returns one push-health notice. WHY: Keeps recovered delivery from rendering as a live alert. */

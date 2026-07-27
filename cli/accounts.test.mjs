@@ -5,7 +5,7 @@ feature("account subscription CLI", () => {
   unit("renders all account rows by default and emits JSON only on request", {
     given: ["a six-account snapshot and output capture", () => {
       const snapshot = { schemaVersion: 2, accounts: [], claude: { ok: false, error: "x" },
-        codex: { ok: false, error: "y" }, gemini: { ok: false, error: "z" } };
+        codex: { ok: false, error: "y" }, kimi: { ok: false, error: "z" } };
       const lines = [];
       return { snapshot, lines, readSnapshot: async () => snapshot, output: (line) => lines.push(line) };
     }],

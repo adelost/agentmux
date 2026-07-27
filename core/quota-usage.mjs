@@ -12,7 +12,7 @@ import {
   readClaudeQuota,
 } from "./claude-account-quota.mjs";
 import { readCodexAccountQuota } from "./codex-account-quota.mjs";
-import { readGeminiAccountQuota } from "./gemini-account-quota.mjs";
+import { readKimiAccountQuota } from "./kimi-account-quota.mjs";
 import { readTailWindow } from "./jsonl-reader.mjs";
 import {
   clampQuotaPercent,
@@ -150,7 +150,7 @@ export function readCodexQuota({
 const collectorFor = (provider, readers) => {
   if (provider === "codex") return readers.codex;
   if (provider === "claude") return readers.claude;
-  return readers.gemini;
+  return readers.kimi;
 };
 
 const collectProfile = async (profile, options, readers, now) => {
@@ -177,23 +177,23 @@ const providerHeadline = (accounts, provider) =>
 export async function readQuotaSnapshot({
   claude,
   codex,
-  gemini,
+  kimi,
   profiles = quotaProfileCatalog(),
   readers = {
     claude: readClaudeQuota,
     codex: readCodexAccountQuota,
-    gemini: readGeminiAccountQuota,
+    kimi: readKimiAccountQuota,
   },
   now = Date.now,
 } = {}) {
   const accounts = await Promise.all(profiles.map((profile) =>
-    collectProfile(profile, { claude, codex, gemini }, readers, now)));
+    collectProfile(profile, { claude, codex, kimi }, readers, now)));
   return {
     schemaVersion: 2,
     generatedAt: new Date(now()).toISOString(),
     accounts,
     claude: providerHeadline(accounts, "claude"),
     codex: providerHeadline(accounts, "codex"),
-    gemini: providerHeadline(accounts, "gemini"),
+    kimi: providerHeadline(accounts, "kimi"),
   };
 }

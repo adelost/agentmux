@@ -10,7 +10,7 @@ import { readQuotaSnapshot } from "../core/quota-usage.mjs";
 
 const usage = `Usage:
   amux accounts
-  amux accounts login <codex|claude|gemini>:<1|2>
+  amux accounts login <codex|claude|kimi>:<1|2>
   amux quota [--all] [--json]`;
 
 /** WHAT: Builds one shared quota view. WHY: Keeps text and JSON views on one collection pass. */
