@@ -10,6 +10,7 @@ import {
   parseCodexRateLimitEvents,
   readClaudeQuota,
   readCodexQuota,
+  readQuotaSnapshot,
 } from "./quota-usage.mjs";
 
 const NOW = new Date("2026-07-15T12:00:00Z").getTime();
@@ -113,6 +114,7 @@ feature("readClaudeQuota() credential handling", () => {
       credentialsPath: path,
       fetchImpl: async () => { throw new Error("must not fetch"); },
       now: () => NOW,
+      refresh: false,
     })],
     then: ["the result names the expiry", (result) => {
       expect(result).toEqual({ ok: false, engine: "claude", error: "credentials_expired" });
@@ -135,6 +137,40 @@ feature("readClaudeQuota() credential handling", () => {
     })],
     then: ["the status is visible in the error", (result) => {
       expect(result).toEqual({ ok: false, engine: "claude", error: "http_401" });
+    }],
+  });
+});
+
+feature("multi-account subscription snapshot", () => {
+  unit("collects two profiles per provider and keeps backward-compatible headlines", {
+    given: ["six provider-owned profiles and sterile collectors", () => {
+      const profiles = ["codex", "claude", "gemini"].flatMap((provider) =>
+        ["1", "2"].map((id) => ({
+          provider, id, key: `${provider}:${id}`, label: `${provider} ${id}`,
+          home: `/profiles/${provider}/${id}`, credentialsPath: `/profiles/${provider}/${id}/credentials`,
+          source: id === "1" ? "primary" : "isolated",
+        })));
+      const read = (provider) => async (...args) => {
+        const profile = provider === "claude" ? args[0].profile : args[0];
+        return { ok: profile.id === "2", engine: provider, provider,
+          profile: { id: profile.id, key: profile.key, label: profile.label, source: profile.source },
+          ...(profile.id === "2" ? { limits: [] } : { error: "login_required" }) };
+      };
+      return { profiles, readers: {
+        codex: read("codex"), claude: read("claude"), gemini: read("gemini"),
+      } };
+    }],
+    when: ["collecting one shared snapshot", (ctx) => readQuotaSnapshot({
+      ...ctx, now: () => NOW,
+    })],
+    then: ["all six rows remain and healthy profile 2 is each provider headline", (snapshot) => {
+      expect(snapshot.schemaVersion).toBe(2);
+      expect(snapshot.accounts.map((row) => row.profile.key)).toEqual([
+        "codex:1", "codex:2", "claude:1", "claude:2", "gemini:1", "gemini:2",
+      ]);
+      expect(snapshot.codex.profile.id).toBe("2");
+      expect(snapshot.claude.profile.id).toBe("2");
+      expect(snapshot.gemini.profile.id).toBe("2");
     }],
   });
 });

@@ -3522,7 +3522,9 @@ Usage:
     -c <channelId>                Explicit Discord channel ID
     -p <agent>:<pane>             Explicit agent:pane channel mapping
     --voice <name>                Override the configured edge-tts voice
-  agent quota                     Shared account quota: Claude session/week/Fable + Codex week
+  agent quota [--all] [--json]    Subscription quota for every configured coding account
+  agent accounts                  Same account overview, grouped by provider profile
+  agent accounts login TYPE:ID    Print a provider-scoped login command; never exposes tokens
   agent r                         Resume last agent
   agent help                      Show this message
 
@@ -3788,12 +3790,10 @@ export async function dispatch(argv, ctx) {
       return cmdDoctor(ctx);
     }
 
-    case "quota": {
-      const { readQuotaSnapshot } = await import("../core/quota-usage.mjs");
-      const { formatQuotaSnapshot } = await import("../core/quota-format.mjs");
-      console.log(formatQuotaSnapshot(await readQuotaSnapshot()));
-      return;
-    }
+    case "quota":
+      return (await import("./accounts.mjs")).runQuotaCommand(rest);
+    case "account": case "accounts":
+      return (await import("./accounts.mjs")).cmdAccounts(rest);
 
     case "queue": {
       const { flags, positional } = parseFlags(rest, FLAG_SPECS.queue);

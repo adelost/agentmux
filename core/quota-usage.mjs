@@ -1,130 +1,44 @@
-// Weekly subscription quota for the engines the fleet runs on.
-//
-// Claude: the same OAuth usage endpoint the CLI's /usage screen reads,
-// authenticated with the locally stored Claude Code credentials.
-// Codex: rate_limits events that every Codex turn already appends to its
-// rollout jsonl, read from the tail of the newest session files.
-//
-// Pure normalizers with injected IO so contracts are testable offline.
+// Shared subscription-quota snapshot for every configured coding-client
+// profile. Provider credentials stay in their own profile homes.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+  CLAUDE_OAUTH_BETA,
+  CLAUDE_QUOTA_SOURCE,
+  CLAUDE_USAGE_URL,
+  normalizeClaudeUsage,
+  readClaudeQuota,
+} from "./claude-account-quota.mjs";
+import { readCodexAccountQuota } from "./codex-account-quota.mjs";
+import { readGeminiAccountQuota } from "./gemini-account-quota.mjs";
 import { readTailWindow } from "./jsonl-reader.mjs";
+import {
+  clampQuotaPercent,
+  quotaObservation,
+  QUOTA_OBSERVATION_SCHEMA_VERSION,
+  QUOTA_REFRESH_INTERVAL_MS,
+} from "./quota-observation.mjs";
+import { quotaProfileCatalog } from "./quota-profiles.mjs";
 
-export const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
-export const CLAUDE_OAUTH_BETA = "oauth-2025-04-20";
+export {
+  CLAUDE_OAUTH_BETA,
+  CLAUDE_QUOTA_SOURCE,
+  CLAUDE_USAGE_URL,
+  normalizeClaudeUsage,
+  QUOTA_OBSERVATION_SCHEMA_VERSION,
+  QUOTA_REFRESH_INTERVAL_MS,
+  readClaudeQuota,
+};
 export const CODEX_TAIL_BYTES = 256 * 1024;
 export const CODEX_SCAN_FILES = 12;
-/** WHAT: Defines provider observation fields. WHY: Keeps Code and Suggest on one decodable shape. */
-export const QUOTA_OBSERVATION_SCHEMA_VERSION = 1;
-/** WHAT: Names the collector cadence. WHY: Keeps both surfaces on one stale boundary. */
-export const QUOTA_REFRESH_INTERVAL_MS = 15 * 60_000;
-/** WHAT: Names Claude quota provenance. WHY: Keeps collection time distinct from provider source. */
-export const CLAUDE_QUOTA_SOURCE = "anthropic.oauth.usage";
 /** WHAT: Names Codex quota provenance. WHY: Keeps rollout events distinct from push receipt time. */
 export const CODEX_QUOTA_SOURCE = "codex.rollout.rate_limits";
 
-const clampPercent = (value) => {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return null;
-  return Math.min(100, Math.max(0, Math.round(numeric * 10) / 10));
-};
-
-const quotaObservation = ({ source, observedAt, usedPercent, resetsAt }) => {
-  const observedMs = Date.parse(String(observedAt || ""));
-  const used = clampPercent(usedPercent);
-  if (!Number.isFinite(observedMs) || used === null) return null;
-  return {
-    schemaVersion: QUOTA_OBSERVATION_SCHEMA_VERSION,
-    source,
-    observedAt: new Date(observedMs).toISOString(),
-    refreshIntervalMs: QUOTA_REFRESH_INTERVAL_MS,
-    usedPercent: used,
-    remainingPercent: Math.round((100 - used) * 10) / 10,
-    resetsAt: typeof resetsAt === "string" ? resetsAt : null,
-  };
-};
-
-// ---------- Claude ----------
-
-/** WHAT: Normalizes one Claude provider response. WHY: Keeps raw OAuth fields out of shared consumers. */
-export function normalizeClaudeUsage(payload, fetchedAt) {
-  const rows = Array.isArray(payload?.limits) ? payload.limits : [];
-  const limits = rows
-    .map((row) => {
-      const scopeName = row?.scope?.model?.display_name || null;
-      const kind = String(row?.kind || "unknown");
-      return {
-        id: kind === "weekly_scoped" && scopeName
-          ? `weekly_${scopeName.toLowerCase().replace(/[^a-z0-9]+/gu, "_")}`
-          : kind,
-        kind,
-        scopeName,
-        usedPercent: clampPercent(row?.percent),
-        resetsAt: typeof row?.resets_at === "string" ? row.resets_at : null,
-        severity: typeof row?.severity === "string" ? row.severity : null,
-        isActive: row?.is_active === true,
-      };
-    })
-    .filter((limit) => limit.usedPercent !== null);
-  if (limits.length === 0) {
-    return { ok: false, engine: "claude", error: "no_limits_in_response", fetchedAt };
-  }
-  const headline = limits.find((limit) => limit.kind === "weekly_scoped"
-    && limit.scopeName === "Fable")
-    ?? limits.find((limit) => limit.kind === "weekly_all")
-    ?? limits[0];
-  const observation = quotaObservation({ source: CLAUDE_QUOTA_SOURCE,
-    observedAt: fetchedAt, usedPercent: headline.usedPercent, resetsAt: headline.resetsAt });
-  return { ok: true, engine: "claude", fetchedAt, observation, limits };
-}
-
-export async function readClaudeQuota({
-  credentialsPath = join(homedir(), ".claude", ".credentials.json"),
-  fetchImpl = fetch,
-  timeoutMs = 10_000,
-  now = Date.now,
-} = {}) {
-  let credentials;
-  try {
-    credentials = JSON.parse(readFileSync(credentialsPath, "utf-8"))?.claudeAiOauth;
-  } catch {
-    return { ok: false, engine: "claude", error: "credentials_unavailable" };
-  }
-  if (!credentials?.accessToken) {
-    return { ok: false, engine: "claude", error: "credentials_unavailable" };
-  }
-  if (Number.isFinite(credentials.expiresAt) && credentials.expiresAt <= now()) {
-    return { ok: false, engine: "claude", error: "credentials_expired" };
-  }
-
-  let response;
-  try {
-    response = await fetchImpl(CLAUDE_USAGE_URL, {
-      headers: {
-        Authorization: `Bearer ${credentials.accessToken}`,
-        "anthropic-beta": CLAUDE_OAUTH_BETA,
-      },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-  } catch {
-    return { ok: false, engine: "claude", error: "network_error" };
-  }
-  if (!response.ok) {
-    return { ok: false, engine: "claude", error: `http_${response.status}` };
-  }
-  let payload;
-  try {
-    payload = await response.json();
-  } catch {
-    return { ok: false, engine: "claude", error: "invalid_response" };
-  }
-  return normalizeClaudeUsage(payload, new Date(now()).toISOString());
-}
-
 // ---------- Codex ----------
 
+/** WHAT: Parses Codex rollout fallback events. WHY: Keeps torn JSONL rows from becoming quota truth. */
 export function parseCodexRateLimitEvents(text) {
   const events = [];
   for (const line of String(text || "").split("\n")) {
@@ -139,7 +53,7 @@ export function parseCodexRateLimitEvents(text) {
     if (!rateLimits || typeof rateLimits !== "object") continue;
     const windows = ["primary", "secondary"].flatMap((windowId) => {
       const window = rateLimits[windowId];
-      const usedPercent = clampPercent(window?.used_percent);
+      const usedPercent = clampQuotaPercent(window?.used_percent);
       if (usedPercent === null) return [];
       return [{
         id: windowId,
@@ -233,14 +147,53 @@ export function readCodexQuota({
 
 // ---------- Snapshot ----------
 
-export async function readQuotaSnapshot({ claude, codex, now = Date.now } = {}) {
-  const [claudeQuota, codexQuota] = await Promise.all([
-    readClaudeQuota({ ...(claude ?? {}), now }),
-    Promise.resolve(readCodexQuota(codex)),
-  ]);
+const collectorFor = (provider, readers) => {
+  if (provider === "codex") return readers.codex;
+  if (provider === "claude") return readers.claude;
+  return readers.gemini;
+};
+
+const collectProfile = async (profile, options, readers, now) => {
+  const reader = collectorFor(profile.provider, readers);
+  try {
+    if (profile.provider === "claude") {
+      return await reader({ profile, credentialsPath: profile.credentialsPath,
+        ...(options.claude ?? {}), now });
+    }
+    return await reader(profile, { ...(options[profile.provider] ?? {}), now });
+  } catch {
+    return { ok: false, engine: profile.provider, provider: profile.provider,
+      profile: { id: profile.id, key: profile.key, label: profile.label, source: profile.source },
+      error: "collector_failed" };
+  }
+};
+
+const providerHeadline = (accounts, provider) =>
+  accounts.find((account) => account.provider === provider && account.ok)
+  ?? accounts.find((account) => account.provider === provider)
+  ?? { ok: false, engine: provider, provider, error: "profile_missing" };
+
+/** WHAT: Collects every coding-subscription profile. WHY: Keeps all clients on one account snapshot. */
+export async function readQuotaSnapshot({
+  claude,
+  codex,
+  gemini,
+  profiles = quotaProfileCatalog(),
+  readers = {
+    claude: readClaudeQuota,
+    codex: readCodexAccountQuota,
+    gemini: readGeminiAccountQuota,
+  },
+  now = Date.now,
+} = {}) {
+  const accounts = await Promise.all(profiles.map((profile) =>
+    collectProfile(profile, { claude, codex, gemini }, readers, now)));
   return {
+    schemaVersion: 2,
     generatedAt: new Date(now()).toISOString(),
-    claude: claudeQuota,
-    codex: codexQuota,
+    accounts,
+    claude: providerHeadline(accounts, "claude"),
+    codex: providerHeadline(accounts, "codex"),
+    gemini: providerHeadline(accounts, "gemini"),
   };
 }
