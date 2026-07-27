@@ -33,6 +33,22 @@ final class ConversationController implements AutoCloseable {
     }
 
     ConversationController(
+        Activity activity,
+        String consumerId,
+        KeystoreSessionStore sessions,
+        Listener listener
+    ) {
+        this(
+            activity::runOnUiThread,
+            List.of(
+                new PublicConversationTransport(sessions),
+                new TailnetConversationTransport(consumerId)
+            ),
+            listener
+        );
+    }
+
+    ConversationController(
         UiDispatcher ui,
         List<ConversationTransport> transports,
         Listener listener

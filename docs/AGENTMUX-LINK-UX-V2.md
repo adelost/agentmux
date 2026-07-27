@@ -1,6 +1,6 @@
 # Agentmux Link UX V2 contract
 
-Contract version: `2.1.0`
+Contract version: `2.2.0`
 
 Status: normative
 
@@ -13,12 +13,13 @@ flight, stop speech immediately, and update the app without browsing for an
 APK. The Android app owns presentation, durable local conversation/playback
 state, audio focus, MediaSession controls, and release verification. The
 transport owns durable acceptance and correlated replies. Views depend only on
-`ConversationTransport`; Tailscale and the future public Link adapter implement
+`ConversationTransport`; Tailscale and the public Link adapter implement
 that interface without transport-specific state in the UI.
 
 The public `link.v1d.io` mailbox, authentication, and Internet delivery are
 owned outside this slice. This slice does not duplicate that backend. The
-tailnet voice server remains the current production adapter.
+Android adapter consumes its authenticated send/await-reply contract while the
+tailnet voice server remains an independent fallback adapter.
 
 ## Module and migration architecture
 
@@ -172,8 +173,10 @@ concurrently. The typed composer clears only after durable acceptance. A PTT
 capture releases to send exactly once and immediately returns capture capacity
 after durable acceptance, even while its reply is still pending.
 
-Tailscale discovery supplies the current adapter. A fake public adapter must
-drive the same reducer and render the same timeline without view changes.
+Tailscale discovery and authenticated Public Link discovery supply independent
+adapters. Public and tailnet adapters drive the same reducer and render the same
+timeline without view changes; target busy/thinking state never changes either
+transport's online projection.
 
 ## Playback ordering and receipts
 
@@ -208,6 +211,11 @@ from an actual lifecycle interruption is explicit and visible. Release sends.
 There is no hidden app-level maximum duration. Elapsed recording time is
 visible and the states read exactly `Listening`, `Sending`, `Waiting for
 reply`, or the concrete failure.
+
+Public Link applies one byte fence, not a duration fence: recording continues
+until release, warns visibly from 80% of the 5 MiB upload limit, and a larger
+released file fails visibly without truncation or durable acceptance. The
+former public-contract phrase “≤60 s” is superseded by this rule.
 
 ## Update security and release contract
 
@@ -307,6 +315,6 @@ The release receipt must record:
 - restart/reconnect item ids and before/after playback counts;
 - update manifest URL/hash/signature result, APK URL/bytes/SHA-256, installer
   confirmation, post-upgrade data checks;
-- Tailscale/fake-public reducer test result;
+- Tailscale/Public Link reducer parity test result;
 - git head, APK path/hash, focused test commands/counts/runtimes, and any honest
   limitation.

@@ -1,6 +1,7 @@
 package io.agentmux.audioinbox
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -24,6 +25,7 @@ class MainActivity : ComponentActivity() {
         window.statusBarColor = LinkTokens.Canvas.toArgb()
         window.navigationBarColor = LinkTokens.Canvas.toArgb()
         coordinator = LinkCoordinator(this)
+        coordinator.handlePublicAuth(intent?.data)
         recorder = PushToTalkRecorder(this)
         updater = AppUpdater(this) { presentation ->
             runOnUiThread {
@@ -50,6 +52,12 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (::updater.isInitialized) updater.resumeInstallerStatus()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        coordinator.handlePublicAuth(intent.data)
     }
 
     override fun onDestroy() {

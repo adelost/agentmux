@@ -17,7 +17,9 @@ final class TailnetConversationTransport implements ConversationTransport {
 
     @Override
     public boolean supports(ConversationTarget target) {
-        return target != null && target.available();
+        return target != null
+            && target.kind != ConversationTarget.Kind.PUBLIC
+            && target.available();
     }
 
     @Override

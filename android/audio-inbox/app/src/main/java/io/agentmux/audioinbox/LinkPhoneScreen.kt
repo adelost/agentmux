@@ -145,6 +145,8 @@ internal fun LinkPhoneScreen(
                 startedAtMs = state.captureStartedAtMs,
                 enabled = coordinator.selectedTarget()?.available == true &&
                     state.capture != CapturePhase.FINALIZING,
+                byteLimit = coordinator.selectedVoiceByteLimit(),
+                recordedBytes = recorder::currentBytes,
                 onBegin = {
                     val capture = recorder.begin()
                     if (capture == null) false
@@ -192,10 +194,15 @@ internal fun LinkPhoneScreen(
         SettingsRow(
             handsFree = state.handsFree,
             speakReplies = speakReplies,
+            publicConnected = coordinator.publicLoggedIn(),
             onHandsFree = coordinator::setHandsFree,
             onSpeak = {
                 speakReplies = it
                 coordinator.setSpeakReplies(it)
+            },
+            onPublicConnection = {
+                if (coordinator.publicLoggedIn()) coordinator.logoutPublic()
+                else coordinator.beginPublicLogin()
             },
         )
         UpdateCard(
@@ -272,13 +279,21 @@ private fun TargetChooser(
 private fun SettingsRow(
     handsFree: Boolean,
     speakReplies: Boolean,
+    publicConnected: Boolean,
     onHandsFree: (Boolean) -> Unit,
     onSpeak: (Boolean) -> Unit,
+    onPublicConnection: () -> Unit,
 ) {
     Surface(shape = RoundedCornerShape(14.dp), color = LinkTokens.Surface) {
         Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
             ToggleRow("Hands-free broadcasts", handsFree, onHandsFree)
             ToggleRow("Read direct replies aloud", speakReplies, onSpeak)
+            Button(
+                onClick = onPublicConnection,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            ) {
+                Text(if (publicConnected) "Disconnect Public Link" else "Connect Public Link")
+            }
         }
     }
 }

@@ -23,6 +23,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.agentmux.linkcore.CapturePhase
+import io.agentmux.linkcore.VoiceUploadPolicy
 import kotlinx.coroutines.delay
 
 @Composable
@@ -30,18 +31,25 @@ internal fun PttDisc(
     phase: CapturePhase,
     startedAtMs: Long,
     enabled: Boolean,
+    byteLimit: Long?,
+    recordedBytes: () -> Long,
     onBegin: () -> Boolean,
     onRelease: () -> Unit,
     onCancel: () -> Unit,
 ) {
     val view = LocalView.current
     var elapsed by remember { mutableLongStateOf(0) }
+    var bytes by remember { mutableLongStateOf(0) }
     LaunchedEffect(phase, startedAtMs) {
         while (phase == CapturePhase.LISTENING) {
             elapsed = ((System.currentTimeMillis() - startedAtMs) / 1000).coerceAtLeast(0)
+            bytes = recordedBytes()
             delay(250)
         }
-        if (phase != CapturePhase.LISTENING) elapsed = 0
+        if (phase != CapturePhase.LISTENING) {
+            elapsed = 0
+            bytes = 0
+        }
     }
     CircularControl(
         diameter = 112.dp,
@@ -91,6 +99,16 @@ internal fun PttDisc(
                     text = "%d:%02d".format(elapsed / 60, elapsed % 60),
                     color = LinkTokens.AccentInk,
                 )
+                if (VoiceUploadPolicy.warning(bytes, byteLimit) != null) {
+                    Text(
+                        text = if (bytes > (byteLimit ?: Long.MAX_VALUE)) {
+                            "OVER 5 MB"
+                        } else {
+                            "5 MB SOON"
+                        },
+                        color = Color(0xFF502B00),
+                    )
+                }
             }
         }
     }

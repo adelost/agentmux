@@ -76,6 +76,8 @@ internal class PushToTalkRecorder(
         return current
     }
 
+    fun currentBytes(): Long = capture?.file?.length() ?: 0
+
     fun cancel() {
         recorder?.let {
             runCatching { it.reset() }

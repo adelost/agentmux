@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 class ConversationTransportParityTest {
     @Test
     fun `tailnet and fake public adapters produce the same conversation state`() {
-        assertEquals(runAdapter("tailnet"), runAdapter("public-fake"))
+        assertEquals(runAdapter("tailnet"), runAdapter("public-link"))
     }
 
     private fun runAdapter(id: String): LinkState {
@@ -25,7 +25,7 @@ class ConversationTransportParityTest {
             ),
         )
         val replied = CountDownLatch(1)
-        val transport = object : ConversationTransport {
+        val fakeTailnet = object : ConversationTransport {
             override fun transportId() = id
             override fun supports(target: ConversationTarget) = true
             override fun durableAccept(
@@ -41,6 +41,21 @@ class ConversationTransportParityTest {
                 accepted: ConversationTransport.Accepted,
             ) = ConversationTransport.Reply("lsrc:3", "Svar")
         }
+        val public = PublicConversationTransport(
+            object : PublicConversationTransport.Client {
+                override fun send(clientMessageId: String, target: String, text: String) =
+                    "queued"
+
+                override fun sendVoice(
+                    clientMessageId: String,
+                    target: String,
+                    audio: File,
+                ) = "queued"
+
+                override fun awaitReply(clientMessageId: String, timeoutMs: Long) = "Svar"
+            },
+        )
+        val transport = if (id == "public-link") public else fakeTailnet
         val controller = ConversationController(
             Runnable::run,
             listOf(transport),
@@ -85,15 +100,19 @@ class ConversationTransportParityTest {
                 ) = Unit
             },
         )
-        val target = ConversationTarget(
-            "lsrc:3",
-            "L-source 3",
-            ConversationTarget.Kind.AGENT,
-            "http://127.0.0.1",
-            "1234567890",
-            "lsrc",
-            3,
-        )
+        val target = if (id == "public-link") {
+            ConversationTarget.publicLink("lsrc:3", "L-source 3", true)
+        } else {
+            ConversationTarget(
+                "lsrc:3",
+                "L-source 3",
+                ConversationTarget.Kind.AGENT,
+                "http://127.0.0.1",
+                "1234567890",
+                "lsrc",
+                3,
+            )
+        }
 
         assertTrue(controller.sendText(target, "Hej", "turn-1"))
         assertTrue(replied.await(2, TimeUnit.SECONDS))

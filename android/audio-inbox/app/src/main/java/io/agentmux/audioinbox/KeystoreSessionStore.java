@@ -67,7 +67,7 @@ final class KeystoreSessionStore {
     private SecretKey key() throws Exception {
         KeyStore store = KeyStore.getInstance("AndroidKeyStore");
         store.load(null);
-        SecretKey existing = store.getKey(KEY_ALIAS, null);
+        SecretKey existing = (SecretKey) store.getKey(KEY_ALIAS, null);
         if (existing != null) return existing;
         KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
         generator.init(new KeyGenParameterSpec.Builder(KEY_ALIAS,

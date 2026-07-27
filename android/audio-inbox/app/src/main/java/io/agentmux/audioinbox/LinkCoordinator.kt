@@ -3,6 +3,7 @@ package io.agentmux.audioinbox
 import android.app.Activity
 import android.content.Intent
 import android.content.SharedPreferences
+import android.net.Uri
 import android.os.Build
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.ConnectionState
@@ -13,6 +14,7 @@ import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.RecoveredReply
 import io.agentmux.linkcore.RecoveredReplyPolicy
+import io.agentmux.linkcore.VoiceUploadPolicy
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import java.io.File
@@ -33,14 +35,37 @@ internal class LinkCoordinator(
     private val ledger = LinkStateLedger(repository.load(), repository::save)
     private val mutableAccepted = MutableSharedFlow<AcceptedDraft>(extraBufferCapacity = 16)
     private val targets = ConcurrentHashMap<String, ConversationTarget>()
+    private val tailnetTargets = ConcurrentHashMap<String, ConversationTarget>()
+    private val publicTargets = ConcurrentHashMap<String, ConversationTarget>()
+    private val linkSessions = KeystoreSessionStore(preferences)
     private val discovery: ExecutorService = Executors.newFixedThreadPool(2)
-    private val pendingDiscovery = AtomicInteger(2)
+    private val pendingDiscovery = AtomicInteger(3)
     private val drafts = ConcurrentHashMap<String, String>()
     private val voiceTurns = ConcurrentHashMap.newKeySet<String>()
     @Volatile private var recoveredPlaybackApplied = false
+    private val linkAuth = LinkAuthController(
+        activity,
+        linkSessions,
+        object : LinkAuthController.Listener {
+            override fun onLogin(session: String) {
+                discovery.execute(::refreshPublicTargets)
+            }
+
+            override fun onError(message: String) {
+                dispatch(
+                    LinkAction.Connection(
+                        ledger.value.connection,
+                        "Public Link login failed · $message",
+                        System.currentTimeMillis(),
+                    ),
+                )
+            }
+        },
+    )
     private val controller = ConversationController(
         activity,
         AppContract.consumerId(preferences),
+        linkSessions,
         object : ConversationController.Listener {
             override fun onSending(
                 turnId: String,
@@ -127,6 +152,11 @@ internal class LinkCoordinator(
         preferences.edit().putString(AppContract.KEY_CONVERSATION_TARGET, id).apply()
     }
 
+    fun selectedVoiceByteLimit(): Long? =
+        VoiceUploadPolicy.PUBLIC_MAX_BYTES.takeIf {
+            targetForSelection()?.kind == ConversationTarget.Kind.PUBLIC
+        }
+
     fun submitText(raw: String): String? {
         val text = raw.trim()
         val target = targetForSelection() ?: return null
@@ -207,6 +237,27 @@ internal class LinkCoordinator(
     fun speaksReplies(): Boolean =
         preferences.getBoolean(AppContract.KEY_SPEAK_REPLIES, false)
 
+    fun publicLoggedIn(): Boolean = linkAuth.loggedIn()
+
+    fun beginPublicLogin() = linkAuth.beginLogin()
+
+    fun handlePublicAuth(uri: Uri?): Boolean = linkAuth.handleDeepLink(uri)
+
+    fun logoutPublic() {
+        linkAuth.logout()
+        publicTargets.clear()
+        rebuildTargets()
+        dispatch(
+            LinkAction.Connection(
+                if (tailnetTargets.isEmpty()) ConnectionState.DISCONNECTED
+                else ConnectionState.CONNECTED,
+                if (tailnetTargets.isEmpty()) "Public Link disconnected"
+                else "Connected via Tailscale",
+                System.currentTimeMillis(),
+            ),
+        )
+    }
+
     fun playReply(turnId: String, explicitReplay: Boolean = true) {
         val turn = ledger.value.turns.firstOrNull { it.turnId == turnId } ?: return
         val target = targets[turn.targetId] ?: return
@@ -266,6 +317,13 @@ internal class LinkCoordinator(
                 discoveryFinished()
             }
         }
+        discovery.execute {
+            try {
+                refreshPublicTargets()
+            } finally {
+                discoveryFinished()
+            }
+        }
     }
 
     private fun applyDiscovery(found: ServerDiscovery.Configuration?, save: Boolean) {
@@ -287,11 +345,8 @@ internal class LinkCoordinator(
                 .putString(AppContract.KEY_TARGET, found.target)
                 .apply()
         }
-        found.conversationTargets.forEach { targets[it.id] = it }
-        val ordered = targets.values.sortedBy { favoriteOrder(it.id) }.map {
-            LinkTarget(it.id, it.label, true)
-        }
-        dispatch(LinkAction.Targets(ordered))
+        found.conversationTargets.forEach { tailnetTargets[it.id] = it }
+        rebuildTargets()
         dispatch(
             LinkAction.Connection(
                 ConnectionState.CONNECTED,
@@ -300,6 +355,64 @@ internal class LinkCoordinator(
             ),
         )
         if (save && preferences.getBoolean(AppContract.KEY_ENABLED, false)) setHandsFree(true)
+    }
+
+    private fun refreshPublicTargets() {
+        val session = linkSessions.session()
+        if (session == null) {
+            publicTargets.clear()
+            rebuildTargets()
+            return
+        }
+        try {
+            val rows = PublicLinkClient(linkSessions.baseUrl(), session).targets()
+            publicTargets.clear()
+            rows.forEach {
+                val id = if (it.id == "windows") "_windows_" else it.id
+                publicTargets[id] = ConversationTarget.publicLink(id, it.label, it.online)
+            }
+            rebuildTargets()
+            dispatch(
+                LinkAction.Connection(
+                    ConnectionState.CONNECTED,
+                    "Connected via Public Link",
+                    System.currentTimeMillis(),
+                ),
+            )
+        } catch (error: Exception) {
+            if (tailnetTargets.isEmpty()) {
+                dispatch(
+                    LinkAction.Connection(
+                        ConnectionState.DISCONNECTED,
+                        "Public Link unavailable · ${error.message.orEmpty().take(100)}",
+                        System.currentTimeMillis(),
+                    ),
+                )
+            }
+        }
+    }
+
+    @Synchronized
+    private fun rebuildTargets() {
+        val ids = (tailnetTargets.keys + publicTargets.keys).toSortedSet()
+        val chosen = ids.mapNotNull { id ->
+            val internet = publicTargets[id]
+            val tailnet = tailnetTargets[id]
+            when {
+                internet?.available() == true -> internet
+                tailnet != null -> tailnet
+                else -> internet
+            }
+        }
+        targets.clear()
+        chosen.forEach { targets[it.id] = it }
+        dispatch(
+            LinkAction.Targets(
+                chosen.sortedBy { favoriteOrder(it.id) }.map {
+                    LinkTarget(it.id, it.label, it.available())
+                },
+            ),
+        )
     }
 
     private fun discoveryFinished() {
@@ -366,6 +479,7 @@ internal class LinkCoordinator(
     override fun close() {
         preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener)
         discovery.shutdownNow()
+        linkAuth.close()
         controller.close()
     }
 

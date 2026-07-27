@@ -3,7 +3,11 @@ package io.agentmux.audioinbox;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import io.agentmux.linkcore.VoiceUploadPolicy;
+
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -15,8 +19,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** HTTP client for the public Agentmux Link mailbox (docs/link-internet-v1.md). */
-final class PublicLinkClient {
+final class PublicLinkClient implements PublicConversationTransport.Client {
     static final String DEFAULT_BASE = "https://link.v1d.io";
+    static final int MAX_VOICE_BYTES = (int) VoiceUploadPolicy.PUBLIC_MAX_BYTES;
 
     static final class LinkTarget {
         final String id;
@@ -117,14 +122,47 @@ final class PublicLinkClient {
         return targets;
     }
 
-    String send(String clientMessageId, String target, String text) throws Exception {
-        JSONObject response = new JSONObject(request("POST", baseUrl + "/api/link/send", session,
+    @Override
+    public String send(String clientMessageId, String target, String text) throws Exception {
+        return enqueue(new JSONObject()
+            .put("clientMessageId", clientMessageId)
+            .put("target", target)
+            .put("kind", "text")
+            .put("text", text));
+    }
+
+    @Override
+    public String sendVoice(String clientMessageId, String target, File audio) throws Exception {
+        if (audio == null || audio.length() > MAX_VOICE_BYTES) {
+            throw new IllegalArgumentException(VoiceUploadPolicy.OVER_LIMIT_MESSAGE);
+        }
+        byte[] bytes;
+        try (InputStream input = new FileInputStream(audio)) {
+            bytes = readBounded(input, MAX_VOICE_BYTES);
+        }
+        JSONObject uploaded = new JSONObject(request(
+            "POST",
+            baseUrl + "/api/link/voice/upload",
+            session,
             new JSONObject()
-                .put("clientMessageId", clientMessageId)
-                .put("target", target)
-                .put("kind", "text")
-                .put("text", text)
-                .toString()));
+                .put("audio", android.util.Base64.encodeToString(
+                    bytes,
+                    android.util.Base64.NO_WRAP
+                ))
+                .toString()
+        ));
+        String voiceRef = uploaded.optString("voiceRef", "");
+        if (voiceRef.isBlank()) throw new IllegalStateException("voice upload returned no reference");
+        return enqueue(new JSONObject()
+            .put("clientMessageId", clientMessageId)
+            .put("target", target)
+            .put("kind", "voice")
+            .put("voiceRef", voiceRef));
+    }
+
+    private String enqueue(JSONObject payload) throws Exception {
+        JSONObject response = new JSONObject(request("POST", baseUrl + "/api/link/send", session,
+            payload.toString()));
         return response.optString("state", "queued");
     }
 
@@ -156,7 +194,8 @@ final class PublicLinkClient {
     }
 
     /** Polls the events feed until one message is replied, failed, or the bound passes. */
-    String awaitReply(String clientMessageId, long timeoutMs) throws Exception {
+    @Override
+    public String awaitReply(String clientMessageId, long timeoutMs) throws Exception {
         long afterSeq = 0;
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < deadline) {

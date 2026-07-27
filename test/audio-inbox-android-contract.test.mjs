@@ -25,6 +25,8 @@ feature("Android audio inbox source contract", () => {
       expect(manifest).toContain('android:name=".AudioInboxService"');
       expect(manifest).toContain('android:exported="false"');
       expect(manifest).toContain("android.permission.RECORD_AUDIO");
+      expect(manifest).toContain('android:scheme="agentmux"');
+      expect(manifest).toContain('android:host="auth"');
       expect(discovery).toContain('"agentmux-audio-inbox"');
       expect(discovery).toContain('"https://abyss-wsl.tail13cb13.ts.net:8443"');
       expect(startup).toContain("AUDIO_INBOX_SERVER_ID");
@@ -62,6 +64,13 @@ feature("Android audio inbox source contract", () => {
       expect(read(
         "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/TailnetConversationTransport.java",
       )).toContain("awaitAgentReply");
+      expect(read(
+        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/PublicConversationTransport.java",
+      )).toContain('return "public-link"');
+      expect(read(
+        "android/audio-inbox/link-core/src/main/kotlin/io/agentmux/linkcore/VoiceUploadPolicy.kt",
+      )).toContain("PUBLIC_MAX_BYTES: Long = 5L * 1024 * 1024");
+      expect(read("docs/link-internet-v1.md")).not.toContain("Upload ≤ 60 s");
       expect(read(
         "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/ConversationController.java",
       )).toContain("replies.execute");

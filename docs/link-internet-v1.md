@@ -83,7 +83,11 @@ heartbeats(connectorId TEXT, target TEXT, seenAt, source TEXT) -- wsl|windows
 
 ## Voice (S3)
 
-Upload ≤ 60 s / 5 MB till `link-voice` (R2, privat, signed by Worker).
+Inspelningen har ingen tidsgräns i appen och avbryts aldrig tyst efter 60 s.
+Public Link-uploaden har i stället en auktoritativ bytegräns på 5 MiB till
+`link-voice` (R2, privat, signed by Worker). Appen visar en varning från 80 %
+men fortsätter spela in tills användaren släpper. Om filen då är större än
+5 MiB misslyckas sändningen synligt utan trunkering eller fabricerad acceptans.
 `send` köar referensen; connector laddar ner, transkriberar via befintlig
 kedja (windows-transcribe/bridge), reply innehåller transcript + svar.
 Audio raderas vid terminal retention (replied/failed + 24 h).
