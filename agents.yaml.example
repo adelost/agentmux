@@ -18,6 +18,7 @@ myproject:
   panes:
     - name: claude
       cmd: claude --continue --dangerously-skip-permissions
+      accountProfile: 1       # durable state may override this during an explicit account rotation
 
 # Advanced: multiple panes with isolated sessions
 multi:

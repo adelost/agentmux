@@ -389,6 +389,32 @@ resume --last -m ... -c ...` instead of Codex's TUI picker because the picker
 persists its selection to the account-wide `config.toml`; process-local launch
 overrides prevent one pane's Max/XHigh choice from changing every other pane.
 
+### Rotate a Claude fleet between accounts
+
+Account homes are declared in `~/.agentmux/account-profiles.json`; OAuth files
+stay inside each provider-owned home. Prepare and authenticate profile 2 once:
+
+```bash
+amux accounts login claude:2
+```
+
+Inspect a fleet rotation without changing a pane:
+
+```bash
+amux accounts rotate claude:2 --dry
+```
+
+The real rotation first locks delivery and refuses active turns, drafts,
+unknown state, or missing exact sessions. It then obtains a real `/compact`
+command receipt and journal boundary for every running Claude pane, switches
+the profile, and resumes each exact session. Sleeping panes are only marked for
+their next wake; they are not started. A failed restart rolls that pane back to
+its previous profile and reports `PARTIAL` or `BLOCKED`, never false success.
+
+The secondary Claude profile shares only the `projects` session-history
+directory with profile 1. Credentials, settings, and quota remain isolated.
+No logout or token copy is part of the workflow.
+
 Terminal commands:
 
 ```bash

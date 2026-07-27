@@ -12,6 +12,7 @@ import {
   latestKimiSessionIdentity,
 } from "./kimi-jsonl-reader.mjs";
 import { isKimiPaneCommand } from "./tui-stall-recovery.mjs";
+import { createRuntimeProfileResolver } from "./runtime-account-profiles.mjs";
 
 const PROMPT_READY_TIMEOUT_MS = 15_000;
 const KIMI_STEER_QUEUE_TIMEOUT_MS = 5_000;
@@ -46,6 +47,7 @@ export const kimiJournal = Object.freeze({
 /** WHAT: Builds Kimi pane lifecycle operations. WHY: Keeps agent orchestration below its legacy size cap. */
 export function createKimiAgentRuntime({
   t,
+  state,
   wait,
   paneDir,
   agentConfig,
@@ -57,6 +59,7 @@ export function createKimiAgentRuntime({
   captureScreen,
   promptAlreadyInComposer,
 }) {
+  const runtimeProfileFor = createRuntimeProfileResolver({ state, configFor: agentConfig });
   function blocked(message) {
     const error = new Error(message);
     error.code = "AMUX_DELIVERY_BLOCKED";
@@ -68,6 +71,7 @@ export function createKimiAgentRuntime({
     if (await isAlreadyRunning(target)) return;
     const dir = paneDir(rootDir, pane);
     const paneConfig = agentConfig(name).panes?.[pane] || {};
+    const profile = launch?.profile || runtimeProfileFor?.(name, pane, "kimi") || null;
     const discovered = latestKimiSessionIdentity(dir);
     const resumeSessionId = launch?.resumeSessionId
       || paneConfig.resumeSessionId
@@ -84,6 +88,7 @@ export function createKimiAgentRuntime({
       model,
       resumeSessionId,
       allowFreshBootstrap: !resumeSessionId,
+      profileHome: profile?.home || null,
     });
     await t.runShell(target, `cd ${esc(dir)} && ${cmd}`);
     await wait(1500);
@@ -108,7 +113,7 @@ export function createKimiAgentRuntime({
     return false;
   }
 
-  async function restartKimi(agentName, pane) {
+  async function restartKimi(agentName, pane, launch = null) {
     const config = agentConfig(agentName);
     const paneCmd = config.panes?.[pane]?.cmd || "";
     if (!isKimiPaneCommand(paneCmd)) throw new Error(`${agentName}:${pane} is not a Kimi pane`);
@@ -127,6 +132,7 @@ export function createKimiAgentRuntime({
     }
     const model = config.panes?.[pane]?.model || "kimi-code/k3";
     await startKimi(agentName, target, config.dir, pane, {
+      ...(launch || {}),
       resumeSessionId: identity.sessionId,
       model,
     });

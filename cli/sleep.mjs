@@ -24,8 +24,8 @@ import {
 } from "./sleep-probes.mjs";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { sendSlashVerified } from "../core/delivery.mjs";
-import { hasClaudeCompactBoundaryAfterSubmit } from "../core/claude-submit-boundary.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
+import { verifiedClaudeCompact } from "../core/verified-compact.mjs";
 import { createWakeAdmissionGate } from "../core/wake-admission.mjs";
 import {
   beginSleepState,
@@ -62,7 +62,6 @@ export async function cmdSleep(ctx, agentName, pane, _opts = {}, deps = {}) {
   const observe = deps.observe || observePane;
   const latestIdentity = deps.latestIdentity || latestClaudeSessionIdentity;
   const sendSlash = deps.sendSlash || sendSlashVerified;
-  const hasCompactBoundary = deps.hasCompactBoundary || hasClaudeCompactBoundaryAfterSubmit;
   const hasActivityAfterCursor = deps.hasActivityAfterCursor || hasClaudeUserActivityAfterCursor;
   const stateOptions = { rootDir: deps.stateRoot || paneSleepStateDir() };
   const agent = agentEntry(ctx, agentName, deps.agents);
@@ -116,32 +115,23 @@ export async function cmdSleep(ctx, agentName, pane, _opts = {}, deps = {}) {
     });
     writePaneSleepState(state, stateOptions);
 
-    const compactFence = await ctx.agent.capturePromptEchoCursor(
-      agentName, pane, `AMUX-COMPACT-FENCE-${state.sleepGeneration}`,
-    ).catch(() => null);
-    if (!compactFence || !Object.keys(compactFence.positions || {}).length) {
-      return fail("compact-cursor-missing");
-    }
-    const compactSubmittedAt = now();
-    const compact = await sendSlash(ctx.agent, agentName, pane, "/compact", {
-      suppressReceipt: true,
-      settleMs: deps.slashSettleMs ?? 200,
-      maxRescues: 2,
+    const compact = await verifiedClaudeCompact({
+      agent: ctx.agent,
+      agentName,
+      pane,
+      paneDir: paneDirectory(agent, pane),
+      latestIdentity,
+      now,
       sleep,
+      sendSlash,
+      hasBoundary: deps.hasCompactBoundary,
+      pollAttempts: deps.compactPollAttempts,
+      pollMs: deps.compactPollMs,
+      settleMs: deps.slashSettleMs,
     });
-    if (!compact.delivered || compact.via !== "command-receipt") {
-      return fail("compact-command-unverified");
-    }
-    const boundary = await poll(
-      deps.compactPollAttempts ?? 120,
-      deps.compactPollMs ?? 1_000,
-      sleep,
-      () => hasCompactBoundary(compactFence, compactSubmittedAt),
-    );
-    if (!boundary) return fail("compact-boundary-missing");
-
-    const postCompactIdentity = latestIdentity(paneDirectory(agent, pane));
-    if (!postCompactIdentity?.sessionId) return fail("post-compact-session-missing");
+    if (!compact.ok) return fail(compact.reason);
+    const compactFence = compact.cursor;
+    const postCompactIdentity = { sessionId: compact.sessionId };
     state = {
       ...state,
       stage: "post-compact-check",

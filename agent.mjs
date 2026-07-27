@@ -221,7 +221,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if (!config[name]?.dir) throw new Error(`Agent '${name}' not found in ${configPath}`);
     return config[name];
   }
-
   // --- tmux primitives ---
 
   async function hasSession(name) {
@@ -873,7 +872,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
 
   const { maybeRescueKimiSubmit, restartKimi, startKimi, submitKimiPromptNow,
     waitForKimiPromptReady, waitForKimiUiReady } = createKimiAgentRuntime({
-    t, wait, paneDir, agentConfig, isBusy, isPaneDead, respawnPane,
+    t, state, wait, paneDir, agentConfig, isBusy, isPaneDead, respawnPane,
     isAlreadyRunning, isShellProcess: isShellProc, captureScreen, promptAlreadyInComposer,
   });
   const maybeRescueClaudeSubmit = createClaudeSubmitRescue({
@@ -1837,6 +1836,6 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     capturePane, captureScreen, capturePromptEchoCursor, captureSlashReceiptCursor, waitForSlashReceipt, sendEscape, sendTab, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
     dismissBlockingPrompt, waitForPromptEcho, probeIngest,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession, paneProcessState: tuiRecovery.paneProcessState,
-    sanitizeTmuxGlobalEnv, restartCodex, restartKimi, restartPaneExact, restartFleet,
+    sanitizeTmuxGlobalEnv, restartCodex, restartKimi, restartClaudeAccount: tuiRecovery.restartClaudeAccount, restartPaneExact, restartFleet,
   };
 }

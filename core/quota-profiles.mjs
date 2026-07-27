@@ -30,7 +30,7 @@ const windowsProviderHome = (provider, {
 
 const envPrefix = (provider, id) => `AMUX_${provider.toUpperCase()}_PROFILE_${id}`;
 
-const readOperatorLabels = (env, home, readFile) => {
+const readOperatorProfiles = (env, home, readFile) => {
   const path = resolve(env.AMUX_ACCOUNT_LABELS_FILE
     || join(home, ".agentmux", "account-profiles.json"));
   try {
@@ -39,26 +39,35 @@ const readOperatorLabels = (env, home, readFile) => {
       || typeof document.profiles !== "object" || Array.isArray(document.profiles)) return {};
     return Object.fromEntries(Object.entries(document.profiles).flatMap(([key, value]) => {
       const label = typeof value?.label === "string" ? value.label.trim() : "";
-      return label && label.length <= 254 ? [[key.toLowerCase(), label]] : [];
+      const profileHome = typeof value?.home === "string" ? value.home.trim() : "";
+      if ((!label || label.length > 254) && !profileHome) return [];
+      return [[key.toLowerCase(), {
+        ...(label && label.length <= 254 ? { label } : {}),
+        ...(profileHome ? { home: resolve(profileHome) } : {}),
+      }]];
     }));
   } catch {
     return {};
   }
 };
 
-const profile = (provider, id, home, env, source, labels) => {
+const profile = (provider, id, home, env, source, operatorProfiles) => {
   const prefix = envPrefix(provider, id);
-  const resolvedHome = resolve(env[`${prefix}_HOME`] || home);
   const key = `${provider}:${id}`;
-  const label = String(env[`${prefix}_LABEL`] || labels[key] || `${provider} ${id}`).trim();
+  const operator = operatorProfiles[key] || {};
+  const resolvedHome = resolve(env[`${prefix}_HOME`] || operator.home || home);
+  const resolvedSource = env[`${prefix}_HOME`] ? "env"
+    : operator.home ? "configured"
+      : source;
+  const label = String(env[`${prefix}_LABEL`] || operator.label || `${provider} ${id}`).trim();
   const base = { provider, id: String(id), key: `${provider}:${id}`,
-    label, home: resolvedHome, source };
+    label, home: resolvedHome, source: resolvedSource };
   if (provider === "codex") return { ...base, credentialsPath: join(resolvedHome, "auth.json") };
   if (provider === "kimi") {
     return { ...base, credentialsPath: join(resolvedHome, "credentials", "kimi-code.json"),
       configPath: join(resolvedHome, "config.toml") };
   }
-  const defaultIdentity = source === "windows"
+  const defaultIdentity = resolvedSource === "windows"
     ? join(dirname(resolvedHome), ".claude.json")
     : id === 1 ? join(resolve(env.HOME || homedir()), ".claude.json")
       : join(resolvedHome, ".claude.json");
@@ -71,18 +80,18 @@ export function quotaProfileCatalog(env = process.env, options = {}) {
   const home = resolve(env.HOME || homedir());
   const roots = resolve(env.AMUX_ACCOUNT_PROFILES_DIR
     || join(home, ".config", "agent", "account-profiles"));
-  const labels = readOperatorLabels(env, home, options.readFile || readFileSync);
+  const operatorProfiles = readOperatorProfiles(env, home, options.readFile || readFileSync);
   const windows = Object.fromEntries(PROVIDERS.map((provider) =>
     [provider, windowsProviderHome(provider, options)]));
   return [
-    profile("codex", 1, join(home, ".codex"), env, "primary", labels),
-    profile("codex", 2, join(home, ".config", "agent", "codex-profiles", "2"), env, "isolated", labels),
-    profile("claude", 1, join(home, ".claude"), env, "primary", labels),
+    profile("codex", 1, join(home, ".codex"), env, "primary", operatorProfiles),
+    profile("codex", 2, join(home, ".config", "agent", "codex-profiles", "2"), env, "isolated", operatorProfiles),
+    profile("claude", 1, join(home, ".claude"), env, "primary", operatorProfiles),
     profile("claude", 2, windows.claude || join(roots, "claude", "2"), env,
-      windows.claude ? "windows" : "isolated", labels),
-    profile("kimi", 1, join(home, ".kimi-code"), env, "primary", labels),
+      windows.claude ? "windows" : "isolated", operatorProfiles),
+    profile("kimi", 1, join(home, ".kimi-code"), env, "primary", operatorProfiles),
     profile("kimi", 2, windows.kimi || join(roots, "kimi", "2"), env,
-      windows.kimi ? "windows" : "isolated", labels),
+      windows.kimi ? "windows" : "isolated", operatorProfiles),
   ];
 }
 

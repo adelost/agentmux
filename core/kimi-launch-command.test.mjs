@@ -8,9 +8,11 @@ describe("Kimi launch continuity", () => {
       executable: "/home/test/.kimi-code/bin/kimi",
       model: "kimi-code/k3",
       resumeSessionId: "session_12345678-1234-4234-9234-123456789abc",
+      profileHome: "/profiles/kimi-two",
     });
     expect(command).toBe(
-      "KIMI_MODEL_THINKING_EFFORT='max' '/home/test/.kimi-code/bin/kimi' " +
+      "KIMI_CODE_HOME='/profiles/kimi-two' KIMI_MODEL_THINKING_EFFORT='max' " +
+      "'/home/test/.kimi-code/bin/kimi' " +
       "--model 'kimi-code/k3' --auto --session " +
       "'session_12345678-1234-4234-9234-123456789abc'",
     );

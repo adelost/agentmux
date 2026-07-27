@@ -21,10 +21,15 @@ feature("account subscription CLI", () => {
   unit("prints a provider-scoped login instruction without credentials", {
     given: ["one isolated Claude profile", () => {
       const lines = [];
-      return { lines, output: (line) => lines.push(line), catalog: [{
-        provider: "claude", id: "2", key: "claude:2", label: "Claude 2",
-        home: "/profiles/claude/2", source: "isolated",
-      }] };
+      return {
+        lines,
+        output: (line) => lines.push(line),
+        prepare: () => {},
+        catalog: [{
+          provider: "claude", id: "2", key: "claude:2", label: "Claude 2",
+          home: "/profiles/claude/2", source: "isolated",
+        }],
+      };
     }],
     when: ["requesting its login command", async (ctx) => {
       await cmdAccounts(["login", "claude:2"], ctx);
@@ -33,6 +38,28 @@ feature("account subscription CLI", () => {
     then: ["the profile path is explicit and no token value is present", (line) => {
       expect(line).toContain("CLAUDE_CONFIG_DIR='/profiles/claude/2' claude auth login");
       expect(line.toLowerCase()).not.toContain("access_token");
+    }],
+  });
+
+  unit("routes an explicit Claude dry-run to the fleet safety boundary", {
+    given: ["a runtime context and injected rotation", () => {
+      const calls = [];
+      return {
+        calls,
+        runtime: { agent: {}, deliveryQueue: {} },
+        rotate: async (...args) => { calls.push(args); return { status: "DRY-RUN" }; },
+      };
+    }],
+    when: ["requesting a dry-run", async (ctx) => {
+      ctx.result = await cmdAccounts(
+        ["rotate", "claude:2", "--dry"],
+        ctx.runtime,
+        { rotate: ctx.rotate },
+      );
+    }],
+    then: ["the provider id and non-mutating mode are exact", (_, ctx) => {
+      expect(ctx.result.status).toBe("DRY-RUN");
+      expect(ctx.calls).toEqual([[ctx.runtime, "2", { dry: true }]]);
     }],
   });
 });

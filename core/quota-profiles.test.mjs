@@ -47,7 +47,7 @@ feature("subscription account profile catalog", () => {
           version: 1,
           profiles: {
             "codex:1": { label: "matt@example.com" },
-            "kimi:2": { label: "work@example.com" },
+            "kimi:2": { label: "work@example.com", home: "/profiles/kimi-two" },
           },
         });
       },
@@ -57,7 +57,7 @@ feature("subscription account profile catalog", () => {
         label: "matt@example.com", home: "/home/matt/.codex",
       });
       expect(catalog.find((row) => row.key === "kimi:2")).toMatchObject({
-        label: "work@example.com",
+        label: "work@example.com", home: "/profiles/kimi-two",
       });
     }],
   });

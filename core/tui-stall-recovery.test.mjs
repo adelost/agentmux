@@ -99,6 +99,7 @@ feature("exact TUI crash recovery", () => {
     }],
     then: ["the launch and continuation stay bound to the same pane", ({ ready, targets }, ctx) => {
       expect(ctx.commands).toHaveLength(1);
+      expect(ctx.commands[0]).toContain(`CLAUDE_CONFIG_DIR='${join(ctx.root, "home", ".claude")}'`);
       expect(ctx.commands[0]).toContain("--model 'claude-fable-5'");
       expect(ctx.commands[0]).toContain(`--resume '${ctx.sessionId}'`);
       expect(ctx.commands[0]).not.toContain("claude-opus-4-8");
@@ -143,6 +144,32 @@ feature("exact TUI crash recovery", () => {
       expect(ctx.exact).toMatchObject({ ok: true, dialect: "codex" });
       expect(ctx.observedDrafts).toEqual(["", "owned prompt"]);
       expect(ctx.restarts).toHaveLength(1);
+    }],
+  });
+
+  component("Claude account restart rechecks the composer at the kill boundary", {
+    given: ["an idle pane whose composer gained a draft after fleet preflight", () => {
+      const respawns = [];
+      const recovery = createTuiStallRecovery({
+        tmux: { respawnPane: async (...args) => respawns.push(args) },
+        state: { get: (_key, fallback) => fallback, set: () => {} },
+        delay: async () => {},
+        configFor: () => ({ dir: "/workspace", panes: [{ cmd: "claude" }] }),
+        paneDirectory: (root) => root,
+        isBusy: async () => false,
+        promptTransportState: async () => ({ state: "foreign", busy: false }),
+      });
+      return { recovery, respawns };
+    }],
+    when: ["the account rotation reaches restart", async (ctx) => {
+      ctx.error = await ctx.recovery.restartClaudeAccount("claw", 0, {
+        profile: { id: "2", home: "/profiles/two" },
+        resumeSessionId: "11111111-1111-4111-8111-111111111111",
+      }).catch((error) => error);
+    }],
+    then: ["the draft blocks before the pane is killed", (_, ctx) => {
+      expect(ctx.error.message).toContain("composer is not provably empty");
+      expect(ctx.respawns).toEqual([]);
     }],
   });
 });
