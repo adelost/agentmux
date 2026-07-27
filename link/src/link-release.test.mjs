@@ -38,7 +38,7 @@ feature("release payload and signature", () => {
       expect(r.wrongKey).toBe(false);
       expect(r.canonicalTwice).toBe(true);
       expect(r.payload.apk.sha256).toMatch(/^[0-9a-f]{64}$/u);
-      expect(r.payload.apk.url).toBe("https://link.v1d.io/releases/agentmux-link/app-42.apk");
+      expect(r.payload.apk.url).toBe("https://link.v1d.io/releases/agentmux-link/phone/app-42.apk");
     }],
   });
 });
@@ -47,9 +47,9 @@ feature("release route", () => {
   component("serves manifest, sig, and apk with correct types and honest 404s", {
     given: ["an env with release objects", () => {
       const objects = new Map([
-        ["agentmux-link/manifest-v1.json", { body: "{\"schemaVersion\":1}" }],
-        ["agentmux-link/manifest-v1.json.sig", { body: "c2ln\n" }],
-        ["agentmux-link/app-42.apk", { body: "APK-BYTES" }],
+        ["agentmux-link/phone/manifest-v1.json", { body: "{\"schemaVersion\":1}" }],
+        ["agentmux-link/phone/manifest-v1.json.sig", { body: "c2ln\n" }],
+        ["agentmux-link/phone/app-42.apk", { body: "APK-BYTES" }],
       ]);
       return {
         env: {
@@ -59,9 +59,9 @@ feature("release route", () => {
       };
     }],
     when: ["fetching all three plus a missing and a bad key", async ({ env }) => ({
-      manifest: await worker.fetch(new Request("https://link.v1d.io/releases/agentmux-link/manifest-v1.json"), env),
-      sig: await worker.fetch(new Request("https://link.v1d.io/releases/agentmux-link/manifest-v1.json.sig"), env),
-      apk: await worker.fetch(new Request("https://link.v1d.io/releases/agentmux-link/app-42.apk"), env),
+      manifest: await worker.fetch(new Request("https://link.v1d.io/releases/agentmux-link/phone/manifest-v1.json"), env),
+      sig: await worker.fetch(new Request("https://link.v1d.io/releases/agentmux-link/phone/manifest-v1.json.sig"), env),
+      apk: await worker.fetch(new Request("https://link.v1d.io/releases/agentmux-link/phone/app-42.apk"), env),
       missing: await worker.fetch(new Request("https://link.v1d.io/releases/agentmux-link/nope.json"), env),
       badKey: await worker.fetch(new Request("https://link.v1d.io/releases/..%2Fsecret"), env),
     })],

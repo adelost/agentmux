@@ -17,15 +17,22 @@ export function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
-/** WHAT: Builds the signed release payload for one APK. WHY: Keeps the client contract exactly verifiable. */
-export function buildReleasePayload({ apkBytes, versionCode, versionName, changelog = "", createdAt, expiresAt }) {
+const CHANNEL_PACKAGES = {
+  phone: "io.agentmux.audioinbox",
+  wear: "io.agentmux.audioinbox.wear",
+};
+
+/** WHAT: Builds the signed release payload for one APK and channel. WHY: Keeps the client contract exactly verifiable per device family. */
+export function buildReleasePayload({ apkBytes, versionCode, versionName, changelog = "", createdAt, expiresAt, channel = "phone" }) {
+  const packageName = CHANNEL_PACKAGES[channel];
+  if (!packageName) throw new Error(`unknown release channel: ${channel}`);
   return {
     schemaVersion: 1,
-    packageName: "io.agentmux.audioinbox",
+    packageName,
     versionCode,
     versionName,
     apk: {
-      url: `https://link.v1d.io/releases/agentmux-link/app-${versionCode}.apk`,
+      url: `https://link.v1d.io/releases/agentmux-link/${channel}/app-${versionCode}.apk`,
       sizeBytes: apkBytes.length,
       sha256: createHash("sha256").update(apkBytes).digest("hex"),
     },
@@ -60,6 +67,7 @@ function main() {
   if (!apkPath || !Number.isInteger(versionCode) || !versionName) {
     throw new Error("usage: --apk <path> --version-code N --version-name X [--changelog ...] [--key path] [--dry]");
   }
+  const channel = argValue("--channel") || "phone";
   const apkBytes = readFileSync(apkPath);
   const now = new Date();
   const payload = buildReleasePayload({
@@ -69,11 +77,12 @@ function main() {
     changelog,
     createdAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + 14 * 24 * 3600 * 1000).toISOString(),
+    channel,
   });
   const signature = signRelease(readFileSync(keyPath, "utf8"), payload);
   const outDir = join(process.cwd(), ".link-release");
   mkdirSync(outDir, { recursive: true });
-  const manifestName = "agentmux-link/manifest-v1.json";
+  const manifestName = `agentmux-link/${channel}/manifest-v1.json`;
   writeFileSync(join(outDir, "manifest-v1.json"), JSON.stringify(payload, null, 2), "utf8");
   writeFileSync(join(outDir, "manifest-v1.json.sig"), `${signature}\n`, "utf8");
   if (process.argv.includes("--dry")) {
@@ -82,8 +91,8 @@ function main() {
   }
   execFileSync("npx", ["wrangler", "r2", "object", "put", `link-releases/${manifestName}`, "--file", join(outDir, "manifest-v1.json"), "--content-type", "application/json"], { stdio: "inherit" });
   execFileSync("npx", ["wrangler", "r2", "object", "put", `link-releases/${manifestName}.sig`, "--file", join(outDir, "manifest-v1.json.sig"), "--content-type", "text/plain"], { stdio: "inherit" });
-  execFileSync("npx", ["wrangler", "r2", "object", "put", `link-releases/agentmux-link/app-${versionCode}.apk`, "--file", apkPath, "--content-type", "application/vnd.android.package-archive"], { stdio: "inherit" });
-  console.log(`published ${basename(apkPath)} as versionCode ${versionCode}`);
+  execFileSync("npx", ["wrangler", "r2", "object", "put", `link-releases/agentmux-link/${channel}/app-${versionCode}.apk`, "--file", apkPath, "--content-type", "application/vnd.android.package-archive"], { stdio: "inherit" });
+  console.log(`published ${basename(apkPath)} as ${channel} versionCode ${versionCode}`);
 }
 
 if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) main();
