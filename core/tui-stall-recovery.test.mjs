@@ -99,7 +99,7 @@ feature("exact TUI crash recovery", () => {
     }],
     then: ["the launch and continuation stay bound to the same pane", ({ ready, targets }, ctx) => {
       expect(ctx.commands).toHaveLength(1);
-      expect(ctx.commands[0]).toContain(`CLAUDE_CONFIG_DIR='${join(ctx.root, "home", ".claude")}'`);
+      expect(ctx.commands[0]).not.toContain("CLAUDE_CONFIG_DIR=");
       expect(ctx.commands[0]).toContain("--model 'claude-fable-5'");
       expect(ctx.commands[0]).toContain(`--resume '${ctx.sessionId}'`);
       expect(ctx.commands[0]).not.toContain("claude-opus-4-8");

@@ -109,6 +109,7 @@ export function profileLoginInstruction(item) {
     return `CODEX_HOME=${shellQuote(item.home)} codex login --device-auth`;
   }
   if (item.provider === "claude") {
+    if (item.id === "1" && item.source === "primary") return "claude auth login";
     return `CLAUDE_CONFIG_DIR=${shellQuote(item.home)} claude auth login`;
   }
   return `KIMI_CODE_HOME=${shellQuote(item.home)} kimi login`;
