@@ -34,6 +34,14 @@ feature("windows manager core", () => {
         .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl"] });
       expect(planLocalRescueTurn("Kan du starta om WSL?"))
         .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl"] });
+      // STT/typo variants of the same order land on the same local intent;
+      // the WSL/bryggan object anchor is what makes them unambiguous.
+      for (const typo of ["starata om wsl nu", "startaom bryggan", "staratta om wsl", "start om bryggan nu"]) {
+        expect(planLocalRescueTurn(typo))
+          .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl"] });
+      }
+      expect(planLocalRescueTurn("starta projektet")).toBeNull();
+      expect(planLocalRescueTurn("kan du starta om datorn")).toBeNull();
       expect(planLocalRescueTurn("WSL svarar inte")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
       expect(planLocalRescueTurn("hur restartar vi WSL?")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
       expect(planLocalRescueTurn("Hej! Hur restartar vi?")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });

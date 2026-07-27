@@ -11,7 +11,14 @@ export const MANAGER_CONTRACT_VERSION = 1;
 
 const LOCAL_STATUS = /^(?:status|hur\s+m[aå]r\s+(?:wsl|bryggan|l[aä]get)|[aä]r\s+(?:wsl|bryggan)\s+(?:uppe|online|nere|offline))\??$/iu;
 const LOCAL_LOGS = /^(?:logg(?:ar(?:na)?|en)?|visa\s+logg(?:ar(?:na)?|en)?|vad\s+gick\s+fel)\??$/iu;
-const LOCAL_RESTART_WSL = /(?:\b(?:wsl|bryggan)\b.{0,120}\b(?:beh[oö]ver\s+)?(?:startas?\s+om|restart\w*)\b|\b(?:starta\s+om|restart\w*)\b.{0,80}\b(?:wsl|bryggan)\b)/iu;
+// STT/typo-tolerant restart verb ("starata om", "startaom", "staratta om",
+// "start om"): the WSL/bryggan object anchor below is what makes the intent
+// unambiguous, never the exact spelling of the verb.
+const RESTART_VERB = String.raw`(?:startas?\s*om\b|starat\w*\s+om\b|start\s+om\b|restart\w*)`;
+const LOCAL_RESTART_WSL = new RegExp(
+  String.raw`(?:\b(?:wsl|bryggan)\b.{0,120}\b(?:beh[oö]ver\s+)?${RESTART_VERB}|\b${RESTART_VERB}.{0,80}\b(?:wsl|bryggan)\b)`,
+  "iu",
+);
 const LOCAL_RECOVERY = /(?:\bwsl\b.*(?:\bkra(?:sch|sh)\w*|\b(?:nere|offline|dog|d[oö]d|h[aä]ng\w*|starta|restart\w*|[aå]terst[aä]ll\w*|recover\w*)\b|svarar\s+inte)|\b(?:starta|restart\w*|[aå]terst[aä]ll\w*|recover\w*)\b.*\b(?:wsl|bryggan)\b|^(?:hej[!,.]?\s+)?hur\s+(?:startar|restartar|[aå]terst[aä]ller)\s+vi\??$)/iu;
 
 /** WHAT: Maps a tiny unambiguous rescue vocabulary without an LLM. WHY: Keeps WSL recovery independent from optional provider authentication and availability. */
