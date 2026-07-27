@@ -34,12 +34,16 @@ projects:
     pane: 2
 ```
 
-The mapping is deliberately explicit. The standard fleet convention routes
-each board to its session's Claude broker on pane 2; Codex implementation
-workers live on panes 3 and above. To reuse the bridge for another board, add
-its public project ID and responsible pane-2 target. Each configured ID is
-validated by its project-isolated `/api/tickets/poll` request; an unknown ID is
-a visible error. Public projects without a mapping are intentionally ignored.
+The mapping is deliberately explicit. It selects the project manager that
+observes unmatched comments and delivery health; it does not make that pane a
+mandatory gateway. The current poller sends project-level comment events to
+that configured observer; ticket owners still claim, update and complete work
+through the board contract without a manager round-trip. Direct owner routing
+is a board follow-up, not something this read-only poller claims to provide. To
+reuse the bridge for another board, add its public project ID and responsible
+manager target. Each configured ID is validated by its project-isolated
+`/api/tickets/poll` request; an unknown ID is a visible error. Public projects
+without a mapping are intentionally ignored.
 
 Every handoff includes the global implementation policy. The relay prefers the
 bounded canonical structured `implementationPolicy` supplied by
