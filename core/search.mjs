@@ -22,8 +22,15 @@ import { execFileSync } from "child_process";
 import { readFileSync, statSync, existsSync } from "fs";
 import { join, delimiter } from "path";
 
-const MAX_FILESIZE = "8M"; // session jsonl lines can be huge; caps rg memory
 const SNIPPET_AROUND = 60;
+// NO file-size cap. rg reads line by line and `-o` prints only the bounded
+// match (snippetPattern), so a multi-GB corpus costs bounded memory — a size
+// guard was never what made this safe. `--max-filesize 8M` lived here from
+// 1.20.57 until 1.25.32 and SKIPPED WHOLE FILES: 43 of 253 session jsonl held
+// 1.6 of 1.7 GB, so 91.6% of all searchable history answered "0 träffar"
+// instead of admitting it was never read — and the oversized files are
+// exactly the long-running panes where the decisions live. Measured cost of
+// removing it over the full 1.7 GB corpus: 47ms -> 122ms.
 
 // ripgrep resolution: a real `rg` on PATH is fastest; when absent, Claude
 // Code's own binary embeds ripgrep and activates it when argv0 is "rg" —
@@ -130,7 +137,6 @@ export function snippetPattern(query) {
 function rgBaseArgs(root) {
   const args = [
     "--no-ignore", "--hidden", "-i",
-    "--max-filesize", MAX_FILESIZE,
     "--no-messages",
     // -H: a SINGLE explicit file otherwise drops the path prefix (grep
     // semantics) and the path:line:match parser silently skips every hit.
