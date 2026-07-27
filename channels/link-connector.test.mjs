@@ -29,7 +29,9 @@ function harness({ responses = {}, replyText = "svar från pane" } = {}) {
     const route = url.replace("https://link.v1d.io", "");
     const payload = responses[route] ?? (route.startsWith("/api/link/connector/poll") ? { messages: [] } : {});
     if (payload instanceof Error) throw payload;
-    return { ok: true, json: async () => payload };
+    const voice = Buffer.from("FAKE-VOICE-BYTES");
+    const voiceBytes = voice.buffer.slice(voice.byteOffset, voice.byteOffset + voice.byteLength);
+    return { ok: true, json: async () => payload, arrayBuffer: async () => voiceBytes };
   };
   const agent = {
     hasResponseForPrompt: () => true,
@@ -123,6 +125,24 @@ feature("link connector cycle", () => {
     then: ["the failure is classified, nothing enqueued", (result, ctx) => {
       expect(result).toBeDefined();
       expect(ctx.calls.enqueued).toHaveLength(0);
+      ctx.cleanup();
+    }],
+  });
+
+  component("a voice message is downloaded and transcribed before delivery", {
+    given: ["one voice message and a transcription", () => {
+      const ctx = harness({
+        responses: { "/api/link/connector/poll?source=wsl": { messages: [message({ kind: "voice", body: "", voiceRef: "voice/abc-123.m4a" })] } },
+      });
+      ctx.deps.transcribe = async (bytes) => `transkript: ${bytes.length} bytes`;
+      return ctx;
+    }],
+    when: ["running the cycle", async (ctx) => runLinkConnectorCycle(ctx.deps)],
+    then: ["the pane gets the transcript, never the ref", (result, ctx) => {
+      expect(result).toEqual({ claimed: 1, handled: 1 });
+      expect(ctx.calls.enqueued).toHaveLength(1);
+      expect(ctx.calls.enqueued[0].text).toBe("[amux-link-turn:m-1]\ntranskript: 16 bytes");
+      expect(ctx.calls.posts.some((p) => p.url.includes("/api/link/voice/voice/abc-123.m4a"))).toBe(true);
       ctx.cleanup();
     }],
   });

@@ -50,6 +50,7 @@ export async function runLinkConnectorCycle({
   statePath,
   replyTimeoutMs = 20 * 60_000,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  transcribe = null,
   log = () => {},
 } = {}) {
   const journal = readJournal(statePath);
@@ -75,9 +76,20 @@ export async function runLinkConnectorCycle({
     if (plan.action === "skip") continue;
     try {
       if (plan.action === "deliver") {
+        let body = String(message.body || "").trim();
+        if (message.kind === "voice" && message.voiceRef) {
+          const audio = await fetchImpl(`${linkBase}/api/link/voice/${message.voiceRef}`, {
+            headers: auth,
+            signal: AbortSignal.timeout(60_000),
+          });
+          if (!audio.ok) throw new Error(`link-voice-${audio.status}`);
+          if (typeof transcribe !== "function") throw new Error("transcribe-unavailable");
+          body = String(await transcribe(Buffer.from(await audio.arrayBuffer()), message.voiceRef) || "").trim();
+          if (!body) throw new Error("transcribe-empty");
+        }
         const agentName = String(message.target).split(":")[0];
         const pane = Number(String(message.target).split(":")[1]);
-        const prompt = linkTurnPrompt(message);
+        const prompt = linkTurnPrompt({ clientMessageId: id, body });
         journal.messages[id] = { stage: "claimed", at: Date.now(), target: message.target, prompt };
         writeJournal(statePath, journal);
         const job = deliveryBroker.enqueue({
