@@ -51,6 +51,13 @@ function harness({ responses = {}, replyText = "svar från pane" } = {}) {
       targets: ["lsrc:3"],
       agent,
       deliveryBroker,
+      deliveryQueue: {
+        read: (_agentName, _pane, id) => ({
+          id,
+          status: "acknowledged",
+          acknowledgedAt: NOW,
+        }),
+      },
       statePath,
       sleep: async () => {},
     },

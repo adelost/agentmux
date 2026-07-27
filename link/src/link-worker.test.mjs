@@ -51,7 +51,7 @@ async function seedIdentity(store, { identityId, email }) {
     ttlSeconds: 60,
   });
   // identities allowlist row goes straight into the table via a message-less path
-  await store.insertMessage({ clientMessageId: uuid(), target: "lsrc:3", kind: "text", body: "seed", nowMs: NOW });
+  await store.insertMessage({ clientMessageId: uuid(), identityId, target: "lsrc:3", kind: "text", body: "seed", nowMs: NOW });
 }
 
 feature("sealed login state", () => {

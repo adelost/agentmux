@@ -53,6 +53,16 @@ export function verifyRelease(publicKeyPem, payload, signatureB64) {
     createPublicKey(publicKeyPem), Buffer.from(String(signatureB64 || ""), "base64"));
 }
 
+/** WHAT: Builds the upload steps in immutable-first order. WHY: Prevents a fresh manifest from ever pointing at missing artifacts. */
+export function releaseUploadPlan({ channel, versionCode }) {
+  const manifestName = `agentmux-link/${channel}/manifest-v1.json`;
+  return [
+    { put: `link-releases/agentmux-link/${channel}/app-${versionCode}.apk`, contentType: "application/vnd.android.package-archive" },
+    { put: `link-releases/${manifestName}.sig`, contentType: "text/plain" },
+    { put: `link-releases/${manifestName}`, contentType: "application/json" },
+  ];
+}
+
 function argValue(flag) {
   const index = process.argv.indexOf(flag);
   return index >= 0 ? process.argv[index + 1] : null;
@@ -82,16 +92,17 @@ function main() {
   const signature = signRelease(readFileSync(keyPath, "utf8"), payload);
   const outDir = join(process.cwd(), ".link-release");
   mkdirSync(outDir, { recursive: true });
-  const manifestName = `agentmux-link/${channel}/manifest-v1.json`;
   writeFileSync(join(outDir, "manifest-v1.json"), JSON.stringify(payload, null, 2), "utf8");
   writeFileSync(join(outDir, "manifest-v1.json.sig"), `${signature}\n`, "utf8");
   if (process.argv.includes("--dry")) {
     console.log(JSON.stringify({ dry: true, manifest: payload, signature }, null, 2));
     return;
   }
-  execFileSync("npx", ["wrangler", "r2", "object", "put", `link-releases/${manifestName}`, "--file", join(outDir, "manifest-v1.json"), "--content-type", "application/json"], { stdio: "inherit" });
-  execFileSync("npx", ["wrangler", "r2", "object", "put", `link-releases/${manifestName}.sig`, "--file", join(outDir, "manifest-v1.json.sig"), "--content-type", "text/plain"], { stdio: "inherit" });
-  execFileSync("npx", ["wrangler", "r2", "object", "put", `link-releases/agentmux-link/${channel}/app-${versionCode}.apk`, "--file", apkPath, "--content-type", "application/vnd.android.package-archive"], { stdio: "inherit" });
+  const plan = releaseUploadPlan({ channel, versionCode });
+  const files = [apkPath, join(outDir, "manifest-v1.json.sig"), join(outDir, "manifest-v1.json")];
+  for (const [index, step] of plan.entries()) {
+    execFileSync("npx", ["wrangler", "r2", "object", "put", step.put, "--file", files[index], "--content-type", step.contentType], { stdio: "inherit" });
+  }
   console.log(`published ${basename(apkPath)} as ${channel} versionCode ${versionCode}`);
 }
 

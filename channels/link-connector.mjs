@@ -47,8 +47,10 @@ export async function runLinkConnectorCycle({
   connectorId = "wsl-1",
   agent,
   deliveryBroker,
+  deliveryQueue = null,
   statePath,
   replyTimeoutMs = 20 * 60_000,
+  receiptTimeoutMs = 120_000,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   transcribe = null,
   log = () => {},
@@ -92,14 +94,35 @@ export async function runLinkConnectorCycle({
         const prompt = linkTurnPrompt({ clientMessageId: id, body });
         journal.messages[id] = { stage: "claimed", at: Date.now(), target: message.target, prompt };
         writeJournal(statePath, journal);
-        const job = deliveryBroker.enqueue({
-          agentName,
-          pane,
-          text: prompt,
-          idempotencyKey: `link:${id}`,
-        });
+        let job;
+        try {
+          job = deliveryBroker.enqueue({
+            agentName,
+            pane,
+            text: prompt,
+            idempotencyKey: `link:${id}`,
+          });
+        } catch (error) {
+          log(`link-connector ${id} not-delivered:enqueue-refused ${String(error?.message || error)}`);
+          continue;
+        }
         journal.messages[id] = { ...journal.messages[id], stage: "enqueued", jobId: job?.id || null };
         writeJournal(statePath, journal);
+        // A merely enqueued job is not delivered: ack only on the broker's
+        // acknowledged ingest receipt. Cancelled or timed out stays leased,
+        // so the reclaim path keeps it recoverable without a false ack.
+        const receipt = await waitForBrokerReceipt({
+          queue: deliveryQueue,
+          agentName,
+          pane,
+          jobId: job?.id,
+          timeoutMs: receiptTimeoutMs,
+          sleep,
+        });
+        if (!receipt.delivered) {
+          log(`link-connector ${id} not-delivered:${receipt.terminal || "receipt-timeout"} (kept recoverable)`);
+          continue;
+        }
         await post("/api/link/connector/ack", { clientMessageId: id, connectorId });
         journal.messages[id] = { ...journal.messages[id], stage: "delivered" };
         writeJournal(statePath, journal);
@@ -127,6 +150,25 @@ export async function runLinkConnectorCycle({
     }
   }
   return { claimed: messages.length, handled };
+}
+
+/** WHAT: Checks the durable broker until one job has an ingest outcome. WHY: Prevents a merely enqueued job from being reported as delivered. */
+export async function waitForBrokerReceipt({ queue, agentName, pane, jobId, timeoutMs = 120_000, sleep }) {
+  if (!queue?.read || !jobId) {
+    return { delivered: false, terminal: "receipt-unavailable" };
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const job = queue.read(agentName, pane, jobId);
+    if (job?.status === "acknowledged" && Number.isFinite(job.acknowledgedAt)) {
+      return { delivered: true, job };
+    }
+    if (job?.status === "cancelled" || job?.status === "delivered_unverified") {
+      return { delivered: false, terminal: job.status, job };
+    }
+    await sleep(1_000);
+  }
+  return { delivered: false, terminal: null, timeout: true };
 }
 
 /** WHAT: Fetches one pane reply within a bound. WHY: Keeps a slow turn from blocking the connector forever. */

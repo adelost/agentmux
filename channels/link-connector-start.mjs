@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { runLinkConnectorCycle } from "./link-connector.mjs";
 
 /** WHAT: Schedules the Link connector poll loop when configured. WHY: Keeps index.mjs free of connector wiring detail. */
-export function startLinkConnectorIfConfigured({ agent, deliveryBroker, log = console.log, error = console.error } = {}) {
+export function startLinkConnectorIfConfigured({ agent, deliveryBroker, deliveryQueue, log = console.log, error = console.error } = {}) {
   if (!process.env.LINK_BASE || !process.env.LINK_TOKEN_WSL) return false;
   const targets = String(process.env.LINK_TARGETS_WSL || "lsrc:3,lsrc:10")
     .split(",").map((value) => value.trim()).filter(Boolean);
@@ -17,6 +17,7 @@ export function startLinkConnectorIfConfigured({ agent, deliveryBroker, log = co
     targets,
     agent,
     deliveryBroker,
+    deliveryQueue,
     statePath,
     log,
   }).catch((cycleError) => error(`link-connector | cycle failed: ${cycleError.message}`));

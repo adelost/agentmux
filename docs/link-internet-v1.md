@@ -42,7 +42,7 @@ Nekad identitet = 403 med neutral orsak, även vid giltig Google-login (E).
 ## Mailbox-kontrakt
 
 ```
-messages(clientMessageId TEXT PK, target TEXT, kind text|voice,
+messages(clientMessageId TEXT PK, identityId TEXT, target TEXT, kind text|voice,
          body TEXT, voiceRef TEXT NULL, state, createdAt, leaseOwner, leaseExpiresAt,
          deliveredAt, replyBody, replyAt, attempts INT, lastError TEXT)
 sessions(tokenHash TEXT PK, identityId TEXT, createdAt, expiresAt, revokedAt)
@@ -51,14 +51,17 @@ heartbeats(connectorId TEXT, target TEXT, seenAt, source TEXT) -- wsl|windows
 ```
 
 - `POST /api/link/send` (session): `{clientMessageId: uuid, target, text|voiceRef}`.
-  Unik PK gör submit idempotent; samma id + samma payload → 200 replay, annan
-  payload → 409. Text ≤ 4000 tecken.
+  Unik PK gör submit idempotent inom samma identity; samma id + samma payload
+  → 200 replay, annan payload eller en annan identitys id → neutral 409.
+  Eventhistorik och voiceRef-ägarskap filtreras på samma identity. Text ≤ 4000 tecken.
 - States: `queued → leased → delivered → replied | failed`. Working visas
   bara ur verkligt kvitto (delivered), aldrig ur "skickat".
 - `POST /api/link/connector/poll` (connector-auth): claimar ägda targets
   atomiskt `UPDATE ... WHERE state='queued' AND leaseExpiresAt < now`
   med bounded lease (60 s); förlorad lease återgår till queued.
-- Connector journalför lokalt FÖRE `ack`. `ack` markerar delivered;
+- Connector journalför lokalt FÖRE `ack`. `ack` skickas först efter den
+  durable amux-köns exakta ingest-kvitto; kö-cancel, vägrad enqueue eller
+  kvittotimeout lämnar mailbox-leasen oackad och återvinningsbar. `ack` markerar delivered;
   `reply {body}` markerar replied, idempotent per clientMessageId.
 - Tappat svar återlevererar samma messageId vid nästa poll; aldrig nytt jobb (D).
 - `GET /api/link/events` (session): SSE eller bounded poll (`?after=<seq>`);
@@ -94,7 +97,9 @@ Android TTS är V1-uppspelning; server-MP3 optional fallback.
   engångskod single-use + TTL; SSE after-seq.
 - **Obehörig Google-identitet:** allowlist i D1; bind en gång; authz
   identityId-only; neutral 403 (E).
-- **DoS/kostnad:** rate-limit per session+IP på send/poll; bounded bodies
+- **DoS/kostnad:** separata minutgränser per session + Cloudflare-käll-IP på
+  send/upload och per connector + käll-IP på poll, med löpande rensning av
+  gamla buckets; bounded bodies
   (16 KB text, 5 MB audio); lease-bounded claims; bounded SSE (30 s + reconnect).
 - **Connector-kapning:** separata credentials per connector (wsl/windows),
   0600/Credential Manager lokalt, scope: endast egna targets.

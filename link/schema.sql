@@ -2,6 +2,7 @@
 
 CREATE TABLE IF NOT EXISTS messages (
   clientMessageId TEXT PRIMARY KEY,
+  identityId TEXT NOT NULL,
   target TEXT NOT NULL,
   kind TEXT NOT NULL DEFAULT 'text' CHECK (kind IN ('text', 'voice')),
   body TEXT NOT NULL DEFAULT '',
@@ -21,6 +22,8 @@ CREATE INDEX IF NOT EXISTS idx_messages_state_lease
   ON messages (state, leaseExpiresAt);
 CREATE INDEX IF NOT EXISTS idx_messages_target_state
   ON messages (target, state);
+CREATE INDEX IF NOT EXISTS idx_messages_identity
+  ON messages (identityId);
 
 CREATE TABLE IF NOT EXISTS sessions (
   tokenHash TEXT PRIMARY KEY,
@@ -49,6 +52,14 @@ CREATE TABLE IF NOT EXISTS heartbeats (
   seenAt INTEGER NOT NULL,
   source TEXT NOT NULL CHECK (source IN ('wsl', 'windows')),
   PRIMARY KEY (connectorId, target)
+);
+
+CREATE TABLE IF NOT EXISTS rate_windows (
+  subject TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  bucket INTEGER NOT NULL,
+  count INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (subject, scope, bucket)
 );
 
 CREATE TABLE IF NOT EXISTS exchange_codes (

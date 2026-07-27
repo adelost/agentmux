@@ -11,11 +11,18 @@ export function createLinkStore(db) {
     getMessage: (clientMessageId) =>
       first("SELECT * FROM messages WHERE clientMessageId = ?", clientMessageId),
 
-    insertMessage: ({ clientMessageId, target, kind, body, voiceRef = null, nowMs }) =>
-      run(
-        `INSERT INTO messages (clientMessageId, target, kind, body, voiceRef, state, createdAt)
-         VALUES (?, ?, ?, ?, ?, 'queued', ?)`,
-        clientMessageId, target, kind, body, voiceRef, nowMs,
+    getMessageForApp: (clientMessageId, identityId) =>
+      first(
+        "SELECT * FROM messages WHERE clientMessageId = ? AND identityId = ?",
+        clientMessageId, identityId,
+      ),
+
+    insertMessage: ({ clientMessageId, identityId, target, kind, body, voiceRef = null, nowMs }) =>
+      first(
+        `INSERT INTO messages (clientMessageId, identityId, target, kind, body, voiceRef, state, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, 'queued', ?)
+         ON CONFLICT (clientMessageId) DO NOTHING RETURNING *`,
+        clientMessageId, identityId, target, kind, body, voiceRef, nowMs,
       ),
 
     reclaimExpiredLeases: (nowMs) =>
@@ -67,13 +74,22 @@ export function createLinkStore(db) {
         String(error || "").slice(0, 300), nowMs, clientMessageId, connectorId,
       ),
 
-    eventsAfter: ({ afterSeq = 0, limit = 50 }) =>
-      all(
+    eventsAfter: ({ afterSeq = 0, limit = 50, identityId = null }) => {
+      if (identityId) {
+        return all(
+          `SELECT rowid AS seq, clientMessageId, target, kind, state, body, replyBody,
+                  createdAt, deliveredAt, replyAt, lastError
+           FROM messages WHERE rowid > ? AND identityId = ? ORDER BY rowid LIMIT ?`,
+          afterSeq, identityId, limit,
+        );
+      }
+      return all(
         `SELECT rowid AS seq, clientMessageId, target, kind, state, body, replyBody,
                 createdAt, deliveredAt, replyAt, lastError
          FROM messages WHERE rowid > ? ORDER BY rowid LIMIT ?`,
         afterSeq, limit,
-      ),
+      );
+    },
 
     heartbeat: ({ connectorId, target, source, nowMs }) =>
       run(
@@ -88,6 +104,18 @@ export function createLinkStore(db) {
          FROM heartbeats`,
         nowMs - staleMs,
       ),
+
+    /** WHAT: Counts one scoped action and prunes expired windows. WHY: Bounds both request bursts and retained rate-limit debt. */
+    hitRateLimit: async ({ subject, scope, bucket, max }) => {
+      await run("DELETE FROM rate_windows WHERE bucket < ?", bucket - 1);
+      const row = await first(
+        `INSERT INTO rate_windows (subject, scope, bucket, count) VALUES (?, ?, ?, 1)
+         ON CONFLICT (subject, scope, bucket) DO UPDATE SET count = count + 1
+         RETURNING count`,
+        subject, scope, bucket,
+      );
+      return (row?.count ?? 0) > max;
+    },
 
     insertSession: ({ tokenHash, identityId, nowMs, ttlSeconds }) =>
       run(
@@ -124,11 +152,11 @@ export function createLinkStore(db) {
         codeHash, challenge, identityId, verifiedEmail, nowMs, nowMs + ttlSeconds * 1000,
       ),
 
-    takeExchangeCode: (codeHash, nowMs) =>
+    takeExchangeCode: (codeHash, challenge, nowMs) =>
       first(
         `UPDATE exchange_codes SET usedAt = ?
-         WHERE codeHash = ? AND usedAt IS NULL AND expiresAt > ? RETURNING *`,
-        nowMs, codeHash, nowMs,
+         WHERE codeHash = ? AND challenge = ? AND usedAt IS NULL AND expiresAt > ? RETURNING *`,
+        nowMs, codeHash, challenge, nowMs,
       ),
   };
 }

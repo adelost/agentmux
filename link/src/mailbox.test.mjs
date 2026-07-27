@@ -88,7 +88,7 @@ feature("store over the real schema: one exact journey and a connector crash", (
   component("queue to reply with a connector restart between claim and ack", {
     given: ["a fresh store and one message", async () => {
       const store = createLinkStore(createTestDb());
-      await store.insertMessage({ clientMessageId: "m-1", target: "lsrc:3", kind: "text", body: "hej", nowMs: NOW });
+      await store.insertMessage({ clientMessageId: "m-1", identityId: "person-1", target: "lsrc:3", kind: "text", body: "hej", nowMs: NOW });
       return { store };
     }],
     when: ["connector A claims, dies, B re-claims, delivers and replies", async ({ store }) => {
@@ -120,7 +120,7 @@ feature("store over the real schema: one exact journey and a connector crash", (
   component("a delivered message with no reply returns to the queue once, never duplicated", {
     given: ["one delivered message owned by a dead connector", async () => {
       const store = createLinkStore(createTestDb());
-      await store.insertMessage({ clientMessageId: "m-1", target: "lsrc:3", kind: "text", body: "hej", nowMs: NOW });
+      await store.insertMessage({ clientMessageId: "m-1", identityId: "person-1", target: "lsrc:3", kind: "text", body: "hej", nowMs: NOW });
       await store.claimQueued({ connectorId: "wsl-A", targets: ["lsrc:3"], leaseMs: 60_000, nowMs: NOW });
       await store.markDelivered({ clientMessageId: "m-1", connectorId: "wsl-A", nowMs: NOW });
       return { store };
@@ -139,7 +139,7 @@ feature("store over the real schema: one exact journey and a connector crash", (
     given: ["messages for two targets plus one foreign", async () => {
       const store = createLinkStore(createTestDb());
       for (let i = 0; i < 7; i += 1) {
-        await store.insertMessage({ clientMessageId: `m-${i}`, target: i < 6 ? "lsrc:3" : "windows", kind: "text", body: `t${i}`, nowMs: NOW + i });
+        await store.insertMessage({ clientMessageId: `m-${i}`, identityId: "person-1", target: i < 6 ? "lsrc:3" : "windows", kind: "text", body: `t${i}`, nowMs: NOW + i });
       }
       return { store };
     }],
@@ -156,7 +156,7 @@ feature("store over the real schema: one exact journey and a connector crash", (
   component("duplicate insert id with different payload is rejected by the caller", {
     given: ["one stored message", async () => {
       const store = createLinkStore(createTestDb());
-      await store.insertMessage({ clientMessageId: "m-1", target: "lsrc:3", kind: "text", body: "hej", nowMs: NOW });
+      await store.insertMessage({ clientMessageId: "m-1", identityId: "person-1", target: "lsrc:3", kind: "text", body: "hej", nowMs: NOW });
       return { store };
     }],
     when: ["reading it back for the send decision", async ({ store }) => ({

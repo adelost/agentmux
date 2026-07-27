@@ -14,7 +14,9 @@ function makeEnv() {
     env: {
       LINK_DB: createTestDb(),
       LINK_VOICE: {
-        put: async (key, bytes, meta) => { objects.set(key, { body: bytes, meta }); },
+        put: async (key, bytes, meta) => {
+          objects.set(key, { body: bytes, customMetadata: meta?.customMetadata || {} });
+        },
         get: async (key) => objects.get(key) || null,
         delete: async (key) => { objects.delete(key); },
       },

@@ -16,6 +16,18 @@ function targetsForApp(env) {
     });
 }
 
+async function requestRateLimited({ store, request, subject, scope, bucket, max }) {
+  const subjects = [subject];
+  const ip = request.headers.get("cf-connecting-ip");
+  if (ip && ip.length <= 64 && !/[\u0000-\u0020\u007f]/u.test(ip)) {
+    subjects.push(`ip:${await sha256Hex(ip)}`);
+  }
+  for (const current of subjects) {
+    if (await store.hitRateLimit({ subject: current, scope, bucket, max })) return true;
+  }
+  return false;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -83,11 +95,8 @@ export default {
       if (!code || !/^[A-Za-z0-9_-]{32,128}$/u.test(verifier)) {
         return json(null, 400, { error: "code-and-verifier-required" });
       }
-      const taken = await store.takeExchangeCode(await sha256Hex(code), nowMs);
+      const taken = await store.takeExchangeCode(await sha256Hex(code), await pkceChallenge(verifier), nowMs);
       if (!taken) return json(null, 403, { error: "code-invalid-or-used" });
-      if ((await pkceChallenge(verifier)) !== taken.challenge) {
-        return json(null, 403, { error: "verifier-mismatch" });
-      }
       if (taken.verifiedEmail) {
         const existing = await store.bindingFor(taken.identityId);
         if (existing && existing.verifiedEmail !== taken.verifiedEmail) {
@@ -127,6 +136,16 @@ export default {
     if (url.pathname === "/api/link/send" && request.method === "POST") {
       const session = await requireSession({ store, request, nowMs });
       if (!session) return json(null, 401, { error: "session-required" });
+      if (await requestRateLimited({
+        store,
+        request,
+        subject: `session:${session.tokenHash}`,
+        scope: "send",
+        bucket: Math.floor(nowMs / 60_000),
+        max: Number(env.RATE_SEND_PER_MINUTE) || 30,
+      })) {
+        return json(null, 429, { error: "rate-limited" });
+      }
       const body = await request.json().catch(() => ({}));
       const clientMessageId = String(body.clientMessageId || "");
       const target = String(body.target || "");
@@ -138,23 +157,46 @@ export default {
       if (!allowed) return json(null, 403, { error: "unknown-target" });
       if (rawText.length > maxChars) return json(null, 400, { error: `text-over-${maxChars}-chars` });
       if (kind === "text" && !rawText) return json(null, 400, { error: "text-required" });
-      const existing = await store.getMessage(clientMessageId);
+      const existing = await store.getMessageForApp(clientMessageId, session.identityId);
       const decision = sendDecision({ existing, clientMessageId, target, kind, body: rawText });
       if (decision.action === "reject") return json(null, decision.status, { error: decision.reason });
+      let responseStatus = decision.status;
+      let replayed = decision.action === "replay";
       let voiceRef = null;
       if (kind === "voice") {
         voiceRef = String(body.voiceRef || "");
         if (!/^voice\/[\w-]{8,80}\.m4a$/u.test(voiceRef)) return json(null, 400, { error: "voiceRef-invalid" });
         const object = await env.LINK_VOICE.get(voiceRef);
-        if (!object) return json(null, 404, { error: "voice-not-found" });
+        if (!object || object.customMetadata?.identityId !== session.identityId) {
+          return json(null, 404, { error: "voice-not-found" });
+        }
       }
       if (decision.action === "insert") {
-        await store.insertMessage({ clientMessageId, target, kind, body: rawText, voiceRef, nowMs });
+        const inserted = await store.insertMessage({
+          clientMessageId,
+          identityId: session.identityId,
+          target,
+          kind,
+          body: rawText,
+          voiceRef,
+          nowMs,
+        });
+        if (!inserted) {
+          const raced = await store.getMessageForApp(clientMessageId, session.identityId);
+          const racedDecision = sendDecision({
+            existing: raced, clientMessageId, target, kind, body: rawText,
+          });
+          if (racedDecision.action !== "replay") {
+            return json(null, 409, { error: "idempotency-key-reused" });
+          }
+          replayed = true;
+          responseStatus = 200;
+        }
       }
-      return json(null, decision.status, {
+      return json(null, responseStatus, {
         state: "queued",
         target,
-        replayed: decision.action === "replay",
+        replayed,
       });
     }
 
@@ -162,7 +204,7 @@ export default {
       const session = await requireSession({ store, request, nowMs });
       if (!session) return json(null, 401, { error: "session-required" });
       const afterSeq = Number(url.searchParams.get("after") || 0) || 0;
-      const events = await store.eventsAfter({ afterSeq, limit: 50 });
+      const events = await store.eventsAfter({ afterSeq, limit: 50, identityId: session.identityId });
       const beats = await store.heartbeatStates(90_000, nowMs);
       return json(null, 200, {
         events,
@@ -176,6 +218,16 @@ export default {
     if (url.pathname === "/api/link/voice/upload" && request.method === "POST") {
       const session = await requireSession({ store, request, nowMs });
       if (!session) return json(null, 401, { error: "session-required" });
+      if (await requestRateLimited({
+        store,
+        request,
+        subject: `session:${session.tokenHash}`,
+        scope: "voice-upload",
+        bucket: Math.floor(nowMs / 60_000),
+        max: Number(env.RATE_UPLOAD_PER_MINUTE) || 10,
+      })) {
+        return json(null, 429, { error: "rate-limited" });
+      }
       const body = await request.json().catch(() => ({}));
       const audioB64 = String(body.audio || "");
       const maxBytes = Number(env.MAX_AUDIO_BYTES) || 5 * 1024 * 1024;
@@ -207,6 +259,16 @@ export default {
       const source = url.searchParams.get("source") === "windows" ? "windows" : "wsl";
       const connector = requireConnector({ env, request, source });
       if (!connector) return json(null, 401, { error: "connector-auth-required" });
+      if (await requestRateLimited({
+        store,
+        request,
+        subject: `connector:${connector.connectorId}`,
+        scope: "connector-poll",
+        bucket: Math.floor(nowMs / 60_000),
+        max: Number(env.RATE_POLL_PER_MINUTE) || 120,
+      })) {
+        return json(null, 429, { error: "rate-limited" });
+      }
       await store.reclaimExpiredLeases(nowMs);
       await store.reclaimStaleDelivered(nowMs - (Number(env.REPLY_TIMEOUT_SECONDS) || 600) * 1000);
       const messages = await store.claimQueued({
