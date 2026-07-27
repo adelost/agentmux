@@ -1,4 +1,4 @@
-// WHAT: one text render of the shared account quota (Claude + Codex) for
+// WHAT: one text render of the shared account quota for
 //       every non-browser surface — the Discord bridge and the amux CLI.
 // WHY:  the quota is account-level and already collected by quota-usage.mjs;
 //       each surface re-inventing its own render is how the headline bug
@@ -62,14 +62,64 @@ const codexLine = (codex) => {
   if (!codex?.ok) return `Codex   otillgänglig (${codex?.error ?? "okänt fel"})`;
   const cells = codex.limits.flatMap((limit) => limit.windows.map((window) => {
     const reset = formatReset(window.resetsAt);
-    return `${percentCell(codexWindowLabel(window), window.usedPercent)}${reset ? ` (${reset})` : ""}`;
+    const label = [limit.limitName, codexWindowLabel(window)].filter(Boolean).join(" ");
+    return `${percentCell(label, window.usedPercent)}${reset ? ` (${reset})` : ""}`;
   }));
   return `Codex   ${cells.join(" · ")}`;
 };
 
-// Plain text that reads the same in a terminal and in Discord markdown.
+const geminiLine = (gemini) => {
+  if (!gemini?.ok) return `Gemini  otillgänglig (${gemini?.error ?? "okänt fel"})`;
+  const tightest = gemini.limits.reduce((current, limit) =>
+    !current || limit.usedPercent > current.usedPercent ? limit : current, null);
+  if (!tightest) return "Gemini  otillgänglig (inga modellgränser)";
+  const reset = formatReset(tightest.resetsAt);
+  const count = gemini.limits.length === 1 ? "" : ` · ${gemini.limits.length} modeller`;
+  return `Gemini  ${percentCell(tightest.scopeName || tightest.id, tightest.usedPercent)}`
+    + `${reset ? ` (${reset})` : ""}${count}`;
+};
+
+const accountSuffix = (account, duplicate) => {
+  const identity = account?.account?.email || account?.profile?.label;
+  const plan = account?.account?.plan;
+  const values = [identity, plan].filter(Boolean);
+  if (duplicate) values.push("⚠ samma inloggning");
+  return values.length ? ` · ${values.join(" · ")}` : "";
+};
+
+const accountLine = (account, duplicates = new Set()) => {
+  const rendered = account?.provider === "claude" ? claudeLine(account)
+    : account?.provider === "gemini" ? geminiLine(account)
+      : codexLine(account);
+  const id = account?.profile?.id;
+  if (!id) return rendered;
+  const providerName = account.provider === "claude" ? "Claude"
+    : account.provider === "gemini" ? "Gemini" : "Codex";
+  return `${providerName} ${id}${accountSuffix(account, duplicates.has(account.profile?.key))}  `
+    + rendered.replace(/^\S+\s+/u, "");
+};
+
+const snapshotLines = (snapshot) => {
+  if (Array.isArray(snapshot?.accounts) && snapshot.accounts.length) {
+    const order = ["codex", "claude", "gemini"];
+    const identities = new Map();
+    for (const account of snapshot.accounts) {
+      const email = account?.account?.email?.toLowerCase();
+      if (!email) continue;
+      const key = `${account.provider}:${email}`;
+      identities.set(key, [...(identities.get(key) || []), account.profile?.key]);
+    }
+    const duplicates = new Set([...identities.values()]
+      .filter((keys) => keys.length > 1).flat());
+    return order.flatMap((provider) =>
+      snapshot.accounts.filter((account) => account.provider === provider)
+        .map((account) => accountLine(account, duplicates)));
+  }
+  return [claudeLine(snapshot?.claude), codexLine(snapshot?.codex)];
+};
+
+/** WHAT: Builds one shared account view. WHY: Keeps terminal and Discord quota truth identical. */
 export const formatQuotaSnapshot = (snapshot) => [
   "Kvot (använt, delad per konto):",
-  claudeLine(snapshot?.claude),
-  codexLine(snapshot?.codex),
+  ...snapshotLines(snapshot),
 ].join("\n");

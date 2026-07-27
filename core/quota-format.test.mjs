@@ -92,4 +92,22 @@ feature("quota text render for bridge and CLI", () => {
       expect(results).toEqual(["", ""]);
     }],
   });
+
+  unit("marks duplicate profile identities and keeps Gemini compact", {
+    when: ["rendering two Gemini profiles logged into the same account", () => formatQuotaSnapshot({
+      accounts: ["1", "2"].map((id) => ({
+        ok: true, provider: "gemini", profile: { id, key: `gemini:${id}` },
+        account: { email: "same@example.com", plan: "Free" },
+        limits: [
+          { id: "pro", scopeName: "pro", usedPercent: 100, resetsAt: null },
+          { id: "flash", scopeName: "flash", usedPercent: 0, resetsAt: null },
+        ],
+      })),
+    })],
+    then: ["both rows tell the truth without dumping every model bucket", (text) => {
+      expect(text.match(/⚠ samma inloggning/gu)).toHaveLength(2);
+      expect(text).toContain("pro 100% 🔴 · 2 modeller");
+      expect(text).not.toContain("flash 0%");
+    }],
+  });
 });

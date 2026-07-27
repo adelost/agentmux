@@ -42,10 +42,13 @@ export function loadPushConfig(raw) {
   return { baseUrl, credentialFile, statePath };
 }
 
+/** WHAT: Builds one pushed-snapshot summary. WHY: Keeps provider failures visible in cron logs. */
 export function quotaPushSummary(snapshot) {
   const engineState = (engine) =>
     snapshot[engine]?.ok ? `${engine} ok` : `${engine} ${snapshot[engine]?.error || "missing"}`;
-  return `pushed quota snapshot (${engineState("claude")}, ${engineState("codex")})`;
+  const accounts = Array.isArray(snapshot?.accounts) ? `, ${snapshot.accounts.length} accounts` : "";
+  return `pushed quota snapshot (${engineState("claude")}, ${engineState("codex")}, `
+    + `${engineState("gemini")}${accounts})`;
 }
 
 const PUSH_OUTCOMES = new Set(["success", "failure", "lock_skip"]);
