@@ -71,7 +71,8 @@ feature("windows manager core", () => {
       expect(runbook).toContain("wsl=offline");
       expect(runbook).toContain("wsl=unresponsive");
       expect(runbook).toContain("häng-signaturen");
-      expect(runbook).toContain("aldrig människans order");
+      expect(runbook).toContain("i vartenda WSL-läge");
+      expect(runbook).toContain("Neka aldrig ett mänskligt omställningskommando");
       expect(runbook).toContain("60 sekunder");
       expect(runbook).toContain("Journalföring sker före varje exekvering");
       expect(runbook).toContain("RECOVERED");
@@ -183,6 +184,9 @@ feature("windows manager core", () => {
         .toEqual({ allow: true, reason: "explicit-human-restart" });
       // The hang signature itself authorizes the explicit human restart order.
       expect(planToolCall({ name: "restart_wsl", observation: { wsl: "unresponsive" }, explicitHumanRestart: true }))
+        .toEqual({ allow: true, reason: "explicit-human-restart" });
+      // The human order is unconditional: a healthy WSL may be restarted on command too.
+      expect(planToolCall({ name: "restart_wsl", observation: { wsl: "online" }, explicitHumanRestart: true }))
         .toEqual({ allow: true, reason: "explicit-human-restart" });
       const nowMs = 1_000_000;
       expect(planToolCall({ name: "recover", lastStatusMs: nowMs - 59_000, nowMs }))
