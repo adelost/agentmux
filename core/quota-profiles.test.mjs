@@ -95,4 +95,16 @@ feature("subscription account profile catalog", () => {
       expect(profileLoginInstruction(profiles[2])).toContain("kimi login");
     }],
   });
+
+  unit("primary Claude login keeps its native identity path", {
+    given: ["default and isolated Claude profiles", () =>
+      quotaProfileCatalog({ HOME: "/home/matt" }, {
+        readDir: () => [], exists: () => false,
+      }).filter((row) => row.provider === "claude")],
+    then: ["only the isolated login exports CLAUDE_CONFIG_DIR", ([primary, secondary]) => {
+      expect(profileLoginInstruction(primary)).toBe("claude auth login");
+      expect(profileLoginInstruction(secondary))
+        .toBe("CLAUDE_CONFIG_DIR='/home/matt/.config/agent/account-profiles/claude/2' claude auth login");
+    }],
+  });
 });

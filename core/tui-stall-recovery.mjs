@@ -11,7 +11,10 @@ import {
 import { latestKimiSessionIdentity } from "./kimi-jsonl-reader.mjs";
 import { paneModelSelection, setPaneModelSelection } from "./pane-model-state.mjs";
 import { waitForProgressingUi } from "./progressing-ui.mjs";
-import { createRuntimeProfileResolver } from "./runtime-account-profiles.mjs";
+import {
+  createRuntimeProfileResolver,
+  runtimeProfileLaunchHome,
+} from "./runtime-account-profiles.mjs";
 import { esc } from "../lib.mjs";
 
 const TUI_ESCAPE_AFTER_MS = 2 * 60_000;
@@ -74,7 +77,7 @@ export function createTuiStallRecovery({
       resume: !resumeSessionId && sessionFlag === "--continue",
       resumeSessionId,
       model: rememberedModel || undefined,
-      profileHome: profile?.home || null,
+      profileHome: runtimeProfileLaunchHome(profile),
     });
     await tmux.runShell(target, `cd ${esc(dir)} && ${command}`);
     await delay(2000);

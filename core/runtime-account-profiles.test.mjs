@@ -8,6 +8,7 @@ import {
   completeRuntimeProfileTransition,
   pendingRuntimeProfile,
   prepareRuntimeProfile,
+  runtimeProfileLaunchHome,
   selectedRuntimeProfile,
   setRuntimeProfile,
 } from "./runtime-account-profiles.mjs";
@@ -70,6 +71,23 @@ feature("runtime account profiles", () => {
         .toBe(join(ctx.primary.home, "projects"));
       expect(() => readlinkSync(ctx.secondary.credentialsPath)).toThrow();
       rmSync(ctx.root, { recursive: true, force: true });
+    }],
+  });
+
+  unit("Claude default identity is implicit while isolated profiles stay explicit", {
+    when: ["resolving process homes", () => [
+      runtimeProfileLaunchHome({
+        provider: "claude", id: "1", source: "primary", home: "/home/matt/.claude",
+      }),
+      runtimeProfileLaunchHome({
+        provider: "claude", id: "1", source: "configured", home: "/vault/claude-one",
+      }),
+      runtimeProfileLaunchHome({
+        provider: "claude", id: "2", source: "isolated", home: "/profiles/claude-two",
+      }),
+    ]],
+    then: ["only the native default omits CLAUDE_CONFIG_DIR", (homes) => {
+      expect(homes).toEqual([null, "/vault/claude-one", "/profiles/claude-two"]);
     }],
   });
 

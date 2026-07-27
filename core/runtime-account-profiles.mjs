@@ -73,6 +73,19 @@ export function resolveRuntimeProfile(provider, requested, catalog = runtimeProf
   return catalog.find((profile) => profile.id === id) || null;
 }
 
+/**
+ * WHAT: Returns the provider home that must be exported at process launch.
+ * WHY: Prevents Claude's default profile from becoming a different first-run
+ * identity when its state spans both ~/.claude and ~/.claude.json.
+ */
+export function runtimeProfileLaunchHome(profile) {
+  if (!profile?.home) return null;
+  if (profile.provider === "claude" && profile.id === "1" && profile.source === "primary") {
+    return null;
+  }
+  return profile.home;
+}
+
 /** WHAT: Stores a pane selection. WHY: Keeps bridge and standalone CLI aligned across restarts. */
 export function setRuntimeProfile(state, agentName, pane, provider, profileId) {
   if (!state?.set) throw new Error("account profile state is unavailable");
