@@ -1,7 +1,9 @@
 # Agentmux Link UX V2 contract
 
-Contract version: `2.0.0`  
-Status: normative  
+Contract version: `2.1.0`
+
+Status: normative
+
 Android package: `io.agentmux.audioinbox`
 
 ## Purpose and ownership
@@ -17,6 +19,120 @@ that interface without transport-specific state in the UI.
 The public `link.v1d.io` mailbox, authentication, and Internet delivery are
 owned outside this slice. This slice does not duplicate that backend. The
 tailnet voice server remains the current production adapter.
+
+## Module and migration architecture
+
+Agentmux Link adopts Kotlin/Compose only at the presentation seam. Existing
+Java transport, persistence, recording, TTS, and `MediaSessionService` code
+continues to run throughout the migration.
+
+```text
+                  ┌────────────────────────────┐
+                  │ :link-core (pure Kotlin)   │
+                  │ reducers, immutable state, │
+                  │ commands, target selection,│
+                  │ update presentation        │
+                  └──────────────┬─────────────┘
+                         state + │ commands
+             ┌───────────────────┴───────────────────┐
+             │                                       │
+┌────────────▼─────────────┐            ┌────────────▼─────────────┐
+│ :app (phone)             │            │ :wear (milestone 2)      │
+│ Kotlin/Compose screen    │            │ Kotlin/Wear Compose      │
+│ app-local design atoms   │            │ tiny round screen        │
+└────────────┬─────────────┘            └────────────┬─────────────┘
+             │ Java-compatible ports                │ public/fake port
+┌────────────▼──────────────────────────────────────▼─────────────┐
+│ Existing app-local Java domain/service                         │
+│ ConversationTransport adapters · stores · recorder · TTS ·     │
+│ AudioInboxService/MediaSession · updater installer/verifier    │
+└────────────────────────────────────────────────────────────────┘
+```
+
+`:link-core` has no Android, View, Compose, HTTP, filesystem, or transport
+dependency. Phone and Wear reducer tests use the same fixtures and expected
+turn/playback/target/update transitions. `:wear` is not on the phone V2 critical
+path; it is added only after the phone reducer and urgent stop/concurrency/update
+flow are stable.
+
+The following is shared as source code:
+
+- immutable conversation turn, capture, connection, playback and update
+  presentation models;
+- pure reducer and command vocabulary;
+- target selection/favorite ordering;
+- app-local color, spacing, typography, circular-control, and touch-size tokens
+  that were adapted from Skyvw's `designkit`;
+- generic signed-manifest parsing and updater security policy where Android-free.
+
+The following is shared only as a traced visual/security contract:
+
+- Skyvw's Graphite palette hierarchy, restrained surfaces, readable contrast,
+  compact spacing, circular primary-action language, and round-safe insets;
+- Skyvw `releasekit` state names, bounded verified download, archive identity,
+  signer, and `PackageInstaller` fences.
+
+Skyvw altimeter dials, altitude semantics, map components, and app-specific
+widgets are not copied. Agentmux Link owns its PTT disc, reply/audio card,
+timeline, and target chooser. There is no sibling-path Gradle dependency,
+submodule, authenticated build-time fetch, or private binary dependency. The
+generic kit is ported with provenance because the existing modules cannot be
+consumed hermetically outside the Skyvw build today. Extraction into a
+versioned v1d Android kit is considered only after phone and Wear prove the
+boundary as two consumers.
+
+### Navigation sketches
+
+Phone is one vertically scrolling Compose destination:
+
+```text
+┌ Agentmux Link                 ● Connected ┐
+│ [lsrc:3] [lsrc:10] [_windows_]            │
+│ ┌ compact timeline / status / media ────┐ │
+│ │ You → lsrc:3        thinking          │ │
+│ │ lsrc:10             reply ready       │ │
+│ │ [Play] [Pause] [Stop] [Replay]        │ │
+│ └───────────────────────────────────────┘ │
+│ [ Type another message…          ][Send]  │
+│               ◯ HOLD TO TALK              │
+│ [■ STOP AUDIO] when anything is active    │
+│ Connection · Hands-free · Update v…       │
+└───────────────────────────────────────────┘
+```
+
+The future round-watch screen deliberately omits the full timeline:
+
+```text
+          ╭──────────────╮
+       ╭──┤ ● Connected  ├──╮
+      │   │   lsrc:3 ▾   │   │
+      │   │              │   │
+      │   │   ◯ HOLD     │   │
+      │   │              │   │
+      │   │ latest reply │   │
+       ╰──┤ Play Stop ↻  ├──╯
+          ╰──────────────╯
+```
+
+### Incremental migration and rollback
+
+1. Add and test `:link-core`; existing Java Views remain the production UI.
+2. Introduce Java-compatible transport/service/store ports and feed their
+   snapshots into the reducer. No behavioral route is removed.
+3. Build the phone Compose screen beside the existing Java panel and switch
+   `MainActivity` to the Compose host only after reducer/component tests pass.
+4. Keep `AudioInboxService`, MediaSession, recorder, HTTP clients, and persisted
+   preference keys intact. The Compose screen issues commands to these ports.
+5. Land the signed updater and physical old-to-new phone rehearsal.
+6. After phone stability, add `:wear` using the same reducer/tokens and a fake
+   public adapter; enable live public transport only when its external contract
+   is available.
+
+The explicit no-big-bang rollback point is the commit immediately before step
+3's activity switch. Reverting only that switch restores the Java UI while
+retaining the tested reducer, service fixes, and unchanged on-device data. No
+storage migration is destructive, so downgrade to the prior UI remains
+possible during the migration window.
 
 ## Independent state machines
 
@@ -94,9 +210,20 @@ automatic check, bounded download, SHA-256, installed/archive identity
 comparison, signer equality, monotonic version fence, staged installer handoff,
 and explicit OS confirmation.
 
-The pinned feed is:
+Phone and Wear use separate pinned catalogs and APK identities:
 
-`https://link.v1d.io/releases/agentmux-link/manifest-v1.json`
+- phone: package `io.agentmux.audioinbox`, catalog
+  `https://link.v1d.io/releases/agentmux-link/phone/manifest-v1.json`;
+- Wear milestone 2: package `io.agentmux.audioinbox.wear`, catalog
+  `https://link.v1d.io/releases/agentmux-link/wear/manifest-v1.json`.
+
+Each product has an independent monotonic `versionCode`, semantic
+`versionName`, pinned application id, pinned release manifest key, and pinned
+APK signing certificate. A phone artifact can never satisfy the Wear catalog
+or vice versa. Key rotation requires an app release that pins both old and new
+manifest keys before a later catalog switches signing keys; APK certificate
+rotation follows Android signing lineage and is never inferred from the
+manifest.
 
 The document contains `payload` plus base64 `signature`. `payload` has exactly:
 
@@ -107,7 +234,7 @@ The document contains `payload` plus base64 `signature`. `payload` has exactly:
   "versionCode": 2,
   "versionName": "1.1.0",
   "apk": {
-    "url": "https://link.v1d.io/releases/agentmux-link/agentmux-link-1.1.0.apk",
+    "url": "https://link.v1d.io/releases/agentmux-link/phone/agentmux-link-1.1.0.apk",
     "sizeBytes": 1,
     "sha256": "64 lowercase hexadecimal characters"
   },
@@ -155,6 +282,10 @@ opened or silently installed.
    signed build with one OS-confirmed tap while app data survives. Invalid
    signature, hash, signer, version, size, or stale metadata fails closed.
 7. Tailscale and fake public adapters produce the same reducer/timeline output.
+8. Phone and Wear run the same reducer fixtures and produce identical turn,
+   playback, target, and update presentation states. Phone physical rehearsal
+   is release-blocking. Wear physical device or emulator rehearsal is recorded
+   when that milestone is built; unavailable hardware does not delay phone V2.
 
 ## Manual acceptance receipt
 
