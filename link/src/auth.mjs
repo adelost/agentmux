@@ -15,21 +15,28 @@ async function stateKey(secret) {
 export async function sealState(secret, payload) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await stateKey(secret);
-  const sealed = await crypto.subtle.encrypt(
+  const sealed = new Uint8Array(await crypto.subtle.encrypt(
     { name: "AES-GCM", iv },
     key,
     textEncoder.encode(JSON.stringify(payload)),
-  );
-  return `v1_${base64Url(iv)}.${base64Url(new Uint8Array(sealed))}`;
+  ));
+  const envelope = new Uint8Array(iv.length + sealed.length);
+  envelope.set(iv);
+  envelope.set(sealed, iv.length);
+  return `v1_${base64Url(envelope)}`;
 }
 
 /** WHAT: Decodes a sealed login transaction. WHY: Keeps callback state confidential and tamper-evident. */
 export async function openState(secret, state) {
   try {
-    const [ivPart, sealedPart] = String(state || "").split(".");
-    if (!ivPart?.startsWith("v1_") || !sealedPart) return null;
-    const iv = Uint8Array.from(atob(ivPart.slice(3).replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0));
-    const sealed = Uint8Array.from(atob(sealedPart.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0));
+    const encoded = String(state || "");
+    if (!/^v1_[A-Za-z0-9_-]+$/u.test(encoded)) return null;
+    const base64 = encoded.slice(3).replaceAll("-", "+").replaceAll("_", "/");
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+    const envelope = Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+    if (envelope.length <= 28) return null;
+    const iv = envelope.slice(0, 12);
+    const sealed = envelope.slice(12);
     const key = await stateKey(secret);
     const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, sealed);
     return JSON.parse(textDecoder.decode(plain));
