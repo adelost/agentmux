@@ -7,23 +7,77 @@ import android.net.Uri;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Google login flow for the public Link: Custom Tab, deep link, exchange. */
+/**
+ * WHAT: Coordinates restart-safe Public Link PKCE login and session persistence.
+ * WHY: Keeps process recreation from invalidating a legitimate auth callback.
+ */
 final class LinkAuthController {
     interface Listener {
         void onLogin(String session);
         void onError(String message);
     }
 
-    private final Activity activity;
-    private final KeystoreSessionStore store;
+    interface StateStore {
+        String baseUrl();
+        String session();
+        String pendingVerifier();
+        boolean replacePendingVerifier(String verifier);
+        boolean saveSessionAndClearPending(
+            String baseUrl,
+            String session,
+            String expectedVerifier
+        );
+        void clear();
+    }
+
+    interface Client {
+        String generateVerifier();
+        String challenge(String verifier);
+        String authStartUrl(String baseUrl, String challenge);
+        String exchange(String baseUrl, String code, String verifier) throws Exception;
+        void revoke(String baseUrl, String session);
+    }
+
+    interface Host {
+        void open(String url);
+        void onUi(Runnable operation);
+    }
+
+    private final Host host;
+    private final StateStore store;
+    private final Client client;
     private final Listener listener;
-    private final ExecutorService work = Executors.newSingleThreadExecutor();
-    private String pendingVerifier;
+    private final ExecutorService work;
 
     LinkAuthController(Activity activity, KeystoreSessionStore store, Listener listener) {
-        this.activity = activity;
+        this(
+            new Host() {
+                public void open(String url) {
+                    activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                }
+                public void onUi(Runnable operation) {
+                    activity.runOnUiThread(operation);
+                }
+            },
+            store,
+            new PlatformClient(),
+            listener,
+            Executors.newSingleThreadExecutor()
+        );
+    }
+
+    LinkAuthController(
+        Host host,
+        StateStore store,
+        Client client,
+        Listener listener,
+        ExecutorService work
+    ) {
+        this.host = host;
         this.store = store;
+        this.client = client;
         this.listener = listener;
+        this.work = work;
     }
 
     boolean loggedIn() {
@@ -35,28 +89,44 @@ final class LinkAuthController {
     }
 
     void beginLogin() {
-        pendingVerifier = PublicLinkClient.generateVerifier();
-        String challenge = PublicLinkClient.pkceChallenge(pendingVerifier);
-        String url = PublicLinkClient.authStartUrl(store.baseUrl(), challenge);
-        activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        String verifier = client.generateVerifier();
+        if (!store.replacePendingVerifier(verifier)) {
+            notifyError("secure login state could not be saved");
+            return;
+        }
+        String challenge = client.challenge(verifier);
+        host.open(client.authStartUrl(store.baseUrl(), challenge));
     }
 
     /** Handles agentmux://auth?code=... deep links. Returns true when consumed. */
     boolean handleDeepLink(Uri uri) {
-        if (uri == null || !"agentmux".equals(uri.getScheme()) || !"auth".equals(uri.getHost())) return false;
-        String code = uri.getQueryParameter("code");
-        if (code == null || pendingVerifier == null) {
+        if (uri == null) return false;
+        return handleCallback(uri.getScheme(), uri.getHost(), uri.getQueryParameter("code"));
+    }
+
+    boolean handleCallback(String scheme, String hostName, String code) {
+        if (!"agentmux".equals(scheme) || !"auth".equals(hostName)) return false;
+        if (code == null || code.isBlank()) {
             listener.onError("login code missing; start login again");
             return true;
         }
         work.execute(() -> {
+            String verifier = store.pendingVerifier();
+            if (verifier == null) {
+                notifyError("login state missing; start login again");
+                return;
+            }
             try {
-                String session = PublicLinkClient.exchange(store.baseUrl(), code, pendingVerifier);
-                store.save(store.baseUrl(), session);
-                activity.runOnUiThread(() -> listener.onLogin(session));
+                String baseUrl = store.baseUrl();
+                String session = client.exchange(baseUrl, code, verifier);
+                if (!store.saveSessionAndClearPending(baseUrl, session, verifier)) {
+                    notifyError("secure session save failed");
+                    return;
+                }
+                host.onUi(() -> listener.onLogin(session));
             } catch (Exception error) {
                 String message = error.getMessage() == null ? "login failed" : error.getMessage();
-                activity.runOnUiThread(() -> listener.onError(message));
+                notifyError(message);
             }
         });
         return true;
@@ -66,12 +136,38 @@ final class LinkAuthController {
         String session = store.session();
         if (session != null) {
             String base = store.baseUrl();
-            work.execute(() -> new PublicLinkClient(base, session).revoke());
+            work.execute(() -> client.revoke(base, session));
         }
         store.clear();
     }
 
     void close() {
         work.shutdownNow();
+    }
+
+    private void notifyError(String message) {
+        host.onUi(() -> listener.onError(message));
+    }
+
+    private static final class PlatformClient implements Client {
+        public String generateVerifier() {
+            return PublicLinkClient.generateVerifier();
+        }
+
+        public String challenge(String verifier) {
+            return PublicLinkClient.pkceChallenge(verifier);
+        }
+
+        public String authStartUrl(String baseUrl, String challenge) {
+            return PublicLinkClient.authStartUrl(baseUrl, challenge);
+        }
+
+        public String exchange(String baseUrl, String code, String verifier) throws Exception {
+            return PublicLinkClient.exchange(baseUrl, code, verifier);
+        }
+
+        public void revoke(String baseUrl, String session) {
+            new PublicLinkClient(baseUrl, session).revoke();
+        }
     }
 }

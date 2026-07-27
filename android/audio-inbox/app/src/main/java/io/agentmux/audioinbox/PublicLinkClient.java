@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 
 /** HTTP client for the public Agentmux Link mailbox (docs/link-internet-v1.md). */
@@ -84,8 +85,7 @@ final class PublicLinkClient implements PublicConversationTransport.Client {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hash = digest.digest(verifier.getBytes(StandardCharsets.UTF_8));
             // Exactly base64url without padding, matching the worker's S256.
-            return android.util.Base64.encodeToString(hash, android.util.Base64.NO_WRAP | android.util.Base64.URL_SAFE)
-                .replace("=", "");
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
         } catch (Exception error) {
             throw new IllegalStateException("pkce challenge failed", error);
         }

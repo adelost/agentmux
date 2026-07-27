@@ -1,6 +1,6 @@
 # Agentmux Link UX V2 contract
 
-Contract version: `2.2.0`
+Contract version: `2.2.1`
 
 Status: normative
 
@@ -20,6 +20,14 @@ The public `link.v1d.io` mailbox, authentication, and Internet delivery are
 owned outside this slice. This slice does not duplicate that backend. The
 Android adapter consumes its authenticated send/await-reply contract while the
 tailnet voice server remains an independent fallback adapter.
+
+Public Link PKCE state is restart-safe: the verifier is encrypted under the
+Android Keystore key before opening the Custom Tab, is never placed in an
+Intent, log, or argument, and a new login replaces the prior pending value.
+The callback reloads that exact verifier after process recreation. A failed
+exchange preserves it for retry; successful encrypted session persistence and
+pending-verifier removal are one expected-verifier transition. No login state
+is projected when that durable commit fails.
 
 ## Module and migration architecture
 
