@@ -92,6 +92,8 @@ export async function runLinkConnectorCycle({
         const agentName = String(message.target).split(":")[0];
         const pane = Number(String(message.target).split(":")[1]);
         const prompt = linkTurnPrompt({ clientMessageId: id, body });
+        const leaseAttempt = Number.isSafeInteger(message.attempts) && message.attempts > 0
+          ? message.attempts : 1;
         journal.messages[id] = { stage: "claimed", at: Date.now(), target: message.target, prompt };
         writeJournal(statePath, journal);
         let job;
@@ -100,7 +102,7 @@ export async function runLinkConnectorCycle({
             agentName,
             pane,
             text: prompt,
-            idempotencyKey: `link:${id}`,
+            idempotencyKey: `link:${id}:attempt:${leaseAttempt}`,
           });
         } catch (error) {
           log(`link-connector ${id} not-delivered:enqueue-refused ${String(error?.message || error)}`);

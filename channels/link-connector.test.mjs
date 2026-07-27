@@ -82,7 +82,7 @@ feature("link connector cycle", () => {
       expect(r.ctx.calls.enqueued[0]).toMatchObject({
         agentName: "lsrc",
         pane: 3,
-        idempotencyKey: "link:m-1",
+        idempotencyKey: "link:m-1:attempt:1",
       });
       expect(r.ctx.calls.enqueued[0].text).toBe("[amux-link-turn:m-1]\nhej från telefonen");
       const acks = r.ctx.calls.posts.filter((p) => p.url.includes("/ack"));

@@ -7,6 +7,7 @@ import { createTestDb } from "./testdb.mjs";
 import { createLinkStore } from "./store.mjs";
 import { sha256Hex, pkceChallenge } from "./util.mjs";
 import { runLinkConnectorCycle } from "../../channels/link-connector.mjs";
+import { createDeliveryQueue } from "../../core/delivery-queue.mjs";
 import { releaseUploadPlan } from "../scripts/publish-release.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -203,6 +204,90 @@ feature("B2: the connector acks only on the broker's acknowledged receipt", () =
         expect(item.posts.some((post) => /\/(?:ack|reply|fail)$/u.test(new URL(post.url).pathname))).toBe(false);
         rmSync(item.root, { recursive: true, force: true });
       }
+    }],
+  });
+
+  component("a reclaimed mailbox lease gets a new queue generation after cancellation", {
+    given: ["attempt one twice, then reclaimed attempt two over the real durable queue", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-link-b2-generation-"));
+      const queue = createDeliveryQueue({ rootDir: join(root, "queue"), now: () => NOW });
+      const mailboxAttempts = [1, 1, 2];
+      const posts = [];
+      const enqueues = [];
+      const deliveryBroker = {
+        enqueue(request) {
+          const job = queue.enqueue(request);
+          enqueues.push({ id: job.id, key: request.idempotencyKey });
+          const current = queue.read(request.agentName, request.pane, job.id);
+          if (request.idempotencyKey.endsWith(":attempt:1") && current.status !== "cancelled") {
+            queue.update(current, { status: "cancelled", terminalAt: NOW });
+          }
+          if (request.idempotencyKey.endsWith(":attempt:2") && current.status !== "acknowledged") {
+            queue.update(current, { status: "acknowledged", acknowledgedAt: NOW });
+          }
+          return queue.read(request.agentName, request.pane, job.id);
+        },
+      };
+      return {
+        root,
+        posts,
+        enqueues,
+        deps: {
+          fetchImpl: async (url, init) => {
+            posts.push({ url, body: JSON.parse(init.body || "{}") });
+            if (url.includes("/connector/poll")) {
+              return {
+                ok: true,
+                json: async () => ({
+                  messages: [{
+                    clientMessageId: "m-generation",
+                    target: "lsrc:3",
+                    kind: "text",
+                    body: "hej",
+                    attempts: mailboxAttempts.shift(),
+                  }],
+                }),
+              };
+            }
+            return { ok: true, json: async () => ({}) };
+          },
+          linkBase: "https://link.v1d.io",
+          token: "wsl-token",
+          targets: ["lsrc:3"],
+          agent: {
+            hasResponseForPrompt: () => true,
+            getResponseStreamWithRaw: async () => ({
+              items: [{ type: "text", content: "svaret" }],
+            }),
+          },
+          deliveryBroker,
+          deliveryQueue: queue,
+          statePath: join(root, "connector.json"),
+          receiptTimeoutMs: 1,
+          sleep: async () => {},
+        },
+      };
+    }],
+    when: ["running both same-lease cycles and the reclaimed generation", async (ctx) => {
+      const results = [];
+      for (let index = 0; index < 3; index += 1) {
+        results.push(await runLinkConnectorCycle(ctx.deps));
+      }
+      return { ctx, results };
+    }],
+    then: ["same lease deduplicates, reclaimed lease delivers through a fresh job", ({ ctx, results }) => {
+      expect(results.map((result) => result.handled)).toEqual([0, 0, 1]);
+      expect(ctx.enqueues.map((entry) => entry.key)).toEqual([
+        "link:m-generation:attempt:1",
+        "link:m-generation:attempt:1",
+        "link:m-generation:attempt:2",
+      ]);
+      expect(ctx.enqueues[0].id).toBe(ctx.enqueues[1].id);
+      expect(ctx.enqueues[2].id).not.toBe(ctx.enqueues[0].id);
+      expect(ctx.posts.filter((post) => post.url.includes("/ack"))).toHaveLength(1);
+      expect(ctx.posts.filter((post) => post.url.includes("/reply"))).toHaveLength(1);
+      expect(ctx.posts.filter((post) => post.url.includes("/fail"))).toHaveLength(0);
+      rmSync(ctx.root, { recursive: true, force: true });
     }],
   });
 
