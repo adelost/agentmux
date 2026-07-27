@@ -93,6 +93,7 @@ internal fun LinkPhoneScreen(
                     turns = state.turns,
                     onPlay = coordinator::playReply,
                     onPause = coordinator::pauseAudio,
+                    onResume = coordinator::resumeAudio,
                     onStop = coordinator::stopAudio,
                 )
                 Row(

@@ -39,6 +39,11 @@ feature("Android audio inbox source contract", () => {
       expect(notifier).toContain("session.getPlatformToken()");
       expect(notifier).toContain('"Stop"');
       expect(notifier).toContain("AppContract.ACTION_STOP_AUDIO");
+      const timeline = read(
+        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/Timeline.kt",
+      );
+      expect(timeline).toContain('PlaybackPhase.PAUSED -> {');
+      expect(timeline).toContain('SmallAction("Play", onResume)');
       expect(read("channels/voice.mjs")).toContain('path === "/api/audio/send"');
       const ptt = read(
         "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/PttDisc.kt",

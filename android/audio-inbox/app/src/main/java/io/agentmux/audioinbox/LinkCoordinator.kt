@@ -227,6 +227,7 @@ internal class LinkCoordinator(
     }
 
     fun pauseAudio() = sendAudioAction(AppContract.ACTION_PAUSE_AUDIO)
+    fun resumeAudio() = sendAudioAction(AppContract.ACTION_RESUME_AUDIO)
     fun stopAudio() = sendAudioAction(AppContract.ACTION_STOP_AUDIO)
 
     fun applyUpdatePresentation(action: LinkAction.Update) {

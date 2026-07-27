@@ -28,6 +28,7 @@ internal fun ConversationTimeline(
     turns: List<LinkTurn>,
     onPlay: (String) -> Unit,
     onPause: () -> Unit,
+    onResume: () -> Unit,
     onStop: () -> Unit,
 ) {
     if (turns.isEmpty()) {
@@ -36,7 +37,7 @@ internal fun ConversationTimeline(
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         turns.takeLast(30).forEach { turn ->
-            TurnCard(turn, onPlay, onPause, onStop)
+            TurnCard(turn, onPlay, onPause, onResume, onStop)
         }
     }
 }
@@ -46,6 +47,7 @@ private fun TurnCard(
     turn: LinkTurn,
     onPlay: (String) -> Unit,
     onPause: () -> Unit,
+    onResume: () -> Unit,
     onStop: () -> Unit,
 ) {
     Surface(
@@ -80,7 +82,7 @@ private fun TurnCard(
                             SmallAction("Stop", onStop)
                         }
                         PlaybackPhase.PAUSED -> {
-                            SmallAction("Play", { onPlay(turn.turnId) })
+                            SmallAction("Play", onResume)
                             SmallAction("Stop", onStop)
                         }
                         PlaybackPhase.STOPPED, PlaybackPhase.PLAYED,
