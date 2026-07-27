@@ -60,6 +60,7 @@ feature("sealed login state", () => {
       state: await sealState(SECRET, { verifier: "v", challenge: "c", expiresAt: NOW + 1000 }),
     })],
     when: ["opening intact and forged", async (ctx) => ({
+      state: ctx.state,
       intact: await openState(SECRET, ctx.state),
       forged: await openState(SECRET, `${ctx.state.slice(0, -4)}AAAA`),
       wrongKey: await openState("cd".repeat(32), ctx.state),
@@ -68,6 +69,7 @@ feature("sealed login state", () => {
       expect(r.intact).toMatchObject({ verifier: "v", challenge: "c" });
       expect(r.forged).toBeNull();
       expect(r.wrongKey).toBeNull();
+      expect(r.state).toMatch(/^v1_[A-Za-z0-9_-]+$/u);
     }],
   });
 });
