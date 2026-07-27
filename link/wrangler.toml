@@ -1,6 +1,12 @@
 name = "agentmux-link"
 main = "src/index.mjs"
 compatibility_date = "2026-07-20"
+workers_dev = false
+preview_urls = true
+
+routes = [
+  { pattern = "link.v1d.io", custom_domain = true }
+]
 
 # Public mailbox for Agentmux Link Internet V1 (docs/link-internet-v1.md).
 # Secrets (never in source): V1D_AUTH_CLIENT_SECRET, V1D_AUTH_STATE_SECRET,

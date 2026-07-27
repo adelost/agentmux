@@ -6,6 +6,22 @@ import { createLinkStore } from "./store.mjs";
 import { json, pkceChallenge, randomId, sha256Hex, text } from "./util.mjs";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const HEX_SECRET_RE = /^[0-9a-f]{64,256}$/iu;
+
+function configured(env) {
+  return Boolean(
+    env.LINK_DB?.prepare
+    && env.LINK_VOICE?.get
+    && env.LINK_RELEASES?.get
+    && env.V1D_AUTH_ORIGIN === "https://auth.v1d.io"
+    && env.V1D_AUTH_CALLBACK_URL === "https://link.v1d.io/auth/callback"
+    && env.V1D_AUTH_APP_ID === "agentmux-link"
+    && String(env.V1D_AUTH_CLIENT_SECRET || "").length >= 32
+    && HEX_SECRET_RE.test(String(env.V1D_AUTH_STATE_SECRET || ""))
+    && String(env.CONNECTOR_TOKEN_WSL || "").length >= 32
+    && String(env.CONNECTOR_TOKEN_WINDOWS || "").length >= 32
+  );
+}
 
 function targetsForApp(env) {
   return String(env.LINK_TARGETS || "lsrc:3|L-source 3,lsrc:10|L-source 10,windows|Windows rescue")
@@ -34,7 +50,10 @@ export default {
     const store = createLinkStore(env.LINK_DB);
     const nowMs = Date.now();
 
-    if (url.pathname === "/healthz") return json(null, 200, { ok: true, service: "agentmux-link" });
+    if (url.pathname === "/healthz") {
+      const ok = configured(env);
+      return json(null, ok ? 200 : 503, { ok, service: "agentmux-link" });
+    }
 
     // --- Read-only release channel (client update contract v1) --------------
     if (url.pathname.startsWith("/releases/") && request.method === "GET") {

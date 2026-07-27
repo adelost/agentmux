@@ -72,6 +72,31 @@ feature("sealed login state", () => {
   });
 });
 
+feature("deployment health", () => {
+  component("fails closed until every live binding and secret is present", {
+    given: ["one complete and one incomplete deployment env", () => {
+      const complete = makeEnv({
+        LINK_VOICE: { get: async () => null },
+        LINK_RELEASES: { get: async () => null },
+        V1D_AUTH_CLIENT_SECRET: "c".repeat(32),
+        CONNECTOR_TOKEN_WSL: "w".repeat(32),
+        CONNECTOR_TOKEN_WINDOWS: "x".repeat(32),
+      });
+      return { complete, incomplete: { ...complete, CONNECTOR_TOKEN_WINDOWS: "" } };
+    }],
+    when: ["reading both health endpoints", async ({ complete, incomplete }) => ({
+      complete: await worker.fetch(req("https://link.v1d.io/healthz"), complete),
+      incomplete: await worker.fetch(req("https://link.v1d.io/healthz"), incomplete),
+    })],
+    then: ["only the fully configured worker is healthy", async (result) => {
+      expect(result.complete.status).toBe(200);
+      expect(await result.complete.json()).toEqual({ ok: true, service: "agentmux-link" });
+      expect(result.incomplete.status).toBe(503);
+      expect(await result.incomplete.json()).toEqual({ ok: false, service: "agentmux-link" });
+    }],
+  });
+});
+
 feature("mailbox journey over the real router", () => {
   component("send to reply with replay, conflict, and scoped connector auth", {
     given: ["an env and one connector token", () => ({ env: makeEnv(), session: "lnk_test" })],
@@ -210,6 +235,63 @@ feature("auth exchange leg", () => {
     then: ["identity-not-allowed, no session minted", async (response) => {
       expect(response.status).toBe(403);
       expect((await response.json()).error).toBe("identity-not-allowed");
+    }],
+  });
+
+  component("the broker's verifiedEmail claim binds locally while central authorization fields are ignored", {
+    given: ["an allowlisted identity and the real broker response shape", async () => {
+      const env = makeEnv();
+      const identityId = "7e7c2a1e-7777-4111-8111-cccccccccccc";
+      const appVerifier = "a".repeat(64);
+      await env.LINK_DB.prepare(
+        "INSERT INTO identities(identityId, label, createdAt) VALUES (?, ?, ?)",
+      ).bind(identityId, "Link User", NOW).run();
+      const state = await sealState(SECRET, {
+        verifier: "broker-verifier",
+        challenge: await pkceChallenge(appVerifier),
+        client: "android",
+        expiresAt: Date.now() + 60_000,
+      });
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = async () => Response.json({
+        principal: {
+          id: identityId,
+          name: "Link User",
+          verifiedEmail: "link@example.com",
+          isOwner: true,
+          memberships: [{ resourceId: "central", role: "editor" }],
+          membershipRevision: 9,
+        },
+      });
+      return {
+        env, identityId, state, appVerifier,
+        restore: () => { globalThis.fetch = realFetch; },
+      };
+    }],
+    when: ["completing and exchanging the identity callback", async ({
+      env, identityId, state, appVerifier, restore,
+    }) => {
+      const response = await worker.fetch(
+        req(`https://link.v1d.io/auth/callback?code=once&state=${encodeURIComponent(state)}`),
+        env,
+      );
+      restore();
+      const html = await response.text();
+      const code = html.match(/xch_[0-9a-f]+/u)?.[0];
+      const exchange = await worker.fetch(req("https://link.v1d.io/auth/exchange", {
+        method: "POST",
+        body: { code, verifier: appVerifier },
+      }), env);
+      const { createLinkStore } = await import("./store.mjs");
+      const binding = await createLinkStore(env.LINK_DB).bindingFor(identityId);
+      return { response, exchange, binding };
+    }],
+    then: ["the local claim is retained without importing central roles", (result) => {
+      expect(result.response.status).toBe(200);
+      expect(result.exchange.status).toBe(200);
+      expect(result.binding).toMatchObject({ verifiedEmail: "link@example.com" });
+      expect(result.binding).not.toHaveProperty("isOwner");
+      expect(result.binding).not.toHaveProperty("memberships");
     }],
   });
 });
