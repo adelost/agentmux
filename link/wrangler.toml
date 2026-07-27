@@ -15,7 +15,7 @@ routes = [
 [[d1_databases]]
 binding = "LINK_DB"
 database_name = "link_mailbox"
-database_id = "REPLACE_WITH_D1_ID"
+database_id = "32ee7aad-3d6e-46d3-b375-76b126b8cee1"
 
 [[r2_buckets]]
 binding = "LINK_VOICE"
