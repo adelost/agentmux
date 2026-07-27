@@ -7,7 +7,7 @@ import android.media.AudioManager;
 import android.os.Build;
 
 final class SpeechAudioFocus implements PlaybackQueue.FocusPort {
-    static final int DURATION_HINT = AudioManager.AUDIOFOCUS_GAIN_TRANSIENT;
+    static final int DURATION_HINT = AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK;
 
     private final AudioManager audioManager;
     private final AudioManager.OnAudioFocusChangeListener listener;

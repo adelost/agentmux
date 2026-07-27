@@ -1,0 +1,56 @@
+package io.agentmux.audioinbox
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import io.agentmux.linkcore.PlaybackPhase
+import io.agentmux.linkcore.ReplyPhase
+
+class LinkStateRepositoryCorruptionTest {
+    @Test
+    fun `corrupt v2 is quarantined and never reinterpreted as legacy`() {
+        val preferences = TestPreferences()
+        val corrupt = """{"schemaVersion":2,"turns":[broken}"""
+        preferences.data[AppContract.KEY_LINK_STATE_V2] = corrupt
+        preferences.data[AppContract.KEY_CONVERSATION] =
+            """[{"role":"assistant","target":"wrong","text":"legacy fallback"}]"""
+
+        val state = LinkStateRepository(preferences).load()
+
+        assertTrue(state.turns.isEmpty())
+        assertTrue(state.recoveryError.contains("quarantined"))
+        assertEquals(corrupt, preferences.data[AppContract.KEY_LINK_STATE_V2_QUARANTINE])
+    }
+
+    @Test
+    fun `restart makes queued audio recoverable but never resumes interrupted playback`() {
+        val preferences = TestPreferences()
+        preferences.data[AppContract.KEY_LINK_STATE_V2] = """
+            {
+              "schemaVersion": 2,
+              "selectedTargetId": "lsrc:3",
+              "turns": [
+                {
+                  "turnId": "queued", "targetId": "lsrc:3", "userText": "one",
+                  "replyText": "reply one", "createdAtMs": 1,
+                  "deliveryPhase": "QUEUED", "replyPhase": "READY",
+                  "playbackPhase": "QUEUED"
+                },
+                {
+                  "turnId": "interrupted", "targetId": "lsrc:3", "userText": "two",
+                  "replyText": "reply two", "createdAtMs": 2,
+                  "deliveryPhase": "QUEUED", "replyPhase": "READY",
+                  "playbackPhase": "PAUSED"
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val turns = LinkStateRepository(preferences).load().turns
+
+        assertEquals(PlaybackPhase.IDLE, turns[0].playbackPhase)
+        assertEquals(PlaybackPhase.STOPPED, turns[1].playbackPhase)
+        assertEquals(listOf(ReplyPhase.READY, ReplyPhase.READY), turns.map { it.replyPhase })
+        assertEquals(listOf("reply one", "reply two"), turns.map { it.replyText })
+    }
+}

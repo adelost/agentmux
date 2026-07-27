@@ -109,11 +109,12 @@ final class AudioInboxHttpClient {
             if (status != 200) {
                 throw new IllegalStateException(json.optString("error", "PTT HTTP " + status));
             }
-            String sent = json.optString("sent", "").trim();
-            String replyPrompt = json.optString("replyPrompt", "").trim();
-            String transcript = json.optString("transcript", "").trim();
-            String answer = json.optString("answer", "").trim();
+            String sent = jsonText(json, "sent");
+            String replyPrompt = jsonText(json, "replyPrompt");
+            String transcript = jsonText(json, "transcript");
+            String answer = jsonText(json, "answer");
             if (sent.isEmpty()) sent = transcript;
+            if (sent.isEmpty() && text != null) sent = text.trim();
             if (sent.isEmpty()) throw new IllegalStateException("conversation response has no sent text");
             if (audioFile != null && transcript.isEmpty()) {
                 throw new IllegalStateException("PTT response has no transcript");
@@ -123,6 +124,12 @@ final class AudioInboxHttpClient {
         } finally {
             connection.disconnect();
         }
+    }
+
+    static String jsonText(JSONObject object, String key) {
+        if (object == null || object.isNull(key)) return "";
+        String value = object.optString(key, "").trim();
+        return "null".equalsIgnoreCase(value) ? "" : value;
     }
 
     String awaitAgentReply(ConversationTarget target, String prompt) throws Exception {

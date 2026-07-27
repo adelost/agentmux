@@ -71,7 +71,7 @@ final class ServerDiscovery {
             if (serverId.isEmpty()) return null;
             if ("agentmux-windows-manager-audio".equals(service) && schema == 1) {
                 ConversationTarget manager = new ConversationTarget(
-                    "windows",
+                    "_windows_",
                     "Windows rescue",
                     ConversationTarget.Kind.WINDOWS,
                     serverUrl.replaceAll("/+$", ""),

@@ -32,7 +32,12 @@ destruktiv restart (gäller #198/#199 redan).
    (`code`, ≤60 s, single-use) som returneras via verifierad Android App Link
    (https://link.v1d.io/auth/app-return) eller custom scheme `agentmux://auth`.
    Appen byter `code` + sin verifier mot `/auth/exchange` → opaque
-   Link-session (30 d, revokerbar). Sessionen lagras i Android Keystore.
+   Link-session (30 d, revokerbar). Verifiern lagras krypterad med Android
+   Keystore före Custom Tab-start och överlever processåterskapande utan att
+   läggas i Intent/logg/argv. Ny login ersätter pending verifier; misslyckad
+   exchange behåller den. Lyckad sessionlagring och verifier-rensning sker som
+   en expected-verifier-transition, och login kvitteras inte om lagringen
+   misslyckas.
 
 **Bindning exakt en gång:** första giltiga loggen binder verifiedEmail →
 identityId mot en konfigurerad allowlist (identiteter i D1, seedade av
@@ -83,7 +88,11 @@ heartbeats(connectorId TEXT, target TEXT, seenAt, source TEXT) -- wsl|windows
 
 ## Voice (S3)
 
-Upload ≤ 60 s / 5 MB till `link-voice` (R2, privat, signed by Worker).
+Inspelningen har ingen tidsgräns i appen och avbryts aldrig tyst efter 60 s.
+Public Link-uploaden har i stället en auktoritativ bytegräns på 5 MiB till
+`link-voice` (R2, privat, signed by Worker). Appen visar en varning från 80 %
+men fortsätter spela in tills användaren släpper. Om filen då är större än
+5 MiB misslyckas sändningen synligt utan trunkering eller fabricerad acceptans.
 `send` köar referensen; connector laddar ner, transkriberar via befintlig
 kedja (windows-transcribe/bridge), reply innehåller transcript + svar.
 Audio raderas vid terminal retention (replied/failed + 24 h).
