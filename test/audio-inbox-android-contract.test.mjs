@@ -31,38 +31,47 @@ feature("Android audio inbox source contract", () => {
       expect(startup).toContain("AUDIO_INBOX_TARGET");
       expect(startup).toContain("AUDIO_INBOX_TARGETS");
       expect(startup).toContain("${process.env.HOME}/.local/bin");
-      expect(focus).toContain("AUDIOFOCUS_GAIN_TRANSIENT");
-      expect(focus).not.toContain("AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK");
+      expect(focus).toContain("AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK");
       expect(read("channels/voice.mjs")).toContain('path === "/api/audio/send"');
       expect(read(
-        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/PushToTalkController.java",
-      )).toContain("MotionEvent.ACTION_UP");
+        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/PttDisc.kt",
+      )).toContain("awaitEachGesture");
       expect(discovery).toContain('"agentmux-windows-manager-audio"');
       expect(discovery).toContain('"http://abyss-win.tail13cb13.ts.net:8081"');
       expect(read(
-        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/ConversationPanel.java",
-      )).toContain('"Read replies aloud"');
+        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/LinkPhoneScreen.kt",
+      )).toContain('"Read direct replies aloud"');
       expect(read(
-        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/ConversationPanel.java",
-      )).toContain('KEY_CONVERSATION_TARGET, "lsrc:3"');
+        "android/audio-inbox/link-core/src/main/kotlin/io/agentmux/linkcore/LinkState.kt",
+      )).toContain('selectedTargetId: String = "lsrc:3"');
+      expect(read(
+        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/TailnetConversationTransport.java",
+      )).toContain("awaitAgentReply");
       expect(read(
         "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/ConversationController.java",
-      )).toContain("awaitAgentReply");
+      )).toContain("replies.execute");
       expect(read("channels/voice-input.mjs")).not.toContain("answer normally, then send");
       expect(read("channels/voice-input.mjs")).not.toContain("ptt-echo-");
     }],
   });
 
-  unit("every Android Java source stays within the repository size limit", {
+  unit("every touched Android source stays within the repository size limit", {
     then: ["no source file exceeds 500 lines", () => {
-      const directory = new URL(
+      const appDirectory = new URL(
         "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/",
         ROOT,
       );
+      const coreDirectory = new URL(
+        "android/audio-inbox/link-core/src/main/kotlin/io/agentmux/linkcore/",
+        ROOT,
+      );
       const counts = Object.fromEntries(
-        readdirSync(directory)
-          .filter((name) => name.endsWith(".java"))
-          .map((name) => {
+        [
+          ...readdirSync(appDirectory).map((name) => [appDirectory, name]),
+          ...readdirSync(coreDirectory).map((name) => [coreDirectory, name]),
+        ]
+          .filter(([, name]) => name.endsWith(".java") || name.endsWith(".kt"))
+          .map(([directory, name]) => {
             const source = readFileSync(join(directory.pathname, name), "utf8");
             const lines = source.split("\n").length - (source.endsWith("\n") ? 1 : 0);
             return [name, lines];
@@ -71,8 +80,9 @@ feature("Android audio inbox source contract", () => {
       expect(counts).toEqual(expect.objectContaining({
         "AudioInboxHttpClient.java": expect.any(Number),
         "AudioInboxService.java": expect.any(Number),
-        "MainActivity.java": expect.any(Number),
-        "ConversationPanel.java": expect.any(Number),
+        "MainActivity.kt": expect.any(Number),
+        "LinkPhoneScreen.kt": expect.any(Number),
+        "LinkState.kt": expect.any(Number),
         "ServerDiscovery.java": expect.any(Number),
       }));
       expect(Math.max(...Object.values(counts))).toBeLessThanOrEqual(500);

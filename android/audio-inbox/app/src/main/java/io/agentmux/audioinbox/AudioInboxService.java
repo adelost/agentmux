@@ -1,12 +1,7 @@
 package io.agentmux.audioinbox;
 
-import android.app.Notification;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.pm.ServiceInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
@@ -24,25 +19,14 @@ import androidx.media3.session.MediaSessionService;
 
 import org.json.JSONObject;
 
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public final class AudioInboxService extends MediaSessionService {
     static final String ACTION_REPLAY = "io.agentmux.audioinbox.REPLAY";
-    private static final String STATUS_CHANNEL = "agent-audio-inbox-status";
-    private static final int STATUS_NOTIFICATION_ID = 7301;
-
     private final Handler main = new Handler(Looper.getMainLooper());
-    private final ExecutorService feedExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService workExecutor = Executors.newSingleThreadExecutor();
-    private final AtomicInteger feedGeneration = new AtomicInteger();
     private final AudioEventClaims claims = new AudioEventClaims();
 
     private SharedPreferences preferences;
@@ -52,9 +36,13 @@ public final class AudioInboxService extends MediaSessionService {
     private PlaybackQueue playbackQueue;
     private AudioInboxHttpClient httpClient;
     private AudioInboxStore store;
+    private AudioReceiptWriter receipts;
+    private AudioFeedLoop feedLoop;
+    private AudioServiceNotifier notifier;
+    private DirectReplyLoader directLoader;
     private volatile boolean enabled;
     private volatile boolean connected;
-    private volatile HttpURLConnection feedConnection;
+    private volatile boolean directAvailable;
     private String startingId;
     private boolean replaying;
 
@@ -63,12 +51,42 @@ public final class AudioInboxService extends MediaSessionService {
         super.onCreate();
         preferences = getSharedPreferences(AppContract.PREFS, MODE_PRIVATE);
         store = new AudioInboxStore(this, preferences);
-        createNotificationChannel();
+        receipts = new AudioReceiptWriter(store, claims);
+        notifier = new AudioServiceNotifier(this);
 
         audioFocus = new SpeechAudioFocus(this, change -> main.post(() -> {
             if (change <= 0 && player != null && player.isPlaying()) player.pause();
         }));
         playbackQueue = new PlaybackQueue(audioFocus);
+        feedLoop = new AudioFeedLoop(new AudioFeedLoop.Listener() {
+            public void onConnected(boolean value) { setConnected(value); }
+            public void onEvent(JSONObject event) { acceptEvent(event); }
+            public void onError(String detail) {
+                if (enabled) store.updateConnection(
+                    "Disconnected: " + AudioReceiptWriter.safe(detail),
+                    false
+                );
+            }
+        });
+        directLoader = new DirectReplyLoader(
+            this,
+            preferences,
+            claims,
+            workExecutor,
+            new DirectReplyLoader.Listener() {
+                public void onReserved() {
+                    directAvailable = true;
+                    playbackQueue.setConnected(true);
+                }
+                public void onReady(AudioEventClaims.Entry item) {
+                    main.post(() -> queueItem(item));
+                }
+                public void onFailed(String turnId, String eventId) {
+                    store.saveTurnPlayback(turnId, "failed");
+                    refreshDirectAvailability();
+                }
+            }
+        );
         AudioAttributes attributes = new AudioAttributes.Builder()
             .setUsage(C.USAGE_ASSISTANT)
             .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
@@ -84,13 +102,14 @@ public final class AudioInboxService extends MediaSessionService {
 
             @Override
             public void onPlayerError(PlaybackException error) {
-                failActive("player: " + safeDetail(error.getMessage()));
+                failActive("player: " + AudioReceiptWriter.safe(error.getMessage()));
             }
 
             @Override
             public void onPlayWhenReadyChanged(boolean playWhenReady, int reason) {
                 if (!playWhenReady) {
                     playbackQueue.pauseActive();
+                    updateActiveTurnState("paused");
                     return;
                 }
                 String active = playbackQueue.active();
@@ -105,6 +124,8 @@ public final class AudioInboxService extends MediaSessionService {
                     }
                 } else if (!playbackQueue.ensureFocusForActive()) {
                     player.pause();
+                } else {
+                    updateActiveTurnState("playing");
                 }
             }
         });
@@ -125,6 +146,22 @@ public final class AudioInboxService extends MediaSessionService {
             replayCurrent();
             return START_STICKY;
         }
+        if (AppContract.ACTION_PLAY_REPLY.equals(action)
+            || AppContract.ACTION_REPLAY_REPLY.equals(action)) {
+            notifier.start();
+            if (!directLoader.prepare(intent, AppContract.ACTION_REPLAY_REPLY.equals(action))) {
+                stopForegroundAndSelf();
+            }
+            return START_STICKY;
+        }
+        if (AppContract.ACTION_PAUSE_AUDIO.equals(action)) {
+            if (player.isPlaying()) player.pause();
+            return START_STICKY;
+        }
+        if (AppContract.ACTION_STOP_AUDIO.equals(action)) {
+            stopAllAudio();
+            return START_STICKY;
+        }
         if (AppContract.ACTION_START.equals(action)
             || (action == null && preferences.getBoolean(AppContract.KEY_ENABLED, false))) {
             startHandsFree();
@@ -141,11 +178,9 @@ public final class AudioInboxService extends MediaSessionService {
     @Override
     public void onDestroy() {
         enabled = false;
-        feedGeneration.incrementAndGet();
-        disconnectFeed();
+        feedLoop.close();
         playbackQueue.setHandsFree(false);
         workExecutor.shutdownNow();
-        feedExecutor.shutdownNow();
         claims.clear();
         mediaSession.release();
         player.release();
@@ -169,135 +204,82 @@ public final class AudioInboxService extends MediaSessionService {
         enabled = true;
         preferences.edit().putBoolean(AppContract.KEY_ENABLED, true).apply();
         playbackQueue.setHandsFree(true);
-        startStatusForeground();
-        int generation = feedGeneration.incrementAndGet();
+        notifier.start();
         store.updateConnection("Connecting", false);
-        feedExecutor.execute(() -> runFeed(generation, target));
+        feedLoop.start(httpClient, target);
     }
 
     private void stopHandsFree() {
         enabled = false;
         connected = false;
-        feedGeneration.incrementAndGet();
         preferences.edit().putBoolean(AppContract.KEY_ENABLED, false).apply();
-        disconnectFeed();
-        playbackQueue.setConnected(false);
+        feedLoop.stop();
         playbackQueue.setHandsFree(false);
-        replaying = false;
-        player.stop();
-        claims.clear();
+        discardBroadcastItems();
+        playbackQueue.setConnected(directAvailable);
         store.updateConnection("Off", false);
-        if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE);
-        else stopForeground(true);
-        stopSelf();
-    }
-
-    private void runFeed(int generation, String target) {
-        while (enabled && generation == feedGeneration.get()) {
-            try {
-                HttpURLConnection connection = httpClient.openFeed(target);
-                feedConnection = connection;
-                setConnected(true);
-                readFeed(connection, generation);
-            } catch (Exception error) {
-                if (enabled && generation == feedGeneration.get()) {
-                    store.updateConnection("Disconnected: " + safeDetail(error.getMessage()), false);
-                }
-            } finally {
-                feedConnection = null;
-                setConnected(false);
-            }
-            if (enabled && generation == feedGeneration.get()) {
-                try {
-                    Thread.sleep(2000);
-                } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-            }
-        }
-    }
-
-    private void readFeed(HttpURLConnection connection, int generation) throws Exception {
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
-            connection.getInputStream(),
-            StandardCharsets.UTF_8
-        ))) {
-            String eventName = "";
-            String line;
-            while (enabled && connected && generation == feedGeneration.get()
-                && (line = reader.readLine()) != null) {
-                if (line.startsWith("event:")) {
-                    eventName = line.substring("event:".length()).trim();
-                } else if (line.startsWith("data:") && "audio".equals(eventName)) {
-                    JSONObject event = new JSONObject(line.substring("data:".length()).trim());
-                    acceptEvent(event);
-                } else if (line.isEmpty()) {
-                    eventName = "";
-                }
-            }
-        }
+        if (!directAvailable) stopForegroundAndSelf();
     }
 
     private void acceptEvent(JSONObject event) {
-        String eventId = event.optString("eventId", "");
-        String text = event.optString("text", "");
-        if (eventId.isBlank() || text.isBlank() || text.length() > 1500) return;
-        long createdAt;
-        long expiresAt;
-        try {
-            createdAt = Instant.parse(event.getString("createdAt")).toEpochMilli();
-            expiresAt = Instant.parse(event.getString("expiresAt")).toEpochMilli();
-        } catch (Exception ignored) {
-            return;
-        }
-        if (expiresAt <= System.currentTimeMillis()) return;
-        String local = store.localState(eventId);
-        if ("playback-started".equals(local) || "played".equals(local) || "failed".equals(local)) return;
+        String rawId = event.optString("eventId", "");
+        AudioFeedEvent parsed = AudioFeedEvent.parse(
+            event,
+            store.localState(rawId),
+            System.currentTimeMillis()
+        );
+        if (parsed == null) return;
         // Runtime reservation before any fetch: a replayed SSE event must
         // never overwrite the file the queued entry already uses. Held only
         // while in flight, queued, or active; terminal paths release it.
-        if (!claims.reserve(eventId)) return;
+        if (!claims.reserve(parsed.eventId())) return;
         workExecutor.execute(() -> {
             try {
                 if (!canClaim()) {
-                    claims.release(eventId);
+                    claims.release(parsed.eventId());
                     return;
                 }
-                httpClient.postReceipt(eventId, "received", null);
-                store.saveLocalState(eventId, "received");
-                File media = httpClient.fetchTts(getCacheDir(), eventId, text);
+                httpClient.postReceipt(parsed.eventId(), "received", null);
+                store.saveLocalState(parsed.eventId(), "received");
+                File media = httpClient.fetchTts(getCacheDir(), parsed.eventId(), parsed.text());
                 if (!canClaim()) {
                     if (media != null) media.delete();
-                    claims.release(eventId);
+                    claims.release(parsed.eventId());
                     return;
                 }
-                httpClient.postReceipt(eventId, "queued", null);
-                store.saveLocalState(eventId, "queued");
-                AudioEventClaims.Entry item = new AudioEventClaims.Entry(eventId, text, createdAt, expiresAt, media);
+                httpClient.postReceipt(parsed.eventId(), "queued", null);
+                store.saveLocalState(parsed.eventId(), "queued");
+                AudioEventClaims.Entry item = new AudioEventClaims.Entry(
+                    parsed.eventId(), parsed.text(), parsed.createdAt(), parsed.expiresAt(), media
+                );
                 main.post(() -> queueItem(item));
             } catch (Exception error) {
-                failBeforePlayback(eventId, error);
+                failBeforePlayback(parsed.eventId(), error);
             }
         });
     }
 
     private void queueItem(AudioEventClaims.Entry item) {
-        if (!enabled || !connected || item.expiresAt <= System.currentTimeMillis()) {
+        if ((!item.direct && (!enabled || !connected))
+            || item.expiresAt <= System.currentTimeMillis()) {
             claims.releaseAndDelete(getCacheDir(), item.eventId);
             return;
         }
-        if (!playbackQueue.offer(item.eventId)) {
+        PlaybackQueue.Priority priority = item.direct
+            ? PlaybackQueue.Priority.DIRECT
+            : PlaybackQueue.Priority.BROADCAST;
+        if (!playbackQueue.offer(item.eventId, priority)) {
             claims.releaseAndDelete(getCacheDir(), item.eventId);
             return;
         }
         claims.putQueued(item);
-        store.saveCurrent(item.text, item.createdAt);
+        if (item.direct) store.saveTurnPlayback(item.turnId, "queued");
+        else store.saveCurrent(item.text, item.createdAt);
         maybeStartNext();
     }
 
     private void maybeStartNext() {
-        if (!enabled || !connected || startingId != null) return;
+        if ((!connected && !directAvailable) || startingId != null) return;
         String candidate = playbackQueue.candidate();
         if (candidate == null) return;
         AudioEventClaims.Entry item = claims.queued(candidate);
@@ -309,11 +291,17 @@ public final class AudioInboxService extends MediaSessionService {
             // An item that expired while queued must never play stale audio.
             playbackQueue.discard(candidate);
             claims.releaseAndDelete(getCacheDir(), candidate);
-            workExecutor.execute(() -> markFailed(candidate, "expired before playback"));
+            workExecutor.execute(() -> receipts.terminal(
+                item, "skipped", "expired before playback", httpClient, connected
+            ));
             maybeStartNext();
             return;
         }
         startingId = candidate;
+        if (item.direct) {
+            main.post(() -> startReserved(item));
+            return;
+        }
         workExecutor.execute(() -> {
             try {
                 if (!canClaim()) throw new IllegalStateException("disconnected before playback receipt");
@@ -325,7 +313,9 @@ public final class AudioInboxService extends MediaSessionService {
                     startingId = null;
                     playbackQueue.discard(candidate);
                     claims.releaseAndDelete(getCacheDir(), candidate);
-                    workExecutor.execute(() -> markFailed(candidate, safeDetail(error.getMessage())));
+                    workExecutor.execute(() -> receipts.failed(
+                        candidate, AudioReceiptWriter.safe(error.getMessage()), httpClient, connected
+                    ));
                     maybeStartNext();
                 });
             }
@@ -335,16 +325,19 @@ public final class AudioInboxService extends MediaSessionService {
     private void startReserved(AudioEventClaims.Entry item) {
         startingId = null;
         replaying = false;
-        if (!enabled || !connected || !playbackQueue.start(item.eventId)) {
+        boolean available = item.direct ? directAvailable : enabled && connected;
+        if (!available || !playbackQueue.start(item.eventId)) {
             playbackQueue.discard(item.eventId);
             claims.releaseAndDelete(getCacheDir(), item.eventId);
-            workExecutor.execute(() -> markFailed(item.eventId, "audio focus denied"));
+            workExecutor.execute(() -> receipts.terminal(
+                item, "failed", "audio focus denied", httpClient, connected
+            ));
             maybeStartNext();
             return;
         }
         MediaMetadata metadata = new MediaMetadata.Builder()
             .setTitle(item.text)
-            .setArtist("Agent update")
+            .setArtist(item.targetLabel)
             .build();
         MediaItem mediaItem = new MediaItem.Builder()
             .setMediaId(item.eventId)
@@ -354,6 +347,7 @@ public final class AudioInboxService extends MediaSessionService {
         player.setMediaItem(mediaItem);
         player.prepare();
         player.play();
+        if (item.direct) store.saveTurnPlayback(item.turnId, "playing");
         store.updateConnection("Playing", true);
     }
 
@@ -368,17 +362,21 @@ public final class AudioInboxService extends MediaSessionService {
         player.pause();
         player.seekTo(0);
         if (!wasReplay && item != null) store.saveHistory("Played · " + item.text);
+        if (item != null && item.direct) store.saveTurnPlayback(item.turnId, "played");
         if (wasReplay) {
             store.updateConnection(connected ? "Connected" : "Disconnected", connected);
             return;
         }
         if (item != null) claims.rotateReplayFile(item.mediaFile);
-        workExecutor.execute(() -> {
-            try {
-                if (connected) httpClient.postReceipt(eventId, "played", null);
-                store.saveLocalState(eventId, "played");
-            } catch (Exception ignored) {}
-        });
+        if (item != null && !item.direct) {
+            workExecutor.execute(() -> {
+                try {
+                    if (connected) httpClient.postReceipt(eventId, "played", null);
+                    store.saveLocalState(eventId, "played");
+                } catch (Exception ignored) {}
+            });
+        }
+        refreshDirectAvailability();
         store.updateConnection(connected ? "Connected" : "Disconnected", connected);
         maybeStartNext();
     }
@@ -390,11 +388,15 @@ public final class AudioInboxService extends MediaSessionService {
         replaying = false;
         playbackQueue.discard(eventId);
         if (!wasReplay) {
+            AudioEventClaims.Entry item = claims.queued(eventId);
             claims.releaseAndDelete(getCacheDir(), eventId);
-            workExecutor.execute(() -> markFailed(eventId, detail));
+            workExecutor.execute(() -> receipts.terminal(
+                item, "failed", detail, httpClient, connected
+            ));
         } else {
             claims.release(eventId);
         }
+        refreshDirectAvailability();
         maybeStartNext();
     }
 
@@ -404,24 +406,77 @@ public final class AudioInboxService extends MediaSessionService {
             return;
         }
         claims.releaseAndDelete(getCacheDir(), eventId);
-        markFailed(eventId, safeDetail(error.getMessage()));
+        receipts.failed(eventId, AudioReceiptWriter.safe(error.getMessage()), httpClient, connected);
     }
 
-    private void markFailed(String eventId, String detail) {
-        claims.release(eventId);
-        try {
-            if (connected) httpClient.postReceipt(eventId, "failed", safeDetail(detail));
-        } catch (Exception ignored) {}
-        store.saveLocalState(eventId, "failed");
-        store.saveHistory("Failed · " + eventId + " · " + safeDetail(detail));
+    private void stopAllAudio() {
+        String activeId = playbackQueue.active();
+        if (activeId != null) {
+            AudioEventClaims.Entry item = claims.removeQueued(activeId);
+            playbackQueue.discard(activeId);
+            player.stop();
+            player.clearMediaItems();
+            claims.release(activeId);
+            if (item != null) {
+                claims.rotateReplayFile(item.mediaFile);
+                workExecutor.execute(() -> receipts.terminal(
+                    item, "stopped", "stopped by user", httpClient, connected
+                ));
+            }
+        }
+        for (AudioEventClaims.Entry item : claims.queuedEntries()) {
+            playbackQueue.discard(item.eventId);
+            claims.releaseAndDelete(getCacheDir(), item.eventId);
+            workExecutor.execute(() -> receipts.terminal(
+                item, "skipped", "queue stopped by user", httpClient, connected
+            ));
+        }
+        replaying = false;
+        startingId = null;
+        audioFocus.abandon();
+        refreshDirectAvailability();
+    }
+
+    private void discardBroadcastItems() {
+        for (AudioEventClaims.Entry item : claims.queuedEntries()) {
+            if (item.direct) continue;
+            if (item.eventId.equals(playbackQueue.active())) {
+                player.stop();
+                player.clearMediaItems();
+            }
+            playbackQueue.discard(item.eventId);
+            claims.releaseAndDelete(getCacheDir(), item.eventId);
+            workExecutor.execute(() -> receipts.terminal(
+                item, "skipped", "Hands-free turned off", httpClient, connected
+            ));
+        }
+    }
+
+    private void updateActiveTurnState(String state) {
+        AudioEventClaims.Entry item = claims.queued(playbackQueue.active());
+        if (item != null && item.direct) store.saveTurnPlayback(item.turnId, state);
+    }
+
+    private void refreshDirectAvailability() {
+        boolean hasDirect = claims.queuedEntries().stream().anyMatch(item -> item.direct);
+        directAvailable = hasDirect;
+        playbackQueue.setConnected(connected || hasDirect);
+        if (!enabled && !hasDirect) stopForegroundAndSelf();
+    }
+
+    private void stopForegroundAndSelf() {
+        if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE);
+        else stopForeground(true);
+        stopSelf();
     }
 
     private void setConnected(boolean value) {
         if (connected == value) return;
         connected = value;
         main.post(() -> {
-            playbackQueue.setConnected(value);
-            if (!value && player.getPlayWhenReady()) player.pause();
+            playbackQueue.setConnected(value || directAvailable);
+            AudioEventClaims.Entry active = claims.queued(playbackQueue.active());
+            if (!value && (active == null || !active.direct) && player.getPlayWhenReady()) player.pause();
             store.updateConnection(value ? "Connected" : "Disconnected", value);
             if (value) maybeStartNext();
         });
@@ -441,49 +496,5 @@ public final class AudioInboxService extends MediaSessionService {
     private String serverUrl() {
         String value = preferences.getString(AppContract.KEY_SERVER, "");
         return value == null ? "" : value.replaceAll("/+$", "");
-    }
-
-    private void disconnectFeed() {
-        HttpURLConnection connection = feedConnection;
-        if (connection != null) connection.disconnect();
-        feedConnection = null;
-    }
-    private void createNotificationChannel() {
-        NotificationManager manager = getSystemService(NotificationManager.class);
-        manager.createNotificationChannel(new NotificationChannel(
-            STATUS_CHANNEL,
-            "Hands-free connection",
-            NotificationManager.IMPORTANCE_LOW
-        ));
-    }
-
-    private void startStatusForeground() {
-        PendingIntent open = PendingIntent.getActivity(
-            this,
-            0,
-            new Intent(this, MainActivity.class),
-            PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
-        );
-        Notification notification = new Notification.Builder(this, STATUS_CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
-            .setContentTitle("Agent Audio Inbox")
-            .setContentText("Hands-free is on")
-            .setContentIntent(open)
-            .setOngoing(true)
-            .build();
-        if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(
-                STATUS_NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            );
-        } else {
-            startForeground(STATUS_NOTIFICATION_ID, notification);
-        }
-    }
-
-    private static String safeDetail(String value) {
-        String clean = value == null ? "unknown" : value.replaceAll("[\\r\\n]+", " ").trim();
-        return clean.substring(0, Math.min(clean.length(), 160));
     }
 }

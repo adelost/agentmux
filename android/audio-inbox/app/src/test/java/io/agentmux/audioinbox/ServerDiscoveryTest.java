@@ -38,7 +38,7 @@ public class ServerDiscoveryTest {
 
         assertEquals(1, result.conversationTargets.size());
         assertEquals(ConversationTarget.Kind.WINDOWS, result.conversationTargets.get(0).kind);
-        assertEquals("windows", result.conversationTargets.get(0).id);
+        assertEquals("_windows_", result.conversationTargets.get(0).id);
     }
 
     @Test

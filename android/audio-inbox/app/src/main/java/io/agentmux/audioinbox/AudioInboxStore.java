@@ -23,6 +23,12 @@ final class AudioInboxStore {
         return preferences.getString("event-state:" + eventId, "");
     }
 
+    void saveTurnPlayback(String turnId, String state) {
+        if (turnId == null || turnId.isBlank()) return;
+        preferences.edit().putString("turn-playback:" + turnId, state).apply();
+        broadcastStatus();
+    }
+
     void saveCurrent(String text, long createdAt) {
         preferences.edit()
             .putString(AppContract.KEY_CURRENT, text)

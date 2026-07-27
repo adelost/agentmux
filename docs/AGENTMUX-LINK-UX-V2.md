@@ -149,8 +149,10 @@ There is no global busy flag.
 | Update | `idle`, `checking`, `up-to-date`, `available`, `downloading`, `ready-to-install`, `installing`, `failed` | Malformed, stale, untrusted, oversized, hash-mismatched, signer-mismatched, or non-monotonic releases leave the installed version untouched. |
 
 The compact timeline persists at most 100 messages and includes the turn id,
-role, actual target, text/transcript, attachment references, created time,
-send/wait state, and reply playback state. Favorites remain dynamic, with
+role, actual target, text/transcript, attachment references, created time, and
+three independent per-turn axes: `deliveryPhase`, `replyPhase`, and
+`playbackPhase`, each with its own bounded error detail. Playback never
+overwrites delivery or reply truth. Favorites remain dynamic, with
 preferred ordering `lsrc:3`, `lsrc:10`, `_windows_`. A missing target is shown
 as unavailable; a reachable target with outstanding work is shown as
 `thinking`, never offline.
@@ -176,8 +178,12 @@ drive the same reducer and render the same timeline without view changes.
 ## Playback ordering and receipts
 
 Direct phone-turn replies have priority over generic explicit `amux say`
-broadcasts. FIFO is preserved within each class. Expired items are terminally
-skipped and never played. The durable receipt path is:
+broadcasts. FIFO is preserved within each class for replies arriving live.
+Reconnect does not reverse that live ordering: all recovered replies stay in
+timeline order, historical audio is marked honestly as available/skipped, and
+at most the newest eligible, non-expired direct reply may autoplay. Generic
+audio remains lower priority. Expired items are terminally skipped and never
+played. The durable receipt path is:
 
 `received -> queued -> playback-started -> played|stopped|skipped|failed`
 
@@ -225,7 +231,8 @@ manifest keys before a later catalog switches signing keys; APK certificate
 rotation follows Android signing lineage and is never inferred from the
 manifest.
 
-The document contains `payload` plus base64 `signature`. `payload` has exactly:
+The manifest document is the payload below. Its adjacent `.sig` response
+contains the detached base64 signature. The payload has exactly:
 
 ```json
 {

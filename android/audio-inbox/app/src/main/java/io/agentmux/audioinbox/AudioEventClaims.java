@@ -22,13 +22,32 @@ final class AudioEventClaims {
         final long createdAt;
         final long expiresAt;
         final File mediaFile;
+        final boolean direct;
+        final String turnId;
+        final String targetLabel;
 
         Entry(String eventId, String text, long createdAt, long expiresAt, File mediaFile) {
+            this(eventId, text, createdAt, expiresAt, mediaFile, false, null, "Agent update");
+        }
+
+        Entry(
+            String eventId,
+            String text,
+            long createdAt,
+            long expiresAt,
+            File mediaFile,
+            boolean direct,
+            String turnId,
+            String targetLabel
+        ) {
             this.eventId = eventId;
             this.text = text;
             this.createdAt = createdAt;
             this.expiresAt = expiresAt;
             this.mediaFile = mediaFile;
+            this.direct = direct;
+            this.turnId = turnId;
+            this.targetLabel = targetLabel;
         }
     }
 

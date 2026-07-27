@@ -3,39 +3,47 @@ package io.agentmux.audioinbox;
 import android.app.Activity;
 
 import java.io.File;
-import java.util.UUID;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 final class ConversationController implements AutoCloseable {
     interface Listener {
-        void onSending();
-        void onTranscript(ConversationTarget target, String text);
-        void onReply(ConversationTarget target, String text);
-        void onFailure(String message);
+        void onSending(String turnId, ConversationTarget target, String draft);
+        void onAccepted(String turnId, ConversationTarget target, String visibleText);
+        void onReply(String turnId, ConversationTarget target, String respondingTarget, String text);
+        void onDeliveryFailure(String turnId, ConversationTarget target, String message);
+        void onReplyFailure(String turnId, ConversationTarget target, String message);
     }
 
-    private final Activity activity;
-    private final String consumerId;
+    interface UiDispatcher {
+        void dispatch(Runnable operation);
+    }
+
+    private final UiDispatcher ui;
     private final Listener listener;
-    private final ExecutorService turns = Executors.newSingleThreadExecutor();
-    private final AtomicBoolean busy = new AtomicBoolean();
+    private final ExecutorService accepts = Executors.newFixedThreadPool(4);
+    private final ExecutorService replies = Executors.newCachedThreadPool();
+    private final List<ConversationTransport> transports;
 
     ConversationController(Activity activity, String consumerId, Listener listener) {
-        this.activity = activity;
-        this.consumerId = consumerId;
+        this(activity::runOnUiThread, List.of(new TailnetConversationTransport(consumerId)), listener);
+    }
+
+    ConversationController(
+        UiDispatcher ui,
+        List<ConversationTransport> transports,
+        Listener listener
+    ) {
+        this.ui = ui;
         this.listener = listener;
+        this.transports = List.copyOf(transports);
     }
 
-    boolean isBusy() {
-        return busy.get();
-    }
-
-    boolean sendText(ConversationTarget target, String text) {
+    boolean sendText(ConversationTarget target, String text, String turnId) {
         String clean = String.valueOf(text).trim();
         if (clean.isEmpty()) return false;
-        return submit(target, clean, null, "text-" + UUID.randomUUID());
+        return submit(target, clean, null, turnId);
     }
 
     boolean sendAudio(ConversationTarget target, File audio, String turnId) {
@@ -43,32 +51,51 @@ final class ConversationController implements AutoCloseable {
     }
 
     private boolean submit(ConversationTarget target, String text, File audio, String turnId) {
-        if (target == null || !target.available() || !busy.compareAndSet(false, true)) return false;
-        activity.runOnUiThread(listener::onSending);
-        turns.execute(() -> runTurn(target, text, audio, turnId));
+        ConversationTransport transport = transports.stream()
+            .filter(candidate -> candidate.supports(target))
+            .findFirst()
+            .orElse(null);
+        if (transport == null || turnId == null || turnId.isBlank()) return false;
+        String draft = text == null ? "" : text;
+        ui.dispatch(() -> listener.onSending(turnId, target, draft));
+        accepts.execute(() -> acceptTurn(transport, target, text, audio, turnId));
         return true;
     }
 
-    private void runTurn(ConversationTarget target, String text, File audio, String turnId) {
+    private void acceptTurn(
+        ConversationTransport transport,
+        ConversationTarget target,
+        String text,
+        File audio,
+        String turnId
+    ) {
         try {
-            AudioInboxHttpClient client = new AudioInboxHttpClient(target.serverUrl, consumerId);
-            AudioInboxHttpClient.TurnResult sent = client.sendTurn(target, text, audio, turnId);
-            String visibleUserText = sent.transcript.isEmpty() ? sent.sent : sent.transcript;
-            activity.runOnUiThread(() -> listener.onTranscript(target, visibleUserText));
-            String answer = sent.answer;
-            if (answer.isEmpty() && target.kind == ConversationTarget.Kind.AGENT) {
-                answer = client.awaitAgentReply(target, sent.replyPrompt);
-            }
-            if (answer.isEmpty()) throw new IllegalStateException("empty agent reply");
-            String finalAnswer = answer;
-            busy.set(false);
-            activity.runOnUiThread(() -> listener.onReply(target, finalAnswer));
+            ConversationTransport.Accepted accepted =
+                transport.durableAccept(turnId, target, text, audio);
+            ui.dispatch(() ->
+                listener.onAccepted(turnId, target, accepted.visibleText()));
+            replies.execute(() -> awaitReply(transport, target, turnId, accepted));
         } catch (Exception error) {
             String message = safeMessage(error);
-            busy.set(false);
-            activity.runOnUiThread(() -> listener.onFailure(message));
+            ui.dispatch(() -> listener.onDeliveryFailure(turnId, target, message));
         } finally {
             if (audio != null) audio.delete();
+        }
+    }
+
+    private void awaitReply(
+        ConversationTransport transport,
+        ConversationTarget target,
+        String turnId,
+        ConversationTransport.Accepted accepted
+    ) {
+        try {
+            ConversationTransport.Reply reply = transport.awaitReply(turnId, target, accepted);
+            ui.dispatch(() ->
+                listener.onReply(turnId, target, reply.respondingTarget(), reply.text()));
+        } catch (Exception error) {
+            String message = safeMessage(error);
+            ui.dispatch(() -> listener.onReplyFailure(turnId, target, message));
         }
     }
 
@@ -80,6 +107,7 @@ final class ConversationController implements AutoCloseable {
 
     @Override
     public void close() {
-        turns.shutdownNow();
+        accepts.shutdownNow();
+        replies.shutdownNow();
     }
 }

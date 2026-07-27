@@ -18,9 +18,20 @@ final class AppContract {
     static final String KEY_CONVERSATION = "conversation";
     static final String KEY_CONVERSATION_TARGET = "conversationTarget";
     static final String KEY_SPEAK_REPLIES = "speakReplies";
+    static final String KEY_LINK_STATE_V2 = "linkStateV2";
+    static final String KEY_LINK_STATE_V2_QUARANTINE = "linkStateV2Quarantine";
+    static final String KEY_UPDATE_READY = "updateReadyV1";
     static final String ACTION_START = "io.agentmux.audioinbox.START";
     static final String ACTION_STOP = "io.agentmux.audioinbox.STOP";
     static final String ACTION_STATUS = "io.agentmux.audioinbox.STATUS";
+    static final String ACTION_PLAY_REPLY = "io.agentmux.audioinbox.PLAY_REPLY";
+    static final String ACTION_PAUSE_AUDIO = "io.agentmux.audioinbox.PAUSE_AUDIO";
+    static final String ACTION_STOP_AUDIO = "io.agentmux.audioinbox.STOP_AUDIO";
+    static final String ACTION_REPLAY_REPLY = "io.agentmux.audioinbox.REPLAY_REPLY";
+    static final String EXTRA_TURN_ID = "turnId";
+    static final String EXTRA_TEXT = "text";
+    static final String EXTRA_SERVER = "serverUrl";
+    static final String EXTRA_TARGET_LABEL = "targetLabel";
 
     private AppContract() {}
 

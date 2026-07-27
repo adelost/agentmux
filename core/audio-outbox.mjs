@@ -27,16 +27,26 @@ export const AUDIO_RECEIPT_STATES = Object.freeze([
   "queued",
   "playback-started",
   "played",
+  "stopped",
+  "skipped",
   "failed",
 ]);
 
-const TERMINAL_OR_AMBIGUOUS = new Set(["playback-started", "played", "failed"]);
+const TERMINAL_OR_AMBIGUOUS = new Set([
+  "playback-started",
+  "played",
+  "stopped",
+  "skipped",
+  "failed",
+]);
 const RECEIPT_TRANSITIONS = new Map([
   [null, new Set(["received"])],
   ["received", new Set(["queued", "failed"])],
-  ["queued", new Set(["playback-started", "failed"])],
-  ["playback-started", new Set(["played", "failed"])],
+  ["queued", new Set(["playback-started", "skipped", "failed"])],
+  ["playback-started", new Set(["played", "stopped", "failed"])],
   ["played", new Set()],
+  ["stopped", new Set()],
+  ["skipped", new Set()],
   ["failed", new Set()],
 ]);
 const MAX_JOURNAL_BYTES = 2 * 1024 * 1024;

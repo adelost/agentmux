@@ -100,6 +100,33 @@ feature("durable explicit-audio outbox", () => {
     }],
   });
 
+  component("stopped and skipped are honest terminal receipts", {
+    given: ["two queued events", () => {
+      const fx = fixture();
+      const stopped = fx.outbox.publish({ text: "stop", target: "channel-1" }).event;
+      const skipped = fx.outbox.publish({ text: "skip", target: "channel-1" }).event;
+      for (const event of [stopped, skipped]) {
+        fx.outbox.receipt({ eventId: event.eventId, consumerId: "phone-1", state: "received" });
+        fx.outbox.receipt({ eventId: event.eventId, consumerId: "phone-1", state: "queued" });
+      }
+      return { fx, stopped, skipped };
+    }],
+    when: ["one playback starts then stops and the other is skipped", ({ fx, stopped, skipped }) => {
+      fx.outbox.receipt({
+        eventId: stopped.eventId,
+        consumerId: "phone-1",
+        state: "playback-started",
+      });
+      fx.outbox.receipt({ eventId: stopped.eventId, consumerId: "phone-1", state: "stopped" });
+      fx.outbox.receipt({ eventId: skipped.eventId, consumerId: "phone-1", state: "skipped" });
+      return fx;
+    }],
+    then: ["restart replays neither terminal event", (fx) => {
+      expect(fx.restart().listPending({ consumerId: "phone-1", target: "channel-1" })).toEqual([]);
+      rmSync(fx.root, { recursive: true, force: true });
+    }],
+  });
+
   component("receipt transitions are idempotent but cannot skip to played", {
     given: ["one pending event", () => {
       const fx = fixture();
