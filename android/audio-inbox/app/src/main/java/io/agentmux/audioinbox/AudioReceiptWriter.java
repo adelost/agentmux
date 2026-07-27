@@ -24,6 +24,17 @@ final class AudioReceiptWriter {
         store.saveHistory("Failed · " + eventId + " · " + safe(detail));
     }
 
+    void recoverInterrupted(AudioInboxHttpClient client) {
+        for (String eventId : store.interruptedEventIds()) {
+            try {
+                client.postReceipt(eventId, "failed", "app restarted during playback");
+                store.saveLocalState(eventId, "failed");
+            } catch (Exception ignored) {
+                // Keep playback-started so a later service restart retries reconciliation.
+            }
+        }
+    }
+
     void terminal(
         AudioEventClaims.Entry item,
         String state,

@@ -5,6 +5,9 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 final class AudioInboxStore {
     private final Context context;
@@ -21,6 +24,17 @@ final class AudioInboxStore {
 
     String localState(String eventId) {
         return preferences.getString("event-state:" + eventId, "");
+    }
+
+    List<String> interruptedEventIds() {
+        List<String> ids = new ArrayList<>();
+        for (Map.Entry<String, ?> entry : preferences.getAll().entrySet()) {
+            if (entry.getKey().startsWith("event-state:")
+                && "playback-started".equals(entry.getValue())) {
+                ids.add(entry.getKey().substring("event-state:".length()));
+            }
+        }
+        return ids;
     }
 
     void saveTurnPlayback(String turnId, String state) {

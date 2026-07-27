@@ -186,7 +186,6 @@ public final class AudioInboxService extends MediaSessionService {
         player.release();
         super.onDestroy();
     }
-
     private void startHandsFree() {
         String server = serverUrl();
         String target = preferences.getString(AppContract.KEY_TARGET, "");
@@ -201,6 +200,7 @@ public final class AudioInboxService extends MediaSessionService {
             server,
             AppContract.consumerId(preferences)
         );
+        workExecutor.execute(() -> receipts.recoverInterrupted(httpClient));
         enabled = true;
         preferences.edit().putBoolean(AppContract.KEY_ENABLED, true).apply();
         playbackQueue.setHandsFree(true);
