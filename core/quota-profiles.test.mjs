@@ -35,6 +35,55 @@ feature("subscription account profile catalog", () => {
     }],
   });
 
+  unit("loads non-secret operator labels outside the replaceable package", {
+    when: ["building with a versioned account-profile file", () => quotaProfileCatalog({
+      HOME: "/home/matt",
+    }, {
+      readDir: () => [],
+      exists: () => false,
+      readFile: (path) => {
+        expect(path).toBe("/home/matt/.agentmux/account-profiles.json");
+        return JSON.stringify({
+          version: 1,
+          profiles: {
+            "codex:1": { label: "matt@example.com" },
+            "kimi:2": { label: "work@example.com" },
+          },
+        });
+      },
+    })],
+    then: ["the labels apply without moving provider-owned credentials", (catalog) => {
+      expect(catalog.find((row) => row.key === "codex:1")).toMatchObject({
+        label: "matt@example.com", home: "/home/matt/.codex",
+      });
+      expect(catalog.find((row) => row.key === "kimi:2")).toMatchObject({
+        label: "work@example.com",
+      });
+    }],
+  });
+
+  unit("environment labels override the file and malformed files fail closed", {
+    when: ["building once with both sources and once with invalid JSON", () => [
+      quotaProfileCatalog({
+        HOME: "/home/matt",
+        AMUX_KIMI_PROFILE_1_LABEL: "explicit@example.com",
+      }, {
+        readDir: () => [], exists: () => false,
+        readFile: () => JSON.stringify({
+          version: 1,
+          profiles: { "kimi:1": { label: "file@example.com" } },
+        }),
+      }),
+      quotaProfileCatalog({ HOME: "/home/matt" }, {
+        readDir: () => [], exists: () => false, readFile: () => "{",
+      }),
+    ]],
+    then: ["the explicit value wins and invalid data cannot invent an identity", ([explicit, invalid]) => {
+      expect(explicit.find((row) => row.key === "kimi:1")?.label).toBe("explicit@example.com");
+      expect(invalid.find((row) => row.key === "kimi:1")?.label).toBe("kimi 1");
+    }],
+  });
+
   unit("login instructions scope the provider CLI without exposing credentials", {
     given: ["three profile homes", () => quotaProfileCatalog({ HOME: "/home/matt" }, {
       readDir: () => [], exists: () => false,
