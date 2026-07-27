@@ -30,4 +30,13 @@ public class PushToTalkStateTest {
         assertTrue(state.cancel());
         assertEquals(PushToTalkState.Release.IGNORE, state.release(3_000));
     }
+
+    @Test
+    public void aLongHoldHasNoAutomaticCutoff() {
+        PushToTalkState state = new PushToTalkState();
+        assertTrue(state.begin("long", 1_000));
+        assertEquals(PushToTalkState.Phase.RECORDING, state.phase());
+        assertEquals(PushToTalkState.Release.SEND, state.release(601_000));
+        assertEquals("long", state.turnId());
+    }
 }
