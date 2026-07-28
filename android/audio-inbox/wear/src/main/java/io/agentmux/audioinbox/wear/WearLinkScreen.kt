@@ -1,46 +1,17 @@
 package io.agentmux.audioinbox.wear
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import com.adelost.designkit.ui.RingIcons
+import com.adelost.ringkit.ui.RenderRingScreen
+import com.adelost.ringkit.ui.RingNavigator
+import com.adelost.ringkit.ui.RingScreen
+import com.adelost.ringkit.ui.RowSpec
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.LinkState
-import com.adelost.designkit.ui.GraphiteTokens
 import io.agentmux.linkcore.PlaybackPhase
-
-private val Canvas = GraphiteTokens.Canvas
-private val SurfaceInk = GraphiteTokens.SurfaceStrong
-private val Ink = GraphiteTokens.Ink
-private val Muted = GraphiteTokens.Muted
-private val Accent = GraphiteTokens.Primary
+import kotlinx.coroutines.flow.MutableStateFlow
 
 @Composable
 internal fun WearLinkScreen(
@@ -51,115 +22,134 @@ internal fun WearLinkScreen(
     onStop: () -> Unit,
     onReplay: () -> Unit,
 ) {
-    val latest = state.turns.lastOrNull()
-    val selected = state.targets.firstOrNull { it.id == state.selectedTargetId }
-        ?: state.targets.firstOrNull()
-    val next = state.targets.let { targets ->
-        val index = targets.indexOf(selected)
-        targets.getOrNull((index + 1).mod(targets.size.coerceAtLeast(1)))
+    val items = remember { MutableStateFlow(emptyList<RowSpec>()) }
+    val navigator = remember {
+        RingNavigator(
+            RingScreen.Rows(
+                title = "AGENTMUX LINK",
+                items = items,
+                showBack = false,
+            ),
+        )
     }
-    MaterialTheme(
-        colorScheme = darkColorScheme(
-            background = Canvas,
-            surface = SurfaceInk,
-            onSurface = Ink,
-            primary = Accent,
-        ),
-    ) {
-        Box(
-            contentAlignment = Alignment.TopCenter,
-            modifier = Modifier.fillMaxSize().background(Canvas),
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(5.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(top = 24.dp, bottom = 24.dp, start = 18.dp, end = 18.dp),
-            ) {
-                Text("AGENTMUX LINK", color = Accent, fontSize = 10.sp)
-                Text(
-                    text = connectionLabel(state.connection),
-                    color = if (state.connection == ConnectionState.CONNECTED) Accent else Muted,
-                    fontSize = 11.sp,
-                )
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .width(110.dp)
-                        .height(34.dp)
-                        .background(SurfaceInk, RoundedCornerShape(17.dp))
-                        .clickable(enabled = state.targets.any { it.available }) {
-                            next?.let { onSelectTarget(it.id) }
-                        },
-                ) {
-                    Text("${selected?.id ?: "No target"} ▾", fontSize = 10.sp)
-                }
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(56.dp)
-                        .background(SurfaceInk, CircleShape)
-                        .border(BorderStroke(1.dp, Accent.copy(alpha = 0.55f)), CircleShape)
-                        .clickable(
-                            enabled = state.targets.any {
-                                it.id == state.selectedTargetId && it.available
-                            },
-                            onClick = onHoldToTalk,
-                        ),
-                ) {
-                    Text(
-                        "HOLD\nTO TALK",
-                        color = Muted,
-                        fontSize = 9.sp,
-                        textAlign = TextAlign.Center,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-                Surface(shape = RoundedCornerShape(12.dp), color = SurfaceInk) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.fillMaxWidth().padding(8.dp),
-                    ) {
-                        Text(
-                            latest?.respondingTarget?.ifBlank { latest.targetId } ?: "No reply",
-                            color = Accent,
-                            fontSize = 10.sp,
-                        )
-                        Text(
-                            latest?.replyText?.take(100) ?: state.connectionDetail,
-                            color = Ink,
-                            fontSize = 11.sp,
-                            textAlign = TextAlign.Center,
-                        )
-                        if (latest?.replyText?.isNotBlank() == true) {
-                            when (latest.playbackPhase) {
-                                PlaybackPhase.PLAYING -> TinyButton("Stop", onStop)
-                                PlaybackPhase.STOPPED, PlaybackPhase.PLAYED,
-                                PlaybackPhase.SKIPPED, PlaybackPhase.FAILED ->
-                                    TinyButton("Replay", onReplay)
-                                else -> TinyButton("Play", onPlay)
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    LaunchedEffect(state, onSelectTarget, onHoldToTalk, onPlay, onStop, onReplay) {
+        items.value = wearLinkRows(
+            state = state,
+            onSelectTarget = onSelectTarget,
+            onHoldToTalk = onHoldToTalk,
+            onPlay = onPlay,
+            onStop = onStop,
+            onReplay = onReplay,
+        )
     }
+    RenderRingScreen(nav = navigator, onExit = {})
 }
 
-@Composable
-private fun TinyButton(label: String, action: () -> Unit) {
-    Button(onClick = action, modifier = Modifier.size(width = 72.dp, height = 36.dp)) {
-        Text(label, fontSize = 10.sp)
+internal fun wearLinkRows(
+    state: LinkState,
+    onSelectTarget: (String) -> Unit,
+    onHoldToTalk: () -> Unit,
+    onPlay: () -> Unit,
+    onStop: () -> Unit,
+    onReplay: () -> Unit,
+): List<RowSpec> {
+    val selected = state.targets.firstOrNull { it.id == state.selectedTargetId }
+        ?: state.targets.firstOrNull()
+    val availableTargets = state.targets.filter { it.available }
+    val targetChoices = availableTargets.map { it.label.ifBlank { it.id } }
+    val latest = state.turns.lastOrNull()
+    val selectedAvailable = selected?.available == true
+    val rows = mutableListOf(
+        RowSpec(
+            key = "connection",
+            title = connectionLabel(state.connection),
+            sub = connectionSub(state),
+            icon = if (state.connection == ConnectionState.CONNECTED) RingIcons.Wifi else RingIcons.Link,
+        ),
+        RowSpec(
+            key = "target",
+            title = "AGENT",
+            sub = selected?.label?.ifBlank { selected.id }?.uppercase() ?: "NO TARGET",
+            icon = RingIcons.Target,
+            choices = targetChoices,
+            onSelect = if (targetChoices.isEmpty()) {
+                null
+            } else {
+                { label ->
+                    availableTargets.firstOrNull {
+                        it.label.ifBlank { it.id } == label
+                    }?.let { onSelectTarget(it.id) }
+                }
+            },
+        ),
+        RowSpec(
+            key = "talk",
+            title = "HOLD TO TALK",
+            sub = if (selectedAvailable) "RELEASE TO SEND" else "TARGET UNAVAILABLE",
+            icon = RingIcons.Record,
+            onTap = onHoldToTalk.takeIf { selectedAvailable },
+            holdToConfirm = selectedAvailable,
+        ),
+    )
+    if (latest == null) {
+        rows += RowSpec(
+            key = "latest",
+            title = "LATEST REPLY",
+            sub = "NO CONVERSATION YET",
+            icon = RingIcons.Speaker,
+        )
+        return rows
     }
+    rows += RowSpec(
+        key = "latest",
+        title = latest.respondingTarget.ifBlank { latest.targetId }.uppercase(),
+        sub = latest.replyText.ifBlank { "WAITING FOR REPLY" }.uppercase().take(54),
+        icon = RingIcons.Speaker,
+    )
+    if (latest.replyText.isNotBlank()) {
+        rows += when (latest.playbackPhase) {
+            PlaybackPhase.PLAYING -> RowSpec(
+                key = "playback",
+                title = "STOP REPLY",
+                sub = "PLAYING",
+                icon = RingIcons.Stop,
+                onTap = onStop,
+            )
+            PlaybackPhase.STOPPED,
+            PlaybackPhase.PLAYED,
+            PlaybackPhase.SKIPPED,
+            PlaybackPhase.FAILED,
+            -> RowSpec(
+                key = "playback",
+                title = "REPLAY",
+                sub = "PLAY LATEST REPLY",
+                icon = RingIcons.Refresh,
+                onTap = onReplay,
+            )
+            else -> RowSpec(
+                key = "playback",
+                title = "PLAY REPLY",
+                sub = "LATEST RESPONSE",
+                icon = RingIcons.Play,
+                onTap = onPlay,
+            )
+        }
+    }
+    return rows
 }
 
 private fun connectionLabel(state: ConnectionState): String = when (state) {
-    ConnectionState.CONNECTED -> "Connected"
-    ConnectionState.CONNECTING -> "Connecting"
-    ConnectionState.DISCONNECTED -> "Disconnected"
-    ConnectionState.CONFIGURATION_REQUIRED -> "Pairing unavailable"
-    ConnectionState.OFF -> "Off"
+    ConnectionState.CONNECTED -> "CONNECTED"
+    ConnectionState.CONNECTING -> "CONNECTING"
+    ConnectionState.DISCONNECTED -> "DISCONNECTED"
+    ConnectionState.CONFIGURATION_REQUIRED -> "PAIRING"
+    ConnectionState.OFF -> "OFF"
+}
+
+private fun connectionSub(state: LinkState): String = when (state.connection) {
+    ConnectionState.CONNECTED -> state.connectionDetail.uppercase().take(28).ifBlank { "READY" }
+    ConnectionState.CONNECTING -> "LOOKING FOR LINK"
+    ConnectionState.DISCONNECTED -> "OPEN PHONE TO CONNECT"
+    ConnectionState.CONFIGURATION_REQUIRED -> "OPEN PHONE TO PAIR"
+    ConnectionState.OFF -> "LINK IS OFF"
 }
