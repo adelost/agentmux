@@ -1,6 +1,8 @@
 package io.agentmux.audioinbox
 
 import android.app.Activity
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -40,6 +43,7 @@ import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.ReplyPhase
 import io.agentmux.linkcore.UpdatePresentation
+import kotlin.math.sin
 
 /**
  * Link owns state and callbacks only. CircleKit owns the host, rows, choices,
@@ -54,7 +58,18 @@ internal fun LinkPhoneScreen(
     val state by coordinator.state.collectAsStateWithLifecycle()
     val qaActive = BuildConfig.DEBUG &&
         ((LocalContext.current as? Activity)?.intent?.getStringExtra("qa_state") == "active")
-    val presentedState = if (qaActive) phoneActivePreviewState() else state
+    var qaTargetId by remember { mutableStateOf("skyvw:3") }
+    var qaCapture by remember { mutableStateOf(CapturePhase.IDLE) }
+    var qaCaptureStartedAtMs by remember { mutableLongStateOf(0L) }
+    val presentedState = if (qaActive) {
+        phoneActivePreviewState().copy(
+            selectedTargetId = qaTargetId,
+            capture = qaCapture,
+            captureStartedAtMs = qaCaptureStartedAtMs,
+        )
+    } else {
+        state
+    }
     val selectedAvailable = presentedState.targets.firstOrNull {
         it.id == presentedState.selectedTargetId
     }?.available == true
@@ -75,7 +90,14 @@ internal fun LinkPhoneScreen(
                 .padding(bottom = 28.dp),
         ) {
             PhoneScreenHeader(title = "AGENTMUX LINK", onBack = null, icon = RingIcons.Link)
-            LinkStatusRows(presentedState, coordinator)
+            LinkStatusRows(
+                state = presentedState,
+                onSelectTarget = if (qaActive) {
+                    { qaTargetId = it }
+                } else {
+                    coordinator::selectTarget
+                },
+            )
             ConversationRows(
                 turns = presentedState.turns,
                 onPlay = coordinator::playReply,
@@ -91,8 +113,12 @@ internal fun LinkPhoneScreen(
                     maxLength = 4_000,
                     onValueChange = { composer = composer.edited(it) },
                     onSubmit = {
-                        coordinator.submitText(composer.text)?.let {
-                            composer = composer.submitted(it)
+                        if (qaActive) {
+                            composer = ComposerDraft()
+                        } else {
+                            coordinator.submitText(composer.text)?.let {
+                                composer = composer.submitted(it)
+                            }
                         }
                     },
                 ),
@@ -105,25 +131,47 @@ internal fun LinkPhoneScreen(
                     presentedState.capture != CapturePhase.FINALIZING,
                 byteLimit = coordinator.selectedVoiceByteLimit(),
                 recordedBytes = recorder::currentBytes,
+                recordedLevel = if (qaActive) {
+                    {
+                        val phase = System.currentTimeMillis() / 85.0
+                        (0.16 + 0.78 * kotlin.math.abs(sin(phase))).toFloat()
+                    }
+                } else {
+                    recorder::currentLevel
+                },
                 onBegin = {
-                    val capture = recorder.begin()
-                    if (capture == null) {
-                        false
-                    } else {
-                        coordinator.capture(CapturePhase.LISTENING, capture.startedAtMs)
+                    if (qaActive) {
+                        qaCaptureStartedAtMs = System.currentTimeMillis()
+                        qaCapture = CapturePhase.LISTENING
                         true
+                    } else {
+                        val capture = recorder.begin()
+                        if (capture == null) {
+                            false
+                        } else {
+                            coordinator.capture(CapturePhase.LISTENING, capture.startedAtMs)
+                            true
+                        }
                     }
                 },
                 onRelease = {
-                    coordinator.capture(CapturePhase.FINALIZING)
-                    val capture = recorder.release()
-                    if (capture == null || !coordinator.submitAudio(capture)) {
-                        coordinator.capture(CapturePhase.FAILED)
+                    if (qaActive) {
+                        qaCapture = CapturePhase.IDLE
+                    } else {
+                        coordinator.capture(CapturePhase.FINALIZING)
+                        val capture = recorder.release()
+                        if (capture == null || !coordinator.submitAudio(capture)) {
+                            coordinator.capture(CapturePhase.FAILED)
+                        }
                     }
                 },
                 onCancel = {
-                    recorder.cancel()
-                    coordinator.capture(CapturePhase.FAILED)
+                    if (qaActive) {
+                        qaCapture = CapturePhase.FAILED
+                    } else {
+                        recorder.cancel()
+                        coordinator.capture(CapturePhase.FAILED)
+                    }
                 },
             )
             if (presentedState.activePlaybackTurnId != null ||
@@ -178,7 +226,7 @@ internal fun LinkPhoneScreen(
 }
 
 @Composable
-private fun LinkStatusRows(state: LinkState, coordinator: LinkCoordinator) {
+private fun LinkStatusRows(state: LinkState, onSelectTarget: (String) -> Unit) {
     PhoneRow(
         title = connectionLabel(state.connection),
         sub = state.connectionDetail.uppercase().ifBlank { "NO STATUS" },
@@ -187,16 +235,15 @@ private fun LinkStatusRows(state: LinkState, coordinator: LinkCoordinator) {
     val available = state.targets.filter { it.available }
     val selected = available.firstOrNull { it.id == state.selectedTargetId } ?: available.firstOrNull()
     if (available.size >= 2 && selected != null) {
-        val options = available.map { it.label.ifBlank { it.id }.uppercase() }
+        val choices = targetChoices(available)
+        val options = choices.map { it.second }
         RingChoiceRow(
             title = "AGENT",
-            selected = selected.label.ifBlank { selected.id }.uppercase(),
+            selected = requireNotNull(choices.firstOrNull { it.first == selected.id }).second,
             options = options,
             role = SkyvwChoiceRole.STEPPED,
             onSelect = { label ->
-                available.firstOrNull {
-                    it.label.ifBlank { it.id }.uppercase() == label
-                }?.let { coordinator.selectTarget(it.id) }
+                choices.firstOrNull { it.second == label }?.let { onSelectTarget(it.first) }
             },
             icon = RingIcons.Target,
             modifier = phoneRowModifier(),
@@ -221,13 +268,14 @@ private fun ConversationRows(
     onResume: () -> Unit,
     onStop: () -> Unit,
 ) {
+    val context = LocalContext.current
     if (turns.isEmpty()) {
         PhoneRow("CONVERSATION", "NO CONVERSATION YET", RingIcons.Speaker)
         return
     }
     turns.takeLast(30).forEach { turn ->
         PhoneRow(
-            title = "YOU → ${turn.targetLabel}".uppercase(),
+            title = "YOU → ${turn.targetLabel} · ${turnStatusLabel(turn)}".uppercase(),
             sub = turn.userText.uppercase().take(160),
             icon = RingIcons.Arrow,
         )
@@ -251,6 +299,18 @@ private fun ConversationRows(
                 turn.playbackPhase == PlaybackPhase.PAUSED
             ) {
                 PhoneRow("STOP REPLY", "PLAYBACK", RingIcons.Stop, onStop, immediate = true)
+            }
+            attachmentUrls(turn.replyText).forEach { url ->
+                PhoneRow(
+                    title = "OPEN ATTACHMENT",
+                    sub = url.uppercase(),
+                    icon = RingIcons.Link,
+                    onTap = {
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        }
+                    },
+                )
             }
         }
         listOf(turn.deliveryError, turn.replyError, turn.playbackError)
@@ -279,6 +339,9 @@ private fun UpdateRow(state: LinkState, updater: LinkUpdater) {
             else -> null
         },
     )
+    if (update.changelog.isNotBlank()) {
+        PhoneRow("WHAT'S NEW", update.changelog.uppercase(), RingIcons.Activity)
+    }
 }
 
 @Composable
@@ -310,6 +373,38 @@ private fun connectionLabel(state: ConnectionState): String = when (state) {
     ConnectionState.DISCONNECTED -> "DISCONNECTED"
     ConnectionState.CONFIGURATION_REQUIRED -> "PAIRING"
     ConnectionState.OFF -> "OFF"
+}
+
+internal fun targetChoices(targets: List<LinkTarget>): List<Pair<String, String>> {
+    val baseLabels = targets.associateWith { it.label.ifBlank { it.id }.uppercase() }
+    val duplicates = baseLabels.values.groupingBy { it }.eachCount()
+    return targets.map { target ->
+        val base = requireNotNull(baseLabels[target])
+        target.id to if (duplicates.getValue(base) > 1) {
+            "$base · ${target.id.uppercase()}"
+        } else {
+            base
+        }
+    }
+}
+
+private fun attachmentUrls(text: String): List<String> =
+    Regex("""https?://[^\s<>()\]"]+""")
+        .findAll(text)
+        .map { it.value.trimEnd('.', ',', ';') }
+        .distinct()
+        .take(4)
+        .toList()
+
+private fun turnStatusLabel(turn: LinkTurn): String = when {
+    turn.playbackPhase == PlaybackPhase.PLAYING -> "PLAYING"
+    turn.playbackPhase == PlaybackPhase.PAUSED -> "PAUSED"
+    turn.deliveryPhase == DeliveryPhase.FAILED -> "SEND FAILED"
+    turn.replyPhase == ReplyPhase.FAILED -> "REPLY FAILED"
+    turn.replyPhase == ReplyPhase.READY -> "REPLY READY"
+    turn.replyPhase == ReplyPhase.THINKING -> "THINKING"
+    turn.deliveryPhase == DeliveryPhase.QUEUED -> "SENT"
+    else -> "SENDING"
 }
 
 private fun phoneActivePreviewState(): LinkState = LinkState(
