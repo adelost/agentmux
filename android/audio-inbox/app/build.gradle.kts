@@ -68,6 +68,7 @@ android {
 dependencies {
     implementation(project(":link-core"))
     implementation("io.v1d.circlekit:designkit:0.1.4")
+    implementation("io.v1d.circlekit:ringkit:0.1.4")
     implementation("io.v1d.circlekit:releasekit:0.1.4")
     implementation("io.v1d.circlekit:servicekit:0.1.4")
     implementation("androidx.annotation:annotation:1.9.1")
