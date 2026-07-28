@@ -46,7 +46,7 @@ import io.agentmux.linkcore.ConnectionState
 internal fun LinkPhoneScreen(
     coordinator: LinkCoordinator,
     recorder: PushToTalkRecorder,
-    updater: AppUpdater,
+    updater: LinkUpdater,
 ) {
     val state by coordinator.state.collectAsStateWithLifecycle()
     var composer by remember { mutableStateOf(ComposerDraft()) }

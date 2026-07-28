@@ -36,8 +36,5 @@
             android:exported="false"
             android:foregroundServiceType="dataSync|mediaPlayback" />
 
-        <receiver
-            android:name=".UpdateInstallReceiver"
-            android:exported="false" />
     </application>
 </manifest>

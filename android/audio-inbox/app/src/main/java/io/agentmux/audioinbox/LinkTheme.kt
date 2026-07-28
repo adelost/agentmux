@@ -15,27 +15,35 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import io.agentmux.linkcore.LinkVisualTokens
+import com.adelost.designkit.ui.GraphiteMetrics
+import com.adelost.designkit.ui.GraphiteTokens
 
 /**
- * App-local adaptation of Skyvw designkit Graphite tokens. Values and circular
- * hierarchy are traced in docs/AGENTMUX-LINK-UX-V2.md; no cross-repo runtime
- * dependency is introduced.
+ * Link's names for CircleKit's canonical Graphite palette.
+ *
+ * These values used to be traced by hand into link-core so the two apps would
+ * "look the same" without a shared dependency — and the accent had already
+ * drifted (0xFF6DE3B5 against Graphite's 0xFF79B8B4). Naming the tokens is
+ * fine; owning a second copy of their values is what drifts.
+ *
+ * Two values move by adopting the canonical set: the accent, and the page
+ * gutter (16dp to Graphite's 20dp). Both are deliberate — a shared design
+ * system that lets each app keep its own spacing is just two design systems.
  */
 internal object LinkTokens {
-    val Canvas = Color(LinkVisualTokens.CANVAS_ARGB)
-    val Surface = Color(LinkVisualTokens.SURFACE_ARGB)
-    val SurfaceStrong = Color(LinkVisualTokens.SURFACE_STRONG_ARGB)
-    val Border = Color(0x2EF1EFE9)
-    val Ink = Color(LinkVisualTokens.INK_ARGB)
-    val Muted = Color(LinkVisualTokens.MUTED_ARGB)
-    val Faint = Color(0xFF727579)
-    val Accent = Color(LinkVisualTokens.ACCENT_ARGB)
-    val AccentInk = Color(LinkVisualTokens.ACCENT_INK_ARGB)
-    val Warning = Color(LinkVisualTokens.WARNING_ARGB)
-    val Error = Color(LinkVisualTokens.ERROR_ARGB)
-    val PageGutter = LinkVisualTokens.PAGE_GUTTER_DP.dp
-    val Control = LinkVisualTokens.MIN_TOUCH_DP.dp
+    val Canvas = GraphiteTokens.Canvas
+    val Surface = GraphiteTokens.Surface
+    val SurfaceStrong = GraphiteTokens.SurfaceStrong
+    val Border = GraphiteTokens.BorderStrong
+    val Ink = GraphiteTokens.Ink
+    val Muted = GraphiteTokens.Muted
+    val Faint = GraphiteTokens.Faint
+    val Accent = GraphiteTokens.Primary
+    val AccentInk = GraphiteTokens.PrimaryInk
+    val Warning = GraphiteTokens.Orange
+    val Error = GraphiteTokens.Red
+    val PageGutter = GraphiteMetrics.PageGutter
+    val Control = GraphiteMetrics.ControlHeight
 }
 
 @Composable

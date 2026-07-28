@@ -33,14 +33,14 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.verticalScroll
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.LinkState
-import io.agentmux.linkcore.LinkVisualTokens
+import com.adelost.designkit.ui.GraphiteTokens
 import io.agentmux.linkcore.PlaybackPhase
 
-private val Canvas = Color(LinkVisualTokens.CANVAS_ARGB)
-private val SurfaceInk = Color(LinkVisualTokens.SURFACE_STRONG_ARGB)
-private val Ink = Color(LinkVisualTokens.INK_ARGB)
-private val Muted = Color(LinkVisualTokens.MUTED_ARGB)
-private val Accent = Color(LinkVisualTokens.ACCENT_ARGB)
+private val Canvas = GraphiteTokens.Canvas
+private val SurfaceInk = GraphiteTokens.SurfaceStrong
+private val Ink = GraphiteTokens.Ink
+private val Muted = GraphiteTokens.Muted
+private val Accent = GraphiteTokens.Primary
 
 @Composable
 internal fun WearLinkScreen(

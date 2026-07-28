@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import androidx.lifecycle.lifecycleScope
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.graphics.toArgb
@@ -18,7 +19,7 @@ import io.agentmux.linkcore.LinkAction
 class MainActivity : ComponentActivity() {
     private lateinit var coordinator: LinkCoordinator
     private lateinit var recorder: PushToTalkRecorder
-    private lateinit var updater: AppUpdater
+    private lateinit var updater: LinkUpdater
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -27,10 +28,8 @@ class MainActivity : ComponentActivity() {
         coordinator = LinkCoordinator(this)
         coordinator.handlePublicAuth(intent?.data)
         recorder = PushToTalkRecorder(this)
-        updater = AppUpdater(this) { presentation ->
-            runOnUiThread {
-                coordinator.applyUpdatePresentation(LinkAction.Update(presentation))
-            }
+        updater = LinkUpdater(this, lifecycleScope) { presentation ->
+            coordinator.applyUpdatePresentation(LinkAction.Update(presentation))
         }
         setContent {
             AgentmuxLinkTheme {
@@ -61,7 +60,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        updater.close()
+        // The updater has no executor of its own to shut down any more: its
+        // work runs on lifecycleScope, which this activity cancels for us.
         recorder.cancel()
         coordinator.close()
         super.onDestroy()
