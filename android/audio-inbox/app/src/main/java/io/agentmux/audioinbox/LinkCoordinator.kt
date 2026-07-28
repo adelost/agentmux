@@ -410,11 +410,7 @@ internal class LinkCoordinator(
         val chosen = ids.mapNotNull { id ->
             val internet = publicTargets[id]
             val tailnet = tailnetTargets[id]
-            when {
-                internet?.available() == true -> internet
-                tailnet != null -> tailnet
-                else -> internet
-            }
+            LinkTargetRoutePolicy.choose(tailnet, internet)
         }
         targets.clear()
         chosen.forEach { targets[it.id] = it }
