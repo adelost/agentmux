@@ -1,0 +1,4 @@
+# Legacy production files above 500 lines, shrink-only.
+# Format: <module-relative path> <current lines> <cleanup owner>
+#
+# Empty by design. A newly written file may never enter this baseline.
