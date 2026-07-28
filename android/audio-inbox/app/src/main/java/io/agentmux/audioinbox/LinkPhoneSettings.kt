@@ -8,7 +8,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.adelost.designkit.ui.RingIcons
-import com.adelost.designkit.ui.SkyvwChoiceRole
+import com.adelost.designkit.ui.CircleChoiceRole
 import com.adelost.ringkit.ui.PhoneScreenHeader
 import com.adelost.ringkit.ui.RingChoiceRow
 import io.agentmux.linkcore.ConnectionState
@@ -82,7 +82,7 @@ internal fun LinkPhoneSettings(
                 title = "HANDS-FREE",
                 selected = if (state.handsFree) "ON" else "OFF",
                 options = listOf("OFF", "ON"),
-                role = SkyvwChoiceRole.TOGGLE,
+                role = CircleChoiceRole.TOGGLE,
                 onSelect = { onHandsFree(it == "ON") },
                 icon = RingIcons.Speaker,
                 modifier = phoneRowModifier(),
@@ -93,7 +93,7 @@ internal fun LinkPhoneSettings(
                 title = "READ REPLIES",
                 selected = if (speakReplies) "ON" else "OFF",
                 options = listOf("OFF", "ON"),
-                role = SkyvwChoiceRole.TOGGLE,
+                role = CircleChoiceRole.TOGGLE,
                 onSelect = { onSpeakReplies(it == "ON") },
                 icon = RingIcons.Speaker,
                 modifier = phoneRowModifier(),
