@@ -39,28 +39,12 @@ public final class AudioInboxService extends MediaSessionService {
     private AudioFeedLoop feedLoop;
     private AudioServiceNotifier notifier;
     private DirectReplyLoader directLoader;
+    private PlaybackProgressPublisher progressPublisher;
     private volatile boolean enabled;
     private volatile boolean connected;
     private volatile boolean directAvailable;
     private String startingId;
     private boolean replaying;
-    private final Runnable progressPublisher = new Runnable() {
-        @Override
-        public void run() {
-            if (player != null) {
-                AudioEventClaims.Entry item = claims.queued(playbackQueue.active());
-                if (item != null && item.direct && item.turnId != null && !item.turnId.isBlank()) {
-                    long duration = player.getDuration();
-                    PlaybackProgressBus.publish(
-                        item.turnId,
-                        Math.max(0L, player.getCurrentPosition()),
-                        duration == C.TIME_UNSET ? 0L : Math.max(0L, duration)
-                    );
-                }
-            }
-            main.postDelayed(this, PLAYBACK_PROGRESS_INTERVAL_MS);
-        }
-    };
 
     @Override
     public void onCreate() {
@@ -150,7 +134,7 @@ public final class AudioInboxService extends MediaSessionService {
             .setCallback(new AudioSessionCallback(this::stopAllAudio))
             .build();
         notifier.attach(mediaSession, player);
-        main.post(progressPublisher);
+        progressPublisher = PlaybackProgressPublisher.start(main, player, claims, playbackQueue);
     }
 
     @Override
@@ -192,10 +176,9 @@ public final class AudioInboxService extends MediaSessionService {
 
     @Override
     public MediaSession onGetSession(MediaSession.ControllerInfo controllerInfo) { return mediaSession; }
-
     @Override
     public void onDestroy() {
-        main.removeCallbacks(progressPublisher);
+        progressPublisher.stop();
         enabled = false;
         feedLoop.close();
         playbackQueue.setHandsFree(false);
@@ -508,14 +491,9 @@ public final class AudioInboxService extends MediaSessionService {
         player.play();
     }
 
-    private boolean canClaim() {
-        return enabled && connected;
-    }
-
+    private boolean canClaim() { return enabled && connected; }
     private String serverUrl() {
         String value = preferences.getString(AppContract.KEY_SERVER, "");
         return value == null ? "" : value.replaceAll("/+$", "");
     }
-
-    private static final long PLAYBACK_PROGRESS_INTERVAL_MS = 250L;
 }
