@@ -26,11 +26,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adelost.designkit.ui.RingIcons
-import com.adelost.designkit.ui.SkyvwActionTiming
-import com.adelost.designkit.ui.SkyvwChoiceRole
-import com.adelost.designkit.ui.SkyvwLabelProgress
-import com.adelost.designkit.ui.SkyvwResponsiveSurface
-import com.adelost.designkit.ui.SkyvwIconDisc
+import com.adelost.designkit.ui.CircleActionTiming
+import com.adelost.designkit.ui.CircleChoiceRole
+import com.adelost.designkit.ui.CircleIconDisc
+import com.adelost.designkit.ui.CircleLabelProgress
+import com.adelost.designkit.ui.CircleResponsiveSurface
 import com.adelost.designkit.ui.phoneSurfaceDesign
 import com.adelost.ringkit.ui.PhoneHeaderAction
 import com.adelost.ringkit.ui.PhoneScreenHeader
@@ -90,7 +90,7 @@ internal fun LinkPhoneScreen(
         }
     }
     BackHandler(showingSettings) { showingSettings = false }
-    SkyvwResponsiveSurface {
+    CircleResponsiveSurface {
         if (showingSettings) {
             LinkPhoneSettings(
                 state = presentedState,
@@ -281,7 +281,7 @@ private fun LinkStatusRows(state: LinkState, onSelectTarget: (String) -> Unit) {
             title = title,
             selected = requireNotNull(choices.firstOrNull { it.first == selected.id }).second,
             options = options,
-            role = SkyvwChoiceRole.STEPPED,
+            role = CircleChoiceRole.STEPPED,
             onSelect = { label ->
                 choices.firstOrNull { it.second == label }?.let { onSelectTarget(it.first) }
             },
@@ -328,14 +328,14 @@ private fun ConversationTurn(
             } else {
                 {
                     val design = phoneSurfaceDesign()
-                    SkyvwIconDisc(
+                    CircleIconDisc(
                         icon = RingIcons.Play,
                         contentDescription = "Play this reply",
                         actionLabel = "PLAY",
                         onTap = { onPlay(turn.turnId) },
                         diameter = design.rowIconDiameter,
                         iconSize = design.rowIconSize,
-                        timing = SkyvwActionTiming.IMMEDIATE,
+                        timing = CircleActionTiming.IMMEDIATE,
                     )
                 }
             },
@@ -413,8 +413,8 @@ internal fun UpdateRow(state: LinkState, updater: LinkUpdater) {
             else -> null
         },
         progress = when (update.state) {
-            "downloading" -> SkyvwLabelProgress.Determinate(update.progress.coerceIn(0f, 1f))
-            "checking", "installing" -> SkyvwLabelProgress.Indeterminate
+            "downloading" -> CircleLabelProgress.Determinate(update.progress.coerceIn(0f, 1f))
+            "checking", "installing" -> CircleLabelProgress.Indeterminate
             else -> null
         },
     )
@@ -430,7 +430,7 @@ internal fun PhoneRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     onTap: (() -> Unit)? = null,
     immediate: Boolean = false,
-    progress: SkyvwLabelProgress? = null,
+    progress: CircleLabelProgress? = null,
 ) {
     RingRow(
         title = title,
@@ -438,7 +438,11 @@ internal fun PhoneRow(
         icon = icon,
         onTap = onTap,
         labelProgress = progress,
-        actionTiming = if (immediate) SkyvwActionTiming.IMMEDIATE else SkyvwActionTiming.DELIBERATE,
+        actionTiming = if (immediate) {
+            CircleActionTiming.IMMEDIATE
+        } else {
+            CircleActionTiming.DELIBERATE
+        },
         modifier = phoneRowModifier(),
     )
 }
