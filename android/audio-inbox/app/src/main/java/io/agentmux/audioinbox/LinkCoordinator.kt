@@ -34,9 +34,8 @@ internal class LinkCoordinator(
     private val repository = LinkStateRepository(preferences)
     private val ledger = LinkStateLedger(repository.load(), repository::save)
     private val mutableAccepted = MutableSharedFlow<AcceptedDraft>(extraBufferCapacity = 16)
-    private val targets = ConcurrentHashMap<String, ConversationTarget>()
-    private val tailnetTargets = ConcurrentHashMap<String, ConversationTarget>()
-    private val publicTargets = ConcurrentHashMap<String, ConversationTarget>()
+    private val targetDirectory = LinkTargetDirectory()
+    private val audioActions = LinkAudioActions(activity, targetDirectory::target)
     private val linkSessions = KeystoreSessionStore(preferences)
     private val discovery: ExecutorService = Executors.newFixedThreadPool(2)
     private val pendingDiscovery = AtomicInteger(3)
@@ -257,13 +256,13 @@ internal class LinkCoordinator(
 
     fun logoutPublic() {
         linkAuth.logout()
-        publicTargets.clear()
-        rebuildTargets()
+        targetDirectory.clearPublic()
+        publishTargets()
         dispatch(
             LinkAction.Connection(
-                if (tailnetTargets.isEmpty()) ConnectionState.DISCONNECTED
+                if (!targetDirectory.hasTailnetRoutes()) ConnectionState.DISCONNECTED
                 else ConnectionState.CONNECTED,
-                if (tailnetTargets.isEmpty()) "Public Link disconnected"
+                if (!targetDirectory.hasTailnetRoutes()) "Public Link disconnected"
                 else "Connected via Tailscale",
                 System.currentTimeMillis(),
             ),
@@ -272,32 +271,15 @@ internal class LinkCoordinator(
 
     fun playReply(turnId: String, explicitReplay: Boolean = true) {
         val turn = ledger.value.turns.firstOrNull { it.turnId == turnId } ?: return
-        val target = targets[turn.targetId] ?: return
-        if (turn.replyText.isBlank()) return
-        val intent = Intent(activity, AudioInboxService::class.java).apply {
-            action = if (explicitReplay) AppContract.ACTION_REPLAY_REPLY
-            else AppContract.ACTION_PLAY_REPLY
-            putExtra(AppContract.EXTRA_TURN_ID, turnId)
-            putExtra(AppContract.EXTRA_TEXT, turn.replyText)
-            putExtra(AppContract.EXTRA_SERVER, target.serverUrl)
-            putExtra(AppContract.EXTRA_TARGET_LABEL, turn.respondingTarget.ifBlank { target.id })
-        }
-        if (Build.VERSION.SDK_INT >= 26) activity.startForegroundService(intent)
-        else activity.startService(intent)
+        audioActions.playReply(turn, explicitReplay)
     }
 
-    fun pauseAudio() = sendAudioAction(AppContract.ACTION_PAUSE_AUDIO)
-    fun resumeAudio() = sendAudioAction(AppContract.ACTION_RESUME_AUDIO)
-    fun stopAudio() = sendAudioAction(AppContract.ACTION_STOP_AUDIO)
+    fun pauseAudio() = audioActions.pause()
+    fun resumeAudio() = audioActions.resume()
+    fun stopAudio() = audioActions.stop()
 
     fun applyUpdatePresentation(action: LinkAction.Update) {
         dispatch(action)
-    }
-
-    private fun sendAudioAction(actionName: String) {
-        activity.startService(Intent(activity, AudioInboxService::class.java).apply {
-            action = actionName
-        })
     }
 
     private fun discoverTargets() {
@@ -340,7 +322,7 @@ internal class LinkCoordinator(
 
     private fun applyDiscovery(found: ServerDiscovery.Configuration?, save: Boolean) {
         if (found == null) {
-            if (targets.isEmpty()) {
+            if (targetDirectory.isEmpty()) {
                 dispatch(
                     LinkAction.Connection(
                         ConnectionState.DISCONNECTED,
@@ -357,8 +339,8 @@ internal class LinkCoordinator(
                 .putString(AppContract.KEY_TARGET, found.target)
                 .apply()
         }
-        found.conversationTargets.forEach { tailnetTargets[it.id] = it }
-        rebuildTargets()
+        targetDirectory.addTailnet(found.conversationTargets)
+        publishTargets()
         dispatch(
             LinkAction.Connection(
                 ConnectionState.CONNECTED,
@@ -372,31 +354,29 @@ internal class LinkCoordinator(
     private fun refreshPublicTargets() {
         val session = linkSessions.session()
         if (session == null) {
-            publicTargets.clear()
-            rebuildTargets()
+            targetDirectory.clearPublic()
+            publishTargets()
             return
         }
         try {
             val rows = PublicLinkClient(linkSessions.baseUrl(), session).targets()
-            publicTargets.clear()
-            rows.forEach {
+            targetDirectory.replacePublic(rows.map {
                 val id = if (it.id == "windows") "_windows_" else it.id
-                publicTargets[id] = ConversationTarget.publicLink(id, it.label, it.online)
-            }
-            rebuildTargets()
-            val hasPublicFallback = publicTargets.values.any(ConversationTarget::available)
+                ConversationTarget.publicLink(id, it.label, it.online)
+            })
+            publishTargets()
             dispatch(
                 LinkAction.Connection(
                     ConnectionState.CONNECTED,
                     LinkTargetRoutePolicy.connectionDetail(
-                        hasTailnetRoute = tailnetTargets.isNotEmpty(),
-                        hasPublicFallback = hasPublicFallback,
+                        hasTailnetRoute = targetDirectory.hasTailnetRoutes(),
+                        hasPublicFallback = targetDirectory.hasAvailablePublicRoute(),
                     ),
                     System.currentTimeMillis(),
                 ),
             )
         } catch (error: Exception) {
-            if (tailnetTargets.isEmpty()) {
+            if (!targetDirectory.hasTailnetRoutes()) {
                 dispatch(
                     LinkAction.Connection(
                         ConnectionState.DISCONNECTED,
@@ -408,19 +388,11 @@ internal class LinkCoordinator(
         }
     }
 
-    @Synchronized
-    private fun rebuildTargets() {
-        val ids = (tailnetTargets.keys + publicTargets.keys).toSortedSet()
-        val chosen = ids.mapNotNull { id ->
-            val internet = publicTargets[id]
-            val tailnet = tailnetTargets[id]
-            LinkTargetRoutePolicy.choose(tailnet, internet)
-        }
-        targets.clear()
-        chosen.forEach { targets[it.id] = it }
+    private fun publishTargets() {
+        val chosen = targetDirectory.rebuild()
         dispatch(
             LinkAction.Targets(
-                chosen.sortedBy { favoriteOrder(it.id) }.map {
+                chosen.map {
                     LinkTarget(it.id, it.label, it.available())
                 },
             ),
@@ -446,7 +418,7 @@ internal class LinkCoordinator(
                     it.turnId,
                     it.replyReceivedAtMs,
                     it.replyReceivedAtMs + RECOVERED_AUDIO_TTL_MS,
-                    targets.containsKey(it.targetId),
+                    targetDirectory.contains(it.targetId),
                 )
             },
             now,
@@ -460,7 +432,7 @@ internal class LinkCoordinator(
     }
 
     private fun targetForSelection(): ConversationTarget? =
-        targets[ledger.value.selectedTargetId]
+        targetDirectory.target(ledger.value.selectedTargetId)
 
     private fun dispatch(action: LinkAction) {
         ledger.dispatch(action)
@@ -494,13 +466,6 @@ internal class LinkCoordinator(
         discovery.shutdownNow()
         linkAuth.close()
         controller.close()
-    }
-
-    private fun favoriteOrder(id: String): Int = when (id) {
-        "lsrc:3" -> 0
-        "lsrc:10" -> 1
-        "_windows_" -> 2
-        else -> 3
     }
 
     private companion object {
