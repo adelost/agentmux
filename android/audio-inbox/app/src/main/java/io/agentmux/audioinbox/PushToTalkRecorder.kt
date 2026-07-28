@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.media.MediaRecorder
 import java.io.File
 import java.util.UUID
+import kotlin.math.sqrt
 
 internal class PushToTalkRecorder(
     private val activity: Activity,
@@ -78,6 +79,9 @@ internal class PushToTalkRecorder(
 
     fun currentBytes(): Long = capture?.file?.length() ?: 0
 
+    fun currentLevel(): Float =
+        runCatching { normalizeAmplitude(recorder?.maxAmplitude ?: 0) }.getOrDefault(0f)
+
     fun cancel() {
         recorder?.let {
             runCatching { it.reset() }
@@ -87,4 +91,9 @@ internal class PushToTalkRecorder(
         capture?.file?.delete()
         capture = null
     }
+}
+
+internal fun normalizeAmplitude(amplitude: Int): Float {
+    require(amplitude >= 0)
+    return sqrt((amplitude / 32_767f).coerceIn(0f, 1f))
 }

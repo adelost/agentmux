@@ -9,6 +9,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.graphics.toArgb
+import com.adelost.designkit.ui.GraphiteTokens
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.LinkAction
 
@@ -23,8 +24,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = LinkTokens.Canvas.toArgb()
-        window.navigationBarColor = LinkTokens.Canvas.toArgb()
+        window.statusBarColor = GraphiteTokens.Canvas.toArgb()
+        window.navigationBarColor = GraphiteTokens.Canvas.toArgb()
         coordinator = LinkCoordinator(this)
         coordinator.handlePublicAuth(intent?.data)
         recorder = PushToTalkRecorder(this)
@@ -32,9 +33,7 @@ class MainActivity : ComponentActivity() {
             coordinator.applyUpdatePresentation(LinkAction.Update(presentation))
         }
         setContent {
-            AgentmuxLinkTheme {
-                LinkPhoneScreen(coordinator, recorder, updater)
-            }
+            LinkPhoneScreen(coordinator, recorder, updater)
         }
         requestRuntimePermissions()
         updater.start()
