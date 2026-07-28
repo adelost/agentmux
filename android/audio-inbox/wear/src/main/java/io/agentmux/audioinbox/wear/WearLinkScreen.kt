@@ -85,7 +85,7 @@ internal fun wearLinkRows(
         RowSpec(
             key = "talk",
             title = "HOLD TO TALK",
-            sub = if (selectedAvailable) "RELEASE TO SEND" else "TARGET UNAVAILABLE",
+            sub = if (selectedAvailable) "RELEASE TO SEND" else "UNAVAILABLE",
             icon = RingIcons.Record,
             onTap = onHoldToTalk.takeIf { selectedAvailable },
             holdToConfirm = selectedAvailable,
