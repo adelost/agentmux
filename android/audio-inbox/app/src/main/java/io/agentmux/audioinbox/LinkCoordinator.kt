@@ -384,10 +384,14 @@ internal class LinkCoordinator(
                 publicTargets[id] = ConversationTarget.publicLink(id, it.label, it.online)
             }
             rebuildTargets()
+            val hasPublicFallback = publicTargets.values.any(ConversationTarget::available)
             dispatch(
                 LinkAction.Connection(
                     ConnectionState.CONNECTED,
-                    "Connected via Public Link",
+                    LinkTargetRoutePolicy.connectionDetail(
+                        hasTailnetRoute = tailnetTargets.isNotEmpty(),
+                        hasPublicFallback = hasPublicFallback,
+                    ),
                     System.currentTimeMillis(),
                 ),
             )

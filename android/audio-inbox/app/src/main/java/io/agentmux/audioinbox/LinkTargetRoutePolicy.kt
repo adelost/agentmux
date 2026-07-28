@@ -16,4 +16,15 @@ internal object LinkTargetRoutePolicy {
         tailnet != null -> tailnet
         else -> publicLink
     }
+
+    fun connectionDetail(
+        hasTailnetRoute: Boolean,
+        hasPublicFallback: Boolean,
+    ): String = when {
+        hasTailnetRoute && hasPublicFallback ->
+            "Connected via Tailscale · Public fallback ready"
+        hasTailnetRoute -> "Connected via Tailscale"
+        hasPublicFallback -> "Connected via Public Link"
+        else -> "Link unavailable"
+    }
 }

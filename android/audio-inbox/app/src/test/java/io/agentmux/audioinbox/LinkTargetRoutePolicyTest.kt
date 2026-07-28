@@ -27,6 +27,17 @@ class LinkTargetRoutePolicyTest {
         assertSame(tailnet, LinkTargetRoutePolicy.choose(tailnet, publicLink))
     }
 
+    @Test
+    fun `connection copy tells the truth when public is only a fallback`() {
+        org.junit.Assert.assertEquals(
+            "Connected via Tailscale · Public fallback ready",
+            LinkTargetRoutePolicy.connectionDetail(
+                hasTailnetRoute = true,
+                hasPublicFallback = true,
+            ),
+        )
+    }
+
     private fun privateTarget() = ConversationTarget(
         "skyvw:3",
         "Skyvw 3",
