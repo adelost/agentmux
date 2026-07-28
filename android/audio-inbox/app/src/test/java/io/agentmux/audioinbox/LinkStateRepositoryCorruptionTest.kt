@@ -53,4 +53,27 @@ class LinkStateRepositoryCorruptionTest {
         assertEquals(listOf(ReplyPhase.READY, ReplyPhase.READY), turns.map { it.replyPhase })
         assertEquals(listOf("reply one", "reply two"), turns.map { it.replyText })
     }
+
+    @Test
+    fun `legacy JSON null strings never leak into conversation copy`() {
+        val preferences = TestPreferences()
+        preferences.data[AppContract.KEY_LINK_STATE_V2] = """
+            {
+              "schemaVersion": 2,
+              "turns": [{
+                "turnId": "old", "targetId": "lsrc:3", "targetLabel": null,
+                "userText": "null", "replyText": null, "respondingTarget": "NULL",
+                "createdAtMs": 1, "deliveryPhase": "QUEUED",
+                "replyPhase": "NONE", "playbackPhase": "IDLE"
+              }]
+            }
+        """.trimIndent()
+
+        val turn = LinkStateRepository(preferences).load().turns.single()
+
+        assertEquals("lsrc:3", turn.targetLabel)
+        assertEquals("", turn.userText)
+        assertEquals("", turn.replyText)
+        assertEquals("", turn.respondingTarget)
+    }
 }

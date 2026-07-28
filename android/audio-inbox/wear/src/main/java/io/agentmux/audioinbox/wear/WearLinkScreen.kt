@@ -104,7 +104,7 @@ internal fun wearLinkRows(
         rows += RowSpec(
             key = "latest",
             title = "LATEST REPLY",
-            sub = "NO CONVERSATION YET",
+            sub = "NO REPLY YET",
             icon = RingIcons.Speaker,
         )
         rows += settingsRow(onSettings)

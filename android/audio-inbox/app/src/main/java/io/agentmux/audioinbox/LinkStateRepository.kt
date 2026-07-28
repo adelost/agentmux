@@ -82,10 +82,10 @@ internal class LinkStateRepository(
                     LinkTurn(
                         turnId = turnId,
                         targetId = targetId,
-                        targetLabel = row.optString("targetLabel", targetId),
-                        userText = row.optString("userText"),
-                        replyText = row.optString("replyText"),
-                        respondingTarget = row.optString("respondingTarget"),
+                        targetLabel = row.optionalText("targetLabel").ifBlank { targetId },
+                        userText = row.optionalText("userText"),
+                        replyText = row.optionalText("replyText"),
+                        respondingTarget = row.optionalText("respondingTarget"),
                         createdAtMs = row.optLong("createdAtMs"),
                         replyReceivedAtMs = row.optLong(
                             "replyReceivedAtMs",
@@ -94,9 +94,9 @@ internal class LinkStateRepository(
                         deliveryPhase = delivery,
                         replyPhase = reply,
                         playbackPhase = restoredPlayback,
-                        deliveryError = row.optString("deliveryError"),
-                        replyError = row.optString("replyError"),
-                        playbackError = row.optString("playbackError"),
+                        deliveryError = row.optionalText("deliveryError"),
+                        replyError = row.optionalText("replyError"),
+                        playbackError = row.optionalText("playbackError"),
                     ),
                 )
             }
@@ -161,3 +161,10 @@ internal class LinkStateRepository(
         )
     }
 }
+
+private fun JSONObject.optionalText(key: String): String =
+    if (isNull(key)) {
+        ""
+    } else {
+        optString(key).trim().takeUnless { it.equals("null", ignoreCase = true) }.orEmpty()
+    }

@@ -238,7 +238,7 @@ private fun LinkPhoneHome(
         ) {
             if (state.turns.isEmpty()) {
                 item("empty") {
-                    PhoneRow("CONVERSATION", "NO CONVERSATION YET", RingIcons.Speaker)
+                    PhoneRow("CONVERSATION", "NO MESSAGES YET", RingIcons.Speaker)
                 }
             } else {
                 items(state.turns, key = LinkTurn::turnId) { turn ->
@@ -313,7 +313,7 @@ private fun ConversationTurn(
     val context = LocalContext.current
     PhoneRow(
         title = "YOU → ${turn.targetLabel} · ${turnStatusLabel(turn)}".uppercase(),
-        sub = turn.userText.uppercase().take(320),
+        sub = turn.userText.ifBlank { "VOICE MESSAGE" }.uppercase().take(320),
         icon = RingIcons.Arrow,
     )
     if (turn.replyText.isNotBlank()) {
