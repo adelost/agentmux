@@ -25,7 +25,8 @@ class WearLinkScreenTest {
         )
 
         assertEquals(listOf("target", "talk", "latest", "settings"), rows.map { it.key })
-        assertEquals("LSRC:3 · PAIRING", rows[0].sub)
+        assertEquals("AGENT · PAIRING", rows[0].title)
+        assertEquals("LSRC:3", rows[0].sub)
         assertTrue(rows[0].choices.isEmpty())
         assertNull(rows[1].onTap)
         assertFalse(rows[1].holdToConfirm)
@@ -69,7 +70,8 @@ class WearLinkScreenTest {
         )
 
         assertEquals(listOf("target", "talk", "latest", "playback", "settings"), rows.map { it.key })
-        assertEquals("BETA · PRIVATE", rows[0].sub)
+        assertEquals("AGENT · PRIVATE", rows[0].title)
+        assertEquals("BETA", rows[0].sub)
         assertEquals(listOf("ALPHA", "BETA"), rows[0].choices)
         rows[0].onSelect?.invoke("ALPHA")
         assertEquals("alpha", selected)

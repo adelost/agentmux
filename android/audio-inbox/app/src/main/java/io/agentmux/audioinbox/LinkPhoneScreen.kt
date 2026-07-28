@@ -46,6 +46,7 @@ import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
+import io.agentmux.linkcore.linkConnectionRoute
 import kotlin.math.sin
 
 /**
@@ -270,18 +271,14 @@ private fun LinkPhoneHome(
 
 @Composable
 private fun LinkStatusRows(state: LinkState, onSelectTarget: (String) -> Unit) {
-    PhoneRow(
-        title = connectionLabel(state.connection),
-        sub = state.connectionDetail.uppercase().ifBlank { "NO STATUS" },
-        icon = if (state.connection == ConnectionState.CONNECTED) RingIcons.Wifi else RingIcons.Link,
-    )
     val available = state.targets.filter { it.available }
     val selected = available.firstOrNull { it.id == state.selectedTargetId } ?: available.firstOrNull()
+    val title = "AGENT · ${linkConnectionRoute(state)}"
     if (available.size >= 2 && selected != null) {
         val choices = targetChoices(available)
         val options = choices.map { it.second }
         RingChoiceRow(
-            title = "AGENT",
+            title = title,
             selected = requireNotNull(choices.firstOrNull { it.first == selected.id }).second,
             options = options,
             role = SkyvwChoiceRole.STEPPED,
@@ -293,7 +290,7 @@ private fun LinkStatusRows(state: LinkState, onSelectTarget: (String) -> Unit) {
         )
     } else {
         PhoneRow(
-            title = "AGENT",
+            title = title,
             sub = selected?.label?.ifBlank { selected.id }?.uppercase() ?: "NO TARGET",
             icon = RingIcons.Target,
         )
@@ -448,11 +445,3 @@ internal fun PhoneRow(
 
 internal fun phoneRowModifier(): Modifier =
     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
-
-private fun connectionLabel(state: ConnectionState): String = when (state) {
-    ConnectionState.CONNECTED -> "CONNECTED"
-    ConnectionState.CONNECTING -> "CONNECTING"
-    ConnectionState.DISCONNECTED -> "DISCONNECTED"
-    ConnectionState.CONFIGURATION_REQUIRED -> "PAIRING"
-    ConnectionState.OFF -> "OFF"
-}

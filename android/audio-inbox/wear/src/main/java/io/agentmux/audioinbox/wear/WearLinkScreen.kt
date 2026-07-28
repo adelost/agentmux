@@ -11,6 +11,9 @@ import com.adelost.ringkit.ui.RowSpec
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.PlaybackPhase
+import io.agentmux.linkcore.linkConnectionLabel
+import io.agentmux.linkcore.linkConnectionRoute
+import io.agentmux.linkcore.linkConnectionSettingsDetail
 import kotlinx.coroutines.flow.MutableStateFlow
 
 @Composable
@@ -74,12 +77,8 @@ internal fun wearLinkRows(
     val rows = mutableListOf(
         RowSpec(
             key = "target",
-            title = "AGENT",
-            sub = buildString {
-                append(selected?.label?.ifBlank { selected.id }?.uppercase() ?: "NO TARGET")
-                append(" · ")
-                append(connectionRoute(state))
-            },
+            title = "AGENT · ${linkConnectionRoute(state)}",
+            sub = selected?.label?.ifBlank { selected.id }?.uppercase() ?: "NO TARGET",
             icon = RingIcons.Target,
             choices = targetChoices,
             onSelect = if (targetChoices.isEmpty()) {
@@ -153,8 +152,8 @@ internal fun wearLinkRows(
 internal fun wearLinkSettingsRows(state: LinkState): List<RowSpec> = listOf(
     RowSpec(
         key = "connection",
-        title = connectionLabel(state.connection),
-        sub = connectionSub(state),
+        title = linkConnectionLabel(state.connection),
+        sub = linkConnectionSettingsDetail(state),
         icon = if (state.connection == ConnectionState.CONNECTED) RingIcons.Wifi else RingIcons.Link,
     ),
     RowSpec(
@@ -172,25 +171,3 @@ private fun settingsRow(onSettings: () -> Unit) = RowSpec(
     icon = RingIcons.Gear,
     onTap = onSettings,
 )
-
-private fun connectionRoute(state: LinkState): String = when {
-    state.connection != ConnectionState.CONNECTED -> connectionLabel(state.connection)
-    state.connectionDetail.contains("public", ignoreCase = true) -> "PUBLIC"
-    else -> "PRIVATE"
-}
-
-private fun connectionLabel(state: ConnectionState): String = when (state) {
-    ConnectionState.CONNECTED -> "CONNECTED"
-    ConnectionState.CONNECTING -> "CONNECTING"
-    ConnectionState.DISCONNECTED -> "DISCONNECTED"
-    ConnectionState.CONFIGURATION_REQUIRED -> "PAIRING"
-    ConnectionState.OFF -> "OFF"
-}
-
-private fun connectionSub(state: LinkState): String = when (state.connection) {
-    ConnectionState.CONNECTED -> state.connectionDetail.uppercase().take(28).ifBlank { "READY" }
-    ConnectionState.CONNECTING -> "LOOKING FOR LINK"
-    ConnectionState.DISCONNECTED -> "OPEN PHONE TO CONNECT"
-    ConnectionState.CONFIGURATION_REQUIRED -> "OPEN PHONE TO PAIR"
-    ConnectionState.OFF -> "LINK IS OFF"
-}
