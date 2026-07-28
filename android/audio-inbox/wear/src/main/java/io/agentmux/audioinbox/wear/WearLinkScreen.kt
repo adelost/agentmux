@@ -11,6 +11,9 @@ import com.adelost.ringkit.ui.RowSpec
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.PlaybackPhase
+import io.agentmux.linkcore.linkConnectionLabel
+import io.agentmux.linkcore.linkConnectionRoute
+import io.agentmux.linkcore.linkConnectionSettingsDetail
 import kotlinx.coroutines.flow.MutableStateFlow
 
 @Composable
@@ -23,6 +26,7 @@ internal fun WearLinkScreen(
     onReplay: () -> Unit,
 ) {
     val items = remember { MutableStateFlow(emptyList<RowSpec>()) }
+    val settingsItems = remember { MutableStateFlow(emptyList<RowSpec>()) }
     val navigator = remember {
         RingNavigator(
             RingScreen.Rows(
@@ -33,6 +37,7 @@ internal fun WearLinkScreen(
         )
     }
     LaunchedEffect(state, onSelectTarget, onHoldToTalk, onPlay, onStop, onReplay) {
+        settingsItems.value = wearLinkSettingsRows(state)
         items.value = wearLinkRows(
             state = state,
             onSelectTarget = onSelectTarget,
@@ -40,6 +45,15 @@ internal fun WearLinkScreen(
             onPlay = onPlay,
             onStop = onStop,
             onReplay = onReplay,
+            onSettings = {
+                navigator.push(
+                    RingScreen.Rows(
+                        title = "LINK SETTINGS",
+                        items = settingsItems,
+                        showBack = true,
+                    ),
+                )
+            },
         )
     }
     RenderRingScreen(nav = navigator, onExit = {})
@@ -52,6 +66,7 @@ internal fun wearLinkRows(
     onPlay: () -> Unit,
     onStop: () -> Unit,
     onReplay: () -> Unit,
+    onSettings: () -> Unit = {},
 ): List<RowSpec> {
     val selected = state.targets.firstOrNull { it.id == state.selectedTargetId }
         ?: state.targets.firstOrNull()
@@ -61,14 +76,8 @@ internal fun wearLinkRows(
     val selectedAvailable = selected?.available == true
     val rows = mutableListOf(
         RowSpec(
-            key = "connection",
-            title = connectionLabel(state.connection),
-            sub = connectionSub(state),
-            icon = if (state.connection == ConnectionState.CONNECTED) RingIcons.Wifi else RingIcons.Link,
-        ),
-        RowSpec(
             key = "target",
-            title = "AGENT",
+            title = "AGENT · ${linkConnectionRoute(state)}",
             sub = selected?.label?.ifBlank { selected.id }?.uppercase() ?: "NO TARGET",
             icon = RingIcons.Target,
             choices = targetChoices,
@@ -95,9 +104,10 @@ internal fun wearLinkRows(
         rows += RowSpec(
             key = "latest",
             title = "LATEST REPLY",
-            sub = "NO CONVERSATION YET",
+            sub = "NO REPLY YET",
             icon = RingIcons.Speaker,
         )
+        rows += settingsRow(onSettings)
         return rows
     }
     rows += RowSpec(
@@ -135,21 +145,29 @@ internal fun wearLinkRows(
             )
         }
     }
+    rows += settingsRow(onSettings)
     return rows
 }
 
-private fun connectionLabel(state: ConnectionState): String = when (state) {
-    ConnectionState.CONNECTED -> "CONNECTED"
-    ConnectionState.CONNECTING -> "CONNECTING"
-    ConnectionState.DISCONNECTED -> "DISCONNECTED"
-    ConnectionState.CONFIGURATION_REQUIRED -> "PAIRING"
-    ConnectionState.OFF -> "OFF"
-}
+internal fun wearLinkSettingsRows(state: LinkState): List<RowSpec> = listOf(
+    RowSpec(
+        key = "connection",
+        title = linkConnectionLabel(state.connection),
+        sub = linkConnectionSettingsDetail(state),
+        icon = if (state.connection == ConnectionState.CONNECTED) RingIcons.Wifi else RingIcons.Link,
+    ),
+    RowSpec(
+        key = "hands-free",
+        title = "HANDS-FREE",
+        sub = if (state.handsFree) "ON · CHANGE ON PHONE" else "OFF · CHANGE ON PHONE",
+        icon = RingIcons.Speaker,
+    ),
+)
 
-private fun connectionSub(state: LinkState): String = when (state.connection) {
-    ConnectionState.CONNECTED -> state.connectionDetail.uppercase().take(28).ifBlank { "READY" }
-    ConnectionState.CONNECTING -> "LOOKING FOR LINK"
-    ConnectionState.DISCONNECTED -> "OPEN PHONE TO CONNECT"
-    ConnectionState.CONFIGURATION_REQUIRED -> "OPEN PHONE TO PAIR"
-    ConnectionState.OFF -> "LINK IS OFF"
-}
+private fun settingsRow(onSettings: () -> Unit) = RowSpec(
+    key = "settings",
+    title = "SETTINGS",
+    sub = "CONNECTION & AUDIO",
+    icon = RingIcons.Gear,
+    onTap = onSettings,
+)

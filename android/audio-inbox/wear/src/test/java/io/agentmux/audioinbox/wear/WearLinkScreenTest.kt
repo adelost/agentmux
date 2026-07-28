@@ -24,13 +24,13 @@ class WearLinkScreenTest {
             onReplay = {},
         )
 
-        assertEquals(listOf("connection", "target", "talk", "latest"), rows.map { it.key })
-        assertEquals("PAIRING", rows[0].title)
-        assertEquals("OPEN PHONE TO PAIR", rows[0].sub)
-        assertEquals("LSRC:3", rows[1].sub)
-        assertTrue(rows[1].choices.isEmpty())
-        assertNull(rows[2].onTap)
-        assertFalse(rows[2].holdToConfirm)
+        assertEquals(listOf("target", "talk", "latest", "settings"), rows.map { it.key })
+        assertEquals("AGENT · PAIRING", rows[0].title)
+        assertEquals("LSRC:3", rows[0].sub)
+        assertTrue(rows[0].choices.isEmpty())
+        assertNull(rows[1].onTap)
+        assertFalse(rows[1].holdToConfirm)
+        assertEquals("OPEN PHONE TO PAIR", wearLinkSettingsRows(unavailableState())[0].sub)
     }
 
     @Test
@@ -69,16 +69,18 @@ class WearLinkScreenTest {
             onReplay = { replayed = true },
         )
 
-        assertEquals(listOf("connection", "target", "talk", "latest", "playback"), rows.map { it.key })
-        assertEquals(listOf("ALPHA", "BETA"), rows[1].choices)
-        rows[1].onSelect?.invoke("ALPHA")
+        assertEquals(listOf("target", "talk", "latest", "playback", "settings"), rows.map { it.key })
+        assertEquals("AGENT · PRIVATE", rows[0].title)
+        assertEquals("BETA", rows[0].sub)
+        assertEquals(listOf("ALPHA", "BETA"), rows[0].choices)
+        rows[0].onSelect?.invoke("ALPHA")
         assertEquals("alpha", selected)
-        assertTrue(rows[2].holdToConfirm)
-        assertNotNull(rows[2].onTap)
-        rows[2].onTap?.invoke()
+        assertTrue(rows[1].holdToConfirm)
+        assertNotNull(rows[1].onTap)
+        rows[1].onTap?.invoke()
         assertTrue(talked)
-        assertEquals("REPLAY", rows[4].title)
-        rows[4].onTap?.invoke()
+        assertEquals("REPLAY", rows[3].title)
+        rows[3].onTap?.invoke()
         assertTrue(replayed)
     }
 }

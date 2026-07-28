@@ -85,10 +85,17 @@ data class LinkTurn(
     val deliveryPhase: DeliveryPhase = DeliveryPhase.SENDING,
     val replyPhase: ReplyPhase = ReplyPhase.NONE,
     val playbackPhase: PlaybackPhase = PlaybackPhase.IDLE,
+    val playbackPositionMs: Long = 0,
+    val playbackDurationMs: Long = 0,
     val deliveryError: String = "",
     val replyError: String = "",
     val playbackError: String = "",
-)
+) {
+    init {
+        require(playbackPositionMs >= 0L)
+        require(playbackDurationMs >= 0L)
+    }
+}
 
 /**
  * WHAT: Stores the immutable presentation state shared by phone and watch reducers.

@@ -75,7 +75,7 @@ internal fun PttDisc(
                 onRelease = onRelease,
                 onCancel = onCancel,
             ),
-            diameter = 88.dp,
+            diameter = 72.dp,
             modifier = Modifier,
         )
     }

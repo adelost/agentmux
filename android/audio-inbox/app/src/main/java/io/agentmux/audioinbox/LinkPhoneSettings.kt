@@ -1,0 +1,123 @@
+package io.agentmux.audioinbox
+
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.adelost.designkit.ui.RingIcons
+import com.adelost.designkit.ui.SkyvwChoiceRole
+import com.adelost.ringkit.ui.PhoneScreenHeader
+import com.adelost.ringkit.ui.RingChoiceRow
+import io.agentmux.linkcore.ConnectionState
+import io.agentmux.linkcore.LinkHistoryPolicy
+import io.agentmux.linkcore.LinkState
+
+/**
+ * Secondary behavior and connection controls stay off the conversation
+ * surface. Every row remains a shared CircleKit atom; this file is wiring.
+ */
+@Composable
+internal fun LinkPhoneSettings(
+    state: LinkState,
+    speakReplies: Boolean,
+    publicLoggedIn: Boolean,
+    onBack: () -> Unit,
+    onHandsFree: (Boolean) -> Unit,
+    onSpeakReplies: (Boolean) -> Unit,
+    onPublicLink: () -> Unit,
+    updater: LinkUpdater,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onStop: () -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        item("header") {
+            PhoneScreenHeader(
+                title = "LINK SETTINGS",
+                onBack = onBack,
+                icon = RingIcons.Gear,
+            )
+        }
+        state.activePlaybackTurnId
+            ?.let { id -> state.turns.firstOrNull { it.turnId == id } }
+            ?.let { active ->
+                item("active-playback") {
+                    LinkPlaybackControls(
+                        turn = active,
+                        onPlay = {},
+                        onPause = onPause,
+                        onResume = onResume,
+                        onStop = onStop,
+                    )
+                }
+            }
+        item("connection") {
+            PhoneRow(
+                title = connectionRouteLabel(state.connectionDetail),
+                sub = state.connectionDetail.uppercase().ifBlank { "NO CONNECTION" },
+                icon = if (state.connection == ConnectionState.CONNECTED) {
+                    RingIcons.Wifi
+                } else {
+                    RingIcons.Link
+                },
+            )
+        }
+        item("public-link") {
+            PhoneRow(
+                title = if (publicLoggedIn) "DISCONNECT PUBLIC LINK" else "CONNECT PUBLIC LINK",
+                sub = if (publicLoggedIn) "OPTIONAL FALLBACK · CONNECTED" else "OPTIONAL OUTSIDE TAILSCALE",
+                icon = RingIcons.Link,
+                onTap = onPublicLink,
+            )
+        }
+        item("hands-free") {
+            RingChoiceRow(
+                title = "HANDS-FREE",
+                selected = if (state.handsFree) "ON" else "OFF",
+                options = listOf("OFF", "ON"),
+                role = SkyvwChoiceRole.TOGGLE,
+                onSelect = { onHandsFree(it == "ON") },
+                icon = RingIcons.Speaker,
+                modifier = phoneRowModifier(),
+            )
+        }
+        item("read-replies") {
+            RingChoiceRow(
+                title = "READ REPLIES",
+                selected = if (speakReplies) "ON" else "OFF",
+                options = listOf("OFF", "ON"),
+                role = SkyvwChoiceRole.TOGGLE,
+                onSelect = { onSpeakReplies(it == "ON") },
+                icon = RingIcons.Speaker,
+                modifier = phoneRowModifier(),
+            )
+        }
+        item("history-policy") {
+            PhoneRow(
+                title = "LOCAL HISTORY",
+                sub = "${state.turns.size} / ${LinkHistoryPolicy.MAX_LOCAL_TURNS} TURNS · OLDEST DROPS FIRST",
+                icon = RingIcons.Activity,
+            )
+        }
+        item("update") { UpdateRow(state, updater) }
+        if (state.recoveryError.isNotBlank()) {
+            item("recovery") {
+                PhoneRow("RECOVERY", state.recoveryError.uppercase(), RingIcons.Warning)
+            }
+        }
+    }
+}
+
+internal fun connectionRouteLabel(detail: String): String = when {
+    detail.contains("public", ignoreCase = true) -> "PUBLIC LINK"
+    detail.contains("tailscale", ignoreCase = true) ||
+        detail.contains("private", ignoreCase = true) -> "PRIVATE LINK"
+    else -> "CONNECTION"
+}

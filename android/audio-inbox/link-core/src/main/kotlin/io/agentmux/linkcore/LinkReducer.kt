@@ -20,6 +20,11 @@ sealed interface LinkAction {
     ) : LinkAction
 
     data class Playback(val turnId: String, val phase: PlaybackPhase) : LinkAction
+    data class PlaybackProgress(
+        val turnId: String,
+        val positionMs: Long,
+        val durationMs: Long,
+    ) : LinkAction
     data class DeliveryFailed(val turnId: String, val reason: String) : LinkAction
     data class ReplyFailed(val turnId: String, val reason: String) : LinkAction
     data class PlaybackFailed(val turnId: String, val reason: String) : LinkAction
@@ -32,8 +37,6 @@ sealed interface LinkAction {
  * WHY: Keeps phone and watch behavior identical without sharing Android UI code.
  */
 object LinkReducer {
-    private const val MAX_TURNS = 100
-
     fun reduce(state: LinkState, action: LinkAction): LinkState = when (action) {
         is LinkAction.Connection -> state.copy(
             connection = action.state,
@@ -58,7 +61,7 @@ object LinkReducer {
             } ?: 0,
         )
         is LinkAction.Submit -> state.copy(
-            turns = (state.turns + action.turn).takeLast(MAX_TURNS),
+            turns = LinkHistoryPolicy.retain(state.turns + action.turn),
         )
         is LinkAction.Accepted -> state.mapTurn(action.turnId) {
             it.copy(
@@ -85,6 +88,12 @@ object LinkReducer {
                 else -> state.activePlaybackTurnId?.takeUnless { it == action.turnId }
             },
         )
+        is LinkAction.PlaybackProgress -> state.mapTurn(action.turnId) {
+            it.copy(
+                playbackPositionMs = action.positionMs.coerceAtLeast(0L),
+                playbackDurationMs = action.durationMs.coerceAtLeast(0L),
+            )
+        }
         is LinkAction.DeliveryFailed -> state.mapTurn(action.turnId) {
             it.copy(deliveryPhase = DeliveryPhase.FAILED, deliveryError = action.reason)
         }

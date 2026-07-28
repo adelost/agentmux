@@ -134,12 +134,24 @@ internal class LinkCoordinator(
             if (key?.startsWith("turn-playback:") == true) syncPlayback(key)
             if (key == AppContract.KEY_CONNECTION) syncConnection()
         }
+    private val playbackProgressListener = PlaybackProgressBus.Listener { value ->
+        activity.runOnUiThread {
+            dispatch(
+                LinkAction.PlaybackProgress(
+                    value.turnId(),
+                    value.positionMs(),
+                    value.durationMs(),
+                ),
+            )
+        }
+    }
 
     val state = ledger.state
     val acceptedDrafts = mutableAccepted.asSharedFlow()
 
     init {
         preferences.registerOnSharedPreferenceChangeListener(preferenceListener)
+        PlaybackProgressBus.addListener(playbackProgressListener)
         discoverTargets()
         syncConnection()
     }
@@ -372,10 +384,14 @@ internal class LinkCoordinator(
                 publicTargets[id] = ConversationTarget.publicLink(id, it.label, it.online)
             }
             rebuildTargets()
+            val hasPublicFallback = publicTargets.values.any(ConversationTarget::available)
             dispatch(
                 LinkAction.Connection(
                     ConnectionState.CONNECTED,
-                    "Connected via Public Link",
+                    LinkTargetRoutePolicy.connectionDetail(
+                        hasTailnetRoute = tailnetTargets.isNotEmpty(),
+                        hasPublicFallback = hasPublicFallback,
+                    ),
                     System.currentTimeMillis(),
                 ),
             )
@@ -398,11 +414,7 @@ internal class LinkCoordinator(
         val chosen = ids.mapNotNull { id ->
             val internet = publicTargets[id]
             val tailnet = tailnetTargets[id]
-            when {
-                internet?.available() == true -> internet
-                tailnet != null -> tailnet
-                else -> internet
-            }
+            LinkTargetRoutePolicy.choose(tailnet, internet)
         }
         targets.clear()
         chosen.forEach { targets[it.id] = it }
@@ -478,6 +490,7 @@ internal class LinkCoordinator(
 
     override fun close() {
         preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener)
+        PlaybackProgressBus.removeListener(playbackProgressListener)
         discovery.shutdownNow()
         linkAuth.close()
         controller.close()

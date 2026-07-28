@@ -67,10 +67,10 @@ android {
 
 dependencies {
     implementation(project(":link-core"))
-    implementation("io.v1d.circlekit:designkit:0.1.5")
-    implementation("io.v1d.circlekit:ringkit:0.1.5")
-    implementation("io.v1d.circlekit:releasekit:0.1.5")
-    implementation("io.v1d.circlekit:servicekit:0.1.5")
+    implementation("io.v1d.circlekit:designkit:0.1.6")
+    implementation("io.v1d.circlekit:ringkit:0.1.6")
+    implementation("io.v1d.circlekit:releasekit:0.1.6")
+    implementation("io.v1d.circlekit:servicekit:0.1.6")
     implementation("androidx.annotation:annotation:1.9.1")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))

@@ -57,6 +57,32 @@ class LinkReducerTest {
         assertEquals("reply B", state.turns[1].replyText)
     }
 
+    @Test
+    fun `playback progress belongs to its turn and never changes playback phase`() {
+        var state = LinkReducer.reduce(LinkState(), LinkAction.Submit(turn("a", "lsrc:3")))
+        state = LinkReducer.reduce(state, LinkAction.Playback("a", PlaybackPhase.PAUSED))
+        state = LinkReducer.reduce(state, LinkAction.PlaybackProgress("a", 12_500L, 60_000L))
+
+        assertEquals(PlaybackPhase.PAUSED, state.turns.single().playbackPhase)
+        assertEquals(12_500L, state.turns.single().playbackPositionMs)
+        assertEquals(60_000L, state.turns.single().playbackDurationMs)
+    }
+
+    @Test
+    fun `local history retains exactly the newest fifty turns`() {
+        var state = LinkState()
+        repeat(55) { index ->
+            state = LinkReducer.reduce(
+                state,
+                LinkAction.Submit(turn("turn-$index", "lsrc:3")),
+            )
+        }
+
+        assertEquals(LinkHistoryPolicy.MAX_LOCAL_TURNS, state.turns.size)
+        assertEquals("turn-5", state.turns.first().turnId)
+        assertEquals("turn-54", state.turns.last().turnId)
+    }
+
     private fun turn(id: String, target: String) = LinkTurn(
         turnId = id,
         targetId = target,
