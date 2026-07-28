@@ -70,8 +70,8 @@ class WearLinkScreenTest {
         )
 
         assertEquals(listOf("connection", "target", "talk", "latest", "playback"), rows.map { it.key })
-        assertEquals(listOf("Alpha", "Beta"), rows[1].choices)
-        rows[1].onSelect?.invoke("Alpha")
+        assertEquals(listOf("ALPHA", "BETA"), rows[1].choices)
+        rows[1].onSelect?.invoke("ALPHA")
         assertEquals("alpha", selected)
         assertTrue(rows[2].holdToConfirm)
         assertNotNull(rows[2].onTap)

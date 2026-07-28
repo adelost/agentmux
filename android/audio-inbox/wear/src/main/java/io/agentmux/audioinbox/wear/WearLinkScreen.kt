@@ -56,7 +56,7 @@ internal fun wearLinkRows(
     val selected = state.targets.firstOrNull { it.id == state.selectedTargetId }
         ?: state.targets.firstOrNull()
     val availableTargets = state.targets.filter { it.available }
-    val targetChoices = availableTargets.map { it.label.ifBlank { it.id } }
+    val targetChoices = availableTargets.map { it.label.ifBlank { it.id }.uppercase() }
     val latest = state.turns.lastOrNull()
     val selectedAvailable = selected?.available == true
     val rows = mutableListOf(
@@ -77,7 +77,7 @@ internal fun wearLinkRows(
             } else {
                 { label ->
                     availableTargets.firstOrNull {
-                        it.label.ifBlank { it.id } == label
+                        it.label.ifBlank { it.id }.uppercase() == label
                     }?.let { onSelectTarget(it.id) }
                 }
             },
