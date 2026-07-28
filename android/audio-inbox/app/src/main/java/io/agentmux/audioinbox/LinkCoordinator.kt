@@ -134,12 +134,24 @@ internal class LinkCoordinator(
             if (key?.startsWith("turn-playback:") == true) syncPlayback(key)
             if (key == AppContract.KEY_CONNECTION) syncConnection()
         }
+    private val playbackProgressListener = PlaybackProgressBus.Listener { value ->
+        activity.runOnUiThread {
+            dispatch(
+                LinkAction.PlaybackProgress(
+                    value.turnId(),
+                    value.positionMs(),
+                    value.durationMs(),
+                ),
+            )
+        }
+    }
 
     val state = ledger.state
     val acceptedDrafts = mutableAccepted.asSharedFlow()
 
     init {
         preferences.registerOnSharedPreferenceChangeListener(preferenceListener)
+        PlaybackProgressBus.addListener(playbackProgressListener)
         discoverTargets()
         syncConnection()
     }
@@ -478,6 +490,7 @@ internal class LinkCoordinator(
 
     override fun close() {
         preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener)
+        PlaybackProgressBus.removeListener(playbackProgressListener)
         discovery.shutdownNow()
         linkAuth.close()
         controller.close()

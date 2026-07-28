@@ -23,6 +23,7 @@ internal fun WearLinkScreen(
     onReplay: () -> Unit,
 ) {
     val items = remember { MutableStateFlow(emptyList<RowSpec>()) }
+    val settingsItems = remember { MutableStateFlow(emptyList<RowSpec>()) }
     val navigator = remember {
         RingNavigator(
             RingScreen.Rows(
@@ -33,6 +34,7 @@ internal fun WearLinkScreen(
         )
     }
     LaunchedEffect(state, onSelectTarget, onHoldToTalk, onPlay, onStop, onReplay) {
+        settingsItems.value = wearLinkSettingsRows(state)
         items.value = wearLinkRows(
             state = state,
             onSelectTarget = onSelectTarget,
@@ -40,6 +42,15 @@ internal fun WearLinkScreen(
             onPlay = onPlay,
             onStop = onStop,
             onReplay = onReplay,
+            onSettings = {
+                navigator.push(
+                    RingScreen.Rows(
+                        title = "LINK SETTINGS",
+                        items = settingsItems,
+                        showBack = true,
+                    ),
+                )
+            },
         )
     }
     RenderRingScreen(nav = navigator, onExit = {})
@@ -52,6 +63,7 @@ internal fun wearLinkRows(
     onPlay: () -> Unit,
     onStop: () -> Unit,
     onReplay: () -> Unit,
+    onSettings: () -> Unit = {},
 ): List<RowSpec> {
     val selected = state.targets.firstOrNull { it.id == state.selectedTargetId }
         ?: state.targets.firstOrNull()
@@ -61,15 +73,13 @@ internal fun wearLinkRows(
     val selectedAvailable = selected?.available == true
     val rows = mutableListOf(
         RowSpec(
-            key = "connection",
-            title = connectionLabel(state.connection),
-            sub = connectionSub(state),
-            icon = if (state.connection == ConnectionState.CONNECTED) RingIcons.Wifi else RingIcons.Link,
-        ),
-        RowSpec(
             key = "target",
             title = "AGENT",
-            sub = selected?.label?.ifBlank { selected.id }?.uppercase() ?: "NO TARGET",
+            sub = buildString {
+                append(selected?.label?.ifBlank { selected.id }?.uppercase() ?: "NO TARGET")
+                append(" · ")
+                append(connectionRoute(state))
+            },
             icon = RingIcons.Target,
             choices = targetChoices,
             onSelect = if (targetChoices.isEmpty()) {
@@ -98,6 +108,7 @@ internal fun wearLinkRows(
             sub = "NO CONVERSATION YET",
             icon = RingIcons.Speaker,
         )
+        rows += settingsRow(onSettings)
         return rows
     }
     rows += RowSpec(
@@ -135,7 +146,37 @@ internal fun wearLinkRows(
             )
         }
     }
+    rows += settingsRow(onSettings)
     return rows
+}
+
+internal fun wearLinkSettingsRows(state: LinkState): List<RowSpec> = listOf(
+    RowSpec(
+        key = "connection",
+        title = connectionLabel(state.connection),
+        sub = connectionSub(state),
+        icon = if (state.connection == ConnectionState.CONNECTED) RingIcons.Wifi else RingIcons.Link,
+    ),
+    RowSpec(
+        key = "hands-free",
+        title = "HANDS-FREE",
+        sub = if (state.handsFree) "ON · CHANGE ON PHONE" else "OFF · CHANGE ON PHONE",
+        icon = RingIcons.Speaker,
+    ),
+)
+
+private fun settingsRow(onSettings: () -> Unit) = RowSpec(
+    key = "settings",
+    title = "SETTINGS",
+    sub = "CONNECTION & AUDIO",
+    icon = RingIcons.Gear,
+    onTap = onSettings,
+)
+
+private fun connectionRoute(state: LinkState): String = when {
+    state.connection != ConnectionState.CONNECTED -> connectionLabel(state.connection)
+    state.connectionDetail.contains("public", ignoreCase = true) -> "PUBLIC"
+    else -> "PRIVATE"
 }
 
 private fun connectionLabel(state: ConnectionState): String = when (state) {

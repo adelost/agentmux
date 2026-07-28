@@ -5,6 +5,7 @@ import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTurn
+import io.agentmux.linkcore.LinkHistoryPolicy
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.ReplyPhase
 import org.json.JSONArray
@@ -103,7 +104,7 @@ internal class LinkStateRepository(
         return LinkState(
             connection = ConnectionState.OFF,
             selectedTargetId = json.optString("selectedTargetId", "lsrc:3"),
-            turns = turns.takeLast(100),
+            turns = LinkHistoryPolicy.retain(turns),
             handsFree = preferences.getBoolean(AppContract.KEY_ENABLED, false),
             recoveryError = json.optString("recoveryError"),
         )
@@ -155,7 +156,7 @@ internal class LinkStateRepository(
                 AppContract.KEY_CONVERSATION_TARGET,
                 "lsrc:3",
             ) ?: "lsrc:3",
-            turns = turns.takeLast(100),
+            turns = LinkHistoryPolicy.retain(turns),
             handsFree = preferences.getBoolean(AppContract.KEY_ENABLED, false),
         )
     }
