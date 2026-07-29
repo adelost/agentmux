@@ -8,7 +8,7 @@ import android.os.Build
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.LinkAction
-import io.agentmux.linkcore.LinkMailboxEventProjector
+import io.agentmux.linkcore.LinkMailboxSyncResult
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkStateLedger
 import io.agentmux.linkcore.LinkTarget
@@ -40,7 +40,7 @@ internal class LinkCoordinator(
     private val audioActions = LinkAudioActions(activity, targetDirectory::target)
     private val linkSessions = KeystoreSessionStore(preferences)
     private val wearSessions = LinkWearSessionPublisher(activity)
-    private val publicEvents = PublicMailboxFeed(linkSessions, ::applyPublicEvents)
+    private val publicEvents = PublicMailboxFeed(linkSessions, { ledger.value }, ::applyPublicSync)
     private val discovery: ExecutorService = Executors.newFixedThreadPool(2)
     private val pendingDiscovery = AtomicInteger(2)
     private val drafts = ConcurrentHashMap<String, String>()
@@ -409,11 +409,9 @@ internal class LinkCoordinator(
         )
     }
 
-    private fun applyPublicEvents(page: PublicLinkClient.EventsPage) {
-        page.events.forEach { event ->
-            LinkMailboxEventProjector.actions(ledger.value, event.asDomainEvent())
-                .forEach(::dispatch)
-        }
+    private fun applyPublicSync(result: LinkMailboxSyncResult) {
+        targetDirectory.updatePublicAvailability(result.heartbeatStates)
+        result.actions.forEach(::dispatch)
     }
 
     private fun discoveryFinished() {

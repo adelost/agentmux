@@ -69,12 +69,21 @@ export async function handleConnectorRoutes({ request, env, store, url, nowMs })
     if (url.pathname === path && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
       const message = await store.getMessage(String(body.clientMessageId || ""));
-      const connectorId = String(body.connectorId || "");
-      const source = connectorId.startsWith("windows") ? "windows" : "wsl";
-      if (!requireConnector({ env, request, source })) return json(null, 401, { error: "connector-auth-required" });
-      const decision = decide({ message, connectorId });
+      const requestedConnectorId = String(body.connectorId || "");
+      const source = requestedConnectorId.startsWith("windows") ? "windows" : "wsl";
+      const connector = requireConnector({ env, request, source });
+      if (!connector) return json(null, 401, { error: "connector-auth-required" });
+      if (requestedConnectorId !== connector.connectorId ||
+          (message && !connector.targets.includes(message.target))) {
+        return json(null, 403, { error: "connector-scope-required" });
+      }
+      const decision = decide({ message, connectorId: connector.connectorId });
       if (!decision.ok) return json(null, 409, { error: decision.reason });
-      if (!decision.idempotent) await apply({ message, connectorId, body });
+      if (!decision.idempotent) await apply({
+        message,
+        connectorId: connector.connectorId,
+        body,
+      });
       const state = path.endsWith("/ack") ? "delivered" : path.endsWith("/reply") ? "replied" : "failed";
       return json(null, 200, { state, reason: decision.reason });
     }

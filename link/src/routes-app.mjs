@@ -5,6 +5,11 @@ import { sendDecision } from "./mailbox.mjs";
 import { targetsForApp, privateDiscoveryUrlsForApp, requestRateLimited, UUID_RE } from "./config.mjs";
 import { json } from "./util.mjs";
 
+async function deleteUnusedVoice(env, voiceRef, existing) {
+  if (!voiceRef || existing?.voiceRef === voiceRef) return;
+  await env.LINK_VOICE.delete(voiceRef).catch(() => {});
+}
+
 /** WHAT: Routes one app API request. WHY: Keeps session-facing endpoints behind one identity-scoped handler. */
 export async function handleAppRoutes({ request, env, store, url, nowMs }) {
   if (url.pathname === "/api/link/targets" && request.method === "GET") {
@@ -37,25 +42,40 @@ export async function handleAppRoutes({ request, env, store, url, nowMs }) {
     const kind = body.kind === "voice" ? "voice" : "text";
     const maxChars = Number(env.MAX_TEXT_CHARS) || 4000;
     const rawText = String(body.text ?? "").trim();
-    const allowed = targetsForApp(env).some((entry) => entry.id === target);
-    if (!UUID_RE.test(clientMessageId)) return json(null, 400, { error: "clientMessageId-uuid-required" });
-    if (!allowed) return json(null, 403, { error: "unknown-target" });
-    if (rawText.length > maxChars) return json(null, 400, { error: `text-over-${maxChars}-chars` });
-    if (kind === "text" && !rawText) return json(null, 400, { error: "text-required" });
-    const existing = await store.getMessageForApp(clientMessageId, session.identityId);
-    const decision = sendDecision({ existing, clientMessageId, target, kind, body: rawText });
-    if (decision.action === "reject") return json(null, decision.status, { error: decision.reason });
-    let responseStatus = decision.status;
-    let replayed = decision.action === "replay";
     let voiceRef = null;
     if (kind === "voice") {
       voiceRef = String(body.voiceRef || "");
-      if (!/^voice\/[\w-]{8,80}\.m4a$/u.test(voiceRef)) return json(null, 400, { error: "voiceRef-invalid" });
+      if (!/^voice\/[\w-]{8,80}\.m4a$/u.test(voiceRef)) {
+        return json(null, 400, { error: "voiceRef-invalid" });
+      }
       const object = await env.LINK_VOICE.get(voiceRef);
       if (!object || object.customMetadata?.identityId !== session.identityId) {
         return json(null, 404, { error: "voice-not-found" });
       }
     }
+    const allowed = targetsForApp(env).some((entry) => entry.id === target);
+    const existing = await store.getMessageForApp(clientMessageId, session.identityId);
+    const rejectInput = async (status, error) => {
+      await deleteUnusedVoice(env, voiceRef, existing);
+      return json(null, status, { error });
+    };
+    if (!UUID_RE.test(clientMessageId)) {
+      return rejectInput(400, "clientMessageId-uuid-required");
+    }
+    if (!allowed) return rejectInput(403, "unknown-target");
+    if (rawText.length > maxChars) {
+      return rejectInput(400, `text-over-${maxChars}-chars`);
+    }
+    if (kind === "text" && !rawText) return rejectInput(400, "text-required");
+    const decision = sendDecision({
+      existing, clientMessageId, target, kind, body: rawText, voiceRef,
+    });
+    if (decision.action === "reject") {
+      await deleteUnusedVoice(env, voiceRef, existing);
+      return json(null, decision.status, { error: decision.reason });
+    }
+    let responseStatus = decision.status;
+    let replayed = decision.action === "replay";
     if (decision.action === "insert") {
       const inserted = await store.insertMessage({
         clientMessageId,
@@ -69,9 +89,10 @@ export async function handleAppRoutes({ request, env, store, url, nowMs }) {
       if (!inserted) {
         const raced = await store.getMessageForApp(clientMessageId, session.identityId);
         const racedDecision = sendDecision({
-          existing: raced, clientMessageId, target, kind, body: rawText,
+          existing: raced, clientMessageId, target, kind, body: rawText, voiceRef,
         });
         if (racedDecision.action !== "replay") {
+          await deleteUnusedVoice(env, voiceRef, raced);
           return json(null, 409, { error: "idempotency-key-reused" });
         }
         replayed = true;

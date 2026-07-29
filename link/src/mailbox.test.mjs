@@ -113,7 +113,64 @@ feature("store over the real schema: one exact journey and a connector crash", (
         replyBody: "svar",
         attempts: 2,
       });
-      expect(r.events).toHaveLength(1);
+      expect(r.events.map((event) => event.state)).toEqual([
+        "queued",
+        "leased",
+        "queued",
+        "leased",
+        "delivered",
+        "replied",
+      ]);
+    }],
+  });
+
+  component("a cursor that observed queued still receives the later reply transition", {
+    given: ["one freshly queued message and its first event cursor", async () => {
+      const store = createLinkStore(createTestDb());
+      await store.insertMessage({
+        clientMessageId: "m-cursor",
+        identityId: "person-1",
+        target: "lsrc:3",
+        kind: "text",
+        body: "hej",
+        nowMs: NOW,
+      });
+      const queued = await store.eventsAfter({ afterSeq: 0, identityId: "person-1" });
+      return { store, cursor: queued.at(-1).seq };
+    }],
+    when: ["the connector leases, delivers, and replies after that poll", async ({ store, cursor }) => {
+      await store.claimQueued({
+        connectorId: "wsl-1",
+        targets: ["lsrc:3"],
+        leaseMs: 60_000,
+        nowMs: NOW + 1,
+      });
+      await store.markDelivered({
+        clientMessageId: "m-cursor",
+        connectorId: "wsl-1",
+        nowMs: NOW + 2,
+      });
+      await store.markReplied({
+        clientMessageId: "m-cursor",
+        connectorId: "wsl-1",
+        replyBody: "sent svar",
+        nowMs: NOW + 3,
+      });
+      return store.eventsAfter({
+        afterSeq: cursor,
+        identityId: "person-1",
+      });
+    }],
+    then: ["the same message has a new replied event beyond the old cursor", (events) => {
+      expect(events.map((event) => event.state)).toEqual([
+        "leased",
+        "delivered",
+        "replied",
+      ]);
+      expect(events.at(-1)).toMatchObject({
+        clientMessageId: "m-cursor",
+        replyBody: "sent svar",
+      });
     }],
   });
 
@@ -181,6 +238,31 @@ feature("store over the real schema: one exact journey and a connector crash", (
     then: ["fresh is online, ten-minute-old is offline", (rows) => {
       const byTarget = Object.fromEntries(rows.map((row) => [row.target, row.online]));
       expect(byTarget).toEqual({ "lsrc:3": 1, windows: 0 });
+    }],
+  });
+
+  component("one active connector keeps a target online when another row is stale", {
+    given: ["fresh and stale connectors for the same target", async () => {
+      const store = createLinkStore(createTestDb());
+      await store.heartbeat({
+        connectorId: "wsl-fresh",
+        target: "lsrc:3",
+        source: "wsl",
+        nowMs: NOW,
+      });
+      await store.heartbeat({
+        connectorId: "wsl-stale",
+        target: "lsrc:3",
+        source: "wsl",
+        nowMs: NOW - 10 * 60_000,
+      });
+      return store;
+    }],
+    when: ["reading the aggregate target state", (store) =>
+      store.heartbeatStates(90_000, NOW)],
+    then: ["the target appears once and remains online", (rows) => {
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ target: "lsrc:3", online: 1 });
     }],
   });
 });

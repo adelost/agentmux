@@ -120,4 +120,99 @@ feature("voice upload and retention", () => {
       expect(response.status).toBe(404);
     }],
   });
+
+  component("voice replay is bound to its exact object and a rejected replacement is deleted", {
+    given: ["a session and two uploaded voice objects", async () => {
+      const { env } = makeEnv();
+      const store = createLinkStore(env.LINK_DB);
+      await store.insertSession({
+        tokenHash: await sha256Hex("lnk_voice3"),
+        identityId: "p-1",
+        nowMs: NOW,
+        ttlSeconds: 3600,
+      });
+      const upload = async (value) => {
+        const response = await worker.fetch(req("https://link.v1d.io/api/link/voice/upload", {
+          method: "POST",
+          token: "lnk_voice3",
+          body: { audio: btoa(value), filename: "ptt.m4a" },
+        }), env);
+        return (await response.json()).voiceRef;
+      };
+      return { env, firstRef: await upload("VOICE-FIRST-1234"), secondRef: await upload("VOICE-SECOND-1234") };
+    }],
+    when: ["sending first, replaying it, then reusing the id with the other object", async (ctx) => {
+      const clientMessageId = crypto.randomUUID();
+      const send = (voiceRef) => worker.fetch(req("https://link.v1d.io/api/link/send", {
+        method: "POST",
+        token: "lnk_voice3",
+        body: { clientMessageId, target: "lsrc:3", kind: "voice", voiceRef },
+      }), ctx.env);
+      const first = await send(ctx.firstRef);
+      const replay = await send(ctx.firstRef);
+      const conflict = await send(ctx.secondRef);
+      return {
+        ...ctx,
+        first,
+        replay,
+        conflict,
+        firstObject: await ctx.env.LINK_VOICE.get(ctx.firstRef),
+        secondObject: await ctx.env.LINK_VOICE.get(ctx.secondRef),
+      };
+    }],
+    then: ["the replay succeeds, the identity conflict fails, and only its orphan is removed", (result) => {
+      expect(result.first.status).toBe(201);
+      expect(result.replay.status).toBe(200);
+      expect(result.conflict.status).toBe(409);
+      expect(result.firstObject).not.toBeNull();
+      expect(result.secondObject).toBeNull();
+    }],
+  });
+
+  component("a failed terminal message deletes its retained voice object", {
+    given: ["one sent and leased voice message", async () => {
+      const { env } = makeEnv();
+      const store = createLinkStore(env.LINK_DB);
+      await store.insertSession({
+        tokenHash: await sha256Hex("lnk_voice4"),
+        identityId: "p-1",
+        nowMs: NOW,
+        ttlSeconds: 3600,
+      });
+      const upload = await worker.fetch(req("https://link.v1d.io/api/link/voice/upload", {
+        method: "POST",
+        token: "lnk_voice4",
+        body: { audio: btoa("VOICE-FAILED-1234"), filename: "ptt.m4a" },
+      }), env);
+      const { voiceRef } = await upload.json();
+      const clientMessageId = crypto.randomUUID();
+      await worker.fetch(req("https://link.v1d.io/api/link/send", {
+        method: "POST",
+        token: "lnk_voice4",
+        body: { clientMessageId, target: "lsrc:3", kind: "voice", voiceRef },
+      }), env);
+      await worker.fetch(req("https://link.v1d.io/api/link/connector/poll?source=wsl", {
+        method: "POST",
+        token: "wsl-token",
+        body: {},
+      }), env);
+      return { env, voiceRef, clientMessageId };
+    }],
+    when: ["the owning connector fails it", async (ctx) => {
+      const failed = await worker.fetch(req("https://link.v1d.io/api/link/connector/fail", {
+        method: "POST",
+        token: "wsl-token",
+        body: {
+          clientMessageId: ctx.clientMessageId,
+          connectorId: "wsl-1",
+          error: "transcription-failed",
+        },
+      }), ctx.env);
+      return { failed, object: await ctx.env.LINK_VOICE.get(ctx.voiceRef) };
+    }],
+    then: ["failure is terminal and no R2 orphan remains", (result) => {
+      expect(result.failed.status).toBe(200);
+      expect(result.object).toBeNull();
+    }],
+  });
 });

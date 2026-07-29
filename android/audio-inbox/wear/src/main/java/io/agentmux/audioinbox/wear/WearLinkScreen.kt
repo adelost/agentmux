@@ -193,12 +193,6 @@ internal fun wearLinkSettingsRows(state: LinkState): List<RowSpec> = listOf(
         sub = linkConnectionSettingsDetail(state),
         icon = if (state.connection == ConnectionState.CONNECTED) RingIcons.Wifi else RingIcons.Link,
     ),
-    RowSpec(
-        key = "hands-free",
-        title = "HANDS-FREE",
-        sub = if (state.handsFree) "ON · CHANGE ON PHONE" else "OFF · CHANGE ON PHONE",
-        icon = RingIcons.Speaker,
-    ),
 )
 
 private fun settingsRow(onSettings: () -> Unit) = RowSpec(

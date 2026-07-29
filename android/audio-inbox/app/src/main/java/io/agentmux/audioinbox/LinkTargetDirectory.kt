@@ -39,6 +39,13 @@ internal class LinkTargetDirectory {
     }
 
     @Synchronized
+    fun updatePublicAvailability(states: Map<String, Boolean>) {
+        publicTargets.replaceAll { id, target ->
+            ConversationTarget.publicLink(id, target.label, states[id] ?: false)
+        }
+    }
+
+    @Synchronized
     fun clearPublic() {
         publicTargets.clear()
     }

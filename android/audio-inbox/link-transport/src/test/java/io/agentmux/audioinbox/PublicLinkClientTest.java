@@ -79,6 +79,7 @@ public class PublicLinkClientTest {
                 "state": "replied",
                 "body": "",
                 "replyBody": "Klart",
+                "lastError": "",
                 "createdAt": 70,
                 "replyAt": 71
               }],
@@ -93,5 +94,33 @@ public class PublicLinkClientTest {
         assertEquals(71L, page.events.get(0).replyAtMs);
         assertEquals(Boolean.TRUE, page.heartbeats.get("agent:7"));
         assertEquals(Boolean.FALSE, page.heartbeats.get("agent:8"));
+    }
+
+    @Test
+    public void failedEventPreservesTheExactServerError() {
+        PublicLinkClient.EventsPage page = PublicLinkClient.parseEventsPage(
+            """
+            {
+              "events": [{
+                "seq": 8,
+                "clientMessageId": "turn-eight",
+                "target": "agent:8",
+                "state": "failed",
+                "body": "Voice message",
+                "replyBody": "",
+                "lastError": "transcription-failed",
+                "createdAt": 80,
+                "replyAt": 81
+              }],
+              "heartbeats": {}
+            }
+            """
+        );
+
+        assertEquals("transcription-failed", page.events.get(0).lastError);
+        assertEquals(
+            "transcription-failed",
+            page.events.get(0).asDomainEvent().getLastError()
+        );
     }
 }

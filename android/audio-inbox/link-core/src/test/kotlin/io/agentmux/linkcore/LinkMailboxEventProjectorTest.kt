@@ -14,6 +14,7 @@ class LinkMailboxEventProjectorTest {
             state = "replied",
             body = "",
             replyBody = "Svar",
+            lastError = "",
             createdAtMs = 42,
             replyAtMs = 45,
         )
@@ -35,6 +36,7 @@ class LinkMailboxEventProjectorTest {
             "mystery",
             "Hej",
             "",
+            "",
             43,
             0,
         )
@@ -42,6 +44,25 @@ class LinkMailboxEventProjectorTest {
 
         assertEquals(1, actions.size)
         assertTrue(actions.single() is LinkAction.Submit)
+    }
+
+    @Test
+    fun `failed event carries the exact server error`() {
+        val event = LinkMailboxEvent(
+            seq = 3,
+            clientMessageId = "turn-failed",
+            targetId = "agent:1",
+            state = "failed",
+            body = "Voice message",
+            replyBody = "",
+            lastError = "transcription-failed",
+            createdAtMs = 43,
+            replyAtMs = 44,
+        )
+
+        val state = reduce(LinkState(), event)
+
+        assertEquals("transcription-failed", state.turns.single().deliveryError)
     }
 
     private fun reduce(initial: LinkState, event: LinkMailboxEvent): LinkState =

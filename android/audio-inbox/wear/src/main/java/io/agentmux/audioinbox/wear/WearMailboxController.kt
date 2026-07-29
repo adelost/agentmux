@@ -7,7 +7,7 @@ import io.agentmux.audioinbox.PublicLinkClient
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.LinkAction
-import io.agentmux.linkcore.LinkMailboxEventProjector
+import io.agentmux.linkcore.LinkMailboxSync
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkStateLedger
 import io.agentmux.linkcore.LinkTarget
@@ -33,6 +33,7 @@ internal class WearMailboxController(
     private var client: PublicLinkClient? = null
     private var afterSeq = 0L
     private var catalogRefreshAtMs = 0L
+    private var sessionFingerprint = ""
     private val tts = WearTtsPlayer(
         context,
         object : WearTtsPlayer.Listener {
@@ -61,6 +62,14 @@ internal class WearMailboxController(
         recorder.cancel()
         tts.stop()
         val credentials = store.credentials()
+        val nextFingerprint = credentials?.let {
+            "${it.identityId()}:${it.session().takeLast(12)}"
+        }.orEmpty()
+        if (nextFingerprint != sessionFingerprint) {
+            sessionFingerprint = nextFingerprint
+            spokenTurns.clear()
+            dispatch(LinkAction.ResetSession)
+        }
         if (credentials == null) {
             client = null
             dispatch(LinkAction.Targets(emptyList()))
@@ -182,19 +191,21 @@ internal class WearMailboxController(
             }
             val page = mailbox.events(afterSeq)
             if (generation.get() != expectedGeneration) return
-            val newReplies = mutableListOf<PublicLinkClient.LinkEvent>()
-            page.events.forEach { event ->
-                afterSeq = maxOf(afterSeq, event.seq)
-                LinkMailboxEventProjector.actions(ledger.value, event.asDomainEvent())
-                    .forEach(::dispatch)
-                if (event.state.equals("replied", true) && event.replyBody.isNotBlank() &&
+            val result = LinkMailboxSync.apply(
+                initial = ledger.value,
+                afterSeq = afterSeq,
+                events = page.events.map(PublicLinkClient.LinkEvent::asDomainEvent),
+                heartbeatStates = page.heartbeats,
+            )
+            afterSeq = result.afterSeq
+            result.actions.forEach(::dispatch)
+            val newReplies = page.events.filter { event ->
+                event.clientMessageId in result.repliedTurnIds &&
                     spokenTurns.add(event.clientMessageId)
-                ) newReplies += event
             }
             newReplies.lastOrNull {
                 it.replyAtMs >= now - RECOVERED_TTS_TTL_MS
             }?.let { playTurn(it.clientMessageId) }
-            applyHeartbeats(page.heartbeats)
             dispatch(
                 LinkAction.Connection(
                     ConnectionState.CONNECTED,
@@ -216,17 +227,6 @@ internal class WearMailboxController(
                 )
             }
         }
-    }
-
-    private fun applyHeartbeats(heartbeats: Map<String, Boolean>) {
-        if (ledger.value.targets.isEmpty()) return
-        dispatch(
-            LinkAction.Targets(
-                ledger.value.targets.map { target ->
-                    target.copy(available = heartbeats[target.id] ?: false)
-                },
-            ),
-        )
     }
 
     private fun selectedTarget(): LinkTarget? =

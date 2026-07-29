@@ -8,6 +8,7 @@ data class LinkMailboxEvent(
     val state: String,
     val body: String,
     val replyBody: String,
+    val lastError: String,
     val createdAtMs: Long,
     val replyAtMs: Long,
 )
@@ -61,7 +62,9 @@ object LinkMailboxEventProjector {
                 if (existing?.deliveryPhase != DeliveryPhase.FAILED) {
                     actions += LinkAction.DeliveryFailed(
                         event.clientMessageId,
-                        event.replyBody.ifBlank { "Delivery failed" },
+                        event.lastError.ifBlank {
+                            event.replyBody.ifBlank { "Delivery failed" }
+                        },
                     )
                 }
             }

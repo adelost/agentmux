@@ -5,9 +5,12 @@
 const TERMINAL = new Set(["replied", "failed"]);
 
 /** WHAT: Checks one send and classifies it replay, conflict, or new. WHY: Prevents a duplicate submit from ever double-delivering. */
-export function sendDecision({ existing, clientMessageId, target, kind, body }) {
+export function sendDecision({ existing, clientMessageId, target, kind, body, voiceRef = null }) {
   if (existing) {
-    const same = existing.target === target && existing.kind === kind && existing.body === body;
+    const same = existing.target === target &&
+      existing.kind === kind &&
+      existing.body === body &&
+      (existing.voiceRef || null) === voiceRef;
     return same
       ? { action: "replay", status: 200, reason: "idempotent-replay", message: existing }
       : { action: "reject", status: 409, reason: "idempotency-key-reused" };
