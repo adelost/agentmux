@@ -38,3 +38,6 @@ MAX_AUDIO_BYTES = "5242880"
 RATE_SEND_PER_MINUTE = "30"
 RATE_UPLOAD_PER_MINUTE = "10"
 RATE_POLL_PER_MINUTE = "120"
+# Server-owned catalog. Keeping this non-secret value in deployment config
+# prevents a normal Worker upload from silently clearing every valid target.
+LINK_TARGETS = "lsrc:3|L-source 3,lsrc:10|L-source 10,windows|Windows rescue"
