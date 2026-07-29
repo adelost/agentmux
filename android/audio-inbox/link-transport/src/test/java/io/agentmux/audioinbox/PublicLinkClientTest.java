@@ -53,4 +53,17 @@ public class PublicLinkClientTest {
             catalog.privateDiscoveryUrls
         );
     }
+
+    @Test
+    public void sessionCredentialsNormalizeAndPreserveIdentity() {
+        LinkSessionCredentials credentials = new LinkSessionCredentials(
+            "https://link.v1d.io/",
+            " session-one ",
+            " identity-one "
+        );
+
+        assertEquals("https://link.v1d.io", credentials.baseUrl());
+        assertEquals("session-one", credentials.session());
+        assertEquals("identity-one", credentials.identityId());
+    }
 }

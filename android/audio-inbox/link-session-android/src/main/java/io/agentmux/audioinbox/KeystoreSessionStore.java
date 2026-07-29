@@ -16,29 +16,30 @@ import javax.crypto.spec.GCMParameterSpec;
  * WHAT: Stores Link session and pending PKCE state under an Android Keystore key.
  * WHY: Lets authentication survive process recreation without exposing bearer material.
  */
-final class KeystoreSessionStore implements LinkAuthController.StateStore, LinkSessionSource {
+public final class KeystoreSessionStore implements LinkSessionStore {
     private static final String KEY_ALIAS = "agentmux-link-session";
     private static final String PREF_SESSION = "linkSession";
     private static final String PREF_IV = "linkSessionIv";
     private static final String PREF_BASE = "linkBase";
+    private static final String PREF_IDENTITY = "linkIdentity";
     private static final String PREF_PENDING = "linkPendingVerifier";
     private static final String PREF_PENDING_IV = "linkPendingVerifierIv";
 
-    interface Codec {
+    public interface Codec {
         EncryptedValue encrypt(String value) throws Exception;
         String decrypt(EncryptedValue value) throws Exception;
     }
 
-    record EncryptedValue(String ciphertext, String iv) {}
+    public record EncryptedValue(String ciphertext, String iv) {}
 
     private final SharedPreferences preferences;
     private final Codec codec;
 
-    KeystoreSessionStore(SharedPreferences preferences) {
+    public KeystoreSessionStore(SharedPreferences preferences) {
         this(preferences, new AndroidKeystoreCodec());
     }
 
-    KeystoreSessionStore(SharedPreferences preferences, Codec codec) {
+    public KeystoreSessionStore(SharedPreferences preferences, Codec codec) {
         this.preferences = preferences;
         this.codec = codec;
     }
@@ -52,6 +53,11 @@ final class KeystoreSessionStore implements LinkAuthController.StateStore, LinkS
     @Override
     public String session() {
         return readEncrypted(PREF_SESSION, PREF_IV);
+    }
+
+    @Override
+    public String identityId() {
+        return preferences.getString(PREF_IDENTITY, "");
     }
 
     @Override
@@ -74,15 +80,15 @@ final class KeystoreSessionStore implements LinkAuthController.StateStore, LinkS
 
     @Override
     public synchronized boolean saveSessionAndClearPending(
-        String baseUrl,
-        String session,
+        LinkSessionCredentials credentials,
         String expectedVerifier
     ) {
         try {
             if (!expectedVerifier.equals(pendingVerifier())) return false;
-            EncryptedValue value = codec.encrypt(session);
+            EncryptedValue value = codec.encrypt(credentials.session());
             return preferences.edit()
-                .putString(PREF_BASE, baseUrl)
+                .putString(PREF_BASE, credentials.baseUrl())
+                .putString(PREF_IDENTITY, credentials.identityId())
                 .putString(PREF_SESSION, value.ciphertext())
                 .putString(PREF_IV, value.iv())
                 .remove(PREF_PENDING)
@@ -94,13 +100,29 @@ final class KeystoreSessionStore implements LinkAuthController.StateStore, LinkS
     }
 
     @Override
-    public void clear() {
+    public synchronized boolean replaceSession(LinkSessionCredentials credentials) {
+        try {
+            EncryptedValue value = codec.encrypt(credentials.session());
+            return preferences.edit()
+                .putString(PREF_BASE, credentials.baseUrl())
+                .putString(PREF_IDENTITY, credentials.identityId())
+                .putString(PREF_SESSION, value.ciphertext())
+                .putString(PREF_IV, value.iv())
+                .commit();
+        } catch (Exception error) {
+            return false;
+        }
+    }
+
+    @Override
+    public synchronized void clear() {
         preferences.edit()
             .remove(PREF_SESSION)
             .remove(PREF_IV)
+            .remove(PREF_IDENTITY)
             .remove(PREF_PENDING)
             .remove(PREF_PENDING_IV)
-            .apply();
+            .commit();
     }
 
     private String readEncrypted(String valueKey, String ivKey) {

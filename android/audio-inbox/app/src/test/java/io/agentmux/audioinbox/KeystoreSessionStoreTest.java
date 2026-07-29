@@ -32,21 +32,35 @@ public class KeystoreSessionStoreTest {
         assertTrue(store.replacePendingVerifier("verifier-one"));
 
         assertFalse(store.saveSessionAndClearPending(
-            PublicLinkClient.DEFAULT_BASE,
-            "session-one",
+            credentials("session-one", "identity-one"),
             "stale-verifier"
         ));
         assertNull(store.session());
         assertEquals("verifier-one", store.pendingVerifier());
 
         assertTrue(store.saveSessionAndClearPending(
-            PublicLinkClient.DEFAULT_BASE,
-            "session-one",
+            credentials("session-one", "identity-one"),
             "verifier-one"
         ));
         assertEquals("session-one", store.session());
+        assertEquals("identity-one", store.identityId());
         assertNull(store.pendingVerifier());
         assertFalse(preferences.data.containsValue("session-one"));
+    }
+
+    @Test
+    public void handoffSessionRoundTripsAsOneCredentialSet() {
+        TestPreferences preferences = new TestPreferences();
+        TestCodec codec = new TestCodec();
+        KeystoreSessionStore store = new KeystoreSessionStore(preferences, codec);
+
+        assertTrue(store.replaceSession(credentials("session-wear", "identity-wear")));
+
+        LinkSessionCredentials recreated =
+            new KeystoreSessionStore(preferences, codec).credentials();
+        assertEquals("session-wear", recreated.session());
+        assertEquals("identity-wear", recreated.identityId());
+        assertFalse(preferences.data.containsValue("session-wear"));
     }
 
     @Test
@@ -80,5 +94,9 @@ public class KeystoreSessionStoreTest {
             String encoded = value.ciphertext().substring("cipher:".length());
             return new StringBuilder(encoded).reverse().toString();
         }
+    }
+
+    private static LinkSessionCredentials credentials(String session, String identity) {
+        return new LinkSessionCredentials(PublicLinkClient.DEFAULT_BASE, session, identity);
     }
 }

@@ -35,7 +35,8 @@ public class LinkAuthControllerTest {
         assertEquals("verifier-one", client.exchangedVerifier);
         assertEquals("session-one", store.session());
         assertNull(store.pendingVerifier());
-        assertEquals("session-one", listener.login);
+        assertEquals("session-one", listener.login.session());
+        assertEquals("identity-one", listener.login.identityId());
         assertNull(listener.error);
         recreated.close();
     }
@@ -116,8 +117,9 @@ public class LinkAuthControllerTest {
         }
     }
 
-    private static final class FakeStore implements LinkAuthController.StateStore {
+    private static final class FakeStore implements LinkSessionStore {
         String session;
+        String identity;
         String pending;
         boolean failSessionSave;
 
@@ -127,6 +129,10 @@ public class LinkAuthControllerTest {
 
         public String session() {
             return session;
+        }
+
+        public String identityId() {
+            return identity == null ? "" : identity;
         }
 
         public String pendingVerifier() {
@@ -139,18 +145,25 @@ public class LinkAuthControllerTest {
         }
 
         public boolean saveSessionAndClearPending(
-            String baseUrl,
-            String value,
+            LinkSessionCredentials credentials,
             String expectedVerifier
         ) {
             if (failSessionSave || !expectedVerifier.equals(pending)) return false;
-            session = value;
+            session = credentials.session();
+            identity = credentials.identityId();
             pending = null;
+            return true;
+        }
+
+        public boolean replaceSession(LinkSessionCredentials credentials) {
+            session = credentials.session();
+            identity = credentials.identityId();
             return true;
         }
 
         public void clear() {
             session = null;
+            identity = null;
             pending = null;
         }
     }
@@ -176,21 +189,25 @@ public class LinkAuthControllerTest {
             return baseUrl + "/auth/start?challenge=" + challenge;
         }
 
-        public String exchange(String baseUrl, String code, String verifier) {
+        public LinkSessionCredentials exchange(
+            String baseUrl,
+            String code,
+            String verifier
+        ) {
             exchangedVerifier = verifier;
             if (exchangeFailure != null) throw exchangeFailure;
-            return "session-one";
+            return new LinkSessionCredentials(baseUrl, "session-one", "identity-one");
         }
 
         public void revoke(String baseUrl, String session) {}
     }
 
     private static final class RecordingListener implements LinkAuthController.Listener {
-        String login;
+        LinkSessionCredentials login;
         String error;
 
-        public void onLogin(String session) {
-            login = session;
+        public void onLogin(LinkSessionCredentials credentials) {
+            login = credentials;
         }
 
         public void onError(String message) {
