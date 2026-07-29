@@ -13,7 +13,7 @@ import { tmpdir } from "os";
 import { claudeProjectDir } from "./claude-paths.mjs";
 import { codexSessionDirs } from "./codex-profiles.mjs";
 import { getContextFromKimiJsonl } from "./kimi-jsonl-reader.mjs";
-
+import { normalizeClaudeEffort } from "./claude-statusline.mjs";
 /**
  * Read only the last `maxBytes` of a file and return its complete trailing
  * lines (the partial leading line is dropped). Claude session jsonl grows to
@@ -446,8 +446,8 @@ const STATUSLINE_BRIDGE_FRESH_MS = 2 * 60 * 60 * 1000;
  * so /gsd-update can't break this, and a setup without that statusline
  * simply falls through to the older paths.
  *
- * Tokens/model are not in the bridge file; they come from the jsonl
- * reader for display only. Percent is the authoritative field.
+ * Context is authoritative from the bridge. Model falls back to jsonl for
+ * older bridge producers; effort is only reported when Claude observed it.
  * WHAT: Reads Claude's statusline context observation.
  * WHY: Keeps displayed percent authoritative over reconstructed estimates.
  */
@@ -471,13 +471,14 @@ export function getContextPushed(paneDir) {
     model = jsonl?.model ?? null;
     windowTokens = jsonl?.windowTokens ?? null;
   } catch { /* display-only — percent stands alone */ }
-  return { percent: Math.round(percent), tokens, windowTokens, model,
+  return { percent: Math.round(percent), tokens, windowTokens,
+    model: typeof data?.model === "string" && data.model.length <= 160 ? data.model : model,
+    effort: normalizeClaudeEffort(data?.effort),
     observedAt: new Date(Number(data.timestamp) * 1000).toISOString(),
     source: "claude-statusline", confidence: "reported" };
 }
 
 // --- Public dispatcher -------------------------------------------------
-
 /**
  * WHAT: Reads context usage from the selected engine store.
  * WHY: Keeps cross-pane status from mixing unrelated session journals.
@@ -490,7 +491,6 @@ export function getContextPercent(paneDir, dialect) {
 }
 
 // --- Pane-content path -------------------------------------------------
-//
 // The jsonl path above keys off cwd, so multiple claude panes sharing a
 // workspace all resolve to the same "latest session" and report the same
 // number. The pane's own status bar is per-pane correct because each pane

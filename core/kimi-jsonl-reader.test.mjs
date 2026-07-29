@@ -93,6 +93,7 @@ describe("Kimi Wire journal", () => {
       expect(isBusyFromKimiJsonl(fx.cwd, fx.options)).toBe(false);
       expect(getContextFromKimiJsonl(fx.cwd, fx.options)).toMatchObject({
         model: "kimi-code/k3",
+        effort: "max",
         tokens: 100,
         max: 200,
         percent: 50,
