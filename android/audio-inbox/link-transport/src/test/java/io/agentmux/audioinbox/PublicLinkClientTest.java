@@ -66,4 +66,32 @@ public class PublicLinkClientTest {
         assertEquals("session-one", credentials.session());
         assertEquals("identity-one", credentials.identityId());
     }
+
+    @Test
+    public void eventPagePreservesMailboxTruthForBothHosts() {
+        PublicLinkClient.EventsPage page = PublicLinkClient.parseEventsPage(
+            """
+            {
+              "events": [{
+                "seq": 7,
+                "clientMessageId": "turn-seven",
+                "target": "agent:7",
+                "state": "replied",
+                "body": "",
+                "replyBody": "Klart",
+                "createdAt": 70,
+                "replyAt": 71
+              }],
+              "heartbeats": {"agent:7": true, "agent:8": false}
+            }
+            """
+        );
+
+        assertEquals(1, page.events.size());
+        assertEquals("turn-seven", page.events.get(0).clientMessageId);
+        assertEquals(70L, page.events.get(0).createdAtMs);
+        assertEquals(71L, page.events.get(0).replyAtMs);
+        assertEquals(Boolean.TRUE, page.heartbeats.get("agent:7"));
+        assertEquals(Boolean.FALSE, page.heartbeats.get("agent:8"));
+    }
 }

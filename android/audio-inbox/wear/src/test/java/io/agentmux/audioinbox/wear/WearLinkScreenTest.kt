@@ -18,25 +18,25 @@ class WearLinkScreenTest {
         val rows = wearLinkRows(
             state = unavailableState(),
             onSelectTarget = {},
-            onHoldToTalk = {},
+            onOpenCapture = {},
             onPlay = {},
             onStop = {},
             onReplay = {},
         )
 
         assertEquals(listOf("target", "talk", "latest", "settings"), rows.map { it.key })
-        assertEquals("AGENT · PAIRING", rows[0].title)
-        assertEquals("LSRC:3", rows[0].sub)
+        assertEquals("AGENT · SIGN IN", rows[0].title)
+        assertEquals("NO TARGET", rows[0].sub)
         assertTrue(rows[0].choices.isEmpty())
         assertNull(rows[1].onTap)
         assertFalse(rows[1].holdToConfirm)
-        assertEquals("OPEN PHONE TO PAIR", wearLinkSettingsRows(unavailableState())[0].sub)
+        assertEquals("LOG IN ON PHONE", wearLinkSettingsRows(unavailableState())[0].sub)
     }
 
     @Test
     fun connectedStateExposesChoiceHoldAndPlaybackThroughRowData() {
         var selected = ""
-        var talked = false
+        var openedCapture = false
         var replayed = false
         val state = LinkState(
             connection = ConnectionState.CONNECTED,
@@ -63,7 +63,7 @@ class WearLinkScreenTest {
         val rows = wearLinkRows(
             state = state,
             onSelectTarget = { selected = it },
-            onHoldToTalk = { talked = true },
+            onOpenCapture = { openedCapture = true },
             onPlay = {},
             onStop = {},
             onReplay = { replayed = true },
@@ -75,10 +75,10 @@ class WearLinkScreenTest {
         assertEquals(listOf("ALPHA", "BETA"), rows[0].choices)
         rows[0].onSelect?.invoke("ALPHA")
         assertEquals("alpha", selected)
-        assertTrue(rows[1].holdToConfirm)
+        assertFalse(rows[1].holdToConfirm)
         assertNotNull(rows[1].onTap)
         rows[1].onTap?.invoke()
-        assertTrue(talked)
+        assertTrue(openedCapture)
         assertEquals("REPLAY", rows[3].title)
         rows[3].onTap?.invoke()
         assertTrue(replayed)

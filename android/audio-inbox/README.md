@@ -63,9 +63,11 @@ Public Link uses the `/auth/*` and `/api/link/*` routes on `link.v1d.io`.
 - `link-session-android`: the single Android Keystore-backed session store.
 - `app`: Phone hosts, private relay adapter, recording, playback, signed
   updater and the phone-owned Wear Data Layer session producer.
-- `wear`: CircleKit host plus the matching Data Layer consumer. Phase 1 shares
-  the phone's revocable 30-day session; a per-device session can replace that
-  wire contract later without changing the mailbox transport.
+- `wear`: CircleKit host and a direct `link.v1d.io` mailbox client. Phone sends
+  its revocable 30-day session over the Wear Data Layer without exposing
+  pairing UI; Wear then discovers live targets, records push-to-talk, polls
+  replies and plays them with the watch TTS engine. A per-device session can
+  replace that handoff later without changing the mailbox transport.
 - CircleKit `designkit`, `ringkit`, `releasekit` and `servicekit`: shared
   Phone/Wear atoms, release workflow and service presentation.
 

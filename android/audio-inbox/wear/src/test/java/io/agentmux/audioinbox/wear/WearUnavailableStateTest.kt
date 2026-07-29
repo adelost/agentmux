@@ -7,11 +7,12 @@ import org.junit.Test
 
 class WearUnavailableStateTest {
     @Test
-    fun `wear stays truthfully unavailable until public pairing is wired`() {
+    fun `wear asks for phone login without fabricating targets`() {
         val state = unavailableState()
 
         assertEquals(ConnectionState.CONFIGURATION_REQUIRED, state.connection)
-        assertEquals(listOf("lsrc:3", "lsrc:10", "_windows_"), state.targets.map { it.id })
+        assertEquals("LOGGA IN PÅ TELEFONEN", state.connectionDetail)
+        assertEquals(emptyList<String>(), state.targets.map { it.id })
         assertFalse(state.targets.any { it.available })
     }
 }

@@ -1,6 +1,7 @@
 package io.agentmux.audioinbox.wear
 
 import android.content.Context
+import android.content.Intent
 import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
@@ -15,6 +16,9 @@ internal enum class HandoffResult {
     REVOKED,
     REFUSED,
 }
+
+internal const val ACTION_WEAR_SESSION_CHANGED =
+    "io.agentmux.audioinbox.wear.SESSION_CHANGED"
 
 internal class WearSessionHandoffConsumer(
     private val store: LinkSessionStore,
@@ -40,7 +44,12 @@ class WearSessionListenerService : WearableListenerService() {
             if (event.type == DataEvent.TYPE_CHANGED &&
                 event.dataItem.uri.path == LinkWearSessionPayload.PATH
             ) {
-                consumer.accept(DataMapItem.fromDataItem(event.dataItem).dataMap.stringValues())
+                val result = consumer.accept(
+                    DataMapItem.fromDataItem(event.dataItem).dataMap.stringValues(),
+                )
+                if (result != HandoffResult.REFUSED) {
+                    sendBroadcast(Intent(ACTION_WEAR_SESSION_CHANGED).setPackage(packageName))
+                }
             }
         }
     }

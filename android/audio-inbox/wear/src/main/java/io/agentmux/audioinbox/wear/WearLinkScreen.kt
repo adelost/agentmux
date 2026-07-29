@@ -2,7 +2,11 @@ package io.agentmux.audioinbox.wear
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.activity.compose.BackHandler
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.ringkit.ui.RenderRingScreen
 import com.adelost.ringkit.ui.RingNavigator
@@ -20,11 +24,45 @@ import kotlinx.coroutines.flow.MutableStateFlow
 internal fun WearLinkScreen(
     state: LinkState,
     onSelectTarget: (String) -> Unit,
-    onHoldToTalk: () -> Unit,
+    onBeginCapture: () -> Boolean,
+    onReleaseCapture: () -> Unit,
+    onCancelCapture: () -> Unit,
+    recordedBytes: () -> Long,
+    recordedLevel: () -> Float,
     onPlay: () -> Unit,
     onStop: () -> Unit,
     onReplay: () -> Unit,
 ) {
+    var captureOpen by remember { mutableStateOf(false) }
+    var captureStarted by remember { mutableStateOf(false) }
+    BackHandler(enabled = captureOpen) {
+        onCancelCapture()
+        captureStarted = false
+        captureOpen = false
+    }
+    LaunchedEffect(state.capture) {
+        if (state.capture == io.agentmux.linkcore.CapturePhase.LISTENING ||
+            state.capture == io.agentmux.linkcore.CapturePhase.FINALIZING
+        ) {
+            captureStarted = true
+        } else if (captureStarted &&
+            state.capture == io.agentmux.linkcore.CapturePhase.IDLE
+        ) {
+            captureStarted = false
+            captureOpen = false
+        }
+    }
+    if (captureOpen) {
+        WearCaptureScreen(
+            phase = state.capture,
+            recordedBytes = recordedBytes,
+            recordedLevel = recordedLevel,
+            onBegin = onBeginCapture,
+            onRelease = onReleaseCapture,
+            onCancel = onCancelCapture,
+        )
+        return
+    }
     val items = remember { MutableStateFlow(emptyList<RowSpec>()) }
     val settingsItems = remember { MutableStateFlow(emptyList<RowSpec>()) }
     val navigator = remember {
@@ -36,12 +74,12 @@ internal fun WearLinkScreen(
             ),
         )
     }
-    LaunchedEffect(state, onSelectTarget, onHoldToTalk, onPlay, onStop, onReplay) {
+    LaunchedEffect(state, onSelectTarget, onPlay, onStop, onReplay) {
         settingsItems.value = wearLinkSettingsRows(state)
         items.value = wearLinkRows(
             state = state,
             onSelectTarget = onSelectTarget,
-            onHoldToTalk = onHoldToTalk,
+            onOpenCapture = { captureOpen = true },
             onPlay = onPlay,
             onStop = onStop,
             onReplay = onReplay,
@@ -62,7 +100,7 @@ internal fun WearLinkScreen(
 internal fun wearLinkRows(
     state: LinkState,
     onSelectTarget: (String) -> Unit,
-    onHoldToTalk: () -> Unit,
+    onOpenCapture: () -> Unit,
     onPlay: () -> Unit,
     onStop: () -> Unit,
     onReplay: () -> Unit,
@@ -93,11 +131,10 @@ internal fun wearLinkRows(
         ),
         RowSpec(
             key = "talk",
-            title = "HOLD TO TALK",
-            sub = if (selectedAvailable) "RELEASE TO SEND" else "UNAVAILABLE",
+            title = "PUSH TO TALK",
+            sub = if (selectedAvailable) "OPEN RECORDER" else "UNAVAILABLE",
             icon = RingIcons.Record,
-            onTap = onHoldToTalk.takeIf { selectedAvailable },
-            holdToConfirm = selectedAvailable,
+            onTap = onOpenCapture.takeIf { selectedAvailable },
         ),
     )
     if (latest == null) {
