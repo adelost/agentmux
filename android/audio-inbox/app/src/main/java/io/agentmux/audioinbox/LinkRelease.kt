@@ -8,6 +8,7 @@ import com.adelost.releasekit.ReleaseSource
 import com.adelost.servicekit.ServiceId
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
+import java.net.URI
 import java.net.URL
 import java.nio.charset.StandardCharsets
 
@@ -29,9 +30,9 @@ object LinkReleaseSource : ReleaseSource {
     private const val SIGNATURE_BUDGET_BYTES = 4 * 1024
 
     override fun fetchNewest(product: ReleaseProductContract): ReleaseFetchResult = try {
-        val manifest = fetch(ReleaseManifestVerifier.MANIFEST_URL, MANIFEST_BUDGET_BYTES)
+        val manifest = fetch(LinkReleaseProducts.MANIFEST_URL, MANIFEST_BUDGET_BYTES)
         val signature = fetch(
-            ReleaseManifestVerifier.MANIFEST_URL + ".sig",
+            LinkReleaseProducts.MANIFEST_URL + ".sig",
             SIGNATURE_BUDGET_BYTES,
         )
         // Expiry is checked here at the moment metadata is accepted, and again
@@ -105,6 +106,10 @@ internal fun ReleaseCandidate.toSharedCandidate(): SharedReleaseCandidate = Shar
 
 /** Link's release identity. */
 object LinkReleaseProducts {
+    const val MANIFEST_URL =
+        "https://link.v1d.io/releases/agentmux-link/phone/manifest-v1.json"
+    private val manifestUri = URI(MANIFEST_URL)
+
     val PHONE = ReleaseProductContract(
         id = "agentmux-link-phone",
         packageName = "io.agentmux.audioinbox",
@@ -116,8 +121,8 @@ object LinkReleaseProducts {
         // instead — including redirects, which UpdateController re-approves
         // against this same policy rather than following them blindly.
         assetUrlPolicy = HttpsPrefixAssetUrlPolicy(
-            host = "link.v1d.io",
-            pathPrefix = "/releases/agentmux-link/",
+            host = manifestUri.host,
+            pathPrefix = manifestUri.path.substringBeforeLast('/') + "/",
         ),
         // The manifest is authoritative about ordering: versionCode is a
         // monotonic integer, where a version name is only a label.

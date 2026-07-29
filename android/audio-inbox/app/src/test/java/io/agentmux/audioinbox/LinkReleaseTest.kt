@@ -65,9 +65,14 @@ class LinkReleaseTest {
     @Test
     fun `the fence admits Link's release path and refuses everything around it`() {
         val policy = product.assetUrlPolicy
+        assertEquals(
+            LinkReleaseProducts.MANIFEST_URL.substringBeforeLast('/') + "/",
+            "https://link.v1d.io/releases/agentmux-link/phone/",
+        )
         assertTrue(
             policy.allows("https://link.v1d.io/releases/agentmux-link/phone/agentmux-link-v1.4.0.apk"),
         )
+        assertFalse(policy.allows("https://link.v1d.io/releases/agentmux-link/wear/app.apk"))
         // A different product's releases on the same host.
         assertFalse(policy.allows("https://link.v1d.io/releases/other-app/phone/app.apk"))
         // A host that merely starts the same way.
