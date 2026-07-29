@@ -63,12 +63,40 @@ export function releaseUploadPlan({ channel, versionCode }) {
   ];
 }
 
+/** WHAT: Builds one production R2 upload command. WHY: Prevents local Wrangler storage from impersonating the public channel. */
+export function wranglerPutArgs({ step, file }) {
+  return ["wrangler", "r2", "object", "put", step.put, "--remote",
+    "--file", file, "--content-type", step.contentType];
+}
+
+/** WHAT: Reads the public release back after upload. WHY: Keeps publication acknowledgement behind exact public-byte proof. */
+export async function verifyPublishedRelease({ payload, signature, channel, fetchImpl = fetch }) {
+  const root = `https://link.v1d.io/releases/agentmux-link/${channel}`;
+  const [manifestResponse, signatureResponse, apkResponse] = await Promise.all([
+    fetchImpl(`${root}/manifest-v1.json`, { cache: "no-store" }),
+    fetchImpl(`${root}/manifest-v1.json.sig`, { cache: "no-store" }),
+    fetchImpl(payload.apk.url, { cache: "no-store" }),
+  ]);
+  if (!manifestResponse.ok || !signatureResponse.ok || !apkResponse.ok) {
+    throw new Error(`public release verification failed: manifest=${manifestResponse.status} signature=${signatureResponse.status} apk=${apkResponse.status}`);
+  }
+  const publicPayload = await manifestResponse.json();
+  const publicSignature = (await signatureResponse.text()).trim();
+  const publicApk = Buffer.from(await apkResponse.arrayBuffer());
+  const publicSha = createHash("sha256").update(publicApk).digest("hex");
+  if (canonicalJson(publicPayload) !== canonicalJson(payload)) throw new Error("public release manifest mismatch");
+  if (publicSignature !== signature) throw new Error("public release signature mismatch");
+  if (publicApk.length !== payload.apk.sizeBytes || publicSha !== payload.apk.sha256) {
+    throw new Error("public release apk mismatch");
+  }
+}
+
 function argValue(flag) {
   const index = process.argv.indexOf(flag);
   return index >= 0 ? process.argv[index + 1] : null;
 }
 
-function main() {
+async function main() {
   const apkPath = argValue("--apk");
   const versionCode = Number(argValue("--version-code"));
   const versionName = argValue("--version-name");
@@ -101,11 +129,12 @@ function main() {
   const plan = releaseUploadPlan({ channel, versionCode });
   const files = [apkPath, join(outDir, "manifest-v1.json.sig"), join(outDir, "manifest-v1.json")];
   for (const [index, step] of plan.entries()) {
-    execFileSync("npx", ["wrangler", "r2", "object", "put", step.put, "--file", files[index], "--content-type", step.contentType], { stdio: "inherit" });
+    execFileSync("npx", wranglerPutArgs({ step, file: files[index] }), { stdio: "inherit" });
   }
+  await verifyPublishedRelease({ payload, signature, channel });
   console.log(`published ${basename(apkPath)} as ${channel} versionCode ${versionCode}`);
 }
 
-if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) main();
+if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) await main();
 
 export const __keygen = () => generateKeyPairSync("ed25519");
