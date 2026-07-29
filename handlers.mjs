@@ -30,6 +30,7 @@ import { sendPromptVerified, sendSlashVerified } from "./core/delivery.mjs";
 import { MODEL_RECOVERY_STATE_KEY, MODEL_RECOVERY_SETTLE_MS, resumeBrief } from "./core/model-watch.mjs";
 import { queueFleetRestart } from "./core/fleet-restart.mjs";
 import { setPaneModelSelection } from "./core/pane-model-state.mjs";
+import { normalizeClaudeModelName } from "./core/claude-model.mjs";
 
 /**
  * Reconcile every configured agent's live tmux session against the
@@ -629,32 +630,35 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         }
         return;
       }
-      // Loose whitelist: model ids/aliases only — never arbitrary text into
-      // the pane from a typo'd Discord message.
-      if (!/^[a-z0-9._\[\]-]+$/i.test(name)) {
-        await msg.reply(`invalid model name: \`${name}\``);
+      // Model ids/aliases only — never arbitrary text into the pane from a
+      // typo'd Discord message. Spoken forms (`opus 4.8`) normalize to the
+      // wire id first, so the guard rejects garbage and not human syntax.
+      const requested = normalizeClaudeModelName(name);
+      if (!requested.ok) {
+        await msg.reply(`invalid model name: \`${name}\`\n  reason: ${requested.reason}\n  ${requested.hint}`);
         return;
       }
+      const model = requested.model;
       try {
         const result = deliveryBroker
           ? await deliveryBroker.enqueueAndWait({
               agentName: mapping.name,
               pane,
-              text: `/model ${name}`,
+              text: `/model ${model}`,
               kind: "slash",
               source: "discord",
               metadata: { channelId: msg.channelId, messageId: msg.id },
             })
           : await withPaneSendLock(`${mapping.name}:${pane}`, () =>
-              sendSlashVerified(agent, mapping.name, pane, `/model ${name}`));
+              sendSlashVerified(agent, mapping.name, pane, `/model ${model}`));
         if (result.delivered) {
-          setPaneModelSelection(state, mapping.name, pane, name);
+          setPaneModelSelection(state, mapping.name, pane, model);
           const rescued = result.rescues ? ` (palette ate Enter, rescued x${result.rescues})` : "";
-          await msg.reply(`sent \`/model ${name}\`${rescued}; verify on the next turn's footer (or \`//model\`)`);
+          await msg.reply(`sent \`/model ${model}\`${rescued}; verify on the next turn's footer (or \`//model\`)`);
         } else {
           await msg.reply(result.pending
-            ? `queued durably \`/model ${name}\``
-            : `⚠️ \`/model ${name}\` still sits unsubmitted in the composer; check \`/raw\``);
+            ? `queued durably \`/model ${model}\``
+            : `⚠️ \`/model ${model}\` still sits unsubmitted in the composer; check \`/raw\``);
         }
       } catch (err) {
         await msg.reply(`/model failed: ${err.message}`).catch(() => {});
