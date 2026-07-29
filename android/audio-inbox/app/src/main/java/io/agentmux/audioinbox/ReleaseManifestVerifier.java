@@ -19,8 +19,6 @@ import java.util.Set;
 
 /** Fail-closed parser for the detached Ed25519 phone release manifest. */
 final class ReleaseManifestVerifier {
-    static final String MANIFEST_URL =
-        "https://link.v1d.io/releases/agentmux-link/phone/manifest-v1.json";
     private static final String PUBLIC_KEY_DER =
         "MCowBQYDK2VwAyEA248dCHD6+pv8du7D2m7SdaseJukMbICGiygzgD9HUbM=";
     private static final Set<String> PAYLOAD_KEYS = Set.of(
@@ -106,13 +104,10 @@ final class ReleaseManifestVerifier {
     private static boolean safeReleaseUrl(String raw) {
         try {
             URI uri = URI.create(raw);
-            return "https".equalsIgnoreCase(uri.getScheme())
-                && "link.v1d.io".equalsIgnoreCase(uri.getHost())
-                && uri.getUserInfo() == null
-                && (uri.getPort() == -1 || uri.getPort() == 443)
-                && uri.getPath().matches(
-                    "^/releases/agentmux-link/phone/app-[1-9]\\d*\\.apk$"
-                );
+            String path = uri.getPath();
+            String fileName = path.substring(path.lastIndexOf('/') + 1);
+            return LinkReleaseProducts.INSTANCE.getPHONE().getAssetUrlPolicy().allows(raw)
+                && fileName.matches("^app-[1-9]\\d*\\.apk$");
         } catch (Exception ignored) {
             return false;
         }
