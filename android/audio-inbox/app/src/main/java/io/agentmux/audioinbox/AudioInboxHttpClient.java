@@ -28,14 +28,6 @@ final class AudioInboxHttpClient {
         this.consumerId = consumerId;
     }
 
-    static final class PttResult {
-        final String transcript;
-
-        PttResult(String transcript) {
-            this.transcript = transcript;
-        }
-    }
-
     static final class TurnResult {
         final String sent;
         final String replyPrompt;
@@ -48,14 +40,6 @@ final class AudioInboxHttpClient {
             this.transcript = transcript;
             this.answer = answer;
         }
-    }
-
-    PttResult sendPushToTalk(File audioFile, String target, String turnId) throws Exception {
-        ConversationTarget legacy = new ConversationTarget(
-            "legacy", "Agent", ConversationTarget.Kind.AGENT, serverUrl,
-            target, "lsrc", 3
-        );
-        return new PttResult(sendTurn(legacy, null, audioFile, turnId).transcript);
     }
 
     TurnResult sendTurn(
