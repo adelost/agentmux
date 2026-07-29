@@ -10,8 +10,9 @@
 
     <application
         android:allowBackup="false"
-        android:icon="@android:drawable/ic_lock_silent_mode_off"
+        android:icon="@mipmap/ic_launcher"
         android:label="Agentmux Link"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="true">

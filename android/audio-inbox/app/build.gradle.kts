@@ -16,8 +16,8 @@ android {
         applicationId = "io.agentmux.audioinbox"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
@@ -67,10 +67,10 @@ android {
 
 dependencies {
     implementation(project(":link-core"))
-    implementation("io.v1d.circlekit:designkit:0.2.0")
-    implementation("io.v1d.circlekit:ringkit:0.2.0")
-    implementation("io.v1d.circlekit:releasekit:0.2.0")
-    implementation("io.v1d.circlekit:servicekit:0.2.0")
+    implementation("io.v1d.circlekit:designkit:0.2.1")
+    implementation("io.v1d.circlekit:ringkit:0.2.1")
+    implementation("io.v1d.circlekit:releasekit:0.2.1")
+    implementation("io.v1d.circlekit:servicekit:0.2.1")
     implementation("androidx.annotation:annotation:1.9.1")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
