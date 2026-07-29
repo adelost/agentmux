@@ -5,6 +5,24 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
 
+internal enum class TtsEngineState {
+    INITIALIZING,
+    READY,
+    FAILED,
+}
+
+internal enum class TtsRequestDecision {
+    QUEUE,
+    SPEAK,
+    FAIL,
+}
+
+internal fun ttsRequestDecision(state: TtsEngineState): TtsRequestDecision = when (state) {
+    TtsEngineState.INITIALIZING -> TtsRequestDecision.QUEUE
+    TtsEngineState.READY -> TtsRequestDecision.SPEAK
+    TtsEngineState.FAILED -> TtsRequestDecision.FAIL
+}
+
 internal class WearTtsPlayer(
     context: Context,
     private val listener: Listener,
@@ -15,14 +33,18 @@ internal class WearTtsPlayer(
         fun onFailed(turnId: String, detail: String)
     }
 
-    private var ready = false
+    private var state = TtsEngineState.INITIALIZING
     private var pending: Pair<String, String>? = null
     private lateinit var engine: TextToSpeech
 
     init {
         engine = TextToSpeech(context.applicationContext) { status ->
-            ready = status == TextToSpeech.SUCCESS
-            if (!ready) {
+            state = if (status == TextToSpeech.SUCCESS) {
+                TtsEngineState.READY
+            } else {
+                TtsEngineState.FAILED
+            }
+            if (state == TtsEngineState.FAILED) {
                 pending?.first?.let { listener.onFailed(it, "TTS unavailable") }
                 pending = null
             } else {
@@ -48,11 +70,11 @@ internal class WearTtsPlayer(
 
     fun play(turnId: String, text: String) {
         if (text.isBlank()) return
-        if (!ready) {
-            pending = turnId to text
-            return
+        when (ttsRequestDecision(state)) {
+            TtsRequestDecision.QUEUE -> pending = turnId to text
+            TtsRequestDecision.SPEAK -> speakNow(turnId, text)
+            TtsRequestDecision.FAIL -> listener.onFailed(turnId, "TTS unavailable")
         }
-        speakNow(turnId, text)
     }
 
     fun stop() {
