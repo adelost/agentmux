@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public class PublicConversationTransportTest {
     @Test
-    public void windowsVoiceUsesTheWireTargetAndKeepsTheVisibleResponder()
+    public void serverTargetIdentityIsPreservedOnTheWireAndInTheVisibleResponder()
         throws Exception {
         AtomicReference<String> wireTarget = new AtomicReference<>();
         PublicConversationTransport.Client client = new PublicConversationTransport.Client() {
@@ -29,7 +29,7 @@ public class PublicConversationTransportTest {
         };
         PublicConversationTransport transport = new PublicConversationTransport(client);
         ConversationTarget target =
-            ConversationTarget.publicLink("_windows_", "Windows rescue", true);
+            ConversationTarget.publicLink("manager", "Rescue manager", true);
         File audio = Files.createTempFile("public-link-voice", ".m4a").toFile();
         Files.write(audio.toPath(), new byte[] { 1, 2, 3 });
 
@@ -39,9 +39,9 @@ public class PublicConversationTransportTest {
             transport.awaitReply("turn-1", target, accepted);
 
         assertTrue(transport.supports(target));
-        assertEquals("windows", wireTarget.get());
+        assertEquals("manager", wireTarget.get());
         assertEquals("Voice message", accepted.visibleText());
-        assertEquals("_windows_", reply.respondingTarget());
+        assertEquals("manager", reply.respondingTarget());
         assertEquals("Windows svar", reply.text());
         audio.delete();
     }

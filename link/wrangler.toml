@@ -11,6 +11,7 @@ routes = [
 # Public mailbox for Agentmux Link Internet V1 (docs/link-internet-v1.md).
 # Secrets (never in source): V1D_AUTH_CLIENT_SECRET, V1D_AUTH_STATE_SECRET,
 # CONNECTOR_TOKEN_WSL, CONNECTOR_TOKEN_WINDOWS.
+# Optional deployment config: LINK_TARGETS and LINK_PRIVATE_DISCOVERY_URLS.
 
 [[d1_databases]]
 binding = "LINK_DB"

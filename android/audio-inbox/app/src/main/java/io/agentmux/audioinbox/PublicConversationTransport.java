@@ -49,9 +49,8 @@ final class PublicConversationTransport implements ConversationTransport {
         File audio
     ) throws Exception {
         Client client = client();
-        String wireTarget = "_windows_".equals(target.id) ? "windows" : target.id;
-        if (audio == null) client.send(turnId, wireTarget, text);
-        else client.sendVoice(turnId, wireTarget, audio);
+        if (audio == null) client.send(turnId, target.id, text);
+        else client.sendVoice(turnId, target.id, audio);
         String visible = audio == null ? text : "Voice message";
         return new Accepted(visible, turnId, "");
     }

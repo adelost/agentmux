@@ -103,7 +103,7 @@ internal class LinkStateRepository(
         }
         return LinkState(
             connection = ConnectionState.OFF,
-            selectedTargetId = json.optString("selectedTargetId", "lsrc:3"),
+            selectedTargetId = json.optString("selectedTargetId"),
             turns = LinkHistoryPolicy.retain(turns),
             handsFree = preferences.getBoolean(AppContract.KEY_ENABLED, false),
             recoveryError = json.optString("recoveryError"),
@@ -154,8 +154,8 @@ internal class LinkStateRepository(
         return LinkState(
             selectedTargetId = preferences.getString(
                 AppContract.KEY_CONVERSATION_TARGET,
-                "lsrc:3",
-            ) ?: "lsrc:3",
+                "",
+            ).orEmpty(),
             turns = LinkHistoryPolicy.retain(turns),
             handsFree = preferences.getBoolean(AppContract.KEY_ENABLED, false),
         )
