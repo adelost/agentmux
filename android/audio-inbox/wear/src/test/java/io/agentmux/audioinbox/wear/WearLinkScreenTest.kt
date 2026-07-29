@@ -117,4 +117,41 @@ class WearLinkScreenTest {
         assertEquals("AGENT · PUBLIC", rows[0].title)
         assertEquals("TRANSCRIPTION-FAILED", rows[2].sub)
     }
+
+    @Test
+    fun unavailableTtsIsVisibleAndRetryable() {
+        var retried = false
+        val state = LinkState(
+            connection = ConnectionState.CONNECTED,
+            connectionDetail = "PUBLIC LINK",
+            targets = listOf(LinkTarget("alpha", "Alpha")),
+            selectedTargetId = "alpha",
+            turns = listOf(
+                LinkTurn(
+                    turnId = "turn-replied",
+                    targetId = "alpha",
+                    targetLabel = "Alpha",
+                    userText = "Status",
+                    replyText = "Ready",
+                    createdAtMs = 1L,
+                    playbackPhase = PlaybackPhase.FAILED,
+                    playbackError = "TTS unavailable",
+                ),
+            ),
+        )
+
+        val rows = wearLinkRows(
+            state = state,
+            onSelectTarget = {},
+            onOpenCapture = {},
+            onPlay = {},
+            onStop = {},
+            onReplay = { retried = true },
+        )
+
+        assertEquals("RETRY PLAYBACK", rows[3].title)
+        assertEquals("TTS UNAVAILABLE", rows[3].sub)
+        rows[3].onTap?.invoke()
+        assertTrue(retried)
+    }
 }
