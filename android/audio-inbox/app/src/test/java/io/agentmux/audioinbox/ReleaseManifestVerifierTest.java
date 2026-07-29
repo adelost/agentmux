@@ -23,6 +23,35 @@ import java.util.Base64;
 
 public class ReleaseManifestVerifierTest {
     @Test
+    public void nodePublisherAndPinnedAndroidVerifierAgree() throws Exception {
+        String manifest = """
+            {"schemaVersion":1,"packageName":"io.agentmux.audioinbox","versionCode":3,"versionName":"1.1.1","apk":{"url":"https://link.v1d.io/releases/agentmux-link/phone/app-3.apk","sizeBytes":8998355,"sha256":"4f2dcf192bc98f4dfd5fcfd20907d475e1c85f6d5feb4b00d5676137d03bf0d3"},"changelog":"Polished CircleKit UI, signed automatic updates, safer playback, and improved launcher identity","createdAt":"2026-07-29T10:00:19.571Z","expiresAt":"2026-08-12T10:00:19.571Z"}
+            """;
+        String signature =
+            "JJRXRoO/P9OWeotObksldA20BWdonYwtW1mlsG+l2YraIvwQIugtlNi/x3L1COCMPGGALQKeTp5I+0JuHfC3BA==";
+
+        ReleaseCandidate candidate = ReleaseManifestVerifier.verify(
+            manifest,
+            signature,
+            Instant.parse("2026-07-29T10:05:00Z").toEpochMilli()
+        );
+
+        assertEquals(3, candidate.versionCode());
+    }
+
+    @Test
+    public void canonicalUrlsUseThePublisherSlashForm() throws Exception {
+        JSONObject payload = new JSONObject()
+            .put("url", "https://link.v1d.io/releases/app.apk")
+            .put("label", "quote\"slash\\line\n");
+
+        assertEquals(
+            "{\"label\":\"quote\\\"slash\\\\line\\n\",\"url\":\"https:\\/\\/link.v1d.io\\/releases\\/app.apk\"}",
+            CanonicalJson.encode(payload)
+        );
+    }
+
+    @Test
     public void validCanonicalManifestPassesAndTamperOrStaleFailsClosed() throws Exception {
         EdDSANamedCurveSpec spec = EdDSANamedCurveTable.getByName("Ed25519");
         KeyPairGenerator generator = new KeyPairGenerator();

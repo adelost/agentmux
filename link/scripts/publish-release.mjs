@@ -14,6 +14,7 @@ export function canonicalJson(value) {
       .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
       .join(",")}}`;
   }
+  if (typeof value === "string") return JSON.stringify(value).replaceAll("/", "\\/");
   return JSON.stringify(value);
 }
 
