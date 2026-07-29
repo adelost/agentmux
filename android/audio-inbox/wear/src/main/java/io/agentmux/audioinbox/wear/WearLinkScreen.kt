@@ -171,10 +171,16 @@ internal fun wearLinkRows(
                 icon = RingIcons.Stop,
                 onTap = onStop,
             )
+            PlaybackPhase.FAILED -> RowSpec(
+                key = "playback",
+                title = "RETRY PLAYBACK",
+                sub = latest.playbackError.ifBlank { "PLAYBACK FAILED" }.uppercase().take(54),
+                icon = RingIcons.Refresh,
+                onTap = onReplay,
+            )
             PlaybackPhase.STOPPED,
             PlaybackPhase.PLAYED,
             PlaybackPhase.SKIPPED,
-            PlaybackPhase.FAILED,
             -> RowSpec(
                 key = "playback",
                 title = "REPLAY",
