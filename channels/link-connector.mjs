@@ -96,14 +96,22 @@ export async function runLinkConnectorCycle({
           ? message.attempts : 1;
         journal.messages[id] = { stage: "claimed", at: Date.now(), target: message.target, prompt };
         writeJournal(statePath, journal);
+        // The stable key is the dedup: the durable queue atomically returns
+        // the existing job for a reused key. Only a proven cancelled job
+        // earns a rotated key; a live or unproven job keeps its single pane
+        // write and can never duplicate on reclaim.
+        const stableKey = `link:${id}`;
         let job;
         try {
-          job = deliveryBroker.enqueue({
-            agentName,
-            pane,
-            text: prompt,
-            idempotencyKey: `link:${id}:attempt:${leaseAttempt}`,
-          });
+          job = deliveryBroker.enqueue({ agentName, pane, text: prompt, idempotencyKey: stableKey });
+          if (job?.status === "cancelled") {
+            job = deliveryBroker.enqueue({
+              agentName,
+              pane,
+              text: prompt,
+              idempotencyKey: `${stableKey}:attempt:${leaseAttempt}`,
+            });
+          }
         } catch (error) {
           log(`link-connector ${id} not-delivered:enqueue-refused ${String(error?.message || error)}`);
           continue;
