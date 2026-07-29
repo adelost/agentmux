@@ -56,6 +56,7 @@ public final class PublicLinkClient implements PublicConversationTransport.Clien
         public final String state;
         public final String body;
         public final String replyBody;
+        public final String lastError;
         public final long createdAtMs;
         public final long replyAtMs;
 
@@ -66,6 +67,7 @@ public final class PublicLinkClient implements PublicConversationTransport.Clien
             String state,
             String body,
             String replyBody,
+            String lastError,
             long createdAtMs,
             long replyAtMs
         ) {
@@ -75,6 +77,7 @@ public final class PublicLinkClient implements PublicConversationTransport.Clien
             this.state = state;
             this.body = body;
             this.replyBody = replyBody;
+            this.lastError = lastError;
             this.createdAtMs = createdAtMs;
             this.replyAtMs = replyAtMs;
         }
@@ -87,6 +90,7 @@ public final class PublicLinkClient implements PublicConversationTransport.Clien
                 state,
                 body,
                 replyBody,
+                lastError,
                 createdAtMs,
                 replyAtMs
             );
@@ -247,6 +251,7 @@ public final class PublicLinkClient implements PublicConversationTransport.Clien
                 row.optString("state"),
                 row.optString("body"),
                 row.optString("replyBody"),
+                row.optString("lastError"),
                 row.optLong("createdAt"),
                 row.optLong("replyAt")
             ));
@@ -281,7 +286,8 @@ public final class PublicLinkClient implements PublicConversationTransport.Clien
                 if (!clientMessageId.equals(event.clientMessageId)) continue;
                 if ("replied".equals(event.state)) return event.replyBody;
                 if ("failed".equals(event.state)) {
-                    throw new IllegalStateException("delivery failed: " + event.replyBody);
+                    String detail = event.lastError.isBlank() ? event.replyBody : event.lastError;
+                    throw new IllegalStateException("delivery failed: " + detail);
                 }
             }
             Thread.sleep(2_000);

@@ -134,6 +134,18 @@ feature("mailbox journey over the real router", () => {
       const windowsScope = await worker.fetch(req("https://link.v1d.io/api/link/connector/poll?source=wsl", {
         method: "POST", token: "wsl-token", body: {},
       }), env);
+      const spoofedConnector = await worker.fetch(req("https://link.v1d.io/api/link/connector/ack", {
+        method: "POST", token: "wsl-token", body: { clientMessageId: id, connectorId: "wsl-2" },
+      }), env);
+      const windowsId = uuid();
+      await worker.fetch(req("https://link.v1d.io/api/link/send", {
+        method: "POST", ...auth,
+        body: { clientMessageId: windowsId, target: "windows", kind: "text", text: "foreign" },
+      }), env);
+      const foreignTarget = await worker.fetch(req("https://link.v1d.io/api/link/connector/fail", {
+        method: "POST", token: "wsl-token",
+        body: { clientMessageId: windowsId, connectorId: "wsl-1", error: "not mine" },
+      }), env);
       const ack = await worker.fetch(req("https://link.v1d.io/api/link/connector/ack", {
         method: "POST", token: "wsl-token", body: { clientMessageId: id, connectorId: "wsl-1" },
       }), env);
@@ -143,7 +155,7 @@ feature("mailbox journey over the real router", () => {
       const events = await worker.fetch(req("https://link.v1d.io/api/link/events?after=0", auth), env);
       return {
         send, replay, conflict, badTarget, noSession,
-        badConnector, windowsScope, ack, reply,
+        badConnector, windowsScope, spoofedConnector, foreignTarget, ack, reply,
         events: await events.json(),
       };
     }],
@@ -156,6 +168,8 @@ feature("mailbox journey over the real router", () => {
       expect(r.noSession.status).toBe(401);
       expect(r.badConnector.status).toBe(401);
       expect(r.windowsScope.status).toBe(200);
+      expect(r.spoofedConnector.status).toBe(403);
+      expect(r.foreignTarget.status).toBe(403);
       const claimed = (await r.windowsScope.json()).messages;
       expect(claimed).toHaveLength(1);
       expect(claimed[0]).toMatchObject({ clientMessageId: claimed[0].clientMessageId, target: "lsrc:3", state: "leased" });

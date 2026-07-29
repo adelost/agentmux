@@ -82,16 +82,16 @@ export function createLinkStore(db) {
     eventsAfter: ({ afterSeq = 0, limit = 50, identityId = null }) => {
       if (identityId) {
         return all(
-          `SELECT rowid AS seq, clientMessageId, target, kind, state, body, replyBody,
+          `SELECT seq, clientMessageId, target, kind, state, body, replyBody,
                   createdAt, deliveredAt, replyAt, lastError
-           FROM messages WHERE rowid > ? AND identityId = ? ORDER BY rowid LIMIT ?`,
+           FROM message_events WHERE seq > ? AND identityId = ? ORDER BY seq LIMIT ?`,
           afterSeq, identityId, limit,
         );
       }
       return all(
-        `SELECT rowid AS seq, clientMessageId, target, kind, state, body, replyBody,
+        `SELECT seq, clientMessageId, target, kind, state, body, replyBody,
                 createdAt, deliveredAt, replyAt, lastError
-         FROM messages WHERE rowid > ? ORDER BY rowid LIMIT ?`,
+         FROM message_events WHERE seq > ? ORDER BY seq LIMIT ?`,
         afterSeq, limit,
       );
     },
@@ -105,8 +105,9 @@ export function createLinkStore(db) {
 
     heartbeatStates: (staleMs, nowMs) =>
       all(
-        `SELECT target, source, seenAt, (CASE WHEN seenAt >= ? THEN 1 ELSE 0 END) AS online
-         FROM heartbeats`,
+        `SELECT target, MAX(seenAt) AS seenAt,
+                MAX(CASE WHEN seenAt >= ? THEN 1 ELSE 0 END) AS online
+         FROM heartbeats GROUP BY target`,
         nowMs - staleMs,
       ),
 
