@@ -3618,6 +3618,7 @@ const FLAG_SPECS = {
   dream: {
     since: "string", workspace: "string", dry: "boolean", q: "boolean", quiet: "boolean",
     retry: "boolean", "defer-sentinel": "boolean", deferSentinel: "boolean",
+    help: "boolean", h: "boolean",
   },
   janitor: { dry: "boolean", days: "number" },
   trim: { dry: "boolean", "max-files": "number", "min-stable-minutes": "number" },
