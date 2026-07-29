@@ -65,7 +65,7 @@ internal fun LinkPhoneScreen(
         ((LocalContext.current as? Activity)?.intent?.getStringExtra("qa_page") == "settings")
     val qaPlayback = BuildConfig.DEBUG &&
         ((LocalContext.current as? Activity)?.intent?.getStringExtra("qa_playback") == "active")
-    var qaTargetId by remember { mutableStateOf("skyvw:3") }
+    var qaTargetId by remember { mutableStateOf("demo:1") }
     var qaCapture by remember { mutableStateOf(CapturePhase.IDLE) }
     var qaCaptureStartedAtMs by remember { mutableLongStateOf(0L) }
     val presentedState = if (qaActive) {

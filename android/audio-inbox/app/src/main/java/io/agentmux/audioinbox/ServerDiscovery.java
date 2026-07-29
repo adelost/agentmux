@@ -13,14 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class ServerDiscovery {
-    static final List<String> WSL_CANDIDATES = List.of(
-        "https://abyss-wsl.tail13cb13.ts.net:8443",
-        "http://agentmux.local:8080"
-    );
-    static final List<String> WINDOWS_CANDIDATES = List.of(
-        "http://abyss-win.tail13cb13.ts.net:8081",
-        "http://100.115.225.24:8081"
-    );
+    private static final String LOCAL_DISCOVERY_URL = "http://agentmux.local:8080";
 
     static final class Configuration {
         final String serverUrl;
@@ -43,10 +36,11 @@ final class ServerDiscovery {
 
     private ServerDiscovery() {}
 
-    static String displayLabelFor(String id, String serverLabel) {
-        if ("lsrc:3".equals(id)) return "L-source 3";
-        if ("lsrc:10".equals(id)) return "L-source 10";
-        return serverLabel == null || serverLabel.isEmpty() ? id : serverLabel;
+    static List<String> bootstrapCandidates(String savedServerUrl) {
+        List<String> candidates = new ArrayList<>();
+        if (isAllowedServer(savedServerUrl)) candidates.add(savedServerUrl.replaceAll("/+$", ""));
+        if (!candidates.contains(LOCAL_DISCOVERY_URL)) candidates.add(LOCAL_DISCOVERY_URL);
+        return List.copyOf(candidates);
     }
 
     static Configuration discover(List<String> candidates) {
@@ -70,9 +64,19 @@ final class ServerDiscovery {
             String serverId = json.optString("serverId", "").trim();
             if (serverId.isEmpty()) return null;
             if ("agentmux-windows-manager-audio".equals(service) && schema == 1) {
+                JSONObject declared = json.optJSONArray("targets") == null
+                    ? null
+                    : json.optJSONArray("targets").optJSONObject(0);
+                String id = declared == null
+                    ? serverId
+                    : declared.optString("id", serverId).trim();
+                String label = declared == null
+                    ? id
+                    : declared.optString("label", id).trim();
+                if (!id.matches("^[A-Za-z0-9_.:@-]{1,80}$")) return null;
                 ConversationTarget manager = new ConversationTarget(
-                    "_windows_",
-                    "Windows rescue",
+                    id,
+                    label.isEmpty() ? id : label,
                     ConversationTarget.Kind.WINDOWS,
                     serverUrl.replaceAll("/+$", ""),
                     null,
@@ -98,9 +102,8 @@ final class ServerDiscovery {
                     int pane = row.optInt("pane", -1);
                     if (!id.matches("^[A-Za-z0-9_.:@-]{1,80}$") || agent.isEmpty()
                         || pane < 0 || !audioTarget.matches("^\\d{10,24}$")) continue;
-                    String displayLabel = displayLabelFor(id, label);
                     targets.add(new ConversationTarget(
-                        id, displayLabel, ConversationTarget.Kind.AGENT,
+                        id, label.isEmpty() ? id : label, ConversationTarget.Kind.AGENT,
                         normalized, audioTarget, agent, pane
                     ));
                 }

@@ -106,7 +106,7 @@ data class LinkState(
     val connectionDetail: String = "Off",
     val connectionObservedAtMs: Long = 0,
     val targets: List<LinkTarget> = emptyList(),
-    val selectedTargetId: String = "lsrc:3",
+    val selectedTargetId: String = "",
     val capture: CapturePhase = CapturePhase.IDLE,
     val captureStartedAtMs: Long = 0,
     val turns: List<LinkTurn> = emptyList(),

@@ -36,6 +36,16 @@ final class PublicLinkClient implements PublicConversationTransport.Client {
         }
     }
 
+    static final class TargetCatalog {
+        final List<LinkTarget> targets;
+        final List<String> privateDiscoveryUrls;
+
+        TargetCatalog(List<LinkTarget> targets, List<String> privateDiscoveryUrls) {
+            this.targets = targets;
+            this.privateDiscoveryUrls = privateDiscoveryUrls;
+        }
+    }
+
     static final class LinkEvent {
         final long seq;
         final String clientMessageId;
@@ -106,8 +116,12 @@ final class PublicLinkClient implements PublicConversationTransport.Client {
         return session;
     }
 
-    List<LinkTarget> targets() throws Exception {
-        JSONObject response = new JSONObject(request("GET", baseUrl + "/api/link/targets", session, null));
+    TargetCatalog targetCatalog() throws Exception {
+        return parseTargetCatalog(request("GET", baseUrl + "/api/link/targets", session, null));
+    }
+
+    static TargetCatalog parseTargetCatalog(String raw) throws Exception {
+        JSONObject response = new JSONObject(raw);
         JSONArray rows = response.optJSONArray("targets");
         List<LinkTarget> targets = new ArrayList<>();
         for (int index = 0; rows != null && index < rows.length(); index++) {
@@ -119,7 +133,17 @@ final class PublicLinkClient implements PublicConversationTransport.Client {
                 row.optBoolean("online", false)
             ));
         }
-        return targets;
+        JSONArray discoveryRows = response.optJSONArray("privateDiscoveryUrls");
+        List<String> privateDiscoveryUrls = new ArrayList<>();
+        for (int index = 0; discoveryRows != null && index < discoveryRows.length(); index++) {
+            String candidate = discoveryRows.optString(index, "").trim().replaceAll("/+$", "");
+            if (ServerDiscovery.isAllowedServer(candidate)
+                && !privateDiscoveryUrls.contains(candidate)
+                && privateDiscoveryUrls.size() < 8) {
+                privateDiscoveryUrls.add(candidate);
+            }
+        }
+        return new TargetCatalog(List.copyOf(targets), List.copyOf(privateDiscoveryUrls));
     }
 
     @Override

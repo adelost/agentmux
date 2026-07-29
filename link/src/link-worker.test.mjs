@@ -20,6 +20,9 @@ function makeEnv(overrides = {}) {
     V1D_AUTH_CALLBACK_URL: "https://link.v1d.io/auth/callback",
     CONNECTOR_TOKEN_WSL: "wsl-token",
     CONNECTOR_TOKEN_WINDOWS: "win-token",
+    LINK_TARGETS: "lsrc:3|L-source 3,lsrc:10|L-source 10,windows|Windows rescue",
+    LINK_PRIVATE_DISCOVERY_URLS:
+      "https://relay.example.ts.net:8443,http://agentmux.local:8080",
     CONNECTOR_TARGETS_WSL: "lsrc:3,lsrc:10",
     CONNECTOR_LEASE_SECONDS: "60",
     SESSION_TTL_SECONDS: "2592000",
@@ -195,17 +198,23 @@ feature("auth exchange leg", () => {
       }), env);
       const session = firstBody.session;
       const targets = await worker.fetch(req("https://link.v1d.io/api/link/targets", { token: session }), env);
+      const targetsBody = await targets.clone().json();
       await worker.fetch(req("https://link.v1d.io/auth/revoke", { method: "POST", token: session }), env);
       const afterRevoke = await worker.fetch(req("https://link.v1d.io/api/link/targets", { token: session }), env);
-      return { first, firstBody, second, wrongVerifier, targets, afterRevoke };
+      return { first, firstBody, second, wrongVerifier, targets, targetsBody, afterRevoke };
     }],
     then: ["exactly one session, dead after use and after revoke", async (r) => {
       expect(r.first.status).toBe(200);
       expect(r.firstBody.session).toMatch(/^lnk_/u);
       expect(r.firstBody.targets.map((t) => t.id)).toEqual(["lsrc:3", "lsrc:10", "windows"]);
+      expect(r.firstBody.privateDiscoveryUrls).toEqual([
+        "https://relay.example.ts.net:8443",
+        "http://agentmux.local:8080",
+      ]);
       expect(r.second.status).toBe(403);
       expect(r.wrongVerifier.status).toBe(403);
       expect(r.targets.status).toBe(200);
+      expect(r.targetsBody.privateDiscoveryUrls).toEqual(r.firstBody.privateDiscoveryUrls);
       expect(r.afterRevoke.status).toBe(401);
     }],
   });

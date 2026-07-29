@@ -32,6 +32,7 @@ function makeEnv() {
     V1D_AUTH_CALLBACK_URL: "x",
     CONNECTOR_TOKEN_WSL: "wsl-token",
     CONNECTOR_TOKEN_WINDOWS: "win-token",
+    LINK_TARGETS: "lsrc:3|L-source 3,lsrc:10|L-source 10,windows|Windows rescue",
     CONNECTOR_TARGETS_WSL: "lsrc:3,lsrc:10",
     CONNECTOR_LEASE_SECONDS: "60",
     SESSION_TTL_SECONDS: "3600",

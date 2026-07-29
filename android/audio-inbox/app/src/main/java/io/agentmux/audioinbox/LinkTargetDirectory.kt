@@ -1,7 +1,5 @@
 package io.agentmux.audioinbox
 
-import java.util.concurrent.ConcurrentHashMap
-
 /**
  * Owns the discovered routes for each logical Link target.
  *
@@ -9,30 +7,38 @@ import java.util.concurrent.ConcurrentHashMap
  * visible directory can always apply [LinkTargetRoutePolicy] consistently.
  */
 internal class LinkTargetDirectory {
-    private val targets = ConcurrentHashMap<String, ConversationTarget>()
-    private val tailnetTargets = ConcurrentHashMap<String, ConversationTarget>()
-    private val publicTargets = ConcurrentHashMap<String, ConversationTarget>()
+    private val targets = linkedMapOf<String, ConversationTarget>()
+    private val tailnetTargets = linkedMapOf<String, ConversationTarget>()
+    private val publicTargets = linkedMapOf<String, ConversationTarget>()
 
+    @Synchronized
     fun target(id: String?): ConversationTarget? = targets[id]
 
+    @Synchronized
     fun contains(id: String): Boolean = targets.containsKey(id)
 
+    @Synchronized
     fun isEmpty(): Boolean = targets.isEmpty()
 
+    @Synchronized
     fun hasTailnetRoutes(): Boolean = tailnetTargets.isNotEmpty()
 
+    @Synchronized
     fun hasAvailablePublicRoute(): Boolean =
         publicTargets.values.any(ConversationTarget::available)
 
+    @Synchronized
     fun addTailnet(routes: Iterable<ConversationTarget>) {
         routes.forEach { tailnetTargets[it.id] = it }
     }
 
+    @Synchronized
     fun replacePublic(routes: Iterable<ConversationTarget>) {
         publicTargets.clear()
         routes.forEach { publicTargets[it.id] = it }
     }
 
+    @Synchronized
     fun clearPublic() {
         publicTargets.clear()
     }
@@ -40,20 +46,12 @@ internal class LinkTargetDirectory {
     @Synchronized
     fun rebuild(): List<ConversationTarget> {
         val chosen = (tailnetTargets.keys + publicTargets.keys)
-            .toSortedSet()
+            .distinct()
             .mapNotNull { id ->
                 LinkTargetRoutePolicy.choose(tailnetTargets[id], publicTargets[id])
             }
-            .sortedBy { favoriteOrder(it.id) }
         targets.clear()
         chosen.forEach { targets[it.id] = it }
         return chosen
-    }
-
-    private fun favoriteOrder(id: String): Int = when (id) {
-        "lsrc:3" -> 0
-        "lsrc:10" -> 1
-        "_windows_" -> 2
-        else -> 3
     }
 }

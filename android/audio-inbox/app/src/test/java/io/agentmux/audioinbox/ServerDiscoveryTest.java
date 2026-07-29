@@ -11,7 +11,7 @@ public class ServerDiscoveryTest {
     @Test
     public void acceptsVersionedAgentmuxConfigurationOnTailnet() {
         ServerDiscovery.Configuration result = ServerDiscovery.parse(
-            "https://abyss-wsl.tail13cb13.ts.net:8443/",
+            "https://relay.example.ts.net:8443/",
             "{\"service\":\"agentmux-audio-inbox\",\"schemaVersion\":2,"
                 + "\"serverId\":\"abyss-wsl\",\"target\":\"1502949109491961917\","
                 + "\"targets\":[{\"id\":\"lsrc:3\",\"label\":\"L-source 3\","
@@ -19,7 +19,7 @@ public class ServerDiscoveryTest {
                 + "\"audioTarget\":\"1502949109491961917\"}]}"
         );
 
-        assertEquals("https://abyss-wsl.tail13cb13.ts.net:8443", result.serverUrl);
+        assertEquals("https://relay.example.ts.net:8443", result.serverUrl);
         assertEquals("abyss-wsl", result.serverId);
         assertEquals("1502949109491961917", result.target);
         assertEquals(1, result.conversationTargets.size());
@@ -33,12 +33,14 @@ public class ServerDiscoveryTest {
         ServerDiscovery.Configuration result = ServerDiscovery.parse(
             "http://100.115.225.24:8081",
             "{\"service\":\"agentmux-windows-manager-audio\",\"schemaVersion\":1,"
-                + "\"serverId\":\"abyss-windows\"}"
+                + "\"serverId\":\"windows-host\","
+                + "\"targets\":[{\"id\":\"manager\",\"label\":\"Rescue manager\"}]}"
         );
 
         assertEquals(1, result.conversationTargets.size());
         assertEquals(ConversationTarget.Kind.WINDOWS, result.conversationTargets.get(0).kind);
-        assertEquals("_windows_", result.conversationTargets.get(0).id);
+        assertEquals("manager", result.conversationTargets.get(0).id);
+        assertEquals("Rescue manager", result.conversationTargets.get(0).label);
     }
 
     @Test
@@ -68,7 +70,7 @@ public class ServerDiscoveryTest {
     @Test
     public void parsesMultipleAgentTargetsWithFriendlyLabels() {
         ServerDiscovery.Configuration result = ServerDiscovery.parse(
-            "https://abyss-wsl.tail13cb13.ts.net:8443",
+            "https://relay.example.ts.net:8443",
             "{\"service\":\"agentmux-audio-inbox\",\"schemaVersion\":2,"
                 + "\"serverId\":\"abyss-wsl\",\"target\":\"1502949109491961917\","
                 + "\"targets\":["
@@ -77,10 +79,25 @@ public class ServerDiscoveryTest {
                 + "]}"
         );
         assertEquals(2, result.conversationTargets.size());
-        assertEquals("L-source 3", result.conversationTargets.get(0).label);
-        assertEquals("L-source 10", result.conversationTargets.get(1).label);
+        assertEquals("broker", result.conversationTargets.get(0).label);
+        assertEquals("worker", result.conversationTargets.get(1).label);
         assertEquals(10, result.conversationTargets.get(1).pane);
         assertEquals("1528238682744557598", result.conversationTargets.get(1).audioTarget);
         assertEquals("lsrc", result.conversationTargets.get(1).agent);
+    }
+
+    @Test
+    public void bootstrapUsesTheLastGoodServerThenTheGenericLocalAlias() {
+        assertEquals(
+            java.util.List.of(
+                "https://relay.example.ts.net:8443",
+                "http://agentmux.local:8080"
+            ),
+            ServerDiscovery.bootstrapCandidates("https://relay.example.ts.net:8443/")
+        );
+        assertEquals(
+            java.util.List.of("http://agentmux.local:8080"),
+            ServerDiscovery.bootstrapCandidates("http://example.com:8080")
+        );
     }
 }

@@ -20,16 +20,25 @@ function configured(env) {
     && HEX_SECRET_RE.test(String(env.V1D_AUTH_STATE_SECRET || ""))
     && String(env.CONNECTOR_TOKEN_WSL || "").length >= 32
     && String(env.CONNECTOR_TOKEN_WINDOWS || "").length >= 32
+    && targetsForApp(env).length > 0
   );
 }
 
 function targetsForApp(env) {
-  return String(env.LINK_TARGETS || "lsrc:3|L-source 3,lsrc:10|L-source 10,windows|Windows rescue")
+  return String(env.LINK_TARGETS || "")
     .split(",").map((entry) => entry.trim()).filter(Boolean)
     .map((entry) => {
       const [id, label] = entry.split("|");
       return { id, label: label || id, kind: id === "windows" ? "windows" : "agent" };
     });
+}
+
+function privateDiscoveryUrlsForApp(env) {
+  return String(env.LINK_PRIVATE_DISCOVERY_URLS || "")
+    .split(",")
+    .map((entry) => entry.trim().replace(/\/+$/u, ""))
+    .filter((entry, index, rows) => entry && rows.indexOf(entry) === index)
+    .slice(0, 8);
 }
 
 async function requestRateLimited({ store, request, subject, scope, bucket, max }) {
@@ -131,7 +140,12 @@ export default {
         nowMs,
         ttlSeconds: Number(env.SESSION_TTL_SECONDS) || 2_592_000,
       });
-      return json(null, 200, { session, identityId: taken.identityId, targets: targetsForApp(env) });
+      return json(null, 200, {
+        session,
+        identityId: taken.identityId,
+        targets: targetsForApp(env),
+        privateDiscoveryUrls: privateDiscoveryUrlsForApp(env),
+      });
     }
 
     if (url.pathname === "/auth/revoke" && request.method === "POST") {
@@ -149,6 +163,7 @@ export default {
       const online = Object.fromEntries(beats.map((row) => [row.target, row.online === 1]));
       return json(null, 200, {
         targets: targetsForApp(env).map((target) => ({ ...target, online: Boolean(online[target.id]) })),
+        privateDiscoveryUrls: privateDiscoveryUrlsForApp(env),
       });
     }
 

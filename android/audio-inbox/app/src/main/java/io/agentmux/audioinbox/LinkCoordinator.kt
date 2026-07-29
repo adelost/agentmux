@@ -38,7 +38,7 @@ internal class LinkCoordinator(
     private val audioActions = LinkAudioActions(activity, targetDirectory::target)
     private val linkSessions = KeystoreSessionStore(preferences)
     private val discovery: ExecutorService = Executors.newFixedThreadPool(2)
-    private val pendingDiscovery = AtomicInteger(3)
+    private val pendingDiscovery = AtomicInteger(2)
     private val drafts = ConcurrentHashMap<String, String>()
     private val voiceTurns = ConcurrentHashMap.newKeySet<String>()
     @Volatile private var recoveredPlaybackApplied = false
@@ -296,16 +296,11 @@ internal class LinkCoordinator(
         )
         discovery.execute {
             try {
-                applyDiscovery(ServerDiscovery.discover(ServerDiscovery.WSL_CANDIDATES), save = true)
-            } finally {
-                discoveryFinished()
-            }
-        }
-        discovery.execute {
-            try {
                 applyDiscovery(
-                    ServerDiscovery.discover(ServerDiscovery.WINDOWS_CANDIDATES),
-                    save = false,
+                    ServerDiscovery.discover(
+                        ServerDiscovery.bootstrapCandidates(savedServer),
+                    ),
+                    save = true,
                 )
             } finally {
                 discoveryFinished()
@@ -359,11 +354,18 @@ internal class LinkCoordinator(
             return
         }
         try {
-            val rows = PublicLinkClient(linkSessions.baseUrl(), session).targets()
-            targetDirectory.replacePublic(rows.map {
-                val id = if (it.id == "windows") "_windows_" else it.id
-                ConversationTarget.publicLink(id, it.label, it.online)
+            val catalog = PublicLinkClient(linkSessions.baseUrl(), session).targetCatalog()
+            targetDirectory.replacePublic(catalog.targets.map {
+                ConversationTarget.publicLink(it.id, it.label, it.online)
             })
+            catalog.privateDiscoveryUrls.forEach { candidate ->
+                ServerDiscovery.discover(listOf(candidate))?.let { found ->
+                    applyDiscovery(
+                        found,
+                        save = found.target.matches(Regex("^\\d{10,24}$")),
+                    )
+                }
+            }
             publishTargets()
             dispatch(
                 LinkAction.Connection(
