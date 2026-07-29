@@ -32,7 +32,6 @@ function blockedRetryMs(job, { drafted = false } = {}) {
   const exponent = Math.min(5, Math.max(0, Number(job.attempts || 1) - 1));
   return Math.min(MAX_BLOCKED_RETRY_MS, base * (2 ** exponent));
 }
-
 function queueEvent(job, state, extra = {}) {
   try {
     appendEvent({
@@ -48,7 +47,6 @@ function queueEvent(job, state, extra = {}) {
     });
   } catch { /* diagnostics must never stop the queue */ }
 }
-
 /** WHAT: Builds the single-writer delivery broker over the durable queue. WHY: Keeps every pane write serialized, receipt-gated, and restart-safe. */
 export function createDeliveryBroker({
   agent,
@@ -143,7 +141,7 @@ export function createDeliveryBroker({
   const { maybeNotifyBlocked, notifyTerminal } = createDeliveryNotices({
     queue, now, notify, log, blockedRetryMs, resolveNotificationChannel,
   });
-  const { stalePreSubmit, terminalizeNotSent } = createDeliveryNotSent({
+  const { stalePreSubmit, terminalizeNotSent, yieldSupersededMaintenance } = createDeliveryNotSent({
     queue, agent, now, notify, log, queueEvent, exactEcho, acknowledge, notifyTerminal,
   });
   const gateIngestProbe = createIngestProbeGate({
@@ -642,6 +640,8 @@ export function createDeliveryBroker({
         // longer release later writes or create out-of-order receipts.
         const head = queue.next(agentName, pane);
         if (!head) return;
+        const yielded = await yieldSupersededMaintenance(head);
+        if (yielded && TERMINAL_DELIVERY_STATES.has(yielded.status)) continue;
         await answerBacklogBehindProbe(agentName, pane, head);
         if (Number(head.nextAttemptAt || 0) > now()) return;
         const outcome = await processJob(head);

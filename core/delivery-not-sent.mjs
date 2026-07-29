@@ -41,6 +41,38 @@ export function createDeliveryNotSent({
     return isTargetProvenNotIngesting(queue.list(job.agentName, job.pane));
   }
 
+  /**
+   * Auto-compact is maintenance, not user work. If it has not reached a
+   * submit fence and owns no visible draft, a real follower may supersede it
+   * immediately. Exact/foreign/hidden drafts retain FIFO and go through the
+   * ordinary safety path; this policy never clears or submits pane text.
+   */
+  async function yieldSupersededMaintenance(job) {
+    if (job.source !== "auto-compact" || !PRE_SUBMIT_STATES.has(job.status)) return null;
+    const hasRealFollower = queue.list(job.agentName, job.pane).some((candidate) =>
+      candidate.id !== job.id
+      && !TERMINAL_DELIVERY_STATES.has(candidate.status)
+      && candidate.source !== "auto-compact");
+    if (!hasRealFollower) return null;
+
+    let safeToCancel = !job.draftOwned
+      && (job.status === "pending" || job.status === "delivering");
+    if (!safeToCancel && job.status === "pasting"
+        && typeof agent.promptTransportState === "function") {
+      const transport = await agent.promptTransportState(
+        job.agentName, job.pane, job.text,
+      ).catch(() => null);
+      safeToCancel = transport?.state === "empty-idle";
+    }
+    if (!safeToCancel) return null;
+
+    queue.requestCancellation(job.id, {
+      requestedBy: "delivery-broker",
+      reason: "pre-submit auto-compact yielded to queued user work",
+    });
+    return terminalizeNotSent(queue.read(job.agentName, job.pane, job.id) || job);
+  }
+
   /** WHAT: Classifies why one job qualifies as NOT SENT. WHY: Separates parked timeouts from terminal cancels. */
   function notSentCause(job) {
     if (!PRE_SUBMIT_STATES.has(job.status)) return null;
@@ -174,5 +206,6 @@ export function createDeliveryNotSent({
   return {
     stalePreSubmit,
     terminalizeNotSent,
+    yieldSupersededMaintenance,
   };
 }

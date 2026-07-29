@@ -142,6 +142,24 @@ feature("classifyCodexSlashEcho: hard pre-submit echo gate", () => {
     }],
   });
 
+  component("Codex slash-menu help is chrome, not duplicated command text", {
+    given: ["the exact live /compact frame that blocked skydive:3 and :6", () => ({
+      prompt: "/compact",
+      snapshot: [
+        "› /compact",
+        "",
+        "  /compact  summarize conversation to prevent hitting",
+        "            the context limit",
+        "",
+        "  gpt-5.6-sol xhigh · ~/repo",
+      ].join("\n"),
+    })],
+    when: ["classifying the visible command", (ctx) =>
+      classifyCodexSlashEcho({ prompt: ctx.prompt, snapshot: ctx.snapshot })],
+    then: ["the exact input passes despite its selected palette row", (echo) =>
+      expect(echo).toEqual({ blocked: false, kind: "match" })],
+  });
+
   unit("only short slash commands are guarded", {
     given: ["commands, paths, prose, and an overlong payload", () => [
       "/compact", "/model fable", "/home/adelost/file.txt", "vanlig prompt", `/${"a".repeat(200)}`,

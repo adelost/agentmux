@@ -30,6 +30,66 @@ function acceptingAgent() {
 }
 
 feature("single-writer delivery broker", () => {
+  component("pre-submit auto-compact yields immediately to real queued work", {
+    given: ["an untouched maintenance head followed by a Discord prompt", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir });
+      const compact = queue.enqueue({
+        agentName: "skydive", pane: 3, text: "/compact",
+        source: "auto-compact", orderKey: "001",
+      });
+      queue.update(compact, { status: "pending", nextAttemptAt: Date.now() + 60_000 });
+      const user = queue.enqueue({
+        agentName: "skydive", pane: 3, text: "answer me",
+        source: "discord", orderKey: "002",
+      });
+      const agent = acceptingAgent();
+      const broker = createDeliveryBroker({ agent, queue, notify: async () => {} });
+      return { rootDir, queue, compact, user, agent, broker };
+    }],
+    when: ["the target drains once", ({ broker }) => broker.kickTarget("skydive", 3)],
+    then: ["maintenance is honestly not-sent and the user prompt is delivered", (_, ctx) => {
+      expect(ctx.queue.read("skydive", 3, ctx.compact.id)).toMatchObject({
+        status: "cancelled",
+        cancelRequestStatus: "completed",
+      });
+      expect(ctx.queue.read("skydive", 3, ctx.user.id).status).toBe("acknowledged");
+      expect(ctx.agent.sends.map((send) => send.text)).toEqual(["answer me"]);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("an absent provisional auto-compact also yields without duplicate paste", {
+    given: ["a crash fence with an empty idle composer and a real follower", () => {
+      const rootDir = tempRoot();
+      const queue = createDeliveryQueue({ rootDir });
+      const compact = queue.enqueue({
+        agentName: "skydive", pane: 7, text: "/compact",
+        source: "auto-compact", orderKey: "001",
+      });
+      queue.update(compact, {
+        status: "pasting", draftOwned: true, attempts: 1, nextAttemptAt: 0,
+      });
+      const user = queue.enqueue({
+        agentName: "skydive", pane: 7, text: "real report",
+        source: "cli", orderKey: "002",
+      });
+      const agent = acceptingAgent();
+      agent.promptTransportState = async () => ({
+        state: "empty-idle", busy: false, dialect: "codex",
+      });
+      const broker = createDeliveryBroker({ agent, queue, notify: async () => {} });
+      return { rootDir, queue, compact, user, agent, broker };
+    }],
+    when: ["the target drains", ({ broker }) => broker.kickTarget("skydive", 7)],
+    then: ["only the real follower reaches tmux", (_, ctx) => {
+      expect(ctx.queue.read("skydive", 7, ctx.compact.id).status).toBe("cancelled");
+      expect(ctx.queue.read("skydive", 7, ctx.user.id).status).toBe("acknowledged");
+      expect(ctx.agent.sends.map((send) => send.text)).toEqual(["real report"]);
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("a legacy job for an invalid target is terminalized without retrying tmux", {
     given: ["one pre-validation ghost job", () => {
       const rootDir = tempRoot();

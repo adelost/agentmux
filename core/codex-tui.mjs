@@ -7,6 +7,7 @@
 // another path still behaves safely.
 
 import { promptRequiresAtomicPaste } from "./prompt-paste.mjs";
+import { isCodexCommandPaletteRow } from "./codex-composer-chrome.mjs";
 
 // Narrow tmux captures occasionally merge the cursor cell into the gap
 // (observed live as "editoprevious"). Keep the full Codex-owned sentence
@@ -45,7 +46,6 @@ const EMPTY_COMPOSER_HINTS = new Set([
   "How many files have been modified?",
   "Will this algorithm scale well?",
 ]);
-
 // Codex paints its cursor by temporarily replacing cells with box/block
 // glyphs. A tmux capture can freeze those intermediate cells (observed live
 // as "Impr─ve d─cumentation i──@filename"). Treat that as an empty rotating
@@ -74,7 +74,6 @@ export function isCodexTranscriptView(text) {
   return /\/\s*T\s*R\s*A\s*N\s*S\s*C\s*R\s*I\s*P\s*T\s*\//i.test(value)
     && /q to quit/i.test(value);
 }
-
 // Codex's backtrack / "edit a previous message" overlay is a SECOND full-screen
 // pager that hides the › composer. Modern Codex maps Escape at an idle composer
 // to this view, so the delivery layer's own "reveal the composer" Escape can
@@ -94,7 +93,6 @@ export function isCodexBacktrackPager(text) {
 export function isCodexFullscreenPager(text) {
   return isCodexTranscriptView(text) || isCodexBacktrackPager(text);
 }
-
 /** Codex explicitly advertises a safe queue composer while a turn is busy. */
 export function codexOffersQueueComposer(text) {
   return CODEX_QUEUE_HINT.test(String(text || ""));
@@ -113,6 +111,7 @@ export function codexComposerHasPasteBlock(text) {
   return typeof composer === "string" && CODEX_PASTE_BLOCK.test(composer);
 }
 
+/** WHAT: Extracts only editable Codex composer text. WHY: Keeps TUI chrome from being submitted as user input. */
 export function codexComposerText(text) {
   if (isCodexTranscriptView(text)) return null;
   const lines = String(text || "").split("\n");
@@ -140,6 +139,7 @@ export function codexComposerText(text) {
   for (let i = index + 1; i < lines.length; i++) {
     const candidate = lines[i];
     if (!candidate.trim()) continue;
+    if (isCodexCommandPaletteRow(parts[0], candidate)) break;
     // Queue-mode chrome is painted directly beneath a busy draft. It is not
     // composer content; retaining it made the durable broker classify its own
     // exact recovered draft as a different human edit.
