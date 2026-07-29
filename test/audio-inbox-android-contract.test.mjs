@@ -41,23 +41,26 @@ feature("Android audio inbox source contract", () => {
       expect(notifier).toContain("session.getPlatformToken()");
       expect(notifier).toContain('"Stop"');
       expect(notifier).toContain("AppContract.ACTION_STOP_AUDIO");
-      const timeline = read(
-        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/Timeline.kt",
+      const phone = read(
+        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/LinkPhoneScreen.kt",
       );
-      expect(timeline).toContain('PlaybackPhase.PAUSED -> {');
-      expect(timeline).toContain('SmallAction("Play", onResume)');
+      expect(phone).toContain("PlaybackPhase.PAUSED -> RingPlaybackState.PAUSED");
+      expect(phone).toContain("PlaybackPhase.PAUSED -> onResume");
+      expect(phone).toContain("RingPlaybackControls(");
       expect(read("channels/voice.mjs")).toContain('path === "/api/audio/send"');
       const ptt = read(
         "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/PttDisc.kt",
       );
-      expect(ptt).toContain("awaitEachGesture");
-      expect(ptt).toContain(".pointerInput(enabled)");
-      expect(ptt).not.toContain(".pointerInput(enabled, phase)");
+      expect(ptt).toContain("RingPressLifecycle(");
+      expect(ptt).toContain("RingPressLifecycleSpec(");
+      expect(ptt).toContain("onBegin = onBegin");
+      expect(ptt).toContain("onRelease = onRelease");
+      expect(ptt).toContain("onCancel = onCancel");
       expect(discovery).toContain('"agentmux-windows-manager-audio"');
       expect(discovery).toContain('"http://abyss-win.tail13cb13.ts.net:8081"');
       expect(read(
-        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/LinkPhoneScreen.kt",
-      )).toContain('"Read direct replies aloud"');
+        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/LinkPhoneSettings.kt",
+      )).toContain('"READ REPLIES"');
       expect(read(
         "android/audio-inbox/link-core/src/main/kotlin/io/agentmux/linkcore/LinkState.kt",
       )).toContain('selectedTargetId: String = "lsrc:3"');

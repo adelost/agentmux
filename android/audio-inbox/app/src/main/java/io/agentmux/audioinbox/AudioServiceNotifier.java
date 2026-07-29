@@ -54,7 +54,7 @@ final class AudioServiceNotifier {
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
         );
         Notification.Builder builder = new Notification.Builder(service, CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
+            .setSmallIcon(R.drawable.ic_link_notification)
             .setContentTitle("Agentmux Link")
             .setContentIntent(open)
             .setOngoing(true);
