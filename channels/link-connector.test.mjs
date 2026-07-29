@@ -82,7 +82,7 @@ feature("link connector cycle", () => {
       expect(r.ctx.calls.enqueued[0]).toMatchObject({
         agentName: "lsrc",
         pane: 3,
-        idempotencyKey: "link:m-1:attempt:1",
+        idempotencyKey: "link:m-1",
       });
       expect(r.ctx.calls.enqueued[0].text).toBe("[amux-link-turn:m-1]\nhej från telefonen");
       const acks = r.ctx.calls.posts.filter((p) => p.url.includes("/ack"));
@@ -182,6 +182,68 @@ feature("waitForLinkReply", () => {
     }],
     then: ["reply-timeout, never a fabricated answer", (result) => {
       expect(result).toEqual({ error: "reply-timeout" });
+    }],
+  });
+});
+
+feature("redelivery dedup: a live broker job is never duplicated on reclaim", () => {
+  const reclaimHarness = ({ existingJob }) => {
+    const root = mkdtempSync(join(tmpdir(), "amux-link-dedup-"));
+    const statePath = join(root, "connector.json");
+    const enqueued = [];
+    const posts = [];
+    const fetchImpl = async (url, init) => {
+      posts.push({ url, body: JSON.parse(init.body || "{}") });
+      if (url.includes("/connector/poll")) {
+        return { ok: true, json: async () => ({ messages: [{ clientMessageId: "m-dup", target: "lsrc:3", kind: "text", body: "hej", attempts: 2 }] }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    };
+    return {
+      root,
+      cleanup: () => rmSync(root, { recursive: true, force: true }),
+      enqueued,
+      posts,
+      deps: {
+        fetchImpl,
+        linkBase: "https://link.v1d.io",
+        token: "wsl-token",
+        targets: ["lsrc:3"],
+        agent: { hasResponseForPrompt: () => true, getResponseStreamWithRaw: async () => ({ items: [{ type: "text", content: "svar" }] }) },
+        deliveryBroker: {
+          enqueue: (job) => {
+            enqueued.push(job.idempotencyKey);
+            return existingJob;
+          },
+        },
+        deliveryQueue: { read: () => existingJob },
+        statePath,
+        receiptTimeoutMs: 1,
+        sleep: async () => {},
+      },
+    };
+  };
+
+  component("a pending first-attempt job keeps its key and its single pane write", {
+    given: ["an existing pending job and a reclaimed message", () => reclaimHarness({ existingJob: { id: "job-1", status: "acknowledged", acknowledgedAt: 1 } })],
+    when: ["running the cycle", async (ctx) => runLinkConnectorCycle(ctx.deps)],
+    then: ["the stable key is reused and no rotated key is created", (result, ctx) => {
+      expect(result.handled).toBe(1);
+      expect(ctx.enqueued).toEqual(["link:m-dup"]);
+      expect(ctx.posts.filter((p) => p.url.includes("/ack"))).toHaveLength(1);
+      ctx.cleanup();
+    }],
+  });
+
+  component("only a cancelled job earns the rotated attempt key", {
+    given: ["an existing cancelled job and a reclaimed message", () => reclaimHarness({ existingJob: { id: "job-1", status: "cancelled" } })],
+    when: ["running the cycle", async (ctx) => runLinkConnectorCycle(ctx.deps)],
+    then: ["rotation happens exactly once, for the terminal job", (result, ctx) => {
+      expect(ctx.enqueued[0]).toBe("link:m-dup");
+      expect(ctx.enqueued[1]).toBe("link:m-dup:attempt:2");
+      expect(ctx.enqueued).toHaveLength(2);
+      expect(result.handled).toBe(0);
+      ctx.cleanup();
     }],
   });
 });

@@ -208,7 +208,7 @@ feature("B2: the connector acks only on the broker's acknowledged receipt", () =
     }],
   });
 
-  component("a reclaimed mailbox lease gets a new queue generation after cancellation", {
+  component("a reclaimed lease keeps the stable key until cancellation is proven", {
     given: ["attempt one twice, then reclaimed attempt two over the real durable queue", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-link-b2-generation-"));
       const queue = createDeliveryQueue({ rootDir: join(root, "queue"), now: () => NOW });
@@ -220,7 +220,7 @@ feature("B2: the connector acks only on the broker's acknowledged receipt", () =
           const job = queue.enqueue(request);
           enqueues.push({ id: job.id, key: request.idempotencyKey });
           const current = queue.read(request.agentName, request.pane, job.id);
-          if (request.idempotencyKey.endsWith(":attempt:1") && current.status !== "cancelled") {
+          if (request.idempotencyKey === "link:m-generation" && current.status !== "cancelled") {
             queue.update(current, { status: "cancelled", terminalAt: NOW });
           }
           if (request.idempotencyKey.endsWith(":attempt:2") && current.status !== "acknowledged") {
@@ -276,15 +276,20 @@ feature("B2: the connector acks only on the broker's acknowledged receipt", () =
       }
       return { ctx, results };
     }],
-    then: ["same lease deduplicates, reclaimed lease delivers through a fresh job", ({ ctx, results }) => {
+    then: ["the stable key deduplicates live jobs and only a cancelled job rotates", ({ ctx, results }) => {
       expect(results.map((result) => result.handled)).toEqual([0, 0, 1]);
       expect(ctx.enqueues.map((entry) => entry.key)).toEqual([
+        "link:m-generation",
         "link:m-generation:attempt:1",
+        "link:m-generation",
         "link:m-generation:attempt:1",
+        "link:m-generation",
         "link:m-generation:attempt:2",
       ]);
-      expect(ctx.enqueues[0].id).toBe(ctx.enqueues[1].id);
-      expect(ctx.enqueues[2].id).not.toBe(ctx.enqueues[0].id);
+      expect(ctx.enqueues[0].id).toBe(ctx.enqueues[2].id);
+      expect(ctx.enqueues[0].id).toBe(ctx.enqueues[4].id);
+      expect(ctx.enqueues[1].id).toBe(ctx.enqueues[3].id);
+      expect(ctx.enqueues[5].id).not.toBe(ctx.enqueues[0].id);
       expect(ctx.posts.filter((post) => post.url.includes("/ack"))).toHaveLength(1);
       expect(ctx.posts.filter((post) => post.url.includes("/reply"))).toHaveLength(1);
       expect(ctx.posts.filter((post) => post.url.includes("/fail"))).toHaveLength(0);
