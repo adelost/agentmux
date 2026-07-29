@@ -16,16 +16,23 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 final class AudioInboxHttpClient {
     private static final int MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 
     private final String serverUrl;
     private final String consumerId;
+    private final String language;
 
     AudioInboxHttpClient(String serverUrl, String consumerId) {
+        this(serverUrl, consumerId, Locale.getDefault().getLanguage());
+    }
+
+    AudioInboxHttpClient(String serverUrl, String consumerId, String language) {
         this.serverUrl = serverUrl.replaceAll("/+$", "");
         this.consumerId = consumerId;
+        this.language = normalizeLanguage(language);
     }
 
     static final class TurnResult {
@@ -48,9 +55,8 @@ final class AudioInboxHttpClient {
         File audioFile,
         String turnId
     ) throws Exception {
-        JSONObject request = new JSONObject()
-            .put("lang", "sv")
-            .put("idempotencyKey", turnId);
+        JSONObject request = new JSONObject().put("idempotencyKey", turnId);
+        if (!language.isEmpty()) request.put("lang", language);
         if (target.audioTarget != null) request.put("audioTarget", target.audioTarget);
         if (text != null && !text.trim().isEmpty()) {
             String clean = text.trim();
@@ -114,6 +120,11 @@ final class AudioInboxHttpClient {
         if (object == null || object.isNull(key)) return "";
         String value = object.optString(key, "").trim();
         return "null".equalsIgnoreCase(value) ? "" : value;
+    }
+
+    static String normalizeLanguage(String raw) {
+        String normalized = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        return normalized.matches("^[a-z]{2,8}$") ? normalized : "";
     }
 
     String awaitAgentReply(ConversationTarget target, String prompt) throws Exception {

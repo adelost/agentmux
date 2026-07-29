@@ -4,9 +4,18 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val linkReleaseStore = providers.environmentVariable("AGENTMUX_LINK_RELEASE_STORE")
-    .orElse("/home/adelost/.agentmux/secrets/agentmux-link-release.p12")
-    .get()
+val linkReleaseStore = providers.gradleProperty("agentmuxLinkReleaseStore")
+    .orElse(providers.environmentVariable("AGENTMUX_LINK_RELEASE_STORE"))
+    .orNull
+val linkReleaseStorePassword = providers.gradleProperty("agentmuxLinkReleaseStorePassword")
+    .orElse(providers.environmentVariable("AGENTMUX_LINK_RELEASE_STORE_PASSWORD"))
+    .orNull
+val linkReleaseKeyPassword = providers.gradleProperty("agentmuxLinkReleaseKeyPassword")
+    .orElse(providers.environmentVariable("AGENTMUX_LINK_RELEASE_KEY_PASSWORD"))
+    .orNull
+val linkReleaseKeyAlias = providers.gradleProperty("agentmuxLinkReleaseKeyAlias")
+    .orElse(providers.environmentVariable("AGENTMUX_LINK_RELEASE_KEY_ALIAS"))
+    .getOrElse("agentmux-link")
 
 android {
     namespace = "io.agentmux.audioinbox"
@@ -18,23 +27,21 @@ android {
         targetSdk = 35
         versionCode = 4
         versionName = "1.1.2"
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField(
-            "String",
-            "UPDATE_SIGNER_SHA256",
-            "\"B57A2862AB312BC970BEEEFC" +
-                "D55D4B48A974EFD85B274B91394D4C9199484E97\"",
-        )
     }
 
     signingConfigs {
-        if (file(linkReleaseStore).isFile) {
+        if (
+            linkReleaseStore != null &&
+            linkReleaseStorePassword != null &&
+            linkReleaseKeyPassword != null &&
+            file(linkReleaseStore).isFile
+        ) {
             create("linkRelease") {
                 storeFile = file(linkReleaseStore)
-                storePassword = ""
-                keyAlias = "agentmux-link"
-                keyPassword = ""
+                storePassword = linkReleaseStorePassword
+                keyAlias = linkReleaseKeyAlias
+                keyPassword = linkReleaseKeyPassword
             }
         }
     }

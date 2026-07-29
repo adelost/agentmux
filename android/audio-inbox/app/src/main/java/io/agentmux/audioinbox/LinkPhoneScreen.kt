@@ -42,7 +42,6 @@ import com.adelost.ringkit.ui.RingRow
 import com.adelost.ringkit.ui.RingTextComposer
 import com.adelost.ringkit.ui.RingTextInputSpec
 import io.agentmux.linkcore.CapturePhase
-import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase

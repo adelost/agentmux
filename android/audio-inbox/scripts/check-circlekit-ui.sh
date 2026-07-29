@@ -19,6 +19,12 @@ if rg -n \
   exit 1
 fi
 
+if rg -n 'androidx\.compose\.material3' \
+  "$root/app/build.gradle.kts" "$root/wear/build.gradle.kts"; then
+  echo "Link UI regression: an app module reintroduced Material3 beside CircleKit" >&2
+  exit 1
+fi
+
 for module in app wear; do
   if ! rg -q 'io\.v1d\.circlekit:ringkit:' "$root/$module/build.gradle.kts"; then
     echo "Link UI regression: $module no longer consumes CircleKit RingKit" >&2
