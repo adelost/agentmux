@@ -16,7 +16,7 @@ import javax.crypto.spec.GCMParameterSpec;
  * WHAT: Stores Link session and pending PKCE state under an Android Keystore key.
  * WHY: Lets authentication survive process recreation without exposing bearer material.
  */
-final class KeystoreSessionStore implements LinkAuthController.StateStore {
+final class KeystoreSessionStore implements LinkAuthController.StateStore, LinkSessionSource {
     private static final String KEY_ALIAS = "agentmux-link-session";
     private static final String PREF_SESSION = "linkSession";
     private static final String PREF_IV = "linkSessionIv";
