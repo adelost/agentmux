@@ -1,11 +1,12 @@
 {
   "name": "agentmux",
-  "version": "1.25.32",
+  "version": "1.25.33",
   "description": "Local bridge and native workspace for coding agents (Claude Code, Codex, Kimi Code)",
   "type": "module",
   "bin": {
     "amux": "./bin/agent-cli.mjs",
     "ax": "./bin/agent-cli.mjs",
+    "amux-claude-statusline": "./bin/claude-statusline.mjs",
     "amux-suggest": "./bin/amux-suggest.mjs",
     "overlap-gate": "./bin/overlap-gate.mjs"
   },

@@ -108,14 +108,33 @@ feature("pushed statusline truth", () => {
   component("a fresh bridge file beats jsonl math", {
     given: ["jsonl says 35% but Claude Code's own statusline pushed 92%", () => ({
       lines: [usageEntry("claude-fable-5", 351_000)],
-      bridge: { used_pct: 92, timestamp: nowS() },
+      bridge: {
+        used_pct: 92,
+        timestamp: nowS(),
+        model: "claude-fable-5",
+        effort: "xhigh",
+      },
     })],
     when: ["reading context", ({ lines, bridge }) =>
       withSessionJsonl(lines, (paneDir) => getContextPercent(paneDir, "claude"), { bridge })],
     then: ["92% — Claude Code's rendered number wins; tokens/model still from jsonl", (ctx) => {
       expect(ctx.percent).toBe(92);
       expect(ctx.model).toBe("claude-fable-5");
+      expect(ctx.effort).toBe("xhigh");
       expect(ctx.tokens).toBe(351_000);
+    }],
+  });
+
+  component("an unbounded effort label is ignored without losing context truth", {
+    given: ["a valid percent with an unsafe effort label", () => ({
+      lines: [usageEntry("claude-opus-5", 351_000)],
+      bridge: { used_pct: 41, timestamp: nowS(), effort: "../../max" },
+    })],
+    when: ["reading context", ({ lines, bridge }) =>
+      withSessionJsonl(lines, (paneDir) => getContextPercent(paneDir, "claude"), { bridge })],
+    then: ["context remains available and effort stays unknown", (ctx) => {
+      expect(ctx.percent).toBe(41);
+      expect(ctx.effort).toBeNull();
     }],
   });
 
