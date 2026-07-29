@@ -106,14 +106,22 @@ public final class PublicLinkClient implements PublicConversationTransport.Clien
             + "/auth/start?client=android&challenge=" + challenge;
     }
 
-    public static String exchange(String baseUrl, String code, String verifier) throws Exception {
+    public static LinkSessionCredentials exchange(
+        String baseUrl,
+        String code,
+        String verifier
+    ) throws Exception {
         JSONObject response = new JSONObject(request("POST",
             (baseUrl == null || baseUrl.isBlank() ? DEFAULT_BASE : baseUrl).replaceAll("/+$", "") + "/auth/exchange",
             null,
             new JSONObject().put("code", code).put("verifier", verifier).toString()));
         String session = response.optString("session", "");
         if (session.isEmpty()) throw new IllegalStateException("exchange returned no session");
-        return session;
+        return new LinkSessionCredentials(
+            baseUrl,
+            session,
+            response.optString("identityId", "")
+        );
     }
 
     public TargetCatalog targetCatalog() throws Exception {

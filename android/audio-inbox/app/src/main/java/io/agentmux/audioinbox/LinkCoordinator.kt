@@ -37,6 +37,7 @@ internal class LinkCoordinator(
     private val targetDirectory = LinkTargetDirectory()
     private val audioActions = LinkAudioActions(activity, targetDirectory::target)
     private val linkSessions = KeystoreSessionStore(preferences)
+    private val wearSessions = LinkWearSessionPublisher(activity)
     private val discovery: ExecutorService = Executors.newFixedThreadPool(2)
     private val pendingDiscovery = AtomicInteger(2)
     private val drafts = ConcurrentHashMap<String, String>()
@@ -46,7 +47,8 @@ internal class LinkCoordinator(
         activity,
         linkSessions,
         object : LinkAuthController.Listener {
-            override fun onLogin(session: String) {
+            override fun onLogin(credentials: LinkSessionCredentials) {
+                wearSessions.publish(credentials)
                 discovery.execute(::refreshPublicTargets)
             }
 
@@ -151,6 +153,7 @@ internal class LinkCoordinator(
     init {
         preferences.registerOnSharedPreferenceChangeListener(preferenceListener)
         PlaybackProgressBus.addListener(playbackProgressListener)
+        linkSessions.credentials()?.let(wearSessions::publish)
         discoverTargets()
         syncConnection()
     }
@@ -255,6 +258,7 @@ internal class LinkCoordinator(
     fun handlePublicAuth(uri: Uri?): Boolean = linkAuth.handleDeepLink(uri)
 
     fun logoutPublic() {
+        wearSessions.revoke()
         linkAuth.logout()
         targetDirectory.clearPublic()
         publishTargets()

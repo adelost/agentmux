@@ -20,7 +20,8 @@ export function canonicalJson(value) {
 
 const CHANNEL_PACKAGES = {
   phone: "io.agentmux.audioinbox",
-  wear: "io.agentmux.audioinbox.wear",
+  // Data Layer peers intentionally share package and signer across device families.
+  wear: "io.agentmux.audioinbox",
 };
 
 /** WHAT: Builds the signed release payload for one APK and channel. WHY: Keeps the client contract exactly verifiable per device family. */

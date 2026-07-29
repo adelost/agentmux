@@ -28,7 +28,8 @@ feature("Android audio inbox source contract", () => {
       expect(manifest).toContain('android:scheme="agentmux"');
       expect(manifest).toContain('android:host="auth"');
       expect(discovery).toContain('"agentmux-audio-inbox"');
-      expect(discovery).toContain('"https://abyss-wsl.tail13cb13.ts.net:8443"');
+      expect(discovery).toContain('"http://agentmux.local:8080"');
+      expect(discovery).not.toContain("abyss-");
       expect(startup).toContain("AUDIO_INBOX_SERVER_ID");
       expect(startup).toContain("AUDIO_INBOX_TARGET");
       expect(startup).toContain("AUDIO_INBOX_TARGETS");
@@ -57,18 +58,17 @@ feature("Android audio inbox source contract", () => {
       expect(ptt).toContain("onRelease = onRelease");
       expect(ptt).toContain("onCancel = onCancel");
       expect(discovery).toContain('"agentmux-windows-manager-audio"');
-      expect(discovery).toContain('"http://abyss-win.tail13cb13.ts.net:8081"');
       expect(read(
         "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/LinkPhoneSettings.kt",
       )).toContain('"READ REPLIES"');
       expect(read(
         "android/audio-inbox/link-core/src/main/kotlin/io/agentmux/linkcore/LinkState.kt",
-      )).toContain('selectedTargetId: String = "lsrc:3"');
+      )).toContain('selectedTargetId: String = ""');
       expect(read(
         "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/TailnetConversationTransport.java",
       )).toContain("awaitAgentReply");
       expect(read(
-        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/PublicConversationTransport.java",
+        "android/audio-inbox/link-transport/src/main/java/io/agentmux/audioinbox/PublicConversationTransport.java",
       )).toContain('return "public-link"');
       expect(read(
         "android/audio-inbox/link-core/src/main/kotlin/io/agentmux/linkcore/VoiceUploadPolicy.kt",
@@ -96,11 +96,21 @@ feature("Android audio inbox source contract", () => {
         "android/audio-inbox/wear/src/main/java/io/agentmux/audioinbox/wear/",
         ROOT,
       );
+      const transportDirectory = new URL(
+        "android/audio-inbox/link-transport/src/main/java/io/agentmux/audioinbox/",
+        ROOT,
+      );
+      const sessionDirectory = new URL(
+        "android/audio-inbox/link-session-android/src/main/java/io/agentmux/audioinbox/",
+        ROOT,
+      );
       const counts = Object.fromEntries(
         [
           ...readdirSync(appDirectory).map((name) => [appDirectory, name]),
           ...readdirSync(coreDirectory).map((name) => [coreDirectory, name]),
           ...readdirSync(wearDirectory).map((name) => [wearDirectory, name]),
+          ...readdirSync(transportDirectory).map((name) => [transportDirectory, name]),
+          ...readdirSync(sessionDirectory).map((name) => [sessionDirectory, name]),
         ]
           .filter(([, name]) => name.endsWith(".java") || name.endsWith(".kt"))
           .map(([directory, name]) => {

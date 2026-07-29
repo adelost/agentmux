@@ -13,28 +13,19 @@ import java.util.concurrent.Executors;
  */
 final class LinkAuthController {
     interface Listener {
-        void onLogin(String session);
+        void onLogin(LinkSessionCredentials credentials);
         void onError(String message);
-    }
-
-    interface StateStore {
-        String baseUrl();
-        String session();
-        String pendingVerifier();
-        boolean replacePendingVerifier(String verifier);
-        boolean saveSessionAndClearPending(
-            String baseUrl,
-            String session,
-            String expectedVerifier
-        );
-        void clear();
     }
 
     interface Client {
         String generateVerifier();
         String challenge(String verifier);
         String authStartUrl(String baseUrl, String challenge);
-        String exchange(String baseUrl, String code, String verifier) throws Exception;
+        LinkSessionCredentials exchange(
+            String baseUrl,
+            String code,
+            String verifier
+        ) throws Exception;
         void revoke(String baseUrl, String session);
     }
 
@@ -44,7 +35,7 @@ final class LinkAuthController {
     }
 
     private final Host host;
-    private final StateStore store;
+    private final LinkSessionStore store;
     private final Client client;
     private final Listener listener;
     private final ExecutorService work;
@@ -68,7 +59,7 @@ final class LinkAuthController {
 
     LinkAuthController(
         Host host,
-        StateStore store,
+        LinkSessionStore store,
         Client client,
         Listener listener,
         ExecutorService work
@@ -118,12 +109,13 @@ final class LinkAuthController {
             }
             try {
                 String baseUrl = store.baseUrl();
-                String session = client.exchange(baseUrl, code, verifier);
-                if (!store.saveSessionAndClearPending(baseUrl, session, verifier)) {
+                LinkSessionCredentials credentials =
+                    client.exchange(baseUrl, code, verifier);
+                if (!store.saveSessionAndClearPending(credentials, verifier)) {
                     notifyError("secure session save failed");
                     return;
                 }
-                host.onUi(() -> listener.onLogin(session));
+                host.onUi(() -> listener.onLogin(credentials));
             } catch (Exception error) {
                 String message = error.getMessage() == null ? "login failed" : error.getMessage();
                 notifyError(message);
@@ -162,7 +154,11 @@ final class LinkAuthController {
             return PublicLinkClient.authStartUrl(baseUrl, challenge);
         }
 
-        public String exchange(String baseUrl, String code, String verifier) throws Exception {
+        public LinkSessionCredentials exchange(
+            String baseUrl,
+            String code,
+            String verifier
+        ) throws Exception {
             return PublicLinkClient.exchange(baseUrl, code, verifier);
         }
 

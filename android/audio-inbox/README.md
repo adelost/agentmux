@@ -58,11 +58,14 @@ Public Link uses the `/auth/*` and `/api/link/*` routes on `link.v1d.io`.
 
 - `link-core`: Android-free reducer, history, recovery, connection and voice
   upload policies.
-- `app`: Phone hosts, private/public transport adapters, recording, playback
-  and the signed updater.
-- `wear`: CircleKit-based preview shell. It is packaged separately but does
-  not yet have a Phone/Wear data bridge; it therefore reports unavailable
-  instead of fabricating conversation data.
+- `link-transport`: Android-free public mailbox client and conversation port
+  shared byte-for-byte by Phone and Wear.
+- `link-session-android`: the single Android Keystore-backed session store.
+- `app`: Phone hosts, private relay adapter, recording, playback, signed
+  updater and the phone-owned Wear Data Layer session producer.
+- `wear`: CircleKit host plus the matching Data Layer consumer. Phase 1 shares
+  the phone's revocable 30-day session; a per-device session can replace that
+  wire contract later without changing the mailbox transport.
 - CircleKit `designkit`, `ringkit`, `releasekit` and `servicekit`: shared
   Phone/Wear atoms, release workflow and service presentation.
 

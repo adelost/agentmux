@@ -74,7 +74,9 @@ android {
 
 dependencies {
     implementation(project(":link-core"))
+    implementation(project(":link-session-android"))
     implementation(project(":link-transport"))
+    implementation("com.google.android.gms:play-services-wearable:20.0.1")
     implementation("io.v1d.circlekit:designkit:0.3.2")
     implementation("io.v1d.circlekit:ringkit:0.3.2")
     implementation("io.v1d.circlekit:releasekit:0.3.2")
