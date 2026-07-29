@@ -88,6 +88,28 @@ feature("amux dream stateless orchestration", () => {
     }],
   });
 
+  component("--help shows usage with zero writes, sends, locks, or model calls", {
+    given: ["a fixture that would otherwise run a full dream", () => fixture()],
+    when: ["invoking with the help flag", async (fx) => {
+      const calls = { receipts: 0, sources: 0, summarize: 0, record: 0 };
+      const result = await cmdDream({ configPath: "unused" }, { help: true, workspace: fx.workspace }, {
+        agents: new Proxy([], { get: () => { throw new Error("agents must not be read"); } }),
+        readReceipts: () => { calls.receipts++; return fx.receipts; },
+        collectSources: () => { calls.sources++; return { sources: [], unreadable: [] }; },
+        summarize: async () => { calls.summarize++; return "must not run"; },
+        recordReceipts: () => { calls.record++; },
+      });
+      return { fx, result, calls };
+    }],
+    then: ["usage only, no side effects of any kind", ({ fx, result, calls }) => {
+      expect(result).toEqual({ help: true });
+      expect(calls).toEqual({ receipts: 0, sources: 0, summarize: 0, record: 0 });
+      expect(existsSync(fx.workspace)).toBe(false);
+      expect(existsSync(join(fx.root, ".openclaw", ".dream.lock"))).toBe(false);
+      cleanup(fx);
+    }],
+  });
+
   component("a failed or invalid summary never advances receipts", {
     given: ["one active source", () => fixture()],
     when: ["the model returns a reserved marker", async (fx) => {
