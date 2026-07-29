@@ -209,7 +209,7 @@ internal class WearMailboxController(
             dispatch(
                 LinkAction.Connection(
                     ConnectionState.CONNECTED,
-                    "LINK · ${credentials.identityId().ifBlank { "SESSION ACTIVE" }}",
+                    "PUBLIC LINK · ${credentials.identityId().ifBlank { "SESSION ACTIVE" }}",
                     now,
                 ),
             )

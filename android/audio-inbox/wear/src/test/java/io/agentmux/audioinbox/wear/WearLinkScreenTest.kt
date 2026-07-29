@@ -1,6 +1,7 @@
 package io.agentmux.audioinbox.wear
 
 import io.agentmux.linkcore.ConnectionState
+import io.agentmux.linkcore.DeliveryPhase
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTarget
 import io.agentmux.linkcore.LinkTurn
@@ -82,5 +83,38 @@ class WearLinkScreenTest {
         assertEquals("REPLAY", rows[3].title)
         rows[3].onTap?.invoke()
         assertTrue(replayed)
+    }
+
+    @Test
+    fun publicConnectionAndTerminalFailureAreRenderedTruthfully() {
+        val state = LinkState(
+            connection = ConnectionState.CONNECTED,
+            connectionDetail = "PUBLIC LINK · test identity",
+            targets = listOf(LinkTarget("alpha", "Alpha")),
+            selectedTargetId = "alpha",
+            turns = listOf(
+                LinkTurn(
+                    turnId = "turn-failed",
+                    targetId = "alpha",
+                    targetLabel = "Alpha",
+                    userText = "Voice message",
+                    createdAtMs = 1L,
+                    deliveryPhase = DeliveryPhase.FAILED,
+                    deliveryError = "transcription-failed",
+                ),
+            ),
+        )
+
+        val rows = wearLinkRows(
+            state = state,
+            onSelectTarget = {},
+            onOpenCapture = {},
+            onPlay = {},
+            onStop = {},
+            onReplay = {},
+        )
+
+        assertEquals("AGENT · PUBLIC", rows[0].title)
+        assertEquals("TRANSCRIPTION-FAILED", rows[2].sub)
     }
 }
