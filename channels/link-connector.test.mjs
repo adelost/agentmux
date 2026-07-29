@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  connectorFailureDisposition,
   connectorFailureStage,
   linkTurnPrompt,
   planClaimedMessage,
@@ -81,6 +82,23 @@ feature("link connector cycle", () => {
         "transcription-failed",
         "link-unavailable",
         "link-unavailable",
+      ]);
+    }],
+  });
+
+  component("invalid audio is terminal while transient transcription has a three-attempt bound", {
+    given: ["empty, first transient, and third transient failures", () => [
+      [Object.assign(new Error("transcription empty"), { status: 422 }), 1],
+      [Object.assign(new Error("transcription failed: service 503"), { status: 500 }), 1],
+      [Object.assign(new Error("transcription failed: service 503"), { status: 500 }), 3],
+    ]],
+    when: ["deciding their retry disposition", (cases) =>
+      cases.map(([error, attempts]) => connectorFailureDisposition(error, attempts))],
+    then: ["bad input stops once and infrastructure retries only within the bound", (result) => {
+      expect(result).toEqual([
+        { stage: "transcription-failed", terminal: true },
+        { stage: "transcription-failed", terminal: false },
+        { stage: "transcription-failed", terminal: true },
       ]);
     }],
   });
@@ -170,6 +188,42 @@ feature("link connector cycle", () => {
       expect(ctx.calls.enqueued[0].text).toBe("[amux-link-turn:m-1]\ntranskript: 16 bytes");
       expect(ctx.calls.posts.some((p) => p.url.includes("/api/link/voice/voice/abc-123.m4a"))).toBe(true);
       ctx.cleanup();
+    }],
+  });
+
+  component("empty voice transcription posts one terminal failure and never reclaims locally", {
+    given: ["one claimed voice message with no intelligible transcript", () => {
+      const ctx = harness({
+        responses: {
+          "/api/link/connector/poll?source=wsl": {
+            messages: [message({
+              kind: "voice",
+              body: "",
+              voiceRef: "voice/empty-123.m4a",
+              attempts: 1,
+            })],
+          },
+        },
+      });
+      ctx.deps.transcribe = async () => "";
+      return ctx;
+    }],
+    when: ["running the same claim twice", async (ctx) => {
+      const first = await runLinkConnectorCycle(ctx.deps);
+      const second = await runLinkConnectorCycle(ctx.deps);
+      return { first, second, ctx };
+    }],
+    then: ["one fail is posted, nothing reaches a pane, and the journal prevents a loop", (result) => {
+      expect(result.first).toEqual({ claimed: 1, handled: 0 });
+      expect(result.second).toEqual({ claimed: 1, handled: 0 });
+      expect(result.ctx.calls.enqueued).toHaveLength(0);
+      expect(result.ctx.calls.posts.filter((post) => post.url.includes("/fail"))).toHaveLength(1);
+      const journal = JSON.parse(readFileSync(result.ctx.statePath, "utf8"));
+      expect(journal.messages["m-1"]).toMatchObject({
+        stage: "failed",
+        error: "transcription-failed",
+      });
+      result.ctx.cleanup();
     }],
   });
 

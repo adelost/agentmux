@@ -22,6 +22,9 @@ export function createLinkStore(db) {
         clientMessageId, identityId,
       ),
 
+    getMessageForVoice: (voiceRef) =>
+      first("SELECT * FROM messages WHERE voiceRef = ? ORDER BY createdAt LIMIT 1", voiceRef),
+
     insertMessage: ({ clientMessageId, identityId, target, kind, body, voiceRef = null, nowMs }) =>
       first(
         `INSERT INTO messages (clientMessageId, identityId, target, kind, body, voiceRef, state, createdAt)

@@ -26,7 +26,9 @@ export function linkTurnPrompt({ clientMessageId, body }) {
 
 /** WHAT: Maps one claimed message against the journal to its next step. WHY: Prevents a restart from re-acking or re-replying finished work. */
 export function planClaimedMessage({ message, journalEntry }) {
-  if (journalEntry?.stage === "replied") return { action: "skip", reason: "already-replied-locally" };
+  if (journalEntry?.stage === "replied" || journalEntry?.stage === "failed") {
+    return { action: "skip", reason: `already-${journalEntry.stage}-locally` };
+  }
   if (journalEntry?.stage === "delivered") return { action: "await-reply", message };
   return { action: "deliver", message };
 }
@@ -37,6 +39,21 @@ export function connectorFailureStage(error) {
   if (/transcri(?:be|ption)/iu.test(text)) return "transcription-failed";
   if (/fetch|network|ECONN|timeout|5\d\d/u.test(text)) return "link-unavailable";
   return "pane-delivery-failed";
+}
+
+/** WHAT: Decides whether one failure is terminal or retryable. WHY: Invalid audio stops once while transient infrastructure gets a strict retry bound. */
+export function connectorFailureDisposition(error, attempts = 1) {
+  const stage = connectorFailureStage(error);
+  const status = Number(error?.status || 0);
+  const invalidAudio = stage === "transcription-failed" &&
+    (status >= 400 && status < 500 ||
+      /empty|invalid|unsupported|no bytes/iu.test(String(error?.message || error)));
+  return {
+    stage,
+    terminal: stage === "pane-delivery-failed" ||
+      invalidAudio ||
+      (stage === "transcription-failed" && attempts >= 3),
+  };
 }
 
 /** WHAT: Dispatches one bounded poll cycle for the WSL connector. WHY: Keeps every message exactly once through claim, ack, and reply. */
@@ -151,9 +168,10 @@ export async function runLinkConnectorCycle({
       writeJournal(statePath, journal);
       handled += 1;
     } catch (error) {
-      const stage = connectorFailureStage(error);
+      const disposition = connectorFailureDisposition(error, Number(message.attempts || 1));
+      const { stage } = disposition;
       log(`link-connector ${id} failed:${stage} ${String(error?.message || error)}`);
-      if (stage === "pane-delivery-failed") {
+      if (disposition.terminal) {
         await post("/api/link/connector/fail", { clientMessageId: id, connectorId, error: stage }).catch(() => {});
         journal.messages[id] = { ...journal.messages[id], stage: "failed", error: stage };
         writeJournal(statePath, journal);
