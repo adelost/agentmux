@@ -12,6 +12,7 @@ import { rewriteModelSlash } from "./claude-model.mjs";
 import { recoverSupersededSubmit } from "./submit-boundary.mjs";
 import { createDeliveryNotSent, PRE_SUBMIT_STATES } from "./delivery-not-sent.mjs";
 import { createDeliveryNotices } from "./delivery-notices.mjs";
+import { runDeliveryPreflight } from "./delivery-stale.mjs";
 import { createIngestProbeGate } from "./ingest-probe-gate.mjs";
 import { createWakeAdmissionGate } from "./wake-admission.mjs";
 import { wakeDeliveryTarget } from "./delivery-wake.mjs";
@@ -625,15 +626,11 @@ export function createDeliveryBroker({
     try {
       while (!stopped) {
         // Cancellation is a request, never a producer-side state rewrite.
-        // Resolve every request while holding the same writer lease as pane
-        // delivery; this safely removes an attempts=0 follower out of order.
-        const cancellationRequests = queue.pendingCancellationRequests?.(agentName, pane) || [];
-        for (const request of cancellationRequests) await terminalizeNotSent(request);
-
-        const notices = (queue.pendingTerminalNotices?.(agentName, pane)
-          || queue.pendingUnverifiedNotices?.(agentName, pane) || [])
-          .filter((job) => Number(job.unverifiedNoticeNextAttemptAt || 0) <= now());
-        for (const notice of notices) await notifyTerminal(notice);
+        // All pre-delivery terminal paths run in one ordered pass under the
+        // same writer lease as pane delivery.
+        await runDeliveryPreflight({
+          agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal,
+        });
 
         // Every non-terminal head, including `submitted`, retains FIFO until
         // the exact JSONL event acknowledges it. A TUI transition can no
