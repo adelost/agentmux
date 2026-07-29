@@ -20,4 +20,12 @@ public class AudioInboxHttpClientTest {
             "sent"
         ));
     }
+
+    @Test
+    public void speechLanguageComesFromAValidatedDeviceLanguage() {
+        assertEquals("sv", AudioInboxHttpClient.normalizeLanguage("SV"));
+        assertEquals("en", AudioInboxHttpClient.normalizeLanguage(" en "));
+        assertEquals("", AudioInboxHttpClient.normalizeLanguage("sv-SE"));
+        assertEquals("", AudioInboxHttpClient.normalizeLanguage(null));
+    }
 }
