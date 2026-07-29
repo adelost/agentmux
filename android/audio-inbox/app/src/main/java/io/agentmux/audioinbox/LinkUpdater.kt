@@ -6,6 +6,7 @@ import com.adelost.releasekit.UpdateProgress
 import com.adelost.releasekit.UpdateRowAction
 import com.adelost.releasekit.UpdateState
 import com.adelost.releasekit.updateRowModel
+import com.adelost.releasekit.updateTargetChangelog
 import io.agentmux.linkcore.UpdatePresentation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collectLatest
@@ -64,7 +65,7 @@ internal class LinkUpdater(
             availableVersion = availableVersionName(),
             state = wireState(),
             detail = row.sub,
-            changelog = changelog(),
+            changelog = updateTargetChangelog(this),
             progress = when (val progress = row.progress) {
                 is UpdateProgress.Determinate -> progress.fraction
                 UpdateProgress.Indeterminate -> 0f
@@ -96,6 +97,4 @@ internal class LinkUpdater(
         UpdateState.UpToDate -> "up-to-date"
         else -> "idle"
     }
-
-    private fun UpdateState.changelog(): String = ""
 }

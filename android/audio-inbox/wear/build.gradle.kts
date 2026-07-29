@@ -45,7 +45,7 @@ android {
 
 dependencies {
     implementation(project(":link-core"))
-    implementation("io.v1d.circlekit:ringkit:0.2.1")
+    implementation("io.v1d.circlekit:ringkit:0.3.2")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.compose.material3:material3")
