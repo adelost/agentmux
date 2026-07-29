@@ -480,4 +480,10 @@ voicePwa.start()
 
 // Outbound Link connector (docs/link-internet-v1.md): polls the public
 // mailbox for the panes this bridge owns and carries replies back.
-startLinkConnectorIfConfigured({ agent, deliveryBroker, deliveryQueue });
+startLinkConnectorIfConfigured({
+  agent,
+  deliveryBroker,
+  deliveryQueue,
+  run,
+  transcribeScript: TRANSCRIBE_SCRIPT,
+});

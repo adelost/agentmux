@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  connectorFailureStage,
   linkTurnPrompt,
   planClaimedMessage,
   runLinkConnectorCycle,
@@ -66,6 +67,22 @@ function harness({ responses = {}, replyText = "svar från pane" } = {}) {
 }
 
 feature("link connector cycle", () => {
+  component("transcription failures are never mislabeled as pane failures", {
+    given: ["three failure classes", () => [
+      new Error("transcription empty; audio may have been silent"),
+      new Error("reply-timeout"),
+      new Error("fetch failed"),
+    ]],
+    when: ["classifying them", (errors) => errors.map(connectorFailureStage)],
+    then: ["each operator-facing stage names its real subsystem", (stages) => {
+      expect(stages).toEqual([
+        "transcription-failed",
+        "link-unavailable",
+        "link-unavailable",
+      ]);
+    }],
+  });
+
   component("claim to reply is journaled before every ack and idempotent on restart", {
     given: ["one claimed message and a working pane", () => harness({
       responses: { "/api/link/connector/poll?source=wsl": { messages: [message()] } },
