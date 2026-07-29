@@ -35,6 +35,7 @@ export function planClaimedMessage({ message, journalEntry }) {
 export function connectorFailureStage(error) {
   const text = String(error?.message || error || "unknown");
   if (/fetch|network|ECONN|timeout|5\d\d/u.test(text)) return "link-unavailable";
+  if (/transcri(?:be|ption)/iu.test(text)) return "transcription-failed";
   return "pane-delivery-failed";
 }
 

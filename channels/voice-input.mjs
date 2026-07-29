@@ -1,11 +1,7 @@
-import { randomBytes } from "node:crypto";
-import { writeFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
-import { esc } from "../lib.mjs";
 import { paneForChannel, phoneTargetChannels } from "./audio-targets.mjs";
+import { transcribeVoiceBuffer } from "../core/voice-transcriber.mjs";
 
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
-const TRANSCRIPT_PREFIX = "[transcribed voice, may contain speech-to-text errors; interpret intent]";
 const TURN_ID_PATTERN = /^[A-Za-z0-9_.:@-]{1,120}$/;
 
 /** WHAT: Builds one delivery path for text, voice and phone PTT input. WHY: Keeps transcription and idempotency identical across the PWA and native app. */
@@ -34,28 +30,13 @@ export function createVoiceInput({
     if (typeof body.audio !== "string" || body.audio.length === 0) {
       throw Object.assign(new Error("body must contain either 'text' or 'audio' (base64)"), { status: 400 });
     }
-    const ext = (body.filename?.split(".").pop() || "webm")
-      .toLowerCase().replace(/[^a-z0-9]/g, "") || "webm";
-    const tmpPath = join("/tmp", `voice-pwa-${randomBytes(8).toString("hex")}.${ext}`);
-    try {
-      writeFileSync(tmpPath, Buffer.from(body.audio, "base64"));
-    } catch (error) {
-      throw Object.assign(new Error(`invalid base64 audio: ${error.message}`), { status: 400 });
-    }
-    try {
-      const lang = (body.lang || "sv").replace(/[^a-z]/g, "");
-      const { stdout } = await run(`'${esc(transcribeScript)}' '${esc(tmpPath)}' '${esc(lang)}'`, 60000);
-      const transcript = String(stdout || "").trim();
-      if (!transcript) {
-        throw Object.assign(new Error("transcription empty; audio may have been silent or unintelligible"), { status: 422 });
-      }
-      return { text: `${TRANSCRIPT_PREFIX} ${transcript}`, transcript };
-    } catch (error) {
-      if (error.status) throw error;
-      throw Object.assign(new Error(`transcription failed: ${error.message}`), { status: 500 });
-    } finally {
-      try { unlinkSync(tmpPath); } catch {}
-    }
+    return transcribeVoiceBuffer({
+      audioBuffer: Buffer.from(body.audio, "base64"),
+      filename: body.filename || "voice.webm",
+      language: body.lang || "sv",
+      run,
+      transcribeScript,
+    });
   }
 
   async function deliver(res, { name, pane, body, phoneTarget = null }) {
