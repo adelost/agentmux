@@ -6,24 +6,24 @@ import java.io.File;
  * WHAT: Maps the authenticated public mailbox client onto the conversation port.
  * WHY: Keeps Internet transport and Tailscale discovery out of the Compose surface.
  */
-final class PublicConversationTransport implements ConversationTransport {
-    static final long REPLY_TIMEOUT_MS = 20 * 60_000L;
+public final class PublicConversationTransport implements ConversationTransport {
+    public static final long REPLY_TIMEOUT_MS = 20 * 60_000L;
 
-    interface Client {
+    public interface Client {
         String send(String clientMessageId, String target, String text) throws Exception;
         String sendVoice(String clientMessageId, String target, File audio) throws Exception;
         String awaitReply(String clientMessageId, long timeoutMs) throws Exception;
     }
 
-    private final KeystoreSessionStore sessions;
+    private final LinkSessionSource sessions;
     private final Client injected;
 
-    PublicConversationTransport(KeystoreSessionStore sessions) {
+    public PublicConversationTransport(LinkSessionSource sessions) {
         this.sessions = sessions;
         this.injected = null;
     }
 
-    PublicConversationTransport(Client injected) {
+    public PublicConversationTransport(Client injected) {
         this.sessions = null;
         this.injected = injected;
     }

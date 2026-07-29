@@ -1,18 +1,18 @@
 package io.agentmux.audioinbox;
 
-final class ConversationTarget {
-    enum Kind { AGENT, WINDOWS, PUBLIC }
+public final class ConversationTarget {
+    public enum Kind { AGENT, WINDOWS, PUBLIC }
 
-    final String id;
-    final String label;
-    final Kind kind;
-    final String serverUrl;
-    final String audioTarget;
-    final String agent;
-    final int pane;
+    public final String id;
+    public final String label;
+    public final Kind kind;
+    public final String serverUrl;
+    public final String audioTarget;
+    public final String agent;
+    public final int pane;
     private final Boolean availabilityOverride;
 
-    ConversationTarget(
+    public ConversationTarget(
         String id,
         String label,
         Kind kind,
@@ -44,7 +44,7 @@ final class ConversationTarget {
         this.availabilityOverride = availabilityOverride;
     }
 
-    static ConversationTarget publicLink(String id, String label, boolean online) {
+    public static ConversationTarget publicLink(String id, String label, boolean online) {
         return new ConversationTarget(
             id,
             label,
@@ -57,9 +57,9 @@ final class ConversationTarget {
         );
     }
 
-    boolean available() {
+    public boolean available() {
         if (availabilityOverride != null) return availabilityOverride;
-        return ServerDiscovery.isAllowedServer(serverUrl)
+        return LinkUrlPolicy.isAllowedServer(serverUrl)
             && (kind == Kind.WINDOWS || (agent != null && pane >= 0 && audioTarget != null));
     }
 }

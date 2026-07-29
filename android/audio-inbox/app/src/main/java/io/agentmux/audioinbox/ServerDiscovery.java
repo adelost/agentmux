@@ -6,7 +6,6 @@ import org.json.JSONArray;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
-import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -115,20 +114,7 @@ final class ServerDiscovery {
     }
 
     static boolean isAllowedServer(String value) {
-        try {
-            URI uri = URI.create(value);
-            String scheme = uri.getScheme();
-            String host = uri.getHost();
-            if (scheme == null || host == null || uri.getUserInfo() != null) return false;
-            if ("https".equalsIgnoreCase(scheme)) return true;
-            if (!"http".equalsIgnoreCase(scheme)) return false;
-            String lower = host.toLowerCase();
-            return lower.endsWith(".ts.net")
-                || lower.endsWith(".local")
-                || isPrivateIpv4(lower);
-        } catch (Exception ignored) {
-            return false;
-        }
+        return LinkUrlPolicy.isAllowedServer(value);
     }
 
     private static Configuration fetch(String serverUrl) throws Exception {
@@ -151,26 +137,6 @@ final class ServerDiscovery {
         } finally {
             connection.disconnect();
         }
-    }
-
-    private static boolean isPrivateIpv4(String host) {
-        String[] parts = host.split("\\.");
-        if (parts.length != 4) return false;
-        int[] octets = new int[4];
-        try {
-            for (int i = 0; i < 4; i++) {
-                octets[i] = Integer.parseInt(parts[i]);
-                if (octets[i] < 0 || octets[i] > 255) return false;
-            }
-        } catch (NumberFormatException ignored) {
-            return false;
-        }
-        return octets[0] == 10
-            || octets[0] == 127
-            || (octets[0] == 100 && octets[1] >= 64 && octets[1] <= 127)
-            || (octets[0] == 169 && octets[1] == 254)
-            || (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31)
-            || (octets[0] == 192 && octets[1] == 168);
     }
 
     private static byte[] readBounded(InputStream input, int maxBytes) throws Exception {

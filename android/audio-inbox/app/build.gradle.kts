@@ -74,6 +74,7 @@ android {
 
 dependencies {
     implementation(project(":link-core"))
+    implementation(project(":link-transport"))
     implementation("io.v1d.circlekit:designkit:0.3.2")
     implementation("io.v1d.circlekit:ringkit:0.3.2")
     implementation("io.v1d.circlekit:releasekit:0.3.2")

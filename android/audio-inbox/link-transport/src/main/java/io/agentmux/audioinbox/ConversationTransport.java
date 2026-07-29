@@ -7,7 +7,7 @@ import java.io.File;
  * Durable acceptance and reply waiting are deliberately separate so one slow
  * model turn never locks capture or another send.
  */
-interface ConversationTransport {
+public interface ConversationTransport {
     record Accepted(String visibleText, String replyCursor, String immediateReply) {}
     record Reply(String respondingTarget, String text) {}
 

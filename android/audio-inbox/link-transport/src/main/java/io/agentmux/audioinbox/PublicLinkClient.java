@@ -20,14 +20,14 @@ import java.util.Base64;
 import java.util.List;
 
 /** HTTP client for the public Agentmux Link mailbox (docs/link-internet-v1.md). */
-final class PublicLinkClient implements PublicConversationTransport.Client {
-    static final String DEFAULT_BASE = "https://link.v1d.io";
-    static final int MAX_VOICE_BYTES = (int) VoiceUploadPolicy.PUBLIC_MAX_BYTES;
+public final class PublicLinkClient implements PublicConversationTransport.Client {
+    public static final String DEFAULT_BASE = "https://link.v1d.io";
+    public static final int MAX_VOICE_BYTES = (int) VoiceUploadPolicy.PUBLIC_MAX_BYTES;
 
-    static final class LinkTarget {
-        final String id;
-        final String label;
-        final boolean online;
+    public static final class LinkTarget {
+        public final String id;
+        public final String label;
+        public final boolean online;
 
         LinkTarget(String id, String label, boolean online) {
             this.id = id;
@@ -36,9 +36,9 @@ final class PublicLinkClient implements PublicConversationTransport.Client {
         }
     }
 
-    static final class TargetCatalog {
-        final List<LinkTarget> targets;
-        final List<String> privateDiscoveryUrls;
+    public static final class TargetCatalog {
+        public final List<LinkTarget> targets;
+        public final List<String> privateDiscoveryUrls;
 
         TargetCatalog(List<LinkTarget> targets, List<String> privateDiscoveryUrls) {
             this.targets = targets;
@@ -46,13 +46,13 @@ final class PublicLinkClient implements PublicConversationTransport.Client {
         }
     }
 
-    static final class LinkEvent {
-        final long seq;
-        final String clientMessageId;
-        final String target;
-        final String state;
-        final String body;
-        final String replyBody;
+    public static final class LinkEvent {
+        public final long seq;
+        public final String clientMessageId;
+        public final String target;
+        public final String state;
+        public final String body;
+        public final String replyBody;
 
         LinkEvent(long seq, String clientMessageId, String target, String state, String body, String replyBody) {
             this.seq = seq;
@@ -64,9 +64,9 @@ final class PublicLinkClient implements PublicConversationTransport.Client {
         }
     }
 
-    static final class EventsPage {
-        final List<LinkEvent> events;
-        final JSONObject heartbeats;
+    public static final class EventsPage {
+        public final List<LinkEvent> events;
+        public final JSONObject heartbeats;
 
         EventsPage(List<LinkEvent> events, JSONObject heartbeats) {
             this.events = events;
@@ -77,12 +77,12 @@ final class PublicLinkClient implements PublicConversationTransport.Client {
     private final String baseUrl;
     private final String session;
 
-    PublicLinkClient(String baseUrl, String session) {
+    public PublicLinkClient(String baseUrl, String session) {
         this.baseUrl = (baseUrl == null || baseUrl.isBlank() ? DEFAULT_BASE : baseUrl).replaceAll("/+$", "");
         this.session = session;
     }
 
-    static String generateVerifier() {
+    public static String generateVerifier() {
         byte[] raw = new byte[48];
         new SecureRandom().nextBytes(raw);
         StringBuilder value = new StringBuilder();
@@ -90,7 +90,7 @@ final class PublicLinkClient implements PublicConversationTransport.Client {
         return value.toString();
     }
 
-    static String pkceChallenge(String verifier) {
+    public static String pkceChallenge(String verifier) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hash = digest.digest(verifier.getBytes(StandardCharsets.UTF_8));
@@ -101,12 +101,12 @@ final class PublicLinkClient implements PublicConversationTransport.Client {
         }
     }
 
-    static String authStartUrl(String baseUrl, String challenge) {
+    public static String authStartUrl(String baseUrl, String challenge) {
         return (baseUrl == null || baseUrl.isBlank() ? DEFAULT_BASE : baseUrl).replaceAll("/+$", "")
             + "/auth/start?client=android&challenge=" + challenge;
     }
 
-    static String exchange(String baseUrl, String code, String verifier) throws Exception {
+    public static String exchange(String baseUrl, String code, String verifier) throws Exception {
         JSONObject response = new JSONObject(request("POST",
             (baseUrl == null || baseUrl.isBlank() ? DEFAULT_BASE : baseUrl).replaceAll("/+$", "") + "/auth/exchange",
             null,
@@ -116,11 +116,11 @@ final class PublicLinkClient implements PublicConversationTransport.Client {
         return session;
     }
 
-    TargetCatalog targetCatalog() throws Exception {
+    public TargetCatalog targetCatalog() throws Exception {
         return parseTargetCatalog(request("GET", baseUrl + "/api/link/targets", session, null));
     }
 
-    static TargetCatalog parseTargetCatalog(String raw) throws Exception {
+    public static TargetCatalog parseTargetCatalog(String raw) throws Exception {
         JSONObject response = new JSONObject(raw);
         JSONArray rows = response.optJSONArray("targets");
         List<LinkTarget> targets = new ArrayList<>();
@@ -137,7 +137,7 @@ final class PublicLinkClient implements PublicConversationTransport.Client {
         List<String> privateDiscoveryUrls = new ArrayList<>();
         for (int index = 0; discoveryRows != null && index < discoveryRows.length(); index++) {
             String candidate = discoveryRows.optString(index, "").trim().replaceAll("/+$", "");
-            if (ServerDiscovery.isAllowedServer(candidate)
+            if (LinkUrlPolicy.isAllowedServer(candidate)
                 && !privateDiscoveryUrls.contains(candidate)
                 && privateDiscoveryUrls.size() < 8) {
                 privateDiscoveryUrls.add(candidate);
@@ -169,10 +169,7 @@ final class PublicLinkClient implements PublicConversationTransport.Client {
             baseUrl + "/api/link/voice/upload",
             session,
             new JSONObject()
-                .put("audio", android.util.Base64.encodeToString(
-                    bytes,
-                    android.util.Base64.NO_WRAP
-                ))
+                .put("audio", Base64.getEncoder().encodeToString(bytes))
                 .toString()
         ));
         String voiceRef = uploaded.optString("voiceRef", "");
@@ -190,7 +187,7 @@ final class PublicLinkClient implements PublicConversationTransport.Client {
         return response.optString("state", "queued");
     }
 
-    EventsPage events(long afterSeq) throws Exception {
+    public EventsPage events(long afterSeq) throws Exception {
         JSONObject response = new JSONObject(request("GET", baseUrl + "/api/link/events?after=" + afterSeq, session, null));
         JSONArray rows = response.optJSONArray("events");
         List<LinkEvent> events = new ArrayList<>();
@@ -209,7 +206,7 @@ final class PublicLinkClient implements PublicConversationTransport.Client {
         return new EventsPage(events, response.optJSONObject("heartbeats"));
     }
 
-    void revoke() {
+    public void revoke() {
         try {
             request("POST", baseUrl + "/auth/revoke", session, null);
         } catch (Exception ignored) {
