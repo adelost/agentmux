@@ -1,8 +1,4 @@
-package io.agentmux.audioinbox
-
-import io.agentmux.linkcore.LinkAction
-import io.agentmux.linkcore.LinkReducer
-import io.agentmux.linkcore.LinkState
+package io.agentmux.linkcore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -10,7 +6,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * WHAT: Serializes reducer transitions with their ordered durable persistence.
  * WHY: Keeps concurrent discovery and reply callbacks from overwriting each other.
  */
-internal class LinkStateLedger(
+class LinkStateLedger(
     initial: LinkState,
     private val persist: (LinkState) -> Unit,
 ) {

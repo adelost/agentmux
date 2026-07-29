@@ -5,7 +5,7 @@ fun linkConnectionLabel(connection: ConnectionState): String = when (connection)
     ConnectionState.CONNECTED -> "CONNECTED"
     ConnectionState.CONNECTING -> "CONNECTING"
     ConnectionState.DISCONNECTED -> "DISCONNECTED"
-    ConnectionState.CONFIGURATION_REQUIRED -> "PAIRING"
+    ConnectionState.CONFIGURATION_REQUIRED -> "SIGN IN"
     ConnectionState.OFF -> "OFF"
 }
 
@@ -21,6 +21,6 @@ fun linkConnectionSettingsDetail(state: LinkState): String = when (state.connect
         state.connectionDetail.uppercase().take(42).ifBlank { "READY" }
     ConnectionState.CONNECTING -> "LOOKING FOR LINK"
     ConnectionState.DISCONNECTED -> "OPEN PHONE TO CONNECT"
-    ConnectionState.CONFIGURATION_REQUIRED -> "OPEN PHONE TO PAIR"
+    ConnectionState.CONFIGURATION_REQUIRED -> "LOG IN ON PHONE"
     ConnectionState.OFF -> "LINK IS OFF"
 }

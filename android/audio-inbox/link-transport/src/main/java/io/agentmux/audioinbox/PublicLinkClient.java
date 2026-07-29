@@ -4,6 +4,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import io.agentmux.linkcore.VoiceUploadPolicy;
+import io.agentmux.linkcore.LinkMailboxEvent;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -17,6 +18,8 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.List;
 
 /** HTTP client for the public Agentmux Link mailbox (docs/link-internet-v1.md). */
@@ -53,22 +56,48 @@ public final class PublicLinkClient implements PublicConversationTransport.Clien
         public final String state;
         public final String body;
         public final String replyBody;
+        public final long createdAtMs;
+        public final long replyAtMs;
 
-        LinkEvent(long seq, String clientMessageId, String target, String state, String body, String replyBody) {
+        LinkEvent(
+            long seq,
+            String clientMessageId,
+            String target,
+            String state,
+            String body,
+            String replyBody,
+            long createdAtMs,
+            long replyAtMs
+        ) {
             this.seq = seq;
             this.clientMessageId = clientMessageId;
             this.target = target;
             this.state = state;
             this.body = body;
             this.replyBody = replyBody;
+            this.createdAtMs = createdAtMs;
+            this.replyAtMs = replyAtMs;
+        }
+
+        public LinkMailboxEvent asDomainEvent() {
+            return new LinkMailboxEvent(
+                seq,
+                clientMessageId,
+                target,
+                state,
+                body,
+                replyBody,
+                createdAtMs,
+                replyAtMs
+            );
         }
     }
 
     public static final class EventsPage {
         public final List<LinkEvent> events;
-        public final JSONObject heartbeats;
+        public final Map<String, Boolean> heartbeats;
 
-        EventsPage(List<LinkEvent> events, JSONObject heartbeats) {
+        EventsPage(List<LinkEvent> events, Map<String, Boolean> heartbeats) {
             this.events = events;
             this.heartbeats = heartbeats;
         }
@@ -196,7 +225,16 @@ public final class PublicLinkClient implements PublicConversationTransport.Clien
     }
 
     public EventsPage events(long afterSeq) throws Exception {
-        JSONObject response = new JSONObject(request("GET", baseUrl + "/api/link/events?after=" + afterSeq, session, null));
+        return parseEventsPage(request(
+            "GET",
+            baseUrl + "/api/link/events?after=" + afterSeq,
+            session,
+            null
+        ));
+    }
+
+    static EventsPage parseEventsPage(String json) {
+        JSONObject response = new JSONObject(json);
         JSONArray rows = response.optJSONArray("events");
         List<LinkEvent> events = new ArrayList<>();
         for (int index = 0; rows != null && index < rows.length(); index++) {
@@ -208,10 +246,19 @@ public final class PublicLinkClient implements PublicConversationTransport.Clien
                 row.optString("target"),
                 row.optString("state"),
                 row.optString("body"),
-                row.optString("replyBody")
+                row.optString("replyBody"),
+                row.optLong("createdAt"),
+                row.optLong("replyAt")
             ));
         }
-        return new EventsPage(events, response.optJSONObject("heartbeats"));
+        JSONObject heartbeatRows = response.optJSONObject("heartbeats");
+        Map<String, Boolean> heartbeats = new LinkedHashMap<>();
+        if (heartbeatRows != null) {
+            for (String target : heartbeatRows.keySet()) {
+                heartbeats.put(target, heartbeatRows.optBoolean(target, false));
+            }
+        }
+        return new EventsPage(List.copyOf(events), Map.copyOf(heartbeats));
     }
 
     public void revoke() {

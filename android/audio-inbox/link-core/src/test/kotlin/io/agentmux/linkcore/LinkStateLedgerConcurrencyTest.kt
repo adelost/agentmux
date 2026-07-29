@@ -1,11 +1,4 @@
-package io.agentmux.audioinbox
-
-import io.agentmux.linkcore.DeliveryPhase
-import io.agentmux.linkcore.LinkAction
-import io.agentmux.linkcore.LinkState
-import io.agentmux.linkcore.LinkTarget
-import io.agentmux.linkcore.LinkTurn
-import io.agentmux.linkcore.ReplyPhase
+package io.agentmux.linkcore
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList

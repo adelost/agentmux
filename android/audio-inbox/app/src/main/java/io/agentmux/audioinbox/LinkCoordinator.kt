@@ -8,7 +8,9 @@ import android.os.Build
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.LinkAction
+import io.agentmux.linkcore.LinkMailboxEventProjector
 import io.agentmux.linkcore.LinkState
+import io.agentmux.linkcore.LinkStateLedger
 import io.agentmux.linkcore.LinkTarget
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
@@ -38,6 +40,7 @@ internal class LinkCoordinator(
     private val audioActions = LinkAudioActions(activity, targetDirectory::target)
     private val linkSessions = KeystoreSessionStore(preferences)
     private val wearSessions = LinkWearSessionPublisher(activity)
+    private val publicEvents = PublicMailboxFeed(linkSessions, ::applyPublicEvents)
     private val discovery: ExecutorService = Executors.newFixedThreadPool(2)
     private val pendingDiscovery = AtomicInteger(2)
     private val drafts = ConcurrentHashMap<String, String>()
@@ -153,6 +156,7 @@ internal class LinkCoordinator(
     init {
         preferences.registerOnSharedPreferenceChangeListener(preferenceListener)
         PlaybackProgressBus.addListener(playbackProgressListener)
+        publicEvents.start()
         linkSessions.credentials()?.let(wearSessions::publish)
         discoverTargets()
         syncConnection()
@@ -405,6 +409,13 @@ internal class LinkCoordinator(
         )
     }
 
+    private fun applyPublicEvents(page: PublicLinkClient.EventsPage) {
+        page.events.forEach { event ->
+            LinkMailboxEventProjector.actions(ledger.value, event.asDomainEvent())
+                .forEach(::dispatch)
+        }
+    }
+
     private fun discoveryFinished() {
         if (pendingDiscovery.decrementAndGet() != 0 || recoveredPlaybackApplied) return
         recoveredPlaybackApplied = true
@@ -470,6 +481,7 @@ internal class LinkCoordinator(
         preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener)
         PlaybackProgressBus.removeListener(playbackProgressListener)
         discovery.shutdownNow()
+        publicEvents.close()
         linkAuth.close()
         controller.close()
     }
