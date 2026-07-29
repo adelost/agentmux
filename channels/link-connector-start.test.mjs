@@ -17,28 +17,81 @@ feature("Link connector starter", () => {
       return { before, seen, transcribe };
     }],
     when: ["starting its scheduled cycle", async (ctx) => {
+      const scheduled = [];
       const started = startLinkConnectorIfConfigured({
         agent: {},
         deliveryBroker: {},
         deliveryQueue: {},
         transcribe: ctx.transcribe,
         runCycle: async (deps) => { ctx.seen.push(deps); },
-        scheduleTimeout: (callback) => callback(),
-        scheduleInterval: () => {},
+        scheduleTimeout: (callback, delayMs) => scheduled.push({ callback, delayMs }),
         log: () => {},
       });
-      await Promise.resolve();
-      return { started, ctx };
+      const initial = scheduled.shift();
+      await initial.callback();
+      return { started, ctx, initial, scheduled };
     }],
-    then: ["the exact function and declarative targets reach the cycle", ({ started, ctx }) => {
+    then: ["the exact function and declarative targets reach the cycle", ({ started, ctx, initial, scheduled }) => {
       expect(started).toBe(true);
+      expect(initial.delayMs).toBe(20_000);
       expect(ctx.seen).toHaveLength(1);
       expect(ctx.seen[0].transcribe).toBe(ctx.transcribe);
       expect(ctx.seen[0].targets).toEqual(["lsrc:3", "lsrc:10"]);
+      expect(scheduled).toHaveLength(1);
+      expect(scheduled[0].delayMs).toBe(15_000);
       for (const [key, value] of Object.entries({
         LINK_BASE: ctx.before.base,
         LINK_TOKEN_WSL: ctx.before.token,
         LINK_TARGETS_WSL: ctx.before.targets,
+      })) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }],
+  });
+
+  component("a slow cycle must finish before another poll is scheduled", {
+    given: ["one configured connector and a held-open cycle", () => {
+      const before = {
+        base: process.env.LINK_BASE,
+        token: process.env.LINK_TOKEN_WSL,
+      };
+      process.env.LINK_BASE = "https://link.v1d.io";
+      process.env.LINK_TOKEN_WSL = "secret";
+      const scheduled = [];
+      let release;
+      const held = new Promise((resolve) => { release = resolve; });
+      let cycles = 0;
+      return { before, scheduled, held, release: () => release(), cycles: () => cycles, increment: () => { cycles += 1; } };
+    }],
+    when: ["the initial timer fires while its cycle remains open", async (ctx) => {
+      startLinkConnectorIfConfigured({
+        agent: {},
+        deliveryBroker: {},
+        deliveryQueue: {},
+        transcribe: async () => "text",
+        runCycle: async () => {
+          ctx.increment();
+          await ctx.held;
+        },
+        scheduleTimeout: (callback, delayMs) => ctx.scheduled.push({ callback, delayMs }),
+        log: () => {},
+      });
+      const first = ctx.scheduled.shift().callback();
+      await Promise.resolve();
+      const whileOpen = ctx.scheduled.length;
+      ctx.release();
+      await first;
+      return { ctx, whileOpen };
+    }],
+    then: ["no overlapping tick exists and one next poll appears only after completion", ({ ctx, whileOpen }) => {
+      expect(ctx.cycles()).toBe(1);
+      expect(whileOpen).toBe(0);
+      expect(ctx.scheduled).toHaveLength(1);
+      expect(ctx.scheduled[0].delayMs).toBe(15_000);
+      for (const [key, value] of Object.entries({
+        LINK_BASE: ctx.before.base,
+        LINK_TOKEN_WSL: ctx.before.token,
       })) {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;

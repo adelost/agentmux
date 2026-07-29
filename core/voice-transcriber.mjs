@@ -33,7 +33,7 @@ export async function transcribeVoiceBuffer({
   const lang = String(language || "sv").toLowerCase().replace(/[^a-z]/g, "") || "sv";
   const tmpPath = join(tempDir, `agentmux-voice-${randomBytes(8).toString("hex")}.${ext}`);
   try {
-    writeFileSync(tmpPath, bytes);
+    writeFileSync(tmpPath, bytes, { mode: 0o600 });
     const { stdout } = await run(
       `'${esc(transcribeScript)}' '${esc(tmpPath)}' '${esc(lang)}'`,
       60_000,

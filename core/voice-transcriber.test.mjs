@@ -1,5 +1,5 @@
 import { component, expect, feature } from "bdd-vitest";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -21,6 +21,7 @@ feature("shared voice transcriber", () => {
             observedPath = command.match(/'([^']+\.m4a)'/)?.[1] || "";
             expect(timeoutMs).toBe(60_000);
             expect(readFileSync(observedPath, "utf8")).toBe("VOICE");
+            expect(statSync(observedPath).mode & 0o777).toBe(0o600);
             return { stdout: "live från klockan\n" };
           },
         }),

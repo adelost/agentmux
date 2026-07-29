@@ -34,8 +34,8 @@ export function planClaimedMessage({ message, journalEntry }) {
 /** WHAT: Maps a fetch or pane failure to an honest connector report. WHY: Keeps a dead mailbox or pane from masquerading as a delivered turn. */
 export function connectorFailureStage(error) {
   const text = String(error?.message || error || "unknown");
-  if (/fetch|network|ECONN|timeout|5\d\d/u.test(text)) return "link-unavailable";
   if (/transcri(?:be|ption)/iu.test(text)) return "transcription-failed";
+  if (/fetch|network|ECONN|timeout|5\d\d/u.test(text)) return "link-unavailable";
   return "pane-delivery-failed";
 }
 

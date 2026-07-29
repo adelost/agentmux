@@ -70,12 +70,14 @@ feature("link connector cycle", () => {
   component("transcription failures are never mislabeled as pane failures", {
     given: ["three failure classes", () => [
       new Error("transcription empty; audio may have been silent"),
+      new Error("transcription timeout after 60s"),
       new Error("reply-timeout"),
       new Error("fetch failed"),
     ]],
     when: ["classifying them", (errors) => errors.map(connectorFailureStage)],
     then: ["each operator-facing stage names its real subsystem", (stages) => {
       expect(stages).toEqual([
+        "transcription-failed",
         "transcription-failed",
         "link-unavailable",
         "link-unavailable",
