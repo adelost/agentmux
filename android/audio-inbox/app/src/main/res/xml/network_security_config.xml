@@ -3,7 +3,7 @@
     <base-config cleartextTrafficPermitted="false" />
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">ts.net</domain>
-        <domain>agentmux.local</domain>
-        <domain>localhost</domain>
+        <domain includeSubdomains="false">agentmux.local</domain>
+        <domain includeSubdomains="false">localhost</domain>
     </domain-config>
 </network-security-config>
