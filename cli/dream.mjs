@@ -104,6 +104,10 @@ function writeDreamRunSentinel(memPath, dateKey, timeStr, okCount, failedCount) 
 
 /** WHAT: Builds one fleet summary. WHY: Keeps Dream from resuming, compacting, sending to, or inspecting tmux panes. */
 export async function cmdDream(ctx, flags = {}, dependencies = {}) {
+  if (flags.help || flags.h) {
+    console.log("Usage: amux dream [--quiet] [--dry] [--since 24h|ISO] [--workspace PATH] [--defer-sentinel]");
+    return { help: true };
+  }
   const readReceipts = dependencies.readReceipts || readDreamReceipts;
   const collectSources = dependencies.collectSources || collectDreamSources;
   const summarize = dependencies.summarize || runDreamSummarizer;

@@ -59,15 +59,19 @@ fi
 
 # Actor chain: bank+compact bounded daily backlog, then lint and route the
 # remaining count into today's file. Lint exit 1 means findings, not failure.
+# Compact exit 1 means some per-file failures (backlog remaining), not a
+# crashed compactor: that distinction comes from the JSON, not the exit code.
 compact_status=0
 compact_output="$("$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" memory compact --json --workspace "$OPENCLAW_WORKSPACE" 2>&1)" || compact_status=$?
 printf "%s\n" "$compact_output" >> "$AGENTMUX_DREAM_LOG"
-if ! compacted="$(printf "%s" "$compact_output" | "$NODE_BIN" -e '
-  let s=""; process.stdin.on("data",c=>s+=c).on("end",()=>{try{const r=JSON.parse(s); process.stdout.write(String(r.compacted?.length||0));}catch{process.exit(1)}})
+if ! counts="$(printf "%s" "$compact_output" | "$NODE_BIN" -e '
+  let s=""; process.stdin.on("data",c=>s+=c).on("end",()=>{try{const r=JSON.parse(s); process.stdout.write(String(r.compacted?.length||0)+":"+String(r.failed?.length||0));}catch{process.exit(1)}})
 ')"; then
   echo "memory compact returned invalid JSON" >&2
   exit 2
 fi
+compacted="${counts%%:*}"
+compact_failed="${counts##*:}"
 
 lint_status=0
 lint_output="$("$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" memory lint --json --report-daily --compacted "$compacted" --workspace "$OPENCLAW_WORKSPACE" 2>&1)" || lint_status=$?
@@ -78,9 +82,12 @@ if ! printf "%s" "$lint_output" | "$NODE_BIN" -e 'let s="";process.stdin.on("dat
 fi
 grep -q "<!-- amux-memory-status:$date_key -->" "$daily_file"
 
-if [ "$compact_status" -ne 0 ]; then
-  printf "%s ERROR memory compact exit=%s\n" "$(date -Is)" "$compact_status" >> "$AGENTMUX_DREAM_LOG"
+if [ "$compact_status" -gt 1 ]; then
+  printf "%s ERROR memory compact crashed exit=%s\n" "$(date -Is)" "$compact_status" >> "$AGENTMUX_DREAM_LOG"
   exit "$compact_status"
+fi
+if [ "$compact_failed" -gt 0 ]; then
+  printf "%s WARN memory compact backlog: %s file(s) still failing; dream and lint continue\n" "$(date -Is)" "$compact_failed" >> "$AGENTMUX_DREAM_LOG"
 fi
 # lint exit 1 is its documented "warnings found" contract. Any other nonzero
 # means the linter itself failed and should trigger the cron failure push.
