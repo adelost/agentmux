@@ -2,7 +2,10 @@
 
 import { expect, feature, component } from "bdd-vitest";
 import worker from "./index.mjs";
-import { buildReleasePayload, canonicalJson, signRelease, verifyRelease, __keygen } from "../scripts/publish-release.mjs";
+import {
+  buildReleasePayload, canonicalJson, signRelease, verifyPublishedRelease,
+  verifyRelease, wranglerPutArgs, __keygen,
+} from "../scripts/publish-release.mjs";
 import { createTestDb } from "./testdb.mjs";
 
 const NOW = "2026-07-28T12:00:00.000Z";
@@ -39,6 +42,44 @@ feature("release payload and signature", () => {
       expect(r.canonicalTwice).toBe(true);
       expect(r.payload.apk.sha256).toMatch(/^[0-9a-f]{64}$/u);
       expect(r.payload.apk.url).toBe("https://link.v1d.io/releases/agentmux-link/phone/app-42.apk");
+    }],
+  });
+
+  component("production upload is explicitly remote", {
+    given: ["one release upload", () => ({
+      step: { put: "link-releases/agentmux-link/phone/app-42.apk", contentType: "application/vnd.android.package-archive" },
+      file: "/tmp/app.apk",
+    })],
+    when: ["building Wrangler arguments", (input) => wranglerPutArgs(input)],
+    then: ["remote storage is mandatory", (args) => {
+      expect(args).toContain("--remote");
+      expect(args).toContain("link-releases/agentmux-link/phone/app-42.apk");
+    }],
+  });
+
+  component("publication acknowledgement requires exact public bytes", {
+    given: ["one signed public release", () => {
+      const payload = buildReleasePayload({
+        apkBytes: Buffer.from("APK"),
+        versionCode: 42,
+        versionName: "1.2.0",
+        createdAt: NOW,
+        expiresAt: "2026-08-11T12:00:00.000Z",
+      });
+      const responses = new Map([
+        ["manifest-v1.json", new Response(JSON.stringify(payload))],
+        ["manifest-v1.json.sig", new Response("signature\n")],
+        ["app-42.apk", new Response("APK")],
+      ]);
+      return {
+        payload,
+        signature: "signature",
+        fetchImpl: async (url) => responses.get(url.split("/").at(-1)) || new Response("", { status: 404 }),
+      };
+    }],
+    when: ["verifying the public channel", (input) => verifyPublishedRelease({ ...input, channel: "phone" })],
+    then: ["all public bytes match", (result) => {
+      expect(result).toBeUndefined();
     }],
   });
 });
