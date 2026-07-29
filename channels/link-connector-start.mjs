@@ -18,7 +18,6 @@ export function startLinkConnectorIfConfigured({
   error = console.error,
   runCycle = runLinkConnectorCycle,
   scheduleTimeout = setTimeout,
-  scheduleInterval = setInterval,
 } = {}) {
   if (!process.env.LINK_BASE || !process.env.LINK_TOKEN_WSL) return false;
   const voiceTranscriber = transcribe || createVoiceBufferTranscriber({
@@ -28,21 +27,26 @@ export function startLinkConnectorIfConfigured({
   const targets = String(process.env.LINK_TARGETS_WSL || "lsrc:3,lsrc:10")
     .split(",").map((value) => value.trim()).filter(Boolean);
   const statePath = join(homedir(), ".agentmux", "link-connector.json");
-  const cycle = () => runCycle({
-    linkBase: process.env.LINK_BASE,
-    token: process.env.LINK_TOKEN_WSL,
-    targets,
-    agent,
-    deliveryBroker,
-    deliveryQueue,
-    transcribe: voiceTranscriber,
-    statePath,
-    log,
-  }).catch((cycleError) => error(`link-connector | cycle failed: ${cycleError.message}`));
-  scheduleTimeout(() => {
-    void cycle();
-    scheduleInterval(cycle, 15_000);
-  }, 20_000);
+  const cycle = async () => {
+    try {
+      await runCycle({
+        linkBase: process.env.LINK_BASE,
+        token: process.env.LINK_TOKEN_WSL,
+        targets,
+        agent,
+        deliveryBroker,
+        deliveryQueue,
+        transcribe: voiceTranscriber,
+        statePath,
+        log,
+      });
+    } catch (cycleError) {
+      error(`link-connector | cycle failed: ${cycleError.message}`);
+    } finally {
+      scheduleTimeout(cycle, 15_000);
+    }
+  };
+  scheduleTimeout(cycle, 20_000);
   log(`link-connector | enabled | base=${process.env.LINK_BASE} targets=${targets.join(",")}`);
   return true;
 }
