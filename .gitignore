@@ -5,3 +5,4 @@ agentmux.yaml
 *.pid
 test/recordings/
 spikes/web-ui/artifacts/
+.link-release/
