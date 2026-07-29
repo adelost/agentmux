@@ -13,6 +13,7 @@ import com.adelost.ringkit.ui.RingNavigator
 import com.adelost.ringkit.ui.RingScreen
 import com.adelost.ringkit.ui.RowSpec
 import io.agentmux.linkcore.ConnectionState
+import io.agentmux.linkcore.DeliveryPhase
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.linkConnectionLabel
@@ -109,7 +110,10 @@ internal fun wearLinkRows(
     val selected = state.targets.firstOrNull { it.id == state.selectedTargetId }
         ?: state.targets.firstOrNull()
     val availableTargets = state.targets.filter { it.available }
-    val targetChoices = availableTargets.map { it.label.ifBlank { it.id }.uppercase() }
+    val targetChoices = availableTargets
+        .map { it.label.ifBlank { it.id }.uppercase() }
+        .takeIf { it.size >= 2 }
+        .orEmpty()
     val latest = state.turns.lastOrNull()
     val selectedAvailable = selected?.available == true
     val rows = mutableListOf(
@@ -150,7 +154,12 @@ internal fun wearLinkRows(
     rows += RowSpec(
         key = "latest",
         title = latest.respondingTarget.ifBlank { latest.targetId }.uppercase(),
-        sub = latest.replyText.ifBlank { "WAITING FOR REPLY" }.uppercase().take(54),
+        sub = when {
+            latest.replyText.isNotBlank() -> latest.replyText
+            latest.deliveryPhase == DeliveryPhase.FAILED ->
+                latest.deliveryError.ifBlank { "DELIVERY FAILED" }
+            else -> "WAITING FOR REPLY"
+        }.uppercase().take(54),
         icon = RingIcons.Speaker,
     )
     if (latest.replyText.isNotBlank()) {
