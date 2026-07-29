@@ -215,4 +215,48 @@ feature("voice upload and retention", () => {
       expect(result.object).toBeNull();
     }],
   });
+
+  component("a connector can download only voice assigned to one of its targets", {
+    given: ["a Windows voice message", async () => {
+      const { env } = makeEnv();
+      const store = createLinkStore(env.LINK_DB);
+      await store.insertSession({
+        tokenHash: await sha256Hex("lnk_voice5"),
+        identityId: "p-1",
+        nowMs: NOW,
+        ttlSeconds: 3600,
+      });
+      const upload = await worker.fetch(req("https://link.v1d.io/api/link/voice/upload", {
+        method: "POST",
+        token: "lnk_voice5",
+        body: { audio: btoa("VOICE-WINDOWS-1234"), filename: "ptt.m4a" },
+      }), env);
+      const { voiceRef } = await upload.json();
+      await worker.fetch(req("https://link.v1d.io/api/link/send", {
+        method: "POST",
+        token: "lnk_voice5",
+        body: {
+          clientMessageId: crypto.randomUUID(),
+          target: "windows",
+          kind: "voice",
+          voiceRef,
+        },
+      }), env);
+      return { env, voiceRef };
+    }],
+    when: ["WSL and Windows connectors request the same object", async (ctx) => ({
+      wsl: await worker.fetch(req(
+        `https://link.v1d.io/api/link/voice/${ctx.voiceRef}`,
+        { token: "wsl-token" },
+      ), ctx.env),
+      windows: await worker.fetch(req(
+        `https://link.v1d.io/api/link/voice/${ctx.voiceRef}?source=windows`,
+        { token: "win-token" },
+      ), ctx.env),
+    })],
+    then: ["the foreign connector is refused and the owning connector reads it", (result) => {
+      expect(result.wsl.status).toBe(403);
+      expect(result.windows.status).toBe(200);
+    }],
+  });
 });

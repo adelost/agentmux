@@ -44,6 +44,11 @@ export async function handleConnectorRoutes({ request, env, store, url, nowMs })
     if (!connector) return json(null, 401, { error: "connector-auth-required" });
     const voiceRef = url.pathname.slice("/api/link/voice/".length);
     if (!/^voice\/[\w-]{8,80}\.m4a$/u.test(voiceRef)) return json(null, 400, { error: "voiceRef-invalid" });
+    const message = await store.getMessageForVoice(voiceRef);
+    if (!message) return json(null, 404, { error: "voice-message-not-found" });
+    if (!connector.targets.includes(message.target)) {
+      return json(null, 403, { error: "connector-scope-required" });
+    }
     const object = await env.LINK_VOICE.get(voiceRef);
     if (!object) return json(null, 404, { error: "voice-not-found" });
     return new Response(object.body, { headers: { "content-type": "audio/mp4", "cache-control": "no-store" } });
