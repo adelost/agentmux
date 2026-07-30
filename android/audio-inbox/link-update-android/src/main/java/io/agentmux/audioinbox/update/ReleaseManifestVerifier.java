@@ -1,16 +1,11 @@
-package io.agentmux.audioinbox;
+package io.agentmux.audioinbox.update;
 
-import net.i2p.crypto.eddsa.EdDSAEngine;
-import net.i2p.crypto.eddsa.EdDSAPublicKey;
-import net.i2p.crypto.eddsa.spec.EdDSANamedCurveTable;
-import net.i2p.crypto.eddsa.spec.EdDSAParameterSpec;
-import net.i2p.crypto.eddsa.spec.EdDSAPublicKeySpec;
+import com.adelost.releasekit.DetachedEd25519Verifier;
 
 import org.json.JSONObject;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Base64;
@@ -31,16 +26,28 @@ final class ReleaseManifestVerifier {
 
     private ReleaseManifestVerifier() {}
 
-    static ReleaseCandidate verify(String manifest, String signature, long nowMs) throws Exception {
+    static ReleaseCandidate verify(
+        String manifest,
+        String signature,
+        long nowMs,
+        LinkReleaseCatalog catalog
+    ) throws Exception {
         byte[] encoded = Base64.getDecoder().decode(PUBLIC_KEY_DER);
         if (encoded.length != 44) throw new SecurityException("pinned release key is invalid");
-        return verify(manifest, signature, nowMs, Arrays.copyOfRange(encoded, 12, 44));
+        return verify(
+            manifest,
+            signature,
+            nowMs,
+            catalog,
+            Arrays.copyOfRange(encoded, 12, 44)
+        );
     }
 
     static ReleaseCandidate verify(
         String manifest,
         String signature,
         long nowMs,
+        LinkReleaseCatalog catalog,
         byte[] rawPublicKey
     ) throws Exception {
         if (manifest == null || manifest.getBytes(StandardCharsets.UTF_8).length > 64 * 1024) {
@@ -50,11 +57,15 @@ final class ReleaseManifestVerifier {
         requireExactKeys(payload, PAYLOAD_KEYS);
         byte[] canonical = CanonicalJson.encode(payload).getBytes(StandardCharsets.UTF_8);
         byte[] signatureBytes = Base64.getDecoder().decode(signature.trim());
-        if (!verifyEd25519(rawPublicKey, canonical, signatureBytes)) {
+        if (!DetachedEd25519Verifier.INSTANCE.verify(
+            rawPublicKey,
+            canonical,
+            signatureBytes
+        )) {
             throw new SecurityException("release manifest signature mismatch");
         }
         if (payload.getInt("schemaVersion") != 1
-            || !"io.agentmux.audioinbox".equals(payload.getString("packageName"))) {
+            || !catalog.getProduct().getPackageName().equals(payload.getString("packageName"))) {
             throw new SecurityException("release identity mismatch");
         }
         int versionCode = payload.getInt("versionCode");
@@ -65,7 +76,9 @@ final class ReleaseManifestVerifier {
         JSONObject apk = payload.getJSONObject("apk");
         requireExactKeys(apk, APK_KEYS);
         String apkUrl = apk.getString("url");
-        if (!safeReleaseUrl(apkUrl)) throw new SecurityException("unsafe release APK URL");
+        if (!safeReleaseUrl(apkUrl, catalog)) {
+            throw new SecurityException("unsafe release APK URL");
+        }
         long size = apk.getLong("sizeBytes");
         String sha = apk.getString("sha256");
         if (size <= 0 || size > MAX_APK_BYTES || !sha.matches("^[0-9a-f]{64}$")) {
@@ -84,29 +97,18 @@ final class ReleaseManifestVerifier {
         );
     }
 
-    private static boolean verifyEd25519(byte[] rawKey, byte[] message, byte[] signature)
-        throws Exception {
-        if (rawKey.length != 32 || signature.length != 64) return false;
-        EdDSAParameterSpec spec = EdDSANamedCurveTable.getByName("Ed25519");
-        EdDSAPublicKey key = new EdDSAPublicKey(new EdDSAPublicKeySpec(rawKey, spec));
-        EdDSAEngine engine = new EdDSAEngine(MessageDigest.getInstance(spec.getHashAlgorithm()));
-        engine.initVerify(key);
-        engine.update(message);
-        return engine.verify(signature);
-    }
-
     private static void requireExactKeys(JSONObject object, Set<String> expected) {
         Set<String> actual = new HashSet<>();
         object.keys().forEachRemaining(actual::add);
         if (!actual.equals(expected)) throw new SecurityException("release manifest shape mismatch");
     }
 
-    private static boolean safeReleaseUrl(String raw) {
+    private static boolean safeReleaseUrl(String raw, LinkReleaseCatalog catalog) {
         try {
             URI uri = URI.create(raw);
             String path = uri.getPath();
             String fileName = path.substring(path.lastIndexOf('/') + 1);
-            return LinkReleaseProducts.INSTANCE.getPHONE().getAssetUrlPolicy().allows(raw)
+            return catalog.getProduct().getAssetUrlPolicy().allows(raw)
                 && fileName.matches("^app-[1-9]\\d*\\.apk$");
         } catch (Exception ignored) {
             return false;

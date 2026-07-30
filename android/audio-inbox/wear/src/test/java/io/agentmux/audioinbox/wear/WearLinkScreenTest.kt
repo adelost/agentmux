@@ -1,11 +1,13 @@
 package io.agentmux.audioinbox.wear
 
+import com.adelost.designkit.ui.CircleLabelProgress
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTarget
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
+import io.agentmux.linkcore.UpdatePresentation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -153,5 +155,43 @@ class WearLinkScreenTest {
         assertEquals("TTS UNAVAILABLE", rows[3].sub)
         rows[3].onTap?.invoke()
         assertTrue(retried)
+    }
+
+    @Test
+    fun updateRowUsesSharedProgressAndActionTruth() {
+        var installed = false
+        val downloading = LinkState(
+            update = UpdatePresentation(
+                currentVersion = "0.1.0 (1)",
+                availableVersion = "0.1.1",
+                state = "downloading",
+                detail = "DOWNLOADING… 40%",
+                progress = 0.4f,
+            ),
+        )
+        val downloadingRow = wearLinkSettingsRows(downloading)[1]
+        assertEquals("UPDATE", downloadingRow.title)
+        assertEquals("DOWNLOADING… 40%", downloadingRow.sub)
+        assertEquals(
+            CircleLabelProgress.Determinate(0.4f),
+            downloadingRow.labelProgress,
+        )
+        assertNull(downloadingRow.onTap)
+
+        val ready = downloading.copy(
+            update = downloading.update.copy(
+                state = "ready-to-install",
+                detail = "v0.1.1 READY · TAP",
+                progress = 1f,
+                canInstall = true,
+            ),
+        )
+        val readyRow = wearLinkSettingsRows(
+            state = ready,
+            onInstallUpdate = { installed = true },
+        )[1]
+        assertNotNull(readyRow.onTap)
+        readyRow.onTap?.invoke()
+        assertTrue(installed)
     }
 }

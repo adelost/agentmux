@@ -61,8 +61,10 @@ Public Link uses the `/auth/*` and `/api/link/*` routes on `link.v1d.io`.
 - `link-transport`: Android-free public mailbox client and conversation port
   shared byte-for-byte by Phone and Wear.
 - `link-session-android`: the single Android Keystore-backed session store.
-- `app`: Phone hosts, private relay adapter, recording, playback, signed
-  updater and the phone-owned Wear Data Layer session producer.
+- `link-update-android`: the single Link adapter onto CircleKit ReleaseKit;
+  Phone and Wear inject only their channel and installed version.
+- `app`: Phone hosts, private relay adapter, recording, playback and the
+  phone-owned Wear Data Layer session producer.
 - `wear`: CircleKit host and a direct `link.v1d.io` mailbox client. Phone sends
   its revocable 30-day session over the Wear Data Layer without exposing
   pairing UI; Wear then discovers live targets, records push-to-talk, polls
@@ -77,10 +79,11 @@ into Gradle, a git hook or hosted CI.
 
 ## Signed updates
 
-Phone updates come from the detached Ed25519 manifest at
-`link.v1d.io/releases/agentmux-link/phone/manifest-v1.json`. CircleKit owns
-download, digest/APK identity verification, ready-state recovery and installer
-handoff. Link owns the signed manifest parser and product URL policy.
+Phone and Wear updates come from separate detached Ed25519 manifests under
+`link.v1d.io/releases/agentmux-link/{phone|wear}/manifest-v1.json`. CircleKit
+owns download, digest/APK identity verification, ready-state recovery and
+installer handoff. Link owns one signed manifest parser and two channel data
+records; neither host owns a private updater.
 
 Release signing inputs are local operator configuration, never repository
 paths:

@@ -10,6 +10,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.graphics.toArgb
 import com.adelost.designkit.ui.GraphiteTokens
+import io.agentmux.audioinbox.update.LinkReleaseCatalogs
+import io.agentmux.audioinbox.update.LinkUpdater
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.LinkAction
 
@@ -29,7 +31,13 @@ class MainActivity : ComponentActivity() {
         coordinator = LinkCoordinator(this)
         coordinator.handlePublicAuth(intent?.data)
         recorder = PushToTalkRecorder(this)
-        updater = LinkUpdater(this, lifecycleScope) { presentation ->
+        updater = LinkUpdater(
+            context = this,
+            scope = lifecycleScope,
+            catalog = LinkReleaseCatalogs.PHONE,
+            currentVersionName = BuildConfig.VERSION_NAME,
+            currentVersionCode = BuildConfig.VERSION_CODE,
+        ) { presentation ->
             coordinator.applyUpdatePresentation(LinkAction.Update(presentation))
         }
         setContent {

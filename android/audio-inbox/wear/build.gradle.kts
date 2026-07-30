@@ -27,7 +27,7 @@ android {
         minSdk = 30
         targetSdk = 35
         versionCode = 1
-        versionName = "0.1.0-preview"
+        versionName = "0.1.0"
     }
 
     signingConfigs {
@@ -73,6 +73,7 @@ dependencies {
     implementation(project(":link-core"))
     implementation(project(":link-session-android"))
     implementation(project(":link-transport"))
+    implementation(project(":link-update-android"))
     implementation("com.google.android.gms:play-services-wearable:20.0.1")
     implementation("io.v1d.circlekit:ringkit:0.3.2")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))

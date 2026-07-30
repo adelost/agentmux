@@ -1,4 +1,4 @@
-package io.agentmux.audioinbox;
+package io.agentmux.audioinbox.update;
 
 import org.json.JSONArray;
 import org.json.JSONObject;

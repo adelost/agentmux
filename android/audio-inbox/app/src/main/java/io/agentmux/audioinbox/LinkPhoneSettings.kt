@@ -1,5 +1,7 @@
 package io.agentmux.audioinbox
 
+import io.agentmux.audioinbox.update.LinkUpdater
+
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn

@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.activity.compose.BackHandler
+import com.adelost.designkit.ui.CircleLabelProgress
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.ringkit.ui.RenderRingScreen
 import com.adelost.ringkit.ui.RingNavigator
@@ -16,6 +17,7 @@ import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.PlaybackPhase
+import io.agentmux.linkcore.UpdatePresentation
 import io.agentmux.linkcore.linkConnectionLabel
 import io.agentmux.linkcore.linkConnectionRoute
 import io.agentmux.linkcore.linkConnectionSettingsDetail
@@ -33,6 +35,8 @@ internal fun WearLinkScreen(
     onPlay: () -> Unit,
     onStop: () -> Unit,
     onReplay: () -> Unit,
+    onCheckUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
 ) {
     var captureOpen by remember { mutableStateOf(false) }
     var captureStarted by remember { mutableStateOf(false) }
@@ -75,8 +79,20 @@ internal fun WearLinkScreen(
             ),
         )
     }
-    LaunchedEffect(state, onSelectTarget, onPlay, onStop, onReplay) {
-        settingsItems.value = wearLinkSettingsRows(state)
+    LaunchedEffect(
+        state,
+        onSelectTarget,
+        onPlay,
+        onStop,
+        onReplay,
+        onCheckUpdate,
+        onInstallUpdate,
+    ) {
+        settingsItems.value = wearLinkSettingsRows(
+            state = state,
+            onCheckUpdate = onCheckUpdate,
+            onInstallUpdate = onInstallUpdate,
+        )
         items.value = wearLinkRows(
             state = state,
             onSelectTarget = onSelectTarget,
@@ -201,14 +217,38 @@ internal fun wearLinkRows(
     return rows
 }
 
-internal fun wearLinkSettingsRows(state: LinkState): List<RowSpec> = listOf(
+internal fun wearLinkSettingsRows(
+    state: LinkState,
+    onCheckUpdate: () -> Unit = {},
+    onInstallUpdate: () -> Unit = {},
+): List<RowSpec> = listOf(
     RowSpec(
         key = "connection",
         title = linkConnectionLabel(state.connection),
         sub = linkConnectionSettingsDetail(state),
         icon = if (state.connection == ConnectionState.CONNECTED) RingIcons.Wifi else RingIcons.Link,
     ),
+    RowSpec(
+        key = "update",
+        title = "UPDATE",
+        sub = state.update.detail.ifBlank {
+            state.update.currentVersion.ifBlank { "CHECKING VERSION…" }
+        }.uppercase(),
+        icon = RingIcons.Download,
+        onTap = when {
+            state.update.canInstall -> onInstallUpdate
+            state.update.canRetry -> onCheckUpdate
+            else -> null
+        },
+        labelProgress = state.update.toLabelProgress(),
+    ),
 )
+
+private fun UpdatePresentation.toLabelProgress(): CircleLabelProgress? = when (state) {
+    "checking", "installing" -> CircleLabelProgress.Indeterminate
+    "downloading" -> CircleLabelProgress.Determinate(progress.coerceIn(0f, 1f))
+    else -> null
+}
 
 private fun settingsRow(onSettings: () -> Unit) = RowSpec(
     key = "settings",
