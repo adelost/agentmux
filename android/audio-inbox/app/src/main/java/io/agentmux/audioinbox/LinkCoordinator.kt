@@ -306,7 +306,14 @@ internal class LinkCoordinator(
             try {
                 applyDiscovery(
                     ServerDiscovery.discover(
-                        ServerDiscovery.bootstrapCandidates(savedServer),
+                        ServerDiscovery.bootstrapCandidates(
+                            savedServer,
+                            runCatching {
+                                PublicLinkClient.publishedPrivateDiscoveryUrls(
+                                    PublicLinkClient.DEFAULT_BASE,
+                                )
+                            }.getOrDefault(emptyList()),
+                        ),
                     ),
                     save = true,
                 )

@@ -161,6 +161,18 @@ public final class PublicLinkClient implements PublicConversationTransport.Clien
         return parseTargetCatalog(request("GET", baseUrl + "/api/link/targets", session, null));
     }
 
+    /** Reads non-secret private transport hints before the user needs a mailbox session. */
+    public static List<String> publishedPrivateDiscoveryUrls(String baseUrl) throws Exception {
+        String root = (baseUrl == null || baseUrl.isBlank() ? DEFAULT_BASE : baseUrl)
+            .replaceAll("/+$", "");
+        return parseTargetCatalog(request(
+            "GET",
+            root + "/api/link/discovery",
+            null,
+            null
+        )).privateDiscoveryUrls;
+    }
+
     public static TargetCatalog parseTargetCatalog(String raw) throws Exception {
         JSONObject response = new JSONObject(raw);
         JSONArray rows = response.optJSONArray("targets");

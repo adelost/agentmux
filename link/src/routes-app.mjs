@@ -12,6 +12,12 @@ async function deleteUnusedVoice(env, voiceRef, existing) {
 
 /** WHAT: Routes one app API request. WHY: Keeps session-facing endpoints behind one identity-scoped handler. */
 export async function handleAppRoutes({ request, env, store, url, nowMs }) {
+  if (url.pathname === "/api/link/discovery" && request.method === "GET") {
+    return json(null, 200, {
+      privateDiscoveryUrls: privateDiscoveryUrlsForApp(env),
+    });
+  }
+
   if (url.pathname === "/api/link/targets" && request.method === "GET") {
     const session = await requireSession({ store, request, nowMs });
     if (!session) return json(null, 401, { error: "session-required" });
