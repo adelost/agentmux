@@ -1,4 +1,4 @@
-package io.agentmux.audioinbox;
+package io.agentmux.audioinbox.update;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
@@ -33,7 +33,8 @@ public class ReleaseManifestVerifierTest {
         ReleaseCandidate candidate = ReleaseManifestVerifier.verify(
             manifest,
             signature,
-            Instant.parse("2026-07-29T10:05:00Z").toEpochMilli()
+            Instant.parse("2026-07-29T10:05:00Z").toEpochMilli(),
+            LinkReleaseCatalogs.INSTANCE.getPHONE()
         );
 
         assertEquals(3, candidate.versionCode());
@@ -64,14 +65,32 @@ public class ReleaseManifestVerifierTest {
         byte[] publicKey = ((EdDSAPublicKey) pair.getPublic()).getAbyte();
 
         ReleaseCandidate candidate =
-            ReleaseManifestVerifier.verify(manifest, signature, now, publicKey);
+            ReleaseManifestVerifier.verify(
+                manifest,
+                signature,
+                now,
+                LinkReleaseCatalogs.INSTANCE.getPHONE(),
+                publicKey
+            );
         assertEquals(2, candidate.versionCode());
 
         payload.put("versionCode", 3);
         assertThrows(SecurityException.class, () ->
-            ReleaseManifestVerifier.verify(payload.toString(), signature, now, publicKey));
+            ReleaseManifestVerifier.verify(
+                payload.toString(),
+                signature,
+                now,
+                LinkReleaseCatalogs.INSTANCE.getPHONE(),
+                publicKey
+            ));
         assertThrows(SecurityException.class, () ->
-            ReleaseManifestVerifier.verify(manifest, signature, now + 15L * 24 * 3600_000, publicKey));
+            ReleaseManifestVerifier.verify(
+                manifest,
+                signature,
+                now + 15L * 24 * 3600_000,
+                LinkReleaseCatalogs.INSTANCE.getPHONE(),
+                publicKey
+            ));
     }
 
     @Test
@@ -88,6 +107,7 @@ public class ReleaseManifestVerifierTest {
             payload.toString(),
             sign(pair, payload, spec),
             Instant.parse("2026-07-27T20:00:00Z").toEpochMilli(),
+            LinkReleaseCatalogs.INSTANCE.getPHONE(),
             publicKey
         ));
 
@@ -97,18 +117,49 @@ public class ReleaseManifestVerifierTest {
             extra.toString(),
             sign(pair, extra, spec),
             Instant.parse("2026-07-27T20:00:00Z").toEpochMilli(),
+            LinkReleaseCatalogs.INSTANCE.getPHONE(),
+            publicKey
+        ));
+    }
+
+    @Test
+    public void aWearManifestUsesOnlyTheWearChannelFence() throws Exception {
+        EdDSANamedCurveSpec spec = EdDSANamedCurveTable.getByName("Ed25519");
+        KeyPairGenerator generator = new KeyPairGenerator();
+        generator.initialize(spec, new SecureRandom());
+        KeyPair pair = generator.generateKeyPair();
+        JSONObject wearPayload = payload("wear");
+        byte[] publicKey = ((EdDSAPublicKey) pair.getPublic()).getAbyte();
+
+        ReleaseCandidate accepted = ReleaseManifestVerifier.verify(
+            wearPayload.toString(),
+            sign(pair, wearPayload, spec),
+            Instant.parse("2026-07-27T20:00:00Z").toEpochMilli(),
+            LinkReleaseCatalogs.INSTANCE.getWEAR(),
+            publicKey
+        );
+        assertEquals(2, accepted.versionCode());
+        assertThrows(SecurityException.class, () -> ReleaseManifestVerifier.verify(
+            wearPayload.toString(),
+            sign(pair, wearPayload, spec),
+            Instant.parse("2026-07-27T20:00:00Z").toEpochMilli(),
+            LinkReleaseCatalogs.INSTANCE.getPHONE(),
             publicKey
         ));
     }
 
     private static JSONObject payload() throws Exception {
+        return payload("phone");
+    }
+
+    private static JSONObject payload(String channel) throws Exception {
         return new JSONObject()
             .put("schemaVersion", 1)
             .put("packageName", "io.agentmux.audioinbox")
             .put("versionCode", 2)
             .put("versionName", "1.1.0")
             .put("apk", new JSONObject()
-                .put("url", "https://link.v1d.io/releases/agentmux-link/phone/app-2.apk")
+                .put("url", "https://link.v1d.io/releases/agentmux-link/" + channel + "/app-2.apk")
                 .put("sizeBytes", 4_000_000)
                 .put("sha256", "a".repeat(64)))
             .put("changelog", "Stop and concurrent turns")

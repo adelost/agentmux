@@ -26,8 +26,8 @@ android {
         applicationId = "io.agentmux.audioinbox"
         minSdk = 30
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-preview"
+        versionCode = 2
+        versionName = "0.1.1"
     }
 
     signingConfigs {
@@ -73,8 +73,9 @@ dependencies {
     implementation(project(":link-core"))
     implementation(project(":link-session-android"))
     implementation(project(":link-transport"))
+    implementation(project(":link-update-android"))
     implementation("com.google.android.gms:play-services-wearable:20.0.1")
-    implementation("io.v1d.circlekit:ringkit:0.3.2")
+    implementation("io.v1d.circlekit:ringkit:0.3.3")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.compose.foundation:foundation")

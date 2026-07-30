@@ -232,17 +232,18 @@ automatic check, bounded download, SHA-256, installed/archive identity
 comparison, signer equality, monotonic version fence, staged installer handoff,
 and explicit OS confirmation.
 
-Phone and Wear use separate pinned catalogs and APK identities:
+Phone and Wear use separate pinned catalogs and version sequences:
 
 - phone: package `io.agentmux.audioinbox`, catalog
   `https://link.v1d.io/releases/agentmux-link/phone/manifest-v1.json`;
-- Wear milestone 2: package `io.agentmux.audioinbox.wear`, catalog
+- Wear: package `io.agentmux.audioinbox`, catalog
   `https://link.v1d.io/releases/agentmux-link/wear/manifest-v1.json`.
 
-Each product has an independent monotonic `versionCode`, semantic
-`versionName`, pinned application id, pinned release manifest key, and pinned
-APK signing certificate. A phone artifact can never satisfy the Wear catalog
-or vice versa. Key rotation requires an app release that pins both old and new
+The matching package and signer are intentional: Wear Data Layer peers are the
+same Android application on separate device families. Each channel still has
+an independent monotonic `versionCode`, semantic `versionName`, URL fence and
+cache identity, so a phone artifact can never satisfy the Wear catalog or
+vice versa. Key rotation requires an app release that pins both old and new
 manifest keys before a later catalog switches signing keys; APK certificate
 rotation follows Android signing lineage and is never inferred from the
 manifest.

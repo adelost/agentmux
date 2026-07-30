@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import io.agentmux.linkcore.ConnectionState
@@ -21,9 +22,12 @@ import io.agentmux.linkcore.LinkTarget
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.ReplyPhase
+import io.agentmux.audioinbox.update.LinkReleaseCatalogs
+import io.agentmux.audioinbox.update.LinkUpdater
 
 class WearMainActivity : ComponentActivity() {
     private lateinit var controller: WearMailboxController
+    private lateinit var updater: LinkUpdater
     private val sessionChanges = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             controller.reloadSession()
@@ -33,6 +37,14 @@ class WearMainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         controller = WearMailboxController(this)
+        updater = LinkUpdater(
+            context = this,
+            scope = lifecycleScope,
+            catalog = LinkReleaseCatalogs.WEAR,
+            currentVersionName = BuildConfig.VERSION_NAME,
+            currentVersionCode = BuildConfig.VERSION_CODE,
+            listener = controller::applyUpdate,
+        )
         registerSessionReceiver()
         requestMicrophone()
         controller.start()
@@ -57,14 +69,18 @@ class WearMainActivity : ComponentActivity() {
                 onPlay = controller::playLatest,
                 onStop = controller::stopPlayback,
                 onReplay = controller::playLatest,
+                onCheckUpdate = updater::retry,
+                onInstallUpdate = updater::install,
             )
         }
         refreshHandoff()
+        updater.start()
     }
 
     override fun onResume() {
         super.onResume()
         if (::controller.isInitialized) refreshHandoff()
+        if (::updater.isInitialized) updater.resumeInstallerStatus()
     }
 
     override fun onDestroy() {

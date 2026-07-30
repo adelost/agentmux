@@ -1,4 +1,4 @@
-package io.agentmux.audioinbox
+package io.agentmux.audioinbox.update
 
 import android.content.Context
 import com.adelost.releasekit.UpdateController
@@ -18,25 +18,28 @@ import kotlinx.coroutines.launch
  * Everything that used to live here — the download loop, the hash check, the
  * APK identity check, the installer handoff and its receiver, the ready-update
  * persistence — is [UpdateController] now, the same code Skyvw runs. What is
- * still Link's is where releases are announced ([LinkReleaseSource]) and who
- * it is ([LinkReleaseProducts]).
+ * still Link's is where releases are announced ([SignedLinkReleaseSource])
+ * and which channel it is ([LinkReleaseCatalogs]).
  *
  * The wording comes from CircleKit's shared projection rather than a second
  * private list of sentences, so a state added to [UpdateState] is described
  * once for both products instead of in whichever app noticed.
  */
-internal class LinkUpdater(
+class LinkUpdater(
     context: Context,
     scope: CoroutineScope,
+    catalog: LinkReleaseCatalog,
+    currentVersionName: String,
+    currentVersionCode: Int,
     private val listener: (UpdatePresentation) -> Unit,
 ) {
     private val controller = UpdateController(
         context = context,
         scope = scope,
-        product = LinkReleaseProducts.PHONE,
-        currentVersionName = BuildConfig.VERSION_NAME,
-        currentVersionCode = BuildConfig.VERSION_CODE,
-        releaseSource = LinkReleaseSource,
+        product = catalog.product,
+        currentVersionName = currentVersionName,
+        currentVersionCode = currentVersionCode,
+        releaseSource = SignedLinkReleaseSource(catalog),
     )
 
     init {

@@ -1,4 +1,4 @@
-package io.agentmux.audioinbox
+package io.agentmux.audioinbox.update
 
 import com.adelost.releasekit.isExpiredAt
 import org.junit.Assert.assertEquals
@@ -14,7 +14,8 @@ import org.junit.Test
  * shared candidate and the URL fence that replaced Skyvw's exact pin.
  */
 class LinkReleaseTest {
-    private val product = LinkReleaseProducts.PHONE
+    private val phone = LinkReleaseCatalogs.PHONE
+    private val product = phone.product
 
     private fun manifestRelease(
         versionCode: Int = 42,
@@ -66,7 +67,7 @@ class LinkReleaseTest {
     fun `the fence admits Link's release path and refuses everything around it`() {
         val policy = product.assetUrlPolicy
         assertEquals(
-            LinkReleaseProducts.MANIFEST_URL.substringBeforeLast('/') + "/",
+            phone.manifestUrl.substringBeforeLast('/') + "/",
             "https://link.v1d.io/releases/agentmux-link/phone/",
         )
         assertTrue(
@@ -82,6 +83,29 @@ class LinkReleaseTest {
         // Plain HTTP, however right the rest of the URL looks.
         assertFalse(
             policy.allows("http://link.v1d.io/releases/agentmux-link/phone/agentmux-link-v1.4.0.apk"),
+        )
+    }
+
+    @Test
+    fun `phone and wear are isolated channels on the same signed package`() {
+        val wear = LinkReleaseCatalogs.WEAR
+
+        assertEquals("io.agentmux.audioinbox", product.packageName)
+        assertEquals(product.packageName, wear.product.packageName)
+        assertTrue(
+            wear.product.assetUrlPolicy.allows(
+                "https://link.v1d.io/releases/agentmux-link/wear/app-1.apk",
+            ),
+        )
+        assertFalse(
+            wear.product.assetUrlPolicy.allows(
+                "https://link.v1d.io/releases/agentmux-link/phone/app-4.apk",
+            ),
+        )
+        assertFalse(
+            product.assetUrlPolicy.allows(
+                "https://link.v1d.io/releases/agentmux-link/wear/app-1.apk",
+            ),
         )
     }
 
