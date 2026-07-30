@@ -43,7 +43,7 @@ for module in app wear; do
 done
 
 if [[ ! -f "$update/LinkUpdater.kt" ]] ||
-  ! rg -q 'io\.v1d\.circlekit:releasekit:0\.3\.2' "$root/link-update-android/build.gradle.kts"; then
+  ! rg -q 'io\.v1d\.circlekit:releasekit:0\.3\.3' "$root/link-update-android/build.gradle.kts"; then
   echo "Link update regression: the single CircleKit updater adapter is missing" >&2
   exit 1
 fi
