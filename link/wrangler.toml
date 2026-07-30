@@ -41,3 +41,6 @@ RATE_POLL_PER_MINUTE = "120"
 # Server-owned catalog. Keeping this non-secret value in deployment config
 # prevents a normal Worker upload from silently clearing every valid target.
 LINK_TARGETS = "lsrc:3|L-source 3,lsrc:10|L-source 10,windows|Windows rescue"
+# Public bootstrap carries only a non-secret Tailnet URL. The endpoint itself
+# remains unreachable unless the device belongs to the owner's tailnet.
+LINK_PRIVATE_DISCOVERY_URLS = "https://abyss-win.tail13cb13.ts.net"

@@ -292,7 +292,8 @@ private fun LinkStatusRows(state: LinkState, onSelectTarget: (String) -> Unit) {
     } else {
         PhoneRow(
             title = title,
-            sub = selected?.label?.ifBlank { selected.id }?.uppercase() ?: "NO TARGET",
+            sub = selected?.label?.ifBlank { selected.id }?.uppercase()
+                ?: state.connectionDetail.ifBlank { "NO TARGET" }.uppercase().take(100),
             icon = RingIcons.Target,
         )
     }

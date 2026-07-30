@@ -35,9 +35,18 @@ final class ServerDiscovery {
 
     private ServerDiscovery() {}
 
-    static List<String> bootstrapCandidates(String savedServerUrl) {
+    static List<String> bootstrapCandidates(
+        String savedServerUrl,
+        List<String> publishedCandidates
+    ) {
         List<String> candidates = new ArrayList<>();
         if (isAllowedServer(savedServerUrl)) candidates.add(savedServerUrl.replaceAll("/+$", ""));
+        for (String published : publishedCandidates == null ? List.<String>of() : publishedCandidates) {
+            String normalized = published == null ? "" : published.trim().replaceAll("/+$", "");
+            if (isAllowedServer(normalized) && !candidates.contains(normalized)) {
+                candidates.add(normalized);
+            }
+        }
         if (!candidates.contains(LOCAL_DISCOVERY_URL)) candidates.add(LOCAL_DISCOVERY_URL);
         return List.copyOf(candidates);
     }

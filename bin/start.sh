@@ -47,7 +47,7 @@ while true; do
   # release without requiring a manual supervisor replacement.
   cd "$DIR"
   started=$(date +%s)
-  node --import ./bin/quota-recovery-bootstrap.mjs index.mjs
+  node --import ./bin/runtime-env-bootstrap.mjs --import ./bin/quota-recovery-bootstrap.mjs index.mjs
   code=$?
 
   # Clean exit or SIGTERM → stop

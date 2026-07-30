@@ -102,6 +102,25 @@ feature("deployment health", () => {
   });
 });
 
+feature("private discovery bootstrap", () => {
+  component("publishes the server-owned Tailnet route without requiring a mailbox session", {
+    given: ["a configured deployment", () => makeEnv()],
+    when: ["reading the public discovery document", (env) => worker.fetch(
+      req("https://link.v1d.io/api/link/discovery"),
+      env,
+    )],
+    then: ["only the bounded non-secret routes are returned", async (response) => {
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        privateDiscoveryUrls: [
+          "https://relay.example.ts.net:8443",
+          "http://agentmux.local:8080",
+        ],
+      });
+    }],
+  });
+});
+
 feature("mailbox journey over the real router", () => {
   component("send to reply with replay, conflict, and scoped connector auth", {
     given: ["an env and one connector token", () => ({ env: makeEnv(), session: "lnk_test" })],

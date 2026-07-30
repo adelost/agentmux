@@ -87,17 +87,25 @@ public class ServerDiscoveryTest {
     }
 
     @Test
-    public void bootstrapUsesTheLastGoodServerThenTheGenericLocalAlias() {
+    public void bootstrapUsesSavedThenPublishedThenGenericLocalRoutes() {
         assertEquals(
             java.util.List.of(
                 "https://relay.example.ts.net:8443",
+                "https://other.example.ts.net",
                 "http://agentmux.local:8080"
             ),
-            ServerDiscovery.bootstrapCandidates("https://relay.example.ts.net:8443/")
+            ServerDiscovery.bootstrapCandidates(
+                "https://relay.example.ts.net:8443/",
+                java.util.List.of(
+                    "https://other.example.ts.net/",
+                    "https://relay.example.ts.net:8443",
+                    "http://example.com:8080"
+                )
+            )
         );
         assertEquals(
             java.util.List.of("http://agentmux.local:8080"),
-            ServerDiscovery.bootstrapCandidates("http://example.com:8080")
+            ServerDiscovery.bootstrapCandidates("http://example.com:8080", java.util.List.of())
         );
     }
 }
