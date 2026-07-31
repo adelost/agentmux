@@ -5,6 +5,7 @@ import { expect, feature, unit } from "bdd-vitest";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const INSTALLER = readFileSync(join(ROOT, "bin", "windows-manager-install.ps1"), "utf8");
+const MANAGER_ENTRY = readFileSync(join(ROOT, "bin", "windows-manager.mjs"), "utf8");
 
 feature("windows manager install source contract", () => {
   unit("channel and user are validated as Discord snowflakes", {
@@ -38,6 +39,7 @@ feature("windows manager install source contract", () => {
       expect(INSTALLER).toContain('"core/windows-manager-input.mjs"');
       expect(INSTALLER).toContain('"core/windows-manager-phone.mjs"');
       expect(INSTALLER).toContain('"core/windows-manager-phone-runtime.mjs"');
+      expect(INSTALLER).toContain('"core/windows-manager-link.mjs"');
       expect(INSTALLER).toContain('"core/windows-manager-discord.mjs"');
       expect(INSTALLER).toContain('"core/windows-bridge.mjs"');
       expect(INSTALLER).toContain('"core/windows-recovery.mjs"');
@@ -46,6 +48,15 @@ feature("windows manager install source contract", () => {
       expect(INSTALLER).toContain(".agentmux-release.json");
       expect(INSTALLER).toContain("sourceSha");
       expect(INSTALLER).toContain("manager.json");
+    }],
+  });
+
+  unit("the installed runtime closes over every manager core import", {
+    then: ["no entrypoint import can be omitted from the copy manifest", () => {
+      const coreImports = [...MANAGER_ENTRY.matchAll(/from "\.\.\/core\/([^"]+)"/gu)]
+        .map((match) => `core/${match[1]}`);
+      expect(coreImports.length).toBeGreaterThan(0);
+      for (const runtimePath of coreImports) expect(INSTALLER).toContain(`"${runtimePath}"`);
     }],
   });
 

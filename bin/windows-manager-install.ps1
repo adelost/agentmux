@@ -175,6 +175,7 @@ if ($Install) {
     @{ from = (Join-Path $repoRoot "core\windows-manager-input.mjs"); name = "core/windows-manager-input.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-manager-phone.mjs"); name = "core/windows-manager-phone.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-manager-phone-runtime.mjs"); name = "core/windows-manager-phone-runtime.mjs" },
+    @{ from = (Join-Path $repoRoot "core\windows-manager-link.mjs"); name = "core/windows-manager-link.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-bridge.mjs"); name = "core/windows-bridge.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-recovery.mjs"); name = "core/windows-recovery.mjs" }
   )
