@@ -12,23 +12,23 @@ export const MANAGER_CONTRACT_VERSION = 1;
 const LOCAL_STATUS = /^(?:status|hur\s+m[aå]r\s+(?:wsl|bryggan|l[aä]get)|[aä]r\s+(?:wsl|bryggan)\s+(?:uppe|online|nere|offline))\??$/iu;
 const LOCAL_LOGS = /^(?:logg(?:ar(?:na)?|en)?|visa\s+logg(?:ar(?:na)?|en)?|vad\s+gick\s+fel)\??$/iu;
 // STT/typo-tolerant restart verb ("starata om", "startaom", "staratta om",
-// "start om"): the WSL/bryggan object anchor below is what makes the intent
-// unambiguous, never the exact spelling of the verb.
+// "start om"). The authenticated rescue channel treats a bare imperative as
+// WSL, but an explicitly named non-WSL target must never inherit that meaning.
 const RESTART_VERB = String.raw`(?:startas?\s*om\b|starat\w*\s+om\b|start\s+om\b|restart\w*)`;
 const LOCAL_RESTART_WSL = new RegExp(
-  String.raw`(?:\b(?:wsl|bryggan)\b.{0,120}\b(?:beh[oö]ver\s+)?${RESTART_VERB}|\b${RESTART_VERB}.{0,80}\b(?:wsl|bryggan)\b)`,
+  String.raw`(?:\bwsl\b.{0,120}\b(?:beh[oö]ver\s+)?${RESTART_VERB}|\b${RESTART_VERB}.{0,80}\bwsl\b)`,
   "iu",
 );
-// An objectless slurred restart verb is a WSL restart order only when the
-// immediately previous manager turn already named WSL/bryggan. An explicit
-// other object ("datorn", "projektet") is never a WSL restart, context or not.
 const RESTART_VERB_ONLY = new RegExp(`\\b${RESTART_VERB}`, "iu");
-const RESCUE_CONTEXT = /\b(?:wsl|bryggan)\b/iu;
-const OTHER_OBJECT = /\b(?:datorn?|projekt\w*|telefon\w*|appen?|bilen?|routern?)\b/iu;
+const DIRECT_RESTART_WSL = new RegExp(
+  String.raw`^(?:(?:men|sn[aä]lla|f[oö]r\s*helvet\w*|f[oö]rhelvet\w*)[\s,.!?]*)*(?:kan\s+du\s+)?${RESTART_VERB}(?:\s+(?:du|nu|igen|omedelbart|omedelbums|direkt|bara|tack|d[aå]))*[\s.!?]*$`,
+  "iu",
+);
+const NON_WSL_RESTART_TARGET = /\b(?:brygg\w*|dator\w*|projekt\w*|telefon\w*|app\w*|bil\w*|router\w*|modell\w*|agent\w*|panel\w*|session\w*|f[oö]nster\w*|process\w*)\b/iu;
 const LOCAL_RECOVERY = /(?:\bwsl\b.*(?:\bkra(?:sch|sh)\w*|\b(?:nere|offline|dog|d[oö]d|h[aä]ng\w*|starta|restart\w*|[aå]terst[aä]ll\w*|recover\w*)\b|svarar\s+inte)|\b(?:starta|restart\w*|[aå]terst[aä]ll\w*|recover\w*)\b.*\b(?:wsl|bryggan)\b|^(?:hej[!,.]?\s+)?hur\s+(?:startar|restartar|[aå]terst[aä]ller)\s+vi\??$)/iu;
 
 /** WHAT: Maps a tiny unambiguous rescue vocabulary without an LLM. WHY: Keeps WSL recovery independent from optional provider authentication and availability. */
-export function planLocalRescueTurn(userText, { previousTurnText = "" } = {}) {
+export function planLocalRescueTurn(userText) {
   const text = String(userText || "").trim().replace(/\s+/gu, " ");
   if (!text) return null;
   if (LOCAL_STATUS.test(text)) return { kind: "status", tools: ["get_status"] };
@@ -37,9 +37,10 @@ export function planLocalRescueTurn(userText, { previousTurnText = "" } = {}) {
     if (LOCAL_RECOVERY.test(text)) return { kind: "recovery", tools: ["get_status", "recover"] };
     return null;
   }
-  const restartOrdered = LOCAL_RESTART_WSL.test(text)
-    || (RESTART_VERB_ONLY.test(text) && RESCUE_CONTEXT.test(previousTurnText));
-  if (restartOrdered && !OTHER_OBJECT.test(text)) {
+  // Never infer a destructive target from the manager's previous prose. That
+  // made "starta om modellerna" inherit WSL from an earlier status answer.
+  if (RESTART_VERB_ONLY.test(text) && NON_WSL_RESTART_TARGET.test(text)) return null;
+  if (LOCAL_RESTART_WSL.test(text) || DIRECT_RESTART_WSL.test(text)) {
     return { kind: "restart-wsl", tools: ["get_status", "restart_wsl"] };
   }
   if (LOCAL_RECOVERY.test(text)) return { kind: "recovery", tools: ["get_status", "recover"] };

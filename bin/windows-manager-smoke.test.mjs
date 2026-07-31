@@ -160,8 +160,8 @@ feature("windows manager smoke", () => {
     }],
   });
 
-  unit("a slurred restart order borrows only the immediately previous turn's WSL reference", {
-    then: ["incident string restarts after a status answer, not after an intervening chat", async () => {
+  unit("restart targets never borrow destructive meaning from manager prose", {
+    then: ["a direct imperative restarts WSL while explicit models stay with the provider", async () => {
       const harness = makeHarness({
         messages: [],
         scripted: [{ ok: true, text: "Allt lugnt, ingen rescue här." }],
@@ -181,21 +181,19 @@ feature("windows manager smoke", () => {
           { id: "201", content: "status", author: { id: CONFIG.authorizedUserId, bot: false } },
         ];
         expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(1);
-        expect(state.lastAnswerText).toContain("wsl=");
         harness.deps.listMessages = async () => [
           { id: "202", content: "Men förhelvet.. starata om du omedelbums..", author: { id: CONFIG.authorizedUserId, bot: false } },
         ];
         expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(1);
         expect(harness.executed).toEqual(["get_status", "get_status", "restart_wsl"]);
-        // An intervening non-rescue answer replaces the context: the same
-        // slurred order without a fresh WSL reference goes to the model.
+        // The previous local answer names WSL, but the explicit model target
+        // must not inherit it or execute any further tool.
         harness.deps.listMessages = async () => [
-          { id: "203", content: "hej", author: { id: CONFIG.authorizedUserId, bot: false } },
-          { id: "204", content: "starata om igen du", author: { id: CONFIG.authorizedUserId, bot: false } },
+          { id: "203", content: "starta om modellerna då", author: { id: CONFIG.authorizedUserId, bot: false } },
         ];
-        expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(2);
+        expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(1);
         expect(harness.executed).toEqual(["get_status", "get_status", "restart_wsl"]);
-        expect(harness.chats()).toBe(2); // both non-restart turns used the provider
+        expect(harness.chats()).toBe(1);
       } finally {
         harness.cleanup();
       }
