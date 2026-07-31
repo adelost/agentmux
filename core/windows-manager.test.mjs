@@ -34,24 +34,27 @@ feature("windows manager core", () => {
         .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl"] });
       expect(planLocalRescueTurn("Kan du starta om WSL?"))
         .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl"] });
-      // STT/typo variants of the same order land on the same local intent;
-      // the WSL/bryggan object anchor is what makes them unambiguous.
-      for (const typo of ["starata om wsl nu", "startaom bryggan", "staratta om wsl", "start om bryggan nu"]) {
+      // STT/typo variants of the same WSL order land on the same local intent.
+      for (const typo of ["starata om wsl nu", "startaom wsl", "staratta om wsl", "start om wsl nu"]) {
         expect(planLocalRescueTurn(typo))
           .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl"] });
       }
       expect(planLocalRescueTurn("starta projektet")).toBeNull();
       expect(planLocalRescueTurn("kan du starta om datorn")).toBeNull();
-      // The exact 2026-07-27 incident string carries no WSL/bryggan object;
-      // only the immediately previous manager turn may supply the reference.
-      const incident = "Men förhelvet.. starata om du omedelbums..";
-      expect(planLocalRescueTurn(incident)).toBeNull();
-      expect(planLocalRescueTurn(incident, { previousTurnText: "windows=online wsl=unknown boot=unknown" }))
+      // The rescue channel gives a direct objectless imperative one documented
+      // default target: WSL. It does not need a model or previous prose.
+      expect(planLocalRescueTurn("starta om nu"))
         .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl"] });
-      expect(planLocalRescueTurn(incident, { previousTurnText: "hej mamma, allt lugnt här" })).toBeNull();
-      // An explicit other object is never a WSL restart, context or not.
-      expect(planLocalRescueTurn("starta om datorn nu", { previousTurnText: "wsl=unknown" })).toBeNull();
-      expect(planLocalRescueTurn("starta om projektet", { previousTurnText: "bryggan svarar inte" })).toBeNull();
+      const incident = "Men förhelvet.. starata om du omedelbums..";
+      expect(planLocalRescueTurn(incident))
+        .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl"] });
+      // Explicit targets never borrow WSL from prior manager prose. This is the
+      // exact 2026-07-31 regression that restarted WSL after a model request.
+      expect(planLocalRescueTurn("starta om modellerna då")).toBeNull();
+      expect(planLocalRescueTurn("starta om panelerna nu")).toBeNull();
+      expect(planLocalRescueTurn("starta om bryggan nu")).toBeNull();
+      expect(planLocalRescueTurn("starta om datorn nu")).toBeNull();
+      expect(planLocalRescueTurn("starta om projektet")).toBeNull();
       expect(planLocalRescueTurn("WSL svarar inte")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
       expect(planLocalRescueTurn("hur restartar vi WSL?")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
       expect(planLocalRescueTurn("Hej! Hur restartar vi?")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
