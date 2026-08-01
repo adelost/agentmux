@@ -1,19 +1,26 @@
-// Dream command: one bounded stateless fleet summary plus session housekeeping.
+// Dream command: one configured, compacted fleet curator plus session housekeeping.
 
 import {
   existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync,
 } from "fs";
 import { dirname, join } from "path";
-import { listAgents } from "./config.mjs";
+import { findChannelForPane, listAgents, loadConfig } from "./config.mjs";
+import { sendToChannelId } from "./send-notify.mjs";
+import { getPaneStatus, sendToPane } from "./tmux.mjs";
+import { getContextPercent } from "../core/context.mjs";
 import { parseSinceArg } from "../core/jsonl-reader.mjs";
 import { formatJanitorResult, trimAgedSessions } from "../core/janitor.mjs";
+import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
 import {
   defaultDreamReceiptPath, readDreamReceipts, recordDreamReceipts,
 } from "../core/dream-eligibility.mjs";
 import {
-  buildDreamBatch, collectDreamSources, dreamSummaryBlock, runDreamSummarizer,
-  upsertDreamSummary, validateDreamSummary,
+  buildDreamBatch, collectDreamSources, dreamSummaryBlock, upsertDreamSummary,
 } from "../core/dream-summarizer.mjs";
+import {
+  dreamOwnerPrompt, readDreamOwnerResult, resolveDreamOwner, writeDreamOwnerInput,
+} from "../core/dream-owner.mjs";
+import { verifiedClaudeCompact, verifiedCodexCompact } from "../core/verified-compact.mjs";
 
 const DREAM_LOCK_PATH = () => join(process.env.HOME, ".openclaw", ".dream.lock");
 
@@ -80,7 +87,7 @@ function ensureDreamDailyFile(memPath, dateKey) {
   if (current.includes("<!-- template: daily -->")
       && /^> summary:/m.test(current) && /^> why:/m.test(current)
       && new RegExp(`^# ${escapeRegExp(dateKey)}$`, "m").test(current)) return;
-  const body = current.trimStart().replace(new RegExp(`^# ${escapeRegExp(dateKey)}\s*\n*`), "");
+  const body = current.trimStart().replace(new RegExp(`^# ${escapeRegExp(dateKey)}\\s*\\n*`), "");
   writeFileSync(memPath, dailyMemoryHeader(dateKey) + body);
 }
 
@@ -102,7 +109,80 @@ function writeDreamRunSentinel(memPath, dateKey, timeStr, okCount, failedCount) 
   atomicWrite(memPath, content);
 }
 
-/** WHAT: Builds one fleet summary. WHY: Keeps Dream from resuming, compacting, sending to, or inspecting tmux panes. */
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function previousDateKey(dateKey) {
+  const atNoonUtc = new Date(`${dateKey}T12:00:00Z`);
+  atNoonUtc.setUTCDate(atNoonUtc.getUTCDate() - 1);
+  return atNoonUtc.toISOString().slice(0, 10);
+}
+
+function ownerResponseText(response) {
+  return (response?.items || [])
+    .filter((item) => item.type === "text")
+    .map((item) => String(item.content || "").trim())
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+/** WHAT: Reads file, response, and idle truth until complete. WHY: Prevents prompt delivery alone from becoming a Dream receipt. */
+export async function waitForDreamOwnerResult({
+  ctx, owner, prompt, outputPath, dateKey, runId, sourceSha256,
+  attempts = 450, pollMs = 2_000, sleep = wait,
+}) {
+  const expected = `DREAM_OK ${dateKey} ${runId}`;
+  let last = { ok: false, reason: "dream-output-missing" };
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    last = readDreamOwnerResult(outputPath, dateKey, runId, owner, sourceSha256);
+    if (last.ok) {
+      const busy = await ctx.agent.isBusy(owner.agent, owner.pane).catch(() => true);
+      const response = await ctx.agent.getResponseStreamWithRaw(
+        owner.agent, owner.pane, prompt,
+      ).catch(() => null);
+      if (!busy && ownerResponseText(response) === expected) return last;
+    }
+    if (attempt + 1 < attempts) await sleep(pollMs);
+  }
+  return { ok: false, reason: last.reason || "dream-owner-response-missing" };
+}
+
+/** WHAT: Routes the exact instruction synchronously. WHY: Prevents Dream from acting through an invisible brief. */
+export async function mirrorDreamOwnerPrompt(ctx, owner, prompt, {
+  findChannel = findChannelForPane, send = sendToChannelId,
+} = {}) {
+  const channelId = findChannel(ctx.configPath, owner.agent, owner.pane);
+  if (!channelId) throw new Error(`dream-owner-channel-missing:${owner.agent}:${owner.pane}`);
+  const receipts = await send(channelId, `[dream] ${prompt}`);
+  if (!Array.isArray(receipts) || receipts.length === 0) {
+    throw new Error(`dream-owner-prompt-mirror-unverified:${owner.agent}:${owner.pane}`);
+  }
+  return { channelId, messages: receipts.length };
+}
+
+async function waitForOwnerIdle(ctx, owner, {
+  attempts = 120, pollMs = 5_000, sleep = wait, getStatus = getPaneStatus,
+} = {}) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const status = await getStatus(ctx, owner.agent, owner.pane).catch(() => "unknown");
+    if (status === "idle") return true;
+    if (["permission", "menu", "limited"].includes(status)) return false;
+    if (attempt + 1 < attempts) await sleep(pollMs);
+  }
+  return false;
+}
+
+function verifyOwnerQuality(owner, context) {
+  if (!context?.model || !context?.effort) {
+    throw new Error(`dream-owner-quality-unverified:${owner.agent}:${owner.pane}`);
+  }
+  if (/haiku/iu.test(context.model) || String(context.effort || "").toLowerCase() === "low") {
+    throw new Error(`dream-owner-quality-blocked:${context.model}:${context.effort || "unknown-effort"}`);
+  }
+  return { model: String(context.model), effort: String(context.effort) };
+}
+
+/** WHAT: Builds one fleet summary. WHY: Keeps editorial judgment visible while AMUX owns the memory write. */
 export async function cmdDream(ctx, flags = {}, dependencies = {}) {
   if (flags.help || flags.h) {
     console.log("Usage: amux dream [--quiet] [--dry] [--since 24h|ISO] [--workspace PATH] [--defer-sentinel]");
@@ -110,7 +190,6 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
   }
   const readReceipts = dependencies.readReceipts || readDreamReceipts;
   const collectSources = dependencies.collectSources || collectDreamSources;
-  const summarize = dependencies.summarize || runDreamSummarizer;
   const recordReceipts = dependencies.recordReceipts || recordDreamReceipts;
   const receiptPath = dependencies.receiptPath || defaultDreamReceiptPath();
   const sinceArg = flags.since || "24h";
@@ -128,19 +207,36 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
     || join(process.env.HOME, ".openclaw", "workspace");
   const memPath = join(workspaceDir, "memory", `${dateKey}.md`);
   const agents = dependencies.agents || listAgents(ctx.configPath);
+  const runtimeConfig = dependencies.runtimeConfig || loadConfig(ctx.configPath);
+  const owner = dependencies.owner || resolveDreamOwner(runtimeConfig);
   const receipts = readReceipts(receiptPath);
   const observed = collectSources(agents, since.getTime(), { receipts });
   const batch = buildDreamBatch(observed.sources, dateKey, dependencies.batchOptions);
 
   if (flags.dry) {
-    console.log(`Dream would run one stateless summarizer for ${batch.included.length} pane(s).`);
-    console.log(`Prompt: ${Buffer.byteLength(batch.prompt)} bytes; no pane wake; no /compact.`);
+    console.log(`Dream owner: ${owner.agent}:${owner.pane} (${owner.engine}).`);
+    console.log(`Dream would verify /compact, then send one visible prompt for ${batch.included.length} pane(s).`);
+    console.log(`Input packet: ${Buffer.byteLength(JSON.stringify(batch.payload))} bytes; no hidden model process.`);
     for (const source of batch.included) {
       console.log(`- ${source.agent}:${source.pane} ${source.engine}, ${source.turns} recent real turn(s), cursor ${source.activityCursor}`);
     }
     for (const source of batch.omitted) console.log(`- OMIT ${source.agent}:${source.pane}: ${source.omitReason}`);
     for (const source of observed.unreadable) console.log(`- UNREADABLE ${source.agent}:${source.pane}: ${source.reason}`);
     for (const source of observed.skipped || []) console.log(`- SKIP ${source.agent}:${source.pane}: ${source.reason}`);
+    console.log("\nVisible prompt template:\n");
+    console.log(dreamOwnerPrompt({
+      owner,
+      input: {
+        path: "<durable-local-input>", outputPath: "<isolated-summary-output>",
+        sha256: "<sha256>", bytes: 0, runId: "<run-id>",
+      },
+      memPath,
+      previousMemPath: join(workspaceDir, "memory", `${previousDateKey(dateKey)}.md`),
+      dateKey,
+      included: batch.included.length,
+      omitted: batch.omitted.length,
+      unreadable: observed.unreadable.length,
+    }));
     runDreamJanitor(flags);
     return { ...observed, ...batch, dryRun: true };
   }
@@ -149,7 +245,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
   if (!lock.acquired) return { skipped: "lock-held" };
   try {
     if (!batch.included.length) {
-      if (!flags.quiet && !flags.q) console.log("Dream: no new journal-backed work; no model invoked.");
+      if (!flags.quiet && !flags.q) console.log("Dream: no new journal-backed work; owner pane untouched.");
       if (!flags.deferSentinel && !flags["defer-sentinel"]) {
         writeDreamRunSentinel(memPath, dateKey, timeStr, 0, observed.unreadable.length);
       }
@@ -157,15 +253,85 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       return { included: [], omitted: batch.omitted, unreadable: observed.unreadable };
     }
 
-    if (!flags.quiet && !flags.q) {
-      console.log(`Dream: one stateless summary from ${batch.included.length} pane(s), ${Buffer.byteLength(batch.prompt)} prompt bytes.`);
-    }
-    const generated = await summarize(batch.prompt, { dateKey });
-    const valid = validateDreamSummary(generated);
-    if (!valid.ok) throw new Error(`dream summary rejected: ${valid.reason}`);
+    await ctx.agent.ensureReady(owner.agent, owner.pane);
+    const idle = await waitForOwnerIdle(ctx, owner, {
+      attempts: dependencies.idleAttempts,
+      pollMs: dependencies.idlePollMs,
+      sleep: dependencies.sleep,
+      getStatus: dependencies.getStatus,
+    });
+    if (!idle) throw new Error(`dream-owner-not-idle:${owner.agent}:${owner.pane}`);
+    const context = (dependencies.getContext || getContextPercent)(owner.paneDir, owner.engine);
+    verifyOwnerQuality(owner, context);
+
+    const compact = owner.engine === "codex"
+      ? await (dependencies.compactCodex || verifiedCodexCompact)({
+          agent: ctx.agent, agentName: owner.agent, pane: owner.pane, paneDir: owner.paneDir,
+          sleep: dependencies.sleep,
+        })
+      : await (dependencies.compactClaude || verifiedClaudeCompact)({
+          agent: ctx.agent, agentName: owner.agent, pane: owner.pane, paneDir: owner.paneDir,
+          latestIdentity: latestClaudeSessionIdentity, sleep: dependencies.sleep,
+        });
+    if (!compact.ok) throw new Error(`dream-owner-compact-failed:${compact.reason}`);
+
+    const quality = verifyOwnerQuality(
+      owner,
+      (dependencies.getContext || getContextPercent)(owner.paneDir, owner.engine),
+    );
+
     ensureDreamDailyFile(memPath, dateKey);
-    const block = dreamSummaryBlock(valid.content, dateKey, batch.included, batch.omitted);
-    atomicWrite(memPath, upsertDreamSummary(readFileSync(memPath, "utf8"), dateKey, block));
+    const memoryBefore = readFileSync(memPath, "utf8");
+    const input = (dependencies.writeInput || writeDreamOwnerInput)({
+      schemaVersion: 1,
+      dateKey,
+      createdAt: now.toISOString(),
+      owner: { agent: owner.agent, pane: owner.pane, engine: owner.engine },
+      compact: {
+        sessionId: compact.sessionId, boundary: compact.compactBoundary,
+        model: quality.model, effort: quality.effort,
+      },
+      payload: batch.payload,
+      omitted: batch.omitted.map(({ agent, pane, engine, omitReason }) => ({ agent, pane, engine, omitReason })),
+      unreadable: observed.unreadable,
+      skipped: observed.skipped || [],
+    });
+    const prompt = dreamOwnerPrompt({
+      owner,
+      input,
+      memPath,
+      previousMemPath: join(workspaceDir, "memory", `${previousDateKey(dateKey)}.md`),
+      dateKey,
+      included: batch.included.length,
+      omitted: batch.omitted.length,
+      unreadable: observed.unreadable.length,
+    });
+    const visibleMirror = await (dependencies.mirrorPrompt || mirrorDreamOwnerPrompt)(
+      ctx, owner, prompt,
+    );
+    if (!flags.quiet && !flags.q) console.log(prompt);
+    const sent = await (dependencies.send || sendToPane)(ctx, owner.agent, owner.pane, prompt, {
+      source: "dream",
+      idempotencyKey: `dream:${dateKey}:${input.runId}`,
+      waitMs: 30_000,
+      mirror: false,
+    });
+    if (!sent?.delivered || sent.pending || sent.unverified) {
+      throw new Error(`dream-owner-prompt-unverified:${sent?.reason || sent?.queueState || "unknown"}`);
+    }
+    const product = await (dependencies.waitForResult || waitForDreamOwnerResult)({
+      ctx, owner, prompt, outputPath: input.outputPath, dateKey, runId: input.runId,
+      sourceSha256: input.sha256,
+      attempts: dependencies.resultAttempts,
+      pollMs: dependencies.resultPollMs,
+      sleep: dependencies.sleep,
+    });
+    if (!product.ok) throw new Error(`dream-owner-product-invalid:${product.reason}`);
+    if (readFileSync(memPath, "utf8") !== memoryBefore) {
+      throw new Error("dream-owner-touched-memory-before-controller-commit");
+    }
+    const block = dreamSummaryBlock(product.content, dateKey, batch.included, batch.omitted);
+    atomicWrite(memPath, upsertDreamSummary(memoryBefore, dateKey, block));
     recordReceipts(receipts, batch.included, { path: receiptPath, dateKey, now });
 
     if (!flags.deferSentinel && !flags["defer-sentinel"]) {
@@ -176,7 +342,16 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       console.warn(`Dream: ${observed.unreadable.length} pane journal(s) unreadable; receipts unchanged.`);
       process.exitCode = 1;
     }
-    return { included: batch.included, omitted: batch.omitted, unreadable: observed.unreadable, path: memPath };
+    return {
+      included: batch.included,
+      omitted: batch.omitted,
+      unreadable: observed.unreadable,
+      owner,
+      compact,
+      visibleMirror,
+      input,
+      path: memPath,
+    };
   } finally {
     runDreamJanitor(flags);
     lock.release();

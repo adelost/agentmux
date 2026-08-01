@@ -139,6 +139,24 @@ export function parseConfig(yamlContent) {
     });
   }
 
+  let dream = null;
+  if (doc.dream !== undefined) {
+    const agent = String(doc.dream?.agent || "").trim();
+    const pane = Number(doc.dream?.pane);
+    const target = agents.get(agent);
+    if (!agent || !Number.isSafeInteger(pane) || pane < 0 || !target || pane >= target.panes) {
+      throw new Error("agentmux.yaml: 'dream' must name one configured agent and pane");
+    }
+    if (target.backend !== "tmux") {
+      throw new Error("agentmux.yaml: 'dream' target must be a tmux pane");
+    }
+    const dialect = paneDialect(target, pane);
+    if (dialect !== "claude" && dialect !== "codex") {
+      throw new Error("agentmux.yaml: 'dream' target must be a Claude or Codex pane");
+    }
+    dream = { agent, pane };
+  }
+
   return {
     guild: String(doc.guild),
     category: doc.category || "Agents",
@@ -147,6 +165,9 @@ export function parseConfig(yamlContent) {
     // survives every regeneration of agents.yaml. A hand-added section in
     // the generated file dies on the next /sync or `amux label`.
     search: doc.search ?? null,
+    // Dream is an operator-selected existing pane. It is never allowed to
+    // fall back to a hidden one-shot model process.
+    dream,
   };
 }
 
@@ -291,11 +312,15 @@ export function buildSyncPlan(desired, existing) {
 }
 
 /** WHAT: Builds runtime pane configuration. WHY: Keeps labels and channel bindings stable across regeneration. */
-export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = null, search = null) {
+export function generateAgentsYaml(
+  agents, channelMap, agentIds, existingYaml = null, search = null, dream = null,
+) {
   // `search:` is emitted first: it is fleet config, not an agent entry.
   // Consumers enumerate agents by filtering on `dir`, so the key is inert
   // for them; loadSearchRoots reads it from this generated file.
-  const result = search ? { search } : {};
+  const result = {};
+  if (search) result.search = search;
+  if (dream) result.dream = dream;
   const sortedNames = [...agents.keys()].sort();
 
   for (const name of sortedNames) {
@@ -416,7 +441,7 @@ export function generateAgentsYaml(agents, channelMap, agentIds, existingYaml = 
 
 /** WHAT: Builds local runtime configuration. WHY: Keeps Discord bindings unchanged during local edits. */
 export function regenerateAgentsYaml(sourceYaml, existingAgentsYaml) {
-  const { agents, search } = parseConfig(sourceYaml);
+  const { agents, search, dream } = parseConfig(sourceYaml);
   const existing = existingAgentsYaml ? yaml.load(existingAgentsYaml) : null;
 
   // Carry over channelMap + agentIds from existing agents.yaml. If none
@@ -438,5 +463,5 @@ export function regenerateAgentsYaml(sourceYaml, existingAgentsYaml) {
     }
   }
 
-  return generateAgentsYaml(agents, channelMap, agentIds, existing, search);
+  return generateAgentsYaml(agents, channelMap, agentIds, existing, search, dream);
 }

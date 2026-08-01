@@ -301,6 +301,10 @@ Create or edit `agentmux.yaml`:
 guild: "YOUR_DISCORD_SERVER_ID"
 category: "Agent Cave"
 
+dream:
+  agent: api
+  pane: 0
+
 agents:
   api:
     dir: ~/projects/api
@@ -316,6 +320,11 @@ agents:
 Sessions use tmux's `tiled` layout by default, including mixed Claude, Codex,
 service, and shell fleets. Set `layout:` on an agent only when that session
 deliberately needs another tmux layout.
+
+`dream.agent` and `dream.pane` select the existing Claude/Codex pane that
+curates the nightly fleet digest. AMUX verifies an exact compact receipt and
+posts the full prompt to that pane's Discord channel; there is no hidden model
+or fallback.
 
 Start the bridge:
 

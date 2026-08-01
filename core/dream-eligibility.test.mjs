@@ -12,11 +12,12 @@ feature("nightly dream receipts", () => {
       human: isDreamActivityTurn("fixa den riktiga buggen"),
       delegated: isDreamActivityTurn("[from lsrc:2] reviewa PR #12"),
       dream: isDreamActivityTurn("[dream 2026-07-21 04:00] summarize"),
+      visibleDream: isDreamActivityTurn("[AMUX DREAM 2026-08-01 · run abc] sammanfatta"),
       compact: isDreamActivityTurn("/compact"),
       recovery: isDreamActivityTurn("[AMUX AUTOMATIC CRASH RECOVERY · SAME SESSION] Fortsätt."),
     })],
     then: ["only real work remains", (result) => expect(result).toEqual({
-      human: true, delegated: true, dream: false, compact: false, recovery: false,
+      human: true, delegated: true, dream: false, visibleDream: false, compact: false, recovery: false,
     })],
   });
 

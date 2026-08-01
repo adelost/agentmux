@@ -213,5 +213,6 @@ drift is a red gate, not a scoping excuse.
   återanvändbara how-tos till \`memory/references/\`, persondetaljer till
   \`memory/people/\`, och länka därifrån.
 - Skriv allt viktigt, men duplicera inte samma status i flera sektioner.
-  \`amux memory compact\` roterar gamla dagfiler; dagens rålogg får vara fri.
+  \`amux dream\` använder den synliga, konfigurerade kuratorpanelen. Gamla
+  dagfiler mäts av lint men skrivs aldrig om av en dold modellprocess.
 `;

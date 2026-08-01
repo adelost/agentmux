@@ -4,8 +4,8 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { readRecentTurnsAcrossClaudeSessions } from "./jsonl-reader.mjs";
 import {
-  buildDreamBatch, collectDreamSources, dreamPaneEngine, dreamSummarizerFailure, upsertDreamSummary,
-  validateDreamSummary, dreamSummarizerEnvironment,
+  buildDreamBatch, collectDreamSources, dreamPaneEngine, upsertDreamSummary,
+  validateDreamSummary,
 } from "./dream-summarizer.mjs";
 
 const turn = (timestamp, userPrompt, assistant = "done") => ({
@@ -18,17 +18,7 @@ const source = (agent, pane, latestMs, text = "work") => ({
   entries: [turn(new Date(latestMs).toISOString(), text)],
 });
 
-feature("stateless fleet dream input", () => {
-  unit("headless Dream sees the same user-local Claude Code binary as interactive agents", {
-    when: ["building the cron-safe process environment", () => dreamSummarizerEnvironment({
-      HOME: "/home/test", PATH: "/usr/bin:/bin", SENTINEL: "kept",
-    })],
-    then: ["the existing PATH is preserved after ~/.local/bin", (env) => {
-      expect(env.PATH.split(":")).toEqual(["/home/test/.local/bin", "/usr/bin", "/bin"]);
-      expect(env.SENTINEL).toBe("kept");
-    }],
-  });
-
+feature("bounded fleet dream input", () => {
   unit("recognizes all supported coding engines", {
     when: ["classifying configured panes", () => [
       dreamPaneEngine({ cmd: "claude --continue" }),
@@ -130,7 +120,8 @@ feature("stateless fleet dream input", () => {
     then: ["newest is included and every omission has a cause", (batch) => {
       expect(batch.included.map((item) => `${item.agent}:${item.pane}`)).toEqual(["ai:0"]);
       expect(batch.omitted.map((item) => item.omitReason)).toEqual(["pane-limit", "pane-limit"]);
-      expect(Buffer.byteLength(batch.prompt)).toBeLessThanOrEqual(96 * 1024);
+      expect(Buffer.byteLength(batch.sourceText)).toBeLessThanOrEqual(96 * 1024);
+      expect(batch.payload.panes).toHaveLength(1);
     }],
   });
 
@@ -146,16 +137,6 @@ feature("stateless fleet dream input", () => {
       expect(result.empty.reason).toBe("empty-summary");
       expect(result.tooMany.reason).toBe("summary-line-limit");
       expect(result.marker.reason).toBe("reserved-marker");
-    }],
-  });
-
-  unit("structured CLI failures remain diagnosable when stderr is empty", {
-    when: ["formatting a JSON-on-stdout error", () => dreamSummarizerFailure(JSON.stringify([{
-      type: "result", is_error: true, result: "Max budget exceeded",
-    }]), "", 1)],
-    then: ["the provider reason survives", (error) => {
-      expect(error.message).toContain("Max budget exceeded");
-      expect(error.message).not.toMatch(/exited 1:\s*$/u);
     }],
   });
 
