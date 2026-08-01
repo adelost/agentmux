@@ -7,7 +7,6 @@ import { dirname, join } from "path";
 import { findChannelForPane, listAgents, loadConfig } from "./config.mjs";
 import { sendToChannelId } from "./send-notify.mjs";
 import { getPaneStatus, sendToPane } from "./tmux.mjs";
-import { getContextPercent } from "../core/context.mjs";
 import { parseSinceArg } from "../core/jsonl-reader.mjs";
 import { formatJanitorResult, trimAgedSessions } from "../core/janitor.mjs";
 import { latestClaudeSessionIdentity } from "../core/native-session-identity.mjs";
@@ -18,7 +17,8 @@ import {
   buildDreamBatch, collectDreamSources, dreamSummaryBlock, upsertDreamSummary,
 } from "../core/dream-summarizer.mjs";
 import {
-  dreamOwnerPrompt, readDreamOwnerResult, resolveDreamOwner, writeDreamOwnerInput,
+  dreamOwnerPrompt, readDreamOwnerQuality, readDreamOwnerResult, resolveDreamOwner,
+  writeDreamOwnerInput,
 } from "../core/dream-owner.mjs";
 import { verifiedClaudeCompact, verifiedCodexCompact } from "../core/verified-compact.mjs";
 
@@ -179,7 +179,16 @@ function verifyOwnerQuality(owner, context) {
   if (/haiku/iu.test(context.model) || String(context.effort || "").toLowerCase() === "low") {
     throw new Error(`dream-owner-quality-blocked:${context.model}:${context.effort || "unknown-effort"}`);
   }
-  return { model: String(context.model), effort: String(context.effort) };
+  return {
+    model: String(context.model), effort: String(context.effort),
+    sessionId: context.sessionId || null, source: context.source || null,
+  };
+}
+
+function ownerQuality(owner, dependencies) {
+  return dependencies.getContext
+    ? dependencies.getContext(owner.paneDir, owner.engine)
+    : (dependencies.getQuality || readDreamOwnerQuality)(owner);
 }
 
 /** WHAT: Builds one fleet summary. WHY: Keeps editorial judgment visible while AMUX owns the memory write. */
@@ -261,7 +270,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       getStatus: dependencies.getStatus,
     });
     if (!idle) throw new Error(`dream-owner-not-idle:${owner.agent}:${owner.pane}`);
-    const context = (dependencies.getContext || getContextPercent)(owner.paneDir, owner.engine);
+    const context = ownerQuality(owner, dependencies);
     verifyOwnerQuality(owner, context);
 
     const compact = owner.engine === "codex"
@@ -277,8 +286,11 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
 
     const quality = verifyOwnerQuality(
       owner,
-      (dependencies.getContext || getContextPercent)(owner.paneDir, owner.engine),
+      ownerQuality(owner, dependencies),
     );
+    if (quality.sessionId && quality.sessionId !== compact.sessionId) {
+      throw new Error("dream-owner-quality-session-mismatch");
+    }
 
     ensureDreamDailyFile(memPath, dateKey);
     const memoryBefore = readFileSync(memPath, "utf8");
@@ -289,7 +301,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       owner: { agent: owner.agent, pane: owner.pane, engine: owner.engine },
       compact: {
         sessionId: compact.sessionId, boundary: compact.compactBoundary,
-        model: quality.model, effort: quality.effort,
+        model: quality.model, effort: quality.effort, qualitySource: quality.source,
       },
       payload: batch.payload,
       omitted: batch.omitted.map(({ agent, pane, engine, omitReason }) => ({ agent, pane, engine, omitReason })),

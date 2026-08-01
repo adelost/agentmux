@@ -2,13 +2,36 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import {
-  chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync,
+  chmodSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { validateDreamSummary } from "./dream-summarizer.mjs";
+import { latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
+import { getContextPercent } from "./context.mjs";
+import { latestCodexModelObservation } from "./native-model-observation.mjs";
 
 const CODING_ENGINE = /(?:^|[\s/])(claude|codex)(?:\s|$)/u;
+const CODEX_QUALITY_TAIL_BYTES = 8 * 1024 * 1024;
+
+function readTailLines(path, maxBytes = CODEX_QUALITY_TAIL_BYTES) {
+  let fd;
+  try {
+    fd = openSync(path, "r");
+    const size = fstatSync(fd).size;
+    const offset = Math.max(0, size - maxBytes);
+    const buffer = Buffer.alloc(size - offset);
+    readSync(fd, buffer, 0, buffer.length, offset);
+    const text = buffer.toString("utf8");
+    const firstNewline = text.indexOf("\n");
+    const complete = offset === 0 ? text : firstNewline < 0 ? "" : text.slice(firstNewline + 1);
+    return complete.trimEnd().split("\n");
+  } catch {
+    return [];
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch {} }
+  }
+}
 
 /** WHAT: Resolves one explicit configured owner. WHY: Prevents Dream from falling back to a hidden model process. */
 export function resolveDreamOwner(config) {
@@ -31,6 +54,26 @@ export function resolveDreamOwner(config) {
     engine,
     paneDir: join(entry.dir, ".agents", String(pane)),
   });
+}
+
+/** WHAT: Reads runtime quality from the selected pane's exact session. WHY: Prevents a nearby cwd session from authorizing Dream. */
+export function readDreamOwnerQuality(owner, {
+  latestCodexIdentity = latestCodexSessionIdentity,
+  readCodexLines = readTailLines,
+  readContext = getContextPercent,
+} = {}) {
+  if (owner.engine !== "codex") return readContext(owner.paneDir, owner.engine);
+  const identity = latestCodexIdentity(owner.paneDir);
+  if (!identity?.sessionId || !identity?.path) return null;
+  const observation = latestCodexModelObservation(readCodexLines(identity.path));
+  if (!observation?.model || !observation?.effort) return null;
+  return {
+    model: observation.model,
+    effort: observation.effort,
+    sessionId: identity.sessionId,
+    source: observation.source,
+    sourcePath: identity.path,
+  };
 }
 
 /** WHAT: Stores the bounded source packet before delivery. WHY: Keeps the visible prompt short while preserving exact audit input. */

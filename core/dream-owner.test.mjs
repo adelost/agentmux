@@ -3,7 +3,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  dreamOwnerPrompt, readDreamOwnerResult, resolveDreamOwner, writeDreamOwnerInput,
+  dreamOwnerPrompt, readDreamOwnerQuality, readDreamOwnerResult, resolveDreamOwner,
+  writeDreamOwnerInput,
 } from "./dream-owner.mjs";
 
 feature("configured Dream owner", () => {
@@ -46,6 +47,32 @@ feature("configured Dream owner", () => {
       expect(prompt).toContain("Ändra INTE någon minnesfil");
       expect(prompt).toContain("DREAM_OK 2026-08-01 run-1");
       rmSync(root, { recursive: true, force: true });
+    }],
+  });
+
+  unit("reads Codex model and effort only from the exact pane-owned rollout", {
+    when: ["observing one exact identity", () => readDreamOwnerQuality({
+      agent: "claw", pane: 3, engine: "codex", paneDir: "/workspace/.agents/3",
+    }, {
+      latestCodexIdentity: () => ({ sessionId: "session-exact", path: "/exact/rollout.jsonl" }),
+      readCodexLines: (path) => [
+        JSON.stringify({ type: "turn_context", payload: { model: "gpt-old", effort: "medium" } }),
+        JSON.stringify({
+          type: "turn_context",
+          payload: {
+            model: "gpt-5.6-sol",
+            collaboration_mode: { settings: { reasoning_effort: "max" } },
+          },
+        }),
+        JSON.stringify({ type: "event_msg", payload: { type: "task_complete" } }),
+        path,
+      ],
+    })],
+    then: ["quality carries the same immutable session and file identity", (quality) => {
+      expect(quality).toMatchObject({
+        model: "gpt-5.6-sol", effort: "max", sessionId: "session-exact",
+        source: "codex-turn-context", sourcePath: "/exact/rollout.jsonl",
+      });
     }],
   });
 
