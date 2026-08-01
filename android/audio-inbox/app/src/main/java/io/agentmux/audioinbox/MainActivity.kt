@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        microphoneGranted.value = hasMicrophonePermission()
         if (::updater.isInitialized) updater.resumeInstallerStatus()
     }
 

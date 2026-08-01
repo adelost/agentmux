@@ -91,6 +91,7 @@ class WearMainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        microphoneGranted.value = hasMicrophonePermission()
         if (::controller.isInitialized) refreshHandoff()
         if (::updater.isInitialized) updater.resumeInstallerStatus()
     }

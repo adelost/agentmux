@@ -107,7 +107,11 @@ internal class WearMailboxController(
     fun beginCapture(): Boolean {
         val selected = selectedTarget() ?: return false
         if (!selected.acceptsMessages) return false
-        val capture = recorder.begin() ?: return false
+        val capture = recorder.begin()
+        if (capture == null) {
+            dispatch(LinkAction.Capture(CapturePhase.FAILED))
+            return false
+        }
         dispatch(LinkAction.Capture(CapturePhase.LISTENING, capture.startedAtMs))
         return true
     }

@@ -20,8 +20,8 @@ android {
 
 dependencies {
     api(project(":link-core"))
-    implementation("io.v1d.circlekit:designkit:0.3.6")
-    implementation("io.v1d.circlekit:ringkit:0.3.6")
+    implementation("io.v1d.circlekit:designkit:0.3.7")
+    implementation("io.v1d.circlekit:ringkit:0.3.7")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.foundation:foundation")
     testImplementation("junit:junit:4.13.2")

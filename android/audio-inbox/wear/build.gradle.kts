@@ -76,7 +76,7 @@ dependencies {
     implementation(project(":link-ui"))
     implementation(project(":link-update-android"))
     implementation("com.google.android.gms:play-services-wearable:20.0.1")
-    implementation("io.v1d.circlekit:ringkit:0.3.6")
+    implementation("io.v1d.circlekit:ringkit:0.3.7")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.compose.foundation:foundation")

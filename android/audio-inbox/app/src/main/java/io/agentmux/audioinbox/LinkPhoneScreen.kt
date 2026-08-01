@@ -175,6 +175,7 @@ internal fun LinkPhoneScreen(
                                 } else {
                                     val capture = recorder.begin()
                                     if (capture == null) {
+                                        coordinator.capture(CapturePhase.FAILED)
                                         false
                                     } else {
                                         coordinator.capture(CapturePhase.LISTENING, capture.startedAtMs)

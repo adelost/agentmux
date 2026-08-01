@@ -68,8 +68,40 @@ if ! rg -q 'RingActionCueHost' "$main/LinkPhoneScreen.kt" ||
 fi
 
 if [[ ! -f "$update/LinkUpdater.kt" ]] ||
-  ! rg -q 'io\.v1d\.circlekit:releasekit:0\.3\.6' "$root/link-update-android/build.gradle.kts"; then
+  ! rg -q 'io\.v1d\.circlekit:releasekit:' "$root/link-update-android/build.gradle.kts"; then
   echo "Link update regression: the single CircleKit updater adapter is missing" >&2
+  exit 1
+fi
+
+circlekit_builds=(
+  "$root/app/build.gradle.kts"
+  "$root/wear/build.gradle.kts"
+  "$root/link-ui/build.gradle.kts"
+  "$root/link-update-android/build.gradle.kts"
+)
+required_circlekit_coordinates=(
+  "app:designkit"
+  "app:ringkit"
+  "wear:ringkit"
+  "link-ui:designkit"
+  "link-ui:ringkit"
+  "link-update-android:releasekit"
+)
+for declaration in "${required_circlekit_coordinates[@]}"; do
+  module="${declaration%%:*}"
+  artifact="${declaration##*:}"
+  if ! rg -q "io\\.v1d\\.circlekit:$artifact:" "$root/$module/build.gradle.kts"; then
+    echo "Link CircleKit regression: $module lost required $artifact" >&2
+    exit 1
+  fi
+done
+mapfile -t circlekit_versions < <(
+  rg -I -o 'io\.v1d\.circlekit:[a-z]+:[0-9]+\.[0-9]+\.[0-9]+' "${circlekit_builds[@]}" |
+    awk -F: '{print $3}' |
+    sort -u
+)
+if [[ "${#circlekit_versions[@]}" -ne 1 ]]; then
+  echo "Link CircleKit regression: consumer modules have version skew: ${circlekit_versions[*]:-none}" >&2
   exit 1
 fi
 
