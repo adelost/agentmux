@@ -10,9 +10,12 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableStateOf
+import com.adelost.ringkit.ui.RingActionCueHost
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
 import io.agentmux.linkcore.LinkAction
@@ -28,6 +31,10 @@ import io.agentmux.audioinbox.update.LinkUpdater
 class WearMainActivity : ComponentActivity() {
     private lateinit var controller: WearMailboxController
     private lateinit var updater: LinkUpdater
+    private val microphoneGranted = mutableStateOf(false)
+    private val microphonePermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> microphoneGranted.value = granted }
     private val sessionChanges = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             controller.reloadSession()
@@ -37,6 +44,7 @@ class WearMainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         controller = WearMailboxController(this)
+        microphoneGranted.value = hasMicrophonePermission()
         updater = LinkUpdater(
             context = this,
             scope = lifecycleScope,
@@ -58,20 +66,24 @@ class WearMainActivity : ComponentActivity() {
             } else {
                 liveState
             }
-            WearLinkScreen(
-                state = state,
-                onSelectTarget = controller::selectTarget,
-                onBeginCapture = controller::beginCapture,
-                onReleaseCapture = controller::releaseCapture,
-                onCancelCapture = controller::cancelCapture,
-                recordedBytes = controller::recordedBytes,
-                recordedLevel = controller::recordedLevel,
-                onPlay = controller::playLatest,
-                onStop = controller::stopPlayback,
-                onReplay = controller::playLatest,
-                onCheckUpdate = updater::retry,
-                onInstallUpdate = updater::install,
-            )
+            RingActionCueHost {
+                WearLinkScreen(
+                    state = state,
+                    microphoneGranted = microphoneGranted.value,
+                    onRequestMicrophone = ::requestMicrophone,
+                    onSelectTarget = controller::selectTarget,
+                    onBeginCapture = controller::beginCapture,
+                    onReleaseCapture = controller::releaseCapture,
+                    onCancelCapture = controller::cancelCapture,
+                    recordedBytes = controller::recordedBytes,
+                    recordedLevel = controller::recordedLevel,
+                    onPlay = controller::playLatest,
+                    onStop = controller::stopPlayback,
+                    onReplay = controller::playLatest,
+                    onCheckUpdate = updater::retry,
+                    onInstallUpdate = updater::install,
+                )
+            }
         }
         refreshHandoff()
         updater.start()
@@ -97,11 +109,12 @@ class WearMainActivity : ComponentActivity() {
         }
     }
 
+    private fun hasMicrophonePermission(): Boolean =
+        checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
     private fun requestMicrophone() {
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 701)
+        if (!hasMicrophonePermission()) {
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 

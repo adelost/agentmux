@@ -11,9 +11,6 @@ import kotlin.math.sqrt
 internal class PushToTalkRecorder(
     private val activity: Activity,
 ) {
-    companion object {
-        const val MICROPHONE_PERMISSION_REQUEST = 702
-    }
     data class Capture(
         val turnId: String,
         val file: File,
@@ -28,10 +25,6 @@ internal class PushToTalkRecorder(
         if (activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
             PackageManager.PERMISSION_GRANTED
         ) {
-            activity.requestPermissions(
-                arrayOf(Manifest.permission.RECORD_AUDIO),
-                MICROPHONE_PERMISSION_REQUEST,
-            )
             return null
         }
         val turnId = UUID.randomUUID().toString()

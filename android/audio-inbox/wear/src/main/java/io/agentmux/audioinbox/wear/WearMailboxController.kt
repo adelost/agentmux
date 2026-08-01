@@ -106,7 +106,7 @@ internal class WearMailboxController(
 
     fun beginCapture(): Boolean {
         val selected = selectedTarget() ?: return false
-        if (!selected.available) return false
+        if (!selected.acceptsMessages) return false
         val capture = recorder.begin() ?: return false
         dispatch(LinkAction.Capture(CapturePhase.LISTENING, capture.startedAtMs))
         return true
@@ -188,7 +188,14 @@ internal class WearMailboxController(
                 if (generation.get() != expectedGeneration) return
                 dispatch(
                     LinkAction.Targets(
-                        catalog.targets.map { LinkTarget(it.id, it.label, it.online) },
+                        catalog.targets.map {
+                            LinkTarget(
+                                id = it.id,
+                                label = it.label,
+                                available = it.online,
+                                acceptsMessages = true,
+                            )
+                        },
                     ),
                 )
                 catalogRefreshAtMs = now + CATALOG_REFRESH_MS

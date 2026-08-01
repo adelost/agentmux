@@ -4,6 +4,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 main="$root/app/src/main/java/io/agentmux/audioinbox"
 wear="$root/wear/src/main/java/io/agentmux/audioinbox/wear"
+shared="$root/link-ui/src/main/java/io/agentmux/linkui"
 update="$root/link-update-android/src/main/java/io/agentmux/audioinbox/update"
 
 for retired in LinkTheme.kt Timeline.kt UpdateCard.kt; do
@@ -15,7 +16,7 @@ done
 
 if rg -n \
   'androidx\.compose\.material3|CircularControl|ConversationTimeline|UpdateCard' \
-  "$main/LinkPhoneScreen.kt" "$main/PttDisc.kt" "$wear/WearLinkScreen.kt"; then
+  "$main/LinkPhoneScreen.kt" "$wear/WearLinkScreen.kt" "$shared/LinkCaptureControl.kt"; then
   echo "Link UI regression: a product-local Material renderer bypasses CircleKit" >&2
   exit 1
 fi
@@ -42,8 +43,32 @@ for module in app wear; do
   fi
 done
 
+for retired in "$main/PttDisc.kt" "$wear/WearCaptureScreen.kt"; do
+  if [[ -e "$retired" ]]; then
+    echo "Link capture regression: host-local PTT renderer returned: $retired" >&2
+    exit 1
+  fi
+done
+
+for module in app wear; do
+  if ! rg -q 'project\(":link-ui"\)' "$root/$module/build.gradle.kts"; then
+    echo "Link capture regression: $module bypasses the shared Link UI module" >&2
+    exit 1
+  fi
+done
+if ! rg -q 'fun LinkCaptureControl\(' "$shared/LinkCaptureControl.kt" ||
+   rg -n 'RingPressLifecycle\(' "$main" "$wear"; then
+  echo "Link capture regression: Phone/Wear no longer share one PTT lifecycle" >&2
+  exit 1
+fi
+if ! rg -q 'RingActionCueHost' "$main/LinkPhoneScreen.kt" ||
+   ! rg -q 'RingActionCueHost' "$wear/WearMainActivity.kt"; then
+  echo "Link capture regression: a host lost the shared CircleKit progress surface" >&2
+  exit 1
+fi
+
 if [[ ! -f "$update/LinkUpdater.kt" ]] ||
-  ! rg -q 'io\.v1d\.circlekit:releasekit:0\.3\.3' "$root/link-update-android/build.gradle.kts"; then
+  ! rg -q 'io\.v1d\.circlekit:releasekit:0\.3\.6' "$root/link-update-android/build.gradle.kts"; then
   echo "Link update regression: the single CircleKit updater adapter is missing" >&2
   exit 1
 fi

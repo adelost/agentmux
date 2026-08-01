@@ -13,8 +13,10 @@ internal object LinkTargetRoutePolicy {
     ): ConversationTarget? = when {
         tailnet?.available() == true -> tailnet
         publicLink?.available() == true -> publicLink
-        tailnet != null -> tailnet
-        else -> publicLink
+        // The authenticated mailbox durably queues for an offline connector;
+        // a dead private route cannot. Presence is not acceptance.
+        publicLink != null -> publicLink
+        else -> tailnet
     }
 
     fun connectionDetail(

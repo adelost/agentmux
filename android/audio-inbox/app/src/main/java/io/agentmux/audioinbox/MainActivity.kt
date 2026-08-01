@@ -8,6 +8,8 @@ import android.os.Bundle
 import androidx.lifecycle.lifecycleScope
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.toArgb
 import com.adelost.designkit.ui.GraphiteTokens
 import io.agentmux.audioinbox.update.LinkReleaseCatalogs
@@ -23,12 +25,17 @@ class MainActivity : ComponentActivity() {
     private lateinit var coordinator: LinkCoordinator
     private lateinit var recorder: PushToTalkRecorder
     private lateinit var updater: LinkUpdater
+    private val microphoneGranted = mutableStateOf(false)
+    private val microphonePermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> microphoneGranted.value = granted }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = GraphiteTokens.Canvas.toArgb()
         window.navigationBarColor = GraphiteTokens.Canvas.toArgb()
         coordinator = LinkCoordinator(this)
+        microphoneGranted.value = hasMicrophonePermission()
         coordinator.handlePublicAuth(intent?.data)
         recorder = PushToTalkRecorder(this)
         updater = LinkUpdater(
@@ -41,7 +48,13 @@ class MainActivity : ComponentActivity() {
             coordinator.applyUpdatePresentation(LinkAction.Update(presentation))
         }
         setContent {
-            LinkPhoneScreen(coordinator, recorder, updater)
+            LinkPhoneScreen(
+                coordinator = coordinator,
+                recorder = recorder,
+                updater = updater,
+                microphoneGranted = microphoneGranted.value,
+                onRequestMicrophone = ::requestMicrophone,
+            )
         }
         requestRuntimePermissions()
         updater.start()
@@ -74,13 +87,17 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    private fun hasMicrophonePermission(): Boolean =
+        checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    private fun requestMicrophone() {
+        if (!hasMicrophonePermission()) {
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
     private fun requestRuntimePermissions() {
         val permissions = mutableListOf<String>()
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            permissions += Manifest.permission.RECORD_AUDIO
-        }
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED

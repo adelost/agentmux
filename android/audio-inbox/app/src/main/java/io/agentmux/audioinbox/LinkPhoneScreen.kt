@@ -43,11 +43,15 @@ import com.adelost.ringkit.ui.RingPlaybackState
 import com.adelost.ringkit.ui.RingRow
 import com.adelost.ringkit.ui.RingTextComposer
 import com.adelost.ringkit.ui.RingTextInputSpec
+import com.adelost.ringkit.ui.RingActionCueHost
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.linkConnectionRoute
+import io.agentmux.linkui.LinkCaptureControl
+import io.agentmux.linkui.LinkCaptureSpec
+import io.agentmux.linkui.resolveLinkCaptureAvailability
 import kotlin.math.sin
 
 /**
@@ -59,6 +63,8 @@ internal fun LinkPhoneScreen(
     coordinator: LinkCoordinator,
     recorder: PushToTalkRecorder,
     updater: LinkUpdater,
+    microphoneGranted: Boolean,
+    onRequestMicrophone: () -> Unit,
 ) {
     val state by coordinator.state.collectAsStateWithLifecycle()
     val qaActive = BuildConfig.DEBUG &&
@@ -79,9 +85,10 @@ internal fun LinkPhoneScreen(
     } else {
         state
     }
-    val selectedAvailable = presentedState.targets.firstOrNull {
+    val selectedTarget = presentedState.targets.firstOrNull {
         it.id == presentedState.selectedTargetId
-    }?.available == true
+    } ?: presentedState.targets.firstOrNull()
+    val selectedSendable = selectedTarget?.acceptsMessages == true
     var composer by remember { mutableStateOf(ComposerDraft()) }
     var speakReplies by remember { mutableStateOf(coordinator.speaksReplies()) }
     var showingSettings by rememberSaveable { mutableStateOf(qaSettings) }
@@ -91,105 +98,114 @@ internal fun LinkPhoneScreen(
         }
     }
     BackHandler(showingSettings) { showingSettings = false }
-    CircleResponsiveSurface {
-        if (showingSettings) {
-            LinkPhoneSettings(
-                state = presentedState,
-                speakReplies = speakReplies,
-                publicLoggedIn = coordinator.publicLoggedIn(),
-                onBack = { showingSettings = false },
-                onHandsFree = coordinator::setHandsFree,
-                onSpeakReplies = {
-                    speakReplies = it
-                    coordinator.setSpeakReplies(it)
-                },
-                onPublicLink = {
-                    if (coordinator.publicLoggedIn()) coordinator.logoutPublic()
-                    else coordinator.beginPublicLogin()
-                },
-                updater = updater,
-                onPause = coordinator::pauseAudio,
-                onResume = coordinator::resumeAudio,
-                onStop = coordinator::stopAudio,
-            )
-        } else {
-            LinkPhoneHome(
-                state = presentedState,
-                composer = composer,
-                selectedAvailable = selectedAvailable,
-                onSettings = { showingSettings = true },
-                onSelectTarget = if (qaActive) {
-                    { qaTargetId = it }
-                } else {
-                    coordinator::selectTarget
-                },
-                onComposerChanged = { composer = composer.edited(it) },
-                onSubmitText = {
-                    if (qaActive) {
-                        composer = ComposerDraft()
+    RingActionCueHost {
+        CircleResponsiveSurface {
+            if (showingSettings) {
+                LinkPhoneSettings(
+                    state = presentedState,
+                    speakReplies = speakReplies,
+                    publicLoggedIn = coordinator.publicLoggedIn(),
+                    onBack = { showingSettings = false },
+                    onHandsFree = coordinator::setHandsFree,
+                    onSpeakReplies = {
+                        speakReplies = it
+                        coordinator.setSpeakReplies(it)
+                    },
+                    onPublicLink = {
+                        if (coordinator.publicLoggedIn()) coordinator.logoutPublic()
+                        else coordinator.beginPublicLogin()
+                    },
+                    updater = updater,
+                    onPause = coordinator::pauseAudio,
+                    onResume = coordinator::resumeAudio,
+                    onStop = coordinator::stopAudio,
+                )
+            } else {
+                LinkPhoneHome(
+                    state = presentedState,
+                    composer = composer,
+                    selectedSendable = selectedSendable,
+                    onSettings = { showingSettings = true },
+                    onSelectTarget = if (qaActive) {
+                        { qaTargetId = it }
                     } else {
-                        coordinator.submitText(composer.text)?.let {
-                            composer = composer.submitted(it)
-                        }
-                    }
-                },
-                onPlay = coordinator::playReply,
-                onPause = coordinator::pauseAudio,
-                onResume = coordinator::resumeAudio,
-                onStop = coordinator::stopAudio,
-                ptt = {
-                    PttDisc(
-                        phase = presentedState.capture,
-                        startedAtMs = presentedState.captureStartedAtMs,
-                        enabled = selectedAvailable &&
-                            presentedState.capture != CapturePhase.FINALIZING,
-                        byteLimit = coordinator.selectedVoiceByteLimit(),
-                        recordedBytes = recorder::currentBytes,
-                        recordedLevel = if (qaActive) {
-                            {
-                                val phase = System.currentTimeMillis() / 85.0
-                                (0.16 + 0.78 * kotlin.math.abs(sin(phase))).toFloat()
-                            }
+                        coordinator::selectTarget
+                    },
+                    onComposerChanged = { composer = composer.edited(it) },
+                    onSubmitText = {
+                        if (qaActive) {
+                            composer = ComposerDraft()
                         } else {
-                            recorder::currentLevel
-                        },
-                        onBegin = {
-                            if (qaActive) {
-                                qaCaptureStartedAtMs = System.currentTimeMillis()
-                                qaCapture = CapturePhase.LISTENING
-                                true
-                            } else {
-                                val capture = recorder.begin()
-                                if (capture == null) {
-                                    false
-                                } else {
-                                    coordinator.capture(CapturePhase.LISTENING, capture.startedAtMs)
-                                    true
-                                }
+                            coordinator.submitText(composer.text)?.let {
+                                composer = composer.submitted(it)
                             }
-                        },
-                        onRelease = {
-                            if (qaActive) {
-                                qaCapture = CapturePhase.IDLE
+                        }
+                    },
+                    onPlay = coordinator::playReply,
+                    onPause = coordinator::pauseAudio,
+                    onResume = coordinator::resumeAudio,
+                    onStop = coordinator::stopAudio,
+                    ptt = {
+                        LinkCaptureControl(
+                            spec = LinkCaptureSpec(
+                                phase = presentedState.capture,
+                                startedAtMs = presentedState.captureStartedAtMs,
+                                availability = resolveLinkCaptureAvailability(
+                                    hasTarget = selectedTarget != null,
+                                    targetAcceptsMessages = selectedSendable,
+                                    microphoneGranted = microphoneGranted || qaActive,
+                                    finalizing = presentedState.capture == CapturePhase.FINALIZING,
+                                ),
+                                byteLimit = coordinator.selectedVoiceByteLimit(),
+                            ),
+                            recordedBytes = recorder::currentBytes,
+                            recordedLevel = if (qaActive) {
+                                {
+                                    val phase = System.currentTimeMillis() / 85.0
+                                    (0.16 + 0.78 * kotlin.math.abs(sin(phase))).toFloat()
+                                }
                             } else {
-                                coordinator.capture(CapturePhase.FINALIZING)
-                                val capture = recorder.release()
-                                if (capture == null || !coordinator.submitAudio(capture)) {
+                                recorder::currentLevel
+                            },
+                            onBegin = {
+                                if (qaActive) {
+                                    qaCaptureStartedAtMs = System.currentTimeMillis()
+                                    qaCapture = CapturePhase.LISTENING
+                                    true
+                                } else {
+                                    val capture = recorder.begin()
+                                    if (capture == null) {
+                                        false
+                                    } else {
+                                        coordinator.capture(CapturePhase.LISTENING, capture.startedAtMs)
+                                        true
+                                    }
+                                }
+                            },
+                            onRelease = {
+                                if (qaActive) {
+                                    qaCapture = CapturePhase.IDLE
+                                } else {
+                                    coordinator.capture(CapturePhase.FINALIZING)
+                                    val capture = recorder.release()
+                                    if (capture == null || !coordinator.submitAudio(capture)) {
+                                        coordinator.capture(CapturePhase.FAILED)
+                                    }
+                                }
+                            },
+                            onCancel = {
+                                if (qaActive) {
+                                    qaCapture = CapturePhase.FAILED
+                                } else {
+                                    recorder.cancel()
                                     coordinator.capture(CapturePhase.FAILED)
                                 }
-                            }
-                        },
-                        onCancel = {
-                            if (qaActive) {
-                                qaCapture = CapturePhase.FAILED
-                            } else {
-                                recorder.cancel()
-                                coordinator.capture(CapturePhase.FAILED)
-                            }
-                        },
-                    )
-                },
-            )
+                            },
+                            onRecover = onRequestMicrophone,
+                        )
+                    },
+                )
+            }
         }
     }
 }
@@ -198,7 +214,7 @@ internal fun LinkPhoneScreen(
 private fun LinkPhoneHome(
     state: LinkState,
     composer: ComposerDraft,
-    selectedAvailable: Boolean,
+    selectedSendable: Boolean,
     onSettings: () -> Unit,
     onSelectTarget: (String) -> Unit,
     onComposerChanged: (String) -> Unit,
@@ -259,7 +275,7 @@ private fun LinkPhoneHome(
             spec = RingTextInputSpec(
                 value = composer.text,
                 label = "MESSAGE",
-                enabled = selectedAvailable,
+                enabled = selectedSendable,
                 maxLength = 4_000,
                 onValueChange = onComposerChanged,
                 onSubmit = onSubmitText,
