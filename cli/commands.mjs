@@ -2174,7 +2174,7 @@ async function cmdMemory(_ctx, subcommand, flags = {}) {
   console.error(`Usage:
   amux memory status [--json] [--workspace PATH]
   amux memory lint [--json] [--report-daily] [--compacted N] [--workspace PATH]
-  amux memory compact [--dry] [--json] [--max N] [--workspace PATH]`);
+  amux memory compact --dry [--json] [--max N] [--workspace PATH]`);
   process.exitCode = 1;
 }
 
@@ -3500,7 +3500,7 @@ Usage:
   agent queue cancel JOB_ID --reason TEXT
                                   Request pre-submit cancellation; broker decides safely
   agent memory lint               Structured memory lint (--json, exit 1 on warnings)
-  agent memory compact            Bank + compact oldest daily files (--dry, --max N)
+  agent memory compact --dry      Preview old daily-file backlog (automatic model rewrite disabled)
   agent search "term"             Fast lexical search of memory + ledger; --show N expands
     --deep                        Include large raw session archives
     --semantic                    Opt into slower semantic search (index age is always shown)

@@ -1,52 +1,73 @@
 # Dream activity policy
 
-`amux dream` is one bounded, stateless nightly summarizer. It reads durable
-session journals and never sends to, resumes, compacts, sleeps or wakes a coding
-pane. Auto-compact and sleep remain independent controllers.
+`amux dream` uses one explicitly configured, existing AMUX pane. It never
+starts a hidden model process and never chooses a model, effort level, or
+provider on the operator's behalf.
+
+## Configuration
+
+The source of truth is `~/.agentmux/agentmux.yaml`:
+
+```yaml
+dream:
+  agent: claw
+  pane: 3
+```
+
+`amux sync` validates that the address exists and denotes a tmux Claude or
+Codex pane, then carries it into generated `agents.yaml`. There is no default
+and no fallback. Kimi and native panes are rejected until they can produce the
+same exact compact receipt.
 
 ## Exact algorithm
 
-1. Inspect configured Claude, Codex and Kimi panes through their journal
-   readers. Pane liveness, tmux screen text and current context percentage are
-   not inputs.
-2. Inspect at most the latest 24 hours by default and only turns newer than the
-   pane's last successful Dream receipt. Dream prompts, `/compact`, recovery
-   plumbing and canonical system noise are not work.
-3. For Claude, read a bounded tail from up to six recently active session
-   files. This preserves work on both sides of a compact rotation without ever
-   parsing an unbounded historical session.
-4. Keep at most eight recent real turns and 5 KiB of source per pane. Sort panes
-   by latest activity, include at most 48, and cap the complete prompt at 96
-   KiB. Every omitted or unreadable pane is reported with an exact reason.
-5. Invoke one no-tools, no-session-persistence summarizer process with a 0.20
-   USD hard budget (overridable downward). Source text is explicitly untrusted
-   data. Validate the response at 12 KiB and 60 non-empty lines before it can
-   enter memory.
-6. The controller, not the model, atomically writes one marked fleet-summary
-   block in the daily memory file.
-7. Atomically advance receipts only for panes actually included, and only after
-   the validated memory block is durable. Model, validation or write failure
-   advances no receipt; fixed-limit omissions retain their old receipts.
+1. Read bounded journal tails from configured Claude, Codex and Kimi panes.
+   Only turns newer than each pane's successful Dream receipt are eligible.
+   Dream prompts, compact commands and system plumbing are excluded.
+2. Keep at most eight turns and 5 KiB per pane, at most 48 panes, and at most
+   96 KiB total input. Every omission and unreadable journal remains explicit.
+3. Require the selected owner pane to be idle. Read its actual model and effort
+   from its own session journal. Unknown values, Haiku and effort `low` fail
+   closed.
+4. Send `/compact` to that exact session and require a new engine-native compact
+   boundary plus the same session ID afterward. A delivered slash command by
+   itself is not a receipt.
+5. Bank the bounded input as a read-only local JSON packet with SHA-256 and a
+   unique run ID.
+6. Post the complete instruction synchronously to the pane's bound Discord
+   channel. Only after Discord acknowledges it is the same instruction sent to
+   the pane. The ordinary best-effort mirror is disabled for this send so the
+   prompt appears exactly once.
+7. The pane may read today's and yesterday's memory, but writes only an isolated
+   per-run summary file. The prompt treats journal text as untrusted data and
+   forbids delegation or model changes.
+8. Require all three receipts: bounded valid output, exact `DREAM_OK` response
+   for this run, and idle completion. Also prove today's memory remained
+   byte-identical while the pane worked.
+9. The controller atomically inserts the validated summary into the one marked
+   Dream block. Only then are pane cursors advanced and the run sentinel added.
 
-`amux dream --dry` executes collection and budgeting, but invokes no model and
-writes nothing. With no new real work Dream writes only its run sentinel and
-does not invoke a model.
+Any failure leaves Dream receipts unchanged. `amux dream --dry` performs source
+collection and prints the exact visible prompt template, but does not compact,
+send, call a model, or write memory.
 
-## Separate controllers
+## Other memory maintenance
 
-- `amux memory compact` still compacts daily memory according to its own policy.
-- Pane auto-compact still responds to context pressure independently of Dream.
-- Sleep may consume durable evidence, but must independently prove idle, empty
-  delivery queue and safe worktree state. It never wakes a pane merely to sleep
-  it, and suspected stalls are reported rather than killed.
+Nightly `amux memory lint` remains read-only and reports the old-file backlog.
+Automatic `amux memory compact` is retired: it previously used a hidden
+one-shot model process. The command now supports `--dry` for inspection and
+fails closed before touching git or memory if asked to rewrite files.
 
 ## Rejected alternatives
 
-- Waking every pane makes nightly bookkeeping consume each pane's context and
-  turns inactive runtimes into unnecessary failure points.
-- Context-percentage eligibility loses heavily used work after a prior compact.
-- Reading only Claude's newest JSONL loses work when compact rotates the file.
-- A permanent summarizer pane accumulates its own context. A fresh one-shot gets
-  the same bounded cross-fleet view every night.
-- Silent truncation creates a false receipt. Omitted material is explicit and
-  never receipted.
+- A hidden one-shot model is cheap but hides the model, effort, prompt and
+  judgment from the operator.
+- Waking every pane spends context in every runtime and multiplies failure
+  points.
+- Letting the selected model edit the daily memory directly grants more write
+  authority than necessary. Isolated output plus a controller-owned atomic
+  insert is narrower and auditable.
+- Treating command delivery as proof of compaction risks summarizing stale
+  context. The engine journal boundary is the receipt.
+- Silent truncation creates a false receipt. Omitted material stays explicit
+  and is never receipted.

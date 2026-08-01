@@ -1,7 +1,11 @@
 // Exact Claude compact receipt shared by sleep and account rotation.
 
 import { hasClaudeCompactBoundaryAfterSubmit } from "./claude-submit-boundary.mjs";
+import { latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
+import {
+  captureJsonlAppendCursor, hasJsonlEventAfterCursor,
+} from "./jsonl-append-cursor.mjs";
 
 const waitFor = async (attempts, delayMs, sleep, predicate) => {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -64,6 +68,58 @@ export async function verifiedClaudeCompact({
     submittedAt,
     sessionId: after.sessionId,
     commandReceipt: command.via,
+    compactBoundary: true,
+  };
+}
+
+/** WHAT: Routes one Codex compact through the TUI and rollout boundary. WHY: Prevents Dream from running on stale pre-compact context. */
+export async function verifiedCodexCompact({
+  agent,
+  agentName,
+  pane,
+  paneDir,
+  latestIdentity = latestCodexSessionIdentity,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  sendSlash = sendSlashVerified,
+  pollAttempts = 180,
+  pollMs = 1_000,
+  settleMs = 200,
+} = {}) {
+  const before = latestIdentity(paneDir);
+  if (!before?.sessionId || !before?.path) {
+    return { ok: false, reason: "pre-compact-session-missing" };
+  }
+  const cursor = captureJsonlAppendCursor("codex-compact-events-v1", [before.path]);
+  if (!Object.keys(cursor.positions || {}).length) {
+    return { ok: false, reason: "compact-cursor-missing" };
+  }
+  const command = await sendSlash(agent, agentName, pane, "/compact", {
+    suppressReceipt: true,
+    settleMs,
+    maxRescues: 2,
+    sleep,
+  });
+  if (!command.delivered) return { ok: false, reason: "compact-command-unverified" };
+
+  const boundary = await waitFor(pollAttempts, pollMs, sleep, () => {
+    const current = latestIdentity(paneDir);
+    const files = [...new Set([before.path, current?.path].filter(Boolean))];
+    return hasJsonlEventAfterCursor(files, cursor, (event) => (
+      event?.type === "compacted"
+      || (event?.type === "event_msg" && event?.payload?.type === "context_compacted")
+    ));
+  });
+  if (!boundary) return { ok: false, reason: "compact-boundary-missing" };
+  const after = latestIdentity(paneDir);
+  if (!after?.sessionId) return { ok: false, reason: "post-compact-session-missing" };
+  if (after.sessionId !== before.sessionId) {
+    return { ok: false, reason: "compact-session-changed" };
+  }
+  return {
+    ok: true,
+    cursor,
+    sessionId: after.sessionId,
+    commandReceipt: "codex-compact-boundary",
     compactBoundary: true,
   };
 }

@@ -1,5 +1,5 @@
 import { feature, component, expect } from "bdd-vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { cmdDream } from "../cli/commands.mjs";
@@ -29,6 +29,40 @@ function fixture() {
   };
 }
 
+const owner = {
+  agent: "claw", pane: 3, engine: "codex", paneDir: "/workspace/.agents/3",
+};
+
+function ownerDependencies(fx, events = []) {
+  return {
+    now: new Date("2026-07-21T12:00:00Z"),
+    agents: [],
+    owner,
+    receiptPath: fx.receiptPath,
+    readReceipts: () => fx.receipts,
+    collectSources: () => ({ sources: [activeSource()], unreadable: [], skipped: [] }),
+    getStatus: async () => "idle",
+    getContext: () => ({ model: "gpt-5.6-sol", effort: "max" }),
+    compactCodex: async () => {
+      events.push("compact");
+      return { ok: true, sessionId: "session-1", compactBoundary: true };
+    },
+    writeInput: () => ({
+      path: "/tmp/dream-input.json", outputPath: "/tmp/dream-output.md",
+      runId: "run-1", sha256: "a".repeat(64), bytes: 100,
+    }),
+    mirrorPrompt: async () => {
+      events.push("mirror");
+      return { channelId: "channel-3", messages: 1 };
+    },
+    send: async (_ctx, agent, pane, prompt) => {
+      events.push(`send:${agent}:${pane}`);
+      expect(prompt).toContain("Du är den uttryckligen konfigurerade Dream-kuratorn claw:3");
+      return { delivered: true, pending: false, unverified: false };
+    },
+  };
+}
+
 function cleanup(fx) {
   process.env.HOME = fx.previousHome;
   if (fx.previousJanitor === undefined) delete process.env.AMUX_JANITOR_ENABLED;
@@ -36,23 +70,20 @@ function cleanup(fx) {
   rmSync(fx.root, { recursive: true, force: true });
 }
 
-feature("amux dream stateless orchestration", () => {
-  component("dry-run measures the real batch without invoking a model or writing", {
+feature("amux dream configured-pane orchestration", () => {
+  component("dry-run measures the real batch without compacting, sending, or writing", {
     given: ["one active source", () => fixture()],
     when: ["previewing", async (fx) => {
-      let modelCalls = 0;
-      const result = await cmdDream({ configPath: "unused" }, {
+      const result = await cmdDream({ configPath: "unused", agent: { ensureReady: async () => {} } }, {
         dry: true, workspace: fx.workspace,
       }, {
-        agents: [], receiptPath: fx.receiptPath,
+        agents: [], owner, receiptPath: fx.receiptPath,
         readReceipts: () => fx.receipts,
-        collectSources: () => ({ sources: [activeSource()], unreadable: [] }),
-        summarize: async () => { modelCalls++; return "must not run"; },
+        collectSources: () => ({ sources: [activeSource()], unreadable: [], skipped: [] }),
       });
-      return { fx, result, modelCalls };
+      return { fx, result };
     }],
-    then: ["there is one batch and no mutation", ({ fx, result, modelCalls }) => {
-      expect(modelCalls).toBe(0);
+    then: ["there is one batch and no mutation", ({ fx, result }) => {
       expect(result.included).toHaveLength(1);
       expect(existsSync(fx.receiptPath)).toBe(false);
       expect(existsSync(fx.workspace)).toBe(false);
@@ -60,17 +91,24 @@ feature("amux dream stateless orchestration", () => {
     }],
   });
 
-  component("one successful model call writes one block before one batch receipt", {
+  component("verified compact and visible pane prompt precede one batch receipt", {
     given: ["one active source", () => fixture()],
     when: ["running Dream", async (fx) => {
       const events = [];
-      const result = await cmdDream({ configPath: "unused" }, {
+      const deps = ownerDependencies(fx, events);
+      const result = await cmdDream({ configPath: "unused", agent: { ensureReady: async () => {} } }, {
         workspace: fx.workspace, quiet: true, deferSentinel: true,
       }, {
-        now: new Date("2026-07-21T12:00:00Z"), agents: [], receiptPath: fx.receiptPath,
-        readReceipts: () => fx.receipts,
-        collectSources: () => ({ sources: [activeSource()], unreadable: [] }),
-        summarize: async () => { events.push("model"); return "- Fixen mergades och verifierades."; },
+        ...deps,
+        waitForResult: async ({ outputPath, dateKey, runId }) => {
+          events.push("product");
+          const content = [
+            `> Kuraterad av claw:3 efter verifierad kompaktering · run \`${runId}\` · source \`${"a".repeat(64)}\`.`,
+            "- Fixen mergades och verifierades.", "",
+          ].join("\n");
+          writeFileSync(outputPath, content);
+          return { ok: true, content, dateKey };
+        },
         recordReceipts: (_state, targets) => {
           events.push(`receipt:${targets.length}`);
           const path = join(fx.workspace, "memory", "2026-07-21.md");
@@ -79,8 +117,8 @@ feature("amux dream stateless orchestration", () => {
       });
       return { fx, result, events };
     }],
-    then: ["the model runs once and receipt follows the durable memory product", ({ fx, result, events }) => {
-      expect(events).toEqual(["model", "receipt:1"]);
+    then: ["the selected pane runs once and receipt follows the durable memory product", ({ fx, result, events }) => {
+      expect(events).toEqual(["compact", "mirror", "send:claw:3", "product", "receipt:1"]);
       expect(result.included).toHaveLength(1);
       const memory = readFileSync(result.path, "utf8");
       expect(memory.match(/amux-dream-summary:2026-07-21/g)).toHaveLength(2);
@@ -91,36 +129,34 @@ feature("amux dream stateless orchestration", () => {
   component("--help shows usage with zero writes, sends, locks, or model calls", {
     given: ["a fixture that would otherwise run a full dream", () => fixture()],
     when: ["invoking with the help flag", async (fx) => {
-      const calls = { receipts: 0, sources: 0, summarize: 0, record: 0 };
+      const calls = { receipts: 0, sources: 0, record: 0 };
       const result = await cmdDream({ configPath: "unused" }, { help: true, workspace: fx.workspace }, {
         agents: new Proxy([], { get: () => { throw new Error("agents must not be read"); } }),
         readReceipts: () => { calls.receipts++; return fx.receipts; },
         collectSources: () => { calls.sources++; return { sources: [], unreadable: [] }; },
-        summarize: async () => { calls.summarize++; return "must not run"; },
         recordReceipts: () => { calls.record++; },
       });
       return { fx, result, calls };
     }],
     then: ["usage only, no side effects of any kind", ({ fx, result, calls }) => {
       expect(result).toEqual({ help: true });
-      expect(calls).toEqual({ receipts: 0, sources: 0, summarize: 0, record: 0 });
+      expect(calls).toEqual({ receipts: 0, sources: 0, record: 0 });
       expect(existsSync(fx.workspace)).toBe(false);
       expect(existsSync(join(fx.root, ".openclaw", ".dream.lock"))).toBe(false);
       cleanup(fx);
     }],
   });
 
-  component("a failed or invalid summary never advances receipts", {
+  component("a failed or invalid pane product never advances receipts", {
     given: ["one active source", () => fixture()],
-    when: ["the model returns a reserved marker", async (fx) => {
+    when: ["the owner fails to produce a valid block", async (fx) => {
       let receiptCalls = 0;
       let error = null;
       try {
-        await cmdDream({ configPath: "unused" }, { workspace: fx.workspace }, {
-          now: new Date("2026-07-21T12:00:00Z"), agents: [], receiptPath: fx.receiptPath,
-          readReceipts: () => fx.receipts,
-          collectSources: () => ({ sources: [activeSource()], unreadable: [] }),
-          summarize: async () => "<!-- amux-bad -->",
+        const deps = ownerDependencies(fx);
+        await cmdDream({ configPath: "unused", agent: { ensureReady: async () => {} } }, { workspace: fx.workspace }, {
+          ...deps,
+          waitForResult: async () => ({ ok: false, reason: "reserved-marker" }),
           recordReceipts: () => { receiptCalls++; },
         });
       } catch (caught) { error = caught; }
@@ -129,6 +165,28 @@ feature("amux dream stateless orchestration", () => {
     then: ["the exact validation failure is visible and nothing is receipted", ({ fx, error, receiptCalls }) => {
       expect(error?.message).toContain("reserved-marker");
       expect(receiptCalls).toBe(0);
+      cleanup(fx);
+    }],
+  });
+
+  component("unknown quality, Haiku, and effort low fail before compact or delivery", {
+    given: ["one active source", () => fixture()],
+    when: ["the selected pane reports a forbidden runtime", async (fx) => {
+      const events = [];
+      let error = null;
+      try {
+        await cmdDream({ configPath: "unused", agent: { ensureReady: async () => {} } }, {
+          workspace: fx.workspace,
+        }, {
+          ...ownerDependencies(fx, events),
+          getContext: () => ({ model: "claude-haiku-4-5", effort: "low" }),
+        });
+      } catch (caught) { error = caught; }
+      return { fx, events, error };
+    }],
+    then: ["the hidden-cheap-quality path is impossible", ({ fx, events, error }) => {
+      expect(error?.message).toContain("dream-owner-quality-blocked");
+      expect(events).toEqual([]);
       cleanup(fx);
     }],
   });

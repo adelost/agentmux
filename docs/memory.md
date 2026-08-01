@@ -1,107 +1,65 @@
-# amux memory — design (2026-07-11)
+# amux memory
 
-## Implementationsverdict (kritisk review)
+## Current design (2026-08-01)
 
-**Riktningen godkänd, fyra detaljer ändrade före implementation:**
+AMUX owns deterministic collection, bounds, receipts and atomic writes. One
+operator-selected AMUX pane owns the nightly editorial judgment. No hidden
+one-shot model process may edit memory.
 
-1. Fullversioner bankas i en path-scopad batch-commit före någon LLM-körning.
-   Befintligt staged WIP stoppar körningen; orelaterat unstaged/untracked WIP
-   följer aldrig med. En innehållsjämförelse stoppar overwrite vid samtidig edit.
-2. LLM:n får inga verktyg (`claude --print --safe-mode --tools ""`), källan
-   skickas som data via stdin och output skrivs först efter schema- och
-   invariantsvalidering.
-3. `~5`/`~20` betyder semantiska innehållsrader. Dagfilens obligatoriska ram
-   ger upp till fem fysiska rader extra. Annars var 5-radersmålet oförenligt
-   med lintens obligatoriska metadata och sektionsrubriker.
-4. Bash-wrappern pensioneras inte. Den är en tunn, stabil heartbeat-entrypoint;
-   all logik och alla tester ägs av amux.
+The configured pane lives in source `agentmux.yaml`:
 
-## Problem
-
-Minnesunderhållet är idag splittrat över tre halvor som inte pratar med varandra:
-
-1. `amux dream` (i amux): en nattlig fleet-digest från paneljournaler till dagfilen.
-2. `scripts/memory/lint.sh` (workspace-bash): varnar korrekt för stora filer,
-   men outputen har ingen konsument — varningar från MARS står obesvarade i juli.
-3. Manuella konventioner ("dagfiler >30d → ~5 rader"): ingen mekanism kör dem.
-
-Uppmätt kostnad: dagfilen 2026-07-10 = 659 rader/124KB ≈ ~30k tokens.
-Sessionsstart-rutinen "läs dagens + gårdagens" gör det till en skatt VARJE
-panel betalar VARJE morgon. MEMORY.md ligger på 6KB mot sin 4KB-cap.
-
-Rotorsak: **varningar utan aktör** + mekanism utanför amux (otestad bash,
-ingen versionering, ingen som äger den).
-
-## Princip
-
-**amux äger mekanismen, workspace äger policy + innehåll.**
-Samma split som canonical hints: motorn är testad och versionerad i amux,
-workspace bidrar med data (templates, policy-overrides, ignore-lista).
-
-## Kommandofamilj
-
-```
-amux memory status          # storlekar, varningsantal, backlog-ålder, senaste dream/compact
-amux memory lint [--json]   # port av lint.sh som data-drivna regler; exit 1 vid varningar
-amux memory compact [--dry] # AKTÖREN: konsumerar lint-fynden, max N filer/körning
+```yaml
+dream:
+  agent: claw
+  pane: 3
 ```
 
-### Policy som data (defaults, överstyr via `memory/.memory-policy.yaml`)
+The full execution and failure contract is in `docs/DREAM-POLICY.md`.
 
-| Yta | Gräns | Åtgärd |
-|-----|-------|--------|
-| `MEMORY.md` | 4KB | warn (manuell curation, ALDRIG auto-compact) |
-| dagfil idag/igår | — | fredad, rörs aldrig |
-| dagfil 2–30d | >100 rader | compact → ~20 rader |
-| dagfil >30d | >30 rader | compact → ~5 rader |
-| `references/*` | >500 rader | warn-split (aldrig auto) |
-| `people/*` | >500 rader | warn (aldrig auto — känsligt innehåll kräver omdöme) |
+## Commands
 
-Endast dagfiler auto-komprimeras: lägst risk, git-bankade, och deras varaktiga
-innehåll ska ändå graduera till references/people via routing-reglerna.
-
-### Compact-flödet per fil
-
-1. **Banka fullversionen i git** — flera dagfiler är otrackade; utan
-   bank-commit vore komprimering destruktiv. Git-historiken ÄR arkivet.
-2. LLM-komprimering (headless `claude -p`, strikt prompt): behåll
-   `> summary:`/`> why:`, beslut, lärdomar, länkar; mål-radantal per policy.
-3. **Validering**: radantal inom mål, header intakt, template-tagg kvar.
-   Olösta todos och befintliga `memory/*.md`-länkar får inte tappas. Vid
-   valideringsfel har produkten ännu inte skrivits; compact-commit-fel
-   återställer från bank-commiten när filen fortfarande matchar vår produkt.
-4. Compact-commit med tydligt meddelande (fullversion = föregående commit).
-
-Äldst först, max 3 filer/natt (bounded work) → mars–juni-backloggen dräneras
-automatiskt på ~2 veckor, sen är systemet självunderhållande.
-
-### Nattkedjan (dream-cron.sh)
-
-```
-amux dream  →  amux memory compact  →  amux memory lint
+```text
+amux dream                  # visible configured-pane fleet digest
+amux dream --dry            # source inventory + exact prompt, no side effects
+amux memory status          # sizes, warnings, backlog and latest run
+amux memory lint [--json]   # read-only policy findings
+amux memory compact --dry   # inspect old daily-file compaction candidates
 ```
 
-Lint-resultatet routas till en YTA SOM LÄSES: en rad i dagens dagfil,
-`memory: X varningar, backlog Y filer, komprimerade Z inatt`. Det stänger
-"varning utan aktör"-hålet från båda håll: natten agerar, morgonen ser resten.
+Non-dry `amux memory compact` is deliberately disabled. Its former default
+spawned a separate model process that could rewrite memory without a visible
+AMUX prompt. Old files remain intact and searchable; lint keeps the backlog
+visible until a similarly transparent, operator-owned curation flow exists.
 
-## Dream-summarizer
+## Nightly chain
 
-Dream kör en enda stateless, verktygslös summarizer över begränsade journalutdrag
-från Claude, Codex och Kimi. Den väcker aldrig paneler och kör aldrig `/compact`.
-En körning ersätter dagens enda fleet-summary-block; en gammal timslång retry för
-pane-lokala svar behövs därför inte längre. Exakta budgetar och kvittogränser
-finns i `docs/DREAM-POLICY.md`.
+```text
+configured owner exact /compact
+  -> visible Dream prompt
+  -> isolated validated summary
+  -> controller-owned atomic daily block
+  -> read-only memory lint
+  -> incremental search reindex
+```
 
-## Migration
+The cron wrapper remains a thin heartbeat entrypoint. It alerts on failure and
+never changes the chosen pane, model or effort.
 
-1. `amux memory lint` byggs med tester; `scripts/memory/lint.sh` blir en tunn
-   wrapper som anropar den (heartbeat-integrationen orörd).
-2. `amux memory compact` byggs + kedjas in i dream-cron.
-3. Backloggen dräneras automatiskt.
-4. Wrappern ligger kvar som kompatibilitetsyta; den innehåller ingen policy.
+## File policy
 
-## Status
+- `MEMORY.md`: short curated index, never automatically compacted.
+- Today's and yesterday's daily files: never old-file compact candidates.
+- `references/*` and `people/*`: warnings only, never automatic rewrites.
+- Session JSONL housekeeping is separate and preserves every record; it only
+  shortens oversized string fields in sufficiently old inactive journals.
 
-Memory-kedjan är implementerad; Dream producerar nu ett validerat fleet-block
-utan beroende på pane-liveness.
+## Safety properties
+
+- Source packets are bounded and treated as untrusted data.
+- Prompt visibility is acknowledged before delivery to the pane.
+- Haiku, effort `low`, unknown runtime quality and missing compact receipts fail
+  closed.
+- The pane writes an isolated result, not the daily memory file.
+- The controller validates size, line count, reserved markers and current run
+  provenance before one atomic insert.
+- Receipts advance only after the durable memory product exists.

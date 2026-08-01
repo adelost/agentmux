@@ -42,5 +42,5 @@ export function isSystemNoiseDirective(text) {
 /** WHAT: Checks whether a directive proves active work. WHY: Prevents maintenance from waking an otherwise sleeping pane. */
 export function isWorkDirective(text) {
   const head = String(text || "").trimStart();
-  return !isSystemNoiseDirective(head) && !/^\[dream\b/i.test(head);
+  return !isSystemNoiseDirective(head) && !/^\[(?:amux\s+)?dream\b/i.test(head);
 }

@@ -72,6 +72,23 @@ feature("daily compaction validation", () => {
 });
 
 feature("compactMemory git safety", () => {
+  component("the public path refuses hidden model execution before touching git", {
+    given: ["one oversized old daily file", () => {
+      const root = gitWorkspace();
+      const path = join(root, "memory", "2026-05-01.md");
+      writeFileSync(path, daily("2026-05-01"));
+      return { root, before: runGit(root, "status", "--short") };
+    }],
+    when: ["running without an explicitly injected deterministic generator", async ({ root }) => {
+      try { await compactMemory(root, { now: NOW }); return null; }
+      catch (error) { return error; }
+    }],
+    then: ["it fails closed with the worktree unchanged", (error, { root, before }) => {
+      expect(error?.message).toContain("memory-compactor-disabled");
+      expect(runGit(root, "status", "--short")).toBe(before);
+    }],
+  });
+
   component("untracked full file is banked before replacement; unrelated WIP stays dirty", {
     given: ["a dirty shared repo and one untracked oversized daily", () => {
       const root = gitWorkspace();

@@ -558,6 +558,47 @@ feature("buildSyncPlan", () => {
 });
 
 feature("generateAgentsYaml", () => {
+  component("carries the explicit Dream pane from source into generated runtime config", {
+    given: ["a source selecting an existing Codex pane", () => `
+guild: "1"
+dream:
+  agent: claw
+  pane: 1
+agents:
+  claw:
+    dir: /tmp/claw
+    claude: 1
+    codex: 1
+`],
+    when: ["regenerating agents.yaml", (source) => ({
+      parsed: parseConfig(source),
+      generated: yaml.load(regenerateAgentsYaml(source, null)),
+    })],
+    then: ["the operator selection survives without becoming an agent entry", ({ parsed, generated }) => {
+      expect(parsed.dream).toEqual({ agent: "claw", pane: 1 });
+      expect(generated.dream).toEqual({ agent: "claw", pane: 1 });
+      expect(generated.dream.dir).toBeUndefined();
+    }],
+  });
+
+  component("rejects a Dream target whose pane cannot provide an exact compact receipt", {
+    given: ["a source selecting a Kimi pane", () => `
+guild: "1"
+dream:
+  agent: claw
+  pane: 1
+agents:
+  claw:
+    dir: /tmp/claw
+    claude: 1
+    kimi: 1
+`],
+    when: ["parsing the source", (source) => () => parseConfig(source)],
+    then: ["configuration fails closed", (parse) => {
+      expect(parse).toThrow("'dream' target must be a Claude or Codex pane");
+    }],
+  });
+
   component("carries search.roots from source yaml into generated agents.yaml", {
     given: ["a source with a search section and one agent", () => `
 guild: "1"

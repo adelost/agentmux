@@ -1,6 +1,12 @@
 guild: "YOUR_SERVER_ID"
 category: "Agent Cave"       # Discord category for agent channels
 
+# Existing Claude/Codex pane that visibly curates the nightly memory digest.
+# No hidden model process or fallback is used.
+dream:
+  agent: myproject
+  pane: 0
+
 agents:
   myproject:
     dir: ~/projects/myproject

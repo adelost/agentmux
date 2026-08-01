@@ -74,7 +74,7 @@ describe("cron scripts never write logs to the HOME root", () => {
     expect(invoked.indexOf("search --reindex")).toBeGreaterThan(invoked.indexOf("dream --quiet"));
   });
 
-  it("a partial compact (exit 1, valid JSON) logs backlog and continues; invalid JSON is a real error", () => {
+  it("dream cron never invokes the retired hidden memory compactor", () => {
     const dateKey = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date());
     const workspace = join(fx.home, "workspace");
     mkdirSync(join(workspace, "memory"), { recursive: true });
@@ -88,9 +88,8 @@ describe("cron scripts never write logs to the HOME root", () => {
     ].join("\n"));
     const stub = [
       "#!/usr/bin/env bash",
-      `if [ "$1" = "-e" ]; then exec ${process.execPath} "$@"; fi`,
+      'printf "%s\\n" "$*" >> "$CALLS"',
       'case "$*" in',
-      '  *"memory compact"*) printf \'{"compacted":[{"path":"a"}],"failed":[{"path":"b"}],"candidates":[]}\n\'; exit 1;;',
       '  *"memory lint"*) printf \'{}\n\'; exit 0;;',
       '  *"notifyuser"*) exit 0;;',
       '  *) printf "Dream: ok\n"; exit 0;;',
@@ -100,31 +99,16 @@ describe("cron scripts never write logs to the HOME root", () => {
     writeFileSync(fx.node, stub);
     chmodSync(fx.node, 0o755);
     const logPath = join(fx.home, "dream.log");
-    const partial = run("dream-cron.sh", {
+    const calls = join(fx.home, "calls.log");
+    const result = run("dream-cron.sh", {
+      CALLS: calls,
       AGENTMUX_DREAM_LOG: logPath,
       OPENCLAW_WORKSPACE: workspace,
     });
-    expect(partial.status).toBe(0);
-    const log = readFileSync(logPath, "utf-8");
-    expect(log).toContain("WARN memory compact backlog: 1 file(s) still failing");
-    expect(log).not.toContain("ERROR memory compact");
-    writeFileSync(fx.node, [
-      "#!/usr/bin/env bash",
-      `if [ "$1" = "-e" ]; then exec ${process.execPath} "$@"; fi`,
-      'case "$*" in',
-      '  *"memory compact"*) printf \'not-json\n\'; exit 0;;',
-      '  *"memory lint"*) printf \'{}\n\'; exit 0;;',
-      '  *) printf "Dream: ok\n"; exit 0;;',
-      "esac",
-      "",
-    ].join("\n"));
-    chmodSync(fx.node, 0o755);
-    const invalid = run("dream-cron.sh", {
-      AGENTMUX_DREAM_LOG: logPath,
-      OPENCLAW_WORKSPACE: workspace,
-    });
-    expect(invalid.status).toBe(2);
-    expect(invalid.stderr).toContain("memory compact returned invalid JSON");
+    expect(result.status).toBe(0);
+    const invoked = readFileSync(calls, "utf8");
+    expect(invoked).not.toContain("memory compact");
+    expect(invoked).toContain("memory lint --json --report-daily --compacted 0");
   });
 
   it("morning-digest-cron logs under .cache", () => {
