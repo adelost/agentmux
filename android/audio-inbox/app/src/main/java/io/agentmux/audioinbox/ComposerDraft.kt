@@ -1,5 +1,8 @@
 package io.agentmux.audioinbox
 
+/** The submitted text associated with one durably accepted turn. */
+internal data class AcceptedDraft(val turnId: String, val draft: String)
+
 /**
  * WHAT: Tracks which exact local draft revision awaits durable acceptance.
  * WHY: Keeps an older acceptance from clearing newer text with identical content.

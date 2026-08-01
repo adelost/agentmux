@@ -26,11 +26,11 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
+private const val RECOVERED_AUDIO_TTL_MS = 10 * 60_000L
+
 internal class LinkCoordinator(
     private val activity: Activity,
 ) : AutoCloseable {
-    data class AcceptedDraft(val turnId: String, val draft: String)
-
     private val preferences: SharedPreferences =
         activity.getSharedPreferences(AppContract.PREFS, Activity.MODE_PRIVATE)
     private val repository = LinkStateRepository(preferences)
@@ -494,9 +494,5 @@ internal class LinkCoordinator(
         publicEvents.close()
         linkAuth.close()
         controller.close()
-    }
-
-    private companion object {
-        const val RECOVERED_AUDIO_TTL_MS = 10 * 60_000L
     }
 }
