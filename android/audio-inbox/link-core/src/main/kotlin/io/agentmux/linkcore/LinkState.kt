@@ -67,6 +67,8 @@ data class LinkTarget(
     val id: String,
     val label: String,
     val available: Boolean = true,
+    /** Presence predicts latency; acceptance says whether a durable route can queue work. */
+    val acceptsMessages: Boolean = available,
 )
 
 /**

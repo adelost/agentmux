@@ -45,4 +45,19 @@ public class PublicConversationTransportTest {
         assertEquals("Windows svar", reply.text());
         audio.delete();
     }
+
+    @Test
+    public void offlinePresenceDoesNotDisableDurableMailboxAcceptance() {
+        PublicConversationTransport transport = new PublicConversationTransport(
+            new PublicConversationTransport.Client() {
+                public String send(String id, String target, String text) { return "queued"; }
+                public String sendVoice(String id, String target, File audio) { return "queued"; }
+                public String awaitReply(String id, long timeoutMs) { return "reply"; }
+            }
+        );
+
+        assertTrue(transport.supports(
+            ConversationTarget.publicLink("offline-agent", "Offline agent", false)
+        ));
+    }
 }

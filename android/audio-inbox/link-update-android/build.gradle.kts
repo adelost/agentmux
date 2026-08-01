@@ -27,7 +27,7 @@ android {
 
 dependencies {
     implementation(project(":link-core"))
-    implementation("io.v1d.circlekit:releasekit:0.3.3")
+    implementation("io.v1d.circlekit:releasekit:0.3.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.json:json:20240303")
     testImplementation("junit:junit:4.13.2")

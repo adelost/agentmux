@@ -20,11 +20,11 @@ class LinkTargetRoutePolicyTest {
     }
 
     @Test
-    fun `known private route remains visible while temporarily unavailable`() {
-        val tailnet = privateTarget()
+    fun `offline public route wins because it can queue while private route cannot`() {
+        val tailnet = privateTarget(serverUrl = "ftp://offline.invalid")
         val publicLink = ConversationTarget.publicLink("skyvw:3", "Skyvw 3", false)
 
-        assertSame(tailnet, LinkTargetRoutePolicy.choose(tailnet, publicLink))
+        assertSame(publicLink, LinkTargetRoutePolicy.choose(tailnet, publicLink))
     }
 
     @Test
@@ -38,11 +38,13 @@ class LinkTargetRoutePolicyTest {
         )
     }
 
-    private fun privateTarget() = ConversationTarget(
+    private fun privateTarget(
+        serverUrl: String = "https://abyss-wsl.tail13cb13.ts.net:8443",
+    ) = ConversationTarget(
         "skyvw:3",
         "Skyvw 3",
         ConversationTarget.Kind.AGENT,
-        "https://abyss-wsl.tail13cb13.ts.net:8443",
+        serverUrl,
         "1234567890",
         "skyvw",
         3,

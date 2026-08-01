@@ -410,7 +410,12 @@ internal class LinkCoordinator(
         dispatch(
             LinkAction.Targets(
                 chosen.map {
-                    LinkTarget(it.id, it.label, it.available())
+                    LinkTarget(
+                        id = it.id,
+                        label = it.label,
+                        available = it.available(),
+                        acceptsMessages = it.kind == ConversationTarget.Kind.PUBLIC || it.available(),
+                    )
                 },
             ),
         )

@@ -37,7 +37,6 @@ public final class PublicConversationTransport implements ConversationTransport 
     public boolean supports(ConversationTarget target) {
         return target != null
             && target.kind == ConversationTarget.Kind.PUBLIC
-            && target.available()
             && (injected != null || sessions.session() != null);
     }
 

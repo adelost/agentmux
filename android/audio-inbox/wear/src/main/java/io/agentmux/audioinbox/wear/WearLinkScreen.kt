@@ -1,5 +1,8 @@
 package io.agentmux.audioinbox.wear
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -7,7 +10,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import com.adelost.designkit.ui.CircleLabelProgress
+import com.adelost.designkit.ui.GraphiteTokens
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.ringkit.ui.RenderRingScreen
 import com.adelost.ringkit.ui.RingNavigator
@@ -21,11 +27,16 @@ import io.agentmux.linkcore.UpdatePresentation
 import io.agentmux.linkcore.linkConnectionLabel
 import io.agentmux.linkcore.linkConnectionRoute
 import io.agentmux.linkcore.linkConnectionSettingsDetail
+import io.agentmux.linkui.LinkCaptureControl
+import io.agentmux.linkui.LinkCaptureSpec
+import io.agentmux.linkui.resolveLinkCaptureAvailability
 import kotlinx.coroutines.flow.MutableStateFlow
 
 @Composable
 internal fun WearLinkScreen(
     state: LinkState,
+    microphoneGranted: Boolean,
+    onRequestMicrophone: () -> Unit,
     onSelectTarget: (String) -> Unit,
     onBeginCapture: () -> Boolean,
     onReleaseCapture: () -> Unit,
@@ -58,14 +69,31 @@ internal fun WearLinkScreen(
         }
     }
     if (captureOpen) {
-        WearCaptureScreen(
-            phase = state.capture,
-            recordedBytes = recordedBytes,
-            recordedLevel = recordedLevel,
-            onBegin = onBeginCapture,
-            onRelease = onReleaseCapture,
-            onCancel = onCancelCapture,
-        )
+        val selected = state.targets.firstOrNull { it.id == state.selectedTargetId }
+            ?: state.targets.firstOrNull()
+        Box(
+            modifier = Modifier.fillMaxSize().background(GraphiteTokens.Canvas),
+            contentAlignment = Alignment.Center,
+        ) {
+            LinkCaptureControl(
+                spec = LinkCaptureSpec(
+                    phase = state.capture,
+                    startedAtMs = state.captureStartedAtMs,
+                    availability = resolveLinkCaptureAvailability(
+                        hasTarget = selected != null,
+                        targetAcceptsMessages = selected?.acceptsMessages == true,
+                        microphoneGranted = microphoneGranted,
+                        finalizing = state.capture == io.agentmux.linkcore.CapturePhase.FINALIZING,
+                    ),
+                ),
+                recordedBytes = recordedBytes,
+                recordedLevel = recordedLevel,
+                onBegin = onBeginCapture,
+                onRelease = onReleaseCapture,
+                onCancel = onCancelCapture,
+                onRecover = onRequestMicrophone,
+            )
+        }
         return
     }
     val items = remember { MutableStateFlow(emptyList<RowSpec>()) }
@@ -125,13 +153,13 @@ internal fun wearLinkRows(
 ): List<RowSpec> {
     val selected = state.targets.firstOrNull { it.id == state.selectedTargetId }
         ?: state.targets.firstOrNull()
-    val availableTargets = state.targets.filter { it.available }
-    val targetChoices = availableTargets
+    val sendableTargets = state.targets.filter { it.acceptsMessages }
+    val targetChoices = sendableTargets
         .map { it.label.ifBlank { it.id }.uppercase() }
         .takeIf { it.size >= 2 }
         .orEmpty()
     val latest = state.turns.lastOrNull()
-    val selectedAvailable = selected?.available == true
+    val selectedSendable = selected?.acceptsMessages == true
     val rows = mutableListOf(
         RowSpec(
             key = "target",
@@ -143,7 +171,7 @@ internal fun wearLinkRows(
                 null
             } else {
                 { label ->
-                    availableTargets.firstOrNull {
+                    sendableTargets.firstOrNull {
                         it.label.ifBlank { it.id }.uppercase() == label
                     }?.let { onSelectTarget(it.id) }
                 }
@@ -152,9 +180,13 @@ internal fun wearLinkRows(
         RowSpec(
             key = "talk",
             title = "PUSH TO TALK",
-            sub = if (selectedAvailable) "OPEN RECORDER" else "UNAVAILABLE",
+            sub = when {
+                !selectedSendable -> "UNAVAILABLE"
+                selected?.available == false -> "OPEN RECORDER · WILL QUEUE"
+                else -> "OPEN RECORDER"
+            },
             icon = RingIcons.Record,
-            onTap = onOpenCapture.takeIf { selectedAvailable },
+            onTap = onOpenCapture.takeIf { selectedSendable },
         ),
     )
     if (latest == null) {
