@@ -140,7 +140,12 @@ Use `--by-pane` when you want a post-mortem grouped by pane. Use plain
 ## Ask History
 
 `amux asks` answers "what did I ask, where did I ask it, and is it still
-open?" Delivery and pane hooks first append the exact UTF-8 prompt to
+open?" Its default view is grouped by agent and shows the latest shortened
+asks and replies across recently used panes, plus honest unresolved/unverified
+counts. It first covers distinct panes, then fills remaining slots with the
+next newest asks. This is the fast orientation layer; no model summarizes it.
+
+Delivery and pane hooks first append the exact UTF-8 prompt to
 `~/.agentmux/ask-ledger.jsonl`; provider session history is then joined only
 to enrich that durable identity with reply/status and line anchors. If a
 provider session was cleared, respawned, rotated, or reaped before completion
@@ -163,6 +168,8 @@ migration never fabricates completion.
 ```bash
 amux asks
 amux asks --open
+amux asks claw --per-agent 5
+amux asks --list --since 2h
 amux asks --open --all-sources
 amux asks --since 2h
 amux asks claw --pane 3
@@ -171,13 +178,18 @@ amux asks --full --since 30d
 amux asks --all-repos --summary --since 30d
 ```
 
+The deterministic preview strips transport wrappers and private attachment
+paths, represents attachments as counts, and retains both the beginning and
+end of long asks. `--list` exposes the flat exact-ledger drill-down; `--full`
+also resolves full provider history and jsonl line anchors.
+
 The ledger itself is append-only. Its renamed rotation archives and the
 delivery-backfill marker are not janitor inputs. Default mode joins only a
 bounded provider tail, so it is safe as an orientation command. Use `--full`
 when you need exact live-history
 answers or line anchors beyond that tail; it is no longer required to retain
 old prompts. `--all-repos` includes removed agents and `--summary` groups the
-selection for a fleet-wide overview.
+selection by repository rather than agent/pane.
 
 ## Orchestrator Summary
 

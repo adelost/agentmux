@@ -53,8 +53,9 @@ the same engine.
 
 ### Find asks and unfinished human directives
 \`\`\`bash
-amux asks                            # durable asks + bounded live status
-amux asks --open                     # unresolved only
+amux asks                            # grouped agent overview + recent asks/panes
+amux asks --open                     # grouped unresolved overview
+amux asks <agent> --list             # flat exact-ledger drilldown
 amux asks --open --all-sources       # include inter-agent/automation directives
 amux asks <agent> --pane N --since 2d
 amux asks --all-repos --summary      # durable overview across removed/current repos
