@@ -122,6 +122,7 @@ import {
 import { persistAskCompletionEvidence, readAskLedger } from "../core/ask-ledger.mjs";
 import { backfillAskLedgerFromDeliveryQueue } from "../core/ask-ledger-backfill.mjs";
 import { formatAskEntry } from "./ask-format.mjs";
+import { formatAskOverview } from "./ask-overview.mjs";
 import {
   formatWorktreeDeps,
   provisionWorktreeDependencies,
@@ -1232,10 +1233,9 @@ function attachDisplayedAskLineAnchors(rows) {
     return attachAskLineAnchors([row], cache.get(row.jsonlFile))[0];
   });
 }
-
 async function cmdAsks(ctx, flags, positional = []) {
   if (flags.help || flags.h) {
-    console.log(`Usage: amux asks [agent] [--pane N] [--since 2h] [--grep REGEX] [--full] [--open] [--all-sources] [--all-repos] [--summary]\n\nThe durable ask ledger is authoritative; live session history adds reply/status while available.\nHistorical delivery jobs are indexed automatically once, so pre-ledger asks remain visible.\nHuman/operator asks are the default; --all-sources also includes inter-agent and automation directives.\n--open shows open, working, partial, needs-you, and unverified asks.\n--full scans exact live session history instead of only its bounded recent tail.\n--all-repos includes archived agents no longer present in the active config.\n--summary groups the selected rows by repository.\nExample: amux asks --open --full --since 30d`);
+    console.log(`Usage: amux asks [agent] [--since 2h] [--open] [--per-agent N] [--list | --full] [--all-sources] [--all-repos] [--summary]\n\nDefault: grouped agent overview with the latest ask/reply per recently used pane.\n--list prints the flat durable ledger; --full also scans exact live history and line anchors.\n--open keeps unresolved rows; --all-sources includes inter-agent/automation directives.\n--all-repos includes archived agents; --summary groups selected rows by repository.\nExample: amux asks claw --open; amux asks --list --since 2h`);
     return;
   }
   const nowMs = Date.now();
@@ -1365,15 +1365,15 @@ async function cmdAsks(ctx, flags, positional = []) {
       joinedEntries,
     });
   }
+  const overview = !flags.list && !flags.full && !flags.summary && !flags.grep && paneFilter == null && flags.n == null;
   const filteredRows = filterAskEntries(joinedEntries, {
     sinceMs: since ? since.getTime() : null,
     grep,
     openOnly: !!flags.open,
     humanOnly: !flags["all-sources"],
-    limit: flags.summary ? null : (flags.n || 40),
+    limit: flags.summary || overview ? null : (flags.n || 40),
   });
   const rows = flags.full ? attachDisplayedAskLineAnchors(filteredRows) : filteredRows;
-
   const mode = `durable ledger + ${flags.full ? "full" : "bounded"} live status`;
   const filter = [
     `since=${sinceLabel}`,
@@ -1398,6 +1398,7 @@ async function cmdAsks(ctx, flags, positional = []) {
     }
     return;
   }
+  if (overview) return console.log(formatAskOverview(rows, { perAgent: flags["per-agent"] || 3 }));
   for (const e of rows) console.log("\n" + formatAskEntry(e));
 }
 
@@ -3610,9 +3611,8 @@ const FLAG_SPECS = {
     "all-repos": "boolean",
     "all-sources": "boolean",
     summary: "boolean",
+    list: "boolean", "per-agent": "number",
     "per-pane": "number",
-    help: "boolean",
-    h: "boolean",
   },
   compact: { dry: "boolean", force: "boolean", "min-tokens": "number", p: "number", m: "string", message: "string" },
   dream: {
