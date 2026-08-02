@@ -42,6 +42,7 @@ try {
   if (argv[0] === "restarter") await cmdRestarter(argv.slice(1), ctx);
   else if (argv[0] === "restart-ready") await cmdRestartReady(argv.slice(1), ctx);
   else if (argv[0] === "emulator") await (await import("../cli/emulator.mjs")).cmdEmulator(argv.slice(1));
+  else if (argv[0] === "work") await (await import("../cli/work.mjs")).cmdWork(argv.slice(1));
   else await dispatch(argv, ctx);
 } catch (err) {
   console.error(`Error: ${err.message}`);

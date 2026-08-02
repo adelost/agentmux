@@ -146,4 +146,25 @@ PY`)],
       rmSync(ctx.root, { recursive: true, force: true });
     }],
   });
+
+  component("adds only the bounded fleet identity header", {
+    given: ["a staged request", () => {
+      const ctx = fixture();
+      ctx.fetchImpl = async (_url, options) => {
+        ctx.headers = options.headers;
+        return new Response("{}", { status: 200 });
+      };
+      return ctx;
+    }],
+    when: ["sending as one fleet pane", (ctx) => sendSuggestionsRequest({
+      method: "POST", path: "/api/agent/check-in", bodyFile: ctx.bodyFile,
+      token: "fleet-key", requestHeaders: { "x-agent-id": "skyvw:4" },
+      stateDir: ctx.stateDir, fetchImpl: ctx.fetchImpl,
+    })],
+    then: ["authorization cannot be overridden while the pane header is preserved", (_result, ctx) => {
+      expect(ctx.headers).toMatchObject({ authorization: "Bearer fleet-key",
+        "x-agent-id": "skyvw:4" });
+      rmSync(ctx.root, { recursive: true, force: true });
+    }],
+  });
 });

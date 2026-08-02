@@ -1,6 +1,5 @@
 // Command dispatch for agent CLI. Routes argv to handlers.
 // Intent-driven: each command is a clear function name.
-
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, statSync } from "fs";
@@ -3403,6 +3402,7 @@ Usage:
     --detach, -d                  Run under a managed tmux-free supervisor
   agent suggest                   Poll Suggestions here; Ctrl+C stops all Suggestions polling
     --once                        Run one diagnostic poll without changing legacy cron ownership
+  agent work [status|join|add|approve|claim|working|wait|block|answer|done]  Simple durable pull workflow
   agent stop                      Stop Discord bridge (no arg = bridge)
   agent stop --all                Stop bridge + all agent sessions
   agent runtime status            Every managed native runtime + engine health
