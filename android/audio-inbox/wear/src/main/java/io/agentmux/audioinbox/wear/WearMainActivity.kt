@@ -91,6 +91,8 @@ class WearMainActivity : ComponentActivity() {
                         onReplay = controller::playLatest,
                         onCheckUpdate = updater::retry,
                         onInstallUpdate = updater::install,
+                        initialShowingSettings = BuildConfig.DEBUG &&
+                            intent.getStringExtra(QA_PAGE_EXTRA) == QA_PAGE_SETTINGS,
                     )
                 }
             }
@@ -145,6 +147,8 @@ class WearMainActivity : ComponentActivity() {
 
 private const val QA_STATE_EXTRA = "qa_state"
 private const val QA_STATE_ACTIVE = "active"
+private const val QA_PAGE_EXTRA = "qa_page"
+private const val QA_PAGE_SETTINGS = "settings"
 
 internal fun unavailableState(): LinkState = listOf<LinkAction>(
     LinkAction.Targets(emptyList()),

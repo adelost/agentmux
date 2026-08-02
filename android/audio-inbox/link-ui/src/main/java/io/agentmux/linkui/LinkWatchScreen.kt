@@ -47,8 +47,9 @@ fun LinkWatchScreen(
     onCheckUpdate: () -> Unit,
     onInstallUpdate: () -> Unit,
     onOpenDevHost: (() -> Unit)? = null,
+    initialShowingSettings: Boolean = false,
 ) {
-    var showingSettings by rememberSaveable { mutableStateOf(false) }
+    var showingSettings by rememberSaveable { mutableStateOf(initialShowingSettings) }
     LinkWatchSurface(
         state = state,
         showingSettings = showingSettings,
