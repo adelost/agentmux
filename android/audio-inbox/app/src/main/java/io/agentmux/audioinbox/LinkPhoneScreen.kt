@@ -32,8 +32,10 @@ import com.adelost.designkit.ui.CircleActionTiming
 import com.adelost.designkit.ui.CircleChoiceRole
 import com.adelost.designkit.ui.CircleIconDisc
 import com.adelost.designkit.ui.CircleLabelProgress
-import com.adelost.designkit.ui.CircleResponsiveSurface
+import com.adelost.designkit.ui.CircleSurfaceClass
+import com.adelost.designkit.ui.LocalCircleSurfaceLayout
 import com.adelost.designkit.ui.phoneSurfaceDesign
+import com.adelost.ringkit.ui.CircleHostPreviewPort
 import com.adelost.ringkit.ui.PhoneHeaderAction
 import com.adelost.ringkit.ui.PhoneScreenHeader
 import com.adelost.ringkit.ui.RingChoiceRow
@@ -51,6 +53,7 @@ import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.linkConnectionRoute
 import io.agentmux.linkui.LinkCaptureControl
 import io.agentmux.linkui.LinkCaptureSpec
+import io.agentmux.linkui.LinkWatchSurface
 import io.agentmux.linkui.resolveLinkCaptureAvailability
 import kotlin.math.sin
 
@@ -63,14 +66,14 @@ internal fun LinkPhoneScreen(
     coordinator: LinkCoordinator,
     recorder: PushToTalkRecorder,
     updater: LinkUpdater,
+    hostPreview: CircleHostPreviewPort,
     microphoneGranted: Boolean,
     onRequestMicrophone: () -> Unit,
 ) {
     val state by coordinator.state.collectAsStateWithLifecycle()
     val qaActive = BuildConfig.DEBUG &&
         ((LocalContext.current as? Activity)?.intent?.getStringExtra("qa_state") == "active")
-    val qaSettings = BuildConfig.DEBUG &&
-        ((LocalContext.current as? Activity)?.intent?.getStringExtra("qa_page") == "settings")
+    val qaPage = (LocalContext.current as? Activity)?.intent?.getStringExtra("qa_page")
     val qaPlayback = BuildConfig.DEBUG &&
         ((LocalContext.current as? Activity)?.intent?.getStringExtra("qa_playback") == "active")
     var qaTargetId by remember { mutableStateOf("demo:1") }
@@ -91,21 +94,110 @@ internal fun LinkPhoneScreen(
     val selectedSendable = selectedTarget?.acceptsMessages == true
     var composer by remember { mutableStateOf(ComposerDraft()) }
     var speakReplies by remember { mutableStateOf(coordinator.speaksReplies()) }
-    var showingSettings by rememberSaveable { mutableStateOf(qaSettings) }
+    var route by rememberSaveable {
+        mutableStateOf(
+            when {
+                BuildConfig.DEBUG && qaPage == "dev-host" -> LinkSurfaceRoute.DEV_HOST
+                BuildConfig.DEBUG && qaPage == "settings" -> LinkSurfaceRoute.SETTINGS
+                else -> LinkSurfaceRoute.HOME
+            },
+        )
+    }
     LaunchedEffect(coordinator) {
         coordinator.acceptedDrafts.collect { accepted ->
             composer = composer.accepted(accepted.turnId, accepted.draft)
         }
     }
-    BackHandler(showingSettings) { showingSettings = false }
+    val selectedTargetAction: (String) -> Unit = if (qaActive) {
+        { qaTargetId = it }
+    } else {
+        coordinator::selectTarget
+    }
+    val recordedLevel: () -> Float = if (qaActive) {
+        {
+            val phase = System.currentTimeMillis() / 85.0
+            (0.16 + 0.78 * kotlin.math.abs(sin(phase))).toFloat()
+        }
+    } else {
+        recorder::currentLevel
+    }
+    val beginCapture: () -> Boolean = {
+        if (qaActive) {
+            qaCaptureStartedAtMs = System.currentTimeMillis()
+            qaCapture = CapturePhase.LISTENING
+            true
+        } else {
+            val capture = recorder.begin()
+            if (capture == null) {
+                coordinator.capture(CapturePhase.FAILED)
+                false
+            } else {
+                coordinator.capture(CapturePhase.LISTENING, capture.startedAtMs)
+                true
+            }
+        }
+    }
+    val releaseCapture: () -> Unit = {
+        if (qaActive) {
+            qaCapture = CapturePhase.IDLE
+        } else {
+            coordinator.capture(CapturePhase.FINALIZING)
+            val capture = recorder.release()
+            if (capture == null || !coordinator.submitAudio(capture)) {
+                coordinator.capture(CapturePhase.FAILED)
+            }
+        }
+    }
+    val cancelCapture: () -> Unit = {
+        if (qaActive) {
+            qaCapture = CapturePhase.FAILED
+        } else {
+            recorder.cancel()
+            coordinator.capture(CapturePhase.FAILED)
+        }
+    }
+    BackHandler(route != LinkSurfaceRoute.HOME) {
+        route = if (route == LinkSurfaceRoute.DEV_HOST) {
+            LinkSurfaceRoute.SETTINGS
+        } else {
+            LinkSurfaceRoute.HOME
+        }
+    }
     RingActionCueHost {
-        CircleResponsiveSurface {
-            if (showingSettings) {
+        when {
+            route == LinkSurfaceRoute.DEV_HOST -> LinkDevHostScreen(
+                port = hostPreview,
+                onBack = { route = LinkSurfaceRoute.SETTINGS },
+            )
+            LocalCircleSurfaceLayout.current.surfaceClass == CircleSurfaceClass.ROUND -> {
+                val latestTurnId = presentedState.turns.lastOrNull()?.turnId
+                LinkWatchSurface(
+                    state = presentedState,
+                    showingSettings = route == LinkSurfaceRoute.SETTINGS,
+                    onSettings = { route = LinkSurfaceRoute.SETTINGS },
+                    onBack = { route = LinkSurfaceRoute.HOME },
+                    microphoneGranted = microphoneGranted || qaActive,
+                    onRequestMicrophone = onRequestMicrophone,
+                    onSelectTarget = selectedTargetAction,
+                    onBeginCapture = beginCapture,
+                    onReleaseCapture = releaseCapture,
+                    onCancelCapture = cancelCapture,
+                    recordedBytes = recorder::currentBytes,
+                    recordedLevel = recordedLevel,
+                    onPlay = { latestTurnId?.let(coordinator::playReply) },
+                    onStop = coordinator::stopAudio,
+                    onReplay = { latestTurnId?.let(coordinator::playReply) },
+                    onCheckUpdate = updater::retry,
+                    onInstallUpdate = updater::install,
+                    onOpenDevHost = { route = LinkSurfaceRoute.DEV_HOST },
+                )
+            }
+            route == LinkSurfaceRoute.SETTINGS -> {
                 LinkPhoneSettings(
                     state = presentedState,
                     speakReplies = speakReplies,
                     publicLoggedIn = coordinator.publicLoggedIn(),
-                    onBack = { showingSettings = false },
+                    onBack = { route = LinkSurfaceRoute.HOME },
                     onHandsFree = coordinator::setHandsFree,
                     onSpeakReplies = {
                         speakReplies = it
@@ -115,22 +207,20 @@ internal fun LinkPhoneScreen(
                         if (coordinator.publicLoggedIn()) coordinator.logoutPublic()
                         else coordinator.beginPublicLogin()
                     },
+                    onOpenDevHost = { route = LinkSurfaceRoute.DEV_HOST },
                     updater = updater,
                     onPause = coordinator::pauseAudio,
                     onResume = coordinator::resumeAudio,
                     onStop = coordinator::stopAudio,
                 )
-            } else {
+            }
+            else -> {
                 LinkPhoneHome(
                     state = presentedState,
                     composer = composer,
                     selectedSendable = selectedSendable,
-                    onSettings = { showingSettings = true },
-                    onSelectTarget = if (qaActive) {
-                        { qaTargetId = it }
-                    } else {
-                        coordinator::selectTarget
-                    },
+                    onSettings = { route = LinkSurfaceRoute.SETTINGS },
+                    onSelectTarget = selectedTargetAction,
                     onComposerChanged = { composer = composer.edited(it) },
                     onSubmitText = {
                         if (qaActive) {
@@ -159,49 +249,10 @@ internal fun LinkPhoneScreen(
                                 byteLimit = coordinator.selectedVoiceByteLimit(),
                             ),
                             recordedBytes = recorder::currentBytes,
-                            recordedLevel = if (qaActive) {
-                                {
-                                    val phase = System.currentTimeMillis() / 85.0
-                                    (0.16 + 0.78 * kotlin.math.abs(sin(phase))).toFloat()
-                                }
-                            } else {
-                                recorder::currentLevel
-                            },
-                            onBegin = {
-                                if (qaActive) {
-                                    qaCaptureStartedAtMs = System.currentTimeMillis()
-                                    qaCapture = CapturePhase.LISTENING
-                                    true
-                                } else {
-                                    val capture = recorder.begin()
-                                    if (capture == null) {
-                                        coordinator.capture(CapturePhase.FAILED)
-                                        false
-                                    } else {
-                                        coordinator.capture(CapturePhase.LISTENING, capture.startedAtMs)
-                                        true
-                                    }
-                                }
-                            },
-                            onRelease = {
-                                if (qaActive) {
-                                    qaCapture = CapturePhase.IDLE
-                                } else {
-                                    coordinator.capture(CapturePhase.FINALIZING)
-                                    val capture = recorder.release()
-                                    if (capture == null || !coordinator.submitAudio(capture)) {
-                                        coordinator.capture(CapturePhase.FAILED)
-                                    }
-                                }
-                            },
-                            onCancel = {
-                                if (qaActive) {
-                                    qaCapture = CapturePhase.FAILED
-                                } else {
-                                    recorder.cancel()
-                                    coordinator.capture(CapturePhase.FAILED)
-                                }
-                            },
+                            recordedLevel = recordedLevel,
+                            onBegin = beginCapture,
+                            onRelease = releaseCapture,
+                            onCancel = cancelCapture,
                             onRecover = onRequestMicrophone,
                         )
                     },
@@ -210,6 +261,8 @@ internal fun LinkPhoneScreen(
         }
     }
 }
+
+private enum class LinkSurfaceRoute { HOME, SETTINGS, DEV_HOST }
 
 @Composable
 private fun LinkPhoneHome(
@@ -441,30 +494,3 @@ internal fun UpdateRow(state: LinkState, updater: LinkUpdater) {
         PhoneRow("WHAT'S NEW", update.changelog.uppercase(), RingIcons.Activity)
     }
 }
-
-@Composable
-internal fun PhoneRow(
-    title: String,
-    sub: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onTap: (() -> Unit)? = null,
-    immediate: Boolean = false,
-    progress: CircleLabelProgress? = null,
-) {
-    RingRow(
-        title = title,
-        sub = sub,
-        icon = icon,
-        onTap = onTap,
-        labelProgress = progress,
-        actionTiming = if (immediate) {
-            CircleActionTiming.IMMEDIATE
-        } else {
-            CircleActionTiming.DELIBERATE
-        },
-        modifier = phoneRowModifier(),
-    )
-}
-
-internal fun phoneRowModifier(): Modifier =
-    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)

@@ -9,9 +9,13 @@ import androidx.lifecycle.lifecycleScope
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.toArgb
+import com.adelost.designkit.ui.CircleHostSurface
 import com.adelost.designkit.ui.GraphiteTokens
+import com.adelost.designkit.ui.requestedOrientationFor
 import io.agentmux.audioinbox.update.LinkReleaseCatalogs
 import io.agentmux.audioinbox.update.LinkUpdater
 import io.agentmux.linkcore.CapturePhase
@@ -25,6 +29,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var coordinator: LinkCoordinator
     private lateinit var recorder: PushToTalkRecorder
     private lateinit var updater: LinkUpdater
+    private lateinit var host: LinkHostController
     private val microphoneGranted = mutableStateOf(false)
     private val microphonePermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -35,6 +40,15 @@ class MainActivity : ComponentActivity() {
         window.statusBarColor = GraphiteTokens.Canvas.toArgb()
         window.navigationBarColor = GraphiteTokens.Canvas.toArgb()
         coordinator = LinkCoordinator(this)
+        host = LinkHostController(this) { requestedOrientation = requestedOrientationFor(it) }
+        if (BuildConfig.DEBUG) {
+            host.applyQa(
+                mode = intent?.getStringExtra("qa_host"),
+                diameter = intent?.getStringExtra("qa_watch_diameter"),
+                orientation = intent?.getStringExtra("qa_orientation"),
+            )
+        }
+        host.restoreOrientation()
         microphoneGranted.value = hasMicrophonePermission()
         coordinator.handlePublicAuth(intent?.data)
         recorder = PushToTalkRecorder(this)
@@ -48,13 +62,21 @@ class MainActivity : ComponentActivity() {
             coordinator.applyUpdatePresentation(LinkAction.Update(presentation))
         }
         setContent {
-            LinkPhoneScreen(
-                coordinator = coordinator,
-                recorder = recorder,
-                updater = updater,
-                microphoneGranted = microphoneGranted.value,
-                onRequestMicrophone = ::requestMicrophone,
-            )
+            val preview by host.state.collectAsState()
+            CircleHostSurface(
+                isWatchDevice = false,
+                state = preview,
+                onStateChange = host::update,
+            ) {
+                LinkPhoneScreen(
+                    coordinator = coordinator,
+                    recorder = recorder,
+                    updater = updater,
+                    hostPreview = host.port,
+                    microphoneGranted = microphoneGranted.value,
+                    onRequestMicrophone = ::requestMicrophone,
+                )
+            }
         }
         requestRuntimePermissions()
         updater.start()
@@ -78,6 +100,13 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         coordinator.handlePublicAuth(intent.data)
+        if (BuildConfig.DEBUG && ::host.isInitialized) {
+            host.applyQa(
+                mode = intent.getStringExtra("qa_host"),
+                diameter = intent.getStringExtra("qa_watch_diameter"),
+                orientation = intent.getStringExtra("qa_orientation"),
+            )
+        }
     }
 
     override fun onDestroy() {

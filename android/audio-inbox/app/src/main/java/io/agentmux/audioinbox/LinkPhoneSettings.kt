@@ -30,6 +30,7 @@ internal fun LinkPhoneSettings(
     onHandsFree: (Boolean) -> Unit,
     onSpeakReplies: (Boolean) -> Unit,
     onPublicLink: () -> Unit,
+    onOpenDevHost: () -> Unit,
     updater: LinkUpdater,
     onPause: () -> Unit,
     onResume: () -> Unit,
@@ -106,6 +107,14 @@ internal fun LinkPhoneSettings(
                 title = "LOCAL HISTORY",
                 sub = "${state.turns.size} / ${LinkHistoryPolicy.MAX_LOCAL_TURNS} TURNS · OLDEST DROPS FIRST",
                 icon = RingIcons.Activity,
+            )
+        }
+        item("dev-host") {
+            PhoneRow(
+                title = "DEV HOST",
+                sub = "RESPONSIVE · WATCH EXACT",
+                icon = RingIcons.Phone,
+                onTap = onOpenDevHost,
             )
         }
         item("update") { UpdateRow(state, updater) }

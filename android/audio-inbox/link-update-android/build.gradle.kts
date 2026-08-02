@@ -3,6 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val circleKitVersion = providers.gradleProperty("circlekitVersion").get()
+
 android {
     namespace = "io.agentmux.audioinbox.update"
     compileSdk = 35
@@ -27,7 +29,7 @@ android {
 
 dependencies {
     implementation(project(":link-core"))
-    implementation("io.v1d.circlekit:releasekit:0.3.11")
+    implementation("io.v1d.circlekit:releasekit:$circleKitVersion")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.json:json:20240303")
     testImplementation("junit:junit:4.13.2")
