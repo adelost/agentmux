@@ -9,6 +9,7 @@ import androidx.compose.ui.unit.dp
 import com.adelost.designkit.ui.CircleActionTiming
 import com.adelost.designkit.ui.CircleLabelProgress
 import com.adelost.ringkit.ui.RingRow
+import com.adelost.ringkit.ui.RowSpec
 
 /** Link-specific copy projected through the one shared CircleKit phone row. */
 @Composable
@@ -27,6 +28,25 @@ internal fun PhoneRow(
         onTap = onTap,
         labelProgress = progress,
         actionTiming = if (immediate) CircleActionTiming.IMMEDIATE else CircleActionTiming.DELIBERATE,
+        modifier = phoneRowModifier(),
+    )
+}
+
+/** Phone layout adapter for canonical data-driven CircleKit rows. */
+@Composable
+internal fun PhoneRow(row: RowSpec) {
+    RingRow(
+        title = row.title,
+        sub = row.sub,
+        icon = row.icon,
+        accent = row.accent,
+        semanticColor = row.semanticColor,
+        onTap = row.onTap,
+        labelProgress = row.labelProgress,
+        holdToConfirm = row.holdToConfirm,
+        holdMs = row.holdMs,
+        actionTiming = row.actionTiming,
+        hint = row.hint,
         modifier = phoneRowModifier(),
     )
 }

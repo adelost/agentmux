@@ -12,6 +12,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
@@ -55,13 +56,13 @@ class WearMainActivity : ComponentActivity() {
             catalog = LinkReleaseCatalogs.WEAR,
             currentVersionName = BuildConfig.VERSION_NAME,
             currentVersionCode = BuildConfig.VERSION_CODE,
-            listener = controller::applyUpdate,
         )
         registerSessionReceiver()
         requestMicrophone()
         controller.start()
         setContent {
             val liveState by controller.state.collectAsState()
+            val updateState by updater.state.collectAsStateWithLifecycle()
             val state = if (
                 BuildConfig.DEBUG &&
                 intent.getStringExtra(QA_STATE_EXTRA) == QA_STATE_ACTIVE
@@ -78,6 +79,8 @@ class WearMainActivity : ComponentActivity() {
                 ) {
                     LinkWatchScreen(
                         state = state,
+                        updateState = updateState,
+                        currentVersionName = updater.currentVersionName,
                         microphoneGranted = microphoneGranted.value,
                         onRequestMicrophone = ::requestMicrophone,
                         onSelectTarget = controller::selectTarget,

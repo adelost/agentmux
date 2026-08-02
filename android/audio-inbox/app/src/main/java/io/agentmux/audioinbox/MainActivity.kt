@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,7 +20,6 @@ import com.adelost.designkit.ui.requestedOrientationFor
 import io.agentmux.audioinbox.update.LinkReleaseCatalogs
 import io.agentmux.audioinbox.update.LinkUpdater
 import io.agentmux.linkcore.CapturePhase
-import io.agentmux.linkcore.LinkAction
 
 /**
  * WHAT: Builds the phone Compose surface and its lifecycle-owned controllers.
@@ -58,11 +58,10 @@ class MainActivity : ComponentActivity() {
             catalog = LinkReleaseCatalogs.PHONE,
             currentVersionName = BuildConfig.VERSION_NAME,
             currentVersionCode = BuildConfig.VERSION_CODE,
-        ) { presentation ->
-            coordinator.applyUpdatePresentation(LinkAction.Update(presentation))
-        }
+        )
         setContent {
             val preview by host.state.collectAsState()
+            val updateState by updater.state.collectAsStateWithLifecycle()
             CircleHostSurface(
                 isWatchDevice = false,
                 state = preview,
@@ -72,6 +71,7 @@ class MainActivity : ComponentActivity() {
                     coordinator = coordinator,
                     recorder = recorder,
                     updater = updater,
+                    updateState = updateState,
                     hostPreview = host.port,
                     microphoneGranted = microphoneGranted.value,
                     onRequestMicrophone = ::requestMicrophone,

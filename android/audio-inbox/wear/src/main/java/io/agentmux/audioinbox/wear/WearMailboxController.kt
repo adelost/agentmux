@@ -13,7 +13,6 @@ import io.agentmux.linkcore.LinkStateLedger
 import io.agentmux.linkcore.LinkTarget
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
-import io.agentmux.linkcore.UpdatePresentation
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -100,9 +99,6 @@ internal class WearMailboxController(
     }
 
     fun selectTarget(id: String) = dispatch(LinkAction.SelectTarget(id))
-
-    fun applyUpdate(presentation: UpdatePresentation) =
-        dispatch(LinkAction.Update(presentation))
 
     fun beginCapture(): Boolean {
         val selected = selectedTarget() ?: return false

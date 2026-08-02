@@ -29,7 +29,6 @@ sealed interface LinkAction {
     data class ReplyFailed(val turnId: String, val reason: String) : LinkAction
     data class PlaybackFailed(val turnId: String, val reason: String) : LinkAction
     data class HandsFree(val enabled: Boolean) : LinkAction
-    data class Update(val value: UpdatePresentation) : LinkAction
     data object ResetSession : LinkAction
 }
 
@@ -105,8 +104,7 @@ object LinkReducer {
             it.copy(playbackPhase = PlaybackPhase.FAILED, playbackError = action.reason)
         }
         is LinkAction.HandsFree -> state.copy(handsFree = action.enabled)
-        is LinkAction.Update -> state.copy(update = action.value)
-        LinkAction.ResetSession -> LinkState(update = state.update)
+        LinkAction.ResetSession -> LinkState()
     }
 
     private fun LinkState.mapTurn(
