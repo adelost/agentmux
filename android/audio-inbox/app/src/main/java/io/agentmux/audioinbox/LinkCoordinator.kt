@@ -286,10 +286,6 @@ internal class LinkCoordinator(
     fun resumeAudio() = audioActions.resume()
     fun stopAudio() = audioActions.stop()
 
-    fun applyUpdatePresentation(action: LinkAction.Update) {
-        dispatch(action)
-    }
-
     private fun discoverTargets() {
         val savedServer = preferences.getString(AppContract.KEY_SERVER, "").orEmpty()
         val savedTarget = preferences.getString(AppContract.KEY_TARGET, "").orEmpty()

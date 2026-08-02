@@ -7,7 +7,6 @@ import io.agentmux.linkcore.LinkTarget
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.ReplyPhase
-import io.agentmux.linkcore.UpdatePresentation
 
 internal fun targetChoices(targets: List<LinkTarget>): List<Pair<String, String>> {
     val baseLabels = targets.associateWith { it.label.ifBlank { it.id }.uppercase() }
@@ -67,9 +66,4 @@ internal fun phoneActivePreviewState(playbackActive: Boolean): LinkState = LinkS
         ),
     ),
     activePlaybackTurnId = "qa-turn".takeIf { playbackActive },
-    update = UpdatePresentation(
-        currentVersion = "1.0.0",
-        state = "up-to-date",
-        detail = "UP TO DATE",
-    ),
 )

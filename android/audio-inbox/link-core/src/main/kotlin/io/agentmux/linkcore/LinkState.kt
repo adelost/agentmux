@@ -115,20 +115,4 @@ data class LinkState(
     val activePlaybackTurnId: String? = null,
     val handsFree: Boolean = false,
     val recoveryError: String = "",
-    val update: UpdatePresentation = UpdatePresentation(),
-)
-
-/**
- * WHAT: Tracks signed-update progress and actionable installer state.
- * WHY: Keeps updater security machinery out of presentation code.
- */
-data class UpdatePresentation(
-    val currentVersion: String = "",
-    val availableVersion: String = "",
-    val state: String = "idle",
-    val detail: String = "",
-    val changelog: String = "",
-    val progress: Float = 0f,
-    val canInstall: Boolean = false,
-    val canRetry: Boolean = false,
 )

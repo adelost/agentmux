@@ -36,9 +36,9 @@ for module in app wear; do
     echo "Link update regression: $module bypasses the shared Link/CircleKit adapter" >&2
     exit 1
   fi
-  if rg -n 'io\.v1d\.circlekit:releasekit:|com\.adelost\.releasekit' \
+  if rg -n 'io\.v1d\.circlekit:releasekit:|com\.adelost\.releasekit\.(UpdateController|ReleaseSource|ReleaseProductContract)' \
     "$root/$module/build.gradle.kts" "$root/$module/src/main"; then
-    echo "Link update regression: $module owns CircleKit ReleaseKit wiring directly" >&2
+    echo "Link update regression: $module owns ReleaseKit engine wiring directly" >&2
     exit 1
   fi
 done
@@ -85,6 +85,7 @@ required_circlekit_coordinates=(
   "wear:ringkit"
   "link-ui:designkit"
   "link-ui:ringkit"
+  "link-ui:releasekit-ui"
   "link-update-android:releasekit"
 )
 for declaration in "${required_circlekit_coordinates[@]}"; do
@@ -95,6 +96,16 @@ for declaration in "${required_circlekit_coordinates[@]}"; do
     exit 1
   fi
 done
+
+if rg -n 'UpdatePresentation|toLabelProgress\(' "$root/link-core/src" "$shared" "$main"; then
+  echo "Link update regression: a product-local update projection returned" >&2
+  exit 1
+fi
+if ! rg -q 'releaseUpdateRows\(' "$shared/LinkWatchScreen.kt" ||
+   ! rg -q 'releaseUpdateRows\(' "$main/LinkPhoneSettings.kt"; then
+  echo "Link update regression: Phone and Watch no longer share releasekit-ui rows" >&2
+  exit 1
+fi
 circlekit_version="$(sed -n 's/^circlekitVersion=//p' "$root/gradle.properties")"
 if [[ ! "$circlekit_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "Link CircleKit regression: gradle.properties has no valid shared version" >&2

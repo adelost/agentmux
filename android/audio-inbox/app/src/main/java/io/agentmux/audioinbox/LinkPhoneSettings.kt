@@ -11,6 +11,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.designkit.ui.CircleChoiceRole
+import com.adelost.releasekit.UpdateState
+import com.adelost.releasekit.ui.releaseUpdateRows
+import com.adelost.releasekit.updateTargetChangelog
 import com.adelost.ringkit.ui.PhoneScreenHeader
 import com.adelost.ringkit.ui.RingChoiceRow
 import io.agentmux.linkcore.ConnectionState
@@ -24,6 +27,8 @@ import io.agentmux.linkcore.LinkState
 @Composable
 internal fun LinkPhoneSettings(
     state: LinkState,
+    updateState: UpdateState,
+    currentVersionName: String,
     speakReplies: Boolean,
     publicLoggedIn: Boolean,
     onBack: () -> Unit,
@@ -36,6 +41,13 @@ internal fun LinkPhoneSettings(
     onResume: () -> Unit,
     onStop: () -> Unit,
 ) {
+    val updateRows = releaseUpdateRows(
+        state = updateState,
+        currentVersionName = currentVersionName,
+        onCheck = updater::retry,
+        onInstall = updater::install,
+    )
+    val updateChangelog = updateTargetChangelog(updateState)
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 28.dp),
@@ -117,7 +129,14 @@ internal fun LinkPhoneSettings(
                 onTap = onOpenDevHost,
             )
         }
-        item("update") { UpdateRow(state, updater) }
+        updateRows.forEach { row ->
+            item(row.key) { PhoneRow(row) }
+        }
+        if (updateChangelog.isNotBlank()) {
+            item("update-changelog") {
+                PhoneRow("WHAT'S NEW", updateChangelog.uppercase(), RingIcons.Activity)
+            }
+        }
         if (state.recoveryError.isNotBlank()) {
             item("recovery") {
                 PhoneRow("RECOVERY", state.recoveryError.uppercase(), RingIcons.Warning)

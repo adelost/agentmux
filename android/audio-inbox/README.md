@@ -70,8 +70,9 @@ Public Link uses the `/auth/*` and `/api/link/*` routes on `link.v1d.io`.
   pairing UI; Wear then discovers live targets, records push-to-talk, polls
   replies and plays them with the watch TTS engine. A per-device session can
   replace that handoff later without changing the mailbox transport.
-- CircleKit `designkit`, `ringkit`, `releasekit` and `servicekit`: shared
-  Phone/Wear atoms, release workflow and service presentation.
+- CircleKit `designkit`, `ringkit`, `releasekit`, `releasekit-ui` and
+  `servicekit`: shared Phone/Wear atoms, release workflow, canonical update
+  rows and service presentation.
 
 `scripts/check-circlekit-ui.sh` is a focused manual guard: it rejects retired
 local renderers and Material3 dependencies beside CircleKit. It is not wired
@@ -84,6 +85,11 @@ Phone and Wear updates come from separate detached Ed25519 manifests under
 owns download, digest/APK identity verification, ready-state recovery and
 installer handoff. Link owns one signed manifest parser and two channel data
 records; neither host owns a private updater.
+
+The signed manifest's `createdAt` is emitted by the release publisher
+immediately before immutable-first publication. Link preserves that absolute
+UTC epoch through ReleaseKit; `releasekit-ui` localizes it at the device UI
+boundary and omits `PUBLISHED` when a source provides no publication time.
 
 Release signing inputs are local operator configuration, never repository
 paths:

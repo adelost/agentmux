@@ -131,4 +131,7 @@ internal fun ReleaseCandidate.toSharedCandidate(): SharedReleaseCandidate = Shar
     versionCode = versionCode(),
     validUntilEpochMs = expiresAtMs(),
     changelog = changelog(),
+    // The publisher creates this signed UTC instant immediately before its
+    // immutable-first upload and makes this exact manifest public last.
+    publishedAtEpochMillis = createdAtMs(),
 )

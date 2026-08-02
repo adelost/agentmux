@@ -24,6 +24,7 @@ dependencies {
     api(project(":link-core"))
     implementation("io.v1d.circlekit:designkit:$circleKitVersion")
     implementation("io.v1d.circlekit:ringkit:$circleKitVersion")
+    api("io.v1d.circlekit:releasekit-ui:$circleKitVersion")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.foundation:foundation")

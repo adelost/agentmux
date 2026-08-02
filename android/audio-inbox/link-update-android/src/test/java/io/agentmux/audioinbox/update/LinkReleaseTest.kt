@@ -41,6 +41,7 @@ class LinkReleaseTest {
         assertEquals(4_096L, shared.sizeBytes)
         assertEquals("a".repeat(64), shared.sha256)
         assertEquals("fixed the thing", shared.changelog)
+        assertEquals(1_000_000L, shared.publishedAtEpochMillis)
         // expiresAt has to survive the mapping: it is what UpdateController
         // re-checks before installer handoff, long after this call.
         assertEquals(2_000_000L, shared.validUntilEpochMs)

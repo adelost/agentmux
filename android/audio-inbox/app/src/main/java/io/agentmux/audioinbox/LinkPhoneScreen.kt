@@ -31,7 +31,6 @@ import com.adelost.designkit.ui.RingIcons
 import com.adelost.designkit.ui.CircleActionTiming
 import com.adelost.designkit.ui.CircleChoiceRole
 import com.adelost.designkit.ui.CircleIconDisc
-import com.adelost.designkit.ui.CircleLabelProgress
 import com.adelost.designkit.ui.CircleSurfaceClass
 import com.adelost.designkit.ui.LocalCircleSurfaceLayout
 import com.adelost.designkit.ui.phoneSurfaceDesign
@@ -46,6 +45,7 @@ import com.adelost.ringkit.ui.RingRow
 import com.adelost.ringkit.ui.RingTextComposer
 import com.adelost.ringkit.ui.RingTextInputSpec
 import com.adelost.ringkit.ui.RingActionCueHost
+import com.adelost.releasekit.UpdateState
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTurn
@@ -55,6 +55,7 @@ import io.agentmux.linkui.LinkCaptureControl
 import io.agentmux.linkui.LinkCaptureSpec
 import io.agentmux.linkui.LinkWatchSurface
 import io.agentmux.linkui.resolveLinkCaptureAvailability
+import java.time.Instant
 import kotlin.math.sin
 
 /**
@@ -66,6 +67,7 @@ internal fun LinkPhoneScreen(
     coordinator: LinkCoordinator,
     recorder: PushToTalkRecorder,
     updater: LinkUpdater,
+    updateState: UpdateState,
     hostPreview: CircleHostPreviewPort,
     microphoneGranted: Boolean,
     onRequestMicrophone: () -> Unit,
@@ -87,6 +89,16 @@ internal fun LinkPhoneScreen(
         )
     } else {
         state
+    }
+    val presentedUpdateState = if (qaActive && qaPage == "settings") {
+        UpdateState.Available(
+            versionName = "1.2.2",
+            sizeBytes = 6_400_000L,
+            changelog = "Shared update information across Phone and Wear.",
+            publishedAtEpochMillis = Instant.parse("2026-08-02T05:33:20Z").toEpochMilli(),
+        )
+    } else {
+        updateState
     }
     val selectedTarget = presentedState.targets.firstOrNull {
         it.id == presentedState.selectedTargetId
@@ -173,6 +185,8 @@ internal fun LinkPhoneScreen(
                 val latestTurnId = presentedState.turns.lastOrNull()?.turnId
                 LinkWatchSurface(
                     state = presentedState,
+                    updateState = presentedUpdateState,
+                    currentVersionName = updater.currentVersionName,
                     showingSettings = route == LinkSurfaceRoute.SETTINGS,
                     onSettings = { route = LinkSurfaceRoute.SETTINGS },
                     onBack = { route = LinkSurfaceRoute.HOME },
@@ -195,6 +209,8 @@ internal fun LinkPhoneScreen(
             route == LinkSurfaceRoute.SETTINGS -> {
                 LinkPhoneSettings(
                     state = presentedState,
+                    updateState = presentedUpdateState,
+                    currentVersionName = updater.currentVersionName,
                     speakReplies = speakReplies,
                     publicLoggedIn = coordinator.publicLoggedIn(),
                     onBack = { route = LinkSurfaceRoute.HOME },
@@ -468,29 +484,4 @@ internal fun LinkPlaybackControls(
             onStop = onStop,
         ),
     )
-}
-
-@Composable
-internal fun UpdateRow(state: LinkState, updater: LinkUpdater) {
-    val update = state.update
-    PhoneRow(
-        title = "UPDATES",
-        sub = update.detail.ifBlank {
-            "CURRENT ${update.currentVersion.ifBlank { "UNKNOWN" }}"
-        }.uppercase(),
-        icon = RingIcons.Download,
-        onTap = when {
-            update.canInstall -> updater::install
-            update.canRetry -> updater::retry
-            else -> null
-        },
-        progress = when (update.state) {
-            "downloading" -> CircleLabelProgress.Determinate(update.progress.coerceIn(0f, 1f))
-            "checking", "installing" -> CircleLabelProgress.Indeterminate
-            else -> null
-        },
-    )
-    if (update.changelog.isNotBlank()) {
-        PhoneRow("WHAT'S NEW", update.changelog.uppercase(), RingIcons.Activity)
-    }
 }

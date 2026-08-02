@@ -1,13 +1,13 @@
 package io.agentmux.audioinbox.wear
 
 import com.adelost.designkit.ui.CircleLabelProgress
+import com.adelost.releasekit.UpdateState
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTarget
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
-import io.agentmux.linkcore.UpdatePresentation
 import io.agentmux.linkui.linkWatchRows
 import io.agentmux.linkui.linkWatchSettingsRows
 import org.junit.Assert.assertEquals
@@ -16,6 +16,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
+import java.time.ZoneId
+import java.util.Locale
 
 class WearLinkScreenTest {
     @Test
@@ -35,7 +38,10 @@ class WearLinkScreenTest {
         assertTrue(rows[0].choices.isEmpty())
         assertNull(rows[1].onTap)
         assertFalse(rows[1].holdToConfirm)
-        assertEquals("LOG IN ON PHONE", linkWatchSettingsRows(unavailableState())[0].sub)
+        assertEquals(
+            "LOG IN ON PHONE",
+            linkWatchSettingsRows(unavailableState(), UpdateState.UpToDate, "1.2.1")[0].sub,
+        )
     }
 
     @Test
@@ -162,16 +168,11 @@ class WearLinkScreenTest {
     @Test
     fun updateRowUsesSharedProgressAndActionTruth() {
         var installed = false
-        val downloading = LinkState(
-            update = UpdatePresentation(
-                currentVersion = "0.1.0 (1)",
-                availableVersion = "0.1.1",
-                state = "downloading",
-                detail = "DOWNLOADING… 40%",
-                progress = 0.4f,
-            ),
+        val downloading = UpdateState.Downloading(
+            versionName = "0.1.1",
+            progress = 0.4f,
         )
-        val downloadingRow = linkWatchSettingsRows(downloading)[1]
+        val downloadingRow = linkWatchSettingsRows(LinkState(), downloading, "0.1.0")[1]
         assertEquals("UPDATE", downloadingRow.title)
         assertEquals("DOWNLOADING… 40%", downloadingRow.sub)
         assertEquals(
@@ -180,16 +181,14 @@ class WearLinkScreenTest {
         )
         assertNull(downloadingRow.onTap)
 
-        val ready = downloading.copy(
-            update = downloading.update.copy(
-                state = "ready-to-install",
-                detail = "v0.1.1 READY · TAP",
-                progress = 1f,
-                canInstall = true,
-            ),
+        val ready = UpdateState.ReadyToInstall(
+            versionName = "0.1.1",
+            apkPath = "/cache/update.apk",
         )
         val readyRow = linkWatchSettingsRows(
-            state = ready,
+            state = LinkState(),
+            updateState = ready,
+            currentVersionName = "0.1.0",
             onInstallUpdate = { installed = true },
         )[1]
         assertNotNull(readyRow.onTap)
@@ -198,12 +197,40 @@ class WearLinkScreenTest {
     }
 
     @Test
+    fun signedPublicationEpochIsLocalizedAtTheSharedUiBoundary() {
+        val publishedAt = Instant.parse("2026-08-02T05:33:20Z").toEpochMilli()
+        val rows = linkWatchSettingsRows(
+            state = LinkState(),
+            updateState = UpdateState.Available(
+                versionName = "1.2.2",
+                sizeBytes = 6_400_000L,
+                publishedAtEpochMillis = publishedAt,
+            ),
+            currentVersionName = "1.2.1",
+            zoneId = ZoneId.of("Europe/Stockholm"),
+            locale = Locale.US,
+        )
+
+        assertEquals(listOf("connection", "update", "update-published"), rows.map { it.key })
+        assertEquals("PUBLISHED", rows.last().title)
+        assertEquals("v1.2.2 · Aug 2, 2026, 7:33 AM", rows.last().sub)
+    }
+
+    @Test
     fun realWearOmitsPhoneHostControlsWhilePhoneWatchExactCanReturnToResponsive() {
         val state = activePreviewState()
 
-        assertFalse(linkWatchSettingsRows(state).any { it.key == "dev-host" })
+        assertFalse(
+            linkWatchSettingsRows(state, UpdateState.UpToDate, "1.2.1")
+                .any { it.key == "dev-host" },
+        )
         assertTrue(
-            linkWatchSettingsRows(state, onOpenDevHost = {}).any {
+            linkWatchSettingsRows(
+                state,
+                UpdateState.UpToDate,
+                "1.2.1",
+                onOpenDevHost = {},
+            ).any {
                 it.key == "dev-host" && it.sub == "RESPONSIVE · WATCH EXACT"
             },
         )

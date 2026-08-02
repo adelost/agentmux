@@ -2,36 +2,23 @@ package io.agentmux.audioinbox.update
 
 import android.content.Context
 import com.adelost.releasekit.UpdateController
-import com.adelost.releasekit.UpdateProgress
-import com.adelost.releasekit.UpdateRowAction
 import com.adelost.releasekit.UpdateState
-import com.adelost.releasekit.updateRowModel
-import com.adelost.releasekit.updateTargetChangelog
-import io.agentmux.linkcore.UpdatePresentation
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Link's update surface, on the shared engine.
+ * Link's product adapter onto CircleKit's shared update engine.
  *
- * Everything that used to live here — the download loop, the hash check, the
- * APK identity check, the installer handoff and its receiver, the ready-update
- * persistence — is [UpdateController] now, the same code Skyvw runs. What is
- * still Link's is where releases are announced ([SignedLinkReleaseSource])
- * and which channel it is ([LinkReleaseCatalogs]).
- *
- * The wording comes from CircleKit's shared projection rather than a second
- * private list of sentences, so a state added to [UpdateState] is described
- * once for both products instead of in whichever app noticed.
+ * CircleKit owns download, verification, recovery, installation and the
+ * canonical UI projection. Link supplies only its signed release source and
+ * channel contract; every host observes the native [UpdateState] unchanged.
  */
 class LinkUpdater(
     context: Context,
     scope: CoroutineScope,
     catalog: LinkReleaseCatalog,
-    currentVersionName: String,
+    val currentVersionName: String,
     currentVersionCode: Int,
-    private val listener: (UpdatePresentation) -> Unit,
 ) {
     private val controller = UpdateController(
         context = context,
@@ -42,11 +29,8 @@ class LinkUpdater(
         releaseSource = SignedLinkReleaseSource(catalog),
     )
 
-    init {
-        scope.launch {
-            controller.state.collectLatest { listener(it.toPresentation()) }
-        }
-    }
+    /** The one update truth observed by Phone, Wear and Phone WatchExact. */
+    val state: StateFlow<UpdateState> = controller.state
 
     fun start() = controller.checkNow()
 
@@ -55,49 +39,8 @@ class LinkUpdater(
     fun install() = controller.downloadAndInstall()
 
     /**
-     * The controller observes real installer results, so a failed or dismissed
-     * confirmation already lands in [UpdateState.InstallFailed]. Resuming only
-     * has to re-check what is on disk.
+     * Installer results are observed by [UpdateController]. Resuming only
+     * re-checks the signed source and any verified artifact already on disk.
      */
     fun resumeInstallerStatus() = controller.checkNow()
-
-    private fun UpdateState.toPresentation(): UpdatePresentation {
-        val row = updateRowModel(this, controller.currentVersionName)
-        return UpdatePresentation(
-            currentVersion = "${controller.currentVersionName} (${controller.currentVersionCode})",
-            availableVersion = availableVersionName(),
-            state = wireState(),
-            detail = row.sub,
-            changelog = updateTargetChangelog(this),
-            progress = when (val progress = row.progress) {
-                is UpdateProgress.Determinate -> progress.fraction
-                UpdateProgress.Indeterminate -> 0f
-                null -> if (this is UpdateState.ReadyToInstall) 1f else 0f
-            },
-            canInstall = row.action == UpdateRowAction.INSTALL,
-            canRetry = row.action == UpdateRowAction.CHECK,
-        )
-    }
-
-    private fun UpdateState.availableVersionName(): String = when (this) {
-        is UpdateState.Available -> versionName
-        is UpdateState.Downloading -> versionName
-        is UpdateState.ReadyToInstall -> versionName
-        is UpdateState.Installing -> versionName
-        is UpdateState.InstallFailed -> versionName
-        else -> ""
-    }
-
-    /** The vocabulary LinkPhoneScreen and the Wear surface already switch on. */
-    private fun UpdateState.wireState(): String = when (this) {
-        UpdateState.Checking -> "checking"
-        is UpdateState.Available -> "available"
-        is UpdateState.Downloading -> "downloading"
-        is UpdateState.ReadyToInstall -> "ready-to-install"
-        is UpdateState.Installing -> "installing"
-        is UpdateState.InstallFailed -> "failed"
-        is UpdateState.Failed -> "failed"
-        UpdateState.UpToDate -> "up-to-date"
-        else -> "idle"
-    }
 }

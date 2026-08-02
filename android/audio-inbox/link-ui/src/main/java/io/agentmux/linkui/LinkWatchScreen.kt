@@ -13,9 +13,10 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import com.adelost.designkit.ui.CircleLabelProgress
 import com.adelost.designkit.ui.GraphiteTokens
 import com.adelost.designkit.ui.RingIcons
+import com.adelost.releasekit.UpdateState
+import com.adelost.releasekit.ui.releaseUpdateRows
 import com.adelost.ringkit.ui.RenderRingScreen
 import com.adelost.ringkit.ui.RingNavigator
 import com.adelost.ringkit.ui.RingScreen
@@ -24,15 +25,18 @@ import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.PlaybackPhase
-import io.agentmux.linkcore.UpdatePresentation
 import io.agentmux.linkcore.linkConnectionLabel
 import io.agentmux.linkcore.linkConnectionRoute
 import io.agentmux.linkcore.linkConnectionSettingsDetail
 import kotlinx.coroutines.flow.MutableStateFlow
+import java.time.ZoneId
+import java.util.Locale
 
 @Composable
 fun LinkWatchScreen(
     state: LinkState,
+    updateState: UpdateState,
+    currentVersionName: String,
     microphoneGranted: Boolean,
     onRequestMicrophone: () -> Unit,
     onSelectTarget: (String) -> Unit,
@@ -52,6 +56,8 @@ fun LinkWatchScreen(
     var showingSettings by rememberSaveable { mutableStateOf(initialShowingSettings) }
     LinkWatchSurface(
         state = state,
+        updateState = updateState,
+        currentVersionName = currentVersionName,
         showingSettings = showingSettings,
         onSettings = { showingSettings = true },
         onBack = { showingSettings = false },
@@ -76,6 +82,8 @@ fun LinkWatchScreen(
 @Composable
 fun LinkWatchSurface(
     state: LinkState,
+    updateState: UpdateState,
+    currentVersionName: String,
     showingSettings: Boolean,
     onSettings: () -> Unit,
     onBack: () -> Unit,
@@ -154,6 +162,8 @@ fun LinkWatchSurface(
     }
     LaunchedEffect(
         state,
+        updateState,
+        currentVersionName,
         onSelectTarget,
         onPlay,
         onStop,
@@ -167,6 +177,8 @@ fun LinkWatchSurface(
         items.value = if (showingSettings) {
             linkWatchSettingsRows(
                 state = state,
+                updateState = updateState,
+                currentVersionName = currentVersionName,
                 onCheckUpdate = onCheckUpdate,
                 onInstallUpdate = onInstallUpdate,
                 onOpenDevHost = onOpenDevHost,
@@ -295,9 +307,13 @@ fun linkWatchRows(
 
 fun linkWatchSettingsRows(
     state: LinkState,
+    updateState: UpdateState,
+    currentVersionName: String,
     onCheckUpdate: () -> Unit = {},
     onInstallUpdate: () -> Unit = {},
     onOpenDevHost: (() -> Unit)? = null,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+    locale: Locale = Locale.getDefault(),
 ): List<RowSpec> = buildList {
     add(
         RowSpec(
@@ -307,20 +323,14 @@ fun linkWatchSettingsRows(
             icon = if (state.connection == ConnectionState.CONNECTED) RingIcons.Wifi else RingIcons.Link,
         ),
     )
-    add(
-        RowSpec(
-            key = "update",
-            title = "UPDATE",
-            sub = state.update.detail.ifBlank {
-                state.update.currentVersion.ifBlank { "CHECKING VERSION…" }
-            }.uppercase(),
-            icon = RingIcons.Download,
-            onTap = when {
-                state.update.canInstall -> onInstallUpdate
-                state.update.canRetry -> onCheckUpdate
-                else -> null
-            },
-            labelProgress = state.update.toLabelProgress(),
+    addAll(
+        releaseUpdateRows(
+            state = updateState,
+            currentVersionName = currentVersionName,
+            onCheck = onCheckUpdate,
+            onInstall = onInstallUpdate,
+            zoneId = zoneId,
+            locale = locale,
         ),
     )
     onOpenDevHost?.let { open ->
@@ -334,12 +344,6 @@ fun linkWatchSettingsRows(
             ),
         )
     }
-}
-
-private fun UpdatePresentation.toLabelProgress(): CircleLabelProgress? = when (state) {
-    "checking", "installing" -> CircleLabelProgress.Indeterminate
-    "downloading" -> CircleLabelProgress.Determinate(progress.coerceIn(0f, 1f))
-    else -> null
 }
 
 private fun settingsRow(onSettings: () -> Unit) = RowSpec(

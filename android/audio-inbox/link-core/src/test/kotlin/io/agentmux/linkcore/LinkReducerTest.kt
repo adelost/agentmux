@@ -7,14 +7,12 @@ import org.junit.Test
 
 class LinkReducerTest {
     @Test
-    fun `session reset clears private conversation state but preserves updater truth`() {
-        val update = UpdatePresentation(currentVersion = "1.2.3")
+    fun `session reset clears private conversation state`() {
         val initial = LinkState(
             targets = listOf(LinkTarget("agent:1", "ONE")),
             selectedTargetId = "agent:1",
             turns = listOf(turn("private-turn", "agent:1")),
             handsFree = true,
-            update = update,
         )
 
         val reset = LinkReducer.reduce(initial, LinkAction.ResetSession)
@@ -22,7 +20,7 @@ class LinkReducerTest {
         assertTrue(reset.targets.isEmpty())
         assertTrue(reset.turns.isEmpty())
         assertEquals("", reset.selectedTargetId)
-        assertEquals(update, reset.update)
+        assertEquals(false, reset.handsFree)
     }
 
     @Test
