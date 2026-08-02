@@ -16,7 +16,7 @@ done
 
 if rg -n \
   'androidx\.compose\.material3|CircularControl|ConversationTimeline|UpdateCard' \
-  "$main/LinkPhoneScreen.kt" "$wear/WearLinkScreen.kt" "$shared/LinkCaptureControl.kt"; then
+  "$main/LinkPhoneScreen.kt" "$shared/LinkWatchScreen.kt" "$shared/LinkCaptureControl.kt"; then
   echo "Link UI regression: a product-local Material renderer bypasses CircleKit" >&2
   exit 1
 fi
@@ -95,14 +95,20 @@ for declaration in "${required_circlekit_coordinates[@]}"; do
     exit 1
   fi
 done
-mapfile -t circlekit_versions < <(
-  rg -I -o 'io\.v1d\.circlekit:[a-z]+:[0-9]+\.[0-9]+\.[0-9]+' "${circlekit_builds[@]}" |
-    awk -F: '{print $3}' |
-    sort -u
-)
-if [[ "${#circlekit_versions[@]}" -ne 1 ]]; then
-  echo "Link CircleKit regression: consumer modules have version skew: ${circlekit_versions[*]:-none}" >&2
+circlekit_version="$(sed -n 's/^circlekitVersion=//p' "$root/gradle.properties")"
+if [[ ! "$circlekit_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Link CircleKit regression: gradle.properties has no valid shared version" >&2
   exit 1
 fi
+if rg -n 'io\.v1d\.circlekit:[a-z]+:[0-9]+\.[0-9]+\.[0-9]+' "${circlekit_builds[@]}"; then
+  echo "Link CircleKit regression: a consumer duplicated the pinned version" >&2
+  exit 1
+fi
+for build in "${circlekit_builds[@]}"; do
+  if ! rg -q 'providers\.gradleProperty\("circlekitVersion"\)' "$build"; then
+    echo "Link CircleKit regression: $build bypasses the shared pin $circlekit_version" >&2
+    exit 1
+  fi
+done
 
 echo "PASS: Link phone and Wear UI/updater remain CircleKit consumers"

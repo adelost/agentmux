@@ -4,6 +4,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val circleKitVersion = providers.gradleProperty("circlekitVersion").get()
+val linkVersionName = providers.gradleProperty("linkVersionName").get()
+
 val linkReleaseStore = providers.gradleProperty("agentmuxLinkReleaseStore")
     .orElse(providers.environmentVariable("AGENTMUX_LINK_RELEASE_STORE"))
     .orNull
@@ -26,8 +29,8 @@ android {
         applicationId = "io.agentmux.audioinbox"
         minSdk = 30
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.1.4"
+        versionCode = 6
+        versionName = linkVersionName
     }
 
     signingConfigs {
@@ -76,7 +79,8 @@ dependencies {
     implementation(project(":link-ui"))
     implementation(project(":link-update-android"))
     implementation("com.google.android.gms:play-services-wearable:20.0.1")
-    implementation("io.v1d.circlekit:ringkit:0.3.11")
+    implementation("io.v1d.circlekit:designkit:$circleKitVersion")
+    implementation("io.v1d.circlekit:ringkit:$circleKitVersion")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.activity:activity-compose:1.10.1")
     // Play Services Wearable still brings Fragment 1.1 transitively; the

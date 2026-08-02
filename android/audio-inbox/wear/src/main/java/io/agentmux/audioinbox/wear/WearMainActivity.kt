@@ -15,6 +15,9 @@ import androidx.lifecycle.lifecycleScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
+import com.adelost.designkit.ui.CircleHostMode
+import com.adelost.designkit.ui.CircleHostPreviewState
+import com.adelost.designkit.ui.CircleHostSurface
 import com.adelost.ringkit.ui.RingActionCueHost
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
@@ -27,6 +30,7 @@ import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.ReplyPhase
 import io.agentmux.audioinbox.update.LinkReleaseCatalogs
 import io.agentmux.audioinbox.update.LinkUpdater
+import io.agentmux.linkui.LinkWatchScreen
 
 class WearMainActivity : ComponentActivity() {
     private lateinit var controller: WearMailboxController
@@ -67,22 +71,30 @@ class WearMainActivity : ComponentActivity() {
                 liveState
             }
             RingActionCueHost {
-                WearLinkScreen(
-                    state = state,
-                    microphoneGranted = microphoneGranted.value,
-                    onRequestMicrophone = ::requestMicrophone,
-                    onSelectTarget = controller::selectTarget,
-                    onBeginCapture = controller::beginCapture,
-                    onReleaseCapture = controller::releaseCapture,
-                    onCancelCapture = controller::cancelCapture,
-                    recordedBytes = controller::recordedBytes,
-                    recordedLevel = controller::recordedLevel,
-                    onPlay = controller::playLatest,
-                    onStop = controller::stopPlayback,
-                    onReplay = controller::playLatest,
-                    onCheckUpdate = updater::retry,
-                    onInstallUpdate = updater::install,
-                )
+                CircleHostSurface(
+                    isWatchDevice = true,
+                    state = CircleHostPreviewState(mode = CircleHostMode.WATCH_EXACT),
+                    onStateChange = null,
+                ) {
+                    LinkWatchScreen(
+                        state = state,
+                        microphoneGranted = microphoneGranted.value,
+                        onRequestMicrophone = ::requestMicrophone,
+                        onSelectTarget = controller::selectTarget,
+                        onBeginCapture = controller::beginCapture,
+                        onReleaseCapture = controller::releaseCapture,
+                        onCancelCapture = controller::cancelCapture,
+                        recordedBytes = controller::recordedBytes,
+                        recordedLevel = controller::recordedLevel,
+                        onPlay = controller::playLatest,
+                        onStop = controller::stopPlayback,
+                        onReplay = controller::playLatest,
+                        onCheckUpdate = updater::retry,
+                        onInstallUpdate = updater::install,
+                        initialShowingSettings = BuildConfig.DEBUG &&
+                            intent.getStringExtra(QA_PAGE_EXTRA) == QA_PAGE_SETTINGS,
+                    )
+                }
             }
         }
         refreshHandoff()
@@ -135,6 +147,8 @@ class WearMainActivity : ComponentActivity() {
 
 private const val QA_STATE_EXTRA = "qa_state"
 private const val QA_STATE_ACTIVE = "active"
+private const val QA_PAGE_EXTRA = "qa_page"
+private const val QA_PAGE_SETTINGS = "settings"
 
 internal fun unavailableState(): LinkState = listOf<LinkAction>(
     LinkAction.Targets(emptyList()),

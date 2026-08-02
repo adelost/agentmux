@@ -1,4 +1,4 @@
-package io.agentmux.audioinbox.wear
+package io.agentmux.linkui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.adelost.designkit.ui.CircleLabelProgress
@@ -27,13 +28,10 @@ import io.agentmux.linkcore.UpdatePresentation
 import io.agentmux.linkcore.linkConnectionLabel
 import io.agentmux.linkcore.linkConnectionRoute
 import io.agentmux.linkcore.linkConnectionSettingsDetail
-import io.agentmux.linkui.LinkCaptureControl
-import io.agentmux.linkui.LinkCaptureSpec
-import io.agentmux.linkui.resolveLinkCaptureAvailability
 import kotlinx.coroutines.flow.MutableStateFlow
 
 @Composable
-internal fun WearLinkScreen(
+fun LinkWatchScreen(
     state: LinkState,
     microphoneGranted: Boolean,
     onRequestMicrophone: () -> Unit,
@@ -48,6 +46,53 @@ internal fun WearLinkScreen(
     onReplay: () -> Unit,
     onCheckUpdate: () -> Unit,
     onInstallUpdate: () -> Unit,
+    onOpenDevHost: (() -> Unit)? = null,
+    initialShowingSettings: Boolean = false,
+) {
+    var showingSettings by rememberSaveable { mutableStateOf(initialShowingSettings) }
+    LinkWatchSurface(
+        state = state,
+        showingSettings = showingSettings,
+        onSettings = { showingSettings = true },
+        onBack = { showingSettings = false },
+        microphoneGranted = microphoneGranted,
+        onRequestMicrophone = onRequestMicrophone,
+        onSelectTarget = onSelectTarget,
+        onBeginCapture = onBeginCapture,
+        onReleaseCapture = onReleaseCapture,
+        onCancelCapture = onCancelCapture,
+        recordedBytes = recordedBytes,
+        recordedLevel = recordedLevel,
+        onPlay = onPlay,
+        onStop = onStop,
+        onReplay = onReplay,
+        onCheckUpdate = onCheckUpdate,
+        onInstallUpdate = onInstallUpdate,
+        onOpenDevHost = onOpenDevHost,
+    )
+}
+
+/** The exact Watch presentation shared by real Wear and Phone WatchExact. */
+@Composable
+fun LinkWatchSurface(
+    state: LinkState,
+    showingSettings: Boolean,
+    onSettings: () -> Unit,
+    onBack: () -> Unit,
+    microphoneGranted: Boolean,
+    onRequestMicrophone: () -> Unit,
+    onSelectTarget: (String) -> Unit,
+    onBeginCapture: () -> Boolean,
+    onReleaseCapture: () -> Unit,
+    onCancelCapture: () -> Unit,
+    recordedBytes: () -> Long,
+    recordedLevel: () -> Float,
+    onPlay: () -> Unit,
+    onStop: () -> Unit,
+    onReplay: () -> Unit,
+    onCheckUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
+    onOpenDevHost: (() -> Unit)? = null,
 ) {
     var captureOpen by remember { mutableStateOf(false) }
     var captureStarted by remember { mutableStateOf(false) }
@@ -96,14 +141,14 @@ internal fun WearLinkScreen(
         }
         return
     }
+    BackHandler(enabled = showingSettings) { onBack() }
     val items = remember { MutableStateFlow(emptyList<RowSpec>()) }
-    val settingsItems = remember { MutableStateFlow(emptyList<RowSpec>()) }
-    val navigator = remember {
+    val navigator = remember(showingSettings) {
         RingNavigator(
             RingScreen.Rows(
-                title = "AGENTMUX LINK",
+                title = if (showingSettings) "LINK SETTINGS" else "AGENTMUX LINK",
                 items = items,
-                showBack = false,
+                showBack = showingSettings,
             ),
         )
     }
@@ -115,34 +160,33 @@ internal fun WearLinkScreen(
         onReplay,
         onCheckUpdate,
         onInstallUpdate,
+        onOpenDevHost,
+        showingSettings,
+        onSettings,
     ) {
-        settingsItems.value = wearLinkSettingsRows(
-            state = state,
-            onCheckUpdate = onCheckUpdate,
-            onInstallUpdate = onInstallUpdate,
-        )
-        items.value = wearLinkRows(
-            state = state,
-            onSelectTarget = onSelectTarget,
-            onOpenCapture = { captureOpen = true },
-            onPlay = onPlay,
-            onStop = onStop,
-            onReplay = onReplay,
-            onSettings = {
-                navigator.push(
-                    RingScreen.Rows(
-                        title = "LINK SETTINGS",
-                        items = settingsItems,
-                        showBack = true,
-                    ),
-                )
-            },
-        )
+        items.value = if (showingSettings) {
+            linkWatchSettingsRows(
+                state = state,
+                onCheckUpdate = onCheckUpdate,
+                onInstallUpdate = onInstallUpdate,
+                onOpenDevHost = onOpenDevHost,
+            )
+        } else {
+            linkWatchRows(
+                state = state,
+                onSelectTarget = onSelectTarget,
+                onOpenCapture = { captureOpen = true },
+                onPlay = onPlay,
+                onStop = onStop,
+                onReplay = onReplay,
+                onSettings = onSettings,
+            )
+        }
     }
-    RenderRingScreen(nav = navigator, onExit = {})
+    RenderRingScreen(nav = navigator, onExit = onBack)
 }
 
-internal fun wearLinkRows(
+fun linkWatchRows(
     state: LinkState,
     onSelectTarget: (String) -> Unit,
     onOpenCapture: () -> Unit,
@@ -249,32 +293,48 @@ internal fun wearLinkRows(
     return rows
 }
 
-internal fun wearLinkSettingsRows(
+fun linkWatchSettingsRows(
     state: LinkState,
     onCheckUpdate: () -> Unit = {},
     onInstallUpdate: () -> Unit = {},
-): List<RowSpec> = listOf(
-    RowSpec(
-        key = "connection",
-        title = linkConnectionLabel(state.connection),
-        sub = linkConnectionSettingsDetail(state),
-        icon = if (state.connection == ConnectionState.CONNECTED) RingIcons.Wifi else RingIcons.Link,
-    ),
-    RowSpec(
-        key = "update",
-        title = "UPDATE",
-        sub = state.update.detail.ifBlank {
-            state.update.currentVersion.ifBlank { "CHECKING VERSION…" }
-        }.uppercase(),
-        icon = RingIcons.Download,
-        onTap = when {
-            state.update.canInstall -> onInstallUpdate
-            state.update.canRetry -> onCheckUpdate
-            else -> null
-        },
-        labelProgress = state.update.toLabelProgress(),
-    ),
-)
+    onOpenDevHost: (() -> Unit)? = null,
+): List<RowSpec> = buildList {
+    add(
+        RowSpec(
+            key = "connection",
+            title = linkConnectionLabel(state.connection),
+            sub = linkConnectionSettingsDetail(state),
+            icon = if (state.connection == ConnectionState.CONNECTED) RingIcons.Wifi else RingIcons.Link,
+        ),
+    )
+    add(
+        RowSpec(
+            key = "update",
+            title = "UPDATE",
+            sub = state.update.detail.ifBlank {
+                state.update.currentVersion.ifBlank { "CHECKING VERSION…" }
+            }.uppercase(),
+            icon = RingIcons.Download,
+            onTap = when {
+                state.update.canInstall -> onInstallUpdate
+                state.update.canRetry -> onCheckUpdate
+                else -> null
+            },
+            labelProgress = state.update.toLabelProgress(),
+        ),
+    )
+    onOpenDevHost?.let { open ->
+        add(
+            RowSpec(
+                key = "dev-host",
+                title = "DEV HOST",
+                sub = "RESPONSIVE · WATCH EXACT",
+                icon = RingIcons.Phone,
+                onTap = open,
+            ),
+        )
+    }
+}
 
 private fun UpdatePresentation.toLabelProgress(): CircleLabelProgress? = when (state) {
     "checking", "installing" -> CircleLabelProgress.Indeterminate

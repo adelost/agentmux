@@ -8,6 +8,8 @@ import io.agentmux.linkcore.LinkTarget
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.UpdatePresentation
+import io.agentmux.linkui.linkWatchRows
+import io.agentmux.linkui.linkWatchSettingsRows
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -18,7 +20,7 @@ import org.junit.Test
 class WearLinkScreenTest {
     @Test
     fun unavailableStateIsConciseCanonicalRows() {
-        val rows = wearLinkRows(
+        val rows = linkWatchRows(
             state = unavailableState(),
             onSelectTarget = {},
             onOpenCapture = {},
@@ -33,7 +35,7 @@ class WearLinkScreenTest {
         assertTrue(rows[0].choices.isEmpty())
         assertNull(rows[1].onTap)
         assertFalse(rows[1].holdToConfirm)
-        assertEquals("LOG IN ON PHONE", wearLinkSettingsRows(unavailableState())[0].sub)
+        assertEquals("LOG IN ON PHONE", linkWatchSettingsRows(unavailableState())[0].sub)
     }
 
     @Test
@@ -63,7 +65,7 @@ class WearLinkScreenTest {
             ),
         )
 
-        val rows = wearLinkRows(
+        val rows = linkWatchRows(
             state = state,
             onSelectTarget = { selected = it },
             onOpenCapture = { openedCapture = true },
@@ -107,7 +109,7 @@ class WearLinkScreenTest {
             ),
         )
 
-        val rows = wearLinkRows(
+        val rows = linkWatchRows(
             state = state,
             onSelectTarget = {},
             onOpenCapture = {},
@@ -142,7 +144,7 @@ class WearLinkScreenTest {
             ),
         )
 
-        val rows = wearLinkRows(
+        val rows = linkWatchRows(
             state = state,
             onSelectTarget = {},
             onOpenCapture = {},
@@ -169,7 +171,7 @@ class WearLinkScreenTest {
                 progress = 0.4f,
             ),
         )
-        val downloadingRow = wearLinkSettingsRows(downloading)[1]
+        val downloadingRow = linkWatchSettingsRows(downloading)[1]
         assertEquals("UPDATE", downloadingRow.title)
         assertEquals("DOWNLOADING… 40%", downloadingRow.sub)
         assertEquals(
@@ -186,12 +188,24 @@ class WearLinkScreenTest {
                 canInstall = true,
             ),
         )
-        val readyRow = wearLinkSettingsRows(
+        val readyRow = linkWatchSettingsRows(
             state = ready,
             onInstallUpdate = { installed = true },
         )[1]
         assertNotNull(readyRow.onTap)
         readyRow.onTap?.invoke()
         assertTrue(installed)
+    }
+
+    @Test
+    fun realWearOmitsPhoneHostControlsWhilePhoneWatchExactCanReturnToResponsive() {
+        val state = activePreviewState()
+
+        assertFalse(linkWatchSettingsRows(state).any { it.key == "dev-host" })
+        assertTrue(
+            linkWatchSettingsRows(state, onOpenDevHost = {}).any {
+                it.key == "dev-host" && it.sub == "RESPONSIVE · WATCH EXACT"
+            },
+        )
     }
 }
