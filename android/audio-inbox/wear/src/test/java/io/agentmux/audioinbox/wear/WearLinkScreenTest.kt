@@ -196,4 +196,16 @@ class WearLinkScreenTest {
         readyRow.onTap?.invoke()
         assertTrue(installed)
     }
+
+    @Test
+    fun realWearOmitsPhoneHostControlsWhilePhoneWatchExactCanReturnToResponsive() {
+        val state = activePreviewState()
+
+        assertFalse(linkWatchSettingsRows(state).any { it.key == "dev-host" })
+        assertTrue(
+            linkWatchSettingsRows(state, onOpenDevHost = {}).any {
+                it.key == "dev-host" && it.sub == "RESPONSIVE · WATCH EXACT"
+            },
+        )
+    }
 }
