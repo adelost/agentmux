@@ -10,7 +10,7 @@ Source candidate: `feat/link-host-preview-version-parity`
 - [x] `LHP-004` Real Wear uses the same Watch presenter and omits the meaningless DEV host selector.
 - [x] `LHP-005` WatchExact persists over process restart, then the shared `AUTO` path restores Responsive and that state persists.
 - [x] `LHP-006` Phone and Wear read one `linkVersionName`; their monotonic channel codes remain independent.
-- [x] `LHP-007` Exact merged release APKs and both signed public updater manifests attest version `1.2.0`.
+- [x] `LHP-007` Exact merged release APKs and both signed public updater manifests attest final version `1.2.1` on CircleKit `0.3.17`.
 
 ## Pixel truth checked before committing
 
@@ -37,6 +37,8 @@ Reviewed evidence:
 - `wear-watch-exact-settings.png`
 - `phone-updater-detected.png`
 - `wear-updater-detected.png`
+- `phone-updater-after.png`
+- `wear-updater-after.png`
 
 ## Named QA seam
 
@@ -45,7 +47,7 @@ Phone was driven through debug-only activity extras (`qa_page`, `qa_host`,
 Wear used `qa_state=active` and `qa_page=settings`. No coordinate taps, mock
 renderer, screenshot substitution, or raw input scripting was used.
 
-The relevant shared CircleKit 0.3.15 unit contracts pin:
+The relevant shared CircleKit 0.3.17 unit contracts pin:
 
 - 0°/180° → portrait bounds → `PHONE_COMPACT`;
 - 90°/270° → landscape bounds → `PHONE_WIDE`;
@@ -65,29 +67,33 @@ both assets, then verify both signed `link.v1d.io` channel manifests.
 - Product PR: [#249](https://github.com/adelost/agentmux/pull/249), merged as
   `5aca7246a20ff376da26b3633eac53844fc84968`; rollback is
   `3d6fbf16fc853fbefe4c4d091aa02c24007c6b50`.
+- Final artifact-pin PR: [#251](https://github.com/adelost/agentmux/pull/251),
+  merged as `2cb3a8ea5e8282d991d2a392da3ad2b4f9b4e9e4`; rollback is
+  `2143b051ccea29bfae5e77f95691f31f07c873f9`.
 - GitHub release:
-  [agentmux-link-v1.2.0](https://github.com/adelost/agentmux/releases/tag/agentmux-link-v1.2.0).
+  [agentmux-link-v1.2.1](https://github.com/adelost/agentmux/releases/tag/agentmux-link-v1.2.1).
 - Phone asset:
-  [Agentmux-Link-Phone-1.2.0.apk](https://github.com/adelost/agentmux/releases/download/agentmux-link-v1.2.0/Agentmux-Link-Phone-1.2.0.apk),
-  package `io.agentmux.audioinbox`, version `1.2.0` (`8`), size `9,776,397`,
-  SHA-256 `641fcd88cb0fd1e2a302068453a154596a6a71b0cc971acb8a6348775cdc34d0`.
+  [Agentmux-Link-Phone-1.2.1.apk](https://github.com/adelost/agentmux/releases/download/agentmux-link-v1.2.1/Agentmux-Link-Phone-1.2.1.apk),
+  package `io.agentmux.audioinbox`, version `1.2.1` (`9`), size `9,776,397`,
+  SHA-256 `7ede293874b0d1a23bb9cb1b394d9d458e64736aa6ce1144f27f903da4aa9c72`.
 - Wear asset:
-  [Agentmux-Link-Wear-1.2.0.apk](https://github.com/adelost/agentmux/releases/download/agentmux-link-v1.2.0/Agentmux-Link-Wear-1.2.0.apk),
-  version `1.2.0` (`6`), size `2,427,500`, SHA-256
-  `8754f9fd6aa513e13d28c28717d63ba88546c319bef222b420e104b0782552ad`.
+  [Agentmux-Link-Wear-1.2.1.apk](https://github.com/adelost/agentmux/releases/download/agentmux-link-v1.2.1/Agentmux-Link-Wear-1.2.1.apk),
+  version `1.2.1` (`7`), size `2,427,500`, SHA-256
+  `f0a4cc86575d8e57b16b315c7ba7abcf16e1cab152ae183da761e7c4af230ba2`.
 - Both APKs came from the exact merge SHA and share signer certificate SHA-256
   `b57a2862ab312bc970beeefcd55d4b48a974efd85b274b91394d4c9199484e97`.
 - Public updater manifests:
   [Phone](https://link.v1d.io/releases/agentmux-link/phone/manifest-v1.json) and
   [Wear](https://link.v1d.io/releases/agentmux-link/wear/manifest-v1.json).
   Their public APKs are
-  [phone code 8](https://link.v1d.io/releases/agentmux-link/phone/app-8.apk) and
-  [wear code 6](https://link.v1d.io/releases/agentmux-link/wear/app-6.apk).
+  [phone code 9](https://link.v1d.io/releases/agentmux-link/phone/app-9.apk) and
+  [wear code 7](https://link.v1d.io/releases/agentmux-link/wear/app-7.apk).
   Public bytes, signature, size and checksum matched the GitHub assets.
 
-The updater proof was an in-place signed upgrade without uninstall or clear:
-Phone `1.1.5` (`7`) and Wear `0.1.4` (`5`) both detected
-`V1.2.0 READY · TAP`, installed from their real ReleaseKit feeds, and reported
-`1.2.0` after updater-driven restart. Semantic UiAutomator selected the named
-update row and Android's named `android:id/button1`; no coordinate taps were
-used. The two updater screenshots above were inspected before inclusion.
+The terminal updater proof was an in-place signed upgrade without uninstall or
+clear: Phone `1.2.0` (`8`) and Wear `1.2.0` (`6`) both detected
+`V1.2.1 READY · TAP`, installed through their real ReleaseKit feeds, and showed
+`V1.2.1 · UP TO DATE · TAP` after updater-driven restart. Semantic UiAutomator
+selected the named update row and Android's named `android:id/button1`; no raw
+coordinate taps were used. All four updater screenshots were inspected before
+inclusion.
