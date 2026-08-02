@@ -215,6 +215,18 @@ reaped automatically, and a pane stuck inside a Playwright MCP tool call for 10
 min gets Escape. Visual proof is still expected when the user asks for it; the
 watchdog exists so screenshots remain reliable, not so agents skip them.
 
+### Android emulator lifecycle
+Headless Android emulators sleep after 60 minutes without guest interaction.
+Start Android QA through the repo's idempotent \`tools/qa-env.sh\`, which wakes
+the same AVD and preserves its data. The shared fallback is:
+\`\`\`bash
+amux emulator status
+amux emulator ensure wear34 --port 5554
+amux emulator ensure pixel35 --port 5556
+\`\`\`
+The guard uses two idle observations and graceful \`adb emu kill\`; it never
+SIGKILLs an emulator and aborts while an ADB or active Gradle client exists.
+
 ### Bridge lifecycle
 \`\`\`bash
 amux serve                           # run bridge visibly here; Ctrl+C stops it
