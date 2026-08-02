@@ -1,4 +1,5 @@
 import { execFileSync, execSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,15 +9,16 @@ import {
 import { detectSenderFromEnv } from "../core/sender-detect.mjs";
 
 const PROJECT_BY_SESSION = Object.freeze({
-  ai: "ai", claw: "source", lsrc: "source", skydive: "skydive", skyvw: "skyvw",
+  skydive: "skydive", skyvw: "skyvw",
 });
-const MANAGERS = new Set(["skydive:3", "skyvw:3"]);
 const VALUE_FLAGS = new Set([
   "base-url", "deploy", "hours", "live", "merge", "project", "summary", "tests", "wake",
 ]);
 
 const usage = () => `Usage: amux work [status|next] [--project ID]
+  amux work join --project ID
   amux work add "problem and expected outcome"
+  amux work approve TICKET
   amux work claim TICKET
   amux work working "measured progress"
   amux work wait|block "reason" --wake "observable condition" [--hours N]
@@ -24,8 +26,8 @@ const usage = () => `Usage: amux work [status|next] [--project ID]
   amux work done --tests "focused/manual proof" [--summary TEXT]
                  [--merge URL] [--deploy TEXT] [--live TEXT]
 
-The calling pane and project are inferred. Managers add and point to work; workers
-self-claim an approved READY ticket. Nothing auto-assigns, wakes, releases or closes.`;
+The calling pane and pilot project are inferred. A shared fleet key can join a new
+pane once. Workers self-claim approved READY work; no broker forwards the claim.`;
 
 /** WHAT: Maps a pane address to one Suggestions project. WHY: Keeps project selection obvious and overrideable. */
 export function projectForWorkSender(sender, override = null) {
@@ -62,7 +64,9 @@ const parseResponse = (text, label) => {
 };
 
 const credential = (path, label) => {
-  const value = readFileSync(path, "utf8").trim();
+  let value;
+  try { value = readFileSync(path, "utf8").trim(); }
+  catch { throw new Error(`${label} is unavailable at ${path}`); }
   if (!value) throw new Error(`${label} is empty at ${path}`);
   return value;
 };
@@ -165,23 +169,52 @@ export async function runWorkCommand(argv, dependencies = {}) {
 
   if (action === "status") return formatWorkOverview(await client.read(
     `/api/agent/overview?project=${encodeURIComponent(project)}&recent=5`));
+  if (action === "join") {
+    try {
+      await client.read(`/api/agent/overview?project=${encodeURIComponent(project)}&recent=1`);
+      return `JOINED ${sender} · ${project} (already registered)`;
+    } catch {
+      await client.mutate(`/api/agent/register?project=${encodeURIComponent(project)}`, "POST", {
+        agentId: sender, displayName: sender, mutationId: randomUUID(),
+      });
+      return `JOINED ${sender} · ${project}`;
+    }
+  }
   if (action === "add") {
     const raw = parsed.positional.join(" ").trim();
     if (raw.length < 8) throw new Error("add requires a concrete problem and expected outcome");
     const result = await client.mutate(`/api/agent/tickets?project=${encodeURIComponent(project)}`,
-      "POST", { project, raw, mutationId: crypto.randomUUID() });
+      "POST", { project, raw, mutationId: randomUUID() });
     const ticket = result?.ticket ?? result;
-    return `${outputResult(result, "Ticket created")}\nAPPROVE ${baseUrl}/?project=${project}&ticket=${ticket?.id ?? ""}`;
+    return `${outputResult(result, "Ticket created")}\nNEXT amux work approve ${ticket?.id ?? "<ticket>"}`;
+  }
+  if (action === "approve") {
+    const ticketId = parsed.positional[0];
+    if (!ticketId) throw new Error("approve requires a ticket id");
+    const detail = await client.read(`/api/tickets/${ticketId}?project=${encodeURIComponent(project)}`);
+    const ticket = detail?.ticket;
+    if (ticket?.productApproval?.state === "approved") return `APPROVED ${ticketId} (already)`;
+    if (ticket?.status !== "ready") {
+      throw new Error(`${ticketId} is ${ticket?.status ?? "unavailable"}; approve after triage reaches READY`);
+    }
+    const revision = Number(ticket.revision);
+    const materialFingerprint = ticket.productApproval?.materialFingerprint;
+    if (!Number.isSafeInteger(revision) || typeof materialFingerprint !== "string") {
+      throw new Error("ticket approval material is unavailable");
+    }
+    await client.mutate(`/api/agent/tickets/${ticketId}/product-approval?project=${encodeURIComponent(project)}`,
+      "POST", { source: sender, mutationId: randomUUID(), expectedTicketRevision: revision,
+        materialFingerprint }, true);
+    return `APPROVED ${ticketId}`;
   }
   if (action === "claim") {
-    if (MANAGERS.has(sender)) throw new Error("pane 3 is the manager; point a worker at the ticket instead of claiming it");
     const ticketId = parsed.positional[0];
     if (!ticketId) throw new Error("claim requires a ticket id");
     const detail = await client.read(`/api/tickets/${ticketId}?project=${encodeURIComponent(project)}`);
     const revision = Number(detail?.ticket?.revision);
     if (!Number.isSafeInteger(revision)) throw new Error("ticket revision is unavailable");
     const result = await client.mutate("/api/agent/claim", "POST", { ticketId,
-      expectedTicketRevision: revision, mutationId: crypto.randomUUID() });
+      expectedTicketRevision: revision, mutationId: randomUUID() });
     return outputResult(result, `CLAIMED ${ticketId}`);
   }
   if (action === "working") {
@@ -189,7 +222,7 @@ export async function runWorkCommand(argv, dependencies = {}) {
     if (summary.length < 3) throw new Error("working requires measured progress");
     const current = await currentWork(client, project);
     await client.mutate("/api/agent/check-in", "POST", { ticketId: current.ticketId,
-      assignmentGeneration: current.generation, mutationId: crypto.randomUUID(),
+      assignmentGeneration: current.generation, mutationId: randomUUID(),
       status: "working", summary });
     return `WORKING ${current.ticketId}`;
   }
@@ -202,7 +235,7 @@ export async function runWorkCommand(argv, dependencies = {}) {
     }
     const current = await currentWork(client, project);
     await client.mutate("/api/agent/check-in", "POST", { ticketId: current.ticketId,
-      assignmentGeneration: current.generation, mutationId: crypto.randomUUID(),
+      assignmentGeneration: current.generation, mutationId: randomUUID(),
       status: action === "wait" ? "waiting" : "blocked", reason, wakeCondition,
       nextCheckAt: Date.now() + Math.round(hours * 3_600_000) });
     return `${action.toUpperCase()} ${current.ticketId}`;
@@ -212,7 +245,7 @@ export async function runWorkCommand(argv, dependencies = {}) {
     if (body.length < 3) throw new Error("answer requires text after reading the full thread");
     const current = await currentWork(client, project);
     await client.mutate(`/api/tickets/${current.ticketId}/comments?project=${encodeURIComponent(project)}`,
-      "POST", { mutationId: crypto.randomUUID(), body });
+      "POST", { mutationId: randomUUID(), body });
     return `ANSWERED ${current.ticketId}`;
   }
   if (action === "done") {
@@ -223,13 +256,15 @@ export async function runWorkCommand(argv, dependencies = {}) {
       ? { label: dependencies.commitLabel ?? "Delivered change", url: parsed.options.merge }
       : githubCommit(dependencies.cwd ?? process.cwd(), dependencies.execFileSync);
     if (!commit) throw new Error("cannot derive a GitHub commit; pass --merge URL");
+    if (!/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/(?:commit|pull)\/[A-Za-z0-9_.-]+$/u
+      .test(commit.url)) throw new Error("--merge must be a GitHub commit or pull-request URL");
     const completionReceipt = { assignmentGeneration: current.generation,
       summary: parsed.options.summary ?? `Delivered ${current.ticketId}.`, merge: [commit],
       tests: [{ label: tests, url: null }],
       deploy: parsed.options.deploy ? [{ label: parsed.options.deploy, url: null }] : [],
       live: parsed.options.live ? [{ label: parsed.options.live, url: null }] : [], attachmentIds: [] };
     await client.mutate(`/api/tickets/${current.ticketId}/admin?project=${encodeURIComponent(project)}`,
-      "PATCH", { mutationId: crypto.randomUUID(), source: sender, status: "done",
+      "PATCH", { mutationId: randomUUID(), source: sender, status: "done",
         terminalAssignmentGeneration: current.generation, completionReceipt }, true);
     return `DONE ${current.ticketId} · ${commit.url}`;
   }
@@ -242,7 +277,7 @@ export async function cmdWork(argv) {
   if (parsed.help) { console.log(usage()); return; }
   const sender = detectSenderFromEnv(process.env,
     (command) => execSync(command, { encoding: "utf8", timeout: 2_000 }));
-  const needsAdmin = parsed.action === "done";
+  const needsAdmin = parsed.action === "approve" || parsed.action === "done";
   const result = await runWorkCommand(argv, { sender,
     fleetToken: credential(process.env.AMUX_SUGGESTIONS_FLEET_KEY_FILE
       ?? defaultSuggestionsFleetKeyFile(), "Suggestions fleet key"),

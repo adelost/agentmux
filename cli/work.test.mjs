@@ -31,7 +31,7 @@ feature("simple Suggestions work CLI", () => {
       projectForWorkSender("unknown:1", "ai"),
     ]],
     then: ["known fleets map and an explicit override remains possible", (result) => {
-      expect(result).toEqual(["skyvw", "skydive", "source", null, "ai"]);
+      expect(result).toEqual(["skyvw", "skydive", null, null, "ai"]);
     }],
   });
 
@@ -61,25 +61,53 @@ feature("simple Suggestions work CLI", () => {
     }],
   });
 
-  component("creates one ticket and points to the existing human approval page", {
+  component("creates one ticket and points to delegated terminal approval", {
     given: ["a manager pane and a fake board", () => ({ client: fakeClient() })],
     when: ["adding a concrete task", ({ client }) => runWorkCommand(
       ["add", "Recorder loses the final message after restart"],
       { sender: "skyvw:3", client, baseUrl: "https://suggest.v1d.io" },
     )],
-    then: ["the fleet-key mutation is small and approval stays human", (text, { client }) => {
+    then: ["the fleet-key mutation is small and no GUI is required", (text, { client }) => {
       expect(client.calls[0]).toMatchObject({ path: "/api/agent/tickets?project=skyvw",
         method: "POST", body: { project: "skyvw",
           raw: "Recorder loses the final message after restart" } });
-      expect(text).toContain("APPROVE https://suggest.v1d.io/?project=skyvw&ticket=SVW-0101");
+      expect(text).toContain("NEXT amux work approve SVW-0101");
     }],
   });
 
-  component("keeps the manager out of implementation claims", {
-    when: ["pane 3 tries to claim", () => runWorkCommand(["claim", "SVW-0100"],
-      { sender: "skyvw:3", client: fakeClient() }).catch((error) => error)],
-    then: ["the CLI explains the sidecar role before HTTP", (error) => {
-      expect(error.message).toContain("manager");
+  component("registers a new pane once with the shared fleet key", {
+    given: ["an unregistered pane", () => {
+      const client = fakeClient();
+      client.read = async () => { throw new Error("fleet-key-invalid"); };
+      return { client };
+    }],
+    when: ["the pane joins its explicit project", ({ client }) => runWorkCommand(
+      ["join", "--project", "skyvw"], { sender: "friend:7", client },
+    )],
+    then: ["the existing self-registration seam receives only pane identity", (text, { client }) => {
+      expect(text).toBe("JOINED friend:7 · skyvw");
+      expect(client.calls[0]).toMatchObject({ kind: "mutate",
+        path: "/api/agent/register?project=skyvw", body: {
+          agentId: "friend:7", displayName: "friend:7",
+        } });
+    }],
+  });
+
+  component("approves stable ticket material with delegated admin authority", {
+    given: ["a READY ticket after triage", () => ({ client: fakeClient([{ ticket: {
+      id: "SVW-0101", status: "ready", revision: 4,
+      productApproval: { state: "required", materialFingerprint: `material-v1:${"a".repeat(64)}` },
+    } }]) })],
+    when: ["the delegated pane approves it", ({ client }) => runWorkCommand(
+      ["approve", "SVW-0101"], { sender: "skyvw:3", client },
+    )],
+    then: ["approval is revision- and material-bound without a GUI", (text, { client }) => {
+      expect(text).toBe("APPROVED SVW-0101");
+      expect(client.calls[1]).toMatchObject({ admin: true,
+        path: "/api/agent/tickets/SVW-0101/product-approval?project=skyvw", body: {
+          source: "skyvw:3", expectedTicketRevision: 4,
+          materialFingerprint: `material-v1:${"a".repeat(64)}`,
+        } });
     }],
   });
 
@@ -130,6 +158,19 @@ feature("simple Suggestions work CLI", () => {
             tests: [{ label: "7 focused tests and manual phone smoke", url: null }],
             live: [{ label: "Phone smoke passed", url: null }],
           } } });
+    }],
+  });
+
+  component("rejects malformed merge evidence before terminal mutation", {
+    given: ["active work and a non-GitHub URL", () => ({ client: fakeClient([overview({
+      agent: { id: "skyvw:4", currentTicket: "SVW-0100", assignmentGeneration: 2 },
+    })]) })],
+    when: ["completion is attempted", ({ client }) => runWorkCommand([
+      "done", "--tests", "manual smoke", "--merge", "https://example.test/not-a-commit",
+    ], { sender: "skyvw:4", client }).catch((error) => error)],
+    then: ["the CLI explains the evidence boundary and sends no write", (error, { client }) => {
+      expect(error.message).toContain("GitHub commit or pull-request URL");
+      expect(client.calls).toHaveLength(1);
     }],
   });
 
