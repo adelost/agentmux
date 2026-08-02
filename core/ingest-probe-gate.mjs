@@ -18,17 +18,24 @@ export function createIngestProbeGate({
 }) {
   /** WHAT: Gates one retry on a successful nonce probe. WHY: Prevents payload retypes into a pane that proves nothing lands. */
   return async function gateIngestProbe(job, { drafted = false, ownsPaneDraft = false } = {}) {
+    const prepared = job.metadata?.ingestProbe || null;
     if (job.kind !== "prompt"
         || job.metadata?.deliveryTransport === "native"
-        || Number(job.attempts || 0) < 2
-        || now() - Number(job.lastProbeAt || 0) < probeIntervalMs
+        || (!prepared && Number(job.attempts || 0) < 2)
+        || (!prepared && now() - Number(job.lastProbeAt || 0) < probeIntervalMs)
         || typeof agent.probeIngest !== "function") {
       return { proceed: true, job };
     }
-    const probe = await agent.probeIngest(job.agentName, job.pane)
+    let durableJob = job;
+    const probe = await agent.probeIngest(job.agentName, job.pane, {
+      prepared,
+      onPrepared: async (plan) => {
+        durableJob = queue.update(durableJob, { metadata: { ingestProbe: plan } });
+      },
+    })
       .catch((error) => ({ ok: false, reason: error.message }));
     if (probe && probe.ok === false) {
-      const parked = queue.update(job, {
+      const parked = queue.update(durableJob, {
         status: drafted ? "drafted" : (ownsPaneDraft ? "pasting" : "pending"),
         lastProbeAt: now(),
         nextAttemptAt: now() + blockedRetryMs(job),
@@ -37,6 +44,9 @@ export function createIngestProbeGate({
       queueEvent(parked, "ingest_probe_failed", { reason: String(probe.reason || "") });
       return { proceed: false, job: parked };
     }
-    return { proceed: true, job: queue.update(job, { lastProbeAt: now() }) };
+    return {
+      proceed: true,
+      job: queue.update(durableJob, { lastProbeAt: now(), metadata: { ingestProbe: null } }),
+    };
   };
 }
