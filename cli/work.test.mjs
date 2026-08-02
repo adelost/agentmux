@@ -49,12 +49,15 @@ feature("simple Suggestions work CLI", () => {
     when: ["formatting an overview", () => formatWorkOverview(overview({
       agent: { id: "skyvw:4", workStatus: "working", currentTicket: "SVW-0099" },
       pendingActions: [{ kind: "human_comment" }],
+      recentTickets: [{ id: "SVW-0098", title: "Previous delivery", status: "done",
+        delivery: { commit: { shortSha: "abc12345" } } }],
     }))],
     then: ["the terminal summary stays compact", (text) => {
       expect(text).toContain("skyvw · skyvw:4 · working");
       expect(text).toContain("CURRENT SVW-0099");
       expect(text).toContain("NEEDS RESPONSE human_comment");
       expect(text).toContain("SVW-0100 · Fix recorder · high");
+      expect(text).toContain("SVW-0098 · Previous delivery · done · abc12345");
     }],
   });
 

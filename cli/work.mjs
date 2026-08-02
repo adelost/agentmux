@@ -114,6 +114,12 @@ export function formatWorkOverview(data) {
   const ready = Array.isArray(data?.readyCandidates) ? data.readyCandidates.slice(0, 5) : [];
   lines.push(ready.length ? "READY" : "READY none");
   ready.forEach((row) => lines.push(`  ${rowLabel(row)}`));
+  const recent = Array.isArray(data?.recentTickets) ? data.recentTickets.slice(0, 3) : [];
+  if (recent.length) lines.push("RECENT");
+  recent.forEach((row) => {
+    const commit = row?.delivery?.commit?.shortSha ? ` · ${row.delivery.commit.shortSha}` : "";
+    lines.push(`  ${rowLabel(row)} · ${row.status ?? "unknown"}${commit}`);
+  });
   return lines.join("\n");
 }
 
