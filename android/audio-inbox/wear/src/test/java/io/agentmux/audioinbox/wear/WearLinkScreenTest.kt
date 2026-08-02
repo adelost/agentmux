@@ -40,7 +40,11 @@ class WearLinkScreenTest {
         assertFalse(rows[1].holdToConfirm)
         assertEquals(
             "LOG IN ON PHONE",
-            linkWatchSettingsRows(unavailableState(), UpdateState.UpToDate, "1.2.1")[0].sub,
+            linkWatchSettingsRows(
+                unavailableState(),
+                UpdateState.UpToDate("1.2.1", publishedAtEpochMillis = null),
+                "1.2.1",
+            )[0].sub,
         )
     }
 
@@ -197,16 +201,15 @@ class WearLinkScreenTest {
     }
 
     @Test
-    fun signedPublicationEpochIsLocalizedAtTheSharedUiBoundary() {
+    fun currentReleaseKeepsItsSignedPublicationEpochAtTheSharedUiBoundary() {
         val publishedAt = Instant.parse("2026-08-02T05:33:20Z").toEpochMilli()
         val rows = linkWatchSettingsRows(
             state = LinkState(),
-            updateState = UpdateState.Available(
+            updateState = UpdateState.UpToDate(
                 versionName = "1.2.2",
-                sizeBytes = 6_400_000L,
                 publishedAtEpochMillis = publishedAt,
             ),
-            currentVersionName = "1.2.1",
+            currentVersionName = "1.2.2",
             zoneId = ZoneId.of("Europe/Stockholm"),
             locale = Locale.US,
         )
@@ -221,13 +224,17 @@ class WearLinkScreenTest {
         val state = activePreviewState()
 
         assertFalse(
-            linkWatchSettingsRows(state, UpdateState.UpToDate, "1.2.1")
+            linkWatchSettingsRows(
+                state,
+                UpdateState.UpToDate("1.2.1", publishedAtEpochMillis = null),
+                "1.2.1",
+            )
                 .any { it.key == "dev-host" },
         )
         assertTrue(
             linkWatchSettingsRows(
                 state,
-                UpdateState.UpToDate,
+                UpdateState.UpToDate("1.2.1", publishedAtEpochMillis = null),
                 "1.2.1",
                 onOpenDevHost = {},
             ).any {
