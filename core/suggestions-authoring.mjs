@@ -156,6 +156,7 @@ export async function sendSuggestionsRequest({
   expectFiles = [],
   readPath = null,
   token,
+  requestHeaders = {},
   stateDir = join(homedir(), ".agentmux", "suggestions-authoring-outbox"),
   fetchImpl = fetch,
 }) {
@@ -175,10 +176,14 @@ export async function sendSuggestionsRequest({
   const bodyBytes = readFileSync(resolve(bodyFile));
   const expectedBytes = expectFiles.map((file) => readFileSync(resolve(file)));
   const expected = assertVerbatimSources(bodyBytes, expectedBytes);
+  if (Object.keys(requestHeaders).some((name) => name.toLowerCase() !== "x-agent-id")) {
+    throw new Error("only X-Agent-ID may be added to a Suggestions request");
+  }
   const staged = stageSuggestionsRequest({
     bodyBytes, method: upperMethod, url: target.href, stateDir: resolve(stateDir),
   });
   const headers = {
+    ...requestHeaders,
     authorization: `Bearer ${token}`,
     "content-type": "application/json; charset=utf-8",
     "user-agent": "curl/7.81.0 amux-suggest/1",
@@ -223,6 +228,11 @@ export async function sendSuggestionsRequest({
  */
 export function defaultSuggestionsTokenFile() {
   return join(homedir(), ".config", "agent", "suggestions-admin-token");
+}
+
+/** WHAT: Resolves the shared fleet key used by the simple pull workflow. WHY: Keeps it out of argv and shell history. */
+export function defaultSuggestionsFleetKeyFile() {
+  return join(homedir(), ".config", "agent", "suggestions-fleet-key");
 }
 
 /**

@@ -3402,7 +3402,7 @@ Usage:
   agent serve                     Run Discord bridge here; Ctrl+C stops it
     --detach, -d                  Run under a managed tmux-free supervisor
   agent suggest                   Poll Suggestions here; Ctrl+C stops all Suggestions polling
-    --once                        Run one diagnostic poll without changing legacy cron ownership
+    --once                        Run one diagnostic poll without changing legacy cron ownership\n  agent work [status|add|claim|working|wait|block|answer|done]  Simple durable pull workflow
   agent stop                      Stop Discord bridge (no arg = bridge)
   agent stop --all                Stop bridge + all agent sessions
   agent runtime status            Every managed native runtime + engine health
