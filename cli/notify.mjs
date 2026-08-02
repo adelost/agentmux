@@ -82,17 +82,30 @@ export async function notifyWorker({ name, pane, timeout, notifyChannel, msgSess
     await sleep(interval);
   }
 
-  // Timeout - but keep polling every 30s in case it finishes
-  log("⏰", name, pane, "TIMEOUT", `Timeout after ${timeout}s, still monitoring`);
+  // Passing the foreground wait budget is not a failure: the worker keeps
+  // monitoring and real stalls are reported separately above. Keep this event
+  // compact so a healthy long-running turn does not page the user as a warning.
+  const monitoring = longRunningEvent(timeout);
+  log(monitoring.icon, name, pane, monitoring.event, monitoring.detail);
   while (true) {
     await sleep(30000);
     const status = await safeGetStatus(agent, name, pane);
     if (status === "idle") {
       const text = await safeGetResponse(agent, name, pane);
-      log("✅", name, pane, "DONE", "Finished (post-timeout)", text);
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      log("✅", name, pane, "DONE", `Finished after ${formatElapsed(elapsed)}`, text);
       return;
     }
   }
+}
+
+/** A long turn is active work, not a timeout failure. */
+export function longRunningEvent(elapsedSeconds) {
+  return {
+    icon: "⏳",
+    event: "MONITORING",
+    detail: `${formatElapsed(elapsedSeconds)} elapsed, still monitoring`,
+  };
 }
 
 /**
