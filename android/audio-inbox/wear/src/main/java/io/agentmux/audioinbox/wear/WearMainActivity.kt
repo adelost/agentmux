@@ -32,8 +32,11 @@ import io.agentmux.linkcore.ReplyPhase
 import io.agentmux.audioinbox.update.LinkReleaseCatalogs
 import io.agentmux.audioinbox.update.LinkUpdater
 import io.agentmux.linkui.LinkWatchScreen
+import io.agentmux.linkui.product.LinkProductSession
+import io.agentmux.linkui.product.generated.LinkArtifactProfile
 
 class WearMainActivity : ComponentActivity() {
+    private val product = LinkProductSession(LinkArtifactProfile.WEAR_FULL_UI)
     private lateinit var controller: WearMailboxController
     private lateinit var updater: LinkUpdater
     private val microphoneGranted = mutableStateOf(false)
@@ -78,6 +81,7 @@ class WearMainActivity : ComponentActivity() {
                     onStateChange = null,
                 ) {
                     LinkWatchScreen(
+                        product = product,
                         state = state,
                         updateState = updateState,
                         currentVersionName = updater.currentVersionName,

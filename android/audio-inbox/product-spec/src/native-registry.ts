@@ -1,0 +1,82 @@
+export const LINK_NATIVE_REGISTRY_SCHEMA_VERSION = 1 as const;
+
+export interface LinkNativeRegistry {
+  readonly stage: "native-export";
+  readonly schemaVersion: typeof LINK_NATIVE_REGISTRY_SCHEMA_VERSION;
+  readonly sourceFile: string;
+  readonly profiles: readonly string[];
+  readonly components: readonly {
+    componentId: string; rendererId: string; profiles: readonly string[];
+  }[];
+  readonly icons: readonly { iconId: string; nativeSymbol: string }[];
+  readonly palettes: readonly { paletteId: string; nativeSymbol: string; profiles: readonly string[] }[];
+  readonly services: readonly {
+    serviceId: string; nativePortId: string; profiles: readonly string[];
+    inputPorts: readonly string[]; outputPorts: readonly string[];
+  }[];
+}
+
+export function decodeLinkNativeRegistry(raw: unknown): LinkNativeRegistry {
+  const root = record(raw, "native registry");
+  if (root.stage !== "native-export") throw new Error("native registry is not compiled truth");
+  if (root.schemaVersion !== LINK_NATIVE_REGISTRY_SCHEMA_VERSION) {
+    throw new Error(`native registry schema ${String(root.schemaVersion)} is unsupported`);
+  }
+  return {
+    stage: "native-export",
+    schemaVersion: LINK_NATIVE_REGISTRY_SCHEMA_VERSION,
+    sourceFile: requiredString(root.sourceFile, "native registry source file"),
+    profiles: strings(root.profiles, "native profiles"),
+    components: array(root.components, "native components").map((value, index) => {
+      const item = record(value, `native component ${index}`);
+      return {
+        componentId: requiredString(item.componentId, `native component ${index} id`),
+        rendererId: requiredString(item.rendererId, `native component ${index} renderer`),
+        profiles: strings(item.profiles, `native component ${index} profiles`),
+      };
+    }),
+    icons: array(root.icons, "native icons").map((value, index) => {
+      const item = record(value, `native icon ${index}`);
+      return {
+        iconId: requiredString(item.iconId, `native icon ${index} id`),
+        nativeSymbol: requiredString(item.nativeSymbol, `native icon ${index} symbol`),
+      };
+    }),
+    palettes: array(root.palettes, "native palettes").map((value, index) => {
+      const item = record(value, `native palette ${index}`);
+      return {
+        paletteId: requiredString(item.paletteId, `native palette ${index} id`),
+        nativeSymbol: requiredString(item.nativeSymbol, `native palette ${index} symbol`),
+        profiles: strings(item.profiles, `native palette ${index} profiles`),
+      };
+    }),
+    services: array(root.services, "native services").map((value, index) => {
+      const item = record(value, `native service ${index}`);
+      return {
+        serviceId: requiredString(item.serviceId, `native service ${index} id`),
+        nativePortId: requiredString(item.nativePortId, `native service ${index} port`),
+        profiles: strings(item.profiles, `native service ${index} profiles`),
+        inputPorts: strings(item.inputPorts, `native service ${index} inputs`),
+        outputPorts: strings(item.outputPorts, `native service ${index} outputs`),
+      };
+    }),
+  };
+}
+
+function record(value: unknown, owner: string): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${owner} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+function array(value: unknown, owner: string): readonly unknown[] {
+  if (!Array.isArray(value)) throw new Error(`${owner} must be an array`);
+  return value;
+}
+function strings(value: unknown, owner: string): readonly string[] {
+  return array(value, owner).map((item, index) => requiredString(item, `${owner} ${index}`));
+}
+function requiredString(value: unknown, owner: string): string {
+  if (typeof value !== "string" || value.trim() === "") throw new Error(`${owner} must be nonblank`);
+  return value;
+}

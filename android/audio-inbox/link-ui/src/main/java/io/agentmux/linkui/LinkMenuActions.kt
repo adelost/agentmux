@@ -1,45 +1,39 @@
 package io.agentmux.linkui
 
-import androidx.compose.ui.graphics.vector.ImageVector
-import com.adelost.designkit.ui.RingIcons
 import com.adelost.ringkit.ui.PhoneHeaderAction
 import com.adelost.ringkit.ui.RowSpec
+import io.agentmux.linkui.product.LinkProductSession
+import io.agentmux.linkui.product.generated.LinkMenuAction
+import io.agentmux.linkui.product.generated.LinkRoute
 
-enum class LinkMenuAction {
-    OPEN_SETTINGS,
+fun LinkMenuAction.dispatch(
+    product: LinkProductSession,
+    onNavigate: (LinkRoute) -> Unit,
+) = onNavigate(product.action(this).destination)
+
+fun linkSettingsHeaderAction(
+    product: LinkProductSession,
+    onAction: (LinkMenuAction) -> Unit,
+): PhoneHeaderAction {
+    val descriptor = product.action(LinkMenuAction.OPEN_SETTINGS)
+    return PhoneHeaderAction(
+        icon = product.icon(descriptor.iconId),
+        label = descriptor.title,
+        contentDescription = descriptor.contentDescription,
+        onTap = { onAction(descriptor.action) },
+    )
 }
 
-private data class LinkMenuActionSpec(
-    val action: LinkMenuAction,
-    val title: String,
-    val detail: String,
-    val contentDescription: String,
-    val icon: ImageVector,
-)
-
-private val settingsAction = LinkMenuActionSpec(
-    action = LinkMenuAction.OPEN_SETTINGS,
-    title = "SETTINGS",
-    detail = "CONNECTION & AUDIO",
-    contentDescription = "Open Link settings",
-    icon = RingIcons.Gear,
-)
-
-fun LinkMenuAction.dispatch(onOpenSettings: () -> Unit) = when (this) {
-    LinkMenuAction.OPEN_SETTINGS -> onOpenSettings()
+fun linkSettingsRow(
+    product: LinkProductSession,
+    onAction: (LinkMenuAction) -> Unit,
+): RowSpec {
+    val descriptor = product.action(LinkMenuAction.OPEN_SETTINGS)
+    return RowSpec(
+        key = descriptor.rowId,
+        title = descriptor.title,
+        sub = descriptor.detail,
+        icon = product.icon(descriptor.iconId),
+        onTap = { onAction(descriptor.action) },
+    )
 }
-
-fun linkSettingsHeaderAction(onAction: (LinkMenuAction) -> Unit) = PhoneHeaderAction(
-    icon = settingsAction.icon,
-    label = settingsAction.title,
-    contentDescription = settingsAction.contentDescription,
-    onTap = { onAction(settingsAction.action) },
-)
-
-fun linkSettingsRow(onAction: (LinkMenuAction) -> Unit) = RowSpec(
-    key = "settings",
-    title = settingsAction.title,
-    sub = settingsAction.detail,
-    icon = settingsAction.icon,
-    onTap = { onAction(settingsAction.action) },
-)

@@ -1,0 +1,1733 @@
+{
+  "artifacts": [
+    {
+      "id": "phone-full-ui",
+      "rendererRefs": [
+        "android-phone-compose"
+      ],
+      "requiredCapabilities": [
+        "ui.menu",
+        "ui.navigation",
+        "ui.component-tree"
+      ]
+    },
+    {
+      "id": "wear-full-ui",
+      "rendererRefs": [
+        "android-wear-compose"
+      ],
+      "requiredCapabilities": [
+        "ui.menu",
+        "ui.navigation",
+        "ui.component-tree"
+      ]
+    }
+  ],
+  "componentCatalog": [
+    {
+      "id": "target"
+    },
+    {
+      "id": "latest"
+    },
+    {
+      "id": "composer"
+    },
+    {
+      "id": "talk"
+    },
+    {
+      "id": "active-playback"
+    },
+    {
+      "id": "connection"
+    },
+    {
+      "id": "public-link"
+    },
+    {
+      "id": "preferences"
+    },
+    {
+      "id": "local-history"
+    },
+    {
+      "id": "updates"
+    },
+    {
+      "id": "dev-host"
+    },
+    {
+      "id": "recovery"
+    },
+    {
+      "id": "dev-preview"
+    }
+  ],
+  "componentFamilies": [
+    {
+      "family": {
+        "id": "link.home",
+        "trees": [
+          {
+            "mounts": [
+              {
+                "capacity": null,
+                "component": "target",
+                "id": "target",
+                "order": 0,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "talk",
+                "id": "talk",
+                "order": 1,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "latest",
+                "id": "latest",
+                "order": 2,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              }
+            ],
+            "surface": "round"
+          },
+          {
+            "mounts": [
+              {
+                "capacity": null,
+                "component": "target",
+                "id": "target",
+                "order": 0,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "latest",
+                "id": "latest",
+                "order": 1,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "composer",
+                "id": "composer",
+                "order": 2,
+                "priority": 0,
+                "region": "footer",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "talk",
+                "id": "talk",
+                "order": 3,
+                "priority": 0,
+                "region": "footer",
+                "requirement": {
+                  "kind": "required"
+                }
+              }
+            ],
+            "surface": "compact"
+          },
+          {
+            "mounts": [
+              {
+                "capacity": null,
+                "component": "target",
+                "id": "target",
+                "order": 0,
+                "priority": 0,
+                "region": "rail",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "latest",
+                "id": "latest",
+                "order": 1,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "composer",
+                "id": "composer",
+                "order": 2,
+                "priority": 0,
+                "region": "footer",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "talk",
+                "id": "talk",
+                "order": 3,
+                "priority": 0,
+                "region": "footer",
+                "requirement": {
+                  "kind": "required"
+                }
+              }
+            ],
+            "surface": "wide"
+          }
+        ]
+      },
+      "screen": "home"
+    },
+    {
+      "family": {
+        "id": "link.settings",
+        "trees": [
+          {
+            "mounts": [
+              {
+                "capacity": null,
+                "component": "connection",
+                "id": "connection",
+                "order": 0,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "updates",
+                "id": "updates",
+                "order": 1,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "dev-host",
+                "id": "dev-host",
+                "order": 2,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "fallback": "omit",
+                  "kind": "optional"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "recovery",
+                "id": "recovery",
+                "order": 3,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "fallback": "omit",
+                  "kind": "optional"
+                }
+              }
+            ],
+            "surface": "round"
+          },
+          {
+            "mounts": [
+              {
+                "capacity": null,
+                "component": "active-playback",
+                "id": "active-playback",
+                "order": 0,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "fallback": "omit",
+                  "kind": "optional"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "connection",
+                "id": "connection",
+                "order": 1,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "public-link",
+                "id": "public-link",
+                "order": 2,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "preferences",
+                "id": "preferences",
+                "order": 3,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "local-history",
+                "id": "local-history",
+                "order": 4,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "updates",
+                "id": "updates",
+                "order": 5,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "dev-host",
+                "id": "dev-host",
+                "order": 6,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "recovery",
+                "id": "recovery",
+                "order": 7,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "fallback": "omit",
+                  "kind": "optional"
+                }
+              }
+            ],
+            "surface": "compact"
+          },
+          {
+            "mounts": [
+              {
+                "capacity": null,
+                "component": "active-playback",
+                "id": "active-playback",
+                "order": 0,
+                "priority": 0,
+                "region": "rail",
+                "requirement": {
+                  "fallback": "omit",
+                  "kind": "optional"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "connection",
+                "id": "connection",
+                "order": 1,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "public-link",
+                "id": "public-link",
+                "order": 2,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "preferences",
+                "id": "preferences",
+                "order": 3,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "local-history",
+                "id": "local-history",
+                "order": 4,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "updates",
+                "id": "updates",
+                "order": 5,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "dev-host",
+                "id": "dev-host",
+                "order": 6,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
+                "component": "recovery",
+                "id": "recovery",
+                "order": 7,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "fallback": "omit",
+                  "kind": "optional"
+                }
+              }
+            ],
+            "surface": "wide"
+          }
+        ]
+      },
+      "screen": "settings"
+    },
+    {
+      "family": {
+        "id": "link.dev-host",
+        "trees": [
+          {
+            "mounts": [
+              {
+                "capacity": null,
+                "component": "dev-preview",
+                "id": "dev-preview",
+                "order": 0,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              }
+            ],
+            "surface": "round"
+          },
+          {
+            "mounts": [
+              {
+                "capacity": null,
+                "component": "dev-preview",
+                "id": "dev-preview",
+                "order": 0,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              }
+            ],
+            "surface": "compact"
+          },
+          {
+            "mounts": [
+              {
+                "capacity": null,
+                "component": "dev-preview",
+                "id": "dev-preview",
+                "order": 0,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              }
+            ],
+            "surface": "wide"
+          }
+        ]
+      },
+      "screen": "dev-host"
+    }
+  ],
+  "id": "agentmux-link",
+  "kind": "product-spec-ir",
+  "legos": {
+    "configs": [
+      {
+        "id": "link.capture-policy"
+      },
+      {
+        "id": "link.delivery-policy"
+      },
+      {
+        "id": "link.reply-policy"
+      },
+      {
+        "id": "link.playback-policy"
+      }
+    ],
+    "contracts": [
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "route",
+            "nullable": false,
+            "value": "string"
+          }
+        ],
+        "id": "link.route-command",
+        "kind": "event"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "route",
+            "nullable": false,
+            "value": "string"
+          }
+        ],
+        "id": "link.route-state",
+        "kind": "state"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "operation",
+            "nullable": false,
+            "value": "string"
+          }
+        ],
+        "id": "link.capture-command",
+        "kind": "event"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "phase",
+            "nullable": false,
+            "value": "string"
+          },
+          {
+            "clockDomain": "monotonic",
+            "name": "startedAtMonotonicMs",
+            "nullable": true,
+            "unit": "ms",
+            "value": "integer"
+          },
+          {
+            "clockDomain": "none",
+            "name": "byteCount",
+            "nullable": false,
+            "unit": "byte",
+            "value": "integer"
+          }
+        ],
+        "id": "link.capture-state",
+        "kind": "state"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "turnId",
+            "nullable": false,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "targetId",
+            "nullable": false,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "payloadRef",
+            "nullable": false,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "idempotencyKey",
+            "nullable": false,
+            "value": "string"
+          },
+          {
+            "clockDomain": "wall",
+            "name": "createdAtMs",
+            "nullable": false,
+            "unit": "ms",
+            "value": "integer"
+          },
+          {
+            "clockDomain": "monotonic",
+            "name": "capturedAtMonotonicMs",
+            "nullable": false,
+            "unit": "ms",
+            "value": "integer"
+          }
+        ],
+        "id": "link.captured-turn",
+        "kind": "snapshot"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "turnId",
+            "nullable": true,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "phase",
+            "nullable": false,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "offline",
+            "nullable": false,
+            "value": "boolean"
+          },
+          {
+            "clockDomain": "none",
+            "name": "idempotencyKey",
+            "nullable": true,
+            "value": "string"
+          },
+          {
+            "clockDomain": "wall",
+            "name": "retryAtMs",
+            "nullable": true,
+            "unit": "ms",
+            "value": "integer"
+          }
+        ],
+        "id": "link.delivery-state",
+        "kind": "state"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "turnId",
+            "nullable": false,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "targetId",
+            "nullable": false,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "idempotencyKey",
+            "nullable": false,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "sequence",
+            "nullable": false,
+            "value": "integer"
+          },
+          {
+            "clockDomain": "none",
+            "name": "durablyAccepted",
+            "nullable": false,
+            "value": "boolean"
+          },
+          {
+            "clockDomain": "wall",
+            "name": "acceptedAtMs",
+            "nullable": false,
+            "unit": "ms",
+            "value": "integer"
+          }
+        ],
+        "id": "link.accepted-turn",
+        "kind": "snapshot"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "turnId",
+            "nullable": true,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "phase",
+            "nullable": false,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "sequence",
+            "nullable": true,
+            "value": "integer"
+          },
+          {
+            "clockDomain": "none",
+            "name": "offline",
+            "nullable": false,
+            "value": "boolean"
+          }
+        ],
+        "id": "link.reply-state",
+        "kind": "state"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "turnId",
+            "nullable": false,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "sequence",
+            "nullable": false,
+            "value": "integer"
+          },
+          {
+            "clockDomain": "none",
+            "name": "body",
+            "nullable": false,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "audioRef",
+            "nullable": true,
+            "value": "string"
+          },
+          {
+            "clockDomain": "wall",
+            "name": "receivedAtMs",
+            "nullable": false,
+            "unit": "ms",
+            "value": "integer"
+          }
+        ],
+        "id": "link.ready-reply",
+        "kind": "snapshot"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "operation",
+            "nullable": false,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "turnId",
+            "nullable": false,
+            "value": "string"
+          }
+        ],
+        "id": "link.playback-command",
+        "kind": "event"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "turnId",
+            "nullable": true,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "phase",
+            "nullable": false,
+            "value": "string"
+          },
+          {
+            "clockDomain": "monotonic",
+            "name": "positionMs",
+            "nullable": false,
+            "unit": "ms",
+            "value": "integer"
+          },
+          {
+            "clockDomain": "monotonic",
+            "name": "durationMs",
+            "nullable": false,
+            "unit": "ms",
+            "value": "integer"
+          }
+        ],
+        "id": "link.playback-state",
+        "kind": "state"
+      }
+    ],
+    "id": "agentmux-link.graph",
+    "mounts": [
+      {
+        "config": {},
+        "id": "navigation",
+        "lego": {
+          "id": "link.navigation",
+          "inputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "route",
+                    "nullable": false,
+                    "value": "string"
+                  }
+                ],
+                "id": "link.route-command",
+                "kind": "event"
+              },
+              "id": "open"
+            }
+          ],
+          "outputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "route",
+                    "nullable": false,
+                    "value": "string"
+                  }
+                ],
+                "id": "link.route-state",
+                "kind": "state"
+              },
+              "id": "destination"
+            }
+          ],
+          "role": "adapter",
+          "runtime": {
+            "clockDomain": "none",
+            "contextInputs": [],
+            "durability": "transient",
+            "effects": [],
+            "lifetime": "instance",
+            "stateOwner": "instance"
+          }
+        }
+      },
+      {
+        "config": {
+          "policy": "link.capture-policy"
+        },
+        "id": "capture",
+        "lego": {
+          "id": "link.capture",
+          "inputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "operation",
+                    "nullable": false,
+                    "value": "string"
+                  }
+                ],
+                "id": "link.capture-command",
+                "kind": "event"
+              },
+              "id": "command"
+            }
+          ],
+          "outputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "phase",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "monotonic",
+                    "name": "startedAtMonotonicMs",
+                    "nullable": true,
+                    "unit": "ms",
+                    "value": "integer"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "byteCount",
+                    "nullable": false,
+                    "unit": "byte",
+                    "value": "integer"
+                  }
+                ],
+                "id": "link.capture-state",
+                "kind": "state"
+              },
+              "id": "status"
+            },
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "turnId",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "targetId",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "payloadRef",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "idempotencyKey",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "wall",
+                    "name": "createdAtMs",
+                    "nullable": false,
+                    "unit": "ms",
+                    "value": "integer"
+                  },
+                  {
+                    "clockDomain": "monotonic",
+                    "name": "capturedAtMonotonicMs",
+                    "nullable": false,
+                    "unit": "ms",
+                    "value": "integer"
+                  }
+                ],
+                "id": "link.captured-turn",
+                "kind": "snapshot"
+              },
+              "id": "captured"
+            }
+          ],
+          "role": "source",
+          "runtime": {
+            "clockDomain": "monotonic",
+            "contextInputs": [
+              "microphone.permission"
+            ],
+            "durability": "durable",
+            "effects": [
+              "audio.capture",
+              "storage.write"
+            ],
+            "lifetime": "operation",
+            "stateOwner": "external"
+          }
+        }
+      },
+      {
+        "config": {
+          "policy": "link.delivery-policy"
+        },
+        "id": "delivery",
+        "lego": {
+          "id": "link.delivery",
+          "inputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "turnId",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "targetId",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "payloadRef",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "idempotencyKey",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "wall",
+                    "name": "createdAtMs",
+                    "nullable": false,
+                    "unit": "ms",
+                    "value": "integer"
+                  },
+                  {
+                    "clockDomain": "monotonic",
+                    "name": "capturedAtMonotonicMs",
+                    "nullable": false,
+                    "unit": "ms",
+                    "value": "integer"
+                  }
+                ],
+                "id": "link.captured-turn",
+                "kind": "snapshot"
+              },
+              "id": "turn"
+            }
+          ],
+          "outputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "turnId",
+                    "nullable": true,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "phase",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "offline",
+                    "nullable": false,
+                    "value": "boolean"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "idempotencyKey",
+                    "nullable": true,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "wall",
+                    "name": "retryAtMs",
+                    "nullable": true,
+                    "unit": "ms",
+                    "value": "integer"
+                  }
+                ],
+                "id": "link.delivery-state",
+                "kind": "state"
+              },
+              "id": "status"
+            },
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "turnId",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "targetId",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "idempotencyKey",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "sequence",
+                    "nullable": false,
+                    "value": "integer"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "durablyAccepted",
+                    "nullable": false,
+                    "value": "boolean"
+                  },
+                  {
+                    "clockDomain": "wall",
+                    "name": "acceptedAtMs",
+                    "nullable": false,
+                    "unit": "ms",
+                    "value": "integer"
+                  }
+                ],
+                "id": "link.accepted-turn",
+                "kind": "snapshot"
+              },
+              "id": "accepted"
+            }
+          ],
+          "role": "adapter",
+          "runtime": {
+            "clockDomain": "wall",
+            "contextInputs": [
+              "network.connectivity"
+            ],
+            "durability": "durable",
+            "effects": [
+              "storage.write",
+              "transport.send",
+              "retry.schedule"
+            ],
+            "lifetime": "process",
+            "stateOwner": "external"
+          }
+        }
+      },
+      {
+        "config": {
+          "policy": "link.reply-policy"
+        },
+        "id": "reply",
+        "lego": {
+          "id": "link.reply",
+          "inputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "turnId",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "targetId",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "idempotencyKey",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "sequence",
+                    "nullable": false,
+                    "value": "integer"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "durablyAccepted",
+                    "nullable": false,
+                    "value": "boolean"
+                  },
+                  {
+                    "clockDomain": "wall",
+                    "name": "acceptedAtMs",
+                    "nullable": false,
+                    "unit": "ms",
+                    "value": "integer"
+                  }
+                ],
+                "id": "link.accepted-turn",
+                "kind": "snapshot"
+              },
+              "id": "accepted"
+            }
+          ],
+          "outputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "turnId",
+                    "nullable": true,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "phase",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "sequence",
+                    "nullable": true,
+                    "value": "integer"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "offline",
+                    "nullable": false,
+                    "value": "boolean"
+                  }
+                ],
+                "id": "link.reply-state",
+                "kind": "state"
+              },
+              "id": "status"
+            },
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "turnId",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "sequence",
+                    "nullable": false,
+                    "value": "integer"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "body",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "audioRef",
+                    "nullable": true,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "wall",
+                    "name": "receivedAtMs",
+                    "nullable": false,
+                    "unit": "ms",
+                    "value": "integer"
+                  }
+                ],
+                "id": "link.ready-reply",
+                "kind": "snapshot"
+              },
+              "id": "reply"
+            }
+          ],
+          "role": "adapter",
+          "runtime": {
+            "clockDomain": "wall",
+            "contextInputs": [
+              "network.connectivity"
+            ],
+            "durability": "durable",
+            "effects": [
+              "transport.receive",
+              "storage.write"
+            ],
+            "lifetime": "process",
+            "stateOwner": "external"
+          }
+        }
+      },
+      {
+        "config": {
+          "policy": "link.playback-policy"
+        },
+        "id": "playback",
+        "lego": {
+          "id": "link.playback",
+          "inputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "turnId",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "sequence",
+                    "nullable": false,
+                    "value": "integer"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "body",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "audioRef",
+                    "nullable": true,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "wall",
+                    "name": "receivedAtMs",
+                    "nullable": false,
+                    "unit": "ms",
+                    "value": "integer"
+                  }
+                ],
+                "id": "link.ready-reply",
+                "kind": "snapshot"
+              },
+              "id": "reply"
+            },
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "operation",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "turnId",
+                    "nullable": false,
+                    "value": "string"
+                  }
+                ],
+                "id": "link.playback-command",
+                "kind": "event"
+              },
+              "id": "command"
+            }
+          ],
+          "outputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "turnId",
+                    "nullable": true,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "phase",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "monotonic",
+                    "name": "positionMs",
+                    "nullable": false,
+                    "unit": "ms",
+                    "value": "integer"
+                  },
+                  {
+                    "clockDomain": "monotonic",
+                    "name": "durationMs",
+                    "nullable": false,
+                    "unit": "ms",
+                    "value": "integer"
+                  }
+                ],
+                "id": "link.playback-state",
+                "kind": "state"
+              },
+              "id": "status"
+            }
+          ],
+          "role": "consumer",
+          "runtime": {
+            "clockDomain": "monotonic",
+            "contextInputs": [
+              "audio.focus"
+            ],
+            "durability": "transient",
+            "effects": [
+              "audio.playback"
+            ],
+            "lifetime": "process",
+            "stateOwner": "external"
+          }
+        }
+      }
+    ],
+    "wiring": [
+      {
+        "from": "capture.captured",
+        "to": "delivery.turn"
+      },
+      {
+        "from": "delivery.accepted",
+        "to": "reply.accepted"
+      },
+      {
+        "from": "reply.reply",
+        "to": "playback.reply"
+      }
+    ]
+  },
+  "link": {
+    "artifacts": [
+      {
+        "id": "phone-full-ui",
+        "surfaces": [
+          "round",
+          "compact",
+          "wide"
+        ]
+      },
+      {
+        "id": "wear-full-ui",
+        "surfaces": [
+          "round"
+        ]
+      }
+    ],
+    "components": [
+      {
+        "artifacts": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "iconId": "target",
+        "id": "target",
+        "rendererId": "status"
+      },
+      {
+        "artifacts": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "iconId": "speaker",
+        "id": "latest",
+        "rendererId": "conversation-feed"
+      },
+      {
+        "artifacts": [
+          "phone-full-ui"
+        ],
+        "iconId": "pencil",
+        "id": "composer",
+        "rendererId": "composer"
+      },
+      {
+        "artifacts": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "iconId": "record",
+        "id": "talk",
+        "rendererId": "capture"
+      },
+      {
+        "artifacts": [
+          "phone-full-ui"
+        ],
+        "iconId": "play",
+        "id": "active-playback",
+        "rendererId": "active-playback"
+      },
+      {
+        "artifacts": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "iconId": "wifi",
+        "id": "connection",
+        "rendererId": "connection"
+      },
+      {
+        "artifacts": [
+          "phone-full-ui"
+        ],
+        "iconId": "link",
+        "id": "public-link",
+        "rendererId": "public-link"
+      },
+      {
+        "artifacts": [
+          "phone-full-ui"
+        ],
+        "iconId": "speaker",
+        "id": "preferences",
+        "rendererId": "preferences"
+      },
+      {
+        "artifacts": [
+          "phone-full-ui"
+        ],
+        "iconId": "activity",
+        "id": "local-history",
+        "rendererId": "local-history"
+      },
+      {
+        "artifacts": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "iconId": "download",
+        "id": "updates",
+        "rendererId": "updates"
+      },
+      {
+        "artifacts": [
+          "phone-full-ui"
+        ],
+        "iconId": "phone",
+        "id": "dev-host",
+        "rendererId": "dev-host"
+      },
+      {
+        "artifacts": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "iconId": "warning",
+        "id": "recovery",
+        "rendererId": "recovery"
+      },
+      {
+        "artifacts": [
+          "phone-full-ui"
+        ],
+        "iconId": "phone",
+        "id": "dev-preview",
+        "rendererId": "dev-preview"
+      }
+    ],
+    "menuActions": [
+      {
+        "a11y": "Open Link settings",
+        "artifacts": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "destination": "settings",
+        "detail": "CONNECTION & AUDIO",
+        "iconId": "gear",
+        "id": "open-settings",
+        "rowId": "settings",
+        "title": "SETTINGS"
+      }
+    ],
+    "palettes": [
+      {
+        "artifacts": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "id": "graphite"
+      }
+    ],
+    "routes": [
+      {
+        "artifacts": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "iconId": "link",
+        "id": "home",
+        "title": "AGENTMUX LINK"
+      },
+      {
+        "artifacts": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "iconId": "gear",
+        "id": "settings",
+        "title": "LINK SETTINGS"
+      },
+      {
+        "artifacts": [
+          "phone-full-ui"
+        ],
+        "iconId": "phone",
+        "id": "dev-host",
+        "title": "DEV HOST"
+      }
+    ]
+  },
+  "productSpecVersion": "0.3.24",
+  "rendererBindings": [
+    {
+      "capabilities": [
+        "ui.menu",
+        "ui.navigation",
+        "ui.component-tree"
+      ],
+      "id": "android-phone-compose"
+    },
+    {
+      "capabilities": [
+        "ui.menu",
+        "ui.navigation",
+        "ui.component-tree"
+      ],
+      "id": "android-wear-compose"
+    }
+  ],
+  "schemaVersion": 1,
+  "ui": [
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "id": "link.navigation",
+      "kind": "menu-entry",
+      "ports": {
+        "action": "navigation.open",
+        "state": "navigation.destination"
+      },
+      "requiredCapabilities": [
+        "ui.menu",
+        "ui.navigation"
+      ]
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "id": "link.capture",
+      "kind": "component-entry",
+      "ports": {
+        "action": "capture.command",
+        "state": "capture.status"
+      },
+      "requiredCapabilities": [
+        "ui.component-tree"
+      ]
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "id": "link.delivery",
+      "kind": "component-entry",
+      "ports": {
+        "state": "delivery.status"
+      },
+      "requiredCapabilities": [
+        "ui.component-tree"
+      ]
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "id": "link.reply",
+      "kind": "component-entry",
+      "ports": {
+        "state": "reply.status"
+      },
+      "requiredCapabilities": [
+        "ui.component-tree"
+      ]
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "id": "link.playback",
+      "kind": "component-entry",
+      "ports": {
+        "action": "playback.command",
+        "state": "playback.status"
+      },
+      "requiredCapabilities": [
+        "ui.component-tree"
+      ]
+    }
+  ]
+}
