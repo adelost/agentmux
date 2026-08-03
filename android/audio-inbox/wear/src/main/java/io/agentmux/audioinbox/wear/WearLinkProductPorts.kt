@@ -1,6 +1,8 @@
 package io.agentmux.audioinbox.wear
 
 import io.agentmux.linkcore.CapturePhase
+import io.agentmux.linkcore.CaptureOperation
+import io.agentmux.linkcore.PlaybackOperation
 import io.agentmux.linkui.product.LinkNavigationNativePort
 import io.agentmux.linkui.product.LinkStatePlaybackServicePort
 import io.agentmux.linkui.product.conversationState
@@ -9,6 +11,7 @@ import io.agentmux.linkui.product.generated.ConversationServicePort
 import io.agentmux.linkui.product.generated.LinkCaptureCommand
 import io.agentmux.linkui.product.generated.LinkCapturedTurn
 import io.agentmux.linkui.product.generated.LinkCaptureState
+import io.agentmux.linkui.product.generated.LinkCapturePhase
 import io.agentmux.linkui.product.generated.LinkNativePortGraph
 import io.agentmux.linkui.product.generated.LinkPlaybackCommand
 import io.agentmux.linkui.product.generated.LinkRoute
@@ -16,12 +19,12 @@ import io.agentmux.linkui.product.generated.LinkRoute
 internal class WearLinkProductPorts(
     private val controller: WearMailboxController,
 ) : LinkNativePortGraph {
-    private var routeId = LinkRoute.HOME.id
+    private var route = LinkRoute.HOME
     private val payloads = WearCapturedPayloads()
 
     override val navigation = LinkNavigationNativePort(
-        current = { routeId },
-        navigate = { routeId = it },
+        current = { route },
+        navigate = { route = it },
     )
     override val capture: CaptureServicePort = WearCaptureServicePort(controller, payloads)
     override val conversation: ConversationServicePort =
@@ -37,22 +40,21 @@ private class WearCaptureServicePort(
     private val payloads: WearCapturedPayloads,
 ) : CaptureServicePort {
     override fun command(value: LinkCaptureCommand) {
-        when (value.operation) {
-            "BEGIN" -> {
+        when (CaptureOperation.valueOf(value.operation.name)) {
+            CaptureOperation.BEGIN -> {
                 payloads.clear()
                 controller.beginCapture()
             }
-            "RELEASE" -> release()
-            "CANCEL" -> {
+            CaptureOperation.RELEASE -> release()
+            CaptureOperation.CANCEL -> {
                 payloads.clear()
                 controller.cancelCapture()
             }
-            else -> error("Unsupported Link capture operation '${value.operation}'")
         }
     }
 
     override fun status(): LinkCaptureState = LinkCaptureState(
-        phase = controller.state.value.capture.name,
+        phase = LinkCapturePhase.valueOf(controller.state.value.capture.name),
         startedAtMs = controller.state.value.captureStartedAtMs.takeIf { it > 0L },
         byteCount = controller.recordedBytes(),
     )
@@ -121,9 +123,11 @@ private class WearCapturedPayloads {
 }
 
 private fun WearMailboxController.handlePlayback(command: LinkPlaybackCommand) {
-    when (command.operation) {
-        "PLAY" -> playTurn(command.turnId)
-        "STOP" -> stopPlayback()
-        else -> error("Unsupported Wear playback operation '${command.operation}'")
+    when (PlaybackOperation.valueOf(command.operation.name)) {
+        PlaybackOperation.PLAY -> playTurn(command.turnId)
+        PlaybackOperation.STOP -> stopPlayback()
+        PlaybackOperation.PAUSE,
+        PlaybackOperation.RESUME,
+        -> error("Wear playback does not support ${command.operation.id}")
     }
 }

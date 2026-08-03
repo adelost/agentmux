@@ -1,21 +1,21 @@
-import { defineLegoSpec, field, mount, port } from "@v1d/product-spec";
+import { defineLegoSpec, field, finiteValueRef, mount, port } from "@v1d/product-spec";
 
 const routeCommand = {
   id: "link.route-command", kind: "event",
-  fields: [field("route", "string")],
+  fields: [field("route", finiteValueRef("link.route"))],
 } as const;
 const routeState = {
   id: "link.route-state", kind: "state",
-  fields: [field("route", "string")],
+  fields: [field("route", finiteValueRef("link.route"))],
 } as const;
 const captureCommand = {
   id: "link.capture-command", kind: "event",
-  fields: [field("operation", "string")],
+  fields: [field("operation", finiteValueRef("link.capture-operation"))],
 } as const;
 const captureState = {
   id: "link.capture-state", kind: "state",
   fields: [
-    field("phase", "string"),
+    field("phase", finiteValueRef("link.capture-phase")),
     field("startedAtMs", "integer", { nullable: true, unit: "ms", clockDomain: "wall" }),
     field("byteCount", "integer", { unit: "byte" }),
   ],
@@ -32,18 +32,20 @@ const conversationState = {
   id: "link.conversation-state", kind: "state",
   fields: [
     field("turnId", "string", { nullable: true }),
-    field("deliveryPhase", "string"), field("replyPhase", "string"),
+    field("deliveryPhase", finiteValueRef("link.delivery-phase"), { nullable: true }),
+    field("replyPhase", finiteValueRef("link.reply-phase"), { nullable: true }),
     field("offline", "boolean"), field("idempotencyKey", "string", { nullable: true }),
   ],
 } as const;
 const playbackCommand = {
   id: "link.playback-command", kind: "event",
-  fields: [field("operation", "string"), field("turnId", "string")],
+  fields: [field("operation", finiteValueRef("link.playback-operation")), field("turnId", "string")],
 } as const;
 const playbackState = {
   id: "link.playback-state", kind: "state",
   fields: [
-    field("turnId", "string", { nullable: true }), field("phase", "string"),
+    field("turnId", "string", { nullable: true }),
+    field("phase", finiteValueRef("link.playback-phase")),
     field("positionMs", "integer", { unit: "ms" }),
     field("durationMs", "integer", { unit: "ms" }),
   ],

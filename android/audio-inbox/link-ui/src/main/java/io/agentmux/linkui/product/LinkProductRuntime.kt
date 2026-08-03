@@ -1,8 +1,11 @@
 package io.agentmux.linkui.product
 
 import io.agentmux.linkui.product.generated.LinkCaptureCommand
+import io.agentmux.linkui.product.generated.LinkCaptureOperation
+import io.agentmux.linkui.product.generated.LinkCapturePhase
 import io.agentmux.linkui.product.generated.LinkNativePortGraph
 import io.agentmux.linkui.product.generated.LinkPlaybackCommand
+import io.agentmux.linkui.product.generated.LinkPlaybackOperation
 import io.agentmux.linkui.product.generated.LinkProductWiring
 import io.agentmux.linkui.product.generated.LinkRoute
 import io.agentmux.linkui.product.generated.LinkRouteCommand
@@ -12,17 +15,17 @@ class LinkProductRuntime(
     private val ports: LinkNativePortGraph,
 ) {
     fun open(route: LinkRoute): LinkRoute {
-        ports.navigation.open(LinkRouteCommand(route.id))
-        return LinkRoute.entries.single { it.id == ports.navigation.destination().route }
+        ports.navigation.open(LinkRouteCommand(route))
+        return ports.navigation.destination().route
     }
 
     fun beginCapture(): Boolean {
-        ports.capture.command(LinkCaptureCommand(CAPTURE_BEGIN))
-        return ports.capture.status().phase == CAPTURE_LISTENING
+        ports.capture.command(LinkCaptureCommand(LinkCaptureOperation.BEGIN))
+        return ports.capture.status().phase == LinkCapturePhase.LISTENING
     }
 
     fun releaseCapture() {
-        ports.capture.command(LinkCaptureCommand(CAPTURE_RELEASE))
+        ports.capture.command(LinkCaptureCommand(LinkCaptureOperation.RELEASE))
         ports.capture.captured()?.let { captured ->
             check(
                 LinkProductWiring.CAPTURE_CAPTURED_TO_CONVERSATION_TURN in
@@ -33,29 +36,18 @@ class LinkProductRuntime(
     }
 
     fun cancelCapture() {
-        ports.capture.command(LinkCaptureCommand(CAPTURE_CANCEL))
+        ports.capture.command(LinkCaptureCommand(LinkCaptureOperation.CANCEL))
     }
 
-    fun play(turnId: String) = playback(PLAYBACK_PLAY, turnId)
+    fun play(turnId: String) = playback(LinkPlaybackOperation.PLAY, turnId)
 
-    fun pause(turnId: String) = playback(PLAYBACK_PAUSE, turnId)
+    fun pause(turnId: String) = playback(LinkPlaybackOperation.PAUSE, turnId)
 
-    fun resume(turnId: String) = playback(PLAYBACK_RESUME, turnId)
+    fun resume(turnId: String) = playback(LinkPlaybackOperation.RESUME, turnId)
 
-    fun stop(turnId: String) = playback(PLAYBACK_STOP, turnId)
+    fun stop(turnId: String) = playback(LinkPlaybackOperation.STOP, turnId)
 
-    private fun playback(operation: String, turnId: String) {
+    private fun playback(operation: LinkPlaybackOperation, turnId: String) {
         ports.playback.command(LinkPlaybackCommand(operation, turnId))
-    }
-
-    private companion object {
-        const val CAPTURE_BEGIN = "BEGIN"
-        const val CAPTURE_RELEASE = "RELEASE"
-        const val CAPTURE_CANCEL = "CANCEL"
-        const val CAPTURE_LISTENING = "LISTENING"
-        const val PLAYBACK_PLAY = "PLAY"
-        const val PLAYBACK_PAUSE = "PAUSE"
-        const val PLAYBACK_RESUME = "RESUME"
-        const val PLAYBACK_STOP = "STOP"
     }
 }

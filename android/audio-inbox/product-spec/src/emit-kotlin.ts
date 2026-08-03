@@ -23,6 +23,13 @@ function emitKotlin(product: AgentmuxLinkProductIr): string {
     `    ${enumName(item.id)}(${str(item.id)}, setOf(${item.serves.map(str).join(", ")})),`).join("\n");
   const routes = product.link.routes.map((item) =>
     `    ${enumName(item.id)}(${str(item.id)}),`).join("\n");
+  const finiteEnums = product.finiteValues
+    .filter(({ id }) => id !== "link.route")
+    .map(({ id, values }) => `enum class ${contractName(id)}(val id: String) {\n${values
+      .map((value) => `    ${enumName(value)}(${str(value)}),`).join("\n")}\n}`)
+    .join("\n");
+  const finiteValues = product.finiteValues.map(({ id, values }) =>
+    `        LinkFiniteValueDeclaration(${str(id)}, setOf(${values.map(str).join(", ")})),`).join("\n");
   const actions = product.link.menuActions.map((item) =>
     `    ${enumName(item.id)}(${str(item.id)}),`).join("\n");
   const componentIds = product.componentCatalog.map((item) =>
@@ -51,7 +58,7 @@ function emitKotlin(product: AgentmuxLinkProductIr): string {
     if (native === undefined) throw new Error(`Service '${item.id}' has no native port binding`);
     return `        LinkServiceDescriptor(${str(item.id)}, ${str(native.nativePortId)}, listOf(${inputs}), listOf(${outputs}), ${str(runtime.stateOwner)}, ${str(runtime.lifetime)}, ${str(runtime.durability)}, ${str(runtime.clockDomain)}, listOf(${runtime.contextInputs.map(str).join(", ")}), listOf(${runtime.effects.map(str).join(", ")})),`;
   }).join("\n");
-  const contracts = product.legos.contracts.map(emitContract).join("\n");
+  const contracts = product.legos.contracts.map((contract) => emitContract(product, contract)).join("\n");
   const ports = product.legos.mounts.map((mount) => {
     const members = [
       ...mount.lego.inputs.map((port) =>
@@ -81,6 +88,7 @@ ${profiles}
 enum class LinkRoute(val id: String) {
 ${routes}
 }
+${finiteEnums}
 enum class LinkMenuAction(val id: String) {
 ${actions}
 }
@@ -99,6 +107,7 @@ data class LinkComponentMount(val component: LinkComponentId, val region: String
 data class LinkComponentTree(val route: LinkRoute, val surface: String, val mounts: List<LinkComponentMount>)
 data class LinkServiceDescriptor(val id: String, val nativePortId: String, val inputPorts: List<String>, val outputPorts: List<String>, val stateOwner: String, val lifetime: String, val durability: String, val clockDomain: String, val contextInputs: List<String>, val effects: List<String>)
 data class LinkServiceEdge(val fromService: String, val fromPort: String, val toService: String, val toPort: String)
+data class LinkFiniteValueDeclaration(val id: String, val values: Set<String>)
 
 object LinkProductWiring {
 ${edgeConstants}
@@ -125,6 +134,9 @@ ${trees}
     val services: List<LinkServiceDescriptor> = listOf(
 ${services}
     )
+    val finiteValues: List<LinkFiniteValueDeclaration> = listOf(
+${finiteValues}
+    )
     fun route(route: LinkRoute): LinkRouteDescriptor = routes.single { it.route == route }
     fun action(action: LinkMenuAction): LinkMenuActionDescriptor = menuActions.single { it.action == action }
     fun component(id: LinkComponentId): LinkComponentDescriptor = components.single { it.id == id }
@@ -133,15 +145,20 @@ ${services}
 `;
 }
 
-function emitContract(contract: LegoContract): string {
+function emitContract(product: AgentmuxLinkProductIr, contract: LegoContract): string {
   const fields = contract.fields.map((item) =>
-    `    val ${item.name}: ${kotlinType(item)}`).join(",\n");
+    `    val ${item.name}: ${kotlinType(product, item)}`).join(",\n");
   return `data class ${contractName(contract.id)}(\n${fields},\n)`;
 }
 
-function kotlinType(field: LegoField): string {
+function kotlinType(product: AgentmuxLinkProductIr, field: LegoField): string {
   if (typeof field.value !== "string") {
-    throw new Error(`Contract field '${field.name}' uses unsupported value ref '${field.value.ref}'`);
+    const finite = product.finiteValues.find(({ id }) => id === field.value.ref);
+    if (finite === undefined || field.value.finite !== true) {
+      throw new Error(`Contract field '${field.name}' uses unsupported value ref '${field.value.ref}'`);
+    }
+    const type = field.value.ref === "link.route" ? "LinkRoute" : contractName(field.value.ref);
+    return `${type}${field.nullable ? "?" : ""}`;
   }
   const base = ({ string: "String", integer: "Long", number: "Double", boolean: "Boolean" } as const)[field.value];
   return `${base}${field.nullable ? "?" : ""}`;

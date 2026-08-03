@@ -4,6 +4,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.adelost.designkit.ui.GraphiteTokens
 import com.adelost.designkit.ui.RingIcons
+import io.agentmux.linkcore.CaptureOperation
+import io.agentmux.linkcore.CapturePhase
+import io.agentmux.linkcore.DeliveryPhase
+import io.agentmux.linkcore.PlaybackOperation
+import io.agentmux.linkcore.PlaybackPhase
+import io.agentmux.linkcore.ReplyPhase
 
 const val LINK_PHONE_PROFILE = "phone-full-ui"
 const val LINK_WEAR_PROFILE = "wear-full-ui"
@@ -31,6 +37,12 @@ enum class LinkNativeServicePort(val id: String) {
     PLAYBACK("link.playback.port"),
 }
 
+enum class LinkNativeRoute(val id: String) {
+    HOME("home"),
+    SETTINGS("settings"),
+    DEV_HOST("dev-host"),
+}
+
 data class LinkNativeComponentBinding(
     val componentId: String,
     val renderer: LinkNativeComponentRenderer,
@@ -49,6 +61,11 @@ data class LinkNativeServiceBinding(
     val profiles: Set<String>,
     val inputPorts: Set<String>,
     val outputPorts: Set<String>,
+)
+
+data class LinkNativeFiniteValueBinding(
+    val id: String,
+    val values: Set<String>,
 )
 
 /**
@@ -104,6 +121,16 @@ object LinkNativeBindings {
         service("playback", LinkNativeServicePort.PLAYBACK, setOf("command"), setOf("status")),
     )
 
+    val finiteValues: List<LinkNativeFiniteValueBinding> = listOf(
+        LinkNativeFiniteValueBinding("link.route", LinkNativeRoute.entries.mapTo(linkedSetOf()) { it.id }),
+        finiteValues("link.capture-operation", CaptureOperation.entries.toTypedArray()),
+        finiteValues("link.capture-phase", CapturePhase.entries.toTypedArray()),
+        finiteValues("link.delivery-phase", DeliveryPhase.entries.toTypedArray()),
+        finiteValues("link.reply-phase", ReplyPhase.entries.toTypedArray()),
+        finiteValues("link.playback-operation", PlaybackOperation.entries.toTypedArray()),
+        finiteValues("link.playback-phase", PlaybackPhase.entries.toTypedArray()),
+    )
+
     fun requireComponent(componentId: String): LinkNativeComponentBinding =
         requireNotNull(components.singleOrNull { it.componentId == componentId }) {
             "No native Link component binding for $componentId"
@@ -129,4 +156,7 @@ object LinkNativeBindings {
         inputs: Set<String>,
         outputs: Set<String>,
     ) = LinkNativeServiceBinding(id, port, both, inputs, outputs)
+
+    private fun <E : Enum<E>> finiteValues(id: String, values: Array<E>) =
+        LinkNativeFiniteValueBinding(id, values.mapTo(linkedSetOf()) { it.name })
 }

@@ -77,6 +77,12 @@ class LinkProductSession(
             require(native.outputPorts == declared.outputPorts.toSet())
             require(artifactProfile.id in native.profiles)
         }
+        require(LinkProductManifest.finiteValues.map { it.id }.toSet() ==
+            LinkNativeBindings.finiteValues.map { it.id }.toSet())
+        LinkProductManifest.finiteValues.forEach { declared ->
+            val native = LinkNativeBindings.finiteValues.single { it.id == declared.id }
+            require(declared.values == native.values)
+        }
         LinkComponentId.entries.forEach { LinkProductManifest.component(it) }
     }
 }

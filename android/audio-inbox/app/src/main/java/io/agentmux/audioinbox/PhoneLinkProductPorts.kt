@@ -1,6 +1,8 @@
 package io.agentmux.audioinbox
 
 import io.agentmux.linkcore.CapturePhase
+import io.agentmux.linkcore.CaptureOperation
+import io.agentmux.linkcore.PlaybackOperation
 import io.agentmux.linkui.product.LinkNavigationNativePort
 import io.agentmux.linkui.product.LinkStatePlaybackServicePort
 import io.agentmux.linkui.product.conversationState
@@ -11,12 +13,14 @@ import io.agentmux.linkui.product.generated.LinkCapturedTurn
 import io.agentmux.linkui.product.generated.LinkCaptureState
 import io.agentmux.linkui.product.generated.LinkNativePortGraph
 import io.agentmux.linkui.product.generated.LinkPlaybackCommand
+import io.agentmux.linkui.product.generated.LinkCapturePhase
+import io.agentmux.linkui.product.generated.LinkRoute
 
 internal class PhoneLinkProductPorts(
     coordinator: LinkCoordinator,
     recorder: PushToTalkRecorder,
-    currentRoute: () -> String,
-    navigate: (String) -> Unit,
+    currentRoute: () -> LinkRoute,
+    navigate: (LinkRoute) -> Unit,
 ) : LinkNativePortGraph {
     private val payloads = PhoneCapturedPayloads()
 
@@ -40,20 +44,19 @@ private class PhoneCaptureServicePort(
     private val payloads: PhoneCapturedPayloads,
 ) : CaptureServicePort {
     override fun command(value: LinkCaptureCommand) {
-        when (value.operation) {
-            "BEGIN" -> begin()
-            "RELEASE" -> release()
-            "CANCEL" -> {
+        when (CaptureOperation.valueOf(value.operation.name)) {
+            CaptureOperation.BEGIN -> begin()
+            CaptureOperation.RELEASE -> release()
+            CaptureOperation.CANCEL -> {
                 payloads.clear()
                 recorder.cancel()
                 coordinator.capture(CapturePhase.FAILED)
             }
-            else -> error("Unsupported Link capture operation '${value.operation}'")
         }
     }
 
     override fun status(): LinkCaptureState = LinkCaptureState(
-        phase = coordinator.state.value.capture.name,
+        phase = LinkCapturePhase.valueOf(coordinator.state.value.capture.name),
         startedAtMs = coordinator.state.value.captureStartedAtMs.takeIf { it > 0L },
         byteCount = recorder.currentBytes(),
     )
@@ -132,11 +135,10 @@ private class PhoneCapturedPayloads {
 }
 
 private fun LinkCoordinator.handlePlayback(command: LinkPlaybackCommand) {
-    when (command.operation) {
-        "PLAY" -> playReply(command.turnId)
-        "PAUSE" -> pauseAudio()
-        "RESUME" -> resumeAudio()
-        "STOP" -> stopAudio()
-        else -> error("Unsupported Link playback operation '${command.operation}'")
+    when (PlaybackOperation.valueOf(command.operation.name)) {
+        PlaybackOperation.PLAY -> playReply(command.turnId)
+        PlaybackOperation.PAUSE -> pauseAudio()
+        PlaybackOperation.RESUME -> resumeAudio()
+        PlaybackOperation.STOP -> stopAudio()
     }
 }

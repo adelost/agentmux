@@ -1,4 +1,4 @@
-export const LINK_NATIVE_REGISTRY_SCHEMA_VERSION = 1 as const;
+export const LINK_NATIVE_REGISTRY_SCHEMA_VERSION = 2 as const;
 
 export interface LinkNativeRegistry {
   readonly stage: "native-export";
@@ -13,6 +13,7 @@ export interface LinkNativeRegistry {
     serviceId: string; nativePortId: string; profiles: readonly string[];
     inputPorts: readonly string[]; outputPorts: readonly string[];
   }[];
+  readonly finiteValues: readonly { id: string; values: readonly string[] }[];
 }
 
 export function decodeLinkNativeRegistry(raw: unknown): LinkNativeRegistry {
@@ -49,6 +50,13 @@ export function decodeLinkNativeRegistry(raw: unknown): LinkNativeRegistry {
         profiles: strings(item.profiles, `native service ${index} profiles`),
         inputPorts: strings(item.inputPorts, `native service ${index} inputs`),
         outputPorts: strings(item.outputPorts, `native service ${index} outputs`),
+      };
+    }),
+    finiteValues: array(root.finiteValues, "native finite values").map((value, index) => {
+      const item = record(value, `native finite value ${index}`);
+      return {
+        id: requiredString(item.id, `native finite value ${index} id`),
+        values: strings(item.values, `native finite value ${index} values`),
       };
     }),
   };
