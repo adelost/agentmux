@@ -28,33 +28,12 @@ const capturedTurn = {
     field("createdAtMs", "integer", { unit: "ms", clockDomain: "wall" }),
   ],
 } as const;
-const deliveryState = {
-  id: "link.delivery-state", kind: "state",
+const conversationState = {
+  id: "link.conversation-state", kind: "state",
   fields: [
-    field("turnId", "string", { nullable: true }), field("phase", "string"),
+    field("turnId", "string", { nullable: true }),
+    field("deliveryPhase", "string"), field("replyPhase", "string"),
     field("offline", "boolean"), field("idempotencyKey", "string", { nullable: true }),
-  ],
-} as const;
-const acceptedTurn = {
-  id: "link.accepted-turn", kind: "snapshot",
-  fields: [
-    field("turnId", "string"), field("targetId", "string"), field("idempotencyKey", "string"),
-    field("durablyAccepted", "boolean"),
-  ],
-} as const;
-const replyState = {
-  id: "link.reply-state", kind: "state",
-  fields: [
-    field("turnId", "string", { nullable: true }), field("phase", "string"),
-    field("offline", "boolean"),
-  ],
-} as const;
-const readyReply = {
-  id: "link.ready-reply", kind: "snapshot",
-  fields: [
-    field("turnId", "string"), field("body", "string"),
-    field("audioRef", "string", { nullable: true }),
-    field("receivedAtMs", "integer", { unit: "ms", clockDomain: "wall" }),
   ],
 } as const;
 const playbackCommand = {
@@ -90,21 +69,15 @@ export const captureService = defineLegoSpec({
   outputs: [port("status", captureState), port("captured", capturedTurn)],
   runtime: runtime("external", "operation", "durable", "monotonic", ["microphone.permission"], ["audio.capture", "storage.write"]),
 } as const);
-export const deliveryService = defineLegoSpec({
-  id: "link.delivery", role: "adapter",
+export const conversationService = defineLegoSpec({
+  id: "link.conversation", role: "adapter",
   inputs: [port("turn", capturedTurn)],
-  outputs: [port("status", deliveryState), port("accepted", acceptedTurn)],
-  runtime: runtime("external", "process", "durable", "wall", ["network.connectivity"], ["storage.write", "transport.send", "retry.schedule"]),
-} as const);
-export const replyService = defineLegoSpec({
-  id: "link.reply", role: "adapter",
-  inputs: [port("accepted", acceptedTurn)],
-  outputs: [port("status", replyState), port("reply", readyReply)],
-  runtime: runtime("external", "process", "durable", "wall", ["network.connectivity"], ["transport.receive", "storage.write"]),
+  outputs: [port("status", conversationState)],
+  runtime: runtime("external", "process", "durable", "wall", ["network.connectivity"], ["storage.write", "transport.send", "transport.receive", "retry.schedule"]),
 } as const);
 export const playbackService = defineLegoSpec({
   id: "link.playback", role: "consumer",
-  inputs: [port("reply", readyReply), port("command", playbackCommand)],
+  inputs: [port("command", playbackCommand)],
   outputs: [port("status", playbackState)],
   runtime: runtime("external", "process", "transient", "monotonic", ["audio.focus"], ["audio.playback"]),
 } as const);
@@ -112,12 +85,11 @@ export const playbackService = defineLegoSpec({
 export const linkServiceMounts = [
   mount("navigation", navigationService),
   mount("capture", captureService, { policy: "link.capture-policy" }),
-  mount("delivery", deliveryService, { policy: "link.delivery-policy" }),
-  mount("reply", replyService, { policy: "link.reply-policy" }),
+  mount("conversation", conversationService, { policy: "link.conversation-policy" }),
   mount("playback", playbackService, { policy: "link.playback-policy" }),
 ] as const;
 
 export const linkServiceConfigs = [
-  { id: "link.capture-policy" }, { id: "link.delivery-policy" },
-  { id: "link.reply-policy" }, { id: "link.playback-policy" },
+  { id: "link.capture-policy" }, { id: "link.conversation-policy" },
+  { id: "link.playback-policy" },
 ] as const;

@@ -12,22 +12,22 @@ const registry = decodeLinkNativeRegistry(
 );
 
 test("one Link product drives Phone and Wear with a closed native graph", () => {
-  const product = compileAgentmuxLinkProduct(registry, "0.3.24");
+  const product = compileAgentmuxLinkProduct(registry, "0.3.25");
   assert.deepEqual(product.artifacts.map(({ id }) => id), ["phone-full-ui", "wear-full-ui"]);
   assert.equal(product.componentFamilies.length, 3);
-  assert.equal(product.legos.mounts.length, 5);
+  assert.equal(product.legos.mounts.length, 4);
   assert.deepEqual(product.legos.wiring, [
-    { from: "capture.captured", to: "delivery.turn" },
-    { from: "delivery.accepted", to: "reply.accepted" },
-    { from: "reply.reply", to: "playback.reply" },
+    { from: "capture.captured", to: "conversation.turn" },
   ]);
-  assert.equal(product.legos.mounts.find(({ id }) => id === "delivery")?.lego.runtime.durability, "durable");
+  assert.equal(product.legos.mounts.find(({ id }) => id === "conversation")?.lego.runtime.durability, "durable");
+  assert.equal(product.assetCatalogRef.id, "circlekit");
+  assert.equal(product.palette.variants[0]?.id, "graphite");
   assert.ok(product.link.routes.every(({ artifacts }) => artifacts.length > 0));
 });
 
 test("missing native component fails before emission", () => {
   assert.throws(
-    () => compileAgentmuxLinkProduct({ ...registry, components: registry.components.slice(1) }, "0.3.24"),
+    () => compileAgentmuxLinkProduct({ ...registry, components: registry.components.slice(1) }, "0.3.25"),
     /component\/native binding missing/,
   );
 });

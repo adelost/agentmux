@@ -38,8 +38,7 @@
   "services": [
     { "serviceId": "navigation", "nativePortId": "link.navigation.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["open"], "outputPorts": ["destination"] },
     { "serviceId": "capture", "nativePortId": "link.capture.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["command"], "outputPorts": ["status", "captured"] },
-    { "serviceId": "delivery", "nativePortId": "link.delivery.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["turn"], "outputPorts": ["status", "accepted"] },
-    { "serviceId": "reply", "nativePortId": "link.reply.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["accepted"], "outputPorts": ["status", "reply"] },
-    { "serviceId": "playback", "nativePortId": "link.playback.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["reply", "command"], "outputPorts": ["status"] }
+    { "serviceId": "conversation", "nativePortId": "link.conversation.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["turn"], "outputPorts": ["status"] },
+    { "serviceId": "playback", "nativePortId": "link.playback.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["command"], "outputPorts": ["status"] }
   ]
 }

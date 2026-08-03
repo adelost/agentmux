@@ -25,10 +25,10 @@ class LinkProductRuntime(
         ports.capture.command(LinkCaptureCommand(CAPTURE_RELEASE))
         ports.capture.captured()?.let { captured ->
             check(
-                LinkProductWiring.CAPTURE_CAPTURED_TO_DELIVERY_TURN in
+                LinkProductWiring.CAPTURE_CAPTURED_TO_CONVERSATION_TURN in
                     LinkProductWiring.all,
             )
-            ports.delivery.turn(captured)
+            ports.conversation.turn(captured)
         }
     }
 

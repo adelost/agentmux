@@ -27,8 +27,7 @@ enum class LinkNativeComponentRenderer(val id: String) {
 enum class LinkNativeServicePort(val id: String) {
     NAVIGATION("link.navigation.port"),
     CAPTURE("link.capture.port"),
-    DELIVERY("link.delivery.port"),
-    REPLY("link.reply.port"),
+    CONVERSATION("link.conversation.port"),
     PLAYBACK("link.playback.port"),
 }
 
@@ -115,9 +114,8 @@ object LinkNativeBindings {
     val services: List<LinkNativeServiceBinding> = listOf(
         service("navigation", LinkNativeServicePort.NAVIGATION, setOf("open"), setOf("destination")),
         service("capture", LinkNativeServicePort.CAPTURE, setOf("command"), setOf("status", "captured")),
-        service("delivery", LinkNativeServicePort.DELIVERY, setOf("turn"), setOf("status", "accepted")),
-        service("reply", LinkNativeServicePort.REPLY, setOf("accepted"), setOf("status", "reply")),
-        service("playback", LinkNativeServicePort.PLAYBACK, setOf("reply", "command"), setOf("status")),
+        service("conversation", LinkNativeServicePort.CONVERSATION, setOf("turn"), setOf("status")),
+        service("playback", LinkNativeServicePort.PLAYBACK, setOf("command"), setOf("status")),
     )
 
     fun requireComponent(componentId: String): LinkNativeComponentBinding =

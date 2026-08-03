@@ -49,28 +49,12 @@ data class LinkCapturedTurn(
     val idempotencyKey: String,
     val createdAtMs: Long,
 )
-data class LinkDeliveryState(
+data class LinkConversationState(
     val turnId: String?,
-    val phase: String,
+    val deliveryPhase: String,
+    val replyPhase: String,
     val offline: Boolean,
     val idempotencyKey: String?,
-)
-data class LinkAcceptedTurn(
-    val turnId: String,
-    val targetId: String,
-    val idempotencyKey: String,
-    val durablyAccepted: Boolean,
-)
-data class LinkReplyState(
-    val turnId: String?,
-    val phase: String,
-    val offline: Boolean,
-)
-data class LinkReadyReply(
-    val turnId: String,
-    val body: String,
-    val audioRef: String?,
-    val receivedAtMs: Long,
 )
 data class LinkPlaybackCommand(
     val operation: String,
@@ -91,26 +75,18 @@ interface CaptureServicePort {
     fun status(): LinkCaptureState
     fun captured(): LinkCapturedTurn?
 }
-interface DeliveryServicePort {
+interface ConversationServicePort {
     fun turn(value: LinkCapturedTurn)
-    fun status(): LinkDeliveryState
-    fun accepted(): LinkAcceptedTurn?
-}
-interface ReplyServicePort {
-    fun accepted(value: LinkAcceptedTurn)
-    fun status(): LinkReplyState
-    fun reply(): LinkReadyReply?
+    fun status(): LinkConversationState
 }
 interface PlaybackServicePort {
-    fun reply(value: LinkReadyReply)
     fun command(value: LinkPlaybackCommand)
     fun status(): LinkPlaybackState
 }
 interface LinkNativePortGraph {
     val navigation: NavigationServicePort
     val capture: CaptureServicePort
-    val delivery: DeliveryServicePort
-    val reply: ReplyServicePort
+    val conversation: ConversationServicePort
     val playback: PlaybackServicePort
 }
 data class LinkRouteDescriptor(val route: LinkRoute, val title: String, val iconId: String, val artifacts: Set<LinkArtifactProfile>)
@@ -123,15 +99,15 @@ data class LinkServiceDescriptor(val id: String, val nativePortId: String, val i
 data class LinkServiceEdge(val fromService: String, val fromPort: String, val toService: String, val toPort: String)
 
 object LinkProductWiring {
-    val CAPTURE_CAPTURED_TO_DELIVERY_TURN: LinkServiceEdge = LinkServiceEdge("capture", "captured", "delivery", "turn")
-    val DELIVERY_ACCEPTED_TO_REPLY_ACCEPTED: LinkServiceEdge = LinkServiceEdge("delivery", "accepted", "reply", "accepted")
-    val REPLY_REPLY_TO_PLAYBACK_REPLY: LinkServiceEdge = LinkServiceEdge("reply", "reply", "playback", "reply")
-    val all: List<LinkServiceEdge> = listOf(CAPTURE_CAPTURED_TO_DELIVERY_TURN, DELIVERY_ACCEPTED_TO_REPLY_ACCEPTED, REPLY_REPLY_TO_PLAYBACK_REPLY)
+    val CAPTURE_CAPTURED_TO_CONVERSATION_TURN: LinkServiceEdge = LinkServiceEdge("capture", "captured", "conversation", "turn")
+    val all: List<LinkServiceEdge> = listOf(CAPTURE_CAPTURED_TO_CONVERSATION_TURN)
 }
 
 object LinkProductManifest {
     const val PRODUCT_ID: String = "agentmux-link"
-    const val PRODUCT_SPEC_VERSION: String = "0.3.24"
+    const val PRODUCT_SPEC_VERSION: String = "0.3.25"
+    const val ASSET_CATALOG_ID: String = "circlekit"
+    const val ASSET_CATALOG_VERSION: String = "0.3.25"
     val routes: List<LinkRouteDescriptor> = listOf(
         LinkRouteDescriptor(LinkRoute.HOME, "AGENTMUX LINK", "link", setOf(LinkArtifactProfile.PHONE_FULL_UI, LinkArtifactProfile.WEAR_FULL_UI)),
         LinkRouteDescriptor(LinkRoute.SETTINGS, "LINK SETTINGS", "gear", setOf(LinkArtifactProfile.PHONE_FULL_UI, LinkArtifactProfile.WEAR_FULL_UI)),
@@ -172,9 +148,8 @@ object LinkProductManifest {
     val services: List<LinkServiceDescriptor> = listOf(
         LinkServiceDescriptor("navigation", "link.navigation.port", listOf("open"), listOf("destination"), "instance", "instance", "transient", "none", listOf(), listOf()),
         LinkServiceDescriptor("capture", "link.capture.port", listOf("command"), listOf("status", "captured"), "external", "operation", "durable", "monotonic", listOf("microphone.permission"), listOf("audio.capture", "storage.write")),
-        LinkServiceDescriptor("delivery", "link.delivery.port", listOf("turn"), listOf("status", "accepted"), "external", "process", "durable", "wall", listOf("network.connectivity"), listOf("storage.write", "transport.send", "retry.schedule")),
-        LinkServiceDescriptor("reply", "link.reply.port", listOf("accepted"), listOf("status", "reply"), "external", "process", "durable", "wall", listOf("network.connectivity"), listOf("transport.receive", "storage.write")),
-        LinkServiceDescriptor("playback", "link.playback.port", listOf("reply", "command"), listOf("status"), "external", "process", "transient", "monotonic", listOf("audio.focus"), listOf("audio.playback")),
+        LinkServiceDescriptor("conversation", "link.conversation.port", listOf("turn"), listOf("status"), "external", "process", "durable", "wall", listOf("network.connectivity"), listOf("storage.write", "transport.send", "transport.receive", "retry.schedule")),
+        LinkServiceDescriptor("playback", "link.playback.port", listOf("command"), listOf("status"), "external", "process", "transient", "monotonic", listOf("audio.focus"), listOf("audio.playback")),
     )
     fun route(route: LinkRoute): LinkRouteDescriptor = routes.single { it.route == route }
     fun action(action: LinkMenuAction): LinkMenuActionDescriptor = menuActions.single { it.action == action }

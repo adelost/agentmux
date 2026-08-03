@@ -19,28 +19,32 @@ function requireLinkProduct(product: ProductIr): AgentmuxLinkProductIr {
 }
 
 function emitKotlin(product: AgentmuxLinkProductIr): string {
-  const profiles = product.link.artifacts.map((item) =>
-    `    ${enumName(item.id)}(${str(item.id)}, setOf(${item.surfaces.map(str).join(", ")})),`).join("\n");
+  const profiles = product.artifacts.map((item) =>
+    `    ${enumName(item.id)}(${str(item.id)}, setOf(${item.serves.map(str).join(", ")})),`).join("\n");
   const routes = product.link.routes.map((item) =>
     `    ${enumName(item.id)}(${str(item.id)}),`).join("\n");
   const actions = product.link.menuActions.map((item) =>
     `    ${enumName(item.id)}(${str(item.id)}),`).join("\n");
-  const componentIds = product.link.components.map((item) =>
+  const componentIds = product.componentCatalog.map((item) =>
     `    ${enumName(item.id)}(${str(item.id)}),`).join("\n");
   const routeDescriptors = product.link.routes.map((item) =>
-    `        LinkRouteDescriptor(LinkRoute.${enumName(item.id)}, ${str(item.title)}, ${str(item.iconId)}, setOf(${item.artifacts.map((id) => `LinkArtifactProfile.${enumName(id)}`).join(", ")})),`).join("\n");
+    `        LinkRouteDescriptor(LinkRoute.${enumName(item.id)}, ${str(item.title)}, ${str(iconAsset(product, `route.${item.id}`))}, setOf(${item.artifacts.map((id) => `LinkArtifactProfile.${enumName(id)}`).join(", ")})),`).join("\n");
   const actionDescriptors = product.link.menuActions.map((item) =>
-    `        LinkMenuActionDescriptor(LinkMenuAction.${enumName(item.id)}, ${str(item.rowId)}, ${str(item.title)}, ${str(item.detail)}, ${str(item.a11y)}, ${str(item.iconId)}, LinkRoute.${enumName(item.destination)}, setOf(${item.artifacts.map((id) => `LinkArtifactProfile.${enumName(id)}`).join(", ")})),`).join("\n");
-  const components = product.link.components.map((item) =>
-    `        LinkComponentDescriptor(LinkComponentId.${enumName(item.id)}, ${str(item.rendererId)}, ${str(item.iconId)}, setOf(${item.artifacts.map((id) => `LinkArtifactProfile.${enumName(id)}`).join(", ")})),`).join("\n");
+    `        LinkMenuActionDescriptor(LinkMenuAction.${enumName(item.id)}, ${str(item.rowId)}, ${str(item.title)}, ${str(item.detail)}, ${str(item.a11y)}, ${str(iconAsset(product, `action.${item.id}`))}, LinkRoute.${enumName(item.destination)}, setOf(${item.artifacts.map((id) => `LinkArtifactProfile.${enumName(id)}`).join(", ")})),`).join("\n");
+  const components = product.componentCatalog.map((item) => {
+    const native = product.link.nativeComponents.find(({ componentId }) => componentId === item.id);
+    if (native === undefined) throw new Error(`Component '${item.id}' has no native binding`);
+    const artifacts = componentArtifacts(product, item.id);
+    return `        LinkComponentDescriptor(LinkComponentId.${enumName(item.id)}, ${str(native.rendererId)}, ${str(iconAsset(product, `component.${item.id}`))}, setOf(${artifacts.map((id) => `LinkArtifactProfile.${enumName(id)}`).join(", ")})),`;
+  }).join("\n");
   const trees = product.componentFamilies.flatMap(({ screen, family }) =>
     family.trees.map((tree) => {
       const mounts = tree.mounts.map((item) =>
         `LinkComponentMount(LinkComponentId.${enumName(item.component)}, ${str(item.region)}, ${item.order}, ${item.requirement.kind === "optional"})`).join(", ");
       return `        LinkComponentTree(LinkRoute.${enumName(screen)}, ${str(tree.surface)}, listOf(${mounts})),`;
     })).join("\n");
-  const palettes = product.link.palettes.map((item) =>
-    `        LinkPaletteDescriptor(${str(item.id)}, setOf(${item.artifacts.map((id) => `LinkArtifactProfile.${enumName(id)}`).join(", ")})),`).join("\n");
+  const palettes = product.palette.variants.map((item) =>
+    `        LinkPaletteDescriptor(${str(item.id)}, setOf(${product.artifacts.map(({ id }) => `LinkArtifactProfile.${enumName(id)}`).join(", ")})),`).join("\n");
   const services = product.legos.mounts.map((item) => {
     const inputs = item.lego.inputs.map(({ id }) => str(id)).join(", ");
     const outputs = item.lego.outputs.map(({ id }) => str(id)).join(", ");
@@ -107,6 +111,8 @@ ${edgeConstants}
 object LinkProductManifest {
     const val PRODUCT_ID: String = ${str(product.id)}
     const val PRODUCT_SPEC_VERSION: String = ${str(product.productSpecVersion)}
+    const val ASSET_CATALOG_ID: String = ${str(product.assetCatalogRef.id)}
+    const val ASSET_CATALOG_VERSION: String = ${str(product.assetCatalogRef.version)}
     val routes: List<LinkRouteDescriptor> = listOf(
 ${routeDescriptors}
     )
@@ -165,6 +171,18 @@ function portRef(value: string): [string, string] {
     throw new Error(`Invalid mounted port ref '${value}'`);
   }
   return [parts[0]!, parts[1]!];
+}
+
+function iconAsset(product: AgentmuxLinkProductIr, ref: string): string {
+  const icon = product.iconRefs.find(({ id }) => id === ref);
+  if (icon === undefined) throw new Error(`Missing portable icon ref '${ref}'`);
+  return icon.assetRef;
+}
+
+function componentArtifacts(product: AgentmuxLinkProductIr, componentId: string): string[] {
+  const icon = product.iconRefs.find(({ id }) => id === `component.${componentId}`);
+  if (icon === undefined) throw new Error(`Component '${componentId}' has no portable icon ref`);
+  return [...icon.artifacts];
 }
 
 function enumName(id: string): string {

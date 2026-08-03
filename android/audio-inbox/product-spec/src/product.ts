@@ -1,23 +1,53 @@
 import {
   defineComponentCatalog,
+  definePalette,
   defineProduct,
   defineScreenComponentFamilyRegistry,
   type ProductIr,
 } from "@v1d/product-spec";
+import { CIRCLEKIT_ASSET_CATALOG } from "@v1d/circlekit-assets";
 import {
-  LINK_ARTIFACTS,
-  linkComponents,
-  linkIconIds,
   linkMenuActions,
-  linkPalettes,
   linkRoutes,
 } from "./catalog.js";
 import type { LinkNativeRegistry } from "./native-registry.js";
 import { linkServiceConfigs, linkServiceMounts } from "./services.js";
 
 const ALL_ARTIFACTS = ["phone-full-ui", "wear-full-ui"] as const;
-const componentCatalog = defineComponentCatalog(linkComponents.map(({ id }) => ({ id })));
+const componentCatalog = defineComponentCatalog([
+  { id: "target" }, { id: "latest" }, { id: "composer" }, { id: "talk" },
+  { id: "active-playback" }, { id: "connection" }, { id: "public-link" },
+  { id: "preferences" }, { id: "local-history" }, { id: "updates" },
+  { id: "dev-host" }, { id: "recovery" }, { id: "dev-preview" },
+]);
 const optional = { kind: "optional", fallback: "omit" } as const;
+const linkPalette = definePalette([{
+  id: "graphite",
+  identity: { canvas: "#000000" },
+  categories: [],
+  status: {},
+  ramps: [],
+}] as const);
+
+const iconRefs = [
+  { id: "route.home", assetRef: "link", artifacts: ALL_ARTIFACTS },
+  { id: "route.settings", assetRef: "gear", artifacts: ALL_ARTIFACTS },
+  { id: "route.dev-host", assetRef: "phone", artifacts: ["phone-full-ui"] },
+  { id: "action.open-settings", assetRef: "gear", artifacts: ALL_ARTIFACTS },
+  { id: "component.target", assetRef: "target", artifacts: ALL_ARTIFACTS },
+  { id: "component.latest", assetRef: "speaker", artifacts: ALL_ARTIFACTS },
+  { id: "component.composer", assetRef: "pencil", artifacts: ["phone-full-ui"] },
+  { id: "component.talk", assetRef: "record", artifacts: ALL_ARTIFACTS },
+  { id: "component.active-playback", assetRef: "play", artifacts: ["phone-full-ui"] },
+  { id: "component.connection", assetRef: "wifi", artifacts: ALL_ARTIFACTS },
+  { id: "component.public-link", assetRef: "link", artifacts: ["phone-full-ui"] },
+  { id: "component.preferences", assetRef: "speaker", artifacts: ["phone-full-ui"] },
+  { id: "component.local-history", assetRef: "activity", artifacts: ["phone-full-ui"] },
+  { id: "component.updates", assetRef: "download", artifacts: ALL_ARTIFACTS },
+  { id: "component.dev-host", assetRef: "phone", artifacts: ["phone-full-ui"] },
+  { id: "component.recovery", assetRef: "warning", artifacts: ALL_ARTIFACTS },
+  { id: "component.dev-preview", assetRef: "phone", artifacts: ["phone-full-ui"] },
+] as const;
 
 const componentFamilies = defineScreenComponentFamilyRegistry(componentCatalog, [
   {
@@ -98,38 +128,40 @@ const baseProduct = defineProduct({
     { id: "android-wear-compose", capabilities: ["ui.menu", "ui.navigation", "ui.component-tree"] },
   ],
   artifacts: [
-    { id: "phone-full-ui", rendererRefs: ["android-phone-compose"], requiredCapabilities: ["ui.menu", "ui.navigation", "ui.component-tree"] },
-    { id: "wear-full-ui", rendererRefs: ["android-wear-compose"], requiredCapabilities: ["ui.menu", "ui.navigation", "ui.component-tree"] },
+    { id: "phone-full-ui", rendererRefs: ["android-phone-compose"], requiredCapabilities: ["ui.menu", "ui.navigation", "ui.component-tree"], entryScreen: "home", serves: ["round", "compact", "wide"] },
+    { id: "wear-full-ui", rendererRefs: ["android-wear-compose"], requiredCapabilities: ["ui.menu", "ui.navigation", "ui.component-tree"], entryScreen: "home", serves: ["round"] },
   ],
   legos: {
     id: "agentmux-link.graph",
     configs: linkServiceConfigs,
     mounts: linkServiceMounts,
     wiring: [
-      { from: "capture.captured", to: "delivery.turn" },
-      { from: "delivery.accepted", to: "reply.accepted" },
-      { from: "reply.reply", to: "playback.reply" },
+      { from: "capture.captured", to: "conversation.turn" },
     ],
   },
   componentCatalog,
   componentFamilies,
+  palette: linkPalette,
+  assetCatalogRef: {
+    id: CIRCLEKIT_ASSET_CATALOG.id,
+    version: CIRCLEKIT_ASSET_CATALOG.version,
+  },
+  iconRefs,
   ui: [
     { id: "link.navigation", kind: "menu-entry", artifacts: ALL_ARTIFACTS, requiredCapabilities: ["ui.menu", "ui.navigation"], ports: { state: "navigation.destination", action: "navigation.open" } },
     { id: "link.capture", kind: "component-entry", artifacts: ALL_ARTIFACTS, requiredCapabilities: ["ui.component-tree"], ports: { state: "capture.status", action: "capture.command" } },
-    { id: "link.delivery", kind: "component-entry", artifacts: ALL_ARTIFACTS, requiredCapabilities: ["ui.component-tree"], ports: { state: "delivery.status" } },
-    { id: "link.reply", kind: "component-entry", artifacts: ALL_ARTIFACTS, requiredCapabilities: ["ui.component-tree"], ports: { state: "reply.status" } },
+    { id: "link.delivery", kind: "component-entry", artifacts: ALL_ARTIFACTS, requiredCapabilities: ["ui.component-tree"], ports: { state: "conversation.status" } },
+    { id: "link.reply", kind: "component-entry", artifacts: ALL_ARTIFACTS, requiredCapabilities: ["ui.component-tree"], ports: { state: "conversation.status" } },
     { id: "link.playback", kind: "component-entry", artifacts: ALL_ARTIFACTS, requiredCapabilities: ["ui.component-tree"], ports: { state: "playback.status", action: "playback.command" } },
   ],
-});
+}, CIRCLEKIT_ASSET_CATALOG);
 
 export interface AgentmuxLinkProductIr extends ProductIr {
   readonly productSpecVersion: string;
   readonly link: {
-    readonly artifacts: typeof LINK_ARTIFACTS;
     readonly routes: typeof linkRoutes;
     readonly menuActions: typeof linkMenuActions;
-    readonly components: typeof linkComponents;
-    readonly palettes: typeof linkPalettes;
+    readonly nativeComponents: LinkNativeRegistry["components"];
     readonly nativeServices: LinkNativeRegistry["services"];
   };
 }
@@ -145,23 +177,21 @@ export function compileAgentmuxLinkProduct(
     ...baseProduct,
     productSpecVersion,
     link: {
-      artifacts: LINK_ARTIFACTS,
       routes: linkRoutes,
       menuActions: linkMenuActions,
-      components: linkComponents,
-      palettes: linkPalettes,
+      nativeComponents: registry.components,
       nativeServices: registry.services,
     },
   };
 }
 
 function requireCatalogSound(): void {
-  const artifacts = new Set(LINK_ARTIFACTS.map(({ id }) => id));
+  const artifacts = new Set(baseProduct.artifacts.map(({ id }) => id));
   const routes = new Set(linkRoutes.map(({ id }) => id));
   requireUnique([...artifacts], "artifact id");
   requireUnique([...routes], "route id");
-  for (const artifact of LINK_ARTIFACTS) requireUnique(artifact.surfaces, `surface in '${artifact.id}'`);
-  for (const item of [...linkRoutes, ...linkMenuActions, ...linkComponents, ...linkPalettes]) {
+  for (const artifact of baseProduct.artifacts) requireUnique(artifact.serves, `surface in '${artifact.id}'`);
+  for (const item of [...linkRoutes, ...linkMenuActions, ...baseProduct.iconRefs]) {
     for (const artifact of item.artifacts) {
       if (!artifacts.has(artifact)) throw new Error(`'${item.id}' uses missing artifact '${artifact}'`);
     }
@@ -174,15 +204,14 @@ function requireCatalogSound(): void {
 }
 
 function requireNativeParity(registry: LinkNativeRegistry): void {
-  requireExactSet(new Set(LINK_ARTIFACTS.map(({ id }) => id)), new Set(registry.profiles), "profile/native binding");
-  requireExactSet(new Set(linkIconIds), new Set(registry.icons.map(({ iconId }) => iconId)), "icon/native binding");
-  requireExactSet(new Set(linkPalettes.map(({ id }) => id)), new Set(registry.palettes.map(({ paletteId }) => paletteId)), "palette/native binding");
+  requireExactSet(new Set(baseProduct.artifacts.map(({ id }) => id)), new Set(registry.profiles), "profile/native binding");
+  requireExactSet(new Set(baseProduct.iconRefs.map(({ assetRef }) => assetRef)), new Set(registry.icons.map(({ iconId }) => iconId)), "icon/native binding");
+  requireExactSet(new Set(baseProduct.palette.variants.map(({ id }) => id)), new Set(registry.palettes.map(({ paletteId }) => paletteId)), "palette/native binding");
   requireUnique(registry.components.map(({ componentId }) => componentId), "native component id");
-  requireExactSet(new Set(linkComponents.map(({ id }) => id)), new Set(registry.components.map(({ componentId }) => componentId)), "component/native binding");
-  for (const component of linkComponents) {
+  requireExactSet(new Set(baseProduct.componentCatalog.map(({ id }) => id)), new Set(registry.components.map(({ componentId }) => componentId)), "component/native binding");
+  for (const component of baseProduct.componentCatalog) {
     const native = registry.components.find(({ componentId }) => componentId === component.id);
-    if (native?.rendererId !== component.rendererId) throw new Error(`component '${component.id}' renderer drift`);
-    requireExactSet(new Set(component.artifacts), new Set(native?.profiles ?? []), `component '${component.id}' profile`);
+    requireExactSet(new Set(componentArtifacts(component.id)), new Set(native?.profiles ?? []), `component '${component.id}' profile`);
   }
   const mounts = baseProduct.legos.mounts;
   requireExactSet(new Set(mounts.map(({ id }) => id)), new Set(registry.services.map(({ serviceId }) => serviceId)), "service/native binding");
@@ -191,12 +220,18 @@ function requireNativeParity(registry: LinkNativeRegistry): void {
     if (mounted === undefined) throw new Error(`orphan native service '${service.serviceId}'`);
     requireExactSet(new Set(mounted.lego.inputs.map(({ id }) => id)), new Set(service.inputPorts), `service '${service.serviceId}' input`);
     requireExactSet(new Set(mounted.lego.outputs.map(({ id }) => id)), new Set(service.outputPorts), `service '${service.serviceId}' output`);
-    requireExactSet(new Set(ALL_ARTIFACTS), new Set(service.profiles), `service '${service.serviceId}' profile`);
+    requireExactSet(new Set(baseProduct.artifacts.map(({ id }) => id)), new Set(service.profiles), `service '${service.serviceId}' profile`);
   }
-  for (const palette of linkPalettes) {
+  for (const palette of baseProduct.palette.variants) {
     const native = registry.palettes.find(({ paletteId }) => paletteId === palette.id);
-    requireExactSet(new Set(palette.artifacts), new Set(native?.profiles ?? []), `palette '${palette.id}' profile`);
+    requireExactSet(new Set(baseProduct.artifacts.map(({ id }) => id)), new Set(native?.profiles ?? []), `palette '${palette.id}' profile`);
   }
+}
+
+function componentArtifacts(componentId: string): string[] {
+  const icon = baseProduct.iconRefs.find(({ id }) => id === `component.${componentId}`);
+  if (icon === undefined) throw new Error(`component '${componentId}' has no portable icon ref`);
+  return [...icon.artifacts];
 }
 
 function requireExactSet(left: ReadonlySet<string>, right: ReadonlySet<string>, owner: string): void {

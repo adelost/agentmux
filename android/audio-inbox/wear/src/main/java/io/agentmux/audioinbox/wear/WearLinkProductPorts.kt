@@ -3,11 +3,9 @@ package io.agentmux.audioinbox.wear
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkui.product.LinkNavigationNativePort
 import io.agentmux.linkui.product.LinkStatePlaybackServicePort
-import io.agentmux.linkui.product.LinkStateReplyServicePort
-import io.agentmux.linkui.product.acceptedTurn
-import io.agentmux.linkui.product.deliveryState
+import io.agentmux.linkui.product.conversationState
 import io.agentmux.linkui.product.generated.CaptureServicePort
-import io.agentmux.linkui.product.generated.DeliveryServicePort
+import io.agentmux.linkui.product.generated.ConversationServicePort
 import io.agentmux.linkui.product.generated.LinkCaptureCommand
 import io.agentmux.linkui.product.generated.LinkCapturedTurn
 import io.agentmux.linkui.product.generated.LinkCaptureState
@@ -26,8 +24,8 @@ internal class WearLinkProductPorts(
         navigate = { routeId = it },
     )
     override val capture: CaptureServicePort = WearCaptureServicePort(controller, payloads)
-    override val delivery: DeliveryServicePort = WearDeliveryServicePort(controller, payloads)
-    override val reply = LinkStateReplyServicePort { controller.state.value }
+    override val conversation: ConversationServicePort =
+        WearConversationServicePort(controller, payloads)
     override val playback = LinkStatePlaybackServicePort(
         state = { controller.state.value },
         commandHandler = controller::handlePlayback,
@@ -85,10 +83,10 @@ private class WearCaptureServicePort(
     }
 }
 
-private class WearDeliveryServicePort(
+private class WearConversationServicePort(
     private val controller: WearMailboxController,
     private val payloads: WearCapturedPayloads,
-) : DeliveryServicePort {
+) : ConversationServicePort {
     override fun turn(value: LinkCapturedTurn) {
         val capture = payloads.take(value)
         if (!controller.deliverCapture(capture, value.targetId)) {
@@ -96,9 +94,7 @@ private class WearDeliveryServicePort(
         }
     }
 
-    override fun status() = controller.state.value.deliveryState()
-
-    override fun accepted() = controller.state.value.acceptedTurn()
+    override fun status() = controller.state.value.conversationState()
 }
 
 private class WearCapturedPayloads {

@@ -1,25 +1,21 @@
 package io.agentmux.linkui.product
 
 import io.agentmux.linkui.product.generated.CaptureServicePort
-import io.agentmux.linkui.product.generated.DeliveryServicePort
-import io.agentmux.linkui.product.generated.LinkAcceptedTurn
+import io.agentmux.linkui.product.generated.ConversationServicePort
 import io.agentmux.linkui.product.generated.LinkArtifactProfile
 import io.agentmux.linkui.product.generated.LinkCaptureCommand
 import io.agentmux.linkui.product.generated.LinkCapturedTurn
 import io.agentmux.linkui.product.generated.LinkCaptureState
-import io.agentmux.linkui.product.generated.LinkDeliveryState
+import io.agentmux.linkui.product.generated.LinkConversationState
 import io.agentmux.linkui.product.generated.LinkNativePortGraph
 import io.agentmux.linkui.product.generated.LinkPlaybackCommand
 import io.agentmux.linkui.product.generated.LinkPlaybackState
 import io.agentmux.linkui.product.generated.LinkProductManifest
-import io.agentmux.linkui.product.generated.LinkReadyReply
-import io.agentmux.linkui.product.generated.LinkReplyState
 import io.agentmux.linkui.product.generated.LinkRoute
 import io.agentmux.linkui.product.generated.LinkRouteCommand
 import io.agentmux.linkui.product.generated.LinkRouteState
 import io.agentmux.linkui.product.generated.NavigationServicePort
 import io.agentmux.linkui.product.generated.PlaybackServicePort
-import io.agentmux.linkui.product.generated.ReplyServicePort
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -35,11 +31,11 @@ class LinkProductContractTest {
             }
         }
         assertEquals(
-            setOf("navigation", "capture", "delivery", "reply", "playback"),
+            setOf("navigation", "capture", "conversation", "playback"),
             LinkProductManifest.services.map { it.id }.toSet(),
         )
-        assertEquals("durable", LinkProductManifest.services.single { it.id == "delivery" }.durability)
-        assertEquals("wall", LinkProductManifest.services.single { it.id == "reply" }.clockDomain)
+        assertEquals("durable", LinkProductManifest.services.single { it.id == "conversation" }.durability)
+        assertEquals("wall", LinkProductManifest.services.single { it.id == "conversation" }.clockDomain)
 
         val graph = FakeNativePortGraph()
         val runtime = LinkProductRuntime(graph)
@@ -77,18 +73,17 @@ private class FakeNativePortGraph : LinkNativePortGraph {
         override fun status() = LinkCaptureState(capturePhase, 42L, 512L)
         override fun captured() = captured.takeIf { capturePhase == "FINALIZING" }
     }
-    override val delivery = object : DeliveryServicePort {
+    override val conversation = object : ConversationServicePort {
         override fun turn(value: LinkCapturedTurn) { delivered = value }
-        override fun status() = LinkDeliveryState(delivered?.turnId, "QUEUED", false, delivered?.idempotencyKey)
-        override fun accepted(): LinkAcceptedTurn? = null
-    }
-    override val reply = object : ReplyServicePort {
-        override fun accepted(value: LinkAcceptedTurn) = Unit
-        override fun status() = LinkReplyState(null, "NONE", false)
-        override fun reply(): LinkReadyReply? = null
+        override fun status() = LinkConversationState(
+            delivered?.turnId,
+            "QUEUED",
+            "THINKING",
+            false,
+            delivered?.idempotencyKey,
+        )
     }
     override val playback = object : PlaybackServicePort {
-        override fun reply(value: LinkReadyReply) = Unit
         override fun command(value: LinkPlaybackCommand) = Unit
         override fun status() = LinkPlaybackState(null, "IDLE", 0L, 0L)
     }

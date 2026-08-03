@@ -1,6 +1,7 @@
 {
   "artifacts": [
     {
+      "entryScreen": "home",
       "id": "phone-full-ui",
       "rendererRefs": [
         "android-phone-compose"
@@ -9,9 +10,15 @@
         "ui.menu",
         "ui.navigation",
         "ui.component-tree"
+      ],
+      "serves": [
+        "round",
+        "compact",
+        "wide"
       ]
     },
     {
+      "entryScreen": "home",
       "id": "wear-full-ui",
       "rendererRefs": [
         "android-wear-compose"
@@ -20,9 +27,16 @@
         "ui.menu",
         "ui.navigation",
         "ui.component-tree"
+      ],
+      "serves": [
+        "round"
       ]
     }
   ],
+  "assetCatalogRef": {
+    "id": "circlekit",
+    "version": "0.3.25"
+  },
   "componentCatalog": [
     {
       "id": "target"
@@ -515,6 +529,136 @@
       "screen": "dev-host"
     }
   ],
+  "iconRefs": [
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "assetRef": "link",
+      "id": "route.home"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "assetRef": "gear",
+      "id": "route.settings"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
+      "assetRef": "phone",
+      "id": "route.dev-host"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "assetRef": "gear",
+      "id": "action.open-settings"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "assetRef": "target",
+      "id": "component.target"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "assetRef": "speaker",
+      "id": "component.latest"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
+      "assetRef": "pencil",
+      "id": "component.composer"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "assetRef": "record",
+      "id": "component.talk"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
+      "assetRef": "play",
+      "id": "component.active-playback"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "assetRef": "wifi",
+      "id": "component.connection"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
+      "assetRef": "link",
+      "id": "component.public-link"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
+      "assetRef": "speaker",
+      "id": "component.preferences"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
+      "assetRef": "activity",
+      "id": "component.local-history"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "assetRef": "download",
+      "id": "component.updates"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
+      "assetRef": "phone",
+      "id": "component.dev-host"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "assetRef": "warning",
+      "id": "component.recovery"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
+      "assetRef": "phone",
+      "id": "component.dev-preview"
+    }
+  ],
   "id": "agentmux-link",
   "kind": "product-spec-ir",
   "legos": {
@@ -523,10 +667,7 @@
         "id": "link.capture-policy"
       },
       {
-        "id": "link.delivery-policy"
-      },
-      {
-        "id": "link.reply-policy"
+        "id": "link.conversation-policy"
       },
       {
         "id": "link.playback-policy"
@@ -642,7 +783,13 @@
           },
           {
             "clockDomain": "none",
-            "name": "phase",
+            "name": "deliveryPhase",
+            "nullable": false,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "replyPhase",
             "nullable": false,
             "value": "string"
           },
@@ -659,93 +806,8 @@
             "value": "string"
           }
         ],
-        "id": "link.delivery-state",
+        "id": "link.conversation-state",
         "kind": "state"
-      },
-      {
-        "fields": [
-          {
-            "clockDomain": "none",
-            "name": "turnId",
-            "nullable": false,
-            "value": "string"
-          },
-          {
-            "clockDomain": "none",
-            "name": "targetId",
-            "nullable": false,
-            "value": "string"
-          },
-          {
-            "clockDomain": "none",
-            "name": "idempotencyKey",
-            "nullable": false,
-            "value": "string"
-          },
-          {
-            "clockDomain": "none",
-            "name": "durablyAccepted",
-            "nullable": false,
-            "value": "boolean"
-          }
-        ],
-        "id": "link.accepted-turn",
-        "kind": "snapshot"
-      },
-      {
-        "fields": [
-          {
-            "clockDomain": "none",
-            "name": "turnId",
-            "nullable": true,
-            "value": "string"
-          },
-          {
-            "clockDomain": "none",
-            "name": "phase",
-            "nullable": false,
-            "value": "string"
-          },
-          {
-            "clockDomain": "none",
-            "name": "offline",
-            "nullable": false,
-            "value": "boolean"
-          }
-        ],
-        "id": "link.reply-state",
-        "kind": "state"
-      },
-      {
-        "fields": [
-          {
-            "clockDomain": "none",
-            "name": "turnId",
-            "nullable": false,
-            "value": "string"
-          },
-          {
-            "clockDomain": "none",
-            "name": "body",
-            "nullable": false,
-            "value": "string"
-          },
-          {
-            "clockDomain": "none",
-            "name": "audioRef",
-            "nullable": true,
-            "value": "string"
-          },
-          {
-            "clockDomain": "wall",
-            "name": "receivedAtMs",
-            "nullable": false,
-            "unit": "ms",
-            "value": "integer"
-          }
-        ],
-        "id": "link.ready-reply",
-        "kind": "snapshot"
       },
       {
         "fields": [
@@ -963,11 +1025,11 @@
       },
       {
         "config": {
-          "policy": "link.delivery-policy"
+          "policy": "link.conversation-policy"
         },
-        "id": "delivery",
+        "id": "conversation",
         "lego": {
-          "id": "link.delivery",
+          "id": "link.conversation",
           "inputs": [
             {
               "contract": {
@@ -1022,7 +1084,13 @@
                   },
                   {
                     "clockDomain": "none",
-                    "name": "phase",
+                    "name": "deliveryPhase",
+                    "nullable": false,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "replyPhase",
                     "nullable": false,
                     "value": "string"
                   },
@@ -1039,43 +1107,10 @@
                     "value": "string"
                   }
                 ],
-                "id": "link.delivery-state",
+                "id": "link.conversation-state",
                 "kind": "state"
               },
               "id": "status"
-            },
-            {
-              "contract": {
-                "fields": [
-                  {
-                    "clockDomain": "none",
-                    "name": "turnId",
-                    "nullable": false,
-                    "value": "string"
-                  },
-                  {
-                    "clockDomain": "none",
-                    "name": "targetId",
-                    "nullable": false,
-                    "value": "string"
-                  },
-                  {
-                    "clockDomain": "none",
-                    "name": "idempotencyKey",
-                    "nullable": false,
-                    "value": "string"
-                  },
-                  {
-                    "clockDomain": "none",
-                    "name": "durablyAccepted",
-                    "nullable": false,
-                    "value": "boolean"
-                  }
-                ],
-                "id": "link.accepted-turn",
-                "kind": "snapshot"
-              },
-              "id": "accepted"
             }
           ],
           "role": "adapter",
@@ -1088,128 +1123,8 @@
             "effects": [
               "storage.write",
               "transport.send",
-              "retry.schedule"
-            ],
-            "lifetime": "process",
-            "stateOwner": "external"
-          }
-        }
-      },
-      {
-        "config": {
-          "policy": "link.reply-policy"
-        },
-        "id": "reply",
-        "lego": {
-          "id": "link.reply",
-          "inputs": [
-            {
-              "contract": {
-                "fields": [
-                  {
-                    "clockDomain": "none",
-                    "name": "turnId",
-                    "nullable": false,
-                    "value": "string"
-                  },
-                  {
-                    "clockDomain": "none",
-                    "name": "targetId",
-                    "nullable": false,
-                    "value": "string"
-                  },
-                  {
-                    "clockDomain": "none",
-                    "name": "idempotencyKey",
-                    "nullable": false,
-                    "value": "string"
-                  },
-                  {
-                    "clockDomain": "none",
-                    "name": "durablyAccepted",
-                    "nullable": false,
-                    "value": "boolean"
-                  }
-                ],
-                "id": "link.accepted-turn",
-                "kind": "snapshot"
-              },
-              "id": "accepted"
-            }
-          ],
-          "outputs": [
-            {
-              "contract": {
-                "fields": [
-                  {
-                    "clockDomain": "none",
-                    "name": "turnId",
-                    "nullable": true,
-                    "value": "string"
-                  },
-                  {
-                    "clockDomain": "none",
-                    "name": "phase",
-                    "nullable": false,
-                    "value": "string"
-                  },
-                  {
-                    "clockDomain": "none",
-                    "name": "offline",
-                    "nullable": false,
-                    "value": "boolean"
-                  }
-                ],
-                "id": "link.reply-state",
-                "kind": "state"
-              },
-              "id": "status"
-            },
-            {
-              "contract": {
-                "fields": [
-                  {
-                    "clockDomain": "none",
-                    "name": "turnId",
-                    "nullable": false,
-                    "value": "string"
-                  },
-                  {
-                    "clockDomain": "none",
-                    "name": "body",
-                    "nullable": false,
-                    "value": "string"
-                  },
-                  {
-                    "clockDomain": "none",
-                    "name": "audioRef",
-                    "nullable": true,
-                    "value": "string"
-                  },
-                  {
-                    "clockDomain": "wall",
-                    "name": "receivedAtMs",
-                    "nullable": false,
-                    "unit": "ms",
-                    "value": "integer"
-                  }
-                ],
-                "id": "link.ready-reply",
-                "kind": "snapshot"
-              },
-              "id": "reply"
-            }
-          ],
-          "role": "adapter",
-          "runtime": {
-            "clockDomain": "wall",
-            "contextInputs": [
-              "network.connectivity"
-            ],
-            "durability": "durable",
-            "effects": [
               "transport.receive",
-              "storage.write"
+              "retry.schedule"
             ],
             "lifetime": "process",
             "stateOwner": "external"
@@ -1224,40 +1139,6 @@
         "lego": {
           "id": "link.playback",
           "inputs": [
-            {
-              "contract": {
-                "fields": [
-                  {
-                    "clockDomain": "none",
-                    "name": "turnId",
-                    "nullable": false,
-                    "value": "string"
-                  },
-                  {
-                    "clockDomain": "none",
-                    "name": "body",
-                    "nullable": false,
-                    "value": "string"
-                  },
-                  {
-                    "clockDomain": "none",
-                    "name": "audioRef",
-                    "nullable": true,
-                    "value": "string"
-                  },
-                  {
-                    "clockDomain": "wall",
-                    "name": "receivedAtMs",
-                    "nullable": false,
-                    "unit": "ms",
-                    "value": "integer"
-                  }
-                ],
-                "id": "link.ready-reply",
-                "kind": "snapshot"
-              },
-              "id": "reply"
-            },
             {
               "contract": {
                 "fields": [
@@ -1336,147 +1217,11 @@
     "wiring": [
       {
         "from": "capture.captured",
-        "to": "delivery.turn"
-      },
-      {
-        "from": "delivery.accepted",
-        "to": "reply.accepted"
-      },
-      {
-        "from": "reply.reply",
-        "to": "playback.reply"
+        "to": "conversation.turn"
       }
     ]
   },
   "link": {
-    "artifacts": [
-      {
-        "id": "phone-full-ui",
-        "surfaces": [
-          "round",
-          "compact",
-          "wide"
-        ]
-      },
-      {
-        "id": "wear-full-ui",
-        "surfaces": [
-          "round"
-        ]
-      }
-    ],
-    "components": [
-      {
-        "artifacts": [
-          "phone-full-ui",
-          "wear-full-ui"
-        ],
-        "iconId": "target",
-        "id": "target",
-        "rendererId": "status"
-      },
-      {
-        "artifacts": [
-          "phone-full-ui",
-          "wear-full-ui"
-        ],
-        "iconId": "speaker",
-        "id": "latest",
-        "rendererId": "conversation-feed"
-      },
-      {
-        "artifacts": [
-          "phone-full-ui"
-        ],
-        "iconId": "pencil",
-        "id": "composer",
-        "rendererId": "composer"
-      },
-      {
-        "artifacts": [
-          "phone-full-ui",
-          "wear-full-ui"
-        ],
-        "iconId": "record",
-        "id": "talk",
-        "rendererId": "capture"
-      },
-      {
-        "artifacts": [
-          "phone-full-ui"
-        ],
-        "iconId": "play",
-        "id": "active-playback",
-        "rendererId": "active-playback"
-      },
-      {
-        "artifacts": [
-          "phone-full-ui",
-          "wear-full-ui"
-        ],
-        "iconId": "wifi",
-        "id": "connection",
-        "rendererId": "connection"
-      },
-      {
-        "artifacts": [
-          "phone-full-ui"
-        ],
-        "iconId": "link",
-        "id": "public-link",
-        "rendererId": "public-link"
-      },
-      {
-        "artifacts": [
-          "phone-full-ui"
-        ],
-        "iconId": "speaker",
-        "id": "preferences",
-        "rendererId": "preferences"
-      },
-      {
-        "artifacts": [
-          "phone-full-ui"
-        ],
-        "iconId": "activity",
-        "id": "local-history",
-        "rendererId": "local-history"
-      },
-      {
-        "artifacts": [
-          "phone-full-ui",
-          "wear-full-ui"
-        ],
-        "iconId": "download",
-        "id": "updates",
-        "rendererId": "updates"
-      },
-      {
-        "artifacts": [
-          "phone-full-ui"
-        ],
-        "iconId": "phone",
-        "id": "dev-host",
-        "rendererId": "dev-host"
-      },
-      {
-        "artifacts": [
-          "phone-full-ui",
-          "wear-full-ui"
-        ],
-        "iconId": "warning",
-        "id": "recovery",
-        "rendererId": "recovery"
-      },
-      {
-        "artifacts": [
-          "phone-full-ui"
-        ],
-        "iconId": "phone",
-        "id": "dev-preview",
-        "rendererId": "dev-preview"
-      }
-    ],
     "menuActions": [
       {
         "a11y": "Open Link settings",
@@ -1486,10 +1231,108 @@
         ],
         "destination": "settings",
         "detail": "CONNECTION & AUDIO",
-        "iconId": "gear",
         "id": "open-settings",
         "rowId": "settings",
         "title": "SETTINGS"
+      }
+    ],
+    "nativeComponents": [
+      {
+        "componentId": "target",
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "rendererId": "status"
+      },
+      {
+        "componentId": "latest",
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "rendererId": "conversation-feed"
+      },
+      {
+        "componentId": "composer",
+        "profiles": [
+          "phone-full-ui"
+        ],
+        "rendererId": "composer"
+      },
+      {
+        "componentId": "talk",
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "rendererId": "capture"
+      },
+      {
+        "componentId": "active-playback",
+        "profiles": [
+          "phone-full-ui"
+        ],
+        "rendererId": "active-playback"
+      },
+      {
+        "componentId": "connection",
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "rendererId": "connection"
+      },
+      {
+        "componentId": "public-link",
+        "profiles": [
+          "phone-full-ui"
+        ],
+        "rendererId": "public-link"
+      },
+      {
+        "componentId": "preferences",
+        "profiles": [
+          "phone-full-ui"
+        ],
+        "rendererId": "preferences"
+      },
+      {
+        "componentId": "local-history",
+        "profiles": [
+          "phone-full-ui"
+        ],
+        "rendererId": "local-history"
+      },
+      {
+        "componentId": "updates",
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "rendererId": "updates"
+      },
+      {
+        "componentId": "dev-host",
+        "profiles": [
+          "phone-full-ui"
+        ],
+        "rendererId": "dev-host"
+      },
+      {
+        "componentId": "recovery",
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "rendererId": "recovery"
+      },
+      {
+        "componentId": "dev-preview",
+        "profiles": [
+          "phone-full-ui"
+        ],
+        "rendererId": "dev-preview"
       }
     ],
     "nativeServices": [
@@ -1526,35 +1369,18 @@
         "inputPorts": [
           "turn"
         ],
-        "nativePortId": "link.delivery.port",
+        "nativePortId": "link.conversation.port",
         "outputPorts": [
-          "status",
-          "accepted"
+          "status"
         ],
         "profiles": [
           "phone-full-ui",
           "wear-full-ui"
         ],
-        "serviceId": "delivery"
+        "serviceId": "conversation"
       },
       {
         "inputPorts": [
-          "accepted"
-        ],
-        "nativePortId": "link.reply.port",
-        "outputPorts": [
-          "status",
-          "reply"
-        ],
-        "profiles": [
-          "phone-full-ui",
-          "wear-full-ui"
-        ],
-        "serviceId": "reply"
-      },
-      {
-        "inputPorts": [
-          "reply",
           "command"
         ],
         "nativePortId": "link.playback.port",
@@ -1568,22 +1394,12 @@
         "serviceId": "playback"
       }
     ],
-    "palettes": [
-      {
-        "artifacts": [
-          "phone-full-ui",
-          "wear-full-ui"
-        ],
-        "id": "graphite"
-      }
-    ],
     "routes": [
       {
         "artifacts": [
           "phone-full-ui",
           "wear-full-ui"
         ],
-        "iconId": "link",
         "id": "home",
         "title": "AGENTMUX LINK"
       },
@@ -1592,7 +1408,6 @@
           "phone-full-ui",
           "wear-full-ui"
         ],
-        "iconId": "gear",
         "id": "settings",
         "title": "LINK SETTINGS"
       },
@@ -1600,13 +1415,25 @@
         "artifacts": [
           "phone-full-ui"
         ],
-        "iconId": "phone",
         "id": "dev-host",
         "title": "DEV HOST"
       }
     ]
   },
-  "productSpecVersion": "0.3.24",
+  "palette": {
+    "variants": [
+      {
+        "categories": [],
+        "id": "graphite",
+        "identity": {
+          "canvas": "#000000"
+        },
+        "ramps": [],
+        "status": {}
+      }
+    ]
+  },
+  "productSpecVersion": "0.3.25",
   "rendererBindings": [
     {
       "capabilities": [
@@ -1625,7 +1452,7 @@
       "id": "android-wear-compose"
     }
   ],
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "ui": [
     {
       "artifacts": [
@@ -1666,7 +1493,7 @@
       "id": "link.delivery",
       "kind": "component-entry",
       "ports": {
-        "state": "delivery.status"
+        "state": "conversation.status"
       },
       "requiredCapabilities": [
         "ui.component-tree"
@@ -1680,7 +1507,7 @@
       "id": "link.reply",
       "kind": "component-entry",
       "ports": {
-        "state": "reply.status"
+        "state": "conversation.status"
       },
       "requiredCapabilities": [
         "ui.component-tree"

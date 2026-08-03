@@ -3,11 +3,9 @@ package io.agentmux.audioinbox
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkui.product.LinkNavigationNativePort
 import io.agentmux.linkui.product.LinkStatePlaybackServicePort
-import io.agentmux.linkui.product.LinkStateReplyServicePort
-import io.agentmux.linkui.product.acceptedTurn
-import io.agentmux.linkui.product.deliveryState
+import io.agentmux.linkui.product.conversationState
 import io.agentmux.linkui.product.generated.CaptureServicePort
-import io.agentmux.linkui.product.generated.DeliveryServicePort
+import io.agentmux.linkui.product.generated.ConversationServicePort
 import io.agentmux.linkui.product.generated.LinkCaptureCommand
 import io.agentmux.linkui.product.generated.LinkCapturedTurn
 import io.agentmux.linkui.product.generated.LinkCaptureState
@@ -28,8 +26,8 @@ internal class PhoneLinkProductPorts(
         recorder,
         payloads,
     )
-    override val delivery: DeliveryServicePort = PhoneDeliveryServicePort(coordinator, payloads)
-    override val reply = LinkStateReplyServicePort { coordinator.state.value }
+    override val conversation: ConversationServicePort =
+        PhoneConversationServicePort(coordinator, payloads)
     override val playback = LinkStatePlaybackServicePort(
         state = { coordinator.state.value },
         commandHandler = { command -> coordinator.handlePlayback(command) },
@@ -95,10 +93,10 @@ private class PhoneCaptureServicePort(
     }
 }
 
-private class PhoneDeliveryServicePort(
+private class PhoneConversationServicePort(
     private val coordinator: LinkCoordinator,
     private val payloads: PhoneCapturedPayloads,
-) : DeliveryServicePort {
+) : ConversationServicePort {
     override fun turn(value: LinkCapturedTurn) {
         val capture = payloads.take(value)
         if (!coordinator.submitAudio(capture)) {
@@ -107,9 +105,7 @@ private class PhoneDeliveryServicePort(
         }
     }
 
-    override fun status() = coordinator.state.value.deliveryState()
-
-    override fun accepted() = coordinator.state.value.acceptedTurn()
+    override fun status() = coordinator.state.value.conversationState()
 }
 
 private class PhoneCapturedPayloads {
