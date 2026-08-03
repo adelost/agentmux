@@ -43,8 +43,6 @@ function emitKotlin(product: AgentmuxLinkProductIr): string {
         `LinkComponentMount(LinkComponentId.${enumName(item.component)}, ${str(item.region)}, ${item.order}, ${item.requirement.kind === "optional"})`).join(", ");
       return `        LinkComponentTree(LinkRoute.${enumName(screen)}, ${str(tree.surface)}, listOf(${mounts})),`;
     })).join("\n");
-  const palettes = product.palette.variants.map((item) =>
-    `        LinkPaletteDescriptor(${str(item.id)}, setOf(${product.artifacts.map(({ id }) => `LinkArtifactProfile.${enumName(id)}`).join(", ")})),`).join("\n");
   const services = product.legos.mounts.map((item) => {
     const inputs = item.lego.inputs.map(({ id }) => str(id)).join(", ");
     const outputs = item.lego.outputs.map(({ id }) => str(id)).join(", ");
@@ -99,7 +97,6 @@ data class LinkMenuActionDescriptor(val action: LinkMenuAction, val rowId: Strin
 data class LinkComponentDescriptor(val id: LinkComponentId, val rendererId: String, val iconId: String, val artifacts: Set<LinkArtifactProfile>)
 data class LinkComponentMount(val component: LinkComponentId, val region: String, val order: Int, val optional: Boolean)
 data class LinkComponentTree(val route: LinkRoute, val surface: String, val mounts: List<LinkComponentMount>)
-data class LinkPaletteDescriptor(val id: String, val artifacts: Set<LinkArtifactProfile>)
 data class LinkServiceDescriptor(val id: String, val nativePortId: String, val inputPorts: List<String>, val outputPorts: List<String>, val stateOwner: String, val lifetime: String, val durability: String, val clockDomain: String, val contextInputs: List<String>, val effects: List<String>)
 data class LinkServiceEdge(val fromService: String, val fromPort: String, val toService: String, val toPort: String)
 
@@ -124,9 +121,6 @@ ${components}
     )
     val componentTrees: List<LinkComponentTree> = listOf(
 ${trees}
-    )
-    val palettes: List<LinkPaletteDescriptor> = listOf(
-${palettes}
     )
     val services: List<LinkServiceDescriptor> = listOf(
 ${services}

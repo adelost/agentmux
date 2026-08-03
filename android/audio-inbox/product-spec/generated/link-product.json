@@ -1421,17 +1421,7 @@
     ]
   },
   "palette": {
-    "variants": [
-      {
-        "categories": [],
-        "id": "graphite",
-        "identity": {
-          "canvas": "#000000"
-        },
-        "ramps": [],
-        "status": {}
-      }
-    ]
+    "variants": []
   },
   "productSpecVersion": "0.3.25",
   "rendererBindings": [

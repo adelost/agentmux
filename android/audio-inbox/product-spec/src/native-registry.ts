@@ -9,7 +9,6 @@ export interface LinkNativeRegistry {
     componentId: string; rendererId: string; profiles: readonly string[];
   }[];
   readonly icons: readonly { iconId: string; nativeSymbol: string }[];
-  readonly palettes: readonly { paletteId: string; nativeSymbol: string; profiles: readonly string[] }[];
   readonly services: readonly {
     serviceId: string; nativePortId: string; profiles: readonly string[];
     inputPorts: readonly string[]; outputPorts: readonly string[];
@@ -40,14 +39,6 @@ export function decodeLinkNativeRegistry(raw: unknown): LinkNativeRegistry {
       return {
         iconId: requiredString(item.iconId, `native icon ${index} id`),
         nativeSymbol: requiredString(item.nativeSymbol, `native icon ${index} symbol`),
-      };
-    }),
-    palettes: array(root.palettes, "native palettes").map((value, index) => {
-      const item = record(value, `native palette ${index}`);
-      return {
-        paletteId: requiredString(item.paletteId, `native palette ${index} id`),
-        nativeSymbol: requiredString(item.nativeSymbol, `native palette ${index} symbol`),
-        profiles: strings(item.profiles, `native palette ${index} profiles`),
       };
     }),
     services: array(root.services, "native services").map((value, index) => {

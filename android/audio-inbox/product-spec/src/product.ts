@@ -1,6 +1,5 @@
 import {
   defineComponentCatalog,
-  definePalette,
   defineProduct,
   defineScreenComponentFamilyRegistry,
   type ProductIr,
@@ -21,13 +20,7 @@ const componentCatalog = defineComponentCatalog([
   { id: "dev-host" }, { id: "recovery" }, { id: "dev-preview" },
 ]);
 const optional = { kind: "optional", fallback: "omit" } as const;
-const linkPalette = definePalette([{
-  id: "graphite",
-  identity: { canvas: "#000000" },
-  categories: [],
-  status: {},
-  ramps: [],
-}] as const);
+const linkPalette = { variants: [] } as const;
 
 const iconRefs = [
   { id: "route.home", assetRef: "link", artifacts: ALL_ARTIFACTS },
@@ -206,7 +199,6 @@ function requireCatalogSound(): void {
 function requireNativeParity(registry: LinkNativeRegistry): void {
   requireExactSet(new Set(baseProduct.artifacts.map(({ id }) => id)), new Set(registry.profiles), "profile/native binding");
   requireExactSet(new Set(baseProduct.iconRefs.map(({ assetRef }) => assetRef)), new Set(registry.icons.map(({ iconId }) => iconId)), "icon/native binding");
-  requireExactSet(new Set(baseProduct.palette.variants.map(({ id }) => id)), new Set(registry.palettes.map(({ paletteId }) => paletteId)), "palette/native binding");
   requireUnique(registry.components.map(({ componentId }) => componentId), "native component id");
   requireExactSet(new Set(baseProduct.componentCatalog.map(({ id }) => id)), new Set(registry.components.map(({ componentId }) => componentId)), "component/native binding");
   for (const component of baseProduct.componentCatalog) {
@@ -221,10 +213,6 @@ function requireNativeParity(registry: LinkNativeRegistry): void {
     requireExactSet(new Set(mounted.lego.inputs.map(({ id }) => id)), new Set(service.inputPorts), `service '${service.serviceId}' input`);
     requireExactSet(new Set(mounted.lego.outputs.map(({ id }) => id)), new Set(service.outputPorts), `service '${service.serviceId}' output`);
     requireExactSet(new Set(baseProduct.artifacts.map(({ id }) => id)), new Set(service.profiles), `service '${service.serviceId}' profile`);
-  }
-  for (const palette of baseProduct.palette.variants) {
-    const native = registry.palettes.find(({ paletteId }) => paletteId === palette.id);
-    requireExactSet(new Set(baseProduct.artifacts.map(({ id }) => id)), new Set(native?.profiles ?? []), `palette '${palette.id}' profile`);
   }
 }
 

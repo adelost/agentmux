@@ -21,7 +21,7 @@ test("one Link product drives Phone and Wear with a closed native graph", () => 
   ]);
   assert.equal(product.legos.mounts.find(({ id }) => id === "conversation")?.lego.runtime.durability, "durable");
   assert.equal(product.assetCatalogRef.id, "circlekit");
-  assert.equal(product.palette.variants[0]?.id, "graphite");
+  assert.deepEqual(product.palette.variants, []);
   assert.ok(product.link.routes.every(({ artifacts }) => artifacts.length > 0));
 });
 
