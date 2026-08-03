@@ -20,6 +20,7 @@ const usage = () => `Usage: amux work [status|next] [--project ID]
   amux work add "problem and expected outcome"
   amux work approve TICKET
   amux work claim TICKET
+  amux work show TICKET
   amux work working "measured progress"
   amux work wait|block "reason" --wake "observable condition" [--hours N]
   amux work answer "answer after reading the ticket thread"
@@ -118,12 +119,70 @@ export function formatWorkOverview(data) {
   const ready = Array.isArray(data?.readyCandidates) ? data.readyCandidates.slice(0, 5) : [];
   lines.push(ready.length ? "READY" : "READY none");
   ready.forEach((row) => lines.push(`  ${rowLabel(row)}`));
+  const omitted = Number(data?.readyOmitted ?? 0);
+  if (omitted > 0) lines.push(`  +${omitted} more claimable`);
+  const groups = data?.readyGroups;
+  if (groups) {
+    const awaiting = Array.isArray(data?.awaitingApprovalCandidates)
+      ? data.awaitingApprovalCandidates.slice(0, 5) : [];
+    if (Number(groups.awaitingApproval) > 0) {
+      lines.push(`AWAITING APPROVAL ${Number(groups.awaitingApproval)}`);
+      awaiting.forEach((row) => lines.push(`  ${rowLabel(row)}`));
+    }
+    const held = Array.isArray(data?.heldCandidates) ? data.heldCandidates.slice(0, 5) : [];
+    if (Number(groups.held) > 0) {
+      lines.push(`HELD ${Number(groups.held)}`);
+      held.forEach((row) => lines.push(`  ${rowLabel(row)}`));
+    }
+    if (Number(groups.dependencyBlocked) > 0) {
+      lines.push(`DEPENDENCY-BLOCKED ${Number(groups.dependencyBlocked)}`);
+    }
+  }
   const recent = Array.isArray(data?.recentTickets) ? data.recentTickets.slice(0, 3) : [];
   if (recent.length) lines.push("RECENT");
   recent.forEach((row) => {
     const commit = row?.delivery?.commit?.shortSha ? ` · ${row.delivery.commit.shortSha}` : "";
     lines.push(`  ${rowLabel(row)} · ${row.status ?? "unknown"}${commit}`);
   });
+  return lines.join("\n");
+}
+
+/** WHAT: Formats one read-only ticket detail with its true claimability. WHY: Keeps criteria, revision and assignment out of raw API calls. */
+export function formatTicketShow(detail) {
+  const ticket = detail?.ticket ?? detail ?? {};
+  const approval = ticket?.productApproval?.state ?? "unknown";
+  const safetyState = ticket?.safety?.state ?? "clear";
+  const lines = [rowLabel(ticket),
+    `${ticket.status ?? "unknown"} · revision ${ticket.revision ?? "?"}`
+    + ` · approval ${approval} · safety ${safetyState}`];
+  const owner = ticket?.assignment?.ownership?.owner?.agentId ?? null;
+  if (ticket?.assignment) {
+    lines.push(`ASSIGNMENT ${owner ?? "?"} · ${ticket.assignment.state ?? "?"}`
+      + ` · generation ${ticket.assignment.generation ?? "?"}`);
+  }
+  const held = ticket?.safety?.executionBlocked === true;
+  const claimBlock = held ? "safety hold"
+    : approval !== "approved" ? `approval ${approval}`
+      : ticket?.assignment ? "already assigned"
+        : ticket.status !== "ready" ? `status ${ticket.status ?? "unknown"}` : null;
+  lines.push(claimBlock ? `CLAIMABLE no (${claimBlock})` : "CLAIMABLE yes");
+  const boundedText = (value, limit = 600) => {
+    const text = String(value ?? "").trim();
+    return text.length > limit ? `${text.slice(0, limit)}...` : text;
+  };
+  const problem = boundedText(ticket?.problem);
+  if (problem) lines.push("PROBLEM", `  ${problem}`);
+  const expected = boundedText(ticket?.expected);
+  if (expected) lines.push("EXPECTED", `  ${expected}`);
+  const criteria = Array.isArray(ticket?.criteria) ? ticket.criteria.slice(0, 8) : [];
+  if (criteria.length) {
+    lines.push("CRITERIA");
+    criteria.forEach((criterion) => lines.push(`  - ${criterion}`));
+  }
+  if (ticket?.deferral) {
+    lines.push(`DEFERRAL ${ticket.deferral.kind ?? "?"} · ${ticket.deferral.state ?? "?"}`
+      + `${ticket.deferral.blockerRef ? ` · ${ticket.deferral.blockerRef}` : ""}`);
+  }
   return lines.join("\n");
 }
 
@@ -169,6 +228,12 @@ export async function runWorkCommand(argv, dependencies = {}) {
 
   if (action === "status") return formatWorkOverview(await client.read(
     `/api/agent/overview?project=${encodeURIComponent(project)}&recent=5`));
+  if (action === "show") {
+    const ticketId = parsed.positional[0];
+    if (!ticketId) throw new Error("show requires a ticket id");
+    return formatTicketShow(await client.read(
+      `/api/tickets/${encodeURIComponent(ticketId)}?project=${encodeURIComponent(project)}`));
+  }
   if (action === "join") {
     try {
       await client.read(`/api/agent/overview?project=${encodeURIComponent(project)}&recent=1`);

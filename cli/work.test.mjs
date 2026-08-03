@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  createWorkClient, formatWorkOverview, parseWorkArgs, projectForWorkSender, runWorkCommand,
+  createWorkClient, formatTicketShow, formatWorkOverview, parseWorkArgs, projectForWorkSender,
+  runWorkCommand,
 } from "./work.mjs";
 
 const overview = (overrides = {}) => ({
@@ -58,6 +59,60 @@ feature("simple Suggestions work CLI", () => {
       expect(text).toContain("NEEDS RESPONSE human_comment");
       expect(text).toContain("SVW-0100 · Fix recorder · high");
       expect(text).toContain("SVW-0098 · Previous delivery · done · abc12345");
+    }],
+  });
+
+  unit("renders omitted claimable and gated groups without hiding them", {
+    when: ["formatting an overview with groups", () => formatWorkOverview(overview({
+      readyOmitted: 2,
+      readyGroups: { awaitingApproval: 1, held: 1, dependencyBlocked: 3 },
+      awaitingApprovalCandidates: [{ id: "SVW-0101", title: "Needs approval", priority: "normal" }],
+      heldCandidates: [{ id: "SVW-0102", title: "Risky change", priority: "high" }],
+    }))],
+    then: ["every group is visible but only claimable work sits under READY", (text) => {
+      expect(text).toContain("+2 more claimable");
+      expect(text).toContain("AWAITING APPROVAL 1");
+      expect(text).toContain("SVW-0101 · Needs approval");
+      expect(text).toContain("HELD 1");
+      expect(text).toContain("SVW-0102 · Risky change");
+      expect(text).toContain("DEPENDENCY-BLOCKED 3");
+      expect(text.indexOf("READY")).toBeLessThan(text.indexOf("AWAITING APPROVAL"));
+    }],
+  });
+
+  unit("shows one ticket with its true claimability and criteria", {
+    when: ["formatting a held ticket detail", () => formatTicketShow({ ticket: {
+      id: "SVW-0103", title: "Delete the world", status: "ready", revision: 4, priority: "high",
+      productApproval: { state: "approved" },
+      safety: { state: "held", executionBlocked: true },
+      criteria: ["never advertised as claimable", "hold visible"],
+    } })],
+    then: ["the hold wins over approval and the criteria stay readable", (text) => {
+      expect(text).toContain("SVW-0103 · Delete the world · high");
+      expect(text).toContain("ready · revision 4 · approval approved · safety held");
+      expect(text).toContain("CLAIMABLE no (safety hold)");
+      expect(text).toContain("- never advertised as claimable");
+    }],
+  });
+
+  component("show reads one ticket through the fleet key without mutation", {
+    given: ["a worker pane and a fake board", () => ({ client: fakeClient([
+      { ticket: { id: "SVW-0104", title: "Plain task", status: "ready", revision: 2,
+        priority: "normal", productApproval: { state: "approved" }, criteria: [],
+        problem: "Recorder output stops at the first silence gap",
+        expected: "One full pass keeps every segment in order" } },
+    ]) })],
+    when: ["showing the ticket", ({ client }) => runWorkCommand(
+      ["show", "SVW-0104"], { sender: "skyvw:4", client, baseUrl: "https://suggest.v1d.io" },
+    )],
+    then: ["a single read returns the claimable truth and the durable contract", (text, { client }) => {
+      expect(client.calls).toEqual([{ kind: "read",
+        path: "/api/tickets/SVW-0104?project=skyvw" }]);
+      expect(text).toContain("CLAIMABLE yes");
+      expect(text).toContain("PROBLEM");
+      expect(text).toContain("Recorder output stops at the first silence gap");
+      expect(text).toContain("EXPECTED");
+      expect(text).toContain("One full pass keeps every segment in order");
     }],
   });
 
