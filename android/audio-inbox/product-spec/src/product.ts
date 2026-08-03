@@ -10,6 +10,7 @@ import {
   linkRoutes,
 } from "./catalog.js";
 import type { LinkNativeRegistry } from "./native-registry.js";
+import { linkFiniteValues } from "./finite-values.js";
 import { linkServiceConfigs, linkServiceMounts } from "./services.js";
 
 const ALL_ARTIFACTS = ["phone-full-ui", "wear-full-ui"] as const;
@@ -140,6 +141,7 @@ const baseProduct = defineProduct({
     version: CIRCLEKIT_ASSET_CATALOG.version,
   },
   iconRefs,
+  finiteValues: linkFiniteValues,
   ui: [
     { id: "link.navigation", kind: "menu-entry", artifacts: ALL_ARTIFACTS, requiredCapabilities: ["ui.menu", "ui.navigation"], ports: { state: "navigation.destination", action: "navigation.open" } },
     { id: "link.capture", kind: "component-entry", artifacts: ALL_ARTIFACTS, requiredCapabilities: ["ui.component-tree"], ports: { state: "capture.status", action: "capture.command" } },
@@ -194,6 +196,11 @@ function requireCatalogSound(): void {
     if (action.a11y.trim() === "") throw new Error(`action '${action.id}' has blank accessibility copy`);
     if (action.rowId.trim() === "") throw new Error(`action '${action.id}' has blank row id`);
   }
+  requireExactSet(
+    new Set(linkRoutes.map(({ id }) => id)),
+    new Set(linkFiniteValues.find(({ id }) => id === "link.route")?.values ?? []),
+    "route/finite value",
+  );
 }
 
 function requireNativeParity(registry: LinkNativeRegistry): void {
@@ -213,6 +220,19 @@ function requireNativeParity(registry: LinkNativeRegistry): void {
     requireExactSet(new Set(mounted.lego.inputs.map(({ id }) => id)), new Set(service.inputPorts), `service '${service.serviceId}' input`);
     requireExactSet(new Set(mounted.lego.outputs.map(({ id }) => id)), new Set(service.outputPorts), `service '${service.serviceId}' output`);
     requireExactSet(new Set(baseProduct.artifacts.map(({ id }) => id)), new Set(service.profiles), `service '${service.serviceId}' profile`);
+  }
+  requireExactSet(
+    new Set(baseProduct.finiteValues.map(({ id }) => id)),
+    new Set(registry.finiteValues.map(({ id }) => id)),
+    "finite value/native binding",
+  );
+  for (const declaration of baseProduct.finiteValues) {
+    const native = registry.finiteValues.find(({ id }) => id === declaration.id);
+    requireExactSet(
+      new Set(declaration.values),
+      new Set(native?.values ?? []),
+      `finite value '${declaration.id}'`,
+    );
   }
 }
 

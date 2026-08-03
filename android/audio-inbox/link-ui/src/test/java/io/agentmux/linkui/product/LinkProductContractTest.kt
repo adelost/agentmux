@@ -4,13 +4,18 @@ import io.agentmux.linkui.product.generated.CaptureServicePort
 import io.agentmux.linkui.product.generated.ConversationServicePort
 import io.agentmux.linkui.product.generated.LinkArtifactProfile
 import io.agentmux.linkui.product.generated.LinkCaptureCommand
+import io.agentmux.linkui.product.generated.LinkCaptureOperation
+import io.agentmux.linkui.product.generated.LinkCapturePhase
 import io.agentmux.linkui.product.generated.LinkCapturedTurn
 import io.agentmux.linkui.product.generated.LinkCaptureState
 import io.agentmux.linkui.product.generated.LinkConversationState
+import io.agentmux.linkui.product.generated.LinkDeliveryPhase
 import io.agentmux.linkui.product.generated.LinkNativePortGraph
 import io.agentmux.linkui.product.generated.LinkPlaybackCommand
+import io.agentmux.linkui.product.generated.LinkPlaybackPhase
 import io.agentmux.linkui.product.generated.LinkPlaybackState
 import io.agentmux.linkui.product.generated.LinkProductManifest
+import io.agentmux.linkui.product.generated.LinkReplyPhase
 import io.agentmux.linkui.product.generated.LinkRoute
 import io.agentmux.linkui.product.generated.LinkRouteCommand
 import io.agentmux.linkui.product.generated.LinkRouteState
@@ -54,37 +59,36 @@ private class FakeNativePortGraph : LinkNativePortGraph {
         createdAtMs = 1_700_000_000_000L,
     )
     var delivered: LinkCapturedTurn? = null
-    private var capturePhase = "IDLE"
+    private var capturePhase = LinkCapturePhase.IDLE
 
     override val navigation = object : NavigationServicePort {
-        private var route = LinkRoute.HOME.id
+        private var route = LinkRoute.HOME
         override fun open(value: LinkRouteCommand) { route = value.route }
         override fun destination() = LinkRouteState(route)
     }
     override val capture = object : CaptureServicePort {
         override fun command(value: LinkCaptureCommand) {
             capturePhase = when (value.operation) {
-                "BEGIN" -> "LISTENING"
-                "RELEASE" -> "FINALIZING"
-                "CANCEL" -> "IDLE"
-                else -> error(value.operation)
+                LinkCaptureOperation.BEGIN -> LinkCapturePhase.LISTENING
+                LinkCaptureOperation.RELEASE -> LinkCapturePhase.FINALIZING
+                LinkCaptureOperation.CANCEL -> LinkCapturePhase.IDLE
             }
         }
         override fun status() = LinkCaptureState(capturePhase, 42L, 512L)
-        override fun captured() = captured.takeIf { capturePhase == "FINALIZING" }
+        override fun captured() = captured.takeIf { capturePhase == LinkCapturePhase.FINALIZING }
     }
     override val conversation = object : ConversationServicePort {
         override fun turn(value: LinkCapturedTurn) { delivered = value }
         override fun status() = LinkConversationState(
             delivered?.turnId,
-            "QUEUED",
-            "THINKING",
+            LinkDeliveryPhase.QUEUED,
+            LinkReplyPhase.THINKING,
             false,
             delivered?.idempotencyKey,
         )
     }
     override val playback = object : PlaybackServicePort {
         override fun command(value: LinkPlaybackCommand) = Unit
-        override fun status() = LinkPlaybackState(null, "IDLE", 0L, 0L)
+        override fun status() = LinkPlaybackState(null, LinkPlaybackPhase.IDLE, 0L, 0L)
     }
 }

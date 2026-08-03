@@ -10,6 +10,44 @@ enum class LinkRoute(val id: String) {
     SETTINGS("settings"),
     DEV_HOST("dev-host"),
 }
+enum class LinkCaptureOperation(val id: String) {
+    BEGIN("begin"),
+    RELEASE("release"),
+    CANCEL("cancel"),
+}
+enum class LinkCapturePhase(val id: String) {
+    IDLE("idle"),
+    LISTENING("listening"),
+    FINALIZING("finalizing"),
+    FAILED("failed"),
+}
+enum class LinkDeliveryPhase(val id: String) {
+    SENDING("sending"),
+    QUEUED("queued"),
+    FAILED("failed"),
+}
+enum class LinkReplyPhase(val id: String) {
+    NONE("none"),
+    THINKING("thinking"),
+    READY("ready"),
+    FAILED("failed"),
+}
+enum class LinkPlaybackOperation(val id: String) {
+    PLAY("play"),
+    PAUSE("pause"),
+    RESUME("resume"),
+    STOP("stop"),
+}
+enum class LinkPlaybackPhase(val id: String) {
+    IDLE("idle"),
+    QUEUED("queued"),
+    PLAYING("playing"),
+    PAUSED("paused"),
+    STOPPED("stopped"),
+    PLAYED("played"),
+    SKIPPED("skipped"),
+    FAILED("failed"),
+}
 enum class LinkMenuAction(val id: String) {
     OPEN_SETTINGS("open-settings"),
 }
@@ -29,16 +67,16 @@ enum class LinkComponentId(val id: String) {
     DEV_PREVIEW("dev-preview"),
 }
 data class LinkRouteCommand(
-    val route: String,
+    val route: LinkRoute,
 )
 data class LinkRouteState(
-    val route: String,
+    val route: LinkRoute,
 )
 data class LinkCaptureCommand(
-    val operation: String,
+    val operation: LinkCaptureOperation,
 )
 data class LinkCaptureState(
-    val phase: String,
+    val phase: LinkCapturePhase,
     val startedAtMs: Long?,
     val byteCount: Long,
 )
@@ -51,18 +89,18 @@ data class LinkCapturedTurn(
 )
 data class LinkConversationState(
     val turnId: String?,
-    val deliveryPhase: String,
-    val replyPhase: String,
+    val deliveryPhase: LinkDeliveryPhase?,
+    val replyPhase: LinkReplyPhase?,
     val offline: Boolean,
     val idempotencyKey: String?,
 )
 data class LinkPlaybackCommand(
-    val operation: String,
+    val operation: LinkPlaybackOperation,
     val turnId: String,
 )
 data class LinkPlaybackState(
     val turnId: String?,
-    val phase: String,
+    val phase: LinkPlaybackPhase,
     val positionMs: Long,
     val durationMs: Long,
 )
@@ -96,6 +134,7 @@ data class LinkComponentMount(val component: LinkComponentId, val region: String
 data class LinkComponentTree(val route: LinkRoute, val surface: String, val mounts: List<LinkComponentMount>)
 data class LinkServiceDescriptor(val id: String, val nativePortId: String, val inputPorts: List<String>, val outputPorts: List<String>, val stateOwner: String, val lifetime: String, val durability: String, val clockDomain: String, val contextInputs: List<String>, val effects: List<String>)
 data class LinkServiceEdge(val fromService: String, val fromPort: String, val toService: String, val toPort: String)
+data class LinkFiniteValueDeclaration(val id: String, val values: Set<String>)
 
 object LinkProductWiring {
     val CAPTURE_CAPTURED_TO_CONVERSATION_TURN: LinkServiceEdge = LinkServiceEdge("capture", "captured", "conversation", "turn")
@@ -104,7 +143,7 @@ object LinkProductWiring {
 
 object LinkProductManifest {
     const val PRODUCT_ID: String = "agentmux-link"
-    const val PRODUCT_SPEC_VERSION: String = "0.3.25"
+    const val PRODUCT_SPEC_VERSION: String = "0.3.29"
     const val ASSET_CATALOG_ID: String = "circlekit"
     const val ASSET_CATALOG_VERSION: String = "0.3.25"
     val routes: List<LinkRouteDescriptor> = listOf(
@@ -146,6 +185,15 @@ object LinkProductManifest {
         LinkServiceDescriptor("capture", "link.capture.port", listOf("command"), listOf("status", "captured"), "external", "operation", "durable", "monotonic", listOf("microphone.permission"), listOf("audio.capture", "storage.write")),
         LinkServiceDescriptor("conversation", "link.conversation.port", listOf("turn"), listOf("status"), "external", "process", "durable", "wall", listOf("network.connectivity"), listOf("storage.write", "transport.send", "transport.receive", "retry.schedule")),
         LinkServiceDescriptor("playback", "link.playback.port", listOf("command"), listOf("status"), "external", "process", "transient", "monotonic", listOf("audio.focus"), listOf("audio.playback")),
+    )
+    val finiteValues: List<LinkFiniteValueDeclaration> = listOf(
+        LinkFiniteValueDeclaration("link.route", setOf("home", "settings", "dev-host")),
+        LinkFiniteValueDeclaration("link.capture-operation", setOf("begin", "release", "cancel")),
+        LinkFiniteValueDeclaration("link.capture-phase", setOf("idle", "listening", "finalizing", "failed")),
+        LinkFiniteValueDeclaration("link.delivery-phase", setOf("sending", "queued", "failed")),
+        LinkFiniteValueDeclaration("link.reply-phase", setOf("none", "thinking", "ready", "failed")),
+        LinkFiniteValueDeclaration("link.playback-operation", setOf("play", "pause", "resume", "stop")),
+        LinkFiniteValueDeclaration("link.playback-phase", setOf("idle", "queued", "playing", "paused", "stopped", "played", "skipped", "failed")),
     )
     fun route(route: LinkRoute): LinkRouteDescriptor = routes.single { it.route == route }
     fun action(action: LinkMenuAction): LinkMenuActionDescriptor = menuActions.single { it.action == action }

@@ -95,10 +95,8 @@ internal fun LinkPhoneScreen(
             PhoneLinkProductPorts(
                 coordinator = coordinator,
                 recorder = recorder,
-                currentRoute = { route.id },
-                navigate = { routeId ->
-                    route = LinkRoute.entries.single { it.id == routeId }
-                },
+                currentRoute = { route },
+                navigate = { route = it },
             ),
         )
     }

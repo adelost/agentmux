@@ -23,6 +23,13 @@ enum class CapturePhase {
     FAILED,
 }
 
+/** User operations accepted by both Phone and Wear capture ports. */
+enum class CaptureOperation {
+    BEGIN,
+    RELEASE,
+    CANCEL,
+}
+
 /**
  * WHAT: Tracks durable acceptance for one outbound turn.
  * WHY: Keeps delivery failures distinct from reply and playback failures.
@@ -57,6 +64,14 @@ enum class PlaybackPhase {
     PLAYED,
     SKIPPED,
     FAILED,
+}
+
+/** User operations accepted by the shared playback port. */
+enum class PlaybackOperation {
+    PLAY,
+    PAUSE,
+    RESUME,
+    STOP,
 }
 
 /**

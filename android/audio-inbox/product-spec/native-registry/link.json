@@ -1,6 +1,6 @@
 {
   "stage": "native-export",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "sourceFile": "link-ui/src/main/java/io/agentmux/linkui/product/LinkNativeBindings.kt",
   "profiles": ["phone-full-ui", "wear-full-ui"],
   "components": [
@@ -37,5 +37,14 @@
     { "serviceId": "capture", "nativePortId": "link.capture.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["command"], "outputPorts": ["status", "captured"] },
     { "serviceId": "conversation", "nativePortId": "link.conversation.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["turn"], "outputPorts": ["status"] },
     { "serviceId": "playback", "nativePortId": "link.playback.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["command"], "outputPorts": ["status"] }
+  ],
+  "finiteValues": [
+    { "id": "link.route", "values": ["home", "settings", "dev-host"] },
+    { "id": "link.capture-operation", "values": ["begin", "release", "cancel"] },
+    { "id": "link.capture-phase", "values": ["idle", "listening", "finalizing", "failed"] },
+    { "id": "link.delivery-phase", "values": ["sending", "queued", "failed"] },
+    { "id": "link.reply-phase", "values": ["none", "thinking", "ready", "failed"] },
+    { "id": "link.playback-operation", "values": ["play", "pause", "resume", "stop"] },
+    { "id": "link.playback-phase", "values": ["idle", "queued", "playing", "paused", "stopped", "played", "skipped", "failed"] }
   ]
 }
