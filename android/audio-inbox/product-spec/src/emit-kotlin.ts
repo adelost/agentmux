@@ -152,15 +152,17 @@ function emitContract(product: AgentmuxLinkProductIr, contract: LegoContract): s
 }
 
 function kotlinType(product: AgentmuxLinkProductIr, field: LegoField): string {
-  if (typeof field.value !== "string") {
-    const finite = product.finiteValues.find(({ id }) => id === field.value.ref);
-    if (finite === undefined || field.value.finite !== true) {
-      throw new Error(`Contract field '${field.name}' uses unsupported value ref '${field.value.ref}'`);
+  const value = field.value;
+  if (typeof value !== "string") {
+    const declared = product.finiteValues.some(({ id }) => id === value.ref);
+    const finite = "finite" in value && value.finite === true;
+    if (!declared || !finite) {
+      throw new Error(`Contract field '${field.name}' uses unsupported value ref '${value.ref}'`);
     }
-    const type = field.value.ref === "link.route" ? "LinkRoute" : contractName(field.value.ref);
+    const type = value.ref === "link.route" ? "LinkRoute" : contractName(value.ref);
     return `${type}${field.nullable ? "?" : ""}`;
   }
-  const base = ({ string: "String", integer: "Long", number: "Double", boolean: "Boolean" } as const)[field.value];
+  const base = ({ string: "String", integer: "Long", number: "Double", boolean: "Boolean" } as const)[value];
   return `${base}${field.nullable ? "?" : ""}`;
 }
 

@@ -529,6 +529,72 @@
       "screen": "dev-host"
     }
   ],
+  "finiteValues": [
+    {
+      "id": "link.route",
+      "values": [
+        "home",
+        "settings",
+        "dev-host"
+      ]
+    },
+    {
+      "id": "link.capture-operation",
+      "values": [
+        "begin",
+        "release",
+        "cancel"
+      ]
+    },
+    {
+      "id": "link.capture-phase",
+      "values": [
+        "idle",
+        "listening",
+        "finalizing",
+        "failed"
+      ]
+    },
+    {
+      "id": "link.delivery-phase",
+      "values": [
+        "sending",
+        "queued",
+        "failed"
+      ]
+    },
+    {
+      "id": "link.reply-phase",
+      "values": [
+        "none",
+        "thinking",
+        "ready",
+        "failed"
+      ]
+    },
+    {
+      "id": "link.playback-operation",
+      "values": [
+        "play",
+        "pause",
+        "resume",
+        "stop"
+      ]
+    },
+    {
+      "id": "link.playback-phase",
+      "values": [
+        "idle",
+        "queued",
+        "playing",
+        "paused",
+        "stopped",
+        "played",
+        "skipped",
+        "failed"
+      ]
+    }
+  ],
   "iconRefs": [
     {
       "artifacts": [
@@ -680,7 +746,10 @@
             "clockDomain": "none",
             "name": "route",
             "nullable": false,
-            "value": "string"
+            "value": {
+              "finite": true,
+              "ref": "link.route"
+            }
           }
         ],
         "id": "link.route-command",
@@ -692,7 +761,10 @@
             "clockDomain": "none",
             "name": "route",
             "nullable": false,
-            "value": "string"
+            "value": {
+              "finite": true,
+              "ref": "link.route"
+            }
           }
         ],
         "id": "link.route-state",
@@ -704,7 +776,10 @@
             "clockDomain": "none",
             "name": "operation",
             "nullable": false,
-            "value": "string"
+            "value": {
+              "finite": true,
+              "ref": "link.capture-operation"
+            }
           }
         ],
         "id": "link.capture-command",
@@ -716,7 +791,10 @@
             "clockDomain": "none",
             "name": "phase",
             "nullable": false,
-            "value": "string"
+            "value": {
+              "finite": true,
+              "ref": "link.capture-phase"
+            }
           },
           {
             "clockDomain": "wall",
@@ -784,14 +862,20 @@
           {
             "clockDomain": "none",
             "name": "deliveryPhase",
-            "nullable": false,
-            "value": "string"
+            "nullable": true,
+            "value": {
+              "finite": true,
+              "ref": "link.delivery-phase"
+            }
           },
           {
             "clockDomain": "none",
             "name": "replyPhase",
-            "nullable": false,
-            "value": "string"
+            "nullable": true,
+            "value": {
+              "finite": true,
+              "ref": "link.reply-phase"
+            }
           },
           {
             "clockDomain": "none",
@@ -815,7 +899,10 @@
             "clockDomain": "none",
             "name": "operation",
             "nullable": false,
-            "value": "string"
+            "value": {
+              "finite": true,
+              "ref": "link.playback-operation"
+            }
           },
           {
             "clockDomain": "none",
@@ -839,7 +926,10 @@
             "clockDomain": "none",
             "name": "phase",
             "nullable": false,
-            "value": "string"
+            "value": {
+              "finite": true,
+              "ref": "link.playback-phase"
+            }
           },
           {
             "clockDomain": "none",
@@ -875,7 +965,10 @@
                     "clockDomain": "none",
                     "name": "route",
                     "nullable": false,
-                    "value": "string"
+                    "value": {
+                      "finite": true,
+                      "ref": "link.route"
+                    }
                   }
                 ],
                 "id": "link.route-command",
@@ -892,7 +985,10 @@
                     "clockDomain": "none",
                     "name": "route",
                     "nullable": false,
-                    "value": "string"
+                    "value": {
+                      "finite": true,
+                      "ref": "link.route"
+                    }
                   }
                 ],
                 "id": "link.route-state",
@@ -918,6 +1014,12 @@
         },
         "id": "capture",
         "lego": {
+          "configInputs": [
+            {
+              "fields": [],
+              "id": "policy"
+            }
+          ],
           "id": "link.capture",
           "inputs": [
             {
@@ -927,7 +1029,10 @@
                     "clockDomain": "none",
                     "name": "operation",
                     "nullable": false,
-                    "value": "string"
+                    "value": {
+                      "finite": true,
+                      "ref": "link.capture-operation"
+                    }
                   }
                 ],
                 "id": "link.capture-command",
@@ -944,7 +1049,10 @@
                     "clockDomain": "none",
                     "name": "phase",
                     "nullable": false,
-                    "value": "string"
+                    "value": {
+                      "finite": true,
+                      "ref": "link.capture-phase"
+                    }
                   },
                   {
                     "clockDomain": "wall",
@@ -1029,6 +1137,12 @@
         },
         "id": "conversation",
         "lego": {
+          "configInputs": [
+            {
+              "fields": [],
+              "id": "policy"
+            }
+          ],
           "id": "link.conversation",
           "inputs": [
             {
@@ -1085,14 +1199,20 @@
                   {
                     "clockDomain": "none",
                     "name": "deliveryPhase",
-                    "nullable": false,
-                    "value": "string"
+                    "nullable": true,
+                    "value": {
+                      "finite": true,
+                      "ref": "link.delivery-phase"
+                    }
                   },
                   {
                     "clockDomain": "none",
                     "name": "replyPhase",
-                    "nullable": false,
-                    "value": "string"
+                    "nullable": true,
+                    "value": {
+                      "finite": true,
+                      "ref": "link.reply-phase"
+                    }
                   },
                   {
                     "clockDomain": "none",
@@ -1137,6 +1257,12 @@
         },
         "id": "playback",
         "lego": {
+          "configInputs": [
+            {
+              "fields": [],
+              "id": "policy"
+            }
+          ],
           "id": "link.playback",
           "inputs": [
             {
@@ -1146,7 +1272,10 @@
                     "clockDomain": "none",
                     "name": "operation",
                     "nullable": false,
-                    "value": "string"
+                    "value": {
+                      "finite": true,
+                      "ref": "link.playback-operation"
+                    }
                   },
                   {
                     "clockDomain": "none",
@@ -1175,7 +1304,10 @@
                     "clockDomain": "none",
                     "name": "phase",
                     "nullable": false,
-                    "value": "string"
+                    "value": {
+                      "finite": true,
+                      "ref": "link.playback-phase"
+                    }
                   },
                   {
                     "clockDomain": "none",
@@ -1423,7 +1555,7 @@
   "palette": {
     "variants": []
   },
-  "productSpecVersion": "0.3.25",
+  "productSpecVersion": "0.3.29",
   "rendererBindings": [
     {
       "capabilities": [
@@ -1442,7 +1574,7 @@
       "id": "android-wear-compose"
     }
   ],
-  "schemaVersion": 2,
+  "schemaVersion": 5,
   "ui": [
     {
       "artifacts": [

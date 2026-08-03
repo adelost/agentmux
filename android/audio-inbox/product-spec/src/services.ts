@@ -1,4 +1,4 @@
-import { defineLegoSpec, field, finiteValueRef, mount, port } from "@v1d/product-spec";
+import { configInput, defineLegoSpec, field, finiteValueRef, mount, port } from "@v1d/product-spec";
 
 const routeCommand = {
   id: "link.route-command", kind: "event",
@@ -69,18 +69,21 @@ export const captureService = defineLegoSpec({
   id: "link.capture", role: "source",
   inputs: [port("command", captureCommand)],
   outputs: [port("status", captureState), port("captured", capturedTurn)],
+  configInputs: [configInput("policy")],
   runtime: runtime("external", "operation", "durable", "monotonic", ["microphone.permission"], ["audio.capture", "storage.write"]),
 } as const);
 export const conversationService = defineLegoSpec({
   id: "link.conversation", role: "adapter",
   inputs: [port("turn", capturedTurn)],
   outputs: [port("status", conversationState)],
+  configInputs: [configInput("policy")],
   runtime: runtime("external", "process", "durable", "wall", ["network.connectivity"], ["storage.write", "transport.send", "transport.receive", "retry.schedule"]),
 } as const);
 export const playbackService = defineLegoSpec({
   id: "link.playback", role: "consumer",
   inputs: [port("command", playbackCommand)],
   outputs: [port("status", playbackState)],
+  configInputs: [configInput("policy")],
   runtime: runtime("external", "process", "transient", "monotonic", ["audio.focus"], ["audio.playback"]),
 } as const);
 

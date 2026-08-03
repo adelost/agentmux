@@ -40,11 +40,11 @@
   ],
   "finiteValues": [
     { "id": "link.route", "values": ["home", "settings", "dev-host"] },
-    { "id": "link.capture-operation", "values": ["BEGIN", "RELEASE", "CANCEL"] },
-    { "id": "link.capture-phase", "values": ["IDLE", "LISTENING", "FINALIZING", "FAILED"] },
-    { "id": "link.delivery-phase", "values": ["SENDING", "QUEUED", "FAILED"] },
-    { "id": "link.reply-phase", "values": ["NONE", "THINKING", "READY", "FAILED"] },
-    { "id": "link.playback-operation", "values": ["PLAY", "PAUSE", "RESUME", "STOP"] },
-    { "id": "link.playback-phase", "values": ["IDLE", "QUEUED", "PLAYING", "PAUSED", "STOPPED", "PLAYED", "SKIPPED", "FAILED"] }
+    { "id": "link.capture-operation", "values": ["begin", "release", "cancel"] },
+    { "id": "link.capture-phase", "values": ["idle", "listening", "finalizing", "failed"] },
+    { "id": "link.delivery-phase", "values": ["sending", "queued", "failed"] },
+    { "id": "link.reply-phase", "values": ["none", "thinking", "ready", "failed"] },
+    { "id": "link.playback-operation", "values": ["play", "pause", "resume", "stop"] },
+    { "id": "link.playback-phase", "values": ["idle", "queued", "playing", "paused", "stopped", "played", "skipped", "failed"] }
   ]
 }

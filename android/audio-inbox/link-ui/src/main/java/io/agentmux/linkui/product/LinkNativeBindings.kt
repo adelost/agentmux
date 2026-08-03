@@ -158,5 +158,8 @@ object LinkNativeBindings {
     ) = LinkNativeServiceBinding(id, port, both, inputs, outputs)
 
     private fun <E : Enum<E>> finiteValues(id: String, values: Array<E>) =
-        LinkNativeFiniteValueBinding(id, values.mapTo(linkedSetOf()) { it.name })
+        LinkNativeFiniteValueBinding(id, values.mapTo(linkedSetOf()) { wireId(it) })
+
+    /** Kotlin constants stay platform idiom; the attested wire value is lowercase kebab. */
+    private fun wireId(entry: Enum<*>): String = entry.name.lowercase().replace('_', '-')
 }
