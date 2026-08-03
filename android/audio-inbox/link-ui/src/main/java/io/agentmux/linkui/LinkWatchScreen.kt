@@ -59,7 +59,7 @@ fun LinkWatchScreen(
         updateState = updateState,
         currentVersionName = currentVersionName,
         showingSettings = showingSettings,
-        onSettings = { showingSettings = true },
+        onMenuAction = { action -> action.dispatch { showingSettings = true } },
         onBack = { showingSettings = false },
         microphoneGranted = microphoneGranted,
         onRequestMicrophone = onRequestMicrophone,
@@ -85,7 +85,7 @@ fun LinkWatchSurface(
     updateState: UpdateState,
     currentVersionName: String,
     showingSettings: Boolean,
-    onSettings: () -> Unit,
+    onMenuAction: (LinkMenuAction) -> Unit,
     onBack: () -> Unit,
     microphoneGranted: Boolean,
     onRequestMicrophone: () -> Unit,
@@ -172,7 +172,7 @@ fun LinkWatchSurface(
         onInstallUpdate,
         onOpenDevHost,
         showingSettings,
-        onSettings,
+        onMenuAction,
     ) {
         items.value = if (showingSettings) {
             linkWatchSettingsRows(
@@ -191,7 +191,7 @@ fun LinkWatchSurface(
                 onPlay = onPlay,
                 onStop = onStop,
                 onReplay = onReplay,
-                onSettings = onSettings,
+                onMenuAction = onMenuAction,
             )
         }
     }
@@ -205,7 +205,7 @@ fun linkWatchRows(
     onPlay: () -> Unit,
     onStop: () -> Unit,
     onReplay: () -> Unit,
-    onSettings: () -> Unit = {},
+    onMenuAction: (LinkMenuAction) -> Unit = {},
 ): List<RowSpec> {
     val selected = state.targets.firstOrNull { it.id == state.selectedTargetId }
         ?: state.targets.firstOrNull()
@@ -252,7 +252,7 @@ fun linkWatchRows(
             sub = "NO REPLY YET",
             icon = RingIcons.Speaker,
         )
-        rows += settingsRow(onSettings)
+        rows += linkSettingsRow(onMenuAction)
         return rows
     }
     rows += RowSpec(
@@ -301,7 +301,7 @@ fun linkWatchRows(
             )
         }
     }
-    rows += settingsRow(onSettings)
+    rows += linkSettingsRow(onMenuAction)
     return rows
 }
 
@@ -345,11 +345,3 @@ fun linkWatchSettingsRows(
         )
     }
 }
-
-private fun settingsRow(onSettings: () -> Unit) = RowSpec(
-    key = "settings",
-    title = "SETTINGS",
-    sub = "CONNECTION & AUDIO",
-    icon = RingIcons.Gear,
-    onTap = onSettings,
-)

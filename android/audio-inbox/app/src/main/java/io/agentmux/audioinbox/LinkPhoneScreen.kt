@@ -35,7 +35,6 @@ import com.adelost.designkit.ui.CircleSurfaceClass
 import com.adelost.designkit.ui.LocalCircleSurfaceLayout
 import com.adelost.designkit.ui.phoneSurfaceDesign
 import com.adelost.ringkit.ui.CircleHostPreviewPort
-import com.adelost.ringkit.ui.PhoneHeaderAction
 import com.adelost.ringkit.ui.PhoneScreenHeader
 import com.adelost.ringkit.ui.RingChoiceRow
 import com.adelost.ringkit.ui.RingPlaybackControls
@@ -53,7 +52,10 @@ import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.linkConnectionRoute
 import io.agentmux.linkui.LinkCaptureControl
 import io.agentmux.linkui.LinkCaptureSpec
+import io.agentmux.linkui.LinkMenuAction
 import io.agentmux.linkui.LinkWatchSurface
+import io.agentmux.linkui.dispatch
+import io.agentmux.linkui.linkSettingsHeaderAction
 import io.agentmux.linkui.resolveLinkCaptureAvailability
 import java.time.Instant
 import kotlin.math.sin
@@ -188,7 +190,9 @@ internal fun LinkPhoneScreen(
                     updateState = presentedUpdateState,
                     currentVersionName = updater.currentVersionName,
                     showingSettings = route == LinkSurfaceRoute.SETTINGS,
-                    onSettings = { route = LinkSurfaceRoute.SETTINGS },
+                    onMenuAction = { action ->
+                        action.dispatch { route = LinkSurfaceRoute.SETTINGS }
+                    },
                     onBack = { route = LinkSurfaceRoute.HOME },
                     microphoneGranted = microphoneGranted || qaActive,
                     onRequestMicrophone = onRequestMicrophone,
@@ -235,7 +239,9 @@ internal fun LinkPhoneScreen(
                     state = presentedState,
                     composer = composer,
                     selectedSendable = selectedSendable,
-                    onSettings = { route = LinkSurfaceRoute.SETTINGS },
+                    onMenuAction = { action ->
+                        action.dispatch { route = LinkSurfaceRoute.SETTINGS }
+                    },
                     onSelectTarget = selectedTargetAction,
                     onComposerChanged = { composer = composer.edited(it) },
                     onSubmitText = {
@@ -285,7 +291,7 @@ private fun LinkPhoneHome(
     state: LinkState,
     composer: ComposerDraft,
     selectedSendable: Boolean,
-    onSettings: () -> Unit,
+    onMenuAction: (LinkMenuAction) -> Unit,
     onSelectTarget: (String) -> Unit,
     onComposerChanged: (String) -> Unit,
     onSubmitText: () -> Unit,
@@ -309,12 +315,7 @@ private fun LinkPhoneHome(
             onBack = null,
             icon = RingIcons.Link,
             actions = listOf(
-                PhoneHeaderAction(
-                    icon = RingIcons.Gear,
-                    label = "SETTINGS",
-                    contentDescription = "Open Link settings",
-                    onTap = onSettings,
-                ),
+                linkSettingsHeaderAction(onMenuAction),
             ),
         )
         LinkStatusRows(state = state, onSelectTarget = onSelectTarget)
