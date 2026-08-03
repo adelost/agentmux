@@ -10,6 +10,8 @@ import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkui.linkWatchRows
 import io.agentmux.linkui.linkWatchSettingsRows
+import io.agentmux.linkui.product.LinkProductSession
+import io.agentmux.linkui.product.generated.LinkArtifactProfile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -21,9 +23,13 @@ import java.time.ZoneId
 import java.util.Locale
 
 class WearLinkScreenTest {
+    private val wearProduct = LinkProductSession(LinkArtifactProfile.WEAR_FULL_UI)
+    private val phoneProduct = LinkProductSession(LinkArtifactProfile.PHONE_FULL_UI)
+
     @Test
     fun unavailableStateIsConciseCanonicalRows() {
         val rows = linkWatchRows(
+            product = wearProduct,
             state = unavailableState(),
             onSelectTarget = {},
             onOpenCapture = {},
@@ -41,9 +47,10 @@ class WearLinkScreenTest {
         assertEquals(
             "LOG IN ON PHONE",
             linkWatchSettingsRows(
-                unavailableState(),
-                UpdateState.UpToDate("1.2.1", publishedAtEpochMillis = null),
-                "1.2.1",
+                product = wearProduct,
+                state = unavailableState(),
+                updateState = UpdateState.UpToDate("1.2.1", publishedAtEpochMillis = null),
+                currentVersionName = "1.2.1",
             )[0].sub,
         )
     }
@@ -76,6 +83,7 @@ class WearLinkScreenTest {
         )
 
         val rows = linkWatchRows(
+            product = wearProduct,
             state = state,
             onSelectTarget = { selected = it },
             onOpenCapture = { openedCapture = true },
@@ -120,6 +128,7 @@ class WearLinkScreenTest {
         )
 
         val rows = linkWatchRows(
+            product = wearProduct,
             state = state,
             onSelectTarget = {},
             onOpenCapture = {},
@@ -155,6 +164,7 @@ class WearLinkScreenTest {
         )
 
         val rows = linkWatchRows(
+            product = wearProduct,
             state = state,
             onSelectTarget = {},
             onOpenCapture = {},
@@ -176,7 +186,7 @@ class WearLinkScreenTest {
             versionName = "0.1.1",
             progress = 0.4f,
         )
-        val downloadingRow = linkWatchSettingsRows(LinkState(), downloading, "0.1.0")[1]
+        val downloadingRow = linkWatchSettingsRows(wearProduct, LinkState(), downloading, "0.1.0")[1]
         assertEquals("UPDATE", downloadingRow.title)
         assertEquals("DOWNLOADING… 40%", downloadingRow.sub)
         assertEquals(
@@ -190,6 +200,7 @@ class WearLinkScreenTest {
             apkPath = "/cache/update.apk",
         )
         val readyRow = linkWatchSettingsRows(
+            product = wearProduct,
             state = LinkState(),
             updateState = ready,
             currentVersionName = "0.1.0",
@@ -204,6 +215,7 @@ class WearLinkScreenTest {
     fun currentReleaseKeepsItsSignedPublicationEpochAtTheSharedUiBoundary() {
         val publishedAt = Instant.parse("2026-08-02T05:33:20Z").toEpochMilli()
         val rows = linkWatchSettingsRows(
+            product = wearProduct,
             state = LinkState(),
             updateState = UpdateState.UpToDate(
                 versionName = "1.2.2",
@@ -225,17 +237,19 @@ class WearLinkScreenTest {
 
         assertFalse(
             linkWatchSettingsRows(
-                state,
-                UpdateState.UpToDate("1.2.1", publishedAtEpochMillis = null),
-                "1.2.1",
+                product = wearProduct,
+                state = state,
+                updateState = UpdateState.UpToDate("1.2.1", publishedAtEpochMillis = null),
+                currentVersionName = "1.2.1",
             )
                 .any { it.key == "dev-host" },
         )
         assertTrue(
             linkWatchSettingsRows(
-                state,
-                UpdateState.UpToDate("1.2.1", publishedAtEpochMillis = null),
-                "1.2.1",
+                product = phoneProduct,
+                state = state,
+                updateState = UpdateState.UpToDate("1.2.1", publishedAtEpochMillis = null),
+                currentVersionName = "1.2.1",
                 onOpenDevHost = {},
             ).any {
                 it.key == "dev-host" && it.sub == "RESPONSIVE · WATCH EXACT"

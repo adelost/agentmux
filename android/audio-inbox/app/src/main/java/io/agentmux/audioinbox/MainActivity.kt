@@ -15,17 +15,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.toArgb
 import com.adelost.designkit.ui.CircleHostSurface
-import com.adelost.designkit.ui.GraphiteTokens
 import com.adelost.designkit.ui.requestedOrientationFor
 import io.agentmux.audioinbox.update.LinkReleaseCatalogs
 import io.agentmux.audioinbox.update.LinkUpdater
 import io.agentmux.linkcore.CapturePhase
+import io.agentmux.linkui.product.LinkProductSession
+import io.agentmux.linkui.product.generated.LinkArtifactProfile
 
 /**
  * WHAT: Builds the phone Compose surface and its lifecycle-owned controllers.
  * WHY: Keeps presentation setup separate from durable transport and playback services.
  */
 class MainActivity : ComponentActivity() {
+    private val product = LinkProductSession(LinkArtifactProfile.PHONE_FULL_UI)
     private lateinit var coordinator: LinkCoordinator
     private lateinit var recorder: PushToTalkRecorder
     private lateinit var updater: LinkUpdater
@@ -37,8 +39,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = GraphiteTokens.Canvas.toArgb()
-        window.navigationBarColor = GraphiteTokens.Canvas.toArgb()
+        window.statusBarColor = product.canvasColor.toArgb()
+        window.navigationBarColor = product.canvasColor.toArgb()
         coordinator = LinkCoordinator(this)
         host = LinkHostController(this) { requestedOrientation = requestedOrientationFor(it) }
         if (BuildConfig.DEBUG) {
@@ -68,6 +70,7 @@ class MainActivity : ComponentActivity() {
                 onStateChange = host::update,
             ) {
                 LinkPhoneScreen(
+                    product = product,
                     coordinator = coordinator,
                     recorder = recorder,
                     updater = updater,

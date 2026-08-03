@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.designkit.ui.CircleChoiceRole
+import com.adelost.designkit.ui.LocalCircleSurfaceLayout
 import com.adelost.releasekit.UpdateState
 import com.adelost.releasekit.ui.releaseUpdateRows
 import com.adelost.releasekit.updateTargetChangelog
@@ -19,6 +20,9 @@ import com.adelost.ringkit.ui.RingChoiceRow
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.LinkHistoryPolicy
 import io.agentmux.linkcore.LinkState
+import io.agentmux.linkui.product.LinkNativeComponentRenderer
+import io.agentmux.linkui.product.LinkProductSession
+import io.agentmux.linkui.product.generated.LinkRoute
 
 /**
  * Secondary behavior and connection controls stay off the conversation
@@ -26,6 +30,7 @@ import io.agentmux.linkcore.LinkState
  */
 @Composable
 internal fun LinkPhoneSettings(
+    product: LinkProductSession,
     state: LinkState,
     updateState: UpdateState,
     currentVersionName: String,
@@ -41,6 +46,11 @@ internal fun LinkPhoneSettings(
     onResume: () -> Unit,
     onStop: () -> Unit,
 ) {
+    val route = product.route(LinkRoute.SETTINGS)
+    val components = product.components(
+        LinkRoute.SETTINGS,
+        LocalCircleSurfaceLayout.current.surfaceClass,
+    )
     val updateRows = releaseUpdateRows(
         state = updateState,
         currentVersionName = currentVersionName,
@@ -55,91 +65,94 @@ internal fun LinkPhoneSettings(
     ) {
         item("header") {
             PhoneScreenHeader(
-                title = "LINK SETTINGS",
+                title = route.title,
                 onBack = onBack,
-                icon = RingIcons.Gear,
+                icon = product.icon(route.iconId),
             )
         }
-        state.activePlaybackTurnId
-            ?.let { id -> state.turns.firstOrNull { it.turnId == id } }
-            ?.let { active ->
-                item("active-playback") {
-                    LinkPlaybackControls(
-                        turn = active,
-                        onPlay = {},
-                        onPause = onPause,
-                        onResume = onResume,
-                        onStop = onStop,
+        components.forEach { component ->
+            when (component.renderer) {
+                LinkNativeComponentRenderer.ACTIVE_PLAYBACK -> state.activePlaybackTurnId
+                    ?.let { id -> state.turns.firstOrNull { it.turnId == id } }
+                    ?.let { active ->
+                        item(component.componentId) {
+                            LinkPlaybackControls(
+                                turn = active,
+                                onPlay = {},
+                                onPause = onPause,
+                                onResume = onResume,
+                                onStop = onStop,
+                            )
+                        }
+                    }
+                LinkNativeComponentRenderer.CONNECTION -> item(component.componentId) {
+                    PhoneRow(
+                        title = connectionRouteLabel(state.connectionDetail),
+                        sub = state.connectionDetail.uppercase().ifBlank { "NO CONNECTION" },
+                        icon = if (state.connection == ConnectionState.CONNECTED) RingIcons.Wifi else RingIcons.Link,
                     )
                 }
-            }
-        item("connection") {
-            PhoneRow(
-                title = connectionRouteLabel(state.connectionDetail),
-                sub = state.connectionDetail.uppercase().ifBlank { "NO CONNECTION" },
-                icon = if (state.connection == ConnectionState.CONNECTED) {
-                    RingIcons.Wifi
-                } else {
-                    RingIcons.Link
-                },
-            )
-        }
-        item("public-link") {
-            PhoneRow(
-                title = if (publicLoggedIn) "DISCONNECT PUBLIC LINK" else "CONNECT PUBLIC LINK",
-                sub = if (publicLoggedIn) "OPTIONAL FALLBACK · CONNECTED" else "OPTIONAL OUTSIDE TAILSCALE",
-                icon = RingIcons.Link,
-                onTap = onPublicLink,
-            )
-        }
-        item("hands-free") {
-            RingChoiceRow(
-                title = "HANDS-FREE",
-                selected = if (state.handsFree) "ON" else "OFF",
-                options = listOf("OFF", "ON"),
-                role = CircleChoiceRole.TOGGLE,
-                onSelect = { onHandsFree(it == "ON") },
-                icon = RingIcons.Speaker,
-                modifier = phoneRowModifier(),
-            )
-        }
-        item("read-replies") {
-            RingChoiceRow(
-                title = "READ REPLIES",
-                selected = if (speakReplies) "ON" else "OFF",
-                options = listOf("OFF", "ON"),
-                role = CircleChoiceRole.TOGGLE,
-                onSelect = { onSpeakReplies(it == "ON") },
-                icon = RingIcons.Speaker,
-                modifier = phoneRowModifier(),
-            )
-        }
-        item("history-policy") {
-            PhoneRow(
-                title = "LOCAL HISTORY",
-                sub = "${state.turns.size} / ${LinkHistoryPolicy.MAX_LOCAL_TURNS} TURNS · OLDEST DROPS FIRST",
-                icon = RingIcons.Activity,
-            )
-        }
-        item("dev-host") {
-            PhoneRow(
-                title = "DEV HOST",
-                sub = "RESPONSIVE · WATCH EXACT",
-                icon = RingIcons.Phone,
-                onTap = onOpenDevHost,
-            )
-        }
-        updateRows.forEach { row ->
-            item(row.key) { PhoneRow(row) }
-        }
-        if (updateChangelog.isNotBlank()) {
-            item("update-changelog") {
-                PhoneRow("WHAT'S NEW", updateChangelog.uppercase(), RingIcons.Activity)
-            }
-        }
-        if (state.recoveryError.isNotBlank()) {
-            item("recovery") {
-                PhoneRow("RECOVERY", state.recoveryError.uppercase(), RingIcons.Warning)
+                LinkNativeComponentRenderer.PUBLIC_LINK -> item(component.componentId) {
+                    PhoneRow(
+                        title = if (publicLoggedIn) "DISCONNECT PUBLIC LINK" else "CONNECT PUBLIC LINK",
+                        sub = if (publicLoggedIn) "OPTIONAL FALLBACK · CONNECTED" else "OPTIONAL OUTSIDE TAILSCALE",
+                        icon = product.icon(component),
+                        onTap = onPublicLink,
+                    )
+                }
+                LinkNativeComponentRenderer.PREFERENCES -> {
+                    item("${component.componentId}.hands-free") {
+                        RingChoiceRow(
+                            title = "HANDS-FREE",
+                            selected = if (state.handsFree) "ON" else "OFF",
+                            options = listOf("OFF", "ON"),
+                            role = CircleChoiceRole.TOGGLE,
+                            onSelect = { onHandsFree(it == "ON") },
+                            icon = product.icon(component),
+                            modifier = phoneRowModifier(),
+                        )
+                    }
+                    item("${component.componentId}.read-replies") {
+                        RingChoiceRow(
+                            title = "READ REPLIES",
+                            selected = if (speakReplies) "ON" else "OFF",
+                            options = listOf("OFF", "ON"),
+                            role = CircleChoiceRole.TOGGLE,
+                            onSelect = { onSpeakReplies(it == "ON") },
+                            icon = product.icon(component),
+                            modifier = phoneRowModifier(),
+                        )
+                    }
+                }
+                LinkNativeComponentRenderer.LOCAL_HISTORY -> item(component.componentId) {
+                    PhoneRow(
+                        title = "LOCAL HISTORY",
+                        sub = "${state.turns.size} / ${LinkHistoryPolicy.MAX_LOCAL_TURNS} TURNS · OLDEST DROPS FIRST",
+                        icon = product.icon(component),
+                    )
+                }
+                LinkNativeComponentRenderer.UPDATES -> {
+                    updateRows.forEach { row -> item(row.key) { PhoneRow(row) } }
+                    if (updateChangelog.isNotBlank()) {
+                        item("update-changelog") {
+                            PhoneRow("WHAT'S NEW", updateChangelog.uppercase(), product.icon(component))
+                        }
+                    }
+                }
+                LinkNativeComponentRenderer.DEV_HOST -> item(component.componentId) {
+                    PhoneRow(
+                        title = "DEV HOST",
+                        sub = "RESPONSIVE · WATCH EXACT",
+                        icon = product.icon(component),
+                        onTap = onOpenDevHost,
+                    )
+                }
+                LinkNativeComponentRenderer.RECOVERY -> if (state.recoveryError.isNotBlank()) {
+                    item(component.componentId) {
+                        PhoneRow("RECOVERY", state.recoveryError.uppercase(), product.icon(component))
+                    }
+                }
+                else -> error("${component.renderer.id} is not a Link settings component on Phone")
             }
         }
     }

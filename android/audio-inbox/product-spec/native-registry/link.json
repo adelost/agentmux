@@ -1,0 +1,44 @@
+{
+  "stage": "native-export",
+  "schemaVersion": 1,
+  "sourceFile": "link-ui/src/main/java/io/agentmux/linkui/product/LinkNativeBindings.kt",
+  "profiles": ["phone-full-ui", "wear-full-ui"],
+  "components": [
+    { "componentId": "target", "rendererId": "status", "profiles": ["phone-full-ui", "wear-full-ui"] },
+    { "componentId": "latest", "rendererId": "conversation-feed", "profiles": ["phone-full-ui", "wear-full-ui"] },
+    { "componentId": "composer", "rendererId": "composer", "profiles": ["phone-full-ui"] },
+    { "componentId": "talk", "rendererId": "capture", "profiles": ["phone-full-ui", "wear-full-ui"] },
+    { "componentId": "active-playback", "rendererId": "active-playback", "profiles": ["phone-full-ui"] },
+    { "componentId": "connection", "rendererId": "connection", "profiles": ["phone-full-ui", "wear-full-ui"] },
+    { "componentId": "public-link", "rendererId": "public-link", "profiles": ["phone-full-ui"] },
+    { "componentId": "preferences", "rendererId": "preferences", "profiles": ["phone-full-ui"] },
+    { "componentId": "local-history", "rendererId": "local-history", "profiles": ["phone-full-ui"] },
+    { "componentId": "updates", "rendererId": "updates", "profiles": ["phone-full-ui", "wear-full-ui"] },
+    { "componentId": "dev-host", "rendererId": "dev-host", "profiles": ["phone-full-ui"] },
+    { "componentId": "recovery", "rendererId": "recovery", "profiles": ["phone-full-ui", "wear-full-ui"] },
+    { "componentId": "dev-preview", "rendererId": "dev-preview", "profiles": ["phone-full-ui"] }
+  ],
+  "icons": [
+    { "iconId": "link", "nativeSymbol": "RingIcons.Link" },
+    { "iconId": "gear", "nativeSymbol": "RingIcons.Gear" },
+    { "iconId": "phone", "nativeSymbol": "RingIcons.Phone" },
+    { "iconId": "target", "nativeSymbol": "RingIcons.Target" },
+    { "iconId": "speaker", "nativeSymbol": "RingIcons.Speaker" },
+    { "iconId": "pencil", "nativeSymbol": "RingIcons.Pencil" },
+    { "iconId": "record", "nativeSymbol": "RingIcons.Record" },
+    { "iconId": "play", "nativeSymbol": "RingIcons.Play" },
+    { "iconId": "wifi", "nativeSymbol": "RingIcons.Wifi" },
+    { "iconId": "activity", "nativeSymbol": "RingIcons.Activity" },
+    { "iconId": "download", "nativeSymbol": "RingIcons.Download" },
+    { "iconId": "warning", "nativeSymbol": "RingIcons.Warning" }
+  ],
+  "palettes": [
+    { "paletteId": "graphite", "nativeSymbol": "GraphiteTokens.Canvas", "profiles": ["phone-full-ui", "wear-full-ui"] }
+  ],
+  "services": [
+    { "serviceId": "navigation", "nativePortId": "link.navigation.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["open"], "outputPorts": ["destination"] },
+    { "serviceId": "capture", "nativePortId": "link.capture.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["command"], "outputPorts": ["status", "captured"] },
+    { "serviceId": "conversation", "nativePortId": "link.conversation.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["turn"], "outputPorts": ["status"] },
+    { "serviceId": "playback", "nativePortId": "link.playback.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["command"], "outputPorts": ["status"] }
+  ]
+}

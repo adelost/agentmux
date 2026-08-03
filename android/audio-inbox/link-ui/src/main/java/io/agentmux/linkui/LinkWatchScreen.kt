@@ -28,12 +28,17 @@ import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.linkConnectionLabel
 import io.agentmux.linkcore.linkConnectionRoute
 import io.agentmux.linkcore.linkConnectionSettingsDetail
+import io.agentmux.linkui.product.LinkNativeComponentRenderer
+import io.agentmux.linkui.product.LinkProductSession
+import io.agentmux.linkui.product.generated.LinkMenuAction
+import io.agentmux.linkui.product.generated.LinkRoute
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.time.ZoneId
 import java.util.Locale
 
 @Composable
 fun LinkWatchScreen(
+    product: LinkProductSession,
     state: LinkState,
     updateState: UpdateState,
     currentVersionName: String,
@@ -51,16 +56,20 @@ fun LinkWatchScreen(
     onCheckUpdate: () -> Unit,
     onInstallUpdate: () -> Unit,
     onOpenDevHost: (() -> Unit)? = null,
+    onNavigateRoute: (LinkRoute) -> LinkRoute = { it },
     initialShowingSettings: Boolean = false,
 ) {
-    var showingSettings by rememberSaveable { mutableStateOf(initialShowingSettings) }
+    var route by rememberSaveable {
+        mutableStateOf(if (initialShowingSettings) LinkRoute.SETTINGS else LinkRoute.HOME)
+    }
     LinkWatchSurface(
+        product = product,
         state = state,
         updateState = updateState,
         currentVersionName = currentVersionName,
-        showingSettings = showingSettings,
-        onMenuAction = { action -> action.dispatch { showingSettings = true } },
-        onBack = { showingSettings = false },
+        route = route,
+        onNavigate = { route = onNavigateRoute(it) },
+        onBack = { route = onNavigateRoute(LinkRoute.HOME) },
         microphoneGranted = microphoneGranted,
         onRequestMicrophone = onRequestMicrophone,
         onSelectTarget = onSelectTarget,
@@ -81,11 +90,12 @@ fun LinkWatchScreen(
 /** The exact Watch presentation shared by real Wear and Phone WatchExact. */
 @Composable
 fun LinkWatchSurface(
+    product: LinkProductSession,
     state: LinkState,
     updateState: UpdateState,
     currentVersionName: String,
-    showingSettings: Boolean,
-    onMenuAction: (LinkMenuAction) -> Unit,
+    route: LinkRoute,
+    onNavigate: (LinkRoute) -> Unit,
     onBack: () -> Unit,
     microphoneGranted: Boolean,
     onRequestMicrophone: () -> Unit,
@@ -102,6 +112,7 @@ fun LinkWatchSurface(
     onInstallUpdate: () -> Unit,
     onOpenDevHost: (() -> Unit)? = null,
 ) {
+    val showingSettings = route == LinkRoute.SETTINGS
     var captureOpen by remember { mutableStateOf(false) }
     var captureStarted by remember { mutableStateOf(false) }
     BackHandler(enabled = captureOpen) {
@@ -154,7 +165,7 @@ fun LinkWatchSurface(
     val navigator = remember(showingSettings) {
         RingNavigator(
             RingScreen.Rows(
-                title = if (showingSettings) "LINK SETTINGS" else "AGENTMUX LINK",
+                title = product.route(route).title,
                 items = items,
                 showBack = showingSettings,
             ),
@@ -172,10 +183,11 @@ fun LinkWatchSurface(
         onInstallUpdate,
         onOpenDevHost,
         showingSettings,
-        onMenuAction,
+        onNavigate,
     ) {
         items.value = if (showingSettings) {
             linkWatchSettingsRows(
+                product = product,
                 state = state,
                 updateState = updateState,
                 currentVersionName = currentVersionName,
@@ -185,13 +197,14 @@ fun LinkWatchSurface(
             )
         } else {
             linkWatchRows(
+                product = product,
                 state = state,
                 onSelectTarget = onSelectTarget,
                 onOpenCapture = { captureOpen = true },
                 onPlay = onPlay,
                 onStop = onStop,
                 onReplay = onReplay,
-                onMenuAction = onMenuAction,
+                onMenuAction = { action -> action.dispatch(product, onNavigate) },
             )
         }
     }
@@ -199,6 +212,7 @@ fun LinkWatchSurface(
 }
 
 fun linkWatchRows(
+    product: LinkProductSession,
     state: LinkState,
     onSelectTarget: (String) -> Unit,
     onOpenCapture: () -> Unit,
@@ -216,96 +230,85 @@ fun linkWatchRows(
         .orEmpty()
     val latest = state.turns.lastOrNull()
     val selectedSendable = selected?.acceptsMessages == true
-    val rows = mutableListOf(
-        RowSpec(
-            key = "target",
-            title = "AGENT · ${linkConnectionRoute(state)}",
-            sub = selected?.label?.ifBlank { selected.id }?.uppercase() ?: "NO TARGET",
-            icon = RingIcons.Target,
-            choices = targetChoices,
-            onSelect = if (targetChoices.isEmpty()) {
-                null
-            } else {
-                { label ->
-                    sendableTargets.firstOrNull {
-                        it.label.ifBlank { it.id }.uppercase() == label
-                    }?.let { onSelectTarget(it.id) }
-                }
-            },
-        ),
-        RowSpec(
-            key = "talk",
-            title = "PUSH TO TALK",
-            sub = when {
-                !selectedSendable -> "UNAVAILABLE"
-                selected?.available == false -> "OPEN RECORDER · WILL QUEUE"
-                else -> "OPEN RECORDER"
-            },
-            icon = RingIcons.Record,
-            onTap = onOpenCapture.takeIf { selectedSendable },
-        ),
-    )
-    if (latest == null) {
-        rows += RowSpec(
-            key = "latest",
-            title = "LATEST REPLY",
-            sub = "NO REPLY YET",
-            icon = RingIcons.Speaker,
-        )
-        rows += linkSettingsRow(onMenuAction)
-        return rows
-    }
-    rows += RowSpec(
-        key = "latest",
-        title = latest.respondingTarget.ifBlank { latest.targetId }.uppercase(),
-        sub = when {
-            latest.replyText.isNotBlank() -> latest.replyText
-            latest.deliveryPhase == DeliveryPhase.FAILED ->
-                latest.deliveryError.ifBlank { "DELIVERY FAILED" }
-            else -> "WAITING FOR REPLY"
-        }.uppercase().take(54),
-        icon = RingIcons.Speaker,
-    )
-    if (latest.replyText.isNotBlank()) {
-        rows += when (latest.playbackPhase) {
-            PlaybackPhase.PLAYING -> RowSpec(
-                key = "playback",
-                title = "STOP REPLY",
-                sub = "PLAYING",
-                icon = RingIcons.Stop,
-                onTap = onStop,
+    val rows = mutableListOf<RowSpec>()
+    product.components(LinkRoute.HOME, "round").forEach { component ->
+        when (component.renderer) {
+            LinkNativeComponentRenderer.STATUS -> rows += RowSpec(
+                key = component.componentId,
+                title = "AGENT · ${linkConnectionRoute(state)}",
+                sub = selected?.label?.ifBlank { selected.id }?.uppercase() ?: "NO TARGET",
+                icon = product.icon(component),
+                choices = targetChoices,
+                onSelect = targetChoices.takeIf { it.isNotEmpty() }?.let {
+                    { label: String ->
+                        sendableTargets.firstOrNull {
+                            it.label.ifBlank { it.id }.uppercase() == label
+                        }?.let { onSelectTarget(it.id) }
+                    }
+                },
             )
-            PlaybackPhase.FAILED -> RowSpec(
-                key = "playback",
-                title = "RETRY PLAYBACK",
-                sub = latest.playbackError.ifBlank { "PLAYBACK FAILED" }.uppercase().take(54),
-                icon = RingIcons.Refresh,
-                onTap = onReplay,
+            LinkNativeComponentRenderer.CAPTURE -> rows += RowSpec(
+                key = component.componentId,
+                title = "PUSH TO TALK",
+                sub = when {
+                    !selectedSendable -> "UNAVAILABLE"
+                    selected?.available == false -> "OPEN RECORDER · WILL QUEUE"
+                    else -> "OPEN RECORDER"
+                },
+                icon = product.icon(component),
+                onTap = onOpenCapture.takeIf { selectedSendable },
             )
-            PlaybackPhase.STOPPED,
-            PlaybackPhase.PLAYED,
-            PlaybackPhase.SKIPPED,
-            -> RowSpec(
-                key = "playback",
-                title = "REPLAY",
-                sub = "PLAY LATEST REPLY",
-                icon = RingIcons.Refresh,
-                onTap = onReplay,
+            LinkNativeComponentRenderer.CONVERSATION_FEED -> rows += watchReplyRows(
+                latest = latest,
+                defaultIcon = product.icon(component),
+                onPlay = onPlay,
+                onStop = onStop,
+                onReplay = onReplay,
             )
-            else -> RowSpec(
-                key = "playback",
-                title = "PLAY REPLY",
-                sub = "LATEST RESPONSE",
-                icon = RingIcons.Play,
-                onTap = onPlay,
-            )
+            else -> error("${component.renderer.id} is not a Link home component on round")
         }
     }
-    rows += linkSettingsRow(onMenuAction)
+    rows += linkSettingsRow(product, onMenuAction)
     return rows
 }
 
+private fun watchReplyRows(
+    latest: io.agentmux.linkcore.LinkTurn?,
+    defaultIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    onPlay: () -> Unit,
+    onStop: () -> Unit,
+    onReplay: () -> Unit,
+): List<RowSpec> = buildList {
+    if (latest == null) {
+        add(RowSpec("latest", "LATEST REPLY", "NO REPLY YET", defaultIcon))
+        return@buildList
+    }
+    add(
+        RowSpec(
+            key = "latest",
+            title = latest.respondingTarget.ifBlank { latest.targetId }.uppercase(),
+            sub = when {
+                latest.replyText.isNotBlank() -> latest.replyText
+                latest.deliveryPhase == DeliveryPhase.FAILED -> latest.deliveryError.ifBlank { "DELIVERY FAILED" }
+                else -> "WAITING FOR REPLY"
+            }.uppercase().take(54),
+            icon = defaultIcon,
+        ),
+    )
+    if (latest.replyText.isBlank()) return@buildList
+    add(
+        when (latest.playbackPhase) {
+            PlaybackPhase.PLAYING -> RowSpec("playback", "STOP REPLY", "PLAYING", RingIcons.Stop, onTap = onStop)
+            PlaybackPhase.FAILED -> RowSpec("playback", "RETRY PLAYBACK", latest.playbackError.ifBlank { "PLAYBACK FAILED" }.uppercase().take(54), RingIcons.Refresh, onTap = onReplay)
+            PlaybackPhase.STOPPED, PlaybackPhase.PLAYED, PlaybackPhase.SKIPPED ->
+                RowSpec("playback", "REPLAY", "PLAY LATEST REPLY", RingIcons.Refresh, onTap = onReplay)
+            else -> RowSpec("playback", "PLAY REPLY", "LATEST RESPONSE", RingIcons.Play, onTap = onPlay)
+        },
+    )
+}
+
 fun linkWatchSettingsRows(
+    product: LinkProductSession,
     state: LinkState,
     updateState: UpdateState,
     currentVersionName: String,
@@ -315,33 +318,33 @@ fun linkWatchSettingsRows(
     zoneId: ZoneId = ZoneId.systemDefault(),
     locale: Locale = Locale.getDefault(),
 ): List<RowSpec> = buildList {
-    add(
-        RowSpec(
-            key = "connection",
-            title = linkConnectionLabel(state.connection),
-            sub = linkConnectionSettingsDetail(state),
-            icon = if (state.connection == ConnectionState.CONNECTED) RingIcons.Wifi else RingIcons.Link,
-        ),
-    )
-    addAll(
-        releaseUpdateRows(
-            state = updateState,
-            currentVersionName = currentVersionName,
-            onCheck = onCheckUpdate,
-            onInstall = onInstallUpdate,
-            zoneId = zoneId,
-            locale = locale,
-        ),
-    )
-    onOpenDevHost?.let { open ->
-        add(
-            RowSpec(
-                key = "dev-host",
-                title = "DEV HOST",
-                sub = "RESPONSIVE · WATCH EXACT",
-                icon = RingIcons.Phone,
-                onTap = open,
-            ),
-        )
+    product.components(LinkRoute.SETTINGS, "round").forEach { component ->
+        when (component.renderer) {
+            LinkNativeComponentRenderer.CONNECTION -> add(
+                RowSpec(
+                    key = component.componentId,
+                    title = linkConnectionLabel(state.connection),
+                    sub = linkConnectionSettingsDetail(state),
+                    icon = if (state.connection == ConnectionState.CONNECTED) RingIcons.Wifi else RingIcons.Link,
+                ),
+            )
+            LinkNativeComponentRenderer.UPDATES -> addAll(
+                releaseUpdateRows(
+                    state = updateState,
+                    currentVersionName = currentVersionName,
+                    onCheck = onCheckUpdate,
+                    onInstall = onInstallUpdate,
+                    zoneId = zoneId,
+                    locale = locale,
+                ),
+            )
+            LinkNativeComponentRenderer.DEV_HOST -> onOpenDevHost?.let { open ->
+                add(RowSpec(component.componentId, "DEV HOST", "RESPONSIVE · WATCH EXACT", product.icon(component), onTap = open))
+            }
+            LinkNativeComponentRenderer.RECOVERY -> state.recoveryError.takeIf { it.isNotBlank() }?.let { error ->
+                add(RowSpec(component.componentId, "RECOVERY", error.uppercase(), product.icon(component)))
+            }
+            else -> error("${component.renderer.id} is not a Link settings component on round")
+        }
     }
 }

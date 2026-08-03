@@ -1,5 +1,9 @@
 package io.agentmux.linkui
 
+import io.agentmux.linkui.product.LinkProductSession
+import io.agentmux.linkui.product.generated.LinkArtifactProfile
+import io.agentmux.linkui.product.generated.LinkMenuAction
+import io.agentmux.linkui.product.generated.LinkRoute
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
@@ -8,9 +12,10 @@ import org.junit.Test
 class LinkMenuActionsTest {
     @Test
     fun settingsActionProjectsToPhoneAndWearAndDispatchesByTypedId() {
+        val product = LinkProductSession(LinkArtifactProfile.PHONE_FULL_UI)
         val actions = mutableListOf<LinkMenuAction>()
-        val phone = linkSettingsHeaderAction(actions::add)
-        val wear = linkSettingsRow(actions::add)
+        val phone = linkSettingsHeaderAction(product, actions::add)
+        val wear = linkSettingsRow(product, actions::add)
 
         assertEquals("SETTINGS", phone.label)
         assertEquals("SETTINGS", wear.title)
@@ -25,8 +30,8 @@ class LinkMenuActionsTest {
             actions,
         )
 
-        var opened = false
-        actions.first().dispatch { opened = true }
-        assertEquals(true, opened)
+        var route = LinkRoute.HOME
+        actions.first().dispatch(product) { route = it }
+        assertEquals(LinkRoute.SETTINGS, route)
     }
 }
