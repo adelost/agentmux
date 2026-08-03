@@ -94,7 +94,6 @@ data class LinkMenuActionDescriptor(val action: LinkMenuAction, val rowId: Strin
 data class LinkComponentDescriptor(val id: LinkComponentId, val rendererId: String, val iconId: String, val artifacts: Set<LinkArtifactProfile>)
 data class LinkComponentMount(val component: LinkComponentId, val region: String, val order: Int, val optional: Boolean)
 data class LinkComponentTree(val route: LinkRoute, val surface: String, val mounts: List<LinkComponentMount>)
-data class LinkPaletteDescriptor(val id: String, val artifacts: Set<LinkArtifactProfile>)
 data class LinkServiceDescriptor(val id: String, val nativePortId: String, val inputPorts: List<String>, val outputPorts: List<String>, val stateOwner: String, val lifetime: String, val durability: String, val clockDomain: String, val contextInputs: List<String>, val effects: List<String>)
 data class LinkServiceEdge(val fromService: String, val fromPort: String, val toService: String, val toPort: String)
 
@@ -141,9 +140,6 @@ object LinkProductManifest {
         LinkComponentTree(LinkRoute.DEV_HOST, "round", listOf(LinkComponentMount(LinkComponentId.DEV_PREVIEW, "content", 0, false))),
         LinkComponentTree(LinkRoute.DEV_HOST, "compact", listOf(LinkComponentMount(LinkComponentId.DEV_PREVIEW, "content", 0, false))),
         LinkComponentTree(LinkRoute.DEV_HOST, "wide", listOf(LinkComponentMount(LinkComponentId.DEV_PREVIEW, "content", 0, false))),
-    )
-    val palettes: List<LinkPaletteDescriptor> = listOf(
-        LinkPaletteDescriptor("graphite", setOf(LinkArtifactProfile.PHONE_FULL_UI, LinkArtifactProfile.WEAR_FULL_UI)),
     )
     val services: List<LinkServiceDescriptor> = listOf(
         LinkServiceDescriptor("navigation", "link.navigation.port", listOf("open"), listOf("destination"), "instance", "instance", "transient", "none", listOf(), listOf()),

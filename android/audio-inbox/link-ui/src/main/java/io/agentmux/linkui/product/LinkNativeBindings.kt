@@ -43,13 +43,6 @@ data class LinkNativeIconBinding(
     val icon: ImageVector,
 )
 
-data class LinkNativePaletteBinding(
-    val paletteId: String,
-    val nativeSymbol: String,
-    val canvas: Color,
-    val profiles: Set<String>,
-)
-
 data class LinkNativeServiceBinding(
     val serviceId: String,
     val port: LinkNativeServicePort,
@@ -102,14 +95,7 @@ object LinkNativeBindings {
         icon("warning", "RingIcons.Warning", RingIcons.Warning),
     )
 
-    val palettes: List<LinkNativePaletteBinding> = listOf(
-        LinkNativePaletteBinding(
-            paletteId = "graphite",
-            nativeSymbol = "GraphiteTokens.Canvas",
-            canvas = GraphiteTokens.Canvas,
-            profiles = both,
-        ),
-    )
+    val canvasColor: Color = GraphiteTokens.Canvas
 
     val services: List<LinkNativeServiceBinding> = listOf(
         service("navigation", LinkNativeServicePort.NAVIGATION, setOf("open"), setOf("destination")),

@@ -18,12 +18,7 @@ class LinkProductSession(
         requireExactNativeGraph()
     }
 
-    val canvasColor get() = requireNotNull(
-        LinkNativeBindings.palettes.singleOrNull {
-            it.paletteId == LinkProductManifest.palettes.single().id &&
-                artifactProfile.id in it.profiles
-        },
-    ).canvas
+    val canvasColor get() = LinkNativeBindings.canvasColor
 
     fun route(route: LinkRoute): LinkRouteDescriptor =
         LinkProductManifest.route(route).also { require(artifactProfile in it.artifacts) }

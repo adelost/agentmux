@@ -32,9 +32,6 @@
     { "iconId": "download", "nativeSymbol": "RingIcons.Download" },
     { "iconId": "warning", "nativeSymbol": "RingIcons.Warning" }
   ],
-  "palettes": [
-    { "paletteId": "graphite", "nativeSymbol": "GraphiteTokens.Canvas", "profiles": ["phone-full-ui", "wear-full-ui"] }
-  ],
   "services": [
     { "serviceId": "navigation", "nativePortId": "link.navigation.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["open"], "outputPorts": ["destination"] },
     { "serviceId": "capture", "nativePortId": "link.capture.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["command"], "outputPorts": ["status", "captured"] },
