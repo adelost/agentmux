@@ -11,6 +11,11 @@ You are running inside agentmux. You can orchestrate other agents from your term
 **Never use raw \`tmux ... capture-pane\`.** Everything is exposed via \`amux\`:
 shorter, validated, mirrors to Discord so the user sees what you do.
 
+**This cheat sheet is the common path, not the whole surface.** It names roughly
+half the flags that exist. \`amux --help\` and \`amux <cmd> --help\` are the
+authority — read them before you conclude a capability is missing or propose
+building one. A gap here is not evidence of a gap in the tool.
+
 > Tip: \`ax\` is a shorter alias for \`amux\` (same script, both work). Use either.
 
 ## Cheat sheet (intent-first)
@@ -19,7 +24,13 @@ shorter, validated, mirrors to Discord so the user sees what you do.
 \`\`\`bash
 amux <agent> -p <pane> "prompt"      # -p default 0
 amux claw -p 1 "run the full test suite"
+amux claw -p 1 --stdin < msg.txt     # exact bytes: quotes, backticks, åäö
 \`\`\`
+**Never build the message text in bash.** Backticks, \`$(...)\`, \`$VAR\` and quotes
+are expanded by the shell before amux ever runs, so the corruption is invisible
+to amux and to you. Write the message to a file with your file tool, then send it
+with \`--stdin\`; the shell then only ever sees a filename.
+
 Mirrors to Discord channel automatically (user sees your briefs). Auto-prepends
 \`[from <sender-session>:<window>]\` when invoker is in tmux; receiver pane +
 Discord mirror both see who briefed. Sender is invariant: provenance is never
