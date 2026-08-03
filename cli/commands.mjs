@@ -133,6 +133,37 @@ const bridgeLifecycle = createBridgeLifecycle({ bridgeDir: BRIDGE_DIR });
 
 // --- Flag parsing ---
 
+const LONG_FLAG_WITH_ATTACHED_VALUE = /^--([^=\s]+)=(.*)$/;
+const SHORT_FLAG_WITH_ATTACHED_VALUE = /^-([A-Za-z])(.+)$/;
+/** A lone token that reads as a flag: no whitespace, so real prose never matches. */
+const FLAG_SHAPED_TOKEN = /^-{1,2}[A-Za-z][^\s]*$/;
+
+const takesValue = (spec, name) => name in spec && spec[name] !== "boolean";
+const coerceFlagValue = (type, raw) => (type === "number" ? parseInt(raw) : raw);
+
+/**
+ * WHAT: Reads a flag whose value sits in the same token (`-p2`, `--pane=2`).
+ * WHY: These are the forms people actually type. Unrecognized, the token falls
+ *      through to `positional` — and on the send path positionals ARE the message,
+ *      so a routing flag turns into prompt text and delivery drops to pane 0.
+ * Returns { name, value }, or null when the token carries no attached value.
+ */
+function readAttachedFlagValue(arg, spec) {
+  const long = arg.match(LONG_FLAG_WITH_ATTACHED_VALUE);
+  if (long && takesValue(spec, long[1])) return { name: long[1], value: long[2] };
+  const short = arg.match(SHORT_FLAG_WITH_ATTACHED_VALUE);
+  if (short && takesValue(spec, short[1])) return { name: short[1], value: short[2] };
+  return null;
+}
+
+/**
+ * WHAT: Finds prompt tokens that read as flags but no spec claimed.
+ * WHY: Silently shipping them as message text is the misroute: the human sees a
+ *      delivered message, the flag never took effect, and nothing reports it.
+ */
+export const flagShapedPromptTokens = (positional) =>
+  positional.filter((token) => FLAG_SHAPED_TOKEN.test(token));
+
 /** Parse CLI flags from args array. Returns { flags, positional }. */
 export function parseFlags(args, spec = {}) {
   const flags = {};
@@ -140,6 +171,12 @@ export function parseFlags(args, spec = {}) {
   let i = 0;
   while (i < args.length) {
     const arg = args[i];
+    const attached = readAttachedFlagValue(arg, spec);
+    if (attached) {
+      flags[attached.name] = coerceFlagValue(spec[attached.name], attached.value);
+      i++;
+      continue;
+    }
     // Check for --flag and -f variants
     const flagName = arg.startsWith("--") ? arg.slice(2) : arg.startsWith("-") ? arg.slice(1) : null;
     if (flagName && flagName in spec) {
@@ -147,7 +184,7 @@ export function parseFlags(args, spec = {}) {
         flags[flagName] = true;
         i++;
       } else {
-        flags[flagName] = spec[flagName] === "number" ? parseInt(args[i + 1]) : args[i + 1];
+        flags[flagName] = coerceFlagValue(spec[flagName], args[i + 1]);
         i += 2;
       }
     } else {
@@ -3682,6 +3719,15 @@ async function dispatchAgentTarget(name, rest, ctx) {
 
   if (flags.stdin && positional.length > 0) {
     throw new Error("--stdin cannot be combined with a positional prompt");
+  }
+  const strayFlags = flagShapedPromptTokens(positional);
+  if (strayFlags.length > 0) {
+    throw new Error(
+      `unknown option ${strayFlags.join(" ")} — refusing to send it as prompt text.\n`
+      + `  A flag amux does not know becomes part of the message and delivery falls back to pane 0.\n`
+      + `  Check 'amux --help' for the real flag, or send the literal text with:\n`
+      + `    amux ${resolved} -p <pane> --stdin < message.txt`,
+    );
   }
   if (positional.length > 0 || flags.stdin) {
     const prompt = flags.stdin ? await readPromptFromStdin() : positional.join(" ");
