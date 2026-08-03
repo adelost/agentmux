@@ -112,20 +112,24 @@ internal class WearMailboxController(
         return true
     }
 
-    fun releaseCapture() {
+    fun finishCapture(): WearVoiceRecorder.Capture? {
         val capture = recorder.release()
         if (capture == null) {
             dispatch(LinkAction.Capture(CapturePhase.FAILED))
-            return
+            return null
         }
-        val target = selectedTarget()
+        dispatch(LinkAction.Capture(CapturePhase.FINALIZING))
+        return capture
+    }
+
+    fun deliverCapture(capture: WearVoiceRecorder.Capture, targetId: String): Boolean {
+        val target = ledger.value.targets.firstOrNull { it.id == targetId }
         val mailbox = client
         if (target == null || mailbox == null) {
             capture.file.delete()
             dispatch(LinkAction.Capture(CapturePhase.FAILED))
-            return
+            return false
         }
-        dispatch(LinkAction.Capture(CapturePhase.FINALIZING))
         dispatch(
             LinkAction.Submit(
                 LinkTurn(
@@ -149,6 +153,7 @@ internal class WearMailboxController(
             }
             capture.file.delete()
         }
+        return true
     }
 
     fun cancelCapture() {
@@ -156,15 +161,12 @@ internal class WearMailboxController(
         dispatch(LinkAction.Capture(CapturePhase.IDLE))
     }
 
+    fun failCapture() = dispatch(LinkAction.Capture(CapturePhase.FAILED))
+
     fun recordedBytes(): Long = recorder.currentBytes()
     fun recordedLevel(): Float = recorder.currentLevel()
 
-    fun playLatest() {
-        val turn = ledger.value.turns.lastOrNull { it.replyText.isNotBlank() } ?: return
-        playTurn(turn.turnId)
-    }
-
-    private fun playTurn(turnId: String) {
+    fun playTurn(turnId: String) {
         val turn = ledger.value.turns.firstOrNull { it.turnId == turnId } ?: return
         dispatch(LinkAction.Playback(turn.turnId, PlaybackPhase.QUEUED))
         tts.play(turn.turnId, turn.replyText)

@@ -25,6 +25,7 @@ import io.agentmux.linkui.LinkCaptureSpec
 import io.agentmux.linkui.LinkWatchSurface
 import io.agentmux.linkui.dispatch
 import io.agentmux.linkui.product.LinkNativeComponentRenderer
+import io.agentmux.linkui.product.LinkProductRuntime
 import io.agentmux.linkui.product.LinkProductSession
 import io.agentmux.linkui.product.generated.LinkRoute
 import io.agentmux.linkui.resolveLinkCaptureAvailability
@@ -89,6 +90,21 @@ internal fun LinkPhoneScreen(
             },
         )
     }
+    val runtime = remember(coordinator, recorder) {
+        LinkProductRuntime(
+            PhoneLinkProductPorts(
+                coordinator = coordinator,
+                recorder = recorder,
+                currentRoute = { route.id },
+                navigate = { routeId ->
+                    route = LinkRoute.entries.single { it.id == routeId }
+                },
+            ),
+        )
+    }
+    val navigate: (LinkRoute) -> Unit = { destination ->
+        route = runtime.open(destination)
+    }
     LaunchedEffect(coordinator) {
         coordinator.acceptedDrafts.collect { accepted ->
             composer = composer.accepted(accepted.turnId, accepted.draft)
@@ -113,41 +129,29 @@ internal fun LinkPhoneScreen(
             qaCapture = CapturePhase.LISTENING
             true
         } else {
-            val capture = recorder.begin()
-            if (capture == null) {
-                coordinator.capture(CapturePhase.FAILED)
-                false
-            } else {
-                coordinator.capture(CapturePhase.LISTENING, capture.startedAtMs)
-                true
-            }
+            runtime.beginCapture()
         }
     }
     val releaseCapture: () -> Unit = {
         if (qaActive) {
             qaCapture = CapturePhase.IDLE
         } else {
-            coordinator.capture(CapturePhase.FINALIZING)
-            val capture = recorder.release()
-            if (capture == null || !coordinator.submitAudio(capture)) {
-                coordinator.capture(CapturePhase.FAILED)
-            }
+            runtime.releaseCapture()
         }
     }
     val cancelCapture: () -> Unit = {
         if (qaActive) {
             qaCapture = CapturePhase.FAILED
         } else {
-            recorder.cancel()
-            coordinator.capture(CapturePhase.FAILED)
+            runtime.cancelCapture()
         }
     }
     BackHandler(route != LinkRoute.HOME) {
-        route = if (route == LinkRoute.DEV_HOST) {
+        navigate(if (route == LinkRoute.DEV_HOST) {
             LinkRoute.SETTINGS
         } else {
             LinkRoute.HOME
-        }
+        })
     }
     RingActionCueHost {
         when {
@@ -160,7 +164,7 @@ internal fun LinkPhoneScreen(
                 )
                 LinkDevHostScreen(
                     port = hostPreview,
-                    onBack = { route = LinkRoute.SETTINGS },
+                    onBack = { navigate(LinkRoute.SETTINGS) },
                 )
             }
             LocalCircleSurfaceLayout.current.surfaceClass == CircleSurfaceClass.ROUND -> {
@@ -171,8 +175,8 @@ internal fun LinkPhoneScreen(
                     updateState = presentedUpdateState,
                     currentVersionName = updater.currentVersionName,
                     route = route,
-                    onNavigate = { route = it },
-                    onBack = { route = LinkRoute.HOME },
+                    onNavigate = navigate,
+                    onBack = { navigate(LinkRoute.HOME) },
                     microphoneGranted = microphoneGranted || qaActive,
                     onRequestMicrophone = onRequestMicrophone,
                     onSelectTarget = selectedTargetAction,
@@ -181,12 +185,12 @@ internal fun LinkPhoneScreen(
                     onCancelCapture = cancelCapture,
                     recordedBytes = recorder::currentBytes,
                     recordedLevel = recordedLevel,
-                    onPlay = { latestTurnId?.let(coordinator::playReply) },
-                    onStop = coordinator::stopAudio,
-                    onReplay = { latestTurnId?.let(coordinator::playReply) },
+                    onPlay = { latestTurnId?.let(runtime::play) },
+                    onStop = { latestTurnId?.let(runtime::stop) },
+                    onReplay = { latestTurnId?.let(runtime::play) },
                     onCheckUpdate = updater::retry,
                     onInstallUpdate = updater::install,
-                    onOpenDevHost = { route = LinkRoute.DEV_HOST },
+                    onOpenDevHost = { navigate(LinkRoute.DEV_HOST) },
                 )
             }
             route == LinkRoute.SETTINGS -> {
@@ -197,7 +201,7 @@ internal fun LinkPhoneScreen(
                     currentVersionName = updater.currentVersionName,
                     speakReplies = speakReplies,
                     publicLoggedIn = coordinator.publicLoggedIn(),
-                    onBack = { route = LinkRoute.HOME },
+                    onBack = { navigate(LinkRoute.HOME) },
                     onHandsFree = coordinator::setHandsFree,
                     onSpeakReplies = {
                         speakReplies = it
@@ -207,11 +211,11 @@ internal fun LinkPhoneScreen(
                         if (coordinator.publicLoggedIn()) coordinator.logoutPublic()
                         else coordinator.beginPublicLogin()
                     },
-                    onOpenDevHost = { route = LinkRoute.DEV_HOST },
+                    onOpenDevHost = { navigate(LinkRoute.DEV_HOST) },
                     updater = updater,
-                    onPause = coordinator::pauseAudio,
-                    onResume = coordinator::resumeAudio,
-                    onStop = coordinator::stopAudio,
+                    onPause = { presentedState.activePlaybackTurnId?.let(runtime::pause) },
+                    onResume = { presentedState.activePlaybackTurnId?.let(runtime::resume) },
+                    onStop = { presentedState.activePlaybackTurnId?.let(runtime::stop) },
                 )
             }
             else -> {
@@ -221,7 +225,7 @@ internal fun LinkPhoneScreen(
                     composer = composer,
                     selectedSendable = selectedSendable,
                     onMenuAction = { action ->
-                        action.dispatch(product) { route = it }
+                        action.dispatch(product, navigate)
                     },
                     onSelectTarget = selectedTargetAction,
                     onComposerChanged = { composer = composer.edited(it) },
@@ -234,10 +238,10 @@ internal fun LinkPhoneScreen(
                             }
                         }
                     },
-                    onPlay = coordinator::playReply,
-                    onPause = coordinator::pauseAudio,
-                    onResume = coordinator::resumeAudio,
-                    onStop = coordinator::stopAudio,
+                    onPlay = runtime::play,
+                    onPause = { presentedState.activePlaybackTurnId?.let(runtime::pause) },
+                    onResume = { presentedState.activePlaybackTurnId?.let(runtime::resume) },
+                    onStop = { presentedState.activePlaybackTurnId?.let(runtime::stop) },
                     ptt = {
                         LinkCaptureControl(
                             spec = LinkCaptureSpec(

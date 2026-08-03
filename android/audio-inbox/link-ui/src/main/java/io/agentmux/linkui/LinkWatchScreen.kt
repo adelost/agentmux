@@ -56,6 +56,7 @@ fun LinkWatchScreen(
     onCheckUpdate: () -> Unit,
     onInstallUpdate: () -> Unit,
     onOpenDevHost: (() -> Unit)? = null,
+    onNavigateRoute: (LinkRoute) -> LinkRoute = { it },
     initialShowingSettings: Boolean = false,
 ) {
     var route by rememberSaveable {
@@ -67,8 +68,8 @@ fun LinkWatchScreen(
         updateState = updateState,
         currentVersionName = currentVersionName,
         route = route,
-        onNavigate = { route = it },
-        onBack = { route = LinkRoute.HOME },
+        onNavigate = { route = onNavigateRoute(it) },
+        onBack = { route = onNavigateRoute(LinkRoute.HOME) },
         microphoneGranted = microphoneGranted,
         onRequestMicrophone = onRequestMicrophone,
         onSelectTarget = onSelectTarget,

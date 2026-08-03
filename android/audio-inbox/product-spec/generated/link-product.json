@@ -578,8 +578,8 @@
             "value": "string"
           },
           {
-            "clockDomain": "monotonic",
-            "name": "startedAtMonotonicMs",
+            "clockDomain": "wall",
+            "name": "startedAtMs",
             "nullable": true,
             "unit": "ms",
             "value": "integer"
@@ -627,13 +627,6 @@
             "nullable": false,
             "unit": "ms",
             "value": "integer"
-          },
-          {
-            "clockDomain": "monotonic",
-            "name": "capturedAtMonotonicMs",
-            "nullable": false,
-            "unit": "ms",
-            "value": "integer"
           }
         ],
         "id": "link.captured-turn",
@@ -664,13 +657,6 @@
             "name": "idempotencyKey",
             "nullable": true,
             "value": "string"
-          },
-          {
-            "clockDomain": "wall",
-            "name": "retryAtMs",
-            "nullable": true,
-            "unit": "ms",
-            "value": "integer"
           }
         ],
         "id": "link.delivery-state",
@@ -698,22 +684,9 @@
           },
           {
             "clockDomain": "none",
-            "name": "sequence",
-            "nullable": false,
-            "value": "integer"
-          },
-          {
-            "clockDomain": "none",
             "name": "durablyAccepted",
             "nullable": false,
             "value": "boolean"
-          },
-          {
-            "clockDomain": "wall",
-            "name": "acceptedAtMs",
-            "nullable": false,
-            "unit": "ms",
-            "value": "integer"
           }
         ],
         "id": "link.accepted-turn",
@@ -735,12 +708,6 @@
           },
           {
             "clockDomain": "none",
-            "name": "sequence",
-            "nullable": true,
-            "value": "integer"
-          },
-          {
-            "clockDomain": "none",
             "name": "offline",
             "nullable": false,
             "value": "boolean"
@@ -756,12 +723,6 @@
             "name": "turnId",
             "nullable": false,
             "value": "string"
-          },
-          {
-            "clockDomain": "none",
-            "name": "sequence",
-            "nullable": false,
-            "value": "integer"
           },
           {
             "clockDomain": "none",
@@ -819,14 +780,14 @@
             "value": "string"
           },
           {
-            "clockDomain": "monotonic",
+            "clockDomain": "none",
             "name": "positionMs",
             "nullable": false,
             "unit": "ms",
             "value": "integer"
           },
           {
-            "clockDomain": "monotonic",
+            "clockDomain": "none",
             "name": "durationMs",
             "nullable": false,
             "unit": "ms",
@@ -924,8 +885,8 @@
                     "value": "string"
                   },
                   {
-                    "clockDomain": "monotonic",
-                    "name": "startedAtMonotonicMs",
+                    "clockDomain": "wall",
+                    "name": "startedAtMs",
                     "nullable": true,
                     "unit": "ms",
                     "value": "integer"
@@ -973,13 +934,6 @@
                   {
                     "clockDomain": "wall",
                     "name": "createdAtMs",
-                    "nullable": false,
-                    "unit": "ms",
-                    "value": "integer"
-                  },
-                  {
-                    "clockDomain": "monotonic",
-                    "name": "capturedAtMonotonicMs",
                     "nullable": false,
                     "unit": "ms",
                     "value": "integer"
@@ -1048,13 +1002,6 @@
                     "nullable": false,
                     "unit": "ms",
                     "value": "integer"
-                  },
-                  {
-                    "clockDomain": "monotonic",
-                    "name": "capturedAtMonotonicMs",
-                    "nullable": false,
-                    "unit": "ms",
-                    "value": "integer"
                   }
                 ],
                 "id": "link.captured-turn",
@@ -1090,13 +1037,6 @@
                     "name": "idempotencyKey",
                     "nullable": true,
                     "value": "string"
-                  },
-                  {
-                    "clockDomain": "wall",
-                    "name": "retryAtMs",
-                    "nullable": true,
-                    "unit": "ms",
-                    "value": "integer"
                   }
                 ],
                 "id": "link.delivery-state",
@@ -1127,22 +1067,9 @@
                   },
                   {
                     "clockDomain": "none",
-                    "name": "sequence",
-                    "nullable": false,
-                    "value": "integer"
-                  },
-                  {
-                    "clockDomain": "none",
                     "name": "durablyAccepted",
                     "nullable": false,
                     "value": "boolean"
-                  },
-                  {
-                    "clockDomain": "wall",
-                    "name": "acceptedAtMs",
-                    "nullable": false,
-                    "unit": "ms",
-                    "value": "integer"
                   }
                 ],
                 "id": "link.accepted-turn",
@@ -1199,22 +1126,9 @@
                   },
                   {
                     "clockDomain": "none",
-                    "name": "sequence",
-                    "nullable": false,
-                    "value": "integer"
-                  },
-                  {
-                    "clockDomain": "none",
                     "name": "durablyAccepted",
                     "nullable": false,
                     "value": "boolean"
-                  },
-                  {
-                    "clockDomain": "wall",
-                    "name": "acceptedAtMs",
-                    "nullable": false,
-                    "unit": "ms",
-                    "value": "integer"
                   }
                 ],
                 "id": "link.accepted-turn",
@@ -1241,12 +1155,6 @@
                   },
                   {
                     "clockDomain": "none",
-                    "name": "sequence",
-                    "nullable": true,
-                    "value": "integer"
-                  },
-                  {
-                    "clockDomain": "none",
                     "name": "offline",
                     "nullable": false,
                     "value": "boolean"
@@ -1265,12 +1173,6 @@
                     "name": "turnId",
                     "nullable": false,
                     "value": "string"
-                  },
-                  {
-                    "clockDomain": "none",
-                    "name": "sequence",
-                    "nullable": false,
-                    "value": "integer"
                   },
                   {
                     "clockDomain": "none",
@@ -1330,12 +1232,6 @@
                     "name": "turnId",
                     "nullable": false,
                     "value": "string"
-                  },
-                  {
-                    "clockDomain": "none",
-                    "name": "sequence",
-                    "nullable": false,
-                    "value": "integer"
                   },
                   {
                     "clockDomain": "none",
@@ -1401,14 +1297,14 @@
                     "value": "string"
                   },
                   {
-                    "clockDomain": "monotonic",
+                    "clockDomain": "none",
                     "name": "positionMs",
                     "nullable": false,
                     "unit": "ms",
                     "value": "integer"
                   },
                   {
-                    "clockDomain": "monotonic",
+                    "clockDomain": "none",
                     "name": "durationMs",
                     "nullable": false,
                     "unit": "ms",
@@ -1594,6 +1490,82 @@
         "id": "open-settings",
         "rowId": "settings",
         "title": "SETTINGS"
+      }
+    ],
+    "nativeServices": [
+      {
+        "inputPorts": [
+          "open"
+        ],
+        "nativePortId": "link.navigation.port",
+        "outputPorts": [
+          "destination"
+        ],
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "serviceId": "navigation"
+      },
+      {
+        "inputPorts": [
+          "command"
+        ],
+        "nativePortId": "link.capture.port",
+        "outputPorts": [
+          "status",
+          "captured"
+        ],
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "serviceId": "capture"
+      },
+      {
+        "inputPorts": [
+          "turn"
+        ],
+        "nativePortId": "link.delivery.port",
+        "outputPorts": [
+          "status",
+          "accepted"
+        ],
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "serviceId": "delivery"
+      },
+      {
+        "inputPorts": [
+          "accepted"
+        ],
+        "nativePortId": "link.reply.port",
+        "outputPorts": [
+          "status",
+          "reply"
+        ],
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "serviceId": "reply"
+      },
+      {
+        "inputPorts": [
+          "reply",
+          "command"
+        ],
+        "nativePortId": "link.playback.port",
+        "outputPorts": [
+          "status"
+        ],
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "serviceId": "playback"
       }
     ],
     "palettes": [

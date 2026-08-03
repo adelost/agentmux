@@ -130,6 +130,7 @@ export interface AgentmuxLinkProductIr extends ProductIr {
     readonly menuActions: typeof linkMenuActions;
     readonly components: typeof linkComponents;
     readonly palettes: typeof linkPalettes;
+    readonly nativeServices: LinkNativeRegistry["services"];
   };
 }
 
@@ -149,6 +150,7 @@ export function compileAgentmuxLinkProduct(
       menuActions: linkMenuActions,
       components: linkComponents,
       palettes: linkPalettes,
+      nativeServices: registry.services,
     },
   };
 }

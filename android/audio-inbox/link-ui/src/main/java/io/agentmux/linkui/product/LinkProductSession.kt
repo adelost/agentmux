@@ -77,6 +77,7 @@ class LinkProductSession(
             LinkNativeBindings.services.map { it.serviceId }.toSet())
         LinkProductManifest.services.forEach { declared ->
             val native = LinkNativeBindings.services.single { it.serviceId == declared.id }
+            require(native.port.id == declared.nativePortId)
             require(native.inputPorts == declared.inputPorts.toSet())
             require(native.outputPorts == declared.outputPorts.toSet())
             require(artifactProfile.id in native.profiles)

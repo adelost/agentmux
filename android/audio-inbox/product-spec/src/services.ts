@@ -16,7 +16,7 @@ const captureState = {
   id: "link.capture-state", kind: "state",
   fields: [
     field("phase", "string"),
-    field("startedAtMonotonicMs", "integer", { nullable: true, unit: "ms", clockDomain: "monotonic" }),
+    field("startedAtMs", "integer", { nullable: true, unit: "ms", clockDomain: "wall" }),
     field("byteCount", "integer", { unit: "byte" }),
   ],
 } as const;
@@ -26,7 +26,6 @@ const capturedTurn = {
     field("turnId", "string"), field("targetId", "string"), field("payloadRef", "string"),
     field("idempotencyKey", "string"),
     field("createdAtMs", "integer", { unit: "ms", clockDomain: "wall" }),
-    field("capturedAtMonotonicMs", "integer", { unit: "ms", clockDomain: "monotonic" }),
   ],
 } as const;
 const deliveryState = {
@@ -34,28 +33,26 @@ const deliveryState = {
   fields: [
     field("turnId", "string", { nullable: true }), field("phase", "string"),
     field("offline", "boolean"), field("idempotencyKey", "string", { nullable: true }),
-    field("retryAtMs", "integer", { nullable: true, unit: "ms", clockDomain: "wall" }),
   ],
 } as const;
 const acceptedTurn = {
   id: "link.accepted-turn", kind: "snapshot",
   fields: [
     field("turnId", "string"), field("targetId", "string"), field("idempotencyKey", "string"),
-    field("sequence", "integer"), field("durablyAccepted", "boolean"),
-    field("acceptedAtMs", "integer", { unit: "ms", clockDomain: "wall" }),
+    field("durablyAccepted", "boolean"),
   ],
 } as const;
 const replyState = {
   id: "link.reply-state", kind: "state",
   fields: [
     field("turnId", "string", { nullable: true }), field("phase", "string"),
-    field("sequence", "integer", { nullable: true }), field("offline", "boolean"),
+    field("offline", "boolean"),
   ],
 } as const;
 const readyReply = {
   id: "link.ready-reply", kind: "snapshot",
   fields: [
-    field("turnId", "string"), field("sequence", "integer"), field("body", "string"),
+    field("turnId", "string"), field("body", "string"),
     field("audioRef", "string", { nullable: true }),
     field("receivedAtMs", "integer", { unit: "ms", clockDomain: "wall" }),
   ],
@@ -68,8 +65,8 @@ const playbackState = {
   id: "link.playback-state", kind: "state",
   fields: [
     field("turnId", "string", { nullable: true }), field("phase", "string"),
-    field("positionMs", "integer", { unit: "ms", clockDomain: "monotonic" }),
-    field("durationMs", "integer", { unit: "ms", clockDomain: "monotonic" }),
+    field("positionMs", "integer", { unit: "ms" }),
+    field("durationMs", "integer", { unit: "ms" }),
   ],
 } as const;
 

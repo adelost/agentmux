@@ -1,18 +1,32 @@
 package io.agentmux.linkui.product
 
+import io.agentmux.linkui.product.generated.CaptureServicePort
+import io.agentmux.linkui.product.generated.DeliveryServicePort
+import io.agentmux.linkui.product.generated.LinkAcceptedTurn
 import io.agentmux.linkui.product.generated.LinkArtifactProfile
+import io.agentmux.linkui.product.generated.LinkCaptureCommand
+import io.agentmux.linkui.product.generated.LinkCapturedTurn
+import io.agentmux.linkui.product.generated.LinkCaptureState
+import io.agentmux.linkui.product.generated.LinkDeliveryState
+import io.agentmux.linkui.product.generated.LinkNativePortGraph
+import io.agentmux.linkui.product.generated.LinkPlaybackCommand
+import io.agentmux.linkui.product.generated.LinkPlaybackState
 import io.agentmux.linkui.product.generated.LinkProductManifest
+import io.agentmux.linkui.product.generated.LinkReadyReply
+import io.agentmux.linkui.product.generated.LinkReplyState
 import io.agentmux.linkui.product.generated.LinkRoute
-import java.nio.file.Files
-import java.nio.file.Path
+import io.agentmux.linkui.product.generated.LinkRouteCommand
+import io.agentmux.linkui.product.generated.LinkRouteState
+import io.agentmux.linkui.product.generated.NavigationServicePort
+import io.agentmux.linkui.product.generated.PlaybackServicePort
+import io.agentmux.linkui.product.generated.ReplyServicePort
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LinkProductContractTest {
     @Test
-    fun `one generated product binds every supported Phone and Wear surface`() {
+    fun `one generated product binds both artifacts and routes a typed native turn`() {
         LinkArtifactProfile.entries.forEach { profile ->
             val product = LinkProductSession(profile)
             profile.surfaces.forEach { surface ->
@@ -26,82 +40,56 @@ class LinkProductContractTest {
         )
         assertEquals("durable", LinkProductManifest.services.single { it.id == "delivery" }.durability)
         assertEquals("wall", LinkProductManifest.services.single { it.id == "reply" }.clockDomain)
+
+        val graph = FakeNativePortGraph()
+        val runtime = LinkProductRuntime(graph)
+        assertTrue(runtime.beginCapture())
+        runtime.releaseCapture()
+        assertEquals(graph.captured, graph.delivered)
     }
+}
 
-    @Test
-    fun `compiled native registry is independent and matches its ProductSpec snapshot`() {
-        val root = findLinkRoot()
-        val target = root.resolve("product-spec/native-registry/link.json")
-        val snapshot = snapshot()
-        if (System.getenv("LINK_UPDATE_NATIVE_REGISTRY") == "1") {
-            Files.createDirectories(target.parent)
-            Files.write(target, snapshot.toByteArray(Charsets.UTF_8))
-        }
-        assertEquals(
-            "Run this focused test with LINK_UPDATE_NATIVE_REGISTRY=1 after an intentional binding change.",
-            snapshot,
-            Files.readAllBytes(target).toString(Charsets.UTF_8),
-        )
-        val source = Files.readAllBytes(root.resolve(LinkNativeBindings.SOURCE_FILE)).toString(Charsets.UTF_8)
-        assertFalse(source.contains("LinkProductManifest"))
-        assertFalse(source.contains("GeneratedLinkProduct"))
+private class FakeNativePortGraph : LinkNativePortGraph {
+    val captured = LinkCapturedTurn(
+        turnId = "turn-7",
+        targetId = "agent-3",
+        payloadRef = "memory://turn-7",
+        idempotencyKey = "turn-7",
+        createdAtMs = 1_700_000_000_000L,
+    )
+    var delivered: LinkCapturedTurn? = null
+    private var capturePhase = "IDLE"
+
+    override val navigation = object : NavigationServicePort {
+        private var route = LinkRoute.HOME.id
+        override fun open(value: LinkRouteCommand) { route = value.route }
+        override fun destination() = LinkRouteState(route)
     }
-
-    private fun snapshot(): String {
-        val profiles = LinkNativeBindings.profiles.joinToString(", ") { it.json() }
-        val components = LinkNativeBindings.components.joinToString(",\n") { binding ->
-            val supported = binding.profiles.joinToString(", ") { it.json() }
-            "    { \"componentId\": ${binding.componentId.json()}, \"rendererId\": ${binding.renderer.id.json()}, \"profiles\": [$supported] }"
+    override val capture = object : CaptureServicePort {
+        override fun command(value: LinkCaptureCommand) {
+            capturePhase = when (value.operation) {
+                "BEGIN" -> "LISTENING"
+                "RELEASE" -> "FINALIZING"
+                "CANCEL" -> "IDLE"
+                else -> error(value.operation)
+            }
         }
-        val icons = LinkNativeBindings.icons.joinToString(",\n") { binding ->
-            "    { \"iconId\": ${binding.iconId.json()}, \"nativeSymbol\": ${binding.nativeSymbol.json()} }"
-        }
-        val palettes = LinkNativeBindings.palettes.joinToString(",\n") { binding ->
-            val supported = binding.profiles.joinToString(", ") { it.json() }
-            "    { \"paletteId\": ${binding.paletteId.json()}, \"nativeSymbol\": ${binding.nativeSymbol.json()}, \"profiles\": [$supported] }"
-        }
-        val services = LinkNativeBindings.services.joinToString(",\n") { binding ->
-            val supported = binding.profiles.joinToString(", ") { it.json() }
-            val inputs = binding.inputPorts.joinToString(", ") { it.json() }
-            val outputs = binding.outputPorts.joinToString(", ") { it.json() }
-            "    { \"serviceId\": ${binding.serviceId.json()}, \"nativePortId\": ${binding.port.id.json()}, \"profiles\": [$supported], \"inputPorts\": [$inputs], \"outputPorts\": [$outputs] }"
-        }
-        return """
-            |{
-            |  "stage": "native-export",
-            |  "schemaVersion": ${LinkNativeBindings.SCHEMA_VERSION},
-            |  "sourceFile": ${LinkNativeBindings.SOURCE_FILE.json()},
-            |  "profiles": [$profiles],
-            |  "components": [
-            |$components
-            |  ],
-            |  "icons": [
-            |$icons
-            |  ],
-            |  "palettes": [
-            |$palettes
-            |  ],
-            |  "services": [
-            |$services
-            |  ]
-            |}
-        """.trimMargin() + "\n"
+        override fun status() = LinkCaptureState(capturePhase, 42L, 512L)
+        override fun captured() = captured.takeIf { capturePhase == "FINALIZING" }
     }
-
-    private fun findLinkRoot(): Path = generateSequence(
-        Path.of(System.getProperty("user.dir")).toAbsolutePath(),
-    ) { it.parent }.first { Files.exists(it.resolve("settings.gradle.kts")) }
-
-    private fun String.json(): String = buildString {
-        append('"')
-        for (char in this@json) when (char) {
-            '\\' -> append("\\\\")
-            '"' -> append("\\\"")
-            '\n' -> append("\\n")
-            '\r' -> append("\\r")
-            '\t' -> append("\\t")
-            else -> append(char)
-        }
-        append('"')
+    override val delivery = object : DeliveryServicePort {
+        override fun turn(value: LinkCapturedTurn) { delivered = value }
+        override fun status() = LinkDeliveryState(delivered?.turnId, "QUEUED", false, delivered?.idempotencyKey)
+        override fun accepted(): LinkAcceptedTurn? = null
+    }
+    override val reply = object : ReplyServicePort {
+        override fun accepted(value: LinkAcceptedTurn) = Unit
+        override fun status() = LinkReplyState(null, "NONE", false)
+        override fun reply(): LinkReadyReply? = null
+    }
+    override val playback = object : PlaybackServicePort {
+        override fun reply(value: LinkReadyReply) = Unit
+        override fun command(value: LinkPlaybackCommand) = Unit
+        override fun status() = LinkPlaybackState(null, "IDLE", 0L, 0L)
     }
 }

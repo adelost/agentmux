@@ -28,13 +28,106 @@ enum class LinkComponentId(val id: String) {
     RECOVERY("recovery"),
     DEV_PREVIEW("dev-preview"),
 }
+data class LinkRouteCommand(
+    val route: String,
+)
+data class LinkRouteState(
+    val route: String,
+)
+data class LinkCaptureCommand(
+    val operation: String,
+)
+data class LinkCaptureState(
+    val phase: String,
+    val startedAtMs: Long?,
+    val byteCount: Long,
+)
+data class LinkCapturedTurn(
+    val turnId: String,
+    val targetId: String,
+    val payloadRef: String,
+    val idempotencyKey: String,
+    val createdAtMs: Long,
+)
+data class LinkDeliveryState(
+    val turnId: String?,
+    val phase: String,
+    val offline: Boolean,
+    val idempotencyKey: String?,
+)
+data class LinkAcceptedTurn(
+    val turnId: String,
+    val targetId: String,
+    val idempotencyKey: String,
+    val durablyAccepted: Boolean,
+)
+data class LinkReplyState(
+    val turnId: String?,
+    val phase: String,
+    val offline: Boolean,
+)
+data class LinkReadyReply(
+    val turnId: String,
+    val body: String,
+    val audioRef: String?,
+    val receivedAtMs: Long,
+)
+data class LinkPlaybackCommand(
+    val operation: String,
+    val turnId: String,
+)
+data class LinkPlaybackState(
+    val turnId: String?,
+    val phase: String,
+    val positionMs: Long,
+    val durationMs: Long,
+)
+interface NavigationServicePort {
+    fun open(value: LinkRouteCommand)
+    fun destination(): LinkRouteState
+}
+interface CaptureServicePort {
+    fun command(value: LinkCaptureCommand)
+    fun status(): LinkCaptureState
+    fun captured(): LinkCapturedTurn?
+}
+interface DeliveryServicePort {
+    fun turn(value: LinkCapturedTurn)
+    fun status(): LinkDeliveryState
+    fun accepted(): LinkAcceptedTurn?
+}
+interface ReplyServicePort {
+    fun accepted(value: LinkAcceptedTurn)
+    fun status(): LinkReplyState
+    fun reply(): LinkReadyReply?
+}
+interface PlaybackServicePort {
+    fun reply(value: LinkReadyReply)
+    fun command(value: LinkPlaybackCommand)
+    fun status(): LinkPlaybackState
+}
+interface LinkNativePortGraph {
+    val navigation: NavigationServicePort
+    val capture: CaptureServicePort
+    val delivery: DeliveryServicePort
+    val reply: ReplyServicePort
+    val playback: PlaybackServicePort
+}
 data class LinkRouteDescriptor(val route: LinkRoute, val title: String, val iconId: String, val artifacts: Set<LinkArtifactProfile>)
 data class LinkMenuActionDescriptor(val action: LinkMenuAction, val rowId: String, val title: String, val detail: String, val contentDescription: String, val iconId: String, val destination: LinkRoute, val artifacts: Set<LinkArtifactProfile>)
 data class LinkComponentDescriptor(val id: LinkComponentId, val rendererId: String, val iconId: String, val artifacts: Set<LinkArtifactProfile>)
 data class LinkComponentMount(val component: LinkComponentId, val region: String, val order: Int, val optional: Boolean)
 data class LinkComponentTree(val route: LinkRoute, val surface: String, val mounts: List<LinkComponentMount>)
 data class LinkPaletteDescriptor(val id: String, val artifacts: Set<LinkArtifactProfile>)
-data class LinkServiceDescriptor(val id: String, val inputPorts: List<String>, val outputPorts: List<String>, val stateOwner: String, val lifetime: String, val durability: String, val clockDomain: String, val contextInputs: List<String>, val effects: List<String>)
+data class LinkServiceDescriptor(val id: String, val nativePortId: String, val inputPorts: List<String>, val outputPorts: List<String>, val stateOwner: String, val lifetime: String, val durability: String, val clockDomain: String, val contextInputs: List<String>, val effects: List<String>)
+data class LinkServiceEdge(val fromService: String, val fromPort: String, val toService: String, val toPort: String)
+
+object LinkProductWiring {
+    val CAPTURE_CAPTURED_TO_DELIVERY_TURN: LinkServiceEdge = LinkServiceEdge("capture", "captured", "delivery", "turn")
+    val DELIVERY_ACCEPTED_TO_REPLY_ACCEPTED: LinkServiceEdge = LinkServiceEdge("delivery", "accepted", "reply", "accepted")
+    val REPLY_REPLY_TO_PLAYBACK_REPLY: LinkServiceEdge = LinkServiceEdge("reply", "reply", "playback", "reply")
+    val all: List<LinkServiceEdge> = listOf(CAPTURE_CAPTURED_TO_DELIVERY_TURN, DELIVERY_ACCEPTED_TO_REPLY_ACCEPTED, REPLY_REPLY_TO_PLAYBACK_REPLY)
+}
 
 object LinkProductManifest {
     const val PRODUCT_ID: String = "agentmux-link"
@@ -77,11 +170,11 @@ object LinkProductManifest {
         LinkPaletteDescriptor("graphite", setOf(LinkArtifactProfile.PHONE_FULL_UI, LinkArtifactProfile.WEAR_FULL_UI)),
     )
     val services: List<LinkServiceDescriptor> = listOf(
-        LinkServiceDescriptor("navigation", listOf("open"), listOf("destination"), "instance", "instance", "transient", "none", listOf(), listOf()),
-        LinkServiceDescriptor("capture", listOf("command"), listOf("status", "captured"), "external", "operation", "durable", "monotonic", listOf("microphone.permission"), listOf("audio.capture", "storage.write")),
-        LinkServiceDescriptor("delivery", listOf("turn"), listOf("status", "accepted"), "external", "process", "durable", "wall", listOf("network.connectivity"), listOf("storage.write", "transport.send", "retry.schedule")),
-        LinkServiceDescriptor("reply", listOf("accepted"), listOf("status", "reply"), "external", "process", "durable", "wall", listOf("network.connectivity"), listOf("transport.receive", "storage.write")),
-        LinkServiceDescriptor("playback", listOf("reply", "command"), listOf("status"), "external", "process", "transient", "monotonic", listOf("audio.focus"), listOf("audio.playback")),
+        LinkServiceDescriptor("navigation", "link.navigation.port", listOf("open"), listOf("destination"), "instance", "instance", "transient", "none", listOf(), listOf()),
+        LinkServiceDescriptor("capture", "link.capture.port", listOf("command"), listOf("status", "captured"), "external", "operation", "durable", "monotonic", listOf("microphone.permission"), listOf("audio.capture", "storage.write")),
+        LinkServiceDescriptor("delivery", "link.delivery.port", listOf("turn"), listOf("status", "accepted"), "external", "process", "durable", "wall", listOf("network.connectivity"), listOf("storage.write", "transport.send", "retry.schedule")),
+        LinkServiceDescriptor("reply", "link.reply.port", listOf("accepted"), listOf("status", "reply"), "external", "process", "durable", "wall", listOf("network.connectivity"), listOf("transport.receive", "storage.write")),
+        LinkServiceDescriptor("playback", "link.playback.port", listOf("reply", "command"), listOf("status"), "external", "process", "transient", "monotonic", listOf("audio.focus"), listOf("audio.playback")),
     )
     fun route(route: LinkRoute): LinkRouteDescriptor = routes.single { it.route == route }
     fun action(action: LinkMenuAction): LinkMenuActionDescriptor = menuActions.single { it.action == action }

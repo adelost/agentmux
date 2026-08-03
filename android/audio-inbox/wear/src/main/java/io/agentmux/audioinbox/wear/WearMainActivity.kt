@@ -33,11 +33,13 @@ import io.agentmux.audioinbox.update.LinkReleaseCatalogs
 import io.agentmux.audioinbox.update.LinkUpdater
 import io.agentmux.linkui.LinkWatchScreen
 import io.agentmux.linkui.product.LinkProductSession
+import io.agentmux.linkui.product.LinkProductRuntime
 import io.agentmux.linkui.product.generated.LinkArtifactProfile
 
 class WearMainActivity : ComponentActivity() {
     private val product = LinkProductSession(LinkArtifactProfile.WEAR_FULL_UI)
     private lateinit var controller: WearMailboxController
+    private lateinit var productRuntime: LinkProductRuntime
     private lateinit var updater: LinkUpdater
     private val microphoneGranted = mutableStateOf(false)
     private val microphonePermission = registerForActivityResult(
@@ -52,6 +54,7 @@ class WearMainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         controller = WearMailboxController(this)
+        productRuntime = LinkProductRuntime(WearLinkProductPorts(controller))
         microphoneGranted.value = hasMicrophonePermission()
         updater = LinkUpdater(
             context = this,
@@ -88,16 +91,29 @@ class WearMainActivity : ComponentActivity() {
                         microphoneGranted = microphoneGranted.value,
                         onRequestMicrophone = ::requestMicrophone,
                         onSelectTarget = controller::selectTarget,
-                        onBeginCapture = controller::beginCapture,
-                        onReleaseCapture = controller::releaseCapture,
-                        onCancelCapture = controller::cancelCapture,
+                        onBeginCapture = productRuntime::beginCapture,
+                        onReleaseCapture = productRuntime::releaseCapture,
+                        onCancelCapture = productRuntime::cancelCapture,
                         recordedBytes = controller::recordedBytes,
                         recordedLevel = controller::recordedLevel,
-                        onPlay = controller::playLatest,
-                        onStop = controller::stopPlayback,
-                        onReplay = controller::playLatest,
+                        onPlay = {
+                            controller.state.value.turns.lastOrNull {
+                                it.replyText.isNotBlank()
+                            }?.turnId?.let(productRuntime::play)
+                        },
+                        onStop = {
+                            (controller.state.value.activePlaybackTurnId ?: controller.state.value
+                                .turns.lastOrNull { it.replyText.isNotBlank() }?.turnId)
+                                ?.let(productRuntime::stop)
+                        },
+                        onReplay = {
+                            controller.state.value.turns.lastOrNull {
+                                it.replyText.isNotBlank()
+                            }?.turnId?.let(productRuntime::play)
+                        },
                         onCheckUpdate = updater::retry,
                         onInstallUpdate = updater::install,
+                        onNavigateRoute = productRuntime::open,
                         initialShowingSettings = BuildConfig.DEBUG &&
                             intent.getStringExtra(QA_PAGE_EXTRA) == QA_PAGE_SETTINGS,
                     )
