@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  createWorkClient, formatTicketShow, formatWorkOverview, parseWorkArgs, projectForWorkSender,
-  runWorkCommand,
+  claimBlocker, createWorkClient, formatTicketShow, formatWorkOverview, parseWorkArgs,
+  projectForWorkSender, runWorkCommand,
 } from "./work.mjs";
 
 const overview = (overrides = {}) => ({
@@ -154,20 +154,91 @@ feature("simple Suggestions work CLI", () => {
   });
 
   component("approves stable ticket material with delegated admin authority", {
-    given: ["a READY ticket after triage", () => ({ client: fakeClient([{ ticket: {
-      id: "SVW-0101", status: "ready", revision: 4,
-      productApproval: { state: "required", materialFingerprint: `material-v1:${"a".repeat(64)}` },
-    } }]) })],
+    given: ["a READY ticket after triage", () => ({ client: fakeClient([
+      { ticket: {
+        id: "SVW-0101", status: "ready", revision: 4,
+        productApproval: { state: "required", materialFingerprint: `material-v1:${"a".repeat(64)}` },
+      } },
+      { ticket: {
+        id: "SVW-0101", status: "ready", revision: 5,
+        productApproval: { state: "approved", materialFingerprint: `material-v1:${"a".repeat(64)}` },
+      } },
+    ]) })],
     when: ["the delegated pane approves it", ({ client }) => runWorkCommand(
       ["approve", "SVW-0101"], { sender: "skyvw:3", client },
     )],
     then: ["approval is revision- and material-bound without a GUI", (text, { client }) => {
-      expect(text).toBe("APPROVED SVW-0101");
+      expect(text).toBe("APPROVED SVW-0101\nCLAIMABLE yes");
       expect(client.calls[1]).toMatchObject({ admin: true,
         path: "/api/agent/tickets/SVW-0101/product-approval?project=skyvw", body: {
           source: "skyvw:3", expectedTicketRevision: 4,
           materialFingerprint: `material-v1:${"a".repeat(64)}`,
         } });
+    }],
+  });
+
+  // Measured on suggest.v1d.io 2026-08-04: SRC-0137 carried a policy safety flag
+  // AND an unapproved product gate. `approve` cleared the second, printed a bare
+  // APPROVED, and left executionBlocked true. Safety release is human-only by
+  // design (/api/human/tickets/:id/safety-approval), so the hold is not a race
+  // the caller can wait out — it is a different door, behind a different actor.
+  const heldAfterApproval = (overrides = {}) => ({ ticket: {
+    id: "SVW-0101", status: "ready", revision: 4,
+    productApproval: { state: "approved", materialFingerprint: `material-v1:${"a".repeat(64)}` },
+    safety: { state: "held", executionBlocked: true },
+    ...overrides,
+  } });
+
+  unit("names the surviving gate, not the one just opened", {
+    given: ["a product-approved ticket that policy still holds", () => heldAfterApproval().ticket],
+    when: ["asking what blocks the claim", (ticket) => claimBlocker(ticket)],
+    then: ["the answer is the hold", (reason) => expect(reason).toBe("safety hold")],
+  });
+
+  component("does not report bare success while the ticket stays held", {
+    given: ["a held ticket whose product gate the mutation clears", () => ({
+      client: fakeClient([
+        heldAfterApproval({ productApproval: { state: "required",
+          materialFingerprint: `material-v1:${"a".repeat(64)}` } }),
+        heldAfterApproval(),
+      ]) })],
+    when: ["approving it", ({ client }) => runWorkCommand(
+      ["approve", "SVW-0101"], { sender: "skyvw:3", client },
+    )],
+    then: ["the caller learns the claim is still blocked, and by whom", (text) => {
+      expect(text).toContain("APPROVED SVW-0101");
+      expect(text).toContain("CLAIMABLE no (safety hold)");
+      expect(text).toContain("NEEDS HUMAN POST /api/human/tickets/SVW-0101/safety-approval");
+    }],
+  });
+
+  component("keeps the already-approved shortcut equally honest", {
+    given: ["a ticket approved earlier and held since", () => ({
+      client: fakeClient([heldAfterApproval()]) })],
+    when: ["approving it again", ({ client }) => runWorkCommand(
+      ["approve", "SVW-0101"], { sender: "skyvw:3", client },
+    )],
+    then: ["the shortcut reports the hold and sends no mutation", (text, { client }) => {
+      expect(text).toContain("(already)");
+      expect(text).toContain("CLAIMABLE no (safety hold)");
+      expect(client.calls.filter((call) => call.kind === "mutate")).toHaveLength(0);
+    }],
+  });
+
+  component("says unverified rather than replaying stale state", {
+    given: ["a board that answers the confirming re-read with nothing", () => {
+      const reads = [heldAfterApproval({ safety: { state: "clear", executionBlocked: false },
+        productApproval: { state: "required",
+          materialFingerprint: `material-v1:${"a".repeat(64)}` } })];
+      return { client: { calls: [],
+        read: async () => reads.shift() ?? null,
+        mutate: async () => ({ ok: true }) } };
+    }],
+    when: ["approving it", ({ client }) => runWorkCommand(
+      ["approve", "SVW-0101"], { sender: "skyvw:3", client },
+    )],
+    then: ["the missing confirmation is stated, not guessed", (text) => {
+      expect(text).toBe("APPROVED SVW-0101\nCLAIMABLE unverified (re-read returned no ticket)");
     }],
   });
 
