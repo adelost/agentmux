@@ -28,6 +28,23 @@ const MAX_BLOCKED_RETRY_MS = 60_000;
 // Warn well before a legitimate long turn reaches the 60-minute verdict.
 const SUBMITTED_STALL_NOTICE_MS = 3 * 60_000;
 const STALE_SUBMITTED_TERMINAL_MS = 60 * 60 * 1_000;
+// A slash command is consumed by the TUI's own parser and never becomes a
+// conversation turn, so the JSONL receipt this wait is built on cannot arrive.
+// Holding the lane for the full hour therefore starves every later message to
+// that pane on a verdict that was decided in the first seconds: skyvw:0 sat 32
+// minutes behind one `/model` while four later sends piled up, and skydive:3
+// lost 6h16m of deliveries to the same shape. Either the composer took it
+// immediately or it did not.
+const STALE_SUBMITTED_SLASH_TERMINAL_MS = 60_000;
+
+/**
+ * WHAT: How long a submitted job may hold its lane before the broker gives up.
+ * WHY: The deadline must match what the job can actually prove. A prompt earns
+ *      the full hour because a long turn is legitimate; a slash command has no
+ *      receipt to wait for, so the same hour is pure starvation.
+ */
+export const submittedTerminalMs = (job) =>
+  job?.kind === "slash" ? STALE_SUBMITTED_SLASH_TERMINAL_MS : STALE_SUBMITTED_TERMINAL_MS;
 function blockedRetryMs(job, { drafted = false } = {}) {
   const base = drafted ? 5_000 : BLOCKED_RETRY_MS;
   const exponent = Math.min(5, Math.max(0, Number(job.attempts || 1) - 1));
@@ -413,7 +430,7 @@ export function createDeliveryBroker({
       const submittedAge = now() - Number(
         job.submittedAt || job.submitFenceAt || job.lastAttemptAt || job.createdAt || now(),
       );
-      const submittedExpired = submittedAge >= STALE_SUBMITTED_TERMINAL_MS;
+      const submittedExpired = submittedAge >= submittedTerminalMs(job);
       if (submittedExpired) return terminalizeUnverified(job);
       // One durable notice reports a stalled FIFO and closes with recovered on receipt.
       if (!job.noticeSentAt && submittedAge >= SUBMITTED_STALL_NOTICE_MS) {
