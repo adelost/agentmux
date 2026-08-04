@@ -4,12 +4,12 @@ import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { decodeLinkNativeRegistry } from "../src/native-registry.js";
+import { productArtifactConformance } from "@v1d/product-spec";
 import { compileAgentmuxLinkProduct } from "../src/product.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const registry = decodeLinkNativeRegistry(
-  JSON.parse(await readFile(resolve(root, "native-registry/link.json"), "utf8")),
-);
+const rawRegistryJson = await readFile(resolve(root, "native-registry/link.json"), "utf8");
+const registry = decodeLinkNativeRegistry(JSON.parse(rawRegistryJson));
 
 test("one Link product drives Phone and Wear with a closed native graph", () => {
   const product = compileAgentmuxLinkProduct(registry, "0.3.25");
@@ -41,4 +41,17 @@ test("missing native component fails before emission", () => {
     () => compileAgentmuxLinkProduct({ ...registry, components: registry.components.slice(1) }, "0.3.25"),
     /component\/native binding missing/,
   );
+});
+
+// Criterion 4 of SVW-0112: Link, Showcase and Skyvw verify the SAME contract
+// through the same helper, so drift between a product and its native bindings
+// cannot hide behind a per-product test. Link is the second of the three.
+//
+// Link declares every manifest section, so unlike Showcase there is nothing
+// unasserted here — an empty list is the strongest result this helper can give.
+test("Link conforms to its native bindings through the shared helper", () => {
+  const product = compileAgentmuxLinkProduct(registry, "0.3.31");
+  const raw = JSON.parse(rawRegistryJson);
+
+  assert.deepEqual(productArtifactConformance(product, raw), []);
 });
