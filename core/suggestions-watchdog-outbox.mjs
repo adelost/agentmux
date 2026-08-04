@@ -144,6 +144,18 @@ export function createAmuxOutboxDeliverer({ queue = createDeliveryQueue(),
       acknowledgedAt: Number(settled.acknowledgedAt),
     };
   };
+  /**
+   * WHAT: Returns the receipt of an already-acknowledged delivery, or null.
+   * WHY: A drain that re-runs over a reconciled item must acknowledge it, not
+   * send it again. The pane already got this prompt; a second copy is noise
+   * the agent cannot tell from new work.
+   */
+  deliver.settledReceipt = ({ agent, pane, idempotencyKey }) => {
+    const job = queue.list(agent, pane).find((candidate) =>
+      candidate.idempotencyKey === idempotencyKey);
+    if (!job || job.status !== "acknowledged" || !Number.isFinite(Number(job.acknowledgedAt))) return null;
+    return { jobId: job.id, status: "acknowledged", acknowledgedAt: Number(job.acknowledgedAt) };
+  };
   deliver.wasAttempted = ({ agent, pane, idempotencyKey }) => {
     const job = queue.list(agent, pane).find((candidate) =>
       candidate.idempotencyKey === idempotencyKey);
@@ -223,7 +235,15 @@ export async function pollWatchdogOutboxes({ config, readToken, adminToken,
               throw new Error(`assignment offer was not attempted (${reason}; ownerAckClockStarted=false)`);
             }
           }
-          const receipt = validateReceipt(await deliver(request), idempotencyKey);
+          // A drain re-run must reconcile, not re-send: an alert whose job is
+          // already acknowledged is acknowledged upstream with the receipt it
+          // earned, so the outbox drains without touching the pane again.
+          const settledReceipt = typeof deliver.settledReceipt === "function"
+            ? await deliver.settledReceipt(request)
+            : null;
+          const receipt = validateReceipt(
+            settledReceipt ?? await deliver(request), idempotencyKey,
+          );
           const ackUrl = endpoint(config.baseUrl, "/api/watchdog/outbox/ack", projectId);
           const acknowledged = await fetchJson(ackUrl, {
             fetchImpl,

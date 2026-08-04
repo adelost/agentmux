@@ -793,3 +793,77 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
     ]);
   });
 });
+
+describe("draining an already-reconciled outbox (SRC-0128)", () => {
+  // The queue holds jobs the broker already handled: state=cancelled,
+  // reason=broker-recovered-before-deadline. Re-running the drain must not
+  // ping a manager pane a second time for work that already reached it.
+  const reconciledDeliver = (attempts) => {
+    const deliver = async (request) => {
+      attempts.push(request.idempotencyKey);
+      return { jobId: "a".repeat(32), status: "acknowledged", acknowledgedAt: 5_000 };
+    };
+    deliver.wasAttempted = () => true;
+    deliver.settledReceipt = () => ({ jobId: "a".repeat(32), status: "acknowledged", acknowledgedAt: 5_000 });
+    return deliver;
+  };
+
+  it("treats only an acknowledged job as reconciled, never one still in flight", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "amux-watchdog-settled-"));
+    const request = { agent: "lsrc", pane: 2, prompt: PROMPT,
+      idempotencyKey: watchdogDeliveryKey("source", alert.dedupeKey), projectId: "source", alert };
+    try {
+      const queue = createDeliveryQueue({ rootDir });
+      const job = queue.enqueue({ agentName: "lsrc", pane: 2, text: PROMPT,
+        verifyText: PROMPT, kind: "prompt", source: "suggestions-watchdog",
+        idempotencyKey: request.idempotencyKey,
+        metadata: { projectId: "source", outboxId: alert.id, dedupeKey: alert.dedupeKey } });
+      const deliver = createAmuxOutboxDeliverer({ queue, waitMs: 0 });
+
+      queue.update(job, { status: "delivered_unverified", acknowledgedAt: null });
+      expect(deliver.settledReceipt(request)).toBeNull();
+
+      queue.update(queue.findById(job.id), { status: "acknowledged", acknowledgedAt: 1_400 });
+      expect(deliver.settledReceipt(request)).toMatchObject({ status: "acknowledged", acknowledgedAt: 1_400 });
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not accept a stored acknowledgement that carries no time", () => {
+    // The queue makes this state unreachable through its own API, so it can
+    // only arrive from a corrupted job file on disk. Returning null re-sends
+    // the alert, which is a retry; a timeless receipt would fail validation
+    // and leave the alert pending forever.
+    const timeless = { id: "b".repeat(32), idempotencyKey: "key-1", status: "acknowledged" };
+    const deliver = createAmuxOutboxDeliverer({
+      queue: { list: () => [timeless], enqueue: () => timeless, update: () => timeless },
+      waitMs: 0,
+    });
+    expect(deliver.settledReceipt({ agent: "lsrc", pane: 2, idempotencyKey: "key-1" })).toBeNull();
+  });
+
+  it("produces zero new manager deliveries", async () => {
+    const attempts = [];
+    const { fetchImpl } = api();
+    await pollWatchdogOutboxes({
+      config: config(), readToken: READ, adminToken: ADMIN,
+      fetchImpl, deliver: reconciledDeliver(attempts),
+      availability: async () => ({ eligible: true, reason: "explicit-done" }),
+    });
+    expect(attempts).toEqual([]);
+  });
+
+  it("keeps the reconciled state authoritative by acknowledging without re-sending", async () => {
+    const attempts = [];
+    const { calls, fetchImpl } = api();
+    const result = await pollWatchdogOutboxes({
+      config: config(), readToken: READ, adminToken: ADMIN,
+      fetchImpl, deliver: reconciledDeliver(attempts),
+      availability: async () => ({ eligible: true, reason: "explicit-done" }),
+    });
+    const acked = calls.filter((c) => c.url.pathname === "/api/watchdog/outbox/ack");
+    expect(acked.map((c) => c.body.id)).toEqual([7]);
+    expect(result.pending).toBe(0);
+  });
+});
