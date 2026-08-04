@@ -3,9 +3,14 @@ import {
   classifyPlaywrightProcess,
   detectActivePlaywrightTool,
   findStalePlaywrightProcesses,
+  parseCdpClientCount,
   parsePsRows,
   reapStalePlaywrightProcesses,
 } from "./playwright-watchdog.mjs";
+
+const IDLE_SHARED_BROWSER = {
+  known: true, clients: 0, heartbeatAgeMs: null, heartbeatFresh: false, error: null,
+};
 
 feature("playwright watchdog process reaper", () => {
   const ps = [
@@ -45,6 +50,7 @@ feature("playwright watchdog process reaper", () => {
       dryRun: true,
       maxAgeMs: 60 * 60_000,
       kill: (pid) => ctx.killed.push(pid),
+      observe: () => IDLE_SHARED_BROWSER,
     })],
     then: ["reports candidates without side effects", (result, ctx) => {
       expect(result.candidates).toBe(3);
@@ -106,6 +112,110 @@ feature("playwright watchdog pane detector", () => {
     when: ["detecting", (content) => detectActivePlaywrightTool(content, "idle")],
     then: ["returns null", (signature) => {
       expect(signature).toBeNull();
+    }],
+  });
+});
+
+feature("shared agent-browser survives the age reaper (SRC-0136)", () => {
+  // The incident shape: skydive:5 held a connectOverCDP wait against the shared
+  // headed Chrome when the 60m age rule fired and killed the measurement.
+  const sharedBrowser = " 200 1 200 200 Ssl 7200 /opt/google/chrome/chrome"
+    + " --user-data-dir=/home/me/.cache/agent-browser/chrome-42089 --remote-debugging-port=42089";
+  const mcpClient = " 201 1 201 201 Sl+ 7200 npm exec @playwright/mcp@latest"
+    + " --cdp-endpoint http://localhost:42089";
+  const ephemeralMcp = " 202 1 202 202 Sl+ 7200 npm exec @playwright/mcp@latest";
+  const rows = parsePsRows([sharedBrowser, mcpClient, ephemeralMcp].join("\n"));
+
+  const reapWith = (activity, extra = {}) => {
+    const killed = [];
+    const result = reapStalePlaywrightProcesses({
+      rows, maxAgeMs: 60 * 60_000, kill: (pid) => killed.push(pid),
+      observe: () => activity, ...extra,
+    });
+    return { killed, result };
+  };
+
+  unit("an aged shared browser with an attached CDP client is preserved", {
+    given: ["a live client on :42089", () => ({ ...IDLE_SHARED_BROWSER, clients: 1 })],
+    when: ["reaping", (activity) => reapWith(activity)],
+    then: ["only the ephemeral MCP dies, the shared session lives", ({ killed, result }) => {
+      expect(killed).toEqual([202]);
+      expect(result.skipped.map((s) => s.pid).sort()).toEqual([200, 201]);
+      expect(result.skipped[0].reason).toContain("1 attached CDP client");
+    }],
+  });
+
+  unit("an aged shared browser with a fresh heartbeat is preserved", {
+    given: ["no client but a 30s-old ownership claim", () =>
+      ({ ...IDLE_SHARED_BROWSER, heartbeatAgeMs: 30_000, heartbeatFresh: true })],
+    when: ["reaping", (activity) => reapWith(activity)],
+    then: ["the claim protects it", ({ killed, result }) => {
+      expect(killed).toEqual([202]);
+      expect(result.skipped.map((s) => s.reason).join()).toContain("heartbeat is 30s old");
+    }],
+  });
+
+  unit("an aged, idle, unclaimed shared browser is still reaped", {
+    given: ["no client and no claim", () => IDLE_SHARED_BROWSER],
+    when: ["reaping", (activity) => reapWith(activity)],
+    then: ["the leak protection survives the fix", ({ killed, result }) => {
+      expect(killed.sort()).toEqual([200, 201, 202]);
+      expect(result.skipped).toEqual([]);
+    }],
+  });
+
+  unit("unreadable activity warns and skips instead of killing blind", {
+    given: ["a probe that could not run", () =>
+      ({ known: false, clients: null, heartbeatAgeMs: null, heartbeatFresh: false, error: "ss: not found" })],
+    when: ["reaping", (activity) => reapWith(activity)],
+    then: ["the shared session is spared and the reason is stated", ({ killed, result }) => {
+      expect(killed).toEqual([202]);
+      expect(result.skipped.map((s) => s.reason).join()).toContain("unreadable (ss: not found)");
+    }],
+  });
+
+  unit("a client attaching between scan and kill cancels the kill", {
+    given: ["idle at scan, busy at the pre-kill recheck", () => {
+      let calls = 0;
+      return () => (++calls === 1 ? IDLE_SHARED_BROWSER : { ...IDLE_SHARED_BROWSER, clients: 1 });
+    }],
+    when: ["reaping", (observe) => {
+      const killed = [];
+      const result = reapStalePlaywrightProcesses({
+        rows, maxAgeMs: 60 * 60_000, kill: (pid) => killed.push(pid), observe,
+      });
+      return { killed, result };
+    }],
+    then: ["the race loses to the live client", ({ killed, result }) => {
+      expect(killed).toEqual([202]);
+      expect(result.skipped.map((s) => s.reason).join()).toContain("arrived after scan");
+    }],
+  });
+
+  unit("a reused pid is never killed", {
+    given: ["the scanned pid now holds a much younger process", () => rows],
+    when: ["reaping against a rescan where pid 202 restarted", (scanRows) => {
+      const killed = [];
+      reapStalePlaywrightProcesses({
+        rows: scanRows, maxAgeMs: 60 * 60_000, kill: (pid) => killed.push(pid),
+        observe: () => IDLE_SHARED_BROWSER,
+        rescan: () => scanRows.map((r) => (r.pid === 202 ? { ...r, etimes: 3 } : r)),
+      });
+      return killed;
+    }],
+    then: ["the stranger wearing that pid survives", (killed) => {
+      expect(killed).not.toContain(202);
+    }],
+  });
+
+  unit("counts the browser side of a loopback connection, not both ends", {
+    given: ["ss output where one client shows twice", () =>
+      "Recv-Q Send-Q Local Address:Port Peer Address:Port Process\n"
+      + "0      0          127.0.0.1:42089       127.0.0.1:34558\n"
+      + "0      0          127.0.0.1:34558       127.0.0.1:42089\n"],
+    when: ["counting", (stdout) => parseCdpClientCount(stdout, 42089)],
+    then: ["one client is one client", (count) => {
+      expect(count).toBe(1);
     }],
   });
 });
