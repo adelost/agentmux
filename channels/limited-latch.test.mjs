@@ -47,3 +47,51 @@ feature("A quota banner that scrolls out of the pane tail", () => {
     then: ["only working does", (clearing) => expect(clearing).toEqual(["working"])],
   });
 });
+
+feature("A delivery into a still-dead pane is not proof of recovery", () => {
+  unit("keeps the latch while the quota banner is still on screen", {
+    // skydive:3, 2026-08-04: quota-dead until 9 Aug, 427 deliveries in a day.
+    // Each delivery painted a spinner over a banner that had NOT expired, and
+    // detectPaneStatus reports that as "working" on purpose. Before this, the
+    // latch took it as recovery and the next poll re-announced the same stall.
+    given: ["a latched pane observed working with the banner visible", () => ({
+      prev: "limited", status: "working", opts: { limitBannerVisible: true },
+    })],
+    when: ["folding the observation into memory",
+      ({ prev, status, opts }) => nextLimitedMemory(prev, status, opts)],
+    then: ["it stays limited, so no fresh edge is manufactured", (next) => {
+      expect(next).toBe("limited");
+      expect(enteredLimited(next, "limited")).toBe(false);
+    }],
+  });
+
+  unit("releases the latch once the banner is actually gone", {
+    given: ["a latched pane running again with no banner in the tail", () => ({
+      prev: "limited", status: "working", opts: { limitBannerVisible: false },
+    })],
+    when: ["folding the observation into memory",
+      ({ prev, status, opts }) => nextLimitedMemory(prev, status, opts)],
+    then: ["recovery is recorded, and a later stall can alert again", (next) => {
+      expect(next).toBe("working");
+      expect(enteredLimited(next, "limited")).toBe(true);
+    }],
+  });
+
+  unit("a visible banner never turns idle or unknown into recovery either", {
+    given: ["the non-working observations a dead pane also produces",
+      () => ["idle", "unknown", "interrupted"]],
+    when: ["folding each in with the banner visible", (statuses) => statuses.map(
+      (status) => nextLimitedMemory("limited", status, { limitBannerVisible: true }))],
+    then: ["all stay latched", (results) => {
+      expect(results).toEqual(["limited", "limited", "limited"]);
+    }],
+  });
+
+  unit("defaults to the old rule when no banner information is supplied", {
+    // clearsLimitedLatch has other callers; omitting the option must not
+    // silently start latching panes that genuinely recovered.
+    given: ["a latched pane observed working, banner unknown", () => "working"],
+    when: ["folding it in without options", (status) => nextLimitedMemory("limited", status)],
+    then: ["it clears, exactly as before", (next) => expect(next).toBe("working")],
+  });
+});

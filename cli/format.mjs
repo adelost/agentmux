@@ -8,6 +8,13 @@ import { statusIcon } from "../core/pane-status.mjs";
 // callers keep working; the truth lives in core/pane-status.mjs.
 export { statusIcon };
 
+/**
+ * The quota banner both Claude and Codex print when a subscription limit is hit.
+ * Exported so the auto-compact latch can ask the same question this classifier
+ * asks, instead of keeping a second copy that would drift away from it.
+ */
+export const LIMIT_BANNER = /You've hit your (session|usage) limit/;
+
 /** Detect pane status from captured content. */
 export function detectPaneStatus(paneContent) {
   const text = stripAnsi(paneContent);
@@ -62,7 +69,7 @@ export function detectPaneStatus(paneContent) {
   // a limited pane read as idle and got a false auto-compact warning). The
   // banner re-prints on every attempted prompt and scrolls out with the
   // first real turn after reset.
-  if (/You've hit your (session|usage) limit/.test(tailRaw)) return "limited";
+  if (LIMIT_BANNER.test(tailRaw)) return "limited";
 
   // Codex renders "■ Conversation interrupted - tell the model what to do
   // differently" when a turn dies (Esc keypress, stream error). The composer
