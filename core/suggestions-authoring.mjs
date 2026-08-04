@@ -188,12 +188,35 @@ export async function sendSuggestionsRequest({
     "content-type": "application/json; charset=utf-8",
     "user-agent": "curl/7.81.0 amux-suggest/1",
   };
-  const response = await fetchImpl(target, {
-    method: upperMethod, headers, body: staged.bodyBytes,
-  });
+  // Every exit past this point records what the attempt did, because the file
+  // is the only durable account of it. Leaving a failed attempt at "staged"
+  // makes it indistinguishable from one that never left the machine — and the
+  // two need opposite handling: replay the unsent, never replay the rejected,
+  // verify the ones whose response was lost. Measured 2026-08-04: 193 envelopes
+  // sat at "staged" with no way to tell those three apart.
+  const recordAttempt = (state, extra) => {
+    const persisted = JSON.parse(readFileSync(staged.metadataPath, "utf8"));
+    atomicJson(staged.metadataPath, {
+      ...persisted, state, attemptedAt: new Date().toISOString(), ...extra,
+    });
+    return persisted;
+  };
+  let response;
+  try {
+    response = await fetchImpl(target, {
+      method: upperMethod, headers, body: staged.bodyBytes,
+    });
+  }
+  catch (error) {
+    // The server may or may not have applied it; only a readback can say.
+    recordAttempt("send_failed", { lastStatus: null, lastError: String(error.message ?? error) });
+    throw error;
+  }
   const responseBytes = Buffer.from(await response.arrayBuffer());
   if (!response.ok) {
-    throw new Error(`Suggestions mutation HTTP ${response.status}: ${strictUtf8(responseBytes).slice(0, 500)}`);
+    const detail = strictUtf8(responseBytes).slice(0, 500);
+    recordAttempt("rejected", { lastStatus: response.status, lastError: detail });
+    throw new Error(`Suggestions mutation HTTP ${response.status}: ${detail}`);
   }
   if (readPath) {
     const readTarget = new URL(readPath, base);
@@ -202,14 +225,23 @@ export async function sendSuggestionsRequest({
     }
     const readback = await fetchImpl(readTarget, { headers: { authorization: `Bearer ${token}` } });
     const readBytes = Buffer.from(await readback.arrayBuffer());
-    if (!readback.ok) throw new Error(`Suggestions readback HTTP ${readback.status}`);
-    assertReadback(readBytes, expected);
+    // The mutation itself already succeeded, so this is NOT a replay candidate:
+    // resending would apply it twice, and comments have no delete route.
+    if (!readback.ok) {
+      recordAttempt("applied_unverified",
+        { lastStatus: response.status, lastError: `readback HTTP ${readback.status}` });
+      throw new Error(`Suggestions readback HTTP ${readback.status}`);
+    }
+    try { assertReadback(readBytes, expected); }
+    catch (error) {
+      recordAttempt("applied_unverified",
+        { lastStatus: response.status, lastError: String(error.message ?? error) });
+      throw error;
+    }
   }
-  const metadata = JSON.parse(readFileSync(staged.metadataPath, "utf8"));
-  atomicJson(staged.metadataPath, {
-    ...metadata,
-    state: "acknowledged",
+  const metadata = recordAttempt("acknowledged", {
     acknowledgedAt: new Date().toISOString(),
+    lastStatus: response.status,
     responseHash: sha256(responseBytes),
   });
   return {
