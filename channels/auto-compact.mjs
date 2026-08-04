@@ -10,7 +10,7 @@ import {
   formatCompactedMessage,
 } from "../core/auto-compact.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
-import { appendEvent } from "../core/events.mjs";
+import { appendEvent, readEvents } from "../core/events.mjs";
 import { notifyUser } from "../cli/send-notify.mjs";
 import { getContextFromPane, getContextPercent } from "../core/context.mjs";
 import { detectPaneStatus } from "../cli/format.mjs";
@@ -26,6 +26,31 @@ import { latestConversationActivityMs } from "../core/pane-activity.mjs";
 
 export function enteredLimited(prev, status) {
   return status === "limited" && prev !== "limited";
+}
+
+/**
+ * WHAT: Rebuilds "which panes were already limited" from the durable ledger.
+ * WHY: The alert fires on a TRANSITION into limited, but the map holding the
+ *      previous state is in memory. A restart therefore looked like every
+ *      quota-dead pane had just this moment run out.
+ * A pane counts as still-limited only when its `limited` row is its most recent
+ * event. Any later row means it ran again, so a fresh stall deserves a fresh
+ * alert — that is the failure this alert exists to catch.
+ */
+export function seedLimitedFromLedger(prevStatus, {
+  readEventsFn = readEvents, since = null,
+} = {}) {
+  const lastEventPerPane = new Map();
+  try {
+    for (const evt of readEventsFn({ since })) {
+      if (!evt?.session) continue;
+      lastEventPerPane.set(`${evt.session}:${Number(evt.pane) || 0}`, evt.event);
+    }
+  } catch { return prevStatus; }
+  for (const [paneKey, event] of lastEventPerPane) {
+    if (event === "limited") prevStatus.set(paneKey, "limited");
+  }
+  return prevStatus;
 }
 
 export function createAutoCompact({
@@ -191,6 +216,12 @@ export function createAutoCompact({
   // discovered ai:4's stall by accident (2026-07-10). One alert per entry
   // into "limited", re-armed when the pane leaves the state.
   const prevStatus = new Map();
+  // This map lives in memory, so every bridge restart used to re-announce
+  // every already-limited pane: 14 quota-dead Codex panes meant 14 Discord
+  // messages per restart, and four restarts during one release evening buried
+  // the channels in a stall the human had already been told about twice. The
+  // ledger has recorded each `limited` entry all along; nothing read it back.
+  seedLimitedFromLedger(prevStatus);
 
   async function alertOnLimited(agentName, paneIdx, paneKey, status) {
     const prev = prevStatus.get(paneKey);
