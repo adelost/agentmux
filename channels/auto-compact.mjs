@@ -49,26 +49,38 @@ export function nextLimitedMemory(prev, status) {
 }
 
 /**
+ * Events that prove a pane actually RAN a turn, and therefore that a recorded
+ * quota stall is over. `delivery_queue` and `notification` say only that
+ * something was addressed TO the pane — a quota-dead pane collects those
+ * exactly as a live one does, so they prove nothing about whether it can run.
+ * They are also the ledger's loudest rows (7158 of 8000+ when this was written),
+ * which is why keying on "the newest row of any kind" silently stopped working.
+ */
+const TURN_PROVING_EVENTS = new Set(["prompt", "stop", "session_start"]);
+
+/**
  * WHAT: Rebuilds "which panes were already limited" from the durable ledger.
  * WHY: The alert fires on a TRANSITION into limited, but the map holding the
  *      previous state is in memory. A restart therefore looked like every
  *      quota-dead pane had just this moment run out.
- * A pane counts as still-limited only when its `limited` row is its most recent
- * event. Any later row means it ran again, so a fresh stall deserves a fresh
- * alert — that is the failure this alert exists to catch.
+ * A pane stays seeded as limited until a row that PROVES it ran again arrives
+ * after the stall. Same rule as the runtime latch above: only positive evidence
+ * of a turn clears a quota stall; traffic addressed to a silent pane is not it.
  */
 export function seedLimitedFromLedger(prevStatus, {
   readEventsFn = readEvents, since = null,
 } = {}) {
-  const lastEventPerPane = new Map();
+  const limitedPerPane = new Map();
   try {
     for (const evt of readEventsFn({ since })) {
       if (!evt?.session) continue;
-      lastEventPerPane.set(`${evt.session}:${Number(evt.pane) || 0}`, evt.event);
+      const paneKey = `${evt.session}:${Number(evt.pane) || 0}`;
+      if (evt.event === "limited") limitedPerPane.set(paneKey, true);
+      else if (TURN_PROVING_EVENTS.has(evt.event)) limitedPerPane.set(paneKey, false);
     }
   } catch { return prevStatus; }
-  for (const [paneKey, event] of lastEventPerPane) {
-    if (event === "limited") prevStatus.set(paneKey, "limited");
+  for (const [paneKey, stillLimited] of limitedPerPane) {
+    if (stillLimited) prevStatus.set(paneKey, "limited");
   }
   return prevStatus;
 }
