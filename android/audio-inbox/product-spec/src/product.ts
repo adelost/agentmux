@@ -9,6 +9,7 @@ import {
   linkMenuActions,
   linkRoutes,
 } from "./catalog.js";
+import { linkComponentBindings, type LinkComponentBinding } from "./component-bindings.js";
 import type { LinkNativeRegistry } from "./native-registry.js";
 import { linkFiniteValues } from "./finite-values.js";
 import { linkServiceConfigs, linkServiceMounts } from "./services.js";
@@ -148,6 +149,13 @@ const baseProduct = defineProduct({
     { id: "link.delivery", kind: "component-entry", artifacts: ALL_ARTIFACTS, requiredCapabilities: ["ui.component-tree"], ports: { state: "conversation.status" } },
     { id: "link.reply", kind: "component-entry", artifacts: ALL_ARTIFACTS, requiredCapabilities: ["ui.component-tree"], ports: { state: "conversation.status" } },
     { id: "link.playback", kind: "component-entry", artifacts: ALL_ARTIFACTS, requiredCapabilities: ["ui.component-tree"], ports: { state: "playback.status", action: "playback.command" } },
+    { id: "link.composer", kind: "component-entry", artifacts: ["phone-full-ui"], requiredCapabilities: ["ui.component-tree"], ports: { state: "conversation.status", action: "conversation.compose" } },
+    { id: "link.target", kind: "component-entry", artifacts: ALL_ARTIFACTS, requiredCapabilities: ["ui.component-tree"], ports: { state: "target.directory", action: "target.select" } },
+    { id: "link.session", kind: "component-entry", artifacts: ALL_ARTIFACTS, requiredCapabilities: ["ui.component-tree"], ports: { state: "session.status" } },
+    { id: "link.history", kind: "component-entry", artifacts: ["phone-full-ui"], requiredCapabilities: ["ui.component-tree"], ports: { state: "history.status" } },
+    { id: "link.preferences", kind: "component-entry", artifacts: ["phone-full-ui"], requiredCapabilities: ["ui.component-tree"], ports: { state: "preferences.status", action: "preferences.toggle" } },
+    { id: "link.updates", kind: "component-entry", artifacts: ALL_ARTIFACTS, requiredCapabilities: ["ui.component-tree"], ports: { state: "updates.status", action: "updates.command" } },
+    { id: "link.recovery", kind: "component-entry", artifacts: ALL_ARTIFACTS, requiredCapabilities: ["ui.component-tree"], ports: { state: "recovery.status" } },
   ],
 }, CIRCLEKIT_ASSET_CATALOG);
 
@@ -158,6 +166,7 @@ export interface AgentmuxLinkProductIr extends ProductIr {
     readonly menuActions: typeof linkMenuActions;
     readonly nativeComponents: LinkNativeRegistry["components"];
     readonly nativeServices: LinkNativeRegistry["services"];
+    readonly componentBindings: typeof linkComponentBindings;
   };
 }
 
@@ -167,6 +176,7 @@ export function compileAgentmuxLinkProduct(
 ): AgentmuxLinkProductIr {
   if (productSpecVersion.trim() === "") throw new Error("ProductSpec package version is blank");
   requireCatalogSound();
+  requireComponentWiring();
   requireNativeParity(registry);
   return {
     ...baseProduct,
@@ -176,8 +186,40 @@ export function compileAgentmuxLinkProduct(
       menuActions: linkMenuActions,
       nativeComponents: registry.components,
       nativeServices: registry.services,
+      componentBindings: linkComponentBindings,
     },
   };
+}
+
+/**
+ * The component↔service join: every catalog component carries exactly one
+ * binding, every ui binding resolves to declared typed UI entries, and every
+ * UI entry is rendered by at least one component. Throws before emission.
+ */
+function requireComponentWiring(): void {
+  const componentIds = new Set(baseProduct.componentCatalog.map(({ id }) => id));
+  const uiEntryIds = new Set(baseProduct.ui.map(({ id }) => id));
+  requireExactSet(componentIds, new Set(Object.keys(linkComponentBindings)), "component/binding");
+  const referenced = new Set<string>();
+  for (const [componentId, binding] of Object.entries(linkComponentBindings) as [string, LinkComponentBinding][]) {
+    if (binding.kind === "framework") {
+      if (binding.reason.trim().length < 24) {
+        throw new Error(`framework component '${componentId}' needs a real reason, not a token`);
+      }
+      continue;
+    }
+    requireUnique(binding.entries, `ui entries of component '${componentId}'`);
+    for (const entry of binding.entries) {
+      if (!uiEntryIds.has(entry)) {
+        throw new Error(`component '${componentId}' binds missing ui entry '${entry}'`);
+      }
+      referenced.add(entry);
+    }
+  }
+  const orphanEntries = [...uiEntryIds].filter((id) => !referenced.has(id));
+  if (orphanEntries.length > 0) {
+    throw new Error(`ui entries rendered by no component: '${orphanEntries.join("', '")}'`);
+  }
 }
 
 function requireCatalogSound(): void {

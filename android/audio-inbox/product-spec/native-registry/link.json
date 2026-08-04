@@ -35,8 +35,14 @@
   "services": [
     { "serviceId": "navigation", "nativePortId": "link.navigation.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["open"], "outputPorts": ["destination"] },
     { "serviceId": "capture", "nativePortId": "link.capture.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["command"], "outputPorts": ["status", "captured"] },
-    { "serviceId": "conversation", "nativePortId": "link.conversation.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["turn"], "outputPorts": ["status"] },
-    { "serviceId": "playback", "nativePortId": "link.playback.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["command"], "outputPorts": ["status"] }
+    { "serviceId": "conversation", "nativePortId": "link.conversation.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["turn", "compose"], "outputPorts": ["status"] },
+    { "serviceId": "playback", "nativePortId": "link.playback.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["command"], "outputPorts": ["status"] },
+    { "serviceId": "target", "nativePortId": "link.target.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["select"], "outputPorts": ["directory"] },
+    { "serviceId": "session", "nativePortId": "link.session.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": [], "outputPorts": ["status"] },
+    { "serviceId": "history", "nativePortId": "link.history.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": [], "outputPorts": ["status"] },
+    { "serviceId": "preferences", "nativePortId": "link.preferences.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["toggle"], "outputPorts": ["status"] },
+    { "serviceId": "updates", "nativePortId": "link.updates.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": ["command"], "outputPorts": ["status"] },
+    { "serviceId": "recovery", "nativePortId": "link.recovery.port", "profiles": ["phone-full-ui", "wear-full-ui"], "inputPorts": [], "outputPorts": ["status"] }
   ],
   "finiteValues": [
     { "id": "link.route", "values": ["home", "settings", "dev-host"] },
@@ -45,6 +51,12 @@
     { "id": "link.delivery-phase", "values": ["sending", "queued", "failed"] },
     { "id": "link.reply-phase", "values": ["none", "thinking", "ready", "failed"] },
     { "id": "link.playback-operation", "values": ["play", "pause", "resume", "stop"] },
-    { "id": "link.playback-phase", "values": ["idle", "queued", "playing", "paused", "stopped", "played", "skipped", "failed"] }
+    { "id": "link.playback-phase", "values": ["idle", "queued", "playing", "paused", "stopped", "played", "skipped", "failed"] },
+    { "id": "link.target-kind", "values": ["agent", "windows", "public"] },
+    { "id": "link.connection-state", "values": ["off", "connecting", "connected", "disconnected", "configuration-required"] },
+    { "id": "link.preference-key", "values": ["hands-free", "speak-replies"] },
+    { "id": "link.update-operation", "values": ["check", "retry", "install"] },
+    { "id": "link.update-phase", "values": ["idle", "checking", "up-to-date", "unavailable", "available", "downloading", "ready-to-install", "installing", "install-failed", "failed"] },
+    { "id": "link.recovery-phase", "values": ["clean", "quarantined"] }
   ]
 }

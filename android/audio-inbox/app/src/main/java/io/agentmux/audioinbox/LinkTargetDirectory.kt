@@ -15,6 +15,9 @@ internal class LinkTargetDirectory {
     fun target(id: String?): ConversationTarget? = targets[id]
 
     @Synchronized
+    fun kind(id: String): ConversationTarget.Kind? = targets[id]?.kind
+
+    @Synchronized
     fun contains(id: String): Boolean = targets.containsKey(id)
 
     @Synchronized

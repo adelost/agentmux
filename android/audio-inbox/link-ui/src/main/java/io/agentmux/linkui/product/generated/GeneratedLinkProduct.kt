@@ -48,6 +48,43 @@ enum class LinkPlaybackPhase(val id: String) {
     SKIPPED("skipped"),
     FAILED("failed"),
 }
+enum class LinkTargetKind(val id: String) {
+    AGENT("agent"),
+    WINDOWS("windows"),
+    PUBLIC("public"),
+}
+enum class LinkConnectionState(val id: String) {
+    OFF("off"),
+    CONNECTING("connecting"),
+    CONNECTED("connected"),
+    DISCONNECTED("disconnected"),
+    CONFIGURATION_REQUIRED("configuration-required"),
+}
+enum class LinkPreferenceKey(val id: String) {
+    HANDS_FREE("hands-free"),
+    SPEAK_REPLIES("speak-replies"),
+}
+enum class LinkUpdateOperation(val id: String) {
+    CHECK("check"),
+    RETRY("retry"),
+    INSTALL("install"),
+}
+enum class LinkUpdatePhase(val id: String) {
+    IDLE("idle"),
+    CHECKING("checking"),
+    UP_TO_DATE("up-to-date"),
+    UNAVAILABLE("unavailable"),
+    AVAILABLE("available"),
+    DOWNLOADING("downloading"),
+    READY_TO_INSTALL("ready-to-install"),
+    INSTALLING("installing"),
+    INSTALL_FAILED("install-failed"),
+    FAILED("failed"),
+}
+enum class LinkRecoveryPhase(val id: String) {
+    CLEAN("clean"),
+    QUARANTINED("quarantined"),
+}
 enum class LinkMenuAction(val id: String) {
     OPEN_SETTINGS("open-settings"),
 }
@@ -87,6 +124,9 @@ data class LinkCapturedTurn(
     val idempotencyKey: String,
     val createdAtMs: Long,
 )
+data class LinkTextTurn(
+    val text: String,
+)
 data class LinkConversationState(
     val turnId: String?,
     val deliveryPhase: LinkDeliveryPhase?,
@@ -104,6 +144,41 @@ data class LinkPlaybackState(
     val positionMs: Long,
     val durationMs: Long,
 )
+data class LinkTargetSelect(
+    val targetId: String,
+)
+data class LinkTargetState(
+    val selectedTargetId: String?,
+    val kind: LinkTargetKind?,
+    val availableCount: Long,
+)
+data class LinkSessionState(
+    val connection: LinkConnectionState,
+    val connectionDetail: String?,
+    val publicLinkActive: Boolean,
+)
+data class LinkHistoryState(
+    val retainedTurns: Long,
+    val maxTurns: Long,
+)
+data class LinkPreferenceToggle(
+    val key: LinkPreferenceKey,
+    val enabled: Boolean,
+)
+data class LinkPreferencesState(
+    val handsFree: Boolean,
+    val speakReplies: Boolean,
+)
+data class LinkUpdateCommand(
+    val operation: LinkUpdateOperation,
+)
+data class LinkUpdateState(
+    val phase: LinkUpdatePhase,
+)
+data class LinkRecoveryState(
+    val phase: LinkRecoveryPhase,
+    val detail: String?,
+)
 interface NavigationServicePort {
     fun open(value: LinkRouteCommand)
     fun destination(): LinkRouteState
@@ -115,17 +190,45 @@ interface CaptureServicePort {
 }
 interface ConversationServicePort {
     fun turn(value: LinkCapturedTurn)
+    fun compose(value: LinkTextTurn)
     fun status(): LinkConversationState
 }
 interface PlaybackServicePort {
     fun command(value: LinkPlaybackCommand)
     fun status(): LinkPlaybackState
 }
+interface TargetServicePort {
+    fun select(value: LinkTargetSelect)
+    fun directory(): LinkTargetState
+}
+interface SessionServicePort {
+    fun status(): LinkSessionState
+}
+interface HistoryServicePort {
+    fun status(): LinkHistoryState
+}
+interface PreferencesServicePort {
+    fun toggle(value: LinkPreferenceToggle)
+    fun status(): LinkPreferencesState
+}
+interface UpdatesServicePort {
+    fun command(value: LinkUpdateCommand)
+    fun status(): LinkUpdateState
+}
+interface RecoveryServicePort {
+    fun status(): LinkRecoveryState
+}
 interface LinkNativePortGraph {
     val navigation: NavigationServicePort
     val capture: CaptureServicePort
     val conversation: ConversationServicePort
     val playback: PlaybackServicePort
+    val target: TargetServicePort
+    val session: SessionServicePort
+    val history: HistoryServicePort
+    val preferences: PreferencesServicePort
+    val updates: UpdatesServicePort
+    val recovery: RecoveryServicePort
 }
 data class LinkRouteDescriptor(val route: LinkRoute, val title: String, val iconId: String, val artifacts: Set<LinkArtifactProfile>)
 data class LinkMenuActionDescriptor(val action: LinkMenuAction, val rowId: String, val title: String, val detail: String, val contentDescription: String, val iconId: String, val destination: LinkRoute, val artifacts: Set<LinkArtifactProfile>)
@@ -135,6 +238,8 @@ data class LinkComponentTree(val route: LinkRoute, val surface: String, val moun
 data class LinkServiceDescriptor(val id: String, val nativePortId: String, val inputPorts: List<String>, val outputPorts: List<String>, val stateOwner: String, val lifetime: String, val durability: String, val clockDomain: String, val contextInputs: List<String>, val effects: List<String>)
 data class LinkServiceEdge(val fromService: String, val fromPort: String, val toService: String, val toPort: String)
 data class LinkFiniteValueDeclaration(val id: String, val values: Set<String>)
+data class LinkUiEntryDescriptor(val id: String, val stateRef: String?, val actionRef: String?, val valueRef: String?)
+data class LinkComponentWiring(val component: LinkComponentId, val uiEntries: List<String>, val frameworkReason: String?)
 
 object LinkProductWiring {
     val CAPTURE_CAPTURED_TO_CONVERSATION_TURN: LinkServiceEdge = LinkServiceEdge("capture", "captured", "conversation", "turn")
@@ -183,8 +288,14 @@ object LinkProductManifest {
     val services: List<LinkServiceDescriptor> = listOf(
         LinkServiceDescriptor("navigation", "link.navigation.port", listOf("open"), listOf("destination"), "instance", "instance", "transient", "none", listOf(), listOf()),
         LinkServiceDescriptor("capture", "link.capture.port", listOf("command"), listOf("status", "captured"), "external", "operation", "durable", "monotonic", listOf("microphone.permission"), listOf("audio.capture", "storage.write")),
-        LinkServiceDescriptor("conversation", "link.conversation.port", listOf("turn"), listOf("status"), "external", "process", "durable", "wall", listOf("network.connectivity"), listOf("storage.write", "transport.send", "transport.receive", "retry.schedule")),
+        LinkServiceDescriptor("conversation", "link.conversation.port", listOf("turn", "compose"), listOf("status"), "external", "process", "durable", "wall", listOf("network.connectivity"), listOf("storage.write", "transport.send", "transport.receive", "retry.schedule")),
         LinkServiceDescriptor("playback", "link.playback.port", listOf("command"), listOf("status"), "external", "process", "transient", "monotonic", listOf("audio.focus"), listOf("audio.playback")),
+        LinkServiceDescriptor("target", "link.target.port", listOf("select"), listOf("directory"), "instance", "process", "durable", "none", listOf("transport.route-policy"), listOf("storage.write")),
+        LinkServiceDescriptor("session", "link.session.port", listOf(), listOf("status"), "external", "process", "durable", "wall", listOf("network.connectivity", "keystore.session"), listOf("transport.poll", "transport.auth")),
+        LinkServiceDescriptor("history", "link.history.port", listOf(), listOf("status"), "external", "process", "durable", "none", listOf(), listOf()),
+        LinkServiceDescriptor("preferences", "link.preferences.port", listOf("toggle"), listOf("status"), "external", "process", "durable", "none", listOf("storage.preferences"), listOf("storage.write")),
+        LinkServiceDescriptor("updates", "link.updates.port", listOf("command"), listOf("status"), "instance", "process", "transient", "wall", listOf("network.connectivity"), listOf("network.fetch", "apk.install")),
+        LinkServiceDescriptor("recovery", "link.recovery.port", listOf(), listOf("status"), "external", "process", "durable", "wall", listOf("storage.state-repository"), listOf()),
     )
     val finiteValues: List<LinkFiniteValueDeclaration> = listOf(
         LinkFiniteValueDeclaration("link.route", setOf("home", "settings", "dev-host")),
@@ -194,9 +305,45 @@ object LinkProductManifest {
         LinkFiniteValueDeclaration("link.reply-phase", setOf("none", "thinking", "ready", "failed")),
         LinkFiniteValueDeclaration("link.playback-operation", setOf("play", "pause", "resume", "stop")),
         LinkFiniteValueDeclaration("link.playback-phase", setOf("idle", "queued", "playing", "paused", "stopped", "played", "skipped", "failed")),
+        LinkFiniteValueDeclaration("link.target-kind", setOf("agent", "windows", "public")),
+        LinkFiniteValueDeclaration("link.connection-state", setOf("off", "connecting", "connected", "disconnected", "configuration-required")),
+        LinkFiniteValueDeclaration("link.preference-key", setOf("hands-free", "speak-replies")),
+        LinkFiniteValueDeclaration("link.update-operation", setOf("check", "retry", "install")),
+        LinkFiniteValueDeclaration("link.update-phase", setOf("idle", "checking", "up-to-date", "unavailable", "available", "downloading", "ready-to-install", "installing", "install-failed", "failed")),
+        LinkFiniteValueDeclaration("link.recovery-phase", setOf("clean", "quarantined")),
+    )
+    val uiEntries: List<LinkUiEntryDescriptor> = listOf(
+        LinkUiEntryDescriptor("link.navigation", "navigation.destination", "navigation.open", null),
+        LinkUiEntryDescriptor("link.capture", "capture.status", "capture.command", null),
+        LinkUiEntryDescriptor("link.delivery", "conversation.status", null, null),
+        LinkUiEntryDescriptor("link.reply", "conversation.status", null, null),
+        LinkUiEntryDescriptor("link.playback", "playback.status", "playback.command", null),
+        LinkUiEntryDescriptor("link.composer", "conversation.status", "conversation.compose", null),
+        LinkUiEntryDescriptor("link.target", "target.directory", "target.select", null),
+        LinkUiEntryDescriptor("link.session", "session.status", null, null),
+        LinkUiEntryDescriptor("link.history", "history.status", null, null),
+        LinkUiEntryDescriptor("link.preferences", "preferences.status", "preferences.toggle", null),
+        LinkUiEntryDescriptor("link.updates", "updates.status", "updates.command", null),
+        LinkUiEntryDescriptor("link.recovery", "recovery.status", null, null),
+    )
+    val componentWiring: List<LinkComponentWiring> = listOf(
+        LinkComponentWiring(LinkComponentId.TARGET, listOf("link.target"), null),
+        LinkComponentWiring(LinkComponentId.LATEST, listOf("link.delivery", "link.reply"), null),
+        LinkComponentWiring(LinkComponentId.COMPOSER, listOf("link.composer"), null),
+        LinkComponentWiring(LinkComponentId.TALK, listOf("link.capture"), null),
+        LinkComponentWiring(LinkComponentId.ACTIVE_PLAYBACK, listOf("link.playback"), null),
+        LinkComponentWiring(LinkComponentId.CONNECTION, listOf("link.session"), null),
+        LinkComponentWiring(LinkComponentId.PUBLIC_LINK, listOf("link.session"), null),
+        LinkComponentWiring(LinkComponentId.PREFERENCES, listOf("link.preferences"), null),
+        LinkComponentWiring(LinkComponentId.LOCAL_HISTORY, listOf("link.history"), null),
+        LinkComponentWiring(LinkComponentId.UPDATES, listOf("link.updates"), null),
+        LinkComponentWiring(LinkComponentId.DEV_HOST, listOf("link.navigation"), null),
+        LinkComponentWiring(LinkComponentId.RECOVERY, listOf("link.recovery"), null),
+        LinkComponentWiring(LinkComponentId.DEV_PREVIEW, listOf(), "self-contained CircleKit host preview; renders outside the product service graph"),
     )
     fun route(route: LinkRoute): LinkRouteDescriptor = routes.single { it.route == route }
     fun action(action: LinkMenuAction): LinkMenuActionDescriptor = menuActions.single { it.action == action }
     fun component(id: LinkComponentId): LinkComponentDescriptor = components.single { it.id == id }
     fun tree(route: LinkRoute, surface: String): LinkComponentTree = componentTrees.single { it.route == route && it.surface == surface }
+    fun wiring(id: LinkComponentId): LinkComponentWiring = componentWiring.single { it.component == id }
 }

@@ -52,6 +52,8 @@ internal class WearMailboxController(
 
     fun start() = reloadSession()
 
+    fun hasSession(): Boolean = store.credentials() != null
+
     @Synchronized
     fun reloadSession() {
         val currentGeneration = generation.incrementAndGet()

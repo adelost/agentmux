@@ -84,5 +84,30 @@ class LinkProductSession(
             require(declared.values == native.values)
         }
         LinkComponentId.entries.forEach { LinkProductManifest.component(it) }
+        requireTotalComponentWiring()
+    }
+
+    /** Every component resolves to typed ui-entry portRefs or a named framework reason. */
+    private fun requireTotalComponentWiring() {
+        val uiEntryIds = LinkProductManifest.uiEntries.map { it.id }.toSet()
+        LinkProductManifest.uiEntries.forEach { entry ->
+            listOfNotNull(entry.stateRef, entry.actionRef, entry.valueRef).forEach { ref ->
+                val descriptor = LinkProductManifest.services.single { it.id == ref.substringBefore('.') }
+                val portId = ref.substringAfter('.')
+                require(portId in descriptor.inputPorts + descriptor.outputPorts) {
+                    "ui entry ${entry.id} references unknown port $ref"
+                }
+            }
+        }
+        require(LinkProductManifest.componentWiring.map { it.component }.toSet() ==
+            LinkComponentId.entries.toSet())
+        LinkProductManifest.componentWiring.forEach { wiring ->
+            require(wiring.uiEntries.isNotEmpty() != (wiring.frameworkReason != null)) {
+                "${wiring.component.id} must bind ui entries or one framework reason"
+            }
+            wiring.uiEntries.forEach { entry ->
+                require(entry in uiEntryIds) { "${wiring.component.id} binds unknown ui entry $entry" }
+            }
+        }
     }
 }

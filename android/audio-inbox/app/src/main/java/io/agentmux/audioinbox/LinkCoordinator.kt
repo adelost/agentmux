@@ -10,6 +10,7 @@ import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.LinkAction
 import io.agentmux.linkcore.LinkMailboxSyncResult
 import io.agentmux.linkcore.LinkState
+import io.agentmux.linkcore.LinkTargetKind
 import io.agentmux.linkcore.LinkStateLedger
 import io.agentmux.linkcore.LinkTarget
 import io.agentmux.linkcore.LinkTurn
@@ -256,6 +257,13 @@ internal class LinkCoordinator(
         preferences.getBoolean(AppContract.KEY_SPEAK_REPLIES, false)
 
     fun publicLoggedIn(): Boolean = linkAuth.loggedIn()
+
+    fun targetKind(id: String): LinkTargetKind? = when (targetDirectory.kind(id)) {
+        ConversationTarget.Kind.AGENT -> LinkTargetKind.AGENT
+        ConversationTarget.Kind.WINDOWS -> LinkTargetKind.WINDOWS
+        ConversationTarget.Kind.PUBLIC -> LinkTargetKind.PUBLIC
+        null -> null
+    }
 
     fun beginPublicLogin() = linkAuth.beginLogin()
 
