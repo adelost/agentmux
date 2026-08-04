@@ -32,6 +32,7 @@ const usage = () => `Usage: amux work [status|next] [--project ID]
   amux work approve TICKET
   amux work claim TICKET
   amux work show TICKET
+  amux work retry TICKET
   amux work working "measured progress"
   amux work wait|block "reason" --wake "observable condition" [--hours N]
   amux work answer "answer after reading the ticket thread"
@@ -107,6 +108,39 @@ export function createWorkClient({ baseUrl, sender, fleetToken, adminToken, fetc
     } finally { rmSync(temporary, { recursive: true, force: true }); }
   };
   return { read, mutate };
+}
+
+const RETRY_NEXT_STEP = {
+  "retry-budget-spent":
+    "the bounded retry was already used and judged. Re-running an unstable judge is dice, not recovery — rewrite the report as a new ticket, or have a human review this one.",
+  "last-triage-outcome-was-not-a-failure":
+    "the triage completed and asked questions; retry cannot answer them. Use: amux work answer \"<answer>\".",
+  "ticket-not-in-needs-detail":
+    "retry recovers a triage that failed; this ticket is not waiting on one.",
+  "no-terminalized-triage":
+    "no triage has terminalized on this ticket, so there is nothing to re-run.",
+  "ticket-changed-during-retry":
+    "the ticket moved between the check and the write. Re-read it and try once more.",
+};
+
+/**
+ * WHAT: Turns a refused retry into the caller's next action.
+ * WHY: A terminal reason must say what to DO. The board answers one 409 for
+ * several distinct states, and until it carried a reason three panes in one day
+ * each read it as a spent budget. When the server does not name a state, say so
+ * plainly rather than guessing one — a confident wrong reason is worse than none.
+ */
+export function retryRefusal(ticketId, error) {
+  const message = String(error?.message ?? error);
+  const start = message.indexOf("{");
+  let reason = null;
+  if (start >= 0) {
+    try { reason = JSON.parse(message.slice(start))?.reason ?? null; } catch { reason = null; }
+  }
+  const step = reason ? RETRY_NEXT_STEP[reason] : null;
+  if (step) return `CANNOT RETRY ${ticketId} · ${reason}\n${step}`;
+  if (reason) return `CANNOT RETRY ${ticketId} · ${reason}\n${message}`;
+  return `CANNOT RETRY ${ticketId} · the board did not name a reason\n${message}`;
 }
 
 const rowLabel = (row) => {
@@ -302,6 +336,23 @@ export async function runWorkCommand(argv, dependencies = {}) {
       "POST", { project, raw, mutationId: randomUUID() });
     const ticket = result?.ticket ?? result;
     return `${outputResult(result, "Ticket created")}\nNEXT amux work approve ${ticket?.id ?? "<ticket>"}`;
+  }
+  if (action === "retry") {
+    const ticketId = parsed.positional[0];
+    if (!ticketId) throw new Error("retry requires a ticket id");
+    // Same ticket, same raw report: the board refuses unless a triage actually
+    // failed, and the call is revision-guarded and dedupe-keyed, so a replay is
+    // a no-op rather than a second triage.
+    try {
+      const result = await client.mutate(
+        `/api/agent/tickets/${encodeURIComponent(ticketId)}/triage-retry?project=${encodeURIComponent(project)}`,
+        "POST", { mutationId: randomUUID() });
+      const ticket = result?.ticket ?? result;
+      return `RETRYING ${ticketId} \u00b7 ${ticket?.status ?? "triaging"} \u00b7 same ticket id, same raw report`
+        + `\nNEXT amux work show ${ticketId}`;
+    } catch (error) {
+      throw new Error(retryRefusal(ticketId, error));
+    }
   }
   if (action === "approve") {
     const ticketId = parsed.positional[0];
