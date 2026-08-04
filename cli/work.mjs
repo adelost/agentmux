@@ -158,6 +158,25 @@ export function formatWorkOverview(data) {
   return lines.join("\n");
 }
 
+/** WHAT: Names the one gate that keeps a ticket from being claimed, or null. WHY: `show` and `approve` must answer "can a worker take this?" identically; a second copy would drift and tell two agents different stories. */
+export function claimBlocker(ticket) {
+  const approval = ticket?.productApproval?.state ?? "unknown";
+  if (ticket?.safety?.executionBlocked === true) return "safety hold";
+  if (approval !== "approved") return `approval ${approval}`;
+  if (ticket?.assignment) return "already assigned";
+  if (ticket?.status !== "ready") return `status ${ticket?.status ?? "unknown"}`;
+  return null;
+}
+
+/** WHAT: States whether a ticket can now be claimed, and by whose action if not. WHY: A mutation that opened one gate must not read as if it opened them all; a safety hold releases only through the human namespace, so retrying is the wrong next move. */
+export function claimVerdict(ticketId, ticket) {
+  const blocker = claimBlocker(ticket);
+  if (!blocker) return "CLAIMABLE yes";
+  if (blocker !== "safety hold") return `CLAIMABLE no (${blocker})`;
+  return `CLAIMABLE no (safety hold) · agents cannot release it`
+    + `\nNEEDS HUMAN POST /api/human/tickets/${ticketId}/safety-approval`;
+}
+
 /** WHAT: Formats one read-only ticket detail with its true claimability. WHY: Keeps criteria, revision and assignment out of raw API calls. */
 export function formatTicketShow(detail) {
   const ticket = detail?.ticket ?? detail ?? {};
@@ -171,11 +190,7 @@ export function formatTicketShow(detail) {
     lines.push(`ASSIGNMENT ${owner ?? "?"} · ${ticket.assignment.state ?? "?"}`
       + ` · generation ${ticket.assignment.generation ?? "?"}`);
   }
-  const held = ticket?.safety?.executionBlocked === true;
-  const claimBlock = held ? "safety hold"
-    : approval !== "approved" ? `approval ${approval}`
-      : ticket?.assignment ? "already assigned"
-        : ticket.status !== "ready" ? `status ${ticket.status ?? "unknown"}` : null;
+  const claimBlock = claimBlocker(ticket);
   lines.push(claimBlock ? `CLAIMABLE no (${claimBlock})` : "CLAIMABLE yes");
   const boundedText = (value, limit = 600) => {
     const text = String(value ?? "").trim();
@@ -293,7 +308,9 @@ export async function runWorkCommand(argv, dependencies = {}) {
     if (!ticketId) throw new Error("approve requires a ticket id");
     const detail = await client.read(`/api/tickets/${ticketId}?project=${encodeURIComponent(project)}`);
     const ticket = detail?.ticket;
-    if (ticket?.productApproval?.state === "approved") return `APPROVED ${ticketId} (already)`;
+    if (ticket?.productApproval?.state === "approved") {
+      return `APPROVED ${ticketId} (already)\n${claimVerdict(ticketId, ticket)}`;
+    }
     if (ticket?.status !== "ready") {
       throw new Error(`${ticketId} is ${ticket?.status ?? "unavailable"}; approve after triage reaches READY`);
     }
@@ -305,7 +322,15 @@ export async function runWorkCommand(argv, dependencies = {}) {
     await client.mutate(`/api/agent/tickets/${ticketId}/product-approval?project=${encodeURIComponent(project)}`,
       "POST", { source: sender, mutationId: randomUUID(), expectedTicketRevision: revision,
         materialFingerprint }, true);
-    return `APPROVED ${ticketId}`;
+    // Re-read rather than predict: the product gate is one of several, and the
+    // caller's next move depends on the state that actually landed. Falling back
+    // to the pre-mutation ticket would report the approval we just cleared as a
+    // live blocker, so an unreadable board says so instead of guessing.
+    const settled = await client.read(
+      `/api/tickets/${ticketId}?project=${encodeURIComponent(project)}`);
+    return `APPROVED ${ticketId}\n${settled?.ticket
+      ? claimVerdict(ticketId, settled.ticket)
+      : "CLAIMABLE unverified (re-read returned no ticket)"}`;
   }
   if (action === "claim") {
     const ticketId = parsed.positional[0];
