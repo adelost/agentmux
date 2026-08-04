@@ -11,4 +11,15 @@ export const linkFiniteValues = [
   finiteValues("link.playback-phase", [
     "idle", "queued", "playing", "paused", "stopped", "played", "skipped", "failed",
   ]),
+  finiteValues("link.target-kind", ["agent", "windows", "public"]),
+  finiteValues("link.connection-state", [
+    "off", "connecting", "connected", "disconnected", "configuration-required",
+  ]),
+  finiteValues("link.preference-key", ["hands-free", "speak-replies"]),
+  finiteValues("link.update-operation", ["check", "retry", "install"]),
+  finiteValues("link.update-phase", [
+    "idle", "checking", "up-to-date", "unavailable", "available",
+    "downloading", "ready-to-install", "installing", "install-failed", "failed",
+  ]),
+  finiteValues("link.recovery-phase", ["clean", "quarantined"]),
 ] as const;

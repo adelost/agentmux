@@ -90,11 +90,12 @@ internal fun LinkPhoneScreen(
             },
         )
     }
-    val runtime = remember(coordinator, recorder) {
+    val runtime = remember(coordinator, recorder, updater) {
         LinkProductRuntime(
             PhoneLinkProductPorts(
                 coordinator = coordinator,
                 recorder = recorder,
+                updater = updater,
                 currentRoute = { route },
                 navigate = { route = it },
             ),

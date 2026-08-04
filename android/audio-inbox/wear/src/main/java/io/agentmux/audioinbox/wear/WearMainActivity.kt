@@ -54,8 +54,6 @@ class WearMainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         controller = WearMailboxController(this)
-        productRuntime = LinkProductRuntime(WearLinkProductPorts(controller))
-        microphoneGranted.value = hasMicrophonePermission()
         updater = LinkUpdater(
             context = this,
             scope = lifecycleScope,
@@ -63,6 +61,8 @@ class WearMainActivity : ComponentActivity() {
             currentVersionName = BuildConfig.VERSION_NAME,
             currentVersionCode = BuildConfig.VERSION_CODE,
         )
+        productRuntime = LinkProductRuntime(WearLinkProductPorts(controller, updater))
+        microphoneGranted.value = hasMicrophonePermission()
         registerSessionReceiver()
         requestMicrophone()
         controller.start()

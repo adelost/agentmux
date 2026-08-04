@@ -6,7 +6,13 @@ import com.adelost.designkit.ui.GraphiteTokens
 import com.adelost.designkit.ui.RingIcons
 import io.agentmux.linkcore.CaptureOperation
 import io.agentmux.linkcore.CapturePhase
+import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
+import io.agentmux.linkcore.LinkPreferenceKey
+import io.agentmux.linkcore.LinkRecoveryPhase
+import io.agentmux.linkcore.LinkTargetKind
+import io.agentmux.linkcore.LinkUpdateOperation
+import io.agentmux.linkcore.LinkUpdatePhase
 import io.agentmux.linkcore.PlaybackOperation
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.ReplyPhase
@@ -35,6 +41,12 @@ enum class LinkNativeServicePort(val id: String) {
     CAPTURE("link.capture.port"),
     CONVERSATION("link.conversation.port"),
     PLAYBACK("link.playback.port"),
+    TARGET("link.target.port"),
+    SESSION("link.session.port"),
+    HISTORY("link.history.port"),
+    PREFERENCES("link.preferences.port"),
+    UPDATES("link.updates.port"),
+    RECOVERY("link.recovery.port"),
 }
 
 enum class LinkNativeRoute(val id: String) {
@@ -117,8 +129,14 @@ object LinkNativeBindings {
     val services: List<LinkNativeServiceBinding> = listOf(
         service("navigation", LinkNativeServicePort.NAVIGATION, setOf("open"), setOf("destination")),
         service("capture", LinkNativeServicePort.CAPTURE, setOf("command"), setOf("status", "captured")),
-        service("conversation", LinkNativeServicePort.CONVERSATION, setOf("turn"), setOf("status")),
+        service("conversation", LinkNativeServicePort.CONVERSATION, setOf("turn", "compose"), setOf("status")),
         service("playback", LinkNativeServicePort.PLAYBACK, setOf("command"), setOf("status")),
+        service("target", LinkNativeServicePort.TARGET, setOf("select"), setOf("directory")),
+        service("session", LinkNativeServicePort.SESSION, setOf(), setOf("status")),
+        service("history", LinkNativeServicePort.HISTORY, setOf(), setOf("status")),
+        service("preferences", LinkNativeServicePort.PREFERENCES, setOf("toggle"), setOf("status")),
+        service("updates", LinkNativeServicePort.UPDATES, setOf("command"), setOf("status")),
+        service("recovery", LinkNativeServicePort.RECOVERY, setOf(), setOf("status")),
     )
 
     val finiteValues: List<LinkNativeFiniteValueBinding> = listOf(
@@ -129,6 +147,12 @@ object LinkNativeBindings {
         finiteValues("link.reply-phase", ReplyPhase.entries.toTypedArray()),
         finiteValues("link.playback-operation", PlaybackOperation.entries.toTypedArray()),
         finiteValues("link.playback-phase", PlaybackPhase.entries.toTypedArray()),
+        finiteValues("link.target-kind", LinkTargetKind.entries.toTypedArray()),
+        finiteValues("link.connection-state", ConnectionState.entries.toTypedArray()),
+        finiteValues("link.preference-key", LinkPreferenceKey.entries.toTypedArray()),
+        finiteValues("link.update-operation", LinkUpdateOperation.entries.toTypedArray()),
+        finiteValues("link.update-phase", LinkUpdatePhase.entries.toTypedArray()),
+        finiteValues("link.recovery-phase", LinkRecoveryPhase.entries.toTypedArray()),
     )
 
     fun requireComponent(componentId: String): LinkNativeComponentBinding =

@@ -593,6 +593,61 @@
         "skipped",
         "failed"
       ]
+    },
+    {
+      "id": "link.target-kind",
+      "values": [
+        "agent",
+        "windows",
+        "public"
+      ]
+    },
+    {
+      "id": "link.connection-state",
+      "values": [
+        "off",
+        "connecting",
+        "connected",
+        "disconnected",
+        "configuration-required"
+      ]
+    },
+    {
+      "id": "link.preference-key",
+      "values": [
+        "hands-free",
+        "speak-replies"
+      ]
+    },
+    {
+      "id": "link.update-operation",
+      "values": [
+        "check",
+        "retry",
+        "install"
+      ]
+    },
+    {
+      "id": "link.update-phase",
+      "values": [
+        "idle",
+        "checking",
+        "up-to-date",
+        "unavailable",
+        "available",
+        "downloading",
+        "ready-to-install",
+        "installing",
+        "install-failed",
+        "failed"
+      ]
+    },
+    {
+      "id": "link.recovery-phase",
+      "values": [
+        "clean",
+        "quarantined"
+      ]
     }
   ],
   "iconRefs": [
@@ -855,6 +910,18 @@
         "fields": [
           {
             "clockDomain": "none",
+            "name": "text",
+            "nullable": false,
+            "value": "string"
+          }
+        ],
+        "id": "link.text-turn",
+        "kind": "event"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
             "name": "turnId",
             "nullable": true,
             "value": "string"
@@ -947,6 +1014,180 @@
           }
         ],
         "id": "link.playback-state",
+        "kind": "state"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "targetId",
+            "nullable": false,
+            "value": "string"
+          }
+        ],
+        "id": "link.target-select",
+        "kind": "event"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "selectedTargetId",
+            "nullable": true,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "kind",
+            "nullable": true,
+            "value": {
+              "finite": true,
+              "ref": "link.target-kind"
+            }
+          },
+          {
+            "clockDomain": "none",
+            "name": "availableCount",
+            "nullable": false,
+            "value": "integer"
+          }
+        ],
+        "id": "link.target-state",
+        "kind": "state"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "connection",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.connection-state"
+            }
+          },
+          {
+            "clockDomain": "none",
+            "name": "connectionDetail",
+            "nullable": true,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "publicLinkActive",
+            "nullable": false,
+            "value": "boolean"
+          }
+        ],
+        "id": "link.session-state",
+        "kind": "state"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "retainedTurns",
+            "nullable": false,
+            "value": "integer"
+          },
+          {
+            "clockDomain": "none",
+            "name": "maxTurns",
+            "nullable": false,
+            "value": "integer"
+          }
+        ],
+        "id": "link.history-state",
+        "kind": "state"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "key",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.preference-key"
+            }
+          },
+          {
+            "clockDomain": "none",
+            "name": "enabled",
+            "nullable": false,
+            "value": "boolean"
+          }
+        ],
+        "id": "link.preference-toggle",
+        "kind": "event"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "handsFree",
+            "nullable": false,
+            "value": "boolean"
+          },
+          {
+            "clockDomain": "none",
+            "name": "speakReplies",
+            "nullable": false,
+            "value": "boolean"
+          }
+        ],
+        "id": "link.preferences-state",
+        "kind": "state"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "operation",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.update-operation"
+            }
+          }
+        ],
+        "id": "link.update-command",
+        "kind": "event"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "phase",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.update-phase"
+            }
+          }
+        ],
+        "id": "link.update-state",
+        "kind": "state"
+      },
+      {
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "phase",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.recovery-phase"
+            }
+          },
+          {
+            "clockDomain": "none",
+            "name": "detail",
+            "nullable": true,
+            "value": "string"
+          }
+        ],
+        "id": "link.recovery-state",
         "kind": "state"
       }
     ],
@@ -1184,6 +1425,21 @@
                 "kind": "snapshot"
               },
               "id": "turn"
+            },
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "text",
+                    "nullable": false,
+                    "value": "string"
+                  }
+                ],
+                "id": "link.text-turn",
+                "kind": "event"
+              },
+              "id": "compose"
             }
           ],
           "outputs": [
@@ -1344,6 +1600,345 @@
             "stateOwner": "external"
           }
         }
+      },
+      {
+        "config": {},
+        "id": "target",
+        "lego": {
+          "id": "link.target-directory",
+          "inputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "targetId",
+                    "nullable": false,
+                    "value": "string"
+                  }
+                ],
+                "id": "link.target-select",
+                "kind": "event"
+              },
+              "id": "select"
+            }
+          ],
+          "outputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "selectedTargetId",
+                    "nullable": true,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "kind",
+                    "nullable": true,
+                    "value": {
+                      "finite": true,
+                      "ref": "link.target-kind"
+                    }
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "availableCount",
+                    "nullable": false,
+                    "value": "integer"
+                  }
+                ],
+                "id": "link.target-state",
+                "kind": "state"
+              },
+              "id": "directory"
+            }
+          ],
+          "role": "adapter",
+          "runtime": {
+            "clockDomain": "none",
+            "contextInputs": [
+              "transport.route-policy"
+            ],
+            "durability": "durable",
+            "effects": [
+              "storage.write"
+            ],
+            "lifetime": "process",
+            "stateOwner": "instance"
+          }
+        }
+      },
+      {
+        "config": {},
+        "id": "session",
+        "lego": {
+          "id": "link.session",
+          "inputs": [],
+          "outputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "connection",
+                    "nullable": false,
+                    "value": {
+                      "finite": true,
+                      "ref": "link.connection-state"
+                    }
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "connectionDetail",
+                    "nullable": true,
+                    "value": "string"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "publicLinkActive",
+                    "nullable": false,
+                    "value": "boolean"
+                  }
+                ],
+                "id": "link.session-state",
+                "kind": "state"
+              },
+              "id": "status"
+            }
+          ],
+          "role": "adapter",
+          "runtime": {
+            "clockDomain": "wall",
+            "contextInputs": [
+              "network.connectivity",
+              "keystore.session"
+            ],
+            "durability": "durable",
+            "effects": [
+              "transport.poll",
+              "transport.auth"
+            ],
+            "lifetime": "process",
+            "stateOwner": "external"
+          }
+        }
+      },
+      {
+        "config": {},
+        "id": "history",
+        "lego": {
+          "id": "link.history",
+          "inputs": [],
+          "outputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "retainedTurns",
+                    "nullable": false,
+                    "value": "integer"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "maxTurns",
+                    "nullable": false,
+                    "value": "integer"
+                  }
+                ],
+                "id": "link.history-state",
+                "kind": "state"
+              },
+              "id": "status"
+            }
+          ],
+          "role": "adapter",
+          "runtime": {
+            "clockDomain": "none",
+            "contextInputs": [],
+            "durability": "durable",
+            "effects": [],
+            "lifetime": "process",
+            "stateOwner": "external"
+          }
+        }
+      },
+      {
+        "config": {},
+        "id": "preferences",
+        "lego": {
+          "id": "link.preferences",
+          "inputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "key",
+                    "nullable": false,
+                    "value": {
+                      "finite": true,
+                      "ref": "link.preference-key"
+                    }
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "enabled",
+                    "nullable": false,
+                    "value": "boolean"
+                  }
+                ],
+                "id": "link.preference-toggle",
+                "kind": "event"
+              },
+              "id": "toggle"
+            }
+          ],
+          "outputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "handsFree",
+                    "nullable": false,
+                    "value": "boolean"
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "speakReplies",
+                    "nullable": false,
+                    "value": "boolean"
+                  }
+                ],
+                "id": "link.preferences-state",
+                "kind": "state"
+              },
+              "id": "status"
+            }
+          ],
+          "role": "adapter",
+          "runtime": {
+            "clockDomain": "none",
+            "contextInputs": [
+              "storage.preferences"
+            ],
+            "durability": "durable",
+            "effects": [
+              "storage.write"
+            ],
+            "lifetime": "process",
+            "stateOwner": "external"
+          }
+        }
+      },
+      {
+        "config": {},
+        "id": "updates",
+        "lego": {
+          "id": "link.updates",
+          "inputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "operation",
+                    "nullable": false,
+                    "value": {
+                      "finite": true,
+                      "ref": "link.update-operation"
+                    }
+                  }
+                ],
+                "id": "link.update-command",
+                "kind": "event"
+              },
+              "id": "command"
+            }
+          ],
+          "outputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "phase",
+                    "nullable": false,
+                    "value": {
+                      "finite": true,
+                      "ref": "link.update-phase"
+                    }
+                  }
+                ],
+                "id": "link.update-state",
+                "kind": "state"
+              },
+              "id": "status"
+            }
+          ],
+          "role": "adapter",
+          "runtime": {
+            "clockDomain": "wall",
+            "contextInputs": [
+              "network.connectivity"
+            ],
+            "durability": "transient",
+            "effects": [
+              "network.fetch",
+              "apk.install"
+            ],
+            "lifetime": "process",
+            "stateOwner": "instance"
+          }
+        }
+      },
+      {
+        "config": {},
+        "id": "recovery",
+        "lego": {
+          "id": "link.recovery",
+          "inputs": [],
+          "outputs": [
+            {
+              "contract": {
+                "fields": [
+                  {
+                    "clockDomain": "none",
+                    "name": "phase",
+                    "nullable": false,
+                    "value": {
+                      "finite": true,
+                      "ref": "link.recovery-phase"
+                    }
+                  },
+                  {
+                    "clockDomain": "none",
+                    "name": "detail",
+                    "nullable": true,
+                    "value": "string"
+                  }
+                ],
+                "id": "link.recovery-state",
+                "kind": "state"
+              },
+              "id": "status"
+            }
+          ],
+          "role": "source",
+          "runtime": {
+            "clockDomain": "wall",
+            "contextInputs": [
+              "storage.state-repository"
+            ],
+            "durability": "durable",
+            "effects": [],
+            "lifetime": "process",
+            "stateOwner": "external"
+          }
+        }
       }
     ],
     "wiring": [
@@ -1354,6 +1949,85 @@
     ]
   },
   "link": {
+    "componentBindings": {
+      "active-playback": {
+        "entries": [
+          "link.playback"
+        ],
+        "kind": "ui"
+      },
+      "composer": {
+        "entries": [
+          "link.composer"
+        ],
+        "kind": "ui"
+      },
+      "connection": {
+        "entries": [
+          "link.session"
+        ],
+        "kind": "ui"
+      },
+      "dev-host": {
+        "entries": [
+          "link.navigation"
+        ],
+        "kind": "ui"
+      },
+      "dev-preview": {
+        "kind": "framework",
+        "reason": "self-contained CircleKit host preview; renders outside the product service graph"
+      },
+      "latest": {
+        "entries": [
+          "link.delivery",
+          "link.reply"
+        ],
+        "kind": "ui"
+      },
+      "local-history": {
+        "entries": [
+          "link.history"
+        ],
+        "kind": "ui"
+      },
+      "preferences": {
+        "entries": [
+          "link.preferences"
+        ],
+        "kind": "ui"
+      },
+      "public-link": {
+        "entries": [
+          "link.session"
+        ],
+        "kind": "ui"
+      },
+      "recovery": {
+        "entries": [
+          "link.recovery"
+        ],
+        "kind": "ui"
+      },
+      "talk": {
+        "entries": [
+          "link.capture"
+        ],
+        "kind": "ui"
+      },
+      "target": {
+        "entries": [
+          "link.target"
+        ],
+        "kind": "ui"
+      },
+      "updates": {
+        "entries": [
+          "link.updates"
+        ],
+        "kind": "ui"
+      }
+    },
     "menuActions": [
       {
         "a11y": "Open Link settings",
@@ -1499,7 +2173,8 @@
       },
       {
         "inputPorts": [
-          "turn"
+          "turn",
+          "compose"
         ],
         "nativePortId": "link.conversation.port",
         "outputPorts": [
@@ -1524,6 +2199,84 @@
           "wear-full-ui"
         ],
         "serviceId": "playback"
+      },
+      {
+        "inputPorts": [
+          "select"
+        ],
+        "nativePortId": "link.target.port",
+        "outputPorts": [
+          "directory"
+        ],
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "serviceId": "target"
+      },
+      {
+        "inputPorts": [],
+        "nativePortId": "link.session.port",
+        "outputPorts": [
+          "status"
+        ],
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "serviceId": "session"
+      },
+      {
+        "inputPorts": [],
+        "nativePortId": "link.history.port",
+        "outputPorts": [
+          "status"
+        ],
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "serviceId": "history"
+      },
+      {
+        "inputPorts": [
+          "toggle"
+        ],
+        "nativePortId": "link.preferences.port",
+        "outputPorts": [
+          "status"
+        ],
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "serviceId": "preferences"
+      },
+      {
+        "inputPorts": [
+          "command"
+        ],
+        "nativePortId": "link.updates.port",
+        "outputPorts": [
+          "status"
+        ],
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "serviceId": "updates"
+      },
+      {
+        "inputPorts": [],
+        "nativePortId": "link.recovery.port",
+        "outputPorts": [
+          "status"
+        ],
+        "profiles": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "serviceId": "recovery"
       }
     ],
     "routes": [
@@ -1645,6 +2398,105 @@
       "ports": {
         "action": "playback.command",
         "state": "playback.status"
+      },
+      "requiredCapabilities": [
+        "ui.component-tree"
+      ]
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
+      "id": "link.composer",
+      "kind": "component-entry",
+      "ports": {
+        "action": "conversation.compose",
+        "state": "conversation.status"
+      },
+      "requiredCapabilities": [
+        "ui.component-tree"
+      ]
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "id": "link.target",
+      "kind": "component-entry",
+      "ports": {
+        "action": "target.select",
+        "state": "target.directory"
+      },
+      "requiredCapabilities": [
+        "ui.component-tree"
+      ]
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "id": "link.session",
+      "kind": "component-entry",
+      "ports": {
+        "state": "session.status"
+      },
+      "requiredCapabilities": [
+        "ui.component-tree"
+      ]
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
+      "id": "link.history",
+      "kind": "component-entry",
+      "ports": {
+        "state": "history.status"
+      },
+      "requiredCapabilities": [
+        "ui.component-tree"
+      ]
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
+      "id": "link.preferences",
+      "kind": "component-entry",
+      "ports": {
+        "action": "preferences.toggle",
+        "state": "preferences.status"
+      },
+      "requiredCapabilities": [
+        "ui.component-tree"
+      ]
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "id": "link.updates",
+      "kind": "component-entry",
+      "ports": {
+        "action": "updates.command",
+        "state": "updates.status"
+      },
+      "requiredCapabilities": [
+        "ui.component-tree"
+      ]
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "id": "link.recovery",
+      "kind": "component-entry",
+      "ports": {
+        "state": "recovery.status"
       },
       "requiredCapabilities": [
         "ui.component-tree"

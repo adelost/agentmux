@@ -3,8 +3,15 @@ package io.agentmux.audioinbox.wear
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.CaptureOperation
 import io.agentmux.linkcore.PlaybackOperation
+import io.agentmux.audioinbox.update.LinkUpdater
 import io.agentmux.linkui.product.LinkNavigationNativePort
+import io.agentmux.linkui.product.LinkStateHistoryServicePort
 import io.agentmux.linkui.product.LinkStatePlaybackServicePort
+import io.agentmux.linkui.product.LinkStatePreferencesServicePort
+import io.agentmux.linkui.product.LinkStateRecoveryServicePort
+import io.agentmux.linkui.product.LinkStateSessionServicePort
+import io.agentmux.linkui.product.LinkStateTargetServicePort
+import io.agentmux.linkui.product.LinkUpdateServicePort
 import io.agentmux.linkui.product.conversationState
 import io.agentmux.linkui.product.generated.CaptureServicePort
 import io.agentmux.linkui.product.generated.ConversationServicePort
@@ -15,9 +22,11 @@ import io.agentmux.linkui.product.generated.LinkCapturePhase
 import io.agentmux.linkui.product.generated.LinkNativePortGraph
 import io.agentmux.linkui.product.generated.LinkPlaybackCommand
 import io.agentmux.linkui.product.generated.LinkRoute
+import io.agentmux.linkui.product.generated.LinkTextTurn
 
 internal class WearLinkProductPorts(
     private val controller: WearMailboxController,
+    updater: LinkUpdater,
 ) : LinkNativePortGraph {
     private var route = LinkRoute.HOME
     private val payloads = WearCapturedPayloads()
@@ -33,6 +42,30 @@ internal class WearLinkProductPorts(
         state = { controller.state.value },
         commandHandler = controller::handlePlayback,
     )
+    override val target = LinkStateTargetServicePort(
+        state = { controller.state.value },
+        // The watch replicates targets from the phone without route provenance.
+        kindOf = { null },
+        select = controller::selectTarget,
+    )
+    override val session = LinkStateSessionServicePort(
+        state = { controller.state.value },
+        publicLinkActive = controller::hasSession,
+    )
+    override val history = LinkStateHistoryServicePort { controller.state.value }
+    override val preferences = LinkStatePreferencesServicePort(
+        state = { controller.state.value },
+        speakReplies = { false },
+        setHandsFree = { error("Wear has no hands-free preference surface") },
+        setSpeakReplies = { error("Wear has no speak-replies preference surface") },
+    )
+    override val updates = LinkUpdateServicePort(
+        updateState = { updater.state.value },
+        check = updater::start,
+        retry = updater::retry,
+        install = updater::install,
+    )
+    override val recovery = LinkStateRecoveryServicePort { controller.state.value }
 }
 
 private class WearCaptureServicePort(
@@ -95,6 +128,8 @@ private class WearConversationServicePort(
             capture.file.delete()
         }
     }
+
+    override fun compose(value: LinkTextTurn) = error("Wear has no composer surface")
 
     override fun status() = controller.state.value.conversationState()
 }

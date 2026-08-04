@@ -3,8 +3,15 @@ package io.agentmux.audioinbox
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.CaptureOperation
 import io.agentmux.linkcore.PlaybackOperation
+import io.agentmux.audioinbox.update.LinkUpdater
 import io.agentmux.linkui.product.LinkNavigationNativePort
+import io.agentmux.linkui.product.LinkStateHistoryServicePort
 import io.agentmux.linkui.product.LinkStatePlaybackServicePort
+import io.agentmux.linkui.product.LinkStatePreferencesServicePort
+import io.agentmux.linkui.product.LinkStateRecoveryServicePort
+import io.agentmux.linkui.product.LinkStateSessionServicePort
+import io.agentmux.linkui.product.LinkStateTargetServicePort
+import io.agentmux.linkui.product.LinkUpdateServicePort
 import io.agentmux.linkui.product.conversationState
 import io.agentmux.linkui.product.generated.CaptureServicePort
 import io.agentmux.linkui.product.generated.ConversationServicePort
@@ -15,10 +22,12 @@ import io.agentmux.linkui.product.generated.LinkNativePortGraph
 import io.agentmux.linkui.product.generated.LinkPlaybackCommand
 import io.agentmux.linkui.product.generated.LinkCapturePhase
 import io.agentmux.linkui.product.generated.LinkRoute
+import io.agentmux.linkui.product.generated.LinkTextTurn
 
 internal class PhoneLinkProductPorts(
     coordinator: LinkCoordinator,
     recorder: PushToTalkRecorder,
+    updater: LinkUpdater,
     currentRoute: () -> LinkRoute,
     navigate: (LinkRoute) -> Unit,
 ) : LinkNativePortGraph {
@@ -36,6 +45,29 @@ internal class PhoneLinkProductPorts(
         state = { coordinator.state.value },
         commandHandler = { command -> coordinator.handlePlayback(command) },
     )
+    override val target = LinkStateTargetServicePort(
+        state = { coordinator.state.value },
+        kindOf = coordinator::targetKind,
+        select = coordinator::selectTarget,
+    )
+    override val session = LinkStateSessionServicePort(
+        state = { coordinator.state.value },
+        publicLinkActive = coordinator::publicLoggedIn,
+    )
+    override val history = LinkStateHistoryServicePort { coordinator.state.value }
+    override val preferences = LinkStatePreferencesServicePort(
+        state = { coordinator.state.value },
+        speakReplies = coordinator::speaksReplies,
+        setHandsFree = coordinator::setHandsFree,
+        setSpeakReplies = coordinator::setSpeakReplies,
+    )
+    override val updates = LinkUpdateServicePort(
+        updateState = { updater.state.value },
+        check = updater::start,
+        retry = updater::retry,
+        install = updater::install,
+    )
+    override val recovery = LinkStateRecoveryServicePort { coordinator.state.value }
 }
 
 private class PhoneCaptureServicePort(
@@ -106,6 +138,10 @@ private class PhoneConversationServicePort(
             capture.file.delete()
             coordinator.capture(CapturePhase.FAILED)
         }
+    }
+
+    override fun compose(value: LinkTextTurn) {
+        coordinator.submitText(value.text)
     }
 
     override fun status() = coordinator.state.value.conversationState()
