@@ -187,25 +187,42 @@ export async function mirrorDreamOwnerPrompt(ctx, owner, prompt, {
   return { channelId, messages: receipts.length };
 }
 
+// A pane in one of these states cannot curate tonight no matter how long Dream
+// waits: the quota is spent, or a human has to clear something first. Every
+// other non-idle state is a pane that is merely busy and will come back.
+const CANNOT_CURATE = Object.freeze({
+  limited: "quota or rate limited",
+  permission: "waiting on a human permission prompt",
+  menu: "sitting in a modal menu",
+});
+
+/** WHAT: Says why a candidate cannot curate at all, or null if it merely might be busy. WHY: Falling through must follow capability, never momentary load. */
+export function dreamCandidateBlocker(status) {
+  return CANNOT_CURATE[status] ?? null;
+}
+
 /**
- * WHAT: Picks the first configured candidate that is actually idle.
- * WHY: A single busy or quota-dead curator used to cost the whole night. The
- * first candidate keeps the full grace period, since a pane that is merely
- * mid-turn should still be preferred; later candidates only have to be idle
- * right now, so one stuck pane cannot spend the entire window.
+ * WHAT: Picks the first configured candidate that can curate, waiting out a busy one.
+ * WHY: The list exists because a quota-dead curator cost a whole night, and
+ * that is the only thing it may skip for. A candidate that is merely busy keeps
+ * the night: handing the digest onward because a pane happened to be mid-turn
+ * at 04:00 would make the curator whoever was free, and the memory would wander
+ * between panes from night to night. So an incapable candidate is skipped on
+ * its first poll, a capable one gets the whole grace period, and a capable one
+ * that never settles ends the walk instead of passing the night along.
  */
 async function selectIdleOwner(ctx, candidates, { ensureReady, attempts, ...idleOptions } = {}) {
   const skipped = [];
-  for (const [index, candidate] of candidates.entries()) {
+  const reasons = [];
+  for (const candidate of candidates) {
     await ensureReady(candidate.agent, candidate.pane);
-    const idle = await waitForOwnerIdle(ctx, candidate, {
-      ...idleOptions,
-      attempts: index === 0 ? attempts : 1,
-    });
-    if (idle) return { owner: candidate, skipped };
+    const outcome = await waitForOwnerIdle(ctx, candidate, { ...idleOptions, attempts });
+    if (outcome.idle) return { owner: candidate, skipped, reasons };
     skipped.push(`${candidate.agent}:${candidate.pane}`);
+    reasons.push(`${candidate.agent}:${candidate.pane} ${outcome.blocked || "stayed busy for the whole grace period"}`);
+    if (!outcome.blocked) break;
   }
-  return { owner: null, skipped };
+  return { owner: null, skipped, reasons };
 }
 
 async function waitForOwnerIdle(ctx, owner, {
@@ -213,11 +230,14 @@ async function waitForOwnerIdle(ctx, owner, {
 } = {}) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const status = await getStatus(ctx, owner.agent, owner.pane).catch(() => "unknown");
-    if (status === "idle") return true;
-    if (["permission", "menu", "limited"].includes(status)) return false;
+    if (status === "idle") return { idle: true, blocked: null };
+    // Incapacity is visible on the first poll, so giving every candidate the
+    // full grace costs a quota-dead pane nothing.
+    const blocked = dreamCandidateBlocker(status);
+    if (blocked) return { idle: false, blocked };
     if (attempt + 1 < attempts) await sleep(pollMs);
   }
-  return false;
+  return { idle: false, blocked: null };
 }
 
 function verifyOwnerQuality(owner, context) {
@@ -325,7 +345,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
     });
     if (!selection.owner) throw new Error(`dream-owner-not-idle:${selection.skipped.join(",")}`);
     if (selection.skipped.length) {
-      const message = `Dream: curator ${selection.skipped.join(", ")} not idle;`
+      const message = `Dream: curator ${selection.reasons.join("; ")};`
         + ` curating with configured fallback ${selection.owner.agent}:${selection.owner.pane}.`;
       console.warn(message);
       try {

@@ -245,11 +245,138 @@ feature("amux dream configured-pane orchestration", () => {
     then: ["the fallback curates the night, loudly and visibly", ({ fx, result, events, warnings, notified }) => {
       expect(result.owner).toMatchObject({ agent: "claw", pane: 7 });
       expect(events).toContain("send:claw:7");
-      // Loud, not silent: the skip is on the console and pushed to the human.
-      const line = warnings.find((row) => row.includes("not idle"));
-      expect(line).toContain("claw:3");
+      // Loud, not silent: the skip is on the console and pushed to the human,
+      // and it says WHY the primary was passed over. "not idle" would have
+      // covered a merely busy pane too, which is no longer a reason to skip.
+      const line = warnings.find((row) => row.includes("claw:3"));
+      expect(line).toContain("quota or rate limited");
       expect(line).toContain("claw:7");
       expect(notified.join("\n")).toContain("claw:7");
+      cleanup(fx);
+    }],
+  });
+
+  component("a busy primary keeps the night instead of handing it to the next candidate", {
+    given: ["two candidates, the first busy and only later idle", () => fixture()],
+    when: ["running Dream", async (fx) => {
+      const events = [];
+      const fallback = { agent: "claw", pane: 7, engine: "codex", paneDir: "/workspace/.agents/7" };
+      const polls = [];
+      // The primary is mid-turn for the first polls and then settles. The
+      // fallback is idle the whole time, so a selector that hops on "busy"
+      // would visibly pick claw:7.
+      let seen = 0;
+      const result = await cmdDream({ configPath: "unused", agent: { ensureReady: async () => {} } }, {
+        workspace: fx.workspace, quiet: true, deferSentinel: true,
+      }, {
+        ...ownerDependencies(fx, events),
+        owner: undefined,
+        candidates: [owner, fallback],
+        idleAttempts: 5,
+        idlePollMs: 0,
+        sleep: async () => {},
+        getStatus: async (_ctx, agent, pane) => {
+          polls.push(`${agent}:${pane}`);
+          if (pane !== 3) return "idle";
+          seen += 1;
+          return seen < 3 ? "working" : "idle";
+        },
+        notifyUser: async () => {},
+        send: async (_ctx, agent, pane) => {
+          events.push(`send:${agent}:${pane}`);
+          return { delivered: true, pending: false, unverified: false };
+        },
+        waitForResult: async ({ outputPath, dateKey, runId }) => {
+          const content = [
+            `> Kuraterad av claw:3 efter verifierad kompaktering · run \`${runId}\` · source \`${"a".repeat(64)}\`.`,
+            "- Primaren vantade ut sin egen upptagenhet.", "",
+          ].join("\n");
+          writeFileSync(outputPath, content);
+          return { ok: true, content, dateKey };
+        },
+      });
+      return { fx, result, events, polls };
+    }],
+    then: ["the busy primary curated and the fallback was never polled", ({ fx, events, polls }) => {
+      expect(events.filter((line) => line.startsWith("send:"))).toEqual(["send:claw:3"]);
+      expect(polls.some((entry) => entry === "claw:7")).toBe(false);
+      cleanup(fx);
+    }],
+  });
+
+  component("a quota-dead primary hands over to a busy fallback and waits that one out", {
+    given: ["a quota-dead primary and a fallback that is mid-turn at first", () => fixture()],
+    when: ["running Dream", async (fx) => {
+      const events = [];
+      const fallback = { agent: "claw", pane: 7, engine: "codex", paneDir: "/workspace/.agents/7" };
+      // The exact incident shape: the configured curator is quota-dead, and the
+      // next candidate happens to be working at 04:00. Skipping the fallback
+      // for being busy is what cost a whole night's digest.
+      let fallbackPolls = 0;
+      const result = await cmdDream({ configPath: "unused", agent: { ensureReady: async () => {} } }, {
+        workspace: fx.workspace, quiet: true, deferSentinel: true,
+      }, {
+        ...ownerDependencies(fx, events),
+        owner: undefined,
+        candidates: [owner, fallback],
+        idleAttempts: 6,
+        idlePollMs: 0,
+        sleep: async () => {},
+        getStatus: async (_ctx, _agent, pane) => {
+          if (pane === 3) return "limited";
+          fallbackPolls += 1;
+          return fallbackPolls < 4 ? "working" : "idle";
+        },
+        notifyUser: async () => {},
+        send: async (_ctx, agent, pane) => {
+          events.push(`send:${agent}:${pane}`);
+          return { delivered: true, pending: false, unverified: false };
+        },
+        waitForResult: async ({ outputPath, dateKey, runId }) => {
+          const content = [
+            `> Kuraterad av claw:7 efter verifierad kompaktering · run \`${runId}\` · source \`${"a".repeat(64)}\`.`,
+            "- Reservpanelen vantades ut i stallet for att hoppas over.", "",
+          ].join("\n");
+          writeFileSync(outputPath, content);
+          return { ok: true, content, dateKey };
+        },
+      });
+      return { fx, result, events, fallbackPolls };
+    }],
+    then: ["the busy fallback was waited out and curated the night", ({ fx, result, events, fallbackPolls }) => {
+      expect(result.owner).toMatchObject({ agent: "claw", pane: 7 });
+      expect(events).toContain("send:claw:7");
+      // Proof it waited rather than got lucky: more than one poll on claw:7.
+      expect(fallbackPolls).toBeGreaterThan(1);
+      cleanup(fx);
+    }],
+  });
+
+  component("a candidate that can run but never settles ends the walk rather than passing the night on", {
+    given: ["a permanently busy primary and an idle fallback", () => fixture()],
+    when: ["running Dream", async (fx) => {
+      const events = [];
+      const fallback = { agent: "claw", pane: 7, engine: "codex", paneDir: "/workspace/.agents/7" };
+      let error = null;
+      try {
+        await cmdDream({ configPath: "unused", agent: { ensureReady: async () => {} } }, {
+          workspace: fx.workspace, quiet: true,
+        }, {
+          ...ownerDependencies(fx, events),
+          owner: undefined,
+          candidates: [owner, fallback],
+          idleAttempts: 3,
+          idlePollMs: 0,
+          sleep: async () => {},
+          getStatus: async (_ctx, _agent, pane) => (pane === 3 ? "working" : "idle"),
+          notifyUser: async () => {},
+        });
+      } catch (caught) { error = caught; }
+      return { fx, error, events };
+    }],
+    then: ["only the primary is named and nothing was sent", ({ fx, error, events }) => {
+      expect(error?.message).toBe("dream-owner-not-idle:claw:3");
+      expect(events).toEqual([]);
       cleanup(fx);
     }],
   });
