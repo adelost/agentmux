@@ -25,6 +25,7 @@ import {
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
 import { stripAnsi, esc, extractActivity, formatDuration, validateImagePath } from "../lib.mjs";
 import { shortModelName } from "../core/context.mjs";
+import { isCodingDialect } from "../core/dialects.mjs";
 import { cmdSearch } from "./search.mjs";
 import { journalInterruptionFromTurns, planRevive, reviveBrief, parseBootMs } from "../core/revive.mjs";
 import { readLastTurns, parseSinceArg, readAllTurnsAcrossPanes, panePathFor } from "../core/jsonl-reader.mjs";
@@ -2443,11 +2444,10 @@ async function cmdCompact(ctx, flags = {}, positional = []) {
     if (!(await hasSession(ctx, a.name))) continue;
     const panes = await listPanes(ctx, a.name);
     for (const p of panes) {
-      // Coding-agent panes only. Claude shows up as `claude` in tmux;
-      // codex shows up as `node` (binary is node-based) so we resolve
-      // dialect via dialectFor which cross-references agents.yaml cmd.
+      // Coding-agent panes only. Engines hide behind their binary in tmux
+      // (codex runs as `node`), so dialectFor cross-references agents.yaml cmd.
       const dialect = dialectFor(a, p);
-      if (dialect !== "claude" && dialect !== "codex") continue;
+      if (!isCodingDialect(dialect)) continue;
       const { status, context } = await inspectPane(ctx, a, p);
       if (!context) continue;
       if (context.percent < threshold) continue;
@@ -2528,8 +2528,8 @@ async function compactOnePane(ctx, name, flags, compactText) {
     process.exit(1);
   }
   const dialect = dialectFor(a, p);
-  if (dialect !== "claude" && dialect !== "codex") {
-    console.error(`${name} p${paneIdx} is not a claude/codex pane — /compact would land in a shell.`);
+  if (!isCodingDialect(dialect)) {
+    console.error(`${name} p${paneIdx} is not a coding-agent pane: /compact would land in a shell.`);
     process.exit(1);
   }
   const { status, context } = await inspectPane(ctx, a, p);

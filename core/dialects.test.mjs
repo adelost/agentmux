@@ -1,6 +1,6 @@
 import { feature, unit, expect } from "bdd-vitest";
 import {
-  CLAUDE, CODEX, KIMI, ALL_DIALECTS, detectDialect,
+  CLAUDE, CODEX, KIMI, ALL_DIALECTS, detectDialect, isCodingDialect,
   matchesAnyBullet, matchesAnyToolResult, matchesAnyToolCall,
   matchesAnyPromptPrefix, matchesAnyPromptWithText, stripBullet,
   COMPOSER_LINE_RE, foreignComposerText,
@@ -265,5 +265,32 @@ feature("foreignComposerText", () => {
       `  agenten fick: "[from ai:2] gör X"\n\n❯ `],
     when: ["inspecting", (raw) => foreignComposerText(raw, "min nya prompt")],
     then: ["null", (text) => expect(text).toBeNull()],
+  });
+});
+
+// --- Slash-command gate --------------------------------------------------
+
+feature("coding-dialect gate", () => {
+  // The /compact gates used to spell out claude/codex by hand, so Kimi stayed
+  // locked out long after its dialect shipped complete — skydive:10/11 and
+  // skyvw:9 sat at 76-84% context with no way to compact. Deriving the gate
+  // from the registry makes a new engine opt OUT, never opt in.
+  unit("admits every registered dialect", {
+    given: ["the dialect registry", () => ALL_DIALECTS],
+    when: ["gating each name", (all) => all.map((entry) => isCodingDialect(entry.name))],
+    then: ["all admitted", (gated) => expect(gated.every(Boolean)).toBe(true)],
+  });
+
+  unit("admits kimi by name", {
+    given: ["the kimi dialect", () => KIMI.name],
+    when: ["gating it", (name) => isCodingDialect(name)],
+    then: ["admitted", (ok) => expect(ok).toBe(true)],
+  });
+
+  unit("rejects a shell pane", {
+    // dialectFor returns null when no coding agent runs in the pane.
+    given: ["no resolved dialect", () => null],
+    when: ["gating it", (dialect) => isCodingDialect(dialect)],
+    then: ["rejected so /compact never lands in a shell", (ok) => expect(ok).toBe(false)],
   });
 });

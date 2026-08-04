@@ -126,6 +126,17 @@ export const KIMI = {
 /** WHAT: Defines supported TUI dialects. WHY: Keeps fallback detection aligned with every engine. */
 export const ALL_DIALECTS = [CLAUDE, CODEX, KIMI];
 
+// A new engine opts OUT by staying off the registry, never in by editing a
+// call site. dialectFor returns null for shell panes, which is what the
+// /compact gates reject.
+/**
+ * WHAT: Reports whether a resolved dialect name belongs to a registered coding agent.
+ * WHY: Keeps slash-command gates from excluding a registered engine the way
+ * hardcoded claude/codex lists silently excluded Kimi.
+ */
+export const isCodingDialect = (dialect) =>
+  ALL_DIALECTS.some((entry) => entry.name === dialect);
+
 /**
  * WHAT: Resolves the dialect producing a tmux buffer.
  * WHY: Keeps scrollback parsing from applying another engine's markers.
