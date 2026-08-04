@@ -172,6 +172,21 @@ export const DRIFT_SECTIONS = [
     directive: "fix the cause, not the symptom. " +
       "No --no-verify, no swallowed errors, no skipped tests.",
   },
+  // Incident 2026-08-04: the fleet spent a night repairing its own
+  // coordination machinery while Mattias's three product priorities stood
+  // still. The rule existed as prose and was forgotten after /compact —
+  // which is exactly the failure this rotation exists to counter, so the
+  // incident rule rides the same active channel as the rules it joins.
+  {
+    file: "~/.agentmux/board-incident-reminder.md",
+    section: null,
+    label: "prioritet > maskineri (incident 2026-08-04: hitta aldrig på eget scope)",
+    directive: "before touching the board or picking work, name which of " +
+      "Mattias's written priorities the task serves — if you cannot, stand " +
+      "still and say so. Write his decisions verbatim to a repo file BEFORE " +
+      "continuing. Never repair tooling/board/bookkeeping in order to " +
+      "bookkeep; the receipt is commit + deploy + what the user can now DO.",
+  },
 ];
 
 /**

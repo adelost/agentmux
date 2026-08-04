@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   defaultSuggestionsTokenFile, displayBodyFile, sendSuggestionsRequest,
 } from "../core/suggestions-authoring.mjs";
+import { emitBoardUseReminder } from "../core/board-use-reminder.mjs";
 
 const usage = () => {
   console.error(`Usage: amux-suggest --method PATCH --path '/api/tickets/AI-0001/admin?project=ai' \\
@@ -76,6 +77,10 @@ if (invokedDirectly) try {
   for (const required of ["method", "path", "bodyFile"]) {
     if (!options[required]) throw new Error(`--${required.replace(/[A-Z]/gu, (c) => `-${c.toLowerCase()}`)} is required`);
   }
+  // Before the request, deliberately: a 409/500 from the board is exactly the
+  // moment an agent is tempted to start repairing machinery, so the incident
+  // reminder must land even when the call fails.
+  emitBoardUseReminder();
   const tokenFile = options.tokenFile ?? defaultSuggestionsTokenFile();
   const token = readFileSync(tokenFile, "utf8").trim();
   const result = await sendSuggestionsRequest({ ...options, token });

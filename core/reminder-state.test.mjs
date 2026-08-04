@@ -309,6 +309,16 @@ feature("formatReminderMessage rotation (1.25.2 behavior)", () => {
     }],
   });
 
+  unit("the 2026-08-04 incident rule rides the rotation", {
+    given: ["the incident slot (last entry)", () => ({ n: 45, count: DRIFT_SECTIONS.length - 1 })],
+    when: ["formatting", ({ n, count }) => formatReminderMessage(n, count)],
+    then: ["deep-dive targets the incident file and the stand-still directive", (r) => {
+      expect(r).toMatch(/board-incident-reminder\.md/);
+      expect(r).toMatch(/stand still and say so/);
+      expect(r).toMatch(/Never repair tooling\/board\/bookkeeping/);
+    }],
+  });
+
   unit("count wraps around past the list end", {
     given: ["count equal to list length", () => ({ n: 45, count: DRIFT_SECTIONS.length })],
     when: ["formatting", ({ n, count }) => formatReminderMessage(n, count)],
