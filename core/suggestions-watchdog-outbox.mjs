@@ -167,9 +167,38 @@ export function createAmuxOutboxDeliverer({ queue = createDeliveryQueue(),
 }
 
 /** WHAT: Dispatches eligible watchdog outbox alerts. WHY: Keeps unavailable assignment targets pending without starting their ACK clock. */
+/**
+ * WHAT: Delivers one owner-directed alert to the human and acknowledges it upstream.
+ * WHY: Keeps the pane path untouched. A missing notifier is a loud error rather than a
+ * quiet fall-through, because falling through here means paging an agent about work only
+ * a human can release — the defect this whole class exists to remove.
+ */
+async function deliverToOwner({ alert, projectId, config, adminToken, fetchImpl,
+  notifyOwner, now, logger }) {
+  if (typeof notifyOwner !== "function") {
+    throw new Error(`delivery: ${alert.kind} requires an owner notifier`);
+  }
+  const idempotencyKey = watchdogDeliveryKey(projectId, alert.dedupeKey);
+  const message = ownerGateMessage(projectId, alert);
+  await notifyOwner({ projectId, alert, message, idempotencyKey });
+  const receipt = validateReceipt(
+    ownerNotificationReceipt(idempotencyKey, Number(now())), idempotencyKey,
+  );
+  const acknowledged = await fetchJson(
+    endpoint(config.baseUrl, "/api/watchdog/outbox/ack", projectId), {
+      fetchImpl, token: adminToken, timeoutMs: config.requestTimeoutMs,
+      method: "POST", body: { id: alert.id, deliveryReceipt: receipt },
+    });
+  if (acknowledged.acknowledged !== true || acknowledged.id !== alert.id) {
+    throw new Error("acknowledgement: exact outbox id was not confirmed");
+  }
+  logger.info?.(`DELIVERED ${projectId}/${alert.id} ${alert.kind} -> owner`);
+  return 1;
+}
+
 export async function pollWatchdogOutboxes({ config, readToken, adminToken,
   fetchImpl = globalThis.fetch, deliver, availability, onAssignmentUnavailable = null,
-  now = () => Date.now(), logger = console }) {
+  notifyOwner = null, now = () => Date.now(), logger = console }) {
   if (!isObject(config) || (config.projects !== null && !Array.isArray(config.projects))
     || typeof deliver !== "function") {
     throw new Error("poller: config and deliver function are required");
@@ -198,6 +227,11 @@ export async function pollWatchdogOutboxes({ config, readToken, adminToken,
       const alerts = validateAlerts(outbox, projectId);
       for (const alert of alerts) {
         try {
+          if (HUMAN_DIRECTED_ALERT_KINDS.has(alert.kind)) {
+            delivered += await deliverToOwner({ alert, projectId, config, adminToken,
+              fetchImpl, notifyOwner, now, logger });
+            continue;
+          }
           const delivery = watchdogAlertDelivery(projectId, alert, bootstrap, broker);
           const target = { agent: delivery.agent, pane: delivery.pane };
           const idempotencyKey = watchdogDeliveryKey(projectId, alert.dedupeKey);
@@ -373,7 +407,19 @@ function brokerTarget(value, projectId) {
   return { agent: match[1], pane };
 }
 
+/**
+ * WHAT: Alert kinds whose only competent audience is the human project owner.
+ * WHY: SRC-0122. These exist BECAUSE the board refuses to let any agent act, so routing
+ * one to a pane recreates the false page it was invented to replace. The fallback below
+ * hands any unrecognised kind to the broker, which is the right default for agent work
+ * and exactly wrong here, so the set is checked before the fallback can be reached.
+ */
+export const HUMAN_DIRECTED_ALERT_KINDS = Object.freeze(new Set(["owner_gate_due"]));
+
 function alertTarget(alert, broker) {
+  if (HUMAN_DIRECTED_ALERT_KINDS.has(alert.kind)) {
+    throw new Error(`delivery: ${alert.kind} is owner-directed and has no pane target`);
+  }
   const field = alert.kind === "assignment_offer_delivery" ? "targetAgent"
     : alert.kind === "pull_claim_attention_due" ? "targetAgentId" : null;
   if (!field) return broker;
@@ -494,6 +540,31 @@ function recoverLegacyBrokerCheckPrompt(alert, bootstrap) {
   if (!rendered.trim() || /\{\{|\}\}/u.test(rendered)
     || bytes(rendered) > MAX_PROMPT_BYTES) return null;
   return rendered;
+}
+
+/**
+ * WHAT: Builds the message the owner reads for one gate-blocked ticket.
+ * WHY: Names WHICH gate refuses, because sending someone to the approval screen for a
+ * ticket whose approval is already current is its own wasted trip.
+ */
+export function ownerGateMessage(projectId, alert) {
+  const gate = alert.payload?.gate === "safety-hold" ? "a safety review" : "your approval";
+  const waitingMs = Number(alert.payload?.unownedForMs);
+  const days = Number.isFinite(waitingMs) ? Math.floor(waitingMs / 86_400_000) : 0;
+  return `[${projectId}/${alert.ticketId}] READY and unclaimed, waiting on ${gate}.`
+    + " No agent can take it until you open that gate."
+    + ` priority=${alert.payload?.priority ?? "unknown"}; waiting ${days}d.`;
+}
+
+/**
+ * WHAT: The delivery receipt for a notification that reached a person, not a pane.
+ * WHY: The outbox acknowledges on an exact receipt. This transport has no job queue, so
+ * identity comes from the idempotency key the notifier itself dedupes on — the same
+ * string, hashed to the shape the acknowledgement contract already validates.
+ */
+export function ownerNotificationReceipt(idempotencyKey, acknowledgedAt) {
+  return { status: "acknowledged", acknowledgedAt,
+    jobId: createHash("sha256").update(idempotencyKey).digest("hex").slice(0, 32) };
 }
 
 function validateReceipt(value, idempotencyKey) {

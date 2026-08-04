@@ -41,6 +41,16 @@ async function escalateAssignmentUnavailable({ message, idempotencyKey }) {
   });
 }
 
+/** WHAT: Tells the project owner about work only they can release. WHY: SRC-0122 — the board stops paging the broker for gate-blocked tickets, so the person holding the gate is the one who must hear about it. */
+async function notifyOwnerGate({ message, idempotencyKey }) {
+  const { notifyUser } = await import("../cli/send-notify.mjs");
+  return notifyUser(message, {
+    level: "warn",
+    title: "Ready work is waiting on you",
+    idempotencyKey,
+  });
+}
+
 function expandHome(path) {
   if (path === "~") return process.env.HOME;
   if (String(path).startsWith("~/")) return resolve(process.env.HOME, String(path).slice(2));
@@ -104,6 +114,7 @@ try {
     adminToken,
     availability,
     onAssignmentUnavailable: escalateAssignmentUnavailable,
+    notifyOwner: notifyOwnerGate,
     deliver: createAmuxOutboxDeliverer({
       queue: createDeliveryQueue({
         validateTarget: (agent, pane) => validateAgentPane(agentConfigPath, agent, pane),
