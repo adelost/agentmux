@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   claimBlocker, createWorkClient, formatTicketShow, formatWorkOverview, parseWorkArgs,
-  projectForWorkSender, runWorkCommand,
+  projectForWorkSender, retryRefusal, runWorkCommand,
 } from "./work.mjs";
 
 const overview = (overrides = {}) => ({
@@ -25,6 +25,38 @@ const fakeClient = (reads = []) => {
 };
 
 feature("simple Suggestions work CLI", () => {
+  // SRC-0127. An agent whose triage failed had no recovery verb at all, and the
+  // board answered one 409 for several distinct states without naming any of
+  // them — three panes in one day each read it as a spent budget.
+  component("recovers a ticket whose triage failed, on the same ticket id", {
+    given: ["a board that accepts the retry", () => ({ client: fakeClient() })],
+    when: ["the worker retries", ({ client }) => runWorkCommand(
+      ["retry", "SVW-0100"], { sender: "skyvw:4", client })],
+    then: ["it re-runs the existing ticket rather than creating a second one", (text, { client }) => {
+      expect(client.calls[0]).toMatchObject({ kind: "mutate", method: "POST",
+        path: "/api/agent/tickets/SVW-0100/triage-retry?project=skyvw" });
+      expect(client.calls[0].body.mutationId).toBeTruthy();
+      expect(client.calls).toHaveLength(1);
+      expect(text).toContain("same ticket id, same raw report");
+    }],
+  });
+
+  unit("turns each refusal into the next action, and never invents one", {
+    when: ["the board names a state, and when it does not", () => [
+      retryRefusal("SVW-0100", new Error('HTTP 409: {"error":"retry-not-applicable","reason":"retry-budget-spent"}')),
+      retryRefusal("SVW-0100", new Error('HTTP 409: {"error":"retry-not-applicable","reason":"last-triage-outcome-was-not-a-failure"}')),
+      retryRefusal("SVW-0100", new Error('HTTP 409: {"error":"retry-not-applicable"}')),
+    ]],
+    then: ["a named state gets a next step and an unnamed one says so", ([spent, asked, silent]) => {
+      expect(spent).toContain("retry-budget-spent");
+      expect(spent).toContain("rewrite the report as a new ticket");
+      expect(asked).toContain("amux work answer");
+      // The half that matters: no guessed reason when the server named none.
+      expect(silent).toContain("the board did not name a reason");
+      expect(silent).not.toContain("budget");
+    }],
+  });
+
   unit("infers only the small known project map", {
     when: ["mapping pane addresses", () => [
       projectForWorkSender("skyvw:3"), projectForWorkSender("skydive:9"),
