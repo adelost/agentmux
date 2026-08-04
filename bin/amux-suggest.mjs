@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   defaultSuggestionsTokenFile, displayBodyFile, sendSuggestionsRequest,
@@ -58,8 +57,15 @@ export function parseArgs(argv) {
 // try-block executed on plain `import`, so importing the module to test its flag
 // map ran a real request path and called process.exit — which is also why the
 // map had no test and could lose a flag unnoticed.
+//
+// Both sides must be realpaths. Every pane reaches this file through the
+// symlink ~/.local/bin/amux-suggest, and path.resolve() does not follow
+// symlinks while Node hands import.meta.url the resolved target — so comparing
+// them made the guard false for every real invocation, and the CLI exited 0
+// with no output and sent nothing. That failure is indistinguishable from a
+// successful send, which is why it cost the fleet a day of receipts.
 const invokedDirectly = process.argv[1]
-  && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
 
 if (invokedDirectly) try {
   const options = parseArgs(process.argv.slice(2));
