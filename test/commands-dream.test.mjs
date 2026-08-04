@@ -205,6 +205,84 @@ feature("amux dream configured-pane orchestration", () => {
     }],
   });
 
+  component("a quota-dead primary hands the night to the next configured candidate", {
+    given: ["two configured candidates, the first not idle", () => fixture()],
+    when: ["running Dream", async (fx) => {
+      const events = [];
+      const warnings = [];
+      const notified = [];
+      const fallback = { agent: "claw", pane: 7, engine: "codex", paneDir: "/workspace/.agents/7" };
+      const statuses = { 3: "limited", 7: "idle" };
+      const originalWarn = console.warn;
+      console.warn = (line) => warnings.push(String(line));
+      let result = null;
+      try {
+        result = await cmdDream({ configPath: "unused", agent: { ensureReady: async () => {} } }, {
+          workspace: fx.workspace, quiet: true, deferSentinel: true,
+        }, {
+          ...ownerDependencies(fx, events),
+          owner: undefined,
+          candidates: [owner, fallback],
+          getStatus: async (_ctx, _agent, pane) => statuses[pane],
+          notifyUser: async (message) => { notified.push(message); },
+          send: async (_ctx, agent, pane) => {
+            events.push(`send:${agent}:${pane}`);
+            return { delivered: true, pending: false, unverified: false };
+          },
+          waitForResult: async ({ outputPath, dateKey, runId }) => {
+            const content = [
+              `> Kuraterad av claw:7 efter verifierad kompaktering · run \`${runId}\` · source \`${"a".repeat(64)}\`.`,
+              "- Natten kurerades av reservpanelen.", "",
+            ].join("\n");
+            writeFileSync(outputPath, content);
+            return { ok: true, content, dateKey };
+          },
+          recordReceipts: () => {},
+        });
+      } finally { console.warn = originalWarn; }
+      return { fx, result, events, warnings, notified };
+    }],
+    then: ["the fallback curates the night, loudly and visibly", ({ fx, result, events, warnings, notified }) => {
+      expect(result.owner).toMatchObject({ agent: "claw", pane: 7 });
+      expect(events).toContain("send:claw:7");
+      // Loud, not silent: the skip is on the console and pushed to the human.
+      const line = warnings.find((row) => row.includes("not idle"));
+      expect(line).toContain("claw:3");
+      expect(line).toContain("claw:7");
+      expect(notified.join("\n")).toContain("claw:7");
+      cleanup(fx);
+    }],
+  });
+
+  component("only when no configured candidate is idle does the night hard-fail", {
+    given: ["two candidates, neither idle", () => fixture()],
+    when: ["running Dream", async (fx) => {
+      const events = [];
+      const fallback = { agent: "claw", pane: 7, engine: "codex", paneDir: "/workspace/.agents/7" };
+      let error = null;
+      try {
+        await cmdDream({ configPath: "unused", agent: { ensureReady: async () => {} } }, {
+          workspace: fx.workspace, quiet: true,
+        }, {
+          ...ownerDependencies(fx, events),
+          owner: undefined,
+          candidates: [owner, fallback],
+          getStatus: async () => "limited",
+          notifyUser: async () => {},
+        });
+      } catch (caught) { error = caught; }
+      return { fx, error, events, daily: readFileSync(join(fx.workspace, "memory", "2026-07-21.md"), "utf8") };
+    }],
+    then: ["both exhausted candidates are named and the gap is recorded", ({ fx, error, events, daily }) => {
+      expect(error?.message).toBe("dream-owner-not-idle:claw:3,claw:7");
+      expect(events).toEqual([]);
+      expect(daily).toContain("<!-- amux-dream-failed:2026-07-21 ");
+      expect(daily).toContain("claw:3,claw:7");
+      expect(daily).toContain("DIGEST SAKNAS");
+      cleanup(fx);
+    }],
+  });
+
   component("a second failed night replaces the gap marker instead of stacking one per attempt", {
     given: ["one active source", () => fixture()],
     when: ["dream fails twice for the same day", async (fx) => {

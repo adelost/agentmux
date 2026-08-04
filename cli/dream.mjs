@@ -5,7 +5,7 @@ import {
 } from "fs";
 import { dirname, join } from "path";
 import { findChannelForPane, listAgents, loadConfig } from "./config.mjs";
-import { sendToChannelId } from "./send-notify.mjs";
+import { notifyUser, sendToChannelId } from "./send-notify.mjs";
 import { getPaneStatus, sendToPane } from "./tmux.mjs";
 import { parseSinceArg } from "../core/jsonl-reader.mjs";
 import { formatJanitorResult, trimAgedSessions } from "../core/janitor.mjs";
@@ -17,7 +17,7 @@ import {
   buildDreamBatch, collectDreamSources, dreamSummaryBlock, upsertDreamSummary,
 } from "../core/dream-summarizer.mjs";
 import {
-  dreamOwnerPrompt, readDreamOwnerQuality, readDreamOwnerResult, resolveDreamOwner,
+  dreamOwnerPrompt, readDreamOwnerQuality, readDreamOwnerResult, resolveDreamCandidates,
   writeDreamOwnerInput,
 } from "../core/dream-owner.mjs";
 import { verifiedClaudeCompact, verifiedCodexCompact } from "../core/verified-compact.mjs";
@@ -187,6 +187,27 @@ export async function mirrorDreamOwnerPrompt(ctx, owner, prompt, {
   return { channelId, messages: receipts.length };
 }
 
+/**
+ * WHAT: Picks the first configured candidate that is actually idle.
+ * WHY: A single busy or quota-dead curator used to cost the whole night. The
+ * first candidate keeps the full grace period, since a pane that is merely
+ * mid-turn should still be preferred; later candidates only have to be idle
+ * right now, so one stuck pane cannot spend the entire window.
+ */
+async function selectIdleOwner(ctx, candidates, { ensureReady, attempts, ...idleOptions } = {}) {
+  const skipped = [];
+  for (const [index, candidate] of candidates.entries()) {
+    await ensureReady(candidate.agent, candidate.pane);
+    const idle = await waitForOwnerIdle(ctx, candidate, {
+      ...idleOptions,
+      attempts: index === 0 ? attempts : 1,
+    });
+    if (idle) return { owner: candidate, skipped };
+    skipped.push(`${candidate.agent}:${candidate.pane}`);
+  }
+  return { owner: null, skipped };
+}
+
 async function waitForOwnerIdle(ctx, owner, {
   attempts = 120, pollMs = 5_000, sleep = wait, getStatus = getPaneStatus,
 } = {}) {
@@ -244,13 +265,19 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
   const memPath = join(workspaceDir, "memory", `${dateKey}.md`);
   const agents = dependencies.agents || listAgents(ctx.configPath);
   const runtimeConfig = dependencies.runtimeConfig || loadConfig(ctx.configPath);
-  const owner = dependencies.owner || resolveDreamOwner(runtimeConfig);
+  const candidates = dependencies.candidates
+    || (dependencies.owner ? [dependencies.owner] : resolveDreamCandidates(runtimeConfig));
+  let owner = candidates[0];
   const receipts = readReceipts(receiptPath);
   const observed = collectSources(agents, since.getTime(), { receipts });
   const batch = buildDreamBatch(observed.sources, dateKey, dependencies.batchOptions);
 
   if (flags.dry) {
     console.log(`Dream owner: ${owner.agent}:${owner.pane} (${owner.engine}).`);
+    if (candidates.length > 1) {
+      console.log(`Configured fallbacks, tried in order: ${candidates.slice(1)
+        .map((candidate) => `${candidate.agent}:${candidate.pane} (${candidate.engine})`).join(", ")}.`);
+    }
     console.log(`Dream would verify /compact, then send one visible prompt for ${batch.included.length} pane(s).`);
     console.log(`Input packet: ${Buffer.byteLength(JSON.stringify(batch.payload))} bytes; no hidden model process.`);
     for (const source of batch.included) {
@@ -289,14 +316,25 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       return { included: [], omitted: batch.omitted, unreadable: observed.unreadable };
     }
 
-    await ctx.agent.ensureReady(owner.agent, owner.pane);
-    const idle = await waitForOwnerIdle(ctx, owner, {
+    const selection = await selectIdleOwner(ctx, candidates, {
+      ensureReady: (agent, pane) => ctx.agent.ensureReady(agent, pane),
       attempts: dependencies.idleAttempts,
       pollMs: dependencies.idlePollMs,
       sleep: dependencies.sleep,
       getStatus: dependencies.getStatus,
     });
-    if (!idle) throw new Error(`dream-owner-not-idle:${owner.agent}:${owner.pane}`);
+    if (!selection.owner) throw new Error(`dream-owner-not-idle:${selection.skipped.join(",")}`);
+    if (selection.skipped.length) {
+      const message = `Dream: curator ${selection.skipped.join(", ")} not idle;`
+        + ` curating with configured fallback ${selection.owner.agent}:${selection.owner.pane}.`;
+      console.warn(message);
+      try {
+        await (dependencies.notifyUser || notifyUser)(message, { level: "warn", title: "amux dream" });
+      } catch (error) {
+        console.error(`Dream: fallback notification failed: ${error.message}`);
+      }
+    }
+    owner = selection.owner;
     const context = ownerQuality(owner, dependencies);
     verifyOwnerQuality(owner, context);
 

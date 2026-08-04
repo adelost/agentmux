@@ -33,20 +33,17 @@ function readTailLines(path, maxBytes = CODEX_QUALITY_TAIL_BYTES) {
   }
 }
 
-/** WHAT: Resolves one explicit configured owner. WHY: Prevents Dream from falling back to a hidden model process. */
-export function resolveDreamOwner(config) {
-  const agent = String(config?.dream?.agent || "").trim();
-  const pane = Number(config?.dream?.pane);
+function resolveConfiguredPane(config, agent, pane, notConfigured) {
   const entry = config?.[agent];
   const paneConfig = Number.isSafeInteger(pane) ? entry?.panes?.[pane] : null;
   const engine = paneConfig?.engine
     || String(paneConfig?.cmd || "").match(CODING_ENGINE)?.[1]
     || null;
   if (!agent || !Number.isSafeInteger(pane) || pane < 0 || !entry?.dir || !paneConfig) {
-    throw new Error("dream-owner-not-configured: set dream.agent and dream.pane in agentmux.yaml, then run amux sync");
+    throw new Error(notConfigured);
   }
   if (entry.backend === "native" || !["claude", "codex"].includes(engine)) {
-    throw new Error("dream-owner-unsupported: choose one tmux Claude or Codex pane");
+    throw new Error(`dream-owner-unsupported:${agent}:${pane}: choose one tmux Claude or Codex pane`);
   }
   return Object.freeze({
     agent,
@@ -54,6 +51,54 @@ export function resolveDreamOwner(config) {
     engine,
     paneDir: join(entry.dir, ".agents", String(pane)),
   });
+}
+
+/** WHAT: Resolves one explicit configured owner. WHY: Prevents Dream from falling back to a hidden model process. */
+export function resolveDreamOwner(config) {
+  return resolveConfiguredPane(
+    config,
+    String(config?.dream?.agent || "").trim(),
+    Number(config?.dream?.pane),
+    "dream-owner-not-configured: set dream.agent and dream.pane in agentmux.yaml, then run amux sync",
+  );
+}
+
+/** WHAT: Parses one `agent:pane` or `{agent, pane}` candidate reference. WHY: Keeps agentmux.yaml readable without accepting a vague ref. */
+export function parseDreamCandidate(ref) {
+  if (ref && typeof ref === "object") {
+    return { agent: String(ref.agent || "").trim(), pane: Number(ref.pane) };
+  }
+  const [agent, paneText, ...rest] = String(ref ?? "").trim().split(":");
+  if (rest.length) return { agent: "", pane: Number.NaN };
+  return { agent: String(agent || "").trim(), pane: paneText === undefined ? Number.NaN : Number(paneText) };
+}
+
+/**
+ * WHAT: Resolves the ordered list of panes Dream may curate from.
+ * WHY: One busy or quota-dead curator used to cost a whole night's digest. Every
+ * candidate still comes from agentmux.yaml, so the pane stays visible and
+ * configured and no hidden model process can be selected. A malformed candidate
+ * throws rather than being skipped: a silently dropped entry would quietly
+ * remove the very resilience the list exists to provide.
+ */
+export function resolveDreamCandidates(config) {
+  const primary = resolveDreamOwner(config);
+  const configured = config?.dream?.candidates;
+  if (configured === undefined || configured === null) return Object.freeze([primary]);
+  if (!Array.isArray(configured)) {
+    throw new Error("dream-candidates-invalid: dream.candidates must be a list of agent:pane entries");
+  }
+  const owners = [primary];
+  for (const ref of configured) {
+    const { agent, pane } = parseDreamCandidate(ref);
+    const owner = resolveConfiguredPane(
+      config, agent, pane,
+      `dream-candidate-not-configured:${JSON.stringify(ref)}: use agent:pane entries that exist in agentmux.yaml`,
+    );
+    if (owners.some((known) => known.agent === owner.agent && known.pane === owner.pane)) continue;
+    owners.push(owner);
+  }
+  return Object.freeze(owners);
 }
 
 /** WHAT: Reads runtime quality from the selected pane's exact session. WHY: Prevents a nearby cwd session from authorizing Dream. */

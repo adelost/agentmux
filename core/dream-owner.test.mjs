@@ -3,9 +3,59 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  dreamOwnerPrompt, readDreamOwnerQuality, readDreamOwnerResult, resolveDreamOwner,
-  writeDreamOwnerInput,
+  dreamOwnerPrompt, readDreamOwnerQuality, readDreamOwnerResult, resolveDreamCandidates,
+  resolveDreamOwner, writeDreamOwnerInput,
 } from "./dream-owner.mjs";
+
+const FLEET = {
+  claw: { dir: "/workspace", panes: [
+    { cmd: "claude" }, { cmd: "claude" }, { cmd: "claude" }, { cmd: "codex --yolo" },
+  ] },
+};
+
+feature("Dream candidate list", () => {
+  unit("without candidates the configured owner remains the only curator", {
+    when: ["resolving a config that predates the candidate list", () =>
+      resolveDreamCandidates({ dream: { agent: "claw", pane: 3 }, ...FLEET })],
+    then: ["exactly the configured pane, unchanged", (owners) => {
+      expect(owners).toHaveLength(1);
+      expect(owners[0]).toMatchObject({ agent: "claw", pane: 3, engine: "codex" });
+    }],
+  });
+
+  unit("candidates are ordered, deduplicated, and accept both ref forms", {
+    when: ["resolving a list that repeats the primary", () =>
+      resolveDreamCandidates({
+        dream: { agent: "claw", pane: 1, candidates: ["claw:1", "claw:2", { agent: "claw", pane: 3 }] },
+        ...FLEET,
+      })],
+    then: ["the primary leads and never appears twice", (owners) => {
+      expect(owners.map((owner) => `${owner.agent}:${owner.pane}`)).toEqual(["claw:1", "claw:2", "claw:3"]);
+    }],
+  });
+
+  unit("a malformed candidate fails loudly instead of quietly shrinking the list", {
+    when: ["resolving a typo and a non-list", () => ({
+      typo: (() => {
+        try {
+          resolveDreamCandidates({ dream: { agent: "claw", pane: 1, candidates: ["claw:99"] }, ...FLEET });
+          return null;
+        } catch (error) { return error.message; }
+      })(),
+      notAList: (() => {
+        try {
+          resolveDreamCandidates({ dream: { agent: "claw", pane: 1, candidates: "claw:2" }, ...FLEET });
+          return null;
+        } catch (error) { return error.message; }
+      })(),
+    })],
+    then: ["both name the exact problem", ({ typo, notAList }) => {
+      expect(typo).toContain("dream-candidate-not-configured");
+      expect(typo).toContain("claw:99");
+      expect(notAList).toContain("dream-candidates-invalid");
+    }],
+  });
+});
 
 feature("configured Dream owner", () => {
   unit("resolves one existing Codex pane and rejects hidden fallback", {

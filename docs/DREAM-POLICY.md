@@ -12,12 +12,22 @@ The source of truth is `~/.agentmux/agentmux.yaml`:
 dream:
   agent: claw
   pane: 3
+  candidates: [claw:3, claw:1]   # optional, ordered, tried in turn
 ```
 
 `amux sync` validates that the address exists and denotes a tmux Claude or
-Codex pane, then carries it into generated `agents.yaml`. There is no default
-and no fallback. Kimi and native panes are rejected until they can produce the
-same exact compact receipt.
+Codex pane, then carries it into generated `agents.yaml`. There is no default.
+Kimi and native panes are rejected until they can produce the same exact
+compact receipt.
+
+`candidates` is optional; without it the single configured pane is the only
+curator, exactly as before. With it, Dream tries each entry in order and
+curates from the first one that is live and idle. Every candidate is still
+written in `agentmux.yaml`, so the curator remains visible and operator-chosen
+and no hidden model process can be selected. Entries accept `agent:pane` or
+`{agent, pane}`; a candidate that does not resolve is an error rather than a
+silent omission, because a quietly dropped entry would remove the resilience
+the list exists to provide.
 
 ## Exact algorithm
 
@@ -26,9 +36,12 @@ same exact compact receipt.
    Dream prompts, compact commands and system plumbing are excluded.
 2. Keep at most eight turns and 5 KiB per pane, at most 48 panes, and at most
    96 KiB total input. Every omission and unreadable journal remains explicit.
-3. Require the selected owner pane to be idle. Read its actual model and effort
-   from its own session journal. Unknown values, Haiku and effort `low` fail
-   closed.
+3. Require the owner pane to be idle. The first candidate keeps the full grace
+   period, since a pane that is merely mid-turn is still the preferred curator;
+   any further candidate only has to be idle right now, so one stuck pane cannot
+   spend the whole window. A skipped primary is logged and pushed to the human.
+   Read the selected pane's actual model and effort from its own session
+   journal. Unknown values, Haiku and effort `low` fail closed.
 4. Send `/compact` to that exact session and require a new engine-native compact
    boundary plus the same session ID afterward. A delivered slash command by
    itself is not a receipt.
@@ -50,6 +63,13 @@ same exact compact receipt.
 Any failure leaves Dream receipts unchanged. `amux dream --dry` performs source
 collection and prints the exact visible prompt template, but does not compact,
 send, call a model, or write memory.
+
+When no candidate is idle the run still hard-fails, and the failure is recorded
+where it will be seen: the controller writes an `amux-dream-failed` marker plus
+a visible `DIGEST SAKNAS` line into the day's memory file, and `amux memory
+lint` turns that marker into a `dream_gap` warning when the same day has no run
+sentinel. A lost night used to be visible only as a MISSING sentinel, and nobody
+greps for an absence, so the file read exactly like an ordinary quiet day.
 
 ## Other memory maintenance
 
