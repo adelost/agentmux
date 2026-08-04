@@ -212,6 +212,30 @@ const outputResult = (result, fallback) => {
   return ticket?.id ? rowLabel(ticket) : fallback;
 };
 
+/**
+ * The board rejects a completion receipt WHOLE: `completionReceiptInput` returns
+ * null if any field fails, so an over-long summary and a malformed merge URL come
+ * back as the same `invalid-completion-receipt`. Two agents lost a delivery to that
+ * today, one concluding the receipt could not be booked at all. Limits mirror the
+ * board's own `cleanText` bounds — summary 2000, evidence label 500.
+ */
+const RECEIPT_FIELD_LIMITS = Object.freeze({
+  summary: 2_000, tests: 500, deploy: 500, live: 500,
+});
+
+/** WHAT: Rejects over-long receipt fields by name before the board can blame the whole receipt. WHY: An unattributable 400 costs more to debug than the flag it came from. */
+export const assertReceiptFieldLengths = (fields) => {
+  for (const [field, limit] of Object.entries(RECEIPT_FIELD_LIMITS)) {
+    const value = fields[field];
+    if (value == null) continue;
+    const length = String(value).trim().length;
+    if (length > limit) {
+      throw new Error(`--${field} is ${length} chars; the board rejects the whole receipt over `
+        + `${limit}. Shorten it and put the detail in a ticket comment.`);
+    }
+  }
+};
+
 /** WHAT: Defines one explicit board operation for the calling pane. WHY: Keeps the board additive instead of a mandatory broker. */
 export async function runWorkCommand(argv, dependencies = {}) {
   const parsed = parseWorkArgs(argv);
@@ -316,6 +340,8 @@ export async function runWorkCommand(argv, dependencies = {}) {
   if (action === "done") {
     const tests = String(parsed.options.tests ?? "").trim();
     if (tests.length < 3) throw new Error("done requires --tests with focused/manual proof");
+    assertReceiptFieldLengths({ summary: parsed.options.summary, tests,
+      deploy: parsed.options.deploy, live: parsed.options.live });
     const current = await currentWork(client, project);
     const commit = parsed.options.merge
       ? { label: dependencies.commitLabel ?? "Delivered change", url: parsed.options.merge }
