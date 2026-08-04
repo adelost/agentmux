@@ -12,7 +12,7 @@
 
 import {
   chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync,
-  readlinkSync, symlinkSync, unlinkSync, writeFileSync,
+  readlinkSync, realpathSync, symlinkSync, unlinkSync, writeFileSync,
 } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -41,6 +41,24 @@ function without(entries, predicate) {
     .filter((e) => e.hooks.length > 0);
 }
 
+// The installed guard runs from ~/.agentmux, NOT from the package tree, so every
+// relative import it reaches must be copied alongside it. A hardcoded list of one
+// file silently stopped being the whole closure when core/mangled-swedish.mjs was
+// added: the installed copy kept an import to a file that was never installed, the
+// guard aborted at module load, and because the hook contract reads any exit other
+// than 2 as "allowed", the gate failed open across the fleet without a word.
+// Derive the closure instead of maintaining it by hand.
+export function relativeImportClosure(entryPath, seen = new Set()) {
+  const path = resolve(entryPath);
+  if (seen.has(path)) return seen;
+  seen.add(path);
+  const source = readFileSync(path, "utf8");
+  for (const match of source.matchAll(/\bfrom\s*["'](\.[^"']*)["']/gu)) {
+    relativeImportClosure(resolve(dirname(path), match[1]), seen);
+  }
+  return seen;
+}
+
 function installSuggestionsAuthoringRuntime() {
   mkdirSync(dirname(INSTALLED_GUARD), { recursive: true });
   mkdirSync(dirname(INSTALLED_CLIENT), { recursive: true });
@@ -48,10 +66,19 @@ function installSuggestionsAuthoringRuntime() {
   mkdirSync(dirname(CLIENT_LINK), { recursive: true });
   copyFileSync(join(__dir, "suggestions-write-guard.mjs"), INSTALLED_GUARD);
   copyFileSync(join(__dir, "amux-suggest.mjs"), INSTALLED_CLIENT);
-  copyFileSync(join(__dir, "..", "core", "suggestions-authoring.mjs"), INSTALLED_CORE);
+  // Every core module the guard or the client can reach, not just the entry one.
+  const coreSource = join(__dir, "..", "core");
+  const coreDir = dirname(INSTALLED_CORE);
+  for (const dependency of relativeImportClosure(join(coreSource, "suggestions-authoring.mjs"))) {
+    if (dirname(dependency) !== resolve(coreSource)) {
+      throw new Error(`installed guard reaches outside core/: ${dependency}`);
+    }
+    const installed = join(coreDir, dependency.slice(resolve(coreSource).length + 1));
+    copyFileSync(dependency, installed);
+    chmodSync(installed, 0o644);
+  }
   chmodSync(INSTALLED_GUARD, 0o755);
   chmodSync(INSTALLED_CLIENT, 0o755);
-  chmodSync(INSTALLED_CORE, 0o644);
   if (existsSync(CLIENT_LINK) || lstatSafe(CLIENT_LINK)) {
     if (!lstatSync(CLIENT_LINK).isSymbolicLink()) {
       throw new Error(`refusing to replace non-symlink ${CLIENT_LINK}`);
@@ -121,4 +148,12 @@ function main() {
   console.log(`Suggestions mutations: PreToolUse/Bash -> ${SUGGESTIONS_GUARD_CMD}`);
 }
 
-main();
+// Only run when executed, never on import. This file now exports a helper, and
+// importing it to test that helper would otherwise rewrite the caller's real
+// ~/.claude/settings.json — which is exactly what happened while writing this
+// change. Both sides are realpaths because panes reach these scripts through
+// symlinks and path.resolve() does not follow them (see amux-suggest, #283).
+const invokedDirectly = process.argv[1]
+  && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+
+if (invokedDirectly) main();
