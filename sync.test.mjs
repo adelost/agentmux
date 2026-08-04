@@ -581,6 +581,46 @@ agents:
     }],
   });
 
+  component("carries the ordered Dream candidate list into generated runtime config", {
+    given: ["a source with fallback curators", () => `
+guild: "1"
+dream:
+  agent: claw
+  pane: 0
+  candidates: [claw:0, claw:1, claw:0]
+agents:
+  claw:
+    dir: /tmp/claw
+    claude: 2
+`],
+    when: ["regenerating agents.yaml", (source) => ({
+      parsed: parseConfig(source),
+      generated: yaml.load(regenerateAgentsYaml(source, null)),
+    })],
+    then: ["the whole ordered list survives sync, deduplicated", ({ parsed, generated }) => {
+      expect(parsed.dream.candidates).toEqual(["claw:0", "claw:1"]);
+      expect(generated.dream.candidates).toEqual(["claw:0", "claw:1"]);
+    }],
+  });
+
+  component("rejects a Dream candidate that does not resolve, instead of silently shrinking the list", {
+    given: ["a source whose fallback names a pane that does not exist", () => `
+guild: "1"
+dream:
+  agent: claw
+  pane: 0
+  candidates: [claw:0, claw:9]
+agents:
+  claw:
+    dir: /tmp/claw
+    claude: 1
+`],
+    when: ["parsing the source", (source) => () => parseConfig(source)],
+    then: ["sync fails closed and names the bad entry", (parse) => {
+      expect(parse).toThrow("dream.candidates entry");
+    }],
+  });
+
   component("rejects a Dream target whose pane cannot provide an exact compact receipt", {
     given: ["a source selecting a Kimi pane", () => `
 guild: "1"

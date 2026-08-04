@@ -141,20 +141,47 @@ export function parseConfig(yamlContent) {
 
   let dream = null;
   if (doc.dream !== undefined) {
+    const validateDreamPane = (agent, pane, label) => {
+      const target = agents.get(agent);
+      if (!agent || !Number.isSafeInteger(pane) || pane < 0 || !target || pane >= target.panes) {
+        throw new Error(`agentmux.yaml: '${label}' must name one configured agent and pane`);
+      }
+      if (target.backend !== "tmux") {
+        throw new Error(`agentmux.yaml: '${label}' target must be a tmux pane`);
+      }
+      const dialect = paneDialect(target, pane);
+      if (dialect !== "claude" && dialect !== "codex") {
+        throw new Error(`agentmux.yaml: '${label}' target must be a Claude or Codex pane`);
+      }
+    };
     const agent = String(doc.dream?.agent || "").trim();
     const pane = Number(doc.dream?.pane);
-    const target = agents.get(agent);
-    if (!agent || !Number.isSafeInteger(pane) || pane < 0 || !target || pane >= target.panes) {
-      throw new Error("agentmux.yaml: 'dream' must name one configured agent and pane");
-    }
-    if (target.backend !== "tmux") {
-      throw new Error("agentmux.yaml: 'dream' target must be a tmux pane");
-    }
-    const dialect = paneDialect(target, pane);
-    if (dialect !== "claude" && dialect !== "codex") {
-      throw new Error("agentmux.yaml: 'dream' target must be a Claude or Codex pane");
-    }
+    validateDreamPane(agent, pane, "dream");
     dream = { agent, pane };
+
+    // Optional ordered fallback curators. Validated here, at the same bar as the
+    // primary, so a typo fails `amux sync` instead of quietly shrinking the list
+    // at 04:00 and costing the night the list exists to protect.
+    if (doc.dream?.candidates !== undefined) {
+      if (!Array.isArray(doc.dream.candidates)) {
+        throw new Error("agentmux.yaml: 'dream.candidates' must be a list of agent:pane entries");
+      }
+      const candidates = [];
+      for (const ref of doc.dream.candidates) {
+        const parsed = typeof ref === "object" && ref !== null
+          ? { agent: String(ref.agent || "").trim(), pane: Number(ref.pane) }
+          : (() => {
+            const [refAgent, refPane, ...rest] = String(ref ?? "").trim().split(":");
+            return rest.length
+              ? { agent: "", pane: Number.NaN }
+              : { agent: String(refAgent || "").trim(), pane: refPane === undefined ? Number.NaN : Number(refPane) };
+          })();
+        validateDreamPane(parsed.agent, parsed.pane, `dream.candidates entry ${JSON.stringify(ref)}`);
+        if (candidates.some((known) => known.agent === parsed.agent && known.pane === parsed.pane)) continue;
+        candidates.push({ agent: parsed.agent, pane: parsed.pane });
+      }
+      if (candidates.length) dream.candidates = candidates.map((entry) => `${entry.agent}:${entry.pane}`);
+    }
   }
 
   return {
