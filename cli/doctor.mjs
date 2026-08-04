@@ -40,7 +40,21 @@ export async function cmdDoctor(ctx) {
   const home = process.env.HOME;
   const repoDir = dirname(dirname(fileURLToPath(import.meta.url)));
   // bridge process + supervision
-  let pids = [], supervised = false;
+  /**
+   * WHAT: Reads whether this pid's parent is the start.sh supervisor.
+   * WHY: Supervision is a fact about the live process, so it must be asked of
+   *      whatever pid we finally believe in — not only of the one that survived
+   *      the cwd filter below.
+   */
+  const isSupervisedPid = (pid) => {
+    try {
+      const ppid = execSync(`ps -o ppid= -p ${pid}`, { encoding: "utf-8" }).trim();
+      const parent = execSync(`ps -o args= -p ${ppid} || true`, { encoding: "utf-8" }).trim();
+      return /start\.sh/.test(parent);
+    } catch { return false; }
+  };
+
+  let pids = [];
   try {
     // [n]ode: the bracket keeps pgrep from matching its own sh wrapper.
     // cwd filter: only count bridges running from THIS repo (other projects
@@ -51,11 +65,6 @@ export async function cmdDoctor(ctx) {
         try { return readlinkSync(`/proc/${pid}/cwd`) === repoDir; }
         catch { return false; }
       });
-    if (pids.length) {
-      const ppid = execSync(`ps -o ppid= -p ${pids[0]}`, { encoding: "utf-8" }).trim();
-      const parent = execSync(`ps -o args= -p ${ppid} || true`, { encoding: "utf-8" }).trim();
-      supervised = /start\.sh/.test(parent);
-    }
   } catch {}
   // repo version + heartbeat
   let repoVersion = null;
@@ -71,6 +80,12 @@ export async function cmdDoctor(ctx) {
     pidAlive: isPidAlive,
     cmdline: (pid) => { try { return readFileSync("/proc/" + pid + "/cmdline", "utf-8"); } catch { return ""; } },
   });
+  // Ask supervision of the pid we ended up believing in. Deciding it before the
+  // rescue meant every release install reported a supervised bridge as
+  // UNSUPERVISED: the swap renames the staging dir, the cwd filter goes blind,
+  // and the flag stayed false even though start.sh was still its parent. That
+  // sent a reader to restart a healthy bridge.
+  const supervised = pids.length > 0 && isSupervisedPid(pids[0]);
   const guardHeartbeats = readGuardHeartbeats();
   // hooks
   let settings = null, hookFileExists = false;
