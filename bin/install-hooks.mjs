@@ -66,10 +66,19 @@ function installSuggestionsAuthoringRuntime() {
   mkdirSync(dirname(CLIENT_LINK), { recursive: true });
   copyFileSync(join(__dir, "suggestions-write-guard.mjs"), INSTALLED_GUARD);
   copyFileSync(join(__dir, "amux-suggest.mjs"), INSTALLED_CLIENT);
-  // Every core module the guard or the client can reach, not just the entry one.
+  // Every core module the guard or the client can reach, not just the entry
+  // one. Seeding from suggestions-authoring.mjs repeated the exact hardcoded-
+  // closure failure this function's own comment documents: the client grew an
+  // import outside that seed (core/board-use-reminder.mjs, 2026-08-04) and the
+  // installed CLI died at module load. Derive the closure from the two REAL
+  // entrypoints instead, so a new import can never be silently left behind.
   const coreSource = join(__dir, "..", "core");
   const coreDir = dirname(INSTALLED_CORE);
-  for (const dependency of relativeImportClosure(join(coreSource, "suggestions-authoring.mjs"))) {
+  const entrypoints = [join(__dir, "amux-suggest.mjs"), join(__dir, "suggestions-write-guard.mjs")];
+  const closure = new Set();
+  for (const entrypoint of entrypoints) relativeImportClosure(entrypoint, closure);
+  for (const dependency of closure) {
+    if (entrypoints.some((entry) => resolve(entry) === dependency)) continue;
     if (dirname(dependency) !== resolve(coreSource)) {
       throw new Error(`installed guard reaches outside core/: ${dependency}`);
     }
