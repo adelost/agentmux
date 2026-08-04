@@ -105,6 +105,28 @@ function atomicJson(path, value) {
   renameSync(temporary, path);
 }
 
+const FAILURE_DETAIL_BYTES = 20_000;
+
+/**
+ * WHAT: Keeps a rejection body whole, and says so out loud when it cannot.
+ * WHY: Some rejections are handshakes, not just complaints. A 428
+ * `policy-ack-required` answers with the exact acknowledgement the caller must
+ * echo back, and that payload is longer than the 500 characters this used to
+ * keep — so the sanctioned client could never complete the exchange it was told
+ * to complete. Worse, the cut landed mid-value and produced text that still
+ * looked like JSON, so a reader could not tell a whole body from a severed one.
+ * Measured 2026-08-04 on `release-off-board` for SRC-0086.
+ *
+ * The bound stays, because a proxy can answer with a megabyte of HTML, but it is
+ * now far above any protocol payload and truncation is explicit rather than
+ * silent.
+ */
+export function failureDetail(text) {
+  return text.length <= FAILURE_DETAIL_BYTES ? text
+    : `${text.slice(0, FAILURE_DETAIL_BYTES)}\n[amux-suggest: response truncated at `
+      + `${FAILURE_DETAIL_BYTES} of ${text.length} characters]`;
+}
+
 /**
  * WHAT: Stores one mutation identity and exact body before network delivery.
  * WHY: Prevents idempotency reuse from silently carrying different text.
@@ -225,7 +247,7 @@ export async function sendSuggestionsRequest({
   }
   const responseBytes = Buffer.from(await response.arrayBuffer());
   if (!response.ok) {
-    const detail = strictUtf8(responseBytes).slice(0, 500);
+    const detail = failureDetail(strictUtf8(responseBytes));
     recordAttempt("rejected", { lastStatus: response.status, lastError: detail });
     throw new Error(`Suggestions mutation HTTP ${response.status}: ${detail}`);
   }

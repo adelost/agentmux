@@ -1,12 +1,12 @@
 import { component, expect, feature, unit } from "bdd-vitest";
 import {
-  mkdtempSync, readFileSync, rmSync, writeFileSync,
+  mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
-  assertVerbatimSources, inspectSuggestionsMutationCommand, sendSuggestionsRequest,
+  assertVerbatimSources, failureDetail, inspectSuggestionsMutationCommand, sendSuggestionsRequest,
 } from "./suggestions-authoring.mjs";
 
 const mutationId = "11111111-1111-4111-8111-111111111111";
@@ -230,6 +230,64 @@ PY`)],
     }],
     then: ["nothing was warned about", (ctx) => {
       expect(ctx.warnings).toEqual([]);
+      rmSync(ctx.root, { recursive: true, force: true });
+    }],
+  });
+  unit("keeps a protocol handshake payload whole instead of severing it", {
+    given: ["a 428 acknowledgement longer than the old 500-character cut", () => {
+      const ack = JSON.stringify({ error: "policy-ack-required", currentBootstrap: {
+        protocolVersion: "1.1.0", protocolHash: `sha256:${"a".repeat(64)}`,
+        routingGuideHash: `sha256:${"b".repeat(64)}`, brokerOwner: "lsrc:2",
+        allowedWorkerPanesHash: `sha256:${"c".repeat(64)}`,
+        capabilityMatrixHash: `sha256:${"d".repeat(64)}`,
+        resolvedPolicyHash: `sha256:${"e".repeat(64)}`,
+      } });
+      return { ack };
+    }],
+    when: ["formatting it as a rejection detail", ({ ack }) => failureDetail(ack)],
+    then: ["it survives intact and still parses", (detail, { ack }) => {
+      expect(detail.length).toBeGreaterThan(500);
+      expect(detail).toBe(ack);
+      expect(JSON.parse(detail).currentBootstrap.resolvedPolicyHash)
+        .toBe(`sha256:${"e".repeat(64)}`);
+    }],
+  });
+
+  unit("says so out loud when a body really is too large to keep", {
+    given: ["a response far past the bound", () => ({ huge: "x".repeat(25_000) })],
+    when: ["formatting it", ({ huge }) => failureDetail(huge)],
+    then: ["the cut is announced with both numbers, never silent", (detail) => {
+      expect(detail).toContain("[amux-suggest: response truncated at 20000 of 25000 characters]");
+      expect(detail.startsWith("x".repeat(20_000))).toBe(true);
+    }],
+  });
+
+  component("a rejected send records the whole acknowledgement in its envelope", {
+    given: ["a server answering 428 with a long ack", () => {
+      const ctx = fixture();
+      ctx.ack = JSON.stringify({ error: "policy-ack-required",
+        currentBootstrap: { filler: "f".repeat(900) } });
+      return ctx;
+    }],
+    when: ["sending and reading the envelope back", async (ctx) => {
+      await sendSuggestionsRequest({
+        method: "PATCH",
+        path: "/api/tickets/SRC-0086/assignment?project=source",
+        bodyFile: ctx.bodyFile,
+        token: "test-token",
+        stateDir: ctx.stateDir,
+        fetchImpl: async () => new Response(ctx.ack, { status: 428 }),
+      }).catch((error) => { ctx.error = error; });
+      const file = readdirSync(ctx.stateDir)
+        .find((name) => name.endsWith(".json") && !name.endsWith(".body.json"));
+      ctx.envelope = JSON.parse(readFileSync(join(ctx.stateDir, file), "utf8"));
+      return ctx;
+    }],
+    then: ["the caller and the durable record both hold the echoable payload", (ctx) => {
+      expect(ctx.envelope.state).toBe("rejected");
+      expect(ctx.envelope.lastStatus).toBe(428);
+      expect(JSON.parse(ctx.envelope.lastError).currentBootstrap.filler.length).toBe(900);
+      expect(ctx.error.message).toContain("policy-ack-required");
       rmSync(ctx.root, { recursive: true, force: true });
     }],
   });
