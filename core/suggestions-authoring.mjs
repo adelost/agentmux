@@ -5,6 +5,8 @@ import {
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
+import { describeManglingRisk, findManglingRiskInPayload } from "./mangled-swedish.mjs";
+
 const MUTATING_METHODS = new Set(["POST", "PATCH", "PUT", "DELETE"]);
 const PUBLIC_SUGGESTIONS_HOST = /https:\/\/(?:suggest|suggestions)\.v1d\.io\/api\//iu;
 const MUTATING_SHELL = /(?:\b(?:curl|wget)\b[\s\S]*(?:\s-X\s*|--request(?:=|\s+)|\s-(?:d|F)\s|--data(?:-binary|raw|urlencode)?(?:=|\s+)|--form(?:=|\s+))|\b(?:fetch|Request)\s*\([\s\S]*?\bmethod\s*[:=]\s*["']?(?:POST|PATCH|PUT|DELETE))/iu;
@@ -159,6 +161,7 @@ export async function sendSuggestionsRequest({
   requestHeaders = {},
   stateDir = join(homedir(), ".agentmux", "suggestions-authoring-outbox"),
   fetchImpl = fetch,
+  warn = (message) => console.warn(message),
 }) {
   const upperMethod = String(method ?? "").toUpperCase();
   if (!MUTATING_METHODS.has(upperMethod)) {
@@ -179,6 +182,14 @@ export async function sendSuggestionsRequest({
   if (Object.keys(requestHeaders).some((name) => name.toLowerCase() !== "x-agent-id")) {
     throw new Error("only X-Agent-ID may be added to a Suggestions request");
   }
+  // AI-0026. Deliberately BEFORE staging: this warns today, but the day it
+  // rejects it must refuse without leaving an envelope behind, or a send that
+  // was never meant to happen becomes indistinguishable from one that failed.
+  // That is the ambiguity #284 removed, and it is one line away from returning.
+  const manglingWarning = describeManglingRisk(
+    findManglingRiskInPayload(parseJsonBytes(bodyBytes, "request body").value),
+  );
+  if (manglingWarning) warn(manglingWarning);
   const staged = stageSuggestionsRequest({
     bodyBytes, method: upperMethod, url: target.href, stateDir: resolve(stateDir),
   });
