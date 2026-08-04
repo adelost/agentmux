@@ -169,6 +169,63 @@ feature("amux dream configured-pane orchestration", () => {
     }],
   });
 
+  component("a lost night states itself in the daily file instead of passing as a quiet day", {
+    given: ["one active source and a quota-dead curator pane", () => fixture()],
+    when: ["the configured owner is not idle, exactly as on 2026-08-04", async (fx) => {
+      const events = [];
+      let error = null;
+      let receiptCalls = 0;
+      try {
+        await cmdDream({ configPath: "unused", agent: { ensureReady: async () => {} } }, {
+          workspace: fx.workspace, quiet: true,
+        }, {
+          ...ownerDependencies(fx, events),
+          getStatus: async () => "limited",
+          recordReceipts: () => { receiptCalls++; },
+        });
+      } catch (caught) { error = caught; }
+      const dailyPath = join(fx.workspace, "memory", "2026-07-21.md");
+      return {
+        fx, error, events, receiptCalls,
+        daily: existsSync(dailyPath) ? readFileSync(dailyPath, "utf8") : null,
+      };
+    }],
+    then: ["the run still hard-fails, and the gap is durably recorded", ({ fx, error, events, receiptCalls, daily }) => {
+      // Unchanged contract: no hidden pane takes over, nothing is receipted.
+      expect(error?.message).toBe("dream-owner-not-idle:claw:3");
+      expect(events).toEqual([]);
+      expect(receiptCalls).toBe(0);
+      // The new durable evidence: the night says it is missing, in the file
+      // everyone reads, both as a parseable marker and as visible prose.
+      expect(daily).toContain("<!-- amux-dream-failed:2026-07-21 ");
+      expect(daily).toContain("dream-owner-not-idle:claw:3");
+      expect(daily).toContain("DIGEST SAKNAS");
+      expect(daily).not.toContain("<!-- amux-dream-run:2026-07-21 ");
+      cleanup(fx);
+    }],
+  });
+
+  component("a second failed night replaces the gap marker instead of stacking one per attempt", {
+    given: ["one active source", () => fixture()],
+    when: ["dream fails twice for the same day", async (fx) => {
+      const run = async () => {
+        try {
+          await cmdDream({ configPath: "unused", agent: { ensureReady: async () => {} } }, {
+            workspace: fx.workspace, quiet: true,
+          }, { ...ownerDependencies(fx), getStatus: async () => "limited" });
+        } catch {}
+      };
+      await run();
+      await run();
+      return { fx, daily: readFileSync(join(fx.workspace, "memory", "2026-07-21.md"), "utf8") };
+    }],
+    then: ["exactly one marker and one prose line remain", ({ fx, daily }) => {
+      expect(daily.match(/<!-- amux-dream-failed:2026-07-21 /g)).toHaveLength(1);
+      expect(daily.match(/DIGEST SAKNAS/g)).toHaveLength(1);
+      cleanup(fx);
+    }],
+  });
+
   component("unknown quality, Haiku, and effort low fail before compact or delivery", {
     given: ["one active source", () => fixture()],
     when: ["the selected pane reports a forbidden runtime", async (fx) => {

@@ -46,6 +46,41 @@ feature("memory lint", () => {
     }],
   });
 
+  unit("a recorded dream failure with no successful run is a warning, not a status line", {
+    given: ["today's file carrying only a gap marker", () => {
+      const root = workspaceFixture();
+      writeFileSync(join(root, "memory", "2026-07-11.md"),
+        `${daily(12)}<!-- amux-dream-failed:2026-07-11 04:00 dream-owner-not-idle:claw:3 -->\n`);
+      return { root };
+    }],
+    when: ["linting", ({ root }) => lintMemory(root, { now: NOW, home: join(root, "home") })],
+    then: ["the lost night is counted as a warning with its reason", (result) => {
+      const finding = result.findings.find((row) => row.code === "dream_gap");
+      expect(finding?.severity).toBe("warning");
+      expect(finding?.message).toContain("dream-owner-not-idle:claw:3");
+      expect(result.summary.warnings).toBeGreaterThan(0);
+      expect(result.dreamGap).toMatchObject({ date: "2026-07-11", time: "04:00" });
+    }],
+  });
+
+  unit("a failure followed by a successful run is not reported as a lost night", {
+    given: ["today's file with both a gap marker and a run sentinel", () => {
+      const root = workspaceFixture();
+      writeFileSync(join(root, "memory", "2026-07-11.md"), [
+        daily(12),
+        "<!-- amux-dream-failed:2026-07-11 04:00 dream-owner-not-idle:claw:3 -->",
+        "<!-- amux-dream-run:2026-07-11 05:00 (7 panes ok / 0 failed) -->",
+        "",
+      ].join("\n"));
+      return { root };
+    }],
+    when: ["linting", ({ root }) => lintMemory(root, { now: NOW, home: join(root, "home") })],
+    then: ["the retry closes the gap", (result) => {
+      expect(result.findings.some((row) => row.code === "dream_gap")).toBe(false);
+      expect(result.dream).toMatchObject({ date: "2026-07-11", ok: 7 });
+    }],
+  });
+
   unit("frontmatter descriptions satisfy the summary contract", {
     given: ["a reference with modern frontmatter", () => {
       const root = workspaceFixture();

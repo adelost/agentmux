@@ -46,16 +46,25 @@ fi
 date_key="$(TZ=Europe/Stockholm date +%F)"
 daily_file="$OPENCLAW_WORKSPACE/memory/$date_key.md"
 
+# Judge the run by its own exit status BEFORE asserting on the daily file. The
+# assertions below describe a SUCCESSFUL run and include the run sentinel, which
+# a failed run never writes, so evaluating them first killed the script under
+# `set -e` and discarded the exit code this branch exists to report.
+if [ "$dream_status" -ne 0 ]; then
+  printf "%s ERROR dream pass exit=%s\n" "$(date -Is)" "$dream_status" >> "$AGENTMUX_DREAM_LOG"
+  if grep -q "<!-- amux-dream-failed:$date_key " "$daily_file" 2>/dev/null; then
+    printf "%s OK gap recorded in %s\n" "$(date -Is)" "$daily_file" >> "$AGENTMUX_DREAM_LOG"
+  else
+    printf "%s ERROR dream failed and left NO gap marker in %s\n" "$(date -Is)" "$daily_file" >> "$AGENTMUX_DREAM_LOG"
+  fi
+  exit "$dream_status"
+fi
+
 test -s "$daily_file"
 grep -q "<!-- template: daily -->" "$daily_file"
 grep -q "^> summary:" "$daily_file"
 grep -q "^> why:" "$daily_file"
 grep -q "<!-- amux-dream-run:$date_key " "$daily_file"
-
-if [ "$dream_status" -ne 0 ]; then
-  printf "%s ERROR dream pass exit=%s\n" "$(date -Is)" "$dream_status" >> "$AGENTMUX_DREAM_LOG"
-  exit "$dream_status"
-fi
 
 # Hidden one-shot model processes are forbidden from editing memory. Dream's
 # configured visible pane curates today's block; old-file backlog is linted

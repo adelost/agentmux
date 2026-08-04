@@ -58,6 +58,13 @@ function hasFrontmatterDescription(lines) {
   return false;
 }
 
+function latestDreamGap(text) {
+  const hits = [...text.matchAll(/<!-- amux-dream-failed:([^ ]+) ([^ ]+) ([^\n]*?) -->/g)];
+  if (!hits.length) return null;
+  const m = hits.at(-1);
+  return { date: m[1], time: m[2], reason: m[3] };
+}
+
 function latestDreamSentinel(text) {
   const hits = [...text.matchAll(/<!-- amux-dream-run:([^ ]+) ([^ ]+) \((\d+) panes ok \/ (\d+) failed\) -->/g)];
   if (!hits.length) return null;
@@ -300,10 +307,20 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
     }
   }
 
+  const todayPath = join(memoryDir, `${today}.md`);
+  const todayText = existsSync(todayPath) ? readFileSync(todayPath, "utf-8") : null;
+  const dream = todayText === null ? null : latestDreamSentinel(todayText);
+  const dreamGap = todayText === null ? null : latestDreamGap(todayText);
+  // A recorded failure with no successful run for the same day means the night
+  // produced no digest. Escalate it to a warning so the morning lint reports a
+  // lost night instead of leaving it as a status line nobody acts on.
+  if (dreamGap && !dream) {
+    add("warning", "dream_gap", todayPath,
+      `nightly digest missing (${dreamGap.time}): ${dreamGap.reason}`);
+  }
+
   const warningCount = findings.filter((finding) => finding.severity === "warning").length;
   const infoCount = findings.length - warningCount;
-  const todayPath = join(memoryDir, `${today}.md`);
-  const dream = existsSync(todayPath) ? latestDreamSentinel(readFileSync(todayPath, "utf-8")) : null;
   return {
     workspace: root,
     policy,
@@ -311,6 +328,7 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
     compactable: compactable.sort((a, b) => a.dateKey.localeCompare(b.dateKey)),
     summary: { warnings: warningCount, info: infoCount, compactable: compactable.length },
     dream,
+    dreamGap,
   };
 }
 
@@ -336,6 +354,7 @@ export function formatMemoryStatus(result) {
     rows.push("Backlog: empty");
   }
   if (result.dream) rows.push(`Latest dream: ${result.dream.date} ${result.dream.time}, ${result.dream.ok} ok / ${result.dream.failed} failed`);
+  else if (result.dreamGap) rows.push(`Latest dream: FAILED ${result.dreamGap.date} ${result.dreamGap.time}, no digest written (${result.dreamGap.reason})`);
   else rows.push("Latest dream: no sentinel in today's file");
   if (result.compact) rows.push(`Latest compact: ${result.compact.date} ${result.compact.hash.slice(0, 12)} (${result.compact.subject})`);
   else rows.push("Latest compact: none");

@@ -97,16 +97,43 @@ function atomicWrite(path, content) {
   renameSync(temporary, path);
 }
 
-function writeDreamRunSentinel(memPath, dateKey, timeStr, okCount, failedCount) {
+function upsertDailyMarker(memPath, dateKey, block, blockRe) {
   ensureDreamDailyFile(memPath, dateKey);
-  const sentinel = `<!-- amux-dream-run:${dateKey} ${timeStr} (${okCount} panes ok / ${failedCount} failed) -->`;
-  const re = new RegExp(`\n?<!-- amux-dream-run:${escapeRegExp(dateKey)} [^\n]*-->\n?`, "g");
-  let content = readFileSync(memPath, "utf8").replace(re, "\n");
+  let content = readFileSync(memPath, "utf8").replace(blockRe, "\n");
   const heading = `# ${dateKey}`;
   const lineEnd = content.indexOf("\n", content.indexOf(heading));
   const at = lineEnd >= 0 ? lineEnd + 1 : content.length;
-  content = `${content.slice(0, at)}${sentinel}\n${content.slice(at).replace(/^\n+/, "\n")}`;
+  content = `${content.slice(0, at)}${block}\n${content.slice(at).replace(/^\n+/, "\n")}`;
   atomicWrite(memPath, content);
+}
+
+function writeDreamRunSentinel(memPath, dateKey, timeStr, okCount, failedCount) {
+  upsertDailyMarker(
+    memPath,
+    dateKey,
+    `<!-- amux-dream-run:${dateKey} ${timeStr} (${okCount} panes ok / ${failedCount} failed) -->`,
+    new RegExp(`\n?<!-- amux-dream-run:${escapeRegExp(dateKey)} [^\n]*-->\n?`, "g"),
+  );
+}
+
+/**
+ * WHAT: Records a failed nightly run inside the daily memory file itself.
+ * WHY: A lost night used to be visible only as a MISSING sentinel, and nobody
+ * greps for an absence. The gap now states itself in the durable artifact
+ * everyone already reads, so it cannot pass as an ordinary quiet day.
+ */
+export function writeDreamGapMarker(memPath, dateKey, timeStr, reason) {
+  const detail = String(reason || "unknown").replace(/[<>]/gu, "").replace(/\s+/gu, " ").trim().slice(0, 200)
+    || "unknown";
+  upsertDailyMarker(
+    memPath,
+    dateKey,
+    [
+      `<!-- amux-dream-failed:${dateKey} ${timeStr} ${detail} -->`,
+      `> DIGEST SAKNAS (${timeStr}): ${detail}. Ingen nattlig sammanfattning skrevs for detta dygn.`,
+    ].join("\n"),
+    new RegExp(`\n?<!-- amux-dream-failed:${escapeRegExp(dateKey)} [^\n]*-->\n(?:> DIGEST SAKNAS[^\n]*\n)?`, "g"),
+  );
 }
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -364,6 +391,14 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       input,
       path: memPath,
     };
+  } catch (error) {
+    // The run is still hard-failed and rethrown: no hidden pane may take over
+    // curation. Only the record of the gap is added, by the controller itself.
+    try { writeDreamGapMarker(memPath, dateKey, timeStr, error?.message); }
+    catch (markerError) {
+      console.error(`Dream: could not record the gap marker: ${markerError.message}`);
+    }
+    throw error;
   } finally {
     runDreamJanitor(flags);
     lock.release();
