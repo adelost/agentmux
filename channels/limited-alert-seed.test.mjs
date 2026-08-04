@@ -25,6 +25,21 @@ feature("Re-announcing a quota stall across a bridge restart", () => {
     then: ["the new stall is announced, because this one is news", (alerts) => expect(alerts).toBe(true)],
   });
 
+  unit("stays quiet when only queued traffic followed the stall", {
+    given: ["a limited row buried under delivery rows addressed to a silent pane", () => seedLimitedFromLedger(
+      new Map(),
+      { readEventsFn: ledger([
+        { session: "skydive", pane: 3, event: "limited" },
+        { session: "skydive", pane: 3, event: "delivery_queue" },
+        { session: "skydive", pane: 3, event: "notification" },
+        { session: "skydive", pane: 3, event: "delivery_queue" },
+      ]) },
+    )],
+    when: ["the poller sees it limited again after a restart", (prev) => enteredLimited(prev.get("skydive:3"), "limited")],
+    then: ["a quota-dead pane collecting mail is not a pane that recovered",
+      (alerts) => expect(alerts).toBe(false)],
+  });
+
   unit("leaves a pane that never hit a limit alone", {
     given: ["a ledger with only ordinary turns", () => seedLimitedFromLedger(
       new Map(),
