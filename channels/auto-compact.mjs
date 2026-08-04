@@ -29,6 +29,26 @@ export function enteredLimited(prev, status) {
 }
 
 /**
+ * WHAT: Decides what a pane's remembered status becomes after one observation.
+ * WHY: `limited` is scraped from a banner in the pane tail (cli/format.mjs:65),
+ *      and that banner scrolls out whenever anything else prints — a delivery,
+ *      a keystroke, a redraw. The absence of the banner is therefore NOT
+ *      evidence that the quota lifted. Overwriting the memory with that absence
+ *      manufactures a fresh "entered limited" edge the next time the banner
+ *      re-prints, which is why one quota-dead pane re-announced itself roughly
+ *      hourly all day: every delivery into it produced one flap.
+ *      So `limited` is a latch. Only a pane demonstrably RUNNING clears it;
+ *      idle and unknown are absence of evidence, not evidence of recovery.
+ */
+export const clearsLimitedLatch = (status) => status === "working";
+
+export function nextLimitedMemory(prev, status) {
+  if (status === "limited") return "limited";
+  if (prev === "limited" && !clearsLimitedLatch(status)) return "limited";
+  return status;
+}
+
+/**
  * WHAT: Rebuilds "which panes were already limited" from the durable ledger.
  * WHY: The alert fires on a TRANSITION into limited, but the map holding the
  *      previous state is in memory. A restart therefore looked like every
@@ -225,7 +245,7 @@ export function createAutoCompact({
 
   async function alertOnLimited(agentName, paneIdx, paneKey, status) {
     const prev = prevStatus.get(paneKey);
-    prevStatus.set(paneKey, status);
+    prevStatus.set(paneKey, nextLimitedMemory(prev, status));
     // A bridge that starts while a pane is already limited must still alert;
     // suppressing prev===undefined made quota stalls invisible after reboot.
     if (!enteredLimited(prev, status)) return;
