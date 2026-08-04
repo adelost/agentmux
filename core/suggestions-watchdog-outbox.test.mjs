@@ -15,7 +15,9 @@ import {
   createAmuxOutboxDeliverer,
   loadPrivateCredential,
   loadWatchdogOutboxConfig,
+  ownerGateMessage,
   pollWatchdogOutboxes,
+  watchdogAlertDelivery,
   watchdogDeliveryKey,
 } from "./suggestions-watchdog-outbox.mjs";
 
@@ -865,5 +867,66 @@ describe("draining an already-reconciled outbox (SRC-0128)", () => {
     const acked = calls.filter((c) => c.url.pathname === "/api/watchdog/outbox/ack");
     expect(acked.map((c) => c.body.id)).toEqual([7]);
     expect(result.pending).toBe(0);
+  });
+});
+
+describe("owner-directed watchdog alerts", () => {
+  const ownerAlert = Object.freeze({
+    id: 11,
+    ticketId: "SRC-0004",
+    assignmentId: null,
+    kind: "owner_gate_due",
+    dedupeKey: "owner-gate:4:0:safety-hold",
+    payload: Object.freeze({ ticketId: "SRC-0004", priority: "high", gate: "safety-hold",
+      readySince: 1_000, unownedForMs: 21 * 86_400_000 }),
+    queuedAt: 2_000,
+    deliveredAt: null,
+  });
+
+  it("reaches the person holding the gate instead of falling back to the broker", async () => {
+    // The board raises this kind precisely BECAUSE no agent may act. The pane
+    // fallback below alertTarget is right for agent work and exactly wrong here,
+    // so both the routing guard and the delivery path are pinned.
+    expect(() => watchdogAlertDelivery("source", ownerAlert, {}, { agent: "lsrc", pane: 2 }))
+      .toThrow(/owner-directed/u);
+
+    const remote = api({ outboxAlert: ownerAlert });
+    const deliver = vi.fn();
+    const notifyOwner = vi.fn(async () => ({ sent: true, target: "dm" }));
+    const result = await pollWatchdogOutboxes({
+      config: config(), readToken: READ, adminToken: ADMIN,
+      fetchImpl: remote.fetchImpl, deliver, notifyOwner, now: () => 9_000,
+    });
+
+    expect(result).toMatchObject({ delivered: 1, pending: 0 });
+    expect(deliver).not.toHaveBeenCalled();
+    expect(notifyOwner).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "source",
+      idempotencyKey: watchdogDeliveryKey("source", ownerAlert.dedupeKey),
+    }));
+    const acked = remote.calls.filter((call) => call.url.pathname.endsWith("/ack"));
+    expect(acked.map((call) => call.body.id)).toEqual([11]);
+    expect(acked[0].body.deliveryReceipt).toMatchObject({ status: "acknowledged",
+      acknowledgedAt: 9_000 });
+  });
+
+  it("names which gate refuses, so the reader is not sent to the wrong screen", () => {
+    expect(ownerGateMessage("source", ownerAlert))
+      .toBe("[source/SRC-0004] READY and unclaimed, waiting on a safety review."
+        + " No agent can take it until you open that gate. priority=high; waiting 21d.");
+    expect(ownerGateMessage("source", { ...ownerAlert,
+      payload: { ...ownerAlert.payload, gate: "product-approval", unownedForMs: 0 } }))
+      .toContain("waiting on your approval");
+  });
+
+  it("stays pending rather than paging an agent when no notifier is wired", async () => {
+    const remote = api({ outboxAlert: ownerAlert });
+    const deliver = vi.fn();
+    await expect(pollWatchdogOutboxes({
+      config: config(), readToken: READ, adminToken: ADMIN,
+      fetchImpl: remote.fetchImpl, deliver, logger: { info: vi.fn(), error: vi.fn() },
+    })).rejects.toThrow(/1 pending alert/u);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(remote.calls.filter((call) => call.url.pathname.endsWith("/ack"))).toHaveLength(0);
   });
 });
