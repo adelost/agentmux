@@ -167,4 +167,70 @@ PY`)],
       rmSync(ctx.root, { recursive: true, force: true });
     }],
   });
+
+  // AI-0026. The helper having tests proves the helper. This proves the SEND
+  // PATH consults it: a body whose Swedish already lost every diacritic must
+  // produce a counted warning on the way out, without blocking the send.
+  component("warns on the way out when the body carries mangled Swedish", {
+    given: ["a request body whose Swedish lost every diacritic when it was written", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-suggest-mangled-"));
+      const bodyFile = join(root, "request.json");
+      const reason = "Laget ar systemiskt, inte ticket-specifikt: ingen av "
+        + "projektets tickets har state=approved eftersom gaten ar retroaktiv, och "
+        + "watchdogen eskalerar anda, vilket gor att den larmar om arbete som ingen "
+        + "agent kan starta. Det flyttar bara bordan till den som lases av larmet "
+        + "utan att en enda ticket blir mojlig att paborja.";
+      writeFileSync(bodyFile, `${JSON.stringify({ mutationId, reason }, null, 2)}\n`);
+      return { root, bodyFile, stateDir: join(root, "outbox"), warnings: [] };
+    }],
+    when: ["sending it", async (ctx) => {
+      await sendSuggestionsRequest({
+        method: "PATCH",
+        path: "/api/tickets/AI-0026/admin?project=ai",
+        bodyFile: ctx.bodyFile,
+        token: "test-token",
+        stateDir: ctx.stateDir,
+        warn: (message) => ctx.warnings.push(message),
+        fetchImpl: async () => new Response("{}"),
+      });
+      return ctx;
+    }],
+    then: ["one counted warning was raised and the send still completed", (ctx) => {
+      expect(ctx.warnings).toHaveLength(1);
+      expect(ctx.warnings[0]).toContain("1 paragraph reads");
+      expect(readFileSync(join(ctx.stateDir, `${mutationId}.json`), "utf8"))
+        .toContain("acknowledged");
+      rmSync(ctx.root, { recursive: true, force: true });
+    }],
+  });
+
+  component("stays silent for the same text with its diacritics intact", {
+    given: ["the identical body, correctly spelled", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-suggest-clean-"));
+      const bodyFile = join(root, "request.json");
+      const reason = "Läget är systemiskt, inte ticket-specifikt: ingen av "
+        + "projektets tickets har state=approved eftersom gaten är retroaktiv, och "
+        + "watchdogen eskalerar ändå, vilket gör att den larmar om arbete som ingen "
+        + "agent kan starta. Det flyttar bara bördan till den som låses av larmet "
+        + "utan att en enda ticket blir möjlig att påbörja.";
+      writeFileSync(bodyFile, `${JSON.stringify({ mutationId, reason }, null, 2)}\n`);
+      return { root, bodyFile, stateDir: join(root, "outbox"), warnings: [] };
+    }],
+    when: ["sending it", async (ctx) => {
+      await sendSuggestionsRequest({
+        method: "PATCH",
+        path: "/api/tickets/AI-0026/admin?project=ai",
+        bodyFile: ctx.bodyFile,
+        token: "test-token",
+        stateDir: ctx.stateDir,
+        warn: (message) => ctx.warnings.push(message),
+        fetchImpl: async () => new Response("{}"),
+      });
+      return ctx;
+    }],
+    then: ["nothing was warned about", (ctx) => {
+      expect(ctx.warnings).toEqual([]);
+      rmSync(ctx.root, { recursive: true, force: true });
+    }],
+  });
 });

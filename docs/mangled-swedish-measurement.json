@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "ticketId": "AI-0026",
+  "measuredOn": "2026-08-04",
+  "measuredBy": "ai:1, corroborated by ai:2 on an independent corpus",
+  "what": "False-alarm rate of the author-side mangled-Swedish check, measured on real agent-authored history before the check was allowed to block anything.",
+  "criterion": "A paragraph is flagged when it has at least minParagraphWords word tokens, contains no a-ring/umlaut at all, and contains at least minSwedishMarkers distinct Swedish function words. A single diacritic anywhere clears the paragraph.",
+  "thresholds": {
+    "minParagraphWords": 40,
+    "minSwedishMarkers": 3
+  },
+  "headline": {
+    "flagged": 184,
+    "falseAlarms": 0,
+    "falseAlarmRateOfAllParagraphsPercent": 0.0
+  },
+  "corpora": {
+    "outbox": {
+      "path": "~/.agentmux/suggestions-authoring-outbox/*.body.json",
+      "files": 1141,
+      "paragraphsConsidered": 996,
+      "flagged": 127
+    },
+    "memory": {
+      "path": "~/.openclaw/workspace/memory/*.md",
+      "files": 168,
+      "paragraphsConsidered": 1505,
+      "flagged": 57
+    }
+  },
+  "theTicketsHypothesisWasWrong": {
+    "hypothesis": "The criterion asked for false alarms to be measured against English and technical text.",
+    "measured": "Neither corpus produced a single English or technical false alarm at any threshold. The dominant false alarm is SHORT, entirely correct Swedish that happens to need no diacritic: 'PR #49 mergad som e94f730d och finns i live-builden', 'Janitorn ska trimma sessionsloggar per rad, inte radera hela filer', 'Varje har ett jobb.'",
+    "consequence": "For a short paragraph the rule is unsound in principle rather than miscalibrated: there is too little text for the absence of a diacritic to carry information. The fix is a length floor, not a better word list."
+  },
+  "lengthSweep": {
+    "method": "Flag counts over the same 6937 paragraphs at rising length floors, scored against the 17 exhaustively hand-audited false alarms found at the lowest floor.",
+    "rows": [
+      { "minParagraphWords": 8, "flagged": 247, "knownFalseAlarms": 17 },
+      { "minParagraphWords": 15, "flagged": 235, "knownFalseAlarms": 10 },
+      { "minParagraphWords": 20, "flagged": 230, "knownFalseAlarms": 6 },
+      { "minParagraphWords": 25, "flagged": 223, "knownFalseAlarms": 4 },
+      { "minParagraphWords": 30, "flagged": 208, "knownFalseAlarms": 3 },
+      { "minParagraphWords": 40, "flagged": 184, "knownFalseAlarms": 0 },
+      { "minParagraphWords": 50, "flagged": 167, "knownFalseAlarms": 0 }
+    ],
+    "cost": "Raising the floor from 8 to 40 gives up 63 flags. 17 of those were the false alarms; the other 46 were real but short mangling, deliberately conceded to reach a clean operating point."
+  },
+  "audit": {
+    "method": "At the lowest floor every flagged paragraph that an automatic classifier could not confirm as mangled was read by hand. 100% of that residue was reviewed; nothing was sampled. The flag set at floor 40 is a strict SUBSET of the flag set at floor 8, and contains none of the 17 enumerated false alarms, so its zero follows from the same audit rather than from a second, weaker one.",
+    "atFloor8": { "flagged": 247, "trulyMangled": 230, "falseAlarms": 17, "precisionPercent": 93.1 },
+    "atFloor40": { "flagged": 184, "falseAlarms": 0, "precisionPercent": 100.0 },
+    "doNotCalibrateOn": "The stripped-diacritic word list used to pre-sort the residue UNDERSTATES the damage: paragraphs it could not confirm were mostly undetected mangling, not false alarms. The hand review is the acceptance number, not that list's precision.",
+    "secondDialectFound": "Part of the corpus is mangled as aa/ae/oe transliteration ('vaagen', 'anvaendare', 'floede') rather than as stripped diacritics. The criterion catches it too, because that text also contains no a-ring/umlaut."
+  },
+  "independentCorroboration": {
+    "by": "ai:2",
+    "corpus": "534 agent-authored board documents, disjoint from both corpora above",
+    "result": "96 flags across 51 documents (9.6%) at the same 40-word floor; 14 of 14 hand-reviewed flags were genuine damage, zero false alarms. Under 20 words: 17 flags, all noise.",
+    "why_it_matters": "Two independent measurements on disjoint corpora selected the same operating point."
+  },
+  "decision": {
+    "mode": "warn",
+    "why": "The ticket requires a measured number before a flaky gate is switched on. The number is now clean enough to justify blocking, but flipping a warning into a rejection changes what happens to an author's work and is a deliberate decision with an owner, not a side effect of a measurement.",
+    "beforeBlocking": "Re-run bin/measure-mangled-swedish.mjs, re-audit the residue by hand, and move the rejection ahead of stageSuggestionsRequest so a refused send leaves no envelope behind (#284)."
+  },
+  "incidentalFinding": {
+    "what": "184 paragraphs of agent-authored Swedish in these two corpora alone had already lost every diacritic before this check existed, plus 96 more in ai:2's board corpus.",
+    "why": "AI-0014 made DECLARED quotes byte-exact. Text mangled while it was being written was never declared, so nothing ever looked at it. This is the size of that gap, measured."
+  },
+  "reproduce": "node bin/measure-mangled-swedish.mjs"
+}
