@@ -8,8 +8,19 @@ import {
 } from "../core/suggestions-authoring.mjs";
 import { detectSenderFromEnv } from "../core/sender-detect.mjs";
 
+// A tmux session maps to one Suggestions project ONLY where the pane's work has
+// exactly one home. `ai` was missing here, and the cost was not one extra flag:
+// the CLI aborted LOCALLY with "cannot infer project", never reaching the network,
+// and three days of conclusions read the resulting failure as a capability denial.
+// A request that never left the machine cannot be an authorization decision — but
+// nothing in the output said so, and two panes redesigned trust around it.
+//
+// `lsrc` is deliberately absent. Its panes work Source AND orchestrate the
+// skydive, skyvw and ai boards, so there is no single right default; guessing one
+// would be a silent wrong-project pick, which is worse than the explicit
+// --project it saves.
 const PROJECT_BY_SESSION = Object.freeze({
-  skydive: "skydive", skyvw: "skyvw",
+  ai: "ai", skydive: "skydive", skyvw: "skyvw",
 });
 const VALUE_FLAGS = new Set([
   "base-url", "deploy", "hours", "live", "merge", "project", "summary", "tests", "wake",

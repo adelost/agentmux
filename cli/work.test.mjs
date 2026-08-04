@@ -28,11 +28,16 @@ feature("simple Suggestions work CLI", () => {
   unit("infers only the small known project map", {
     when: ["mapping pane addresses", () => [
       projectForWorkSender("skyvw:3"), projectForWorkSender("skydive:9"),
+      projectForWorkSender("ai:1"),
       projectForWorkSender("lsrc:4"), projectForWorkSender("unknown:1"),
       projectForWorkSender("unknown:1", "ai"),
     ]],
     then: ["known fleets map and an explicit override remains possible", (result) => {
-      expect(result).toEqual(["skyvw", "skydive", null, null, "ai"]);
+      // `ai` belongs here: those panes have exactly one board, and its absence made
+      // every ai command fail locally in a way that read as a permission error.
+      // `lsrc` stays null ON PURPOSE — those panes orchestrate four boards, so a
+      // default would be a silent wrong-project pick, not a convenience.
+      expect(result).toEqual(["skyvw", "skydive", "ai", null, null, "ai"]);
     }],
   });
 
