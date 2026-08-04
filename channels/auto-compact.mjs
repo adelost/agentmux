@@ -13,7 +13,7 @@ import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { appendEvent, readEvents } from "../core/events.mjs";
 import { notifyUser } from "../cli/send-notify.mjs";
 import { getContextFromPane, getContextPercent } from "../core/context.mjs";
-import { detectPaneStatus } from "../cli/format.mjs";
+import { detectPaneStatus, LIMIT_BANNER } from "../cli/format.mjs";
 import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
 import { sendSlashVerified } from "../core/delivery.mjs";
 import { panePathFor } from "../core/jsonl-reader.mjs";
@@ -39,12 +39,29 @@ export function enteredLimited(prev, status) {
  *      hourly all day: every delivery into it produced one flap.
  *      So `limited` is a latch. Only a pane demonstrably RUNNING clears it;
  *      idle and unknown are absence of evidence, not evidence of recovery.
+ *
+ *      "Running" cannot be a bare scraped `working` either, and that was the
+ *      hole this latch still had. detectPaneStatus DELIBERATELY lets a live
+ *      spinner footer beat banner residue, because after a reset the pane really
+ *      has resumed while the old banner is still on screen (test/format-status
+ *      pins that, and it is right for the compaction decision). But a delivery
+ *      into a still-dead pane paints the same footer over a banner that has NOT
+ *      expired, so the alert path read the flap as recovery and re-announced the
+ *      stall on the next poll. Measured 2026-08-04 on skydive:3, a codex pane
+ *      quota-dead until 9 Aug: 427 deliveries, 8 identical alerts to the human,
+ *      five of them 60-66s after a delivery burst — one poll interval exactly.
+ *
+ *      So the two consumers get the standard each needs. Compaction keeps the
+ *      scraped status. The latch additionally requires the banner to be GONE:
+ *      a visible quota banner is positive evidence the stall persists, and it
+ *      outranks a footer that merely proves something was painted.
  */
-export const clearsLimitedLatch = (status) => status === "working";
+export const clearsLimitedLatch = (status, { limitBannerVisible = false } = {}) =>
+  status === "working" && !limitBannerVisible;
 
-export function nextLimitedMemory(prev, status) {
+export function nextLimitedMemory(prev, status, options = {}) {
   if (status === "limited") return "limited";
-  if (prev === "limited" && !clearsLimitedLatch(status)) return "limited";
+  if (prev === "limited" && !clearsLimitedLatch(status, options)) return "limited";
   return status;
 }
 
@@ -180,7 +197,11 @@ export function createAutoCompact({
     try { lastActivityMs = latestConversationActivityMs(paneDir, dialect); }
     catch { lastActivityMs = null; }
 
-    return { status, contextPercent, paneInMode, paneHeight, lastActivityMs };
+    // Asked of the SAME captured tail the status came from, so the latch and
+    // the classifier can never disagree about whether the banner is on screen.
+    const limitBannerVisible = Boolean(content) && LIMIT_BANNER.test(content);
+    return { status, contextPercent, paneInMode, paneHeight, lastActivityMs,
+             limitBannerVisible };
   }
 
   async function fireCompact(agentName, paneIdx, paneKey, contextPercent, dialect) {
@@ -255,9 +276,10 @@ export function createAutoCompact({
   // ledger has recorded each `limited` entry all along; nothing read it back.
   seedLimitedFromLedger(prevStatus);
 
-  async function alertOnLimited(agentName, paneIdx, paneKey, status) {
+  async function alertOnLimited(agentName, paneIdx, paneKey, status,
+                                { limitBannerVisible = false } = {}) {
     const prev = prevStatus.get(paneKey);
-    prevStatus.set(paneKey, nextLimitedMemory(prev, status));
+    prevStatus.set(paneKey, nextLimitedMemory(prev, status, { limitBannerVisible }));
     // A bridge that starts while a pane is already limited must still alert;
     // suppressing prev===undefined made quota stalls invisible after reboot.
     if (!enteredLimited(prev, status)) return;
@@ -319,11 +341,12 @@ export function createAutoCompact({
         const paneKey = `${a.name}:${i}`;
         if (compacting.has(paneKey)) continue;
 
-        const { status, contextPercent, paneInMode, paneHeight, lastActivityMs } = await inspect(a, i);
+        const { status, contextPercent, paneInMode, paneHeight, lastActivityMs,
+                limitBannerVisible } = await inspect(a, i);
 
         // Quota-silence watch runs for EVERY pane (the classic producer is
         // codex, which the compact logic below deliberately skips).
-        await alertOnLimited(a.name, i, paneKey, status);
+        await alertOnLimited(a.name, i, paneKey, status, { limitBannerVisible });
 
         if (!config.codexEnabled && paneDialect(a, i) === "codex") {
           if (warnings.has(paneKey) || compactFloors.has(paneKey) || lastWarnPostAt.has(paneKey)) {
