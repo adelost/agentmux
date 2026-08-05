@@ -33,7 +33,7 @@ import { readLastTurnsCodex } from "../core/codex-jsonl-reader.mjs";
 import { readLastTurnsKimi } from "../core/kimi-jsonl-reader.mjs";
 import { dialectFor, inspectPane } from "./inspect-pane.mjs";
 import { readAlternateTurns } from "../core/alternate-session-reader.mjs";
-import { assertConfiguredSender, detectSenderFromEnv, prependSenderHeader } from "../core/sender-detect.mjs";
+import { assertConfiguredSender, detectSenderFromEnv, outgoingPaneText } from "../core/sender-detect.mjs";
 import { appendEvent, readEvents } from "../core/events.mjs";
 import { isLiveStatus, needsHumanStatus, statusTier, isCompactUnsafe } from "../core/pane-status.mjs";
 import { readHeartbeat } from "../core/heartbeat.mjs";
@@ -675,11 +675,13 @@ async function cmdSend(name, prompt, flags, ctx) {
   // Auto-prepend [from <session>:<window>] when invoker is inside tmux,
   // so receiver panes know which orchestrator briefed them. Invisible
   // when called from raw terminal, Discord bot, or cron (no TMUX env).
-  // Sender is invariant — provenance must never be silently erased.
+  // Sender is invariant — provenance must never be silently erased —
+  // except for short slash commands, where a header would turn the
+  // control action into prose; their provenance stays in the mirror.
   const exec = (cmd) => execSync(cmd, { encoding: "utf8", timeout: 2000 });
   const sender = detectSenderFromEnv(process.env, exec);
   assertConfiguredSender(sender, (session, senderPane) => validateAgentSender(ctx.configPath, session, senderPane));
-  const finalPrompt = prependSenderHeader(prompt, sender);
+  const finalPrompt = outgoingPaneText(prompt, sender);
   const idempotencyKey = flags["idempotency-key"];
   if (idempotencyKey != null
       && (typeof idempotencyKey !== "string" || Buffer.byteLength(idempotencyKey, "utf8") > 256

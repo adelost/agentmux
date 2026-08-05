@@ -3,6 +3,8 @@
 // should see who briefed them. This module does detection + formatting
 // as pure functions so tests don't need a live tmux.
 
+import { isShortSlashCommand } from "./slash-ingest-guard.mjs";
+
 /**
  * Detect sender from tmux env. Returns "session:paneIndex" or null, matching
  * agentmux's addressing in `amux ps` (p0..pN). Agentmux lays each agent out
@@ -101,4 +103,17 @@ export function parseSenderHeader(text) {
   const match = String(text || "").match(/^\[from ([a-zA-Z0-9_-]+):(\d+)\](?:\r?\n|$)/);
   if (!match) return null;
   return { session: match[1], pane: Number(match[2]), key: `${match[1]}:${Number(match[2])}` };
+}
+
+/**
+ * The pane text for an outgoing CLI send. A "[from x]" header in front of a
+ * slash command turns a control action into prose: the engine reads "/usage"
+ * as message text and spends a failing API turn instead of running the local
+ * command (lsrc:10, 2026-08-05). Short slash commands therefore go out
+ * unwrapped; their provenance lives in the Discord mirror and the send
+ * receipt, never in the pane text. Everything else keeps the header.
+ */
+export function outgoingPaneText(text, sender) {
+  if (isShortSlashCommand(text)) return String(text).trim();
+  return prependSenderHeader(text, sender);
 }

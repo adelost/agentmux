@@ -3,6 +3,7 @@ import {
   assertConfiguredSender,
   detectSenderFromEnv,
   parseSenderAddress,
+  outgoingPaneText,
   parseSenderHeader,
   prependSenderHeader,
 } from "./sender-detect.mjs";
@@ -238,5 +239,33 @@ feature("parseSenderHeader", () => {
     given: ["an unwrapped prompt", () => "tell lsrc:4 to review this"],
     when: ["parsing provenance", (text) => parseSenderHeader(text)],
     then: ["null", (sender) => expect(sender).toBeNull()],
+  });
+});
+
+feature("outgoingPaneText", () => {
+  unit("sends a short slash command unwrapped even with a sender", {
+    given: ["/usage from a tmux pane", () => ({ text: "/usage", sender: "lsrc:2" })],
+    when: ["preparing pane text", ({ text, sender }) => outgoingPaneText(text, sender)],
+    then: ["the command reaches the composer bare", (result) => expect(result).toBe("/usage")],
+  });
+
+  unit("trims whitespace so the composer line starts with the slash", {
+    given: ["a padded slash command", () => ({ text: "  /model fable\n", sender: "lsrc:2" })],
+    when: ["preparing pane text", ({ text, sender }) => outgoingPaneText(text, sender)],
+    then: ["padding is gone", (result) => expect(result).toBe("/model fable")],
+  });
+
+  unit("keeps the provenance header on prose", {
+    given: ["an ordinary brief", () => ({ text: "run the tests", sender: "lsrc:2" })],
+    when: ["preparing pane text", ({ text, sender }) => outgoingPaneText(text, sender)],
+    then: ["header stays", (result) => expect(result).toBe("[from lsrc:2]\n\nrun the tests")],
+  });
+
+  unit("wraps slash-like text past the short-command cap like prose", {
+    given: ["a 200-char pseudo command", () => ({ text: "/x " + "a".repeat(200), sender: "lsrc:2" })],
+    when: ["preparing pane text", ({ text, sender }) => outgoingPaneText(text, sender)],
+    then: ["it is attributed, not submitted as a command", (result) => {
+      expect(result.startsWith("[from lsrc:2]")).toBe(true);
+    }],
   });
 });
