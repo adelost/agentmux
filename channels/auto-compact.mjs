@@ -18,6 +18,7 @@ import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
 import { sendSlashVerified } from "../core/delivery.mjs";
 import { panePathFor } from "../core/jsonl-reader.mjs";
 import { latestConversationActivityMs } from "../core/pane-activity.mjs";
+import { compactReceiptIsAuthoritative } from "../core/dialects.mjs";
 
 // Panes that have warnings pending (paneKey → { warned_at: ms }).
 // Panes currently mid-compact (paneKey string).
@@ -225,12 +226,15 @@ export function createAutoCompact({
         log(`/compact ${result.pending ? "durably queued" : "NOT acknowledged"} on ${paneKey}`);
         return;
       }
-      log(`${dialect === "codex" ? "requested" : "fired"} /compact on ${paneKey} (was ${contextPercent}%)${result.rescues ? ` (rescued x${result.rescues})` : ""}`);
+      const authoritative = compactReceiptIsAuthoritative(dialect);
+      log(`${authoritative ? "fired" : "requested"} /compact on ${paneKey} (was ${contextPercent}%)${result.rescues ? ` (rescued x${result.rescues})` : ""}`);
 
-      // Codex emits an authoritative `compacted` journal event, which the
-      // JSONL watcher announces. Composer consumption proves only that the
-      // request was submitted, so never claim completion here for Codex.
-      if (dialect === "codex") return;
+      // Composer consumption proves only that the request was submitted. Codex
+      // emits its own `compacted` journal event later, and Kimi's slash receipt
+      // is not part of the verified-slash transport, so neither may be
+      // announced as completed here. Both are still compacted; whether it
+      // worked is settled by the compactFloors outcome check on the next tick.
+      if (!authoritative) return;
 
       const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
       if (channelId && discord) {
@@ -356,16 +360,6 @@ export function createAutoCompact({
           }
           continue;
         }
-        // Kimi compacts itself and its slash receipt is not yet part of the
-        // generic verified-slash transport. Track/display context, but never
-        // inject an unverified `/compact` into a Kimi pane.
-        if (paneDialect(a, i) === "kimi") {
-          warnings.delete(paneKey);
-          compactFloors.delete(paneKey);
-          lastWarnPostAt.delete(paneKey);
-          continue;
-        }
-
         // Too small to read reliably — skip rather than act on redraw-soup.
         if (paneHeight != null && paneHeight < MIN_PANE_HEIGHT) {
           if (warnings.has(paneKey) || compactFloors.has(paneKey)) {

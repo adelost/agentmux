@@ -24,6 +24,13 @@ const CLAUDE_COMPLETED_LINE = new RegExp(`^[${CLAUDE_PROGRESS_ICONS}] [A-Z][a-z]
 export const CLAUDE = {
   name: "claude",
 
+  // Claude's composer consumption of `/compact` is a reliable enough signal to
+  // announce completion. Codex and Kimi are not: Codex emits its own journal
+  // event later, and Kimi's slash receipt is not part of the verified-slash
+  // transport. Those two still GET compacted; the outcome check (did context
+  // actually drop) is what verifies them, not the transport.
+  compactReceiptIsAuthoritative: true,
+
   // UI glyphs
   promptChar: "❯",         // user prompt marker
   bullet: "●",              // response bullet (text or tool call)
@@ -65,6 +72,8 @@ export const CLAUDE = {
 export const CODEX = {
   name: "codex",
 
+  compactReceiptIsAuthoritative: false,
+
   promptChar: "›",
   bullet: "•",
   toolResultPrefix: "└",
@@ -102,6 +111,8 @@ export const CODEX = {
 export const KIMI = {
   name: "kimi",
 
+  compactReceiptIsAuthoritative: false,
+
   promptChar: ">",
   bullet: "◆",
   toolResultPrefix: "│",
@@ -136,6 +147,17 @@ export const ALL_DIALECTS = [CLAUDE, CODEX, KIMI];
  */
 export const isCodingDialect = (dialect) =>
   ALL_DIALECTS.some((entry) => entry.name === dialect);
+
+/**
+ * WHAT: Reports whether a dialect's `/compact` acknowledgement may be announced
+ * as completion.
+ * WHY: Auto-compact used to answer this with a hardcoded engine list at the call
+ * site, which is exactly how Kimi was silently excluded from compaction
+ * altogether and grew to 83% context untouched. The capability belongs to the
+ * registry so a registered engine cannot be dropped by editing a call site.
+ */
+export const compactReceiptIsAuthoritative = (dialect) =>
+  ALL_DIALECTS.find((entry) => entry.name === dialect)?.compactReceiptIsAuthoritative === true;
 
 /**
  * WHAT: Resolves the dialect producing a tmux buffer.

@@ -74,6 +74,78 @@ async function ticks(ac, n) {
   for (let i = 0; i < n; i++) { await ac.tick(); await yield_(); }
 }
 
+// A Kimi pane reads its context from its own wire journal, not from the pane
+// buffer, so this fixture builds the journal a real session would leave behind.
+function kimiHarness({ percentTokens = 900_000, maxContext = 1_000_000 } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "amux-ac-kimi-"));
+  const path = join(dir, "agents.yaml");
+  writeFileSync(path, `test:\n  dir: ${dir}\n  id: 00000000-0000-0000-0000-000000000098\n  panes:\n    - name: kimi\n      cmd: kimi --model kimi-code/k3\n`);
+
+  const kimiHome = join(dir, "kimi-home");
+  const sessionDir = join(kimiHome, "sessions", "session_11111111-2222-3333-8444-555555555555");
+  mkdirSync(join(sessionDir, "agents", "main"), { recursive: true });
+  writeFileSync(join(kimiHome, "config.toml"),
+    `[models."kimi-code/k3"]\nprovider = "managed:kimi-code"\nmax_context_size = ${maxContext}\n`);
+  const paneDir = join(dir, ".agents", "0");
+  mkdirSync(paneDir, { recursive: true });
+  writeFileSync(join(kimiHome, "session_index.jsonl"), JSON.stringify({
+    sessionId: "session_11111111-2222-3333-8444-555555555555",
+    sessionDir,
+    workDir: paneDir,
+  }) + "\n");
+  writeFileSync(join(sessionDir, "agents", "main", "wire.jsonl"), [
+    JSON.stringify({ type: "config.update", modelAlias: "kimi-code/k3", thinkingEffort: "max" }),
+    JSON.stringify({ type: "context.update_token_count", tokenCount: percentTokens }),
+  ].join("\n") + "\n");
+
+  const previousKimiHome = process.env.KIMI_CODE_HOME;
+  process.env.KIMI_CODE_HOME = kimiHome;
+
+  const state = { fires: 0, rootDir: dir, restore: () => {
+    if (previousKimiHome === undefined) delete process.env.KIMI_CODE_HOME;
+    else process.env.KIMI_CODE_HOME = previousKimiHome;
+  } };
+  const agent = {
+    capturePane: async () => ["◆ work", "> "].join("\n"),
+    sendOnly: async (_name, cmd) => { if (cmd === "/compact") state.fires++; },
+    dismissBlockingPrompt: async () => null,
+    sendEnter: async () => {},
+  };
+  const config = { ...DEFAULT_CONFIG, threshold: 60, graceMs: 0, compactLockMs: 0, minIdleMs: 0, slashSettleMs: 0 };
+  const ac = createAutoCompact({
+    agent, agentsYamlPath: path, discord: { send: async () => {} },
+    tmux: async () => ({ stdout: "0 50" }), config, log: () => {},
+  });
+  return { ac, state };
+}
+
+feature("auto-compact covers every registered engine", () => {
+  unit("a Kimi pane over the threshold is compacted, not silently skipped", {
+    given: ["a Kimi pane whose journal reports 90% context", () => kimiHarness()],
+    when: ["running the warn+compact ticks", async ({ ac, state }) => {
+      await ticks(ac, 3);
+      return state;
+    }],
+    then: ["/compact reached the pane", (state) => {
+      // The regression this pins: auto-compact carried a hardcoded
+      // `if (dialect === "kimi") continue`, so Kimi panes were tracked but
+      // never compacted. skyvw:7 sat at 83% for days and every wake re-sent
+      // that whole uncached context.
+      expect(state.fires).toBeGreaterThan(0);
+      state.restore();
+    }],
+  });
+
+  unit("a Kimi pane below the threshold is left alone", {
+    given: ["a Kimi pane at 20% context", () => kimiHarness({ percentTokens: 200_000 })],
+    when: ["running several ticks", async ({ ac, state }) => { await ticks(ac, 3); return state; }],
+    then: ["no /compact is sent", (state) => {
+      expect(state.fires).toBe(0);
+      state.restore();
+    }],
+  });
+});
+
 feature("auto-compact tick — runaway prevention (the real bug)", () => {
   unit("limited status alerts on first observation and once per transition", {
     given: ["startup, steady limited, and recovery states", () => [undefined, "limited", "idle"]],
