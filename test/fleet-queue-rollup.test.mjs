@@ -45,7 +45,7 @@ const run = (fx, extraEnv = {}) => new Promise((ok, bad) => {
   const child = spawn("bash", [SCRIPT], { env: {
     ...process.env,
     WATCH_DIR: fx.watchDir,
-    CONF: join(fx.root, "missing-fleets.conf"),   // fleet/review/starvation sweeps skip
+    CONF: join(fx.root, "missing-fleets.conf"),   // fleet/review sweeps skip
     AMUX: fx.amux,
     QUEUE_DIR: fx.queueDir,
     TMUX_SOCKET: join(fx.root, "no-tmux.sock"),
