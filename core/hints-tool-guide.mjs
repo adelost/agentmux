@@ -190,8 +190,10 @@ the existing audit location). Disable the nightly pass with
 \`AMUX_JANITOR_ENABLED=false\`; tune with \`AMUX_JANITOR_RETENTION_DAYS\`.
 
 ### Auto-compact (background, bridge-driven)
-Idle panes >=70% context get warned (Discord channel), then /compact:ed
-after 60s grace unless activity cancels. Requires 5 min conversation
+Idle panes >=60% context get warned (Discord channel), then /compact:ed
+after 60s grace unless activity cancels. Applies to EVERY registered engine
+(claude, codex, kimi); an engine opts out by leaving the dialect registry,
+never by a hardcoded check at a call site. Requires 5 min conversation
 silence before warning (AUTO_COMPACT_MIN_IDLE_MS) so between-turns pauses
 don't trigger. Poll every 60s. Disable via \`AUTO_COMPACT_ENABLED=false\`.
 Tune via \`AUTO_COMPACT_WARN_THRESHOLD\`, \`AUTO_COMPACT_GRACE_MS\`,
