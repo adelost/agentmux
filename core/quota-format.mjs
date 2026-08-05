@@ -70,13 +70,15 @@ const codexLine = (codex) => {
 
 const kimiLine = (kimi) => {
   if (!kimi?.ok) return `Kimi    otillgänglig (${kimi?.error ?? "okänt fel"})`;
-  const tightest = kimi.limits.reduce((current, limit) =>
-    !current || limit.usedPercent > current.usedPercent ? limit : current, null);
-  if (!tightest) return "Kimi    otillgänglig (inga kvotgränser)";
-  const reset = formatReset(tightest.resetsAt);
-  const count = kimi.limits.length === 1 ? "" : ` · ${kimi.limits.length} gränser`;
-  return `Kimi    ${percentCell(tightest.scopeName || tightest.id, tightest.usedPercent)}`
-    + `${reset ? ` (${reset})` : ""}${count}`;
+  if (!kimi.limits.length) return "Kimi    otillgänglig (inga kvotgränser)";
+  // Every window, like the Codex line: "· 2 gränser" hid exactly the fact that
+  // decides what a stop means — 5h-fönstret läker självt, veckan gör det inte
+  // (2026-08-05: tre paneler dömdes som månadsdöda när 5h-fönstret var boven).
+  const cells = kimi.limits.map((limit) => {
+    const reset = formatReset(limit.resetsAt);
+    return `${percentCell(limit.scopeName || limit.id, limit.usedPercent)}${reset ? ` (${reset})` : ""}`;
+  });
+  return `Kimi    ${cells.join(" · ")}`;
 };
 
 const accountSuffix = (account, duplicate) => {

@@ -104,10 +104,14 @@ feature("quota text render for bridge and CLI", () => {
         ],
       })),
     })],
-    then: ["both rows tell the truth without dumping every allowance", (text) => {
+    then: ["every window is shown — the window KIND decides what a stop means", (text) => {
+      // "· 2 gränser" hid the fact that settles a diagnosis: a 5h window heals
+      // itself, the weekly does not. 2026-08-05 three panes were misread as
+      // month-dead while the hidden 5h row was the actual bound.
       expect(text.match(/⚠ samma inloggning/gu)).toHaveLength(2);
-      expect(text).toContain("Vecka 100% 🔴 · 2 gränser");
-      expect(text).not.toContain("5 h 20%");
+      expect(text).toContain("Vecka 100% 🔴");
+      expect(text).toContain("5 h 20%");
+      expect(text).not.toContain("gränser");
     }],
   });
 });
