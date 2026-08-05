@@ -34,7 +34,19 @@ with \`--stdin\`; the shell then only ever sees a filename.
 Mirrors to Discord channel automatically (user sees your briefs). Auto-prepends
 \`[from <sender-session>:<window>]\` when invoker is in tmux; receiver pane +
 Discord mirror both see who briefed. Sender is invariant: provenance is never
-silently erased.
+silently erased — EXCEPT short slash commands (\`/usage\`, \`/model\`, \`/compact\`):
+they are delivered RAW, no prefix, so the engine runs them as commands instead
+of reading them as prose. Provenance for those lives in the Discord mirror.
+
+### Check an engine's quota (Kimi/Codex "usage limit" errors)
+\`\`\`bash
+amux <agent> -p <pane> "/usage"      # renders the TUI quota panel in that pane
+amux log <agent> -p <pane> --tmux -s 45   # read the panel (weekly + 5h window)
+\`\`\`
+NEVER trust the 403 error text: Kimi says "billing cycle" for EVERY quota stop.
+The /usage panel shows which limit actually fired (5h rolling window vs weekly)
+and the exact reset time. Works even while the API refuses completions — the
+panel renders locally. Account switching: memory/references/kimi-account-switch.md.
 
 ### See what a pane has done
 \`\`\`bash

@@ -3423,6 +3423,9 @@ Usage:
   agent                           List agents (● = running)
   agent <name|:nr>                Attach to agent session
   agent <name|:nr> "prompt"       Send prompt to agent
+                                  Short slash commands ("/usage", "/model") are
+                                  delivered raw — no [from] prefix — so the
+                                  engine runs them instead of reading them
     -n <channel>                  Notify Discord channel when done
     -m <session>                  Message OpenClaw session when done
     --notify-user                 Mobile-push the human when done/problem
