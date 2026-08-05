@@ -38,15 +38,17 @@ silently erased — EXCEPT short slash commands (\`/usage\`, \`/model\`, \`/comp
 they are delivered RAW, no prefix, so the engine runs them as commands instead
 of reading them as prose. Provenance for those lives in the Discord mirror.
 
-### Check an engine's quota (Kimi/Codex "usage limit" errors)
+### Check an engine's quota (Kimi/Codex/Claude "usage limit" errors)
 \`\`\`bash
-amux <agent> -p <pane> "/usage"      # renders the TUI quota panel in that pane
-amux log <agent> -p <pane> --tmux -s 45   # read the panel (weekly + 5h window)
+amux quota                           # ALL providers + accounts, every window,
+                                     # exact reset times — no pane needed
 \`\`\`
-NEVER trust the 403 error text: Kimi says "billing cycle" for EVERY quota stop.
-The /usage panel shows which limit actually fired (5h rolling window vs weekly)
-and the exact reset time. Works even while the API refuses completions — the
-panel renders locally. Account switching: memory/references/kimi-account-switch.md.
+NEVER trust the 403 error text: Kimi says "billing cycle" for EVERY quota stop;
+\`amux quota\` shows which window actually fired (a 5h rolling window heals
+itself, the weekly does not). Fallback if the endpoint is unreachable: send
+\`/usage\` raw to a pane and read it via \`log --tmux\`. A pane that stays dead
+AFTER the window reopened is latched — recover with \`amux esc\` + \`/retry\`
+(a plain prompt only queues). Details: memory/references/kimi-quota-check.md.
 
 ### See what a pane has done
 \`\`\`bash
