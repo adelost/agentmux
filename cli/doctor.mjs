@@ -13,11 +13,13 @@ import {
   checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkReleaseIdentity, checkSupervisors, checkLedger,
   rescueBridgePidFromHeartbeat, checkBridgeMode, checkContextBridge, checkConfig, overallStatus, formatDoctorReport,
   FAIL, WARN, checkDeliveryQueue, checkNativeRuntimeFleet, checkGuardCronHeartbeats, checkSuggestionsBoard,
-  checkQuotaRecoveryHealth, quotaRecoveryHealthObservation,
+  checkQuotaRecoveryHealth, quotaRecoveryHealthObservation, checkPaneModals,
 } from "../core/doctor.mjs";
 import {
   checkTmux, checkTmuxClients, checkTmuxPaneGeometry, checkTmuxVersion, observeTmuxFleet,
 } from "../core/doctor-tmux.mjs";
+import { needsHumanStatus } from "../core/pane-status.mjs";
+import { getPaneStatus } from "./tmux.mjs";
 import { readHeartbeat } from "../core/heartbeat.mjs";
 import { readGuardHeartbeats } from "../core/guard-heartbeat.mjs";
 import { observeReleaseIdentity } from "../core/release-identity.mjs";
@@ -106,6 +108,7 @@ export async function cmdDoctor(ctx) {
   try { tmuxVersion = execSync("tmux -V", { encoding: "utf-8" }).trim(); }
   catch {}
   const tmuxFleet = await observeTmuxFleet(ctx.tmux);
+  const paneModals = await observeKimiPaneModals(ctx);
   const sessions = tmuxFleet.sessions.map((session) => session.name);
 
   // config
@@ -209,6 +212,7 @@ export async function cmdDoctor(ctx) {
     checkTmux({ sessions, error: tmuxFleet.error, required: tmuxRequired }),
     checkTmuxPaneGeometry({ ...tmuxFleet, required: tmuxRequired }),
     checkTmuxClients({ ...tmuxFleet, required: tmuxRequired }),
+    checkPaneModals(paneModals),
     checkConfig({ agents, error: cfgError }),
     checkSuggestionsBoard({
       configured: suggestionsConfigured,
@@ -234,4 +238,32 @@ export async function cmdDoctor(ctx) {
   console.log("");
   if (overall === FAIL) process.exit(2);
   if (overall === WARN) process.exit(1);
+}
+
+/**
+ * Scrapes every live Kimi pane for a held modal dialog. Kimi-only by design:
+ * Claude/Codex modals already surface through recognition + pushed events,
+ * while Kimi's startup/cache dialogs read as idle before recognition moved
+ * into the dialect registry (2026-08-07). One list-panes call finds the kimi
+ * processes; only those panes pay for a screen capture.
+ */
+async function observeKimiPaneModals(ctx) {
+  if (typeof ctx.tmux !== "function") return { modalPanes: null, error: null };
+  try {
+    const { stdout } = await ctx.tmux(
+      "list-panes -a -F '#{session_name}\t#{pane_index}\t#{pane_current_command}'",
+    );
+    const kimiPanes = String(stdout || "")
+      .split("\n")
+      .map((line) => line.split("\t"))
+      .filter((cols) => /^(?:kimi|kimi-code)$/u.test(cols[2] || ""));
+    const modalPanes = [];
+    for (const [session, pane] of kimiPanes) {
+      const status = await getPaneStatus(ctx, session, Number(pane)).catch(() => "unknown");
+      if (needsHumanStatus(status)) modalPanes.push({ pane: `${session}:${pane}`, status });
+    }
+    return { modalPanes, error: null };
+  } catch (error) {
+    return { modalPanes: null, error: String(error?.message || error).split("\n")[0] };
+  }
 }

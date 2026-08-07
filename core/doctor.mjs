@@ -225,6 +225,29 @@ export function checkLedger({ stat, now = Date.now(), maxBytes = 8 * 1024 * 1024
 }
 
 /**
+ * A Kimi pane held by a startup/send-time dialog ("Trust this folder?",
+ * "Cache expired") blocks every delivery while reading as idle to anyone who
+ * is not scraping the screen — the 2026-08-07 incident burned a day on
+ * exactly that. Doctor scrapes only kimi panes: Claude/Codex modals already
+ * surface through their own recognition and pushed events. modalPanes is
+ * null when no tmux sweep ran (all-native fleet), which skips the row.
+ */
+export function checkPaneModals({ modalPanes = null, error = null } = {}) {
+  if (error) {
+    return check("pane modals", WARN, `modal sweep failed: ${error}`,
+      "run `amux ps` and inspect kimi panes manually");
+  }
+  if (!modalPanes) return null;
+  if (modalPanes.length === 0) {
+    return check("pane modals", OK, "no kimi pane is held by a modal dialog");
+  }
+  const detail = modalPanes.map((pane) => `${pane.pane} (${pane.status})`).join(", ");
+  return check("pane modals", FAIL,
+    `modal dialog holding ${modalPanes.length} kimi pane(s): ${detail}`,
+    "restart the pane (trust is pre-seeded on launch) or answer with `amux select <agent> -p <N> 1`");
+}
+
+/**
  * Context truth relies on Claude Code's statusline pushing its own percent
  * to os.tmpdir()/claude-ctx-<session>.json (core/context.mjs). If that
  * channel dies silently (statusline replaced/updated without the tee),
