@@ -14,7 +14,7 @@ import {
   FAIL, OK, WARN,
   checkBridgeMode, checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkReleaseIdentity, checkSupervisors,
   rescueBridgePidFromHeartbeat,
-  checkLedger, overallStatus,
+  checkLedger, overallStatus, checkPaneModals,
 } from "./doctor.mjs";
 import {
   checkTmux, checkTmuxClients, checkTmuxPaneGeometry, checkTmuxVersion,
@@ -842,5 +842,34 @@ feature("heartbeat pid rescue after release swap", () => {
     then: ["the list is unchanged", (pids) => {
       expect(pids).toEqual([6231]);
     }],
+  });
+});
+
+feature("pane modals (kimi dialog watch)", () => {
+  unit("skips the row when no sweep ran", {
+    when: ["checking", () => checkPaneModals({ modalPanes: null })],
+    then: ["null row", (row) => expect(row).toBe(null)],
+  });
+
+  unit("ok when no kimi pane is held", {
+    when: ["checking", () => checkPaneModals({ modalPanes: [] })],
+    then: ["ok row", (row) => {
+      expect(row.status).toBe(OK);
+      expect(row.name).toBe("pane modals");
+    }],
+  });
+
+  unit("fails loudly with the pane names when a dialog holds a pane", {
+    when: ["checking", () => checkPaneModals({ modalPanes: [{ pane: "claw:8", status: "menu" }] })],
+    then: ["fail row with fix hint", (row) => {
+      expect(row.status).toBe(FAIL);
+      expect(row.detail).toContain("claw:8");
+      expect(row.hint).toContain("amux select");
+    }],
+  });
+
+  unit("a broken sweep is a warn, never a crash", {
+    when: ["checking", () => checkPaneModals({ modalPanes: null, error: "tmux gone" })],
+    then: ["warn row", (row) => expect(row.status).toBe(WARN)],
   });
 });

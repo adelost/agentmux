@@ -91,15 +91,41 @@ export function detectPaneStatus(paneContent) {
   // on every pane discussing these strings.
   const nonEmpty = lines.map((l) => l.trim()).filter(Boolean);
   const tail = nonEmpty.slice(-10);
+  // Kimi dialogs ("Trust this folder?", "Cache expired") replace the editor
+  // and render their selected option with a "❯" pointer — textually identical
+  // to a Claude composer line after trimming. They must be detected BEFORE
+  // the prompt-first idle return below, or every held Kimi pane reads as
+  // idle (the 2026-08-07 silent-blocking incident). Two discriminators, both
+  // from the dialect registry: Kimi keeps its boxed composer row ("│ > │")
+  // during busy AND idle turns and the dialog removes it, so a modal pattern
+  // only counts when that row is absent; and the scan runs over the deepest
+  // NON-EMPTY lines because a startup dialog on a fresh pane sits above a
+  // field of blank rows that tailRaw would drown in.
+  const tailWide = nonEmpty.slice(-14);
+  for (const dialect of ALL_DIALECTS) {
+    if (!dialect.modalVetoLineRe) continue;
+    if (tailWide.some((line) => dialect.modalVetoLineRe.test(line))) continue;
+    const modalText = tailWide.join("\n");
+    for (const modal of dialect.modals || []) {
+      if (modal.re.test(modalText)) return modal.status;
+    }
+  }
+
   const hasPrompt = tail.findLast((l) => ALL_DIALECTS.some((d) => l.startsWith(d.promptChar)));
   if (hasPrompt) return "idle";
 
-  // No prompt → real modal possible. Tail-15 keeps "Allow once" boxes
-  // (5-10 lines) detectable.
-  if (/Allow once|Allow always|Do you want to proceed/.test(tailRaw)) return "permission";
-  if (/Enter to select|Esc to cancel/.test(tailRaw)) return "menu";
-  if (/Resume from summary/.test(tailRaw)) return "resume";
-  if (/0: Dismiss/.test(tailRaw)) return "dismiss";
+  // No prompt → real modal possible. Prompt-first dialects (Claude) keep
+  // their checks below the idle return: a visible composer means a matching
+  // string is quoted content, not a live dialog. Recognition data lives in
+  // the dialect registry (dialects.mjs); an engine opts out by leaving the
+  // registry, never by a call-site branch. Within a dialect the array order
+  // is the report priority (permission before menu).
+  for (const dialect of ALL_DIALECTS) {
+    if (dialect.modalVetoLineRe) continue;
+    for (const modal of dialect.modals || []) {
+      if (modal.re.test(tailRaw)) return modal.status;
+    }
+  }
 
   return "unknown";
 }

@@ -3,6 +3,11 @@
 import { existsSync } from "node:fs";
 import { esc, stripAnsi } from "../lib.mjs";
 import { buildKimiLaunchCommand } from "./agent-launch-command.mjs";
+import { KIMI } from "./dialects.mjs";
+import {
+  effectiveKimiHome,
+  ensureKimiWorkspaceTrusted,
+} from "./kimi-workspace-trust.mjs";
 import {
   captureKimiPromptEchoCursor,
   extractFromKimiJsonl,
@@ -16,13 +21,35 @@ import { createRuntimeProfileResolver } from "./runtime-account-profiles.mjs";
 
 const PROMPT_READY_TIMEOUT_MS = 15_000;
 const KIMI_STEER_QUEUE_TIMEOUT_MS = 5_000;
+// Never hammer a dialog: at most one modal answer per wait loop this often,
+// and never more than this many per wait. Both known dialogs preselect their
+// first option, so a single Enter is the whole answer.
+const KIMI_MODAL_ANSWER_INTERVAL_MS = 2_000;
+const KIMI_MODAL_ANSWER_MAX = 3;
 
 /** WHAT: Names the internal ingest-probe prompt prefix. WHY: Prevents probe turns from reaching Discord mirrors. */
 export const AMUX_PROBE_PREFIX = "AMUX-PROBE ";
 
 /** WHAT: Checks Kimi's empty plain or bordered composer. WHY: Prevents TUI box glyphs from hiding a ready input boundary. */
 export function isKimiComposerReady(snapshot) {
-  return /^\s*(?:[│┃]\s*)?>\s*(?:[│┃]\s*)?$/mu.test(stripAnsi(snapshot));
+  return KIMI.promptLineRe.test(stripAnsi(snapshot));
+}
+
+/**
+ * WHAT: Names the Kimi dialog holding a pane, or null. WHY: Kimi's startup
+ * ("Trust this folder?") and send-time ("Cache expired") dialogs replace the
+ * editor, so the boxed composer vanishes — that absence is the discriminator
+ * that keeps turn prose quoting these titles from reading as a modal.
+ * Recognition data lives in the dialect registry (KIMI.modals).
+ */
+export function kimiModalForScreen(snapshot) {
+  const text = stripAnsi(snapshot || "");
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  const tail = lines.slice(-15);
+  if (tail.some((line) => KIMI.promptLineRe.test(line))) return null;
+  const tailText = tail.join("\n");
+  const modal = (KIMI.modals || []).find((entry) => entry.re.test(tailText));
+  return modal ? modal.id : null;
 }
 
 // A composer line holding only Kimi's collapsed atomic-paste marker. The
@@ -66,6 +93,39 @@ export function createKimiAgentRuntime({
     return error;
   }
 
+  /**
+   * WHAT: Answers a known Kimi dialog with its preselected first option
+   * (Enter). WHY: a CONSCIOUS workaround, written down as such on Mattias's
+   * 2026-08-07 directive — the real fix for "Trust this folder?" is the
+   * launch-time pre-seed above; this backstop exists for upstream store drift
+   * and for the cache-expiry hint, which cannot be pre-seeded. What Enter
+   * selects: "Trust" — it only ever trusts the pane's own launch directory,
+   * which the operator already trusted by launching the pane there — and
+   * "Compact and continue", the fleet's standing manual answer and the
+   * product's cheapest keep-topic option. Rate-limited and capped so an
+   * unknown dialog never gets hammered.
+   */
+  function createKimiModalAnswerer(target) {
+    let lastAnswerAt = 0;
+    let answers = 0;
+    const seen = new Set();
+    async function answerKimiModal(screen) {
+      const modal = kimiModalForScreen(screen);
+      if (!modal) return null;
+      seen.add(modal);
+      const now = Date.now();
+      if (answers < KIMI_MODAL_ANSWER_MAX && now - lastAnswerAt >= KIMI_MODAL_ANSWER_INTERVAL_MS) {
+        lastAnswerAt = now;
+        answers++;
+        console.warn(`kimi modal "${modal}" on ${target}; answering with its preselected first option (Enter)`);
+        await t.sendKeys(target, "Enter").catch(() => {});
+      }
+      return modal;
+    }
+    answerKimiModal.seen = () => [...seen];
+    return answerKimiModal;
+  }
+
   async function startKimi(name, target, rootDir, pane = 0, launch = null) {
     if (await isPaneDead(target)) await respawnPane(target);
     if (await isAlreadyRunning(target)) return;
@@ -90,6 +150,18 @@ export function createKimiAgentRuntime({
       allowFreshBootstrap: !resumeSessionId,
       profileHome: profile?.home || null,
     });
+    // Pre-seed kimi-code's workspace-trust store for the pane's own launch
+    // dir so the "Trust this folder?" startup modal never blocks a restart.
+    // The store is the product's own (see core/kimi-workspace-trust.mjs for
+    // the verified format); a failure here only means the modal answerer in
+    // the wait loops below stays the backstop — the launch must proceed.
+    const trust = ensureKimiWorkspaceTrusted({
+      kimiHome: effectiveKimiHome({ profileHome: profile?.home || null }),
+      workDir: dir,
+    });
+    if (trust.status === "error") {
+      console.warn(`kimi workspace-trust pre-seed failed for ${dir}: ${trust.error} (launch continues)`);
+    }
     await t.runShell(target, `cd ${esc(dir)} && ${cmd}`);
     await wait(1500);
   }
@@ -100,6 +172,7 @@ export function createKimiAgentRuntime({
     pane,
     timeoutMs = PROMPT_READY_TIMEOUT_MS,
   ) {
+    const answerModal = createKimiModalAnswerer(target);
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const [command, screen] = await Promise.all([
@@ -107,9 +180,11 @@ export function createKimiAgentRuntime({
         t.captureScreen(target).catch(() => ""),
       ]);
       if (/^(kimi|kimi-code)$/u.test(command) && isKimiComposerReady(screen)) return true;
+      await answerModal(screen);
       await wait(250);
     }
-    console.warn(`waitForKimiUiReady(${agentName}:${pane}) stalled before ${timeoutMs}ms`);
+    const modals = answerModal.seen();
+    console.warn(`waitForKimiUiReady(${agentName}:${pane}) stalled before ${timeoutMs}ms${modals.length ? ` — modal(s) seen: ${modals.join(", ")}` : ""}`);
     return false;
   }
 
@@ -143,6 +218,8 @@ export function createKimiAgentRuntime({
   }
 
   async function waitForKimiPromptReady(agentName, pane) {
+    const target = `${agentName}:.${pane}`;
+    const answerModal = createKimiModalAnswerer(target);
     const deadline = Date.now() + PROMPT_READY_TIMEOUT_MS;
     while (Date.now() < deadline) {
       const [busy, snapshot] = await Promise.all([
@@ -150,9 +227,11 @@ export function createKimiAgentRuntime({
         captureScreen(agentName, pane).catch(() => ""),
       ]);
       if (isKimiComposerReady(snapshot)) return { busy: Boolean(busy), snapshot };
+      await answerModal(snapshot);
       await wait(250);
     }
-    throw blocked("Kimi prompt delivery timed out: composer is not ready");
+    const modals = answerModal.seen();
+    throw blocked(`Kimi prompt delivery timed out: composer is not ready${modals.length ? ` (modal held: ${modals.join(", ")})` : ""}`);
   }
 
   /**
@@ -183,6 +262,7 @@ export function createKimiAgentRuntime({
   } = {}) {
     let dir;
     try { dir = paneDir(agentConfig(agentName).dir, pane); } catch { return; }
+    const answerModal = createKimiModalAnswerer(target);
     const submitted = () => {
       try { return isPromptInKimiJsonl(dir, prompt, { notBeforeMs }) === true; }
       catch { return false; }
@@ -191,6 +271,10 @@ export function createKimiAgentRuntime({
     if (submitted()) return;
     for (let attempt = 0; attempt < 2; attempt++) {
       if (await isBusy(agentName, pane).catch(() => true)) return;
+      // A dialog (classically the cache-expiry hint on first send) hides the
+      // composer; answer it instead of abandoning the rescue.
+      const screen = await captureScreen(agentName, pane).catch(() => "");
+      if (await answerModal(screen)) continue;
       if (!await promptAlreadyInComposer(agentName, pane, prompt)) return;
       if (submitted()) return;
       await t.sendEnter(target);

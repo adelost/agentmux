@@ -65,6 +65,16 @@ export const CLAUDE = {
     CLAUDE_PROGRESS_LINE,                      // active progress: "✻ Musing…"
     CLAUDE_COMPLETED_LINE,                      // completed progress: "✻ Worked for 32s"
   ],
+
+  // Modal dialogs, in the priority order detectPaneStatus must report them.
+  // These are exactly the strings format.mjs matched before recognition moved
+  // into the registry; keep array order stable.
+  modals: [
+    { id: "permission", status: "permission", re: /Allow once|Allow always|Do you want to proceed/ },
+    { id: "menu", status: "menu", re: /Enter to select|Esc to cancel/ },
+    { id: "resume", status: "resume", re: /Resume from summary/ },
+    { id: "dismiss", status: "dismiss", re: /0: Dismiss/ },
+  ],
 };
 
 // --- Codex ---------------------------------------------------------------
@@ -103,6 +113,10 @@ export const CODEX = {
     /^Tip: /,                                    // tips
     /^\s*• Working \(/,                           // busy indicator
   ],
+
+  // No Codex choice-modals are scrape-recognized today; the interrupted-turn
+  // banner is a status, not a modal, and stays in detectPaneStatus.
+  modals: [],
 };
 
 // --- Kimi Code ------------------------------------------------------------
@@ -130,6 +144,26 @@ export const KIMI = {
     /^\s*(?:yolo|auto|plan)\s+\S+\s+~/iu,
     /^\s*context:\s*\d+(?:\.\d+)?%/iu,
   ],
+
+  // The boxed composer row ("│ > │"). Kimi keeps it visible while a turn
+  // runs, so presence never proves idle — but ABSENCE proves the editor was
+  // replaced by a dialog (mountEditorReplacement). detectPaneStatus uses it
+  // as the modal veto line.
+  promptLineRe: /^\s*(?:[│┃]\s*)?>\s*(?:[│┃]\s*)?$/mu,
+
+  // Startup/send-time dialogs. The veto contract (modalVetoLineRe) matters
+  // because these dialogs render their selected option with a "❯" pointer —
+  // textually a Claude composer line — which is why Kimi modals are checked
+  // before the prompt-first idle return, gated on composer absence. Patterns
+  // are title + option-label compounds so a pane merely discussing one title
+  // string does not match (verified against the 0.34.0 dialog renders: the
+  // trust dialog has no footer; the cache hint always pairs its title with
+  // the "Compact and continue" option).
+  modals: [
+    { id: "workspace-trust", status: "menu", re: /Trust this folder\?[\s\S]*Don't trust/u },
+    { id: "cache-expiry-hint", status: "menu", re: /Cache expired[\s\S]*Compact and continue/u },
+  ],
+  modalVetoLineRe: /^\s*(?:[│┃]\s*)?>\s*(?:[│┃]\s*)?$/mu,
 };
 
 // --- Registry ------------------------------------------------------------
