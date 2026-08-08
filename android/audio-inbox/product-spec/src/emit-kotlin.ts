@@ -113,7 +113,7 @@ function emitCatalogAggregate(product: ProductIr, sha: string): string {
   ).join("\n");
   const finiteValues = product.finiteValues.map((declaration) =>
     `        GeneratedLinkFiniteValueDeclaration(FiniteValueIds.${kotlinEnumToken(declaration.id)}, setOf(${declaration.values.map((value) => `"${value}"`).join(", ")}))`
-  ).join("\n");
+  ).join(",\n");
   return `${header("the portable native-Lego catalog", sha)}
 internal object GeneratedLinkNativeLegoCatalog {
     object PortIds {
@@ -139,7 +139,7 @@ function emitPortData(product: ProductIr, sha: string): string {
   const ports = [...product.portRegistry.servicePorts, ...product.portRegistry.componentPorts];
   const entries = ports.map((port) =>
     `        GeneratedProductPort(GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(port.ref)}, ${ownerKind(port.ownerKind)}, "${port.ownerId}", "${port.typeRef}", "${port.portId}", ${direction(port.direction)}, "${port.contractRef}", ${boundary(port.boundary)}, ${port.required}, ${purpose(port.purpose)})`
-  ).join("\n");
+  ).join(",\n");
   return `${header("the portable native-Lego port registry", sha)}
 internal object GeneratedLinkNativeLegoPortData {
     val ports: List<GeneratedProductPort> = listOf(
@@ -152,7 +152,7 @@ ${entries}
 function emitPortBindings(product: ProductIr, sha: string): string {
   const entries = product.portRegistry.bindings.map((binding) =>
     `        GeneratedProductPortBinding(${bindingKind(binding.kind)}, GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(binding.from)}, GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(binding.to)}, ${purpose(binding.purpose)})`
-  ).join("\n");
+  ).join(",\n");
   return `${header("the portable native-Lego port bindings", sha)}
 internal object GeneratedLinkNativeLegoPortBindings {
     val bindings: List<GeneratedProductPortBinding> = listOf(

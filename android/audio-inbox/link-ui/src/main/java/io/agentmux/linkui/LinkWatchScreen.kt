@@ -128,14 +128,18 @@ fun LinkWatchSurface(
     val onSelectTarget = remember(graph) {
         { targetId: String -> graph.onTargetSelect(LinkTargetSelectEvent(targetId)) }
     }
-    val onPlay = remember(graph) {
+    // The body ends in a safe-call, so its natural type is `() -> Unit?`: "there
+    // was no turn to play" is not a value a row handler may return. Stating the
+    // contract here makes the compiler coerce it, instead of letting the
+    // nullability travel into every call site.
+    val onPlay: () -> Unit = remember(graph) {
         {
             graph.latest.value.turns.lastOrNull { it.replyText.isNotBlank() }?.turnId?.let { turnId ->
                 graph.onActivePlaybackCommand(LinkPlaybackCommandEvent(PlaybackOperation.PLAY, turnId))
             }
         }
     }
-    val onStop = remember(graph) {
+    val onStop: () -> Unit = remember(graph) {
         {
             (
                 graph.activePlayback.value.activeTurnId
