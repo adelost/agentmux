@@ -28,14 +28,17 @@ const MAX_BLOCKED_RETRY_MS = 60_000;
 // Warn well before a legitimate long turn reaches the 60-minute verdict.
 const SUBMITTED_STALL_NOTICE_MS = 3 * 60_000;
 const STALE_SUBMITTED_TERMINAL_MS = 60 * 60 * 1_000;
-// A slash command is consumed by the TUI's own parser and never becomes a
-// conversation turn, so the JSONL receipt this wait is built on cannot arrive.
-// Holding the lane for the full hour therefore starves every later message to
-// that pane on a verdict that was decided in the first seconds: skyvw:0 sat 32
-// minutes behind one `/model` while four later sends piled up, and skydive:3
-// lost 6h16m of deliveries to the same shape. Either the composer took it
-// immediately or it did not.
+// A slash command normally proves itself in seconds (the Claude TUI writes an
+// exact command receipt to JSONL), but holding the lane while waiting starves
+// every later message to that pane: skyvw:0 sat 32 minutes behind one `/model`
+// while four later sends piled up, and skydive:3 lost 6h16m of deliveries to
+// the same shape. So the LANE releases after a minute — while the receipt
+// remains legitimate evidence for the same hour a prompt gets: a slash queued
+// behind a /compact of a 62 MB session produced its exact receipt minutes
+// after this deadline (lsrc:2, 2026-08-08). The late-echo watch below keeps
+// listening for it without holding anything.
 const STALE_SUBMITTED_SLASH_TERMINAL_MS = 60_000;
+const LATE_ECHO_WATCH_MS = STALE_SUBMITTED_TERMINAL_MS;
 
 /**
  * WHAT: How long a submitted job may hold its lane before the broker gives up.
@@ -185,21 +188,48 @@ export function createDeliveryBroker({
     if (TERMINAL_DELIVERY_STATES.has(current.status)) return current;
 
     const preEnterFence = current.status === "submitting";
+    // A post-Enter slash with a receipt cursor keeps its evidence channel open
+    // after the lane releases: the warning is deferred to the watch horizon
+    // (preflight holds it via unverifiedNoticeNextAttemptAt) and a soft
+    // stalled notice arms the recovered confirmation instead. A pre-Enter
+    // fence, an explicit reason/ambiguity, or a dialect without slash receipts
+    // cannot produce late evidence, so they keep the immediate warning.
+    const lateEchoWatchUntil = (!skipEcho && !reason && !ambiguity
+      && current.kind === "slash"
+      && current.status === "submitted"
+      && current.echoCursor
+      && typeof agent.waitForSlashReceipt === "function")
+      ? Number(current.submittedAt || current.createdAt || now()) + LATE_ECHO_WATCH_MS
+      : null;
     const terminal = queue.update(current, {
       status: DELIVERED_UNVERIFIED_STATE,
       draftOwned: false,
       terminalAt: now(),
       nextAttemptAt: null,
       unverifiedNoticeSentAt: null,
-      unverifiedNoticeNextAttemptAt: now(),
+      unverifiedNoticeNextAttemptAt: lateEchoWatchUntil ?? now(),
+      ...(lateEchoWatchUntil ? {
+        lateEchoWatchUntil,
+        noticeSentAt: current.noticeSentAt || now(),
+      } : {}),
       ...(ambiguity || preEnterFence ? {
         metadata: { deliveryAmbiguity: ambiguity || "submitting-fence" },
       } : {}),
-      lastReason: reason || (preEnterFence
-        ? "pre-Enter submit fence has no exact receipt after 60 minutes; physical delivery remains unverified"
-        : "submit attempt has no exact JSONL receipt after 60 minutes; delivery remains unverified"),
+      lastReason: reason || (lateEchoWatchUntil
+        ? "slash lane released after 60 seconds; the exact command receipt is still watched for until the 60-minute mark"
+        : preEnterFence
+          ? "pre-Enter submit fence has no exact receipt after 60 minutes; physical delivery remains unverified"
+          : "submit attempt has no exact JSONL receipt after 60 minutes; delivery remains unverified"),
     });
     queueEvent(terminal, DELIVERED_UNVERIFIED_STATE);
+    if (lateEchoWatchUntil) {
+      const queuedBehind = queue.list(terminal.agentName, terminal.pane)
+        .filter((other) => other.id !== terminal.id && !TERMINAL_DELIVERY_STATES.has(other.status))
+        .length;
+      await notify(terminal, "stalled", { queuedBehind }).catch((error) =>
+        log(`delivery broker watch notice failed for ${terminal.id}: ${error.message}`));
+      return terminal;
+    }
     return notifyTerminal(terminal);
   }
 
@@ -647,6 +677,7 @@ export function createDeliveryBroker({
         // same writer lease as pane delivery.
         await runDeliveryPreflight({
           agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal,
+          exactEcho, acknowledge,
         });
 
         // Every non-terminal head, including `submitted`, retains FIFO until
