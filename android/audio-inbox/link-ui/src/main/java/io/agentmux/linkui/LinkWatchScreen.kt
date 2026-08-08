@@ -1,88 +1,71 @@
 package io.agentmux.linkui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.activity.compose.BackHandler
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.adelost.designkit.ui.CircleSurfaceClass
 import com.adelost.designkit.ui.GraphiteTokens
 import com.adelost.designkit.ui.RingIcons
-import com.adelost.releasekit.UpdateState
 import com.adelost.releasekit.ui.releaseUpdateRows
 import com.adelost.ringkit.ui.RenderRingScreen
 import com.adelost.ringkit.ui.RingNavigator
 import com.adelost.ringkit.ui.RingScreen
 import com.adelost.ringkit.ui.RowSpec
+import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
-import io.agentmux.linkcore.LinkState
+import io.agentmux.linkcore.LinkRecoveryPhase
+import io.agentmux.linkcore.LinkTurn
+import io.agentmux.linkcore.LinkUpdateOperation
+import io.agentmux.linkcore.PlaybackOperation
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.linkConnectionLabel
-import io.agentmux.linkcore.linkConnectionRoute
-import io.agentmux.linkcore.linkConnectionSettingsDetail
-import io.agentmux.linkui.product.LinkNativeComponentRenderer
-import io.agentmux.linkui.product.LinkProductSession
-import io.agentmux.linkui.product.generated.LinkMenuAction
-import io.agentmux.linkui.product.generated.LinkRoute
+import io.agentmux.linkui.product.LinkConversationPresentation
+import io.agentmux.linkui.product.LinkNativeBindings
+import io.agentmux.linkui.product.LinkPlaybackCommandEvent
+import io.agentmux.linkui.product.LinkPlaybackPresentation
+import io.agentmux.linkui.product.LinkProductGraph
+import io.agentmux.linkui.product.LinkRecoveryPresentation
+import io.agentmux.linkui.product.LinkRoute
+import io.agentmux.linkui.product.LinkRouteOpenEvent
+import io.agentmux.linkui.product.LinkSessionPresentation
+import io.agentmux.linkui.product.LinkTargetPresentation
+import io.agentmux.linkui.product.LinkTargetSelectEvent
+import io.agentmux.linkui.product.LinkUpdateCommandEvent
+import io.agentmux.linkui.product.LinkUpdatePresentation
+import io.agentmux.linkui.product.generated.GeneratedLinkHomeComponent
+import io.agentmux.linkui.product.generated.GeneratedLinkHomeComponents
+import io.agentmux.linkui.product.generated.GeneratedLinkSettingsComponent
+import io.agentmux.linkui.product.generated.GeneratedLinkSettingsComponents
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.time.ZoneId
 import java.util.Locale
 
 @Composable
 fun LinkWatchScreen(
-    product: LinkProductSession,
-    state: LinkState,
-    updateState: UpdateState,
+    graph: LinkProductGraph,
     currentVersionName: String,
-    microphoneGranted: Boolean,
     onRequestMicrophone: () -> Unit,
-    onSelectTarget: (String) -> Unit,
-    onBeginCapture: () -> Boolean,
-    onReleaseCapture: () -> Unit,
-    onCancelCapture: () -> Unit,
     recordedBytes: () -> Long,
     recordedLevel: () -> Float,
-    onPlay: () -> Unit,
-    onStop: () -> Unit,
-    onReplay: () -> Unit,
-    onCheckUpdate: () -> Unit,
-    onInstallUpdate: () -> Unit,
     onOpenDevHost: (() -> Unit)? = null,
-    onNavigateRoute: (LinkRoute) -> LinkRoute = { it },
-    initialShowingSettings: Boolean = false,
 ) {
-    var route by rememberSaveable {
-        mutableStateOf(if (initialShowingSettings) LinkRoute.SETTINGS else LinkRoute.HOME)
-    }
     LinkWatchSurface(
-        product = product,
-        state = state,
-        updateState = updateState,
+        graph = graph,
         currentVersionName = currentVersionName,
-        route = route,
-        onNavigate = { route = onNavigateRoute(it) },
-        onBack = { route = onNavigateRoute(LinkRoute.HOME) },
-        microphoneGranted = microphoneGranted,
         onRequestMicrophone = onRequestMicrophone,
-        onSelectTarget = onSelectTarget,
-        onBeginCapture = onBeginCapture,
-        onReleaseCapture = onReleaseCapture,
-        onCancelCapture = onCancelCapture,
         recordedBytes = recordedBytes,
         recordedLevel = recordedLevel,
-        onPlay = onPlay,
-        onStop = onStop,
-        onReplay = onReplay,
-        onCheckUpdate = onCheckUpdate,
-        onInstallUpdate = onInstallUpdate,
         onOpenDevHost = onOpenDevHost,
     )
 }
@@ -90,190 +73,188 @@ fun LinkWatchScreen(
 /** The exact Watch presentation shared by real Wear and Phone WatchExact. */
 @Composable
 fun LinkWatchSurface(
-    product: LinkProductSession,
-    state: LinkState,
-    updateState: UpdateState,
+    graph: LinkProductGraph,
     currentVersionName: String,
-    route: LinkRoute,
-    onNavigate: (LinkRoute) -> Unit,
-    onBack: () -> Unit,
-    microphoneGranted: Boolean,
     onRequestMicrophone: () -> Unit,
-    onSelectTarget: (String) -> Unit,
-    onBeginCapture: () -> Boolean,
-    onReleaseCapture: () -> Unit,
-    onCancelCapture: () -> Unit,
     recordedBytes: () -> Long,
     recordedLevel: () -> Float,
-    onPlay: () -> Unit,
-    onStop: () -> Unit,
-    onReplay: () -> Unit,
-    onCheckUpdate: () -> Unit,
-    onInstallUpdate: () -> Unit,
     onOpenDevHost: (() -> Unit)? = null,
 ) {
+    val route by graph.navigation.route.collectAsState()
+    val target by graph.target.collectAsState()
+    val capture by graph.capture.collectAsState()
+    val captureSpec by graph.captureSpec.collectAsState()
+    val latest by graph.latest.collectAsState()
+    val connection by graph.connection.collectAsState()
+    val updates by graph.updates.collectAsState()
+    val recovery by graph.recovery.collectAsState()
     val showingSettings = route == LinkRoute.SETTINGS
     var captureOpen by remember { mutableStateOf(false) }
     var captureStarted by remember { mutableStateOf(false) }
     BackHandler(enabled = captureOpen) {
-        onCancelCapture()
+        graph.cancelCapture()
         captureStarted = false
         captureOpen = false
     }
-    LaunchedEffect(state.capture) {
-        if (state.capture == io.agentmux.linkcore.CapturePhase.LISTENING ||
-            state.capture == io.agentmux.linkcore.CapturePhase.FINALIZING
-        ) {
+    LaunchedEffect(capture.phase) {
+        if (capture.phase == CapturePhase.LISTENING || capture.phase == CapturePhase.FINALIZING) {
             captureStarted = true
-        } else if (captureStarted &&
-            state.capture == io.agentmux.linkcore.CapturePhase.IDLE
-        ) {
+        } else if (captureStarted && capture.phase == CapturePhase.IDLE) {
             captureStarted = false
             captureOpen = false
         }
     }
     if (captureOpen) {
-        val selected = state.targets.firstOrNull { it.id == state.selectedTargetId }
-            ?: state.targets.firstOrNull()
         Box(
             modifier = Modifier.fillMaxSize().background(GraphiteTokens.Canvas),
             contentAlignment = Alignment.Center,
         ) {
             LinkCaptureControl(
-                spec = LinkCaptureSpec(
-                    phase = state.capture,
-                    startedAtMs = state.captureStartedAtMs,
-                    availability = resolveLinkCaptureAvailability(
-                        hasTarget = selected != null,
-                        targetAcceptsMessages = selected?.acceptsMessages == true,
-                        microphoneGranted = microphoneGranted,
-                        finalizing = state.capture == io.agentmux.linkcore.CapturePhase.FINALIZING,
-                    ),
-                ),
+                spec = captureSpec,
                 recordedBytes = recordedBytes,
                 recordedLevel = recordedLevel,
-                onBegin = onBeginCapture,
-                onRelease = onReleaseCapture,
-                onCancel = onCancelCapture,
+                onBegin = graph::beginCapture,
+                onRelease = graph::releaseCapture,
+                onCancel = graph::cancelCapture,
                 onRecover = onRequestMicrophone,
             )
         }
         return
     }
-    BackHandler(enabled = showingSettings) { onBack() }
+    BackHandler(enabled = showingSettings) { graph.navigation.open(LinkRoute.HOME) }
+    val onOpenSettings = remember(graph) {
+        { graph.onSettingsActionOpen(LinkRouteOpenEvent(LinkRoute.SETTINGS)) }
+    }
+    val onSelectTarget = remember(graph) {
+        { targetId: String -> graph.onTargetSelect(LinkTargetSelectEvent(targetId)) }
+    }
+    val onPlay = remember(graph) {
+        {
+            graph.latest.value.turns.lastOrNull { it.replyText.isNotBlank() }?.turnId?.let { turnId ->
+                graph.onActivePlaybackCommand(LinkPlaybackCommandEvent(PlaybackOperation.PLAY, turnId))
+            }
+        }
+    }
+    val onStop = remember(graph) {
+        {
+            (
+                graph.activePlayback.value.activeTurnId
+                    ?: graph.latest.value.turns.lastOrNull { it.replyText.isNotBlank() }?.turnId
+                )?.let { turnId ->
+                graph.onActivePlaybackCommand(LinkPlaybackCommandEvent(PlaybackOperation.STOP, turnId))
+            }
+        }
+    }
     val items = remember { MutableStateFlow(emptyList<RowSpec>()) }
     val navigator = remember(showingSettings) {
         RingNavigator(
             RingScreen.Rows(
-                title = product.route(route).title,
+                title = route.headerTitle,
                 items = items,
                 showBack = showingSettings,
             ),
         )
     }
     LaunchedEffect(
-        state,
-        updateState,
+        target,
+        latest,
+        connection,
+        updates,
+        recovery,
         currentVersionName,
-        onSelectTarget,
-        onPlay,
-        onStop,
-        onReplay,
-        onCheckUpdate,
-        onInstallUpdate,
-        onOpenDevHost,
         showingSettings,
-        onNavigate,
+        route,
+        onOpenDevHost,
+        graph,
     ) {
         items.value = if (showingSettings) {
             linkWatchSettingsRows(
-                product = product,
-                state = state,
-                updateState = updateState,
+                session = connection,
+                updates = updates,
+                recovery = recovery,
                 currentVersionName = currentVersionName,
-                onCheckUpdate = onCheckUpdate,
-                onInstallUpdate = onInstallUpdate,
+                onCheckUpdate = {
+                    graph.onUpdatesCommand(LinkUpdateCommandEvent(LinkUpdateOperation.RETRY))
+                },
+                onInstallUpdate = {
+                    graph.onUpdatesCommand(LinkUpdateCommandEvent(LinkUpdateOperation.INSTALL))
+                },
                 onOpenDevHost = onOpenDevHost,
             )
         } else {
             linkWatchRows(
-                product = product,
-                state = state,
+                target = target,
+                conversation = latest,
+                session = connection,
                 onSelectTarget = onSelectTarget,
                 onOpenCapture = { captureOpen = true },
                 onPlay = onPlay,
                 onStop = onStop,
-                onReplay = onReplay,
-                onMenuAction = { action -> action.dispatch(product, onNavigate) },
+                onReplay = onPlay,
+                onOpenSettings = onOpenSettings,
             )
         }
     }
-    RenderRingScreen(nav = navigator, onExit = onBack)
+    RenderRingScreen(nav = navigator, onExit = { graph.navigation.open(LinkRoute.HOME) })
 }
 
 fun linkWatchRows(
-    product: LinkProductSession,
-    state: LinkState,
+    target: LinkTargetPresentation,
+    conversation: LinkConversationPresentation,
+    session: LinkSessionPresentation,
     onSelectTarget: (String) -> Unit,
     onOpenCapture: () -> Unit,
     onPlay: () -> Unit,
     onStop: () -> Unit,
     onReplay: () -> Unit,
-    onMenuAction: (LinkMenuAction) -> Unit = {},
+    onOpenSettings: () -> Unit = {},
 ): List<RowSpec> {
-    val selected = state.targets.firstOrNull { it.id == state.selectedTargetId }
-        ?: state.targets.firstOrNull()
-    val sendableTargets = state.targets.filter { it.acceptsMessages }
-    val targetChoices = sendableTargets
+    val selected = target.targets.firstOrNull { it.id == target.selectedTargetId }
+    val targetChoices = target.targets
         .map { it.label.ifBlank { it.id }.uppercase() }
         .takeIf { it.size >= 2 }
         .orEmpty()
-    val latest = state.turns.lastOrNull()
-    val selectedSendable = selected?.acceptsMessages == true
     val rows = mutableListOf<RowSpec>()
-    product.components(LinkRoute.HOME, "round").forEach { component ->
-        when (component.renderer) {
-            LinkNativeComponentRenderer.STATUS -> rows += RowSpec(
-                key = component.componentId,
-                title = "AGENT · ${linkConnectionRoute(state)}",
+    GeneratedLinkHomeComponents.resolve(CircleSurfaceClass.ROUND).orderedMounts.forEach { mount ->
+        when (mount.component) {
+            GeneratedLinkHomeComponent.TARGET -> rows += RowSpec(
+                key = mount.id,
+                title = "AGENT · ${linkSessionRoute(session)}",
                 sub = selected?.label?.ifBlank { selected.id }?.uppercase() ?: "NO TARGET",
-                icon = product.icon(component),
+                icon = LinkNativeBindings.requireIcon("target"),
                 choices = targetChoices,
                 onSelect = targetChoices.takeIf { it.isNotEmpty() }?.let {
                     { label: String ->
-                        sendableTargets.firstOrNull {
+                        target.targets.firstOrNull {
                             it.label.ifBlank { it.id }.uppercase() == label
                         }?.let { onSelectTarget(it.id) }
                     }
                 },
             )
-            LinkNativeComponentRenderer.CAPTURE -> rows += RowSpec(
-                key = component.componentId,
+            GeneratedLinkHomeComponent.TALK -> rows += RowSpec(
+                key = mount.id,
                 title = "PUSH TO TALK",
-                sub = when {
-                    !selectedSendable -> "UNAVAILABLE"
-                    selected?.available == false -> "OPEN RECORDER · WILL QUEUE"
-                    else -> "OPEN RECORDER"
-                },
-                icon = product.icon(component),
-                onTap = onOpenCapture.takeIf { selectedSendable },
+                sub = if (selected == null) "UNAVAILABLE" else "OPEN RECORDER",
+                icon = LinkNativeBindings.requireIcon("record"),
+                onTap = onOpenCapture.takeIf { selected != null },
             )
-            LinkNativeComponentRenderer.CONVERSATION_FEED -> rows += watchReplyRows(
-                latest = latest,
-                defaultIcon = product.icon(component),
+            GeneratedLinkHomeComponent.LATEST -> rows += watchReplyRows(
+                latest = conversation.turns.lastOrNull(),
+                defaultIcon = LinkNativeBindings.requireIcon("speaker"),
                 onPlay = onPlay,
                 onStop = onStop,
                 onReplay = onReplay,
             )
-            else -> error("${component.renderer.id} is not a Link home component on round")
+            GeneratedLinkHomeComponent.SETTINGS_ACTION -> rows += linkSettingsRow(onOpenSettings)
+            GeneratedLinkHomeComponent.COMPOSER ->
+                error("${mount.component.id.wireId} is not a Link home component on round")
         }
     }
-    rows += linkSettingsRow(product, onMenuAction)
     return rows
 }
 
 private fun watchReplyRows(
-    latest: io.agentmux.linkcore.LinkTurn?,
+    latest: LinkTurn?,
     defaultIcon: androidx.compose.ui.graphics.vector.ImageVector,
     onPlay: () -> Unit,
     onStop: () -> Unit,
@@ -308,9 +289,9 @@ private fun watchReplyRows(
 }
 
 fun linkWatchSettingsRows(
-    product: LinkProductSession,
-    state: LinkState,
-    updateState: UpdateState,
+    session: LinkSessionPresentation,
+    updates: LinkUpdatePresentation,
+    recovery: LinkRecoveryPresentation,
     currentVersionName: String,
     onCheckUpdate: () -> Unit = {},
     onInstallUpdate: () -> Unit = {},
@@ -318,19 +299,23 @@ fun linkWatchSettingsRows(
     zoneId: ZoneId = ZoneId.systemDefault(),
     locale: Locale = Locale.getDefault(),
 ): List<RowSpec> = buildList {
-    product.components(LinkRoute.SETTINGS, "round").forEach { component ->
-        when (component.renderer) {
-            LinkNativeComponentRenderer.CONNECTION -> add(
+    GeneratedLinkSettingsComponents.resolve(CircleSurfaceClass.ROUND).orderedMounts.forEach { mount ->
+        when (mount.component) {
+            GeneratedLinkSettingsComponent.CONNECTION -> add(
                 RowSpec(
-                    key = component.componentId,
-                    title = linkConnectionLabel(state.connection),
-                    sub = linkConnectionSettingsDetail(state),
-                    icon = if (state.connection == ConnectionState.CONNECTED) RingIcons.Wifi else RingIcons.Link,
+                    key = mount.id,
+                    title = linkConnectionLabel(session.connection),
+                    sub = linkSessionSettingsDetail(session),
+                    icon = if (session.connection == ConnectionState.CONNECTED) {
+                        LinkNativeBindings.requireIcon("wifi")
+                    } else {
+                        LinkNativeBindings.requireIcon("link")
+                    },
                 ),
             )
-            LinkNativeComponentRenderer.UPDATES -> addAll(
+            GeneratedLinkSettingsComponent.UPDATES -> addAll(
                 releaseUpdateRows(
-                    state = updateState,
+                    state = updates.update,
                     currentVersionName = currentVersionName,
                     onCheck = onCheckUpdate,
                     onInstall = onInstallUpdate,
@@ -338,13 +323,52 @@ fun linkWatchSettingsRows(
                     locale = locale,
                 ),
             )
-            LinkNativeComponentRenderer.DEV_HOST -> onOpenDevHost?.let { open ->
-                add(RowSpec(component.componentId, "DEV HOST", "RESPONSIVE · WATCH EXACT", product.icon(component), onTap = open))
+            GeneratedLinkSettingsComponent.DEV_HOST -> onOpenDevHost?.let { open ->
+                add(
+                    RowSpec(
+                        mount.id,
+                        "DEV HOST",
+                        "RESPONSIVE · WATCH EXACT",
+                        LinkNativeBindings.requireIcon("phone"),
+                        onTap = open,
+                    ),
+                )
             }
-            LinkNativeComponentRenderer.RECOVERY -> state.recoveryError.takeIf { it.isNotBlank() }?.let { error ->
-                add(RowSpec(component.componentId, "RECOVERY", error.uppercase(), product.icon(component)))
+            GeneratedLinkSettingsComponent.RECOVERY -> if (recovery.phase == LinkRecoveryPhase.QUARANTINED) {
+                add(
+                    RowSpec(
+                        mount.id,
+                        "RECOVERY",
+                        recovery.detail.orEmpty().uppercase(),
+                        LinkNativeBindings.requireIcon("warning"),
+                    ),
+                )
             }
-            else -> error("${component.renderer.id} is not a Link settings component on round")
+            else -> error("${mount.component.id.wireId} is not a Link settings component on round")
         }
     }
 }
+
+/** The turn the playback service is actively driving; null once it stops or fails. */
+val LinkPlaybackPresentation.activeTurnId: String?
+    get() = turnId?.takeIf { phase == PlaybackPhase.PLAYING || phase == PlaybackPhase.PAUSED }
+
+fun linkSessionRoute(session: LinkSessionPresentation): String {
+    val detail = session.connectionDetail.orEmpty()
+    return when {
+        session.connection != ConnectionState.CONNECTED -> linkConnectionLabel(session.connection)
+        detail.contains("public", ignoreCase = true) &&
+            !detail.contains("tailscale", ignoreCase = true) -> "PUBLIC"
+        else -> "PRIVATE"
+    }
+}
+
+fun linkSessionSettingsDetail(session: LinkSessionPresentation): String =
+    when (session.connection) {
+        ConnectionState.CONNECTED ->
+            session.connectionDetail.orEmpty().uppercase().take(42).ifBlank { "READY" }
+        ConnectionState.CONNECTING -> "LOOKING FOR LINK"
+        ConnectionState.DISCONNECTED -> "OPEN PHONE TO CONNECT"
+        ConnectionState.CONFIGURATION_REQUIRED -> "LOG IN ON PHONE"
+        ConnectionState.OFF -> "LINK IS OFF"
+    }

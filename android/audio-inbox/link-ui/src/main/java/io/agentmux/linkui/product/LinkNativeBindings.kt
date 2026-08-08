@@ -1,8 +1,6 @@
 package io.agentmux.linkui.product
 
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import com.adelost.designkit.ui.GraphiteTokens
 import com.adelost.designkit.ui.RingIcons
 import io.agentmux.linkcore.CaptureOperation
 import io.agentmux.linkcore.CapturePhase
@@ -16,97 +14,62 @@ import io.agentmux.linkcore.LinkUpdatePhase
 import io.agentmux.linkcore.PlaybackOperation
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.ReplyPhase
+import io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef
+import io.agentmux.linkui.product.generated.GeneratedLinkComponentId
+import io.agentmux.linkui.product.generated.GeneratedLinkFiniteValueId
+import io.agentmux.linkui.product.generated.GeneratedLinkNativeLegoCatalog.FiniteValueIds
+import kotlin.enums.enumEntries
 
-const val LINK_PHONE_PROFILE = "phone-full-ui"
-const val LINK_WEAR_PROFILE = "wear-full-ui"
-
-enum class LinkNativeComponentRenderer(val id: String) {
-    STATUS("status"),
-    CONVERSATION_FEED("conversation-feed"),
-    COMPOSER("composer"),
-    CAPTURE("capture"),
-    ACTIVE_PLAYBACK("active-playback"),
-    CONNECTION("connection"),
-    PUBLIC_LINK("public-link"),
-    PREFERENCES("preferences"),
-    LOCAL_HISTORY("local-history"),
-    UPDATES("updates"),
-    DEV_HOST("dev-host"),
-    RECOVERY("recovery"),
-    DEV_PREVIEW("dev-preview"),
-}
-
-enum class LinkNativeServicePort(val id: String) {
-    NAVIGATION("link.navigation.port"),
-    CAPTURE("link.capture.port"),
-    CONVERSATION("link.conversation.port"),
-    PLAYBACK("link.playback.port"),
-    TARGET("link.target.port"),
-    SESSION("link.session.port"),
-    HISTORY("link.history.port"),
-    PREFERENCES("link.preferences.port"),
-    UPDATES("link.updates.port"),
-    RECOVERY("link.recovery.port"),
-}
-
-enum class LinkNativeRoute(val id: String) {
-    HOME("home"),
-    SETTINGS("settings"),
-    DEV_HOST("dev-host"),
-}
-
+/** One component instance attested to a native renderer and its host artifacts. */
 data class LinkNativeComponentBinding(
-    val componentId: String,
-    val renderer: LinkNativeComponentRenderer,
-    val profiles: Set<String>,
+    val component: GeneratedLinkComponentId,
+    val rendererId: String,
+    val profiles: Set<GeneratedLinkArtifactRef>,
 )
 
+/** One portable icon asset attested to its compile-bound CircleKit symbol. */
 data class LinkNativeIconBinding(
     val iconId: String,
     val nativeSymbol: String,
     val icon: ImageVector,
 )
 
-data class LinkNativeServiceBinding(
-    val serviceId: String,
-    val port: LinkNativeServicePort,
-    val profiles: Set<String>,
-    val inputPorts: Set<String>,
-    val outputPorts: Set<String>,
-)
-
-data class LinkNativeFiniteValueBinding(
-    val id: String,
+/** One generated finite-value declaration attested to its native enum's wire values. */
+internal data class LinkNativeFiniteValueBinding(
+    val id: GeneratedLinkFiniteValueId,
     val values: Set<String>,
 )
 
 /**
- * Handwritten Android truth. It deliberately imports no generated ProductSpec
- * output, so generation cannot certify itself when a real native binding drifts.
+ * The native attestation named by product-spec/native-registry/link.json.
+ * Every entry binds a generated component/artifact id or a compile-checked
+ * RingIcons/enum symbol, so a product change that drops one fails here at
+ * compile time, and the manifest/parity tests fail on any other drift.
  */
 object LinkNativeBindings {
-    const val SCHEMA_VERSION = 1
+    const val SCHEMA_VERSION = 2
     const val SOURCE_FILE =
         "link-ui/src/main/java/io/agentmux/linkui/product/LinkNativeBindings.kt"
 
-    val profiles: Set<String> = setOf(LINK_PHONE_PROFILE, LINK_WEAR_PROFILE)
+    val profiles: Set<GeneratedLinkArtifactRef> = GeneratedLinkArtifactRef.entries.toSet()
     private val both = profiles
-    private val phone = setOf(LINK_PHONE_PROFILE)
+    private val phone = setOf(GeneratedLinkArtifactRef.PHONE_FULL_UI)
 
     val components: List<LinkNativeComponentBinding> = listOf(
-        component("target", LinkNativeComponentRenderer.STATUS, both),
-        component("latest", LinkNativeComponentRenderer.CONVERSATION_FEED, both),
-        component("composer", LinkNativeComponentRenderer.COMPOSER, phone),
-        component("talk", LinkNativeComponentRenderer.CAPTURE, both),
-        component("active-playback", LinkNativeComponentRenderer.ACTIVE_PLAYBACK, phone),
-        component("connection", LinkNativeComponentRenderer.CONNECTION, both),
-        component("public-link", LinkNativeComponentRenderer.PUBLIC_LINK, phone),
-        component("preferences", LinkNativeComponentRenderer.PREFERENCES, phone),
-        component("local-history", LinkNativeComponentRenderer.LOCAL_HISTORY, phone),
-        component("updates", LinkNativeComponentRenderer.UPDATES, both),
-        component("dev-host", LinkNativeComponentRenderer.DEV_HOST, phone),
-        component("recovery", LinkNativeComponentRenderer.RECOVERY, both),
-        component("dev-preview", LinkNativeComponentRenderer.DEV_PREVIEW, phone),
+        component(GeneratedLinkComponentId.TARGET, "status", both),
+        component(GeneratedLinkComponentId.LATEST, "conversation-feed", both),
+        component(GeneratedLinkComponentId.COMPOSER, "composer", phone),
+        component(GeneratedLinkComponentId.TALK, "capture", both),
+        component(GeneratedLinkComponentId.ACTIVE_PLAYBACK, "active-playback", phone),
+        component(GeneratedLinkComponentId.CONNECTION, "connection", both),
+        component(GeneratedLinkComponentId.PUBLIC_LINK, "public-link", phone),
+        component(GeneratedLinkComponentId.PREFERENCES, "preferences", phone),
+        component(GeneratedLinkComponentId.LOCAL_HISTORY, "local-history", phone),
+        component(GeneratedLinkComponentId.UPDATES, "updates", both),
+        component(GeneratedLinkComponentId.RECOVERY, "recovery", both),
+        component(GeneratedLinkComponentId.SETTINGS_ACTION, "navigation-entry", both),
+        component(GeneratedLinkComponentId.DEV_HOST, "navigation-entry", phone),
+        component(GeneratedLinkComponentId.DEV_PREVIEW, "dev-preview", phone),
     )
 
     val icons: List<LinkNativeIconBinding> = listOf(
@@ -124,41 +87,32 @@ object LinkNativeBindings {
         icon("warning", "RingIcons.Warning", RingIcons.Warning),
     )
 
-    val canvasColor: Color = GraphiteTokens.Canvas
-
-    val services: List<LinkNativeServiceBinding> = listOf(
-        service("navigation", LinkNativeServicePort.NAVIGATION, setOf("open"), setOf("destination")),
-        service("capture", LinkNativeServicePort.CAPTURE, setOf("command"), setOf("status", "captured")),
-        service("conversation", LinkNativeServicePort.CONVERSATION, setOf("turn", "compose"), setOf("status")),
-        service("playback", LinkNativeServicePort.PLAYBACK, setOf("command"), setOf("status")),
-        service("target", LinkNativeServicePort.TARGET, setOf("select"), setOf("directory")),
-        service("session", LinkNativeServicePort.SESSION, setOf(), setOf("status")),
-        service("history", LinkNativeServicePort.HISTORY, setOf(), setOf("status")),
-        service("preferences", LinkNativeServicePort.PREFERENCES, setOf("toggle"), setOf("status")),
-        service("updates", LinkNativeServicePort.UPDATES, setOf("command"), setOf("status")),
-        service("recovery", LinkNativeServicePort.RECOVERY, setOf(), setOf("status")),
+    internal val finiteValues: List<LinkNativeFiniteValueBinding> = listOf(
+        LinkNativeFiniteValueBinding(
+            FiniteValueIds.LINK_ROUTE,
+            LinkRoute.entries.mapTo(linkedSetOf()) { it.wireId },
+        ),
+        finiteValues(FiniteValueIds.LINK_CAPTURE_OPERATION, wireValues<CaptureOperation>()),
+        finiteValues(FiniteValueIds.LINK_CAPTURE_PHASE, wireValues<CapturePhase>()),
+        finiteValues(FiniteValueIds.LINK_DELIVERY_PHASE, wireValues<DeliveryPhase>()),
+        finiteValues(FiniteValueIds.LINK_REPLY_PHASE, wireValues<ReplyPhase>()),
+        finiteValues(FiniteValueIds.LINK_PLAYBACK_OPERATION, wireValues<PlaybackOperation>()),
+        finiteValues(FiniteValueIds.LINK_PLAYBACK_PHASE, wireValues<PlaybackPhase>()),
+        finiteValues(FiniteValueIds.LINK_TARGET_KIND, wireValues<LinkTargetKind>()),
+        finiteValues(FiniteValueIds.LINK_CONNECTION_STATE, wireValues<ConnectionState>()),
+        finiteValues(FiniteValueIds.LINK_PREFERENCE_KEY, wireValues<LinkPreferenceKey>()),
+        finiteValues(FiniteValueIds.LINK_UPDATE_OPERATION, wireValues<LinkUpdateOperation>()),
+        finiteValues(FiniteValueIds.LINK_UPDATE_PHASE, wireValues<LinkUpdatePhase>()),
+        finiteValues(FiniteValueIds.LINK_RECOVERY_PHASE, wireValues<LinkRecoveryPhase>()),
     )
 
-    val finiteValues: List<LinkNativeFiniteValueBinding> = listOf(
-        LinkNativeFiniteValueBinding("link.route", LinkNativeRoute.entries.mapTo(linkedSetOf()) { it.id }),
-        finiteValues("link.capture-operation", CaptureOperation.entries.toTypedArray()),
-        finiteValues("link.capture-phase", CapturePhase.entries.toTypedArray()),
-        finiteValues("link.delivery-phase", DeliveryPhase.entries.toTypedArray()),
-        finiteValues("link.reply-phase", ReplyPhase.entries.toTypedArray()),
-        finiteValues("link.playback-operation", PlaybackOperation.entries.toTypedArray()),
-        finiteValues("link.playback-phase", PlaybackPhase.entries.toTypedArray()),
-        finiteValues("link.target-kind", LinkTargetKind.entries.toTypedArray()),
-        finiteValues("link.connection-state", ConnectionState.entries.toTypedArray()),
-        finiteValues("link.preference-key", LinkPreferenceKey.entries.toTypedArray()),
-        finiteValues("link.update-operation", LinkUpdateOperation.entries.toTypedArray()),
-        finiteValues("link.update-phase", LinkUpdatePhase.entries.toTypedArray()),
-        finiteValues("link.recovery-phase", LinkRecoveryPhase.entries.toTypedArray()),
-    )
-
-    fun requireComponent(componentId: String): LinkNativeComponentBinding =
-        requireNotNull(components.singleOrNull { it.componentId == componentId }) {
-            "No native Link component binding for $componentId"
+    init {
+        components.groupBy { it.component.typeId }.forEach { (typeId, instances) ->
+            require(instances.map { it.rendererId }.distinct().size == 1) {
+                "Component type $typeId is attested to more than one renderer"
+            }
         }
+    }
 
     fun requireIcon(iconId: String): ImageVector =
         requireNotNull(icons.singleOrNull { it.iconId == iconId }) {
@@ -166,24 +120,18 @@ object LinkNativeBindings {
         }.icon
 
     private fun component(
-        id: String,
-        renderer: LinkNativeComponentRenderer,
-        supportedProfiles: Set<String>,
-    ) = LinkNativeComponentBinding(id, renderer, supportedProfiles)
+        id: GeneratedLinkComponentId,
+        rendererId: String,
+        supportedProfiles: Set<GeneratedLinkArtifactRef>,
+    ) = LinkNativeComponentBinding(id, rendererId, supportedProfiles)
 
     private fun icon(id: String, symbol: String, value: ImageVector) =
         LinkNativeIconBinding(id, symbol, value)
 
-    private fun service(
-        id: String,
-        port: LinkNativeServicePort,
-        inputs: Set<String>,
-        outputs: Set<String>,
-    ) = LinkNativeServiceBinding(id, port, both, inputs, outputs)
-
-    private fun <E : Enum<E>> finiteValues(id: String, values: Array<E>) =
-        LinkNativeFiniteValueBinding(id, values.mapTo(linkedSetOf()) { wireId(it) })
+    private fun finiteValues(id: GeneratedLinkFiniteValueId, values: Set<String>) =
+        LinkNativeFiniteValueBinding(id, values)
 
     /** Kotlin constants stay platform idiom; the attested wire value is lowercase kebab. */
-    private fun wireId(entry: Enum<*>): String = entry.name.lowercase().replace('_', '-')
+    private inline fun <reified E : Enum<E>> wireValues(): Set<String> =
+        enumEntries<E>().mapTo(linkedSetOf()) { it.name.lowercase().replace('_', '-') }
 }
