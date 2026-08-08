@@ -5,7 +5,7 @@ package io.agentmux.linkui.product.generated
 
 enum class GeneratedLinkRouteRef(val wireId: String) { HOME("home"), SETTINGS("settings"), DEV_HOST("dev-host") }
 enum class GeneratedLinkComponentFamilyRef(val wireId: String) { LINK_HOME("link.home"), LINK_SETTINGS("link.settings"), LINK_DEV_HOST("link.dev-host") }
-enum class GeneratedLinkComponentId(val wireId: String) { TARGET("target"), TALK("talk"), LATEST("latest"), COMPOSER("composer"), ACTIVE_PLAYBACK("active-playback"), CONNECTION("connection"), PUBLIC_LINK("public-link"), PREFERENCES("preferences"), LOCAL_HISTORY("local-history"), UPDATES("updates"), RECOVERY("recovery"), SETTINGS_ACTION("settings-action"), DEV_HOST("dev-host"), DEV_PREVIEW("dev-preview") }
+enum class GeneratedLinkComponentId(val wireId: String, val typeId: String) { TARGET("target", "link.target-picker"), TALK("talk", "link.talk"), LATEST("latest", "link.latest-turn"), COMPOSER("composer", "link.composer"), ACTIVE_PLAYBACK("active-playback", "link.active-playback"), CONNECTION("connection", "link.connection-status"), PUBLIC_LINK("public-link", "link.public-link"), PREFERENCES("preferences", "link.preferences"), LOCAL_HISTORY("local-history", "link.local-history"), UPDATES("updates", "link.updates"), RECOVERY("recovery", "link.recovery-status"), SETTINGS_ACTION("settings-action", "link.navigation-entry"), DEV_HOST("dev-host", "link.navigation-entry"), DEV_PREVIEW("dev-preview", "link.dev-preview") }
 enum class GeneratedLinkArtifactRef(val wireId: String) { PHONE_FULL_UI("phone-full-ui"), WEAR_FULL_UI("wear-full-ui") }
 
 data class GeneratedLinkComponentFamilyBinding(
