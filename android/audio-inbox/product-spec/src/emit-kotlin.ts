@@ -1,229 +1,331 @@
-import type { LegoContract, LegoField, ProductEmitterPlugin, ProductIr } from "@v1d/product-spec";
-import type { AgentmuxLinkProductIr } from "./product.js";
+import { createHash } from "node:crypto";
+import type {
+  LegoFiniteValueDeclaration,
+  OutputArtifact,
+  ProductEmitterPlugin,
+  ProductIr,
+  ScreenComponentFamilyRef,
+  SurfaceFamily,
+} from "@v1d/product-spec";
 
-export function linkKotlinEmitter(path: string): ProductEmitterPlugin {
+const packageName = "io.agentmux.linkui.product.generated";
+
+/**
+ * Link's native emitter: projects the compiled ProductSpec port graph and the
+ * component families into the exact Kotlin the Android runtime, renderer
+ * attestation and inspector read. Shapes mirror the SVW-0124 catalog so the
+ * native engine stays a mechanical port; the generic graph laws are enforced
+ * by @v1d/product-spec before anything is emitted.
+ */
+export function linkNativeEmitter(kotlinRoot: string): ProductEmitterPlugin {
   return {
-    id: "link-kotlin",
+    id: "link-native",
     emit(product) {
-      const link = requireLinkProduct(product);
-      return [{ id: "link-kotlin", path, mediaType: "text/x-kotlin", content: emitKotlin(link) }];
+      const catalogSha = fingerprint({
+        ports: product.portRegistry.servicePorts,
+        componentPorts: product.portRegistry.componentPorts,
+        bindings: product.portRegistry.bindings,
+        demandEdges: product.portRegistry.demandEdges,
+        finiteValues: product.finiteValues,
+      });
+      const familiesSha = fingerprint(product.componentFamilies);
+      return [
+        artifact("catalog-types", `${kotlinRoot}/GeneratedLinkNativeLegoCatalogTypes.kt`,
+          emitCatalogTypes(catalogSha)),
+        artifact("catalog", `${kotlinRoot}/GeneratedLinkNativeLegoCatalog.kt`,
+          emitCatalogAggregate(product, catalogSha)),
+        artifact("catalog-ports", `${kotlinRoot}/GeneratedLinkNativeLegoCatalogPortData.kt`,
+          emitPortData(product, catalogSha)),
+        artifact("catalog-bindings", `${kotlinRoot}/GeneratedLinkNativeLegoCatalogPortBindings.kt`,
+          emitPortBindings(product, catalogSha)),
+        artifact("component-families", `${kotlinRoot}/GeneratedLinkComponentFamilies.kt`,
+          emitComponentFamilies(product, familiesSha)),
+        ...product.componentFamilies.map((entry) => {
+          const name = `Generated${kotlinIdentifier(entry.family.id)}Components`;
+          return artifact(
+            `components-${name}`,
+            `${kotlinRoot}/${name}.kt`,
+            emitComponentTree(entry, familiesSha),
+          );
+        }),
+      ];
     },
   };
 }
 
-function requireLinkProduct(product: ProductIr): AgentmuxLinkProductIr {
-  if (product.id !== "agentmux-link" || !("link" in product)) {
-    throw new Error("Link Kotlin emitter received another product");
-  }
-  return product as AgentmuxLinkProductIr;
+function emitCatalogTypes(sha: string): string {
+  return `${header("the portable native-Lego catalog type vocabulary", sha)}
+internal interface GeneratedLinkFiniteValueId { val value: String }
+internal sealed interface GeneratedProductPortId { val value: String }
+internal sealed interface GeneratedProductInputPortId : GeneratedProductPortId
+internal sealed interface GeneratedProductOutputPortId : GeneratedProductPortId
+internal data class GeneratedLinkFiniteValueDeclaration(
+    val id: GeneratedLinkFiniteValueId,
+    val values: Set<String>,
+)
+internal enum class GeneratedProductPortOwnerKind { SERVICE, COMPONENT }
+internal enum class GeneratedProductPortDirection { INPUT, OUTPUT }
+internal enum class GeneratedProductPortBoundary { PRESENTATION, UI_EVENT, SERVICE_INTERNAL }
+internal enum class GeneratedProductPortPurpose { DATA, DEMAND, CONTEXT }
+internal data class GeneratedProductPort(
+    val id: GeneratedProductPortId,
+    val ownerKind: GeneratedProductPortOwnerKind,
+    val ownerId: String,
+    val typeRef: String,
+    val portId: String,
+    val direction: GeneratedProductPortDirection,
+    val contractRef: String,
+    val boundary: GeneratedProductPortBoundary,
+    val required: Boolean,
+    val purpose: GeneratedProductPortPurpose,
+)
+internal enum class GeneratedProductPortBindingKind { SERVICE_INPUT, COMPONENT_INPUT, COMPONENT_EVENT }
+internal data class GeneratedProductPortBinding(
+    val kind: GeneratedProductPortBindingKind,
+    val from: GeneratedProductOutputPortId,
+    val to: GeneratedProductInputPortId,
+    val purpose: GeneratedProductPortPurpose,
+)
+internal data class GeneratedLinkNativeLegoEdge(val from: String, val to: String)
+internal data class GeneratedProductDemandEdge(
+    val kind: String,
+    val serviceInstanceRef: String,
+    val targetPortRef: GeneratedProductInputPortId,
+    val source: String? = null,
+    val rootServiceInstanceRef: String? = null,
+    val artifactRef: String? = null,
+    val screenRef: String? = null,
+    val surface: String? = null,
+    val mountRef: String? = null,
+    val componentInstanceRef: String? = null,
+)
+`;
 }
 
-function emitKotlin(product: AgentmuxLinkProductIr): string {
-  const profiles = product.artifacts.map((item) =>
-    `    ${enumName(item.id)}(${str(item.id)}, setOf(${item.serves.map(str).join(", ")})),`).join("\n");
-  const routes = product.link.routes.map((item) =>
-    `    ${enumName(item.id)}(${str(item.id)}),`).join("\n");
-  const finiteEnums = product.finiteValues
-    .filter(({ id }) => id !== "link.route")
-    .map(({ id, values }) => `enum class ${contractName(id)}(val id: String) {\n${values
-      .map((value) => `    ${enumName(value)}(${str(value)}),`).join("\n")}\n}`)
-    .join("\n");
-  const finiteValues = product.finiteValues.map(({ id, values }) =>
-    `        LinkFiniteValueDeclaration(${str(id)}, setOf(${values.map(str).join(", ")})),`).join("\n");
-  const actions = product.link.menuActions.map((item) =>
-    `    ${enumName(item.id)}(${str(item.id)}),`).join("\n");
-  const componentIds = product.componentCatalog.map((item) =>
-    `    ${enumName(item.id)}(${str(item.id)}),`).join("\n");
-  const routeDescriptors = product.link.routes.map((item) =>
-    `        LinkRouteDescriptor(LinkRoute.${enumName(item.id)}, ${str(item.title)}, ${str(iconAsset(product, `route.${item.id}`))}, setOf(${item.artifacts.map((id) => `LinkArtifactProfile.${enumName(id)}`).join(", ")})),`).join("\n");
-  const actionDescriptors = product.link.menuActions.map((item) =>
-    `        LinkMenuActionDescriptor(LinkMenuAction.${enumName(item.id)}, ${str(item.rowId)}, ${str(item.title)}, ${str(item.detail)}, ${str(item.a11y)}, ${str(iconAsset(product, `action.${item.id}`))}, LinkRoute.${enumName(item.destination)}, setOf(${item.artifacts.map((id) => `LinkArtifactProfile.${enumName(id)}`).join(", ")})),`).join("\n");
-  const components = product.componentCatalog.map((item) => {
-    const native = product.link.nativeComponents.find(({ componentId }) => componentId === item.id);
-    if (native === undefined) throw new Error(`Component '${item.id}' has no native binding`);
-    const artifacts = componentArtifacts(product, item.id);
-    return `        LinkComponentDescriptor(LinkComponentId.${enumName(item.id)}, ${str(native.rendererId)}, ${str(iconAsset(product, `component.${item.id}`))}, setOf(${artifacts.map((id) => `LinkArtifactProfile.${enumName(id)}`).join(", ")})),`;
+function emitCatalogAggregate(product: ProductIr, sha: string): string {
+  const ports = [...product.portRegistry.servicePorts, ...product.portRegistry.componentPorts];
+  const portIdObjects = ports.map((port) => {
+    const face = port.direction === "input" ? "GeneratedProductInputPortId" : "GeneratedProductOutputPortId";
+    return `        data object ${kotlinEnumToken(port.ref)} : ${face} { override val value = "${port.ref}" }`;
   }).join("\n");
-  const trees = product.componentFamilies.flatMap(({ screen, family }) =>
-    family.trees.map((tree) => {
-      const mounts = tree.mounts.map((item) =>
-        `LinkComponentMount(LinkComponentId.${enumName(item.component)}, ${str(item.region)}, ${item.order}, ${item.requirement.kind === "optional"})`).join(", ");
-      return `        LinkComponentTree(LinkRoute.${enumName(screen)}, ${str(tree.surface)}, listOf(${mounts})),`;
-    })).join("\n");
-  const services = product.legos.mounts.map((item) => {
-    const inputs = item.lego.inputs.map(({ id }) => str(id)).join(", ");
-    const outputs = item.lego.outputs.map(({ id }) => str(id)).join(", ");
-    const runtime = item.lego.runtime;
-    const native = product.link.nativeServices.find(({ serviceId }) => serviceId === item.id);
-    if (native === undefined) throw new Error(`Service '${item.id}' has no native port binding`);
-    return `        LinkServiceDescriptor(${str(item.id)}, ${str(native.nativePortId)}, listOf(${inputs}), listOf(${outputs}), ${str(runtime.stateOwner)}, ${str(runtime.lifetime)}, ${str(runtime.durability)}, ${str(runtime.clockDomain)}, listOf(${runtime.contextInputs.map(str).join(", ")}), listOf(${runtime.effects.map(str).join(", ")})),`;
-  }).join("\n");
-  const contracts = product.legos.contracts.map((contract) => emitContract(product, contract)).join("\n");
-  const ports = product.legos.mounts.map((mount) => {
-    const members = [
-      ...mount.lego.inputs.map((port) =>
-        `    fun ${port.id}(value: ${contractName(port.contract.id)})`),
-      ...mount.lego.outputs.map((port) =>
-        `    fun ${port.id}(): ${contractName(port.contract.id)}${port.contract.kind === "state" ? "" : "?"}`),
-    ].join("\n");
-    return `interface ${servicePortName(mount.id)} {\n${members}\n}`;
-  }).join("\n");
-  const graphMembers = product.legos.mounts.map((mount) =>
-    `    val ${mount.id}: ${servicePortName(mount.id)}`).join("\n");
-  const edges = product.legos.wiring.map((edge) => {
-    const name = enumName(`${edge.from}-to-${edge.to}`);
-    const [fromService, fromPort] = portRef(edge.from);
-    const [toService, toPort] = portRef(edge.to);
-    return { name, value: `LinkServiceEdge(${str(fromService)}, ${str(fromPort)}, ${str(toService)}, ${str(toPort)})` };
-  });
-  const edgeConstants = edges.map(({ name, value }) => `    val ${name}: LinkServiceEdge = ${value}`).join("\n");
-  const edgeList = edges.map(({ name }) => name).join(", ");
-  const uiEntries = product.ui.map((entry) => {
-    const ports = entry.ports as Partial<Record<"state" | "action" | "value", string>>;
-    return `        LinkUiEntryDescriptor(${str(entry.id)}, ${optStr(ports.state)}, ${optStr(ports.action)}, ${optStr(ports.value)}),`;
-  }).join("\n");
-  const componentBindings = product.componentCatalog.map(({ id }) => {
-    const binding = product.link.componentBindings[id];
-    if (binding === undefined) throw new Error(`Component '${id}' has no wiring binding`);
-    const entries = binding.kind === "ui" ? binding.entries.map(str).join(", ") : "";
-    const reason = binding.kind === "framework" ? str(binding.reason) : "null";
-    return `        LinkComponentWiring(LinkComponentId.${enumName(id)}, listOf(${entries}), ${reason}),`;
-  }).join("\n");
-
-  return `// Generated by product-spec/src/generate.ts. Do not edit.
-package io.agentmux.linkui.product.generated
-
-enum class LinkArtifactProfile(val id: String, val surfaces: Set<String>) {
-${profiles}
-}
-enum class LinkRoute(val id: String) {
-${routes}
-}
-${finiteEnums}
-enum class LinkMenuAction(val id: String) {
-${actions}
-}
-enum class LinkComponentId(val id: String) {
-${componentIds}
-}
-${contracts}
-${ports}
-interface LinkNativePortGraph {
-${graphMembers}
-}
-data class LinkRouteDescriptor(val route: LinkRoute, val title: String, val iconId: String, val artifacts: Set<LinkArtifactProfile>)
-data class LinkMenuActionDescriptor(val action: LinkMenuAction, val rowId: String, val title: String, val detail: String, val contentDescription: String, val iconId: String, val destination: LinkRoute, val artifacts: Set<LinkArtifactProfile>)
-data class LinkComponentDescriptor(val id: LinkComponentId, val rendererId: String, val iconId: String, val artifacts: Set<LinkArtifactProfile>)
-data class LinkComponentMount(val component: LinkComponentId, val region: String, val order: Int, val optional: Boolean)
-data class LinkComponentTree(val route: LinkRoute, val surface: String, val mounts: List<LinkComponentMount>)
-data class LinkServiceDescriptor(val id: String, val nativePortId: String, val inputPorts: List<String>, val outputPorts: List<String>, val stateOwner: String, val lifetime: String, val durability: String, val clockDomain: String, val contextInputs: List<String>, val effects: List<String>)
-data class LinkServiceEdge(val fromService: String, val fromPort: String, val toService: String, val toPort: String)
-data class LinkFiniteValueDeclaration(val id: String, val values: Set<String>)
-data class LinkUiEntryDescriptor(val id: String, val stateRef: String?, val actionRef: String?, val valueRef: String?)
-data class LinkComponentWiring(val component: LinkComponentId, val uiEntries: List<String>, val frameworkReason: String?)
-
-object LinkProductWiring {
-${edgeConstants}
-    val all: List<LinkServiceEdge> = listOf(${edgeList})
-}
-
-object LinkProductManifest {
-    const val PRODUCT_ID: String = ${str(product.id)}
-    const val PRODUCT_SPEC_VERSION: String = ${str(product.productSpecVersion)}
-    const val ASSET_CATALOG_ID: String = ${str(product.assetCatalogRef.id)}
-    const val ASSET_CATALOG_VERSION: String = ${str(product.assetCatalogRef.version)}
-    val routes: List<LinkRouteDescriptor> = listOf(
-${routeDescriptors}
-    )
-    val menuActions: List<LinkMenuActionDescriptor> = listOf(
-${actionDescriptors}
-    )
-    val components: List<LinkComponentDescriptor> = listOf(
-${components}
-    )
-    val componentTrees: List<LinkComponentTree> = listOf(
-${trees}
-    )
-    val services: List<LinkServiceDescriptor> = listOf(
-${services}
-    )
-    val finiteValues: List<LinkFiniteValueDeclaration> = listOf(
+  const finiteIdObjects = product.finiteValues.map((declaration) =>
+    `        data object ${kotlinEnumToken(declaration.id)} : GeneratedLinkFiniteValueId { override val value = "${declaration.id}" }`
+  ).join("\n");
+  const finiteValues = product.finiteValues.map((declaration) =>
+    `        GeneratedLinkFiniteValueDeclaration(FiniteValueIds.${kotlinEnumToken(declaration.id)}, setOf(${declaration.values.map((value) => `"${value}"`).join(", ")}))`
+  ).join("\n");
+  return `${header("the portable native-Lego catalog", sha)}
+internal object GeneratedLinkNativeLegoCatalog {
+    object PortIds {
+${portIdObjects}
+    }
+    object FiniteValueIds {
+${finiteIdObjects}
+    }
+    val finiteValues: List<GeneratedLinkFiniteValueDeclaration> = listOf(
 ${finiteValues}
     )
-    val uiEntries: List<LinkUiEntryDescriptor> = listOf(
-${uiEntries}
-    )
-    val componentWiring: List<LinkComponentWiring> = listOf(
-${componentBindings}
-    )
-    fun route(route: LinkRoute): LinkRouteDescriptor = routes.single { it.route == route }
-    fun action(action: LinkMenuAction): LinkMenuActionDescriptor = menuActions.single { it.action == action }
-    fun component(id: LinkComponentId): LinkComponentDescriptor = components.single { it.id == id }
-    fun tree(route: LinkRoute, surface: String): LinkComponentTree = componentTrees.single { it.route == route && it.surface == surface }
-    fun wiring(id: LinkComponentId): LinkComponentWiring = componentWiring.single { it.component == id }
+    val ports: List<GeneratedProductPort> = GeneratedLinkNativeLegoPortData.ports
+    val portBindings: List<GeneratedProductPortBinding> = GeneratedLinkNativeLegoPortBindings.bindings
+    val demandEdges: List<GeneratedProductDemandEdge> = emptyList()
+    val allEdges: Set<GeneratedLinkNativeLegoEdge> = portBindings.mapTo(linkedSetOf()) {
+        GeneratedLinkNativeLegoEdge(it.from.value, it.to.value)
+    }
 }
 `;
 }
 
-function emitContract(product: AgentmuxLinkProductIr, contract: LegoContract): string {
-  const fields = contract.fields.map((item) =>
-    `    val ${item.name}: ${kotlinType(product, item)}`).join(",\n");
-  return `data class ${contractName(contract.id)}(\n${fields},\n)`;
+function emitPortData(product: ProductIr, sha: string): string {
+  const ports = [...product.portRegistry.servicePorts, ...product.portRegistry.componentPorts];
+  const entries = ports.map((port) =>
+    `        GeneratedProductPort(GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(port.ref)}, ${ownerKind(port.ownerKind)}, "${port.ownerId}", "${port.typeRef}", "${port.portId}", ${direction(port.direction)}, "${port.contractRef}", ${boundary(port.boundary)}, ${port.required}, ${purpose(port.purpose)})`
+  ).join("\n");
+  return `${header("the portable native-Lego port registry", sha)}
+internal object GeneratedLinkNativeLegoPortData {
+    val ports: List<GeneratedProductPort> = listOf(
+${entries}
+    )
+}
+`;
 }
 
-function kotlinType(product: AgentmuxLinkProductIr, field: LegoField): string {
-  const value = field.value;
-  if (typeof value !== "string") {
-    const declared = product.finiteValues.some(({ id }) => id === value.ref);
-    const finite = "finite" in value && value.finite === true;
-    if (!declared || !finite) {
-      throw new Error(`Contract field '${field.name}' uses unsupported value ref '${value.ref}'`);
+function emitPortBindings(product: ProductIr, sha: string): string {
+  const entries = product.portRegistry.bindings.map((binding) =>
+    `        GeneratedProductPortBinding(${bindingKind(binding.kind)}, GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(binding.from)}, GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(binding.to)}, ${purpose(binding.purpose)})`
+  ).join("\n");
+  return `${header("the portable native-Lego port bindings", sha)}
+internal object GeneratedLinkNativeLegoPortBindings {
+    val bindings: List<GeneratedProductPortBinding> = listOf(
+${entries}
+    )
+}
+`;
+}
+
+function emitComponentFamilies(product: ProductIr, sha: string): string {
+  const routes = product.componentFamilies.map(({ screen }) => screen);
+  const families = product.componentFamilies.map(({ family }) => family.id);
+  const components = product.components.map(({ id }) => id);
+  const artifacts = product.artifacts.map(({ id }) => id);
+  const bindings = product.componentFamilies.map(({ screen, family }) => {
+    const mounted = family.trees.flatMap((tree) => tree.mounts.map((mount) => mount.instance));
+    const distinct = [...new Set(mounted)];
+    return `        GeneratedLinkComponentFamilyBinding(
+            route = GeneratedLinkRouteRef.${kotlinEnumToken(screen)},
+            family = GeneratedLinkComponentFamilyRef.${kotlinEnumToken(family.id)},
+            components = setOf(${distinct.map((id) => `GeneratedLinkComponentId.${kotlinEnumToken(id)}`).join(", ")}),
+        )`;
+  }).join(",\n");
+  return `${header("ProductConfig.componentFamilies", sha)}
+enum class GeneratedLinkRouteRef(val wireId: String) { ${routes.map((id) => `${kotlinEnumToken(id)}("${id}")`).join(", ")} }
+enum class GeneratedLinkComponentFamilyRef(val wireId: String) { ${families.map((id) => `${kotlinEnumToken(id)}("${id}")`).join(", ")} }
+enum class GeneratedLinkComponentId(val wireId: String) { ${components.map((id) => `${kotlinEnumToken(id)}("${id}")`).join(", ")} }
+enum class GeneratedLinkArtifactRef(val wireId: String) { ${artifacts.map((id) => `${kotlinEnumToken(id)}("${id}")`).join(", ")} }
+
+data class GeneratedLinkComponentFamilyBinding(
+    val route: GeneratedLinkRouteRef,
+    val family: GeneratedLinkComponentFamilyRef,
+    val components: Set<GeneratedLinkComponentId>,
+)
+
+object GeneratedLinkComponentFamilies {
+    val bindings: Set<GeneratedLinkComponentFamilyBinding> = setOf(
+${bindings}
+    )
+
+    init {
+        require(bindings.map { it.route }.distinct().size == bindings.size)
+        require(bindings.map { it.family }.distinct().size == bindings.size)
+        val mountedIdentities = bindings.flatMap { binding ->
+            binding.components.map { component -> Triple(binding.route, binding.family, component) }
+        }
+        require(mountedIdentities.distinct().size == mountedIdentities.size)
     }
-    const type = value.ref === "link.route" ? "LinkRoute" : contractName(value.ref);
-    return `${type}${field.nullable ? "?" : ""}`;
+}
+`;
+}
+
+function emitComponentTree(entry: ScreenComponentFamilyRef, sha: string): string {
+  const family: SurfaceFamily = entry.family;
+  const prefix = `Generated${kotlinIdentifier(family.id)}`;
+  const surfaces = family.trees.map((tree) => tree.surface);
+  const components = family.trees.flatMap((tree) => tree.mounts.map((mount) => mount.instance));
+  const regions = [...new Set(family.trees.flatMap((tree) => tree.mounts.map((mount) => mount.region)))];
+  const surfaceClass = (surface: string) => {
+    switch (surface) {
+      case "round": return "CircleSurfaceClass.ROUND";
+      case "compact": return "CircleSurfaceClass.PHONE_COMPACT";
+      case "wide": return "CircleSurfaceClass.PHONE_WIDE";
+      default: throw new Error(`unknown surface '${surface}' in family '${family.id}'`);
+    }
+  };
+  const trees = family.trees.map((tree) => {
+    const mounts = tree.mounts.map((mount) =>
+      `            ${prefix}Mount(
+                id = "${mount.id}",
+                component = ${prefix}Component.${kotlinEnumToken(mount.instance)},
+                region = ${prefix}Region.${kotlinEnumToken(mount.region)},
+                order = ${mount.order},
+                priority = ${mount.priority},
+                capacity = ${mount.capacity === null ? "null" : mount.capacity},
+                required = ${mount.requirement.kind === "required"},
+            )`
+    ).join(",\n");
+    return `        ${surfaceClass(tree.surface)} -> ${prefix}Tree(listOf(\n${mounts}\n        ))`;
+  }).join("\n");
+  return `${header("ProductConfig.componentFamilies", sha)}
+import com.adelost.designkit.ui.CircleSurfaceClass
+
+enum class ${prefix}Component(val id: GeneratedLinkComponentId) {
+    ${[...new Set(components)].map((id) => `${kotlinEnumToken(id)}(GeneratedLinkComponentId.${kotlinEnumToken(id)})`).join(", ")}
+}
+enum class ${prefix}Region { ${regions.map((region) => kotlinEnumToken(region)).join(", ")} }
+
+data class ${prefix}Mount(
+    val id: String,
+    val component: ${prefix}Component,
+    val region: ${prefix}Region,
+    val order: Int,
+    val priority: Int,
+    val capacity: Int?,
+    val required: Boolean,
+)
+
+data class ${prefix}Tree(val mounts: List<${prefix}Mount>) {
+    val orderedMounts: List<${prefix}Mount> = mounts.sortedWith(
+        compareBy(${prefix}Mount::order).thenBy(${prefix}Mount::priority),
+    )
+
+    init {
+        require(mounts.map { it.id }.distinct().size == mounts.size)
+        require(mounts.map { it.region to it.order }.distinct().size == mounts.size)
+        require(mounts == orderedMounts)
+    }
+}
+
+object ${prefix}Components {
+    val declaredSurfaceClasses: Set<CircleSurfaceClass> = setOf(
+        ${surfaces.map((surface) => surfaceClass(surface)).join(",\n        ")},
+    )
+
+    fun resolve(surfaceClass: CircleSurfaceClass): ${prefix}Tree = when (surfaceClass) {
+${trees}
+        else -> error("${family.id} does not serve \$surfaceClass")
+    }
+}
+`;
+}
+
+function header(source: string, sha: string): string {
+  return `// GENERATED FILE. DO NOT EDIT.
+// GENERATED FROM ${source}
+// Product declarations SHA-256: ${sha}
+package ${packageName}
+`;
+}
+
+function kotlinIdentifier(id: string): string {
+  return id.split(/[^A-Za-z0-9]+/u).filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("");
+}
+
+function kotlinEnumToken(id: string): string {
+  return id.replace(/[^A-Za-z0-9]+/gu, "_").toUpperCase();
+}
+
+function ownerKind(kind: "service" | "component"): string {
+  return `GeneratedProductPortOwnerKind.${kind === "service" ? "SERVICE" : "COMPONENT"}`;
+}
+function direction(value: "input" | "output"): string {
+  return `GeneratedProductPortDirection.${value === "input" ? "INPUT" : "OUTPUT"}`;
+}
+function boundary(value: string): string {
+  const token = kotlinEnumToken(value);
+  if (!["PRESENTATION", "UI_EVENT", "SERVICE_INTERNAL"].includes(token)) {
+    throw new Error(`unknown port boundary '${value}'`);
   }
-  const base = ({ string: "String", integer: "Long", number: "Double", boolean: "Boolean" } as const)[value];
-  return `${base}${field.nullable ? "?" : ""}`;
+  return `GeneratedProductPortBoundary.${token}`;
 }
-
-function contractName(id: string): string {
-  return id.split(/[^A-Za-z0-9]+/u).filter(Boolean).map(capitalize).join("");
-}
-
-function servicePortName(id: string): string {
-  return `${id.split(/[^A-Za-z0-9]+/u).filter(Boolean).map(capitalize).join("")}ServicePort`;
-}
-
-function capitalize(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function portRef(value: string): [string, string] {
-  const parts = value.split(".");
-  if (parts.length !== 2 || parts.some((part) => part.length === 0)) {
-    throw new Error(`Invalid mounted port ref '${value}'`);
+function purpose(value: string): string {
+  const token = kotlinEnumToken(value);
+  if (!["DATA", "DEMAND", "CONTEXT"].includes(token)) {
+    throw new Error(`unknown port purpose '${value}'`);
   }
-  return [parts[0]!, parts[1]!];
+  return `GeneratedProductPortPurpose.${token}`;
+}
+function bindingKind(kind: string): string {
+  const token = kotlinEnumToken(kind);
+  if (!["SERVICE_INPUT", "COMPONENT_INPUT", "COMPONENT_EVENT"].includes(token)) {
+    throw new Error(`unknown binding kind '${kind}'`);
+  }
+  return `GeneratedProductPortBindingKind.${token}`;
 }
 
-function iconAsset(product: AgentmuxLinkProductIr, ref: string): string {
-  const icon = product.iconRefs.find(({ id }) => id === ref);
-  if (icon === undefined) throw new Error(`Missing portable icon ref '${ref}'`);
-  return icon.assetRef;
+function artifact(id: string, path: string, content: string): OutputArtifact {
+  return { id, path, mediaType: "text/x-kotlin", content };
 }
 
-function componentArtifacts(product: AgentmuxLinkProductIr, componentId: string): string[] {
-  const icon = product.iconRefs.find(({ id }) => id === `component.${componentId}`);
-  if (icon === undefined) throw new Error(`Component '${componentId}' has no portable icon ref`);
-  return [...icon.artifacts];
-}
-
-function enumName(id: string): string {
-  return id.replaceAll(/[^A-Za-z0-9]+/gu, "_").toUpperCase();
-}
-function str(value: string): string {
-  return `"${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"").replaceAll("\n", "\\n")}"`;
-}
-function optStr(value: string | undefined): string {
-  return value === undefined ? "null" : str(value);
+function fingerprint(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
