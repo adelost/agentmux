@@ -32,6 +32,7 @@ import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.linkConnectionLabel
 import io.agentmux.linkui.product.LinkConversationPresentation
 import io.agentmux.linkui.product.LinkNativeBindings
+import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
 import io.agentmux.linkui.product.LinkPlaybackCommandEvent
 import io.agentmux.linkui.product.LinkPlaybackPresentation
 import io.agentmux.linkui.product.LinkProductGraph
@@ -153,7 +154,7 @@ fun LinkWatchSurface(
     val navigator = remember(showingSettings) {
         RingNavigator(
             RingScreen.Rows(
-                title = route.headerTitle,
+                title = GeneratedLinkRoutes.descriptor(route).title,
                 items = items,
                 showBack = showingSettings,
             ),

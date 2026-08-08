@@ -18,3 +18,25 @@ object GeneratedLinkRoutes {
         LinkRoute.DEV_HOST -> GeneratedLinkRouteDescriptor(route, "DEV HOST", "route.dev-host")
     }
 }
+
+data class GeneratedLinkChromeAction(
+    val id: String,
+    val rowKey: String,
+    val title: String,
+    val detail: String,
+    val a11y: String,
+    val iconAssetRef: String,
+    val destination: LinkRoute,
+)
+
+object GeneratedLinkChromeActions {
+    val OPEN_SETTINGS: GeneratedLinkChromeAction = GeneratedLinkChromeAction(
+        "open-settings",
+        "settings",
+        "SETTINGS",
+        "CONNECTION & AUDIO",
+        "Open Link settings",
+        "gear",
+        LinkRoute.SETTINGS,
+    )
+}

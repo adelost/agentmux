@@ -10,10 +10,10 @@ import com.adelost.ringkit.ui.RingNavigator
 import com.adelost.ringkit.ui.RingScreen
 import com.adelost.ringkit.ui.RowSpec
 import com.adelost.ringkit.ui.circleHostPreviewScreen
-import io.agentmux.linkui.headerTitle
 import io.agentmux.linkui.linkProductPortRows
 import io.agentmux.linkui.product.LinkNativeBindings
 import io.agentmux.linkui.product.LinkRoute
+import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
 import io.agentmux.linkui.product.ProductPortInspection
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,7 +32,7 @@ internal fun LinkDevHostScreen(
     val navigator = remember {
         RingNavigator(
             RingScreen.Rows(
-                title = LinkRoute.DEV_HOST.headerTitle,
+                title = GeneratedLinkRoutes.descriptor(LinkRoute.DEV_HOST).title,
                 items = items,
                 showBack = true,
             ),

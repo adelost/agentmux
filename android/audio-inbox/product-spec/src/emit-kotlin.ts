@@ -7,7 +7,7 @@ import type {
   ScreenComponentFamilyRef,
   SurfaceFamily,
 } from "@v1d/product-spec";
-import { linkRoutes } from "./routes.js";
+import { linkChromeActions, linkRoutes } from "./routes.js";
 
 const packageName = "io.agentmux.linkui.product.generated";
 
@@ -164,6 +164,17 @@ function emitRoutes(sha: string): string {
   const branches = linkRoutes.map((route) =>
     `        LinkRoute.${kotlinEnumToken(route.id)} -> GeneratedLinkRouteDescriptor(route, ${JSON.stringify(route.title)}, "route.${route.id}")`
   ).join("\n");
+  const chromeActions = linkChromeActions.map((action) =>
+    `    val ${kotlinEnumToken(action.id)}: GeneratedLinkChromeAction = GeneratedLinkChromeAction(
+        ${JSON.stringify(action.id)},
+        ${JSON.stringify(action.rowKey)},
+        ${JSON.stringify(action.title)},
+        ${JSON.stringify(action.detail)},
+        ${JSON.stringify(action.a11y)},
+        ${JSON.stringify(action.iconAssetRef)},
+        LinkRoute.${kotlinEnumToken(action.destination)},
+    )`
+  ).join("\n");
   return `${header("the declared route identity (title and icon per screen)", sha)}
 import io.agentmux.linkui.product.LinkRoute
 
@@ -177,6 +188,20 @@ object GeneratedLinkRoutes {
     fun descriptor(route: LinkRoute): GeneratedLinkRouteDescriptor = when (route) {
 ${branches}
     }
+}
+
+data class GeneratedLinkChromeAction(
+    val id: String,
+    val rowKey: String,
+    val title: String,
+    val detail: String,
+    val a11y: String,
+    val iconAssetRef: String,
+    val destination: LinkRoute,
+)
+
+object GeneratedLinkChromeActions {
+${chromeActions}
 }
 `;
 }

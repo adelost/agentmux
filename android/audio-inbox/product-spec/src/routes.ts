@@ -22,6 +22,25 @@ export const linkRoutes = [
 
 export type LinkRouteId = (typeof linkRoutes)[number]["id"];
 
+/**
+ * Chrome actions: the settings entry as it appears in phone header chrome and
+ * as the round-surface row. Same story as the route titles — these strings
+ * lived in `catalog.ts` before the cutover, came back as hand-written Kotlin,
+ * and belong in the declaration. The phone label and the wear row title are
+ * ONE value on purpose: they are the same product affordance on two surfaces.
+ */
+export const linkChromeActions = [
+  {
+    id: "open-settings",
+    rowKey: "settings",
+    title: "SETTINGS",
+    detail: "CONNECTION & AUDIO",
+    a11y: "Open Link settings",
+    iconAssetRef: "gear",
+    destination: "settings",
+  },
+] as const;
+
 /** Icon refs the product owns for its routes, in the same shape as component icons. */
 export const linkRouteIconRefs = linkRoutes.map((route) => ({
   id: `route.${route.id}`,
