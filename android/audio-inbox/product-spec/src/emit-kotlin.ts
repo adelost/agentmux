@@ -7,6 +7,7 @@ import type {
   ScreenComponentFamilyRef,
   SurfaceFamily,
 } from "@v1d/product-spec";
+import { linkRoutes } from "./routes.js";
 
 const packageName = "io.agentmux.linkui.product.generated";
 
@@ -38,6 +39,8 @@ export function linkNativeEmitter(kotlinRoot: string): ProductEmitterPlugin {
           emitPortData(product, catalogSha)),
         artifact("catalog-bindings", `${kotlinRoot}/GeneratedLinkNativeLegoCatalogPortBindings.kt`,
           emitPortBindings(product, catalogSha)),
+        artifact("routes", `${kotlinRoot}/GeneratedLinkRoutes.kt`,
+          emitRoutes(fingerprint(linkRoutes))),
         artifact("component-families", `${kotlinRoot}/GeneratedLinkComponentFamilies.kt`,
           emitComponentFamilies(product, familiesSha)),
         ...product.componentFamilies.map((entry) => {
@@ -145,6 +148,35 @@ internal object GeneratedLinkNativeLegoPortData {
     val ports: List<GeneratedProductPort> = listOf(
 ${entries}
     )
+}
+`;
+}
+
+/**
+ * Screen identity as an EXHAUSTIVE `when` over LinkRoute, not a map.
+ *
+ * A map would answer `null` for a route nobody declared and the header would
+ * silently render blank. The `when` makes an undeclared route a compilation
+ * error at the exact moment the enum and the declaration disagree, which is
+ * the only moment anyone can still fix it cheaply.
+ */
+function emitRoutes(sha: string): string {
+  const branches = linkRoutes.map((route) =>
+    `        LinkRoute.${kotlinEnumToken(route.id)} -> GeneratedLinkRouteDescriptor(route, ${JSON.stringify(route.title)}, "route.${route.id}")`
+  ).join("\n");
+  return `${header("the declared route identity (title and icon per screen)", sha)}
+import io.agentmux.linkui.product.LinkRoute
+
+data class GeneratedLinkRouteDescriptor(
+    val route: LinkRoute,
+    val title: String,
+    val iconId: String,
+)
+
+object GeneratedLinkRoutes {
+    fun descriptor(route: LinkRoute): GeneratedLinkRouteDescriptor = when (route) {
+${branches}
+    }
 }
 `;
 }

@@ -51,6 +51,7 @@ import io.agentmux.linkui.product.LinkTargetPresentation
 import io.agentmux.linkui.product.LinkTargetSelectEvent
 import io.agentmux.linkui.product.generated.GeneratedLinkHomeComponent
 import io.agentmux.linkui.product.generated.GeneratedLinkHomeComponents
+import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
 
 @Composable
 internal fun LinkPhoneHome(
@@ -79,10 +80,11 @@ internal fun LinkPhoneHome(
         val settingsAction = tree.orderedMounts.firstOrNull {
             it.component == GeneratedLinkHomeComponent.SETTINGS_ACTION
         }
+        val route = GeneratedLinkRoutes.descriptor(LinkRoute.HOME)
         PhoneScreenHeader(
-            title = LinkRoute.HOME.headerTitle,
+            title = route.title,
             onBack = null,
-            icon = LinkNativeBindings.requireIcon(LinkRoute.HOME.headerIconId),
+            icon = LinkNativeBindings.requireIcon(route.iconId),
             actions = if (settingsAction != null) {
                 listOf(
                     linkSettingsHeaderAction {

@@ -1,7 +1,15 @@
+import { linkRouteIconRefs } from "./routes.js";
+
 const ALL_ARTIFACTS = ["phone-full-ui", "wear-full-ui"] as const;
 
-/** One portable icon per component instance; assets live in the CircleKit catalog. */
+/**
+ * One portable icon per component instance, plus the route icons derived from
+ * the route declarations. Route icons are DERIVED, not listed a second time:
+ * a route and its icon can never disagree because there is only one place
+ * that says which asset a route wears.
+ */
 export const linkProductIconRefs = [
+  ...linkRouteIconRefs,
   { id: "component.target", assetRef: "target", artifacts: ALL_ARTIFACTS },
   { id: "component.latest", assetRef: "speaker", artifacts: ALL_ARTIFACTS },
   { id: "component.composer", assetRef: "pencil", artifacts: ["phone-full-ui"] },

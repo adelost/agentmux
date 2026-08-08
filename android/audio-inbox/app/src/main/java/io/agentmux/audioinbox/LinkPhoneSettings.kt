@@ -27,6 +27,7 @@ import io.agentmux.linkui.product.LinkPreferenceToggleEvent
 import io.agentmux.linkui.product.LinkRoute
 import io.agentmux.linkui.product.LinkRouteOpenEvent
 import io.agentmux.linkui.product.LinkUpdateCommandEvent
+import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
 import io.agentmux.linkui.product.generated.GeneratedLinkSettingsComponent
 import io.agentmux.linkui.product.generated.GeneratedLinkSettingsComponents
 
@@ -55,6 +56,14 @@ internal fun LinkPhoneSettings(
         onInstall = { graph.onUpdatesCommand(LinkUpdateCommandEvent(LinkUpdateOperation.INSTALL)) },
     )
     val updateChangelog = updateTargetChangelog(updates.update)
+    // Read inside the composable, not inside the LazyListScope builder: the
+    // builder lambda is not a composable context, so `.current` is unreadable
+    // there. The declared tree for this surface does not change while the list
+    // is being built, so resolving it once here is also the honest lifetime.
+    val settingsRoute = GeneratedLinkRoutes.descriptor(LinkRoute.SETTINGS)
+    val settingsTree = GeneratedLinkSettingsComponents.resolve(
+        LocalCircleSurfaceLayout.current.surfaceClass,
+    )
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 28.dp),
@@ -62,12 +71,12 @@ internal fun LinkPhoneSettings(
     ) {
         item("header") {
             PhoneScreenHeader(
-                title = LinkRoute.SETTINGS.headerTitle,
+                title = settingsRoute.title,
                 onBack = onBack,
-                icon = LinkNativeBindings.requireIcon(LinkRoute.SETTINGS.headerIconId),
+                icon = LinkNativeBindings.requireIcon(settingsRoute.iconId),
             )
         }
-        GeneratedLinkSettingsComponents.resolve(LocalCircleSurfaceLayout.current.surfaceClass)
+        settingsTree
             .orderedMounts.forEach { mount ->
                 when (mount.component) {
                     GeneratedLinkSettingsComponent.ACTIVE_PLAYBACK -> playback.activeTurnId

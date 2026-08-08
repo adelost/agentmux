@@ -1793,6 +1793,29 @@
         "phone-full-ui",
         "wear-full-ui"
       ],
+      "assetRef": "link",
+      "id": "route.home"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
+      "assetRef": "gear",
+      "id": "route.settings"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
+      "assetRef": "phone",
+      "id": "route.dev-host"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui",
+        "wear-full-ui"
+      ],
       "assetRef": "target",
       "id": "component.target"
     },
