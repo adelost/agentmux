@@ -30,22 +30,7 @@ export function parseProcessRows(text) {
     .map((match) => ({ pid: Number(match[1]), elapsedSeconds: Number(match[2]), command: match[3] }));
 }
 
-/**
- * WHAT: The environment a headless emulator is started in: the caller's, minus
- * every display handle.
- *
- * WHY: `-no-window` does not stop the emulator opening libX11 and connecting to
- * DISPLAY. When WSLg's X server dies its socket stays behind in /tmp/.X11-unix,
- * so that connect blocks forever with nothing to time it out. The failure is
- * silent by construction: the process stays alive, never opens its console or
- * adb ports, and the log simply stops after the Vulkan line. One emulator sat
- * like that for nine and a half hours on 2026-08-09 while every release shipped
- * unlooked-at, and the same stall reproduced on two AVDs, two emulator versions
- * and three GPU modes — because none of those were the variable.
- *
- * A headless emulator has no display by definition, so inheriting one is the
- * bug and removing it is the fix, not a workaround.
- */
+/** WHAT: Builds a headless emulator environment without display handles. WHY: Prevents stale WSLg sockets from blocking startup. */
 export function headlessEmulatorEnv(env = process.env) {
   const { DISPLAY: _display, WAYLAND_DISPLAY: _wayland, ...rest } = env;
   return rest;
