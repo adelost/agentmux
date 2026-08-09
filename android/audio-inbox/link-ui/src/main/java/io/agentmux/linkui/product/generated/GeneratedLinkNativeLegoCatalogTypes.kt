@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the portable native-Lego catalog type vocabulary
-// Product declarations SHA-256: afea64d9da9ae8586a41926457d2a07ab33b0b7190275316989720bd6f39cb9a
+// Product declarations SHA-256: b77eca21e1f6b041b988255223d6abc3d53070f52f7f136adf0444b5360ea4f6
 package io.agentmux.linkui.product.generated
 
 internal interface GeneratedLinkFiniteValueId { val value: String }
@@ -11,7 +11,7 @@ internal data class GeneratedLinkFiniteValueDeclaration(
     val id: GeneratedLinkFiniteValueId,
     val values: Set<String>,
 )
-internal enum class GeneratedProductPortOwnerKind { SERVICE, COMPONENT }
+internal enum class GeneratedProductPortOwnerKind { NODE, COMPONENT }
 internal enum class GeneratedProductPortDirection { INPUT, OUTPUT }
 internal enum class GeneratedProductPortBoundary { PRESENTATION, UI_EVENT, SERVICE_INTERNAL }
 internal enum class GeneratedProductPortPurpose { DATA, DEMAND, CONTEXT }
@@ -27,7 +27,7 @@ internal data class GeneratedProductPort(
     val required: Boolean,
     val purpose: GeneratedProductPortPurpose,
 )
-internal enum class GeneratedProductPortBindingKind { SERVICE_INPUT, COMPONENT_INPUT, COMPONENT_EVENT }
+internal enum class GeneratedProductPortBindingKind { NODE_INPUT, COMPONENT_INPUT, COMPONENT_EVENT }
 internal data class GeneratedProductPortBinding(
     val kind: GeneratedProductPortBindingKind,
     val from: GeneratedProductOutputPortId,
@@ -37,10 +37,10 @@ internal data class GeneratedProductPortBinding(
 internal data class GeneratedLinkNativeLegoEdge(val from: String, val to: String)
 internal data class GeneratedProductDemandEdge(
     val kind: String,
-    val serviceInstanceRef: String,
+    val nodeInstanceRef: String,
     val targetPortRef: GeneratedProductInputPortId,
     val source: String? = null,
-    val rootServiceInstanceRef: String? = null,
+    val rootNodeInstanceRef: String? = null,
     val artifactRef: String? = null,
     val screenRef: String? = null,
     val surface: String? = null,

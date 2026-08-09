@@ -20,17 +20,23 @@ test("the mandatory graph has no parallel list and one binding per data input", 
   assert.equal("legos" in product, false, "old lego graph must not survive");
   assert.equal("ui" in product, false, "old ui entry list must not survive");
   assert.equal("componentCatalog" in product, false, "port-less catalog must not survive");
-  assert.equal(product.services.length, 10);
+  assert.equal(product.nodes.length, 20);
+  assert.equal(product.nodes.filter(({ nodeTypeRef }) =>
+    product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "service").length, 10);
+  assert.equal(product.nodes.filter(({ nodeTypeRef }) =>
+    product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "present").length, 10);
   assert.equal(product.components.length, 14);
   assert.equal(product.componentTypes.length, 13);
-  for (const service of product.services) {
-    assert.equal(service.activation.kind, "lifetime", `${service.id} must stay process-lived`);
+  for (const node of product.nodes) {
+    const kind = product.nodeTypes.find(({ id }) => id === node.nodeTypeRef)?.kind;
+    if (kind === "service") assert.equal(node.activation?.kind, "lifetime", `${node.id} must stay process-lived`);
+    if (kind === "present") assert.equal(node.activation, undefined, `${node.id} must not own lifecycle`);
   }
   assert.deepEqual(product.portRegistry.demandEdges, []);
-  const inputs = product.portRegistry.servicePorts.filter(({ direction }) => direction === "input");
+  const inputs = product.portRegistry.nodePorts.filter(({ direction }) => direction === "input");
   const bound = new Set(product.portRegistry.bindings.map(({ to }) => to));
   for (const input of inputs) {
-    assert.ok(bound.has(input.ref), `service data input ${input.ref} has no upstream`);
+    assert.ok(bound.has(input.ref), `node data input ${input.ref} has no upstream`);
   }
   const componentInputs = product.portRegistry.componentPorts.filter(({ direction }) => direction === "input");
   for (const input of componentInputs) {
@@ -46,8 +52,14 @@ test("capture, delivery, reply and playback are typed graph edges", () => {
   assert.ok(edges.includes("active-playback.command->playback.service.command"));
   assert.ok(edges.includes("latest.model->conversation.service.status") === false,
     "bindings point from outputs to inputs, never the reverse");
-  assert.ok(edges.includes("conversation.service.status->latest.model"));
-  assert.ok(edges.includes("playback.service.status->active-playback.model"));
+  assert.ok(edges.includes("conversation.service.status->conversation.presentation.source"));
+  assert.ok(edges.includes("conversation.presentation.model->latest.model"));
+  assert.ok(edges.includes("conversation.presentation.model->composer.model"));
+  assert.ok(edges.includes("playback.service.status->playback.presentation.source"));
+  assert.ok(edges.includes("playback.presentation.model->active-playback.model"));
+  assert.equal(product.portRegistry.bindings.some(({ kind, from }) =>
+    kind === "component-input" && from.includes(".service.")), false,
+  "an effect-owning service must never feed a component directly");
 });
 
 test("pages and artifacts cover exactly the declared screens", () => {
@@ -59,12 +71,12 @@ test("pages and artifacts cover exactly the declared screens", () => {
   assert.deepEqual(wear?.serves, ["round"]);
 });
 
-test("native binding manifest conforms, with service ports native-attested", () => {
+test("native binding manifest conforms, with node ports native-attested", () => {
   const findings = productArtifactConformance(product, manifest);
   assert.deepEqual(findings, [{
-    axis: "service-port",
+    axis: "node-port",
     direction: "unasserted",
-    subject: "services",
+    subject: "nodes",
     message: findings[0]?.message ?? "",
   }]);
   assert.equal(findings[0]?.direction, "unasserted");

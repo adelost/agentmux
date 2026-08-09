@@ -807,7 +807,7 @@
           "select": "target.service.select"
         },
         "inputs": {
-          "model": "target.service.directory"
+          "model": "target.presentation.model"
         }
       },
       "componentTypeRef": "link.target-picker",
@@ -819,7 +819,7 @@
           "command": "capture.service.command"
         },
         "inputs": {
-          "model": "capture.service.status"
+          "model": "capture.presentation.model"
         }
       },
       "componentTypeRef": "link.talk",
@@ -829,7 +829,7 @@
       "bindings": {
         "events": {},
         "inputs": {
-          "model": "conversation.service.status"
+          "model": "conversation.presentation.model"
         }
       },
       "componentTypeRef": "link.latest-turn",
@@ -841,7 +841,7 @@
           "compose": "conversation.service.compose"
         },
         "inputs": {
-          "model": "conversation.service.status"
+          "model": "conversation.presentation.model"
         }
       },
       "componentTypeRef": "link.composer",
@@ -853,7 +853,7 @@
           "command": "playback.service.command"
         },
         "inputs": {
-          "model": "playback.service.status"
+          "model": "playback.presentation.model"
         }
       },
       "componentTypeRef": "link.active-playback",
@@ -863,7 +863,7 @@
       "bindings": {
         "events": {},
         "inputs": {
-          "model": "session.service.status"
+          "model": "session.presentation.model"
         }
       },
       "componentTypeRef": "link.connection-status",
@@ -873,7 +873,7 @@
       "bindings": {
         "events": {},
         "inputs": {
-          "model": "session.service.status"
+          "model": "session.presentation.model"
         }
       },
       "componentTypeRef": "link.public-link",
@@ -885,7 +885,7 @@
           "toggle": "preferences.service.toggle"
         },
         "inputs": {
-          "model": "preferences.service.status"
+          "model": "preferences.presentation.model"
         }
       },
       "componentTypeRef": "link.preferences",
@@ -895,7 +895,7 @@
       "bindings": {
         "events": {},
         "inputs": {
-          "model": "history.service.status"
+          "model": "history.presentation.model"
         }
       },
       "componentTypeRef": "link.local-history",
@@ -907,7 +907,7 @@
           "command": "updates.service.command"
         },
         "inputs": {
-          "model": "updates.service.status"
+          "model": "updates.presentation.model"
         }
       },
       "componentTypeRef": "link.updates",
@@ -917,7 +917,7 @@
       "bindings": {
         "events": {},
         "inputs": {
-          "model": "recovery.service.status"
+          "model": "recovery.presentation.model"
         }
       },
       "componentTypeRef": "link.recovery-status",
@@ -929,7 +929,7 @@
           "open": "navigation.service.openSettings"
         },
         "inputs": {
-          "destination": "navigation.service.destination"
+          "destination": "navigation.presentation.model"
         }
       },
       "componentTypeRef": "link.navigation-entry",
@@ -941,7 +941,7 @@
           "open": "navigation.service.openDevHost"
         },
         "inputs": {
-          "destination": "navigation.service.destination"
+          "destination": "navigation.presentation.model"
         }
       },
       "componentTypeRef": "link.navigation-entry",
@@ -1919,6 +1919,1863 @@
   ],
   "id": "agentmux-link",
   "kind": "product-spec-ir",
+  "nodes": [
+    {
+      "activation": {
+        "kind": "lifetime",
+        "lifecycleSources": []
+      },
+      "bindings": {
+        "openDevHost": "dev-host.open",
+        "openSettings": "settings-action.open"
+      },
+      "config": {},
+      "id": "navigation.service",
+      "nodeTypeRef": "link.navigation"
+    },
+    {
+      "activation": {
+        "kind": "lifetime",
+        "lifecycleSources": []
+      },
+      "bindings": {
+        "command": "talk.command"
+      },
+      "config": {
+        "policy": "link.capture-policy"
+      },
+      "id": "capture.service",
+      "nodeTypeRef": "link.capture"
+    },
+    {
+      "activation": {
+        "kind": "lifetime",
+        "lifecycleSources": []
+      },
+      "bindings": {
+        "compose": "composer.compose",
+        "turn": "capture.service.captured"
+      },
+      "config": {
+        "policy": "link.conversation-policy"
+      },
+      "id": "conversation.service",
+      "nodeTypeRef": "link.conversation"
+    },
+    {
+      "activation": {
+        "kind": "lifetime",
+        "lifecycleSources": []
+      },
+      "bindings": {
+        "command": "active-playback.command"
+      },
+      "config": {
+        "policy": "link.playback-policy"
+      },
+      "id": "playback.service",
+      "nodeTypeRef": "link.playback"
+    },
+    {
+      "activation": {
+        "kind": "lifetime",
+        "lifecycleSources": []
+      },
+      "bindings": {
+        "select": "target.select"
+      },
+      "config": {},
+      "id": "target.service",
+      "nodeTypeRef": "link.target-directory"
+    },
+    {
+      "activation": {
+        "kind": "lifetime",
+        "lifecycleSources": []
+      },
+      "bindings": {},
+      "config": {},
+      "id": "session.service",
+      "nodeTypeRef": "link.session"
+    },
+    {
+      "activation": {
+        "kind": "lifetime",
+        "lifecycleSources": []
+      },
+      "bindings": {},
+      "config": {},
+      "id": "history.service",
+      "nodeTypeRef": "link.history"
+    },
+    {
+      "activation": {
+        "kind": "lifetime",
+        "lifecycleSources": []
+      },
+      "bindings": {
+        "toggle": "preferences.toggle"
+      },
+      "config": {},
+      "id": "preferences.service",
+      "nodeTypeRef": "link.preferences"
+    },
+    {
+      "activation": {
+        "kind": "lifetime",
+        "lifecycleSources": []
+      },
+      "bindings": {
+        "command": "updates.command"
+      },
+      "config": {},
+      "id": "updates.service",
+      "nodeTypeRef": "link.updates"
+    },
+    {
+      "activation": {
+        "kind": "lifetime",
+        "lifecycleSources": []
+      },
+      "bindings": {},
+      "config": {},
+      "id": "recovery.service",
+      "nodeTypeRef": "link.recovery"
+    },
+    {
+      "bindings": {
+        "source": "navigation.service.destination"
+      },
+      "config": {},
+      "id": "navigation.presentation",
+      "nodeTypeRef": "link.present.navigation"
+    },
+    {
+      "bindings": {
+        "source": "capture.service.status"
+      },
+      "config": {},
+      "id": "capture.presentation",
+      "nodeTypeRef": "link.present.capture"
+    },
+    {
+      "bindings": {
+        "source": "conversation.service.status"
+      },
+      "config": {},
+      "id": "conversation.presentation",
+      "nodeTypeRef": "link.present.conversation"
+    },
+    {
+      "bindings": {
+        "source": "playback.service.status"
+      },
+      "config": {},
+      "id": "playback.presentation",
+      "nodeTypeRef": "link.present.playback"
+    },
+    {
+      "bindings": {
+        "source": "target.service.directory"
+      },
+      "config": {},
+      "id": "target.presentation",
+      "nodeTypeRef": "link.present.target"
+    },
+    {
+      "bindings": {
+        "source": "session.service.status"
+      },
+      "config": {},
+      "id": "session.presentation",
+      "nodeTypeRef": "link.present.session"
+    },
+    {
+      "bindings": {
+        "source": "history.service.status"
+      },
+      "config": {},
+      "id": "history.presentation",
+      "nodeTypeRef": "link.present.history"
+    },
+    {
+      "bindings": {
+        "source": "preferences.service.status"
+      },
+      "config": {},
+      "id": "preferences.presentation",
+      "nodeTypeRef": "link.present.preferences"
+    },
+    {
+      "bindings": {
+        "source": "updates.service.status"
+      },
+      "config": {},
+      "id": "updates.presentation",
+      "nodeTypeRef": "link.present.updates"
+    },
+    {
+      "bindings": {
+        "source": "recovery.service.status"
+      },
+      "config": {},
+      "id": "recovery.presentation",
+      "nodeTypeRef": "link.present.recovery"
+    }
+  ],
+  "nodeTypes": [
+    {
+      "id": "link.navigation",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "route",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.route"
+                }
+              }
+            ],
+            "id": "link.route-open",
+            "kind": "event"
+          },
+          "id": "openSettings",
+          "purpose": "data"
+        },
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "route",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.route"
+                }
+              }
+            ],
+            "id": "link.route-open",
+            "kind": "event"
+          },
+          "id": "openDevHost",
+          "purpose": "data"
+        }
+      ],
+      "kind": "service",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "route",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.route"
+                }
+              }
+            ],
+            "id": "link.route-destination",
+            "kind": "state"
+          },
+          "id": "destination",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [
+          "navigation.route-state"
+        ],
+        "lifetime": "instance",
+        "stateOwner": "instance"
+      }
+    },
+    {
+      "configInputs": [
+        {
+          "fields": [],
+          "id": "policy"
+        }
+      ],
+      "id": "link.capture",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "operation",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.capture-operation"
+                }
+              }
+            ],
+            "id": "link.capture-command",
+            "kind": "event"
+          },
+          "id": "command",
+          "purpose": "data"
+        }
+      ],
+      "kind": "service",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.capture-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "available",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "unavailableReason",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "wall",
+                "name": "startedAtMs",
+                "nullable": true,
+                "unit": "si.millisecond",
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "byteCount",
+                "nullable": false,
+                "unit": "si.byte",
+                "value": "integer"
+              }
+            ],
+            "id": "link.capture-status",
+            "kind": "state"
+          },
+          "id": "status",
+          "purpose": "data"
+        },
+        {
+          "contract": {
+            "boundary": "service-internal",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "turnId",
+                "nullable": false,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "targetId",
+                "nullable": false,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "payloadRef",
+                "nullable": false,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "idempotencyKey",
+                "nullable": false,
+                "value": "string"
+              },
+              {
+                "clockDomain": "wall",
+                "name": "createdAtMs",
+                "nullable": false,
+                "unit": "si.millisecond",
+                "value": "integer"
+              }
+            ],
+            "id": "link.captured-turn",
+            "kind": "snapshot"
+          },
+          "id": "captured",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "monotonic",
+        "contextInputs": [
+          "microphone.permission"
+        ],
+        "durability": "durable",
+        "effects": [
+          "audio.capture",
+          "storage.write"
+        ],
+        "lifetime": "operation",
+        "stateOwner": "external"
+      }
+    },
+    {
+      "configInputs": [
+        {
+          "fields": [],
+          "id": "policy"
+        }
+      ],
+      "id": "link.conversation",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "service-internal",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "turnId",
+                "nullable": false,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "targetId",
+                "nullable": false,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "payloadRef",
+                "nullable": false,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "idempotencyKey",
+                "nullable": false,
+                "value": "string"
+              },
+              {
+                "clockDomain": "wall",
+                "name": "createdAtMs",
+                "nullable": false,
+                "unit": "si.millisecond",
+                "value": "integer"
+              }
+            ],
+            "id": "link.captured-turn",
+            "kind": "snapshot"
+          },
+          "id": "turn",
+          "purpose": "data"
+        },
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "text",
+                "nullable": false,
+                "value": "string"
+              }
+            ],
+            "id": "link.compose-turn",
+            "kind": "event"
+          },
+          "id": "compose",
+          "purpose": "data"
+        }
+      ],
+      "kind": "service",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "turnId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "deliveryPhase",
+                "nullable": true,
+                "value": {
+                  "finite": true,
+                  "ref": "link.delivery-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "replyPhase",
+                "nullable": true,
+                "value": {
+                  "finite": true,
+                  "ref": "link.reply-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "offline",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "idempotencyKey",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "turns",
+                "nullable": false,
+                "value": {
+                  "ref": "link.turn-list"
+                }
+              }
+            ],
+            "id": "link.conversation-status",
+            "kind": "state"
+          },
+          "id": "status",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "wall",
+        "contextInputs": [
+          "network.connectivity"
+        ],
+        "durability": "durable",
+        "effects": [
+          "storage.write",
+          "transport.send",
+          "transport.receive",
+          "retry.schedule"
+        ],
+        "lifetime": "process",
+        "stateOwner": "external"
+      }
+    },
+    {
+      "configInputs": [
+        {
+          "fields": [],
+          "id": "policy"
+        }
+      ],
+      "id": "link.playback",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "operation",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.playback-operation"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "turnId",
+                "nullable": false,
+                "value": "string"
+              }
+            ],
+            "id": "link.playback-command",
+            "kind": "event"
+          },
+          "id": "command",
+          "purpose": "data"
+        }
+      ],
+      "kind": "service",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "turnId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.playback-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "positionMs",
+                "nullable": false,
+                "unit": "si.millisecond",
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "durationMs",
+                "nullable": false,
+                "unit": "si.millisecond",
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "turn",
+                "nullable": true,
+                "value": {
+                  "ref": "link.turn"
+                }
+              }
+            ],
+            "id": "link.playback-status",
+            "kind": "state"
+          },
+          "id": "status",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "monotonic",
+        "contextInputs": [
+          "audio.focus"
+        ],
+        "durability": "transient",
+        "effects": [
+          "audio.playback"
+        ],
+        "lifetime": "process",
+        "stateOwner": "external"
+      }
+    },
+    {
+      "id": "link.target-directory",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "targetId",
+                "nullable": false,
+                "value": "string"
+              }
+            ],
+            "id": "link.target-select",
+            "kind": "event"
+          },
+          "id": "select",
+          "purpose": "data"
+        }
+      ],
+      "kind": "service",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "selectedTargetId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "kind",
+                "nullable": true,
+                "value": {
+                  "finite": true,
+                  "ref": "link.target-kind"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "availableCount",
+                "nullable": false,
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "targets",
+                "nullable": false,
+                "value": {
+                  "ref": "link.target-list"
+                }
+              }
+            ],
+            "id": "link.target-directory",
+            "kind": "state"
+          },
+          "id": "directory",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [
+          "transport.route-policy"
+        ],
+        "durability": "durable",
+        "effects": [
+          "storage.write"
+        ],
+        "lifetime": "process",
+        "stateOwner": "instance"
+      }
+    },
+    {
+      "id": "link.session",
+      "inputs": [],
+      "kind": "service",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "connection",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.connection-state"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "connectionDetail",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "publicLinkActive",
+                "nullable": false,
+                "value": "boolean"
+              }
+            ],
+            "id": "link.session-status",
+            "kind": "state"
+          },
+          "id": "status",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "wall",
+        "contextInputs": [
+          "network.connectivity",
+          "keystore.session"
+        ],
+        "durability": "durable",
+        "effects": [
+          "transport.poll",
+          "transport.auth"
+        ],
+        "lifetime": "process",
+        "stateOwner": "external"
+      }
+    },
+    {
+      "id": "link.history",
+      "inputs": [],
+      "kind": "service",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "retainedTurns",
+                "nullable": false,
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "maxTurns",
+                "nullable": false,
+                "value": "integer"
+              }
+            ],
+            "id": "link.history-status",
+            "kind": "state"
+          },
+          "id": "status",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "durable",
+        "effects": [
+          "storage.read"
+        ],
+        "lifetime": "process",
+        "stateOwner": "external"
+      }
+    },
+    {
+      "id": "link.preferences",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "key",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.preference-key"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "enabled",
+                "nullable": false,
+                "value": "boolean"
+              }
+            ],
+            "id": "link.preference-toggle",
+            "kind": "event"
+          },
+          "id": "toggle",
+          "purpose": "data"
+        }
+      ],
+      "kind": "service",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "handsFree",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "speakReplies",
+                "nullable": false,
+                "value": "boolean"
+              }
+            ],
+            "id": "link.preferences-status",
+            "kind": "state"
+          },
+          "id": "status",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [
+          "storage.preferences"
+        ],
+        "durability": "durable",
+        "effects": [
+          "storage.write"
+        ],
+        "lifetime": "process",
+        "stateOwner": "external"
+      }
+    },
+    {
+      "id": "link.updates",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "operation",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.update-operation"
+                }
+              }
+            ],
+            "id": "link.update-command",
+            "kind": "event"
+          },
+          "id": "command",
+          "purpose": "data"
+        }
+      ],
+      "kind": "service",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.update-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "update",
+                "nullable": false,
+                "value": {
+                  "ref": "link.update-native"
+                }
+              }
+            ],
+            "id": "link.update-status",
+            "kind": "state"
+          },
+          "id": "status",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "wall",
+        "contextInputs": [
+          "network.connectivity"
+        ],
+        "durability": "transient",
+        "effects": [
+          "network.fetch",
+          "apk.install"
+        ],
+        "lifetime": "process",
+        "stateOwner": "instance"
+      }
+    },
+    {
+      "id": "link.recovery",
+      "inputs": [],
+      "kind": "service",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.recovery-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "detail",
+                "nullable": true,
+                "value": "string"
+              }
+            ],
+            "id": "link.recovery-status",
+            "kind": "state"
+          },
+          "id": "status",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "wall",
+        "contextInputs": [
+          "storage.state-repository"
+        ],
+        "durability": "durable",
+        "effects": [
+          "storage.read"
+        ],
+        "lifetime": "process",
+        "stateOwner": "external"
+      }
+    },
+    {
+      "id": "link.present.navigation",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "route",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.route"
+                }
+              }
+            ],
+            "id": "link.route-destination",
+            "kind": "state"
+          },
+          "id": "source",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "route",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.route"
+                }
+              }
+            ],
+            "id": "link.route-destination",
+            "kind": "state"
+          },
+          "id": "model",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.present.capture",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.capture-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "available",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "unavailableReason",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "wall",
+                "name": "startedAtMs",
+                "nullable": true,
+                "unit": "si.millisecond",
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "byteCount",
+                "nullable": false,
+                "unit": "si.byte",
+                "value": "integer"
+              }
+            ],
+            "id": "link.capture-status",
+            "kind": "state"
+          },
+          "id": "source",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.capture-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "available",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "unavailableReason",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "wall",
+                "name": "startedAtMs",
+                "nullable": true,
+                "unit": "si.millisecond",
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "byteCount",
+                "nullable": false,
+                "unit": "si.byte",
+                "value": "integer"
+              }
+            ],
+            "id": "link.capture-status",
+            "kind": "state"
+          },
+          "id": "model",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.present.conversation",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "turnId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "deliveryPhase",
+                "nullable": true,
+                "value": {
+                  "finite": true,
+                  "ref": "link.delivery-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "replyPhase",
+                "nullable": true,
+                "value": {
+                  "finite": true,
+                  "ref": "link.reply-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "offline",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "idempotencyKey",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "turns",
+                "nullable": false,
+                "value": {
+                  "ref": "link.turn-list"
+                }
+              }
+            ],
+            "id": "link.conversation-status",
+            "kind": "state"
+          },
+          "id": "source",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "turnId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "deliveryPhase",
+                "nullable": true,
+                "value": {
+                  "finite": true,
+                  "ref": "link.delivery-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "replyPhase",
+                "nullable": true,
+                "value": {
+                  "finite": true,
+                  "ref": "link.reply-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "offline",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "idempotencyKey",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "turns",
+                "nullable": false,
+                "value": {
+                  "ref": "link.turn-list"
+                }
+              }
+            ],
+            "id": "link.conversation-status",
+            "kind": "state"
+          },
+          "id": "model",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.present.playback",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "turnId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.playback-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "positionMs",
+                "nullable": false,
+                "unit": "si.millisecond",
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "durationMs",
+                "nullable": false,
+                "unit": "si.millisecond",
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "turn",
+                "nullable": true,
+                "value": {
+                  "ref": "link.turn"
+                }
+              }
+            ],
+            "id": "link.playback-status",
+            "kind": "state"
+          },
+          "id": "source",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "turnId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.playback-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "positionMs",
+                "nullable": false,
+                "unit": "si.millisecond",
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "durationMs",
+                "nullable": false,
+                "unit": "si.millisecond",
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "turn",
+                "nullable": true,
+                "value": {
+                  "ref": "link.turn"
+                }
+              }
+            ],
+            "id": "link.playback-status",
+            "kind": "state"
+          },
+          "id": "model",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.present.target",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "selectedTargetId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "kind",
+                "nullable": true,
+                "value": {
+                  "finite": true,
+                  "ref": "link.target-kind"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "availableCount",
+                "nullable": false,
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "targets",
+                "nullable": false,
+                "value": {
+                  "ref": "link.target-list"
+                }
+              }
+            ],
+            "id": "link.target-directory",
+            "kind": "state"
+          },
+          "id": "source",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "selectedTargetId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "kind",
+                "nullable": true,
+                "value": {
+                  "finite": true,
+                  "ref": "link.target-kind"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "availableCount",
+                "nullable": false,
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "targets",
+                "nullable": false,
+                "value": {
+                  "ref": "link.target-list"
+                }
+              }
+            ],
+            "id": "link.target-directory",
+            "kind": "state"
+          },
+          "id": "model",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.present.session",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "connection",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.connection-state"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "connectionDetail",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "publicLinkActive",
+                "nullable": false,
+                "value": "boolean"
+              }
+            ],
+            "id": "link.session-status",
+            "kind": "state"
+          },
+          "id": "source",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "connection",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.connection-state"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "connectionDetail",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "publicLinkActive",
+                "nullable": false,
+                "value": "boolean"
+              }
+            ],
+            "id": "link.session-status",
+            "kind": "state"
+          },
+          "id": "model",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.present.history",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "retainedTurns",
+                "nullable": false,
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "maxTurns",
+                "nullable": false,
+                "value": "integer"
+              }
+            ],
+            "id": "link.history-status",
+            "kind": "state"
+          },
+          "id": "source",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "retainedTurns",
+                "nullable": false,
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "maxTurns",
+                "nullable": false,
+                "value": "integer"
+              }
+            ],
+            "id": "link.history-status",
+            "kind": "state"
+          },
+          "id": "model",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.present.preferences",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "handsFree",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "speakReplies",
+                "nullable": false,
+                "value": "boolean"
+              }
+            ],
+            "id": "link.preferences-status",
+            "kind": "state"
+          },
+          "id": "source",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "handsFree",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "speakReplies",
+                "nullable": false,
+                "value": "boolean"
+              }
+            ],
+            "id": "link.preferences-status",
+            "kind": "state"
+          },
+          "id": "model",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.present.updates",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.update-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "update",
+                "nullable": false,
+                "value": {
+                  "ref": "link.update-native"
+                }
+              }
+            ],
+            "id": "link.update-status",
+            "kind": "state"
+          },
+          "id": "source",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.update-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "update",
+                "nullable": false,
+                "value": {
+                  "ref": "link.update-native"
+                }
+              }
+            ],
+            "id": "link.update-status",
+            "kind": "state"
+          },
+          "id": "model",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.present.recovery",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.recovery-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "detail",
+                "nullable": true,
+                "value": "string"
+              }
+            ],
+            "id": "link.recovery-status",
+            "kind": "state"
+          },
+          "id": "source",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.recovery-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "detail",
+                "nullable": true,
+                "value": "string"
+              }
+            ],
+            "id": "link.recovery-status",
+            "kind": "state"
+          },
+          "id": "model",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    }
+  ],
   "palette": {
     "variants": []
   },
@@ -1944,7 +3801,7 @@
       },
       {
         "from": "capture.service.captured",
-        "kind": "service-input",
+        "kind": "node-input",
         "purpose": "data",
         "to": "conversation.service.turn"
       },
@@ -1979,79 +3836,139 @@
         "to": "updates.service.command"
       },
       {
+        "from": "navigation.service.destination",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "navigation.presentation.source"
+      },
+      {
+        "from": "capture.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "capture.presentation.source"
+      },
+      {
+        "from": "conversation.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "conversation.presentation.source"
+      },
+      {
+        "from": "playback.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "playback.presentation.source"
+      },
+      {
         "from": "target.service.directory",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "target.presentation.source"
+      },
+      {
+        "from": "session.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "session.presentation.source"
+      },
+      {
+        "from": "history.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "history.presentation.source"
+      },
+      {
+        "from": "preferences.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "preferences.presentation.source"
+      },
+      {
+        "from": "updates.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "updates.presentation.source"
+      },
+      {
+        "from": "recovery.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "recovery.presentation.source"
+      },
+      {
+        "from": "target.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "target.model"
       },
       {
-        "from": "capture.service.status",
+        "from": "capture.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "talk.model"
       },
       {
-        "from": "conversation.service.status",
+        "from": "conversation.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "latest.model"
       },
       {
-        "from": "conversation.service.status",
+        "from": "conversation.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "composer.model"
       },
       {
-        "from": "playback.service.status",
+        "from": "playback.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "active-playback.model"
       },
       {
-        "from": "session.service.status",
+        "from": "session.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "connection.model"
       },
       {
-        "from": "session.service.status",
+        "from": "session.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "public-link.model"
       },
       {
-        "from": "preferences.service.status",
+        "from": "preferences.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "preferences.model"
       },
       {
-        "from": "history.service.status",
+        "from": "history.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "local-history.model"
       },
       {
-        "from": "updates.service.status",
+        "from": "updates.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "updates.model"
       },
       {
-        "from": "recovery.service.status",
+        "from": "recovery.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "recovery.model"
       },
       {
-        "from": "navigation.service.destination",
+        "from": "navigation.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "settings-action.destination"
       },
       {
-        "from": "navigation.service.destination",
+        "from": "navigation.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "dev-host.destination"
@@ -2771,13 +4688,13 @@
       }
     ],
     "demandEdges": [],
-    "servicePorts": [
+    "nodePorts": [
       {
         "boundary": "ui-event",
         "contractRef": "link.route-open",
         "direction": "input",
         "ownerId": "navigation.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "openSettings",
         "purpose": "data",
         "ref": "navigation.service.openSettings",
@@ -2789,7 +4706,7 @@
         "contractRef": "link.route-open",
         "direction": "input",
         "ownerId": "navigation.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "openDevHost",
         "purpose": "data",
         "ref": "navigation.service.openDevHost",
@@ -2801,7 +4718,7 @@
         "contractRef": "link.route-destination",
         "direction": "output",
         "ownerId": "navigation.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "destination",
         "purpose": "data",
         "ref": "navigation.service.destination",
@@ -2813,7 +4730,7 @@
         "contractRef": "link.capture-command",
         "direction": "input",
         "ownerId": "capture.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "command",
         "purpose": "data",
         "ref": "capture.service.command",
@@ -2825,7 +4742,7 @@
         "contractRef": "link.capture-status",
         "direction": "output",
         "ownerId": "capture.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "status",
         "purpose": "data",
         "ref": "capture.service.status",
@@ -2837,7 +4754,7 @@
         "contractRef": "link.captured-turn",
         "direction": "output",
         "ownerId": "capture.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "captured",
         "purpose": "data",
         "ref": "capture.service.captured",
@@ -2849,7 +4766,7 @@
         "contractRef": "link.captured-turn",
         "direction": "input",
         "ownerId": "conversation.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "turn",
         "purpose": "data",
         "ref": "conversation.service.turn",
@@ -2861,7 +4778,7 @@
         "contractRef": "link.compose-turn",
         "direction": "input",
         "ownerId": "conversation.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "compose",
         "purpose": "data",
         "ref": "conversation.service.compose",
@@ -2873,7 +4790,7 @@
         "contractRef": "link.conversation-status",
         "direction": "output",
         "ownerId": "conversation.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "status",
         "purpose": "data",
         "ref": "conversation.service.status",
@@ -2885,7 +4802,7 @@
         "contractRef": "link.playback-command",
         "direction": "input",
         "ownerId": "playback.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "command",
         "purpose": "data",
         "ref": "playback.service.command",
@@ -2897,7 +4814,7 @@
         "contractRef": "link.playback-status",
         "direction": "output",
         "ownerId": "playback.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "status",
         "purpose": "data",
         "ref": "playback.service.status",
@@ -2909,7 +4826,7 @@
         "contractRef": "link.target-select",
         "direction": "input",
         "ownerId": "target.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "select",
         "purpose": "data",
         "ref": "target.service.select",
@@ -2921,7 +4838,7 @@
         "contractRef": "link.target-directory",
         "direction": "output",
         "ownerId": "target.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "directory",
         "purpose": "data",
         "ref": "target.service.directory",
@@ -2933,7 +4850,7 @@
         "contractRef": "link.session-status",
         "direction": "output",
         "ownerId": "session.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "status",
         "purpose": "data",
         "ref": "session.service.status",
@@ -2945,7 +4862,7 @@
         "contractRef": "link.history-status",
         "direction": "output",
         "ownerId": "history.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "status",
         "purpose": "data",
         "ref": "history.service.status",
@@ -2957,7 +4874,7 @@
         "contractRef": "link.preference-toggle",
         "direction": "input",
         "ownerId": "preferences.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "toggle",
         "purpose": "data",
         "ref": "preferences.service.toggle",
@@ -2969,7 +4886,7 @@
         "contractRef": "link.preferences-status",
         "direction": "output",
         "ownerId": "preferences.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "status",
         "purpose": "data",
         "ref": "preferences.service.status",
@@ -2981,7 +4898,7 @@
         "contractRef": "link.update-command",
         "direction": "input",
         "ownerId": "updates.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "command",
         "purpose": "data",
         "ref": "updates.service.command",
@@ -2993,7 +4910,7 @@
         "contractRef": "link.update-status",
         "direction": "output",
         "ownerId": "updates.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "status",
         "purpose": "data",
         "ref": "updates.service.status",
@@ -3005,16 +4922,256 @@
         "contractRef": "link.recovery-status",
         "direction": "output",
         "ownerId": "recovery.service",
-        "ownerKind": "service",
+        "ownerKind": "node",
         "portId": "status",
         "purpose": "data",
         "ref": "recovery.service.status",
         "required": true,
         "typeRef": "link.recovery"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.route-destination",
+        "direction": "input",
+        "ownerId": "navigation.presentation",
+        "ownerKind": "node",
+        "portId": "source",
+        "purpose": "data",
+        "ref": "navigation.presentation.source",
+        "required": true,
+        "typeRef": "link.present.navigation"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.route-destination",
+        "direction": "output",
+        "ownerId": "navigation.presentation",
+        "ownerKind": "node",
+        "portId": "model",
+        "purpose": "data",
+        "ref": "navigation.presentation.model",
+        "required": true,
+        "typeRef": "link.present.navigation"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.capture-status",
+        "direction": "input",
+        "ownerId": "capture.presentation",
+        "ownerKind": "node",
+        "portId": "source",
+        "purpose": "data",
+        "ref": "capture.presentation.source",
+        "required": true,
+        "typeRef": "link.present.capture"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.capture-status",
+        "direction": "output",
+        "ownerId": "capture.presentation",
+        "ownerKind": "node",
+        "portId": "model",
+        "purpose": "data",
+        "ref": "capture.presentation.model",
+        "required": true,
+        "typeRef": "link.present.capture"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.conversation-status",
+        "direction": "input",
+        "ownerId": "conversation.presentation",
+        "ownerKind": "node",
+        "portId": "source",
+        "purpose": "data",
+        "ref": "conversation.presentation.source",
+        "required": true,
+        "typeRef": "link.present.conversation"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.conversation-status",
+        "direction": "output",
+        "ownerId": "conversation.presentation",
+        "ownerKind": "node",
+        "portId": "model",
+        "purpose": "data",
+        "ref": "conversation.presentation.model",
+        "required": true,
+        "typeRef": "link.present.conversation"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.playback-status",
+        "direction": "input",
+        "ownerId": "playback.presentation",
+        "ownerKind": "node",
+        "portId": "source",
+        "purpose": "data",
+        "ref": "playback.presentation.source",
+        "required": true,
+        "typeRef": "link.present.playback"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.playback-status",
+        "direction": "output",
+        "ownerId": "playback.presentation",
+        "ownerKind": "node",
+        "portId": "model",
+        "purpose": "data",
+        "ref": "playback.presentation.model",
+        "required": true,
+        "typeRef": "link.present.playback"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.target-directory",
+        "direction": "input",
+        "ownerId": "target.presentation",
+        "ownerKind": "node",
+        "portId": "source",
+        "purpose": "data",
+        "ref": "target.presentation.source",
+        "required": true,
+        "typeRef": "link.present.target"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.target-directory",
+        "direction": "output",
+        "ownerId": "target.presentation",
+        "ownerKind": "node",
+        "portId": "model",
+        "purpose": "data",
+        "ref": "target.presentation.model",
+        "required": true,
+        "typeRef": "link.present.target"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.session-status",
+        "direction": "input",
+        "ownerId": "session.presentation",
+        "ownerKind": "node",
+        "portId": "source",
+        "purpose": "data",
+        "ref": "session.presentation.source",
+        "required": true,
+        "typeRef": "link.present.session"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.session-status",
+        "direction": "output",
+        "ownerId": "session.presentation",
+        "ownerKind": "node",
+        "portId": "model",
+        "purpose": "data",
+        "ref": "session.presentation.model",
+        "required": true,
+        "typeRef": "link.present.session"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.history-status",
+        "direction": "input",
+        "ownerId": "history.presentation",
+        "ownerKind": "node",
+        "portId": "source",
+        "purpose": "data",
+        "ref": "history.presentation.source",
+        "required": true,
+        "typeRef": "link.present.history"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.history-status",
+        "direction": "output",
+        "ownerId": "history.presentation",
+        "ownerKind": "node",
+        "portId": "model",
+        "purpose": "data",
+        "ref": "history.presentation.model",
+        "required": true,
+        "typeRef": "link.present.history"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.preferences-status",
+        "direction": "input",
+        "ownerId": "preferences.presentation",
+        "ownerKind": "node",
+        "portId": "source",
+        "purpose": "data",
+        "ref": "preferences.presentation.source",
+        "required": true,
+        "typeRef": "link.present.preferences"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.preferences-status",
+        "direction": "output",
+        "ownerId": "preferences.presentation",
+        "ownerKind": "node",
+        "portId": "model",
+        "purpose": "data",
+        "ref": "preferences.presentation.model",
+        "required": true,
+        "typeRef": "link.present.preferences"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.update-status",
+        "direction": "input",
+        "ownerId": "updates.presentation",
+        "ownerKind": "node",
+        "portId": "source",
+        "purpose": "data",
+        "ref": "updates.presentation.source",
+        "required": true,
+        "typeRef": "link.present.updates"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.update-status",
+        "direction": "output",
+        "ownerId": "updates.presentation",
+        "ownerKind": "node",
+        "portId": "model",
+        "purpose": "data",
+        "ref": "updates.presentation.model",
+        "required": true,
+        "typeRef": "link.present.updates"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.recovery-status",
+        "direction": "input",
+        "ownerId": "recovery.presentation",
+        "ownerKind": "node",
+        "portId": "source",
+        "purpose": "data",
+        "ref": "recovery.presentation.source",
+        "required": true,
+        "typeRef": "link.present.recovery"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.recovery-status",
+        "direction": "output",
+        "ownerId": "recovery.presentation",
+        "ownerKind": "node",
+        "portId": "model",
+        "purpose": "data",
+        "ref": "recovery.presentation.model",
+        "required": true,
+        "typeRef": "link.present.recovery"
       }
     ]
   },
-  "productSpecVersion": "0.3.41",
+  "productSpecVersion": "0.3.42",
   "rendererBindings": [
     {
       "capabilities": [
@@ -3033,934 +5190,5 @@
       "id": "android-wear-compose"
     }
   ],
-  "schemaVersion": 6,
-  "services": [
-    {
-      "activation": {
-        "kind": "lifetime",
-        "lifecycleSources": []
-      },
-      "bindings": {
-        "openDevHost": "dev-host.open",
-        "openSettings": "settings-action.open"
-      },
-      "config": {},
-      "id": "navigation.service",
-      "serviceTypeRef": "link.navigation"
-    },
-    {
-      "activation": {
-        "kind": "lifetime",
-        "lifecycleSources": []
-      },
-      "bindings": {
-        "command": "talk.command"
-      },
-      "config": {
-        "policy": "link.capture-policy"
-      },
-      "id": "capture.service",
-      "serviceTypeRef": "link.capture"
-    },
-    {
-      "activation": {
-        "kind": "lifetime",
-        "lifecycleSources": []
-      },
-      "bindings": {
-        "compose": "composer.compose",
-        "turn": "capture.service.captured"
-      },
-      "config": {
-        "policy": "link.conversation-policy"
-      },
-      "id": "conversation.service",
-      "serviceTypeRef": "link.conversation"
-    },
-    {
-      "activation": {
-        "kind": "lifetime",
-        "lifecycleSources": []
-      },
-      "bindings": {
-        "command": "active-playback.command"
-      },
-      "config": {
-        "policy": "link.playback-policy"
-      },
-      "id": "playback.service",
-      "serviceTypeRef": "link.playback"
-    },
-    {
-      "activation": {
-        "kind": "lifetime",
-        "lifecycleSources": []
-      },
-      "bindings": {
-        "select": "target.select"
-      },
-      "config": {},
-      "id": "target.service",
-      "serviceTypeRef": "link.target-directory"
-    },
-    {
-      "activation": {
-        "kind": "lifetime",
-        "lifecycleSources": []
-      },
-      "bindings": {},
-      "config": {},
-      "id": "session.service",
-      "serviceTypeRef": "link.session"
-    },
-    {
-      "activation": {
-        "kind": "lifetime",
-        "lifecycleSources": []
-      },
-      "bindings": {},
-      "config": {},
-      "id": "history.service",
-      "serviceTypeRef": "link.history"
-    },
-    {
-      "activation": {
-        "kind": "lifetime",
-        "lifecycleSources": []
-      },
-      "bindings": {
-        "toggle": "preferences.toggle"
-      },
-      "config": {},
-      "id": "preferences.service",
-      "serviceTypeRef": "link.preferences"
-    },
-    {
-      "activation": {
-        "kind": "lifetime",
-        "lifecycleSources": []
-      },
-      "bindings": {
-        "command": "updates.command"
-      },
-      "config": {},
-      "id": "updates.service",
-      "serviceTypeRef": "link.updates"
-    },
-    {
-      "activation": {
-        "kind": "lifetime",
-        "lifecycleSources": []
-      },
-      "bindings": {},
-      "config": {},
-      "id": "recovery.service",
-      "serviceTypeRef": "link.recovery"
-    }
-  ],
-  "serviceTypes": [
-    {
-      "id": "link.navigation",
-      "inputs": [
-        {
-          "contract": {
-            "boundary": "ui-event",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "route",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.route"
-                }
-              }
-            ],
-            "id": "link.route-open",
-            "kind": "event"
-          },
-          "id": "openSettings",
-          "purpose": "data"
-        },
-        {
-          "contract": {
-            "boundary": "ui-event",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "route",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.route"
-                }
-              }
-            ],
-            "id": "link.route-open",
-            "kind": "event"
-          },
-          "id": "openDevHost",
-          "purpose": "data"
-        }
-      ],
-      "outputs": [
-        {
-          "contract": {
-            "boundary": "presentation",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "route",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.route"
-                }
-              }
-            ],
-            "id": "link.route-destination",
-            "kind": "state"
-          },
-          "id": "destination",
-          "purpose": "data"
-        }
-      ],
-      "role": "adapter",
-      "runtime": {
-        "clockDomain": "none",
-        "contextInputs": [],
-        "durability": "transient",
-        "effects": [],
-        "lifetime": "instance",
-        "stateOwner": "instance"
-      }
-    },
-    {
-      "configInputs": [
-        {
-          "fields": [],
-          "id": "policy"
-        }
-      ],
-      "id": "link.capture",
-      "inputs": [
-        {
-          "contract": {
-            "boundary": "ui-event",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "operation",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.capture-operation"
-                }
-              }
-            ],
-            "id": "link.capture-command",
-            "kind": "event"
-          },
-          "id": "command",
-          "purpose": "data"
-        }
-      ],
-      "outputs": [
-        {
-          "contract": {
-            "boundary": "presentation",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "phase",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.capture-phase"
-                }
-              },
-              {
-                "clockDomain": "none",
-                "name": "available",
-                "nullable": false,
-                "value": "boolean"
-              },
-              {
-                "clockDomain": "none",
-                "name": "unavailableReason",
-                "nullable": true,
-                "value": "string"
-              },
-              {
-                "clockDomain": "wall",
-                "name": "startedAtMs",
-                "nullable": true,
-                "unit": "si.millisecond",
-                "value": "integer"
-              },
-              {
-                "clockDomain": "none",
-                "name": "byteCount",
-                "nullable": false,
-                "unit": "si.byte",
-                "value": "integer"
-              }
-            ],
-            "id": "link.capture-status",
-            "kind": "state"
-          },
-          "id": "status",
-          "purpose": "data"
-        },
-        {
-          "contract": {
-            "boundary": "service-internal",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "turnId",
-                "nullable": false,
-                "value": "string"
-              },
-              {
-                "clockDomain": "none",
-                "name": "targetId",
-                "nullable": false,
-                "value": "string"
-              },
-              {
-                "clockDomain": "none",
-                "name": "payloadRef",
-                "nullable": false,
-                "value": "string"
-              },
-              {
-                "clockDomain": "none",
-                "name": "idempotencyKey",
-                "nullable": false,
-                "value": "string"
-              },
-              {
-                "clockDomain": "wall",
-                "name": "createdAtMs",
-                "nullable": false,
-                "unit": "si.millisecond",
-                "value": "integer"
-              }
-            ],
-            "id": "link.captured-turn",
-            "kind": "snapshot"
-          },
-          "id": "captured",
-          "purpose": "data"
-        }
-      ],
-      "role": "source",
-      "runtime": {
-        "clockDomain": "monotonic",
-        "contextInputs": [
-          "microphone.permission"
-        ],
-        "durability": "durable",
-        "effects": [
-          "audio.capture",
-          "storage.write"
-        ],
-        "lifetime": "operation",
-        "stateOwner": "external"
-      }
-    },
-    {
-      "configInputs": [
-        {
-          "fields": [],
-          "id": "policy"
-        }
-      ],
-      "id": "link.conversation",
-      "inputs": [
-        {
-          "contract": {
-            "boundary": "service-internal",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "turnId",
-                "nullable": false,
-                "value": "string"
-              },
-              {
-                "clockDomain": "none",
-                "name": "targetId",
-                "nullable": false,
-                "value": "string"
-              },
-              {
-                "clockDomain": "none",
-                "name": "payloadRef",
-                "nullable": false,
-                "value": "string"
-              },
-              {
-                "clockDomain": "none",
-                "name": "idempotencyKey",
-                "nullable": false,
-                "value": "string"
-              },
-              {
-                "clockDomain": "wall",
-                "name": "createdAtMs",
-                "nullable": false,
-                "unit": "si.millisecond",
-                "value": "integer"
-              }
-            ],
-            "id": "link.captured-turn",
-            "kind": "snapshot"
-          },
-          "id": "turn",
-          "purpose": "data"
-        },
-        {
-          "contract": {
-            "boundary": "ui-event",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "text",
-                "nullable": false,
-                "value": "string"
-              }
-            ],
-            "id": "link.compose-turn",
-            "kind": "event"
-          },
-          "id": "compose",
-          "purpose": "data"
-        }
-      ],
-      "outputs": [
-        {
-          "contract": {
-            "boundary": "presentation",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "turnId",
-                "nullable": true,
-                "value": "string"
-              },
-              {
-                "clockDomain": "none",
-                "name": "deliveryPhase",
-                "nullable": true,
-                "value": {
-                  "finite": true,
-                  "ref": "link.delivery-phase"
-                }
-              },
-              {
-                "clockDomain": "none",
-                "name": "replyPhase",
-                "nullable": true,
-                "value": {
-                  "finite": true,
-                  "ref": "link.reply-phase"
-                }
-              },
-              {
-                "clockDomain": "none",
-                "name": "offline",
-                "nullable": false,
-                "value": "boolean"
-              },
-              {
-                "clockDomain": "none",
-                "name": "idempotencyKey",
-                "nullable": true,
-                "value": "string"
-              },
-              {
-                "clockDomain": "none",
-                "name": "turns",
-                "nullable": false,
-                "value": {
-                  "ref": "link.turn-list"
-                }
-              }
-            ],
-            "id": "link.conversation-status",
-            "kind": "state"
-          },
-          "id": "status",
-          "purpose": "data"
-        }
-      ],
-      "role": "adapter",
-      "runtime": {
-        "clockDomain": "wall",
-        "contextInputs": [
-          "network.connectivity"
-        ],
-        "durability": "durable",
-        "effects": [
-          "storage.write",
-          "transport.send",
-          "transport.receive",
-          "retry.schedule"
-        ],
-        "lifetime": "process",
-        "stateOwner": "external"
-      }
-    },
-    {
-      "configInputs": [
-        {
-          "fields": [],
-          "id": "policy"
-        }
-      ],
-      "id": "link.playback",
-      "inputs": [
-        {
-          "contract": {
-            "boundary": "ui-event",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "operation",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.playback-operation"
-                }
-              },
-              {
-                "clockDomain": "none",
-                "name": "turnId",
-                "nullable": false,
-                "value": "string"
-              }
-            ],
-            "id": "link.playback-command",
-            "kind": "event"
-          },
-          "id": "command",
-          "purpose": "data"
-        }
-      ],
-      "outputs": [
-        {
-          "contract": {
-            "boundary": "presentation",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "turnId",
-                "nullable": true,
-                "value": "string"
-              },
-              {
-                "clockDomain": "none",
-                "name": "phase",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.playback-phase"
-                }
-              },
-              {
-                "clockDomain": "none",
-                "name": "positionMs",
-                "nullable": false,
-                "unit": "si.millisecond",
-                "value": "integer"
-              },
-              {
-                "clockDomain": "none",
-                "name": "durationMs",
-                "nullable": false,
-                "unit": "si.millisecond",
-                "value": "integer"
-              },
-              {
-                "clockDomain": "none",
-                "name": "turn",
-                "nullable": true,
-                "value": {
-                  "ref": "link.turn"
-                }
-              }
-            ],
-            "id": "link.playback-status",
-            "kind": "state"
-          },
-          "id": "status",
-          "purpose": "data"
-        }
-      ],
-      "role": "consumer",
-      "runtime": {
-        "clockDomain": "monotonic",
-        "contextInputs": [
-          "audio.focus"
-        ],
-        "durability": "transient",
-        "effects": [
-          "audio.playback"
-        ],
-        "lifetime": "process",
-        "stateOwner": "external"
-      }
-    },
-    {
-      "id": "link.target-directory",
-      "inputs": [
-        {
-          "contract": {
-            "boundary": "ui-event",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "targetId",
-                "nullable": false,
-                "value": "string"
-              }
-            ],
-            "id": "link.target-select",
-            "kind": "event"
-          },
-          "id": "select",
-          "purpose": "data"
-        }
-      ],
-      "outputs": [
-        {
-          "contract": {
-            "boundary": "presentation",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "selectedTargetId",
-                "nullable": true,
-                "value": "string"
-              },
-              {
-                "clockDomain": "none",
-                "name": "kind",
-                "nullable": true,
-                "value": {
-                  "finite": true,
-                  "ref": "link.target-kind"
-                }
-              },
-              {
-                "clockDomain": "none",
-                "name": "availableCount",
-                "nullable": false,
-                "value": "integer"
-              },
-              {
-                "clockDomain": "none",
-                "name": "targets",
-                "nullable": false,
-                "value": {
-                  "ref": "link.target-list"
-                }
-              }
-            ],
-            "id": "link.target-directory",
-            "kind": "state"
-          },
-          "id": "directory",
-          "purpose": "data"
-        }
-      ],
-      "role": "adapter",
-      "runtime": {
-        "clockDomain": "none",
-        "contextInputs": [
-          "transport.route-policy"
-        ],
-        "durability": "durable",
-        "effects": [
-          "storage.write"
-        ],
-        "lifetime": "process",
-        "stateOwner": "instance"
-      }
-    },
-    {
-      "id": "link.session",
-      "inputs": [],
-      "outputs": [
-        {
-          "contract": {
-            "boundary": "presentation",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "connection",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.connection-state"
-                }
-              },
-              {
-                "clockDomain": "none",
-                "name": "connectionDetail",
-                "nullable": true,
-                "value": "string"
-              },
-              {
-                "clockDomain": "none",
-                "name": "publicLinkActive",
-                "nullable": false,
-                "value": "boolean"
-              }
-            ],
-            "id": "link.session-status",
-            "kind": "state"
-          },
-          "id": "status",
-          "purpose": "data"
-        }
-      ],
-      "role": "adapter",
-      "runtime": {
-        "clockDomain": "wall",
-        "contextInputs": [
-          "network.connectivity",
-          "keystore.session"
-        ],
-        "durability": "durable",
-        "effects": [
-          "transport.poll",
-          "transport.auth"
-        ],
-        "lifetime": "process",
-        "stateOwner": "external"
-      }
-    },
-    {
-      "id": "link.history",
-      "inputs": [],
-      "outputs": [
-        {
-          "contract": {
-            "boundary": "presentation",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "retainedTurns",
-                "nullable": false,
-                "value": "integer"
-              },
-              {
-                "clockDomain": "none",
-                "name": "maxTurns",
-                "nullable": false,
-                "value": "integer"
-              }
-            ],
-            "id": "link.history-status",
-            "kind": "state"
-          },
-          "id": "status",
-          "purpose": "data"
-        }
-      ],
-      "role": "adapter",
-      "runtime": {
-        "clockDomain": "none",
-        "contextInputs": [],
-        "durability": "durable",
-        "effects": [],
-        "lifetime": "process",
-        "stateOwner": "external"
-      }
-    },
-    {
-      "id": "link.preferences",
-      "inputs": [
-        {
-          "contract": {
-            "boundary": "ui-event",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "key",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.preference-key"
-                }
-              },
-              {
-                "clockDomain": "none",
-                "name": "enabled",
-                "nullable": false,
-                "value": "boolean"
-              }
-            ],
-            "id": "link.preference-toggle",
-            "kind": "event"
-          },
-          "id": "toggle",
-          "purpose": "data"
-        }
-      ],
-      "outputs": [
-        {
-          "contract": {
-            "boundary": "presentation",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "handsFree",
-                "nullable": false,
-                "value": "boolean"
-              },
-              {
-                "clockDomain": "none",
-                "name": "speakReplies",
-                "nullable": false,
-                "value": "boolean"
-              }
-            ],
-            "id": "link.preferences-status",
-            "kind": "state"
-          },
-          "id": "status",
-          "purpose": "data"
-        }
-      ],
-      "role": "adapter",
-      "runtime": {
-        "clockDomain": "none",
-        "contextInputs": [
-          "storage.preferences"
-        ],
-        "durability": "durable",
-        "effects": [
-          "storage.write"
-        ],
-        "lifetime": "process",
-        "stateOwner": "external"
-      }
-    },
-    {
-      "id": "link.updates",
-      "inputs": [
-        {
-          "contract": {
-            "boundary": "ui-event",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "operation",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.update-operation"
-                }
-              }
-            ],
-            "id": "link.update-command",
-            "kind": "event"
-          },
-          "id": "command",
-          "purpose": "data"
-        }
-      ],
-      "outputs": [
-        {
-          "contract": {
-            "boundary": "presentation",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "phase",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.update-phase"
-                }
-              },
-              {
-                "clockDomain": "none",
-                "name": "update",
-                "nullable": false,
-                "value": {
-                  "ref": "link.update-native"
-                }
-              }
-            ],
-            "id": "link.update-status",
-            "kind": "state"
-          },
-          "id": "status",
-          "purpose": "data"
-        }
-      ],
-      "role": "adapter",
-      "runtime": {
-        "clockDomain": "wall",
-        "contextInputs": [
-          "network.connectivity"
-        ],
-        "durability": "transient",
-        "effects": [
-          "network.fetch",
-          "apk.install"
-        ],
-        "lifetime": "process",
-        "stateOwner": "instance"
-      }
-    },
-    {
-      "id": "link.recovery",
-      "inputs": [],
-      "outputs": [
-        {
-          "contract": {
-            "boundary": "presentation",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "phase",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.recovery-phase"
-                }
-              },
-              {
-                "clockDomain": "none",
-                "name": "detail",
-                "nullable": true,
-                "value": "string"
-              }
-            ],
-            "id": "link.recovery-status",
-            "kind": "state"
-          },
-          "id": "status",
-          "purpose": "data"
-        }
-      ],
-      "role": "source",
-      "runtime": {
-        "clockDomain": "wall",
-        "contextInputs": [
-          "storage.state-repository"
-        ],
-        "durability": "durable",
-        "effects": [],
-        "lifetime": "process",
-        "stateOwner": "external"
-      }
-    }
-  ]
+  "schemaVersion": 7
 }

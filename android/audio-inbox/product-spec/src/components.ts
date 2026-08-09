@@ -94,7 +94,7 @@ export const navigationEntryComponentType = defineComponentType({
   inputs: [componentPort("destination", routeDestinationContract)],
   outputs: [componentPort("open", routeOpenContract)],
 });
-/** Self-contained CircleKit host preview; renders outside the service graph. */
+/** Self-contained CircleKit host preview; renders outside the data graph. */
 export const devPreviewComponentType = defineComponentType({
   id: "link.dev-preview",
   requiredCapabilities: componentTree,
@@ -121,55 +121,55 @@ export const linkComponentTypes = [
 export const linkComponentInstances = [
   {
     id: "target", componentTypeRef: targetPickerComponentType.id,
-    bindings: { inputs: { model: "target.service.directory" }, events: { select: "target.service.select" } },
+    bindings: { inputs: { model: "target.presentation.model" }, events: { select: "target.service.select" } },
   },
   {
     id: "talk", componentTypeRef: talkComponentType.id,
-    bindings: { inputs: { model: "capture.service.status" }, events: { command: "capture.service.command" } },
+    bindings: { inputs: { model: "capture.presentation.model" }, events: { command: "capture.service.command" } },
   },
   {
     id: "latest", componentTypeRef: latestTurnComponentType.id,
-    bindings: { inputs: { model: "conversation.service.status" }, events: {} },
+    bindings: { inputs: { model: "conversation.presentation.model" }, events: {} },
   },
   {
     id: "composer", componentTypeRef: composerComponentType.id,
-    bindings: { inputs: { model: "conversation.service.status" }, events: { compose: "conversation.service.compose" } },
+    bindings: { inputs: { model: "conversation.presentation.model" }, events: { compose: "conversation.service.compose" } },
   },
   {
     id: "active-playback", componentTypeRef: activePlaybackComponentType.id,
-    bindings: { inputs: { model: "playback.service.status" }, events: { command: "playback.service.command" } },
+    bindings: { inputs: { model: "playback.presentation.model" }, events: { command: "playback.service.command" } },
   },
   {
     id: "connection", componentTypeRef: connectionStatusComponentType.id,
-    bindings: { inputs: { model: "session.service.status" }, events: {} },
+    bindings: { inputs: { model: "session.presentation.model" }, events: {} },
   },
   {
     id: "public-link", componentTypeRef: publicLinkComponentType.id,
-    bindings: { inputs: { model: "session.service.status" }, events: {} },
+    bindings: { inputs: { model: "session.presentation.model" }, events: {} },
   },
   {
     id: "preferences", componentTypeRef: preferencesComponentType.id,
-    bindings: { inputs: { model: "preferences.service.status" }, events: { toggle: "preferences.service.toggle" } },
+    bindings: { inputs: { model: "preferences.presentation.model" }, events: { toggle: "preferences.service.toggle" } },
   },
   {
     id: "local-history", componentTypeRef: localHistoryComponentType.id,
-    bindings: { inputs: { model: "history.service.status" }, events: {} },
+    bindings: { inputs: { model: "history.presentation.model" }, events: {} },
   },
   {
     id: "updates", componentTypeRef: updatesComponentType.id,
-    bindings: { inputs: { model: "updates.service.status" }, events: { command: "updates.service.command" } },
+    bindings: { inputs: { model: "updates.presentation.model" }, events: { command: "updates.service.command" } },
   },
   {
     id: "recovery", componentTypeRef: recoveryStatusComponentType.id,
-    bindings: { inputs: { model: "recovery.service.status" }, events: {} },
+    bindings: { inputs: { model: "recovery.presentation.model" }, events: {} },
   },
   {
     id: "settings-action", componentTypeRef: navigationEntryComponentType.id,
-    bindings: { inputs: { destination: "navigation.service.destination" }, events: { open: "navigation.service.openSettings" } },
+    bindings: { inputs: { destination: "navigation.presentation.model" }, events: { open: "navigation.service.openSettings" } },
   },
   {
     id: "dev-host", componentTypeRef: navigationEntryComponentType.id,
-    bindings: { inputs: { destination: "navigation.service.destination" }, events: { open: "navigation.service.openDevHost" } },
+    bindings: { inputs: { destination: "navigation.presentation.model" }, events: { open: "navigation.service.openDevHost" } },
   },
   {
     id: "dev-preview", componentTypeRef: devPreviewComponentType.id,

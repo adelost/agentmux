@@ -27,7 +27,7 @@ enum class LinkRoute(val wireId: String) {
     DEV_HOST("dev-host"),
 }
 
-/** capture.service.status — the talk component's model. */
+/** capture.presentation.model — the talk component's model. */
 data class LinkCapturePresentation(
     val phase: CapturePhase,
     val available: Boolean,
@@ -45,7 +45,7 @@ data class LinkCapturedTurn(
     val createdAtMs: Long,
 )
 
-/** conversation.service.status — the latest-turn and composer components' model. */
+/** conversation.presentation.model — the latest-turn and composer components' model. */
 data class LinkConversationPresentation(
     val turnId: String?,
     val deliveryPhase: DeliveryPhase?,
@@ -55,7 +55,7 @@ data class LinkConversationPresentation(
     val turns: List<LinkTurn>,
 )
 
-/** playback.service.status — the active-playback component's model. */
+/** playback.presentation.model — the active-playback component's model. */
 data class LinkPlaybackPresentation(
     val turnId: String?,
     val phase: PlaybackPhase,
@@ -64,7 +64,7 @@ data class LinkPlaybackPresentation(
     val turn: LinkTurn?,
 )
 
-/** target.service.directory — the target component's model (the picker's available targets). */
+/** target.presentation.model — the target component's model (the picker's available targets). */
 data class LinkTargetPresentation(
     val selectedTargetId: String?,
     val kind: LinkTargetKind?,
@@ -72,38 +72,38 @@ data class LinkTargetPresentation(
     val targets: List<LinkTarget>,
 )
 
-/** session.service.status — the connection and public-link components' model. */
+/** session.presentation.model — the connection and public-link components' model. */
 data class LinkSessionPresentation(
     val connection: ConnectionState,
     val connectionDetail: String?,
     val publicLinkActive: Boolean,
 )
 
-/** history.service.status — the local-history component's model. */
+/** history.presentation.model — the local-history component's model. */
 data class LinkHistoryPresentation(
     val retainedTurns: Int,
     val maxTurns: Int,
 )
 
-/** preferences.service.status — the preferences component's model. */
+/** preferences.presentation.model — the preferences component's model. */
 data class LinkPreferencesPresentation(
     val handsFree: Boolean,
     val speakReplies: Boolean,
 )
 
-/** updates.service.status — the updates component's model. */
+/** updates.presentation.model — the updates component's model. */
 data class LinkUpdatePresentation(
     val phase: LinkUpdatePhase,
     val update: UpdateState,
 )
 
-/** recovery.service.status — the recovery component's model. */
+/** recovery.presentation.model — the recovery component's model. */
 data class LinkRecoveryPresentation(
     val phase: LinkRecoveryPhase,
     val detail: String?,
 )
 
-/** navigation.service.destination — the navigation-entry components' destination input. */
+/** navigation.presentation.model — the navigation-entry components' destination input. */
 data class LinkDestinationPresentation(
     val route: LinkRoute,
 )

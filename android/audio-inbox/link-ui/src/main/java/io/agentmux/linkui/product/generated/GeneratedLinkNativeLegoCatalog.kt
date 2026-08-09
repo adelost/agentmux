@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the portable native-Lego catalog
-// Product declarations SHA-256: afea64d9da9ae8586a41926457d2a07ab33b0b7190275316989720bd6f39cb9a
+// Product declarations SHA-256: b77eca21e1f6b041b988255223d6abc3d53070f52f7f136adf0444b5360ea4f6
 package io.agentmux.linkui.product.generated
 
 internal object GeneratedLinkNativeLegoCatalog {
@@ -25,6 +25,26 @@ internal object GeneratedLinkNativeLegoCatalog {
         data object UPDATES_SERVICE_COMMAND : GeneratedProductInputPortId { override val value = "updates.service.command" }
         data object UPDATES_SERVICE_STATUS : GeneratedProductOutputPortId { override val value = "updates.service.status" }
         data object RECOVERY_SERVICE_STATUS : GeneratedProductOutputPortId { override val value = "recovery.service.status" }
+        data object NAVIGATION_PRESENTATION_SOURCE : GeneratedProductInputPortId { override val value = "navigation.presentation.source" }
+        data object NAVIGATION_PRESENTATION_MODEL : GeneratedProductOutputPortId { override val value = "navigation.presentation.model" }
+        data object CAPTURE_PRESENTATION_SOURCE : GeneratedProductInputPortId { override val value = "capture.presentation.source" }
+        data object CAPTURE_PRESENTATION_MODEL : GeneratedProductOutputPortId { override val value = "capture.presentation.model" }
+        data object CONVERSATION_PRESENTATION_SOURCE : GeneratedProductInputPortId { override val value = "conversation.presentation.source" }
+        data object CONVERSATION_PRESENTATION_MODEL : GeneratedProductOutputPortId { override val value = "conversation.presentation.model" }
+        data object PLAYBACK_PRESENTATION_SOURCE : GeneratedProductInputPortId { override val value = "playback.presentation.source" }
+        data object PLAYBACK_PRESENTATION_MODEL : GeneratedProductOutputPortId { override val value = "playback.presentation.model" }
+        data object TARGET_PRESENTATION_SOURCE : GeneratedProductInputPortId { override val value = "target.presentation.source" }
+        data object TARGET_PRESENTATION_MODEL : GeneratedProductOutputPortId { override val value = "target.presentation.model" }
+        data object SESSION_PRESENTATION_SOURCE : GeneratedProductInputPortId { override val value = "session.presentation.source" }
+        data object SESSION_PRESENTATION_MODEL : GeneratedProductOutputPortId { override val value = "session.presentation.model" }
+        data object HISTORY_PRESENTATION_SOURCE : GeneratedProductInputPortId { override val value = "history.presentation.source" }
+        data object HISTORY_PRESENTATION_MODEL : GeneratedProductOutputPortId { override val value = "history.presentation.model" }
+        data object PREFERENCES_PRESENTATION_SOURCE : GeneratedProductInputPortId { override val value = "preferences.presentation.source" }
+        data object PREFERENCES_PRESENTATION_MODEL : GeneratedProductOutputPortId { override val value = "preferences.presentation.model" }
+        data object UPDATES_PRESENTATION_SOURCE : GeneratedProductInputPortId { override val value = "updates.presentation.source" }
+        data object UPDATES_PRESENTATION_MODEL : GeneratedProductOutputPortId { override val value = "updates.presentation.model" }
+        data object RECOVERY_PRESENTATION_SOURCE : GeneratedProductInputPortId { override val value = "recovery.presentation.source" }
+        data object RECOVERY_PRESENTATION_MODEL : GeneratedProductOutputPortId { override val value = "recovery.presentation.model" }
         data object TARGET_MODEL : GeneratedProductInputPortId { override val value = "target.model" }
         data object TARGET_SELECT : GeneratedProductOutputPortId { override val value = "target.select" }
         data object TALK_MODEL : GeneratedProductInputPortId { override val value = "talk.model" }

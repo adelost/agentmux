@@ -23,7 +23,7 @@ export function linkNativeEmitter(kotlinRoot: string): ProductEmitterPlugin {
     id: "link-native",
     emit(product) {
       const catalogSha = fingerprint({
-        ports: product.portRegistry.servicePorts,
+        ports: product.portRegistry.nodePorts,
         componentPorts: product.portRegistry.componentPorts,
         bindings: product.portRegistry.bindings,
         demandEdges: product.portRegistry.demandEdges,
@@ -66,7 +66,7 @@ internal data class GeneratedLinkFiniteValueDeclaration(
     val id: GeneratedLinkFiniteValueId,
     val values: Set<String>,
 )
-internal enum class GeneratedProductPortOwnerKind { SERVICE, COMPONENT }
+internal enum class GeneratedProductPortOwnerKind { NODE, COMPONENT }
 internal enum class GeneratedProductPortDirection { INPUT, OUTPUT }
 internal enum class GeneratedProductPortBoundary { PRESENTATION, UI_EVENT, SERVICE_INTERNAL }
 internal enum class GeneratedProductPortPurpose { DATA, DEMAND, CONTEXT }
@@ -82,7 +82,7 @@ internal data class GeneratedProductPort(
     val required: Boolean,
     val purpose: GeneratedProductPortPurpose,
 )
-internal enum class GeneratedProductPortBindingKind { SERVICE_INPUT, COMPONENT_INPUT, COMPONENT_EVENT }
+internal enum class GeneratedProductPortBindingKind { NODE_INPUT, COMPONENT_INPUT, COMPONENT_EVENT }
 internal data class GeneratedProductPortBinding(
     val kind: GeneratedProductPortBindingKind,
     val from: GeneratedProductOutputPortId,
@@ -92,10 +92,10 @@ internal data class GeneratedProductPortBinding(
 internal data class GeneratedLinkNativeLegoEdge(val from: String, val to: String)
 internal data class GeneratedProductDemandEdge(
     val kind: String,
-    val serviceInstanceRef: String,
+    val nodeInstanceRef: String,
     val targetPortRef: GeneratedProductInputPortId,
     val source: String? = null,
-    val rootServiceInstanceRef: String? = null,
+    val rootNodeInstanceRef: String? = null,
     val artifactRef: String? = null,
     val screenRef: String? = null,
     val surface: String? = null,
@@ -106,7 +106,7 @@ internal data class GeneratedProductDemandEdge(
 }
 
 function emitCatalogAggregate(product: ProductIr, sha: string): string {
-  const ports = [...product.portRegistry.servicePorts, ...product.portRegistry.componentPorts];
+  const ports = [...product.portRegistry.nodePorts, ...product.portRegistry.componentPorts];
   const portIdObjects = ports.map((port) => {
     const face = port.direction === "input" ? "GeneratedProductInputPortId" : "GeneratedProductOutputPortId";
     return `        data object ${kotlinEnumToken(port.ref)} : ${face} { override val value = "${port.ref}" }`;
@@ -139,7 +139,7 @@ ${finiteValues}
 }
 
 function emitPortData(product: ProductIr, sha: string): string {
-  const ports = [...product.portRegistry.servicePorts, ...product.portRegistry.componentPorts];
+  const ports = [...product.portRegistry.nodePorts, ...product.portRegistry.componentPorts];
   const entries = ports.map((port) =>
     `        GeneratedProductPort(GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(port.ref)}, ${ownerKind(port.ownerKind)}, "${port.ownerId}", "${port.typeRef}", "${port.portId}", ${direction(port.direction)}, "${port.contractRef}", ${boundary(port.boundary)}, ${port.required}, ${purpose(port.purpose)})`
   ).join(",\n");
@@ -351,8 +351,8 @@ function kotlinEnumToken(id: string): string {
   return id.replace(/[^A-Za-z0-9]+/gu, "_").toUpperCase();
 }
 
-function ownerKind(kind: "service" | "component"): string {
-  return `GeneratedProductPortOwnerKind.${kind === "service" ? "SERVICE" : "COMPONENT"}`;
+function ownerKind(kind: "node" | "component"): string {
+  return `GeneratedProductPortOwnerKind.${kind === "node" ? "NODE" : "COMPONENT"}`;
 }
 function direction(value: "input" | "output"): string {
   return `GeneratedProductPortDirection.${value === "input" ? "INPUT" : "OUTPUT"}`;
@@ -373,7 +373,7 @@ function purpose(value: string): string {
 }
 function bindingKind(kind: string): string {
   const token = kotlinEnumToken(kind);
-  if (!["SERVICE_INPUT", "COMPONENT_INPUT", "COMPONENT_EVENT"].includes(token)) {
+  if (!["NODE_INPUT", "COMPONENT_INPUT", "COMPONENT_EVENT"].includes(token)) {
     throw new Error(`unknown binding kind '${kind}'`);
   }
   return `GeneratedProductPortBindingKind.${token}`;

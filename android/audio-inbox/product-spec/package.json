@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@v1d/circlekit-assets": "https://circlekit.pages.dev/npm/v1d/circlekit-assets/0.3.40/v1d-circlekit-assets-0.3.40.tgz",
-    "@v1d/product-spec": "https://circlekit.pages.dev/npm/v1d/product-spec/0.3.41/v1d-product-spec-0.3.41.tgz"
+    "@v1d/product-spec": "https://circlekit.pages.dev/npm/v1d/product-spec/0.3.42/v1d-product-spec-0.3.42.tgz"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

@@ -67,6 +67,47 @@ internal object UpdatesStatusOutput :
 internal object RecoveryStatusOutput :
     ProductOutputPort<LinkRecoveryPresentation>(PortIds.RECOVERY_SERVICE_STATUS)
 
+internal object NavigationPresentationSourceInput :
+    ProductDataInput<LinkDestinationPresentation>(PortIds.NAVIGATION_PRESENTATION_SOURCE)
+internal object NavigationPresentationModelOutput :
+    ProductOutputPort<LinkDestinationPresentation>(PortIds.NAVIGATION_PRESENTATION_MODEL)
+internal object CapturePresentationSourceInput :
+    ProductDataInput<LinkCapturePresentation>(PortIds.CAPTURE_PRESENTATION_SOURCE)
+internal object CapturePresentationModelOutput :
+    ProductOutputPort<LinkCapturePresentation>(PortIds.CAPTURE_PRESENTATION_MODEL)
+internal object ConversationPresentationSourceInput :
+    ProductDataInput<LinkConversationPresentation>(PortIds.CONVERSATION_PRESENTATION_SOURCE)
+internal object ConversationPresentationModelOutput :
+    ProductOutputPort<LinkConversationPresentation>(PortIds.CONVERSATION_PRESENTATION_MODEL)
+internal object PlaybackPresentationSourceInput :
+    ProductDataInput<LinkPlaybackPresentation>(PortIds.PLAYBACK_PRESENTATION_SOURCE)
+internal object PlaybackPresentationModelOutput :
+    ProductOutputPort<LinkPlaybackPresentation>(PortIds.PLAYBACK_PRESENTATION_MODEL)
+internal object TargetPresentationSourceInput :
+    ProductDataInput<LinkTargetPresentation>(PortIds.TARGET_PRESENTATION_SOURCE)
+internal object TargetPresentationModelOutput :
+    ProductOutputPort<LinkTargetPresentation>(PortIds.TARGET_PRESENTATION_MODEL)
+internal object SessionPresentationSourceInput :
+    ProductDataInput<LinkSessionPresentation>(PortIds.SESSION_PRESENTATION_SOURCE)
+internal object SessionPresentationModelOutput :
+    ProductOutputPort<LinkSessionPresentation>(PortIds.SESSION_PRESENTATION_MODEL)
+internal object HistoryPresentationSourceInput :
+    ProductDataInput<LinkHistoryPresentation>(PortIds.HISTORY_PRESENTATION_SOURCE)
+internal object HistoryPresentationModelOutput :
+    ProductOutputPort<LinkHistoryPresentation>(PortIds.HISTORY_PRESENTATION_MODEL)
+internal object PreferencesPresentationSourceInput :
+    ProductDataInput<LinkPreferencesPresentation>(PortIds.PREFERENCES_PRESENTATION_SOURCE)
+internal object PreferencesPresentationModelOutput :
+    ProductOutputPort<LinkPreferencesPresentation>(PortIds.PREFERENCES_PRESENTATION_MODEL)
+internal object UpdatesPresentationSourceInput :
+    ProductDataInput<LinkUpdatePresentation>(PortIds.UPDATES_PRESENTATION_SOURCE)
+internal object UpdatesPresentationModelOutput :
+    ProductOutputPort<LinkUpdatePresentation>(PortIds.UPDATES_PRESENTATION_MODEL)
+internal object RecoveryPresentationSourceInput :
+    ProductDataInput<LinkRecoveryPresentation>(PortIds.RECOVERY_PRESENTATION_SOURCE)
+internal object RecoveryPresentationModelOutput :
+    ProductOutputPort<LinkRecoveryPresentation>(PortIds.RECOVERY_PRESENTATION_MODEL)
+
 internal object TargetModelInput :
     ProductComponentInput<LinkTargetPresentation>(PortIds.TARGET_MODEL)
 

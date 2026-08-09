@@ -1,6 +1,6 @@
 {
   "stage": "native-export",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "sourceFile": "link-ui/src/main/java/io/agentmux/linkui/product/LinkNativeBindings.kt",
   "profiles": ["phone-full-ui", "wear-full-ui"],
   "components": [
