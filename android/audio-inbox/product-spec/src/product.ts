@@ -3,14 +3,14 @@ import { defineProduct, type ProductIr } from "@v1d/product-spec";
 import { linkComponentInstances, linkComponentTypes } from "./components.js";
 import { linkFiniteValues } from "./finite-values.js";
 import { linkProductIconRefs } from "./icons.js";
-import { linkConfigs, linkServices } from "./instances.js";
+import { linkConfigs, linkNodes } from "./nodes.js";
 import { linkScreenComponentFamilies } from "./screens.js";
-import { linkServiceTypes } from "./services.js";
+import { linkNodeTypes } from "./node-types.js";
 
 const linkPalette = { variants: [] } as const;
 
 /**
- * The one portable Link product graph: mandatory typed service and component
+ * The one portable Link product graph: mandatory typed node and component
  * ports, instances and mounts as the only source. There is no ui list, no
  * parallel manifest and no runtime JSON here — native bindings are attested
  * against the compiled IR by the generic conformance engine.
@@ -39,8 +39,8 @@ const linkProductCore = defineProduct({
       serves: ["round"],
     },
   ],
-  serviceTypes: linkServiceTypes,
-  services: linkServices,
+  nodeTypes: linkNodeTypes,
+  nodes: linkNodes,
   configs: linkConfigs,
   finiteValues: linkFiniteValues,
   componentTypes: linkComponentTypes,

@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
  * generated; native code may only attach a typed value or event sink to an
  * existing ID. The inspector reads this exact store, never a second catalog.
  *
- * Link declares ten lifetime services and no demand ports, so there is no
+ * Link declares ten lifetime services, ten final presentations and no demand ports, so there is no
  * demand-owner provider here: the inspector's demandOwners stay empty.
  */
 internal class LinkProductPortRuntime(
@@ -87,7 +87,7 @@ internal class LinkProductPortRuntime(
     }
 
     /**
-     * Reads a service input through its generated upstream edge. Native
+     * Reads a node input through its generated upstream edge. Native
      * projections cannot subscribe to the producer a second time or bypass
      * ProductSpec wiring.
      */
@@ -303,33 +303,33 @@ internal class LinkProductPortRuntime(
         }
     }
 
-    /** Every declared service output must feed runtime and inspector truth. */
-    fun requireServiceOutputTotality() {
+    /** Every declared node output must feed runtime and inspector truth. */
+    fun requireNodeOutputTotality() {
         val required = declarations.values.filterTo(linkedSetOf()) { port ->
-            port.ownerKind == GeneratedProductPortOwnerKind.SERVICE &&
+            port.ownerKind == GeneratedProductPortOwnerKind.NODE &&
                 port.direction == GeneratedProductPortDirection.OUTPUT
         }.mapTo(linkedSetOf()) { it.id }
         val missing = required - observedOutputs.keys
         check(missing.isEmpty()) {
-            "Generated service outputs lack native values: " +
+            "Generated node outputs lack native values: " +
                 missing.map { it.value }.sorted().joinToString()
         }
     }
 
     /**
-     * Every generated service input has exactly one native consumer: a sink
+     * Every generated node input has exactly one native consumer: a sink
      * bound through [bindInput], or a data consumer attached through
-     * [connected]. Link services are all lifetime services with plain data
-     * inputs, so no demand or context exception participates in this proof.
+     * [connected]. Link services are lifetime nodes and presentations are
+     * effect-free nodes; neither group has demand or context exceptions.
      */
-    fun requireServiceInputTotality() {
+    fun requireNodeInputTotality() {
         val required = declarations.values.filterTo(linkedSetOf()) { port ->
-            port.ownerKind == GeneratedProductPortOwnerKind.SERVICE &&
+            port.ownerKind == GeneratedProductPortOwnerKind.NODE &&
                 port.direction == GeneratedProductPortDirection.INPUT
         }.mapTo(linkedSetOf()) { it.id }
         val missing = required - inputSinks.keys - consumedDataInputs.keys
         check(missing.isEmpty()) {
-            "Generated service inputs lack native consumers: " +
+            "Generated node inputs lack native consumers: " +
                 missing.map { it.value }.sorted().joinToString()
         }
     }

@@ -16,7 +16,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
-/** The host-supplied native sinks behind the generated service inputs. */
+/** The host-supplied native sinks behind the generated effect-owning service inputs. */
 class LinkProductSinks(
     val captureCommand: (LinkCaptureCommandEvent) -> Unit,
     val capturedTurn: (LinkCapturedTurn) -> Unit,
@@ -31,8 +31,8 @@ class LinkProductSinks(
  * The native half of the mandatory product graph for one Link host.
  *
  * The constructor mounts the whole boundary and proves it: every generated
- * service output is observed from the real host state, every service input
- * has exactly one native consumer, and every component model/destination
+ * service output is observed from the real host state, every node input has
+ * exactly one native consumer, and every component model/destination
  * input and component event has its one native endpoint. Screens only read
  * the exposed component StateFlows and emit through the on... methods.
  */
@@ -152,6 +152,47 @@ open class LinkProductGraph(
             state.map { it.toRecoveryPresentation() }.hot { state.value.toRecoveryPresentation() },
         )
 
+        runtime.observe(
+            NavigationPresentationModelOutput,
+            runtime.connected(NavigationPresentationSourceInput, processScope),
+        )
+        runtime.observe(
+            CapturePresentationModelOutput,
+            runtime.connected(CapturePresentationSourceInput, processScope),
+        )
+        runtime.observe(
+            ConversationPresentationModelOutput,
+            runtime.connected(ConversationPresentationSourceInput, processScope),
+        )
+        runtime.observe(
+            PlaybackPresentationModelOutput,
+            runtime.connected(PlaybackPresentationSourceInput, processScope),
+        )
+        runtime.observe(
+            TargetPresentationModelOutput,
+            runtime.connected(TargetPresentationSourceInput, processScope),
+        )
+        runtime.observe(
+            SessionPresentationModelOutput,
+            runtime.connected(SessionPresentationSourceInput, processScope),
+        )
+        runtime.observe(
+            HistoryPresentationModelOutput,
+            runtime.connected(HistoryPresentationSourceInput, processScope),
+        )
+        runtime.observe(
+            PreferencesPresentationModelOutput,
+            runtime.connected(PreferencesPresentationSourceInput, processScope),
+        )
+        runtime.observe(
+            UpdatesPresentationModelOutput,
+            runtime.connected(UpdatesPresentationSourceInput, processScope),
+        )
+        runtime.observe(
+            RecoveryPresentationModelOutput,
+            runtime.connected(RecoveryPresentationSourceInput, processScope),
+        )
+
         // The one service-internal edge: a captured turn is delivered to the
         // conversation service through its generated binding, never directly.
         runtime.connected(ConversationTurnInput, processScope) { turn -> sinks.capturedTurn(turn) }
@@ -188,9 +229,9 @@ open class LinkProductGraph(
         settingsActionOpen = runtime.componentEvent(SettingsActionOpenEvent, processScope)
         devHostOpen = runtime.componentEvent(DevHostOpenEvent, processScope)
 
-        runtime.requireServiceOutputTotality()
+        runtime.requireNodeOutputTotality()
         runtime.requireComponentPortTotality()
-        runtime.requireServiceInputTotality()
+        runtime.requireNodeInputTotality()
     }
 
     fun beginCapture(): Boolean {
