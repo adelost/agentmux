@@ -30,6 +30,12 @@ export function parseProcessRows(text) {
     .map((match) => ({ pid: Number(match[1]), elapsedSeconds: Number(match[2]), command: match[3] }));
 }
 
+/** WHAT: Builds a headless emulator environment without display handles. WHY: Prevents stale WSLg sockets from blocking startup. */
+export function headlessEmulatorEnv(env = process.env) {
+  const { DISPLAY: _display, WAYLAND_DISPLAY: _wayland, ...rest } = env;
+  return rest;
+}
+
 /** WHAT: Extracts AVD identity from one process. WHY: Keeps the guard limited to agent-owned headless emulators. */
 export function parseHeadlessEmulator(row) {
   const command = String(row?.command || "");
@@ -336,7 +342,7 @@ export async function ensureAndroidEmulator(avd, {
       "-no-snapshot-load",
       "-gpu", "swiftshader_indirect",
       "-port", String(selectedPort),
-    ], { detached: true, stdio: ["ignore", fd, fd] });
+    ], { detached: true, stdio: ["ignore", fd, fd], env: headlessEmulatorEnv() });
   } finally {
     closeSync(fd);
   }

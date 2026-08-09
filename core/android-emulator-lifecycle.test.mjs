@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   blockingAndroidHostWork,
   ensureAndroidEmulator,
+  headlessEmulatorEnv,
   headlessEmulatorsFromRows,
   parseGuestIdle,
   parseProcessRows,
@@ -25,6 +26,26 @@ describe("Android emulator idle lifecycle", () => {
       { avd: "wear34", serial: "emulator-5554" },
       { avd: "pixel35", serial: "emulator-5556" },
     ]);
+  });
+
+  it("starts a headless emulator with no display to connect to", () => {
+    // A dead WSLg X server leaves its socket in /tmp/.X11-unix, so -no-window
+    // still connects to DISPLAY and blocks with nothing to time it out: the
+    // process lives, never opens its ports, and the log just stops. Removing
+    // the handle is what makes headless actually headless.
+    const env = headlessEmulatorEnv({
+      DISPLAY: ":0",
+      WAYLAND_DISPLAY: "wayland-0",
+      PATH: "/usr/bin",
+      ANDROID_SDK_ROOT: "/sdk",
+    });
+    expect(env).toEqual({ PATH: "/usr/bin", ANDROID_SDK_ROOT: "/sdk" });
+  });
+
+  it("does not mutate the caller's environment while stripping the display", () => {
+    const caller = { DISPLAY: ":0", PATH: "/usr/bin" };
+    headlessEmulatorEnv(caller);
+    expect(caller.DISPLAY).toBe(":0");
   });
 
   it("uses guest uptime minus Android's last user activity, not host process age", () => {
@@ -105,6 +126,38 @@ describe("Android emulator idle lifecycle", () => {
       expect(busy.results.every((result) => result.reason === "android-host-work-active")).toBe(true);
       expect(stop).not.toHaveBeenCalled();
     } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("hands the spawned emulator an environment with no display handle", async () => {
+    // The wiring, not the helper: a passing headlessEmulatorEnv() unit test
+    // proves nothing if the spawn call stops passing it. Deleting `env:` from
+    // the spawn options must fail here.
+    const root = mkdtempSync(join(tmpdir(), "amux-emulator-display-"));
+    const statePath = join(root, "state.json");
+    writeFileSync(statePath, `${JSON.stringify({ version: 1, emulators: {} })}\n`);
+    const spawnProcess = vi.fn(() => ({ pid: 4242, unref: () => {} }));
+    const original = process.env.DISPLAY;
+    process.env.DISPLAY = ":0";
+    try {
+      await ensureAndroidEmulator("wear34", {
+        statePath,
+        port: 5554,
+        waitForBoot: false,
+        logPath: join(root, "emulator.log"),
+        tools: { emulator: process.execPath, adb: "/bin/true" },
+        readRows: () => [],
+        exec: () => "wear34\n",
+        spawnProcess,
+      });
+      const options = spawnProcess.mock.calls[0]?.[2];
+      expect(options?.env, "spawn must receive an explicit env").toBeDefined();
+      expect("DISPLAY" in options.env).toBe(false);
+      expect("WAYLAND_DISPLAY" in options.env).toBe(false);
+    } finally {
+      if (original === undefined) delete process.env.DISPLAY;
+      else process.env.DISPLAY = original;
       rmSync(root, { recursive: true, force: true });
     }
   });
