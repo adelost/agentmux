@@ -16,6 +16,7 @@ import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.ReplyPhase
 import io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef
 import io.agentmux.linkui.product.generated.GeneratedLinkComponentId
+import io.agentmux.linkui.product.generated.GeneratedLinkComponentTypeId
 import io.agentmux.linkui.product.generated.GeneratedLinkFiniteValueId
 import io.agentmux.linkui.product.generated.GeneratedLinkNativeLegoCatalog.FiniteValueIds
 import io.agentmux.linkui.product.generated.GeneratedLinkCapturePhaseAuthority
@@ -32,7 +33,8 @@ import kotlin.enums.enumEntries
 
 /** One component instance attested to a native renderer and its host artifacts. */
 data class LinkNativeComponentBinding(
-    val component: GeneratedLinkComponentId,
+    val componentType: GeneratedLinkComponentTypeId,
+    val instances: Set<GeneratedLinkComponentId>,
     val rendererId: String,
     val profiles: Set<GeneratedLinkArtifactRef>,
 )
@@ -76,20 +78,25 @@ object LinkNativeBindings {
     private val phone = setOf(GeneratedLinkArtifactRef.PHONE_FULL_UI)
 
     val components: List<LinkNativeComponentBinding> = listOf(
-        component(GeneratedLinkComponentId.TARGET, "status", both),
-        component(GeneratedLinkComponentId.LATEST, "conversation-feed", both),
-        component(GeneratedLinkComponentId.COMPOSER, "composer", phone),
-        component(GeneratedLinkComponentId.TALK, "capture", both),
-        component(GeneratedLinkComponentId.ACTIVE_PLAYBACK, "active-playback", phone),
-        component(GeneratedLinkComponentId.CONNECTION, "connection", both),
-        component(GeneratedLinkComponentId.PUBLIC_LINK, "public-link", phone),
-        component(GeneratedLinkComponentId.PREFERENCES, "preferences", phone),
-        component(GeneratedLinkComponentId.LOCAL_HISTORY, "local-history", phone),
-        component(GeneratedLinkComponentId.UPDATES, "updates", both),
-        component(GeneratedLinkComponentId.RECOVERY, "recovery", both),
-        component(GeneratedLinkComponentId.SETTINGS_ACTION, "navigation-entry", both),
-        component(GeneratedLinkComponentId.DEV_HOST, "navigation-entry", phone),
-        component(GeneratedLinkComponentId.DEV_PREVIEW, "dev-preview", phone),
+        component(GeneratedLinkComponentTypeId.LINK_TARGET_PICKER, "status", both, GeneratedLinkComponentId.TARGET),
+        component(GeneratedLinkComponentTypeId.LINK_LATEST_TURN, "conversation-feed", both, GeneratedLinkComponentId.LATEST),
+        component(GeneratedLinkComponentTypeId.LINK_COMPOSER, "composer", phone, GeneratedLinkComponentId.COMPOSER),
+        component(GeneratedLinkComponentTypeId.LINK_TALK, "capture", both, GeneratedLinkComponentId.TALK),
+        component(GeneratedLinkComponentTypeId.LINK_ACTIVE_PLAYBACK, "active-playback", phone, GeneratedLinkComponentId.ACTIVE_PLAYBACK),
+        component(GeneratedLinkComponentTypeId.LINK_CONNECTION_STATUS, "connection", both, GeneratedLinkComponentId.CONNECTION),
+        component(GeneratedLinkComponentTypeId.LINK_PUBLIC_LINK, "public-link", phone, GeneratedLinkComponentId.PUBLIC_LINK),
+        component(GeneratedLinkComponentTypeId.LINK_PREFERENCES, "preferences", phone, GeneratedLinkComponentId.PREFERENCES),
+        component(GeneratedLinkComponentTypeId.LINK_LOCAL_HISTORY, "local-history", phone, GeneratedLinkComponentId.LOCAL_HISTORY),
+        component(GeneratedLinkComponentTypeId.LINK_UPDATES, "updates", both, GeneratedLinkComponentId.UPDATES),
+        component(GeneratedLinkComponentTypeId.LINK_RECOVERY_STATUS, "recovery", both, GeneratedLinkComponentId.RECOVERY),
+        component(
+            GeneratedLinkComponentTypeId.LINK_NAVIGATION_ENTRY,
+            "navigation-entry",
+            both,
+            GeneratedLinkComponentId.SETTINGS_ACTION,
+            GeneratedLinkComponentId.DEV_HOST,
+        ),
+        component(GeneratedLinkComponentTypeId.LINK_DEV_PREVIEW, "dev-preview", phone, GeneratedLinkComponentId.DEV_PREVIEW),
     )
 
     val icons: List<LinkNativeIconBinding> = listOf(
@@ -263,9 +270,11 @@ object LinkNativeBindings {
     )
 
     init {
-        components.groupBy { it.component.typeId }.forEach { (typeId, instances) ->
-            require(instances.map { it.rendererId }.distinct().size == 1) {
-                "Component type $typeId is attested to more than one renderer"
+        require(components.map { it.componentType }.distinct().size == components.size)
+        components.forEach { binding ->
+            require(binding.instances.isNotEmpty())
+            require(binding.instances.all { it.type == binding.componentType }) {
+                "Component type ${binding.componentType.wireId} owns a mismatched instance"
             }
         }
     }
@@ -276,10 +285,11 @@ object LinkNativeBindings {
         }.icon
 
     private fun component(
-        id: GeneratedLinkComponentId,
+        type: GeneratedLinkComponentTypeId,
         rendererId: String,
         supportedProfiles: Set<GeneratedLinkArtifactRef>,
-    ) = LinkNativeComponentBinding(id, rendererId, supportedProfiles)
+        vararg instances: GeneratedLinkComponentId,
+    ) = LinkNativeComponentBinding(type, instances.toSet(), rendererId, supportedProfiles)
 
     private fun icon(id: String, symbol: String, value: ImageVector) =
         LinkNativeIconBinding(id, symbol, value)

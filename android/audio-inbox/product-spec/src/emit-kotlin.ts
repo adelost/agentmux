@@ -346,6 +346,7 @@ function emitComponentFamilies(product: ProductIr, sha: string): string {
   const routes = product.componentFamilies.map(({ screen }) => screen);
   const families = product.componentFamilies.map(({ family }) => family.id);
   const components = product.components;
+  const componentTypes = product.componentTypes;
   const artifacts = product.artifacts.map(({ id }) => id);
   const bindings = product.componentFamilies.map(({ screen, family }) => {
     const mounted = family.trees.flatMap((tree) => tree.mounts.map((mount) => mount.instance));
@@ -359,7 +360,10 @@ function emitComponentFamilies(product: ProductIr, sha: string): string {
   return `${header("ProductConfig.componentFamilies", sha)}
 enum class GeneratedLinkRouteRef(val wireId: String) { ${routes.map((id) => `${kotlinEnumToken(id)}("${id}")`).join(", ")} }
 enum class GeneratedLinkComponentFamilyRef(val wireId: String) { ${families.map((id) => `${kotlinEnumToken(id)}("${id}")`).join(", ")} }
-enum class GeneratedLinkComponentId(val wireId: String, val typeId: String) { ${components.map((component) => `${kotlinEnumToken(component.id)}("${component.id}", "${component.componentTypeRef}")`).join(", ")} }
+enum class GeneratedLinkComponentTypeId(val wireId: String) { ${componentTypes.map(({ id }) => `${kotlinEnumToken(id)}("${id}")`).join(", ")} }
+enum class GeneratedLinkComponentId(val wireId: String, val type: GeneratedLinkComponentTypeId) {
+    ${components.map((component) => `${kotlinEnumToken(component.id)}("${component.id}", GeneratedLinkComponentTypeId.${kotlinEnumToken(component.componentTypeRef)})`).join(", ")}
+}
 enum class GeneratedLinkArtifactRef(val wireId: String) { ${artifacts.map((id) => `${kotlinEnumToken(id)}("${id}")`).join(", ")} }
 
 data class GeneratedLinkComponentFamilyBinding(

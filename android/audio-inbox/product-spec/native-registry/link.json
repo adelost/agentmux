@@ -40,11 +40,6 @@
       "profiles": ["phone-full-ui", "wear-full-ui"]
     },
     {
-      "componentId": "link.navigation-entry",
-      "rendererId": "navigation-entry",
-      "profiles": ["phone-full-ui"]
-    },
-    {
       "componentId": "link.preferences",
       "rendererId": "preferences",
       "profiles": ["phone-full-ui"]

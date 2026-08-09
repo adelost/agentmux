@@ -45,11 +45,11 @@ class LinkNativeBindingManifestTest {
         """.trimMargin() + "\n"
 
     private fun components(): String = LinkNativeBindings.components
-        .sortedBy { it.component.typeId }
+        .sortedBy { it.componentType.wireId }
         .joinToString(",\n") { binding ->
             """
                 |    {
-                |      "componentId": ${binding.component.typeId.json()},
+                |      "componentId": ${binding.componentType.wireId.json()},
                 |      "rendererId": ${binding.rendererId.json()},
                 |      "profiles": ${binding.profiles.map { it.wireId }.sorted().jsonArray()}
                 |    }
