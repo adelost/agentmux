@@ -18,6 +18,16 @@ import io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef
 import io.agentmux.linkui.product.generated.GeneratedLinkComponentId
 import io.agentmux.linkui.product.generated.GeneratedLinkFiniteValueId
 import io.agentmux.linkui.product.generated.GeneratedLinkNativeLegoCatalog.FiniteValueIds
+import io.agentmux.linkui.product.generated.GeneratedLinkCapturePhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkConnectionStateAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkDeliveryPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkNavigationRouteAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkNodeId
+import io.agentmux.linkui.product.generated.GeneratedLinkPlaybackPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkRecoveryPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkReplyPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkTargetKindAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkUpdatePhaseAuthority
 import kotlin.enums.enumEntries
 
 /** One component instance attested to a native renderer and its host artifacts. */
@@ -40,6 +50,16 @@ internal data class LinkNativeFiniteValueBinding(
     val values: Set<String>,
 )
 
+/** One native node implementation and every compile-bound port it mounts. */
+internal data class LinkNativeNodeBinding(
+    val node: GeneratedLinkNodeId,
+    val profiles: Set<GeneratedLinkArtifactRef>,
+    val inputPorts: List<LinkNativeInputPortBinding>,
+    val outputPorts: List<LinkNativeOutputPortBinding>,
+) {
+    val nativePortId: String get() = node.wireId
+}
+
 /**
  * The native attestation named by product-spec/native-registry/link.json.
  * Every entry binds a generated component/artifact id or a compile-checked
@@ -47,7 +67,7 @@ internal data class LinkNativeFiniteValueBinding(
  * compile time, and the manifest/parity tests fail on any other drift.
  */
 object LinkNativeBindings {
-    const val SCHEMA_VERSION = 2
+    const val SCHEMA_VERSION = 4
     const val SOURCE_FILE =
         "link-ui/src/main/java/io/agentmux/linkui/product/LinkNativeBindings.kt"
 
@@ -85,6 +105,142 @@ object LinkNativeBindings {
         icon("activity", "RingIcons.Activity", RingIcons.Activity),
         icon("download", "RingIcons.Download", RingIcons.Download),
         icon("warning", "RingIcons.Warning", RingIcons.Warning),
+    )
+
+    internal val nodes: List<LinkNativeNodeBinding> = listOf(
+        node(
+            GeneratedLinkNodeId.NAVIGATION_SERVICE,
+            listOf(NavigationOpenSettingsInput, NavigationOpenDevHostInput),
+            listOf(NavigationDestinationOutput),
+        ),
+        node(
+            GeneratedLinkNodeId.CAPTURE_SERVICE,
+            listOf(CaptureCommandInput),
+            listOf(CaptureStatusOutput, CaptureCapturedOutput),
+        ),
+        node(
+            GeneratedLinkNodeId.CONVERSATION_SERVICE,
+            listOf(ConversationTurnInput, ConversationComposeInput),
+            listOf(ConversationStatusOutput),
+        ),
+        node(
+            GeneratedLinkNodeId.PLAYBACK_SERVICE,
+            listOf(PlaybackCommandInput),
+            listOf(PlaybackStatusOutput),
+        ),
+        node(
+            GeneratedLinkNodeId.TARGET_SERVICE,
+            listOf(TargetSelectInput),
+            listOf(TargetDirectoryOutput),
+        ),
+        node(GeneratedLinkNodeId.SESSION_SERVICE, emptyList(), listOf(SessionStatusOutput)),
+        node(GeneratedLinkNodeId.HISTORY_SERVICE, emptyList(), listOf(HistoryStatusOutput)),
+        node(
+            GeneratedLinkNodeId.PREFERENCES_SERVICE,
+            listOf(PreferencesToggleInput),
+            listOf(PreferencesStatusOutput),
+        ),
+        node(
+            GeneratedLinkNodeId.UPDATES_SERVICE,
+            listOf(UpdatesCommandInput),
+            listOf(UpdatesStatusOutput),
+        ),
+        node(GeneratedLinkNodeId.RECOVERY_SERVICE, emptyList(), listOf(RecoveryStatusOutput)),
+        node(
+            GeneratedLinkNodeId.NAVIGATION_PRESENTATION,
+            listOf(NavigationPresentationSourceInput),
+            listOf(NavigationPresentationModelOutput),
+        ),
+        node(
+            GeneratedLinkNodeId.CAPTURE_PRESENTATION,
+            listOf(CapturePresentationSourceInput),
+            listOf(CapturePresentationModelOutput),
+        ),
+        node(
+            GeneratedLinkNodeId.CONVERSATION_PRESENTATION,
+            listOf(ConversationPresentationSourceInput),
+            listOf(ConversationPresentationModelOutput),
+        ),
+        node(
+            GeneratedLinkNodeId.PLAYBACK_PRESENTATION,
+            listOf(PlaybackPresentationSourceInput),
+            listOf(PlaybackPresentationModelOutput),
+        ),
+        node(
+            GeneratedLinkNodeId.TARGET_PRESENTATION,
+            listOf(TargetPresentationSourceInput),
+            listOf(TargetPresentationModelOutput),
+        ),
+        node(
+            GeneratedLinkNodeId.SESSION_PRESENTATION,
+            listOf(SessionPresentationSourceInput),
+            listOf(SessionPresentationModelOutput),
+        ),
+        node(
+            GeneratedLinkNodeId.HISTORY_PRESENTATION,
+            listOf(HistoryPresentationSourceInput),
+            listOf(HistoryPresentationModelOutput),
+        ),
+        node(
+            GeneratedLinkNodeId.PREFERENCES_PRESENTATION,
+            listOf(PreferencesPresentationSourceInput),
+            listOf(PreferencesPresentationModelOutput),
+        ),
+        node(
+            GeneratedLinkNodeId.UPDATES_PRESENTATION,
+            listOf(UpdatesPresentationSourceInput),
+            listOf(UpdatesPresentationModelOutput),
+        ),
+        node(
+            GeneratedLinkNodeId.RECOVERY_PRESENTATION,
+            listOf(RecoveryPresentationSourceInput),
+            listOf(RecoveryPresentationModelOutput),
+        ),
+        node(
+            GeneratedLinkNodeId.LINK_NAVIGATION_ROUTE_PRESENTATION_ADAPTER,
+            listOf(GeneratedLinkNavigationRouteAuthority.inputPort<Any>()),
+            listOf(GeneratedLinkNavigationRouteAuthority.outputPort),
+        ),
+        node(
+            GeneratedLinkNodeId.LINK_CAPTURE_PHASE_PRESENTATION_ADAPTER,
+            listOf(GeneratedLinkCapturePhaseAuthority.inputPort<Any>()),
+            listOf(GeneratedLinkCapturePhaseAuthority.outputPort),
+        ),
+        node(
+            GeneratedLinkNodeId.LINK_DELIVERY_PHASE_PRESENTATION_ADAPTER,
+            listOf(GeneratedLinkDeliveryPhaseAuthority.inputPort<Any>()),
+            listOf(GeneratedLinkDeliveryPhaseAuthority.outputPort),
+        ),
+        node(
+            GeneratedLinkNodeId.LINK_REPLY_PHASE_PRESENTATION_ADAPTER,
+            listOf(GeneratedLinkReplyPhaseAuthority.inputPort<Any>()),
+            listOf(GeneratedLinkReplyPhaseAuthority.outputPort),
+        ),
+        node(
+            GeneratedLinkNodeId.LINK_PLAYBACK_PHASE_PRESENTATION_ADAPTER,
+            listOf(GeneratedLinkPlaybackPhaseAuthority.inputPort<Any>()),
+            listOf(GeneratedLinkPlaybackPhaseAuthority.outputPort),
+        ),
+        node(
+            GeneratedLinkNodeId.LINK_TARGET_KIND_PRESENTATION_ADAPTER,
+            listOf(GeneratedLinkTargetKindAuthority.inputPort<Any>()),
+            listOf(GeneratedLinkTargetKindAuthority.outputPort),
+        ),
+        node(
+            GeneratedLinkNodeId.LINK_CONNECTION_STATE_PRESENTATION_ADAPTER,
+            listOf(GeneratedLinkConnectionStateAuthority.inputPort<Any>()),
+            listOf(GeneratedLinkConnectionStateAuthority.outputPort),
+        ),
+        node(
+            GeneratedLinkNodeId.LINK_UPDATE_PHASE_PRESENTATION_ADAPTER,
+            listOf(GeneratedLinkUpdatePhaseAuthority.inputPort<Any>()),
+            listOf(GeneratedLinkUpdatePhaseAuthority.outputPort),
+        ),
+        node(
+            GeneratedLinkNodeId.LINK_RECOVERY_PHASE_PRESENTATION_ADAPTER,
+            listOf(GeneratedLinkRecoveryPhaseAuthority.inputPort<Any>()),
+            listOf(GeneratedLinkRecoveryPhaseAuthority.outputPort),
+        ),
     )
 
     internal val finiteValues: List<LinkNativeFiniteValueBinding> = listOf(
@@ -130,6 +286,12 @@ object LinkNativeBindings {
 
     private fun finiteValues(id: GeneratedLinkFiniteValueId, values: Set<String>) =
         LinkNativeFiniteValueBinding(id, values)
+
+    private fun node(
+        id: GeneratedLinkNodeId,
+        inputs: List<LinkNativeInputPortBinding>,
+        outputs: List<LinkNativeOutputPortBinding>,
+    ) = LinkNativeNodeBinding(id, both, inputs, outputs)
 
     /** Kotlin constants stay platform idiom; the attested wire value is lowercase kebab. */
     private inline fun <reified E : Enum<E>> wireValues(): Set<String> =

@@ -20,6 +20,17 @@ import {
   updatesService,
   updatesPresentation,
 } from "./node-types.js";
+import {
+  capturePhaseAuthority,
+  connectionStateAuthority,
+  deliveryPhaseAuthority,
+  navigationRouteAuthority,
+  playbackPhaseAuthority,
+  recoveryPhaseAuthority,
+  replyPhaseAuthority,
+  targetKindAuthority,
+  updatePhaseAuthority,
+} from "./state-authorities.js";
 
 /**
  * Ten effect-owning services followed by ten final presentations. Every Link service is process-lived: the
@@ -134,6 +145,15 @@ export const linkNodes = [
     id: "recovery.presentation", nodeTypeRef: recoveryPresentation.id,
     config: {}, bindings: { source: "recovery.service.status" },
   },
+  navigationRouteAuthority.adapter.node,
+  capturePhaseAuthority.adapter.node,
+  deliveryPhaseAuthority.adapter.node,
+  replyPhaseAuthority.adapter.node,
+  playbackPhaseAuthority.adapter.node,
+  targetKindAuthority.adapter.node,
+  connectionStateAuthority.adapter.node,
+  updatePhaseAuthority.adapter.node,
+  recoveryPhaseAuthority.adapter.node,
 ] as const;
 
 export const linkConfigs = [

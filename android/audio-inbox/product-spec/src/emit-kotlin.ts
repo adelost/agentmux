@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import type {
+  CompiledStateAuthority,
   LegoFiniteValueDeclaration,
   OutputArtifact,
   ProductEmitterPlugin,
   ProductIr,
   ScreenComponentFamilyRef,
+  StatePresentationField,
   SurfaceFamily,
 } from "@v1d/product-spec";
 import { linkChromeActions, linkRoutes } from "./routes.js";
@@ -39,6 +41,8 @@ export function linkNativeEmitter(kotlinRoot: string): ProductEmitterPlugin {
           emitPortData(product, catalogSha)),
         artifact("catalog-bindings", `${kotlinRoot}/GeneratedLinkNativeLegoCatalogPortBindings.kt`,
           emitPortBindings(product, catalogSha)),
+        artifact("state-presentations", `${kotlinRoot}/GeneratedLinkStatePresentations.kt`,
+          emitStatePresentations(product.stateAuthorities, fingerprint(product.stateAuthorities))),
         artifact("routes", `${kotlinRoot}/GeneratedLinkRoutes.kt`,
           emitRoutes(fingerprint(linkRoutes))),
         artifact("component-families", `${kotlinRoot}/GeneratedLinkComponentFamilies.kt`,
@@ -117,7 +121,10 @@ function emitCatalogAggregate(product: ProductIr, sha: string): string {
   const finiteValues = product.finiteValues.map((declaration) =>
     `        GeneratedLinkFiniteValueDeclaration(FiniteValueIds.${kotlinEnumToken(declaration.id)}, setOf(${declaration.values.map((value) => `"${value}"`).join(", ")}))`
   ).join(",\n");
+  const nodes = product.nodes.map(({ id }) => `${kotlinEnumToken(id)}("${id}")`).join(", ");
   return `${header("the portable native-Lego catalog", sha)}
+internal enum class GeneratedLinkNodeId(val wireId: String) { ${nodes} }
+
 internal object GeneratedLinkNativeLegoCatalog {
     object PortIds {
 ${portIdObjects}
@@ -136,6 +143,122 @@ ${finiteValues}
     }
 }
 `;
+}
+
+function emitStatePresentations(
+  authorities: readonly CompiledStateAuthority[],
+  sha: string,
+): string {
+  const finiteValues = uniquePresentationFiniteValues(authorities);
+  return `${header("ProductConfig.stateAuthorities", sha)}
+import io.agentmux.linkui.product.ProductComponentInput
+import io.agentmux.linkui.product.ProductDataInput
+import io.agentmux.linkui.product.ProductOutputPort
+
+${finiteValues.map(emitPresentationFiniteEnum).join("\n")}
+${authorities.map(emitStatePresentation).join("\n")}
+`;
+}
+
+function emitPresentationFiniteEnum(declaration: LegoFiniteValueDeclaration): string {
+  return `internal enum class ${presentationFiniteName(declaration)}(val wireId: String) {
+${declaration.values.map((value) => `    ${kotlinEnumToken(value)}("${value}"),`).join("\n")}
+}`;
+}
+
+function emitStatePresentation(authority: CompiledStateAuthority): string {
+  const payload = statePayloadName(authority);
+  const objectName = stateAuthorityName(authority);
+  const fields = authority.presentation.fields;
+  const cases = Object.entries(authority.presentation.cases);
+  return `internal data class ${payload}(
+${fields.map((field) => `    val ${field.name}: ${presentationKotlinType(field)},`).join("\n")}
+)
+
+internal object ${objectName} {
+    fun <T : Any> inputPort(): ProductDataInput<T> = object : ProductDataInput<T>(
+        GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(authority.adapter.inputPortRef)},
+    ) {}
+    val outputPort: ProductOutputPort<${payload}> = object : ProductOutputPort<${payload}>(
+        GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(authority.adapter.outputPortRef)},
+    ) {}
+    val componentInputs: List<ProductComponentInput<${payload}>> = listOf(
+${authority.presentation.consumers.map((ref) => `        object : ProductComponentInput<${payload}>(
+            GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(ref)},
+        ) {},`).join("\n")}
+    )
+    private val cases: Map<String, ${payload}> = mapOf(
+${cases.map(([state, value]) => `        "${state}" to ${payload}(${presentationArguments(fields, value)}),`).join("\n")}
+    )
+
+    fun require(stateId: String): ${payload} = requireNotNull(cases[stateId]) {
+        "Unknown ${authority.id} state '\$stateId'"
+    }
+}
+`;
+}
+
+function presentationArguments(
+  fields: readonly StatePresentationField[],
+  value: Readonly<Record<string, unknown>>,
+): string {
+  return fields.map((field) => `${field.name} = ${presentationKotlinValue(field, value[field.name])}`).join(", ");
+}
+
+function presentationKotlinType(field: StatePresentationField): string {
+  if (typeof field.value !== "string") return presentationFiniteName(field.value);
+  switch (field.value) {
+    case "boolean": return "Boolean";
+    case "integer": return "Long";
+    case "number": return "Double";
+    case "string": return "String";
+  }
+}
+
+function presentationKotlinValue(field: StatePresentationField, value: unknown): string {
+  if (typeof field.value !== "string") {
+    if (typeof value !== "string") throw new Error(`${field.name} finite presentation value is not a string`);
+    return `${presentationFiniteName(field.value)}.${kotlinEnumToken(value)}`;
+  }
+  switch (field.value) {
+    case "boolean":
+      if (typeof value === "boolean") return String(value);
+      break;
+    case "integer":
+      if (typeof value === "number" && Number.isSafeInteger(value)) return `${value}L`;
+      break;
+    case "number":
+      if (typeof value === "number" && Number.isFinite(value)) return Number.isInteger(value) ? `${value}.0` : String(value);
+      break;
+    case "string":
+      if (typeof value === "string") return JSON.stringify(value);
+      break;
+  }
+  throw new Error(`${field.name} presentation value does not match ${String(field.value)}`);
+}
+
+function uniquePresentationFiniteValues(
+  authorities: readonly CompiledStateAuthority[],
+): readonly LegoFiniteValueDeclaration[] {
+  const values = new Map<string, LegoFiniteValueDeclaration>();
+  for (const authority of authorities) {
+    for (const field of authority.presentation.fields) {
+      if (typeof field.value !== "string") values.set(field.value.id, field.value);
+    }
+  }
+  return [...values.values()];
+}
+
+function presentationFiniteName(declaration: LegoFiniteValueDeclaration): string {
+  return `Generated${kotlinIdentifier(declaration.id)}Value`;
+}
+
+function statePayloadName(authority: CompiledStateAuthority): string {
+  return `Generated${kotlinIdentifier(authority.id)}Presentation`;
+}
+
+function stateAuthorityName(authority: CompiledStateAuthority): string {
+  return `Generated${kotlinIdentifier(authority.id)}Authority`;
 }
 
 function emitPortData(product: ProductIr, sha: string): string {

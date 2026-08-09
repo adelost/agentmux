@@ -18,16 +18,16 @@ enum class ProductPortQuality {
 }
 
 internal abstract class ProductOutputPort<T : Any> protected constructor(
-    internal val id: GeneratedProductPortId,
-)
+    final override val id: GeneratedProductOutputPortId,
+) : LinkNativeOutputPortBinding
 
 internal abstract class ProductInputPort<T : Any, R : Any> protected constructor(
-    internal val id: GeneratedProductPortId,
-)
+    final override val id: GeneratedProductInputPortId,
+) : LinkNativeInputPortBinding
 
 internal abstract class ProductDataInput<T : Any> protected constructor(
-    internal val id: GeneratedProductInputPortId,
-)
+    final override val id: GeneratedProductInputPortId,
+) : LinkNativeInputPortBinding
 
 internal abstract class ProductComponentInput<T : Any> protected constructor(
     internal val id: GeneratedProductInputPortId,
@@ -36,6 +36,14 @@ internal abstract class ProductComponentInput<T : Any> protected constructor(
 internal abstract class ProductComponentEvent<T : Any, R : Any> protected constructor(
     internal val id: GeneratedProductOutputPortId,
 )
+
+internal sealed interface LinkNativeInputPortBinding {
+    val id: GeneratedProductInputPortId
+}
+
+internal sealed interface LinkNativeOutputPortBinding {
+    val id: GeneratedProductOutputPortId
+}
 
 internal class ProductComponentEventEmitter<T : Any, R : Any> internal constructor(
     private val runtime: LinkProductPortRuntime,

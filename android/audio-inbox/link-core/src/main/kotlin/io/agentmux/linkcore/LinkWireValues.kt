@@ -2,6 +2,7 @@ package io.agentmux.linkcore
 
 /** Product route class of a conversation target; transport bindings map into it. */
 enum class LinkTargetKind {
+    NONE,
     AGENT,
     WINDOWS,
     PUBLIC,

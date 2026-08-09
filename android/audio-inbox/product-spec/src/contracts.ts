@@ -43,8 +43,8 @@ export const conversationStatusContract = {
   id: "link.conversation-status", kind: "state", boundary: "presentation",
   fields: [
     field("turnId", "string", { nullable: true }),
-    field("deliveryPhase", finiteValueRef("link.delivery-phase"), { nullable: true }),
-    field("replyPhase", finiteValueRef("link.reply-phase"), { nullable: true }),
+    field("deliveryPhase", finiteValueRef("link.delivery-phase")),
+    field("replyPhase", finiteValueRef("link.reply-phase")),
     field("offline", "boolean"), field("idempotencyKey", "string", { nullable: true }),
     // The bounded local feed the latest-turn component renders.
     field("turns", valueRef("link.turn-list")),
@@ -74,7 +74,7 @@ export const targetDirectoryContract = {
   id: "link.target-directory", kind: "state", boundary: "presentation",
   fields: [
     field("selectedTargetId", "string", { nullable: true }),
-    field("kind", finiteValueRef("link.target-kind"), { nullable: true }),
+    field("kind", finiteValueRef("link.target-kind")),
     field("availableCount", "integer"),
     field("targets", valueRef("link.target-list")),
   ],

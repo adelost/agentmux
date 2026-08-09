@@ -807,7 +807,8 @@
           "select": "target.service.select"
         },
         "inputs": {
-          "model": "target.presentation.model"
+          "model": "target.presentation.model",
+          "targetState": "link.target-kind.presentation-adapter.presentation"
         }
       },
       "componentTypeRef": "link.target-picker",
@@ -819,6 +820,7 @@
           "command": "capture.service.command"
         },
         "inputs": {
+          "captureState": "link.capture-phase.presentation-adapter.presentation",
           "model": "capture.presentation.model"
         }
       },
@@ -829,7 +831,9 @@
       "bindings": {
         "events": {},
         "inputs": {
-          "model": "conversation.presentation.model"
+          "deliveryState": "link.delivery-phase.presentation-adapter.presentation",
+          "model": "conversation.presentation.model",
+          "replyState": "link.reply-phase.presentation-adapter.presentation"
         }
       },
       "componentTypeRef": "link.latest-turn",
@@ -841,7 +845,9 @@
           "compose": "conversation.service.compose"
         },
         "inputs": {
-          "model": "conversation.presentation.model"
+          "deliveryState": "link.delivery-phase.presentation-adapter.presentation",
+          "model": "conversation.presentation.model",
+          "replyState": "link.reply-phase.presentation-adapter.presentation"
         }
       },
       "componentTypeRef": "link.composer",
@@ -853,7 +859,8 @@
           "command": "playback.service.command"
         },
         "inputs": {
-          "model": "playback.presentation.model"
+          "model": "playback.presentation.model",
+          "playbackState": "link.playback-phase.presentation-adapter.presentation"
         }
       },
       "componentTypeRef": "link.active-playback",
@@ -863,6 +870,7 @@
       "bindings": {
         "events": {},
         "inputs": {
+          "connectionState": "link.connection-state.presentation-adapter.presentation",
           "model": "session.presentation.model"
         }
       },
@@ -873,6 +881,7 @@
       "bindings": {
         "events": {},
         "inputs": {
+          "connectionState": "link.connection-state.presentation-adapter.presentation",
           "model": "session.presentation.model"
         }
       },
@@ -907,7 +916,8 @@
           "command": "updates.service.command"
         },
         "inputs": {
-          "model": "updates.presentation.model"
+          "model": "updates.presentation.model",
+          "updateState": "link.update-phase.presentation-adapter.presentation"
         }
       },
       "componentTypeRef": "link.updates",
@@ -917,7 +927,8 @@
       "bindings": {
         "events": {},
         "inputs": {
-          "model": "recovery.presentation.model"
+          "model": "recovery.presentation.model",
+          "recoveryState": "link.recovery-phase.presentation-adapter.presentation"
         }
       },
       "componentTypeRef": "link.recovery-status",
@@ -929,7 +940,8 @@
           "open": "navigation.service.openSettings"
         },
         "inputs": {
-          "destination": "navigation.presentation.model"
+          "destination": "navigation.presentation.model",
+          "routeState": "link.navigation-route.presentation-adapter.presentation"
         }
       },
       "componentTypeRef": "link.navigation-entry",
@@ -941,7 +953,8 @@
           "open": "navigation.service.openDevHost"
         },
         "inputs": {
-          "destination": "navigation.presentation.model"
+          "destination": "navigation.presentation.model",
+          "routeState": "link.navigation-route.presentation-adapter.presentation"
         }
       },
       "componentTypeRef": "link.navigation-entry",
@@ -973,7 +986,7 @@
               {
                 "clockDomain": "none",
                 "name": "kind",
-                "nullable": true,
+                "nullable": false,
                 "value": {
                   "finite": true,
                   "ref": "link.target-kind"
@@ -998,6 +1011,26 @@
             "kind": "state"
           },
           "id": "model",
+          "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "kind",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.target-kind"
+                }
+              }
+            ],
+            "id": "link.target-kind.payload",
+            "kind": "snapshot"
+          },
+          "id": "targetState",
           "required": true
         }
       ],
@@ -1072,6 +1105,26 @@
           },
           "id": "model",
           "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.capture-phase"
+                }
+              }
+            ],
+            "id": "link.capture-phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "captureState",
+          "required": true
         }
       ],
       "outputs": [
@@ -1116,7 +1169,7 @@
               {
                 "clockDomain": "none",
                 "name": "deliveryPhase",
-                "nullable": true,
+                "nullable": false,
                 "value": {
                   "finite": true,
                   "ref": "link.delivery-phase"
@@ -1125,7 +1178,7 @@
               {
                 "clockDomain": "none",
                 "name": "replyPhase",
-                "nullable": true,
+                "nullable": false,
                 "value": {
                   "finite": true,
                   "ref": "link.reply-phase"
@@ -1157,6 +1210,46 @@
           },
           "id": "model",
           "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.delivery-phase"
+                }
+              }
+            ],
+            "id": "link.delivery-phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "deliveryState",
+          "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.reply-phase"
+                }
+              }
+            ],
+            "id": "link.reply-phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "replyState",
+          "required": true
         }
       ],
       "outputs": [],
@@ -1180,7 +1273,7 @@
               {
                 "clockDomain": "none",
                 "name": "deliveryPhase",
-                "nullable": true,
+                "nullable": false,
                 "value": {
                   "finite": true,
                   "ref": "link.delivery-phase"
@@ -1189,7 +1282,7 @@
               {
                 "clockDomain": "none",
                 "name": "replyPhase",
-                "nullable": true,
+                "nullable": false,
                 "value": {
                   "finite": true,
                   "ref": "link.reply-phase"
@@ -1220,6 +1313,46 @@
             "kind": "state"
           },
           "id": "model",
+          "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.delivery-phase"
+                }
+              }
+            ],
+            "id": "link.delivery-phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "deliveryState",
+          "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.reply-phase"
+                }
+              }
+            ],
+            "id": "link.reply-phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "replyState",
           "required": true
         }
       ],
@@ -1296,6 +1429,26 @@
           },
           "id": "model",
           "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.playback-phase"
+                }
+              }
+            ],
+            "id": "link.playback-phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "playbackState",
+          "required": true
         }
       ],
       "outputs": [
@@ -1364,6 +1517,26 @@
           },
           "id": "model",
           "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "connection",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.connection-state"
+                }
+              }
+            ],
+            "id": "link.connection-state.payload",
+            "kind": "snapshot"
+          },
+          "id": "connectionState",
+          "required": true
         }
       ],
       "outputs": [],
@@ -1404,6 +1577,26 @@
             "kind": "state"
           },
           "id": "model",
+          "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "connection",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.connection-state"
+                }
+              }
+            ],
+            "id": "link.connection-state.payload",
+            "kind": "snapshot"
+          },
+          "id": "connectionState",
           "required": true
         }
       ],
@@ -1533,6 +1726,26 @@
           },
           "id": "model",
           "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.update-phase"
+                }
+              }
+            ],
+            "id": "link.update-phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "updateState",
+          "required": true
         }
       ],
       "outputs": [
@@ -1589,6 +1802,26 @@
           },
           "id": "model",
           "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.recovery-phase"
+                }
+              }
+            ],
+            "id": "link.recovery-phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "recoveryState",
+          "required": true
         }
       ],
       "outputs": [],
@@ -1617,6 +1850,26 @@
             "kind": "state"
           },
           "id": "destination",
+          "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "route",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.route"
+                }
+              }
+            ],
+            "id": "link.navigation-route.payload",
+            "kind": "snapshot"
+          },
+          "id": "routeState",
           "required": true
         }
       ],
@@ -1695,6 +1948,7 @@
     {
       "id": "link.delivery-phase",
       "values": [
+        "none",
         "sending",
         "queued",
         "failed"
@@ -1734,6 +1988,7 @@
     {
       "id": "link.target-kind",
       "values": [
+        "none",
         "agent",
         "windows",
         "public"
@@ -2121,6 +2376,78 @@
       "config": {},
       "id": "recovery.presentation",
       "nodeTypeRef": "link.present.recovery"
+    },
+    {
+      "bindings": {
+        "state": "navigation.service.destination"
+      },
+      "config": {},
+      "id": "link.navigation-route.presentation-adapter",
+      "nodeTypeRef": "link.navigation-route.presentation-adapter"
+    },
+    {
+      "bindings": {
+        "state": "capture.service.status"
+      },
+      "config": {},
+      "id": "link.capture-phase.presentation-adapter",
+      "nodeTypeRef": "link.capture-phase.presentation-adapter"
+    },
+    {
+      "bindings": {
+        "state": "conversation.service.status"
+      },
+      "config": {},
+      "id": "link.delivery-phase.presentation-adapter",
+      "nodeTypeRef": "link.delivery-phase.presentation-adapter"
+    },
+    {
+      "bindings": {
+        "state": "conversation.service.status"
+      },
+      "config": {},
+      "id": "link.reply-phase.presentation-adapter",
+      "nodeTypeRef": "link.reply-phase.presentation-adapter"
+    },
+    {
+      "bindings": {
+        "state": "playback.service.status"
+      },
+      "config": {},
+      "id": "link.playback-phase.presentation-adapter",
+      "nodeTypeRef": "link.playback-phase.presentation-adapter"
+    },
+    {
+      "bindings": {
+        "state": "target.service.directory"
+      },
+      "config": {},
+      "id": "link.target-kind.presentation-adapter",
+      "nodeTypeRef": "link.target-kind.presentation-adapter"
+    },
+    {
+      "bindings": {
+        "state": "session.service.status"
+      },
+      "config": {},
+      "id": "link.connection-state.presentation-adapter",
+      "nodeTypeRef": "link.connection-state.presentation-adapter"
+    },
+    {
+      "bindings": {
+        "state": "updates.service.status"
+      },
+      "config": {},
+      "id": "link.update-phase.presentation-adapter",
+      "nodeTypeRef": "link.update-phase.presentation-adapter"
+    },
+    {
+      "bindings": {
+        "state": "recovery.service.status"
+      },
+      "config": {},
+      "id": "link.recovery-phase.presentation-adapter",
+      "nodeTypeRef": "link.recovery-phase.presentation-adapter"
     }
   ],
   "nodeTypes": [
@@ -2421,7 +2748,7 @@
               {
                 "clockDomain": "none",
                 "name": "deliveryPhase",
-                "nullable": true,
+                "nullable": false,
                 "value": {
                   "finite": true,
                   "ref": "link.delivery-phase"
@@ -2430,7 +2757,7 @@
               {
                 "clockDomain": "none",
                 "name": "replyPhase",
-                "nullable": true,
+                "nullable": false,
                 "value": {
                   "finite": true,
                   "ref": "link.reply-phase"
@@ -2616,7 +2943,7 @@
               {
                 "clockDomain": "none",
                 "name": "kind",
-                "nullable": true,
+                "nullable": false,
                 "value": {
                   "finite": true,
                   "ref": "link.target-kind"
@@ -3113,7 +3440,7 @@
               {
                 "clockDomain": "none",
                 "name": "deliveryPhase",
-                "nullable": true,
+                "nullable": false,
                 "value": {
                   "finite": true,
                   "ref": "link.delivery-phase"
@@ -3122,7 +3449,7 @@
               {
                 "clockDomain": "none",
                 "name": "replyPhase",
-                "nullable": true,
+                "nullable": false,
                 "value": {
                   "finite": true,
                   "ref": "link.reply-phase"
@@ -3171,7 +3498,7 @@
               {
                 "clockDomain": "none",
                 "name": "deliveryPhase",
-                "nullable": true,
+                "nullable": false,
                 "value": {
                   "finite": true,
                   "ref": "link.delivery-phase"
@@ -3180,7 +3507,7 @@
               {
                 "clockDomain": "none",
                 "name": "replyPhase",
-                "nullable": true,
+                "nullable": false,
                 "value": {
                   "finite": true,
                   "ref": "link.reply-phase"
@@ -3351,7 +3678,7 @@
               {
                 "clockDomain": "none",
                 "name": "kind",
-                "nullable": true,
+                "nullable": false,
                 "value": {
                   "finite": true,
                   "ref": "link.target-kind"
@@ -3394,7 +3721,7 @@
               {
                 "clockDomain": "none",
                 "name": "kind",
-                "nullable": true,
+                "nullable": false,
                 "value": {
                   "finite": true,
                   "ref": "link.target-kind"
@@ -3774,6 +4101,680 @@
         "lifetime": "call",
         "stateOwner": "none"
       }
+    },
+    {
+      "id": "link.navigation-route.presentation-adapter",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "route",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.route"
+                }
+              }
+            ],
+            "id": "link.route-destination",
+            "kind": "state"
+          },
+          "id": "state",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "route",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.route"
+                }
+              }
+            ],
+            "id": "link.navigation-route.payload",
+            "kind": "snapshot"
+          },
+          "id": "presentation",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.capture-phase.presentation-adapter",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.capture-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "available",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "unavailableReason",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "wall",
+                "name": "startedAtMs",
+                "nullable": true,
+                "unit": "si.millisecond",
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "byteCount",
+                "nullable": false,
+                "unit": "si.byte",
+                "value": "integer"
+              }
+            ],
+            "id": "link.capture-status",
+            "kind": "state"
+          },
+          "id": "state",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.capture-phase"
+                }
+              }
+            ],
+            "id": "link.capture-phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "presentation",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.delivery-phase.presentation-adapter",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "turnId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "deliveryPhase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.delivery-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "replyPhase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.reply-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "offline",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "idempotencyKey",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "turns",
+                "nullable": false,
+                "value": {
+                  "ref": "link.turn-list"
+                }
+              }
+            ],
+            "id": "link.conversation-status",
+            "kind": "state"
+          },
+          "id": "state",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.delivery-phase"
+                }
+              }
+            ],
+            "id": "link.delivery-phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "presentation",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.reply-phase.presentation-adapter",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "turnId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "deliveryPhase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.delivery-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "replyPhase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.reply-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "offline",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "idempotencyKey",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "turns",
+                "nullable": false,
+                "value": {
+                  "ref": "link.turn-list"
+                }
+              }
+            ],
+            "id": "link.conversation-status",
+            "kind": "state"
+          },
+          "id": "state",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.reply-phase"
+                }
+              }
+            ],
+            "id": "link.reply-phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "presentation",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.playback-phase.presentation-adapter",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "turnId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.playback-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "positionMs",
+                "nullable": false,
+                "unit": "si.millisecond",
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "durationMs",
+                "nullable": false,
+                "unit": "si.millisecond",
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "turn",
+                "nullable": true,
+                "value": {
+                  "ref": "link.turn"
+                }
+              }
+            ],
+            "id": "link.playback-status",
+            "kind": "state"
+          },
+          "id": "state",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.playback-phase"
+                }
+              }
+            ],
+            "id": "link.playback-phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "presentation",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.target-kind.presentation-adapter",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "selectedTargetId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "kind",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.target-kind"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "availableCount",
+                "nullable": false,
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "targets",
+                "nullable": false,
+                "value": {
+                  "ref": "link.target-list"
+                }
+              }
+            ],
+            "id": "link.target-directory",
+            "kind": "state"
+          },
+          "id": "state",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "kind",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.target-kind"
+                }
+              }
+            ],
+            "id": "link.target-kind.payload",
+            "kind": "snapshot"
+          },
+          "id": "presentation",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.connection-state.presentation-adapter",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "connection",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.connection-state"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "connectionDetail",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "publicLinkActive",
+                "nullable": false,
+                "value": "boolean"
+              }
+            ],
+            "id": "link.session-status",
+            "kind": "state"
+          },
+          "id": "state",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "connection",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.connection-state"
+                }
+              }
+            ],
+            "id": "link.connection-state.payload",
+            "kind": "snapshot"
+          },
+          "id": "presentation",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.update-phase.presentation-adapter",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.update-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "update",
+                "nullable": false,
+                "value": {
+                  "ref": "link.update-native"
+                }
+              }
+            ],
+            "id": "link.update-status",
+            "kind": "state"
+          },
+          "id": "state",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.update-phase"
+                }
+              }
+            ],
+            "id": "link.update-phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "presentation",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "link.recovery-phase.presentation-adapter",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.recovery-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "detail",
+                "nullable": true,
+                "value": "string"
+              }
+            ],
+            "id": "link.recovery-status",
+            "kind": "state"
+          },
+          "id": "state",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.recovery-phase"
+                }
+              }
+            ],
+            "id": "link.recovery-phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "presentation",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
     }
   ],
   "palette": {
@@ -3896,10 +4897,70 @@
         "to": "recovery.presentation.source"
       },
       {
+        "from": "navigation.service.destination",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "link.navigation-route.presentation-adapter.state"
+      },
+      {
+        "from": "capture.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "link.capture-phase.presentation-adapter.state"
+      },
+      {
+        "from": "conversation.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "link.delivery-phase.presentation-adapter.state"
+      },
+      {
+        "from": "conversation.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "link.reply-phase.presentation-adapter.state"
+      },
+      {
+        "from": "playback.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "link.playback-phase.presentation-adapter.state"
+      },
+      {
+        "from": "target.service.directory",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "link.target-kind.presentation-adapter.state"
+      },
+      {
+        "from": "session.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "link.connection-state.presentation-adapter.state"
+      },
+      {
+        "from": "updates.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "link.update-phase.presentation-adapter.state"
+      },
+      {
+        "from": "recovery.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "link.recovery-phase.presentation-adapter.state"
+      },
+      {
         "from": "target.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "target.model"
+      },
+      {
+        "from": "link.target-kind.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "target.targetState"
       },
       {
         "from": "capture.presentation.model",
@@ -3908,10 +4969,28 @@
         "to": "talk.model"
       },
       {
+        "from": "link.capture-phase.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "talk.captureState"
+      },
+      {
         "from": "conversation.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "latest.model"
+      },
+      {
+        "from": "link.delivery-phase.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "latest.deliveryState"
+      },
+      {
+        "from": "link.reply-phase.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "latest.replyState"
       },
       {
         "from": "conversation.presentation.model",
@@ -3920,10 +4999,28 @@
         "to": "composer.model"
       },
       {
+        "from": "link.delivery-phase.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "composer.deliveryState"
+      },
+      {
+        "from": "link.reply-phase.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "composer.replyState"
+      },
+      {
         "from": "playback.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "active-playback.model"
+      },
+      {
+        "from": "link.playback-phase.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "active-playback.playbackState"
       },
       {
         "from": "session.presentation.model",
@@ -3932,10 +5029,22 @@
         "to": "connection.model"
       },
       {
+        "from": "link.connection-state.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "connection.connectionState"
+      },
+      {
         "from": "session.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "public-link.model"
+      },
+      {
+        "from": "link.connection-state.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "public-link.connectionState"
       },
       {
         "from": "preferences.presentation.model",
@@ -3956,10 +5065,22 @@
         "to": "updates.model"
       },
       {
+        "from": "link.update-phase.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "updates.updateState"
+      },
+      {
         "from": "recovery.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "recovery.model"
+      },
+      {
+        "from": "link.recovery-phase.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "recovery.recoveryState"
       },
       {
         "from": "navigation.presentation.model",
@@ -3968,10 +5089,22 @@
         "to": "settings-action.destination"
       },
       {
+        "from": "link.navigation-route.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "settings-action.routeState"
+      },
+      {
         "from": "navigation.presentation.model",
         "kind": "component-input",
         "purpose": "data",
         "to": "dev-host.destination"
+      },
+      {
+        "from": "link.navigation-route.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "dev-host.routeState"
       }
     ],
     "componentPorts": [
@@ -3984,6 +5117,18 @@
         "portId": "model",
         "purpose": "data",
         "ref": "target.model",
+        "required": true,
+        "typeRef": "link.target-picker"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.target-kind.payload",
+        "direction": "input",
+        "ownerId": "target",
+        "ownerKind": "component",
+        "portId": "targetState",
+        "purpose": "data",
+        "ref": "target.targetState",
         "required": true,
         "typeRef": "link.target-picker"
       },
@@ -4008,6 +5153,18 @@
         "portId": "model",
         "purpose": "data",
         "ref": "talk.model",
+        "required": true,
+        "typeRef": "link.talk"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.capture-phase.payload",
+        "direction": "input",
+        "ownerId": "talk",
+        "ownerKind": "component",
+        "portId": "captureState",
+        "purpose": "data",
+        "ref": "talk.captureState",
         "required": true,
         "typeRef": "link.talk"
       },
@@ -4037,6 +5194,30 @@
       },
       {
         "boundary": "presentation",
+        "contractRef": "link.delivery-phase.payload",
+        "direction": "input",
+        "ownerId": "latest",
+        "ownerKind": "component",
+        "portId": "deliveryState",
+        "purpose": "data",
+        "ref": "latest.deliveryState",
+        "required": true,
+        "typeRef": "link.latest-turn"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.reply-phase.payload",
+        "direction": "input",
+        "ownerId": "latest",
+        "ownerKind": "component",
+        "portId": "replyState",
+        "purpose": "data",
+        "ref": "latest.replyState",
+        "required": true,
+        "typeRef": "link.latest-turn"
+      },
+      {
+        "boundary": "presentation",
         "contractRef": "link.conversation-status",
         "direction": "input",
         "ownerId": "composer",
@@ -4044,6 +5225,30 @@
         "portId": "model",
         "purpose": "data",
         "ref": "composer.model",
+        "required": true,
+        "typeRef": "link.composer"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.delivery-phase.payload",
+        "direction": "input",
+        "ownerId": "composer",
+        "ownerKind": "component",
+        "portId": "deliveryState",
+        "purpose": "data",
+        "ref": "composer.deliveryState",
+        "required": true,
+        "typeRef": "link.composer"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.reply-phase.payload",
+        "direction": "input",
+        "ownerId": "composer",
+        "ownerKind": "component",
+        "portId": "replyState",
+        "purpose": "data",
+        "ref": "composer.replyState",
         "required": true,
         "typeRef": "link.composer"
       },
@@ -4068,6 +5273,18 @@
         "portId": "model",
         "purpose": "data",
         "ref": "active-playback.model",
+        "required": true,
+        "typeRef": "link.active-playback"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.playback-phase.payload",
+        "direction": "input",
+        "ownerId": "active-playback",
+        "ownerKind": "component",
+        "portId": "playbackState",
+        "purpose": "data",
+        "ref": "active-playback.playbackState",
         "required": true,
         "typeRef": "link.active-playback"
       },
@@ -4097,6 +5314,18 @@
       },
       {
         "boundary": "presentation",
+        "contractRef": "link.connection-state.payload",
+        "direction": "input",
+        "ownerId": "connection",
+        "ownerKind": "component",
+        "portId": "connectionState",
+        "purpose": "data",
+        "ref": "connection.connectionState",
+        "required": true,
+        "typeRef": "link.connection-status"
+      },
+      {
+        "boundary": "presentation",
         "contractRef": "link.session-status",
         "direction": "input",
         "ownerId": "public-link",
@@ -4104,6 +5333,18 @@
         "portId": "model",
         "purpose": "data",
         "ref": "public-link.model",
+        "required": true,
+        "typeRef": "link.public-link"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.connection-state.payload",
+        "direction": "input",
+        "ownerId": "public-link",
+        "ownerKind": "component",
+        "portId": "connectionState",
+        "purpose": "data",
+        "ref": "public-link.connectionState",
         "required": true,
         "typeRef": "link.public-link"
       },
@@ -4156,6 +5397,18 @@
         "typeRef": "link.updates"
       },
       {
+        "boundary": "presentation",
+        "contractRef": "link.update-phase.payload",
+        "direction": "input",
+        "ownerId": "updates",
+        "ownerKind": "component",
+        "portId": "updateState",
+        "purpose": "data",
+        "ref": "updates.updateState",
+        "required": true,
+        "typeRef": "link.updates"
+      },
+      {
         "boundary": "ui-event",
         "contractRef": "link.update-command",
         "direction": "output",
@@ -4181,6 +5434,18 @@
       },
       {
         "boundary": "presentation",
+        "contractRef": "link.recovery-phase.payload",
+        "direction": "input",
+        "ownerId": "recovery",
+        "ownerKind": "component",
+        "portId": "recoveryState",
+        "purpose": "data",
+        "ref": "recovery.recoveryState",
+        "required": true,
+        "typeRef": "link.recovery-status"
+      },
+      {
+        "boundary": "presentation",
         "contractRef": "link.route-destination",
         "direction": "input",
         "ownerId": "settings-action",
@@ -4188,6 +5453,18 @@
         "portId": "destination",
         "purpose": "data",
         "ref": "settings-action.destination",
+        "required": true,
+        "typeRef": "link.navigation-entry"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.navigation-route.payload",
+        "direction": "input",
+        "ownerId": "settings-action",
+        "ownerKind": "component",
+        "portId": "routeState",
+        "purpose": "data",
+        "ref": "settings-action.routeState",
         "required": true,
         "typeRef": "link.navigation-entry"
       },
@@ -4212,6 +5489,18 @@
         "portId": "destination",
         "purpose": "data",
         "ref": "dev-host.destination",
+        "required": true,
+        "typeRef": "link.navigation-entry"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.navigation-route.payload",
+        "direction": "input",
+        "ownerId": "dev-host",
+        "ownerKind": "component",
+        "portId": "routeState",
+        "purpose": "data",
+        "ref": "dev-host.routeState",
         "required": true,
         "typeRef": "link.navigation-entry"
       },
@@ -4382,7 +5671,7 @@
           {
             "clockDomain": "none",
             "name": "deliveryPhase",
-            "nullable": true,
+            "nullable": false,
             "value": {
               "finite": true,
               "ref": "link.delivery-phase"
@@ -4391,7 +5680,7 @@
           {
             "clockDomain": "none",
             "name": "replyPhase",
-            "nullable": true,
+            "nullable": false,
             "value": {
               "finite": true,
               "ref": "link.reply-phase"
@@ -4512,7 +5801,7 @@
           {
             "clockDomain": "none",
             "name": "kind",
-            "nullable": true,
+            "nullable": false,
             "value": {
               "finite": true,
               "ref": "link.target-kind"
@@ -4685,6 +5974,150 @@
         ],
         "id": "link.recovery-status",
         "kind": "state"
+      },
+      {
+        "boundary": "presentation",
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "route",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.route"
+            }
+          }
+        ],
+        "id": "link.navigation-route.payload",
+        "kind": "snapshot"
+      },
+      {
+        "boundary": "presentation",
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "phase",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.capture-phase"
+            }
+          }
+        ],
+        "id": "link.capture-phase.payload",
+        "kind": "snapshot"
+      },
+      {
+        "boundary": "presentation",
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "phase",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.delivery-phase"
+            }
+          }
+        ],
+        "id": "link.delivery-phase.payload",
+        "kind": "snapshot"
+      },
+      {
+        "boundary": "presentation",
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "phase",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.reply-phase"
+            }
+          }
+        ],
+        "id": "link.reply-phase.payload",
+        "kind": "snapshot"
+      },
+      {
+        "boundary": "presentation",
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "phase",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.playback-phase"
+            }
+          }
+        ],
+        "id": "link.playback-phase.payload",
+        "kind": "snapshot"
+      },
+      {
+        "boundary": "presentation",
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "kind",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.target-kind"
+            }
+          }
+        ],
+        "id": "link.target-kind.payload",
+        "kind": "snapshot"
+      },
+      {
+        "boundary": "presentation",
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "connection",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.connection-state"
+            }
+          }
+        ],
+        "id": "link.connection-state.payload",
+        "kind": "snapshot"
+      },
+      {
+        "boundary": "presentation",
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "phase",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.update-phase"
+            }
+          }
+        ],
+        "id": "link.update-phase.payload",
+        "kind": "snapshot"
+      },
+      {
+        "boundary": "presentation",
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "phase",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.recovery-phase"
+            }
+          }
+        ],
+        "id": "link.recovery-phase.payload",
+        "kind": "snapshot"
       }
     ],
     "demandEdges": [],
@@ -5168,10 +6601,226 @@
         "ref": "recovery.presentation.model",
         "required": true,
         "typeRef": "link.present.recovery"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.route-destination",
+        "direction": "input",
+        "ownerId": "link.navigation-route.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "state",
+        "purpose": "data",
+        "ref": "link.navigation-route.presentation-adapter.state",
+        "required": true,
+        "typeRef": "link.navigation-route.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.navigation-route.payload",
+        "direction": "output",
+        "ownerId": "link.navigation-route.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "presentation",
+        "purpose": "data",
+        "ref": "link.navigation-route.presentation-adapter.presentation",
+        "required": true,
+        "typeRef": "link.navigation-route.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.capture-status",
+        "direction": "input",
+        "ownerId": "link.capture-phase.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "state",
+        "purpose": "data",
+        "ref": "link.capture-phase.presentation-adapter.state",
+        "required": true,
+        "typeRef": "link.capture-phase.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.capture-phase.payload",
+        "direction": "output",
+        "ownerId": "link.capture-phase.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "presentation",
+        "purpose": "data",
+        "ref": "link.capture-phase.presentation-adapter.presentation",
+        "required": true,
+        "typeRef": "link.capture-phase.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.conversation-status",
+        "direction": "input",
+        "ownerId": "link.delivery-phase.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "state",
+        "purpose": "data",
+        "ref": "link.delivery-phase.presentation-adapter.state",
+        "required": true,
+        "typeRef": "link.delivery-phase.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.delivery-phase.payload",
+        "direction": "output",
+        "ownerId": "link.delivery-phase.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "presentation",
+        "purpose": "data",
+        "ref": "link.delivery-phase.presentation-adapter.presentation",
+        "required": true,
+        "typeRef": "link.delivery-phase.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.conversation-status",
+        "direction": "input",
+        "ownerId": "link.reply-phase.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "state",
+        "purpose": "data",
+        "ref": "link.reply-phase.presentation-adapter.state",
+        "required": true,
+        "typeRef": "link.reply-phase.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.reply-phase.payload",
+        "direction": "output",
+        "ownerId": "link.reply-phase.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "presentation",
+        "purpose": "data",
+        "ref": "link.reply-phase.presentation-adapter.presentation",
+        "required": true,
+        "typeRef": "link.reply-phase.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.playback-status",
+        "direction": "input",
+        "ownerId": "link.playback-phase.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "state",
+        "purpose": "data",
+        "ref": "link.playback-phase.presentation-adapter.state",
+        "required": true,
+        "typeRef": "link.playback-phase.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.playback-phase.payload",
+        "direction": "output",
+        "ownerId": "link.playback-phase.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "presentation",
+        "purpose": "data",
+        "ref": "link.playback-phase.presentation-adapter.presentation",
+        "required": true,
+        "typeRef": "link.playback-phase.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.target-directory",
+        "direction": "input",
+        "ownerId": "link.target-kind.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "state",
+        "purpose": "data",
+        "ref": "link.target-kind.presentation-adapter.state",
+        "required": true,
+        "typeRef": "link.target-kind.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.target-kind.payload",
+        "direction": "output",
+        "ownerId": "link.target-kind.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "presentation",
+        "purpose": "data",
+        "ref": "link.target-kind.presentation-adapter.presentation",
+        "required": true,
+        "typeRef": "link.target-kind.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.session-status",
+        "direction": "input",
+        "ownerId": "link.connection-state.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "state",
+        "purpose": "data",
+        "ref": "link.connection-state.presentation-adapter.state",
+        "required": true,
+        "typeRef": "link.connection-state.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.connection-state.payload",
+        "direction": "output",
+        "ownerId": "link.connection-state.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "presentation",
+        "purpose": "data",
+        "ref": "link.connection-state.presentation-adapter.presentation",
+        "required": true,
+        "typeRef": "link.connection-state.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.update-status",
+        "direction": "input",
+        "ownerId": "link.update-phase.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "state",
+        "purpose": "data",
+        "ref": "link.update-phase.presentation-adapter.state",
+        "required": true,
+        "typeRef": "link.update-phase.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.update-phase.payload",
+        "direction": "output",
+        "ownerId": "link.update-phase.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "presentation",
+        "purpose": "data",
+        "ref": "link.update-phase.presentation-adapter.presentation",
+        "required": true,
+        "typeRef": "link.update-phase.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.recovery-status",
+        "direction": "input",
+        "ownerId": "link.recovery-phase.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "state",
+        "purpose": "data",
+        "ref": "link.recovery-phase.presentation-adapter.state",
+        "required": true,
+        "typeRef": "link.recovery-phase.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.recovery-phase.payload",
+        "direction": "output",
+        "ownerId": "link.recovery-phase.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "presentation",
+        "purpose": "data",
+        "ref": "link.recovery-phase.presentation-adapter.presentation",
+        "required": true,
+        "typeRef": "link.recovery-phase.presentation-adapter"
       }
     ]
   },
-  "productSpecVersion": "0.3.42",
+  "productSpecVersion": "0.3.45",
   "rendererBindings": [
     {
       "capabilities": [
@@ -5190,5 +6839,1022 @@
       "id": "android-wear-compose"
     }
   ],
-  "schemaVersion": 7
+  "schemaVersion": 8,
+  "stateAuthorities": [
+    {
+      "adapter": {
+        "inputPortRef": "link.navigation-route.presentation-adapter.state",
+        "nodeInstanceRef": "link.navigation-route.presentation-adapter",
+        "nodeTypeRef": "link.navigation-route.presentation-adapter",
+        "outputPortRef": "link.navigation-route.presentation-adapter.presentation"
+      },
+      "id": "link.navigation-route",
+      "presentation": {
+        "cases": {
+          "dev-host": {
+            "route": "dev-host"
+          },
+          "home": {
+            "route": "home"
+          },
+          "settings": {
+            "route": "settings"
+          }
+        },
+        "consumers": [
+          "settings-action.routeState",
+          "dev-host.routeState"
+        ],
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "route",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.route"
+              }
+            }
+          ],
+          "id": "link.navigation-route.payload",
+          "kind": "snapshot"
+        },
+        "fields": [
+          {
+            "name": "route",
+            "value": {
+              "id": "link.route",
+              "values": [
+                "home",
+                "settings",
+                "dev-host"
+              ]
+            }
+          }
+        ],
+        "id": "link.navigation-route",
+        "stateRef": "link.route"
+      },
+      "source": {
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "route",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.route"
+              }
+            }
+          ],
+          "id": "link.route-destination",
+          "kind": "state"
+        },
+        "portRef": "navigation.service.destination",
+        "stateField": "route",
+        "states": {
+          "id": "link.route",
+          "values": [
+            "home",
+            "settings",
+            "dev-host"
+          ]
+        }
+      }
+    },
+    {
+      "adapter": {
+        "inputPortRef": "link.capture-phase.presentation-adapter.state",
+        "nodeInstanceRef": "link.capture-phase.presentation-adapter",
+        "nodeTypeRef": "link.capture-phase.presentation-adapter",
+        "outputPortRef": "link.capture-phase.presentation-adapter.presentation"
+      },
+      "id": "link.capture-phase",
+      "presentation": {
+        "cases": {
+          "failed": {
+            "phase": "failed"
+          },
+          "finalizing": {
+            "phase": "finalizing"
+          },
+          "idle": {
+            "phase": "idle"
+          },
+          "listening": {
+            "phase": "listening"
+          }
+        },
+        "consumers": [
+          "talk.captureState"
+        ],
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "phase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.capture-phase"
+              }
+            }
+          ],
+          "id": "link.capture-phase.payload",
+          "kind": "snapshot"
+        },
+        "fields": [
+          {
+            "name": "phase",
+            "value": {
+              "id": "link.capture-phase",
+              "values": [
+                "idle",
+                "listening",
+                "finalizing",
+                "failed"
+              ]
+            }
+          }
+        ],
+        "id": "link.capture-phase",
+        "stateRef": "link.capture-phase"
+      },
+      "source": {
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "phase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.capture-phase"
+              }
+            },
+            {
+              "clockDomain": "none",
+              "name": "available",
+              "nullable": false,
+              "value": "boolean"
+            },
+            {
+              "clockDomain": "none",
+              "name": "unavailableReason",
+              "nullable": true,
+              "value": "string"
+            },
+            {
+              "clockDomain": "wall",
+              "name": "startedAtMs",
+              "nullable": true,
+              "unit": "si.millisecond",
+              "value": "integer"
+            },
+            {
+              "clockDomain": "none",
+              "name": "byteCount",
+              "nullable": false,
+              "unit": "si.byte",
+              "value": "integer"
+            }
+          ],
+          "id": "link.capture-status",
+          "kind": "state"
+        },
+        "portRef": "capture.service.status",
+        "stateField": "phase",
+        "states": {
+          "id": "link.capture-phase",
+          "values": [
+            "idle",
+            "listening",
+            "finalizing",
+            "failed"
+          ]
+        }
+      }
+    },
+    {
+      "adapter": {
+        "inputPortRef": "link.delivery-phase.presentation-adapter.state",
+        "nodeInstanceRef": "link.delivery-phase.presentation-adapter",
+        "nodeTypeRef": "link.delivery-phase.presentation-adapter",
+        "outputPortRef": "link.delivery-phase.presentation-adapter.presentation"
+      },
+      "id": "link.delivery-phase",
+      "presentation": {
+        "cases": {
+          "failed": {
+            "phase": "failed"
+          },
+          "none": {
+            "phase": "none"
+          },
+          "queued": {
+            "phase": "queued"
+          },
+          "sending": {
+            "phase": "sending"
+          }
+        },
+        "consumers": [
+          "latest.deliveryState",
+          "composer.deliveryState"
+        ],
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "phase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.delivery-phase"
+              }
+            }
+          ],
+          "id": "link.delivery-phase.payload",
+          "kind": "snapshot"
+        },
+        "fields": [
+          {
+            "name": "phase",
+            "value": {
+              "id": "link.delivery-phase",
+              "values": [
+                "none",
+                "sending",
+                "queued",
+                "failed"
+              ]
+            }
+          }
+        ],
+        "id": "link.delivery-phase",
+        "stateRef": "link.delivery-phase"
+      },
+      "source": {
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "turnId",
+              "nullable": true,
+              "value": "string"
+            },
+            {
+              "clockDomain": "none",
+              "name": "deliveryPhase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.delivery-phase"
+              }
+            },
+            {
+              "clockDomain": "none",
+              "name": "replyPhase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.reply-phase"
+              }
+            },
+            {
+              "clockDomain": "none",
+              "name": "offline",
+              "nullable": false,
+              "value": "boolean"
+            },
+            {
+              "clockDomain": "none",
+              "name": "idempotencyKey",
+              "nullable": true,
+              "value": "string"
+            },
+            {
+              "clockDomain": "none",
+              "name": "turns",
+              "nullable": false,
+              "value": {
+                "ref": "link.turn-list"
+              }
+            }
+          ],
+          "id": "link.conversation-status",
+          "kind": "state"
+        },
+        "portRef": "conversation.service.status",
+        "stateField": "deliveryPhase",
+        "states": {
+          "id": "link.delivery-phase",
+          "values": [
+            "none",
+            "sending",
+            "queued",
+            "failed"
+          ]
+        }
+      }
+    },
+    {
+      "adapter": {
+        "inputPortRef": "link.reply-phase.presentation-adapter.state",
+        "nodeInstanceRef": "link.reply-phase.presentation-adapter",
+        "nodeTypeRef": "link.reply-phase.presentation-adapter",
+        "outputPortRef": "link.reply-phase.presentation-adapter.presentation"
+      },
+      "id": "link.reply-phase",
+      "presentation": {
+        "cases": {
+          "failed": {
+            "phase": "failed"
+          },
+          "none": {
+            "phase": "none"
+          },
+          "ready": {
+            "phase": "ready"
+          },
+          "thinking": {
+            "phase": "thinking"
+          }
+        },
+        "consumers": [
+          "latest.replyState",
+          "composer.replyState"
+        ],
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "phase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.reply-phase"
+              }
+            }
+          ],
+          "id": "link.reply-phase.payload",
+          "kind": "snapshot"
+        },
+        "fields": [
+          {
+            "name": "phase",
+            "value": {
+              "id": "link.reply-phase",
+              "values": [
+                "none",
+                "thinking",
+                "ready",
+                "failed"
+              ]
+            }
+          }
+        ],
+        "id": "link.reply-phase",
+        "stateRef": "link.reply-phase"
+      },
+      "source": {
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "turnId",
+              "nullable": true,
+              "value": "string"
+            },
+            {
+              "clockDomain": "none",
+              "name": "deliveryPhase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.delivery-phase"
+              }
+            },
+            {
+              "clockDomain": "none",
+              "name": "replyPhase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.reply-phase"
+              }
+            },
+            {
+              "clockDomain": "none",
+              "name": "offline",
+              "nullable": false,
+              "value": "boolean"
+            },
+            {
+              "clockDomain": "none",
+              "name": "idempotencyKey",
+              "nullable": true,
+              "value": "string"
+            },
+            {
+              "clockDomain": "none",
+              "name": "turns",
+              "nullable": false,
+              "value": {
+                "ref": "link.turn-list"
+              }
+            }
+          ],
+          "id": "link.conversation-status",
+          "kind": "state"
+        },
+        "portRef": "conversation.service.status",
+        "stateField": "replyPhase",
+        "states": {
+          "id": "link.reply-phase",
+          "values": [
+            "none",
+            "thinking",
+            "ready",
+            "failed"
+          ]
+        }
+      }
+    },
+    {
+      "adapter": {
+        "inputPortRef": "link.playback-phase.presentation-adapter.state",
+        "nodeInstanceRef": "link.playback-phase.presentation-adapter",
+        "nodeTypeRef": "link.playback-phase.presentation-adapter",
+        "outputPortRef": "link.playback-phase.presentation-adapter.presentation"
+      },
+      "id": "link.playback-phase",
+      "presentation": {
+        "cases": {
+          "failed": {
+            "phase": "failed"
+          },
+          "idle": {
+            "phase": "idle"
+          },
+          "paused": {
+            "phase": "paused"
+          },
+          "played": {
+            "phase": "played"
+          },
+          "playing": {
+            "phase": "playing"
+          },
+          "queued": {
+            "phase": "queued"
+          },
+          "skipped": {
+            "phase": "skipped"
+          },
+          "stopped": {
+            "phase": "stopped"
+          }
+        },
+        "consumers": [
+          "active-playback.playbackState"
+        ],
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "phase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.playback-phase"
+              }
+            }
+          ],
+          "id": "link.playback-phase.payload",
+          "kind": "snapshot"
+        },
+        "fields": [
+          {
+            "name": "phase",
+            "value": {
+              "id": "link.playback-phase",
+              "values": [
+                "idle",
+                "queued",
+                "playing",
+                "paused",
+                "stopped",
+                "played",
+                "skipped",
+                "failed"
+              ]
+            }
+          }
+        ],
+        "id": "link.playback-phase",
+        "stateRef": "link.playback-phase"
+      },
+      "source": {
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "turnId",
+              "nullable": true,
+              "value": "string"
+            },
+            {
+              "clockDomain": "none",
+              "name": "phase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.playback-phase"
+              }
+            },
+            {
+              "clockDomain": "none",
+              "name": "positionMs",
+              "nullable": false,
+              "unit": "si.millisecond",
+              "value": "integer"
+            },
+            {
+              "clockDomain": "none",
+              "name": "durationMs",
+              "nullable": false,
+              "unit": "si.millisecond",
+              "value": "integer"
+            },
+            {
+              "clockDomain": "none",
+              "name": "turn",
+              "nullable": true,
+              "value": {
+                "ref": "link.turn"
+              }
+            }
+          ],
+          "id": "link.playback-status",
+          "kind": "state"
+        },
+        "portRef": "playback.service.status",
+        "stateField": "phase",
+        "states": {
+          "id": "link.playback-phase",
+          "values": [
+            "idle",
+            "queued",
+            "playing",
+            "paused",
+            "stopped",
+            "played",
+            "skipped",
+            "failed"
+          ]
+        }
+      }
+    },
+    {
+      "adapter": {
+        "inputPortRef": "link.target-kind.presentation-adapter.state",
+        "nodeInstanceRef": "link.target-kind.presentation-adapter",
+        "nodeTypeRef": "link.target-kind.presentation-adapter",
+        "outputPortRef": "link.target-kind.presentation-adapter.presentation"
+      },
+      "id": "link.target-kind",
+      "presentation": {
+        "cases": {
+          "agent": {
+            "kind": "agent"
+          },
+          "none": {
+            "kind": "none"
+          },
+          "public": {
+            "kind": "public"
+          },
+          "windows": {
+            "kind": "windows"
+          }
+        },
+        "consumers": [
+          "target.targetState"
+        ],
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "kind",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.target-kind"
+              }
+            }
+          ],
+          "id": "link.target-kind.payload",
+          "kind": "snapshot"
+        },
+        "fields": [
+          {
+            "name": "kind",
+            "value": {
+              "id": "link.target-kind",
+              "values": [
+                "none",
+                "agent",
+                "windows",
+                "public"
+              ]
+            }
+          }
+        ],
+        "id": "link.target-kind",
+        "stateRef": "link.target-kind"
+      },
+      "source": {
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "selectedTargetId",
+              "nullable": true,
+              "value": "string"
+            },
+            {
+              "clockDomain": "none",
+              "name": "kind",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.target-kind"
+              }
+            },
+            {
+              "clockDomain": "none",
+              "name": "availableCount",
+              "nullable": false,
+              "value": "integer"
+            },
+            {
+              "clockDomain": "none",
+              "name": "targets",
+              "nullable": false,
+              "value": {
+                "ref": "link.target-list"
+              }
+            }
+          ],
+          "id": "link.target-directory",
+          "kind": "state"
+        },
+        "portRef": "target.service.directory",
+        "stateField": "kind",
+        "states": {
+          "id": "link.target-kind",
+          "values": [
+            "none",
+            "agent",
+            "windows",
+            "public"
+          ]
+        }
+      }
+    },
+    {
+      "adapter": {
+        "inputPortRef": "link.connection-state.presentation-adapter.state",
+        "nodeInstanceRef": "link.connection-state.presentation-adapter",
+        "nodeTypeRef": "link.connection-state.presentation-adapter",
+        "outputPortRef": "link.connection-state.presentation-adapter.presentation"
+      },
+      "id": "link.connection-state",
+      "presentation": {
+        "cases": {
+          "configuration-required": {
+            "connection": "configuration-required"
+          },
+          "connected": {
+            "connection": "connected"
+          },
+          "connecting": {
+            "connection": "connecting"
+          },
+          "disconnected": {
+            "connection": "disconnected"
+          },
+          "off": {
+            "connection": "off"
+          }
+        },
+        "consumers": [
+          "connection.connectionState",
+          "public-link.connectionState"
+        ],
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "connection",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.connection-state"
+              }
+            }
+          ],
+          "id": "link.connection-state.payload",
+          "kind": "snapshot"
+        },
+        "fields": [
+          {
+            "name": "connection",
+            "value": {
+              "id": "link.connection-state",
+              "values": [
+                "off",
+                "connecting",
+                "connected",
+                "disconnected",
+                "configuration-required"
+              ]
+            }
+          }
+        ],
+        "id": "link.connection-state",
+        "stateRef": "link.connection-state"
+      },
+      "source": {
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "connection",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.connection-state"
+              }
+            },
+            {
+              "clockDomain": "none",
+              "name": "connectionDetail",
+              "nullable": true,
+              "value": "string"
+            },
+            {
+              "clockDomain": "none",
+              "name": "publicLinkActive",
+              "nullable": false,
+              "value": "boolean"
+            }
+          ],
+          "id": "link.session-status",
+          "kind": "state"
+        },
+        "portRef": "session.service.status",
+        "stateField": "connection",
+        "states": {
+          "id": "link.connection-state",
+          "values": [
+            "off",
+            "connecting",
+            "connected",
+            "disconnected",
+            "configuration-required"
+          ]
+        }
+      }
+    },
+    {
+      "adapter": {
+        "inputPortRef": "link.update-phase.presentation-adapter.state",
+        "nodeInstanceRef": "link.update-phase.presentation-adapter",
+        "nodeTypeRef": "link.update-phase.presentation-adapter",
+        "outputPortRef": "link.update-phase.presentation-adapter.presentation"
+      },
+      "id": "link.update-phase",
+      "presentation": {
+        "cases": {
+          "available": {
+            "phase": "available"
+          },
+          "checking": {
+            "phase": "checking"
+          },
+          "downloading": {
+            "phase": "downloading"
+          },
+          "failed": {
+            "phase": "failed"
+          },
+          "idle": {
+            "phase": "idle"
+          },
+          "install-failed": {
+            "phase": "install-failed"
+          },
+          "installing": {
+            "phase": "installing"
+          },
+          "ready-to-install": {
+            "phase": "ready-to-install"
+          },
+          "unavailable": {
+            "phase": "unavailable"
+          },
+          "up-to-date": {
+            "phase": "up-to-date"
+          }
+        },
+        "consumers": [
+          "updates.updateState"
+        ],
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "phase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.update-phase"
+              }
+            }
+          ],
+          "id": "link.update-phase.payload",
+          "kind": "snapshot"
+        },
+        "fields": [
+          {
+            "name": "phase",
+            "value": {
+              "id": "link.update-phase",
+              "values": [
+                "idle",
+                "checking",
+                "up-to-date",
+                "unavailable",
+                "available",
+                "downloading",
+                "ready-to-install",
+                "installing",
+                "install-failed",
+                "failed"
+              ]
+            }
+          }
+        ],
+        "id": "link.update-phase",
+        "stateRef": "link.update-phase"
+      },
+      "source": {
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "phase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.update-phase"
+              }
+            },
+            {
+              "clockDomain": "none",
+              "name": "update",
+              "nullable": false,
+              "value": {
+                "ref": "link.update-native"
+              }
+            }
+          ],
+          "id": "link.update-status",
+          "kind": "state"
+        },
+        "portRef": "updates.service.status",
+        "stateField": "phase",
+        "states": {
+          "id": "link.update-phase",
+          "values": [
+            "idle",
+            "checking",
+            "up-to-date",
+            "unavailable",
+            "available",
+            "downloading",
+            "ready-to-install",
+            "installing",
+            "install-failed",
+            "failed"
+          ]
+        }
+      }
+    },
+    {
+      "adapter": {
+        "inputPortRef": "link.recovery-phase.presentation-adapter.state",
+        "nodeInstanceRef": "link.recovery-phase.presentation-adapter",
+        "nodeTypeRef": "link.recovery-phase.presentation-adapter",
+        "outputPortRef": "link.recovery-phase.presentation-adapter.presentation"
+      },
+      "id": "link.recovery-phase",
+      "presentation": {
+        "cases": {
+          "clean": {
+            "phase": "clean"
+          },
+          "quarantined": {
+            "phase": "quarantined"
+          }
+        },
+        "consumers": [
+          "recovery.recoveryState"
+        ],
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "phase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.recovery-phase"
+              }
+            }
+          ],
+          "id": "link.recovery-phase.payload",
+          "kind": "snapshot"
+        },
+        "fields": [
+          {
+            "name": "phase",
+            "value": {
+              "id": "link.recovery-phase",
+              "values": [
+                "clean",
+                "quarantined"
+              ]
+            }
+          }
+        ],
+        "id": "link.recovery-phase",
+        "stateRef": "link.recovery-phase"
+      },
+      "source": {
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "phase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.recovery-phase"
+              }
+            },
+            {
+              "clockDomain": "none",
+              "name": "detail",
+              "nullable": true,
+              "value": "string"
+            }
+          ],
+          "id": "link.recovery-status",
+          "kind": "state"
+        },
+        "portRef": "recovery.service.status",
+        "stateField": "phase",
+        "states": {
+          "id": "link.recovery-phase",
+          "values": [
+            "clean",
+            "quarantined"
+          ]
+        }
+      }
+    }
+  ]
 }
