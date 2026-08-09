@@ -2,6 +2,7 @@ package io.agentmux.audioinbox.wear
 
 import com.adelost.designkit.ui.CircleLabelProgress
 import com.adelost.releasekit.UpdateState
+import com.adelost.ringkit.ui.RowSpec
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
 import io.agentmux.linkcore.LinkState
@@ -10,8 +11,11 @@ import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkui.linkWatchRows
 import io.agentmux.linkui.linkWatchSettingsRows
-import io.agentmux.linkui.product.LinkProductSession
-import io.agentmux.linkui.product.generated.LinkArtifactProfile
+import io.agentmux.linkui.product.toConversationPresentation
+import io.agentmux.linkui.product.toRecoveryPresentation
+import io.agentmux.linkui.product.toSessionPresentation
+import io.agentmux.linkui.product.toTargetPresentation
+import io.agentmux.linkui.product.toUpdatePresentation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -22,21 +26,19 @@ import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
 
+/**
+ * What the round surface actually renders.
+ *
+ * The rows used to be asked for through LinkProductSession(LinkArtifactProfile),
+ * so the test carried an artifact enum to say "this is the watch". That indirection
+ * is gone: the round builders ARE the round surface, and they take the same typed
+ * presentations the port graph publishes. The state-to-presentation extensions
+ * below are the production ones, so a test state travels the production path.
+ */
 class WearLinkScreenTest {
-    private val wearProduct = LinkProductSession(LinkArtifactProfile.WEAR_FULL_UI)
-    private val phoneProduct = LinkProductSession(LinkArtifactProfile.PHONE_FULL_UI)
-
     @Test
     fun unavailableStateIsConciseCanonicalRows() {
-        val rows = linkWatchRows(
-            product = wearProduct,
-            state = unavailableState(),
-            onSelectTarget = {},
-            onOpenCapture = {},
-            onPlay = {},
-            onStop = {},
-            onReplay = {},
-        )
+        val rows = unavailableState().watchRows()
 
         assertEquals(listOf("target", "talk", "latest", "settings"), rows.map { it.key })
         assertEquals("AGENT · SIGN IN", rows[0].title)
@@ -46,9 +48,7 @@ class WearLinkScreenTest {
         assertFalse(rows[1].holdToConfirm)
         assertEquals(
             "LOG IN ON PHONE",
-            linkWatchSettingsRows(
-                product = wearProduct,
-                state = unavailableState(),
+            unavailableState().watchSettingsRows(
                 updateState = UpdateState.UpToDate("1.2.1", publishedAtEpochMillis = null),
                 currentVersionName = "1.2.1",
             )[0].sub,
@@ -82,13 +82,9 @@ class WearLinkScreenTest {
             ),
         )
 
-        val rows = linkWatchRows(
-            product = wearProduct,
-            state = state,
+        val rows = state.watchRows(
             onSelectTarget = { selected = it },
             onOpenCapture = { openedCapture = true },
-            onPlay = {},
-            onStop = {},
             onReplay = { replayed = true },
         )
 
@@ -127,15 +123,7 @@ class WearLinkScreenTest {
             ),
         )
 
-        val rows = linkWatchRows(
-            product = wearProduct,
-            state = state,
-            onSelectTarget = {},
-            onOpenCapture = {},
-            onPlay = {},
-            onStop = {},
-            onReplay = {},
-        )
+        val rows = state.watchRows(publicLinkActive = true)
 
         assertEquals("AGENT · PUBLIC", rows[0].title)
         assertEquals("TRANSCRIPTION-FAILED", rows[2].sub)
@@ -163,15 +151,7 @@ class WearLinkScreenTest {
             ),
         )
 
-        val rows = linkWatchRows(
-            product = wearProduct,
-            state = state,
-            onSelectTarget = {},
-            onOpenCapture = {},
-            onPlay = {},
-            onStop = {},
-            onReplay = { retried = true },
-        )
+        val rows = state.watchRows(publicLinkActive = true, onReplay = { retried = true })
 
         assertEquals("RETRY PLAYBACK", rows[3].title)
         assertEquals("TTS UNAVAILABLE", rows[3].sub)
@@ -182,27 +162,20 @@ class WearLinkScreenTest {
     @Test
     fun updateRowUsesSharedProgressAndActionTruth() {
         var installed = false
-        val downloading = UpdateState.Downloading(
-            versionName = "0.1.1",
-            progress = 0.4f,
-        )
-        val downloadingRow = linkWatchSettingsRows(wearProduct, LinkState(), downloading, "0.1.0")[1]
+        val downloadingRow = LinkState().watchSettingsRows(
+            updateState = UpdateState.Downloading(versionName = "0.1.1", progress = 0.4f),
+            currentVersionName = "0.1.0",
+        )[1]
         assertEquals("UPDATE", downloadingRow.title)
         assertEquals("DOWNLOADING… 40%", downloadingRow.sub)
-        assertEquals(
-            CircleLabelProgress.Determinate(0.4f),
-            downloadingRow.labelProgress,
-        )
+        assertEquals(CircleLabelProgress.Determinate(0.4f), downloadingRow.labelProgress)
         assertNull(downloadingRow.onTap)
 
-        val ready = UpdateState.ReadyToInstall(
-            versionName = "0.1.1",
-            apkPath = "/cache/update.apk",
-        )
-        val readyRow = linkWatchSettingsRows(
-            product = wearProduct,
-            state = LinkState(),
-            updateState = ready,
+        val readyRow = LinkState().watchSettingsRows(
+            updateState = UpdateState.ReadyToInstall(
+                versionName = "0.1.1",
+                apkPath = "/cache/update.apk",
+            ),
             currentVersionName = "0.1.0",
             onInstallUpdate = { installed = true },
         )[1]
@@ -214,9 +187,7 @@ class WearLinkScreenTest {
     @Test
     fun currentReleaseKeepsItsSignedPublicationEpochAtTheSharedUiBoundary() {
         val publishedAt = Instant.parse("2026-08-02T05:33:20Z").toEpochMilli()
-        val rows = linkWatchSettingsRows(
-            product = wearProduct,
-            state = LinkState(),
+        val rows = LinkState().watchSettingsRows(
             updateState = UpdateState.UpToDate(
                 versionName = "1.2.2",
                 publishedAtEpochMillis = publishedAt,
@@ -231,29 +202,65 @@ class WearLinkScreenTest {
         assertEquals("v1.2.2 · Aug 2, 2026, 7:33 AM", rows.last().sub)
     }
 
+    /**
+     * The dev host is a phone affordance that the round surface may borrow when a
+     * host offers it. WearMainActivity offers nothing, so the real watch cannot
+     * show it; only the phone's watch-exact preview passes the callback, and it is
+     * how that preview returns to the responsive host.
+     *
+     * The old version of this test said the same thing through LinkArtifactProfile
+     * (WEAR_FULL_UI vs PHONE_FULL_UI). Round is now one surface with one builder,
+     * so the truth that survives is the one the wear app actually depends on: no
+     * callback, no row.
+     */
     @Test
-    fun realWearOmitsPhoneHostControlsWhilePhoneWatchExactCanReturnToResponsive() {
+    fun theRoundDevHostRowIsRenderedOnlyForAHostThatOffersIt() {
         val state = activePreviewState()
+        val upToDate = UpdateState.UpToDate("1.2.1", publishedAtEpochMillis = null)
 
         assertFalse(
-            linkWatchSettingsRows(
-                product = wearProduct,
-                state = state,
-                updateState = UpdateState.UpToDate("1.2.1", publishedAtEpochMillis = null),
-                currentVersionName = "1.2.1",
-            )
+            state.watchSettingsRows(upToDate, "1.2.1")
                 .any { it.key == "dev-host" },
         )
         assertTrue(
-            linkWatchSettingsRows(
-                product = phoneProduct,
-                state = state,
-                updateState = UpdateState.UpToDate("1.2.1", publishedAtEpochMillis = null),
-                currentVersionName = "1.2.1",
-                onOpenDevHost = {},
-            ).any {
-                it.key == "dev-host" && it.sub == "RESPONSIVE · WATCH EXACT"
-            },
+            state.watchSettingsRows(upToDate, "1.2.1", onOpenDevHost = {})
+                .any { it.key == "dev-host" && it.sub == "RESPONSIVE · WATCH EXACT" },
         )
     }
 }
+
+private fun LinkState.watchRows(
+    publicLinkActive: Boolean = false,
+    onSelectTarget: (String) -> Unit = {},
+    onOpenCapture: () -> Unit = {},
+    onPlay: () -> Unit = {},
+    onStop: () -> Unit = {},
+    onReplay: () -> Unit = {},
+): List<RowSpec> = linkWatchRows(
+    target = toTargetPresentation { null },
+    conversation = toConversationPresentation(),
+    session = toSessionPresentation(publicLinkActive),
+    onSelectTarget = onSelectTarget,
+    onOpenCapture = onOpenCapture,
+    onPlay = onPlay,
+    onStop = onStop,
+    onReplay = onReplay,
+)
+
+private fun LinkState.watchSettingsRows(
+    updateState: UpdateState,
+    currentVersionName: String,
+    onInstallUpdate: () -> Unit = {},
+    onOpenDevHost: (() -> Unit)? = null,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+    locale: Locale = Locale.getDefault(),
+): List<RowSpec> = linkWatchSettingsRows(
+    session = toSessionPresentation(publicLinkActive = false),
+    updates = updateState.toUpdatePresentation(),
+    recovery = toRecoveryPresentation(),
+    currentVersionName = currentVersionName,
+    onInstallUpdate = onInstallUpdate,
+    onOpenDevHost = onOpenDevHost,
+    zoneId = zoneId,
+    locale = locale,
+)

@@ -12,10 +12,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.mutableStateOf
 import com.adelost.designkit.ui.CircleHostMode
 import com.adelost.designkit.ui.CircleHostPreviewState
 import com.adelost.designkit.ui.CircleHostSurface
@@ -32,16 +28,15 @@ import io.agentmux.linkcore.ReplyPhase
 import io.agentmux.audioinbox.update.LinkReleaseCatalogs
 import io.agentmux.audioinbox.update.LinkUpdater
 import io.agentmux.linkui.LinkWatchScreen
-import io.agentmux.linkui.product.LinkProductSession
-import io.agentmux.linkui.product.LinkProductRuntime
-import io.agentmux.linkui.product.generated.LinkArtifactProfile
+import io.agentmux.linkui.product.LinkNavigationController
+import io.agentmux.linkui.product.LinkRoute
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class WearMainActivity : ComponentActivity() {
-    private val product = LinkProductSession(LinkArtifactProfile.WEAR_FULL_UI)
     private lateinit var controller: WearMailboxController
-    private lateinit var productRuntime: LinkProductRuntime
+    private lateinit var productGraph: WearLinkProductGraph
     private lateinit var updater: LinkUpdater
-    private val microphoneGranted = mutableStateOf(false)
+    private val microphoneGranted = MutableStateFlow(false)
     private val microphonePermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted -> microphoneGranted.value = granted }
@@ -61,22 +56,31 @@ class WearMainActivity : ComponentActivity() {
             currentVersionName = BuildConfig.VERSION_NAME,
             currentVersionCode = BuildConfig.VERSION_CODE,
         )
-        productRuntime = LinkProductRuntime(WearLinkProductPorts(controller, updater))
         microphoneGranted.value = hasMicrophonePermission()
+        val navigation = LinkNavigationController(
+            initial = savedInstanceState?.getString(STATE_ROUTE)
+                ?.let { saved -> LinkRoute.entries.firstOrNull { it.wireId == saved } }
+                ?: if (BuildConfig.DEBUG && intent.getStringExtra(QA_PAGE_EXTRA) == QA_PAGE_SETTINGS) {
+                    LinkRoute.SETTINGS
+                } else {
+                    LinkRoute.HOME
+                },
+        )
+        productGraph = WearLinkProductGraph.create(
+            controller = controller,
+            updater = updater,
+            navigation = navigation,
+            microphoneGranted = microphoneGranted,
+            state = if (BuildConfig.DEBUG && intent.getStringExtra(QA_STATE_EXTRA) == QA_STATE_ACTIVE) {
+                MutableStateFlow(activePreviewState())
+            } else {
+                controller.state
+            },
+        )
         registerSessionReceiver()
         requestMicrophone()
         controller.start()
         setContent {
-            val liveState by controller.state.collectAsState()
-            val updateState by updater.state.collectAsStateWithLifecycle()
-            val state = if (
-                BuildConfig.DEBUG &&
-                intent.getStringExtra(QA_STATE_EXTRA) == QA_STATE_ACTIVE
-            ) {
-                activePreviewState()
-            } else {
-                liveState
-            }
             RingActionCueHost {
                 CircleHostSurface(
                     isWatchDevice = true,
@@ -84,38 +88,11 @@ class WearMainActivity : ComponentActivity() {
                     onStateChange = null,
                 ) {
                     LinkWatchScreen(
-                        product = product,
-                        state = state,
-                        updateState = updateState,
+                        graph = productGraph,
                         currentVersionName = updater.currentVersionName,
-                        microphoneGranted = microphoneGranted.value,
                         onRequestMicrophone = ::requestMicrophone,
-                        onSelectTarget = controller::selectTarget,
-                        onBeginCapture = productRuntime::beginCapture,
-                        onReleaseCapture = productRuntime::releaseCapture,
-                        onCancelCapture = productRuntime::cancelCapture,
                         recordedBytes = controller::recordedBytes,
                         recordedLevel = controller::recordedLevel,
-                        onPlay = {
-                            controller.state.value.turns.lastOrNull {
-                                it.replyText.isNotBlank()
-                            }?.turnId?.let(productRuntime::play)
-                        },
-                        onStop = {
-                            (controller.state.value.activePlaybackTurnId ?: controller.state.value
-                                .turns.lastOrNull { it.replyText.isNotBlank() }?.turnId)
-                                ?.let(productRuntime::stop)
-                        },
-                        onReplay = {
-                            controller.state.value.turns.lastOrNull {
-                                it.replyText.isNotBlank()
-                            }?.turnId?.let(productRuntime::play)
-                        },
-                        onCheckUpdate = updater::retry,
-                        onInstallUpdate = updater::install,
-                        onNavigateRoute = productRuntime::open,
-                        initialShowingSettings = BuildConfig.DEBUG &&
-                            intent.getStringExtra(QA_PAGE_EXTRA) == QA_PAGE_SETTINGS,
                     )
                 }
             }
@@ -131,8 +108,14 @@ class WearMainActivity : ComponentActivity() {
         if (::updater.isInitialized) updater.resumeInstallerStatus()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString(STATE_ROUTE, productGraph.navigation.route.value.wireId)
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onDestroy() {
         unregisterReceiver(sessionChanges)
+        productGraph.close()
         controller.close()
         super.onDestroy()
     }
@@ -165,6 +148,10 @@ class WearMainActivity : ComponentActivity() {
             @Suppress("DEPRECATION")
             registerReceiver(sessionChanges, IntentFilter(ACTION_WEAR_SESSION_CHANGED))
         }
+    }
+
+    private companion object {
+        const val STATE_ROUTE = "io.agentmux.audioinbox.wear.ROUTE"
     }
 }
 

@@ -3,55 +3,107 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { decodeLinkNativeRegistry } from "../src/native-registry.js";
-import { productArtifactConformance } from "@v1d/product-spec";
+import {
+  decodeNativeBindingManifest,
+  productArtifactConformance,
+  productArtifactHostCoverage,
+} from "@v1d/product-spec";
 import { compileAgentmuxLinkProduct } from "../src/product.js";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const rawRegistryJson = await readFile(resolve(root, "native-registry/link.json"), "utf8");
-const registry = decodeLinkNativeRegistry(JSON.parse(rawRegistryJson));
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const product = compileAgentmuxLinkProduct("0.0.0-test");
+const manifest = decodeNativeBindingManifest(
+  JSON.parse(await readFile(resolve(packageRoot, "native-registry/link.json"), "utf8")),
+);
 
-test("one Link product drives Phone and Wear with a closed native graph", () => {
-  const product = compileAgentmuxLinkProduct(registry, "0.3.25");
-  assert.deepEqual(product.artifacts.map(({ id }) => id), ["phone-full-ui", "wear-full-ui"]);
-  assert.equal(product.componentFamilies.length, 3);
-  assert.equal(product.legos.mounts.length, 10);
-  assert.deepEqual(product.legos.wiring, [
-    { from: "capture.captured", to: "conversation.turn" },
-  ]);
-  assert.equal(product.legos.mounts.find(({ id }) => id === "conversation")?.lego.runtime.durability, "durable");
-  assert.equal(product.assetCatalogRef.id, "circlekit");
-  assert.deepEqual(product.palette.variants, []);
-  assert.ok(product.link.routes.every(({ artifacts }) => artifacts.length > 0));
-  // The component↔service join is total: every catalog component resolves to
-  // typed ui-entry portRefs or a named framework reason.
-  for (const { id } of product.componentCatalog) {
-    const binding = product.link.componentBindings[id];
-    assert.ok(binding, `component '${id}' has no wiring binding`);
-    if (binding.kind === "ui") {
-      for (const entry of binding.entries) {
-        assert.ok(product.ui.some((candidate) => candidate.id === entry));
-      }
-    }
+test("the mandatory graph has no parallel list and one binding per data input", () => {
+  assert.equal("legos" in product, false, "old lego graph must not survive");
+  assert.equal("ui" in product, false, "old ui entry list must not survive");
+  assert.equal("componentCatalog" in product, false, "port-less catalog must not survive");
+  assert.equal(product.services.length, 10);
+  assert.equal(product.components.length, 14);
+  assert.equal(product.componentTypes.length, 13);
+  for (const service of product.services) {
+    assert.equal(service.activation.kind, "lifetime", `${service.id} must stay process-lived`);
+  }
+  assert.deepEqual(product.portRegistry.demandEdges, []);
+  const inputs = product.portRegistry.servicePorts.filter(({ direction }) => direction === "input");
+  const bound = new Set(product.portRegistry.bindings.map(({ to }) => to));
+  for (const input of inputs) {
+    assert.ok(bound.has(input.ref), `service data input ${input.ref} has no upstream`);
+  }
+  const componentInputs = product.portRegistry.componentPorts.filter(({ direction }) => direction === "input");
+  for (const input of componentInputs) {
+    assert.ok(bound.has(input.ref), `component input ${input.ref} has no upstream`);
   }
 });
 
-test("missing native component fails before emission", () => {
-  assert.throws(
-    () => compileAgentmuxLinkProduct({ ...registry, components: registry.components.slice(1) }, "0.3.25"),
-    /component\/native binding missing/,
-  );
+test("capture, delivery, reply and playback are typed graph edges", () => {
+  const edges = product.portRegistry.bindings.map(({ from, to }) => `${from}->${to}`);
+  assert.ok(edges.includes("capture.service.captured->conversation.service.turn"));
+  assert.ok(edges.includes("talk.command->capture.service.command"));
+  assert.ok(edges.includes("composer.compose->conversation.service.compose"));
+  assert.ok(edges.includes("active-playback.command->playback.service.command"));
+  assert.ok(edges.includes("latest.model->conversation.service.status") === false,
+    "bindings point from outputs to inputs, never the reverse");
+  assert.ok(edges.includes("conversation.service.status->latest.model"));
+  assert.ok(edges.includes("playback.service.status->active-playback.model"));
 });
 
-// Criterion 4 of SVW-0112: Link, Showcase and Skyvw verify the SAME contract
-// through the same helper, so drift between a product and its native bindings
-// cannot hide behind a per-product test. Link is the second of the three.
-//
-// Link declares every manifest section, so unlike Showcase there is nothing
-// unasserted here — an empty list is the strongest result this helper can give.
-test("Link conforms to its native bindings through the shared helper", () => {
-  const product = compileAgentmuxLinkProduct(registry, "0.3.31");
-  const raw = JSON.parse(rawRegistryJson);
+test("pages and artifacts cover exactly the declared screens", () => {
+  assert.deepEqual(product.componentFamilies.map(({ screen }) => screen), ["home", "settings", "dev-host"]);
+  const phone = product.artifacts.find(({ id }) => id === "phone-full-ui");
+  const wear = product.artifacts.find(({ id }) => id === "wear-full-ui");
+  assert.deepEqual(phone?.screenRefs, ["home", "settings", "dev-host"]);
+  assert.deepEqual(wear?.screenRefs, ["home", "settings"]);
+  assert.deepEqual(wear?.serves, ["round"]);
+});
 
-  assert.deepEqual(productArtifactConformance(product, raw), []);
+test("native binding manifest conforms, with service ports native-attested", () => {
+  const findings = productArtifactConformance(product, manifest);
+  assert.deepEqual(findings, [{
+    axis: "service-port",
+    direction: "unasserted",
+    subject: "services",
+    message: findings[0]?.message ?? "",
+  }]);
+  assert.equal(findings[0]?.direction, "unasserted");
+  assert.deepEqual(productArtifactHostCoverage(product, [manifest]), []);
+});
+
+test("conformance engine goes red on manifest drift", () => {
+  const withoutComponent = {
+    ...manifest,
+    components: manifest.components.filter(({ componentId }) => componentId !== "link.talk"),
+  };
+  const findings = productArtifactConformance(product, withoutComponent);
+  assert.ok(findings.some((finding) =>
+    finding.axis === "component" && finding.direction === "missing" && finding.subject.startsWith("link.talk@")
+  ));
+  const withoutIcon = { ...manifest, icons: manifest.icons.filter(({ iconId }) => iconId !== "record") };
+  assert.ok(productArtifactConformance(product, withoutIcon).some((finding) =>
+    finding.axis === "icon" && finding.direction === "missing" && finding.subject === "record"
+  ));
+  const bogusFinite = {
+    ...manifest,
+    finiteValues: [...(manifest.finiteValues ?? []), { id: "link.bogus", values: ["x"] }],
+  };
+  assert.ok(productArtifactConformance(product, bogusFinite).some((finding) =>
+    finding.axis === "finite-value" && finding.direction === "orphan" && finding.subject === "link.bogus"
+  ));
+  const driftedFinite = {
+    ...manifest,
+    finiteValues: (manifest.finiteValues ?? []).map((entry) =>
+      entry.id === "link.capture-phase" ? { ...entry, values: [...entry.values, "exploded"] } : entry),
+  };
+  assert.ok(productArtifactConformance(product, driftedFinite).some((finding) =>
+    finding.axis === "finite-value" && finding.direction === "mismatch" && finding.subject === "link.capture-phase"
+  ));
+});
+
+test("the declared product carries no platform symbols or runtime JSON", () => {
+  const serialized = JSON.stringify(product);
+  for (const banned of ["androidx", "Composable", "ImageVector", "RingIcons.", "kotlin"]) {
+    assert.equal(serialized.includes(banned), false, `platform symbol '${banned}' leaked into the product IR`);
+  }
 });

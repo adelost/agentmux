@@ -1,8 +1,9 @@
 import { finiteValues } from "@v1d/product-spec";
-import { linkRoutes } from "./catalog.js";
+
+export const LINK_SCREENS = ["home", "settings", "dev-host"] as const;
 
 export const linkFiniteValues = [
-  finiteValues("link.route", linkRoutes.map(({ id }) => id)),
+  finiteValues("link.route", LINK_SCREENS),
   finiteValues("link.capture-operation", ["begin", "release", "cancel"]),
   finiteValues("link.capture-phase", ["idle", "listening", "finalizing", "failed"]),
   finiteValues("link.delivery-phase", ["sending", "queued", "failed"]),

@@ -1,0 +1,243 @@
+package io.agentmux.linkui.product
+
+import com.adelost.releasekit.UpdateState
+import io.agentmux.linkcore.CaptureOperation
+import io.agentmux.linkcore.CapturePhase
+import io.agentmux.linkcore.LinkState
+import io.agentmux.linkcore.LinkTargetKind
+import io.agentmux.linkui.LinkCaptureSpec
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+
+/** The host-supplied native sinks behind the generated service inputs. */
+class LinkProductSinks(
+    val captureCommand: (LinkCaptureCommandEvent) -> Unit,
+    val capturedTurn: (LinkCapturedTurn) -> Unit,
+    val compose: (LinkComposeEvent) -> Unit,
+    val playbackCommand: (LinkPlaybackCommandEvent) -> Unit,
+    val targetSelect: (LinkTargetSelectEvent) -> Unit,
+    val preferenceToggle: (LinkPreferenceToggleEvent) -> Unit,
+    val updateCommand: (LinkUpdateCommandEvent) -> Unit,
+)
+
+/**
+ * The native half of the mandatory product graph for one Link host.
+ *
+ * The constructor mounts the whole boundary and proves it: every generated
+ * service output is observed from the real host state, every service input
+ * has exactly one native consumer, and every component model/destination
+ * input and component event has its one native endpoint. Screens only read
+ * the exposed component StateFlows and emit through the on... methods.
+ */
+open class LinkProductGraph(
+    protected val processScope: CoroutineScope,
+    private val state: StateFlow<LinkState>,
+    updateState: StateFlow<UpdateState>,
+    microphoneGranted: StateFlow<Boolean>,
+    speakReplies: StateFlow<Boolean>,
+    publicLinkActive: () -> Boolean,
+    targetKindOf: (String) -> LinkTargetKind?,
+    captureByteCount: () -> Long,
+    captureByteLimit: () -> Long?,
+    capturedTurns: Flow<LinkCapturedTurn>,
+    val navigation: LinkNavigationController,
+    private val sinks: LinkProductSinks,
+) {
+    private val runtime = LinkProductPortRuntime(processScope)
+
+    val target: StateFlow<LinkTargetPresentation>
+    val capture: StateFlow<LinkCapturePresentation>
+    val latest: StateFlow<LinkConversationPresentation>
+    val composerModel: StateFlow<LinkConversationPresentation>
+    val activePlayback: StateFlow<LinkPlaybackPresentation>
+    val connection: StateFlow<LinkSessionPresentation>
+    val publicLink: StateFlow<LinkSessionPresentation>
+    val preferences: StateFlow<LinkPreferencesPresentation>
+    val localHistory: StateFlow<LinkHistoryPresentation>
+    val updates: StateFlow<LinkUpdatePresentation>
+    val recovery: StateFlow<LinkRecoveryPresentation>
+    val settingsActionDestination: StateFlow<LinkDestinationPresentation>
+    val devHostDestination: StateFlow<LinkDestinationPresentation>
+
+    /** The capture control's host-neutral spec, derived beside the talk model. */
+    val captureSpec: StateFlow<LinkCaptureSpec> = combine(
+        state,
+        microphoneGranted,
+    ) { current, granted ->
+        LinkCaptureSpec(
+            phase = current.capture,
+            startedAtMs = current.captureStartedAtMs,
+            availability = current.captureAvailability(granted),
+            byteLimit = captureByteLimit(),
+        )
+    }.hot {
+        state.value.let {
+            LinkCaptureSpec(
+                phase = it.capture,
+                startedAtMs = it.captureStartedAtMs,
+                availability = it.captureAvailability(microphoneGranted.value),
+                byteLimit = captureByteLimit(),
+            )
+        }
+    }
+
+    val inspections: Flow<List<ProductPortInspection>> = runtime.inspectionFlow()
+
+    private val talkCommand: ProductComponentEventEmitter<LinkCaptureCommandEvent, Unit>
+    private val composerCompose: ProductComponentEventEmitter<LinkComposeEvent, Unit>
+    private val activePlaybackCommand: ProductComponentEventEmitter<LinkPlaybackCommandEvent, Unit>
+    private val targetSelect: ProductComponentEventEmitter<LinkTargetSelectEvent, Unit>
+    private val preferencesToggle: ProductComponentEventEmitter<LinkPreferenceToggleEvent, Unit>
+    private val updatesCommand: ProductComponentEventEmitter<LinkUpdateCommandEvent, Unit>
+    private val settingsActionOpen: ProductComponentEventEmitter<LinkRouteOpenEvent, Unit>
+    private val devHostOpen: ProductComponentEventEmitter<LinkRouteOpenEvent, Unit>
+
+    init {
+        // Service outputs first: component inputs may only connect to an
+        // upstream that is already mounted, and the hot StateFlow sources
+        // publish their current value synchronously inside observe().
+        runtime.observe(
+            NavigationDestinationOutput,
+            navigation.route.map { LinkDestinationPresentation(it) }
+                .hot { LinkDestinationPresentation(navigation.route.value) },
+        )
+        runtime.observe(
+            CaptureStatusOutput,
+            combine(state, microphoneGranted) { current, granted ->
+                current.toCapturePresentation(granted, captureByteCount())
+            }.hot { state.value.toCapturePresentation(microphoneGranted.value, captureByteCount()) },
+        )
+        runtime.observe(CaptureCapturedOutput, capturedTurns)
+        runtime.observe(
+            ConversationStatusOutput,
+            state.map { it.toConversationPresentation() }.hot { state.value.toConversationPresentation() },
+        )
+        runtime.observe(
+            PlaybackStatusOutput,
+            state.map { it.toPlaybackPresentation() }.hot { state.value.toPlaybackPresentation() },
+        )
+        runtime.observe(
+            TargetDirectoryOutput,
+            state.map { it.toTargetPresentation(targetKindOf) }
+                .hot { state.value.toTargetPresentation(targetKindOf) },
+        )
+        runtime.observe(
+            SessionStatusOutput,
+            state.map { it.toSessionPresentation(publicLinkActive()) }
+                .hot { state.value.toSessionPresentation(publicLinkActive()) },
+        )
+        runtime.observe(
+            HistoryStatusOutput,
+            state.map { it.toHistoryPresentation() }.hot { state.value.toHistoryPresentation() },
+        )
+        runtime.observe(
+            PreferencesStatusOutput,
+            combine(state, speakReplies) { current, replies ->
+                current.toPreferencesPresentation(replies)
+            }.hot { state.value.toPreferencesPresentation(speakReplies.value) },
+        )
+        runtime.observe(
+            UpdatesStatusOutput,
+            updateState.map { it.toUpdatePresentation() }.hot { updateState.value.toUpdatePresentation() },
+        )
+        runtime.observe(
+            RecoveryStatusOutput,
+            state.map { it.toRecoveryPresentation() }.hot { state.value.toRecoveryPresentation() },
+        )
+
+        // The one service-internal edge: a captured turn is delivered to the
+        // conversation service through its generated binding, never directly.
+        runtime.connected(ConversationTurnInput, processScope) { turn -> sinks.capturedTurn(turn) }
+
+        runtime.bindInput(NavigationOpenSettingsInput) { event -> navigation.open(event.route) }
+        runtime.bindInput(NavigationOpenDevHostInput) { event -> navigation.open(event.route) }
+        runtime.bindInput(CaptureCommandInput) { event -> sinks.captureCommand(event) }
+        runtime.bindInput(ConversationComposeInput) { event -> sinks.compose(event) }
+        runtime.bindInput(PlaybackCommandInput) { event -> sinks.playbackCommand(event) }
+        runtime.bindInput(TargetSelectInput) { event -> sinks.targetSelect(event) }
+        runtime.bindInput(PreferencesToggleInput) { event -> sinks.preferenceToggle(event) }
+        runtime.bindInput(UpdatesCommandInput) { event -> sinks.updateCommand(event) }
+
+        target = runtime.connected(TargetModelInput, processScope)
+        capture = runtime.connected(TalkModelInput, processScope)
+        latest = runtime.connected(LatestModelInput, processScope)
+        composerModel = runtime.connected(ComposerModelInput, processScope)
+        activePlayback = runtime.connected(ActivePlaybackModelInput, processScope)
+        connection = runtime.connected(ConnectionModelInput, processScope)
+        publicLink = runtime.connected(PublicLinkModelInput, processScope)
+        preferences = runtime.connected(PreferencesModelInput, processScope)
+        localHistory = runtime.connected(LocalHistoryModelInput, processScope)
+        updates = runtime.connected(UpdatesModelInput, processScope)
+        recovery = runtime.connected(RecoveryModelInput, processScope)
+        settingsActionDestination = runtime.connected(SettingsActionDestinationInput, processScope)
+        devHostDestination = runtime.connected(DevHostDestinationInput, processScope)
+
+        talkCommand = runtime.componentEvent(TalkCommandEvent, processScope)
+        composerCompose = runtime.componentEvent(ComposerComposeEvent, processScope)
+        activePlaybackCommand = runtime.componentEvent(ActivePlaybackCommandEvent, processScope)
+        targetSelect = runtime.componentEvent(TargetSelectEvent, processScope)
+        preferencesToggle = runtime.componentEvent(PreferencesToggleEvent, processScope)
+        updatesCommand = runtime.componentEvent(UpdatesCommandEvent, processScope)
+        settingsActionOpen = runtime.componentEvent(SettingsActionOpenEvent, processScope)
+        devHostOpen = runtime.componentEvent(DevHostOpenEvent, processScope)
+
+        runtime.requireServiceOutputTotality()
+        runtime.requireComponentPortTotality()
+        runtime.requireServiceInputTotality()
+    }
+
+    fun beginCapture(): Boolean {
+        onTalkCommand(LinkCaptureCommandEvent(CaptureOperation.BEGIN))
+        return state.value.capture == CapturePhase.LISTENING
+    }
+
+    fun releaseCapture() = onTalkCommand(LinkCaptureCommandEvent(CaptureOperation.RELEASE))
+
+    fun cancelCapture() = onTalkCommand(LinkCaptureCommandEvent(CaptureOperation.CANCEL))
+
+    fun onTalkCommand(event: LinkCaptureCommandEvent) {
+        talkCommand.emit(event)
+    }
+
+    fun onComposerCompose(event: LinkComposeEvent) {
+        composerCompose.emit(event)
+    }
+
+    fun onActivePlaybackCommand(event: LinkPlaybackCommandEvent) {
+        activePlaybackCommand.emit(event)
+    }
+
+    fun onTargetSelect(event: LinkTargetSelectEvent) {
+        targetSelect.emit(event)
+    }
+
+    fun onPreferencesToggle(event: LinkPreferenceToggleEvent) {
+        preferencesToggle.emit(event)
+    }
+
+    fun onUpdatesCommand(event: LinkUpdateCommandEvent) {
+        updatesCommand.emit(event)
+    }
+
+    fun onSettingsActionOpen(event: LinkRouteOpenEvent) {
+        settingsActionOpen.emit(event)
+    }
+
+    fun onDevHostOpen(event: LinkRouteOpenEvent) {
+        devHostOpen.emit(event)
+    }
+
+    open fun close() {
+        processScope.cancel()
+    }
+
+    private fun <T> Flow<T>.hot(initial: () -> T): StateFlow<T> =
+        distinctUntilChanged().stateIn(processScope, SharingStarted.Eagerly, initial())
+}

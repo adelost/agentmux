@@ -1,5 +1,6 @@
 package io.agentmux.audioinbox
 
+import com.adelost.releasekit.UpdateState
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
 import io.agentmux.linkcore.LinkState
@@ -7,6 +8,8 @@ import io.agentmux.linkcore.LinkTarget
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.ReplyPhase
+import java.time.Instant
+import kotlin.math.sin
 
 internal fun targetChoices(targets: List<LinkTarget>): List<Pair<String, String>> {
     val baseLabels = targets.associateWith { it.label.ifBlank { it.id }.uppercase() }
@@ -67,3 +70,17 @@ internal fun phoneActivePreviewState(playbackActive: Boolean): LinkState = LinkS
     ),
     activePlaybackTurnId = "qa-turn".takeIf { playbackActive },
 )
+
+/** The fixed settings-page update preview the qa_state/qa_page extras have always shown. */
+internal fun phoneQaUpdateState(): UpdateState = UpdateState.Available(
+    versionName = "1.2.2",
+    sizeBytes = 6_400_000L,
+    changelog = "Shared update information across Phone and Wear.",
+    publishedAtEpochMillis = Instant.parse("2026-08-02T05:33:20Z").toEpochMilli(),
+)
+
+/** The synthetic waveform level the QA preview feeds the capture control. */
+internal fun qaRecordedLevel(): Float {
+    val phase = System.currentTimeMillis() / 85.0
+    return (0.16 + 0.78 * kotlin.math.abs(sin(phase))).toFloat()
+}
