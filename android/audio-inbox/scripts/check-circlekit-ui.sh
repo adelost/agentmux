@@ -97,10 +97,28 @@ for declaration in "${required_circlekit_coordinates[@]}"; do
   fi
 done
 
-if rg -n 'UpdatePresentation|toLabelProgress\(' "$root/link-core/src" "$shared" "$main"; then
-  echo "Link update regression: a product-local update projection returned" >&2
+# The defect this guards (killed in #256) was a Link type that RE-DERIVED what
+# ReleaseKit already computes: a `progress: Float` folded out of UpdateProgress,
+# plus local version/wire strings for rendering. The guard used to name that
+# type, which worked while `UpdatePresentation` and "re-derivation" were the
+# same thing. They no longer are: the declared link.update-status contract has
+# two fields -- a finite `phase` and the full UpdateState the shared rows
+# render -- so a carrier type by that name is now required, and the inspector
+# reads it. A name cannot tell the two apart. The shape can.
+if rg -n 'toLabelProgress\(|UpdateProgress\.(Determinate|Indeterminate)|progress:\s*Float' \
+  "$root/link-core/src" "$shared" "$main"; then
+  echo "Link update regression: Link re-derives update progress ReleaseKit already owns" >&2
   exit 1
 fi
+# Directional half: forbidding derivation is not enough, because a carrier that
+# quietly stops carrying UpdateState fails no ban at all. Every Link update
+# presentation must hand the shared rows ReleaseKit's own state.
+for carrier in $(rg -l 'data class \w*UpdatePresentation' "$root/link-core/src" "$shared" "$main"); do
+  if ! rg -q 'data class \w*UpdatePresentation\([^)]*\bupdate:\s*UpdateState' --multiline "$carrier"; then
+    echo "Link update regression: $carrier replaces UpdateState instead of carrying it" >&2
+    exit 1
+  fi
+done
 if ! rg -q 'releaseUpdateRows\(' "$shared/LinkWatchScreen.kt" ||
    ! rg -q 'releaseUpdateRows\(' "$main/LinkPhoneSettings.kt"; then
   echo "Link update regression: Phone and Watch no longer share releasekit-ui rows" >&2
