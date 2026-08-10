@@ -1,14 +1,14 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.componentFamilies
-// Product declarations SHA-256: 9dc2f17efa57eab612d3c63d9f483d8763c254f242b02071052c0d3f06afd1eb
+// Product declarations SHA-256: ac2666eab12e029bbcc15961d131bb644ba80308e1f9a7e4d4a3fe534847bd37
 package io.agentmux.linkui.product.generated
 
 import com.adelost.designkit.ui.CircleSurfaceClass
 
 enum class GeneratedLinkSettingsComponent(val id: GeneratedLinkComponentId) {
-    CONNECTION(GeneratedLinkComponentId.CONNECTION), UPDATES(GeneratedLinkComponentId.UPDATES), DEV_HOST(GeneratedLinkComponentId.DEV_HOST), RECOVERY(GeneratedLinkComponentId.RECOVERY), ACTIVE_PLAYBACK(GeneratedLinkComponentId.ACTIVE_PLAYBACK), PUBLIC_LINK(GeneratedLinkComponentId.PUBLIC_LINK), PREFERENCES(GeneratedLinkComponentId.PREFERENCES), LOCAL_HISTORY(GeneratedLinkComponentId.LOCAL_HISTORY)
+    PAGE_HOST(GeneratedLinkComponentId.PAGE_HOST), CONNECTION(GeneratedLinkComponentId.CONNECTION), UPDATES(GeneratedLinkComponentId.UPDATES), DEV_HOST(GeneratedLinkComponentId.DEV_HOST), RECOVERY(GeneratedLinkComponentId.RECOVERY), ACTIVE_PLAYBACK(GeneratedLinkComponentId.ACTIVE_PLAYBACK), PUBLIC_LINK(GeneratedLinkComponentId.PUBLIC_LINK), PREFERENCES(GeneratedLinkComponentId.PREFERENCES), LOCAL_HISTORY(GeneratedLinkComponentId.LOCAL_HISTORY)
 }
-enum class GeneratedLinkSettingsRegion { CONTENT, RAIL }
+enum class GeneratedLinkSettingsRegion { HOST, CONTENT, RAIL }
 
 data class GeneratedLinkSettingsMount(
     val id: String,
@@ -42,10 +42,19 @@ object GeneratedLinkSettingsComponents {
     fun resolve(surfaceClass: CircleSurfaceClass): GeneratedLinkSettingsTree = when (surfaceClass) {
         CircleSurfaceClass.ROUND -> GeneratedLinkSettingsTree(listOf(
             GeneratedLinkSettingsMount(
+                id = "page-host",
+                component = GeneratedLinkSettingsComponent.PAGE_HOST,
+                region = GeneratedLinkSettingsRegion.HOST,
+                order = 0,
+                priority = 0,
+                capacity = null,
+                required = true,
+            ),
+            GeneratedLinkSettingsMount(
                 id = "connection",
                 component = GeneratedLinkSettingsComponent.CONNECTION,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 0,
+                order = 1,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -54,7 +63,7 @@ object GeneratedLinkSettingsComponents {
                 id = "updates",
                 component = GeneratedLinkSettingsComponent.UPDATES,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 1,
+                order = 2,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -63,7 +72,7 @@ object GeneratedLinkSettingsComponents {
                 id = "dev-host",
                 component = GeneratedLinkSettingsComponent.DEV_HOST,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 2,
+                order = 3,
                 priority = 0,
                 capacity = null,
                 required = false,
@@ -72,7 +81,7 @@ object GeneratedLinkSettingsComponents {
                 id = "recovery",
                 component = GeneratedLinkSettingsComponent.RECOVERY,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 3,
+                order = 4,
                 priority = 0,
                 capacity = null,
                 required = false,
@@ -80,10 +89,19 @@ object GeneratedLinkSettingsComponents {
         ))
         CircleSurfaceClass.PHONE_COMPACT -> GeneratedLinkSettingsTree(listOf(
             GeneratedLinkSettingsMount(
+                id = "page-host",
+                component = GeneratedLinkSettingsComponent.PAGE_HOST,
+                region = GeneratedLinkSettingsRegion.HOST,
+                order = 0,
+                priority = 0,
+                capacity = null,
+                required = true,
+            ),
+            GeneratedLinkSettingsMount(
                 id = "active-playback",
                 component = GeneratedLinkSettingsComponent.ACTIVE_PLAYBACK,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 0,
+                order = 1,
                 priority = 0,
                 capacity = null,
                 required = false,
@@ -92,7 +110,7 @@ object GeneratedLinkSettingsComponents {
                 id = "connection",
                 component = GeneratedLinkSettingsComponent.CONNECTION,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 1,
+                order = 2,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -101,7 +119,7 @@ object GeneratedLinkSettingsComponents {
                 id = "public-link",
                 component = GeneratedLinkSettingsComponent.PUBLIC_LINK,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 2,
+                order = 3,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -110,7 +128,7 @@ object GeneratedLinkSettingsComponents {
                 id = "preferences",
                 component = GeneratedLinkSettingsComponent.PREFERENCES,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 3,
+                order = 4,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -119,7 +137,7 @@ object GeneratedLinkSettingsComponents {
                 id = "local-history",
                 component = GeneratedLinkSettingsComponent.LOCAL_HISTORY,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 4,
+                order = 5,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -128,7 +146,7 @@ object GeneratedLinkSettingsComponents {
                 id = "updates",
                 component = GeneratedLinkSettingsComponent.UPDATES,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 5,
+                order = 6,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -137,7 +155,7 @@ object GeneratedLinkSettingsComponents {
                 id = "dev-host",
                 component = GeneratedLinkSettingsComponent.DEV_HOST,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 6,
+                order = 7,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -146,7 +164,7 @@ object GeneratedLinkSettingsComponents {
                 id = "recovery",
                 component = GeneratedLinkSettingsComponent.RECOVERY,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 7,
+                order = 8,
                 priority = 0,
                 capacity = null,
                 required = false,
@@ -154,10 +172,19 @@ object GeneratedLinkSettingsComponents {
         ))
         CircleSurfaceClass.PHONE_WIDE -> GeneratedLinkSettingsTree(listOf(
             GeneratedLinkSettingsMount(
+                id = "page-host",
+                component = GeneratedLinkSettingsComponent.PAGE_HOST,
+                region = GeneratedLinkSettingsRegion.HOST,
+                order = 0,
+                priority = 0,
+                capacity = null,
+                required = true,
+            ),
+            GeneratedLinkSettingsMount(
                 id = "active-playback",
                 component = GeneratedLinkSettingsComponent.ACTIVE_PLAYBACK,
                 region = GeneratedLinkSettingsRegion.RAIL,
-                order = 0,
+                order = 1,
                 priority = 0,
                 capacity = null,
                 required = false,
@@ -166,7 +193,7 @@ object GeneratedLinkSettingsComponents {
                 id = "connection",
                 component = GeneratedLinkSettingsComponent.CONNECTION,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 1,
+                order = 2,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -175,7 +202,7 @@ object GeneratedLinkSettingsComponents {
                 id = "public-link",
                 component = GeneratedLinkSettingsComponent.PUBLIC_LINK,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 2,
+                order = 3,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -184,7 +211,7 @@ object GeneratedLinkSettingsComponents {
                 id = "preferences",
                 component = GeneratedLinkSettingsComponent.PREFERENCES,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 3,
+                order = 4,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -193,7 +220,7 @@ object GeneratedLinkSettingsComponents {
                 id = "local-history",
                 component = GeneratedLinkSettingsComponent.LOCAL_HISTORY,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 4,
+                order = 5,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -202,7 +229,7 @@ object GeneratedLinkSettingsComponents {
                 id = "updates",
                 component = GeneratedLinkSettingsComponent.UPDATES,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 5,
+                order = 6,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -211,7 +238,7 @@ object GeneratedLinkSettingsComponents {
                 id = "dev-host",
                 component = GeneratedLinkSettingsComponent.DEV_HOST,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 6,
+                order = 7,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -220,7 +247,7 @@ object GeneratedLinkSettingsComponents {
                 id = "recovery",
                 component = GeneratedLinkSettingsComponent.RECOVERY,
                 region = GeneratedLinkSettingsRegion.CONTENT,
-                order = 7,
+                order = 8,
                 priority = 0,
                 capacity = null,
                 required = false,

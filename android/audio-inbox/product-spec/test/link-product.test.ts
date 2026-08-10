@@ -24,13 +24,13 @@ test("the mandatory graph has no parallel list and one binding per data input", 
   assert.equal("legos" in product, false, "old lego graph must not survive");
   assert.equal("ui" in product, false, "old ui entry list must not survive");
   assert.equal("componentCatalog" in product, false, "port-less catalog must not survive");
-  assert.equal(product.nodes.length, 29);
+  assert.equal(product.nodes.length, 27);
   assert.equal(product.nodes.filter(({ nodeTypeRef }) =>
     product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "service").length, 10);
   assert.equal(product.nodes.filter(({ nodeTypeRef }) =>
-    product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "present").length, 19);
-  assert.equal(product.components.length, 14);
-  assert.equal(product.componentTypes.length, 13);
+    product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "present").length, 17);
+  assert.equal(product.components.length, 15);
+  assert.equal(product.componentTypes.length, 14);
   for (const node of product.nodes) {
     const kind = product.nodeTypes.find(({ id }) => id === node.nodeTypeRef)?.kind;
     if (kind === "service") assert.equal(node.activation?.kind, "lifetime", `${node.id} must stay process-lived`);
@@ -61,9 +61,11 @@ test("capture, delivery, reply and playback are typed graph edges", () => {
   assert.ok(edges.includes("conversation.presentation.model->composer.model"));
   assert.ok(edges.includes("playback.service.status->playback.presentation.source"));
   assert.ok(edges.includes("playback.presentation.model->active-playback.model"));
-  assert.equal(product.portRegistry.bindings.some(({ kind, from }) =>
-    kind === "component-input" && from.includes(".service.")), false,
-  "an effect-owning service must never feed a component directly");
+  assert.deepEqual(product.portRegistry.bindings
+    .filter(({ kind, from }) => kind === "component-input" && from.includes(".service."))
+    .map(({ from, to }) => `${from}->${to}`), [
+    "navigation.service.activePage->page-host.activePage",
+  ], "only the typed active PageId may cross service-to-page-host directly");
 });
 
 test("pages and artifacts cover exactly the declared screens", () => {
@@ -73,6 +75,43 @@ test("pages and artifacts cover exactly the declared screens", () => {
   assert.deepEqual(phone?.screenRefs, ["home", "settings", "dev-host"]);
   assert.deepEqual(wear?.screenRefs, ["home", "settings"]);
   assert.deepEqual(wear?.serves, ["round"]);
+  assert.equal(product.navigation.pageValuesRef, "link.navigation.page");
+  assert.equal(product.navigation.activePagePortRef, "navigation.service.activePage");
+  assert.equal(product.navigation.pageHostPortRef, "page-host.activePage");
+  assert.deepEqual(product.navigation.routeIntentContract.fields.map(({ name }) => name), ["target"]);
+  assert.deepEqual(product.navigation.artifacts.map(({ artifactRef, entryPageRef, pages }) => ({
+    artifactRef,
+    entryPageRef,
+    pages: pages.map(({ pageRef, restore, back }) => `${pageRef}:${restore}:${back}`),
+  })), [
+    {
+      artifactRef: "phone-full-ui", entryPageRef: "home",
+      pages: ["home:root:system", "settings:process:previous", "dev-host:process:previous"],
+    },
+    {
+      artifactRef: "wear-full-ui", entryPageRef: "home",
+      pages: ["home:root:system", "settings:process:previous"],
+    },
+  ]);
+  assert.deepEqual(product.navigation.actionGroups
+    .filter(({ actions }) => actions.some(({ kind }) => kind === "route"))
+    .map(({ componentInstanceRef, artifactRefs, actions }) => ({
+      componentInstanceRef,
+      artifactRefs,
+      actions: actions.map(({ sourcePortRef, targetPortRef, effect }) =>
+        `${sourcePortRef}->${targetPortRef}:${effect}`),
+    })), [
+    {
+      componentInstanceRef: "dev-host",
+      artifactRefs: ["phone-full-ui", "wear-full-ui"],
+      actions: ["dev-host.open->navigation.service.openDevHost:push"],
+    },
+    {
+      componentInstanceRef: "settings-action",
+      artifactRefs: ["phone-full-ui", "wear-full-ui"],
+      actions: ["settings-action.open->navigation.service.openSettings:push"],
+    },
+  ]);
 });
 
 test("native binding manifest conforms, with node ports native-attested", () => {
@@ -83,7 +122,6 @@ test("native binding manifest conforms, with node ports native-attested", () => 
 test("every compiler-exposed closed state lineage has one executable authority", () => {
   assert.deepEqual(product.stateAuthorities.map(({ source }) =>
     `${source.portRef}#${source.stateField}`), [
-    "navigation.service.destination#route",
     "capture.service.status#phase",
     "conversation.service.status#deliveryPhase",
     "conversation.service.status#replyPhase",
@@ -136,6 +174,32 @@ test("conformance engine goes red on manifest drift", () => {
   assert.ok(productArtifactConformance(product, withoutNodeOutput).some((finding) =>
     finding.axis === "node-port" && finding.direction === "missing" &&
       finding.subject === "capture.service.status"
+  ));
+  const withoutActivePage = {
+    ...manifest,
+    navigation: { ...manifest.navigation, activePageBindings: [] },
+  };
+  assert.ok(productArtifactConformance(product, withoutActivePage).some((finding) =>
+    finding.axis === "navigation" && finding.direction === "missing" &&
+      finding.subject === "navigation.service.activePage->page-host.activePage"
+  ));
+  const driftedBack = {
+    ...manifest,
+    navigation: {
+      ...manifest.navigation,
+      artifacts: manifest.navigation.artifacts.map((artifact) => artifact.artifactRef === "wear-full-ui"
+        ? {
+          ...artifact,
+          pages: artifact.pages.map((page) => page.pageRef === "settings"
+            ? { ...page, back: "consume" as const }
+            : page),
+        }
+        : artifact),
+    },
+  };
+  assert.ok(productArtifactConformance(product, driftedBack).some((finding) =>
+    finding.axis === "navigation" && finding.direction === "mismatch" &&
+      finding.subject === "wear-full-ui/settings"
   ));
 });
 

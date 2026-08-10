@@ -19,13 +19,10 @@ import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.ReplyPhase
 import io.agentmux.linkui.LinkCaptureAvailability
 import io.agentmux.linkui.resolveLinkCaptureAvailability
+import io.agentmux.linkui.product.generated.GeneratedLinkPageId
 
-/** The only native route vocabulary; the wire values are the generated link.route finite values. */
-enum class LinkRoute(val wireId: String) {
-    HOME("home"),
-    SETTINGS("settings"),
-    DEV_HOST("dev-host"),
-}
+/** Native source compatibility over ProductSpec's generated closed PageId. */
+typealias LinkRoute = GeneratedLinkPageId
 
 /** capture.presentation.model — the talk component's model. */
 data class LinkCapturePresentation(
@@ -103,11 +100,6 @@ data class LinkRecoveryPresentation(
     val detail: String?,
 )
 
-/** navigation.presentation.model — the navigation-entry components' destination input. */
-data class LinkDestinationPresentation(
-    val route: LinkRoute,
-)
-
 /** talk.command → capture.service.command. */
 data class LinkCaptureCommandEvent(val operation: CaptureOperation)
 
@@ -127,7 +119,7 @@ data class LinkPreferenceToggleEvent(val key: LinkPreferenceKey, val enabled: Bo
 data class LinkUpdateCommandEvent(val operation: LinkUpdateOperation)
 
 /** settings-action.open / dev-host.open → navigation.service.openSettings/openDevHost. */
-data class LinkRouteOpenEvent(val route: LinkRoute)
+data class LinkRouteOpenEvent(val target: LinkRoute)
 
 /**
  * The one capture availability decision, shared by the port presentation and

@@ -97,6 +97,7 @@ internal fun LinkPhoneHome(
         )
         tree.orderedMounts.forEach { mount ->
             when (mount.component) {
+                GeneratedLinkHomeComponent.PAGE_HOST -> Unit
                 GeneratedLinkHomeComponent.TARGET -> LinkStatusRows(
                     target = target,
                     session = connection,

@@ -20,6 +20,7 @@ import io.agentmux.audioinbox.update.LinkUpdater
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkui.product.LinkNavigationController
 import io.agentmux.linkui.product.LinkRoute
+import io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -64,13 +65,16 @@ class MainActivity : ComponentActivity() {
         val qaActive = BuildConfig.DEBUG && intent?.getStringExtra(QA_STATE_EXTRA) == QA_STATE_ACTIVE
         val qaPage = if (BuildConfig.DEBUG) intent?.getStringExtra(QA_PAGE_EXTRA) else null
         val qaPlayback = BuildConfig.DEBUG && intent?.getStringExtra(QA_PLAYBACK_EXTRA) == QA_PLAYBACK_ACTIVE
-        val navigation = LinkNavigationController(
-            initial = savedInstanceState?.getString(STATE_ROUTE)?.let(::routeByWireId)
-                ?: when (qaPage) {
+        val initialPage = savedInstanceState?.getString(STATE_ROUTE)?.let(::routeByWireId)
+            ?: when (qaPage) {
                     QA_PAGE_DEV_HOST -> LinkRoute.DEV_HOST
                     QA_PAGE_SETTINGS -> LinkRoute.SETTINGS
                     else -> LinkRoute.HOME
-                },
+                }
+        val navigation = LinkNavigationController(
+            artifact = GeneratedLinkArtifactRef.PHONE_FULL_UI,
+            initial = initialPage,
+            initialPrevious = LinkRoute.SETTINGS.takeIf { initialPage == LinkRoute.DEV_HOST },
         )
         productGraph = if (qaActive) {
             PhoneLinkProductGraph.qa(

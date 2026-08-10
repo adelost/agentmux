@@ -79,6 +79,7 @@ internal fun LinkPhoneSettings(
         settingsTree
             .orderedMounts.forEach { mount ->
                 when (mount.component) {
+                    GeneratedLinkSettingsComponent.PAGE_HOST -> Unit
                     GeneratedLinkSettingsComponent.ACTIVE_PLAYBACK -> playback.activeTurnId
                         ?.let { id -> playback.turn?.takeIf { it.turnId == id } }
                         ?.let { active ->

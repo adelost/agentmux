@@ -11,7 +11,7 @@ import {
   preferenceToggleContract,
   preferencesStatusContract,
   recoveryStatusContract,
-  routeDestinationContract,
+  activePageContract,
   routeOpenContract,
   sessionStatusContract,
   targetDirectoryContract,
@@ -23,7 +23,6 @@ import {
   capturePhaseAuthority,
   connectionStateAuthority,
   deliveryPhaseAuthority,
-  navigationRouteAuthority,
   playbackPhaseAuthority,
   recoveryPhaseAuthority,
   replyPhaseAuthority,
@@ -51,7 +50,7 @@ const runtime = <
 export const navigationService = service({
   id: "link.navigation",
   inputs: [port("openSettings", routeOpenContract), port("openDevHost", routeOpenContract)],
-  outputs: [port("destination", routeDestinationContract)],
+  outputs: [port("activePage", activePageContract)],
   runtime: runtime("instance", "instance", "transient", "none", [], ["navigation.route-state"]),
 } as const);
 
@@ -137,7 +136,6 @@ const presentation = <const Id extends string, const Contract extends LegoContra
   runtime: runtime("none", "call", "transient", "none", [], []),
 } as const);
 
-export const navigationPresentation = presentation("link.present.navigation", routeDestinationContract);
 export const capturePresentation = presentation("link.present.capture", captureStatusContract);
 export const conversationPresentation = presentation("link.present.conversation", conversationStatusContract);
 export const playbackPresentation = presentation("link.present.playback", playbackStatusContract);
@@ -159,7 +157,6 @@ export const linkNodeTypes = [
   preferencesService,
   updatesService,
   recoveryService,
-  navigationPresentation,
   capturePresentation,
   conversationPresentation,
   playbackPresentation,
@@ -169,7 +166,6 @@ export const linkNodeTypes = [
   preferencesPresentation,
   updatesPresentation,
   recoveryPresentation,
-  navigationRouteAuthority.adapter.type,
   capturePhaseAuthority.adapter.type,
   deliveryPhaseAuthority.adapter.type,
   replyPhaseAuthority.adapter.type,

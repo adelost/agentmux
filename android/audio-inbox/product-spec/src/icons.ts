@@ -1,15 +1,11 @@
-import { linkRouteIconRefs } from "./routes.js";
-
 const ALL_ARTIFACTS = ["phone-full-ui", "wear-full-ui"] as const;
 
 /**
- * One portable icon per component instance, plus the route icons derived from
- * the route declarations. Route icons are DERIVED, not listed a second time:
- * a route and its icon can never disagree because there is only one place
- * that says which asset a route wears.
+ * One portable icon per visual component instance. Page icons are joined to
+ * compiled artifact screenRefs in product.ts, beside the authoritative
+ * artifact declarations.
  */
-export const linkProductIconRefs = [
-  ...linkRouteIconRefs,
+export const linkComponentIconRefs = [
   { id: "component.target", assetRef: "target", artifacts: ALL_ARTIFACTS },
   { id: "component.latest", assetRef: "speaker", artifacts: ALL_ARTIFACTS },
   { id: "component.composer", assetRef: "pencil", artifacts: ["phone-full-ui"] },

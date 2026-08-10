@@ -1,21 +1,25 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the declared route identity (title and icon per screen)
-// Product declarations SHA-256: acd94dabb89f47ca0e4b8f1a19265843836effc3788984247683c4466c14c5c2
+// Product declarations SHA-256: 505eb28b27b81c9432aade659b5767082c914f06e900911eb05219a1fb066ee4
 package io.agentmux.linkui.product.generated
 
-import io.agentmux.linkui.product.LinkRoute
+enum class GeneratedLinkPageId(val wireId: String) {
+    HOME("home"),
+    SETTINGS("settings"),
+    DEV_HOST("dev-host"),
+}
 
 data class GeneratedLinkRouteDescriptor(
-    val route: LinkRoute,
+    val route: GeneratedLinkPageId,
     val title: String,
     val iconId: String,
 )
 
 object GeneratedLinkRoutes {
-    fun descriptor(route: LinkRoute): GeneratedLinkRouteDescriptor = when (route) {
-        LinkRoute.HOME -> GeneratedLinkRouteDescriptor(route, "AGENTMUX LINK", "route.home")
-        LinkRoute.SETTINGS -> GeneratedLinkRouteDescriptor(route, "LINK SETTINGS", "route.settings")
-        LinkRoute.DEV_HOST -> GeneratedLinkRouteDescriptor(route, "DEV HOST", "route.dev-host")
+    fun descriptor(route: GeneratedLinkPageId): GeneratedLinkRouteDescriptor = when (route) {
+        GeneratedLinkPageId.HOME -> GeneratedLinkRouteDescriptor(route, "AGENTMUX LINK", "route.home")
+        GeneratedLinkPageId.SETTINGS -> GeneratedLinkRouteDescriptor(route, "LINK SETTINGS", "route.settings")
+        GeneratedLinkPageId.DEV_HOST -> GeneratedLinkRouteDescriptor(route, "DEV HOST", "route.dev-host")
     }
 }
 
@@ -26,7 +30,6 @@ data class GeneratedLinkChromeAction(
     val detail: String,
     val a11y: String,
     val iconAssetRef: String,
-    val destination: LinkRoute,
 )
 
 object GeneratedLinkChromeActions {
@@ -37,6 +40,5 @@ object GeneratedLinkChromeActions {
         "CONNECTION & AUDIO",
         "Open Link settings",
         "gear",
-        LinkRoute.SETTINGS,
     )
 }

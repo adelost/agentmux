@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the portable native-Lego port bindings
-// Product declarations SHA-256: acdefede017fd45944c80403be943626d51cb622e2cb90054d99976a8d1c8de2
+// Product declarations SHA-256: a388fdac3743216a71b8f3285bb4f78dfcd53b187b62fab5fb785c02cffb7e7c
 package io.agentmux.linkui.product.generated
 
 internal object GeneratedLinkNativeLegoPortBindings {
@@ -14,7 +14,6 @@ internal object GeneratedLinkNativeLegoPortBindings {
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.TARGET_SELECT, GeneratedLinkNativeLegoCatalog.PortIds.TARGET_SERVICE_SELECT, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.PREFERENCES_TOGGLE, GeneratedLinkNativeLegoCatalog.PortIds.PREFERENCES_SERVICE_TOGGLE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.UPDATES_COMMAND, GeneratedLinkNativeLegoCatalog.PortIds.UPDATES_SERVICE_COMMAND, GeneratedProductPortPurpose.DATA),
-        GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_SERVICE_DESTINATION, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_PRESENTATION_SOURCE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.CAPTURE_SERVICE_STATUS, GeneratedLinkNativeLegoCatalog.PortIds.CAPTURE_PRESENTATION_SOURCE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.CONVERSATION_SERVICE_STATUS, GeneratedLinkNativeLegoCatalog.PortIds.CONVERSATION_PRESENTATION_SOURCE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.PLAYBACK_SERVICE_STATUS, GeneratedLinkNativeLegoCatalog.PortIds.PLAYBACK_PRESENTATION_SOURCE, GeneratedProductPortPurpose.DATA),
@@ -24,7 +23,6 @@ internal object GeneratedLinkNativeLegoPortBindings {
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.PREFERENCES_SERVICE_STATUS, GeneratedLinkNativeLegoCatalog.PortIds.PREFERENCES_PRESENTATION_SOURCE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.UPDATES_SERVICE_STATUS, GeneratedLinkNativeLegoCatalog.PortIds.UPDATES_PRESENTATION_SOURCE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.RECOVERY_SERVICE_STATUS, GeneratedLinkNativeLegoCatalog.PortIds.RECOVERY_PRESENTATION_SOURCE, GeneratedProductPortPurpose.DATA),
-        GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_SERVICE_DESTINATION, GeneratedLinkNativeLegoCatalog.PortIds.LINK_NAVIGATION_ROUTE_PRESENTATION_ADAPTER_STATE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.CAPTURE_SERVICE_STATUS, GeneratedLinkNativeLegoCatalog.PortIds.LINK_CAPTURE_PHASE_PRESENTATION_ADAPTER_STATE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.CONVERSATION_SERVICE_STATUS, GeneratedLinkNativeLegoCatalog.PortIds.LINK_DELIVERY_PHASE_PRESENTATION_ADAPTER_STATE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.CONVERSATION_SERVICE_STATUS, GeneratedLinkNativeLegoCatalog.PortIds.LINK_REPLY_PHASE_PRESENTATION_ADAPTER_STATE, GeneratedProductPortPurpose.DATA),
@@ -33,6 +31,7 @@ internal object GeneratedLinkNativeLegoPortBindings {
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.SESSION_SERVICE_STATUS, GeneratedLinkNativeLegoCatalog.PortIds.LINK_CONNECTION_STATE_PRESENTATION_ADAPTER_STATE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.UPDATES_SERVICE_STATUS, GeneratedLinkNativeLegoCatalog.PortIds.LINK_UPDATE_PHASE_PRESENTATION_ADAPTER_STATE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.RECOVERY_SERVICE_STATUS, GeneratedLinkNativeLegoCatalog.PortIds.LINK_RECOVERY_PHASE_PRESENTATION_ADAPTER_STATE, GeneratedProductPortPurpose.DATA),
+        GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_SERVICE_ACTIVEPAGE, GeneratedLinkNativeLegoCatalog.PortIds.PAGE_HOST_ACTIVEPAGE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.TARGET_PRESENTATION_MODEL, GeneratedLinkNativeLegoCatalog.PortIds.TARGET_MODEL, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.LINK_TARGET_KIND_PRESENTATION_ADAPTER_PRESENTATION, GeneratedLinkNativeLegoCatalog.PortIds.TARGET_TARGETSTATE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.CAPTURE_PRESENTATION_MODEL, GeneratedLinkNativeLegoCatalog.PortIds.TALK_MODEL, GeneratedProductPortPurpose.DATA),
@@ -54,10 +53,6 @@ internal object GeneratedLinkNativeLegoPortBindings {
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.UPDATES_PRESENTATION_MODEL, GeneratedLinkNativeLegoCatalog.PortIds.UPDATES_MODEL, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.LINK_UPDATE_PHASE_PRESENTATION_ADAPTER_PRESENTATION, GeneratedLinkNativeLegoCatalog.PortIds.UPDATES_UPDATESTATE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.RECOVERY_PRESENTATION_MODEL, GeneratedLinkNativeLegoCatalog.PortIds.RECOVERY_MODEL, GeneratedProductPortPurpose.DATA),
-        GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.LINK_RECOVERY_PHASE_PRESENTATION_ADAPTER_PRESENTATION, GeneratedLinkNativeLegoCatalog.PortIds.RECOVERY_RECOVERYSTATE, GeneratedProductPortPurpose.DATA),
-        GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_PRESENTATION_MODEL, GeneratedLinkNativeLegoCatalog.PortIds.SETTINGS_ACTION_DESTINATION, GeneratedProductPortPurpose.DATA),
-        GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.LINK_NAVIGATION_ROUTE_PRESENTATION_ADAPTER_PRESENTATION, GeneratedLinkNativeLegoCatalog.PortIds.SETTINGS_ACTION_ROUTESTATE, GeneratedProductPortPurpose.DATA),
-        GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.NAVIGATION_PRESENTATION_MODEL, GeneratedLinkNativeLegoCatalog.PortIds.DEV_HOST_DESTINATION, GeneratedProductPortPurpose.DATA),
-        GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.LINK_NAVIGATION_ROUTE_PRESENTATION_ADAPTER_PRESENTATION, GeneratedLinkNativeLegoCatalog.PortIds.DEV_HOST_ROUTESTATE, GeneratedProductPortPurpose.DATA)
+        GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.LINK_RECOVERY_PHASE_PRESENTATION_ADAPTER_PRESENTATION, GeneratedLinkNativeLegoCatalog.PortIds.RECOVERY_RECOVERYSTATE, GeneratedProductPortPurpose.DATA)
     )
 }

@@ -17,12 +17,14 @@ export const linkScreenComponentFamilies = defineScreenComponentFamilyRegistry(
         id: "link.home",
         trees: [
           { surface: "round", mounts: [
+            { instance: "page-host", region: "host" },
             { instance: "target", region: "content" },
             { instance: "talk", region: "content" },
             { instance: "latest", region: "content" },
             { instance: "settings-action", region: "chrome" },
           ] },
           { surface: "compact", mounts: [
+            { instance: "page-host", region: "host" },
             { instance: "target", region: "content" },
             { instance: "latest", region: "content" },
             { instance: "composer", region: "footer" },
@@ -30,6 +32,7 @@ export const linkScreenComponentFamilies = defineScreenComponentFamilyRegistry(
             { instance: "settings-action", region: "chrome" },
           ] },
           { surface: "wide", mounts: [
+            { instance: "page-host", region: "host" },
             { instance: "target", region: "rail" },
             { instance: "latest", region: "content" },
             { instance: "composer", region: "footer" },
@@ -45,12 +48,14 @@ export const linkScreenComponentFamilies = defineScreenComponentFamilyRegistry(
         id: "link.settings",
         trees: [
           { surface: "round", mounts: [
+            { instance: "page-host", region: "host" },
             { instance: "connection", region: "content" },
             { instance: "updates", region: "content" },
             { instance: "dev-host", region: "content", requirement: optional },
             { instance: "recovery", region: "content", requirement: optional },
           ] },
           { surface: "compact", mounts: [
+            { instance: "page-host", region: "host" },
             { instance: "active-playback", region: "content", requirement: optional },
             { instance: "connection", region: "content" },
             { instance: "public-link", region: "content" },
@@ -61,6 +66,7 @@ export const linkScreenComponentFamilies = defineScreenComponentFamilyRegistry(
             { instance: "recovery", region: "content", requirement: optional },
           ] },
           { surface: "wide", mounts: [
+            { instance: "page-host", region: "host" },
             { instance: "active-playback", region: "rail", requirement: optional },
             { instance: "connection", region: "content" },
             { instance: "public-link", region: "content" },
@@ -79,7 +85,10 @@ export const linkScreenComponentFamilies = defineScreenComponentFamilyRegistry(
         id: "link.dev-host",
         trees: (["round", "compact", "wide"] as const).map((surface) => ({
           surface,
-          mounts: [{ instance: "dev-preview", region: "content" }],
+          mounts: [
+            { instance: "page-host", region: "host" },
+            { instance: "dev-preview", region: "content" },
+          ],
         })),
       },
     },

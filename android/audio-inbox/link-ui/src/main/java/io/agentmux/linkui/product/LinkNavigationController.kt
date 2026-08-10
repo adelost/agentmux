@@ -1,22 +1,44 @@
 package io.agentmux.linkui.product
 
+import io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * The native side of navigation.service: it owns the current destination and
- * accepts route opens from the generated openSettings/openDevHost sinks. Host
- * chrome (back handling) may open HOME directly; there is no component event
- * for it by design.
+ * The native side of navigation.service. The selected artifact registration
+ * is also what schema5 serializes, so allowed pages, entry and back behavior
+ * cannot drift from the manifest while the runtime follows another table.
  */
 class LinkNavigationController(
-    initial: LinkRoute,
+    artifact: GeneratedLinkArtifactRef,
+    initial: LinkRoute? = null,
+    initialPrevious: LinkRoute? = null,
 ) {
-    private val mutableRoute = MutableStateFlow(initial)
+    private val registration = LinkNativeBindings.requireNavigationArtifact(artifact)
+    private val initialPage = initial ?: registration.entryPage
+    private val history = mutableListOf<LinkRoute>()
+    private val mutableRoute = MutableStateFlow(registration.requirePage(initialPage).page)
     val route: StateFlow<LinkRoute> = mutableRoute.asStateFlow()
 
-    fun open(route: LinkRoute) {
-        mutableRoute.value = route
+    init {
+        initialPrevious?.let { history += registration.requirePage(it).page }
+    }
+
+    fun open(target: LinkRoute) {
+        registration.requirePage(target)
+        if (target == mutableRoute.value) return
+        history += mutableRoute.value
+        mutableRoute.value = target
+    }
+
+    /** Returns false only when the artifact delegates its root back to system. */
+    fun back(): Boolean = when (registration.requirePage(mutableRoute.value).back) {
+        LinkNativePageBack.PREVIOUS -> {
+            mutableRoute.value = history.removeLastOrNull() ?: registration.entryPage
+            true
+        }
+        LinkNativePageBack.CONSUME -> true
+        LinkNativePageBack.SYSTEM -> false
     }
 }
