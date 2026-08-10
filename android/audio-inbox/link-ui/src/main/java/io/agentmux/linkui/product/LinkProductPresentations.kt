@@ -1,6 +1,8 @@
 package io.agentmux.linkui.product
 
 import com.adelost.releasekit.UpdateState
+import com.adelost.ringkit.ui.CircleHostPreviewPort
+import kotlinx.coroutines.flow.Flow
 import io.agentmux.linkcore.CaptureOperation
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.ConnectionState
@@ -29,10 +31,12 @@ data class LinkCapturePresentation(
     val phase: CapturePhase,
     val available: Boolean,
     val unavailableReason: String?,
+    val recoveryActionAvailable: Boolean,
     val startedAtMs: Long?,
     val byteCount: Long,
     val byteLimit: Long?,
     val level: Float,
+    val sampledAtMs: Long,
 )
 
 /** capture.service.captured — the service-internal edge into conversation.service.turn. */
@@ -104,6 +108,11 @@ data class LinkRecoveryPresentation(
     val detail: String?,
 )
 
+data class LinkDevPreviewPresentation(
+    val previewPort: CircleHostPreviewPort?,
+    val portInspections: Flow<List<ProductPortInspection>>,
+)
+
 /** talk.command → capture.service.command. */
 data class LinkCaptureCommandEvent(val operation: CaptureOperation)
 
@@ -133,6 +142,8 @@ data class LinkUpdateCommandEvent(val operation: LinkUpdateOperation)
 
 /** settings-action.open / dev-host.open → navigation.service.openSettings/openDevHost. */
 data class LinkRouteOpenEvent(val target: LinkRoute)
+
+data object LinkNavigationBackEvent
 
 /**
  * The one capture availability decision, shared by the port presentation and
@@ -166,10 +177,12 @@ fun LinkState.toCapturePresentation(
             is LinkCaptureAvailability.Recoverable -> "${availability.label} · ${availability.detail}"
             is LinkCaptureAvailability.Blocked -> "${availability.label} · ${availability.detail}"
         },
+        recoveryActionAvailable = availability is LinkCaptureAvailability.Recoverable,
         startedAtMs = captureStartedAtMs.takeIf { it > 0L },
         byteCount = byteCount,
         byteLimit = byteLimit,
         level = level.coerceIn(0f, 1f),
+        sampledAtMs = System.currentTimeMillis(),
     )
 }
 

@@ -55,6 +55,7 @@ internal class WearLinkProductGraph private constructor(
     composerDraft = flowOf(""),
     composerDraftValue = { "" },
     currentVersionName = currentVersionName,
+    devPreviewPort = null,
     capturedTurns = capturedTurns,
     navigation = navigation,
     sinks = sinks,

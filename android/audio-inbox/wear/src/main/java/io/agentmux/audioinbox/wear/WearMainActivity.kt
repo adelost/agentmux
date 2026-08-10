@@ -13,6 +13,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
+import androidx.compose.runtime.remember
 import com.adelost.designkit.ui.CircleHostMode
 import com.adelost.designkit.ui.CircleHostPreviewState
 import com.adelost.designkit.ui.CircleHostSurface
@@ -87,6 +88,8 @@ class WearMainActivity : ComponentActivity() {
         requestMicrophone()
         controller.start()
         setContent {
+            val rendererRegistrations = remember(productGraph) { productGraph.nativeWearRendererRegistrations() }
+            check(rendererRegistrations.isNotEmpty())
             RingActionCueHost {
                 CircleHostSurface(
                     isWatchDevice = true,
@@ -95,10 +98,6 @@ class WearMainActivity : ComponentActivity() {
                 ) {
                     LinkWatchScreen(
                         graph = productGraph,
-                        currentVersionName = updater.currentVersionName,
-                        onRequestMicrophone = ::requestMicrophone,
-                        recordedBytes = controller::recordedBytes,
-                        recordedLevel = controller::recordedLevel,
                     )
                 }
             }

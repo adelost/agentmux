@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.stateAuthorities
-// Product declarations SHA-256: 56bf95b453ea869aa086ec4ba867fdffbc26397445c91ea71359ff5353fa7f88
+// Product declarations SHA-256: 249373b1d662928d2901ea30d26d42efc6afbe6f0123e532b57e8e4e28953c51
 package io.agentmux.linkui.product.generated
 
 import io.agentmux.linkui.product.ProductComponentInput

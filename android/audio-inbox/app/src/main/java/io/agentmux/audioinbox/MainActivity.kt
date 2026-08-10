@@ -93,6 +93,7 @@ class MainActivity : ComponentActivity() {
                 openAttachment = ::openAttachment,
                 publicLinkCommand = ::onPublicLink,
                 captureLevel = ::qaRecordedLevel,
+                devPreviewPort = host.port,
             )
         } else {
             PhoneLinkProductGraph.real(
@@ -105,6 +106,7 @@ class MainActivity : ComponentActivity() {
                 requestMicrophone = ::requestMicrophone,
                 openAttachment = ::openAttachment,
                 publicLinkCommand = ::onPublicLink,
+                devPreviewPort = host.port,
             )
         }
         setContent {
@@ -116,12 +118,6 @@ class MainActivity : ComponentActivity() {
             ) {
                 LinkPhoneScreen(
                     graph = productGraph,
-                    currentVersionName = updater.currentVersionName,
-                    hostPreview = host.port,
-                    onRequestMicrophone = ::requestMicrophone,
-                    recordedBytes = recorder::currentBytes,
-                    recordedLevel = if (qaActive) ::qaRecordedLevel else recorder::currentLevel,
-                    onPublicLink = ::onPublicLink,
                 )
             }
         }

@@ -1644,8 +1644,21 @@
     {
       "componentInstanceRef": "dev-preview",
       "componentTypeRef": "link.dev-preview",
-      "events": [],
-      "inputs": [],
+      "events": [
+        {
+          "contractRef": "link.navigation-back",
+          "eventPortRef": "dev-preview.back",
+          "targetPortRef": "navigation.service.back"
+        }
+      ],
+      "inputs": [
+        {
+          "contractRef": "link.dev-preview-status",
+          "inputPortRef": "dev-preview.model",
+          "producerPortRef": "dev-preview.presentation.model",
+          "required": true
+        }
+      ],
       "scopes": [
         {
           "artifactRef": "phone-full-ui",
@@ -1848,8 +1861,12 @@
     },
     {
       "bindings": {
-        "events": {},
-        "inputs": {}
+        "events": {
+          "back": "navigation.service.back"
+        },
+        "inputs": {
+          "model": "dev-preview.presentation.model"
+        }
       },
       "componentTypeRef": "link.dev-preview",
       "id": "dev-preview"
@@ -2070,6 +2087,12 @@
                 "value": "string"
               },
               {
+                "clockDomain": "none",
+                "name": "recoveryActionAvailable",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
                 "clockDomain": "wall",
                 "name": "startedAtMs",
                 "nullable": true,
@@ -2095,6 +2118,13 @@
                 "name": "level",
                 "nullable": false,
                 "value": "number"
+              },
+              {
+                "clockDomain": "wall",
+                "name": "sampledAtMs",
+                "nullable": false,
+                "unit": "si.millisecond",
+                "value": "integer"
               }
             ],
             "id": "link.capture-status",
@@ -3152,8 +3182,47 @@
     },
     {
       "id": "link.dev-preview",
-      "inputs": [],
-      "outputs": [],
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "previewPort",
+                "nullable": true,
+                "value": {
+                  "ref": "link.dev-preview-native"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "portInspections",
+                "nullable": false,
+                "value": {
+                  "ref": "link.port-inspection-stream"
+                }
+              }
+            ],
+            "id": "link.dev-preview-status",
+            "kind": "state"
+          },
+          "id": "model",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [],
+            "id": "link.navigation-back",
+            "kind": "event"
+          },
+          "id": "back",
+          "required": true
+        }
+      ],
       "requiredCapabilities": [
         "ui.component-tree"
       ]
@@ -3496,6 +3565,25 @@
       {
         "actions": [
           {
+            "contractRef": "link.navigation-back",
+            "effect": "dispatch",
+            "id": "back",
+            "kind": "event",
+            "sourcePortRef": "dev-preview.back",
+            "targetPortRef": "navigation.service.back"
+          }
+        ],
+        "artifactRefs": [
+          "phone-full-ui"
+        ],
+        "componentInstanceRef": "dev-preview",
+        "pageRefs": [
+          "dev-host"
+        ]
+      },
+      {
+        "actions": [
+          {
             "contractRef": "link.playback-command",
             "effect": "dispatch",
             "id": "playbackCommand",
@@ -3752,6 +3840,7 @@
         "lifecycleSources": []
       },
       "bindings": {
+        "back": "dev-preview.back",
         "openDevHost": "dev-host.open",
         "openSettings": "settings-action.open"
       },
@@ -3839,6 +3928,16 @@
       "config": {},
       "id": "host.service",
       "nodeTypeRef": "link.host-effect"
+    },
+    {
+      "activation": {
+        "kind": "lifetime",
+        "lifecycleSources": []
+      },
+      "bindings": {},
+      "config": {},
+      "id": "dev-preview.service",
+      "nodeTypeRef": "link.dev-preview"
     },
     {
       "activation": {
@@ -3958,6 +4057,14 @@
     },
     {
       "bindings": {
+        "source": "dev-preview.service.status"
+      },
+      "config": {},
+      "id": "dev-preview.presentation",
+      "nodeTypeRef": "link.present.dev-preview"
+    },
+    {
+      "bindings": {
         "state": "capture.service.status"
       },
       "config": {},
@@ -4072,6 +4179,16 @@
           },
           "id": "openDevHost",
           "purpose": "data"
+        },
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [],
+            "id": "link.navigation-back",
+            "kind": "event"
+          },
+          "id": "back",
+          "purpose": "data"
         }
       ],
       "kind": "service",
@@ -4169,6 +4286,12 @@
                 "value": "string"
               },
               {
+                "clockDomain": "none",
+                "name": "recoveryActionAvailable",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
                 "clockDomain": "wall",
                 "name": "startedAtMs",
                 "nullable": true,
@@ -4194,6 +4317,13 @@
                 "name": "level",
                 "nullable": false,
                 "value": "number"
+              },
+              {
+                "clockDomain": "wall",
+                "name": "sampledAtMs",
+                "nullable": false,
+                "unit": "si.millisecond",
+                "value": "integer"
               }
             ],
             "id": "link.capture-status",
@@ -4963,6 +5093,52 @@
       }
     },
     {
+      "id": "link.dev-preview",
+      "inputs": [],
+      "kind": "service",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "previewPort",
+                "nullable": true,
+                "value": {
+                  "ref": "link.dev-preview-native"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "portInspections",
+                "nullable": false,
+                "value": {
+                  "ref": "link.port-inspection-stream"
+                }
+              }
+            ],
+            "id": "link.dev-preview-status",
+            "kind": "state"
+          },
+          "id": "status",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [
+          "dev.inspection"
+        ],
+        "durability": "transient",
+        "effects": [
+          "dev.render"
+        ],
+        "lifetime": "process",
+        "stateOwner": "external"
+      }
+    },
+    {
       "id": "link.present.capture",
       "inputs": [
         {
@@ -4991,6 +5167,12 @@
                 "value": "string"
               },
               {
+                "clockDomain": "none",
+                "name": "recoveryActionAvailable",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
                 "clockDomain": "wall",
                 "name": "startedAtMs",
                 "nullable": true,
@@ -5016,6 +5198,13 @@
                 "name": "level",
                 "nullable": false,
                 "value": "number"
+              },
+              {
+                "clockDomain": "wall",
+                "name": "sampledAtMs",
+                "nullable": false,
+                "unit": "si.millisecond",
+                "value": "integer"
               }
             ],
             "id": "link.capture-status",
@@ -5053,6 +5242,12 @@
                 "value": "string"
               },
               {
+                "clockDomain": "none",
+                "name": "recoveryActionAvailable",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
                 "clockDomain": "wall",
                 "name": "startedAtMs",
                 "nullable": true,
@@ -5078,6 +5273,13 @@
                 "name": "level",
                 "nullable": false,
                 "value": "number"
+              },
+              {
+                "clockDomain": "wall",
+                "name": "sampledAtMs",
+                "nullable": false,
+                "unit": "si.millisecond",
+                "value": "integer"
               }
             ],
             "id": "link.capture-status",
@@ -5799,6 +6001,76 @@
       }
     },
     {
+      "id": "link.present.dev-preview",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "previewPort",
+                "nullable": true,
+                "value": {
+                  "ref": "link.dev-preview-native"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "portInspections",
+                "nullable": false,
+                "value": {
+                  "ref": "link.port-inspection-stream"
+                }
+              }
+            ],
+            "id": "link.dev-preview-status",
+            "kind": "state"
+          },
+          "id": "source",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "previewPort",
+                "nullable": true,
+                "value": {
+                  "ref": "link.dev-preview-native"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "portInspections",
+                "nullable": false,
+                "value": {
+                  "ref": "link.port-inspection-stream"
+                }
+              }
+            ],
+            "id": "link.dev-preview-status",
+            "kind": "state"
+          },
+          "id": "model",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
       "id": "link.capture-phase.presentation-adapter",
       "inputs": [
         {
@@ -5827,6 +6099,12 @@
                 "value": "string"
               },
               {
+                "clockDomain": "none",
+                "name": "recoveryActionAvailable",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
                 "clockDomain": "wall",
                 "name": "startedAtMs",
                 "nullable": true,
@@ -5852,6 +6130,13 @@
                 "name": "level",
                 "nullable": false,
                 "value": "number"
+              },
+              {
+                "clockDomain": "wall",
+                "name": "sampledAtMs",
+                "nullable": false,
+                "unit": "si.millisecond",
+                "value": "integer"
               }
             ],
             "id": "link.capture-status",
@@ -6466,6 +6751,12 @@
         "to": "navigation.service.openDevHost"
       },
       {
+        "from": "dev-preview.back",
+        "kind": "component-event",
+        "purpose": "data",
+        "to": "navigation.service.back"
+      },
+      {
         "from": "talk.command",
         "kind": "component-event",
         "purpose": "data",
@@ -6584,6 +6875,12 @@
         "kind": "node-input",
         "purpose": "data",
         "to": "recovery.presentation.source"
+      },
+      {
+        "from": "dev-preview.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "dev-preview.presentation.source"
       },
       {
         "from": "capture.service.status",
@@ -6818,6 +7115,12 @@
         "kind": "component-input",
         "purpose": "data",
         "to": "recovery.recoveryState"
+      },
+      {
+        "from": "dev-preview.presentation.model",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "dev-preview.model"
       }
     ],
     "componentPorts": [
@@ -7336,6 +7639,30 @@
         "ref": "dev-host.open",
         "required": true,
         "typeRef": "link.dev-host-entry"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.dev-preview-status",
+        "direction": "input",
+        "ownerId": "dev-preview",
+        "ownerKind": "component",
+        "portId": "model",
+        "purpose": "data",
+        "ref": "dev-preview.model",
+        "required": true,
+        "typeRef": "link.dev-preview"
+      },
+      {
+        "boundary": "ui-event",
+        "contractRef": "link.navigation-back",
+        "direction": "output",
+        "ownerId": "dev-preview",
+        "ownerKind": "component",
+        "portId": "back",
+        "purpose": "data",
+        "ref": "dev-preview.back",
+        "required": true,
+        "typeRef": "link.dev-preview"
       }
     ],
     "contracts": [
@@ -7358,6 +7685,12 @@
           "effect": "push",
           "kind": "route"
         }
+      },
+      {
+        "boundary": "ui-event",
+        "fields": [],
+        "id": "link.navigation-back",
+        "kind": "event"
       },
       {
         "boundary": "presentation",
@@ -7419,6 +7752,12 @@
             "value": "string"
           },
           {
+            "clockDomain": "none",
+            "name": "recoveryActionAvailable",
+            "nullable": false,
+            "value": "boolean"
+          },
+          {
             "clockDomain": "wall",
             "name": "startedAtMs",
             "nullable": true,
@@ -7444,6 +7783,13 @@
             "name": "level",
             "nullable": false,
             "value": "number"
+          },
+          {
+            "clockDomain": "wall",
+            "name": "sampledAtMs",
+            "nullable": false,
+            "unit": "si.millisecond",
+            "value": "integer"
           }
         ],
         "id": "link.capture-status",
@@ -7744,6 +8090,29 @@
         "fields": [
           {
             "clockDomain": "none",
+            "name": "previewPort",
+            "nullable": true,
+            "value": {
+              "ref": "link.dev-preview-native"
+            }
+          },
+          {
+            "clockDomain": "none",
+            "name": "portInspections",
+            "nullable": false,
+            "value": {
+              "ref": "link.port-inspection-stream"
+            }
+          }
+        ],
+        "id": "link.dev-preview-status",
+        "kind": "state"
+      },
+      {
+        "boundary": "presentation",
+        "fields": [
+          {
+            "clockDomain": "none",
             "name": "retainedTurns",
             "nullable": false,
             "value": "integer"
@@ -8023,6 +8392,18 @@
         "typeRef": "link.navigation"
       },
       {
+        "boundary": "ui-event",
+        "contractRef": "link.navigation-back",
+        "direction": "input",
+        "ownerId": "navigation.service",
+        "ownerKind": "node",
+        "portId": "back",
+        "purpose": "data",
+        "ref": "navigation.service.back",
+        "required": true,
+        "typeRef": "link.navigation"
+      },
+      {
         "boundary": "presentation",
         "contractRef": "link.navigation.active-page",
         "direction": "output",
@@ -8213,6 +8594,18 @@
         "ref": "host.service.openAttachment",
         "required": true,
         "typeRef": "link.host-effect"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.dev-preview-status",
+        "direction": "output",
+        "ownerId": "dev-preview.service",
+        "ownerKind": "node",
+        "portId": "status",
+        "purpose": "data",
+        "ref": "dev-preview.service.status",
+        "required": true,
+        "typeRef": "link.dev-preview"
       },
       {
         "boundary": "presentation",
@@ -8501,6 +8894,30 @@
         "ref": "recovery.presentation.model",
         "required": true,
         "typeRef": "link.present.recovery"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.dev-preview-status",
+        "direction": "input",
+        "ownerId": "dev-preview.presentation",
+        "ownerKind": "node",
+        "portId": "source",
+        "purpose": "data",
+        "ref": "dev-preview.presentation.source",
+        "required": true,
+        "typeRef": "link.present.dev-preview"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.dev-preview-status",
+        "direction": "output",
+        "ownerId": "dev-preview.presentation",
+        "ownerKind": "node",
+        "portId": "model",
+        "purpose": "data",
+        "ref": "dev-preview.presentation.model",
+        "required": true,
+        "typeRef": "link.present.dev-preview"
       },
       {
         "boundary": "presentation",
@@ -8803,6 +9220,12 @@
               "value": "string"
             },
             {
+              "clockDomain": "none",
+              "name": "recoveryActionAvailable",
+              "nullable": false,
+              "value": "boolean"
+            },
+            {
               "clockDomain": "wall",
               "name": "startedAtMs",
               "nullable": true,
@@ -8828,6 +9251,13 @@
               "name": "level",
               "nullable": false,
               "value": "number"
+            },
+            {
+              "clockDomain": "wall",
+              "name": "sampledAtMs",
+              "nullable": false,
+              "unit": "si.millisecond",
+              "value": "integer"
             }
           ],
           "id": "link.capture-status",

@@ -20,6 +20,8 @@ import {
   targetSelectContract,
   updateCommandContract,
   updateStatusContract,
+  devPreviewStatusContract,
+  navigationBackContract,
 } from "./contracts.js";
 import {
   capturePhaseAuthority,
@@ -165,8 +167,8 @@ export const devHostEntryComponentType = defineComponentType({
 export const devPreviewComponentType = defineComponentType({
   id: "link.dev-preview",
   requiredCapabilities: componentTree,
-  inputs: [],
-  outputs: [],
+  inputs: [componentPort("model", devPreviewStatusContract)],
+  outputs: [componentPort("back", navigationBackContract)],
 });
 
 export const linkComponentTypes = [
@@ -319,6 +321,9 @@ export const linkComponentInstances = [
   },
   {
     id: "dev-preview", componentTypeRef: devPreviewComponentType.id,
-    bindings: { inputs: {}, events: {} },
+    bindings: {
+      inputs: { model: "dev-preview.presentation.model" },
+      events: { back: "navigation.service.back" },
+    },
   },
 ] as const;

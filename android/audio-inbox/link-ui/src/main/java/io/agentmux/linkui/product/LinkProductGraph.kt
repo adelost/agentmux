@@ -1,11 +1,11 @@
 package io.agentmux.linkui.product
 
 import com.adelost.releasekit.UpdateState
+import com.adelost.ringkit.ui.CircleHostPreviewPort
 import io.agentmux.linkcore.CaptureOperation
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTargetKind
-import io.agentmux.linkui.LinkCaptureSpec
 import io.agentmux.linkui.product.generated.GeneratedLinkCapturePhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkConnectionStateAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkDeliveryPhaseAuthority
@@ -14,6 +14,7 @@ import io.agentmux.linkui.product.generated.GeneratedLinkRecoveryPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkReplyPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkTargetKindAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkUpdatePhaseAuthority
+import io.agentmux.linkui.product.generated.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flow
@@ -65,6 +67,7 @@ open class LinkProductGraph(
     composerDraft: Flow<String>,
     composerDraftValue: () -> String,
     currentVersionName: String,
+    devPreviewPort: CircleHostPreviewPort?,
     capturedTurns: Flow<LinkCapturedTurn>,
     val navigation: LinkNavigationController,
     private val sinks: LinkProductSinks,
@@ -84,27 +87,37 @@ open class LinkProductGraph(
     val recovery: StateFlow<LinkRecoveryPresentation>
     val activePage: StateFlow<LinkRoute>
 
-    /** The capture control's host-neutral spec, derived beside the talk model. */
-    val captureSpec: StateFlow<LinkCaptureSpec> = combine(
-        state,
-        microphoneGranted,
-    ) { current, granted ->
-        LinkCaptureSpec(
-            phase = current.capture,
-            startedAtMs = current.captureStartedAtMs,
-            availability = current.captureAvailability(granted),
-            byteLimit = captureByteLimit(),
-        )
-    }.hot {
-        state.value.let {
-            LinkCaptureSpec(
-                phase = it.capture,
-                startedAtMs = it.captureStartedAtMs,
-                availability = it.captureAvailability(microphoneGranted.value),
-                byteLimit = captureByteLimit(),
-            )
-        }
-    }
+    val targetRenderInputs: StateFlow<GeneratedTargetRenderInputs>
+    val talkRenderInputs: StateFlow<GeneratedTalkRenderInputs>
+    val latestRenderInputs: StateFlow<GeneratedLatestRenderInputs>
+    val composerRenderInputs: StateFlow<GeneratedComposerRenderInputs>
+    val activePlaybackRenderInputs: StateFlow<GeneratedActivePlaybackRenderInputs>
+    val connectionRenderInputs: StateFlow<GeneratedConnectionRenderInputs>
+    val publicLinkRenderInputs: StateFlow<GeneratedPublicLinkRenderInputs>
+    val preferencesRenderInputs: StateFlow<GeneratedPreferencesRenderInputs>
+    val localHistoryRenderInputs: StateFlow<GeneratedLocalHistoryRenderInputs>
+    val updatesRenderInputs: StateFlow<GeneratedUpdatesRenderInputs>
+    val recoveryRenderInputs: StateFlow<GeneratedRecoveryRenderInputs>
+    val devPreviewRenderInputs: StateFlow<GeneratedDevPreviewRenderInputs>
+
+    lateinit var targetRenderEmitter: GeneratedTargetRenderEmitter
+        private set
+    lateinit var talkRenderEmitter: GeneratedTalkRenderEmitter
+        private set
+    lateinit var latestRenderEmitter: GeneratedLatestRenderEmitter
+        private set
+    lateinit var composerRenderEmitter: GeneratedComposerRenderEmitter
+        private set
+    lateinit var activePlaybackRenderEmitter: GeneratedActivePlaybackRenderEmitter
+        private set
+    lateinit var publicLinkRenderEmitter: GeneratedPublicLinkRenderEmitter
+        private set
+    lateinit var preferencesRenderEmitter: GeneratedPreferencesRenderEmitter
+        private set
+    lateinit var updatesRenderEmitter: GeneratedUpdatesRenderEmitter
+        private set
+    lateinit var devPreviewRenderEmitter: GeneratedDevPreviewRenderEmitter
+        private set
 
     val inspections: Flow<List<ProductPortInspection>> = runtime.inspectionFlow()
 
@@ -120,6 +133,7 @@ open class LinkProductGraph(
     private val publicLinkCommand: ProductComponentEventEmitter<LinkPublicLinkCommandEvent, Unit>
     private val settingsActionOpen: ProductComponentEventEmitter<LinkRouteOpenEvent, Unit>
     private val devHostOpen: ProductComponentEventEmitter<LinkRouteOpenEvent, Unit>
+    private val devPreviewBack: ProductComponentEventEmitter<LinkNavigationBackEvent, Unit>
 
     init {
         // Service outputs first: component inputs may only connect to an
@@ -181,6 +195,10 @@ open class LinkProductGraph(
             RecoveryStatusOutput,
             state.map { it.toRecoveryPresentation() }.hot { state.value.toRecoveryPresentation() },
         )
+        runtime.observe(
+            DevPreviewStatusOutput,
+            MutableStateFlow(LinkDevPreviewPresentation(devPreviewPort, inspections)),
+        )
 
         runtime.observe(
             CapturePresentationModelOutput,
@@ -218,57 +236,61 @@ open class LinkProductGraph(
             RecoveryPresentationModelOutput,
             runtime.connected(RecoveryPresentationSourceInput, processScope),
         )
+        runtime.observe(
+            DevPreviewPresentationModelOutput,
+            runtime.connected(DevPreviewPresentationSourceInput, processScope),
+        )
 
-        mountStateAuthority(
+        val captureStates = mountStateAuthority(
             GeneratedLinkCapturePhaseAuthority.inputPort<LinkCapturePresentation>(),
             GeneratedLinkCapturePhaseAuthority.outputPort,
             GeneratedLinkCapturePhaseAuthority.componentInputs,
             { it.phase.wireId() },
             GeneratedLinkCapturePhaseAuthority::require,
         )
-        mountStateAuthority(
+        val deliveryStates = mountStateAuthority(
             GeneratedLinkDeliveryPhaseAuthority.inputPort<LinkConversationPresentation>(),
             GeneratedLinkDeliveryPhaseAuthority.outputPort,
             GeneratedLinkDeliveryPhaseAuthority.componentInputs,
             { it.deliveryPhase.wireId() },
             GeneratedLinkDeliveryPhaseAuthority::require,
         )
-        mountStateAuthority(
+        val replyStates = mountStateAuthority(
             GeneratedLinkReplyPhaseAuthority.inputPort<LinkConversationPresentation>(),
             GeneratedLinkReplyPhaseAuthority.outputPort,
             GeneratedLinkReplyPhaseAuthority.componentInputs,
             { it.replyPhase.wireId() },
             GeneratedLinkReplyPhaseAuthority::require,
         )
-        mountStateAuthority(
+        val playbackStates = mountStateAuthority(
             GeneratedLinkPlaybackPhaseAuthority.inputPort<LinkPlaybackPresentation>(),
             GeneratedLinkPlaybackPhaseAuthority.outputPort,
             GeneratedLinkPlaybackPhaseAuthority.componentInputs,
             { it.phase.wireId() },
             GeneratedLinkPlaybackPhaseAuthority::require,
         )
-        mountStateAuthority(
+        val targetStates = mountStateAuthority(
             GeneratedLinkTargetKindAuthority.inputPort<LinkTargetPresentation>(),
             GeneratedLinkTargetKindAuthority.outputPort,
             GeneratedLinkTargetKindAuthority.componentInputs,
             { it.kind.wireId() },
             GeneratedLinkTargetKindAuthority::require,
         )
-        mountStateAuthority(
+        val connectionStates = mountStateAuthority(
             GeneratedLinkConnectionStateAuthority.inputPort<LinkSessionPresentation>(),
             GeneratedLinkConnectionStateAuthority.outputPort,
             GeneratedLinkConnectionStateAuthority.componentInputs,
             { it.connection.wireId() },
             GeneratedLinkConnectionStateAuthority::require,
         )
-        mountStateAuthority(
+        val updateStates = mountStateAuthority(
             GeneratedLinkUpdatePhaseAuthority.inputPort<LinkUpdatePresentation>(),
             GeneratedLinkUpdatePhaseAuthority.outputPort,
             GeneratedLinkUpdatePhaseAuthority.componentInputs,
             { it.phase.wireId() },
             GeneratedLinkUpdatePhaseAuthority::require,
         )
-        mountStateAuthority(
+        val recoveryStates = mountStateAuthority(
             GeneratedLinkRecoveryPhaseAuthority.inputPort<LinkRecoveryPresentation>(),
             GeneratedLinkRecoveryPhaseAuthority.outputPort,
             GeneratedLinkRecoveryPhaseAuthority.componentInputs,
@@ -282,6 +304,7 @@ open class LinkProductGraph(
 
         runtime.bindInput(NavigationOpenSettingsInput) { event -> navigation.open(event.target) }
         runtime.bindInput(NavigationOpenDevHostInput) { event -> navigation.open(event.target) }
+        runtime.bindInput(NavigationBackInput) { navigation.back() }
         runtime.bindInput(CaptureCommandInput) { event -> sinks.captureCommand(event) }
         runtime.bindInput(ConversationComposeInput) { event -> sinks.compose(event) }
         runtime.bindInput(ConversationEditInput) { event -> sinks.editComposer(event) }
@@ -309,6 +332,122 @@ open class LinkProductGraph(
         updates = runtime.connected(UpdatesModelInput, processScope)
         recovery = runtime.connected(RecoveryModelInput, processScope)
         activePage = runtime.connected(PageHostActivePageInput, processScope)
+        val devPreviewModel = runtime.connected(DevPreviewModelInput, processScope)
+
+        fun <T : Any> Map<String, StateFlow<T>>.component(ref: String): StateFlow<T> =
+            requireNotNull(this[ref]) { "Missing actual component input $ref" }
+
+        val targetCore = combine(
+            target,
+            targetStates.component("target.targetState"),
+            connection,
+            connectionStates.component("target.connectionState"),
+            recovery,
+        ) { model, targetState, session, connectionState, recoveryModel ->
+            GeneratedTargetRenderInputs(
+                model, targetState, session, connectionState, recoveryModel,
+                recoveryStates.component("target.recoveryState").value,
+            )
+        }.hot {
+            GeneratedTargetRenderInputs(
+                target.value,
+                targetStates.component("target.targetState").value,
+                connection.value,
+                connectionStates.component("target.connectionState").value,
+                recovery.value,
+                recoveryStates.component("target.recoveryState").value,
+            )
+        }
+        targetRenderInputs = combine(
+            targetCore,
+            recoveryStates.component("target.recoveryState"),
+        ) { inputs, state -> inputs.copy(recoveryState = state) }.hot { targetCore.value }
+        talkRenderInputs = combine(
+            capture, captureStates.component("talk.captureState"),
+            ::GeneratedTalkRenderInputs,
+        ).hot {
+            GeneratedTalkRenderInputs(capture.value, captureStates.component("talk.captureState").value)
+        }
+        latestRenderInputs = combine(
+            latest,
+            deliveryStates.component("latest.deliveryState"),
+            replyStates.component("latest.replyState"),
+            activePlayback,
+            playbackStates.component("latest.playbackState"),
+            ::GeneratedLatestRenderInputs,
+        ).hot {
+            GeneratedLatestRenderInputs(
+                latest.value,
+                deliveryStates.component("latest.deliveryState").value,
+                replyStates.component("latest.replyState").value,
+                activePlayback.value,
+                playbackStates.component("latest.playbackState").value,
+            )
+        }
+        composerRenderInputs = combine(
+            composerModel,
+            deliveryStates.component("composer.deliveryState"),
+            replyStates.component("composer.replyState"),
+            target,
+            targetStates.component("composer.targetState"),
+            ::GeneratedComposerRenderInputs,
+        ).hot {
+            GeneratedComposerRenderInputs(
+                composerModel.value,
+                deliveryStates.component("composer.deliveryState").value,
+                replyStates.component("composer.replyState").value,
+                target.value,
+                targetStates.component("composer.targetState").value,
+            )
+        }
+        activePlaybackRenderInputs = combine(
+            activePlayback,
+            playbackStates.component("active-playback.playbackState"),
+            ::GeneratedActivePlaybackRenderInputs,
+        ).hot {
+            GeneratedActivePlaybackRenderInputs(
+                activePlayback.value,
+                playbackStates.component("active-playback.playbackState").value,
+            )
+        }
+        connectionRenderInputs = combine(
+            connection,
+            connectionStates.component("connection.connectionState"),
+            ::GeneratedConnectionRenderInputs,
+        ).hot {
+            GeneratedConnectionRenderInputs(
+                connection.value, connectionStates.component("connection.connectionState").value,
+            )
+        }
+        publicLinkRenderInputs = combine(
+            publicLink,
+            connectionStates.component("public-link.connectionState"),
+            ::GeneratedPublicLinkRenderInputs,
+        ).hot {
+            GeneratedPublicLinkRenderInputs(
+                publicLink.value, connectionStates.component("public-link.connectionState").value,
+            )
+        }
+        preferencesRenderInputs = preferences.map(::GeneratedPreferencesRenderInputs)
+            .hot { GeneratedPreferencesRenderInputs(preferences.value) }
+        localHistoryRenderInputs = localHistory.map(::GeneratedLocalHistoryRenderInputs)
+            .hot { GeneratedLocalHistoryRenderInputs(localHistory.value) }
+        updatesRenderInputs = combine(
+            updates,
+            updateStates.component("updates.updateState"),
+            ::GeneratedUpdatesRenderInputs,
+        ).hot {
+            GeneratedUpdatesRenderInputs(updates.value, updateStates.component("updates.updateState").value)
+        }
+        recoveryRenderInputs = combine(
+            recovery,
+            recoveryStates.component("recovery.recoveryState"),
+            ::GeneratedRecoveryRenderInputs,
+        ).hot {
+            GeneratedRecoveryRenderInputs(recovery.value, recoveryStates.component("recovery.recoveryState").value)
+        }
+        devPreviewRenderInputs = devPreviewModel.map(::GeneratedDevPreviewRenderInputs)
+            .hot { GeneratedDevPreviewRenderInputs(devPreviewModel.value) }
 
         talkCommand = runtime.componentEvent(TalkCommandEvent, processScope)
         composerCompose = runtime.componentEvent(ComposerComposeEvent, processScope)
@@ -322,61 +461,27 @@ open class LinkProductGraph(
         publicLinkCommand = runtime.componentEvent(PublicLinkCommandEvent, processScope)
         settingsActionOpen = runtime.componentEvent(SettingsActionOpenEvent, processScope)
         devHostOpen = runtime.componentEvent(DevHostOpenEvent, processScope)
+        devPreviewBack = runtime.componentEvent(DevPreviewBackEvent, processScope)
+
+        targetRenderEmitter = GeneratedTargetRenderEmitter(targetSelect::emit)
+        talkRenderEmitter = GeneratedTalkRenderEmitter(talkCommand::emit)
+        latestRenderEmitter = object : GeneratedLatestRenderEmitter {
+            override fun playbackCommand(event: LinkPlaybackCommandEvent) = latestPlaybackCommand.emit(event)
+            override fun openAttachment(event: LinkOpenAttachmentEvent) = latestOpenAttachment.emit(event)
+        }
+        composerRenderEmitter = object : GeneratedComposerRenderEmitter {
+            override fun compose(event: LinkComposeEvent) = composerCompose.emit(event)
+            override fun edit(event: LinkComposerEditEvent) = composerEdit.emit(event)
+        }
+        activePlaybackRenderEmitter = GeneratedActivePlaybackRenderEmitter(activePlaybackCommand::emit)
+        publicLinkRenderEmitter = GeneratedPublicLinkRenderEmitter(publicLinkCommand::emit)
+        preferencesRenderEmitter = GeneratedPreferencesRenderEmitter(preferencesToggle::emit)
+        updatesRenderEmitter = GeneratedUpdatesRenderEmitter(updatesCommand::emit)
+        devPreviewRenderEmitter = GeneratedDevPreviewRenderEmitter(devPreviewBack::emit)
 
         runtime.requireNodeOutputTotality()
         runtime.requireComponentPortTotality()
         runtime.requireNodeInputTotality()
-    }
-
-    fun beginCapture(): Boolean {
-        onTalkCommand(LinkCaptureCommandEvent(CaptureOperation.BEGIN))
-        return state.value.capture == CapturePhase.LISTENING
-    }
-
-    fun releaseCapture() = onTalkCommand(LinkCaptureCommandEvent(CaptureOperation.RELEASE))
-
-    fun cancelCapture() = onTalkCommand(LinkCaptureCommandEvent(CaptureOperation.CANCEL))
-
-    fun recoverCapture() = onTalkCommand(LinkCaptureCommandEvent(CaptureOperation.RECOVER))
-
-    fun onTalkCommand(event: LinkCaptureCommandEvent) {
-        talkCommand.emit(event)
-    }
-
-    fun onComposerCompose(event: LinkComposeEvent) {
-        composerCompose.emit(event)
-    }
-
-    fun onComposerEdit(event: LinkComposerEditEvent) {
-        composerEdit.emit(event)
-    }
-
-    fun onActivePlaybackCommand(event: LinkPlaybackCommandEvent) {
-        activePlaybackCommand.emit(event)
-    }
-
-    fun onLatestPlaybackCommand(event: LinkPlaybackCommandEvent) {
-        latestPlaybackCommand.emit(event)
-    }
-
-    fun onLatestOpenAttachment(event: LinkOpenAttachmentEvent) {
-        latestOpenAttachment.emit(event)
-    }
-
-    fun onTargetSelect(event: LinkTargetSelectEvent) {
-        targetSelect.emit(event)
-    }
-
-    fun onPreferencesToggle(event: LinkPreferenceToggleEvent) {
-        preferencesToggle.emit(event)
-    }
-
-    fun onUpdatesCommand(event: LinkUpdateCommandEvent) {
-        updatesCommand.emit(event)
-    }
-
-    fun onPublicLinkCommand(event: LinkPublicLinkCommandEvent) {
-        publicLinkCommand.emit(event)
     }
 
     fun onSettingsActionOpen(event: LinkRouteOpenEvent) {
@@ -385,6 +490,61 @@ open class LinkProductGraph(
 
     fun onDevHostOpen(event: LinkRouteOpenEvent) {
         devHostOpen.emit(event)
+    }
+
+    /** Actual generated input endpoint used by host renderer registrations. */
+    fun readRendererInput(id: GeneratedLinkRendererInputId): Any = when (id) {
+        GeneratedLinkRendererInputId.PAGE_HOST_ACTIVEPAGE -> activePage.value
+        GeneratedLinkRendererInputId.TARGET_MODEL -> targetRenderInputs.value.model
+        GeneratedLinkRendererInputId.TARGET_TARGETSTATE -> targetRenderInputs.value.targetState
+        GeneratedLinkRendererInputId.TARGET_SESSION -> targetRenderInputs.value.session
+        GeneratedLinkRendererInputId.TARGET_CONNECTIONSTATE -> targetRenderInputs.value.connectionState
+        GeneratedLinkRendererInputId.TARGET_RECOVERY -> targetRenderInputs.value.recovery
+        GeneratedLinkRendererInputId.TARGET_RECOVERYSTATE -> targetRenderInputs.value.recoveryState
+        GeneratedLinkRendererInputId.TALK_MODEL -> talkRenderInputs.value.model
+        GeneratedLinkRendererInputId.TALK_CAPTURESTATE -> talkRenderInputs.value.captureState
+        GeneratedLinkRendererInputId.LATEST_MODEL -> latestRenderInputs.value.model
+        GeneratedLinkRendererInputId.LATEST_DELIVERYSTATE -> latestRenderInputs.value.deliveryState
+        GeneratedLinkRendererInputId.LATEST_REPLYSTATE -> latestRenderInputs.value.replyState
+        GeneratedLinkRendererInputId.LATEST_PLAYBACK -> latestRenderInputs.value.playback
+        GeneratedLinkRendererInputId.LATEST_PLAYBACKSTATE -> latestRenderInputs.value.playbackState
+        GeneratedLinkRendererInputId.COMPOSER_MODEL -> composerRenderInputs.value.model
+        GeneratedLinkRendererInputId.COMPOSER_DELIVERYSTATE -> composerRenderInputs.value.deliveryState
+        GeneratedLinkRendererInputId.COMPOSER_REPLYSTATE -> composerRenderInputs.value.replyState
+        GeneratedLinkRendererInputId.COMPOSER_TARGET -> composerRenderInputs.value.target
+        GeneratedLinkRendererInputId.COMPOSER_TARGETSTATE -> composerRenderInputs.value.targetState
+        GeneratedLinkRendererInputId.ACTIVE_PLAYBACK_MODEL -> activePlaybackRenderInputs.value.model
+        GeneratedLinkRendererInputId.ACTIVE_PLAYBACK_PLAYBACKSTATE -> activePlaybackRenderInputs.value.playbackState
+        GeneratedLinkRendererInputId.CONNECTION_MODEL -> connectionRenderInputs.value.model
+        GeneratedLinkRendererInputId.CONNECTION_CONNECTIONSTATE -> connectionRenderInputs.value.connectionState
+        GeneratedLinkRendererInputId.PUBLIC_LINK_MODEL -> publicLinkRenderInputs.value.model
+        GeneratedLinkRendererInputId.PUBLIC_LINK_CONNECTIONSTATE -> publicLinkRenderInputs.value.connectionState
+        GeneratedLinkRendererInputId.PREFERENCES_MODEL -> preferencesRenderInputs.value.model
+        GeneratedLinkRendererInputId.LOCAL_HISTORY_MODEL -> localHistoryRenderInputs.value.model
+        GeneratedLinkRendererInputId.UPDATES_MODEL -> updatesRenderInputs.value.model
+        GeneratedLinkRendererInputId.UPDATES_UPDATESTATE -> updatesRenderInputs.value.updateState
+        GeneratedLinkRendererInputId.RECOVERY_MODEL -> recoveryRenderInputs.value.model
+            GeneratedLinkRendererInputId.RECOVERY_RECOVERYSTATE -> recoveryRenderInputs.value.recoveryState
+            GeneratedLinkRendererInputId.DEV_PREVIEW_MODEL -> devPreviewRenderInputs.value.model
+    }
+
+    /** Actual typed event sink used by host renderer registrations. */
+    fun emitRendererEvent(id: GeneratedLinkRendererEventId, payload: Any) {
+        when (id) {
+            GeneratedLinkRendererEventId.TARGET_SELECT -> targetRenderEmitter.select(payload as LinkTargetSelectEvent)
+            GeneratedLinkRendererEventId.TALK_COMMAND -> talkRenderEmitter.command(payload as LinkCaptureCommandEvent)
+            GeneratedLinkRendererEventId.LATEST_PLAYBACKCOMMAND -> latestRenderEmitter.playbackCommand(payload as LinkPlaybackCommandEvent)
+            GeneratedLinkRendererEventId.LATEST_OPENATTACHMENT -> latestRenderEmitter.openAttachment(payload as LinkOpenAttachmentEvent)
+            GeneratedLinkRendererEventId.COMPOSER_COMPOSE -> composerRenderEmitter.compose(payload as LinkComposeEvent)
+            GeneratedLinkRendererEventId.COMPOSER_EDIT -> composerRenderEmitter.edit(payload as LinkComposerEditEvent)
+            GeneratedLinkRendererEventId.ACTIVE_PLAYBACK_COMMAND -> activePlaybackRenderEmitter.command(payload as LinkPlaybackCommandEvent)
+            GeneratedLinkRendererEventId.PUBLIC_LINK_COMMAND -> publicLinkRenderEmitter.command(payload as LinkPublicLinkCommandEvent)
+            GeneratedLinkRendererEventId.PREFERENCES_TOGGLE -> preferencesRenderEmitter.toggle(payload as LinkPreferenceToggleEvent)
+            GeneratedLinkRendererEventId.UPDATES_COMMAND -> updatesRenderEmitter.command(payload as LinkUpdateCommandEvent)
+            GeneratedLinkRendererEventId.SETTINGS_ACTION_OPEN -> onSettingsActionOpen(payload as LinkRouteOpenEvent)
+            GeneratedLinkRendererEventId.DEV_HOST_OPEN -> onDevHostOpen(payload as LinkRouteOpenEvent)
+            GeneratedLinkRendererEventId.DEV_PREVIEW_BACK -> devPreviewRenderEmitter.back(payload as LinkNavigationBackEvent)
+        }
     }
 
     open fun close() {
@@ -407,14 +567,16 @@ open class LinkProductGraph(
         componentInputs: List<ProductComponentInput<Presentation>>,
         stateId: (Source) -> String,
         presentation: (String) -> Presentation,
-    ) {
+    ): Map<String, StateFlow<Presentation>> {
         val source = runtime.connected(input, processScope)
         runtime.observe(
             output,
             source.map { presentation(stateId(it)) }
                 .hot { presentation(stateId(source.value)) },
         )
-        componentInputs.forEach { runtime.connected(it, processScope) }
+        return componentInputs.associate { input ->
+            input.id.value to runtime.connected(input, processScope)
+        }
     }
 
     private fun Enum<*>.wireId(): String = name.lowercase().replace('_', '-')

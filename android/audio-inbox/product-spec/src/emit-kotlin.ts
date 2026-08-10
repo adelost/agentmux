@@ -164,6 +164,7 @@ function rendererInputType(contractRef: string): string {
     "link.history-status": "LinkHistoryPresentation",
     "link.update-status": "LinkUpdatePresentation",
     "link.update-phase.payload": "GeneratedLinkUpdatePhasePresentation",
+    "link.dev-preview-status": "LinkDevPreviewPresentation",
   };
   const result = types[contractRef];
   if (result === undefined) throw new Error(`No native renderer input type for '${contractRef}'`);
@@ -182,6 +183,7 @@ function rendererEventType(contractRef: string): string {
     "link.preference-toggle": "LinkPreferenceToggleEvent",
     "link.update-command": "LinkUpdateCommandEvent",
     "link.navigation.route-intent": "LinkRouteOpenEvent",
+    "link.navigation-back": "LinkNavigationBackEvent",
   };
   const result = types[contractRef];
   if (result === undefined) throw new Error(`No native renderer event type for '${contractRef}'`);

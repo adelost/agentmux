@@ -19,6 +19,7 @@ import io.agentmux.linkui.product.LinkProductGraph
 import io.agentmux.linkui.product.LinkProductSinks
 import io.agentmux.linkui.product.LinkUpdateCommandEvent
 import com.adelost.releasekit.UpdateState
+import com.adelost.ringkit.ui.CircleHostPreviewPort
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -49,6 +50,7 @@ internal class PhoneLinkProductGraph private constructor(
     captureByteLimit: () -> Long?,
     captureLevel: () -> Float,
     currentVersionName: String,
+    devPreviewPort: CircleHostPreviewPort,
     sinks: LinkProductSinks,
     private val composer: ComposerDraftStore,
     private val releaseCaptureFiles: () -> Unit,
@@ -66,14 +68,11 @@ internal class PhoneLinkProductGraph private constructor(
     composerDraft = composer.draft.map { it.text },
     composerDraftValue = { composer.draft.value.text },
     currentVersionName = currentVersionName,
+    devPreviewPort = devPreviewPort,
     capturedTurns = capturedTurns,
     navigation = navigation,
     sinks = sinks,
 ) {
-    val composerDraft: StateFlow<ComposerDraft> get() = composer.draft
-
-    fun onComposerEdited(text: String) = composer.edit(text)
-
     init {
         processScope.launch {
             coordinator.acceptedDrafts.collect { accepted ->
@@ -98,6 +97,7 @@ internal class PhoneLinkProductGraph private constructor(
             requestMicrophone: () -> Unit,
             openAttachment: (String) -> Unit,
             publicLinkCommand: () -> Unit,
+            devPreviewPort: CircleHostPreviewPort,
         ): PhoneLinkProductGraph {
             val captures = PhoneCaptureAdapter(coordinator, recorder)
             val composer = ComposerDraftStore()
@@ -114,6 +114,7 @@ internal class PhoneLinkProductGraph private constructor(
                 captureByteLimit = coordinator::selectedVoiceByteLimit,
                 captureLevel = recorder::currentLevel,
                 currentVersionName = currentVersionName,
+                devPreviewPort = devPreviewPort,
                 sinks = LinkProductSinks(
                     captureCommand = { event ->
                         if (event.operation == CaptureOperation.RECOVER) requestMicrophone()
@@ -147,6 +148,7 @@ internal class PhoneLinkProductGraph private constructor(
             openAttachment: (String) -> Unit,
             publicLinkCommand: () -> Unit,
             captureLevel: () -> Float,
+            devPreviewPort: CircleHostPreviewPort,
         ): PhoneLinkProductGraph {
             val composer = ComposerDraftStore()
             val speakReplies = MutableStateFlow(coordinator.speaksReplies())
@@ -162,6 +164,7 @@ internal class PhoneLinkProductGraph private constructor(
                 captureByteLimit = coordinator::selectedVoiceByteLimit,
                 captureLevel = captureLevel,
                 currentVersionName = currentVersionName,
+                devPreviewPort = devPreviewPort,
                 sinks = LinkProductSinks(
                     captureCommand = { event ->
                         when (event.operation) {

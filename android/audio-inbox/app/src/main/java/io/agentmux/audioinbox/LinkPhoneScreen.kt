@@ -3,10 +3,10 @@ package io.agentmux.audioinbox
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adelost.designkit.ui.CircleSurfaceClass
 import com.adelost.designkit.ui.LocalCircleSurfaceLayout
-import com.adelost.ringkit.ui.CircleHostPreviewPort
 import com.adelost.ringkit.ui.RingActionCueHost
 import io.agentmux.linkui.LinkWatchSurface
 import io.agentmux.linkui.product.LinkRoute
@@ -22,14 +22,11 @@ import io.agentmux.linkui.product.generated.GeneratedLinkDevHostComponents
 @Composable
 internal fun LinkPhoneScreen(
     graph: PhoneLinkProductGraph,
-    currentVersionName: String,
-    hostPreview: CircleHostPreviewPort,
-    onRequestMicrophone: () -> Unit,
-    recordedBytes: () -> Long,
-    recordedLevel: () -> Float,
-    onPublicLink: () -> Unit,
 ) {
+    val rendererRegistrations = remember(graph) { graph.nativePhoneRendererRegistrations() }
+    check(rendererRegistrations.isNotEmpty())
     val route by graph.activePage.collectAsStateWithLifecycle()
+    val devPreview by graph.devPreviewRenderInputs.collectAsStateWithLifecycle()
     BackHandler(route != LinkRoute.HOME) {
         check(graph.navigation.back())
     }
@@ -44,18 +41,13 @@ internal fun LinkPhoneScreen(
                         }.component == GeneratedLinkDevHostComponent.DEV_PREVIEW,
                 )
                 LinkDevHostScreen(
-                    port = hostPreview,
-                    inspections = graph.inspections,
-                    onBack = { check(graph.navigation.back()) },
+                    inputs = devPreview,
+                    emitter = graph.devPreviewRenderEmitter,
                 )
             }
             LocalCircleSurfaceLayout.current.surfaceClass == CircleSurfaceClass.ROUND -> {
                 LinkWatchSurface(
                     graph = graph,
-                    currentVersionName = currentVersionName,
-                    onRequestMicrophone = onRequestMicrophone,
-                    recordedBytes = recordedBytes,
-                    recordedLevel = recordedLevel,
                     onOpenDevHost = {
                         graph.onDevHostOpen(LinkRouteOpenEvent(LinkRoute.DEV_HOST))
                     },
@@ -64,17 +56,12 @@ internal fun LinkPhoneScreen(
             route == LinkRoute.SETTINGS -> {
                 LinkPhoneSettings(
                     graph = graph,
-                    currentVersionName = currentVersionName,
                     onBack = { check(graph.navigation.back()) },
-                    onPublicLink = onPublicLink,
                 )
             }
             else -> {
                 LinkPhoneHome(
                     graph = graph,
-                    onRequestMicrophone = onRequestMicrophone,
-                    recordedBytes = recordedBytes,
-                    recordedLevel = recordedLevel,
                 )
             }
         }

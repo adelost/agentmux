@@ -26,11 +26,11 @@ test("the mandatory graph has no parallel list and one binding per data input", 
   assert.equal("legos" in product, false, "old lego graph must not survive");
   assert.equal("ui" in product, false, "old ui entry list must not survive");
   assert.equal("componentCatalog" in product, false, "port-less catalog must not survive");
-  assert.equal(product.nodes.length, 28);
+  assert.equal(product.nodes.length, 30);
   assert.equal(product.nodes.filter(({ nodeTypeRef }) =>
-    product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "service").length, 11);
+    product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "service").length, 12);
   assert.equal(product.nodes.filter(({ nodeTypeRef }) =>
-    product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "present").length, 17);
+    product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "present").length, 18);
   assert.equal(product.components.length, 15);
   assert.equal(product.componentTypes.length, 15);
   for (const node of product.nodes) {
@@ -146,7 +146,38 @@ test("conformance engine goes red on manifest drift", () => {
   };
   const findings = productArtifactConformance(product, withoutComponent);
   assert.ok(findings.some((finding) =>
-    finding.axis === "component-render" && finding.direction === "missing" && finding.subject.startsWith("talk@")
+    finding.axis === "component-render" && finding.direction === "missing" && finding.subject === "talk"
+  ));
+  const swappedTargetInput = {
+    ...manifest,
+    components: manifest.components.map((component) => {
+      if (component.component.instanceRef !== "target") return component;
+      const [first, second, ...rest] = component.immutableInputs;
+      assert.ok(first && second);
+      return {
+        ...component,
+        immutableInputs: [
+          { ...first, producerPortRef: second.producerPortRef },
+          second,
+          ...rest,
+        ],
+      };
+    }),
+  };
+  assert.ok(productArtifactConformance(product, swappedTargetInput).some((finding) =>
+    finding.axis === "component-render" && finding.direction === "mismatch" &&
+      finding.subject === "target.model"
+  ));
+  const missingLatestEvent = {
+    ...manifest,
+    components: manifest.components.map((component) =>
+      component.component.instanceRef === "latest" && component.eventEmitter.kind === "typed"
+        ? { ...component, eventEmitter: { ...component.eventEmitter, bindings: component.eventEmitter.bindings.slice(1) } }
+        : component),
+  };
+  assert.ok(productArtifactConformance(product, missingLatestEvent).some((finding) =>
+    finding.axis === "component-render" && finding.direction === "missing" &&
+      finding.subject.includes("latest.playbackCommand")
   ));
   const withoutIcon = { ...manifest, icons: manifest.icons.filter(({ iconId }) => iconId !== "record") };
   assert.ok(productArtifactConformance(product, withoutIcon).some((finding) =>
@@ -185,11 +216,12 @@ test("conformance engine goes red on manifest drift", () => {
     finding.axis === "navigation" && finding.direction === "missing" &&
       finding.subject === "navigation.service.activePage->page-host.activePage"
   ));
+  const wearManifest = manifests[1]!;
   const driftedBack = {
-    ...manifest,
+    ...wearManifest,
     navigation: {
-      ...manifest.navigation,
-      artifacts: manifest.navigation.artifacts.map((artifact) => artifact.artifactRef === "wear-full-ui"
+      ...wearManifest.navigation,
+      artifacts: wearManifest.navigation.artifacts.map((artifact) => artifact.artifactRef === "wear-full-ui"
         ? {
           ...artifact,
           pages: artifact.pages.map((page) => page.pageRef === "settings"

@@ -16,6 +16,9 @@ import {
 export const LINK_NAVIGATION_ID = "link.navigation";
 export const routeOpenContract = navigationRouteContract(LINK_NAVIGATION_ID);
 export const activePageContract = navigationActivePageContract(LINK_NAVIGATION_ID);
+export const navigationBackContract = {
+  id: "link.navigation-back", kind: "event", boundary: "ui-event", fields: [],
+} as const;
 
 export const captureCommandContract = {
   id: "link.capture-command", kind: "event", boundary: "ui-event",
@@ -27,10 +30,12 @@ export const captureStatusContract = {
     field("phase", finiteValueRef("link.capture-phase")),
     field("available", "boolean"),
     field("unavailableReason", "string", { nullable: true }),
+    field("recoveryActionAvailable", "boolean"),
     field("startedAtMs", "integer", { nullable: true, unit: "si.millisecond", clockDomain: "wall" }),
     field("byteCount", "integer", { unit: "si.byte" }),
     field("byteLimit", "integer", { nullable: true, unit: "si.byte" }),
     field("level", "number"),
+    field("sampledAtMs", "integer", { unit: "si.millisecond", clockDomain: "wall" }),
   ],
 } as const;
 export const capturedTurnContract = {
@@ -142,5 +147,13 @@ export const recoveryStatusContract = {
   fields: [
     field("phase", finiteValueRef("link.recovery-phase")),
     field("detail", "string", { nullable: true }),
+  ],
+} as const;
+
+export const devPreviewStatusContract = {
+  id: "link.dev-preview-status", kind: "state", boundary: "presentation",
+  fields: [
+    field("previewPort", valueRef("link.dev-preview-native"), { nullable: true }),
+    field("portInspections", valueRef("link.port-inspection-stream")),
   ],
 } as const;

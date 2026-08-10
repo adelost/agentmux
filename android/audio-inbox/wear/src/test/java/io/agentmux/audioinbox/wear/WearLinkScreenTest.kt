@@ -16,6 +16,10 @@ import io.agentmux.linkui.product.toRecoveryPresentation
 import io.agentmux.linkui.product.toSessionPresentation
 import io.agentmux.linkui.product.toTargetPresentation
 import io.agentmux.linkui.product.toUpdatePresentation
+import io.agentmux.linkui.product.toPlaybackPresentation
+import io.agentmux.linkui.product.LinkPlaybackCommandEvent
+import io.agentmux.linkcore.PlaybackOperation
+import io.agentmux.linkui.product.generated.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -237,14 +241,43 @@ private fun LinkState.watchRows(
     onStop: () -> Unit = {},
     onReplay: () -> Unit = {},
 ): List<RowSpec> = linkWatchRows(
-    target = toTargetPresentation { null },
-    conversation = toConversationPresentation(),
-    session = toSessionPresentation(publicLinkActive),
-    onSelectTarget = onSelectTarget,
+    target = GeneratedTargetRenderInputs(
+        toTargetPresentation { null },
+        GeneratedLinkTargetKindPresentation(GeneratedLinkTargetKindValue.valueOf(
+            toTargetPresentation { null }.kind.name,
+        )),
+        toSessionPresentation(publicLinkActive),
+        GeneratedLinkConnectionStatePresentation(GeneratedLinkConnectionStateValue.valueOf(connection.name)),
+        toRecoveryPresentation(),
+        GeneratedLinkRecoveryPhasePresentation(GeneratedLinkRecoveryPhaseValue.valueOf(
+            toRecoveryPresentation().phase.name,
+        )),
+    ),
+    targetEmitter = GeneratedTargetRenderEmitter { onSelectTarget(it.targetId) },
+    latest = GeneratedLatestRenderInputs(
+        toConversationPresentation(""),
+        GeneratedLinkDeliveryPhasePresentation(GeneratedLinkDeliveryPhaseValue.valueOf(
+            toConversationPresentation("").deliveryPhase.name,
+        )),
+        GeneratedLinkReplyPhasePresentation(GeneratedLinkReplyPhaseValue.valueOf(
+            toConversationPresentation("").replyPhase.name,
+        )),
+        toPlaybackPresentation(),
+        GeneratedLinkPlaybackPhasePresentation(GeneratedLinkPlaybackPhaseValue.valueOf(
+            toPlaybackPresentation().phase.name,
+        )),
+    ),
+    latestEmitter = object : GeneratedLatestRenderEmitter {
+        override fun playbackCommand(event: LinkPlaybackCommandEvent) = when (event.operation) {
+            PlaybackOperation.PLAY -> if (toPlaybackPresentation().phase in setOf(
+                    PlaybackPhase.FAILED, PlaybackPhase.STOPPED, PlaybackPhase.PLAYED, PlaybackPhase.SKIPPED,
+                )) onReplay() else onPlay()
+            PlaybackOperation.STOP -> onStop()
+            PlaybackOperation.PAUSE, PlaybackOperation.RESUME -> Unit
+        }
+        override fun openAttachment(event: io.agentmux.linkui.product.LinkOpenAttachmentEvent) = Unit
+    },
     onOpenCapture = onOpenCapture,
-    onPlay = onPlay,
-    onStop = onStop,
-    onReplay = onReplay,
 )
 
 private fun LinkState.watchSettingsRows(
@@ -255,11 +288,25 @@ private fun LinkState.watchSettingsRows(
     zoneId: ZoneId = ZoneId.systemDefault(),
     locale: Locale = Locale.getDefault(),
 ): List<RowSpec> = linkWatchSettingsRows(
-    session = toSessionPresentation(publicLinkActive = false),
-    updates = updateState.toUpdatePresentation(),
-    recovery = toRecoveryPresentation(),
-    currentVersionName = currentVersionName,
-    onInstallUpdate = onInstallUpdate,
+    connection = GeneratedConnectionRenderInputs(
+        toSessionPresentation(publicLinkActive = false),
+        GeneratedLinkConnectionStatePresentation(GeneratedLinkConnectionStateValue.valueOf(connection.name)),
+    ),
+    updates = GeneratedUpdatesRenderInputs(
+        updateState.toUpdatePresentation(currentVersionName),
+        GeneratedLinkUpdatePhasePresentation(GeneratedLinkUpdatePhaseValue.valueOf(
+            updateState.toUpdatePresentation(currentVersionName).phase.name,
+        )),
+    ),
+    updateEmitter = GeneratedUpdatesRenderEmitter {
+        if (it.operation == io.agentmux.linkcore.LinkUpdateOperation.INSTALL) onInstallUpdate()
+    },
+    recovery = GeneratedRecoveryRenderInputs(
+        toRecoveryPresentation(),
+        GeneratedLinkRecoveryPhasePresentation(GeneratedLinkRecoveryPhaseValue.valueOf(
+            toRecoveryPresentation().phase.name,
+        )),
+    ),
     onOpenDevHost = onOpenDevHost,
     zoneId = zoneId,
     locale = locale,

@@ -33,6 +33,7 @@ class LinkProductGraphTotalityTest {
             composerDraft = flowOf(""),
             composerDraftValue = { "" },
             currentVersionName = "test",
+            devPreviewPort = null,
             capturedTurns = MutableSharedFlow(),
             navigation = LinkNavigationController(
                 artifact = io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef.PHONE_FULL_UI,

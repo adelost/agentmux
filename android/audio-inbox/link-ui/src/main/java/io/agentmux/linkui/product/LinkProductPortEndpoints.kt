@@ -13,6 +13,9 @@ internal object NavigationOpenSettingsInput :
 internal object NavigationOpenDevHostInput :
     ProductInputPort<LinkRouteOpenEvent, Unit>(PortIds.NAVIGATION_SERVICE_OPENDEVHOST)
 
+internal object NavigationBackInput :
+    ProductInputPort<LinkNavigationBackEvent, Unit>(PortIds.NAVIGATION_SERVICE_BACK)
+
 internal object NavigationActivePageOutput :
     ProductOutputPort<LinkRoute>(PortIds.NAVIGATION_SERVICE_ACTIVEPAGE)
 
@@ -60,6 +63,15 @@ internal object SessionCommandInput :
 
 internal object HostOpenAttachmentInput :
     ProductInputPort<LinkOpenAttachmentEvent, Unit>(PortIds.HOST_SERVICE_OPENATTACHMENT)
+
+internal object DevPreviewStatusOutput :
+    ProductOutputPort<LinkDevPreviewPresentation>(PortIds.DEV_PREVIEW_SERVICE_STATUS)
+
+internal object DevPreviewPresentationSourceInput :
+    ProductDataInput<LinkDevPreviewPresentation>(PortIds.DEV_PREVIEW_PRESENTATION_SOURCE)
+
+internal object DevPreviewPresentationModelOutput :
+    ProductOutputPort<LinkDevPreviewPresentation>(PortIds.DEV_PREVIEW_PRESENTATION_MODEL)
 
 internal object HistoryStatusOutput :
     ProductOutputPort<LinkHistoryPresentation>(PortIds.HISTORY_SERVICE_STATUS)
@@ -199,3 +211,9 @@ internal object SettingsActionOpenEvent :
 
 internal object DevHostOpenEvent :
     ProductComponentEvent<LinkRouteOpenEvent, Unit>(PortIds.DEV_HOST_OPEN)
+
+internal object DevPreviewModelInput :
+    ProductComponentInput<LinkDevPreviewPresentation>(PortIds.DEV_PREVIEW_MODEL)
+
+internal object DevPreviewBackEvent :
+    ProductComponentEvent<LinkNavigationBackEvent, Unit>(PortIds.DEV_PREVIEW_BACK)

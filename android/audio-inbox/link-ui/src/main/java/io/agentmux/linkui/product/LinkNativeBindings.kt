@@ -1,6 +1,7 @@
 package io.agentmux.linkui.product
 
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.runtime.Composable
 import com.adelost.designkit.ui.RingIcons
 import io.agentmux.linkcore.CaptureOperation
 import io.agentmux.linkcore.CapturePhase
@@ -16,7 +17,6 @@ import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.ReplyPhase
 import io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef
 import io.agentmux.linkui.product.generated.GeneratedLinkComponentId
-import io.agentmux.linkui.product.generated.GeneratedLinkComponentTypeId
 import io.agentmux.linkui.product.generated.GeneratedLinkFiniteValueId
 import io.agentmux.linkui.product.generated.GeneratedLinkNativeLegoCatalog.FiniteValueIds
 import io.agentmux.linkui.product.generated.GeneratedLinkCapturePhaseAuthority
@@ -29,15 +29,50 @@ import io.agentmux.linkui.product.generated.GeneratedLinkRecoveryPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkReplyPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkTargetKindAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkUpdatePhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkRendererEventId
+import io.agentmux.linkui.product.generated.GeneratedLinkRendererInputId
+import io.agentmux.linkui.product.generated.GeneratedLinkRendererScopeId
 import kotlin.enums.enumEntries
 
-/** One component instance attested to a native renderer and its host artifacts. */
-data class LinkNativeComponentBinding(
-    val componentType: GeneratedLinkComponentTypeId,
-    val instances: Set<GeneratedLinkComponentId>,
-    val rendererId: String,
-    val profiles: Set<GeneratedLinkArtifactRef>,
+data class LinkNativeRendererMountRegistration(
+    val scope: GeneratedLinkRendererScopeId,
+    val mount: @Composable (inputs: Any, emitter: Any) -> Unit,
 )
+
+data class LinkNativeRendererInputRegistration(
+    val input: GeneratedLinkRendererInputId,
+    val read: () -> Any,
+)
+
+data class LinkNativeRendererEventRegistration(
+    val event: GeneratedLinkRendererEventId,
+    val emit: (payload: Any) -> Unit,
+)
+
+sealed interface LinkNativeRendererEmitterRegistration {
+    data class Typed(val bindings: List<LinkNativeRendererEventRegistration>) :
+        LinkNativeRendererEmitterRegistration
+    data class Empty(val emit: (Nothing) -> Nothing = { error("read-only renderer emitted an event") }) :
+        LinkNativeRendererEmitterRegistration
+}
+
+data class LinkNativeComponentRendererRegistration(
+    val component: GeneratedLinkComponentId,
+    val mounts: List<LinkNativeRendererMountRegistration>,
+    val immutableInputs: List<LinkNativeRendererInputRegistration>,
+    val eventEmitter: LinkNativeRendererEmitterRegistration,
+) {
+    init {
+        require(mounts.isNotEmpty())
+        require(mounts.all { it.scope.declaration.component == component })
+        require(immutableInputs.all { it.input.declaration.component == component })
+        val events = (eventEmitter as? LinkNativeRendererEmitterRegistration.Typed)?.bindings.orEmpty()
+        require(events.all { it.event.declaration.component == component })
+        require(mounts.map { it.scope }.distinct().size == mounts.size)
+        require(immutableInputs.map { it.input }.distinct().size == immutableInputs.size)
+        require(events.map { it.event }.distinct().size == events.size)
+    }
+}
 
 /** One portable icon asset attested to its compile-bound CircleKit symbol. */
 data class LinkNativeIconBinding(
@@ -119,42 +154,18 @@ internal data class LinkNativeActionGroupBinding(
 )
 
 /**
- * The native attestation named by product-spec/native-registry/link.json.
+ * Shared node/navigation registrations composed into each host's schema-6 manifest.
  * Every entry binds a generated component/artifact id or a compile-checked
  * RingIcons/enum symbol, so a product change that drops one fails here at
  * compile time, and the manifest/parity tests fail on any other drift.
  */
 object LinkNativeBindings {
-    const val SCHEMA_VERSION = 5
+    const val SCHEMA_VERSION = 6
     const val SOURCE_FILE =
         "link-ui/src/main/java/io/agentmux/linkui/product/LinkNativeBindings.kt"
 
     val profiles: Set<GeneratedLinkArtifactRef> = GeneratedLinkArtifactRef.entries.toSet()
     private val both = profiles
-    private val phone = setOf(GeneratedLinkArtifactRef.PHONE_FULL_UI)
-
-    val components: List<LinkNativeComponentBinding> = listOf(
-        component(GeneratedLinkComponentTypeId.LINK_PAGE_HOST, "page-host", both, GeneratedLinkComponentId.PAGE_HOST),
-        component(GeneratedLinkComponentTypeId.LINK_TARGET_PICKER, "status", both, GeneratedLinkComponentId.TARGET),
-        component(GeneratedLinkComponentTypeId.LINK_LATEST_TURN, "conversation-feed", both, GeneratedLinkComponentId.LATEST),
-        component(GeneratedLinkComponentTypeId.LINK_COMPOSER, "composer", phone, GeneratedLinkComponentId.COMPOSER),
-        component(GeneratedLinkComponentTypeId.LINK_TALK, "capture", both, GeneratedLinkComponentId.TALK),
-        component(GeneratedLinkComponentTypeId.LINK_ACTIVE_PLAYBACK, "active-playback", phone, GeneratedLinkComponentId.ACTIVE_PLAYBACK),
-        component(GeneratedLinkComponentTypeId.LINK_CONNECTION_STATUS, "connection", both, GeneratedLinkComponentId.CONNECTION),
-        component(GeneratedLinkComponentTypeId.LINK_PUBLIC_LINK, "public-link", phone, GeneratedLinkComponentId.PUBLIC_LINK),
-        component(GeneratedLinkComponentTypeId.LINK_PREFERENCES, "preferences", phone, GeneratedLinkComponentId.PREFERENCES),
-        component(GeneratedLinkComponentTypeId.LINK_LOCAL_HISTORY, "local-history", phone, GeneratedLinkComponentId.LOCAL_HISTORY),
-        component(GeneratedLinkComponentTypeId.LINK_UPDATES, "updates", both, GeneratedLinkComponentId.UPDATES),
-        component(GeneratedLinkComponentTypeId.LINK_RECOVERY_STATUS, "recovery", both, GeneratedLinkComponentId.RECOVERY),
-        component(
-            GeneratedLinkComponentTypeId.LINK_NAVIGATION_ENTRY,
-            "navigation-entry",
-            both,
-            GeneratedLinkComponentId.SETTINGS_ACTION,
-        ),
-        component(GeneratedLinkComponentTypeId.LINK_DEV_HOST_ENTRY, "dev-host-entry", phone, GeneratedLinkComponentId.DEV_HOST),
-        component(GeneratedLinkComponentTypeId.LINK_DEV_PREVIEW, "dev-preview", phone, GeneratedLinkComponentId.DEV_PREVIEW),
-    )
 
     val icons: List<LinkNativeIconBinding> = listOf(
         icon("link", "RingIcons.Link", RingIcons.Link),
@@ -174,7 +185,7 @@ object LinkNativeBindings {
     internal val nodes: List<LinkNativeNodeBinding> = listOf(
         node(
             GeneratedLinkNodeId.NAVIGATION_SERVICE,
-            listOf(NavigationOpenSettingsInput, NavigationOpenDevHostInput),
+            listOf(NavigationOpenSettingsInput, NavigationOpenDevHostInput, NavigationBackInput),
             listOf(NavigationActivePageOutput),
         ),
         node(
@@ -184,12 +195,12 @@ object LinkNativeBindings {
         ),
         node(
             GeneratedLinkNodeId.CONVERSATION_SERVICE,
-            listOf(ConversationTurnInput, ConversationComposeInput),
+            listOf(ConversationTurnInput, ConversationComposeInput, ConversationEditInput),
             listOf(ConversationStatusOutput),
         ),
         node(
             GeneratedLinkNodeId.PLAYBACK_SERVICE,
-            listOf(PlaybackCommandInput),
+            listOf(PlaybackCommandInput, PlaybackLatestCommandInput),
             listOf(PlaybackStatusOutput),
         ),
         node(
@@ -197,7 +208,9 @@ object LinkNativeBindings {
             listOf(TargetSelectInput),
             listOf(TargetDirectoryOutput),
         ),
-        node(GeneratedLinkNodeId.SESSION_SERVICE, emptyList(), listOf(SessionStatusOutput)),
+        node(GeneratedLinkNodeId.SESSION_SERVICE, listOf(SessionCommandInput), listOf(SessionStatusOutput)),
+        node(GeneratedLinkNodeId.HOST_SERVICE, listOf(HostOpenAttachmentInput), emptyList()),
+        node(GeneratedLinkNodeId.DEV_PREVIEW_SERVICE, emptyList(), listOf(DevPreviewStatusOutput)),
         node(GeneratedLinkNodeId.HISTORY_SERVICE, emptyList(), listOf(HistoryStatusOutput)),
         node(
             GeneratedLinkNodeId.PREFERENCES_SERVICE,
@@ -254,6 +267,11 @@ object LinkNativeBindings {
             GeneratedLinkNodeId.RECOVERY_PRESENTATION,
             listOf(RecoveryPresentationSourceInput),
             listOf(RecoveryPresentationModelOutput),
+        ),
+        node(
+            GeneratedLinkNodeId.DEV_PREVIEW_PRESENTATION,
+            listOf(DevPreviewPresentationSourceInput),
+            listOf(DevPreviewPresentationModelOutput),
         ),
         node(
             GeneratedLinkNodeId.LINK_CAPTURE_PHASE_PRESENTATION_ADAPTER,
@@ -344,9 +362,17 @@ object LinkNativeBindings {
         actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.ACTIVE_PLAYBACK,
             action(ActivePlaybackCommandEvent, PlaybackCommandInput)),
         actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.COMPOSER,
-            action(ComposerComposeEvent, ConversationComposeInput)),
+            action(ComposerComposeEvent, ConversationComposeInput),
+            action(ComposerEditEvent, ConversationEditInput)),
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.LATEST,
+            action(LatestPlaybackCommandEvent, PlaybackLatestCommandInput),
+            action(LatestOpenAttachmentEvent, HostOpenAttachmentInput)),
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.PUBLIC_LINK,
+            action(PublicLinkCommandEvent, SessionCommandInput)),
         actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.DEV_HOST,
             action(DevHostOpenEvent, NavigationOpenDevHostInput, LinkNativeActionEffect.PUSH)),
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.DEV_PREVIEW,
+            action(DevPreviewBackEvent, NavigationBackInput)),
         actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.PREFERENCES,
             action(PreferencesToggleEvent, PreferencesToggleInput)),
         actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.SETTINGS_ACTION,
@@ -365,16 +391,12 @@ object LinkNativeBindings {
             action(TargetSelectEvent, TargetSelectInput)),
         actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.UPDATES,
             action(UpdatesCommandEvent, UpdatesCommandInput)),
+        actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.LATEST,
+            action(LatestPlaybackCommandEvent, PlaybackLatestCommandInput),
+            action(LatestOpenAttachmentEvent, HostOpenAttachmentInput)),
     )
 
     init {
-        require(components.map { it.componentType }.distinct().size == components.size)
-        components.forEach { binding ->
-            require(binding.instances.isNotEmpty())
-            require(binding.instances.all { it.type == binding.componentType }) {
-                "Component type ${binding.componentType.wireId} owns a mismatched instance"
-            }
-        }
         val graph = ProductPortGraph()
         actionGroups.flatMap { it.actions }.forEach { action ->
             val generated = graph.requireComponentEventBinding(action.source)
@@ -388,13 +410,6 @@ object LinkNativeBindings {
         requireNotNull(icons.singleOrNull { it.iconId == iconId }) {
             "No native Link icon binding for $iconId"
         }.icon
-
-    private fun component(
-        type: GeneratedLinkComponentTypeId,
-        rendererId: String,
-        supportedProfiles: Set<GeneratedLinkArtifactRef>,
-        vararg instances: GeneratedLinkComponentId,
-    ) = LinkNativeComponentBinding(type, instances.toSet(), rendererId, supportedProfiles)
 
     private fun icon(id: String, symbol: String, value: ImageVector) =
         LinkNativeIconBinding(id, symbol, value)

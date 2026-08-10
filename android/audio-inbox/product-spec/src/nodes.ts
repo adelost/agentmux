@@ -13,6 +13,8 @@ import {
   recoveryService,
   recoveryPresentation,
   hostEffectService,
+  devPreviewService,
+  devPreviewPresentation,
   sessionService,
   sessionPresentation,
   targetDirectoryService,
@@ -44,6 +46,7 @@ export const linkNodes = [
     bindings: {
       openSettings: "settings-action.open",
       openDevHost: "dev-host.open",
+      back: "dev-preview.back",
     },
     activation: { kind: "lifetime", lifecycleSources: [] },
   },
@@ -85,6 +88,10 @@ export const linkNodes = [
     id: "host.service", nodeTypeRef: hostEffectService.id,
     config: {}, bindings: { openAttachment: "latest.openAttachment" },
     activation: { kind: "lifetime", lifecycleSources: [] },
+  },
+  {
+    id: "dev-preview.service", nodeTypeRef: devPreviewService.id,
+    config: {}, bindings: {}, activation: { kind: "lifetime", lifecycleSources: [] },
   },
   {
     id: "history.service", nodeTypeRef: historyService.id,
@@ -145,6 +152,10 @@ export const linkNodes = [
   {
     id: "recovery.presentation", nodeTypeRef: recoveryPresentation.id,
     config: {}, bindings: { source: "recovery.service.status" },
+  },
+  {
+    id: "dev-preview.presentation", nodeTypeRef: devPreviewPresentation.id,
+    config: {}, bindings: { source: "dev-preview.service.status" },
   },
   capturePhaseAuthority.adapter.node,
   deliveryPhaseAuthority.adapter.node,

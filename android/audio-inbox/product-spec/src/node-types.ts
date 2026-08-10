@@ -21,6 +21,8 @@ import {
   targetSelectContract,
   updateCommandContract,
   updateStatusContract,
+  devPreviewStatusContract,
+  navigationBackContract,
 } from "./contracts.js";
 import {
   capturePhaseAuthority,
@@ -52,7 +54,10 @@ const runtime = <
  */
 export const navigationService = service({
   id: "link.navigation",
-  inputs: [port("openSettings", routeOpenContract), port("openDevHost", routeOpenContract)],
+  inputs: [
+    port("openSettings", routeOpenContract), port("openDevHost", routeOpenContract),
+    port("back", navigationBackContract),
+  ],
   outputs: [port("activePage", activePageContract)],
   runtime: runtime("instance", "instance", "transient", "none", [], ["navigation.route-state"]),
 } as const);
@@ -103,6 +108,13 @@ export const hostEffectService = service({
   inputs: [port("openAttachment", openAttachmentContract)],
   outputs: [],
   runtime: runtime("external", "process", "transient", "none", [], ["host.open-uri"]),
+} as const);
+
+export const devPreviewService = service({
+  id: "link.dev-preview",
+  inputs: [],
+  outputs: [port("status", devPreviewStatusContract)],
+  runtime: runtime("external", "process", "transient", "none", ["dev.inspection"], ["dev.render"]),
 } as const);
 
 /** Local history retention truth; the retention policy constant stays native. */
@@ -156,6 +168,7 @@ export const historyPresentation = presentation("link.present.history", historyS
 export const preferencesPresentation = presentation("link.present.preferences", preferencesStatusContract);
 export const updatesPresentation = presentation("link.present.updates", updateStatusContract);
 export const recoveryPresentation = presentation("link.present.recovery", recoveryStatusContract);
+export const devPreviewPresentation = presentation("link.present.dev-preview", devPreviewStatusContract);
 
 export const linkNodeTypes = [
   navigationService,
@@ -169,6 +182,7 @@ export const linkNodeTypes = [
   updatesService,
   recoveryService,
   hostEffectService,
+  devPreviewService,
   capturePresentation,
   conversationPresentation,
   playbackPresentation,
@@ -178,6 +192,7 @@ export const linkNodeTypes = [
   preferencesPresentation,
   updatesPresentation,
   recoveryPresentation,
+  devPreviewPresentation,
   capturePhaseAuthority.adapter.type,
   deliveryPhaseAuthority.adapter.type,
   replyPhaseAuthority.adapter.type,

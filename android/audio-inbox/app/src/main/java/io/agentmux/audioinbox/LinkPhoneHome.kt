@@ -1,9 +1,9 @@
 package io.agentmux.audioinbox
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -16,7 +16,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adelost.designkit.ui.CircleActionTiming
@@ -56,21 +55,11 @@ import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
 @Composable
 internal fun LinkPhoneHome(
     graph: PhoneLinkProductGraph,
-    onRequestMicrophone: () -> Unit,
-    recordedBytes: () -> Long,
-    recordedLevel: () -> Float,
 ) {
-    val target by graph.target.collectAsStateWithLifecycle()
-    val connection by graph.connection.collectAsStateWithLifecycle()
-    val latest by graph.latest.collectAsStateWithLifecycle()
-    val playback by graph.activePlayback.collectAsStateWithLifecycle()
-    val recovery by graph.recovery.collectAsStateWithLifecycle()
-    val composer by graph.composerDraft.collectAsStateWithLifecycle()
-    val captureSpec by graph.captureSpec.collectAsStateWithLifecycle()
-    val listState = rememberLazyListState()
-    LaunchedEffect(latest.turns.size) {
-        if (latest.turns.isNotEmpty()) listState.animateScrollToItem(latest.turns.lastIndex)
-    }
+    val target by graph.targetRenderInputs.collectAsStateWithLifecycle()
+    val latest by graph.latestRenderInputs.collectAsStateWithLifecycle()
+    val composer by graph.composerRenderInputs.collectAsStateWithLifecycle()
+    val talk by graph.talkRenderInputs.collectAsStateWithLifecycle()
     Column(
         verticalArrangement = Arrangement.spacedBy(2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -98,87 +87,86 @@ internal fun LinkPhoneHome(
         tree.orderedMounts.forEach { mount ->
             when (mount.component) {
                 GeneratedLinkHomeComponent.PAGE_HOST -> Unit
-                GeneratedLinkHomeComponent.TARGET -> LinkStatusRows(
-                    target = target,
-                    session = connection,
-                    recoveryDetail = recovery.detail.takeIf {
-                        recovery.phase == LinkRecoveryPhase.QUARANTINED
-                    },
-                    onSelectTarget = { graph.onTargetSelect(LinkTargetSelectEvent(it)) },
-                    icon = LinkNativeBindings.requireIcon("target"),
-                )
-                GeneratedLinkHomeComponent.LATEST -> LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    if (latest.turns.isEmpty()) {
-                        item("empty") {
-                            PhoneRow(
-                                "CONVERSATION",
-                                "NO MESSAGES YET",
-                                LinkNativeBindings.requireIcon("speaker"),
-                            )
-                        }
-                    } else {
-                        items(latest.turns, key = LinkTurn::turnId) { turn ->
-                            ConversationTurn(
-                                turn = turn,
-                                isLatest = turn.turnId == latest.turns.last().turnId,
-                                isActive = turn.turnId == playback.activeTurnId,
-                                onPlay = { turnId ->
-                                    graph.onActivePlaybackCommand(
-                                        LinkPlaybackCommandEvent(PlaybackOperation.PLAY, turnId),
-                                    )
-                                },
-                                onPause = {
-                                    playback.activeTurnId?.let { turnId ->
-                                        graph.onActivePlaybackCommand(
-                                            LinkPlaybackCommandEvent(PlaybackOperation.PAUSE, turnId),
-                                        )
-                                    }
-                                },
-                                onResume = {
-                                    playback.activeTurnId?.let { turnId ->
-                                        graph.onActivePlaybackCommand(
-                                            LinkPlaybackCommandEvent(PlaybackOperation.RESUME, turnId),
-                                        )
-                                    }
-                                },
-                                onStop = {
-                                    playback.activeTurnId?.let { turnId ->
-                                        graph.onActivePlaybackCommand(
-                                            LinkPlaybackCommandEvent(PlaybackOperation.STOP, turnId),
-                                        )
-                                    }
-                                },
-                            )
-                        }
-                    }
-                }
-                GeneratedLinkHomeComponent.COMPOSER -> RingTextComposer(
-                    spec = RingTextInputSpec(
-                        value = composer.text,
-                        label = "MESSAGE",
-                        enabled = target.selectedTargetId != null,
-                        maxLength = 4_000,
-                        onValueChange = graph::onComposerEdited,
-                        onSubmit = { graph.onComposerCompose(LinkComposeEvent(composer.text)) },
-                    ),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                GeneratedLinkHomeComponent.TARGET -> PhoneTargetRenderer(target, graph.targetRenderEmitter)
+                GeneratedLinkHomeComponent.LATEST -> Box(
+                    Modifier.fillMaxWidth().weight(1f),
+                ) { PhoneLatestRenderer(latest, graph.latestRenderEmitter) }
+                GeneratedLinkHomeComponent.COMPOSER -> PhoneComposerRenderer(
+                    composer, graph.composerRenderEmitter,
                 )
                 GeneratedLinkHomeComponent.TALK -> LinkCaptureControl(
-                    spec = captureSpec,
-                    recordedBytes = recordedBytes,
-                    recordedLevel = recordedLevel,
-                    onBegin = graph::beginCapture,
-                    onRelease = graph::releaseCapture,
-                    onCancel = graph::cancelCapture,
-                    onRecover = onRequestMicrophone,
+                    inputs = talk,
+                    emitter = graph.talkRenderEmitter,
                 )
                 GeneratedLinkHomeComponent.SETTINGS_ACTION -> Unit
             }
         }
+    }
+}
+
+@Composable
+internal fun PhoneTargetRenderer(
+    inputs: io.agentmux.linkui.product.generated.GeneratedTargetRenderInputs,
+    emitter: io.agentmux.linkui.product.generated.GeneratedTargetRenderEmitter,
+) = LinkStatusRows(
+    target = inputs.model,
+    session = inputs.session,
+    recoveryDetail = inputs.recovery.detail.takeIf {
+        inputs.recovery.phase == LinkRecoveryPhase.QUARANTINED
+    },
+    onSelectTarget = { emitter.select(LinkTargetSelectEvent(it)) },
+    icon = LinkNativeBindings.requireIcon("target"),
+)
+
+@Composable
+internal fun PhoneComposerRenderer(
+    inputs: io.agentmux.linkui.product.generated.GeneratedComposerRenderInputs,
+    emitter: io.agentmux.linkui.product.generated.GeneratedComposerRenderEmitter,
+) = RingTextComposer(
+    spec = RingTextInputSpec(
+        value = inputs.model.draftText,
+        label = "MESSAGE",
+        enabled = inputs.target.selectedTargetId != null,
+        maxLength = 4_000,
+        onValueChange = { emitter.edit(io.agentmux.linkui.product.LinkComposerEditEvent(it)) },
+        onSubmit = { emitter.compose(LinkComposeEvent(inputs.model.draftText)) },
+    ),
+    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+)
+
+@Composable
+internal fun PhoneLatestRenderer(
+    inputs: io.agentmux.linkui.product.generated.GeneratedLatestRenderInputs,
+    emitter: io.agentmux.linkui.product.generated.GeneratedLatestRenderEmitter,
+) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(inputs.model.turns.size) {
+        if (inputs.model.turns.isNotEmpty()) listState.animateScrollToItem(inputs.model.turns.lastIndex)
+    }
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+    if (inputs.model.turns.isEmpty()) {
+        item("empty") {
+            PhoneRow("CONVERSATION", "NO MESSAGES YET", LinkNativeBindings.requireIcon("speaker"))
+        }
+    } else {
+        items(inputs.model.turns, key = LinkTurn::turnId) { turn ->
+            val activeTurnId = inputs.playback.turnId
+            ConversationTurn(
+                turn = turn,
+                isLatest = turn.turnId == inputs.model.turns.last().turnId,
+                isActive = turn.turnId == activeTurnId,
+                onPlay = { emitter.playbackCommand(LinkPlaybackCommandEvent(PlaybackOperation.PLAY, it)) },
+                onPause = { activeTurnId?.let { emitter.playbackCommand(LinkPlaybackCommandEvent(PlaybackOperation.PAUSE, it)) } },
+                onResume = { activeTurnId?.let { emitter.playbackCommand(LinkPlaybackCommandEvent(PlaybackOperation.RESUME, it)) } },
+                onStop = { activeTurnId?.let { emitter.playbackCommand(LinkPlaybackCommandEvent(PlaybackOperation.STOP, it)) } },
+                onOpenAttachment = { emitter.openAttachment(io.agentmux.linkui.product.LinkOpenAttachmentEvent(it)) },
+            )
+        }
+    }
     }
 }
 
@@ -227,8 +215,8 @@ private fun ConversationTurn(
     onPause: () -> Unit,
     onResume: () -> Unit,
     onStop: () -> Unit,
+    onOpenAttachment: (String) -> Unit,
 ) {
-    val context = LocalContext.current
     PhoneRow(
         title = "YOU → ${turn.targetLabel} · ${turnStatusLabel(turn)}".uppercase(),
         sub = turn.userText.ifBlank { "VOICE MESSAGE" }.uppercase().take(320),
@@ -265,7 +253,7 @@ private fun ConversationTurn(
                 title = "OPEN ATTACHMENT",
                 sub = url.uppercase(),
                 icon = RingIcons.Link,
-                onTap = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },
+                onTap = { onOpenAttachment(url) },
             )
         }
     }

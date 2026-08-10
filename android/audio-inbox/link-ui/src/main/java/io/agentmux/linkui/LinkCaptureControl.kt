@@ -19,7 +19,10 @@ import com.adelost.ringkit.ui.RingPressLifecycle
 import com.adelost.ringkit.ui.RingPressLifecycleSpec
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.VoiceUploadPolicy
-import kotlinx.coroutines.delay
+import io.agentmux.linkcore.CaptureOperation
+import io.agentmux.linkui.product.LinkCaptureCommandEvent
+import io.agentmux.linkui.product.generated.GeneratedTalkRenderEmitter
+import io.agentmux.linkui.product.generated.GeneratedTalkRenderInputs
 
 /** Why the same recorder control is ready, recoverable, or unavailable. */
 sealed interface LinkCaptureAvailability {
@@ -58,33 +61,38 @@ data class LinkCaptureSpec(
  */
 @Composable
 fun LinkCaptureControl(
-    spec: LinkCaptureSpec,
-    recordedBytes: () -> Long,
-    recordedLevel: () -> Float,
-    onBegin: () -> Boolean,
-    onRelease: () -> Unit,
-    onCancel: () -> Unit,
-    onRecover: (() -> Unit)? = null,
-    modifier: Modifier = Modifier,
+    inputs: GeneratedTalkRenderInputs,
+    emitter: GeneratedTalkRenderEmitter,
 ) {
+    val model = inputs.model
+    val spec = LinkCaptureSpec(
+        phase = model.phase,
+        startedAtMs = model.startedAtMs ?: 0L,
+        availability = when {
+            model.available -> LinkCaptureAvailability.Ready
+            model.recoveryActionAvailable -> LinkCaptureAvailability.Recoverable(
+                "ENABLE MIC", model.unavailableReason.orEmpty(),
+            )
+            else -> LinkCaptureAvailability.Blocked("UNAVAILABLE", model.unavailableReason.orEmpty())
+        },
+        byteLimit = model.byteLimit,
+    )
     var elapsedMs by remember { mutableLongStateOf(0L) }
     var bytes by remember { mutableLongStateOf(0L) }
     val levels = remember { mutableStateListOf<Float>() }
-    LaunchedEffect(spec.phase, spec.startedAtMs) {
-        while (spec.phase == CapturePhase.LISTENING) {
-            elapsedMs = (System.currentTimeMillis() - spec.startedAtMs).coerceAtLeast(0L)
-            bytes = recordedBytes()
+    LaunchedEffect(model.sampledAtMs) {
+        if (spec.phase == CapturePhase.LISTENING) {
+            elapsedMs = (model.sampledAtMs - spec.startedAtMs).coerceAtLeast(0L)
+            bytes = model.byteCount
             if (levels.size == AUDIO_LEVEL_COUNT) levels.removeAt(0)
-            levels += recordedLevel().coerceIn(0f, 1f)
-            delay(AUDIO_LEVEL_SAMPLE_MS)
-        }
-        if (spec.phase != CapturePhase.LISTENING) {
+            levels += model.level.coerceIn(0f, 1f)
+        } else {
             elapsedMs = 0L
             bytes = 0L
             levels.clear()
         }
     }
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
         if (spec.phase == CapturePhase.LISTENING) {
             RingAudioCaptureFeedback(
                 RingAudioCaptureFeedbackSpec(
@@ -96,14 +104,11 @@ fun LinkCaptureControl(
         }
         when (val availability = spec.availability) {
             is LinkCaptureAvailability.Recoverable -> {
-                val recover = requireNotNull(onRecover) {
-                    "Recoverable capture availability requires a recovery action"
-                }
                 IconRing(
                     icon = RingIcons.Record,
                     label = availability.label,
                     sub = availability.detail,
-                    onTap = recover,
+                    onTap = { emitter.command(LinkCaptureCommandEvent(CaptureOperation.RECOVER)) },
                     diameter = 72.dp,
                 )
             }
@@ -127,9 +132,12 @@ fun LinkCaptureControl(
                         is LinkCaptureAvailability.Blocked -> availability.detail
                         is LinkCaptureAvailability.Recoverable -> availability.detail
                     },
-                    onBegin = onBegin,
-                    onRelease = onRelease,
-                    onCancel = onCancel,
+                    onBegin = {
+                        emitter.command(LinkCaptureCommandEvent(CaptureOperation.BEGIN))
+                        true
+                    },
+                    onRelease = { emitter.command(LinkCaptureCommandEvent(CaptureOperation.RELEASE)) },
+                    onCancel = { emitter.command(LinkCaptureCommandEvent(CaptureOperation.CANCEL)) },
                 ),
                 diameter = 72.dp,
             )
@@ -138,4 +146,3 @@ fun LinkCaptureControl(
 }
 
 private const val AUDIO_LEVEL_COUNT = 24
-private const val AUDIO_LEVEL_SAMPLE_MS = 100L

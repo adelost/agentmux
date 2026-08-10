@@ -4,7 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import com.adelost.ringkit.ui.CircleHostPreviewPort
 import com.adelost.ringkit.ui.RenderRingScreen
 import com.adelost.ringkit.ui.RingNavigator
 import com.adelost.ringkit.ui.RingScreen
@@ -14,8 +13,9 @@ import io.agentmux.linkui.linkProductPortRows
 import io.agentmux.linkui.product.LinkNativeBindings
 import io.agentmux.linkui.product.LinkRoute
 import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
-import io.agentmux.linkui.product.ProductPortInspection
-import kotlinx.coroutines.flow.Flow
+import io.agentmux.linkui.product.LinkNavigationBackEvent
+import io.agentmux.linkui.product.generated.GeneratedDevPreviewRenderEmitter
+import io.agentmux.linkui.product.generated.GeneratedDevPreviewRenderInputs
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -24,10 +24,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
  */
 @Composable
 internal fun LinkDevHostScreen(
-    port: CircleHostPreviewPort,
-    inspections: Flow<List<ProductPortInspection>>,
-    onBack: () -> Unit,
+    inputs: GeneratedDevPreviewRenderInputs,
+    emitter: GeneratedDevPreviewRenderEmitter,
 ) {
+    val port = requireNotNull(inputs.model.previewPort) { "Phone dev preview has no host port" }
+    val inspections = inputs.model.portInspections
     val items = remember { MutableStateFlow(emptyList<RowSpec>()) }
     val navigator = remember {
         RingNavigator(
@@ -56,6 +57,7 @@ internal fun LinkDevHostScreen(
             ),
         )
     }
+    val onBack = { emitter.back(LinkNavigationBackEvent) }
     BackHandler(onBack = onBack)
     RenderRingScreen(nav = navigator, onExit = onBack)
 }

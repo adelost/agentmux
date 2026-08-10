@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductIr.componentRenderContracts
-// Product declarations SHA-256: 9cd226c5d42a0e5712b6e809e6bf5b31e8db6c935994e58b92ffcc21e2d0797f
+// Product declarations SHA-256: 847618eab4643ee7df710bc1330a87c64c79e1c88cf9e34bc8191a8b6455251e
 package io.agentmux.linkui.product.generated
 
 import io.agentmux.linkui.product.*
@@ -119,6 +119,7 @@ enum class GeneratedLinkRendererInputId(val declaration: GeneratedLinkRendererIn
     UPDATES_UPDATESTATE(GeneratedLinkRendererInput(GeneratedLinkComponentId.UPDATES, "updates.updateState", "link.update-phase.presentation-adapter.presentation", "link.update-phase.payload", true)),
     RECOVERY_MODEL(GeneratedLinkRendererInput(GeneratedLinkComponentId.RECOVERY, "recovery.model", "recovery.presentation.model", "link.recovery-status", true)),
     RECOVERY_RECOVERYSTATE(GeneratedLinkRendererInput(GeneratedLinkComponentId.RECOVERY, "recovery.recoveryState", "link.recovery-phase.presentation-adapter.presentation", "link.recovery-phase.payload", true)),
+    DEV_PREVIEW_MODEL(GeneratedLinkRendererInput(GeneratedLinkComponentId.DEV_PREVIEW, "dev-preview.model", "dev-preview.presentation.model", "link.dev-preview-status", true)),
 }
 enum class GeneratedLinkRendererEventId(val declaration: GeneratedLinkRendererEvent) {
     TARGET_SELECT(GeneratedLinkRendererEvent(GeneratedLinkComponentId.TARGET, "target.select", "target.service.select", "link.target-select")),
@@ -133,6 +134,7 @@ enum class GeneratedLinkRendererEventId(val declaration: GeneratedLinkRendererEv
     UPDATES_COMMAND(GeneratedLinkRendererEvent(GeneratedLinkComponentId.UPDATES, "updates.command", "updates.service.command", "link.update-command")),
     SETTINGS_ACTION_OPEN(GeneratedLinkRendererEvent(GeneratedLinkComponentId.SETTINGS_ACTION, "settings-action.open", "navigation.service.openSettings", "link.navigation.route-intent")),
     DEV_HOST_OPEN(GeneratedLinkRendererEvent(GeneratedLinkComponentId.DEV_HOST, "dev-host.open", "navigation.service.openDevHost", "link.navigation.route-intent")),
+    DEV_PREVIEW_BACK(GeneratedLinkRendererEvent(GeneratedLinkComponentId.DEV_PREVIEW, "dev-preview.back", "navigation.service.back", "link.navigation-back")),
 }
 object GeneratedLinkRendererIdentities {
     val PAGE_HOST = GeneratedLinkRendererIdentity("page-host", "link.page-host")
@@ -223,7 +225,9 @@ data object GeneratedSettingsActionRenderInputs
 
 data object GeneratedDevHostRenderInputs
 
-data object GeneratedDevPreviewRenderInputs
+data class GeneratedDevPreviewRenderInputs(
+    val model: LinkDevPreviewPresentation,
+)
 
 data object GeneratedPageHostRenderEmitter
 
@@ -275,4 +279,6 @@ fun interface GeneratedDevHostRenderEmitter {
     fun open(event: LinkRouteOpenEvent)
 }
 
-data object GeneratedDevPreviewRenderEmitter
+fun interface GeneratedDevPreviewRenderEmitter {
+    fun back(event: LinkNavigationBackEvent)
+}

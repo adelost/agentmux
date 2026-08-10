@@ -1,0 +1,727 @@
+{
+  "stage": "native-export",
+  "schemaVersion": 6,
+  "sourceFile": "wear/src/main/java/io/agentmux/audioinbox/wear/WearLinkNativeRendererRegistrations.kt",
+  "profiles": ["wear-full-ui"],
+  "components": [
+    {
+      "component": {
+        "instanceRef": "connection",
+        "typeRef": "link.connection-status"
+      },
+      "mounts": [
+        {
+          "profileRef": "wear-full-ui",
+          "pageRef": "settings",
+          "surface": "round",
+          "mountRef": "connection"
+        }
+      ],
+      "immutableInputs": [
+        {
+          "consumerPortRef": "connection.model",
+          "producerPortRef": "session.presentation.model",
+          "contractRef": "link.session-status",
+          "required": true
+        },
+        {
+          "consumerPortRef": "connection.connectionState",
+          "producerPortRef": "link.connection-state.presentation-adapter.presentation",
+          "contractRef": "link.connection-state.payload",
+          "required": true
+        }
+      ],
+      "eventEmitter": { "kind": "empty" }
+    },
+    {
+      "component": {
+        "instanceRef": "latest",
+        "typeRef": "link.latest-turn"
+      },
+      "mounts": [
+        {
+          "profileRef": "wear-full-ui",
+          "pageRef": "home",
+          "surface": "round",
+          "mountRef": "latest"
+        }
+      ],
+      "immutableInputs": [
+        {
+          "consumerPortRef": "latest.model",
+          "producerPortRef": "conversation.presentation.model",
+          "contractRef": "link.conversation-status",
+          "required": true
+        },
+        {
+          "consumerPortRef": "latest.deliveryState",
+          "producerPortRef": "link.delivery-phase.presentation-adapter.presentation",
+          "contractRef": "link.delivery-phase.payload",
+          "required": true
+        },
+        {
+          "consumerPortRef": "latest.replyState",
+          "producerPortRef": "link.reply-phase.presentation-adapter.presentation",
+          "contractRef": "link.reply-phase.payload",
+          "required": true
+        },
+        {
+          "consumerPortRef": "latest.playback",
+          "producerPortRef": "playback.presentation.model",
+          "contractRef": "link.playback-status",
+          "required": true
+        },
+        {
+          "consumerPortRef": "latest.playbackState",
+          "producerPortRef": "link.playback-phase.presentation-adapter.presentation",
+          "contractRef": "link.playback-phase.payload",
+          "required": true
+        }
+      ],
+      "eventEmitter": {
+        "kind": "typed",
+        "bindings": [
+          {
+            "sourcePortRef": "latest.playbackCommand",
+            "targetPortRef": "playback.service.latestCommand",
+            "contractRef": "link.playback-command"
+          },
+          {
+            "sourcePortRef": "latest.openAttachment",
+            "targetPortRef": "host.service.openAttachment",
+            "contractRef": "link.open-attachment"
+          }
+        ]
+      }
+    },
+    {
+      "component": {
+        "instanceRef": "page-host",
+        "typeRef": "link.page-host"
+      },
+      "mounts": [
+        {
+          "profileRef": "wear-full-ui",
+          "pageRef": "home",
+          "surface": "round",
+          "mountRef": "page-host"
+        },
+        {
+          "profileRef": "wear-full-ui",
+          "pageRef": "settings",
+          "surface": "round",
+          "mountRef": "page-host"
+        }
+      ],
+      "immutableInputs": [
+        {
+          "consumerPortRef": "page-host.activePage",
+          "producerPortRef": "navigation.service.activePage",
+          "contractRef": "link.navigation.active-page",
+          "required": true
+        }
+      ],
+      "eventEmitter": { "kind": "empty" }
+    },
+    {
+      "component": {
+        "instanceRef": "recovery",
+        "typeRef": "link.recovery-status"
+      },
+      "mounts": [
+        {
+          "profileRef": "wear-full-ui",
+          "pageRef": "settings",
+          "surface": "round",
+          "mountRef": "recovery"
+        }
+      ],
+      "immutableInputs": [
+        {
+          "consumerPortRef": "recovery.model",
+          "producerPortRef": "recovery.presentation.model",
+          "contractRef": "link.recovery-status",
+          "required": true
+        },
+        {
+          "consumerPortRef": "recovery.recoveryState",
+          "producerPortRef": "link.recovery-phase.presentation-adapter.presentation",
+          "contractRef": "link.recovery-phase.payload",
+          "required": true
+        }
+      ],
+      "eventEmitter": { "kind": "empty" }
+    },
+    {
+      "component": {
+        "instanceRef": "settings-action",
+        "typeRef": "link.navigation-entry"
+      },
+      "mounts": [
+        {
+          "profileRef": "wear-full-ui",
+          "pageRef": "home",
+          "surface": "round",
+          "mountRef": "settings-action"
+        }
+      ],
+      "immutableInputs": [
+
+      ],
+      "eventEmitter": {
+        "kind": "typed",
+        "bindings": [
+          {
+            "sourcePortRef": "settings-action.open",
+            "targetPortRef": "navigation.service.openSettings",
+            "contractRef": "link.navigation.route-intent"
+          }
+        ]
+      }
+    },
+    {
+      "component": {
+        "instanceRef": "talk",
+        "typeRef": "link.talk"
+      },
+      "mounts": [
+        {
+          "profileRef": "wear-full-ui",
+          "pageRef": "home",
+          "surface": "round",
+          "mountRef": "talk"
+        }
+      ],
+      "immutableInputs": [
+        {
+          "consumerPortRef": "talk.model",
+          "producerPortRef": "capture.presentation.model",
+          "contractRef": "link.capture-status",
+          "required": true
+        },
+        {
+          "consumerPortRef": "talk.captureState",
+          "producerPortRef": "link.capture-phase.presentation-adapter.presentation",
+          "contractRef": "link.capture-phase.payload",
+          "required": true
+        }
+      ],
+      "eventEmitter": {
+        "kind": "typed",
+        "bindings": [
+          {
+            "sourcePortRef": "talk.command",
+            "targetPortRef": "capture.service.command",
+            "contractRef": "link.capture-command"
+          }
+        ]
+      }
+    },
+    {
+      "component": {
+        "instanceRef": "target",
+        "typeRef": "link.target-picker"
+      },
+      "mounts": [
+        {
+          "profileRef": "wear-full-ui",
+          "pageRef": "home",
+          "surface": "round",
+          "mountRef": "target"
+        }
+      ],
+      "immutableInputs": [
+        {
+          "consumerPortRef": "target.model",
+          "producerPortRef": "target.presentation.model",
+          "contractRef": "link.target-directory",
+          "required": true
+        },
+        {
+          "consumerPortRef": "target.targetState",
+          "producerPortRef": "link.target-kind.presentation-adapter.presentation",
+          "contractRef": "link.target-kind.payload",
+          "required": true
+        },
+        {
+          "consumerPortRef": "target.session",
+          "producerPortRef": "session.presentation.model",
+          "contractRef": "link.session-status",
+          "required": true
+        },
+        {
+          "consumerPortRef": "target.connectionState",
+          "producerPortRef": "link.connection-state.presentation-adapter.presentation",
+          "contractRef": "link.connection-state.payload",
+          "required": true
+        },
+        {
+          "consumerPortRef": "target.recovery",
+          "producerPortRef": "recovery.presentation.model",
+          "contractRef": "link.recovery-status",
+          "required": true
+        },
+        {
+          "consumerPortRef": "target.recoveryState",
+          "producerPortRef": "link.recovery-phase.presentation-adapter.presentation",
+          "contractRef": "link.recovery-phase.payload",
+          "required": true
+        }
+      ],
+      "eventEmitter": {
+        "kind": "typed",
+        "bindings": [
+          {
+            "sourcePortRef": "target.select",
+            "targetPortRef": "target.service.select",
+            "contractRef": "link.target-select"
+          }
+        ]
+      }
+    },
+    {
+      "component": {
+        "instanceRef": "updates",
+        "typeRef": "link.updates"
+      },
+      "mounts": [
+        {
+          "profileRef": "wear-full-ui",
+          "pageRef": "settings",
+          "surface": "round",
+          "mountRef": "updates"
+        }
+      ],
+      "immutableInputs": [
+        {
+          "consumerPortRef": "updates.model",
+          "producerPortRef": "updates.presentation.model",
+          "contractRef": "link.update-status",
+          "required": true
+        },
+        {
+          "consumerPortRef": "updates.updateState",
+          "producerPortRef": "link.update-phase.presentation-adapter.presentation",
+          "contractRef": "link.update-phase.payload",
+          "required": true
+        }
+      ],
+      "eventEmitter": {
+        "kind": "typed",
+        "bindings": [
+          {
+            "sourcePortRef": "updates.command",
+            "targetPortRef": "updates.service.command",
+            "contractRef": "link.update-command"
+          }
+        ]
+      }
+    }
+  ],
+  "icons": [
+    {
+      "iconId": "activity",
+      "nativeSymbol": "RingIcons.Activity"
+    },
+    {
+      "iconId": "download",
+      "nativeSymbol": "RingIcons.Download"
+    },
+    {
+      "iconId": "gear",
+      "nativeSymbol": "RingIcons.Gear"
+    },
+    {
+      "iconId": "link",
+      "nativeSymbol": "RingIcons.Link"
+    },
+    {
+      "iconId": "pencil",
+      "nativeSymbol": "RingIcons.Pencil"
+    },
+    {
+      "iconId": "phone",
+      "nativeSymbol": "RingIcons.Phone"
+    },
+    {
+      "iconId": "play",
+      "nativeSymbol": "RingIcons.Play"
+    },
+    {
+      "iconId": "record",
+      "nativeSymbol": "RingIcons.Record"
+    },
+    {
+      "iconId": "speaker",
+      "nativeSymbol": "RingIcons.Speaker"
+    },
+    {
+      "iconId": "target",
+      "nativeSymbol": "RingIcons.Target"
+    },
+    {
+      "iconId": "warning",
+      "nativeSymbol": "RingIcons.Warning"
+    },
+    {
+      "iconId": "wifi",
+      "nativeSymbol": "RingIcons.Wifi"
+    }
+  ],
+  "nodes": [
+    {
+      "nodeId": "capture.presentation",
+      "nativePortId": "capture.presentation",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "capture.service",
+      "nativePortId": "capture.service",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["command"],
+      "outputPorts": ["captured", "status"]
+    },
+    {
+      "nodeId": "conversation.presentation",
+      "nativePortId": "conversation.presentation",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "conversation.service",
+      "nativePortId": "conversation.service",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["compose", "edit", "turn"],
+      "outputPorts": ["status"]
+    },
+    {
+      "nodeId": "dev-preview.presentation",
+      "nativePortId": "dev-preview.presentation",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "dev-preview.service",
+      "nativePortId": "dev-preview.service",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": [],
+      "outputPorts": ["status"]
+    },
+    {
+      "nodeId": "history.presentation",
+      "nativePortId": "history.presentation",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "history.service",
+      "nativePortId": "history.service",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": [],
+      "outputPorts": ["status"]
+    },
+    {
+      "nodeId": "host.service",
+      "nativePortId": "host.service",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["openAttachment"],
+      "outputPorts": []
+    },
+    {
+      "nodeId": "link.capture-phase.presentation-adapter",
+      "nativePortId": "link.capture-phase.presentation-adapter",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "link.connection-state.presentation-adapter",
+      "nativePortId": "link.connection-state.presentation-adapter",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "link.delivery-phase.presentation-adapter",
+      "nativePortId": "link.delivery-phase.presentation-adapter",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "link.playback-phase.presentation-adapter",
+      "nativePortId": "link.playback-phase.presentation-adapter",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "link.recovery-phase.presentation-adapter",
+      "nativePortId": "link.recovery-phase.presentation-adapter",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "link.reply-phase.presentation-adapter",
+      "nativePortId": "link.reply-phase.presentation-adapter",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "link.target-kind.presentation-adapter",
+      "nativePortId": "link.target-kind.presentation-adapter",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "link.update-phase.presentation-adapter",
+      "nativePortId": "link.update-phase.presentation-adapter",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "navigation.service",
+      "nativePortId": "navigation.service",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["back", "openDevHost", "openSettings"],
+      "outputPorts": ["activePage"]
+    },
+    {
+      "nodeId": "playback.presentation",
+      "nativePortId": "playback.presentation",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "playback.service",
+      "nativePortId": "playback.service",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["command", "latestCommand"],
+      "outputPorts": ["status"]
+    },
+    {
+      "nodeId": "preferences.presentation",
+      "nativePortId": "preferences.presentation",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "preferences.service",
+      "nativePortId": "preferences.service",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["toggle"],
+      "outputPorts": ["status"]
+    },
+    {
+      "nodeId": "recovery.presentation",
+      "nativePortId": "recovery.presentation",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "recovery.service",
+      "nativePortId": "recovery.service",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": [],
+      "outputPorts": ["status"]
+    },
+    {
+      "nodeId": "session.presentation",
+      "nativePortId": "session.presentation",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "session.service",
+      "nativePortId": "session.service",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["command"],
+      "outputPorts": ["status"]
+    },
+    {
+      "nodeId": "target.presentation",
+      "nativePortId": "target.presentation",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "target.service",
+      "nativePortId": "target.service",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["select"],
+      "outputPorts": ["directory"]
+    },
+    {
+      "nodeId": "updates.presentation",
+      "nativePortId": "updates.presentation",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "updates.service",
+      "nativePortId": "updates.service",
+      "profiles": ["wear-full-ui"],
+      "inputPorts": ["command"],
+      "outputPorts": ["status"]
+    }
+  ],
+  "finiteValues": [
+    {
+      "id": "link.capture-operation",
+      "values": ["begin", "cancel", "recover", "release"]
+    },
+    {
+      "id": "link.capture-phase",
+      "values": ["failed", "finalizing", "idle", "listening"]
+    },
+    {
+      "id": "link.connection-state",
+      "values": ["configuration-required", "connected", "connecting", "disconnected", "off"]
+    },
+    {
+      "id": "link.delivery-phase",
+      "values": ["failed", "none", "queued", "sending"]
+    },
+    {
+      "id": "link.navigation.page",
+      "values": ["dev-host", "home", "settings"]
+    },
+    {
+      "id": "link.playback-operation",
+      "values": ["pause", "play", "resume", "stop"]
+    },
+    {
+      "id": "link.playback-phase",
+      "values": ["failed", "idle", "paused", "played", "playing", "queued", "skipped", "stopped"]
+    },
+    {
+      "id": "link.preference-key",
+      "values": ["hands-free", "speak-replies"]
+    },
+    {
+      "id": "link.recovery-phase",
+      "values": ["clean", "quarantined"]
+    },
+    {
+      "id": "link.reply-phase",
+      "values": ["failed", "none", "ready", "thinking"]
+    },
+    {
+      "id": "link.target-kind",
+      "values": ["agent", "none", "public", "windows"]
+    },
+    {
+      "id": "link.update-operation",
+      "values": ["check", "install", "retry"]
+    },
+    {
+      "id": "link.update-phase",
+      "values": ["available", "checking", "downloading", "failed", "idle", "install-failed", "installing", "ready-to-install", "unavailable", "up-to-date"]
+    }
+  ],
+  "navigation": {
+    "artifacts": [
+      {
+        "artifactRef": "wear-full-ui",
+        "entryPageRef": "home",
+        "pages": [
+        {
+          "pageRef": "home",
+          "restore": "root",
+          "back": "system",
+          "guardContractRef": null
+        },
+        {
+          "pageRef": "settings",
+          "restore": "process",
+          "back": "previous",
+          "guardContractRef": null
+        }
+        ]
+      }
+    ],
+    "activePageBindings": [
+      {
+        "publisherPortRef": "navigation.service.activePage",
+        "pageHostPortRef": "page-host.activePage"
+      }
+    ],
+    "actionGroups": [
+      {
+        "artifactRef": "wear-full-ui",
+        "componentInstanceRef": "latest",
+        "actions": [
+        {
+          "sourcePortRef": "latest.playbackCommand",
+          "targetPortRef": "playback.service.latestCommand",
+          "effect": "dispatch"
+        },
+        {
+          "sourcePortRef": "latest.openAttachment",
+          "targetPortRef": "host.service.openAttachment",
+          "effect": "dispatch"
+        }
+        ]
+      },
+      {
+        "artifactRef": "wear-full-ui",
+        "componentInstanceRef": "settings-action",
+        "actions": [
+        {
+          "sourcePortRef": "settings-action.open",
+          "targetPortRef": "navigation.service.openSettings",
+          "effect": "push"
+        }
+        ]
+      },
+      {
+        "artifactRef": "wear-full-ui",
+        "componentInstanceRef": "talk",
+        "actions": [
+        {
+          "sourcePortRef": "talk.command",
+          "targetPortRef": "capture.service.command",
+          "effect": "dispatch"
+        }
+        ]
+      },
+      {
+        "artifactRef": "wear-full-ui",
+        "componentInstanceRef": "target",
+        "actions": [
+        {
+          "sourcePortRef": "target.select",
+          "targetPortRef": "target.service.select",
+          "effect": "dispatch"
+        }
+        ]
+      },
+      {
+        "artifactRef": "wear-full-ui",
+        "componentInstanceRef": "updates",
+        "actions": [
+        {
+          "sourcePortRef": "updates.command",
+          "targetPortRef": "updates.service.command",
+          "effect": "dispatch"
+        }
+        ]
+      }
+    ]
+  }
+}
