@@ -10,9 +10,12 @@ win. The board never starts, wakes, sleeps, releases, reviews or closes a pane b
    READY tickets.
 3. Choose work that fits the current repo context and run `amux work claim TICKET`. The server
    atomically enforces one ticket per worker and at most two active workers per project.
-4. Record only meaningful state changes with `amux work working`, `wait` or `block`. Use
+4. For medium or large work, follow [the agentic engineering guide](AGENTIC-ENGINEERING-GUIDE.md)
+   before implementation: pin the golden case, product states, responsibility seams, program
+   design and external verification while the context is still small.
+5. Record only meaningful state changes with `amux work working`, `wait` or `block`. Use
    `amux work answer` when the overview says `NEEDS RESPONSE`.
-5. After focused local tests and a manual feature check, run `amux work done --tests "proof"`.
+6. After focused local tests and a manual feature check, run `amux work done --tests "proof"`.
    This stores the current commit pointer and closes the exact assignment generation.
 
 ## Pane 3 manager sidecar
