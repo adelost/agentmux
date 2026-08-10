@@ -4,6 +4,8 @@ import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  NATIVE_BINDING_MANIFEST_SCHEMA_VERSION,
+  PRODUCT_SPEC_SCHEMA_VERSION,
   decodeNativeBindingManifest,
   productArtifactConformance,
   productArtifactHostCoverage,
@@ -17,14 +19,16 @@ const manifest = decodeNativeBindingManifest(
 );
 
 test("the mandatory graph has no parallel list and one binding per data input", () => {
+  assert.equal(product.schemaVersion, PRODUCT_SPEC_SCHEMA_VERSION);
+  assert.equal(manifest.schemaVersion, NATIVE_BINDING_MANIFEST_SCHEMA_VERSION);
   assert.equal("legos" in product, false, "old lego graph must not survive");
   assert.equal("ui" in product, false, "old ui entry list must not survive");
   assert.equal("componentCatalog" in product, false, "port-less catalog must not survive");
-  assert.equal(product.nodes.length, 20);
+  assert.equal(product.nodes.length, 29);
   assert.equal(product.nodes.filter(({ nodeTypeRef }) =>
     product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "service").length, 10);
   assert.equal(product.nodes.filter(({ nodeTypeRef }) =>
-    product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "present").length, 10);
+    product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "present").length, 19);
   assert.equal(product.components.length, 14);
   assert.equal(product.componentTypes.length, 13);
   for (const node of product.nodes) {
@@ -72,15 +76,27 @@ test("pages and artifacts cover exactly the declared screens", () => {
 });
 
 test("native binding manifest conforms, with node ports native-attested", () => {
-  const findings = productArtifactConformance(product, manifest);
-  assert.deepEqual(findings, [{
-    axis: "node-port",
-    direction: "unasserted",
-    subject: "nodes",
-    message: findings[0]?.message ?? "",
-  }]);
-  assert.equal(findings[0]?.direction, "unasserted");
+  assert.deepEqual(productArtifactConformance(product, manifest), []);
   assert.deepEqual(productArtifactHostCoverage(product, [manifest]), []);
+});
+
+test("every compiler-exposed closed state lineage has one executable authority", () => {
+  assert.deepEqual(product.stateAuthorities.map(({ source }) =>
+    `${source.portRef}#${source.stateField}`), [
+    "navigation.service.destination#route",
+    "capture.service.status#phase",
+    "conversation.service.status#deliveryPhase",
+    "conversation.service.status#replyPhase",
+    "playback.service.status#phase",
+    "target.service.directory#kind",
+    "session.service.status#connection",
+    "updates.service.status#phase",
+    "recovery.service.status#phase",
+  ]);
+  for (const authority of product.stateAuthorities) {
+    assert.ok(authority.presentation.consumers.length > 0, `${authority.id} has no component consumer`);
+    assert.ok(product.nodes.some(({ id }) => id === authority.adapter.nodeInstanceRef));
+  }
 });
 
 test("conformance engine goes red on manifest drift", () => {
@@ -110,6 +126,16 @@ test("conformance engine goes red on manifest drift", () => {
   };
   assert.ok(productArtifactConformance(product, driftedFinite).some((finding) =>
     finding.axis === "finite-value" && finding.direction === "mismatch" && finding.subject === "link.capture-phase"
+  ));
+  const withoutNodeOutput = {
+    ...manifest,
+    nodes: manifest.nodes.map((node) => node.nodeId === "capture.service"
+      ? { ...node, outputPorts: node.outputPorts.filter((port) => port !== "status") }
+      : node),
+  };
+  assert.ok(productArtifactConformance(product, withoutNodeOutput).some((finding) =>
+    finding.axis === "node-port" && finding.direction === "missing" &&
+      finding.subject === "capture.service.status"
   ));
 });
 

@@ -19,6 +19,17 @@ import {
   updateCommandContract,
   updateStatusContract,
 } from "./contracts.js";
+import {
+  capturePhaseAuthority,
+  connectionStateAuthority,
+  deliveryPhaseAuthority,
+  navigationRouteAuthority,
+  playbackPhaseAuthority,
+  recoveryPhaseAuthority,
+  replyPhaseAuthority,
+  targetKindAuthority,
+  updatePhaseAuthority,
+} from "./state-authorities.js";
 
 const runtime = <
   const ContextInputs extends readonly string[],
@@ -158,4 +169,13 @@ export const linkNodeTypes = [
   preferencesPresentation,
   updatesPresentation,
   recoveryPresentation,
+  navigationRouteAuthority.adapter.type,
+  capturePhaseAuthority.adapter.type,
+  deliveryPhaseAuthority.adapter.type,
+  replyPhaseAuthority.adapter.type,
+  playbackPhaseAuthority.adapter.type,
+  targetKindAuthority.adapter.type,
+  connectionStateAuthority.adapter.type,
+  updatePhaseAuthority.adapter.type,
+  recoveryPhaseAuthority.adapter.type,
 ] as const;

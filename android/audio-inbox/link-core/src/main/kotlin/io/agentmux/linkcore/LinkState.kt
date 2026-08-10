@@ -35,6 +35,7 @@ enum class CaptureOperation {
  * WHY: Keeps delivery failures distinct from reply and playback failures.
  */
 enum class DeliveryPhase {
+    NONE,
     SENDING,
     QUEUED,
     FAILED,

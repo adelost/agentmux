@@ -5,6 +5,7 @@ import { linkFiniteValues } from "./finite-values.js";
 import { linkProductIconRefs } from "./icons.js";
 import { linkConfigs, linkNodes } from "./nodes.js";
 import { linkScreenComponentFamilies } from "./screens.js";
+import { linkStateAuthorityDefinitions } from "./state-authorities.js";
 import { linkNodeTypes } from "./node-types.js";
 
 const linkPalette = { variants: [] } as const;
@@ -43,6 +44,7 @@ const linkProductCore = defineProduct({
   nodes: linkNodes,
   configs: linkConfigs,
   finiteValues: linkFiniteValues,
+  stateAuthorities: linkStateAuthorityDefinitions.map(({ authority }) => authority),
   componentTypes: linkComponentTypes,
   components: linkComponentInstances,
   componentFamilies: linkScreenComponentFamilies,

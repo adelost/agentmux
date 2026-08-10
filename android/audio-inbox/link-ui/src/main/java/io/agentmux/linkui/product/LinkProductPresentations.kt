@@ -48,8 +48,8 @@ data class LinkCapturedTurn(
 /** conversation.presentation.model — the latest-turn and composer components' model. */
 data class LinkConversationPresentation(
     val turnId: String?,
-    val deliveryPhase: DeliveryPhase?,
-    val replyPhase: ReplyPhase?,
+    val deliveryPhase: DeliveryPhase,
+    val replyPhase: ReplyPhase,
     val offline: Boolean,
     val idempotencyKey: String?,
     val turns: List<LinkTurn>,
@@ -67,7 +67,7 @@ data class LinkPlaybackPresentation(
 /** target.presentation.model — the target component's model (the picker's available targets). */
 data class LinkTargetPresentation(
     val selectedTargetId: String?,
-    val kind: LinkTargetKind?,
+    val kind: LinkTargetKind,
     val availableCount: Int,
     val targets: List<LinkTarget>,
 )
@@ -168,8 +168,8 @@ fun LinkState.toConversationPresentation(): LinkConversationPresentation {
     val turn = turns.lastOrNull()
     return LinkConversationPresentation(
         turnId = turn?.turnId,
-        deliveryPhase = turn?.deliveryPhase,
-        replyPhase = turn?.replyPhase,
+        deliveryPhase = turn?.deliveryPhase ?: DeliveryPhase.NONE,
+        replyPhase = turn?.replyPhase ?: ReplyPhase.NONE,
         offline = connection != ConnectionState.CONNECTED,
         idempotencyKey = turn?.turnId,
         turns = turns,
@@ -194,7 +194,7 @@ fun LinkState.toTargetPresentation(kindOf: (String) -> LinkTargetKind?): LinkTar
     val selected = available.firstOrNull { it.id == selectedTargetId } ?: available.firstOrNull()
     return LinkTargetPresentation(
         selectedTargetId = selected?.id,
-        kind = selected?.let { kindOf(it.id) },
+        kind = selected?.let { kindOf(it.id) } ?: LinkTargetKind.NONE,
         availableCount = available.size,
         targets = available,
     )

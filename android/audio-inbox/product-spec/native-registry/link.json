@@ -1,50 +1,382 @@
 {
   "stage": "native-export",
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "sourceFile": "link-ui/src/main/java/io/agentmux/linkui/product/LinkNativeBindings.kt",
   "profiles": ["phone-full-ui", "wear-full-ui"],
   "components": [
-    { "componentId": "link.target-picker", "rendererId": "status", "profiles": ["phone-full-ui", "wear-full-ui"] },
-    { "componentId": "link.latest-turn", "rendererId": "conversation-feed", "profiles": ["phone-full-ui", "wear-full-ui"] },
-    { "componentId": "link.composer", "rendererId": "composer", "profiles": ["phone-full-ui"] },
-    { "componentId": "link.talk", "rendererId": "capture", "profiles": ["phone-full-ui", "wear-full-ui"] },
-    { "componentId": "link.active-playback", "rendererId": "active-playback", "profiles": ["phone-full-ui"] },
-    { "componentId": "link.connection-status", "rendererId": "connection", "profiles": ["phone-full-ui", "wear-full-ui"] },
-    { "componentId": "link.public-link", "rendererId": "public-link", "profiles": ["phone-full-ui"] },
-    { "componentId": "link.preferences", "rendererId": "preferences", "profiles": ["phone-full-ui"] },
-    { "componentId": "link.local-history", "rendererId": "local-history", "profiles": ["phone-full-ui"] },
-    { "componentId": "link.updates", "rendererId": "updates", "profiles": ["phone-full-ui", "wear-full-ui"] },
-    { "componentId": "link.recovery-status", "rendererId": "recovery", "profiles": ["phone-full-ui", "wear-full-ui"] },
-    { "componentId": "link.navigation-entry", "rendererId": "navigation-entry", "profiles": ["phone-full-ui", "wear-full-ui"] },
-    { "componentId": "link.dev-preview", "rendererId": "dev-preview", "profiles": ["phone-full-ui"] }
+    {
+      "componentId": "link.active-playback",
+      "rendererId": "active-playback",
+      "profiles": ["phone-full-ui"]
+    },
+    {
+      "componentId": "link.composer",
+      "rendererId": "composer",
+      "profiles": ["phone-full-ui"]
+    },
+    {
+      "componentId": "link.connection-status",
+      "rendererId": "connection",
+      "profiles": ["phone-full-ui", "wear-full-ui"]
+    },
+    {
+      "componentId": "link.dev-preview",
+      "rendererId": "dev-preview",
+      "profiles": ["phone-full-ui"]
+    },
+    {
+      "componentId": "link.latest-turn",
+      "rendererId": "conversation-feed",
+      "profiles": ["phone-full-ui", "wear-full-ui"]
+    },
+    {
+      "componentId": "link.local-history",
+      "rendererId": "local-history",
+      "profiles": ["phone-full-ui"]
+    },
+    {
+      "componentId": "link.navigation-entry",
+      "rendererId": "navigation-entry",
+      "profiles": ["phone-full-ui", "wear-full-ui"]
+    },
+    {
+      "componentId": "link.preferences",
+      "rendererId": "preferences",
+      "profiles": ["phone-full-ui"]
+    },
+    {
+      "componentId": "link.public-link",
+      "rendererId": "public-link",
+      "profiles": ["phone-full-ui"]
+    },
+    {
+      "componentId": "link.recovery-status",
+      "rendererId": "recovery",
+      "profiles": ["phone-full-ui", "wear-full-ui"]
+    },
+    {
+      "componentId": "link.talk",
+      "rendererId": "capture",
+      "profiles": ["phone-full-ui", "wear-full-ui"]
+    },
+    {
+      "componentId": "link.target-picker",
+      "rendererId": "status",
+      "profiles": ["phone-full-ui", "wear-full-ui"]
+    },
+    {
+      "componentId": "link.updates",
+      "rendererId": "updates",
+      "profiles": ["phone-full-ui", "wear-full-ui"]
+    }
   ],
   "icons": [
-    { "iconId": "link", "nativeSymbol": "RingIcons.Link" },
-    { "iconId": "gear", "nativeSymbol": "RingIcons.Gear" },
-    { "iconId": "phone", "nativeSymbol": "RingIcons.Phone" },
-    { "iconId": "target", "nativeSymbol": "RingIcons.Target" },
-    { "iconId": "speaker", "nativeSymbol": "RingIcons.Speaker" },
-    { "iconId": "pencil", "nativeSymbol": "RingIcons.Pencil" },
-    { "iconId": "record", "nativeSymbol": "RingIcons.Record" },
-    { "iconId": "play", "nativeSymbol": "RingIcons.Play" },
-    { "iconId": "wifi", "nativeSymbol": "RingIcons.Wifi" },
-    { "iconId": "activity", "nativeSymbol": "RingIcons.Activity" },
-    { "iconId": "download", "nativeSymbol": "RingIcons.Download" },
-    { "iconId": "warning", "nativeSymbol": "RingIcons.Warning" }
+    {
+      "iconId": "activity",
+      "nativeSymbol": "RingIcons.Activity"
+    },
+    {
+      "iconId": "download",
+      "nativeSymbol": "RingIcons.Download"
+    },
+    {
+      "iconId": "gear",
+      "nativeSymbol": "RingIcons.Gear"
+    },
+    {
+      "iconId": "link",
+      "nativeSymbol": "RingIcons.Link"
+    },
+    {
+      "iconId": "pencil",
+      "nativeSymbol": "RingIcons.Pencil"
+    },
+    {
+      "iconId": "phone",
+      "nativeSymbol": "RingIcons.Phone"
+    },
+    {
+      "iconId": "play",
+      "nativeSymbol": "RingIcons.Play"
+    },
+    {
+      "iconId": "record",
+      "nativeSymbol": "RingIcons.Record"
+    },
+    {
+      "iconId": "speaker",
+      "nativeSymbol": "RingIcons.Speaker"
+    },
+    {
+      "iconId": "target",
+      "nativeSymbol": "RingIcons.Target"
+    },
+    {
+      "iconId": "warning",
+      "nativeSymbol": "RingIcons.Warning"
+    },
+    {
+      "iconId": "wifi",
+      "nativeSymbol": "RingIcons.Wifi"
+    }
+  ],
+  "nodes": [
+    {
+      "nodeId": "capture.presentation",
+      "nativePortId": "capture.presentation",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "capture.service",
+      "nativePortId": "capture.service",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["command"],
+      "outputPorts": ["captured", "status"]
+    },
+    {
+      "nodeId": "conversation.presentation",
+      "nativePortId": "conversation.presentation",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "conversation.service",
+      "nativePortId": "conversation.service",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["compose", "turn"],
+      "outputPorts": ["status"]
+    },
+    {
+      "nodeId": "history.presentation",
+      "nativePortId": "history.presentation",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "history.service",
+      "nativePortId": "history.service",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": [],
+      "outputPorts": ["status"]
+    },
+    {
+      "nodeId": "link.capture-phase.presentation-adapter",
+      "nativePortId": "link.capture-phase.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "link.connection-state.presentation-adapter",
+      "nativePortId": "link.connection-state.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "link.delivery-phase.presentation-adapter",
+      "nativePortId": "link.delivery-phase.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "link.navigation-route.presentation-adapter",
+      "nativePortId": "link.navigation-route.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "link.playback-phase.presentation-adapter",
+      "nativePortId": "link.playback-phase.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "link.recovery-phase.presentation-adapter",
+      "nativePortId": "link.recovery-phase.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "link.reply-phase.presentation-adapter",
+      "nativePortId": "link.reply-phase.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "link.target-kind.presentation-adapter",
+      "nativePortId": "link.target-kind.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "link.update-phase.presentation-adapter",
+      "nativePortId": "link.update-phase.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "navigation.presentation",
+      "nativePortId": "navigation.presentation",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "navigation.service",
+      "nativePortId": "navigation.service",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["openDevHost", "openSettings"],
+      "outputPorts": ["destination"]
+    },
+    {
+      "nodeId": "playback.presentation",
+      "nativePortId": "playback.presentation",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "playback.service",
+      "nativePortId": "playback.service",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["command"],
+      "outputPorts": ["status"]
+    },
+    {
+      "nodeId": "preferences.presentation",
+      "nativePortId": "preferences.presentation",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "preferences.service",
+      "nativePortId": "preferences.service",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["toggle"],
+      "outputPorts": ["status"]
+    },
+    {
+      "nodeId": "recovery.presentation",
+      "nativePortId": "recovery.presentation",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "recovery.service",
+      "nativePortId": "recovery.service",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": [],
+      "outputPorts": ["status"]
+    },
+    {
+      "nodeId": "session.presentation",
+      "nativePortId": "session.presentation",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "session.service",
+      "nativePortId": "session.service",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": [],
+      "outputPorts": ["status"]
+    },
+    {
+      "nodeId": "target.presentation",
+      "nativePortId": "target.presentation",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "target.service",
+      "nativePortId": "target.service",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["select"],
+      "outputPorts": ["directory"]
+    },
+    {
+      "nodeId": "updates.presentation",
+      "nativePortId": "updates.presentation",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "updates.service",
+      "nativePortId": "updates.service",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["command"],
+      "outputPorts": ["status"]
+    }
   ],
   "finiteValues": [
-    { "id": "link.route", "values": ["home", "settings", "dev-host"] },
-    { "id": "link.capture-operation", "values": ["begin", "release", "cancel"] },
-    { "id": "link.capture-phase", "values": ["idle", "listening", "finalizing", "failed"] },
-    { "id": "link.delivery-phase", "values": ["sending", "queued", "failed"] },
-    { "id": "link.reply-phase", "values": ["none", "thinking", "ready", "failed"] },
-    { "id": "link.playback-operation", "values": ["play", "pause", "resume", "stop"] },
-    { "id": "link.playback-phase", "values": ["idle", "queued", "playing", "paused", "stopped", "played", "skipped", "failed"] },
-    { "id": "link.target-kind", "values": ["agent", "windows", "public"] },
-    { "id": "link.connection-state", "values": ["off", "connecting", "connected", "disconnected", "configuration-required"] },
-    { "id": "link.preference-key", "values": ["hands-free", "speak-replies"] },
-    { "id": "link.update-operation", "values": ["check", "retry", "install"] },
-    { "id": "link.update-phase", "values": ["idle", "checking", "up-to-date", "unavailable", "available", "downloading", "ready-to-install", "installing", "install-failed", "failed"] },
-    { "id": "link.recovery-phase", "values": ["clean", "quarantined"] }
+    {
+      "id": "link.capture-operation",
+      "values": ["begin", "cancel", "release"]
+    },
+    {
+      "id": "link.capture-phase",
+      "values": ["failed", "finalizing", "idle", "listening"]
+    },
+    {
+      "id": "link.connection-state",
+      "values": ["configuration-required", "connected", "connecting", "disconnected", "off"]
+    },
+    {
+      "id": "link.delivery-phase",
+      "values": ["failed", "none", "queued", "sending"]
+    },
+    {
+      "id": "link.playback-operation",
+      "values": ["pause", "play", "resume", "stop"]
+    },
+    {
+      "id": "link.playback-phase",
+      "values": ["failed", "idle", "paused", "played", "playing", "queued", "skipped", "stopped"]
+    },
+    {
+      "id": "link.preference-key",
+      "values": ["hands-free", "speak-replies"]
+    },
+    {
+      "id": "link.recovery-phase",
+      "values": ["clean", "quarantined"]
+    },
+    {
+      "id": "link.reply-phase",
+      "values": ["failed", "none", "ready", "thinking"]
+    },
+    {
+      "id": "link.route",
+      "values": ["dev-host", "home", "settings"]
+    },
+    {
+      "id": "link.target-kind",
+      "values": ["agent", "none", "public", "windows"]
+    },
+    {
+      "id": "link.update-operation",
+      "values": ["check", "install", "retry"]
+    },
+    {
+      "id": "link.update-phase",
+      "values": ["available", "checking", "downloading", "failed", "idle", "install-failed", "installing", "ready-to-install", "unavailable", "up-to-date"]
+    }
   ]
 }

@@ -6,6 +6,15 @@ import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTargetKind
 import io.agentmux.linkui.LinkCaptureSpec
+import io.agentmux.linkui.product.generated.GeneratedLinkCapturePhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkConnectionStateAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkDeliveryPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkNavigationRouteAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkPlaybackPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkRecoveryPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkReplyPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkTargetKindAuthority
+import io.agentmux.linkui.product.generated.GeneratedLinkUpdatePhaseAuthority
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
@@ -193,6 +202,70 @@ open class LinkProductGraph(
             runtime.connected(RecoveryPresentationSourceInput, processScope),
         )
 
+        mountStateAuthority(
+            GeneratedLinkNavigationRouteAuthority.inputPort<LinkDestinationPresentation>(),
+            GeneratedLinkNavigationRouteAuthority.outputPort,
+            GeneratedLinkNavigationRouteAuthority.componentInputs,
+            { it.route.wireId },
+            GeneratedLinkNavigationRouteAuthority::require,
+        )
+        mountStateAuthority(
+            GeneratedLinkCapturePhaseAuthority.inputPort<LinkCapturePresentation>(),
+            GeneratedLinkCapturePhaseAuthority.outputPort,
+            GeneratedLinkCapturePhaseAuthority.componentInputs,
+            { it.phase.wireId() },
+            GeneratedLinkCapturePhaseAuthority::require,
+        )
+        mountStateAuthority(
+            GeneratedLinkDeliveryPhaseAuthority.inputPort<LinkConversationPresentation>(),
+            GeneratedLinkDeliveryPhaseAuthority.outputPort,
+            GeneratedLinkDeliveryPhaseAuthority.componentInputs,
+            { it.deliveryPhase.wireId() },
+            GeneratedLinkDeliveryPhaseAuthority::require,
+        )
+        mountStateAuthority(
+            GeneratedLinkReplyPhaseAuthority.inputPort<LinkConversationPresentation>(),
+            GeneratedLinkReplyPhaseAuthority.outputPort,
+            GeneratedLinkReplyPhaseAuthority.componentInputs,
+            { it.replyPhase.wireId() },
+            GeneratedLinkReplyPhaseAuthority::require,
+        )
+        mountStateAuthority(
+            GeneratedLinkPlaybackPhaseAuthority.inputPort<LinkPlaybackPresentation>(),
+            GeneratedLinkPlaybackPhaseAuthority.outputPort,
+            GeneratedLinkPlaybackPhaseAuthority.componentInputs,
+            { it.phase.wireId() },
+            GeneratedLinkPlaybackPhaseAuthority::require,
+        )
+        mountStateAuthority(
+            GeneratedLinkTargetKindAuthority.inputPort<LinkTargetPresentation>(),
+            GeneratedLinkTargetKindAuthority.outputPort,
+            GeneratedLinkTargetKindAuthority.componentInputs,
+            { it.kind.wireId() },
+            GeneratedLinkTargetKindAuthority::require,
+        )
+        mountStateAuthority(
+            GeneratedLinkConnectionStateAuthority.inputPort<LinkSessionPresentation>(),
+            GeneratedLinkConnectionStateAuthority.outputPort,
+            GeneratedLinkConnectionStateAuthority.componentInputs,
+            { it.connection.wireId() },
+            GeneratedLinkConnectionStateAuthority::require,
+        )
+        mountStateAuthority(
+            GeneratedLinkUpdatePhaseAuthority.inputPort<LinkUpdatePresentation>(),
+            GeneratedLinkUpdatePhaseAuthority.outputPort,
+            GeneratedLinkUpdatePhaseAuthority.componentInputs,
+            { it.phase.wireId() },
+            GeneratedLinkUpdatePhaseAuthority::require,
+        )
+        mountStateAuthority(
+            GeneratedLinkRecoveryPhaseAuthority.inputPort<LinkRecoveryPresentation>(),
+            GeneratedLinkRecoveryPhaseAuthority.outputPort,
+            GeneratedLinkRecoveryPhaseAuthority.componentInputs,
+            { it.phase.wireId() },
+            GeneratedLinkRecoveryPhaseAuthority::require,
+        )
+
         // The one service-internal edge: a captured turn is delivered to the
         // conversation service through its generated binding, never directly.
         runtime.connected(ConversationTurnInput, processScope) { turn -> sinks.capturedTurn(turn) }
@@ -281,4 +354,22 @@ open class LinkProductGraph(
 
     private fun <T> Flow<T>.hot(initial: () -> T): StateFlow<T> =
         distinctUntilChanged().stateIn(processScope, SharingStarted.Eagerly, initial())
+
+    private fun <Source : Any, Presentation : Any> mountStateAuthority(
+        input: ProductDataInput<Source>,
+        output: ProductOutputPort<Presentation>,
+        componentInputs: List<ProductComponentInput<Presentation>>,
+        stateId: (Source) -> String,
+        presentation: (String) -> Presentation,
+    ) {
+        val source = runtime.connected(input, processScope)
+        runtime.observe(
+            output,
+            source.map { presentation(stateId(it)) }
+                .hot { presentation(stateId(source.value)) },
+        )
+        componentInputs.forEach { runtime.connected(it, processScope) }
+    }
+
+    private fun Enum<*>.wireId(): String = name.lowercase().replace('_', '-')
 }
