@@ -30,7 +30,7 @@ test("the mandatory graph has no parallel list and one binding per data input", 
   assert.equal(product.nodes.filter(({ nodeTypeRef }) =>
     product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "present").length, 17);
   assert.equal(product.components.length, 15);
-  assert.equal(product.componentTypes.length, 14);
+  assert.equal(product.componentTypes.length, 15);
   for (const node of product.nodes) {
     const kind = product.nodeTypes.find(({ id }) => id === node.nodeTypeRef)?.kind;
     if (kind === "service") assert.equal(node.activation?.kind, "lifetime", `${node.id} must stay process-lived`);
@@ -103,7 +103,7 @@ test("pages and artifacts cover exactly the declared screens", () => {
     })), [
     {
       componentInstanceRef: "dev-host",
-      artifactRefs: ["phone-full-ui", "wear-full-ui"],
+      artifactRefs: ["phone-full-ui"],
       actions: ["dev-host.open->navigation.service.openDevHost:push"],
     },
     {

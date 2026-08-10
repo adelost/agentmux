@@ -140,6 +140,13 @@ export const navigationEntryComponentType = defineComponentType({
   inputs: [],
   outputs: [componentPort("open", routeOpenContract)],
 });
+/** Phone-only DEV host entry; optional mounts omit it from the Wear artifact. */
+export const devHostEntryComponentType = defineComponentType({
+  id: "link.dev-host-entry",
+  requiredCapabilities: [...componentTree, "ui.dev-host"],
+  inputs: [],
+  outputs: [componentPort("open", routeOpenContract)],
+});
 /** Self-contained CircleKit host preview; renders outside the data graph. */
 export const devPreviewComponentType = defineComponentType({
   id: "link.dev-preview",
@@ -162,6 +169,7 @@ export const linkComponentTypes = [
   recoveryStatusComponentType,
   pageHostComponentType,
   navigationEntryComponentType,
+  devHostEntryComponentType,
   devPreviewComponentType,
 ] as const;
 
@@ -278,7 +286,7 @@ export const linkComponentInstances = [
     },
   },
   {
-    id: "dev-host", componentTypeRef: navigationEntryComponentType.id,
+    id: "dev-host", componentTypeRef: devHostEntryComponentType.id,
     bindings: {
       inputs: {},
       events: { open: "navigation.service.openDevHost" },

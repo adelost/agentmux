@@ -57,7 +57,7 @@ const linkPageIconRefs = linkPagePresentations.map((page) => ({
 const linkProductCore = defineProduct({
   id: "agentmux-link",
   rendererBindings: [
-    { id: "android-phone-compose", capabilities: ["ui.menu", "ui.navigation", "ui.component-tree"] },
+    { id: "android-phone-compose", capabilities: ["ui.menu", "ui.navigation", "ui.component-tree", "ui.dev-host"] },
     { id: "android-wear-compose", capabilities: ["ui.menu", "ui.navigation", "ui.component-tree"] },
   ],
   artifacts: linkArtifacts,

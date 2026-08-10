@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the portable native-Lego port registry
-// Product declarations SHA-256: a388fdac3743216a71b8f3285bb4f78dfcd53b187b62fab5fb785c02cffb7e7c
+// Product declarations SHA-256: dbae1d15e69b0dab6c901f5aaff8a6043e0bcc46ac4b47228998760d2ded1574
 package io.agentmux.linkui.product.generated
 
 internal object GeneratedLinkNativeLegoPortData {
@@ -89,6 +89,6 @@ internal object GeneratedLinkNativeLegoPortData {
         GeneratedProductPort(GeneratedLinkNativeLegoCatalog.PortIds.RECOVERY_MODEL, GeneratedProductPortOwnerKind.COMPONENT, "recovery", "link.recovery-status", "model", GeneratedProductPortDirection.INPUT, "link.recovery-status", GeneratedProductPortBoundary.PRESENTATION, true, GeneratedProductPortPurpose.DATA),
         GeneratedProductPort(GeneratedLinkNativeLegoCatalog.PortIds.RECOVERY_RECOVERYSTATE, GeneratedProductPortOwnerKind.COMPONENT, "recovery", "link.recovery-status", "recoveryState", GeneratedProductPortDirection.INPUT, "link.recovery-phase.payload", GeneratedProductPortBoundary.PRESENTATION, true, GeneratedProductPortPurpose.DATA),
         GeneratedProductPort(GeneratedLinkNativeLegoCatalog.PortIds.SETTINGS_ACTION_OPEN, GeneratedProductPortOwnerKind.COMPONENT, "settings-action", "link.navigation-entry", "open", GeneratedProductPortDirection.OUTPUT, "link.navigation.route-intent", GeneratedProductPortBoundary.UI_EVENT, true, GeneratedProductPortPurpose.DATA),
-        GeneratedProductPort(GeneratedLinkNativeLegoCatalog.PortIds.DEV_HOST_OPEN, GeneratedProductPortOwnerKind.COMPONENT, "dev-host", "link.navigation-entry", "open", GeneratedProductPortDirection.OUTPUT, "link.navigation.route-intent", GeneratedProductPortBoundary.UI_EVENT, true, GeneratedProductPortPurpose.DATA)
+        GeneratedProductPort(GeneratedLinkNativeLegoCatalog.PortIds.DEV_HOST_OPEN, GeneratedProductPortOwnerKind.COMPONENT, "dev-host", "link.dev-host-entry", "open", GeneratedProductPortDirection.OUTPUT, "link.navigation.route-intent", GeneratedProductPortBoundary.UI_EVENT, true, GeneratedProductPortPurpose.DATA)
     )
 }

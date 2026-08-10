@@ -151,8 +151,8 @@ object LinkNativeBindings {
             "navigation-entry",
             both,
             GeneratedLinkComponentId.SETTINGS_ACTION,
-            GeneratedLinkComponentId.DEV_HOST,
         ),
+        component(GeneratedLinkComponentTypeId.LINK_DEV_HOST_ENTRY, "dev-host-entry", phone, GeneratedLinkComponentId.DEV_HOST),
         component(GeneratedLinkComponentTypeId.LINK_DEV_PREVIEW, "dev-preview", phone, GeneratedLinkComponentId.DEV_PREVIEW),
     )
 
@@ -357,8 +357,6 @@ object LinkNativeBindings {
             action(TargetSelectEvent, TargetSelectInput)),
         actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.UPDATES,
             action(UpdatesCommandEvent, UpdatesCommandInput)),
-        actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.DEV_HOST,
-            action(DevHostOpenEvent, NavigationOpenDevHostInput, LinkNativeActionEffect.PUSH)),
         actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.SETTINGS_ACTION,
             action(SettingsActionOpenEvent, NavigationOpenSettingsInput, LinkNativeActionEffect.PUSH)),
         actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.TALK,

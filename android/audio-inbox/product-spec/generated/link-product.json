@@ -343,15 +343,20 @@
           "mountRef": "updates"
         },
         {
-          "componentInstanceRef": "dev-host",
-          "mountRef": "dev-host"
-        },
-        {
           "componentInstanceRef": "recovery",
           "mountRef": "recovery"
         }
       ],
-      "omittedMounts": [],
+      "omittedMounts": [
+        {
+          "capabilities": [
+            "ui.dev-host"
+          ],
+          "componentInstanceRef": "dev-host",
+          "mountRef": "dev-host",
+          "reason": "missing-capability"
+        }
+      ],
       "screenRef": "settings",
       "surface": "round"
     }
@@ -1104,7 +1109,7 @@
         },
         "inputs": {}
       },
-      "componentTypeRef": "link.navigation-entry",
+      "componentTypeRef": "link.dev-host-entry",
       "id": "dev-host"
     },
     {
@@ -2042,6 +2047,40 @@
       ]
     },
     {
+      "id": "link.dev-host-entry",
+      "inputs": [],
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "target",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.navigation.page"
+                }
+              }
+            ],
+            "id": "link.navigation.route-intent",
+            "kind": "event",
+            "navigation": {
+              "effect": "push",
+              "kind": "route"
+            }
+          },
+          "id": "open",
+          "required": true
+        }
+      ],
+      "requiredCapabilities": [
+        "ui.component-tree",
+        "ui.dev-host"
+      ]
+    },
+    {
       "id": "link.dev-preview",
       "inputs": [],
       "outputs": [],
@@ -2368,8 +2407,7 @@
           }
         ],
         "artifactRefs": [
-          "phone-full-ui",
-          "wear-full-ui"
+          "phone-full-ui"
         ],
         "componentInstanceRef": "dev-host",
         "pageRefs": [
@@ -5738,7 +5776,7 @@
         "purpose": "data",
         "ref": "dev-host.open",
         "required": true,
-        "typeRef": "link.navigation-entry"
+        "typeRef": "link.dev-host-entry"
       }
     ],
     "contracts": [
@@ -6993,7 +7031,8 @@
       "capabilities": [
         "ui.menu",
         "ui.navigation",
-        "ui.component-tree"
+        "ui.component-tree",
+        "ui.dev-host"
       ],
       "id": "android-phone-compose"
     },

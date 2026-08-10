@@ -20,6 +20,11 @@
       "profiles": ["phone-full-ui", "wear-full-ui"]
     },
     {
+      "componentId": "link.dev-host-entry",
+      "rendererId": "dev-host-entry",
+      "profiles": ["phone-full-ui"]
+    },
+    {
       "componentId": "link.dev-preview",
       "rendererId": "dev-preview",
       "profiles": ["phone-full-ui"]
@@ -507,17 +512,6 @@
           "sourcePortRef": "updates.command",
           "targetPortRef": "updates.service.command",
           "effect": "dispatch"
-        }
-        ]
-      },
-      {
-        "artifactRef": "wear-full-ui",
-        "componentInstanceRef": "dev-host",
-        "actions": [
-        {
-          "sourcePortRef": "dev-host.open",
-          "targetPortRef": "navigation.service.openDevHost",
-          "effect": "push"
         }
         ]
       },
