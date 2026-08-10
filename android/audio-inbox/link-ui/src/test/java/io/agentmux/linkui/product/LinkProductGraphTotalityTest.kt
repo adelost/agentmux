@@ -2,7 +2,9 @@ package io.agentmux.linkui.product
 
 import com.adelost.releasekit.UpdateState
 import io.agentmux.linkcore.ConnectionState
+import io.agentmux.linkcore.DeliveryPhase
 import io.agentmux.linkcore.LinkState
+import io.agentmux.linkcore.LinkTargetKind
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -41,6 +43,8 @@ class LinkProductGraphTotalityTest {
 
         try {
             assertEquals(ConnectionState.OFF, graph.connection.value.connection)
+            assertEquals(DeliveryPhase.NONE, graph.latest.value.deliveryPhase)
+            assertEquals(LinkTargetKind.NONE, graph.target.value.kind)
             assertEquals(LinkRoute.HOME, graph.settingsActionDestination.value.route)
             assertEquals(LinkRoute.HOME, graph.devHostDestination.value.route)
         } finally {
