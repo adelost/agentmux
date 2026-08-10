@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type {
   CompiledStateAuthority,
+  ComponentRenderContractIr,
   LegoFiniteValueDeclaration,
   OutputArtifact,
   ProductEmitterPlugin,
@@ -51,6 +52,9 @@ export function linkNativeEmitter(kotlinRoot: string): ProductEmitterPlugin {
           }))),
         artifact("component-families", `${kotlinRoot}/GeneratedLinkComponentFamilies.kt`,
           emitComponentFamilies(product, familiesSha)),
+        artifact("component-render-contracts", `${kotlinRoot}/GeneratedLinkComponentRenderContracts.kt`,
+          emitComponentRenderContracts(product.componentRenderContracts,
+            fingerprint(product.componentRenderContracts))),
         ...product.componentFamilies.map((entry) => {
           const name = `Generated${kotlinIdentifier(entry.family.id)}Components`;
           return artifact(
@@ -62,6 +66,126 @@ export function linkNativeEmitter(kotlinRoot: string): ProductEmitterPlugin {
       ];
     },
   };
+}
+
+function emitComponentRenderContracts(
+  contracts: readonly ComponentRenderContractIr[],
+  sha: string,
+): string {
+  const inputs = contracts.flatMap((contract) => contract.inputs.map((input) => ({ contract, input })));
+  const events = contracts.flatMap((contract) => contract.events.map((event) => ({ contract, event })));
+  const scopes = contracts.flatMap((contract) => contract.scopes.map((scope) => ({ contract, scope })));
+  const bundles = contracts.map((contract) => {
+    const name = `Generated${kotlinIdentifier(contract.componentInstanceRef)}RenderInputs`;
+    const fields = contract.inputs.map((input) =>
+      `    val ${kotlinProperty(input.inputPortRef)}: ${rendererInputType(input.contractRef)},`
+    ).join("\n");
+    return contract.inputs.length === 0
+      ? `data object ${name}`
+      : `data class ${name}(\n${fields}\n)`;
+  }).join("\n\n");
+  const emitters = contracts.map((contract) => {
+    const name = `Generated${kotlinIdentifier(contract.componentInstanceRef)}RenderEmitter`;
+    if (contract.events.length === 0) return `data object ${name}`;
+    const methods = contract.events.map((event) =>
+      `    fun ${kotlinProperty(event.eventPortRef)}(event: ${rendererEventType(event.contractRef)})`
+    ).join("\n");
+    return `${contract.events.length === 1 ? "fun " : ""}interface ${name} {\n${methods}\n}`;
+  }).join("\n\n");
+  return `${header("ProductIr.componentRenderContracts", sha)}
+import io.agentmux.linkui.product.*
+
+data class GeneratedLinkRendererIdentity(
+    val instanceRef: String,
+    val typeRef: String,
+)
+data class GeneratedLinkRendererScope(
+    val component: GeneratedLinkComponentId,
+    val artifact: GeneratedLinkArtifactRef,
+    val page: GeneratedLinkPageId,
+    val surface: String,
+    val mountRef: String,
+)
+data class GeneratedLinkRendererInput(
+    val component: GeneratedLinkComponentId,
+    val inputPortRef: String,
+    val producerPortRef: String,
+    val contractRef: String,
+    val required: Boolean,
+)
+data class GeneratedLinkRendererEvent(
+    val component: GeneratedLinkComponentId,
+    val eventPortRef: String,
+    val targetPortRef: String,
+    val contractRef: String,
+)
+
+enum class GeneratedLinkRendererScopeId(val declaration: GeneratedLinkRendererScope) {
+${scopes.map(({ contract, scope }) => `    ${kotlinEnumToken(`${contract.componentInstanceRef}-${scope.artifactRef}-${scope.screenRef}-${scope.surface}-${scope.mountRef}`)}(GeneratedLinkRendererScope(GeneratedLinkComponentId.${kotlinEnumToken(contract.componentInstanceRef)}, GeneratedLinkArtifactRef.${kotlinEnumToken(scope.artifactRef)}, GeneratedLinkPageId.${kotlinEnumToken(scope.screenRef)}, ${JSON.stringify(scope.surface)}, ${JSON.stringify(scope.mountRef)})),`).join("\n")}
+}
+enum class GeneratedLinkRendererInputId(val declaration: GeneratedLinkRendererInput) {
+${inputs.map(({ contract, input }) => `    ${kotlinEnumToken(input.inputPortRef)}(GeneratedLinkRendererInput(GeneratedLinkComponentId.${kotlinEnumToken(contract.componentInstanceRef)}, ${JSON.stringify(input.inputPortRef)}, ${JSON.stringify(input.producerPortRef)}, ${JSON.stringify(input.contractRef)}, ${input.required})),`).join("\n")}
+}
+enum class GeneratedLinkRendererEventId(val declaration: GeneratedLinkRendererEvent) {
+${events.map(({ contract, event }) => `    ${kotlinEnumToken(event.eventPortRef)}(GeneratedLinkRendererEvent(GeneratedLinkComponentId.${kotlinEnumToken(contract.componentInstanceRef)}, ${JSON.stringify(event.eventPortRef)}, ${JSON.stringify(event.targetPortRef)}, ${JSON.stringify(event.contractRef)})),`).join("\n")}
+}
+object GeneratedLinkRendererIdentities {
+${contracts.map((contract) => `    val ${kotlinEnumToken(contract.componentInstanceRef)} = GeneratedLinkRendererIdentity(${JSON.stringify(contract.componentInstanceRef)}, ${JSON.stringify(contract.componentTypeRef)})`).join("\n")}
+}
+
+${bundles}
+
+${emitters}
+`;
+}
+
+function kotlinProperty(portRef: string): string {
+  const name = portRef.slice(portRef.indexOf(".") + 1);
+  return name.replace(/-([a-z])/gu, (_, char: string) => char.toUpperCase());
+}
+
+function rendererInputType(contractRef: string): string {
+  const types: Readonly<Record<string, string>> = {
+    "link.navigation.active-page": "LinkRoute",
+    "link.target-directory": "LinkTargetPresentation",
+    "link.target-kind.payload": "GeneratedLinkTargetKindPresentation",
+    "link.session-status": "LinkSessionPresentation",
+    "link.connection-state.payload": "GeneratedLinkConnectionStatePresentation",
+    "link.recovery-status": "LinkRecoveryPresentation",
+    "link.recovery-phase.payload": "GeneratedLinkRecoveryPhasePresentation",
+    "link.capture-status": "LinkCapturePresentation",
+    "link.capture-phase.payload": "GeneratedLinkCapturePhasePresentation",
+    "link.conversation-status": "LinkConversationPresentation",
+    "link.delivery-phase.payload": "GeneratedLinkDeliveryPhasePresentation",
+    "link.reply-phase.payload": "GeneratedLinkReplyPhasePresentation",
+    "link.playback-status": "LinkPlaybackPresentation",
+    "link.playback-phase.payload": "GeneratedLinkPlaybackPhasePresentation",
+    "link.preferences-status": "LinkPreferencesPresentation",
+    "link.history-status": "LinkHistoryPresentation",
+    "link.update-status": "LinkUpdatePresentation",
+    "link.update-phase.payload": "GeneratedLinkUpdatePhasePresentation",
+  };
+  const result = types[contractRef];
+  if (result === undefined) throw new Error(`No native renderer input type for '${contractRef}'`);
+  return result;
+}
+
+function rendererEventType(contractRef: string): string {
+  const types: Readonly<Record<string, string>> = {
+    "link.target-select": "LinkTargetSelectEvent",
+    "link.capture-command": "LinkCaptureCommandEvent",
+    "link.playback-command": "LinkPlaybackCommandEvent",
+    "link.open-attachment": "LinkOpenAttachmentEvent",
+    "link.compose-turn": "LinkComposeEvent",
+    "link.edit-composer": "LinkComposerEditEvent",
+    "link.public-link-command": "LinkPublicLinkCommandEvent",
+    "link.preference-toggle": "LinkPreferenceToggleEvent",
+    "link.update-command": "LinkUpdateCommandEvent",
+    "link.navigation.route-intent": "LinkRouteOpenEvent",
+  };
+  const result = types[contractRef];
+  if (result === undefined) throw new Error(`No native renderer event type for '${contractRef}'`);
+  return result;
 }
 
 function emitCatalogTypes(sha: string): string {
@@ -165,7 +289,7 @@ ${authorities.map(emitStatePresentation).join("\n")}
 }
 
 function emitPresentationFiniteEnum(declaration: LegoFiniteValueDeclaration): string {
-  return `internal enum class ${presentationFiniteName(declaration)}(val wireId: String) {
+  return `enum class ${presentationFiniteName(declaration)}(val wireId: String) {
 ${declaration.values.map((value) => `    ${kotlinEnumToken(value)}("${value}"),`).join("\n")}
 }`;
 }
@@ -175,7 +299,7 @@ function emitStatePresentation(authority: CompiledStateAuthority): string {
   const objectName = stateAuthorityName(authority);
   const fields = authority.presentation.fields;
   const cases = Object.entries(authority.presentation.cases);
-  return `internal data class ${payload}(
+  return `data class ${payload}(
 ${fields.map((field) => `    val ${field.name}: ${presentationKotlinType(field)},`).join("\n")}
 )
 

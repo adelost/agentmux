@@ -29,6 +29,8 @@ export const captureStatusContract = {
     field("unavailableReason", "string", { nullable: true }),
     field("startedAtMs", "integer", { nullable: true, unit: "si.millisecond", clockDomain: "wall" }),
     field("byteCount", "integer", { unit: "si.byte" }),
+    field("byteLimit", "integer", { nullable: true, unit: "si.byte" }),
+    field("level", "number"),
   ],
 } as const;
 export const capturedTurnContract = {
@@ -47,12 +49,17 @@ export const conversationStatusContract = {
     field("deliveryPhase", finiteValueRef("link.delivery-phase")),
     field("replyPhase", finiteValueRef("link.reply-phase")),
     field("offline", "boolean"), field("idempotencyKey", "string", { nullable: true }),
+    field("draftText", "string"),
     // The bounded local feed the latest-turn component renders.
     field("turns", valueRef("link.turn-list")),
   ],
 } as const;
 export const composeTurnContract = {
   id: "link.compose-turn", kind: "event", boundary: "ui-event",
+  fields: [field("text", "string")],
+} as const;
+export const editComposerContract = {
+  id: "link.edit-composer", kind: "event", boundary: "ui-event",
   fields: [field("text", "string")],
 } as const;
 
@@ -69,6 +76,10 @@ export const playbackStatusContract = {
     field("durationMs", "integer", { unit: "si.millisecond" }),
     field("turn", valueRef("link.turn"), { nullable: true }),
   ],
+} as const;
+export const openAttachmentContract = {
+  id: "link.open-attachment", kind: "event", boundary: "ui-event",
+  fields: [field("url", "string")],
 } as const;
 
 export const targetDirectoryContract = {
@@ -93,6 +104,10 @@ export const sessionStatusContract = {
     field("publicLinkActive", "boolean"),
   ],
 } as const;
+export const publicLinkCommandContract = {
+  id: "link.public-link-command", kind: "event", boundary: "ui-event",
+  fields: [field("enabled", "boolean")],
+} as const;
 
 export const historyStatusContract = {
   id: "link.history-status", kind: "state", boundary: "presentation",
@@ -114,6 +129,7 @@ export const updateStatusContract = {
     field("phase", finiteValueRef("link.update-phase")),
     // The full ReleaseKit UpdateState the shared update rows render.
     field("update", valueRef("link.update-native")),
+    field("currentVersionName", "string"),
   ],
 } as const;
 export const updateCommandContract = {

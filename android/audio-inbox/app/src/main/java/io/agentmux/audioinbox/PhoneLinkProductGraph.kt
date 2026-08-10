@@ -9,6 +9,9 @@ import io.agentmux.linkcore.LinkUpdateOperation
 import io.agentmux.linkcore.PlaybackOperation
 import io.agentmux.linkui.product.LinkCapturedTurn
 import io.agentmux.linkui.product.LinkCaptureCommandEvent
+import io.agentmux.linkui.product.LinkComposerEditEvent
+import io.agentmux.linkui.product.LinkOpenAttachmentEvent
+import io.agentmux.linkui.product.LinkPublicLinkCommandEvent
 import io.agentmux.linkui.product.LinkNavigationController
 import io.agentmux.linkui.product.LinkPlaybackCommandEvent
 import io.agentmux.linkui.product.LinkPreferenceToggleEvent
@@ -26,6 +29,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -42,6 +46,9 @@ internal class PhoneLinkProductGraph private constructor(
     speakReplies: StateFlow<Boolean>,
     capturedTurns: Flow<LinkCapturedTurn>,
     captureByteCount: () -> Long,
+    captureByteLimit: () -> Long?,
+    captureLevel: () -> Float,
+    currentVersionName: String,
     sinks: LinkProductSinks,
     private val composer: ComposerDraftStore,
     private val releaseCaptureFiles: () -> Unit,
@@ -54,7 +61,11 @@ internal class PhoneLinkProductGraph private constructor(
     publicLinkActive = coordinator::publicLoggedIn,
     targetKindOf = coordinator::targetKind,
     captureByteCount = captureByteCount,
-    captureByteLimit = coordinator::selectedVoiceByteLimit,
+    captureByteLimit = captureByteLimit,
+    captureLevel = captureLevel,
+    composerDraft = composer.draft.map { it.text },
+    composerDraftValue = { composer.draft.value.text },
+    currentVersionName = currentVersionName,
     capturedTurns = capturedTurns,
     navigation = navigation,
     sinks = sinks,
@@ -83,6 +94,10 @@ internal class PhoneLinkProductGraph private constructor(
             updater: LinkUpdater,
             navigation: LinkNavigationController,
             microphoneGranted: StateFlow<Boolean>,
+            currentVersionName: String,
+            requestMicrophone: () -> Unit,
+            openAttachment: (String) -> Unit,
+            publicLinkCommand: () -> Unit,
         ): PhoneLinkProductGraph {
             val captures = PhoneCaptureAdapter(coordinator, recorder)
             val composer = ComposerDraftStore()
@@ -96,16 +111,25 @@ internal class PhoneLinkProductGraph private constructor(
                 speakReplies = speakReplies,
                 capturedTurns = captures.captured,
                 captureByteCount = recorder::currentBytes,
+                captureByteLimit = coordinator::selectedVoiceByteLimit,
+                captureLevel = recorder::currentLevel,
+                currentVersionName = currentVersionName,
                 sinks = LinkProductSinks(
-                    captureCommand = captures::command,
+                    captureCommand = { event ->
+                        if (event.operation == CaptureOperation.RECOVER) requestMicrophone()
+                        else captures.command(event)
+                    },
                     capturedTurn = captures::deliver,
                     compose = { event ->
                         coordinator.submitText(event.text)?.let(composer::submitted)
                     },
+                    editComposer = { event -> composer.edit(event.text) },
                     playbackCommand = coordinatorPlayback(coordinator),
                     targetSelect = { event -> coordinator.selectTarget(event.targetId) },
                     preferenceToggle = phonePreferenceToggle(coordinator, speakReplies),
                     updateCommand = updaterCommands(updater),
+                    publicLinkCommand = { publicLinkCommand() },
+                    openAttachment = { event -> openAttachment(event.url) },
                 ),
                 composer = composer,
                 releaseCaptureFiles = captures::clear,
@@ -118,6 +142,11 @@ internal class PhoneLinkProductGraph private constructor(
             coordinator: LinkCoordinator,
             updater: LinkUpdater,
             navigation: LinkNavigationController,
+            currentVersionName: String,
+            requestMicrophone: () -> Unit,
+            openAttachment: (String) -> Unit,
+            publicLinkCommand: () -> Unit,
+            captureLevel: () -> Float,
         ): PhoneLinkProductGraph {
             val composer = ComposerDraftStore()
             val speakReplies = MutableStateFlow(coordinator.speaksReplies())
@@ -130,6 +159,9 @@ internal class PhoneLinkProductGraph private constructor(
                 speakReplies = speakReplies,
                 capturedTurns = emptyFlow(),
                 captureByteCount = { 0L },
+                captureByteLimit = coordinator::selectedVoiceByteLimit,
+                captureLevel = captureLevel,
+                currentVersionName = currentVersionName,
                 sinks = LinkProductSinks(
                     captureCommand = { event ->
                         when (event.operation) {
@@ -145,16 +177,20 @@ internal class PhoneLinkProductGraph private constructor(
                             CaptureOperation.CANCEL -> qaState.update {
                                 it.copy(capture = CapturePhase.FAILED)
                             }
+                            CaptureOperation.RECOVER -> requestMicrophone()
                         }
                     },
                     capturedTurn = { },
                     compose = { composer.clear() },
+                    editComposer = { event -> composer.edit(event.text) },
                     playbackCommand = coordinatorPlayback(coordinator),
                     targetSelect = { event ->
                         qaState.update { it.copy(selectedTargetId = event.targetId) }
                     },
                     preferenceToggle = phonePreferenceToggle(coordinator, speakReplies),
                     updateCommand = updaterCommands(updater),
+                    publicLinkCommand = { publicLinkCommand() },
+                    openAttachment = { event -> openAttachment(event.url) },
                 ),
                 composer = composer,
                 releaseCaptureFiles = { },
@@ -233,6 +269,7 @@ private class PhoneCaptureAdapter(
                 recorder.cancel()
                 coordinator.capture(CapturePhase.FAILED)
             }
+            CaptureOperation.RECOVER -> error("Capture permission recovery belongs to the host sink")
         }
     }
 

@@ -1,9 +1,9 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the portable native-Lego catalog
-// Product declarations SHA-256: dbae1d15e69b0dab6c901f5aaff8a6043e0bcc46ac4b47228998760d2ded1574
+// Product declarations SHA-256: 07b65a9ab9c517b883647e79220750a7797e54c3b18da4dff792ae4f9f7cc10f
 package io.agentmux.linkui.product.generated
 
-internal enum class GeneratedLinkNodeId(val wireId: String) { NAVIGATION_SERVICE("navigation.service"), CAPTURE_SERVICE("capture.service"), CONVERSATION_SERVICE("conversation.service"), PLAYBACK_SERVICE("playback.service"), TARGET_SERVICE("target.service"), SESSION_SERVICE("session.service"), HISTORY_SERVICE("history.service"), PREFERENCES_SERVICE("preferences.service"), UPDATES_SERVICE("updates.service"), RECOVERY_SERVICE("recovery.service"), CAPTURE_PRESENTATION("capture.presentation"), CONVERSATION_PRESENTATION("conversation.presentation"), PLAYBACK_PRESENTATION("playback.presentation"), TARGET_PRESENTATION("target.presentation"), SESSION_PRESENTATION("session.presentation"), HISTORY_PRESENTATION("history.presentation"), PREFERENCES_PRESENTATION("preferences.presentation"), UPDATES_PRESENTATION("updates.presentation"), RECOVERY_PRESENTATION("recovery.presentation"), LINK_CAPTURE_PHASE_PRESENTATION_ADAPTER("link.capture-phase.presentation-adapter"), LINK_DELIVERY_PHASE_PRESENTATION_ADAPTER("link.delivery-phase.presentation-adapter"), LINK_REPLY_PHASE_PRESENTATION_ADAPTER("link.reply-phase.presentation-adapter"), LINK_PLAYBACK_PHASE_PRESENTATION_ADAPTER("link.playback-phase.presentation-adapter"), LINK_TARGET_KIND_PRESENTATION_ADAPTER("link.target-kind.presentation-adapter"), LINK_CONNECTION_STATE_PRESENTATION_ADAPTER("link.connection-state.presentation-adapter"), LINK_UPDATE_PHASE_PRESENTATION_ADAPTER("link.update-phase.presentation-adapter"), LINK_RECOVERY_PHASE_PRESENTATION_ADAPTER("link.recovery-phase.presentation-adapter") }
+internal enum class GeneratedLinkNodeId(val wireId: String) { NAVIGATION_SERVICE("navigation.service"), CAPTURE_SERVICE("capture.service"), CONVERSATION_SERVICE("conversation.service"), PLAYBACK_SERVICE("playback.service"), TARGET_SERVICE("target.service"), SESSION_SERVICE("session.service"), HOST_SERVICE("host.service"), HISTORY_SERVICE("history.service"), PREFERENCES_SERVICE("preferences.service"), UPDATES_SERVICE("updates.service"), RECOVERY_SERVICE("recovery.service"), CAPTURE_PRESENTATION("capture.presentation"), CONVERSATION_PRESENTATION("conversation.presentation"), PLAYBACK_PRESENTATION("playback.presentation"), TARGET_PRESENTATION("target.presentation"), SESSION_PRESENTATION("session.presentation"), HISTORY_PRESENTATION("history.presentation"), PREFERENCES_PRESENTATION("preferences.presentation"), UPDATES_PRESENTATION("updates.presentation"), RECOVERY_PRESENTATION("recovery.presentation"), LINK_CAPTURE_PHASE_PRESENTATION_ADAPTER("link.capture-phase.presentation-adapter"), LINK_DELIVERY_PHASE_PRESENTATION_ADAPTER("link.delivery-phase.presentation-adapter"), LINK_REPLY_PHASE_PRESENTATION_ADAPTER("link.reply-phase.presentation-adapter"), LINK_PLAYBACK_PHASE_PRESENTATION_ADAPTER("link.playback-phase.presentation-adapter"), LINK_TARGET_KIND_PRESENTATION_ADAPTER("link.target-kind.presentation-adapter"), LINK_CONNECTION_STATE_PRESENTATION_ADAPTER("link.connection-state.presentation-adapter"), LINK_UPDATE_PHASE_PRESENTATION_ADAPTER("link.update-phase.presentation-adapter"), LINK_RECOVERY_PHASE_PRESENTATION_ADAPTER("link.recovery-phase.presentation-adapter") }
 
 internal object GeneratedLinkNativeLegoCatalog {
     object PortIds {
@@ -15,12 +15,16 @@ internal object GeneratedLinkNativeLegoCatalog {
         data object CAPTURE_SERVICE_CAPTURED : GeneratedProductOutputPortId { override val value = "capture.service.captured" }
         data object CONVERSATION_SERVICE_TURN : GeneratedProductInputPortId { override val value = "conversation.service.turn" }
         data object CONVERSATION_SERVICE_COMPOSE : GeneratedProductInputPortId { override val value = "conversation.service.compose" }
+        data object CONVERSATION_SERVICE_EDIT : GeneratedProductInputPortId { override val value = "conversation.service.edit" }
         data object CONVERSATION_SERVICE_STATUS : GeneratedProductOutputPortId { override val value = "conversation.service.status" }
         data object PLAYBACK_SERVICE_COMMAND : GeneratedProductInputPortId { override val value = "playback.service.command" }
+        data object PLAYBACK_SERVICE_LATESTCOMMAND : GeneratedProductInputPortId { override val value = "playback.service.latestCommand" }
         data object PLAYBACK_SERVICE_STATUS : GeneratedProductOutputPortId { override val value = "playback.service.status" }
         data object TARGET_SERVICE_SELECT : GeneratedProductInputPortId { override val value = "target.service.select" }
         data object TARGET_SERVICE_DIRECTORY : GeneratedProductOutputPortId { override val value = "target.service.directory" }
+        data object SESSION_SERVICE_COMMAND : GeneratedProductInputPortId { override val value = "session.service.command" }
         data object SESSION_SERVICE_STATUS : GeneratedProductOutputPortId { override val value = "session.service.status" }
+        data object HOST_SERVICE_OPENATTACHMENT : GeneratedProductInputPortId { override val value = "host.service.openAttachment" }
         data object HISTORY_SERVICE_STATUS : GeneratedProductOutputPortId { override val value = "history.service.status" }
         data object PREFERENCES_SERVICE_TOGGLE : GeneratedProductInputPortId { override val value = "preferences.service.toggle" }
         data object PREFERENCES_SERVICE_STATUS : GeneratedProductOutputPortId { override val value = "preferences.service.status" }
@@ -64,6 +68,10 @@ internal object GeneratedLinkNativeLegoCatalog {
         data object PAGE_HOST_ACTIVEPAGE : GeneratedProductInputPortId { override val value = "page-host.activePage" }
         data object TARGET_MODEL : GeneratedProductInputPortId { override val value = "target.model" }
         data object TARGET_TARGETSTATE : GeneratedProductInputPortId { override val value = "target.targetState" }
+        data object TARGET_SESSION : GeneratedProductInputPortId { override val value = "target.session" }
+        data object TARGET_CONNECTIONSTATE : GeneratedProductInputPortId { override val value = "target.connectionState" }
+        data object TARGET_RECOVERY : GeneratedProductInputPortId { override val value = "target.recovery" }
+        data object TARGET_RECOVERYSTATE : GeneratedProductInputPortId { override val value = "target.recoveryState" }
         data object TARGET_SELECT : GeneratedProductOutputPortId { override val value = "target.select" }
         data object TALK_MODEL : GeneratedProductInputPortId { override val value = "talk.model" }
         data object TALK_CAPTURESTATE : GeneratedProductInputPortId { override val value = "talk.captureState" }
@@ -71,10 +79,17 @@ internal object GeneratedLinkNativeLegoCatalog {
         data object LATEST_MODEL : GeneratedProductInputPortId { override val value = "latest.model" }
         data object LATEST_DELIVERYSTATE : GeneratedProductInputPortId { override val value = "latest.deliveryState" }
         data object LATEST_REPLYSTATE : GeneratedProductInputPortId { override val value = "latest.replyState" }
+        data object LATEST_PLAYBACK : GeneratedProductInputPortId { override val value = "latest.playback" }
+        data object LATEST_PLAYBACKSTATE : GeneratedProductInputPortId { override val value = "latest.playbackState" }
+        data object LATEST_PLAYBACKCOMMAND : GeneratedProductOutputPortId { override val value = "latest.playbackCommand" }
+        data object LATEST_OPENATTACHMENT : GeneratedProductOutputPortId { override val value = "latest.openAttachment" }
         data object COMPOSER_MODEL : GeneratedProductInputPortId { override val value = "composer.model" }
         data object COMPOSER_DELIVERYSTATE : GeneratedProductInputPortId { override val value = "composer.deliveryState" }
         data object COMPOSER_REPLYSTATE : GeneratedProductInputPortId { override val value = "composer.replyState" }
+        data object COMPOSER_TARGET : GeneratedProductInputPortId { override val value = "composer.target" }
+        data object COMPOSER_TARGETSTATE : GeneratedProductInputPortId { override val value = "composer.targetState" }
         data object COMPOSER_COMPOSE : GeneratedProductOutputPortId { override val value = "composer.compose" }
+        data object COMPOSER_EDIT : GeneratedProductOutputPortId { override val value = "composer.edit" }
         data object ACTIVE_PLAYBACK_MODEL : GeneratedProductInputPortId { override val value = "active-playback.model" }
         data object ACTIVE_PLAYBACK_PLAYBACKSTATE : GeneratedProductInputPortId { override val value = "active-playback.playbackState" }
         data object ACTIVE_PLAYBACK_COMMAND : GeneratedProductOutputPortId { override val value = "active-playback.command" }
@@ -82,6 +97,7 @@ internal object GeneratedLinkNativeLegoCatalog {
         data object CONNECTION_CONNECTIONSTATE : GeneratedProductInputPortId { override val value = "connection.connectionState" }
         data object PUBLIC_LINK_MODEL : GeneratedProductInputPortId { override val value = "public-link.model" }
         data object PUBLIC_LINK_CONNECTIONSTATE : GeneratedProductInputPortId { override val value = "public-link.connectionState" }
+        data object PUBLIC_LINK_COMMAND : GeneratedProductOutputPortId { override val value = "public-link.command" }
         data object PREFERENCES_MODEL : GeneratedProductInputPortId { override val value = "preferences.model" }
         data object PREFERENCES_TOGGLE : GeneratedProductOutputPortId { override val value = "preferences.toggle" }
         data object LOCAL_HISTORY_MODEL : GeneratedProductInputPortId { override val value = "local-history.model" }
@@ -109,7 +125,7 @@ internal object GeneratedLinkNativeLegoCatalog {
         data object LINK_NAVIGATION_PAGE : GeneratedLinkFiniteValueId { override val value = "link.navigation.page" }
     }
     val finiteValues: List<GeneratedLinkFiniteValueDeclaration> = listOf(
-        GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_CAPTURE_OPERATION, setOf("begin", "release", "cancel")),
+        GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_CAPTURE_OPERATION, setOf("begin", "release", "cancel", "recover")),
         GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_CAPTURE_PHASE, setOf("idle", "listening", "finalizing", "failed")),
         GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_DELIVERY_PHASE, setOf("none", "sending", "queued", "failed")),
         GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_REPLY_PHASE, setOf("none", "thinking", "ready", "failed")),

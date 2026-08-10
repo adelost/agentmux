@@ -2,6 +2,7 @@ package io.agentmux.audioinbox
 
 import android.Manifest
 import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -87,6 +88,11 @@ class MainActivity : ComponentActivity() {
                 coordinator = coordinator,
                 updater = updater,
                 navigation = navigation,
+                currentVersionName = updater.currentVersionName,
+                requestMicrophone = ::requestMicrophone,
+                openAttachment = ::openAttachment,
+                publicLinkCommand = ::onPublicLink,
+                captureLevel = ::qaRecordedLevel,
             )
         } else {
             PhoneLinkProductGraph.real(
@@ -95,6 +101,10 @@ class MainActivity : ComponentActivity() {
                 updater = updater,
                 navigation = navigation,
                 microphoneGranted = microphoneGranted,
+                currentVersionName = updater.currentVersionName,
+                requestMicrophone = ::requestMicrophone,
+                openAttachment = ::openAttachment,
+                publicLinkCommand = ::onPublicLink,
             )
         }
         setContent {
@@ -162,6 +172,10 @@ class MainActivity : ComponentActivity() {
 
     private fun onPublicLink() {
         if (coordinator.publicLoggedIn()) coordinator.logoutPublic() else coordinator.beginPublicLogin()
+    }
+
+    private fun openAttachment(url: String) {
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
     }
 
     private fun hasMicrophonePermission(): Boolean =

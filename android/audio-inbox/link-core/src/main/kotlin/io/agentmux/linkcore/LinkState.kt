@@ -28,6 +28,7 @@ enum class CaptureOperation {
     BEGIN,
     RELEASE,
     CANCEL,
+    RECOVER,
 }
 
 /**

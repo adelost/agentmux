@@ -31,6 +31,8 @@ data class LinkCapturePresentation(
     val unavailableReason: String?,
     val startedAtMs: Long?,
     val byteCount: Long,
+    val byteLimit: Long?,
+    val level: Float,
 )
 
 /** capture.service.captured — the service-internal edge into conversation.service.turn. */
@@ -49,6 +51,7 @@ data class LinkConversationPresentation(
     val replyPhase: ReplyPhase,
     val offline: Boolean,
     val idempotencyKey: String?,
+    val draftText: String,
     val turns: List<LinkTurn>,
 )
 
@@ -92,6 +95,7 @@ data class LinkPreferencesPresentation(
 data class LinkUpdatePresentation(
     val phase: LinkUpdatePhase,
     val update: UpdateState,
+    val currentVersionName: String,
 )
 
 /** recovery.presentation.model — the recovery component's model. */
@@ -108,6 +112,15 @@ data class LinkPlaybackCommandEvent(val operation: PlaybackOperation, val turnId
 
 /** composer.compose → conversation.service.compose. */
 data class LinkComposeEvent(val text: String)
+
+/** composer.edit → conversation.service.edit. */
+data class LinkComposerEditEvent(val text: String)
+
+/** latest.openAttachment → host.service.openAttachment. */
+data class LinkOpenAttachmentEvent(val url: String)
+
+/** public-link.command → session.service.command. */
+data class LinkPublicLinkCommandEvent(val enabled: Boolean)
 
 /** target.select → target.service.select. */
 data class LinkTargetSelectEvent(val targetId: String)
@@ -141,6 +154,8 @@ fun LinkState.captureAvailability(microphoneGranted: Boolean): LinkCaptureAvaila
 fun LinkState.toCapturePresentation(
     microphoneGranted: Boolean,
     byteCount: Long,
+    byteLimit: Long?,
+    level: Float,
 ): LinkCapturePresentation {
     val availability = captureAvailability(microphoneGranted)
     return LinkCapturePresentation(
@@ -153,10 +168,12 @@ fun LinkState.toCapturePresentation(
         },
         startedAtMs = captureStartedAtMs.takeIf { it > 0L },
         byteCount = byteCount,
+        byteLimit = byteLimit,
+        level = level.coerceIn(0f, 1f),
     )
 }
 
-fun LinkState.toConversationPresentation(): LinkConversationPresentation {
+fun LinkState.toConversationPresentation(draftText: String): LinkConversationPresentation {
     val turn = turns.lastOrNull()
     return LinkConversationPresentation(
         turnId = turn?.turnId,
@@ -164,6 +181,7 @@ fun LinkState.toConversationPresentation(): LinkConversationPresentation {
         replyPhase = turn?.replyPhase ?: ReplyPhase.NONE,
         offline = connection != ConnectionState.CONNECTED,
         idempotencyKey = turn?.turnId,
+        draftText = draftText,
         turns = turns,
     )
 }
@@ -224,8 +242,8 @@ fun UpdateState.wirePhase(): LinkUpdatePhase = when (this) {
     is UpdateState.Failed -> LinkUpdatePhase.FAILED
 }
 
-fun UpdateState.toUpdatePresentation(): LinkUpdatePresentation =
-    LinkUpdatePresentation(phase = wirePhase(), update = this)
+fun UpdateState.toUpdatePresentation(currentVersionName: String): LinkUpdatePresentation =
+    LinkUpdatePresentation(phase = wirePhase(), update = this, currentVersionName = currentVersionName)
 
 fun LinkState.toRecoveryPresentation(): LinkRecoveryPresentation {
     val error = recoveryError

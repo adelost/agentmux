@@ -1,6 +1,6 @@
 import { finiteValues } from "@v1d/product-spec";
 
-export const linkCaptureOperations = finiteValues("link.capture-operation", ["begin", "release", "cancel"]);
+export const linkCaptureOperations = finiteValues("link.capture-operation", ["begin", "release", "cancel", "recover"]);
 export const linkCapturePhases = finiteValues("link.capture-phase", ["idle", "listening", "finalizing", "failed"]);
 export const linkDeliveryPhases = finiteValues("link.delivery-phase", ["none", "sending", "queued", "failed"]);
 export const linkReplyPhases = finiteValues("link.reply-phase", ["none", "thinking", "ready", "failed"]);

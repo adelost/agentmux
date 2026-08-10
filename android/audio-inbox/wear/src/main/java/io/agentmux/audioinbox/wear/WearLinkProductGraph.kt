@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flowOf
 
 /**
  * The wear host of the product port graph. The watch divergences stay exactly
@@ -35,6 +36,8 @@ internal class WearLinkProductGraph private constructor(
     microphoneGranted: StateFlow<Boolean>,
     capturedTurns: Flow<LinkCapturedTurn>,
     captureByteCount: () -> Long,
+    captureLevel: () -> Float,
+    currentVersionName: String,
     sinks: LinkProductSinks,
     private val releaseCaptureFiles: () -> Unit,
 ) : LinkProductGraph(
@@ -48,6 +51,10 @@ internal class WearLinkProductGraph private constructor(
     targetKindOf = { null },
     captureByteCount = captureByteCount,
     captureByteLimit = { null },
+    captureLevel = captureLevel,
+    composerDraft = flowOf(""),
+    composerDraftValue = { "" },
+    currentVersionName = currentVersionName,
     capturedTurns = capturedTurns,
     navigation = navigation,
     sinks = sinks,
@@ -64,6 +71,9 @@ internal class WearLinkProductGraph private constructor(
             navigation: LinkNavigationController,
             microphoneGranted: StateFlow<Boolean>,
             state: StateFlow<LinkState> = controller.state,
+            currentVersionName: String,
+            requestMicrophone: () -> Unit,
+            openAttachment: (String) -> Unit,
         ): WearLinkProductGraph {
             val captures = WearCaptureAdapter(controller)
             return WearLinkProductGraph(
@@ -74,10 +84,16 @@ internal class WearLinkProductGraph private constructor(
                 microphoneGranted = microphoneGranted,
                 capturedTurns = captures.captured,
                 captureByteCount = controller::recordedBytes,
+                captureLevel = controller::recordedLevel,
+                currentVersionName = currentVersionName,
                 sinks = LinkProductSinks(
-                    captureCommand = captures::command,
+                    captureCommand = { event ->
+                        if (event.operation == CaptureOperation.RECOVER) requestMicrophone()
+                        else captures.command(event)
+                    },
                     capturedTurn = captures::deliver,
                     compose = { error("Wear has no composer surface") },
+                    editComposer = { error("Wear has no composer surface") },
                     playbackCommand = { event ->
                         when (event.operation) {
                             PlaybackOperation.PLAY -> controller.playTurn(event.turnId)
@@ -105,6 +121,8 @@ internal class WearLinkProductGraph private constructor(
                             LinkUpdateOperation.INSTALL -> updater.install()
                         }
                     },
+                    publicLinkCommand = { error("Wear has no public-link component") },
+                    openAttachment = { event -> openAttachment(event.url) },
                 ),
                 releaseCaptureFiles = captures::clear,
             )
@@ -130,6 +148,7 @@ private class WearCaptureAdapter(
                 clear()
                 controller.cancelCapture()
             }
+            CaptureOperation.RECOVER -> error("Capture permission recovery belongs to the host sink")
         }
     }
 

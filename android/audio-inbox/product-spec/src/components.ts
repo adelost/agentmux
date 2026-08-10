@@ -3,16 +3,19 @@ import {
   captureCommandContract,
   captureStatusContract,
   composeTurnContract,
+  editComposerContract,
   conversationStatusContract,
   historyStatusContract,
   playbackCommandContract,
   playbackStatusContract,
+  openAttachmentContract,
   preferenceToggleContract,
   preferencesStatusContract,
   recoveryStatusContract,
   activePageContract,
   routeOpenContract,
   sessionStatusContract,
+  publicLinkCommandContract,
   targetDirectoryContract,
   targetSelectContract,
   updateCommandContract,
@@ -37,6 +40,10 @@ export const targetPickerComponentType = defineComponentType({
   inputs: [
     componentPort("model", targetDirectoryContract),
     componentPort("targetState", targetKindAuthority.authority.presentation.contract),
+    componentPort("session", sessionStatusContract),
+    componentPort("connectionState", connectionStateAuthority.authority.presentation.contract),
+    componentPort("recovery", recoveryStatusContract),
+    componentPort("recoveryState", recoveryPhaseAuthority.authority.presentation.contract),
   ],
   outputs: [componentPort("select", targetSelectContract)],
 });
@@ -56,8 +63,13 @@ export const latestTurnComponentType = defineComponentType({
     componentPort("model", conversationStatusContract),
     componentPort("deliveryState", deliveryPhaseAuthority.authority.presentation.contract),
     componentPort("replyState", replyPhaseAuthority.authority.presentation.contract),
+    componentPort("playback", playbackStatusContract),
+    componentPort("playbackState", playbackPhaseAuthority.authority.presentation.contract),
   ],
-  outputs: [],
+  outputs: [
+    componentPort("playbackCommand", playbackCommandContract),
+    componentPort("openAttachment", openAttachmentContract),
+  ],
 });
 export const composerComponentType = defineComponentType({
   id: "link.composer",
@@ -66,8 +78,10 @@ export const composerComponentType = defineComponentType({
     componentPort("model", conversationStatusContract),
     componentPort("deliveryState", deliveryPhaseAuthority.authority.presentation.contract),
     componentPort("replyState", replyPhaseAuthority.authority.presentation.contract),
+    componentPort("target", targetDirectoryContract),
+    componentPort("targetState", targetKindAuthority.authority.presentation.contract),
   ],
-  outputs: [componentPort("compose", composeTurnContract)],
+  outputs: [componentPort("compose", composeTurnContract), componentPort("edit", editComposerContract)],
 });
 export const activePlaybackComponentType = defineComponentType({
   id: "link.active-playback",
@@ -94,7 +108,7 @@ export const publicLinkComponentType = defineComponentType({
     componentPort("model", sessionStatusContract),
     componentPort("connectionState", connectionStateAuthority.authority.presentation.contract),
   ],
-  outputs: [],
+  outputs: [componentPort("command", publicLinkCommandContract)],
 });
 export const preferencesComponentType = defineComponentType({
   id: "link.preferences",
@@ -184,6 +198,10 @@ export const linkComponentInstances = [
       inputs: {
         model: "target.presentation.model",
         targetState: targetKindAuthority.authority.adapter.outputPortRef,
+        session: "session.presentation.model",
+        connectionState: connectionStateAuthority.authority.adapter.outputPortRef,
+        recovery: "recovery.presentation.model",
+        recoveryState: recoveryPhaseAuthority.authority.adapter.outputPortRef,
       },
       events: { select: "target.service.select" },
     },
@@ -205,8 +223,13 @@ export const linkComponentInstances = [
         model: "conversation.presentation.model",
         deliveryState: deliveryPhaseAuthority.authority.adapter.outputPortRef,
         replyState: replyPhaseAuthority.authority.adapter.outputPortRef,
+        playback: "playback.presentation.model",
+        playbackState: playbackPhaseAuthority.authority.adapter.outputPortRef,
       },
-      events: {},
+      events: {
+        playbackCommand: "playback.service.latestCommand",
+        openAttachment: "host.service.openAttachment",
+      },
     },
   },
   {
@@ -216,8 +239,10 @@ export const linkComponentInstances = [
         model: "conversation.presentation.model",
         deliveryState: deliveryPhaseAuthority.authority.adapter.outputPortRef,
         replyState: replyPhaseAuthority.authority.adapter.outputPortRef,
+        target: "target.presentation.model",
+        targetState: targetKindAuthority.authority.adapter.outputPortRef,
       },
-      events: { compose: "conversation.service.compose" },
+      events: { compose: "conversation.service.compose", edit: "conversation.service.edit" },
     },
   },
   {
@@ -247,7 +272,7 @@ export const linkComponentInstances = [
         model: "session.presentation.model",
         connectionState: connectionStateAuthority.authority.adapter.outputPortRef,
       },
-      events: {},
+      events: { command: "session.service.command" },
     },
   },
   {

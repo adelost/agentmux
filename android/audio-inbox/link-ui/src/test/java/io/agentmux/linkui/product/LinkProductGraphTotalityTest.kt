@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -28,6 +29,10 @@ class LinkProductGraphTotalityTest {
             targetKindOf = { null },
             captureByteCount = { 0L },
             captureByteLimit = { null },
+            captureLevel = { 0f },
+            composerDraft = flowOf(""),
+            composerDraftValue = { "" },
+            currentVersionName = "test",
             capturedTurns = MutableSharedFlow(),
             navigation = LinkNavigationController(
                 artifact = io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef.PHONE_FULL_UI,
@@ -36,10 +41,13 @@ class LinkProductGraphTotalityTest {
                 captureCommand = {},
                 capturedTurn = {},
                 compose = {},
+                editComposer = {},
                 playbackCommand = {},
                 targetSelect = {},
                 preferenceToggle = {},
                 updateCommand = {},
+                publicLinkCommand = {},
+                openAttachment = {},
             ),
         )
 

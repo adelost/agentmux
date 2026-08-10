@@ -14,9 +14,11 @@ import { compileAgentmuxLinkProduct } from "../src/product.js";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const product = compileAgentmuxLinkProduct("0.0.0-test");
-const manifest = decodeNativeBindingManifest(
-  JSON.parse(await readFile(resolve(packageRoot, "native-registry/link.json"), "utf8")),
-);
+const manifests = await Promise.all(["phone", "wear"].map(async (host) =>
+  decodeNativeBindingManifest(
+    JSON.parse(await readFile(resolve(packageRoot, `native-registry/${host}.json`), "utf8")),
+  )));
+const manifest = manifests[0]!;
 
 test("the mandatory graph has no parallel list and one binding per data input", () => {
   assert.equal(product.schemaVersion, PRODUCT_SPEC_SCHEMA_VERSION);
@@ -24,9 +26,9 @@ test("the mandatory graph has no parallel list and one binding per data input", 
   assert.equal("legos" in product, false, "old lego graph must not survive");
   assert.equal("ui" in product, false, "old ui entry list must not survive");
   assert.equal("componentCatalog" in product, false, "port-less catalog must not survive");
-  assert.equal(product.nodes.length, 27);
+  assert.equal(product.nodes.length, 28);
   assert.equal(product.nodes.filter(({ nodeTypeRef }) =>
-    product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "service").length, 10);
+    product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "service").length, 11);
   assert.equal(product.nodes.filter(({ nodeTypeRef }) =>
     product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "present").length, 17);
   assert.equal(product.components.length, 15);
@@ -115,8 +117,8 @@ test("pages and artifacts cover exactly the declared screens", () => {
 });
 
 test("native binding manifest conforms, with node ports native-attested", () => {
-  assert.deepEqual(productArtifactConformance(product, manifest), []);
-  assert.deepEqual(productArtifactHostCoverage(product, [manifest]), []);
+  for (const host of manifests) assert.deepEqual(productArtifactConformance(product, host), []);
+  assert.deepEqual(productArtifactHostCoverage(product, manifests), []);
 });
 
 test("every compiler-exposed closed state lineage has one executable authority", () => {
@@ -140,11 +142,11 @@ test("every compiler-exposed closed state lineage has one executable authority",
 test("conformance engine goes red on manifest drift", () => {
   const withoutComponent = {
     ...manifest,
-    components: manifest.components.filter(({ componentId }) => componentId !== "link.talk"),
+    components: manifest.components.filter(({ component }) => component.instanceRef !== "talk"),
   };
   const findings = productArtifactConformance(product, withoutComponent);
   assert.ok(findings.some((finding) =>
-    finding.axis === "component" && finding.direction === "missing" && finding.subject.startsWith("link.talk@")
+    finding.axis === "component-render" && finding.direction === "missing" && finding.subject.startsWith("talk@")
   ));
   const withoutIcon = { ...manifest, icons: manifest.icons.filter(({ iconId }) => iconId !== "record") };
   assert.ok(productArtifactConformance(product, withoutIcon).some((finding) =>

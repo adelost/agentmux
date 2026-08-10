@@ -12,6 +12,7 @@ import {
   preferencesPresentation,
   recoveryService,
   recoveryPresentation,
+  hostEffectService,
   sessionService,
   sessionPresentation,
   targetDirectoryService,
@@ -58,13 +59,14 @@ export const linkNodes = [
     bindings: {
       turn: "capture.service.captured",
       compose: "composer.compose",
+      edit: "composer.edit",
     },
     activation: { kind: "lifetime", lifecycleSources: [] },
   },
   {
     id: "playback.service", nodeTypeRef: playbackService.id,
     config: { policy: "link.playback-policy" },
-    bindings: { command: "active-playback.command" },
+    bindings: { command: "active-playback.command", latestCommand: "latest.playbackCommand" },
     activation: { kind: "lifetime", lifecycleSources: [] },
   },
   {
@@ -76,7 +78,12 @@ export const linkNodes = [
   {
     id: "session.service", nodeTypeRef: sessionService.id,
     config: {},
-    bindings: {},
+    bindings: { command: "public-link.command" },
+    activation: { kind: "lifetime", lifecycleSources: [] },
+  },
+  {
+    id: "host.service", nodeTypeRef: hostEffectService.id,
+    config: {}, bindings: { openAttachment: "latest.openAttachment" },
     activation: { kind: "lifetime", lifecycleSources: [] },
   },
   {

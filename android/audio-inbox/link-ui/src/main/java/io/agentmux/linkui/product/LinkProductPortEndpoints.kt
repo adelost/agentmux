@@ -31,11 +31,17 @@ internal object ConversationTurnInput :
 internal object ConversationComposeInput :
     ProductInputPort<LinkComposeEvent, Unit>(PortIds.CONVERSATION_SERVICE_COMPOSE)
 
+internal object ConversationEditInput :
+    ProductInputPort<LinkComposerEditEvent, Unit>(PortIds.CONVERSATION_SERVICE_EDIT)
+
 internal object ConversationStatusOutput :
     ProductOutputPort<LinkConversationPresentation>(PortIds.CONVERSATION_SERVICE_STATUS)
 
 internal object PlaybackCommandInput :
     ProductInputPort<LinkPlaybackCommandEvent, Unit>(PortIds.PLAYBACK_SERVICE_COMMAND)
+
+internal object PlaybackLatestCommandInput :
+    ProductInputPort<LinkPlaybackCommandEvent, Unit>(PortIds.PLAYBACK_SERVICE_LATESTCOMMAND)
 
 internal object PlaybackStatusOutput :
     ProductOutputPort<LinkPlaybackPresentation>(PortIds.PLAYBACK_SERVICE_STATUS)
@@ -48,6 +54,12 @@ internal object TargetDirectoryOutput :
 
 internal object SessionStatusOutput :
     ProductOutputPort<LinkSessionPresentation>(PortIds.SESSION_SERVICE_STATUS)
+
+internal object SessionCommandInput :
+    ProductInputPort<LinkPublicLinkCommandEvent, Unit>(PortIds.SESSION_SERVICE_COMMAND)
+
+internal object HostOpenAttachmentInput :
+    ProductInputPort<LinkOpenAttachmentEvent, Unit>(PortIds.HOST_SERVICE_OPENATTACHMENT)
 
 internal object HistoryStatusOutput :
     ProductOutputPort<LinkHistoryPresentation>(PortIds.HISTORY_SERVICE_STATUS)
@@ -110,6 +122,12 @@ internal object TargetModelInput :
 internal object TargetSelectEvent :
     ProductComponentEvent<LinkTargetSelectEvent, Unit>(PortIds.TARGET_SELECT)
 
+internal object TargetSessionInput :
+    ProductComponentInput<LinkSessionPresentation>(PortIds.TARGET_SESSION)
+
+internal object TargetRecoveryInput :
+    ProductComponentInput<LinkRecoveryPresentation>(PortIds.TARGET_RECOVERY)
+
 internal object TalkModelInput :
     ProductComponentInput<LinkCapturePresentation>(PortIds.TALK_MODEL)
 
@@ -119,11 +137,26 @@ internal object TalkCommandEvent :
 internal object LatestModelInput :
     ProductComponentInput<LinkConversationPresentation>(PortIds.LATEST_MODEL)
 
+internal object LatestPlaybackInput :
+    ProductComponentInput<LinkPlaybackPresentation>(PortIds.LATEST_PLAYBACK)
+
+internal object LatestPlaybackCommandEvent :
+    ProductComponentEvent<LinkPlaybackCommandEvent, Unit>(PortIds.LATEST_PLAYBACKCOMMAND)
+
+internal object LatestOpenAttachmentEvent :
+    ProductComponentEvent<LinkOpenAttachmentEvent, Unit>(PortIds.LATEST_OPENATTACHMENT)
+
 internal object ComposerModelInput :
     ProductComponentInput<LinkConversationPresentation>(PortIds.COMPOSER_MODEL)
 
+internal object ComposerTargetInput :
+    ProductComponentInput<LinkTargetPresentation>(PortIds.COMPOSER_TARGET)
+
 internal object ComposerComposeEvent :
     ProductComponentEvent<LinkComposeEvent, Unit>(PortIds.COMPOSER_COMPOSE)
+
+internal object ComposerEditEvent :
+    ProductComponentEvent<LinkComposerEditEvent, Unit>(PortIds.COMPOSER_EDIT)
 
 internal object ActivePlaybackModelInput :
     ProductComponentInput<LinkPlaybackPresentation>(PortIds.ACTIVE_PLAYBACK_MODEL)
@@ -136,6 +169,9 @@ internal object ConnectionModelInput :
 
 internal object PublicLinkModelInput :
     ProductComponentInput<LinkSessionPresentation>(PortIds.PUBLIC_LINK_MODEL)
+
+internal object PublicLinkCommandEvent :
+    ProductComponentEvent<LinkPublicLinkCommandEvent, Unit>(PortIds.PUBLIC_LINK_COMMAND)
 
 internal object PreferencesModelInput :
     ProductComponentInput<LinkPreferencesPresentation>(PortIds.PREFERENCES_MODEL)

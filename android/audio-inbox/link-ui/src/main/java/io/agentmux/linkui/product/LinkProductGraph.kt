@@ -23,16 +23,23 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.isActive
 
 /** The host-supplied native sinks behind the generated effect-owning service inputs. */
 class LinkProductSinks(
     val captureCommand: (LinkCaptureCommandEvent) -> Unit,
     val capturedTurn: (LinkCapturedTurn) -> Unit,
     val compose: (LinkComposeEvent) -> Unit,
+    val editComposer: (LinkComposerEditEvent) -> Unit,
     val playbackCommand: (LinkPlaybackCommandEvent) -> Unit,
     val targetSelect: (LinkTargetSelectEvent) -> Unit,
     val preferenceToggle: (LinkPreferenceToggleEvent) -> Unit,
     val updateCommand: (LinkUpdateCommandEvent) -> Unit,
+    val publicLinkCommand: (LinkPublicLinkCommandEvent) -> Unit,
+    val openAttachment: (LinkOpenAttachmentEvent) -> Unit,
 )
 
 /**
@@ -54,6 +61,10 @@ open class LinkProductGraph(
     targetKindOf: (String) -> LinkTargetKind?,
     captureByteCount: () -> Long,
     captureByteLimit: () -> Long?,
+    captureLevel: () -> Float,
+    composerDraft: Flow<String>,
+    composerDraftValue: () -> String,
+    currentVersionName: String,
     capturedTurns: Flow<LinkCapturedTurn>,
     val navigation: LinkNavigationController,
     private val sinks: LinkProductSinks,
@@ -99,10 +110,14 @@ open class LinkProductGraph(
 
     private val talkCommand: ProductComponentEventEmitter<LinkCaptureCommandEvent, Unit>
     private val composerCompose: ProductComponentEventEmitter<LinkComposeEvent, Unit>
+    private val composerEdit: ProductComponentEventEmitter<LinkComposerEditEvent, Unit>
     private val activePlaybackCommand: ProductComponentEventEmitter<LinkPlaybackCommandEvent, Unit>
+    private val latestPlaybackCommand: ProductComponentEventEmitter<LinkPlaybackCommandEvent, Unit>
+    private val latestOpenAttachment: ProductComponentEventEmitter<LinkOpenAttachmentEvent, Unit>
     private val targetSelect: ProductComponentEventEmitter<LinkTargetSelectEvent, Unit>
     private val preferencesToggle: ProductComponentEventEmitter<LinkPreferenceToggleEvent, Unit>
     private val updatesCommand: ProductComponentEventEmitter<LinkUpdateCommandEvent, Unit>
+    private val publicLinkCommand: ProductComponentEventEmitter<LinkPublicLinkCommandEvent, Unit>
     private val settingsActionOpen: ProductComponentEventEmitter<LinkRouteOpenEvent, Unit>
     private val devHostOpen: ProductComponentEventEmitter<LinkRouteOpenEvent, Unit>
 
@@ -116,14 +131,22 @@ open class LinkProductGraph(
         )
         runtime.observe(
             CaptureStatusOutput,
-            combine(state, microphoneGranted) { current, granted ->
-                current.toCapturePresentation(granted, captureByteCount())
-            }.hot { state.value.toCapturePresentation(microphoneGranted.value, captureByteCount()) },
+            combine(state, microphoneGranted, measurementTicks()) { current, granted, _ ->
+                current.toCapturePresentation(
+                    granted, captureByteCount(), captureByteLimit(), captureLevel(),
+                )
+            }.hot {
+                state.value.toCapturePresentation(
+                    microphoneGranted.value, captureByteCount(), captureByteLimit(), captureLevel(),
+                )
+            },
         )
         runtime.observe(CaptureCapturedOutput, capturedTurns)
         runtime.observe(
             ConversationStatusOutput,
-            state.map { it.toConversationPresentation() }.hot { state.value.toConversationPresentation() },
+            combine(state, composerDraft) { current, draft ->
+                current.toConversationPresentation(draft)
+            }.hot { state.value.toConversationPresentation(composerDraftValue()) },
         )
         runtime.observe(
             PlaybackStatusOutput,
@@ -151,7 +174,8 @@ open class LinkProductGraph(
         )
         runtime.observe(
             UpdatesStatusOutput,
-            updateState.map { it.toUpdatePresentation() }.hot { updateState.value.toUpdatePresentation() },
+            updateState.map { it.toUpdatePresentation(currentVersionName) }
+                .hot { updateState.value.toUpdatePresentation(currentVersionName) },
         )
         runtime.observe(
             RecoveryStatusOutput,
@@ -260,15 +284,23 @@ open class LinkProductGraph(
         runtime.bindInput(NavigationOpenDevHostInput) { event -> navigation.open(event.target) }
         runtime.bindInput(CaptureCommandInput) { event -> sinks.captureCommand(event) }
         runtime.bindInput(ConversationComposeInput) { event -> sinks.compose(event) }
+        runtime.bindInput(ConversationEditInput) { event -> sinks.editComposer(event) }
         runtime.bindInput(PlaybackCommandInput) { event -> sinks.playbackCommand(event) }
+        runtime.bindInput(PlaybackLatestCommandInput) { event -> sinks.playbackCommand(event) }
         runtime.bindInput(TargetSelectInput) { event -> sinks.targetSelect(event) }
         runtime.bindInput(PreferencesToggleInput) { event -> sinks.preferenceToggle(event) }
         runtime.bindInput(UpdatesCommandInput) { event -> sinks.updateCommand(event) }
+        runtime.bindInput(SessionCommandInput) { event -> sinks.publicLinkCommand(event) }
+        runtime.bindInput(HostOpenAttachmentInput) { event -> sinks.openAttachment(event) }
 
         target = runtime.connected(TargetModelInput, processScope)
+        runtime.connected(TargetSessionInput, processScope)
+        runtime.connected(TargetRecoveryInput, processScope)
         capture = runtime.connected(TalkModelInput, processScope)
         latest = runtime.connected(LatestModelInput, processScope)
+        runtime.connected(LatestPlaybackInput, processScope)
         composerModel = runtime.connected(ComposerModelInput, processScope)
+        runtime.connected(ComposerTargetInput, processScope)
         activePlayback = runtime.connected(ActivePlaybackModelInput, processScope)
         connection = runtime.connected(ConnectionModelInput, processScope)
         publicLink = runtime.connected(PublicLinkModelInput, processScope)
@@ -280,10 +312,14 @@ open class LinkProductGraph(
 
         talkCommand = runtime.componentEvent(TalkCommandEvent, processScope)
         composerCompose = runtime.componentEvent(ComposerComposeEvent, processScope)
+        composerEdit = runtime.componentEvent(ComposerEditEvent, processScope)
         activePlaybackCommand = runtime.componentEvent(ActivePlaybackCommandEvent, processScope)
+        latestPlaybackCommand = runtime.componentEvent(LatestPlaybackCommandEvent, processScope)
+        latestOpenAttachment = runtime.componentEvent(LatestOpenAttachmentEvent, processScope)
         targetSelect = runtime.componentEvent(TargetSelectEvent, processScope)
         preferencesToggle = runtime.componentEvent(PreferencesToggleEvent, processScope)
         updatesCommand = runtime.componentEvent(UpdatesCommandEvent, processScope)
+        publicLinkCommand = runtime.componentEvent(PublicLinkCommandEvent, processScope)
         settingsActionOpen = runtime.componentEvent(SettingsActionOpenEvent, processScope)
         devHostOpen = runtime.componentEvent(DevHostOpenEvent, processScope)
 
@@ -301,6 +337,8 @@ open class LinkProductGraph(
 
     fun cancelCapture() = onTalkCommand(LinkCaptureCommandEvent(CaptureOperation.CANCEL))
 
+    fun recoverCapture() = onTalkCommand(LinkCaptureCommandEvent(CaptureOperation.RECOVER))
+
     fun onTalkCommand(event: LinkCaptureCommandEvent) {
         talkCommand.emit(event)
     }
@@ -309,8 +347,20 @@ open class LinkProductGraph(
         composerCompose.emit(event)
     }
 
+    fun onComposerEdit(event: LinkComposerEditEvent) {
+        composerEdit.emit(event)
+    }
+
     fun onActivePlaybackCommand(event: LinkPlaybackCommandEvent) {
         activePlaybackCommand.emit(event)
+    }
+
+    fun onLatestPlaybackCommand(event: LinkPlaybackCommandEvent) {
+        latestPlaybackCommand.emit(event)
+    }
+
+    fun onLatestOpenAttachment(event: LinkOpenAttachmentEvent) {
+        latestOpenAttachment.emit(event)
     }
 
     fun onTargetSelect(event: LinkTargetSelectEvent) {
@@ -323,6 +373,10 @@ open class LinkProductGraph(
 
     fun onUpdatesCommand(event: LinkUpdateCommandEvent) {
         updatesCommand.emit(event)
+    }
+
+    fun onPublicLinkCommand(event: LinkPublicLinkCommandEvent) {
+        publicLinkCommand.emit(event)
     }
 
     fun onSettingsActionOpen(event: LinkRouteOpenEvent) {
@@ -339,6 +393,13 @@ open class LinkProductGraph(
 
     private fun <T> Flow<T>.hot(initial: () -> T): StateFlow<T> =
         distinctUntilChanged().stateIn(processScope, SharingStarted.Eagerly, initial())
+
+    private fun measurementTicks(): Flow<Unit> = flow {
+        while (currentCoroutineContext().isActive) {
+            emit(Unit)
+            delay(100L)
+        }
+    }
 
     private fun <Source : Any, Presentation : Any> mountStateAuthority(
         input: ProductDataInput<Source>,

@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -78,6 +79,9 @@ class WearMainActivity : ComponentActivity() {
             } else {
                 controller.state
             },
+            currentVersionName = updater.currentVersionName,
+            requestMicrophone = ::requestMicrophone,
+            openAttachment = ::openAttachment,
         )
         registerSessionReceiver()
         requestMicrophone()
@@ -108,6 +112,10 @@ class WearMainActivity : ComponentActivity() {
         microphoneGranted.value = hasMicrophonePermission()
         if (::controller.isInitialized) refreshHandoff()
         if (::updater.isInitialized) updater.resumeInstallerStatus()
+    }
+
+    private fun openAttachment(url: String) {
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

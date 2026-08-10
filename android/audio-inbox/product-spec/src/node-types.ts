@@ -4,16 +4,19 @@ import {
   capturedTurnContract,
   captureStatusContract,
   composeTurnContract,
+  editComposerContract,
   conversationStatusContract,
   historyStatusContract,
   playbackCommandContract,
   playbackStatusContract,
+  openAttachmentContract,
   preferenceToggleContract,
   preferencesStatusContract,
   recoveryStatusContract,
   activePageContract,
   routeOpenContract,
   sessionStatusContract,
+  publicLinkCommandContract,
   targetDirectoryContract,
   targetSelectContract,
   updateCommandContract,
@@ -64,7 +67,7 @@ export const captureService = service({
 
 export const conversationService = service({
   id: "link.conversation",
-  inputs: [port("turn", capturedTurnContract), port("compose", composeTurnContract)],
+  inputs: [port("turn", capturedTurnContract), port("compose", composeTurnContract), port("edit", editComposerContract)],
   outputs: [port("status", conversationStatusContract)],
   configInputs: [configInput("policy")],
   runtime: runtime("external", "process", "durable", "wall", ["network.connectivity"], ["storage.write", "transport.send", "transport.receive", "retry.schedule"]),
@@ -72,7 +75,7 @@ export const conversationService = service({
 
 export const playbackService = service({
   id: "link.playback",
-  inputs: [port("command", playbackCommandContract)],
+  inputs: [port("command", playbackCommandContract), port("latestCommand", playbackCommandContract)],
   outputs: [port("status", playbackStatusContract)],
   configInputs: [configInput("policy")],
   runtime: runtime("external", "process", "transient", "monotonic", ["audio.focus"], ["audio.playback"]),
@@ -89,9 +92,17 @@ export const targetDirectoryService = service({
 /** Public mailbox session and connection truth; polling and auth transports stay native. */
 export const sessionService = service({
   id: "link.session",
-  inputs: [],
+  inputs: [port("command", publicLinkCommandContract)],
   outputs: [port("status", sessionStatusContract)],
   runtime: runtime("external", "process", "durable", "wall", ["network.connectivity", "keystore.session"], ["transport.poll", "transport.auth"]),
+} as const);
+
+/** Platform URL launch stays behind an effect-owning host service, never in a renderer. */
+export const hostEffectService = service({
+  id: "link.host-effect",
+  inputs: [port("openAttachment", openAttachmentContract)],
+  outputs: [],
+  runtime: runtime("external", "process", "transient", "none", [], ["host.open-uri"]),
 } as const);
 
 /** Local history retention truth; the retention policy constant stays native. */
@@ -157,6 +168,7 @@ export const linkNodeTypes = [
   preferencesService,
   updatesService,
   recoveryService,
+  hostEffectService,
   capturePresentation,
   conversationPresentation,
   playbackPresentation,

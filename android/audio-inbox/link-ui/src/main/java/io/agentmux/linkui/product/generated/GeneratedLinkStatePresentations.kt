@@ -1,31 +1,31 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.stateAuthorities
-// Product declarations SHA-256: e765b26c20a835d72b24d4e16c724784a7ea741d45821935f1cca4e9022ff642
+// Product declarations SHA-256: 56bf95b453ea869aa086ec4ba867fdffbc26397445c91ea71359ff5353fa7f88
 package io.agentmux.linkui.product.generated
 
 import io.agentmux.linkui.product.ProductComponentInput
 import io.agentmux.linkui.product.ProductDataInput
 import io.agentmux.linkui.product.ProductOutputPort
 
-internal enum class GeneratedLinkCapturePhaseValue(val wireId: String) {
+enum class GeneratedLinkCapturePhaseValue(val wireId: String) {
     IDLE("idle"),
     LISTENING("listening"),
     FINALIZING("finalizing"),
     FAILED("failed"),
 }
-internal enum class GeneratedLinkDeliveryPhaseValue(val wireId: String) {
+enum class GeneratedLinkDeliveryPhaseValue(val wireId: String) {
     NONE("none"),
     SENDING("sending"),
     QUEUED("queued"),
     FAILED("failed"),
 }
-internal enum class GeneratedLinkReplyPhaseValue(val wireId: String) {
+enum class GeneratedLinkReplyPhaseValue(val wireId: String) {
     NONE("none"),
     THINKING("thinking"),
     READY("ready"),
     FAILED("failed"),
 }
-internal enum class GeneratedLinkPlaybackPhaseValue(val wireId: String) {
+enum class GeneratedLinkPlaybackPhaseValue(val wireId: String) {
     IDLE("idle"),
     QUEUED("queued"),
     PLAYING("playing"),
@@ -35,20 +35,20 @@ internal enum class GeneratedLinkPlaybackPhaseValue(val wireId: String) {
     SKIPPED("skipped"),
     FAILED("failed"),
 }
-internal enum class GeneratedLinkTargetKindValue(val wireId: String) {
+enum class GeneratedLinkTargetKindValue(val wireId: String) {
     NONE("none"),
     AGENT("agent"),
     WINDOWS("windows"),
     PUBLIC("public"),
 }
-internal enum class GeneratedLinkConnectionStateValue(val wireId: String) {
+enum class GeneratedLinkConnectionStateValue(val wireId: String) {
     OFF("off"),
     CONNECTING("connecting"),
     CONNECTED("connected"),
     DISCONNECTED("disconnected"),
     CONFIGURATION_REQUIRED("configuration-required"),
 }
-internal enum class GeneratedLinkUpdatePhaseValue(val wireId: String) {
+enum class GeneratedLinkUpdatePhaseValue(val wireId: String) {
     IDLE("idle"),
     CHECKING("checking"),
     UP_TO_DATE("up-to-date"),
@@ -60,11 +60,11 @@ internal enum class GeneratedLinkUpdatePhaseValue(val wireId: String) {
     INSTALL_FAILED("install-failed"),
     FAILED("failed"),
 }
-internal enum class GeneratedLinkRecoveryPhaseValue(val wireId: String) {
+enum class GeneratedLinkRecoveryPhaseValue(val wireId: String) {
     CLEAN("clean"),
     QUARANTINED("quarantined"),
 }
-internal data class GeneratedLinkCapturePhasePresentation(
+data class GeneratedLinkCapturePhasePresentation(
     val phase: GeneratedLinkCapturePhaseValue,
 )
 
@@ -92,7 +92,7 @@ internal object GeneratedLinkCapturePhaseAuthority {
     }
 }
 
-internal data class GeneratedLinkDeliveryPhasePresentation(
+data class GeneratedLinkDeliveryPhasePresentation(
     val phase: GeneratedLinkDeliveryPhaseValue,
 )
 
@@ -123,7 +123,7 @@ internal object GeneratedLinkDeliveryPhaseAuthority {
     }
 }
 
-internal data class GeneratedLinkReplyPhasePresentation(
+data class GeneratedLinkReplyPhasePresentation(
     val phase: GeneratedLinkReplyPhaseValue,
 )
 
@@ -154,7 +154,7 @@ internal object GeneratedLinkReplyPhaseAuthority {
     }
 }
 
-internal data class GeneratedLinkPlaybackPhasePresentation(
+data class GeneratedLinkPlaybackPhasePresentation(
     val phase: GeneratedLinkPlaybackPhaseValue,
 )
 
@@ -166,6 +166,9 @@ internal object GeneratedLinkPlaybackPhaseAuthority {
         GeneratedLinkNativeLegoCatalog.PortIds.LINK_PLAYBACK_PHASE_PRESENTATION_ADAPTER_PRESENTATION,
     ) {}
     val componentInputs: List<ProductComponentInput<GeneratedLinkPlaybackPhasePresentation>> = listOf(
+        object : ProductComponentInput<GeneratedLinkPlaybackPhasePresentation>(
+            GeneratedLinkNativeLegoCatalog.PortIds.LATEST_PLAYBACKSTATE,
+        ) {},
         object : ProductComponentInput<GeneratedLinkPlaybackPhasePresentation>(
             GeneratedLinkNativeLegoCatalog.PortIds.ACTIVE_PLAYBACK_PLAYBACKSTATE,
         ) {},
@@ -186,7 +189,7 @@ internal object GeneratedLinkPlaybackPhaseAuthority {
     }
 }
 
-internal data class GeneratedLinkTargetKindPresentation(
+data class GeneratedLinkTargetKindPresentation(
     val kind: GeneratedLinkTargetKindValue,
 )
 
@@ -201,6 +204,9 @@ internal object GeneratedLinkTargetKindAuthority {
         object : ProductComponentInput<GeneratedLinkTargetKindPresentation>(
             GeneratedLinkNativeLegoCatalog.PortIds.TARGET_TARGETSTATE,
         ) {},
+        object : ProductComponentInput<GeneratedLinkTargetKindPresentation>(
+            GeneratedLinkNativeLegoCatalog.PortIds.COMPOSER_TARGETSTATE,
+        ) {},
     )
     private val cases: Map<String, GeneratedLinkTargetKindPresentation> = mapOf(
         "none" to GeneratedLinkTargetKindPresentation(kind = GeneratedLinkTargetKindValue.NONE),
@@ -214,7 +220,7 @@ internal object GeneratedLinkTargetKindAuthority {
     }
 }
 
-internal data class GeneratedLinkConnectionStatePresentation(
+data class GeneratedLinkConnectionStatePresentation(
     val connection: GeneratedLinkConnectionStateValue,
 )
 
@@ -226,6 +232,9 @@ internal object GeneratedLinkConnectionStateAuthority {
         GeneratedLinkNativeLegoCatalog.PortIds.LINK_CONNECTION_STATE_PRESENTATION_ADAPTER_PRESENTATION,
     ) {}
     val componentInputs: List<ProductComponentInput<GeneratedLinkConnectionStatePresentation>> = listOf(
+        object : ProductComponentInput<GeneratedLinkConnectionStatePresentation>(
+            GeneratedLinkNativeLegoCatalog.PortIds.TARGET_CONNECTIONSTATE,
+        ) {},
         object : ProductComponentInput<GeneratedLinkConnectionStatePresentation>(
             GeneratedLinkNativeLegoCatalog.PortIds.CONNECTION_CONNECTIONSTATE,
         ) {},
@@ -246,7 +255,7 @@ internal object GeneratedLinkConnectionStateAuthority {
     }
 }
 
-internal data class GeneratedLinkUpdatePhasePresentation(
+data class GeneratedLinkUpdatePhasePresentation(
     val phase: GeneratedLinkUpdatePhaseValue,
 )
 
@@ -280,7 +289,7 @@ internal object GeneratedLinkUpdatePhaseAuthority {
     }
 }
 
-internal data class GeneratedLinkRecoveryPhasePresentation(
+data class GeneratedLinkRecoveryPhasePresentation(
     val phase: GeneratedLinkRecoveryPhaseValue,
 )
 
@@ -292,6 +301,9 @@ internal object GeneratedLinkRecoveryPhaseAuthority {
         GeneratedLinkNativeLegoCatalog.PortIds.LINK_RECOVERY_PHASE_PRESENTATION_ADAPTER_PRESENTATION,
     ) {}
     val componentInputs: List<ProductComponentInput<GeneratedLinkRecoveryPhasePresentation>> = listOf(
+        object : ProductComponentInput<GeneratedLinkRecoveryPhasePresentation>(
+            GeneratedLinkNativeLegoCatalog.PortIds.TARGET_RECOVERYSTATE,
+        ) {},
         object : ProductComponentInput<GeneratedLinkRecoveryPhasePresentation>(
             GeneratedLinkNativeLegoCatalog.PortIds.RECOVERY_RECOVERYSTATE,
         ) {},
