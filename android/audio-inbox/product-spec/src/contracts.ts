@@ -1,4 +1,10 @@
-import { field, finiteValueRef, valueRef } from "@v1d/product-spec";
+import {
+  field,
+  finiteValueRef,
+  navigationActivePageContract,
+  navigationRouteContract,
+  valueRef,
+} from "@v1d/product-spec";
 
 /**
  * Every contract the Link product graph speaks. Data only: no platform
@@ -7,14 +13,9 @@ import { field, finiteValueRef, valueRef } from "@v1d/product-spec";
  * `service-internal` is the one edge UI can never bind.
  */
 
-export const routeOpenContract = {
-  id: "link.route-open", kind: "event", boundary: "ui-event",
-  fields: [field("route", finiteValueRef("link.route"))],
-} as const;
-export const routeDestinationContract = {
-  id: "link.route-destination", kind: "state", boundary: "presentation",
-  fields: [field("route", finiteValueRef("link.route"))],
-} as const;
+export const LINK_NAVIGATION_ID = "link.navigation";
+export const routeOpenContract = navigationRouteContract(LINK_NAVIGATION_ID);
+export const activePageContract = navigationActivePageContract(LINK_NAVIGATION_ID);
 
 export const captureCommandContract = {
   id: "link.capture-command", kind: "event", boundary: "ui-event",

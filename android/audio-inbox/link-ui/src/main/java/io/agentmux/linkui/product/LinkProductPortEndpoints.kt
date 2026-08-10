@@ -13,8 +13,8 @@ internal object NavigationOpenSettingsInput :
 internal object NavigationOpenDevHostInput :
     ProductInputPort<LinkRouteOpenEvent, Unit>(PortIds.NAVIGATION_SERVICE_OPENDEVHOST)
 
-internal object NavigationDestinationOutput :
-    ProductOutputPort<LinkDestinationPresentation>(PortIds.NAVIGATION_SERVICE_DESTINATION)
+internal object NavigationActivePageOutput :
+    ProductOutputPort<LinkRoute>(PortIds.NAVIGATION_SERVICE_ACTIVEPAGE)
 
 internal object CaptureCommandInput :
     ProductInputPort<LinkCaptureCommandEvent, Unit>(PortIds.CAPTURE_SERVICE_COMMAND)
@@ -67,10 +67,6 @@ internal object UpdatesStatusOutput :
 internal object RecoveryStatusOutput :
     ProductOutputPort<LinkRecoveryPresentation>(PortIds.RECOVERY_SERVICE_STATUS)
 
-internal object NavigationPresentationSourceInput :
-    ProductDataInput<LinkDestinationPresentation>(PortIds.NAVIGATION_PRESENTATION_SOURCE)
-internal object NavigationPresentationModelOutput :
-    ProductOutputPort<LinkDestinationPresentation>(PortIds.NAVIGATION_PRESENTATION_MODEL)
 internal object CapturePresentationSourceInput :
     ProductDataInput<LinkCapturePresentation>(PortIds.CAPTURE_PRESENTATION_SOURCE)
 internal object CapturePresentationModelOutput :
@@ -159,14 +155,11 @@ internal object UpdatesCommandEvent :
 internal object RecoveryModelInput :
     ProductComponentInput<LinkRecoveryPresentation>(PortIds.RECOVERY_MODEL)
 
-internal object SettingsActionDestinationInput :
-    ProductComponentInput<LinkDestinationPresentation>(PortIds.SETTINGS_ACTION_DESTINATION)
+internal object PageHostActivePageInput :
+    ProductComponentInput<LinkRoute>(PortIds.PAGE_HOST_ACTIVEPAGE)
 
 internal object SettingsActionOpenEvent :
     ProductComponentEvent<LinkRouteOpenEvent, Unit>(PortIds.SETTINGS_ACTION_OPEN)
-
-internal object DevHostDestinationInput :
-    ProductComponentInput<LinkDestinationPresentation>(PortIds.DEV_HOST_DESTINATION)
 
 internal object DevHostOpenEvent :
     ProductComponentEvent<LinkRouteOpenEvent, Unit>(PortIds.DEV_HOST_OPEN)

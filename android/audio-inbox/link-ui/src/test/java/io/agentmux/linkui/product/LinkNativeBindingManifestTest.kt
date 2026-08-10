@@ -5,7 +5,7 @@ import java.nio.file.Path
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** Emits schema 4 only from the compile-bound native registrations. */
+/** Emits schema 5 only from the compile-bound native registrations. */
 class LinkNativeBindingManifestTest {
     @Test
     fun nativeRegistryMatchesCompiledBindings() {
@@ -40,7 +40,18 @@ class LinkNativeBindingManifestTest {
             |  ],
             |  "finiteValues": [
             |${finiteValues()}
-            |  ]
+            |  ],
+            |  "navigation": {
+            |    "artifacts": [
+            |${navigationArtifacts()}
+            |    ],
+            |    "activePageBindings": [
+            |${activePageBindings()}
+            |    ],
+            |    "actionGroups": [
+            |${actionGroups()}
+            |    ]
+            |  }
             |}
         """.trimMargin() + "\n"
 
@@ -89,6 +100,63 @@ class LinkNativeBindingManifestTest {
                 |      "id": ${binding.id.value.json()},
                 |      "values": ${binding.values.sorted().jsonArray()}
                 |    }
+            """.trimMargin()
+        }
+
+    private fun navigationArtifacts(): String = LinkNativeBindings.navigationArtifacts
+        .sortedBy { it.artifact.wireId }
+        .joinToString(",\n") { binding ->
+            val pages = binding.pages.joinToString(",\n") { page ->
+                """
+                    |        {
+                    |          "pageRef": ${page.page.wireId.json()},
+                    |          "restore": ${page.restore.wireId.json()},
+                    |          "back": ${page.back.wireId.json()},
+                    |          "guardContractRef": ${page.guardContractRef?.json() ?: "null"}
+                    |        }
+                """.trimMargin()
+            }
+            """
+                |      {
+                |        "artifactRef": ${binding.artifact.wireId.json()},
+                |        "entryPageRef": ${binding.entryPage.wireId.json()},
+                |        "pages": [
+                |$pages
+                |        ]
+                |      }
+            """.trimMargin()
+        }
+
+    private fun activePageBindings(): String = LinkNativeBindings.activePageBindings
+        .joinToString(",\n") { binding ->
+            """
+                |      {
+                |        "publisherPortRef": ${binding.publisher.id.value.json()},
+                |        "pageHostPortRef": ${binding.pageHost.id.value.json()}
+                |      }
+            """.trimMargin()
+        }
+
+    private fun actionGroups(): String = LinkNativeBindings.actionGroups
+        .sortedWith(compareBy({ it.artifact.wireId }, { it.component.wireId }))
+        .joinToString(",\n") { group ->
+            val actions = group.actions.joinToString(",\n") { action ->
+                """
+                    |        {
+                    |          "sourcePortRef": ${action.source.id.value.json()},
+                    |          "targetPortRef": ${action.target.id.value.json()},
+                    |          "effect": ${action.effect.wireId.json()}
+                    |        }
+                """.trimMargin()
+            }
+            """
+                |      {
+                |        "artifactRef": ${group.artifact.wireId.json()},
+                |        "componentInstanceRef": ${group.component.wireId.json()},
+                |        "actions": [
+                |$actions
+                |        ]
+                |      }
             """.trimMargin()
         }
 

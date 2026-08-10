@@ -1,5 +1,8 @@
 /**
- * Screen identity: the header title and icon each route shows.
+ * Presentation metadata for the closed pages ProductSpec derives from the
+ * component-family screens. Page identity, artifact scope and navigation
+ * semantics do not live here; the emitter requires these keys to cover the
+ * compiled navigation pages exactly.
  *
  * This is product judgment, not renderer policy, so it is declared here and
  * emitted. It used to live as `headerTitle`/`headerIconId` properties on a
@@ -10,40 +13,23 @@
  * The titles and icon assets are migrated verbatim from the pre-graph
  * `catalog.ts`; the cutover deleted that file and took them with it.
  *
- * `artifacts` is the closed set of hosts that may show the route, mirroring
- * the artifact profiles in product.ts. A route no host serves is a
- * declaration error, not a screen nobody happens to open.
  */
-export const linkRoutes = [
-  { id: "home", title: "AGENTMUX LINK", iconAssetRef: "link", artifacts: ["phone-full-ui", "wear-full-ui"] },
-  { id: "settings", title: "LINK SETTINGS", iconAssetRef: "gear", artifacts: ["phone-full-ui", "wear-full-ui"] },
-  { id: "dev-host", title: "DEV HOST", iconAssetRef: "phone", artifacts: ["phone-full-ui"] },
+export const linkPagePresentations = [
+  { id: "home", title: "AGENTMUX LINK", iconAssetRef: "link" },
+  { id: "settings", title: "LINK SETTINGS", iconAssetRef: "gear" },
+  { id: "dev-host", title: "DEV HOST", iconAssetRef: "phone" },
 ] as const;
-
-export type LinkRouteId = (typeof linkRoutes)[number]["id"];
 
 /**
- * Chrome actions: the settings entry as it appears in phone header chrome and
- * as the round-surface row. Same story as the route titles — these strings
- * lived in `catalog.ts` before the cutover, came back as hand-written Kotlin,
- * and belong in the declaration. The phone label and the wear row title are
- * ONE value on purpose: they are the same product affordance on two surfaces.
+ * Shared visual copy for the settings RouteIntent affordance. Its source port,
+ * service target and push effect come from product.navigation.actionGroups;
+ * this object deliberately cannot name a destination.
  */
-export const linkChromeActions = [
-  {
-    id: "open-settings",
-    rowKey: "settings",
-    title: "SETTINGS",
-    detail: "CONNECTION & AUDIO",
-    a11y: "Open Link settings",
-    iconAssetRef: "gear",
-    destination: "settings",
-  },
-] as const;
-
-/** Icon refs the product owns for its routes, in the same shape as component icons. */
-export const linkRouteIconRefs = linkRoutes.map((route) => ({
-  id: `route.${route.id}`,
-  assetRef: route.iconAssetRef,
-  artifacts: route.artifacts,
-}));
+export const linkSettingsActionPresentation = {
+  id: "open-settings",
+  rowKey: "settings",
+  title: "SETTINGS",
+  detail: "CONNECTION & AUDIO",
+  a11y: "Open Link settings",
+  iconAssetRef: "gear",
+} as const;

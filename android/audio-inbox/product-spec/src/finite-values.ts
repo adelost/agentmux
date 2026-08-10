@@ -1,8 +1,5 @@
 import { finiteValues } from "@v1d/product-spec";
 
-export const LINK_SCREENS = ["home", "settings", "dev-host"] as const;
-
-export const linkRoutes = finiteValues("link.route", LINK_SCREENS);
 export const linkCaptureOperations = finiteValues("link.capture-operation", ["begin", "release", "cancel"]);
 export const linkCapturePhases = finiteValues("link.capture-phase", ["idle", "listening", "finalizing", "failed"]);
 export const linkDeliveryPhases = finiteValues("link.delivery-phase", ["none", "sending", "queued", "failed"]);
@@ -24,7 +21,6 @@ export const linkUpdatePhases = finiteValues("link.update-phase", [
 export const linkRecoveryPhases = finiteValues("link.recovery-phase", ["clean", "quarantined"]);
 
 export const linkFiniteValues = [
-  linkRoutes,
   linkCaptureOperations,
   linkCapturePhases,
   linkDeliveryPhases,

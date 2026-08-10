@@ -10,7 +10,7 @@ import {
   preferenceToggleContract,
   preferencesStatusContract,
   recoveryStatusContract,
-  routeDestinationContract,
+  activePageContract,
   routeOpenContract,
   sessionStatusContract,
   targetDirectoryContract,
@@ -22,7 +22,6 @@ import {
   capturePhaseAuthority,
   connectionStateAuthority,
   deliveryPhaseAuthority,
-  navigationRouteAuthority,
   playbackPhaseAuthority,
   recoveryPhaseAuthority,
   replyPhaseAuthority,
@@ -127,14 +126,25 @@ export const recoveryStatusComponentType = defineComponentType({
   ],
   outputs: [],
 });
-/** A row whose only job is to open another screen; it reads the current destination. */
+/** The one native page host: it consumes the navigation service's active PageId. */
+export const pageHostComponentType = defineComponentType({
+  id: "link.page-host",
+  requiredCapabilities: componentTree,
+  inputs: [componentPort("activePage", activePageContract)],
+  outputs: [],
+});
+/** A row whose only job is to emit the one typed RouteIntent. */
 export const navigationEntryComponentType = defineComponentType({
   id: "link.navigation-entry",
   requiredCapabilities: componentTree,
-  inputs: [
-    componentPort("destination", routeDestinationContract),
-    componentPort("routeState", navigationRouteAuthority.authority.presentation.contract),
-  ],
+  inputs: [],
+  outputs: [componentPort("open", routeOpenContract)],
+});
+/** Phone-only DEV host entry; optional mounts omit it from the Wear artifact. */
+export const devHostEntryComponentType = defineComponentType({
+  id: "link.dev-host-entry",
+  requiredCapabilities: [...componentTree, "ui.dev-host"],
+  inputs: [],
   outputs: [componentPort("open", routeOpenContract)],
 });
 /** Self-contained CircleKit host preview; renders outside the data graph. */
@@ -157,11 +167,17 @@ export const linkComponentTypes = [
   localHistoryComponentType,
   updatesComponentType,
   recoveryStatusComponentType,
+  pageHostComponentType,
   navigationEntryComponentType,
+  devHostEntryComponentType,
   devPreviewComponentType,
 ] as const;
 
 export const linkComponentInstances = [
+  {
+    id: "page-host", componentTypeRef: pageHostComponentType.id,
+    bindings: { inputs: { activePage: "navigation.service.activePage" }, events: {} },
+  },
   {
     id: "target", componentTypeRef: targetPickerComponentType.id,
     bindings: {
@@ -265,20 +281,14 @@ export const linkComponentInstances = [
   {
     id: "settings-action", componentTypeRef: navigationEntryComponentType.id,
     bindings: {
-      inputs: {
-        destination: "navigation.presentation.model",
-        routeState: navigationRouteAuthority.authority.adapter.outputPortRef,
-      },
+      inputs: {},
       events: { open: "navigation.service.openSettings" },
     },
   },
   {
-    id: "dev-host", componentTypeRef: navigationEntryComponentType.id,
+    id: "dev-host", componentTypeRef: devHostEntryComponentType.id,
     bindings: {
-      inputs: {
-        destination: "navigation.presentation.model",
-        routeState: navigationRouteAuthority.authority.adapter.outputPortRef,
-      },
+      inputs: {},
       events: { open: "navigation.service.openDevHost" },
     },
   },

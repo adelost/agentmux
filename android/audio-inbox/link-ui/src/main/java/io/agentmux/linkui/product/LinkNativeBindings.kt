@@ -22,8 +22,8 @@ import io.agentmux.linkui.product.generated.GeneratedLinkNativeLegoCatalog.Finit
 import io.agentmux.linkui.product.generated.GeneratedLinkCapturePhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkConnectionStateAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkDeliveryPhaseAuthority
-import io.agentmux.linkui.product.generated.GeneratedLinkNavigationRouteAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkNodeId
+import io.agentmux.linkui.product.generated.GeneratedLinkPageId
 import io.agentmux.linkui.product.generated.GeneratedLinkPlaybackPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkRecoveryPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkReplyPhaseAuthority
@@ -62,6 +62,62 @@ internal data class LinkNativeNodeBinding(
     val nativePortId: String get() = node.wireId
 }
 
+internal enum class LinkNativePageRestore(val wireId: String) {
+    ROOT("root"),
+    PROCESS("process"),
+}
+
+internal enum class LinkNativePageBack(val wireId: String) {
+    PREVIOUS("previous"),
+    CONSUME("consume"),
+    SYSTEM("system"),
+}
+
+internal data class LinkNativePageBinding(
+    val page: GeneratedLinkPageId,
+    val restore: LinkNativePageRestore,
+    val back: LinkNativePageBack,
+    val guardContractRef: String? = null,
+)
+
+internal data class LinkNativeNavigationArtifactBinding(
+    val artifact: GeneratedLinkArtifactRef,
+    val entryPage: GeneratedLinkPageId,
+    val pages: List<LinkNativePageBinding>,
+) {
+    init {
+        require(pages.map { it.page }.distinct().size == pages.size)
+        require(pages.any { it.page == entryPage && it.restore == LinkNativePageRestore.ROOT })
+    }
+
+    fun requirePage(page: GeneratedLinkPageId): LinkNativePageBinding =
+        requireNotNull(pages.singleOrNull { it.page == page }) {
+            "Page ${page.wireId} is outside ${artifact.wireId}"
+        }
+}
+
+internal data class LinkNativeActivePageBinding(
+    val publisher: LinkNativeOutputPortBinding,
+    val pageHost: ProductComponentInput<*>,
+)
+
+internal enum class LinkNativeActionEffect(val wireId: String) {
+    PUSH("push"),
+    DISPATCH("dispatch"),
+}
+
+internal data class LinkNativeActionBinding(
+    val source: ProductComponentEvent<*, *>,
+    val target: LinkNativeInputPortBinding,
+    val effect: LinkNativeActionEffect,
+)
+
+internal data class LinkNativeActionGroupBinding(
+    val artifact: GeneratedLinkArtifactRef,
+    val component: GeneratedLinkComponentId,
+    val actions: List<LinkNativeActionBinding>,
+)
+
 /**
  * The native attestation named by product-spec/native-registry/link.json.
  * Every entry binds a generated component/artifact id or a compile-checked
@@ -69,7 +125,7 @@ internal data class LinkNativeNodeBinding(
  * compile time, and the manifest/parity tests fail on any other drift.
  */
 object LinkNativeBindings {
-    const val SCHEMA_VERSION = 4
+    const val SCHEMA_VERSION = 5
     const val SOURCE_FILE =
         "link-ui/src/main/java/io/agentmux/linkui/product/LinkNativeBindings.kt"
 
@@ -78,6 +134,7 @@ object LinkNativeBindings {
     private val phone = setOf(GeneratedLinkArtifactRef.PHONE_FULL_UI)
 
     val components: List<LinkNativeComponentBinding> = listOf(
+        component(GeneratedLinkComponentTypeId.LINK_PAGE_HOST, "page-host", both, GeneratedLinkComponentId.PAGE_HOST),
         component(GeneratedLinkComponentTypeId.LINK_TARGET_PICKER, "status", both, GeneratedLinkComponentId.TARGET),
         component(GeneratedLinkComponentTypeId.LINK_LATEST_TURN, "conversation-feed", both, GeneratedLinkComponentId.LATEST),
         component(GeneratedLinkComponentTypeId.LINK_COMPOSER, "composer", phone, GeneratedLinkComponentId.COMPOSER),
@@ -94,8 +151,8 @@ object LinkNativeBindings {
             "navigation-entry",
             both,
             GeneratedLinkComponentId.SETTINGS_ACTION,
-            GeneratedLinkComponentId.DEV_HOST,
         ),
+        component(GeneratedLinkComponentTypeId.LINK_DEV_HOST_ENTRY, "dev-host-entry", phone, GeneratedLinkComponentId.DEV_HOST),
         component(GeneratedLinkComponentTypeId.LINK_DEV_PREVIEW, "dev-preview", phone, GeneratedLinkComponentId.DEV_PREVIEW),
     )
 
@@ -118,7 +175,7 @@ object LinkNativeBindings {
         node(
             GeneratedLinkNodeId.NAVIGATION_SERVICE,
             listOf(NavigationOpenSettingsInput, NavigationOpenDevHostInput),
-            listOf(NavigationDestinationOutput),
+            listOf(NavigationActivePageOutput),
         ),
         node(
             GeneratedLinkNodeId.CAPTURE_SERVICE,
@@ -153,11 +210,6 @@ object LinkNativeBindings {
             listOf(UpdatesStatusOutput),
         ),
         node(GeneratedLinkNodeId.RECOVERY_SERVICE, emptyList(), listOf(RecoveryStatusOutput)),
-        node(
-            GeneratedLinkNodeId.NAVIGATION_PRESENTATION,
-            listOf(NavigationPresentationSourceInput),
-            listOf(NavigationPresentationModelOutput),
-        ),
         node(
             GeneratedLinkNodeId.CAPTURE_PRESENTATION,
             listOf(CapturePresentationSourceInput),
@@ -204,11 +256,6 @@ object LinkNativeBindings {
             listOf(RecoveryPresentationModelOutput),
         ),
         node(
-            GeneratedLinkNodeId.LINK_NAVIGATION_ROUTE_PRESENTATION_ADAPTER,
-            listOf(GeneratedLinkNavigationRouteAuthority.inputPort<Any>()),
-            listOf(GeneratedLinkNavigationRouteAuthority.outputPort),
-        ),
-        node(
             GeneratedLinkNodeId.LINK_CAPTURE_PHASE_PRESENTATION_ADAPTER,
             listOf(GeneratedLinkCapturePhaseAuthority.inputPort<Any>()),
             listOf(GeneratedLinkCapturePhaseAuthority.outputPort),
@@ -252,8 +299,8 @@ object LinkNativeBindings {
 
     internal val finiteValues: List<LinkNativeFiniteValueBinding> = listOf(
         LinkNativeFiniteValueBinding(
-            FiniteValueIds.LINK_ROUTE,
-            LinkRoute.entries.mapTo(linkedSetOf()) { it.wireId },
+            FiniteValueIds.LINK_NAVIGATION_PAGE,
+            GeneratedLinkPageId.entries.mapTo(linkedSetOf()) { it.wireId },
         ),
         finiteValues(FiniteValueIds.LINK_CAPTURE_OPERATION, wireValues<CaptureOperation>()),
         finiteValues(FiniteValueIds.LINK_CAPTURE_PHASE, wireValues<CapturePhase>()),
@@ -269,12 +316,70 @@ object LinkNativeBindings {
         finiteValues(FiniteValueIds.LINK_RECOVERY_PHASE, wireValues<LinkRecoveryPhase>()),
     )
 
+    internal val navigationArtifacts: List<LinkNativeNavigationArtifactBinding> = listOf(
+        LinkNativeNavigationArtifactBinding(
+            artifact = GeneratedLinkArtifactRef.PHONE_FULL_UI,
+            entryPage = GeneratedLinkPageId.HOME,
+            pages = listOf(
+                page(GeneratedLinkPageId.HOME, LinkNativePageRestore.ROOT, LinkNativePageBack.SYSTEM),
+                page(GeneratedLinkPageId.SETTINGS, LinkNativePageRestore.PROCESS, LinkNativePageBack.PREVIOUS),
+                page(GeneratedLinkPageId.DEV_HOST, LinkNativePageRestore.PROCESS, LinkNativePageBack.PREVIOUS),
+            ),
+        ),
+        LinkNativeNavigationArtifactBinding(
+            artifact = GeneratedLinkArtifactRef.WEAR_FULL_UI,
+            entryPage = GeneratedLinkPageId.HOME,
+            pages = listOf(
+                page(GeneratedLinkPageId.HOME, LinkNativePageRestore.ROOT, LinkNativePageBack.SYSTEM),
+                page(GeneratedLinkPageId.SETTINGS, LinkNativePageRestore.PROCESS, LinkNativePageBack.PREVIOUS),
+            ),
+        ),
+    )
+
+    internal val activePageBindings: List<LinkNativeActivePageBinding> = listOf(
+        LinkNativeActivePageBinding(NavigationActivePageOutput, PageHostActivePageInput),
+    )
+
+    internal val actionGroups: List<LinkNativeActionGroupBinding> = listOf(
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.ACTIVE_PLAYBACK,
+            action(ActivePlaybackCommandEvent, PlaybackCommandInput)),
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.COMPOSER,
+            action(ComposerComposeEvent, ConversationComposeInput)),
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.DEV_HOST,
+            action(DevHostOpenEvent, NavigationOpenDevHostInput, LinkNativeActionEffect.PUSH)),
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.PREFERENCES,
+            action(PreferencesToggleEvent, PreferencesToggleInput)),
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.SETTINGS_ACTION,
+            action(SettingsActionOpenEvent, NavigationOpenSettingsInput, LinkNativeActionEffect.PUSH)),
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.TALK,
+            action(TalkCommandEvent, CaptureCommandInput)),
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.TARGET,
+            action(TargetSelectEvent, TargetSelectInput)),
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.UPDATES,
+            action(UpdatesCommandEvent, UpdatesCommandInput)),
+        actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.SETTINGS_ACTION,
+            action(SettingsActionOpenEvent, NavigationOpenSettingsInput, LinkNativeActionEffect.PUSH)),
+        actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.TALK,
+            action(TalkCommandEvent, CaptureCommandInput)),
+        actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.TARGET,
+            action(TargetSelectEvent, TargetSelectInput)),
+        actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.UPDATES,
+            action(UpdatesCommandEvent, UpdatesCommandInput)),
+    )
+
     init {
         require(components.map { it.componentType }.distinct().size == components.size)
         components.forEach { binding ->
             require(binding.instances.isNotEmpty())
             require(binding.instances.all { it.type == binding.componentType }) {
                 "Component type ${binding.componentType.wireId} owns a mismatched instance"
+            }
+        }
+        val graph = ProductPortGraph()
+        actionGroups.flatMap { it.actions }.forEach { action ->
+            val generated = graph.requireComponentEventBinding(action.source)
+            require(generated.to == action.target.id) {
+                "Action ${action.source.id.value} targets ${generated.to.value}, not ${action.target.id.value}"
             }
         }
     }
@@ -296,6 +401,31 @@ object LinkNativeBindings {
 
     private fun finiteValues(id: GeneratedLinkFiniteValueId, values: Set<String>) =
         LinkNativeFiniteValueBinding(id, values)
+
+    internal fun requireNavigationArtifact(
+        artifact: GeneratedLinkArtifactRef,
+    ): LinkNativeNavigationArtifactBinding =
+        requireNotNull(navigationArtifacts.singleOrNull { it.artifact == artifact }) {
+            "No native Link navigation registration for ${artifact.wireId}"
+        }
+
+    private fun page(
+        id: GeneratedLinkPageId,
+        restore: LinkNativePageRestore,
+        back: LinkNativePageBack,
+    ) = LinkNativePageBinding(id, restore, back)
+
+    private fun actionGroup(
+        artifact: GeneratedLinkArtifactRef,
+        component: GeneratedLinkComponentId,
+        vararg actions: LinkNativeActionBinding,
+    ) = LinkNativeActionGroupBinding(artifact, component, actions.toList())
+
+    private fun action(
+        source: ProductComponentEvent<*, *>,
+        target: LinkNativeInputPortBinding,
+        effect: LinkNativeActionEffect = LinkNativeActionEffect.DISPATCH,
+    ) = LinkNativeActionBinding(source, target, effect)
 
     private fun node(
         id: GeneratedLinkNodeId,

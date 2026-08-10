@@ -30,6 +30,7 @@ import io.agentmux.audioinbox.update.LinkUpdater
 import io.agentmux.linkui.LinkWatchScreen
 import io.agentmux.linkui.product.LinkNavigationController
 import io.agentmux.linkui.product.LinkRoute
+import io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef
 import kotlinx.coroutines.flow.MutableStateFlow
 
 class WearMainActivity : ComponentActivity() {
@@ -58,6 +59,7 @@ class WearMainActivity : ComponentActivity() {
         )
         microphoneGranted.value = hasMicrophonePermission()
         val navigation = LinkNavigationController(
+            artifact = GeneratedLinkArtifactRef.WEAR_FULL_UI,
             initial = savedInstanceState?.getString(STATE_ROUTE)
                 ?.let { saved -> LinkRoute.entries.firstOrNull { it.wireId == saved } }
                 ?: if (BuildConfig.DEBUG && intent.getStringExtra(QA_PAGE_EXTRA) == QA_PAGE_SETTINGS) {

@@ -47,6 +47,10 @@
       "artifactRef": "phone-full-ui",
       "includedMounts": [
         {
+          "componentInstanceRef": "page-host",
+          "mountRef": "page-host"
+        },
+        {
           "componentInstanceRef": "target",
           "mountRef": "target"
         },
@@ -70,6 +74,10 @@
     {
       "artifactRef": "phone-full-ui",
       "includedMounts": [
+        {
+          "componentInstanceRef": "page-host",
+          "mountRef": "page-host"
+        },
         {
           "componentInstanceRef": "target",
           "mountRef": "target"
@@ -99,6 +107,10 @@
       "artifactRef": "phone-full-ui",
       "includedMounts": [
         {
+          "componentInstanceRef": "page-host",
+          "mountRef": "page-host"
+        },
+        {
           "componentInstanceRef": "target",
           "mountRef": "target"
         },
@@ -127,6 +139,10 @@
       "artifactRef": "phone-full-ui",
       "includedMounts": [
         {
+          "componentInstanceRef": "page-host",
+          "mountRef": "page-host"
+        },
+        {
           "componentInstanceRef": "connection",
           "mountRef": "connection"
         },
@@ -150,6 +166,10 @@
     {
       "artifactRef": "phone-full-ui",
       "includedMounts": [
+        {
+          "componentInstanceRef": "page-host",
+          "mountRef": "page-host"
+        },
         {
           "componentInstanceRef": "active-playback",
           "mountRef": "active-playback"
@@ -191,6 +211,10 @@
       "artifactRef": "phone-full-ui",
       "includedMounts": [
         {
+          "componentInstanceRef": "page-host",
+          "mountRef": "page-host"
+        },
+        {
           "componentInstanceRef": "active-playback",
           "mountRef": "active-playback"
         },
@@ -231,6 +255,10 @@
       "artifactRef": "phone-full-ui",
       "includedMounts": [
         {
+          "componentInstanceRef": "page-host",
+          "mountRef": "page-host"
+        },
+        {
           "componentInstanceRef": "dev-preview",
           "mountRef": "dev-preview"
         }
@@ -242,6 +270,10 @@
     {
       "artifactRef": "phone-full-ui",
       "includedMounts": [
+        {
+          "componentInstanceRef": "page-host",
+          "mountRef": "page-host"
+        },
         {
           "componentInstanceRef": "dev-preview",
           "mountRef": "dev-preview"
@@ -255,6 +287,10 @@
       "artifactRef": "phone-full-ui",
       "includedMounts": [
         {
+          "componentInstanceRef": "page-host",
+          "mountRef": "page-host"
+        },
+        {
           "componentInstanceRef": "dev-preview",
           "mountRef": "dev-preview"
         }
@@ -266,6 +302,10 @@
     {
       "artifactRef": "wear-full-ui",
       "includedMounts": [
+        {
+          "componentInstanceRef": "page-host",
+          "mountRef": "page-host"
+        },
         {
           "componentInstanceRef": "target",
           "mountRef": "target"
@@ -291,6 +331,10 @@
       "artifactRef": "wear-full-ui",
       "includedMounts": [
         {
+          "componentInstanceRef": "page-host",
+          "mountRef": "page-host"
+        },
+        {
           "componentInstanceRef": "connection",
           "mountRef": "connection"
         },
@@ -299,15 +343,20 @@
           "mountRef": "updates"
         },
         {
-          "componentInstanceRef": "dev-host",
-          "mountRef": "dev-host"
-        },
-        {
           "componentInstanceRef": "recovery",
           "mountRef": "recovery"
         }
       ],
-      "omittedMounts": [],
+      "omittedMounts": [
+        {
+          "capabilities": [
+            "ui.dev-host"
+          ],
+          "componentInstanceRef": "dev-host",
+          "mountRef": "dev-host",
+          "reason": "missing-capability"
+        }
+      ],
       "screenRef": "settings",
       "surface": "round"
     }
@@ -325,9 +374,20 @@
             "mounts": [
               {
                 "capacity": null,
+                "id": "page-host",
+                "instance": "page-host",
+                "order": 0,
+                "priority": 0,
+                "region": "host",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "target",
                 "instance": "target",
-                "order": 0,
+                "order": 1,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -338,7 +398,7 @@
                 "capacity": null,
                 "id": "talk",
                 "instance": "talk",
-                "order": 1,
+                "order": 2,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -349,7 +409,7 @@
                 "capacity": null,
                 "id": "latest",
                 "instance": "latest",
-                "order": 2,
+                "order": 3,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -360,7 +420,7 @@
                 "capacity": null,
                 "id": "settings-action",
                 "instance": "settings-action",
-                "order": 3,
+                "order": 4,
                 "priority": 0,
                 "region": "chrome",
                 "requirement": {
@@ -374,9 +434,20 @@
             "mounts": [
               {
                 "capacity": null,
+                "id": "page-host",
+                "instance": "page-host",
+                "order": 0,
+                "priority": 0,
+                "region": "host",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "target",
                 "instance": "target",
-                "order": 0,
+                "order": 1,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -387,7 +458,7 @@
                 "capacity": null,
                 "id": "latest",
                 "instance": "latest",
-                "order": 1,
+                "order": 2,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -398,7 +469,7 @@
                 "capacity": null,
                 "id": "composer",
                 "instance": "composer",
-                "order": 2,
+                "order": 3,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -409,7 +480,7 @@
                 "capacity": null,
                 "id": "talk",
                 "instance": "talk",
-                "order": 3,
+                "order": 4,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -420,7 +491,7 @@
                 "capacity": null,
                 "id": "settings-action",
                 "instance": "settings-action",
-                "order": 4,
+                "order": 5,
                 "priority": 0,
                 "region": "chrome",
                 "requirement": {
@@ -434,9 +505,20 @@
             "mounts": [
               {
                 "capacity": null,
+                "id": "page-host",
+                "instance": "page-host",
+                "order": 0,
+                "priority": 0,
+                "region": "host",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "target",
                 "instance": "target",
-                "order": 0,
+                "order": 1,
                 "priority": 0,
                 "region": "rail",
                 "requirement": {
@@ -447,7 +529,7 @@
                 "capacity": null,
                 "id": "latest",
                 "instance": "latest",
-                "order": 1,
+                "order": 2,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -458,7 +540,7 @@
                 "capacity": null,
                 "id": "composer",
                 "instance": "composer",
-                "order": 2,
+                "order": 3,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -469,7 +551,7 @@
                 "capacity": null,
                 "id": "talk",
                 "instance": "talk",
-                "order": 3,
+                "order": 4,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -480,7 +562,7 @@
                 "capacity": null,
                 "id": "settings-action",
                 "instance": "settings-action",
-                "order": 4,
+                "order": 5,
                 "priority": 0,
                 "region": "chrome",
                 "requirement": {
@@ -502,9 +584,20 @@
             "mounts": [
               {
                 "capacity": null,
+                "id": "page-host",
+                "instance": "page-host",
+                "order": 0,
+                "priority": 0,
+                "region": "host",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "connection",
                 "instance": "connection",
-                "order": 0,
+                "order": 1,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -515,7 +608,7 @@
                 "capacity": null,
                 "id": "updates",
                 "instance": "updates",
-                "order": 1,
+                "order": 2,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -526,7 +619,7 @@
                 "capacity": null,
                 "id": "dev-host",
                 "instance": "dev-host",
-                "order": 2,
+                "order": 3,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -538,7 +631,7 @@
                 "capacity": null,
                 "id": "recovery",
                 "instance": "recovery",
-                "order": 3,
+                "order": 4,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -553,9 +646,20 @@
             "mounts": [
               {
                 "capacity": null,
+                "id": "page-host",
+                "instance": "page-host",
+                "order": 0,
+                "priority": 0,
+                "region": "host",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "active-playback",
                 "instance": "active-playback",
-                "order": 0,
+                "order": 1,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -567,7 +671,7 @@
                 "capacity": null,
                 "id": "connection",
                 "instance": "connection",
-                "order": 1,
+                "order": 2,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -578,7 +682,7 @@
                 "capacity": null,
                 "id": "public-link",
                 "instance": "public-link",
-                "order": 2,
+                "order": 3,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -589,7 +693,7 @@
                 "capacity": null,
                 "id": "preferences",
                 "instance": "preferences",
-                "order": 3,
+                "order": 4,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -600,7 +704,7 @@
                 "capacity": null,
                 "id": "local-history",
                 "instance": "local-history",
-                "order": 4,
+                "order": 5,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -611,7 +715,7 @@
                 "capacity": null,
                 "id": "updates",
                 "instance": "updates",
-                "order": 5,
+                "order": 6,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -622,7 +726,7 @@
                 "capacity": null,
                 "id": "dev-host",
                 "instance": "dev-host",
-                "order": 6,
+                "order": 7,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -633,7 +737,7 @@
                 "capacity": null,
                 "id": "recovery",
                 "instance": "recovery",
-                "order": 7,
+                "order": 8,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -648,9 +752,20 @@
             "mounts": [
               {
                 "capacity": null,
+                "id": "page-host",
+                "instance": "page-host",
+                "order": 0,
+                "priority": 0,
+                "region": "host",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "active-playback",
                 "instance": "active-playback",
-                "order": 0,
+                "order": 1,
                 "priority": 0,
                 "region": "rail",
                 "requirement": {
@@ -662,7 +777,7 @@
                 "capacity": null,
                 "id": "connection",
                 "instance": "connection",
-                "order": 1,
+                "order": 2,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -673,7 +788,7 @@
                 "capacity": null,
                 "id": "public-link",
                 "instance": "public-link",
-                "order": 2,
+                "order": 3,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -684,7 +799,7 @@
                 "capacity": null,
                 "id": "preferences",
                 "instance": "preferences",
-                "order": 3,
+                "order": 4,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -695,7 +810,7 @@
                 "capacity": null,
                 "id": "local-history",
                 "instance": "local-history",
-                "order": 4,
+                "order": 5,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -706,7 +821,7 @@
                 "capacity": null,
                 "id": "updates",
                 "instance": "updates",
-                "order": 5,
+                "order": 6,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -717,7 +832,7 @@
                 "capacity": null,
                 "id": "dev-host",
                 "instance": "dev-host",
-                "order": 6,
+                "order": 7,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -728,7 +843,7 @@
                 "capacity": null,
                 "id": "recovery",
                 "instance": "recovery",
-                "order": 7,
+                "order": 8,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -751,9 +866,20 @@
             "mounts": [
               {
                 "capacity": null,
+                "id": "page-host",
+                "instance": "page-host",
+                "order": 0,
+                "priority": 0,
+                "region": "host",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "dev-preview",
                 "instance": "dev-preview",
-                "order": 0,
+                "order": 1,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -767,9 +893,20 @@
             "mounts": [
               {
                 "capacity": null,
+                "id": "page-host",
+                "instance": "page-host",
+                "order": 0,
+                "priority": 0,
+                "region": "host",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "dev-preview",
                 "instance": "dev-preview",
-                "order": 0,
+                "order": 1,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -783,9 +920,20 @@
             "mounts": [
               {
                 "capacity": null,
+                "id": "page-host",
+                "instance": "page-host",
+                "order": 0,
+                "priority": 0,
+                "region": "host",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "dev-preview",
                 "instance": "dev-preview",
-                "order": 0,
+                "order": 1,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -801,6 +949,16 @@
     }
   ],
   "components": [
+    {
+      "bindings": {
+        "events": {},
+        "inputs": {
+          "activePage": "navigation.service.activePage"
+        }
+      },
+      "componentTypeRef": "link.page-host",
+      "id": "page-host"
+    },
     {
       "bindings": {
         "events": {
@@ -939,10 +1097,7 @@
         "events": {
           "open": "navigation.service.openSettings"
         },
-        "inputs": {
-          "destination": "navigation.presentation.model",
-          "routeState": "link.navigation-route.presentation-adapter.presentation"
-        }
+        "inputs": {}
       },
       "componentTypeRef": "link.navigation-entry",
       "id": "settings-action"
@@ -952,12 +1107,9 @@
         "events": {
           "open": "navigation.service.openDevHost"
         },
-        "inputs": {
-          "destination": "navigation.presentation.model",
-          "routeState": "link.navigation-route.presentation-adapter.presentation"
-        }
+        "inputs": {}
       },
-      "componentTypeRef": "link.navigation-entry",
+      "componentTypeRef": "link.dev-host-entry",
       "id": "dev-host"
     },
     {
@@ -1830,7 +1982,7 @@
       ]
     },
     {
-      "id": "link.navigation-entry",
+      "id": "link.page-host",
       "inputs": [
         {
           "contract": {
@@ -1838,41 +1990,32 @@
             "fields": [
               {
                 "clockDomain": "none",
-                "name": "route",
+                "name": "page",
                 "nullable": false,
                 "value": {
                   "finite": true,
-                  "ref": "link.route"
+                  "ref": "link.navigation.page"
                 }
               }
             ],
-            "id": "link.route-destination",
-            "kind": "state"
+            "id": "link.navigation.active-page",
+            "kind": "state",
+            "navigation": {
+              "kind": "active-page"
+            }
           },
-          "id": "destination",
-          "required": true
-        },
-        {
-          "contract": {
-            "boundary": "presentation",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "route",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.route"
-                }
-              }
-            ],
-            "id": "link.navigation-route.payload",
-            "kind": "snapshot"
-          },
-          "id": "routeState",
+          "id": "activePage",
           "required": true
         }
       ],
+      "outputs": [],
+      "requiredCapabilities": [
+        "ui.component-tree"
+      ]
+    },
+    {
+      "id": "link.navigation-entry",
+      "inputs": [],
       "outputs": [
         {
           "contract": {
@@ -1880,16 +2023,20 @@
             "fields": [
               {
                 "clockDomain": "none",
-                "name": "route",
+                "name": "target",
                 "nullable": false,
                 "value": {
                   "finite": true,
-                  "ref": "link.route"
+                  "ref": "link.navigation.page"
                 }
               }
             ],
-            "id": "link.route-open",
-            "kind": "event"
+            "id": "link.navigation.route-intent",
+            "kind": "event",
+            "navigation": {
+              "effect": "push",
+              "kind": "route"
+            }
           },
           "id": "open",
           "required": true
@@ -1897,6 +2044,40 @@
       ],
       "requiredCapabilities": [
         "ui.component-tree"
+      ]
+    },
+    {
+      "id": "link.dev-host-entry",
+      "inputs": [],
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "target",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.navigation.page"
+                }
+              }
+            ],
+            "id": "link.navigation.route-intent",
+            "kind": "event",
+            "navigation": {
+              "effect": "push",
+              "kind": "route"
+            }
+          },
+          "id": "open",
+          "required": true
+        }
+      ],
+      "requiredCapabilities": [
+        "ui.component-tree",
+        "ui.dev-host"
       ]
     },
     {
@@ -1920,14 +2101,6 @@
     }
   ],
   "finiteValues": [
-    {
-      "id": "link.route",
-      "values": [
-        "home",
-        "settings",
-        "dev-host"
-      ]
-    },
     {
       "id": "link.capture-operation",
       "values": [
@@ -2039,6 +2212,14 @@
       "values": [
         "clean",
         "quarantined"
+      ]
+    },
+    {
+      "id": "link.navigation.page",
+      "values": [
+        "home",
+        "settings",
+        "dev-host"
       ]
     }
   ],
@@ -2174,6 +2355,270 @@
   ],
   "id": "agentmux-link",
   "kind": "product-spec-ir",
+  "navigation": {
+    "actionGroups": [
+      {
+        "actions": [
+          {
+            "contractRef": "link.playback-command",
+            "effect": "dispatch",
+            "id": "command",
+            "kind": "event",
+            "sourcePortRef": "active-playback.command",
+            "targetPortRef": "playback.service.command"
+          }
+        ],
+        "artifactRefs": [
+          "phone-full-ui"
+        ],
+        "componentInstanceRef": "active-playback",
+        "pageRefs": [
+          "settings"
+        ]
+      },
+      {
+        "actions": [
+          {
+            "contractRef": "link.compose-turn",
+            "effect": "dispatch",
+            "id": "compose",
+            "kind": "event",
+            "sourcePortRef": "composer.compose",
+            "targetPortRef": "conversation.service.compose"
+          }
+        ],
+        "artifactRefs": [
+          "phone-full-ui"
+        ],
+        "componentInstanceRef": "composer",
+        "pageRefs": [
+          "home"
+        ]
+      },
+      {
+        "actions": [
+          {
+            "contractRef": "link.navigation.route-intent",
+            "effect": "push",
+            "id": "open",
+            "kind": "route",
+            "sourcePortRef": "dev-host.open",
+            "targetPortRef": "navigation.service.openDevHost"
+          }
+        ],
+        "artifactRefs": [
+          "phone-full-ui"
+        ],
+        "componentInstanceRef": "dev-host",
+        "pageRefs": [
+          "settings"
+        ]
+      },
+      {
+        "actions": [
+          {
+            "contractRef": "link.preference-toggle",
+            "effect": "dispatch",
+            "id": "toggle",
+            "kind": "event",
+            "sourcePortRef": "preferences.toggle",
+            "targetPortRef": "preferences.service.toggle"
+          }
+        ],
+        "artifactRefs": [
+          "phone-full-ui"
+        ],
+        "componentInstanceRef": "preferences",
+        "pageRefs": [
+          "settings"
+        ]
+      },
+      {
+        "actions": [
+          {
+            "contractRef": "link.navigation.route-intent",
+            "effect": "push",
+            "id": "open",
+            "kind": "route",
+            "sourcePortRef": "settings-action.open",
+            "targetPortRef": "navigation.service.openSettings"
+          }
+        ],
+        "artifactRefs": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "componentInstanceRef": "settings-action",
+        "pageRefs": [
+          "home"
+        ]
+      },
+      {
+        "actions": [
+          {
+            "contractRef": "link.capture-command",
+            "effect": "dispatch",
+            "id": "command",
+            "kind": "event",
+            "sourcePortRef": "talk.command",
+            "targetPortRef": "capture.service.command"
+          }
+        ],
+        "artifactRefs": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "componentInstanceRef": "talk",
+        "pageRefs": [
+          "home"
+        ]
+      },
+      {
+        "actions": [
+          {
+            "contractRef": "link.target-select",
+            "effect": "dispatch",
+            "id": "select",
+            "kind": "event",
+            "sourcePortRef": "target.select",
+            "targetPortRef": "target.service.select"
+          }
+        ],
+        "artifactRefs": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "componentInstanceRef": "target",
+        "pageRefs": [
+          "home"
+        ]
+      },
+      {
+        "actions": [
+          {
+            "contractRef": "link.update-command",
+            "effect": "dispatch",
+            "id": "command",
+            "kind": "event",
+            "sourcePortRef": "updates.command",
+            "targetPortRef": "updates.service.command"
+          }
+        ],
+        "artifactRefs": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "componentInstanceRef": "updates",
+        "pageRefs": [
+          "settings"
+        ]
+      }
+    ],
+    "activePageContract": {
+      "boundary": "presentation",
+      "fields": [
+        {
+          "clockDomain": "none",
+          "name": "page",
+          "nullable": false,
+          "value": {
+            "finite": true,
+            "ref": "link.navigation.page"
+          }
+        }
+      ],
+      "id": "link.navigation.active-page",
+      "kind": "state",
+      "navigation": {
+        "kind": "active-page"
+      }
+    },
+    "activePagePortRef": "navigation.service.activePage",
+    "artifacts": [
+      {
+        "artifactRef": "phone-full-ui",
+        "entryPageRef": "home",
+        "pages": [
+          {
+            "back": "system",
+            "guardContractRef": null,
+            "pageRef": "home",
+            "restore": "root"
+          },
+          {
+            "back": "previous",
+            "guardContractRef": null,
+            "pageRef": "settings",
+            "restore": "process"
+          },
+          {
+            "back": "previous",
+            "guardContractRef": null,
+            "pageRef": "dev-host",
+            "restore": "process"
+          }
+        ]
+      },
+      {
+        "artifactRef": "wear-full-ui",
+        "entryPageRef": "home",
+        "pages": [
+          {
+            "back": "system",
+            "guardContractRef": null,
+            "pageRef": "home",
+            "restore": "root"
+          },
+          {
+            "back": "previous",
+            "guardContractRef": null,
+            "pageRef": "settings",
+            "restore": "process"
+          }
+        ]
+      }
+    ],
+    "id": "link.navigation",
+    "pageHostPortRef": "page-host.activePage",
+    "pages": [
+      {
+        "back": "system",
+        "guardContractRef": null,
+        "id": "home"
+      },
+      {
+        "back": "previous",
+        "guardContractRef": null,
+        "id": "settings"
+      },
+      {
+        "back": "previous",
+        "guardContractRef": null,
+        "id": "dev-host"
+      }
+    ],
+    "pageValuesRef": "link.navigation.page",
+    "routeIntentContract": {
+      "boundary": "ui-event",
+      "fields": [
+        {
+          "clockDomain": "none",
+          "name": "target",
+          "nullable": false,
+          "value": {
+            "finite": true,
+            "ref": "link.navigation.page"
+          }
+        }
+      ],
+      "id": "link.navigation.route-intent",
+      "kind": "event",
+      "navigation": {
+        "effect": "push",
+        "kind": "route"
+      }
+    }
+  },
   "nodes": [
     {
       "activation": {
@@ -2299,14 +2744,6 @@
     },
     {
       "bindings": {
-        "source": "navigation.service.destination"
-      },
-      "config": {},
-      "id": "navigation.presentation",
-      "nodeTypeRef": "link.present.navigation"
-    },
-    {
-      "bindings": {
         "source": "capture.service.status"
       },
       "config": {},
@@ -2376,14 +2813,6 @@
       "config": {},
       "id": "recovery.presentation",
       "nodeTypeRef": "link.present.recovery"
-    },
-    {
-      "bindings": {
-        "state": "navigation.service.destination"
-      },
-      "config": {},
-      "id": "link.navigation-route.presentation-adapter",
-      "nodeTypeRef": "link.navigation-route.presentation-adapter"
     },
     {
       "bindings": {
@@ -2460,16 +2889,20 @@
             "fields": [
               {
                 "clockDomain": "none",
-                "name": "route",
+                "name": "target",
                 "nullable": false,
                 "value": {
                   "finite": true,
-                  "ref": "link.route"
+                  "ref": "link.navigation.page"
                 }
               }
             ],
-            "id": "link.route-open",
-            "kind": "event"
+            "id": "link.navigation.route-intent",
+            "kind": "event",
+            "navigation": {
+              "effect": "push",
+              "kind": "route"
+            }
           },
           "id": "openSettings",
           "purpose": "data"
@@ -2480,16 +2913,20 @@
             "fields": [
               {
                 "clockDomain": "none",
-                "name": "route",
+                "name": "target",
                 "nullable": false,
                 "value": {
                   "finite": true,
-                  "ref": "link.route"
+                  "ref": "link.navigation.page"
                 }
               }
             ],
-            "id": "link.route-open",
-            "kind": "event"
+            "id": "link.navigation.route-intent",
+            "kind": "event",
+            "navigation": {
+              "effect": "push",
+              "kind": "route"
+            }
           },
           "id": "openDevHost",
           "purpose": "data"
@@ -2503,18 +2940,21 @@
             "fields": [
               {
                 "clockDomain": "none",
-                "name": "route",
+                "name": "page",
                 "nullable": false,
                 "value": {
                   "finite": true,
-                  "ref": "link.route"
+                  "ref": "link.navigation.page"
                 }
               }
             ],
-            "id": "link.route-destination",
-            "kind": "state"
+            "id": "link.navigation.active-page",
+            "kind": "state",
+            "navigation": {
+              "kind": "active-page"
+            }
           },
-          "id": "destination",
+          "id": "activePage",
           "purpose": "data"
         }
       ],
@@ -3258,62 +3698,6 @@
         ],
         "lifetime": "process",
         "stateOwner": "external"
-      }
-    },
-    {
-      "id": "link.present.navigation",
-      "inputs": [
-        {
-          "contract": {
-            "boundary": "presentation",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "route",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.route"
-                }
-              }
-            ],
-            "id": "link.route-destination",
-            "kind": "state"
-          },
-          "id": "source",
-          "purpose": "data"
-        }
-      ],
-      "kind": "present",
-      "outputs": [
-        {
-          "contract": {
-            "boundary": "presentation",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "route",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.route"
-                }
-              }
-            ],
-            "id": "link.route-destination",
-            "kind": "state"
-          },
-          "id": "model",
-          "purpose": "data"
-        }
-      ],
-      "runtime": {
-        "clockDomain": "none",
-        "contextInputs": [],
-        "durability": "transient",
-        "effects": [],
-        "lifetime": "call",
-        "stateOwner": "none"
       }
     },
     {
@@ -4103,62 +4487,6 @@
       }
     },
     {
-      "id": "link.navigation-route.presentation-adapter",
-      "inputs": [
-        {
-          "contract": {
-            "boundary": "presentation",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "route",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.route"
-                }
-              }
-            ],
-            "id": "link.route-destination",
-            "kind": "state"
-          },
-          "id": "state",
-          "purpose": "data"
-        }
-      ],
-      "kind": "present",
-      "outputs": [
-        {
-          "contract": {
-            "boundary": "presentation",
-            "fields": [
-              {
-                "clockDomain": "none",
-                "name": "route",
-                "nullable": false,
-                "value": {
-                  "finite": true,
-                  "ref": "link.route"
-                }
-              }
-            ],
-            "id": "link.navigation-route.payload",
-            "kind": "snapshot"
-          },
-          "id": "presentation",
-          "purpose": "data"
-        }
-      ],
-      "runtime": {
-        "clockDomain": "none",
-        "contextInputs": [],
-        "durability": "transient",
-        "effects": [],
-        "lifetime": "call",
-        "stateOwner": "none"
-      }
-    },
-    {
       "id": "link.capture-phase.presentation-adapter",
       "inputs": [
         {
@@ -4837,12 +5165,6 @@
         "to": "updates.service.command"
       },
       {
-        "from": "navigation.service.destination",
-        "kind": "node-input",
-        "purpose": "data",
-        "to": "navigation.presentation.source"
-      },
-      {
         "from": "capture.service.status",
         "kind": "node-input",
         "purpose": "data",
@@ -4897,12 +5219,6 @@
         "to": "recovery.presentation.source"
       },
       {
-        "from": "navigation.service.destination",
-        "kind": "node-input",
-        "purpose": "data",
-        "to": "link.navigation-route.presentation-adapter.state"
-      },
-      {
         "from": "capture.service.status",
         "kind": "node-input",
         "purpose": "data",
@@ -4949,6 +5265,12 @@
         "kind": "node-input",
         "purpose": "data",
         "to": "link.recovery-phase.presentation-adapter.state"
+      },
+      {
+        "from": "navigation.service.activePage",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "page-host.activePage"
       },
       {
         "from": "target.presentation.model",
@@ -5081,33 +5403,21 @@
         "kind": "component-input",
         "purpose": "data",
         "to": "recovery.recoveryState"
-      },
-      {
-        "from": "navigation.presentation.model",
-        "kind": "component-input",
-        "purpose": "data",
-        "to": "settings-action.destination"
-      },
-      {
-        "from": "link.navigation-route.presentation-adapter.presentation",
-        "kind": "component-input",
-        "purpose": "data",
-        "to": "settings-action.routeState"
-      },
-      {
-        "from": "navigation.presentation.model",
-        "kind": "component-input",
-        "purpose": "data",
-        "to": "dev-host.destination"
-      },
-      {
-        "from": "link.navigation-route.presentation-adapter.presentation",
-        "kind": "component-input",
-        "purpose": "data",
-        "to": "dev-host.routeState"
       }
     ],
     "componentPorts": [
+      {
+        "boundary": "presentation",
+        "contractRef": "link.navigation.active-page",
+        "direction": "input",
+        "ownerId": "page-host",
+        "ownerKind": "component",
+        "portId": "activePage",
+        "purpose": "data",
+        "ref": "page-host.activePage",
+        "required": true,
+        "typeRef": "link.page-host"
+      },
       {
         "boundary": "presentation",
         "contractRef": "link.target-directory",
@@ -5445,32 +5755,8 @@
         "typeRef": "link.recovery-status"
       },
       {
-        "boundary": "presentation",
-        "contractRef": "link.route-destination",
-        "direction": "input",
-        "ownerId": "settings-action",
-        "ownerKind": "component",
-        "portId": "destination",
-        "purpose": "data",
-        "ref": "settings-action.destination",
-        "required": true,
-        "typeRef": "link.navigation-entry"
-      },
-      {
-        "boundary": "presentation",
-        "contractRef": "link.navigation-route.payload",
-        "direction": "input",
-        "ownerId": "settings-action",
-        "ownerKind": "component",
-        "portId": "routeState",
-        "purpose": "data",
-        "ref": "settings-action.routeState",
-        "required": true,
-        "typeRef": "link.navigation-entry"
-      },
-      {
         "boundary": "ui-event",
-        "contractRef": "link.route-open",
+        "contractRef": "link.navigation.route-intent",
         "direction": "output",
         "ownerId": "settings-action",
         "ownerKind": "component",
@@ -5481,32 +5767,8 @@
         "typeRef": "link.navigation-entry"
       },
       {
-        "boundary": "presentation",
-        "contractRef": "link.route-destination",
-        "direction": "input",
-        "ownerId": "dev-host",
-        "ownerKind": "component",
-        "portId": "destination",
-        "purpose": "data",
-        "ref": "dev-host.destination",
-        "required": true,
-        "typeRef": "link.navigation-entry"
-      },
-      {
-        "boundary": "presentation",
-        "contractRef": "link.navigation-route.payload",
-        "direction": "input",
-        "ownerId": "dev-host",
-        "ownerKind": "component",
-        "portId": "routeState",
-        "purpose": "data",
-        "ref": "dev-host.routeState",
-        "required": true,
-        "typeRef": "link.navigation-entry"
-      },
-      {
         "boundary": "ui-event",
-        "contractRef": "link.route-open",
+        "contractRef": "link.navigation.route-intent",
         "direction": "output",
         "ownerId": "dev-host",
         "ownerKind": "component",
@@ -5514,7 +5776,7 @@
         "purpose": "data",
         "ref": "dev-host.open",
         "required": true,
-        "typeRef": "link.navigation-entry"
+        "typeRef": "link.dev-host-entry"
       }
     ],
     "contracts": [
@@ -5523,32 +5785,39 @@
         "fields": [
           {
             "clockDomain": "none",
-            "name": "route",
+            "name": "target",
             "nullable": false,
             "value": {
               "finite": true,
-              "ref": "link.route"
+              "ref": "link.navigation.page"
             }
           }
         ],
-        "id": "link.route-open",
-        "kind": "event"
+        "id": "link.navigation.route-intent",
+        "kind": "event",
+        "navigation": {
+          "effect": "push",
+          "kind": "route"
+        }
       },
       {
         "boundary": "presentation",
         "fields": [
           {
             "clockDomain": "none",
-            "name": "route",
+            "name": "page",
             "nullable": false,
             "value": {
               "finite": true,
-              "ref": "link.route"
+              "ref": "link.navigation.page"
             }
           }
         ],
-        "id": "link.route-destination",
-        "kind": "state"
+        "id": "link.navigation.active-page",
+        "kind": "state",
+        "navigation": {
+          "kind": "active-page"
+        }
       },
       {
         "boundary": "ui-event",
@@ -5980,22 +6249,6 @@
         "fields": [
           {
             "clockDomain": "none",
-            "name": "route",
-            "nullable": false,
-            "value": {
-              "finite": true,
-              "ref": "link.route"
-            }
-          }
-        ],
-        "id": "link.navigation-route.payload",
-        "kind": "snapshot"
-      },
-      {
-        "boundary": "presentation",
-        "fields": [
-          {
-            "clockDomain": "none",
             "name": "phase",
             "nullable": false,
             "value": {
@@ -6124,7 +6377,7 @@
     "nodePorts": [
       {
         "boundary": "ui-event",
-        "contractRef": "link.route-open",
+        "contractRef": "link.navigation.route-intent",
         "direction": "input",
         "ownerId": "navigation.service",
         "ownerKind": "node",
@@ -6136,7 +6389,7 @@
       },
       {
         "boundary": "ui-event",
-        "contractRef": "link.route-open",
+        "contractRef": "link.navigation.route-intent",
         "direction": "input",
         "ownerId": "navigation.service",
         "ownerKind": "node",
@@ -6148,13 +6401,13 @@
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.route-destination",
+        "contractRef": "link.navigation.active-page",
         "direction": "output",
         "ownerId": "navigation.service",
         "ownerKind": "node",
-        "portId": "destination",
+        "portId": "activePage",
         "purpose": "data",
-        "ref": "navigation.service.destination",
+        "ref": "navigation.service.activePage",
         "required": true,
         "typeRef": "link.navigation"
       },
@@ -6361,30 +6614,6 @@
         "ref": "recovery.service.status",
         "required": true,
         "typeRef": "link.recovery"
-      },
-      {
-        "boundary": "presentation",
-        "contractRef": "link.route-destination",
-        "direction": "input",
-        "ownerId": "navigation.presentation",
-        "ownerKind": "node",
-        "portId": "source",
-        "purpose": "data",
-        "ref": "navigation.presentation.source",
-        "required": true,
-        "typeRef": "link.present.navigation"
-      },
-      {
-        "boundary": "presentation",
-        "contractRef": "link.route-destination",
-        "direction": "output",
-        "ownerId": "navigation.presentation",
-        "ownerKind": "node",
-        "portId": "model",
-        "purpose": "data",
-        "ref": "navigation.presentation.model",
-        "required": true,
-        "typeRef": "link.present.navigation"
       },
       {
         "boundary": "presentation",
@@ -6604,30 +6833,6 @@
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.route-destination",
-        "direction": "input",
-        "ownerId": "link.navigation-route.presentation-adapter",
-        "ownerKind": "node",
-        "portId": "state",
-        "purpose": "data",
-        "ref": "link.navigation-route.presentation-adapter.state",
-        "required": true,
-        "typeRef": "link.navigation-route.presentation-adapter"
-      },
-      {
-        "boundary": "presentation",
-        "contractRef": "link.navigation-route.payload",
-        "direction": "output",
-        "ownerId": "link.navigation-route.presentation-adapter",
-        "ownerKind": "node",
-        "portId": "presentation",
-        "purpose": "data",
-        "ref": "link.navigation-route.presentation-adapter.presentation",
-        "required": true,
-        "typeRef": "link.navigation-route.presentation-adapter"
-      },
-      {
-        "boundary": "presentation",
         "contractRef": "link.capture-status",
         "direction": "input",
         "ownerId": "link.capture-phase.presentation-adapter",
@@ -6820,13 +7025,14 @@
       }
     ]
   },
-  "productSpecVersion": "0.3.46",
+  "productSpecVersion": "0.3.47",
   "rendererBindings": [
     {
       "capabilities": [
         "ui.menu",
         "ui.navigation",
-        "ui.component-tree"
+        "ui.component-tree",
+        "ui.dev-host"
       ],
       "id": "android-phone-compose"
     },
@@ -6839,93 +7045,8 @@
       "id": "android-wear-compose"
     }
   ],
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "stateAuthorities": [
-    {
-      "adapter": {
-        "inputPortRef": "link.navigation-route.presentation-adapter.state",
-        "nodeInstanceRef": "link.navigation-route.presentation-adapter",
-        "nodeTypeRef": "link.navigation-route.presentation-adapter",
-        "outputPortRef": "link.navigation-route.presentation-adapter.presentation"
-      },
-      "id": "link.navigation-route",
-      "presentation": {
-        "cases": {
-          "dev-host": {
-            "route": "dev-host"
-          },
-          "home": {
-            "route": "home"
-          },
-          "settings": {
-            "route": "settings"
-          }
-        },
-        "consumers": [
-          "settings-action.routeState",
-          "dev-host.routeState"
-        ],
-        "contract": {
-          "boundary": "presentation",
-          "fields": [
-            {
-              "clockDomain": "none",
-              "name": "route",
-              "nullable": false,
-              "value": {
-                "finite": true,
-                "ref": "link.route"
-              }
-            }
-          ],
-          "id": "link.navigation-route.payload",
-          "kind": "snapshot"
-        },
-        "fields": [
-          {
-            "name": "route",
-            "value": {
-              "id": "link.route",
-              "values": [
-                "home",
-                "settings",
-                "dev-host"
-              ]
-            }
-          }
-        ],
-        "id": "link.navigation-route",
-        "stateRef": "link.route"
-      },
-      "source": {
-        "contract": {
-          "boundary": "presentation",
-          "fields": [
-            {
-              "clockDomain": "none",
-              "name": "route",
-              "nullable": false,
-              "value": {
-                "finite": true,
-                "ref": "link.route"
-              }
-            }
-          ],
-          "id": "link.route-destination",
-          "kind": "state"
-        },
-        "portRef": "navigation.service.destination",
-        "stateField": "route",
-        "states": {
-          "id": "link.route",
-          "values": [
-            "home",
-            "settings",
-            "dev-host"
-          ]
-        }
-      }
-    },
     {
       "adapter": {
         "inputPortRef": "link.capture-phase.presentation-adapter.state",

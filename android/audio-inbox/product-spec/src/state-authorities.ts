@@ -9,7 +9,6 @@ import {
   conversationStatusContract,
   playbackStatusContract,
   recoveryStatusContract,
-  routeDestinationContract,
   sessionStatusContract,
   targetDirectoryContract,
   updateStatusContract,
@@ -21,26 +20,9 @@ import {
   linkPlaybackPhases,
   linkRecoveryPhases,
   linkReplyPhases,
-  linkRoutes,
   linkTargetKinds,
   linkUpdatePhases,
 } from "./finite-values.js";
-
-const navigationRoutePresentation = defineStatePresentation(linkRoutes, {
-  id: "link.navigation-route",
-  fields: [statePresentationField("route", linkRoutes)],
-  cases: mapFiniteCases(linkRoutes, (route) => ({ route })),
-});
-export const navigationRouteAuthority = defineStateAuthority({
-  id: navigationRoutePresentation.id,
-  source: {
-    portRef: "navigation.service.destination",
-    contract: routeDestinationContract,
-    stateField: "route",
-    states: linkRoutes,
-  },
-  presentation: navigationRoutePresentation,
-});
 
 const capturePhasePresentation = defineStatePresentation(linkCapturePhases, {
   id: "link.capture-phase",
@@ -171,7 +153,6 @@ export const recoveryPhaseAuthority = defineStateAuthority({
 });
 
 export const linkStateAuthorityDefinitions = [
-  navigationRouteAuthority,
   capturePhaseAuthority,
   deliveryPhaseAuthority,
   replyPhaseAuthority,

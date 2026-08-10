@@ -29,15 +29,9 @@ internal fun LinkPhoneScreen(
     recordedLevel: () -> Float,
     onPublicLink: () -> Unit,
 ) {
-    val route by graph.navigation.route.collectAsStateWithLifecycle()
+    val route by graph.activePage.collectAsStateWithLifecycle()
     BackHandler(route != LinkRoute.HOME) {
-        graph.navigation.open(
-            if (route == LinkRoute.DEV_HOST) {
-                LinkRoute.SETTINGS
-            } else {
-                LinkRoute.HOME
-            },
-        )
+        check(graph.navigation.back())
     }
     RingActionCueHost {
         when {
@@ -45,12 +39,14 @@ internal fun LinkPhoneScreen(
                 check(
                     GeneratedLinkDevHostComponents
                         .resolve(LocalCircleSurfaceLayout.current.surfaceClass)
-                        .orderedMounts.single().component == GeneratedLinkDevHostComponent.DEV_PREVIEW,
+                        .orderedMounts.single {
+                            it.component == GeneratedLinkDevHostComponent.DEV_PREVIEW
+                        }.component == GeneratedLinkDevHostComponent.DEV_PREVIEW,
                 )
                 LinkDevHostScreen(
                     port = hostPreview,
                     inspections = graph.inspections,
-                    onBack = { graph.navigation.open(LinkRoute.SETTINGS) },
+                    onBack = { check(graph.navigation.back()) },
                 )
             }
             LocalCircleSurfaceLayout.current.surfaceClass == CircleSurfaceClass.ROUND -> {
@@ -69,7 +65,7 @@ internal fun LinkPhoneScreen(
                 LinkPhoneSettings(
                     graph = graph,
                     currentVersionName = currentVersionName,
-                    onBack = { graph.navigation.open(LinkRoute.HOME) },
+                    onBack = { check(graph.navigation.back()) },
                     onPublicLink = onPublicLink,
                 )
             }

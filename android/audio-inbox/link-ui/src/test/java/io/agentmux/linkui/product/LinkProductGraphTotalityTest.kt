@@ -29,7 +29,9 @@ class LinkProductGraphTotalityTest {
             captureByteCount = { 0L },
             captureByteLimit = { null },
             capturedTurns = MutableSharedFlow(),
-            navigation = LinkNavigationController(LinkRoute.HOME),
+            navigation = LinkNavigationController(
+                artifact = io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef.PHONE_FULL_UI,
+            ),
             sinks = LinkProductSinks(
                 captureCommand = {},
                 capturedTurn = {},
@@ -45,8 +47,7 @@ class LinkProductGraphTotalityTest {
             assertEquals(ConnectionState.OFF, graph.connection.value.connection)
             assertEquals(DeliveryPhase.NONE, graph.latest.value.deliveryPhase)
             assertEquals(LinkTargetKind.NONE, graph.target.value.kind)
-            assertEquals(LinkRoute.HOME, graph.settingsActionDestination.value.route)
-            assertEquals(LinkRoute.HOME, graph.devHostDestination.value.route)
+            assertEquals(LinkRoute.HOME, graph.activePage.value)
         } finally {
             graph.close()
         }

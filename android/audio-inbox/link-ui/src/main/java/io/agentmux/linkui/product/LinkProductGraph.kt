@@ -9,7 +9,6 @@ import io.agentmux.linkui.LinkCaptureSpec
 import io.agentmux.linkui.product.generated.GeneratedLinkCapturePhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkConnectionStateAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkDeliveryPhaseAuthority
-import io.agentmux.linkui.product.generated.GeneratedLinkNavigationRouteAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkPlaybackPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkRecoveryPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkReplyPhaseAuthority
@@ -72,8 +71,7 @@ open class LinkProductGraph(
     val localHistory: StateFlow<LinkHistoryPresentation>
     val updates: StateFlow<LinkUpdatePresentation>
     val recovery: StateFlow<LinkRecoveryPresentation>
-    val settingsActionDestination: StateFlow<LinkDestinationPresentation>
-    val devHostDestination: StateFlow<LinkDestinationPresentation>
+    val activePage: StateFlow<LinkRoute>
 
     /** The capture control's host-neutral spec, derived beside the talk model. */
     val captureSpec: StateFlow<LinkCaptureSpec> = combine(
@@ -113,9 +111,8 @@ open class LinkProductGraph(
         // upstream that is already mounted, and the hot StateFlow sources
         // publish their current value synchronously inside observe().
         runtime.observe(
-            NavigationDestinationOutput,
-            navigation.route.map { LinkDestinationPresentation(it) }
-                .hot { LinkDestinationPresentation(navigation.route.value) },
+            NavigationActivePageOutput,
+            navigation.route,
         )
         runtime.observe(
             CaptureStatusOutput,
@@ -162,10 +159,6 @@ open class LinkProductGraph(
         )
 
         runtime.observe(
-            NavigationPresentationModelOutput,
-            runtime.connected(NavigationPresentationSourceInput, processScope),
-        )
-        runtime.observe(
             CapturePresentationModelOutput,
             runtime.connected(CapturePresentationSourceInput, processScope),
         )
@@ -202,13 +195,6 @@ open class LinkProductGraph(
             runtime.connected(RecoveryPresentationSourceInput, processScope),
         )
 
-        mountStateAuthority(
-            GeneratedLinkNavigationRouteAuthority.inputPort<LinkDestinationPresentation>(),
-            GeneratedLinkNavigationRouteAuthority.outputPort,
-            GeneratedLinkNavigationRouteAuthority.componentInputs,
-            { it.route.wireId },
-            GeneratedLinkNavigationRouteAuthority::require,
-        )
         mountStateAuthority(
             GeneratedLinkCapturePhaseAuthority.inputPort<LinkCapturePresentation>(),
             GeneratedLinkCapturePhaseAuthority.outputPort,
@@ -270,8 +256,8 @@ open class LinkProductGraph(
         // conversation service through its generated binding, never directly.
         runtime.connected(ConversationTurnInput, processScope) { turn -> sinks.capturedTurn(turn) }
 
-        runtime.bindInput(NavigationOpenSettingsInput) { event -> navigation.open(event.route) }
-        runtime.bindInput(NavigationOpenDevHostInput) { event -> navigation.open(event.route) }
+        runtime.bindInput(NavigationOpenSettingsInput) { event -> navigation.open(event.target) }
+        runtime.bindInput(NavigationOpenDevHostInput) { event -> navigation.open(event.target) }
         runtime.bindInput(CaptureCommandInput) { event -> sinks.captureCommand(event) }
         runtime.bindInput(ConversationComposeInput) { event -> sinks.compose(event) }
         runtime.bindInput(PlaybackCommandInput) { event -> sinks.playbackCommand(event) }
@@ -290,8 +276,7 @@ open class LinkProductGraph(
         localHistory = runtime.connected(LocalHistoryModelInput, processScope)
         updates = runtime.connected(UpdatesModelInput, processScope)
         recovery = runtime.connected(RecoveryModelInput, processScope)
-        settingsActionDestination = runtime.connected(SettingsActionDestinationInput, processScope)
-        devHostDestination = runtime.connected(DevHostDestinationInput, processScope)
+        activePage = runtime.connected(PageHostActivePageInput, processScope)
 
         talkCommand = runtime.componentEvent(TalkCommandEvent, processScope)
         composerCompose = runtime.componentEvent(ComposerComposeEvent, processScope)

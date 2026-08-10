@@ -1,17 +1,12 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.stateAuthorities
-// Product declarations SHA-256: 9742e98c63220e7cd7ae686c95f5d260c85839ba23059e991a28100ca435ba27
+// Product declarations SHA-256: e765b26c20a835d72b24d4e16c724784a7ea741d45821935f1cca4e9022ff642
 package io.agentmux.linkui.product.generated
 
 import io.agentmux.linkui.product.ProductComponentInput
 import io.agentmux.linkui.product.ProductDataInput
 import io.agentmux.linkui.product.ProductOutputPort
 
-internal enum class GeneratedLinkRouteValue(val wireId: String) {
-    HOME("home"),
-    SETTINGS("settings"),
-    DEV_HOST("dev-host"),
-}
 internal enum class GeneratedLinkCapturePhaseValue(val wireId: String) {
     IDLE("idle"),
     LISTENING("listening"),
@@ -69,36 +64,6 @@ internal enum class GeneratedLinkRecoveryPhaseValue(val wireId: String) {
     CLEAN("clean"),
     QUARANTINED("quarantined"),
 }
-internal data class GeneratedLinkNavigationRoutePresentation(
-    val route: GeneratedLinkRouteValue,
-)
-
-internal object GeneratedLinkNavigationRouteAuthority {
-    fun <T : Any> inputPort(): ProductDataInput<T> = object : ProductDataInput<T>(
-        GeneratedLinkNativeLegoCatalog.PortIds.LINK_NAVIGATION_ROUTE_PRESENTATION_ADAPTER_STATE,
-    ) {}
-    val outputPort: ProductOutputPort<GeneratedLinkNavigationRoutePresentation> = object : ProductOutputPort<GeneratedLinkNavigationRoutePresentation>(
-        GeneratedLinkNativeLegoCatalog.PortIds.LINK_NAVIGATION_ROUTE_PRESENTATION_ADAPTER_PRESENTATION,
-    ) {}
-    val componentInputs: List<ProductComponentInput<GeneratedLinkNavigationRoutePresentation>> = listOf(
-        object : ProductComponentInput<GeneratedLinkNavigationRoutePresentation>(
-            GeneratedLinkNativeLegoCatalog.PortIds.SETTINGS_ACTION_ROUTESTATE,
-        ) {},
-        object : ProductComponentInput<GeneratedLinkNavigationRoutePresentation>(
-            GeneratedLinkNativeLegoCatalog.PortIds.DEV_HOST_ROUTESTATE,
-        ) {},
-    )
-    private val cases: Map<String, GeneratedLinkNavigationRoutePresentation> = mapOf(
-        "home" to GeneratedLinkNavigationRoutePresentation(route = GeneratedLinkRouteValue.HOME),
-        "settings" to GeneratedLinkNavigationRoutePresentation(route = GeneratedLinkRouteValue.SETTINGS),
-        "dev-host" to GeneratedLinkNavigationRoutePresentation(route = GeneratedLinkRouteValue.DEV_HOST),
-    )
-
-    fun require(stateId: String): GeneratedLinkNavigationRoutePresentation = requireNotNull(cases[stateId]) {
-        "Unknown link.navigation-route state '$stateId'"
-    }
-}
-
 internal data class GeneratedLinkCapturePhasePresentation(
     val phase: GeneratedLinkCapturePhaseValue,
 )

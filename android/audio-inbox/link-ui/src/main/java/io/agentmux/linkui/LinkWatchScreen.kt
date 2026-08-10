@@ -81,7 +81,7 @@ fun LinkWatchSurface(
     recordedLevel: () -> Float,
     onOpenDevHost: (() -> Unit)? = null,
 ) {
-    val route by graph.navigation.route.collectAsState()
+    val route by graph.activePage.collectAsState()
     val target by graph.target.collectAsState()
     val capture by graph.capture.collectAsState()
     val captureSpec by graph.captureSpec.collectAsState()
@@ -122,7 +122,7 @@ fun LinkWatchSurface(
         }
         return
     }
-    BackHandler(enabled = showingSettings) { graph.navigation.open(LinkRoute.HOME) }
+    BackHandler(enabled = showingSettings) { check(graph.navigation.back()) }
     val onOpenSettings = remember(graph) {
         { graph.onSettingsActionOpen(LinkRouteOpenEvent(LinkRoute.SETTINGS)) }
     }
@@ -200,7 +200,7 @@ fun LinkWatchSurface(
             )
         }
     }
-    RenderRingScreen(nav = navigator, onExit = { graph.navigation.open(LinkRoute.HOME) })
+    RenderRingScreen(nav = navigator, onExit = { graph.navigation.back() })
 }
 
 fun linkWatchRows(
@@ -222,6 +222,7 @@ fun linkWatchRows(
     val rows = mutableListOf<RowSpec>()
     GeneratedLinkHomeComponents.resolve(CircleSurfaceClass.ROUND).orderedMounts.forEach { mount ->
         when (mount.component) {
+            GeneratedLinkHomeComponent.PAGE_HOST -> Unit
             GeneratedLinkHomeComponent.TARGET -> rows += RowSpec(
                 key = mount.id,
                 title = "AGENT · ${linkSessionRoute(session)}",
@@ -306,6 +307,7 @@ fun linkWatchSettingsRows(
 ): List<RowSpec> = buildList {
     GeneratedLinkSettingsComponents.resolve(CircleSurfaceClass.ROUND).orderedMounts.forEach { mount ->
         when (mount.component) {
+            GeneratedLinkSettingsComponent.PAGE_HOST -> Unit
             GeneratedLinkSettingsComponent.CONNECTION -> add(
                 RowSpec(
                     key = mount.id,

@@ -1,14 +1,14 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.componentFamilies
-// Product declarations SHA-256: 9dc2f17efa57eab612d3c63d9f483d8763c254f242b02071052c0d3f06afd1eb
+// Product declarations SHA-256: ac2666eab12e029bbcc15961d131bb644ba80308e1f9a7e4d4a3fe534847bd37
 package io.agentmux.linkui.product.generated
 
 import com.adelost.designkit.ui.CircleSurfaceClass
 
 enum class GeneratedLinkHomeComponent(val id: GeneratedLinkComponentId) {
-    TARGET(GeneratedLinkComponentId.TARGET), TALK(GeneratedLinkComponentId.TALK), LATEST(GeneratedLinkComponentId.LATEST), SETTINGS_ACTION(GeneratedLinkComponentId.SETTINGS_ACTION), COMPOSER(GeneratedLinkComponentId.COMPOSER)
+    PAGE_HOST(GeneratedLinkComponentId.PAGE_HOST), TARGET(GeneratedLinkComponentId.TARGET), TALK(GeneratedLinkComponentId.TALK), LATEST(GeneratedLinkComponentId.LATEST), SETTINGS_ACTION(GeneratedLinkComponentId.SETTINGS_ACTION), COMPOSER(GeneratedLinkComponentId.COMPOSER)
 }
-enum class GeneratedLinkHomeRegion { CONTENT, CHROME, FOOTER, RAIL }
+enum class GeneratedLinkHomeRegion { HOST, CONTENT, CHROME, FOOTER, RAIL }
 
 data class GeneratedLinkHomeMount(
     val id: String,
@@ -42,10 +42,19 @@ object GeneratedLinkHomeComponents {
     fun resolve(surfaceClass: CircleSurfaceClass): GeneratedLinkHomeTree = when (surfaceClass) {
         CircleSurfaceClass.ROUND -> GeneratedLinkHomeTree(listOf(
             GeneratedLinkHomeMount(
+                id = "page-host",
+                component = GeneratedLinkHomeComponent.PAGE_HOST,
+                region = GeneratedLinkHomeRegion.HOST,
+                order = 0,
+                priority = 0,
+                capacity = null,
+                required = true,
+            ),
+            GeneratedLinkHomeMount(
                 id = "target",
                 component = GeneratedLinkHomeComponent.TARGET,
                 region = GeneratedLinkHomeRegion.CONTENT,
-                order = 0,
+                order = 1,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -54,7 +63,7 @@ object GeneratedLinkHomeComponents {
                 id = "talk",
                 component = GeneratedLinkHomeComponent.TALK,
                 region = GeneratedLinkHomeRegion.CONTENT,
-                order = 1,
+                order = 2,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -63,7 +72,7 @@ object GeneratedLinkHomeComponents {
                 id = "latest",
                 component = GeneratedLinkHomeComponent.LATEST,
                 region = GeneratedLinkHomeRegion.CONTENT,
-                order = 2,
+                order = 3,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -72,7 +81,7 @@ object GeneratedLinkHomeComponents {
                 id = "settings-action",
                 component = GeneratedLinkHomeComponent.SETTINGS_ACTION,
                 region = GeneratedLinkHomeRegion.CHROME,
-                order = 3,
+                order = 4,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -80,10 +89,19 @@ object GeneratedLinkHomeComponents {
         ))
         CircleSurfaceClass.PHONE_COMPACT -> GeneratedLinkHomeTree(listOf(
             GeneratedLinkHomeMount(
+                id = "page-host",
+                component = GeneratedLinkHomeComponent.PAGE_HOST,
+                region = GeneratedLinkHomeRegion.HOST,
+                order = 0,
+                priority = 0,
+                capacity = null,
+                required = true,
+            ),
+            GeneratedLinkHomeMount(
                 id = "target",
                 component = GeneratedLinkHomeComponent.TARGET,
                 region = GeneratedLinkHomeRegion.CONTENT,
-                order = 0,
+                order = 1,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -92,7 +110,7 @@ object GeneratedLinkHomeComponents {
                 id = "latest",
                 component = GeneratedLinkHomeComponent.LATEST,
                 region = GeneratedLinkHomeRegion.CONTENT,
-                order = 1,
+                order = 2,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -101,7 +119,7 @@ object GeneratedLinkHomeComponents {
                 id = "composer",
                 component = GeneratedLinkHomeComponent.COMPOSER,
                 region = GeneratedLinkHomeRegion.FOOTER,
-                order = 2,
+                order = 3,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -110,7 +128,7 @@ object GeneratedLinkHomeComponents {
                 id = "talk",
                 component = GeneratedLinkHomeComponent.TALK,
                 region = GeneratedLinkHomeRegion.FOOTER,
-                order = 3,
+                order = 4,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -119,7 +137,7 @@ object GeneratedLinkHomeComponents {
                 id = "settings-action",
                 component = GeneratedLinkHomeComponent.SETTINGS_ACTION,
                 region = GeneratedLinkHomeRegion.CHROME,
-                order = 4,
+                order = 5,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -127,10 +145,19 @@ object GeneratedLinkHomeComponents {
         ))
         CircleSurfaceClass.PHONE_WIDE -> GeneratedLinkHomeTree(listOf(
             GeneratedLinkHomeMount(
+                id = "page-host",
+                component = GeneratedLinkHomeComponent.PAGE_HOST,
+                region = GeneratedLinkHomeRegion.HOST,
+                order = 0,
+                priority = 0,
+                capacity = null,
+                required = true,
+            ),
+            GeneratedLinkHomeMount(
                 id = "target",
                 component = GeneratedLinkHomeComponent.TARGET,
                 region = GeneratedLinkHomeRegion.RAIL,
-                order = 0,
+                order = 1,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -139,7 +166,7 @@ object GeneratedLinkHomeComponents {
                 id = "latest",
                 component = GeneratedLinkHomeComponent.LATEST,
                 region = GeneratedLinkHomeRegion.CONTENT,
-                order = 1,
+                order = 2,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -148,7 +175,7 @@ object GeneratedLinkHomeComponents {
                 id = "composer",
                 component = GeneratedLinkHomeComponent.COMPOSER,
                 region = GeneratedLinkHomeRegion.FOOTER,
-                order = 2,
+                order = 3,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -157,7 +184,7 @@ object GeneratedLinkHomeComponents {
                 id = "talk",
                 component = GeneratedLinkHomeComponent.TALK,
                 region = GeneratedLinkHomeRegion.FOOTER,
-                order = 3,
+                order = 4,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -166,7 +193,7 @@ object GeneratedLinkHomeComponents {
                 id = "settings-action",
                 component = GeneratedLinkHomeComponent.SETTINGS_ACTION,
                 region = GeneratedLinkHomeRegion.CHROME,
-                order = 4,
+                order = 5,
                 priority = 0,
                 capacity = null,
                 required = true,

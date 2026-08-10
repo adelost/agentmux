@@ -9,7 +9,7 @@ import type {
   StatePresentationField,
   SurfaceFamily,
 } from "@v1d/product-spec";
-import { linkChromeActions, linkRoutes } from "./routes.js";
+import { linkPagePresentations, linkSettingsActionPresentation } from "./routes.js";
 
 const packageName = "io.agentmux.linkui.product.generated";
 
@@ -44,7 +44,11 @@ export function linkNativeEmitter(kotlinRoot: string): ProductEmitterPlugin {
         artifact("state-presentations", `${kotlinRoot}/GeneratedLinkStatePresentations.kt`,
           emitStatePresentations(product.stateAuthorities, fingerprint(product.stateAuthorities))),
         artifact("routes", `${kotlinRoot}/GeneratedLinkRoutes.kt`,
-          emitRoutes(fingerprint(linkRoutes))),
+          emitRoutes(product, fingerprint({
+            pages: product.navigation.pages,
+            presentations: linkPagePresentations,
+            settingsAction: linkSettingsActionPresentation,
+          }))),
         artifact("component-families", `${kotlinRoot}/GeneratedLinkComponentFamilies.kt`,
           emitComponentFamilies(product, familiesSha)),
         ...product.componentFamilies.map((entry) => {
@@ -283,32 +287,42 @@ ${entries}
  * error at the exact moment the enum and the declaration disagree, which is
  * the only moment anyone can still fix it cheaply.
  */
-function emitRoutes(sha: string): string {
-  const branches = linkRoutes.map((route) =>
-    `        LinkRoute.${kotlinEnumToken(route.id)} -> GeneratedLinkRouteDescriptor(route, ${JSON.stringify(route.title)}, "route.${route.id}")`
+function emitRoutes(product: ProductIr, sha: string): string {
+  const pageIds = product.navigation.pages.map(({ id }) => id);
+  const presentations = new Map<string, (typeof linkPagePresentations)[number]>(
+    linkPagePresentations.map((page) => [page.id, page]),
+  );
+  if (presentations.size !== pageIds.length || pageIds.some((id) => !presentations.has(id))) {
+    throw new Error("Link page presentation metadata must exactly cover compiled navigation pages");
+  }
+  const branches = pageIds.map((pageId) => {
+    const page = presentations.get(pageId);
+    if (page === undefined) throw new Error(`Link page '${pageId}' has no presentation metadata`);
+    return `        GeneratedLinkPageId.${kotlinEnumToken(pageId)} -> GeneratedLinkRouteDescriptor(route, ${JSON.stringify(page.title)}, "route.${pageId}")`;
+  }
   ).join("\n");
-  const chromeActions = linkChromeActions.map((action) =>
-    `    val ${kotlinEnumToken(action.id)}: GeneratedLinkChromeAction = GeneratedLinkChromeAction(
+  const action = linkSettingsActionPresentation;
+  const chromeAction = `    val ${kotlinEnumToken(action.id)}: GeneratedLinkChromeAction = GeneratedLinkChromeAction(
         ${JSON.stringify(action.id)},
         ${JSON.stringify(action.rowKey)},
         ${JSON.stringify(action.title)},
         ${JSON.stringify(action.detail)},
         ${JSON.stringify(action.a11y)},
         ${JSON.stringify(action.iconAssetRef)},
-        LinkRoute.${kotlinEnumToken(action.destination)},
-    )`
-  ).join("\n");
+    )`;
   return `${header("the declared route identity (title and icon per screen)", sha)}
-import io.agentmux.linkui.product.LinkRoute
+enum class GeneratedLinkPageId(val wireId: String) {
+${pageIds.map((id) => `    ${kotlinEnumToken(id)}("${id}"),`).join("\n")}
+}
 
 data class GeneratedLinkRouteDescriptor(
-    val route: LinkRoute,
+    val route: GeneratedLinkPageId,
     val title: String,
     val iconId: String,
 )
 
 object GeneratedLinkRoutes {
-    fun descriptor(route: LinkRoute): GeneratedLinkRouteDescriptor = when (route) {
+    fun descriptor(route: GeneratedLinkPageId): GeneratedLinkRouteDescriptor = when (route) {
 ${branches}
     }
 }
@@ -320,11 +334,10 @@ data class GeneratedLinkChromeAction(
     val detail: String,
     val a11y: String,
     val iconAssetRef: String,
-    val destination: LinkRoute,
 )
 
 object GeneratedLinkChromeActions {
-${chromeActions}
+${chromeAction}
 }
 `;
 }
@@ -352,13 +365,12 @@ function emitComponentFamilies(product: ProductIr, sha: string): string {
     const mounted = family.trees.flatMap((tree) => tree.mounts.map((mount) => mount.instance));
     const distinct = [...new Set(mounted)];
     return `        GeneratedLinkComponentFamilyBinding(
-            route = GeneratedLinkRouteRef.${kotlinEnumToken(screen)},
+            route = GeneratedLinkPageId.${kotlinEnumToken(screen)},
             family = GeneratedLinkComponentFamilyRef.${kotlinEnumToken(family.id)},
             components = setOf(${distinct.map((id) => `GeneratedLinkComponentId.${kotlinEnumToken(id)}`).join(", ")}),
         )`;
   }).join(",\n");
   return `${header("ProductConfig.componentFamilies", sha)}
-enum class GeneratedLinkRouteRef(val wireId: String) { ${routes.map((id) => `${kotlinEnumToken(id)}("${id}")`).join(", ")} }
 enum class GeneratedLinkComponentFamilyRef(val wireId: String) { ${families.map((id) => `${kotlinEnumToken(id)}("${id}")`).join(", ")} }
 enum class GeneratedLinkComponentTypeId(val wireId: String) { ${componentTypes.map(({ id }) => `${kotlinEnumToken(id)}("${id}")`).join(", ")} }
 enum class GeneratedLinkComponentId(val wireId: String, val type: GeneratedLinkComponentTypeId) {
@@ -367,7 +379,7 @@ enum class GeneratedLinkComponentId(val wireId: String, val type: GeneratedLinkC
 enum class GeneratedLinkArtifactRef(val wireId: String) { ${artifacts.map((id) => `${kotlinEnumToken(id)}("${id}")`).join(", ")} }
 
 data class GeneratedLinkComponentFamilyBinding(
-    val route: GeneratedLinkRouteRef,
+    val route: GeneratedLinkPageId,
     val family: GeneratedLinkComponentFamilyRef,
     val components: Set<GeneratedLinkComponentId>,
 )
