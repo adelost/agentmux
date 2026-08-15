@@ -37,6 +37,7 @@ class WearMainActivity : ComponentActivity() {
     private lateinit var controller: WearMailboxController
     private lateinit var productGraph: WearLinkProductGraph
     private lateinit var updater: LinkUpdater
+    private var qaPreviewActive = false
     private val microphoneGranted = MutableStateFlow(false)
     private val microphonePermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -49,7 +50,12 @@ class WearMainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        controller = WearMailboxController(this)
+        qaPreviewActive = BuildConfig.DEBUG &&
+            intent.getStringExtra(QA_STATE_EXTRA) == QA_STATE_ACTIVE
+        controller = WearMailboxController(
+            context = this,
+            initialState = if (qaPreviewActive) activePreviewState() else LinkState(),
+        )
         updater = LinkUpdater(
             context = this,
             scope = lifecycleScope,
@@ -73,15 +79,10 @@ class WearMainActivity : ComponentActivity() {
             updater = updater,
             navigation = navigation,
             microphoneGranted = microphoneGranted,
-            state = if (BuildConfig.DEBUG && intent.getStringExtra(QA_STATE_EXTRA) == QA_STATE_ACTIVE) {
-                MutableStateFlow(activePreviewState())
-            } else {
-                controller.state
-            },
         )
         registerSessionReceiver()
         requestMicrophone()
-        controller.start()
+        if (!qaPreviewActive) controller.start()
         setContent {
             RingActionCueHost {
                 CircleHostSurface(
@@ -99,14 +100,14 @@ class WearMainActivity : ComponentActivity() {
                 }
             }
         }
-        refreshHandoff()
+        if (!qaPreviewActive) refreshHandoff()
         updater.start()
     }
 
     override fun onResume() {
         super.onResume()
         microphoneGranted.value = hasMicrophonePermission()
-        if (::controller.isInitialized) refreshHandoff()
+        if (::controller.isInitialized && !qaPreviewActive) refreshHandoff()
         if (::updater.isInitialized) updater.resumeInstallerStatus()
     }
 
