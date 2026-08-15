@@ -12,14 +12,14 @@ enum class GeneratedLinkPageId(val wireId: String) {
 data class GeneratedLinkRouteDescriptor(
     val route: GeneratedLinkPageId,
     val title: String,
-    val iconId: String,
+    val iconAssetRef: String,
 )
 
 object GeneratedLinkRoutes {
     fun descriptor(route: GeneratedLinkPageId): GeneratedLinkRouteDescriptor = when (route) {
-        GeneratedLinkPageId.HOME -> GeneratedLinkRouteDescriptor(route, "AGENTMUX LINK", "route.home")
-        GeneratedLinkPageId.SETTINGS -> GeneratedLinkRouteDescriptor(route, "LINK SETTINGS", "route.settings")
-        GeneratedLinkPageId.DEV_HOST -> GeneratedLinkRouteDescriptor(route, "DEV HOST", "route.dev-host")
+        GeneratedLinkPageId.HOME -> GeneratedLinkRouteDescriptor(route, "AGENTMUX LINK", "link")
+        GeneratedLinkPageId.SETTINGS -> GeneratedLinkRouteDescriptor(route, "LINK SETTINGS", "gear")
+        GeneratedLinkPageId.DEV_HOST -> GeneratedLinkRouteDescriptor(route, "DEV HOST", "phone")
     }
 }
 
