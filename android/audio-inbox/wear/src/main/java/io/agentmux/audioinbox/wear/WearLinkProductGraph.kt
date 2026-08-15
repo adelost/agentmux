@@ -24,8 +24,8 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * The wear host of the product port graph. The watch divergences stay exactly
  * where the old ports had them: no composer, no preference toggles, no
- * playback pause/resume, and no target provenance kinds. QA previews inject
- * only the state flow; the sinks stay real, as before.
+ * playback pause/resume, and no target provenance kinds. State and capture
+ * effects always come from the same controller owner.
  */
 internal class WearLinkProductGraph private constructor(
     controller: WearMailboxController,
@@ -63,13 +63,12 @@ internal class WearLinkProductGraph private constructor(
             updater: LinkUpdater,
             navigation: LinkNavigationController,
             microphoneGranted: StateFlow<Boolean>,
-            state: StateFlow<LinkState> = controller.state,
         ): WearLinkProductGraph {
             val captures = WearCaptureAdapter(controller)
             return WearLinkProductGraph(
                 controller = controller,
                 navigation = navigation,
-                state = state,
+                state = controller.state,
                 updateState = updater.state,
                 microphoneGranted = microphoneGranted,
                 capturedTurns = captures.captured,

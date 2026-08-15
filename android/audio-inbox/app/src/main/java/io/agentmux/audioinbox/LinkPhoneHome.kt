@@ -84,7 +84,7 @@ internal fun LinkPhoneHome(
         PhoneScreenHeader(
             title = route.title,
             onBack = null,
-            icon = LinkNativeBindings.requireIcon(route.iconId),
+            icon = LinkNativeBindings.requireIcon(route.iconAssetRef),
             actions = if (settingsAction != null) {
                 listOf(
                     linkSettingsHeaderAction {

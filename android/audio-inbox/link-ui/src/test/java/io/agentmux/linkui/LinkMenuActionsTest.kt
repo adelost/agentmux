@@ -1,6 +1,7 @@
 package io.agentmux.linkui
 
 import io.agentmux.linkui.product.LinkRoute
+import io.agentmux.linkui.product.LinkNativeBindings
 import io.agentmux.linkui.product.generated.GeneratedLinkChromeActions
 import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
 import org.junit.Assert.assertEquals
@@ -49,7 +50,7 @@ class LinkMenuActionsTest {
         LinkRoute.entries.forEach { route ->
             val descriptor = GeneratedLinkRoutes.descriptor(route)
             assertEquals(route, descriptor.route)
-            assertEquals("route.${route.wireId}", descriptor.iconId)
+            assertNotNull(LinkNativeBindings.requireIcon(descriptor.iconAssetRef))
             assertNotNull(descriptor.title)
             assertEquals(descriptor.title, descriptor.title.trim())
         }

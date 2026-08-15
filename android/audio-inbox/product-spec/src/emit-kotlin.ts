@@ -298,7 +298,7 @@ function emitRoutes(product: ProductIr, sha: string): string {
   const branches = pageIds.map((pageId) => {
     const page = presentations.get(pageId);
     if (page === undefined) throw new Error(`Link page '${pageId}' has no presentation metadata`);
-    return `        GeneratedLinkPageId.${kotlinEnumToken(pageId)} -> GeneratedLinkRouteDescriptor(route, ${JSON.stringify(page.title)}, "route.${pageId}")`;
+    return `        GeneratedLinkPageId.${kotlinEnumToken(pageId)} -> GeneratedLinkRouteDescriptor(route, ${JSON.stringify(page.title)}, ${JSON.stringify(page.iconAssetRef)})`;
   }
   ).join("\n");
   const action = linkSettingsActionPresentation;
@@ -318,7 +318,7 @@ ${pageIds.map((id) => `    ${kotlinEnumToken(id)}("${id}"),`).join("\n")}
 data class GeneratedLinkRouteDescriptor(
     val route: GeneratedLinkPageId,
     val title: String,
-    val iconId: String,
+    val iconAssetRef: String,
 )
 
 object GeneratedLinkRoutes {

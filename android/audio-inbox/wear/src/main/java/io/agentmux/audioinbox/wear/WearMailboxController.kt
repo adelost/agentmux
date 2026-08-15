@@ -20,11 +20,12 @@ import java.util.concurrent.atomic.AtomicLong
 
 internal class WearMailboxController(
     context: Context,
+    initialState: LinkState = LinkState(),
 ) : AutoCloseable {
     private val store = KeystoreSessionStore(
         context.getSharedPreferences("link-wear-session", Context.MODE_PRIVATE),
     )
-    private val ledger = LinkStateLedger(LinkState()) { }
+    private val ledger = LinkStateLedger(initialState) { }
     private val work = Executors.newScheduledThreadPool(2)
     private val recorder = WearVoiceRecorder(context.applicationContext)
     private val generation = AtomicLong()
