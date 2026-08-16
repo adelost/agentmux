@@ -107,10 +107,16 @@ feature("parseConfig", () => {
     then: ["category is Agents", (config) => expect(config.category).toBe("Agents")],
   });
 
-  component("throws on missing guild", {
+  component("allows local-only config without a Discord guild", {
     given: ["yaml without guild", () => `agents:\n  test:\n    dir: /tmp\n`],
-    when: ["parsing", (y) => () => parseConfig(y)],
-    then: ["throws", (fn) => expect(fn).toThrow("guild")],
+    when: ["parsing", (y) => parseConfig(y)],
+    then: ["keeps Discord optional", (config) => expect(config.guild).toBeNull()],
+  });
+
+  component("requires a guild at the Discord sync boundary", {
+    given: ["local-only yaml", () => `agents:\n  test:\n    dir: /tmp\n`],
+    when: ["parsing for Discord", (y) => () => parseConfig(y, { requireGuild: true })],
+    then: ["fails with the missing integration field", (fn) => expect(fn).toThrow("guild")],
   });
 
   component("throws on missing dir", {

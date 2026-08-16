@@ -1,22 +1,22 @@
-guild: "YOUR_SERVER_ID"
-category: "Agent Cave"       # Discord category for agent channels
+# Start with an empty fleet, then run:
+#   amux add myproject ~/projects/myproject
+# The command detects Claude Code, Codex, or Kimi Code instead of assuming
+# one vendor is installed.
+agents: {}
 
-# Existing Claude/Codex pane that visibly curates the nightly memory digest.
-# No hidden model process or fallback is used.
-dream:
-  agent: myproject
-  pane: 0
+# Optional Discord integration. Uncomment after adding DISCORD_TOKEN.
+# guild: "YOUR_SERVER_ID"
+# category: "Agent Cave"
 
-agents:
-  myproject:
-    dir: ~/projects/myproject
-    panes: 3                 # 3 coding agent panes = 3 Discord channels
-    shells: 3                # 3 empty terminals for running commands
-    # layout: tiled          # default; set another tmux layout explicitly to override
-
-  another-project:
-    dir: ~/projects/another
-    panes: 3
-    services:                # named service panes (no Discord channel)
-      - npm run dev
-      - npm run test
+# Optional manual examples:
+# agents:
+#   api:
+#     dir: ~/projects/api
+#     claude: 2
+#     codex: 1
+#     shells: 2
+#   frontend:
+#     dir: ~/projects/frontend
+#     kimi: 1
+#     services:
+#       - npm run dev

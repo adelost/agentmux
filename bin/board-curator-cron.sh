@@ -2,7 +2,7 @@
 # board-curator-cron.sh — periodic ticket-quality pass, delegated to brokers.
 #
 # WHY: tickets rot in three ways nobody owns between
-# waves: duplicates accumulate (lsrc:1's retro tickets overlapped SRC-0035/
+# waves: duplicates accumulate (one legacy ticket wave overlapped later work;
 # 0036 the same night they were filed), unclear tickets stall workers until
 # a propose-first round-trip, and "done" sometimes isn't (phantom-close,
 # direction misses like PR #32). A periodic curation pass catches all three —
@@ -35,6 +35,7 @@ export HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
 export PATH="${HOME}/.nvm/versions/node/v22.19.0/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin"
 AMUX="${AMUX:-${HOME}/.nvm/versions/node/v22.19.0/bin/amux}"
 CURL="${CURL:-curl}"
+NODE_BIN="${NODE_BIN:-$(command -v node)}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=guard-heartbeat.sh
 source "$SCRIPT_DIR/guard-heartbeat.sh"
@@ -58,6 +59,7 @@ fleets=0; briefs=0; board_failures=0
 
 mkdir -p "$WATCH_DIR"
 [ -n "$BOARD_URL" ] || { echo "[$(date -Is)] Suggestions disabled (set SUGGEST_BASE_URL) → skip"; exit 0; }
+BOARD_URL="$("$NODE_BIN" "$SCRIPT_DIR/normalize-service-url.mjs" "$BOARD_URL" "Suggestions base URL")" || exit 1
 [ -f "${WATCH_DIR}/OFF" ] && { echo "[$(date -Is)] global OFF → skip"; exit 0; }
 [ -f "$CONF" ] || { echo "[$(date -Is)] no fleets.conf at $CONF → skip"; exit 0; }
 

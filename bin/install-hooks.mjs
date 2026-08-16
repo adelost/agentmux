@@ -151,6 +151,7 @@ function main() {
   if (existsSync(SETTINGS)) {
     copyFileSync(SETTINGS, `${SETTINGS}.bak-amux-${Date.now()}`);
   }
+  mkdirSync(dirname(SETTINGS), { recursive: true, mode: 0o700 });
   writeFileSync(SETTINGS, next);
   console.log(`${remove ? "removed amux hooks from" : "installed amux hooks in"} ${SETTINGS}`);
   console.log(`events: ${HOOK_EVENTS.join(", ")} -> ${HOOK_CMD}`);

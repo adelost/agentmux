@@ -11,7 +11,7 @@ permissions of the local user who started Agentmux. Protect that user account,
 review project-specific instructions, and keep `~/.agentmux` private.
 
 The public core must not require or silently contact a V1D service. Optional
-network integrations require an explicit HTTPS origin and their own revocable
-credentials. A report that shows core contacting an unconfigured external
+network integrations require an explicit HTTPS origin (or loopback HTTP for a
+same-machine service) and their own revocable credentials. A report that shows core contacting an unconfigured external
 origin, leaking credentials, or crossing one configured project boundary is a
 security issue.

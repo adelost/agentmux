@@ -5,6 +5,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { loadConfig } from "./config.mjs";
+import { runtimeAgentsPath } from "../core/runtime-defaults.mjs";
 
 const WINDOWS_CWD = "/mnt/c/Windows/System32";
 
@@ -45,8 +46,8 @@ function discordToken(bridgeDir) {
   if (process.env.DISCORD_TOKEN) return process.env.DISCORD_TOKEN;
   const candidates = [
     process.env.AMUX_DISCORD_ENV,
+    resolve(process.env.HOME || "", ".agentmux/.env"),
     resolve(bridgeDir, ".env"),
-    resolve(process.env.HOME || "", "lsrc/agentmux/.env"),
   ].filter(Boolean);
   for (const path of candidates) {
     try {
@@ -125,8 +126,7 @@ export async function cmdRestarter(args, { bridgeDir }) {
     if (!/^\d{17,20}$/u.test(channel || "") || !/^\d{17,20}$/u.test(user || "")) {
       throw new Error("install requires Discord snowflakes via --channel ID --user ID");
     }
-    const generatedConfig = process.env.AGENT_CONFIG
-      || resolve(process.env.HOME || "", ".config/agent/agents.yaml");
+    const generatedConfig = runtimeAgentsPath();
     const fleetConfig = loadConfig(generatedConfig);
     try {
       assertRescueChannelIsolation(fleetConfig, channel, {
@@ -136,7 +136,8 @@ export async function cmdRestarter(args, { bridgeDir }) {
       throw new Error(`${error.message}: ${generatedConfig}`);
     }
     const distro = flags.distro || "Ubuntu-22.04";
-    const linuxUser = flags["linux-user"] || process.env.USER || "adelost";
+    const linuxUser = flags["linux-user"] || process.env.USER;
+    if (!linuxUser) throw new Error("install requires --linux-user when USER is unavailable");
     const poll = flags.poll || "3";
     await runPowerShell(script, [
       "-Install",

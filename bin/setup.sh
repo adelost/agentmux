@@ -148,11 +148,16 @@ if [[ ! -f "$YAML_FILE" ]]; then
   cp agentmux.yaml.example "$YAML_FILE"
   chmod 600 "$YAML_FILE"
   echo ""
-  echo "  Created $YAML_FILE, add your projects (and a server ID for Discord):"
-  dim "  nano $YAML_FILE"
+  echo "  Created $YAML_FILE with an empty fleet. Add a project after setup:"
+  dim "  amux add myproject ~/projects/myproject"
 else
   ok "$YAML_FILE exists"
 fi
+
+GENERATED_YAML="${AGENTS_YAML:-$CONFIG_HOME/agents.yaml}"
+node bin/regenerate-config.mjs "$YAML_FILE" "$GENERATED_YAML"
+chmod 600 "$GENERATED_YAML"
+ok "$GENERATED_YAML generated from source config"
 
 # --- CLIs ---
 
@@ -174,7 +179,7 @@ fi
 
 echo ""
 echo -e "${GREEN}Ready!${RESET}"
-echo "  1. Edit $YAML_FILE with your projects"
-echo "  2. For Discord: add DISCORD_TOKEN and guild, then run npm run dev"
-echo "  3. Type /sync in Discord to create channels"
-echo "  4. Without Discord, use the installed amux CLI directly"
+echo "  1. Add a project: amux add myproject ~/projects/myproject"
+echo "  2. Start the local broker with: amux serve --detach"
+echo "  3. For Discord: add DISCORD_TOKEN and guild, then run amux restart"
+echo "  4. Type /sync in Discord to create channels"

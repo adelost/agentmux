@@ -9,7 +9,7 @@ param(
   [Parameter(ParameterSetName = "Install")]
   [string]$Distro = "Ubuntu-22.04",
   [Parameter(ParameterSetName = "Install")]
-  [string]$LinuxUser = "adelost",
+  [string]$LinuxUser = "",
   [Parameter(ParameterSetName = "Install")]
   [string]$NodePath = "",
   [Parameter(ParameterSetName = "Install")]
@@ -134,13 +134,14 @@ if ($Install) {
     throw "channel and authorized user must be Discord snowflake ids"
   }
   Assert-Identifier $Distro "distro"
+  if (!$LinuxUser) { throw "LinuxUser is required" }
   Assert-Identifier $LinuxUser "linux user"
   if ($PollSeconds -lt 2 -or $PollSeconds -gt 30) { throw "poll seconds must be 2..30" }
   if (!$NodePath) {
     $nodeCommand = Get-Command "node.exe" -ErrorAction SilentlyContinue
     if ($null -ne $nodeCommand) { $NodePath = $nodeCommand.Source }
-    elseif (Test-Path "E:\_Sdk\nodejs\node.exe") { $NodePath = "E:\_Sdk\nodejs\node.exe" }
   }
+  if (!$NodePath -or !(Test-Path $NodePath)) { throw "node.exe was not found; pass -NodePath" }
   $token = [Console]::In.ReadToEnd().Trim()
   if (!$token) { throw "Discord token was not provided on stdin" }
   New-Item -ItemType Directory -Force -Path $Root | Out-Null

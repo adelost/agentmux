@@ -112,7 +112,7 @@ const runSweep = (fx) => new Promise((ok, bad) => {
       CONF: fx.conf,
       AMUX: fx.amux,
       CURL: fx.curl,
-      BOARD_URL: "http://board.test",
+      BOARD_URL: "https://board.test",
       READ_TOKEN_FILE: fx.tokenFile,
       TMUX_SOCKET: fx.socket,
       QUEUE_DIR: join(fx.root, "no-queue"),     // absent → queue sweep skipped

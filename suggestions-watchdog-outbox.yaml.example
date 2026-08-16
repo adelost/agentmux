@@ -1,12 +1,12 @@
 # Persistent watchdog delivery for every public project visible to this token.
 baseUrl: https://tasks.example.com
-discoveryProject: source
+discoveryProject: myproject
 
 # By default the project registry is discovered on every run. Set a bounded
 # explicit override only when intentionally limiting delivery:
 # projects:
-#   - source
-#   - skydive
+#   - myproject
+#   - another-project
 
 # Both files must be regular, current-user-owned, mode 0600, and one line.
 readCredentialFile: ~/.config/agent/suggestions-read-token

@@ -105,7 +105,7 @@ export function isRunningNow(bucket, nowMs, withinMs = 60_000) {
  *
  * Deliberately does NOT match generic waiting-state verbs ("awaiting",
  * "avvaktar", "väntar på", "confirm"): those fire on process states —
- * "awaiting review/CI/deploy", "väntar på lsrc:2" — and flooded the
+ * "awaiting review/CI/deploy", "waiting for project:2" — and flooded the
  * needs-you bucket with panes that were waiting on ANOTHER AGENT, not the
  * human (SRC-0053). A needs-you row must mean the ball is in the human's
  * court; a missed generic waiter shows up as idle instead, which the
@@ -145,11 +145,11 @@ export function isWaitingLikeText(text) {
 /*
  * Provenance-aware needs-you: a waiting-like reply only puts the ball in the
  * HUMAN's court when the conversation partner is the human. When the latest
- * prompt carries an inter-agent envelope ("[from lsrc:2] ..."), a generic
+ * prompt carries an inter-agent envelope ("[from project:2] ..."), a generic
  * second-person question ("Vill du att jag mergar?") is addressed to that
  * agent, not to the operator. parseSenderHeader covers the canonical
  * auto-prepended envelope; the loose "[from ..." fallback covers
- * hand-written variants ("[from claw:3 · audit]") that the strict routing
+ * hand-written variants ("[from project:3 · audit]") that the strict routing
  * parser rejects — for CLASSIFICATION a human never types that prefix, so
  * loose is safe here.
  *

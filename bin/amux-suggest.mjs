@@ -6,6 +6,7 @@ import {
   defaultSuggestionsTokenFile, displayBodyFile, sendSuggestionsRequest,
 } from "../core/suggestions-authoring.mjs";
 import { emitBoardUseReminder } from "../core/board-use-reminder.mjs";
+import { loadRuntimeEnv } from "../core/runtime-env.mjs";
 
 const usage = () => {
   console.error(`Usage: amux-suggest --method PATCH --path '/api/tickets/AI-0001/admin?project=ai' \\
@@ -69,6 +70,7 @@ const invokedDirectly = process.argv[1]
   && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
 
 if (invokedDirectly) try {
+  loadRuntimeEnv();
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
     usage();

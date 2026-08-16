@@ -9,6 +9,7 @@ import { fileURLToPath } from "url";
 import { Client, GatewayIntentBits } from "discord.js";
 import { resolveConfigSources } from "../core/config-sources.mjs";
 import { loadRuntimeEnv } from "../core/runtime-env.mjs";
+import { runtimeAgentsPath } from "../core/runtime-defaults.mjs";
 import { createState } from "../core/state.mjs";
 import { executeSync } from "../core/sync-discord.mjs";
 import { parseConfig } from "../sync.mjs";
@@ -20,14 +21,14 @@ loadRuntimeEnv({ packageRoot: ROOT });
 const configSources = resolveConfigSources({ packageDir: ROOT });
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const AGENTS_YAML = process.env.AGENTS_YAML || resolve(ROOT, "agents.yaml");
+const AGENTS_YAML = runtimeAgentsPath();
 const AGENTMUX_YAML = configSources.agentmuxYaml.path;
 const STATE_FILE = process.env.STATE_FILE || "/tmp/agentmux-state.json";
 
 if (!TOKEN) { console.error("DISCORD_TOKEN missing"); process.exit(1); }
 
 const configYaml = readFileSync(AGENTMUX_YAML, "utf-8");
-const { guild: guildId } = parseConfig(configYaml);
+const { guild: guildId } = parseConfig(configYaml, { requireGuild: true });
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 client.once("ready", async () => {

@@ -10,7 +10,7 @@ if [ -z "${TMUX_SOCKET:-}" ] && [ -f "$HOME/.agentmux/.env" ]; then
   TMUX_SOCKET="$(sed -n 's/^TMUX_SOCKET=//p' "$HOME/.agentmux/.env" | tail -1)"
 fi
 export TMUX_SOCKET="${TMUX_SOCKET:-/tmp/agentmux-tmux.sock}"
-export AGENT_CONFIG="${AGENT_CONFIG:-$HOME/.config/agent/agents.yaml}"
+export AGENT_CONFIG="${AGENT_CONFIG:-${AGENTS_YAML:-$HOME/.agentmux/agents.yaml}}"
 
 AGENTMUX_DIR="${AGENTMUX_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 NODE_BIN="${NODE_BIN:-$HOME/.nvm/versions/node/v22.19.0/bin/node}"

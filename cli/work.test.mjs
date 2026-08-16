@@ -7,6 +7,8 @@ import {
   projectForWorkSender, retryRefusal, runWorkCommand,
 } from "./work.mjs";
 
+process.env.AMUX_WORK_PROJECT_MAP = "skyvw=skyvw,skydive=skydive,ai=ai";
+
 const overview = (overrides = {}) => ({
   agent: { id: "skyvw:4", workStatus: "idle", currentTicket: null },
   project: { id: "skyvw", activeWorkers: 1, maxActiveWorkers: 2 },
@@ -57,18 +59,14 @@ feature("simple Suggestions work CLI", () => {
     }],
   });
 
-  unit("infers only the small known project map", {
+  unit("infers only the operator-configured project map", {
     when: ["mapping pane addresses", () => [
       projectForWorkSender("skyvw:3"), projectForWorkSender("skydive:9"),
       projectForWorkSender("ai:1"),
       projectForWorkSender("lsrc:4"), projectForWorkSender("unknown:1"),
       projectForWorkSender("unknown:1", "ai"),
     ]],
-    then: ["known fleets map and an explicit override remains possible", (result) => {
-      // `ai` belongs here: those panes have exactly one board, and its absence made
-      // every ai command fail locally in a way that read as a permission error.
-      // `lsrc` stays null ON PURPOSE — those panes orchestrate four boards, so a
-      // default would be a silent wrong-project pick, not a convenience.
+    then: ["configured fleets map and an explicit override remains possible", (result) => {
       expect(result).toEqual(["skyvw", "skydive", "ai", null, null, "ai"]);
     }],
   });

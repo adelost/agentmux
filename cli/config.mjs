@@ -1,5 +1,5 @@
 // Config management for agent CLI. Replaces all bash yq calls.
-// Single source of truth: ~/.config/agent/agents.yaml
+// Generated runtime view. The user-owned source is ~/.agentmux/agentmux.yaml.
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { dirname } from "path";

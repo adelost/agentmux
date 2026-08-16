@@ -35,7 +35,7 @@ export async function startWindowsManagerPhone({
   const phone = createWindowsManagerPhoneServer({
     host: config.phoneHost,
     port: Number(config.phonePort) || 8081,
-    serverId: config.phoneServerId || "abyss-windows",
+    serverId: config.phoneServerId || "agentmux-windows",
     state,
     saveState: deps.saveState,
     transcribeAudio,

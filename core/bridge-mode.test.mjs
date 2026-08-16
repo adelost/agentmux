@@ -130,12 +130,17 @@ feature("bridge ownership mode", () => {
     then: ["legacy and preload launches stay observable", ({ launch, doctor, watchdog }) => {
       const processPattern = "[n]ode( [^ ]+)* index\\.mjs";
       const javascriptPattern = processPattern.replace("\\", "\\\\");
-      expect(launch).toContain("node --import ./bin/quota-recovery-bootstrap.mjs index.mjs");
+      expect(launch).toContain(
+        "node --import ./bin/runtime-env-bootstrap.mjs --import ./bin/quota-recovery-bootstrap.mjs index.mjs",
+      );
       expect(doctor).toContain(`pgrep -f '${javascriptPattern}'`);
       expect(watchdog).toContain(`pgrep -f '${processPattern}'`);
       const observer = /node( [^ ]+)* index\.mjs/u;
       expect(observer.test("node index.mjs")).toBe(true);
       expect(observer.test("node --import ./bin/quota-recovery-bootstrap.mjs index.mjs")).toBe(true);
+      expect(observer.test(
+        "node --import ./bin/runtime-env-bootstrap.mjs --import ./bin/quota-recovery-bootstrap.mjs index.mjs",
+      )).toBe(true);
     }],
   });
 });

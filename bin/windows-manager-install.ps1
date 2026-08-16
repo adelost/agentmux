@@ -13,7 +13,7 @@ param(
   [Parameter(ParameterSetName = "Install", Mandatory = $true)]
   [string]$AuthorizedUserId,
   [Parameter(ParameterSetName = "Install")]
-  [string]$PythonPath = "E:\_Sdk\python\python.exe",
+  [string]$PythonPath = "",
   [Parameter(ParameterSetName = "Install")]
   [string]$WhisperModelPath = "",
   [Parameter(ParameterSetName = "Install")]
@@ -112,8 +112,11 @@ if ($Install) {
   $nodePath = ""
   $nodeCommand = Get-Command "node.exe" -ErrorAction SilentlyContinue
   if ($null -ne $nodeCommand) { $nodePath = $nodeCommand.Source }
-  elseif (Test-Path "E:\_Sdk\nodejs\node.exe") { $nodePath = "E:\_Sdk\nodejs\node.exe" }
   if (!$nodePath) { throw "node.exe was not found" }
+  if (!$PythonPath) {
+    $pythonCommand = Get-Command "python.exe" -ErrorAction SilentlyContinue
+    if ($null -ne $pythonCommand) { $PythonPath = $pythonCommand.Source }
+  }
   $codexJs = Join-Path $env:APPDATA "npm\node_modules\@openai\codex\bin\codex.js"
   if (!(Test-Path $codexJs)) { throw "Windows-native Codex CLI was not found" }
   if (!(Test-Path $PythonPath)) { throw "Windows Python was not found" }
@@ -138,7 +141,7 @@ if ($Install) {
     pollSeconds = $PollSeconds
     phoneHost = $phoneHost
     phonePort = $PhonePort
-    phoneServerId = "abyss-windows"
+    phoneServerId = "agentmux-windows"
     nodePath = $nodePath
     provider = [pscustomobject]@{
       kind = "cli"

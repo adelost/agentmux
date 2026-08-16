@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { runLinkConnectorCycle } from "./link-connector.mjs";
 import { createVoiceBufferTranscriber } from "../core/voice-transcriber.mjs";
+import { normalizeServiceBaseUrl } from "../core/runtime-defaults.mjs";
 
 /** WHAT: Schedules the Link connector poll loop when configured. WHY: Keeps index.mjs free of connector wiring detail. */
 export function startLinkConnectorIfConfigured({
@@ -20,17 +21,23 @@ export function startLinkConnectorIfConfigured({
   scheduleTimeout = setTimeout,
 } = {}) {
   if (!process.env.LINK_BASE || !process.env.LINK_TOKEN_WSL) return false;
+  if (!process.env.LINK_TARGETS_WSL) {
+    throw new Error("Link connector requires explicit LINK_TARGETS_WSL");
+  }
   const voiceTranscriber = transcribe || createVoiceBufferTranscriber({
     run,
     transcribeScript,
   });
-  const targets = String(process.env.LINK_TARGETS_WSL || "lsrc:3,lsrc:10")
+  const targets = String(process.env.LINK_TARGETS_WSL)
     .split(",").map((value) => value.trim()).filter(Boolean);
+  const linkBase = normalizeServiceBaseUrl(process.env.LINK_BASE, "Link base URL", {
+    allowHttpLoopback: true,
+  });
   const statePath = join(homedir(), ".agentmux", "link-connector.json");
   const cycle = async () => {
     try {
       await runCycle({
-        linkBase: process.env.LINK_BASE,
+        linkBase,
         token: process.env.LINK_TOKEN_WSL,
         targets,
         agent,
@@ -47,6 +54,6 @@ export function startLinkConnectorIfConfigured({
     }
   };
   scheduleTimeout(cycle, 20_000);
-  log(`link-connector | enabled | base=${process.env.LINK_BASE} targets=${targets.join(",")}`);
+  log(`link-connector | enabled | base=${linkBase} targets=${targets.join(",")}`);
   return true;
 }

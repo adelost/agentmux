@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { cwdFromHookInput, loadAgentsConfig, resolvePaneFromCwd, sendReactivePoke } from "../core/reactive-poke.mjs";
+import { runtimeAgentsPath } from "../core/runtime-defaults.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dir, "..");
@@ -42,7 +43,7 @@ async function main() {
   const env = { ...parseEnvFile(resolve(root, ".env")), ...process.env };
   if (env.AMUX_REACTIVE_POKE !== "1") return;
 
-  const agentsYaml = env.AGENTS_YAML || resolve(root, "agents.yaml");
+  const agentsYaml = runtimeAgentsPath(env, env.HOME);
   const port = Number(env.VOICE_PWA_PORT || 8080);
   const hookInput = await readHookInput();
   const cwd = cwdFromHookInput(hookInput, process.cwd());

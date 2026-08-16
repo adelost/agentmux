@@ -62,7 +62,7 @@ function visibleOutcome(answer, fallback) {
 export function createWindowsManagerPhoneServer({
   host,
   port = 8081,
-  serverId = "abyss-windows",
+  serverId = "agentmux-windows",
   state,
   saveState,
   processTurn,

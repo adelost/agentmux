@@ -1,20 +1,11 @@
-# Private Suggestions board. The relay uses a read-only token from a 0600 file.
+# Optional Suggestions-compatible board. The relay uses a read-only token from a 0600 file.
 baseUrl: https://tasks.example.com
 credentialFile: ~/.config/agent/suggestions-read-token
 
 # Explicit routing. Pane 2 is the Claude broker; panes 3+ implement.
 projects:
-  source:
-    agent: lsrc
-    pane: 2
-  skydive:
-    agent: skydive
-    pane: 2
-  skyvw:
-    agent: watch
-    pane: 2
-  ai:
-    agent: ai
+  product:
+    agent: myproject
     pane: 2
 
 # Current production-safe fallback. A bounded implementationPolicy returned by

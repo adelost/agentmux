@@ -5,7 +5,7 @@ import { dirname, resolve } from "path";
 import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, statSync } from "fs";
 import { join } from "path";
 import { createHash } from "crypto";
-import { loadConfig, listAgents, getAgent, addAgent, removeAgent, resolveAgent, saveLast, getLast, getPaneCount, findChannelForPane, validateAgentSender } from "./config.mjs";
+import { loadConfig, listAgents, getAgent, resolveAgent, saveLast, getLast, getPaneCount, findChannelForPane, validateAgentSender } from "./config.mjs";
 import { formatAgentRow, statusIcon, truncate, formatContextCell, formatTokens } from "./format.mjs";
 import { paneRuntimeLabel } from "./pane-runtime-label.mjs";
 import {
@@ -72,7 +72,8 @@ import { composeMorningDigest, digestProjects, boardDecisionItem } from "../core
 import { collectCommitsSince, reposFromAgents } from "../core/commit-log.mjs";
 import { cmdJanitor, cmdTrim } from "./trim.mjs";
 import { reapStalePlaywrightProcesses, formatPlaywrightReapResult } from "../core/playwright-watchdog.mjs";
-import { regenerateAgentsYaml } from "../sync.mjs";
+import { materializeRuntimeConfig } from "../core/runtime-config.mjs";
+import { defaultCodingEngine } from "../core/default-engine.mjs";
 import yaml from "js-yaml";
 import { spawn, execSync } from "child_process";
 import { runOneshot, showRunLog } from "./run.mjs";
@@ -80,8 +81,10 @@ import { executePlan, showPlanLog } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
 import { DEFAULT_SPEECH_VOICE, publishSpeechEvent, synthesizeSpeech } from "./speech.mjs";
 import {
-  DEFAULT_TMUX_SOCKET, defaultWorkspace, normalizeServiceBaseUrl, operatorName,
+  DEFAULT_TMUX_SOCKET, defaultWorkspace, normalizeServiceBaseUrl, operatorName, runtimeAgentsPath,
 } from "../core/runtime-defaults.mjs";
+import { loadSourceYaml, saveSourceAndRegenerate, sourceConfigPath } from "./source-config.mjs";
+export { loadSourceYaml, saveSourceAndRegenerate } from "./source-config.mjs";
 import { groupNativeTurns, nativeHistoryRows } from "../channels/native-runtime-watcher.mjs";
 import { cmdRuntime } from "./runtime.mjs";
 import {
@@ -494,6 +497,7 @@ async function rollbackCutoverReceipt(receipt, receiptPath, ctx) {
   return restarted;
 }
 
+/** WHAT: Dispatches an exact native cutover or rollback. WHY: Keeps session continuity ahead of transport changes. */
 export async function cmdCutover(args, ctx) {
   const { flags, positional } = parseFlags(args, FLAG_SPECS.cutover);
   if (flags.rollback) {
@@ -503,7 +507,7 @@ export async function cmdCutover(args, ctx) {
     return;
   }
   if (flags.apply && flags.dry) throw new Error("choose either --apply or --dry");
-  const sourcePath = agentmuxYamlPath(ctx);
+  const sourcePath = sourceConfigPath(ctx);
   const generatedPath = ctx.configPath;
   const sourceYaml = readFileSync(sourcePath, "utf8");
   const generatedYaml = readFileSync(generatedPath, "utf8");
@@ -770,12 +774,7 @@ async function cmdWait(name, flags, ctx) {
   process.exit(1);
 }
 
-/**
- * Validate an agent name + pane index before we do any work. Rejects
- * shapes like "claw:0" (which look like tmux targets but aren't valid
- * amux agent names) and out-of-bounds panes. Throws user-facing
- * messages so the caller can print them and exit.
- */
+/** WHAT: Checks one agent and pane target. WHY: Keeps malformed or out-of-fleet targets away from pane operations. */
 export function validateAgentAndPane(ctx, name, pane) {
   if (name.includes(":")) {
     throw new Error(
@@ -1455,7 +1454,7 @@ async function cmdAsks(ctx, flags, positional = []) {
 /**
  * Which pane is running this command, as an "agent:pane" key — or null when
  * not invoked from inside a tmux pane. Lets `amux done`/`ps` self-orient ("you
- * are claw:3") so an agent that lost its context (post-compact, fresh spawn)
+ * are project:3") so an agent that lost its context (post-compact, fresh spawn)
  * can find its own thread first. Best-effort; never throws.
  */
 function detectSelfKey() {
@@ -1976,7 +1975,7 @@ function formatCommitRow(c) {
 /**
  * Render a pane as a compact thread block for `amux done`:
  *
- *   claw:9   12:38  +164t
+ *   project:9   12:38  +164t
  *     ← <dir 1> · <dir 2> · <dir 3>      (last ≤3 user directives, oldest→newest)
  *     → <last assistant text>            (where the pane landed)
  *
@@ -2763,7 +2762,7 @@ async function cmdSyncOffline({ allowManagedTakeover = false } = {}) {
   const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
   const SYNC_SCRIPT = resolve(BRIDGE_DIR, "bin/sync.mjs");
   const socket = process.env.TMUX_SOCKET || DEFAULT_TMUX_SOCKET;
-  const configPath = process.env.AGENT_CONFIG || resolve(process.env.HOME, ".config/agent/agents.yaml");
+  const configPath = runtimeAgentsPath();
   const bridgeCtx = { ...createTmuxContext(socket, configPath), bridgeDir: BRIDGE_DIR };
 
   const wasRunning = existsSync(PIDFILE);
@@ -2797,7 +2796,7 @@ async function cmdSyncOffline({ allowManagedTakeover = false } = {}) {
  * Usage:
  *   amux say "Klart, deploy uppe."         # post to current pane's channel
  *   amux say -c <channelId> "..."           # explicit channel
- *   amux say -p claw:2 "..."                # explicit agent:pane
+ *   amux say -p project:2 "..."              # explicit agent:pane
  *   amux say --voice 'sv-SE-SofieNeural' "..."  # different voice
  *
  * Truncates at 1500 chars to keep the clip under about 90 seconds.
@@ -2975,40 +2974,6 @@ async function cmdTop(ctx, flags = {}) {
 // (generated) via regenerateAgentsYaml. `amux label` and `amux edit`
 // read/write the source file; `amux labels` displays current state.
 
-/** Absolute path to the source agentmux.yaml. */
-function agentmuxYamlPath(ctx) {
-  const dir = ctx.bridgeDir;
-  if (!dir) throw new Error("ctx.bridgeDir missing — agent-cli.mjs should set this");
-  return join(dir, "agentmux.yaml");
-}
-
-/** Read + parse agentmux.yaml. Returns the raw js-yaml object. */
-export function loadSourceYaml(ctx) {
-  const path = agentmuxYamlPath(ctx);
-  if (!existsSync(path)) throw new Error(`agentmux.yaml not found at ${path}`);
-  const doc = yaml.load(readFileSync(path, "utf-8"));
-  if (!doc || typeof doc !== "object") throw new Error(`agentmux.yaml is empty or malformed at ${path}`);
-  return doc;
-}
-
-/**
- * Write agentmux.yaml + regenerate agents.yaml in one atomic-ish step.
- *
- * Comments and exact formatting in the original agentmux.yaml are NOT
- * preserved — js-yaml dumps don't round-trip those. For hand-authored
- * files with comments, prefer `amux edit`. This limitation is documented
- * in the `amux label` help text.
- */
-export function saveSourceAndRegenerate(ctx, sourceDoc) {
-  const srcPath = agentmuxYamlPath(ctx);
-  const srcYaml = yaml.dump(sourceDoc, { lineWidth: -1, quotingType: '"' });
-  writeFileSync(srcPath, srcYaml);
-
-  // Propagate to agents.yaml using existing channel/id mappings as carry-over.
-  const existing = existsSync(ctx.configPath) ? readFileSync(ctx.configPath, "utf-8") : null;
-  writeFileSync(ctx.configPath, regenerateAgentsYaml(srcYaml, existing));
-}
-
 async function cmdEdit(flags, positional, ctx) {
   // Block `amux edit agents` — agents.yaml is generated, edits there get
   // wiped on next /sync or `amux label`. Point the user to the source.
@@ -3017,7 +2982,7 @@ async function cmdEdit(flags, positional, ctx) {
     process.exit(1);
   }
   const editor = process.env.EDITOR || process.env.VISUAL || "vi";
-  const path = agentmuxYamlPath(ctx);
+  const path = sourceConfigPath(ctx);
   if (!existsSync(path)) {
     console.error(`agentmux.yaml not found at ${path}`);
     process.exit(1);
@@ -3029,7 +2994,8 @@ async function cmdEdit(flags, positional, ctx) {
     child.on("error", (err) => { console.error(`failed to spawn '${editor}': ${err.message}`); done(1); });
   });
   if (code === 0) {
-    console.log("saved. run /sync if discord or pane structure changed.");
+    materializeRuntimeConfig({ sourcePath: path, generatedPath: ctx.configPath });
+    console.log("saved and regenerated runtime config. run amux sync only to reconcile Discord channels.");
   }
   process.exit(code);
 }
@@ -3174,12 +3140,20 @@ async function cmdClearline(name, flags, ctx) {
 }
 
 async function cmdAdd(name, dir, ctx) {
-  addAgent(ctx.configPath, name, dir);
-  console.log(`Added '${name}' → ${dir}`);
+  const source = loadSourceYaml(ctx);
+  source.agents = source.agents && typeof source.agents === "object" ? source.agents : {};
+  if (source.agents[name]) throw new Error(`Agent '${name}' already exists`);
+  const engine = defaultCodingEngine();
+  source.agents[name] = { dir, [engine]: 1 };
+  saveSourceAndRegenerate(ctx, source);
+  console.log(`Added '${name}' → ${dir} (${engine})`);
 }
 
 async function cmdRm(name, ctx) {
-  removeAgent(ctx.configPath, name);
+  const source = loadSourceYaml(ctx);
+  if (!source.agents?.[name]) throw new Error(`Agent '${name}' not found`);
+  delete source.agents[name];
+  saveSourceAndRegenerate(ctx, source);
   await killSession(ctx, name).catch(() => {});
   console.log(`Removed '${name}'.`);
 }
@@ -3305,7 +3279,7 @@ export function cmdScopedGate(args) {
   return result;
 }
 
-function cmdHelp() {
+function cmdHelp(ctx = {}) {
   const help = `agent: Manage Claude Code/Codex tmux sessions
 
 Usage:
@@ -3473,8 +3447,8 @@ Bridge controls (talk to the running bridge):
   agent tts [on|off|toggle|status]
                                   Legacy preference only; never triggers automatic speech
 
-Config source: ~/.agentmux/agentmux.yaml (generated runtime config stays internal)
-Socket: ${DEFAULT_TMUX_SOCKET}`;
+Config source: ${ctx.sourceConfigPath || "~/.agentmux/agentmux.yaml"} (generated runtime config stays internal)
+Socket: ${ctx.socket || process.env.TMUX_SOCKET || DEFAULT_TMUX_SOCKET}`;
   console.log(help.replace(/^agent/u, "amux").replace(/^  agent/gmu, "  amux"));
 }
 
@@ -3653,7 +3627,7 @@ export async function dispatch(argv, ctx) {
     case "help":
     case "-h":
     case "--help":
-      return cmdHelp();
+      return cmdHelp(ctx);
 
     case "add": {
       if (rest.length < 2) { console.error("Usage: agent add <name> <dir>"); process.exit(1); }

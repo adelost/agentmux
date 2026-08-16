@@ -18,7 +18,7 @@ import {
 } from "../core/suggestions-watchdog-outbox.mjs";
 import { writeGuardHeartbeat } from "../core/guard-heartbeat.mjs";
 import { readAllTurnsAcrossPanes } from "../core/jsonl-reader.mjs";
-import { DEFAULT_TMUX_SOCKET } from "../core/runtime-defaults.mjs";
+import { DEFAULT_TMUX_SOCKET, runtimeAgentsPath } from "../core/runtime-defaults.mjs";
 
 const DEFAULT_CONFIG = "~/.config/agent/suggestions-watchdog-outbox.yaml";
 
@@ -79,8 +79,7 @@ try {
     process.exit(0);
   }
   const configPath = expandHome(args.config || process.env.AMUX_WATCHDOG_OUTBOX_CONFIG || DEFAULT_CONFIG);
-  const agentConfigPath = process.env.AGENT_CONFIG
-    || resolve(homedir(), ".config/agent/agents.yaml");
+  const agentConfigPath = runtimeAgentsPath();
   const allowTestOrigin = process.env.NODE_ENV === "test"
     && process.env.AMUX_WATCHDOG_OUTBOX_TEST_ORIGIN === "1";
   const config = loadWatchdogOutboxConfig(configPath, { allowTestOrigin });

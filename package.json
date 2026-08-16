@@ -1,7 +1,19 @@
 {
   "name": "agentmux",
-  "version": "1.25.40",
+  "version": "1.25.41",
   "description": "Local bridge and native workspace for coding agents (Claude Code, Codex, Kimi Code)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adelost/agentmux.git"
+  },
+  "bugs": {
+    "url": "https://github.com/adelost/agentmux/issues"
+  },
+  "homepage": "https://github.com/adelost/agentmux#readme",
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "bin": {
     "amux": "./bin/agent-cli.mjs",

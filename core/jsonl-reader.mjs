@@ -327,7 +327,7 @@ function findUserPromptIndex(events, promptText) {
     }
     // Pass 2: normalised match — strips ax-meta/voice/TTS wrappers from
     // both sides. Stops handlers from falling through to tmux just because
-    // one side gained a "[from claw:0]" prefix and the other didn't.
+    // one side gained a "[from project:0]" prefix and the other didn't.
     const fuzzyNeedle = normalizePrompt(needle);
     if (fuzzyNeedle) {
       for (let i = events.length - 1; i >= 0; i--) {
@@ -362,7 +362,7 @@ function findUserPromptIndex(events, promptText) {
 function normalizePrompt(text) {
   if (!text) return "";
   let s = String(text).replace(/\r\n?/g, "\n").trim();
-  // ax-meta: "[from claw:0] actual prompt". Strip repeated envelopes too:
+  // ax-meta: "[from project:0] actual prompt". Strip repeated envelopes too:
   // a caller may already include provenance and the CLI then adds its own.
   s = s.replace(/^(?:\[from\s+[^:]+:\d+\]\s*)+/i, "");
   // voice-PWA disclaimer

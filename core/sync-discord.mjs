@@ -25,7 +25,7 @@ export async function executeSync({ guild, configYaml, state, agentsYamlPath }) 
     throw new Error("Bot needs ManageChannels permission. Update bot permissions in Discord Developer Portal → OAuth2 → Bot Permissions.");
   }
 
-  const config = parseConfig(configYaml);
+  const config = parseConfig(configYaml, { requireGuild: true });
   const agentNames = [...config.agents.keys()];
 
   const allChannels = await guild.channels.fetch();

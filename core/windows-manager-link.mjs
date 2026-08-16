@@ -2,6 +2,8 @@
 // answers through the manager turn machinery. Journals per message in
 // manager-state so a restart can never double-ack or double-reply.
 
+import { normalizeServiceBaseUrl } from "./runtime-defaults.mjs";
+
 const CONNECTOR_ID = "windows-1";
 
 /** WHAT: Maps one claimed windows message against manager state. WHY: Prevents a restart from re-acking finished mailbox work. */
@@ -23,9 +25,10 @@ export async function runWindowsLinkCycle({
   runManagerTurn,
   log = () => {},
 } = {}) {
+  const serviceBase = normalizeServiceBaseUrl(linkBase, "Link base URL", { allowHttpLoopback: true });
   const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
   const post = async (path, body) => {
-    const response = await fetchImpl(`${linkBase}${path}`, {
+    const response = await fetchImpl(`${serviceBase}${path}`, {
       method: "POST",
       headers: auth,
       body: JSON.stringify(body || {}),
@@ -80,8 +83,9 @@ export function startWindowsManagerLink({ state, deps, history, serializeTurn, r
   const linkBase = process.env.LINK_BASE;
   const token = process.env.LINK_TOKEN_WINDOWS;
   if (!linkBase || !token) return false;
+  const serviceBase = normalizeServiceBaseUrl(linkBase, "Link base URL", { allowHttpLoopback: true });
   const cycle = () => runWindowsLinkCycle({
-    linkBase,
+    linkBase: serviceBase,
     token,
     state,
     deps,

@@ -9,20 +9,6 @@ import {
 import { detectSenderFromEnv } from "../core/sender-detect.mjs";
 import { normalizeServiceBaseUrl } from "../core/runtime-defaults.mjs";
 
-// A tmux session maps to one Suggestions project ONLY where the pane's work has
-// exactly one home. `ai` was missing here, and the cost was not one extra flag:
-// the CLI aborted LOCALLY with "cannot infer project", never reaching the network,
-// and three days of conclusions read the resulting failure as a capability denial.
-// A request that never left the machine cannot be an authorization decision — but
-// nothing in the output said so, and two panes redesigned trust around it.
-//
-// `lsrc` is deliberately absent. Its panes work Source AND orchestrate the
-// skydive, skyvw and ai boards, so there is no single right default; guessing one
-// would be a silent wrong-project pick, which is worse than the explicit
-// --project it saves.
-const PROJECT_BY_SESSION = Object.freeze({
-  ai: "ai", skydive: "skydive", skyvw: "skyvw",
-});
 const VALUE_FLAGS = new Set([
   "base-url", "deploy", "hours", "live", "merge", "project", "summary", "tests", "wake",
 ]);
@@ -44,10 +30,18 @@ The calling pane and pilot project are inferred. A shared fleet key can join a n
 pane once. Workers self-claim approved READY work; no broker forwards the claim.`;
 
 /** WHAT: Maps a pane address to one Suggestions project. WHY: Keeps project selection obvious and overrideable. */
-export function projectForWorkSender(sender, override = null) {
+export function projectForWorkSender(sender, override = null, configuredMap = process.env.AMUX_WORK_PROJECT_MAP) {
   if (override) return override;
   const session = String(sender ?? "").split(":", 1)[0];
-  return PROJECT_BY_SESSION[session] ?? null;
+  const entries = String(configuredMap || "").split(",").map((entry) => entry.trim()).filter(Boolean);
+  const mapping = Object.fromEntries(entries.map((entry) => {
+    const separator = entry.indexOf("=");
+    if (separator < 1 || separator === entry.length - 1) {
+      throw new Error("AMUX_WORK_PROJECT_MAP must use session=project entries");
+    }
+    return [entry.slice(0, separator).trim(), entry.slice(separator + 1).trim()];
+  }));
+  return mapping[session] ?? null;
 }
 
 /** WHAT: Parses the deliberately small work command surface. WHY: Keeps agent workflow free of curl-shaped ceremony. */
@@ -306,7 +300,7 @@ export async function runWorkCommand(argv, dependencies = {}) {
   if (parsed.help) return usage();
   const sender = dependencies.sender;
   if (!sender) throw new Error("amux work must run inside a configured agent pane");
-  const project = projectForWorkSender(sender, parsed.options.project);
+  const project = projectForWorkSender(sender, parsed.options.project, dependencies.projectMap);
   if (!project) throw new Error("cannot infer Suggestions project; pass --project ID");
   const baseUrl = parsed.options["base-url"] ?? dependencies.baseUrl ?? process.env.SUGGEST_BASE_URL;
   if (!dependencies.client && !baseUrl) {

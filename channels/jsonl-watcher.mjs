@@ -744,7 +744,7 @@ export function createJsonlWatcher({
 
       // Startup self-heal: post anything a previous bridge completed but never
       // delivered (kill -9 mid-grace loses the item forever once the cursor
-      // moves — the lsrc:3 incident, 2026-07-10). Id-dedupe makes re-runs safe.
+      // moves during a restart). Id-dedupe makes re-runs safe.
       if (startupAudit) {
         auditedPanes.add(key);
         const audit = planStartupAudit({

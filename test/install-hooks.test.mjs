@@ -7,6 +7,22 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 feature("agentmux hook installer", () => {
+  integration("creates the Claude settings directory in a clean non-Claude home", {
+    given: ["an empty home", () => mkdtempSync(join(tmpdir(), "amux-install-hooks-clean-"))],
+    when: ["installing shared hooks", (home) => ({
+      home,
+      result: spawnSync(process.execPath, [resolve("bin/install-hooks.mjs")], {
+        encoding: "utf8",
+        env: { ...process.env, HOME: home },
+      }),
+    })],
+    then: ["installation succeeds without a pre-existing Claude directory", ({ home, result }) => {
+      expect(result.status, result.stderr).toBe(0);
+      expect(existsSync(join(home, ".claude", "settings.json"))).toBe(true);
+      rmSync(home, { recursive: true, force: true });
+    }],
+  });
+
   integration("installs one blocking Suggestions authoring guard without removing other hooks", {
     given: ["a settings file with an unrelated Bash hook and a stale amux guard", () => {
       const home = mkdtempSync(join(tmpdir(), "amux-install-hooks-"));
