@@ -76,6 +76,11 @@ export function createDeliveryNotSent({
   /** WHAT: Classifies why one job qualifies as NOT SENT. WHY: Separates parked timeouts from terminal cancels. */
   function notSentCause(job) {
     if (!PRE_SUBMIT_STATES.has(job.status)) return null;
+    // A recovered submit may be back in `pending`, but that is routing state,
+    // not proof that the prompt was never sent. Preserve the post-submit
+    // ambiguity and refuse a late cancellation instead of fabricating a
+    // "cancelled before submit" receipt.
+    if (job.metadata?.submittedRecoveryAt || job.metadata?.submittedRecoveryKind) return null;
     let nativeAttemptMayHaveLeft = false;
     if (Number(job.attempts || 0) > 0 && typeof agent.isNativeTarget === "function") {
       try {

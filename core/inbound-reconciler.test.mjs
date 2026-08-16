@@ -1,154 +1,482 @@
-import { feature, unit, expect } from "bdd-vitest";
-import { vi } from "vitest";
+import { mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createAttachmentHandler } from "../attachments.mjs";
+import { createDeliveryBroker } from "./delivery-broker.mjs";
+import { createDeliveryQueue } from "./delivery-queue.mjs";
+import { createDiscordInboundStore } from "./discord-inbound-store.mjs";
 import { createInboundReconciler, formatRecoveredNotice } from "./inbound-reconciler.mjs";
+import { mergeInboundTarget } from "./inbound-target.mjs";
 
-function setup(initial = {}) {
-  const data = structuredClone(initial);
-  const state = {
-    get: vi.fn((key, fallback) => Object.hasOwn(data, key) ? data[key] : fallback),
-    set: vi.fn((key, value) => { data[key] = value; }),
+const cleanups = [];
+afterEach(() => {
+  while (cleanups.length) cleanups.pop()();
+});
+
+function tempRoot() {
+  const root = mkdtempSync(join(tmpdir(), "amux-discord-inbound-"));
+  cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  return root;
+}
+
+function message(id, channelId, {
+  text = `message-${id}`,
+  attachments = [],
+  bot = false,
+  createdTimestamp = Number(id),
+} = {}) {
+  return {
+    id: String(id), channelId, text, attachments, isBot: bot,
+    authorId: bot ? "bot" : "human", createdTimestamp,
   };
-  const delivered = [];
-  const onMessage = vi.fn(async (msg) => { delivered.push(msg.id); });
-  return { data, state, delivered, onMessage };
 }
 
-function msg(id, { bot = false, channelId = "ch" } = {}) {
-  return { id, channelId, isBot: bot, text: id };
+function fakeChannel(histories) {
+  const transcriptReplies = [];
+  const sends = [];
+  const all = (channelId) => histories[channelId] || [];
+  return {
+    transcriptReplies,
+    sends,
+    async fetchMissed(channelId, afterId) {
+      const messages = all(channelId).filter((item) => !afterId || BigInt(item.id) > BigInt(afterId));
+      return { messages, newestId: all(channelId).at(-1)?.id || afterId || null };
+    },
+    async fetchMessage(channelId, messageId) {
+      return all(channelId).find((item) => item.id === messageId) || null;
+    },
+    async replyTo(channelId, messageId, content) {
+      transcriptReplies.push({ channelId, messageId, content });
+    },
+    async findMessageByNonce() {
+      return false;
+    },
+    async send(channelId, content) {
+      sends.push({ channelId, content });
+    },
+    async sendTyping() {},
+  };
 }
 
-feature("Discord inbound reconciliation", () => {
-  unit("recovery notice is concise and plural-aware", {
-    when: ["formatting one and two recovered messages", () => [
-      formatRecoveredNotice(1),
-      formatRecoveredNotice(2),
-    ]],
-    then: ["one batch produces one plain status line", (lines) => {
-      expect(lines).toEqual([
-        "ℹ Recovered 1 message missed during reconnect.",
-        "ℹ Recovered 2 messages missed during reconnect.",
-      ]);
-    }],
+function state(initial = {}) {
+  const data = structuredClone(initial);
+  return {
+    data,
+    get: (key, fallback) => Object.hasOwn(data, key) ? data[key] : fallback,
+    set: (key, value) => { data[key] = value; },
+  };
+}
+
+const target = (msg) => ({
+  agentName: msg.channelId === "100" ? "skybar" : "lsrc",
+  pane: msg.channelId === "100" ? 3 : 5,
+  dir: `/repo/${msg.channelId}`,
+});
+
+describe("Discord inbound reconciliation", () => {
+  it("formats one batch-level recovery notice", () => {
+    expect([formatRecoveredNotice(1), formatRecoveredNotice(2)]).toEqual([
+      "ℹ Recovered 1 message missed during reconnect.",
+      "ℹ Recovered 2 messages missed during reconnect.",
+    ]);
   });
 
-  unit("a missed human correction is replayed before the cursor advances past later bot output", {
-    given: ["cursor before a human correction and bot reply", () => {
-      const ctx = setup({ last_inbound_ch: "100" });
-      ctx.channel = {
-        fetchMissed: vi.fn(async () => ({
-          messages: [msg("110")],
-          newestId: "120",
-        })),
-      };
-      ctx.reconciler = createInboundReconciler(ctx);
-      return ctx;
-    }],
-    when: ["the channel is reconciled", (ctx) => ctx.reconciler.reconcile(ctx.channel, "ch")],
-    then: ["the correction is delivered and only then is the scan cursor advanced", (_, ctx) => {
-      expect(ctx.delivered).toEqual(["110"]);
-      expect(ctx.data.last_inbound_ch).toBe("120");
-    }],
+  it("persists identity and target before attachment download or handler work", async () => {
+    const root = tempRoot();
+    let releaseDownload;
+    const downloadStarted = new Promise((resolve) => { releaseDownload = resolve; });
+    const store = createDiscordInboundStore({
+      rootDir: root,
+      downloadBuffer: async () => {
+        await downloadStarted;
+        return Buffer.from("image");
+      },
+    });
+    const onMessage = vi.fn(async () => ({ delivered: true }));
+    const reconciler = createInboundReconciler({ onMessage, state: state(), store,
+      resolveTarget: target });
+    const channel = fakeChannel({});
+    const incoming = message("101", "100", {
+      text: "inspect",
+      attachments: [{ id: "501", name: "proof.png", url: "cdn", contentType: "image/png" }],
+    });
+
+    const pending = reconciler.enqueue(incoming, channel);
+    expect(store.read("100", "101")).toMatchObject({
+      identity: "discord:100:101",
+      text: "inspect",
+      target: { agentName: "skybar", pane: 3 },
+      status: "observed",
+      attachments: [{ id: "501", name: "proof.png", durablePath: null }],
+    });
+    expect(onMessage).not.toHaveBeenCalled();
+    releaseDownload();
+    await pending;
+    expect(store.read("100", "101")).toMatchObject({ status: "completed" });
   });
 
-  unit("live delivery and REST replay of the same message are deduplicated", {
-    given: ["one live message followed by a scan containing it", () => {
-      const ctx = setup({ last_inbound_ch: "100" });
-      ctx.channel = { fetchMissed: vi.fn(async () => ({ messages: [msg("110")], newestId: "110" })) };
-      ctx.reconciler = createInboundReconciler(ctx);
-      return ctx;
-    }],
-    when: ["both paths run", async (ctx) => {
-      await ctx.reconciler.enqueue(msg("110"));
-      await ctx.reconciler.reconcile(ctx.channel, "ch");
-    }],
-    then: ["the agent receives one prompt", (_, ctx) => expect(ctx.delivered).toEqual(["110"])],
+  it("keeps the cursor behind a message that could not be durably observed", async () => {
+    const root = tempRoot();
+    const store = createDiscordInboundStore({ rootDir: root,
+      downloadBuffer: async () => Buffer.alloc(0) });
+    store.advanceCursor("100", "100");
+    const original = store.observe;
+    store.observe = vi.fn((msg, resolved) => {
+      if (msg.id === "102") throw new Error("disk-full");
+      return original(msg, resolved);
+    });
+    const reconciler = createInboundReconciler({
+      onMessage: async () => ({ delivered: true }), state: state(), store, resolveTarget: target,
+    });
+    const channel = fakeChannel({ "100": [message("101", "100"), message("102", "100")] });
+    await expect(reconciler.reconcile(channel, "100")).rejects.toThrow("disk-full");
+    expect(store.cursor("100")).toBe("100");
   });
 
-  unit("a failed replay does not advance the cursor or poison the retry", {
-    given: ["handler fails once", () => {
-      const ctx = setup({ last_inbound_ch: "100" });
-      ctx.onMessage.mockRejectedValueOnce(new Error("bridge dying"));
-      ctx.channel = { fetchMissed: vi.fn(async () => ({ messages: [msg("110")], newestId: "120" })) };
-      ctx.reconciler = createInboundReconciler(ctx);
-      return ctx;
-    }],
-    when: ["first scan fails and second scan retries", async (ctx) => {
-      await expect(ctx.reconciler.reconcile(ctx.channel, "ch")).rejects.toThrow("bridge dying");
-      expect(ctx.data.last_inbound_ch).toBe("100");
-      await ctx.reconciler.reconcile(ctx.channel, "ch");
-    }],
-    then: ["the retry succeeds and advances", (_, ctx) => {
-      expect(ctx.onMessage).toHaveBeenCalledTimes(2);
-      expect(ctx.data.last_inbound_ch).toBe("120");
-    }],
+  it("keeps the cursor behind attachment bytes that could not be made durable", async () => {
+    const root = tempRoot();
+    let releaseSlow;
+    const slowDownload = new Promise((resolve) => { releaseSlow = resolve; });
+    let failureSeen;
+    const laterFailed = new Promise((resolve) => { failureSeen = resolve; });
+    const store = createDiscordInboundStore({
+      rootDir: root,
+      downloadBuffer: async (url) => {
+        if (url === "slow-cdn") {
+          await slowDownload;
+          return Buffer.from("durable-first");
+        }
+        failureSeen();
+        throw new Error("cdn-offline");
+      },
+      sleep: async () => {},
+    });
+    store.advanceCursor("100", "100");
+    const reconciler = createInboundReconciler({
+      onMessage: async () => ({ delivered: true }), state: state(), store, resolveTarget: target,
+    });
+    const channel = fakeChannel({ "100": [
+      message("102", "100", {
+        attachments: [{ id: "502", name: "slow.png", url: "slow-cdn",
+          contentType: "image/png" }],
+      }),
+      message("103", "100", {
+        attachments: [{ id: "503", name: "proof.png", url: "bad-cdn",
+          contentType: "image/png" }],
+      }),
+    ] });
+    const failure = reconciler.reconcile(channel, "100").catch((error) => error);
+    await laterFailed;
+    expect(store.cursor("100")).toBe("100");
+    releaseSlow();
+    expect((await failure).message).toBe("cdn-offline");
+    expect(store.read("100", "103")).toMatchObject({ status: "observed" });
   });
 
-  unit("an explicit pane-delivery failure stays unseen and is retried", {
-    given: ["the handler reports NOT delivered once", () => {
-      const ctx = setup();
-      ctx.onMessage
-        .mockResolvedValueOnce({ delivered: false })
-        .mockResolvedValueOnce({ delivered: true });
-      ctx.reconciler = createInboundReconciler(ctx);
-      return ctx;
-    }],
-    when: ["the same Discord id is offered twice", async (ctx) => ({
-      first: await ctx.reconciler.enqueue(msg("130")),
-      second: await ctx.reconciler.enqueue(msg("130")),
-    })],
-    then: ["only the successful attempt is persisted as seen", (result, ctx) => {
-      expect(result.first).toMatchObject({ delivered: false, retryable: true });
-      expect(result.second).toMatchObject({ delivered: true });
-      expect(ctx.onMessage).toHaveBeenCalledTimes(2);
-      expect(ctx.data.inbound_seen_ids.ch).toEqual(["130"]);
-    }],
+  it("observes a queued attachment failure only when its channel turn runs", async () => {
+    const root = tempRoot();
+    let releaseFirst;
+    const firstBlocked = new Promise((resolve) => { releaseFirst = resolve; });
+    let firstStarted;
+    const firstEntered = new Promise((resolve) => { firstStarted = resolve; });
+    const store = createDiscordInboundStore({
+      rootDir: root,
+      downloadBuffer: async () => { throw new Error("permanent-cdn-failure"); },
+      sleep: async () => {},
+    });
+    const reconciler = createInboundReconciler({
+      onMessage: async (msg) => {
+        if (msg.id === "108") {
+          firstStarted();
+          await firstBlocked;
+        }
+        return { delivered: true };
+      },
+      state: state(), store, resolveTarget: target,
+    });
+    const channel = fakeChannel({});
+    const unhandled = [];
+    const onUnhandled = (error) => unhandled.push(error);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const first = reconciler.enqueue(message("108", "100"), channel);
+      await firstEntered;
+      const second = reconciler.enqueue(message("109", "100", {
+        attachments: [{ id: "509", name: "proof.png", url: "bad-cdn",
+          contentType: "image/png" }],
+      }), channel);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+      releaseFirst();
+      await first;
+      await expect(second).rejects.toThrow("permanent-cdn-failure");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 
-  unit("REST reconciliation keeps its cursor on an explicit delivery failure", {
-    given: ["one fetched message whose pane rejects input", () => {
-      const ctx = setup({ last_inbound_ch: "100" });
-      ctx.onMessage.mockResolvedValue({ delivered: false });
-      ctx.channel = {
-        fetchMissed: vi.fn(async () => ({ messages: [msg("140")], newestId: "150" })),
-      };
-      ctx.reconciler = createInboundReconciler(ctx);
-      return ctx;
-    }],
-    when: ["running the scan", (ctx) => ctx.reconciler.reconcile(ctx.channel, "ch")],
-    then: ["the scan reports blocked and does not pass the human message", (result, ctx) => {
-      expect(result).toEqual({ replayed: 0, blocked: true });
-      expect(ctx.data.last_inbound_ch).toBe("100");
-    }],
+  it("keeps the first resolved target when configuration changes during a retry", () => {
+    const root = tempRoot();
+    const store = createDiscordInboundStore({ rootDir: root,
+      downloadBuffer: async () => Buffer.alloc(0) });
+    store.observe(message("104", "100"), { agentName: "skybar", pane: 3, dir: "/first" });
+    store.observe(message("104", "100", { text: "same Discord observation" }),
+      { agentName: "other", pane: 9, dir: "/later" });
+    expect(store.read("100", "104").target).toEqual({
+      agentName: "skybar", pane: 3, dir: "/first",
+    });
+    expect(mergeInboundTarget(
+      { name: "later", pane: 1, dir: "/live", channelId: "100" },
+      store.read("100", "104").target,
+    )).toEqual({ name: "skybar", pane: 3, dir: "/first", channelId: "100" });
+    expect(mergeInboundTarget(null, store.read("100", "104").target)).toEqual({
+      name: "skybar", pane: 3, dir: "/first",
+    });
   });
 
-  unit("a durable enqueue failure is never converted into seen/data loss", {
-    given: ["storage rejects every enqueue attempt", () => {
-      const ctx = setup();
-      ctx.onMessage.mockResolvedValue({ delivered: false });
-      ctx.reconciler = createInboundReconciler(ctx);
-      return ctx;
-    }],
-    when: ["the same id is offered three times", async (ctx) => ({
-      a: await ctx.reconciler.enqueue(msg("160")),
-      b: await ctx.reconciler.enqueue(msg("160")),
-      c: await ctx.reconciler.enqueue(msg("160")),
-    })],
-    then: ["every observation remains retryable and the id is never marked seen", (r, ctx) => {
-      expect(r.a).toMatchObject({ delivered: false, retryable: true });
-      expect(r.b).toMatchObject({ delivered: false, retryable: true });
-      expect(r.c).toMatchObject({ delivered: false, retryable: true });
-      expect(ctx.onMessage).toHaveBeenCalledTimes(3);
-      expect(ctx.data.inbound_seen_ids?.ch).toBeUndefined();
-    }],
+  it("seeds a newly configured channel without replaying its prior history", async () => {
+    const root = tempRoot();
+    const store = createDiscordInboundStore({ rootDir: root,
+      downloadBuffer: async () => Buffer.alloc(0) });
+    const onMessage = vi.fn(async () => ({ delivered: true }));
+    const reconciler = createInboundReconciler({ onMessage, state: state(), store,
+      resolveTarget: target });
+    const channel = fakeChannel({ "100": [message("105", "100"), message("106", "100")] });
+
+    expect(await reconciler.reconcile(channel, "100")).toEqual({ replayed: 0, pending: 0 });
+    expect(store.cursor("100")).toBe("106");
+    expect(store.list("100")).toEqual([]);
+    expect(onMessage).not.toHaveBeenCalled();
   });
 
-  unit("bot gateway events never enter the agent queue", {
-    given: ["a bot message", () => {
-      const ctx = setup();
-      ctx.reconciler = createInboundReconciler(ctx);
-      return ctx;
-    }],
-    when: ["it arrives live", (ctx) => ctx.reconciler.enqueue(msg("200", { bot: true }))],
-    then: ["it is ignored", (_, ctx) => expect(ctx.onMessage).not.toHaveBeenCalled()],
+  it("drains a persisted target after its live channel mapping disappears", async () => {
+    const root = tempRoot();
+    const store = createDiscordInboundStore({ rootDir: root,
+      downloadBuffer: async () => Buffer.alloc(0) });
+    store.observe(message("107", "100", { text: "survive config removal" }), {
+      agentName: "skybar", pane: 3, dir: null,
+    });
+    const accepted = [];
+    const reconciler = createInboundReconciler({
+      onMessage: async (msg) => { accepted.push(msg.resolvedTarget); return { delivered: true }; },
+      state: state(),
+      store,
+      resolveTarget: () => null,
+    });
+
+    expect(store.channelIds()).toContain("100");
+    expect(await reconciler.drain(fakeChannel({ "100": [] }), "100"))
+      .toEqual({ replayed: 1, pending: 0 });
+    expect(accepted).toEqual([{ agentName: "skybar", pane: 3, dir: null }]);
+    expect(store.read("100", "107")).toMatchObject({ status: "completed" });
+  });
+
+  it("retries a transcript with the same Discord nonce after an accepted send loses its acknowledgement", async () => {
+    const root = tempRoot();
+    let clock = 1_000;
+    const store = createDiscordInboundStore({
+      rootDir: root,
+      downloadBuffer: async (url) => Buffer.from(`bytes:${url}`),
+      now: () => clock,
+    });
+    store.advanceCursor("200", "200");
+    const voice = message("210", "200", {
+      text: "",
+      attachments: [{ id: "610", name: "voice.ogg", url: "voice-bytes",
+        contentType: "audio/ogg" }],
+    });
+    const channel = fakeChannel({ "200": [voice] });
+    const accepted = new Map();
+    let replyAttempts = 0;
+    channel.replyTo = async (_channelId, _messageId, payload) => {
+      replyAttempts++;
+      if (!accepted.has(payload.nonce)) accepted.set(payload.nonce, payload);
+      if (replyAttempts === 1) throw new Error("connection reset after Discord accepted send");
+      return accepted.get(payload.nonce);
+    };
+    channel.findMessageByNonce = async (_channelId, nonce) => accepted.has(nonce);
+    const transcribe = vi.fn()
+      .mockResolvedValueOnce({ stdout: "FIRST transcript", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "SECOND transcript", stderr: "" });
+    const attachmentHandler = createAttachmentHandler({
+      run: transcribe,
+      transcribeScript: "/transcribe",
+      downloadBuffer: async () => { throw new Error("durable cache was bypassed"); },
+    });
+    const prompts = [];
+    const onMessage = async (msg) => {
+      prompts.push(await attachmentHandler.buildPrompt(msg, []));
+      return { delivered: true };
+    };
+    const reconciler = createInboundReconciler({ onMessage, state: state(), store,
+      resolveTarget: target });
+
+    await expect(reconciler.reconcile(channel, "200"))
+      .rejects.toThrow("connection reset after Discord accepted send");
+    expect(accepted).toHaveLength(1);
+    expect(store.read("200", "210")).toMatchObject({
+      status: "assets_ready",
+      effects: { "transcript-reply:610": { status: "sending", attempts: 1 } },
+      attachments: [{ id: "610", transcript: "FIRST transcript" }],
+    });
+
+    clock += 31_000;
+    expect(await reconciler.reconcile(channel, "200")).toEqual({ replayed: 0, pending: 0 });
+    expect(replyAttempts).toBe(1);
+    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(accepted).toHaveLength(1);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("FIRST transcript");
+    expect(prompts[0]).not.toContain("SECOND transcript");
+    expect(store.read("200", "210")).toMatchObject({
+      status: "completed",
+      effects: { "transcript-reply:610": { status: "sent", attempts: 2 } },
+    });
+  });
+
+  it("keeps two audio attachments as separate transcript effects", async () => {
+    const root = tempRoot();
+    const store = createDiscordInboundStore({ rootDir: root,
+      downloadBuffer: async (url) => Buffer.from(`bytes:${url}`) });
+    store.advanceCursor("200", "200");
+    const voice = message("211", "200", { text: "",
+      attachments: [
+        { id: "611", name: "first.ogg", url: "first", contentType: "audio/ogg" },
+        { id: "612", name: "second.ogg", url: "second", contentType: "audio/ogg" },
+      ] });
+    const channel = fakeChannel({ "200": [voice] });
+    const transcribe = vi.fn()
+      .mockResolvedValueOnce({ stdout: "first voice", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "second voice", stderr: "" });
+    const attachmentHandler = createAttachmentHandler({ run: transcribe,
+      transcribeScript: "/transcribe", downloadBuffer: async () => {
+        throw new Error("durable cache was bypassed");
+      } });
+    const prompts = [];
+    const reconciler = createInboundReconciler({
+      onMessage: async (msg) => {
+        prompts.push(await attachmentHandler.buildPrompt(msg, []));
+        return { delivered: true };
+      },
+      state: state(), store, resolveTarget: target,
+    });
+
+    expect(await reconciler.reconcile(channel, "200")).toEqual({ replayed: 1, pending: 0 });
+    expect(transcribe).toHaveBeenCalledTimes(2);
+    expect(channel.transcriptReplies).toHaveLength(2);
+    expect(new Set(channel.transcriptReplies.map(({ content }) => content.nonce)).size).toBe(2);
+    expect(prompts[0]).toContain("first voice");
+    expect(prompts[0]).toContain("second voice");
+    expect(store.read("200", "211").effects).toMatchObject({
+      "transcript-reply:611": { status: "sent" },
+      "transcript-reply:612": { status: "sent" },
+    });
+  });
+
+  it("recovers text, image, and audio across channels once, then a second restart is a no-op", async () => {
+    const root = tempRoot();
+    const queueRoot = tempRoot();
+    const histories = {
+      "100": [
+        message("110", "100", { text: "plain request", createdTimestamp: 1_000 }),
+        message("111", "100", {
+          text: "image request", createdTimestamp: 1_100,
+          attachments: [{ id: "511", name: "frame.png", url: "image-bytes",
+            contentType: "image/png" }],
+        }),
+      ],
+      "200": [message("210", "200", {
+        text: "", createdTimestamp: 1_200,
+        attachments: [{ id: "610", name: "voice.ogg", url: "voice-bytes",
+          contentType: "audio/ogg" }],
+      })],
+    };
+    const channel = fakeChannel(histories);
+    const queue = createDeliveryQueue({ rootDir: queueRoot, now: () => 2_000 });
+    const echoed = new Set();
+    const paneSends = [];
+    const agent = {
+      capturePromptEchoCursor: async () => ({ kind: "test", positions: {} }),
+      waitForPromptEcho: async (_name, _pane, text) => echoed.has(text),
+      dismissBlockingPrompt: async () => null,
+      capturePane: async () => "› ",
+      sendEnter: async () => {},
+      sendOnly: async (name, text, pane, options = {}) => {
+        paneSends.push({ name, pane, text });
+        await options.onPasteStarted?.();
+        await options.onDrafted?.();
+        await options.onSubmitting?.();
+        await options.onSubmitted?.();
+        echoed.add(text);
+        return { submitted: true, queued: false };
+      },
+    };
+    const broker = createDeliveryBroker({ agent, queue, now: () => 2_000,
+      notify: async () => {} });
+    const transcribe = vi.fn(async () => ({ stdout: "track the deployment", stderr: "" }));
+    const attachmentHandler = createAttachmentHandler({
+      run: transcribe,
+      transcribeScript: "/transcribe",
+      downloadBuffer: async () => { throw new Error("durable cache was bypassed"); },
+    });
+    const prompts = [];
+    const onMessage = async (msg) => {
+      const prompt = await attachmentHandler.buildPrompt(msg, []);
+      const job = broker.enqueue({
+        agentName: msg.resolvedTarget.agentName,
+        pane: msg.resolvedTarget.pane,
+        text: prompt,
+        source: "discord",
+        idempotencyKey: `discord:${msg.channelId}:${msg.id}`,
+        createdAt: msg.createdTimestamp,
+      });
+      prompts.push({ identity: job.idempotencyKey, prompt });
+      return { delivered: true, jobId: job.id };
+    };
+    const makeStore = () => createDiscordInboundStore({
+      rootDir: root,
+      downloadBuffer: async (url) => Buffer.from(`bytes:${url}`),
+      now: () => 2_000,
+    });
+
+    const firstStore = makeStore();
+    firstStore.advanceCursor("100", "100");
+    firstStore.advanceCursor("200", "200");
+    const first = createInboundReconciler({ onMessage, state: state(), store: firstStore,
+      resolveTarget: target });
+    expect(await first.reconcile(channel, "100")).toMatchObject({ replayed: 2, pending: 0 });
+    expect(await first.reconcile(channel, "200")).toMatchObject({ replayed: 1, pending: 0 });
+    expect(prompts).toHaveLength(3);
+    expect(prompts[1].prompt).toMatch(/\[image attached: .*511\.png\]/u);
+    expect(prompts[2].prompt).toContain("[transcribed voice");
+    expect(channel.transcriptReplies).toHaveLength(1);
+    expect(transcribe).toHaveBeenCalledOnce();
+    expect(firstStore.cursor("100")).toBe("111");
+    expect(firstStore.cursor("200")).toBe("210");
+    await broker.kickTarget("skybar", 3);
+    await broker.kickTarget("lsrc", 5);
+    expect(queue.list("skybar", 3).map(({ status }) => status))
+      .toEqual(["acknowledged", "acknowledged"]);
+    expect(queue.list("lsrc", 5).map(({ status }) => status)).toEqual(["acknowledged"]);
+    expect(paneSends).toHaveLength(3);
+
+    // A fresh process sees the same REST history and the same journal. Stable
+    // Discord identities suppress pane jobs, STT, and transcript replies.
+    const secondStore = makeStore();
+    const second = createInboundReconciler({ onMessage, state: state(), store: secondStore,
+      resolveTarget: target });
+    expect(await second.reconcile(channel, "100")).toMatchObject({ replayed: 0, pending: 0 });
+    expect(await second.reconcile(channel, "200")).toMatchObject({ replayed: 0, pending: 0 });
+    expect(prompts).toHaveLength(3);
+    expect(channel.transcriptReplies).toHaveLength(1);
+    expect(transcribe).toHaveBeenCalledOnce();
+    expect(queue.list("skybar", 3)).toHaveLength(2);
+    expect(queue.list("lsrc", 5)).toHaveLength(1);
+    await broker.kickTarget("skybar", 3);
+    await broker.kickTarget("lsrc", 5);
+    expect(paneSends).toHaveLength(3);
   });
 });
