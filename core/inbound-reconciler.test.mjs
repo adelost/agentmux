@@ -3,6 +3,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAttachmentHandler } from "../attachments.mjs";
+import { createDeliveryBroker } from "./delivery-broker.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 import { createDiscordInboundStore } from "./discord-inbound-store.mjs";
 import { createInboundReconciler, formatRecoveredNotice } from "./inbound-reconciler.mjs";
@@ -285,6 +286,26 @@ describe("Discord inbound reconciliation", () => {
     };
     const channel = fakeChannel(histories);
     const queue = createDeliveryQueue({ rootDir: queueRoot, now: () => 2_000 });
+    const echoed = new Set();
+    const paneSends = [];
+    const agent = {
+      capturePromptEchoCursor: async () => ({ kind: "test", positions: {} }),
+      waitForPromptEcho: async (_name, _pane, text) => echoed.has(text),
+      dismissBlockingPrompt: async () => null,
+      capturePane: async () => "› ",
+      sendEnter: async () => {},
+      sendOnly: async (name, text, pane, options = {}) => {
+        paneSends.push({ name, pane, text });
+        await options.onPasteStarted?.();
+        await options.onDrafted?.();
+        await options.onSubmitting?.();
+        await options.onSubmitted?.();
+        echoed.add(text);
+        return { submitted: true, queued: false };
+      },
+    };
+    const broker = createDeliveryBroker({ agent, queue, now: () => 2_000,
+      notify: async () => {} });
     const transcribe = vi.fn(async () => ({ stdout: "track the deployment", stderr: "" }));
     const attachmentHandler = createAttachmentHandler({
       run: transcribe,
@@ -294,7 +315,7 @@ describe("Discord inbound reconciliation", () => {
     const prompts = [];
     const onMessage = async (msg) => {
       const prompt = await attachmentHandler.buildPrompt(msg, []);
-      const job = queue.enqueue({
+      const job = broker.enqueue({
         agentName: msg.resolvedTarget.agentName,
         pane: msg.resolvedTarget.pane,
         text: prompt,
@@ -325,6 +346,12 @@ describe("Discord inbound reconciliation", () => {
     expect(transcribe).toHaveBeenCalledOnce();
     expect(firstStore.cursor("100")).toBe("111");
     expect(firstStore.cursor("200")).toBe("210");
+    await broker.kickTarget("skybar", 3);
+    await broker.kickTarget("lsrc", 5);
+    expect(queue.list("skybar", 3).map(({ status }) => status))
+      .toEqual(["acknowledged", "acknowledged"]);
+    expect(queue.list("lsrc", 5).map(({ status }) => status)).toEqual(["acknowledged"]);
+    expect(paneSends).toHaveLength(3);
 
     // A fresh process sees the same REST history and the same journal. Stable
     // Discord identities suppress pane jobs, STT, and transcript replies.
@@ -338,5 +365,8 @@ describe("Discord inbound reconciliation", () => {
     expect(transcribe).toHaveBeenCalledOnce();
     expect(queue.list("skybar", 3)).toHaveLength(2);
     expect(queue.list("lsrc", 5)).toHaveLength(1);
+    await broker.kickTarget("skybar", 3);
+    await broker.kickTarget("lsrc", 5);
+    expect(paneSends).toHaveLength(3);
   });
 });
