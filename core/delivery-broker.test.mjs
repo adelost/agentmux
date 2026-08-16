@@ -1046,6 +1046,88 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
+  component("a recovered Codex prompt gets one resend and never loops on later task boundaries", {
+    given: ["the exact health-probe shape after its one bounded recovery was submitted", () => {
+      const rootDir = tempRoot();
+      const clock = 80_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "lsrc", pane: 7, text: "L7_HEALTHY" });
+      const jsonl = join(rootDir, "codex.jsonl");
+      writeFileSync(jsonl, `${JSON.stringify({ type: "event_msg",
+        timestamp: new Date(11_000).toISOString(),
+        payload: { type: "task_complete", turn_id: "turn-2" } })}\n`);
+      queue.update(job, {
+        status: "submitted", submittedAt: 10_000, nextAttemptAt: 0,
+        echoCursor: { kind: "codex-prompt-events-v1", positions: { [jsonl]: 0 } },
+        metadata: { submittedRecoveryAt: 9_000,
+          submittedRecoveryKind: "closed-codex-turn-resend", submittedRecoveryCount: 1 },
+      });
+      const notices = [];
+      const agent = acceptingAgent();
+      agent.waitForPromptEcho = async () => false;
+      agent.promptTransportState = async () => ({ state: "empty-idle", busy: false });
+      const broker = createDeliveryBroker({ agent, queue, now: () => clock,
+        notify: async (_candidate, kind) => notices.push(kind) });
+      return { rootDir, queue, job, agent, notices, broker };
+    }],
+    when: ["repeated broker passes observe the same later task boundary", async ({ broker }) => {
+      await broker.kickTarget("lsrc", 7);
+      await broker.kickTarget("lsrc", 7);
+      await broker.kickTarget("lsrc", 7);
+    }],
+    then: ["zero further writes occur and one consumed-unverified terminal owns the outcome", (_, ctx) => {
+      expect(ctx.agent.sends).toHaveLength(0);
+      expect(ctx.notices).toEqual(["unverified"]);
+      expect(ctx.queue.read("lsrc", 7, ctx.job.id)).toMatchObject({
+        status: "delivered_unverified",
+        metadata: { submittedRecoveryCount: 1,
+          deliveryAmbiguity: "closed-codex-recovery-exhausted" },
+        lastReason: expect.stringContaining("will not be redispatched"),
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
+  component("startup corrects a recovered submit that an older broker mislabeled NOT SENT", {
+    given: ["a terminal contradiction retained from the live duplicate-loop incident", () => {
+      const rootDir = tempRoot();
+      const clock = 90_000;
+      const queue = createDeliveryQueue({ rootDir, now: () => clock });
+      const job = queue.enqueue({ agentName: "lsrc", pane: 7, text: "L7_HEALTHY",
+        metadata: { channelId: "channel-7" } });
+      queue.update(job, {
+        status: "cancelled", attempts: 11, terminalAt: 80_000, nextAttemptAt: null,
+        cancelRequestStatus: "completed", unverifiedNoticeSentAt: 80_001,
+        metadata: { submittedRecoveryAt: 70_000,
+          submittedRecoveryKind: "closed-codex-turn-resend",
+          deliveryOutcome: "not-sent", deliveryCancellation: "sender-request" },
+        lastReason: "not sent: cancellation requested before submit",
+      });
+      const notices = [];
+      const broker = createDeliveryBroker({ agent: acceptingAgent(), queue,
+        intervalMs: 60_000, now: () => clock,
+        notify: async (_candidate, kind) => notices.push(kind) });
+      return { rootDir, queue, job, notices, broker };
+    }],
+    when: ["the single-writer broker starts", async ({ broker }) => {
+      broker.start();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await broker.stop();
+    }],
+    then: ["the audit state becomes truthful without another physical send", (_, ctx) => {
+      expect(ctx.notices).toEqual(["unverified"]);
+      expect(ctx.queue.read("lsrc", 7, ctx.job.id)).toMatchObject({
+        status: "delivered_unverified",
+        attempts: 11,
+        cancelRequestStatus: "refused",
+        metadata: { deliveryOutcome: "consumed-unverified",
+          deliveryAmbiguity: "recovered-submit-cancelled-as-not-sent" },
+        lastReason: expect.stringContaining("corrected the contradictory NOT SENT receipt"),
+      });
+      rmSync(ctx.rootDir, { recursive: true, force: true });
+    }],
+  });
+
   component("delivered-unverified is never exposed as delivered", {
     given: ["an idempotent replay of a terminal prompt with no JSONL receipt", () => {
       const rootDir = tempRoot();

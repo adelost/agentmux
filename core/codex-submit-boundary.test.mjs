@@ -56,8 +56,37 @@ describe("Codex submit turn boundary", () => {
       expect(result).toMatchObject({ status: "pending", submittedAt: null, echoCursor: null,
         cancelRequestStatus: "requested", metadata: {
           submittedRecoveryKind: "closed-codex-turn-resend",
+          submittedRecoveryCount: 1,
         } });
       expect(onRecovered).toHaveBeenCalledOnce();
+    } finally { fx.cleanup(); }
+  });
+
+  it("permits one recovery and terminalizes the next closed turn without redispatch", async () => {
+    const fx = fixture();
+    try {
+      appendFileSync(fx.file, `${event("task_complete", 11_000)}\n`);
+      const job = { id: "job-1", status: "submitted", kind: "prompt", text: "message",
+        agentName: "lsrc", pane: 7, submittedAt: 10_000, echoCursor: fx.cursor,
+        metadata: { submittedRecoveryAt: 9_000,
+          submittedRecoveryKind: "closed-codex-turn-resend", submittedRecoveryCount: 1 } };
+      const update = vi.fn();
+      const terminalizeUnverified = vi.fn(async (_job, decision) => ({
+        status: "delivered_unverified", ...decision,
+      }));
+      const result = await recoverClosedCodexSubmit({
+        job, now: () => 80_000,
+        agent: { promptTransportState: async () => ({ state: "empty-idle", busy: false }) },
+        queue: { read: () => job, update }, exactEcho: async () => false,
+        acknowledge: vi.fn(), terminalizeUnverified, onRecovered: vi.fn(),
+      });
+      expect(update).not.toHaveBeenCalled();
+      expect(terminalizeUnverified).toHaveBeenCalledOnce();
+      expect(result).toMatchObject({
+        status: "delivered_unverified",
+        ambiguity: "closed-codex-recovery-exhausted",
+        reason: expect.stringContaining("will not be redispatched"),
+      });
     } finally { fx.cleanup(); }
   });
 

@@ -12,6 +12,7 @@ import { rewriteModelSlash } from "./claude-model.mjs";
 import { recoverSupersededSubmit } from "./submit-boundary.mjs";
 import { createDeliveryNotSent, PRE_SUBMIT_STATES } from "./delivery-not-sent.mjs";
 import { createDeliveryNotices } from "./delivery-notices.mjs";
+import { createDeliveryTerminalizer } from "./delivery-terminal.mjs";
 import { runDeliveryPreflight } from "./delivery-stale.mjs";
 import { createIngestProbeGate } from "./ingest-probe-gate.mjs";
 import { createWakeAdmissionGate } from "./wake-admission.mjs";
@@ -38,7 +39,6 @@ const STALE_SUBMITTED_TERMINAL_MS = 60 * 60 * 1_000;
 // after this deadline (lsrc:2, 2026-08-08). The late-echo watch below keeps
 // listening for it without holding anything.
 const STALE_SUBMITTED_SLASH_TERMINAL_MS = 60_000;
-const LATE_ECHO_WATCH_MS = STALE_SUBMITTED_TERMINAL_MS;
 
 /**
  * WHAT: How long a submitted job may hold its lane before the broker gives up.
@@ -169,69 +169,10 @@ export function createDeliveryBroker({
     agent, queue, queueEvent, now, blockedRetryMs,
   });
 
-  async function terminalizeUnverified(job, {
-    skipEcho = false,
-    reason = null,
-    ambiguity = null,
-  } = {}) {
-    let current = queue.read(job.agentName, job.pane, job.id) || job;
-    if (TERMINAL_DELIVERY_STATES.has(current.status)) return current;
-
-    // Recheck only the authoritative sink at the transition boundary. TUI
-    // inspection is allowed to annotate a pending submit, never to postpone
-    // or trigger this outcome.
-    if (!skipEcho && await exactEcho(current)) return acknowledge(current, "late-echo-before-unverified");
-    current = queue.read(current.agentName, current.pane, current.id) || current;
-    if (TERMINAL_DELIVERY_STATES.has(current.status)) return current;
-    if (!skipEcho && await exactEcho(current)) return acknowledge(current, "late-echo-before-unverified");
-    current = queue.read(current.agentName, current.pane, current.id) || current;
-    if (TERMINAL_DELIVERY_STATES.has(current.status)) return current;
-
-    const preEnterFence = current.status === "submitting";
-    // A post-Enter slash with a receipt cursor keeps its evidence channel open
-    // after the lane releases: the warning is deferred to the watch horizon
-    // (preflight holds it via unverifiedNoticeNextAttemptAt) and a soft
-    // stalled notice arms the recovered confirmation instead. A pre-Enter
-    // fence, an explicit reason/ambiguity, or a dialect without slash receipts
-    // cannot produce late evidence, so they keep the immediate warning.
-    const lateEchoWatchUntil = (!skipEcho && !reason && !ambiguity
-      && current.kind === "slash"
-      && current.status === "submitted"
-      && current.echoCursor
-      && typeof agent.waitForSlashReceipt === "function")
-      ? Number(current.submittedAt || current.createdAt || now()) + LATE_ECHO_WATCH_MS
-      : null;
-    const terminal = queue.update(current, {
-      status: DELIVERED_UNVERIFIED_STATE,
-      draftOwned: false,
-      terminalAt: now(),
-      nextAttemptAt: null,
-      unverifiedNoticeSentAt: null,
-      unverifiedNoticeNextAttemptAt: lateEchoWatchUntil ?? now(),
-      ...(lateEchoWatchUntil ? {
-        lateEchoWatchUntil,
-        noticeSentAt: current.noticeSentAt || now(),
-      } : {}),
-      ...(ambiguity || preEnterFence ? {
-        metadata: { deliveryAmbiguity: ambiguity || "submitting-fence" },
-      } : {}),
-      lastReason: reason || (lateEchoWatchUntil
-        ? "slash lane released after 60 seconds; the exact command receipt is still watched for until the 60-minute mark"
-        : preEnterFence
-          ? "pre-Enter submit fence has no exact receipt after 60 minutes; physical delivery remains unverified"
-          : "submit attempt has no exact JSONL receipt after 60 minutes; delivery remains unverified"),
+  const { terminalizeUnverified, reconcileRecoveredCancellationTerminals } =
+    createDeliveryTerminalizer({
+      queue, agent, now, notify, notifyTerminal, log, queueEvent, exactEcho, acknowledge,
     });
-    queueEvent(terminal, DELIVERED_UNVERIFIED_STATE);
-    if (lateEchoWatchUntil) {
-      const queuedBehind = queue.list(terminal.agentName, terminal.pane)
-        .filter((other) => other.id !== terminal.id && !TERMINAL_DELIVERY_STATES.has(other.status))
-        .length;
-      await notify(terminal, "stalled", { queuedBehind }).catch((error) =>
-        log(`delivery broker watch notice failed for ${terminal.id}: ${error.message}`));
-      return terminal;
-    }
-    return notifyTerminal(terminal);
-  }
 
   /**
    * A target proven not to ingest answers its whole backlog now rather than one
@@ -452,7 +393,8 @@ export function createDeliveryBroker({
         }
       }
       const superseded = await recoverSupersededSubmit({ job, agent, queue, exactEcho,
-        acknowledge, now, onRecovered: (value, state) => queueEvent(value, state) });
+        acknowledge, terminalizeUnverified, now,
+        onRecovered: (value, state) => queueEvent(value, state) });
       if (superseded) return superseded;
       const recoveredTui = await recoverSubmittedTui({ job, agent, queue, exactEcho, acknowledge, now, log,
         onRecovered: (value) => queueEvent(value, "submit_recovered_after_stall") });
@@ -740,6 +682,8 @@ export function createDeliveryBroker({
     started = true;
     stopped = false;
     queue.prune();
+    void reconcileRecoveredCancellationTerminals().catch((error) =>
+      log(`delivery broker terminal reconciliation failed: ${error.message}`));
     timer = setInterval(() => {
       kick().catch((error) => log(`delivery broker poll failed: ${error.message}`));
     }, intervalMs);

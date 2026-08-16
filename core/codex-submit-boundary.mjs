@@ -6,6 +6,13 @@ import { hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 
 const CODEX_PROMPT_CURSOR_KIND = "codex-prompt-events-v1";
 const MIN_RECOVERY_AGE_MS = 60_000;
+/** WHAT: Names the one allowed closed-turn recovery. WHY: Keeps every delivery seam on the same persisted recovery marker. */
+export const CLOSED_CODEX_RECOVERY_KIND = "closed-codex-turn-resend";
+
+/** WHAT: Checks whether a prompt already consumed its one safe Codex resend. WHY: A later task boundary must terminalize ambiguity instead of typing the prompt again. */
+export function hasClosedCodexRecovery(job) {
+  return job?.metadata?.submittedRecoveryKind === CLOSED_CODEX_RECOVERY_KIND;
+}
 
 /** WHAT: Returns whether Codex closed a turn after submit. WHY: Prevents a closed turn from fencing later messages. */
 export function hasCodexTurnBoundaryAfterSubmit(cursor, submittedAt) {
@@ -26,7 +33,7 @@ export function hasCodexTurnBoundaryAfterSubmit(cursor, submittedAt) {
  * WHY: Prevents one swallowed Enter from fencing every later message for an hour.
  */
 export async function recoverClosedCodexSubmit({
-  job, agent, queue, exactEcho, acknowledge, now, onRecovered,
+  job, agent, queue, exactEcho, acknowledge, terminalizeUnverified = null, now, onRecovered,
 }) {
   const submittedAt = Number(job.submittedAt || job.submitFenceAt || 0);
   if (job.status !== "submitted" || job.kind !== "prompt"
@@ -48,6 +55,18 @@ export async function recoverClosedCodexSubmit({
     return acknowledge(current, "late-echo-after-codex-turn-boundary");
   }
 
+  // The first closed turn is the one bounded recovery. A second closed turn
+  // proves that the recovery itself crossed a submit boundary without an
+  // exact JSONL user event. Returning to pending again would reset submittedAt
+  // forever and physically retype the same prompt once per completed turn.
+  if (hasClosedCodexRecovery(current)) {
+    if (typeof terminalizeUnverified !== "function") return null;
+    return terminalizeUnverified(current, {
+      ambiguity: "closed-codex-recovery-exhausted",
+      reason: "Codex closed the one bounded recovery turn without an exact JSONL prompt receipt; delivery is consumed/unverified and will not be redispatched",
+    });
+  }
+
   const recovered = queue.update(current, {
     status: "pending",
     draftOwned: false,
@@ -60,7 +79,8 @@ export async function recoverClosedCodexSubmit({
     metadata: {
       ...(current.metadata || {}),
       submittedRecoveryAt: now(),
-      submittedRecoveryKind: "closed-codex-turn-resend",
+      submittedRecoveryKind: CLOSED_CODEX_RECOVERY_KIND,
+      submittedRecoveryCount: 1,
     },
     lastReason: "Codex closed the active turn without ingesting this prompt; retrying from a fresh receipt cursor",
   });
