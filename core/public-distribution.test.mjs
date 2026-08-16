@@ -13,11 +13,11 @@ const isProductionCore = (path) => {
   if (path.startsWith("docs/") || path.startsWith("test/") || path.startsWith("link/")
     || path.startsWith("android/") || path.startsWith("spikes/")
     || /(?:^|\/)fixtures\//u.test(path) || /\.test\.[^.]+$/u.test(path)) return false;
-  return new Set([".mjs", ".js", ".sh", ".yaml", ".example"]).has(extname(path));
+  return new Set([".mjs", ".js", ".sh", ".ps1", ".yaml", ".example"]).has(extname(path));
 };
 
 test("production core contains no private installation defaults", () => {
-  const forbidden = /(?:[a-z0-9-]+\.)+v1d\.io|\/home\/adelost|\bMattias\b|\bai-dsl\b|openclaw-claude\.sock|sv-SE-MattiasNeural/iu;
+  const forbidden = /(?:[a-z0-9-]+\.)+v1d\.io|\/home\/adelost|openclaw-claude\.sock|sv-SE-MattiasNeural|E:\\_Sdk|abyss-windows|lsrc\/agentmux/iu;
   const findings = tracked.filter(isProductionCore).flatMap((path) => {
     const source = readFileSync(path, "utf8");
     return forbidden.test(source) ? [path] : [];
@@ -51,26 +51,32 @@ test("setup bootstraps standalone config in a clean home", () => {
     writeFileSync(path, `#!/bin/sh\n${source}\n`);
     chmodSync(path, 0o755);
   };
-  command("node", "echo v22.0.0");
+  command("node", `if [ "$1" = "-v" ]; then echo v22.0.0; else exec ${JSON.stringify(process.execPath)} "$@"; fi`);
   command("tmux", "echo 'tmux 3.4'");
   command("codex", "exit 0");
   try {
+    const cleanEnv = {
+      ...process.env,
+      HOME: home,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      AMUX_SETUP_SKIP_CLI_INSTALL: "1",
+    };
+    for (const key of ["AGENTS_YAML", "AGENT_CONFIG", "AGENTMUX_YAML", "AMUX_DISCORD_ENV"]) {
+      delete cleanEnv[key];
+    }
     const output = execFileSync("bash", ["bin/setup.sh"], {
       cwd: process.cwd(),
-      env: {
-        ...process.env,
-        HOME: home,
-        PATH: `${fakeBin}:${process.env.PATH}`,
-        AMUX_SETUP_SKIP_CLI_INSTALL: "1",
-      },
+      env: cleanEnv,
       encoding: "utf8",
     });
     const configHome = join(home, ".agentmux");
     expect(output).toContain("Ready!");
     expect(readFileSync(join(configHome, ".env"), "utf8")).toContain("DISCORD_TOKEN=");
-    expect(readFileSync(join(configHome, "agentmux.yaml"), "utf8")).toContain("myproject:");
+    expect(readFileSync(join(configHome, "agentmux.yaml"), "utf8")).toContain("agents: {}");
+    expect(readFileSync(join(configHome, "agents.yaml"), "utf8")).toMatch(/\n\{\}\s*$/u);
     expect(statSync(join(configHome, ".env")).mode & 0o777).toBe(0o600);
     expect(statSync(join(configHome, "agentmux.yaml")).mode & 0o777).toBe(0o600);
+    expect(statSync(join(configHome, "agents.yaml")).mode & 0o777).toBe(0o600);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

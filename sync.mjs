@@ -38,9 +38,9 @@ export function expandTilde(p) {
 }
 
 /** WHAT: Parses source configuration. WHY: Keeps generated pane metadata normalized across engines. */
-export function parseConfig(yamlContent) {
+export function parseConfig(yamlContent, { requireGuild = false } = {}) {
   const doc = yaml.load(yamlContent);
-  if (!doc?.guild) throw new Error("agentmux.yaml: 'guild' is required");
+  if (requireGuild && !doc?.guild) throw new Error("agentmux.yaml: 'guild' is required for Discord sync");
   if (!doc?.agents || typeof doc.agents !== "object") throw new Error("agentmux.yaml: 'agents' section is required");
 
   const agents = new Map();
@@ -185,7 +185,7 @@ export function parseConfig(yamlContent) {
   }
 
   return {
-    guild: String(doc.guild),
+    guild: doc.guild ? String(doc.guild) : null,
     category: doc.category || "Agents",
     agents,
     // `search.roots` (amux search corpora) lives in the SOURCE yaml so it

@@ -48,6 +48,20 @@ feature("suggestions-quota-push config", () => {
       expect(message).toContain("baseUrl and adminCredentialFile");
     }],
   });
+
+  unit("credentialed remote delivery rejects plaintext HTTP", {
+    when: ["loading a remote HTTP endpoint", () => {
+      try {
+        loadPushConfig("baseUrl: http://tasks.example\nadminCredentialFile: /tmp/token\n");
+        return "no error";
+      } catch (error) {
+        return error.message;
+      }
+    }],
+    then: ["the transport boundary requires HTTPS", (message) => {
+      expect(message).toContain("must use HTTPS");
+    }],
+  });
 });
 
 feature("suggestions-quota-push summary", () => {

@@ -16,6 +16,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
 import { readQuotaSnapshot } from "../core/quota-usage.mjs";
+import { normalizeServiceBaseUrl } from "../core/runtime-defaults.mjs";
 
 const DEFAULT_CONFIG_PATH = join(homedir(), ".config", "agent", "suggestions-quota-push.yaml");
 const DEFAULT_STATE_PATH = join(homedir(), ".agentmux", "suggestions-quota-push-events.jsonl");
@@ -31,11 +32,13 @@ const expandHome = (value) =>
 /** WHAT: Parses quota delivery configuration. WHY: Keeps credentials and state paths explicit. */
 export function loadPushConfig(raw) {
   const parsed = yaml.load(raw);
-  const baseUrl = typeof parsed?.baseUrl === "string" ? parsed.baseUrl.replace(/\/+$/u, "") : "";
+  const baseUrl = normalizeServiceBaseUrl(parsed?.baseUrl, "config: baseUrl", {
+    allowHttpLoopback: true,
+  });
   const credentialFile = expandHome(parsed?.adminCredentialFile);
   const statePath = expandHome(parsed?.statePath
     ?? process.env.AMUX_QUOTA_PUSH_STATE ?? DEFAULT_STATE_PATH);
-  if (!baseUrl || typeof credentialFile !== "string" || !credentialFile) {
+  if (typeof credentialFile !== "string" || !credentialFile) {
     throw new Error("config requires baseUrl and adminCredentialFile");
   }
   if (typeof statePath !== "string" || !statePath) throw new Error("config statePath is invalid");

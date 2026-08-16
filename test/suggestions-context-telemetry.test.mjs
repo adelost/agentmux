@@ -36,6 +36,12 @@ const reading = (overrides = {}) => ({
 });
 
 describe("context telemetry reconciliation", () => {
+  it("rejects credentialed remote delivery over plaintext HTTP", () => {
+    expect(() => loadContextPushConfig(
+      "baseUrl: http://tasks.example\nadminCredentialFile: /tmp/token\n",
+    )).toThrow("must use HTTPS");
+  });
+
   it("projects canonical rows and native compact events without quota fields", async () => {
     const compactAt = "2026-07-15T12:01:00.000Z";
     const context = nativeContextReading({ agent: {

@@ -1,22 +1,20 @@
 // Shared target lookup for the delivery guard and the recovery sidecar.
 
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { getAgent } from "../cli/config.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
+import { runtimeAgentsPath } from "./runtime-defaults.mjs";
 import {
   activeClaudeLimitReceipt,
   quotaRecoveryContinuation,
 } from "./claude-quota-recovery.mjs";
-
-const DEFAULT_AGENTS_YAML = fileURLToPath(new URL("../agents.yaml", import.meta.url));
 
 /**
  * WHAT: Resolves one configured tmux Claude pane without creating filesystem state.
  * WHY: Keeps delivery and recovery bound to the same config and pane cwd.
  */
 export function configuredClaudeTarget(agentName, pane = 0, {
-  configPath = process.env.AGENTS_YAML || DEFAULT_AGENTS_YAML,
+  configPath = runtimeAgentsPath(),
 } = {}) {
   let entry;
   try { entry = getAgent(configPath, agentName); }

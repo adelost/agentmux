@@ -4,11 +4,10 @@
 # WHY: two failure classes were invisible until a human happened to look
 # (the operator, 2026-07-14: "det känns inte som att agenterna jobbar"):
 #   (A) a broker closes a ticket-wave and never dispatches the next one, so
-#       its whole fleet idles with work still in the backlog (skydive:3 sat a
-#       wave-gap for hours; nobody was hung, nobody was working either).
+#       its whole fleet idles with work still in the backlog.
 #   (B) a delivery-queue job wedges in a non-terminal state (submitted with no
-#       JSONL receipt) and lingers forever — the FIFO is not blocked (claw:3's
-#       decouple fix), but the job never terminalises so it silently rots.
+#       JSONL receipt) and lingers forever — the FIFO is not blocked, but the
+#       job never terminalises so it silently rots.
 #
 # task-keeper watches a registered lane's own task progress; backlog-pull
 # can auto-dispatch one configured writer lane. Neither sees (A) fleet-wide broker gaps
@@ -18,7 +17,7 @@
 #   1. Queue sweep (B): any delivery-queue job non-terminal + older than
 #      STUCK_MIN + never acknowledged → notifyuser ONCE per job-id + log.
 #      Surface-only: it never mutates the queue (that terminal-timeout root-fix
-#      is claw:3's delivery-queue.mjs lane). We report, the owner terminalises.
+#      belongs to delivery-queue.mjs). We report, the owner terminalises.
 #   2. Fleet sweep (A): for each watched fleet (session + broker pane + repo),
 #      progress = max(newest repo commit, broker pane's session-jsonl mtime).
 #        * broker jsonl fresh (<ACTIVE_SEC) → broker is mid-turn, NEVER nudge.
@@ -62,6 +61,7 @@ export PATH="${HOME}/.nvm/versions/node/v22.19.0/bin:${HOME}/.local/bin:/usr/loc
 AMUX="${AMUX:-${HOME}/.nvm/versions/node/v22.19.0/bin/amux}"
 CURL="${CURL:-curl}"
 PY="${PY:-python3}"
+NODE_BIN="${NODE_BIN:-$(command -v node)}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=guard-heartbeat.sh
 source "$SCRIPT_DIR/guard-heartbeat.sh"
@@ -85,6 +85,9 @@ CONF="${CONF:-${WATCH_DIR}/fleets.conf}"
 BOARD_URL="${BOARD_URL:-${SUGGEST_BASE_URL:-}}"
 if [ -z "$BOARD_URL" ] && [ -f "$HOME/.agentmux/.env" ]; then
   BOARD_URL="$(sed -n 's/^SUGGEST_BASE_URL=//p' "$HOME/.agentmux/.env" | tail -1)"
+fi
+if [ -n "$BOARD_URL" ]; then
+  BOARD_URL="$("$NODE_BIN" "$SCRIPT_DIR/normalize-service-url.mjs" "$BOARD_URL" "Suggestions base URL")" || exit 1
 fi
 READ_TOKEN_FILE="${READ_TOKEN_FILE:-${HOME}/.config/agent/suggestions-read-token}"
 STALE_MIN="${STALE_MIN:-60}"        # fleet quiet this long → broker gap (the operator: "en timme")
@@ -267,7 +270,7 @@ fi
 # unwatched until 2026-07-15). Name it instead of failing silently.
 # DRIFT_IGNORE = deliberate non-fleets. Keep it accurate: an alert that is
 # correct to ignore teaches the fleet to ignore alerts.
-DRIFT_IGNORE="${DRIFT_IGNORE:-claw}"   # claw = workspace/orchestrator, watched live by claw:0
+DRIFT_IGNORE="${DRIFT_IGNORE:-}"   # explicit space-separated sessions intentionally monitored elsewhere
 _configured=" $(awk '!/^[[:space:]]*#/ && NF >= 3 { printf "%s ", $1 }' "$CONF") "
 _unwatched=""
 for _s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do

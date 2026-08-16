@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { feature, unit, expect } from "bdd-vitest";
+import { component, feature, unit, expect } from "bdd-vitest";
 
 const cli = fileURLToPath(new URL("./amux-suggest.mjs", import.meta.url));
 
@@ -13,12 +13,15 @@ const cli = fileURLToPath(new URL("./amux-suggest.mjs", import.meta.url));
 // Both streams, always: the CLI writes its usage to stderr and exits 0, so a
 // stdout-only reading of a working run is indistinguishable from a run that
 // never happened — the exact confusion this test exists to prevent.
-const runThroughSymlink = (...args) => {
+const runThroughSymlink = (args, spawnOptions = {}) => {
   const dir = mkdtempSync(join(tmpdir(), "amux-suggest-link-"));
   const link = join(dir, "amux-suggest");
   try {
     symlinkSync(cli, link);
-    const run = spawnSync(process.execPath, [link, ...args], { encoding: "utf8" });
+    const run = spawnSync(process.execPath, [link, ...args], {
+      encoding: "utf8",
+      ...spawnOptions,
+    });
     return `${run.stdout ?? ""}${run.stderr ?? ""}`;
   }
   finally { rmSync(dir, { recursive: true, force: true }); }
@@ -27,14 +30,14 @@ const runThroughSymlink = (...args) => {
 feature("The sanctioned client actually runs when a pane invokes it", () => {
   unit("prints its usage when reached through the symlink every pane uses", {
     given: ["the CLI behind a symlink, asked for help", () => ["--help"]],
-    when: ["a pane runs it the way PATH resolves it", (args) => runThroughSymlink(...args)],
+    when: ["a pane runs it the way PATH resolves it", (args) => runThroughSymlink(args)],
     then: ["it produces output instead of exiting silently", (output) =>
       expect(output.length).toBeGreaterThan(0)],
   });
 
   unit("fails loud on a missing required flag rather than exiting quiet", {
     given: ["a call with no --body-file", () => ["--method", "POST", "--path", "/api/x"]],
-    when: ["a pane runs it through the symlink", (args) => runThroughSymlink(...args)],
+    when: ["a pane runs it through the symlink", (args) => runThroughSymlink(args)],
     then: ["the reason is named on the way out", (output) =>
       expect(output).toContain("--body-file")],
   });
@@ -49,5 +52,33 @@ feature("The sanctioned client actually runs when a pane invokes it", () => {
     }],
     then: ["importing runs no request and prints nothing", (output) =>
       expect(output).toBe("")],
+  });
+
+  component("loads an optional Suggestions origin from the operator env file", {
+    given: ["a clean shell whose only Suggestions origin is in ~/.agentmux/.env", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-suggest-env-"));
+      const home = join(root, "home");
+      mkdirSync(join(home, ".agentmux"), { recursive: true });
+      writeFileSync(join(home, ".agentmux", ".env"), "SUGGEST_BASE_URL=http://127.0.0.1:1\n");
+      writeFileSync(join(root, "body.json"), '{"mutationId":"00000000-0000-4000-8000-000000000001"}\n');
+      writeFileSync(join(root, "token"), "test-token\n");
+      const env = { ...process.env, HOME: home };
+      delete env.SUGGEST_BASE_URL;
+      delete env.AMUX_DISCORD_ENV;
+      return { root, env };
+    }],
+    when: ["the sanctioned client resolves its runtime config", ({ root, env }) => {
+      try {
+        return runThroughSymlink([
+          "--method", "POST", "--path", "/api/test",
+          "--body-file", join(root, "body.json"), "--token-file", join(root, "token"),
+        ], { env });
+      }
+      finally { rmSync(root, { recursive: true, force: true }); }
+    }],
+    then: ["it reaches transport instead of claiming the integration is disabled", (output) => {
+      expect(output).not.toContain("Suggestions is not configured");
+      expect(output).toContain("fetch failed");
+    }],
   });
 });

@@ -6,7 +6,7 @@
 //      /compact wrapper render as "senast ombedd" for a pane (SRC-0053).
 //      One shared definition means the surfaces can never drift apart again.
 // DOES NOT: Judge whether HUMAN text is important — only whether the turn is
-//           machine-authored plumbing. Inter-agent briefs ("[from claw:2]...")
+//           machine-authored plumbing. Inter-agent briefs ("[from project:2]...")
 //           and cron briefs ("[dream ...]") are real directives, never noise.
 
 // Union of the two predicates this module replaced (cli/commands.mjs local +

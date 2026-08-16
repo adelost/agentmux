@@ -15,7 +15,7 @@ import { fileURLToPath } from "url";
 import { parseEnv } from "../lib.mjs";
 import { createAgent } from "../agent.mjs";
 import { createRecorder } from "../core/recorder.mjs";
-import { DEFAULT_TMUX_SOCKET } from "../core/runtime-defaults.mjs";
+import { DEFAULT_TMUX_SOCKET, runtimeAgentsPath } from "../core/runtime-defaults.mjs";
 import { createDeliveryQueue, waitForDeliveryJob } from "../core/delivery-queue.mjs";
 import { validateAgentPane } from "../cli/config.mjs";
 import { load as loadYaml } from "js-yaml";
@@ -45,7 +45,7 @@ function loadEnv() {
 }
 loadEnv();
 
-const AGENTS_YAML = process.env.AGENTS_YAML || resolve(__dir, "..", "agents.yaml");
+const AGENTS_YAML = runtimeAgentsPath();
 const TMUX_SOCKET = process.env.TMUX_SOCKET || DEFAULT_TMUX_SOCKET;
 const TIMEOUT = parseInt(process.env.TIMEOUT_S || "600") * 1000;
 const SHELL_PATH = process.env.SHELL_PATH || `${process.env.HOME}/bin:${process.env.PATH}`;

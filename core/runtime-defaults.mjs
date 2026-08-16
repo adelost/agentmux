@@ -49,3 +49,8 @@ export function defaultWorkspace(home = homedir()) {
 export function defaultTodosPath(home = homedir()) {
   return join(defaultWorkspace(home), "memory", "tasks.md");
 }
+
+/** WHAT: Resolves the generated pane configuration. WHY: Keeps CLI and bridge on one external runtime truth. */
+export function runtimeAgentsPath(env = process.env, home = homedir()) {
+  return env.AGENTS_YAML || env.AGENT_CONFIG || join(home, ".agentmux", "agents.yaml");
+}

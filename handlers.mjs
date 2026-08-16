@@ -762,7 +762,6 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       const enabled = tts.toggle();
       await msg.reply(`TTS ${enabled ? "on" : "off"}`);
     },
-
     "/follow": async (msg, mapping, pane) => {
       if (isNativePane(mapping, pane)) {
         await msg.reply("native follow is always on — completed turns are mirrored from structured runtime events");
@@ -770,7 +769,6 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       }
       await startFollow(msg, mapping, pane);
     },
-
     "/sync": async (msg) => {
       if (!discordChannel || !agentmuxYamlPath) {
         await msg.reply("sync not configured (missing agentmux.yaml path or discord channel)");
@@ -784,11 +782,11 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       try {
         await msg.reply("syncing...");
         const configYaml = readFileSync(agentmuxYamlPath, "utf-8");
-        const { guild: guildId } = await import("./sync.mjs").then((m) => m.parseConfig(configYaml));
+        const { guild: guildId } = await import("./sync.mjs")
+          .then((m) => m.parseConfig(configYaml, { requireGuild: true }));
         const guild = await discordChannel.getGuild(guildId);
         const results = await executeSync({ guild, configYaml, state, agentsYamlPath });
         reloadConfig();
-
         // Reconcile live tmux sessions against the freshly-regenerated config.
         // Fixes the case where agentmux.yaml `panes` changed but the running
         // session still has old panes with wrong commands (bash where claude
@@ -801,7 +799,6 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
         } catch (err) {
           console.warn(`/sync: reconcile skipped: ${err.message}`);
         }
-
         const lines = [];
         if (results.created.length) lines.push(`**created:** ${results.created.join(", ")}`);
         if (results.renamed?.length) lines.push(`**renamed:** ${results.renamed.join(", ")}`);
@@ -1195,11 +1192,10 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
       console.log("sync: starting (CLI-triggered)");
       const configYaml = readFileSync(agentmuxYamlPath, "utf-8");
       const { parseConfig } = await import("./sync.mjs");
-      const { guild: guildId } = parseConfig(configYaml);
+      const { guild: guildId } = parseConfig(configYaml, { requireGuild: true });
       const guild = await discordChannel.getGuild(guildId);
       const results = await executeSync({ guild, configYaml, state, agentsYamlPath });
       reloadConfig();
-
       // Reconcile live tmux sessions against the freshly-regenerated config.
       // Mirrors /sync Discord handler: changes to agentmux.yaml `panes` (e.g.
       // adding `codex: 2`) need split-window calls to materialize the new

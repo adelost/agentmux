@@ -65,7 +65,7 @@ const run = (fx, extraEnv = {}) => spawnSync("bash", [SCRIPT], {
     CURL: fx.curl,
     AMUX_GUARD_HEARTBEAT_DIR: join(fx.root, "heartbeats"),
     READ_TOKEN_FILE: fx.tokenFile,
-    BOARD_URL: "http://board.test",
+    BOARD_URL: "https://board.test",
     CURATE_COOLDOWN_MIN: "0",
     SEND_TIMEOUT: "5",
     ...extraEnv,

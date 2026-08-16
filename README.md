@@ -284,6 +284,14 @@ commit as a copied global npm package. It never `npm link`s the CLI to the check
 AMUX launches configured coding engines in their fully autonomous modes; this
 is an intentional product contract, not a hidden setup side effect.
 
+Add the first project with the installed engine detected automatically, then
+start the local queue broker. Discord is optional:
+
+```bash
+amux add myproject ~/projects/myproject
+amux serve --detach
+```
+
 For later upgrades, fetch first and pass the full immutable commit identity:
 
 ```bash
@@ -567,7 +575,7 @@ See `agentmux.yaml.example` for a fuller project config example.
 - [Public distribution](docs/public-distribution.md): core/integration boundary
   and the no-private-default contract.
 - [Support](SUPPORT.md): supported surface and a safe diagnostic bundle.
-- [Security](SECURITY.md): private reporting and the explicit autonomy model.
+- [Security](SECURITY.md): vulnerability-reporting procedure and the explicit autonomy model.
 
 ## Troubleshooting
 

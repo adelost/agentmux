@@ -8,7 +8,10 @@ feature("bridge supervisor release swaps", () => {
     then: ["cd runs inside the loop immediately before Node", (source) => {
       const loop = source.indexOf("while true; do");
       const reacquire = source.indexOf('cd "$DIR"', loop);
-      const launch = source.indexOf("node --import ./bin/quota-recovery-bootstrap.mjs index.mjs", loop);
+      const launch = source.indexOf(
+        "node --import ./bin/runtime-env-bootstrap.mjs --import ./bin/quota-recovery-bootstrap.mjs index.mjs",
+        loop,
+      );
       expect(loop).toBeGreaterThan(0);
       expect(reacquire).toBeGreaterThan(loop);
       expect(launch).toBeGreaterThan(reacquire);

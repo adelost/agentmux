@@ -4,6 +4,7 @@
 
 import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { normalizeServiceBaseUrl } from "../core/runtime-defaults.mjs";
 
 const JOURNAL_VERSION = 1;
 
@@ -73,10 +74,11 @@ export async function runLinkConnectorCycle({
   transcribe = null,
   log = () => {},
 } = {}) {
+  const serviceBase = normalizeServiceBaseUrl(linkBase, "Link base URL", { allowHttpLoopback: true });
   const journal = readJournal(statePath);
   const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
   const post = async (path, body) => {
-    const response = await fetchImpl(`${linkBase}${path}`, {
+    const response = await fetchImpl(`${serviceBase}${path}`, {
       method: "POST",
       headers: auth,
       body: JSON.stringify(body || {}),
@@ -98,7 +100,7 @@ export async function runLinkConnectorCycle({
       if (plan.action === "deliver") {
         let body = String(message.body || "").trim();
         if (message.kind === "voice" && message.voiceRef) {
-          const audio = await fetchImpl(`${linkBase}/api/link/voice/${message.voiceRef}`, {
+          const audio = await fetchImpl(`${serviceBase}/api/link/voice/${message.voiceRef}`, {
             headers: auth,
             signal: AbortSignal.timeout(60_000),
           });

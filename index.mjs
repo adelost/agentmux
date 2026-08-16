@@ -54,7 +54,8 @@ import { createAgentRouter } from "./core/agent-router.mjs";
 import { pinRuntimeExecutable } from "./core/runtime-helper.mjs";
 import { cmdSleepWatch } from "./cli/sleep.mjs";
 import { createAudioOutbox } from "./core/audio-outbox.mjs";
-import { DEFAULT_TMUX_SOCKET, DEFAULT_TTS_VOICE } from "./core/runtime-defaults.mjs";
+import { DEFAULT_TMUX_SOCKET, DEFAULT_TTS_VOICE, runtimeAgentsPath } from "./core/runtime-defaults.mjs";
+import { ensureRuntimeConfig } from "./core/runtime-config.mjs";
 
 // --- Config ---
 
@@ -77,7 +78,7 @@ function loadEnv() {
 loadEnv();
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const AGENTS_YAML = process.env.AGENTS_YAML || resolve(__dir, "agents.yaml");
+const AGENTS_YAML = runtimeAgentsPath();
 const AGENTMUX_YAML = configSources.agentmuxYaml.path;
 const TIMEOUT = parseInt(process.env.TIMEOUT_S || "600") * 1000;
 const WHISPER_URL = process.env.WHISPER_URL || "http://localhost:2022/v1/audio/transcriptions";
@@ -100,10 +101,7 @@ const TRANSCRIBE_SCRIPT = pinRuntimeExecutable({
   runtimeRoot: resolve(homedir(), ".agentmux/runtime/helpers"),
 }).path;
 
-if (!TOKEN) {
-  console.error(`Set DISCORD_TOKEN in ${configSources.envFile.path} (source: ${configSources.envFile.source})`);
-  process.exit(1);
-}
+ensureRuntimeConfig({ sourcePath: AGENTMUX_YAML, generatedPath: AGENTS_YAML });
 
 // Refresh every configured workspace before any pane/watcher can consume an
 // older generated policy. This is the same engine exposed by `amux hints-sync`.
@@ -197,7 +195,7 @@ function stampChannelMirror(channelId) {
   appState.set("channel_last_mirror_ts", prev);
 }
 
-const discord = createDiscordChannel({ token: TOKEN, onSent: stampChannelMirror });
+const discord = TOKEN ? createDiscordChannel({ token: TOKEN, onSent: stampChannelMirror }) : null;
 
 // Memory admission guard (T1): classifies host memory pressure into a
 // durable state file and alarms on transitions only. It never kills or
@@ -209,7 +207,7 @@ startMemoryGuard({
   onTransition: async ({ from, to, state }) => {
     const text = `🧠 Minnesvakt: ${from} → ${to} (MemAvailable ${Math.round((state.sample?.memAvailableKb || 0) / 1024 / 1024 * 10) / 10} GiB, SwapFree ${Math.round((state.sample?.swapFreeKb || 0) / 1024 / 1024 * 10) / 10} GiB): nya tunga automatjobb ${to === "blocked" || to === "critical" ? "stoppas" : "tillåts"}.`;
     console.warn(`[memory-guard] ${text}`);
-    if (memoryAlertChannel) {
+    if (memoryAlertChannel && discord) {
       await discord.send(memoryAlertChannel, text).catch((error) =>
         console.warn(`[memory-guard] Discord alarm failed: ${error.message}`));
     }
@@ -253,9 +251,10 @@ const deliveryBroker = createDeliveryBroker({
   validateTarget: validateDeliveryTarget,
   bridgeDir: __dir,
   wakeLifecycle: paneSleepWakeLifecycle,
-  resolveNotificationChannel: (job) =>
-    findChannelForPane(AGENTS_YAML, job.agentName, job.pane),
+  resolveNotificationChannel: (job) => TOKEN
+    ? findChannelForPane(AGENTS_YAML, job.agentName, job.pane) : null,
   notify: async (job, state, extra = {}) => {
+    if (!discord) return;
     const channelId = job.metadata?.channelId
       || findChannelForPane(AGENTS_YAML, job.agentName, job.pane);
     if (!channelId) throw new Error(`no Discord channel bound to ${job.agentName}:${job.pane}`);
@@ -294,6 +293,17 @@ const deliveryBroker = createDeliveryBroker({
   log: (message) => console.warn(`[delivery-broker] ${message}`),
 });
 
+// Discord is an adapter, not the queue owner. Headless mode still drains CLI jobs.
+if (!TOKEN) {
+  const localBridge = startBot({
+    channels: [], agentsYaml: AGENTS_YAML, whisperUrl: WHISPER_URL, agent, tts, state: appState,
+    onMessage: async () => {},
+  });
+  await localBridge.ready;
+  deliveryBroker.start();
+  console.log(`local bridge | Discord disabled (${configSources.envFile.path}) | queue broker ready`);
+  await new Promise(() => {});
+}
 // Resume-hints moved to bin/amux-hook.mjs SessionStart context in 1.20.52 —
 // they no longer pass through the bridge, so the Discord mirror that used
 // to live here fell away with the typed delivery path. The session-start
@@ -466,7 +476,7 @@ const voicePwa = createVoicePWA({
   audioDiscovery: {
     serverId: process.env.AUDIO_INBOX_SERVER_ID,
     target: process.env.AUDIO_INBOX_TARGET,
-    // Extra phone-addressable Discord channels, e.g. lsrc:3 + lsrc:10.
+    // Extra phone-addressable Discord channels, e.g. project:3 + project:4.
     targets: String(process.env.AUDIO_INBOX_TARGETS || "")
       .split(",").map((value) => value.trim()).filter(Boolean),
   },

@@ -11,7 +11,7 @@ import { createClaudeQuotaLifecycle } from "../core/claude-quota-lifecycle.mjs";
 import { createClaudeQuotaCoordinator } from "../core/claude-quota-coordinator.mjs";
 import { createQuotaRecoveryLoop, parseQuotaRecoveryConfig } from "../channels/quota-recovery.mjs";
 import { writeQuotaRecoveryHeartbeat } from "../core/quota-recovery-heartbeat.mjs";
-import { DEFAULT_TMUX_SOCKET } from "../core/runtime-defaults.mjs";
+import { DEFAULT_TMUX_SOCKET, runtimeAgentsPath } from "../core/runtime-defaults.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 try {
@@ -26,7 +26,7 @@ const LOOP_KEY = Symbol.for("agentmux.quotaRecoveryLoop");
 if (!config.enabled) {
   try { writeQuotaRecoveryHeartbeat({ state: "disabled" }); } catch {}
 } else if (!globalThis[LOOP_KEY]) {
-  const configPath = process.env.AGENTS_YAML || `${ROOT}/agents.yaml`;
+  const configPath = runtimeAgentsPath();
   const tmuxSocket = process.env.TMUX_SOCKET || DEFAULT_TMUX_SOCKET;
   const shellPath = process.env.SHELL_PATH || `${process.env.HOME}/bin:${process.env.PATH}`;
   const exec = promisify(execCallback);

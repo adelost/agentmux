@@ -21,6 +21,7 @@ import {
   parseFleetProjects,
   reconcileContextTelemetry,
 } from "../core/suggestions-context-telemetry.mjs";
+import { normalizeServiceBaseUrl } from "../core/runtime-defaults.mjs";
 
 const execFile = promisify(execFileCallback);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -38,9 +39,11 @@ const expandHome = (value) => typeof value === "string" && value.startsWith("~/"
 /** WHAT: Loads context delivery configuration. WHY: Keeps credentials and telemetry paths explicit. */
 export function loadContextPushConfig(raw) {
   const parsed = yaml.load(raw);
-  const baseUrl = typeof parsed?.baseUrl === "string" ? parsed.baseUrl.replace(/\/+$/u, "") : "";
+  const baseUrl = normalizeServiceBaseUrl(parsed?.baseUrl, "config: baseUrl", {
+    allowHttpLoopback: true,
+  });
   const credentialFile = expandHome(parsed?.adminCredentialFile);
-  if (!baseUrl || typeof credentialFile !== "string" || !credentialFile) {
+  if (typeof credentialFile !== "string" || !credentialFile) {
     throw new Error("config requires baseUrl and adminCredentialFile");
   }
   const heartbeat = Number(parsed?.contextHeartbeatMs ?? DEFAULT_HEARTBEAT_MS);

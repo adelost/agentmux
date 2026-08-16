@@ -55,9 +55,11 @@ feature("Link connector starter", () => {
       const before = {
         base: process.env.LINK_BASE,
         token: process.env.LINK_TOKEN_WSL,
+        targets: process.env.LINK_TARGETS_WSL,
       };
       process.env.LINK_BASE = "https://link.v1d.io";
       process.env.LINK_TOKEN_WSL = "secret";
+      process.env.LINK_TARGETS_WSL = "project:1";
       const scheduled = [];
       let release;
       const held = new Promise((resolve) => { release = resolve; });
@@ -92,10 +94,45 @@ feature("Link connector starter", () => {
       for (const [key, value] of Object.entries({
         LINK_BASE: ctx.before.base,
         LINK_TOKEN_WSL: ctx.before.token,
+        LINK_TARGETS_WSL: ctx.before.targets,
       })) {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
       }
+    }],
+  });
+
+  component("credentialed remote Link endpoints require HTTPS", {
+    given: ["a plaintext remote endpoint", () => {
+      const before = {
+        base: process.env.LINK_BASE,
+        token: process.env.LINK_TOKEN_WSL,
+        targets: process.env.LINK_TARGETS_WSL,
+      };
+      process.env.LINK_BASE = "http://link.example";
+      process.env.LINK_TOKEN_WSL = "secret";
+      process.env.LINK_TARGETS_WSL = "project:1";
+      return before;
+    }],
+    when: ["starting the connector", (before) => {
+      let message = "no error";
+      try {
+        startLinkConnectorIfConfigured({ transcribe: async () => "text" });
+      } catch (error) {
+        message = error.message;
+      }
+      for (const [key, value] of Object.entries({
+        LINK_BASE: before.base,
+        LINK_TOKEN_WSL: before.token,
+        LINK_TARGETS_WSL: before.targets,
+      })) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      return message;
+    }],
+    then: ["the transport boundary rejects it", (message) => {
+      expect(message).toContain("must use HTTPS");
     }],
   });
 });

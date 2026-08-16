@@ -41,9 +41,11 @@ export function loadRuntimeEnv({
   processEnv = process.env,
 } = {}) {
   const read = (path) => existsSync(path) ? readFileSync(path, "utf8") : "";
+  const userEnvPath = processEnv.AMUX_DISCORD_ENV
+    || join(userHome, ".agentmux", ".env");
   const resolved = resolveRuntimeEnv({
     packageText: read(join(packageRoot, ".env")),
-    userText: read(join(userHome, ".agentmux", ".env")),
+    userText: read(userEnvPath),
     explicit: { ...processEnv },
   });
   Object.assign(processEnv, resolved);

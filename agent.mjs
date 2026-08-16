@@ -1035,7 +1035,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   /**
    * Codex accepts typed input only when its real composer is visible. During
    * /status, transcript replay, or startup paint, tmux keystrokes can land in
-   * a toast/overlay instead (claw:10 retained only the first "i" of an
+   * a toast/overlay instead (one pane retained only the first "i" of an
    * Instagram prompt on 2026-07-12). A visible, empty composer is safe even
    * during a running turn: Codex treats the new user prompt as steering and
    * writes its exact receipt to JSONL. Unknown overlays still fail closed.

@@ -7,6 +7,7 @@ import {
   defaultWorkspace,
   normalizeServiceBaseUrl,
   operatorName,
+  runtimeAgentsPath,
 } from "./runtime-defaults.mjs";
 
 test("standalone defaults contain no private product identity", () => {
@@ -39,4 +40,12 @@ test("service origins are explicit, self-hostable, and fail closed", () => {
 test("operator identity is configured rather than authored into core", () => {
   expect(operatorName({})).toBe("the operator");
   expect(operatorName({ AMUX_OPERATOR_NAME: "Ada" })).toBe("Ada");
+});
+
+test("CLI and bridge resolve one generated config with legacy aliases", () => {
+  expect(runtimeAgentsPath({}, "/home/tester")).toBe("/home/tester/.agentmux/agents.yaml");
+  expect(runtimeAgentsPath({ AGENTS_YAML: "/shared/agents.yaml" }, "/home/tester"))
+    .toBe("/shared/agents.yaml");
+  expect(runtimeAgentsPath({ AGENT_CONFIG: "/legacy/agents.yaml" }, "/home/tester"))
+    .toBe("/legacy/agents.yaml");
 });

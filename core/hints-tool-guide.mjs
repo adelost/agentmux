@@ -153,7 +153,7 @@ Output anatomy (same for all modes):
 
    Each pane shows a 2-line **thread block** (age tag on actionable sections):
    \`\`\`
-   claw:9   13:02  +164t  · 3h sen
+   project:9   13:02  +164t  · 3h sen
       ← <last directives it received>     (≤3, oldest→newest; [from X] = inter-agent)
       → <its latest reply>
    \`\`\`
