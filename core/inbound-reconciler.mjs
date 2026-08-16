@@ -1,7 +1,7 @@
 // Durable Discord inbound reconciliation. Gateway events are the fast path;
 // the private intake journal and REST history repair own restart safety.
 
-import { transcriptPayload } from "./discord-transcript-effect.mjs";
+import { legacyTranscriptPayload, transcriptPayload } from "./discord-transcript-effect.mjs";
 
 const TYPING_INTERVAL_MS = 8_000;
 
@@ -14,10 +14,23 @@ export function formatRecoveredNotice(count) {
 function transcriptSender(record, store, channel, baseMessage) {
   return async (attachmentId, chunks) => {
     const effect = `transcript-reply:${attachmentId}`;
-    const prior = store.read(record.channelId, record.messageId)?.effects?.[effect] || null;
+    const current = store.read(record.channelId, record.messageId) || record;
+    const firstAudio = (current.attachments || [])
+      .find((attachment) => attachment.contentType?.startsWith("audio/"));
+    const legacy = String(firstAudio?.id) === String(attachmentId)
+      ? current.effects?.["transcript-reply"] || null
+      : null;
+    const specific = current.effects?.[effect] || null;
+    const prior = specific || legacy;
+    if (legacy?.status === "sent") {
+      if (specific?.status !== "sent") store.completeEffect(record, effect);
+      return false;
+    }
     if (!store.beginEffect(record, effect)) return false;
     for (let index = 0; index < chunks.length; index++) {
-      const payload = transcriptPayload(record.identity, attachmentId, index, chunks[index]);
+      const payload = legacy
+        ? legacyTranscriptPayload(record.identity, index, chunks[index])
+        : transcriptPayload(record.identity, attachmentId, index, chunks[index]);
       if (prior?.status === "sending" && typeof channel.findMessageByNonce === "function"
           && await channel.findMessageByNonce(record.channelId, payload.nonce, record.messageId)) {
         continue;
