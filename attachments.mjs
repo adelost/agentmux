@@ -30,14 +30,14 @@ export function createAttachmentHandler({
     downloadDiscordAttachment(att, { downloadBuffer, sleep });
 
   /** WHAT: Posts a readable Discord transcript in bounded chunks. WHY: Keeps long voice notes visible without markdown noise or 2000-character failures. */
-  async function replyWithTranscript(msg, text, viaFallback) {
+  async function replyWithTranscript(msg, attachmentId, text, viaFallback) {
     const heading = viaFallback ? "**Transcript · Whisper fallback**" : "**Transcript**";
     const note = viaFallback
       ? "-# Gemini was unavailable. Technical terms may be less accurate."
       : "-# Speech-to-text may contain errors.";
     const chunks = splitMessage(`${heading}\n${text}\n${note}`);
     if (typeof msg.sendTranscriptOnce === "function") {
-      await msg.sendTranscriptOnce(chunks);
+      await msg.sendTranscriptOnce(attachmentId, chunks);
       return;
     }
     for (let i = 0; i < chunks.length; i++) {
@@ -71,7 +71,7 @@ export function createAttachmentHandler({
         const tagged = viaFallback
           ? `[transcribed voice via whisper1 FALLBACK (gemini failed) — extra error-prone on technical terms, interpret intent] ${transcribed}`
           : `[transcribed voice, may contain speech-to-text errors — interpret intent] ${transcribed}`;
-        await replyWithTranscript(msg, transcribed, viaFallback);
+        await replyWithTranscript(msg, att.id, transcribed, viaFallback);
         if (!rawText) rawText = tagged;
         else rawText = `${rawText}\n${tagged}`;
       } else {

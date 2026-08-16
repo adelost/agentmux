@@ -12,11 +12,12 @@ export function formatRecoveredNotice(count) {
 }
 
 function transcriptSender(record, store, channel, baseMessage) {
-  return async (chunks) => {
-    const prior = store.read(record.channelId, record.messageId)?.effects?.["transcript-reply"] || null;
-    if (!store.beginEffect(record, "transcript-reply")) return false;
+  return async (attachmentId, chunks) => {
+    const effect = `transcript-reply:${attachmentId}`;
+    const prior = store.read(record.channelId, record.messageId)?.effects?.[effect] || null;
+    if (!store.beginEffect(record, effect)) return false;
     for (let index = 0; index < chunks.length; index++) {
-      const payload = transcriptPayload(record.identity, index, chunks[index]);
+      const payload = transcriptPayload(record.identity, attachmentId, index, chunks[index]);
       if (prior?.status === "sending" && typeof channel.findMessageByNonce === "function"
           && await channel.findMessageByNonce(record.channelId, payload.nonce, record.messageId)) {
         continue;
@@ -29,7 +30,7 @@ function transcriptSender(record, store, channel, baseMessage) {
         await channel.send(record.channelId, payload);
       }
     }
-    store.completeEffect(record, "transcript-reply");
+    store.completeEffect(record, effect);
     return true;
   };
 }

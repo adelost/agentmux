@@ -319,7 +319,7 @@ describe("Discord inbound reconciliation", () => {
     expect(accepted).toHaveLength(1);
     expect(store.read("200", "210")).toMatchObject({
       status: "assets_ready",
-      effects: { "transcript-reply": { status: "sending", attempts: 1 } },
+      effects: { "transcript-reply:610": { status: "sending", attempts: 1 } },
       attachments: [{ id: "610", transcript: "FIRST transcript" }],
     });
 
@@ -333,7 +333,46 @@ describe("Discord inbound reconciliation", () => {
     expect(prompts[0]).not.toContain("SECOND transcript");
     expect(store.read("200", "210")).toMatchObject({
       status: "completed",
-      effects: { "transcript-reply": { status: "sent", attempts: 2 } },
+      effects: { "transcript-reply:610": { status: "sent", attempts: 2 } },
+    });
+  });
+
+  it("keeps two audio attachments as separate transcript effects", async () => {
+    const root = tempRoot();
+    const store = createDiscordInboundStore({ rootDir: root,
+      downloadBuffer: async (url) => Buffer.from(`bytes:${url}`) });
+    store.advanceCursor("200", "200");
+    const voice = message("211", "200", { text: "",
+      attachments: [
+        { id: "611", name: "first.ogg", url: "first", contentType: "audio/ogg" },
+        { id: "612", name: "second.ogg", url: "second", contentType: "audio/ogg" },
+      ] });
+    const channel = fakeChannel({ "200": [voice] });
+    const transcribe = vi.fn()
+      .mockResolvedValueOnce({ stdout: "first voice", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "second voice", stderr: "" });
+    const attachmentHandler = createAttachmentHandler({ run: transcribe,
+      transcribeScript: "/transcribe", downloadBuffer: async () => {
+        throw new Error("durable cache was bypassed");
+      } });
+    const prompts = [];
+    const reconciler = createInboundReconciler({
+      onMessage: async (msg) => {
+        prompts.push(await attachmentHandler.buildPrompt(msg, []));
+        return { delivered: true };
+      },
+      state: state(), store, resolveTarget: target,
+    });
+
+    expect(await reconciler.reconcile(channel, "200")).toEqual({ replayed: 1, pending: 0 });
+    expect(transcribe).toHaveBeenCalledTimes(2);
+    expect(channel.transcriptReplies).toHaveLength(2);
+    expect(new Set(channel.transcriptReplies.map(({ content }) => content.nonce)).size).toBe(2);
+    expect(prompts[0]).toContain("first voice");
+    expect(prompts[0]).toContain("second voice");
+    expect(store.read("200", "211").effects).toMatchObject({
+      "transcript-reply:611": { status: "sent" },
+      "transcript-reply:612": { status: "sent" },
     });
   });
 

@@ -28,7 +28,7 @@
  *   stable delivery cursor across reconnect retries.
  * @property {Array<{id: string, name: string, url: string, proxyUrl?: string, contentType: string, durablePath?: string|null, sha256?: string|null}>} attachments
  * @property {{agentName: string, pane: number, dir?: string|null}} [resolvedTarget] - Target persisted before expensive work.
- * @property {(chunks: string[]) => Promise<boolean>} [sendTranscriptOnce] - Durable transcript effect using transport-idempotent chunk nonces.
+ * @property {(attachmentId: string, chunks: string[]) => Promise<boolean>} [sendTranscriptOnce] - Per-attachment durable transcript effect using transport-idempotent chunk nonces.
  * @property {(attachmentId: string) => string|null} [getCachedTranscript] - Exact private STT result already journaled for retry.
  * @property {(attachmentId: string, transcript: string) => string} [saveTranscript] - Persist STT before reply or pane delivery.
  * @property {(content: string|object) => Promise<void>} reply - Reply to this message
