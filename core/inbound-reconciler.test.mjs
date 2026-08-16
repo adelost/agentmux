@@ -7,7 +7,7 @@ import { createDeliveryBroker } from "./delivery-broker.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
 import { createDiscordInboundStore } from "./discord-inbound-store.mjs";
 import { createInboundReconciler, formatRecoveredNotice } from "./inbound-reconciler.mjs";
-import { mergeInboundTarget } from "./inbound-target.mjs";
+import { mergeInboundTarget, resolveConfiguredInboundTarget } from "./inbound-target.mjs";
 
 const cleanups = [];
 afterEach(() => {
@@ -75,6 +75,40 @@ const target = (msg) => ({
 });
 
 describe("Discord inbound reconciliation", () => {
+  it("persists and delivers mapped nonzero panes while explicit prefixes override them", async () => {
+    const root = tempRoot();
+    const store = createDiscordInboundStore({ rootDir: root,
+      downloadBuffer: async () => Buffer.from("image") });
+    const mapping = { name: "lsrc", pane: 5, dir: "/repo/lsrc" };
+    const delivered = [];
+    const reconciler = createInboundReconciler({
+      store,
+      state: state(),
+      resolveTarget: (msg) => resolveConfiguredInboundTarget(mapping, msg.text),
+      onMessage: async (msg) => {
+        delivered.push({ id: msg.id, target: msg.resolvedTarget });
+        return { delivered: true };
+      },
+    });
+    const channel = fakeChannel({});
+    const ordinary = message("91", "500", { text: "inspect routing" });
+    const image = message("92", "500", { text: "", attachments: [{
+      id: "image-1", name: "frame.png", url: "signed-image", contentType: "image/png",
+    }] });
+    const explicit = message("93", "500", { text: ".2 inspect routing" });
+
+    await reconciler.enqueue(ordinary, channel);
+    await reconciler.enqueue(image, channel);
+    await reconciler.enqueue(explicit, channel);
+
+    expect(delivered.map(({ id, target: value }) => [id, value.agentName, value.pane]))
+      .toEqual([["91", "lsrc", 5], ["92", "lsrc", 5], ["93", "lsrc", 2]]);
+    expect(store.read("500", "91").target.pane).toBe(5);
+    expect(store.read("500", "92").target.pane).toBe(5);
+    expect(store.read("500", "93").target.pane).toBe(2);
+    expect(resolveConfiguredInboundTarget(mapping, ".0 use primary").pane).toBe(0);
+  });
+
   it("formats one batch-level recovery notice", () => {
     expect([formatRecoveredNotice(1), formatRecoveredNotice(2)]).toEqual([
       "ℹ Recovered 1 message missed during reconnect.",
