@@ -9,7 +9,7 @@
 # ON-file format (shell vars, one per line):
 #   AGENT=ai            # amux session
 #   PANE=3              # amux pane
-#   REPO=/home/adelost/lsrc/ai-dsl
+#   REPO=$HOME/projects/my-project
 #   TASKFILE=.planning/TASK-M9-operation-model-lint.md   # pointer used in the nudge
 #   LOGFILE=.planning/M9-LOG.md                          # wave-log; its mtime = progress signal
 #   STALE_MIN=110       # optional, default 110 (just under 2h cron cadence)
@@ -40,7 +40,7 @@
 #
 # Install:  */29 * * * *  .../bin/task-keeper-cron.sh >> ~/.cache/task-keeper.log 2>&1
 set -uo pipefail
-export HOME="${HOME:-/home/adelost}"
+export HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
 export PATH="${HOME}/.nvm/versions/node/v22.19.0/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin"
 AMUX="${AMUX:-${HOME}/.nvm/versions/node/v22.19.0/bin/amux}"
 KEEPER_DIR="${KEEPER_DIR:-${HOME}/.agentmux-keeper}"   # overridable for tests
@@ -60,7 +60,10 @@ mkdir -p "$KEEPER_DIR"
 # The agent server runs on a NAMED socket (agent-cli.mjs default); bare tmux
 # from cron hits the default socket and resolves no panes, silently forcing
 # the jsonl fallback path on every run. Same fix as fleet-progress-cron.sh.
-TMUX_SOCKET="${TMUX_SOCKET:-/tmp/openclaw-claude.sock}"
+if [ -z "${TMUX_SOCKET:-}" ] && [ -f "$HOME/.agentmux/.env" ]; then
+  TMUX_SOCKET="$(sed -n 's/^TMUX_SOCKET=//p' "$HOME/.agentmux/.env" | tail -1)"
+fi
+TMUX_SOCKET="${TMUX_SOCKET:-/tmp/agentmux-tmux.sock}"
 tmux() { command tmux -S "$TMUX_SOCKET" "$@"; }
 
 # Newest Claude session-jsonl mtime for a pane, or 0 if unresolvable. The pane's

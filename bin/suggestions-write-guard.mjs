@@ -1,12 +1,25 @@
 #!/usr/bin/env node
 
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
-// The Suggestions API host, duplicated here on purpose and ONLY here. This file
-// must be able to decide "is this even about Suggestions?" without loading the
-// module that owns the real rule, because the fallback below exists precisely
-// for the case where that module cannot be loaded.
-const SUGGESTIONS_HOST = /https:\/\/(?:suggest|suggestions)\.v1d\.io\/api\//iu;
+function configuredBaseUrl() {
+  if (process.env.SUGGEST_BASE_URL) return process.env.SUGGEST_BASE_URL;
+  try {
+    const envText = readFileSync(join(homedir(), ".agentmux", ".env"), "utf8");
+    return envText.match(/^SUGGEST_BASE_URL=(.+)$/mu)?.[1]?.trim() || null;
+  } catch { return null; }
+}
+
+function configuredApiPrefix() {
+  const raw = configuredBaseUrl();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    return url.protocol === "https:" ? `${url.origin}/api/` : null;
+  } catch { return null; }
+}
 
 const block = (reason) => {
   console.error(`BLOCKED: ${reason}`);
@@ -21,6 +34,9 @@ catch (error) {
 }
 if (payload.tool_name !== "Bash") process.exit(0);
 const command = String(payload.tool_input?.command ?? "");
+const baseUrl = configuredBaseUrl();
+const apiPrefix = configuredApiPrefix();
+if (!baseUrl || !apiPrefix) process.exit(0);
 
 // Imported dynamically so a broken or missing dependency lands in this catch
 // instead of aborting the process at module load. A top-level import failure
@@ -37,7 +53,7 @@ try {
   // guess at the nuanced rule with a second copy of it that would drift. This is
   // deliberately blunter than the real check and says so, because a guard that
   // cannot evaluate must fail CLOSED on the surface it protects.
-  if (SUGGESTIONS_HOST.test(command)) {
+  if (command.includes(apiPrefix)) {
     block(`the Suggestions guard could not load its rule (${error.message}), so it is `
       + "refusing every command that touches the Suggestions API. Reinstall the release "
       + "(node bin/install-release.mjs --sha <sha>) and retry.");
@@ -47,10 +63,10 @@ try {
 }
 
 try {
-  const result = inspect(command);
+  const result = inspect(command, { baseUrl });
   if (result.blocked) block(result.reason);
 } catch (error) {
-  if (SUGGESTIONS_HOST.test(command)) {
+  if (command.includes(apiPrefix)) {
     block(`the Suggestions guard threw while evaluating this command (${error.message}); `
       + "refusing it rather than passing an unchecked mutation.");
   }

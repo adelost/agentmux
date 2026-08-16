@@ -9,6 +9,7 @@ import {
 import { createTestDb } from "./testdb.mjs";
 
 const NOW = "2026-07-28T12:00:00.000Z";
+const PUBLIC_ORIGIN = "https://link.example.test";
 
 feature("release payload and signature", () => {
   component("canonical JSON is stable and the signature verifies, tamper fails", {
@@ -21,6 +22,7 @@ feature("release payload and signature", () => {
         changelog: "test",
         createdAt: NOW,
         expiresAt: "2026-08-11T12:00:00.000Z",
+        publicOrigin: PUBLIC_ORIGIN,
       });
       return { publicKey: publicKey.export({ type: "spki", format: "pem" }), privateKey: privateKey.export({ type: "pkcs8", format: "pem" }), payload };
     }],
@@ -41,7 +43,7 @@ feature("release payload and signature", () => {
       expect(r.wrongKey).toBe(false);
       expect(r.canonicalTwice).toBe(true);
       expect(r.payload.apk.sha256).toMatch(/^[0-9a-f]{64}$/u);
-      expect(r.payload.apk.url).toBe("https://link.v1d.io/releases/agentmux-link/phone/app-42.apk");
+      expect(r.payload.apk.url).toBe(`${PUBLIC_ORIGIN}/releases/agentmux-link/phone/app-42.apk`);
     }],
   });
 
@@ -65,6 +67,7 @@ feature("release payload and signature", () => {
         versionName: "1.2.0",
         createdAt: NOW,
         expiresAt: "2026-08-11T12:00:00.000Z",
+        publicOrigin: PUBLIC_ORIGIN,
       });
       const responses = new Map([
         ["manifest-v1.json", new Response(JSON.stringify(payload))],
@@ -77,7 +80,9 @@ feature("release payload and signature", () => {
         fetchImpl: async (url) => responses.get(url.split("/").at(-1)) || new Response("", { status: 404 }),
       };
     }],
-    when: ["verifying the public channel", (input) => verifyPublishedRelease({ ...input, channel: "phone" })],
+    when: ["verifying the public channel", (input) => verifyPublishedRelease({
+      ...input, channel: "phone", publicOrigin: PUBLIC_ORIGIN,
+    })],
     then: ["all public bytes match", (result) => {
       expect(result).toBeUndefined();
     }],

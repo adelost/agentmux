@@ -6,9 +6,9 @@ import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
 import { describeManglingRisk, findManglingRiskInPayload } from "./mangled-swedish.mjs";
+import { normalizeServiceBaseUrl } from "./runtime-defaults.mjs";
 
 const MUTATING_METHODS = new Set(["POST", "PATCH", "PUT", "DELETE"]);
-const PUBLIC_SUGGESTIONS_HOST = /https:\/\/(?:suggest|suggestions)\.v1d\.io\/api\//iu;
 const MUTATING_SHELL = /(?:\b(?:curl|wget)\b[\s\S]*(?:\s-X\s*|--request(?:=|\s+)|\s-(?:d|F)\s|--data(?:-binary|raw|urlencode)?(?:=|\s+)|--form(?:=|\s+))|\b(?:fetch|Request)\s*\([\s\S]*?\bmethod\s*[:=]\s*["']?(?:POST|PATCH|PUT|DELETE))/iu;
 const CANONICAL_CLIENT = /(?:^|[;&|]\s*)(?:env\s+)?(?:node\s+\S*\/)?amux-suggest(?:\.mjs)?(?:\s|$)/mu;
 
@@ -18,9 +18,15 @@ const sha256 = (bytes) => `sha256:${createHash("sha256").update(bytes).digest("h
  * WHAT: Checks direct Suggestions mutations for bypasses of the canonical file writer.
  * WHY: Keeps agent-authored human text behind exact UTF-8 verification before transport.
  */
-export function inspectSuggestionsMutationCommand(command) {
+export function inspectSuggestionsMutationCommand(command, {
+  baseUrl = process.env.SUGGEST_BASE_URL,
+} = {}) {
   const text = String(command ?? "");
-  if (!PUBLIC_SUGGESTIONS_HOST.test(text) || !MUTATING_SHELL.test(text)) {
+  if (!baseUrl) return { blocked: false, reason: null };
+  const origin = normalizeServiceBaseUrl(baseUrl, "Suggestions base URL", {
+    allowHttpLoopback: process.env.NODE_ENV === "test",
+  });
+  if (!text.includes(`${origin}/api/`) || !MUTATING_SHELL.test(text)) {
     return { blocked: false, reason: null };
   }
   if (CANONICAL_CLIENT.test(text)
@@ -173,7 +179,7 @@ function assertReadback(responseBytes, expected) {
  * WHY: Keeps success bound to byte-identical authoring and storage evidence.
  */
 export async function sendSuggestionsRequest({
-  baseUrl = "https://suggest.v1d.io",
+  baseUrl = process.env.SUGGEST_BASE_URL,
   path,
   method,
   bodyFile,
@@ -190,7 +196,9 @@ export async function sendSuggestionsRequest({
     throw new Error(`method must be one of ${[...MUTATING_METHODS].join(", ")}`);
   }
   if (!token) throw new Error("Suggestions credential is empty");
-  const base = new URL(baseUrl);
+  const base = new URL(normalizeServiceBaseUrl(baseUrl, "Suggestions base URL", {
+    allowHttpLoopback: process.env.NODE_ENV === "test",
+  }));
   const target = new URL(path, base);
   if (target.origin !== base.origin || !target.pathname.startsWith("/api/")) {
     throw new Error("request path must stay under the configured /api/ origin");

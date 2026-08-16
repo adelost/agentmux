@@ -1,0 +1,42 @@
+name = "agentmux-link"
+main = "src/index.mjs"
+compatibility_date = "2026-07-20"
+workers_dev = true
+preview_urls = true
+
+# Copy this file to link/wrangler.toml and provide your own Cloudflare resource
+# names/IDs. A custom domain is optional and belongs only in the local copy.
+
+[[d1_databases]]
+binding = "LINK_DB"
+database_name = "agentmux_link_mailbox"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+[[r2_buckets]]
+binding = "LINK_VOICE"
+bucket_name = "agentmux-link-voice"
+
+[[r2_buckets]]
+binding = "LINK_RELEASES"
+bucket_name = "agentmux-link-releases"
+
+[vars]
+LINK_AUTH_ORIGIN = "https://identity.example.com"
+LINK_AUTH_CALLBACK_URL = "https://link.example.com/auth/callback"
+LINK_AUTH_APP_ID = "agentmux-link"
+SESSION_TTL_SECONDS = "2592000"
+EXCHANGE_CODE_TTL_SECONDS = "60"
+CONNECTOR_LEASE_SECONDS = "60"
+MAX_TEXT_CHARS = "4000"
+MAX_AUDIO_BYTES = "5242880"
+RATE_SEND_PER_MINUTE = "30"
+RATE_UPLOAD_PER_MINUTE = "10"
+RATE_POLL_PER_MINUTE = "120"
+LINK_TARGETS = "project:0|Primary agent,windows|Windows host"
+CONNECTOR_TARGETS_WSL = "project:0"
+CONNECTOR_TARGETS_WINDOWS = "windows"
+LINK_PRIVATE_DISCOVERY_URLS = ""
+
+# Add secrets with `wrangler secret put`:
+# LINK_AUTH_CLIENT_SECRET, LINK_AUTH_STATE_SECRET,
+# CONNECTOR_TOKEN_WSL, CONNECTOR_TOKEN_WINDOWS.

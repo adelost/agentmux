@@ -6,12 +6,18 @@ if [ -z "${HOME:-}" ]; then
   export HOME
 fi
 export PATH="$HOME/.local/bin:/usr/bin:/bin:${PATH:-}"
-export TMUX_SOCKET="${TMUX_SOCKET:-/tmp/openclaw-claude.sock}"
+if [ -z "${TMUX_SOCKET:-}" ] && [ -f "$HOME/.agentmux/.env" ]; then
+  TMUX_SOCKET="$(sed -n 's/^TMUX_SOCKET=//p' "$HOME/.agentmux/.env" | tail -1)"
+fi
+export TMUX_SOCKET="${TMUX_SOCKET:-/tmp/agentmux-tmux.sock}"
 export AGENT_CONFIG="${AGENT_CONFIG:-$HOME/.config/agent/agents.yaml}"
 
 AGENTMUX_DIR="${AGENTMUX_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 NODE_BIN="${NODE_BIN:-$HOME/.nvm/versions/node/v22.19.0/bin/node}"
-OPENCLAW_WORKSPACE="${OPENCLAW_WORKSPACE:-$HOME/.openclaw/workspace}"
+if [ -z "${OPENCLAW_WORKSPACE:-}" ] && [ -f "$HOME/.agentmux/.env" ]; then
+  OPENCLAW_WORKSPACE="$(sed -n 's/^OPENCLAW_WORKSPACE=//p' "$HOME/.agentmux/.env" | tail -1)"
+fi
+AMUX_WORKSPACE="${OPENCLAW_WORKSPACE:-${AMUX_WORKSPACE:-$HOME/.agentmux/workspace}}"
 AGENTMUX_DREAM_LOG="${AGENTMUX_DREAM_LOG:-$HOME/.cache/agentmux-dream.log}"
 mkdir -p "$(dirname "$AGENTMUX_DREAM_LOG")"
 
@@ -34,7 +40,7 @@ finalize() {
 trap finalize EXIT
 
 dream_status=0
-dream_output="$("$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" dream --quiet --workspace "$OPENCLAW_WORKSPACE" 2>&1)" || dream_status=$?
+dream_output="$("$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" dream --quiet --workspace "$AMUX_WORKSPACE" 2>&1)" || dream_status=$?
 if [ -n "$dream_output" ]; then
   printf "%s\n" "$dream_output" >> "$AGENTMUX_DREAM_LOG"
 fi

@@ -20,7 +20,10 @@ LOG="$STATE_DIR/watchdog.log"
 HEARTBEAT="$STATE_DIR/bridge-heartbeat.json"
 QUOTA_HEARTBEAT="$STATE_DIR/quota-recovery-heartbeat.json"
 INTERVENTIONS="$STATE_DIR/watchdog-interventions"
-TMUX_SOCKET="${TMUX_SOCKET:-/tmp/openclaw-claude.sock}"
+if [ -z "${TMUX_SOCKET:-}" ] && [ -f "$HOME/.agentmux/.env" ]; then
+  TMUX_SOCKET="$(sed -n 's/^TMUX_SOCKET=//p' "$HOME/.agentmux/.env" | tail -1)"
+fi
+TMUX_SOCKET="${TMUX_SOCKET:-/tmp/agentmux-tmux.sock}"
 TMUX_FAILURES="$STATE_DIR/tmux-watchdog-failures"
 FLEET_RESTART_REQUEST="${AMUX_FLEET_RESTART_REQUEST:-$STATE_DIR/fleet-restart-request.json}"
 STALE_SEC=300

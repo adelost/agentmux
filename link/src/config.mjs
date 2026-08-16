@@ -8,19 +8,45 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]
 export const HEX_SECRET_RE = /^[0-9a-f]{64,256}$/iu;
 const CONTROL_CHARS_RE = /[\u0000-\u0020\u007f]/u;
 
+function httpsUrl(value, { callback = false } = {}) {
+  try {
+    const url = new URL(String(value || ""));
+    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) return null;
+    if (callback && url.pathname !== "/auth/callback") return null;
+    if (!callback && url.pathname !== "/") return null;
+    return url.toString().replace(/\/$/u, "");
+  } catch { return null; }
+}
+
+/** WHAT: Resolves Link's identity-provider bindings. WHY: Keeps self-hosted Link separate from one operator's domain. */
+export function linkAuthConfig(env) {
+  return {
+    origin: httpsUrl(env.LINK_AUTH_ORIGIN ?? env.V1D_AUTH_ORIGIN),
+    callbackUrl: httpsUrl(env.LINK_AUTH_CALLBACK_URL ?? env.V1D_AUTH_CALLBACK_URL, {
+      callback: true,
+    }),
+    appId: String(env.LINK_AUTH_APP_ID ?? env.V1D_AUTH_APP_ID ?? ""),
+    clientSecret: String(env.LINK_AUTH_CLIENT_SECRET ?? env.V1D_AUTH_CLIENT_SECRET ?? ""),
+    stateSecret: String(env.LINK_AUTH_STATE_SECRET ?? env.V1D_AUTH_STATE_SECRET ?? ""),
+  };
+}
+
 /** WHAT: Checks that every binding and secret the worker needs is present. WHY: Keeps a misconfigured deploy from serving as if healthy. */
 export function configured(env) {
+  const auth = linkAuthConfig(env);
   return Boolean(
     env.LINK_DB?.prepare
     && env.LINK_VOICE?.get
     && env.LINK_RELEASES?.get
-    && env.V1D_AUTH_ORIGIN === "https://auth.v1d.io"
-    && env.V1D_AUTH_CALLBACK_URL === "https://link.v1d.io/auth/callback"
-    && env.V1D_AUTH_APP_ID === "agentmux-link"
-    && String(env.V1D_AUTH_CLIENT_SECRET || "").length >= 32
-    && HEX_SECRET_RE.test(String(env.V1D_AUTH_STATE_SECRET || ""))
+    && auth.origin
+    && auth.callbackUrl
+    && /^[a-z0-9][a-z0-9_-]{2,63}$/u.test(auth.appId)
+    && auth.clientSecret.length >= 32
+    && HEX_SECRET_RE.test(auth.stateSecret)
     && String(env.CONNECTOR_TOKEN_WSL || "").length >= 32
     && String(env.CONNECTOR_TOKEN_WINDOWS || "").length >= 32
+    && connectorTargets(env, "wsl").length > 0
+    && connectorTargets(env, "windows").length > 0
     && targetsForApp(env).length > 0
   );
 }
@@ -42,6 +68,12 @@ export function privateDiscoveryUrlsForApp(env) {
     .map((entry) => entry.trim().replace(/\/+$/u, ""))
     .filter((entry, index, rows) => entry && rows.indexOf(entry) === index)
     .slice(0, 8);
+}
+
+/** WHAT: Resolves connector-owned targets. WHY: Keeps private fleet identities in deployment config instead of source. */
+export function connectorTargets(env, source) {
+  const raw = source === "wsl" ? env.CONNECTOR_TARGETS_WSL : env.CONNECTOR_TARGETS_WINDOWS;
+  return String(raw || "").split(",").map((target) => target.trim()).filter(Boolean);
 }
 
 /** WHAT: Checks one request against its subject and client-IP windows. WHY: Prevents a single session or address from hammering one route. */

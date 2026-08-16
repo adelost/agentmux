@@ -107,16 +107,17 @@ export function shouldBlockSend({ text, park, force = false } = {}) {
   return !isSlashCommand(text);
 }
 
-/**
+/*
  * Two-strike confirm for a parked pane's Discord briefs. A park exists to stop
  * silent work on a downgraded model, but the human is not always the one who
- * downgraded it and may deliberately want the new model (Mattias: fable→opus is
+ * downgraded it and may deliberately want the new model (the operator: fable→opus is
  * fine now). So the FIRST brief after a park warns without delivering; a SECOND
  * brief is an explicit human confirmation ("send again") — deliver it and clear
  * the park so the pane and every later brief flow normally. A newer park
  * (different timestamp) re-warns. `warnedSinceMs` is the park we already warned
  * about; null on the first brief this incident.
  */
+/** WHAT: Returns the parked-pane send action. WHY: Prevents stale parks from swallowing intentional resends. */
 export function decideParkedSend({ park, warnedSinceMs = null } = {}) {
   if (!park) return { action: "deliver" };
   if (warnedSinceMs === park.sinceMs) return { action: "confirm" };

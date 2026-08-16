@@ -54,6 +54,7 @@ import { createAgentRouter } from "./core/agent-router.mjs";
 import { pinRuntimeExecutable } from "./core/runtime-helper.mjs";
 import { cmdSleepWatch } from "./cli/sleep.mjs";
 import { createAudioOutbox } from "./core/audio-outbox.mjs";
+import { DEFAULT_TMUX_SOCKET, DEFAULT_TTS_VOICE } from "./core/runtime-defaults.mjs";
 
 // --- Config ---
 
@@ -85,8 +86,8 @@ const SHELL_PATH = process.env.SHELL_PATH
 // Keep the bridge on the same canonical server as the amux CLI. A divergent
 // default made model-watch observe Codex through jsonl but send Escape/model
 // keystrokes to a nonexistent socket.
-const TMUX_SOCKET = process.env.TMUX_SOCKET || "/tmp/openclaw-claude.sock";
-const TTS_VOICE = process.env.TTS_VOICE || "sv-SE-MattiasNeural";
+const TMUX_SOCKET = process.env.TMUX_SOCKET || DEFAULT_TMUX_SOCKET;
+const TTS_VOICE = process.env.TTS_VOICE || DEFAULT_TTS_VOICE;
 const STATE_FILE = process.env.STATE_FILE || "/tmp/agentmux-state.json";
 
 // Voice PWA. Defaults to 127.0.0.1 — expose via Tailscale Serve when

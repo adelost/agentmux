@@ -95,7 +95,7 @@ export function createKimiAgentRuntime({
 
   /**
    * WHAT: Answers a known Kimi dialog with its preselected first option
-   * (Enter). WHY: a CONSCIOUS workaround, written down as such on Mattias's
+   * (Enter). WHY: a CONSCIOUS workaround, written down as such on the operator's
    * 2026-08-07 directive — the real fix for "Trust this folder?" is the
    * launch-time pre-seed above; this backstop exists for upstream store drift
    * and for the cache-expiry hint, which cannot be pre-seeded. What Enter

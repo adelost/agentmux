@@ -13,17 +13,18 @@ const NOW = Date.now();
 function makeEnv(overrides = {}) {
   return {
     LINK_DB: createTestDb(),
-    V1D_AUTH_ORIGIN: "https://auth.v1d.io",
-    V1D_AUTH_APP_ID: "agentmux-link",
-    V1D_AUTH_CLIENT_SECRET: "client-secret",
-    V1D_AUTH_STATE_SECRET: SECRET,
-    V1D_AUTH_CALLBACK_URL: "https://link.v1d.io/auth/callback",
+    LINK_AUTH_ORIGIN: "https://identity.example.com",
+    LINK_AUTH_APP_ID: "agentmux-link",
+    LINK_AUTH_CLIENT_SECRET: "client-secret",
+    LINK_AUTH_STATE_SECRET: SECRET,
+    LINK_AUTH_CALLBACK_URL: "https://link.example.com/auth/callback",
     CONNECTOR_TOKEN_WSL: "wsl-token",
     CONNECTOR_TOKEN_WINDOWS: "win-token",
     LINK_TARGETS: "lsrc:3|L-source 3,lsrc:10|L-source 10,windows|Windows rescue",
     LINK_PRIVATE_DISCOVERY_URLS:
       "https://relay.example.ts.net:8443,http://agentmux.local:8080",
     CONNECTOR_TARGETS_WSL: "lsrc:3,lsrc:10",
+    CONNECTOR_TARGETS_WINDOWS: "windows",
     CONNECTOR_LEASE_SECONDS: "60",
     SESSION_TTL_SECONDS: "2592000",
     EXCHANGE_CODE_TTL_SECONDS: "60",
@@ -83,7 +84,7 @@ feature("deployment health", () => {
       const complete = makeEnv({
         LINK_VOICE: { get: async () => null },
         LINK_RELEASES: { get: async () => null },
-        V1D_AUTH_CLIENT_SECRET: "c".repeat(32),
+        LINK_AUTH_CLIENT_SECRET: "c".repeat(32),
         CONNECTOR_TOKEN_WSL: "w".repeat(32),
         CONNECTOR_TOKEN_WINDOWS: "x".repeat(32),
       });

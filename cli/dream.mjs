@@ -21,8 +21,9 @@ import {
   writeDreamOwnerInput,
 } from "../core/dream-owner.mjs";
 import { verifiedClaudeCompact, verifiedCodexCompact } from "../core/verified-compact.mjs";
+import { defaultWorkspace } from "../core/runtime-defaults.mjs";
 
-const DREAM_LOCK_PATH = () => join(process.env.HOME, ".openclaw", ".dream.lock");
+const DREAM_LOCK_PATH = () => join(defaultWorkspace(process.env.HOME), ".dream.lock");
 
 /** WHAT: Checks whether a pid answers signal 0. WHY: Keeps stale locks from suppressing future nights. */
 export function isPidAlive(pid) {
@@ -281,7 +282,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
     timeZone: "Europe/Stockholm", hour: "2-digit", minute: "2-digit", hour12: false,
   }).format(now);
   const workspaceDir = flags.workspace || process.env.OPENCLAW_WORKSPACE
-    || join(process.env.HOME, ".openclaw", "workspace");
+    || defaultWorkspace(process.env.HOME);
   const memPath = join(workspaceDir, "memory", `${dateKey}.md`);
   const agents = dependencies.agents || listAgents(ctx.configPath);
   const runtimeConfig = dependencies.runtimeConfig || loadConfig(ctx.configPath);

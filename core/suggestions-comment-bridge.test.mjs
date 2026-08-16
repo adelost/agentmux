@@ -1072,13 +1072,15 @@ if (process.argv[2] === "-l") {
     } finally { await fixture.close(); }
   });
 
-  it("pins production origin and loads only a private owned regular credential file", () => {
+  it("accepts an explicit self-hosted HTTPS origin and loads only a private credential file", () => {
     const root = makeRoot();
     const configPath = join(root, "bridge.yaml");
     writeFileSync(configPath, "baseUrl: http://127.0.0.1:9999\nprojects:\n  skydive:\n    agent: skydive\n    pane: 3\n");
-    expect(() => loadSuggestionsBridgeConfig(configPath)).toThrow("exactly https://suggest.v1d.io");
+    expect(() => loadSuggestionsBridgeConfig(configPath)).toThrow("must use HTTPS");
     expect(loadSuggestionsBridgeConfig(configPath, { allowTestOrigin: true }).baseUrl)
       .toBe("http://127.0.0.1:9999");
+    writeFileSync(configPath, "baseUrl: https://tasks.example.test\nprojects:\n  skydive:\n    agent: skydive\n    pane: 3\n");
+    expect(loadSuggestionsBridgeConfig(configPath).baseUrl).toBe("https://tasks.example.test");
 
     const tokenFile = join(root, "read-token");
     writeFileSync(tokenFile, `${TEST_READ_TOKEN}\n`, { mode: 0o600 });

@@ -142,7 +142,7 @@ export function writeDreamOwnerInput(document, {
   };
 }
 
-/** WHAT: Builds the exact mirrored task. WHY: Lets Mattias see every instruction before AMUX writes memory. */
+/** WHAT: Builds the exact mirrored task. WHY: Lets the operator see every instruction before AMUX writes memory. */
 export function dreamOwnerPrompt({
   owner, input, memPath, previousMemPath, dateKey, included, omitted, unreadable,
 }) {

@@ -192,7 +192,7 @@ feature("isAskToHuman provenance (SRC-0053 A)", () => {
   unit("a mere MENTION of the human in an agent thread is not a human ask", {
     when: ["questions about (not to) the human inside inter-agent threads", () => ([
       // Asks the PEER whether to escalate — the peer's ball.
-      isAskToHuman("Ska jag eskalera detta till Mattias?", "[from lsrc:2]\n\nquota-läget oklart"),
+      isAskToHuman("Ska jag eskalera detta till the operator?", "[from lsrc:2]\n\nquota-läget oklart"),
       // About the user, not to the user.
       isAskToHuman("Buggen drabbar användaren, ska jag fixa?", "[from skydive:2] triagera SKY-0091"),
       // "your" in a peer thread is the PEER's approval, not the human's.
@@ -202,9 +202,9 @@ feature("isAskToHuman provenance (SRC-0053 A)", () => {
   });
 
   unit("direct address or waiting-on-the-human keeps needs-you in an agent thread", {
-    when: ["replies that address Mattias or wait on his decision", () => ([
-      isAskToHuman("Mattias, vill du ha färg A eller B?", "[from ai:2] designfrågorna kvarstår"),
-      isAskToHuman("Vågen är bankad. Väntar på Mattias besked innan deploy.", "[from lsrc:2] status?"),
+    when: ["replies that address the operator or wait on his decision", () => ([
+      isAskToHuman("the operator, vill du ha färg A eller B?", "[from ai:2] designfrågorna kvarstår"),
+      isAskToHuman("Vågen är bankad. Väntar på the operator besked innan deploy.", "[from lsrc:2] status?"),
     ])],
     then: ["both are human asks", (result) => expect(result).toEqual([true, true])],
   });

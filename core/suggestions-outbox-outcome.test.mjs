@@ -15,6 +15,7 @@ const send = async ({ mutationId, fetchImpl, readPath }) => {
   const stateDir = join(root, "outbox");
   writeFileSync(bodyFile, `${JSON.stringify({ mutationId, source: "ai:4", comment: quote })}\n`);
   const error = await sendSuggestionsRequest({
+    baseUrl: "https://tasks.example.test",
     method: "PATCH", path: "/api/tickets/AI-0014/admin?project=ai",
     bodyFile, readPath, token: "test-token", stateDir, fetchImpl,
   }).then(() => null, (failure) => failure);

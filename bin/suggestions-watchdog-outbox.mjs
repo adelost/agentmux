@@ -18,6 +18,7 @@ import {
 } from "../core/suggestions-watchdog-outbox.mjs";
 import { writeGuardHeartbeat } from "../core/guard-heartbeat.mjs";
 import { readAllTurnsAcrossPanes } from "../core/jsonl-reader.mjs";
+import { DEFAULT_TMUX_SOCKET } from "../core/runtime-defaults.mjs";
 
 const DEFAULT_CONFIG = "~/.config/agent/suggestions-watchdog-outbox.yaml";
 
@@ -99,7 +100,7 @@ try {
     process.exit(0);
   }
   const agents = listAgents(agentConfigPath);
-  const tmux = createTmuxContext(process.env.TMUX_SOCKET || "/tmp/openclaw-claude.sock",
+  const tmux = createTmuxContext(process.env.TMUX_SOCKET || DEFAULT_TMUX_SOCKET,
     agentConfigPath);
   const availability = async ({ agent, pane, idleMs }) => {
     const paneStatus = await getPaneStatus(tmux, agent, pane);

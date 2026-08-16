@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible problem in the public Agentmux core
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste tokens, `.env`, private transcripts, session files, or vulnerability details here. See SECURITY.md for security reports.
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS/WSL version, Node version, tmux version, and coding engine.
+      placeholder: Ubuntu 24.04 on WSL2; Node 22; tmux 3.4; Codex CLI
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Local CLI/core
+        - Discord bridge
+        - Suggestions-compatible integration
+        - Agentmux Link self-hosting
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Exact commands and observable result, with private data removed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Sanitized diagnostics
+      description: Output from amux doctor and npm list --global agentmux --depth=0.
+      render: shell
+    validations:
+      required: true

@@ -2,7 +2,7 @@
 // Push the local weekly-quota snapshot to the Suggestions board.
 // Counterpart of the board's POST/GET /api/ops/quota: the board stores the
 // latest snapshot and shows the hint only to the authority owner. Freshness
-// is cron-paced by design ("behöver inte vara instant", Mattias 2026-07-15).
+// is cron-paced by design ("behöver inte vara instant", the operator 2026-07-15).
 import {
   closeSync,
   fsyncSync,

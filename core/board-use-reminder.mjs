@@ -1,8 +1,8 @@
-// Periodic incident reminder on board use (Mattias 2026-08-04).
+// Periodic incident reminder on board use (the operator 2026-08-04).
 //
 // The 2026-08-04 incident: agents drifted into repairing board machinery
 // instead of shipping the user's priorities, and the prose rule against it
-// was forgotten after /compact. Mattias's direction: the reminder must be
+// was forgotten after /compact. the operator's direction: the reminder must be
 // actively DELIVERED to the agent where the drift happens — at the board —
 // not sit in a file nobody re-reads. amux-suggest is the sanctioned board
 // mutation path, so every Nth use (or after a quiet gap) it emits the

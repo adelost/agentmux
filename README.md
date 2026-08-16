@@ -237,6 +237,7 @@ untrusted-data fencing, and overlap locking are built in. See
 - At least one supported coding-agent CLI:
   - Claude Code
   - Codex CLI
+  - Kimi Code
 - A Discord bot token if you want the Discord bridge
 
 ## Isolated worktree gates
@@ -278,8 +279,10 @@ bash bin/setup.sh
 ```
 
 The setup script checks prerequisites, installs npm dependencies, creates
-starter config files, and installs the fetched `origin/master` commit as a
-copied global npm package. It never `npm link`s the CLI to the checkout.
+starter config in `~/.agentmux/`, and installs the fetched `origin/master`
+commit as a copied global npm package. It never `npm link`s the CLI to the checkout.
+AMUX launches configured coding engines in their fully autonomous modes; this
+is an intentional product contract, not a hidden setup side effect.
 
 For later upgrades, fetch first and pass the full immutable commit identity:
 
@@ -295,7 +298,7 @@ and writes `~/.agentmux/release-receipt.json`. `amux doctor` turns red if the
 global package points into a Git worktree, the receipt or binary realpath drifts,
 hook hashes/behavior drift, or the running bridge reports another source SHA.
 
-Create or edit `agentmux.yaml`:
+Create or edit `~/.agentmux/agentmux.yaml`:
 
 ```yaml
 guild: "YOUR_DISCORD_SERVER_ID"
@@ -351,13 +354,13 @@ This creates or updates the project channels from `agentmux.yaml`.
 2. Enable Message Content Intent for the bot.
 3. Invite the bot to your server with permissions to send messages, read
    history, attach files, and manage channels.
-4. Put the token in `.env`:
+4. Put the token in `~/.agentmux/.env`:
 
 ```bash
 DISCORD_TOKEN=your-token-here
 ```
 
-5. Put your Discord server ID in `agentmux.yaml`.
+5. Put your Discord server ID in `~/.agentmux/agentmux.yaml`.
 6. Start agentmux and run `/sync`.
 
 ## Everyday Commands
@@ -451,7 +454,8 @@ amux todo-remind --dry         # preview push
 bin/install-todo-cron.sh       # enable daily reminder
 ```
 
-Backed by `~/.openclaw/workspace/memory/tasks.md`. Full docs in [`docs/todo.md`](docs/todo.md).
+Backed by `~/.agentmux/workspace/memory/tasks.md`. An existing OpenClaw file
+can be reused explicitly with `AMUX_TODOS_PATH`. Full docs in [`docs/todo.md`](docs/todo.md).
 
 Suggestions comment relay:
 
@@ -462,8 +466,10 @@ bin/install-suggestions-comment-bridge.sh run-once
 bin/install-suggestions-comment-bridge.sh remove
 ```
 
-The default reusable mapping is `skydive -> skydive:3`. Full routing,
-answer/retry, and security contract: [`docs/suggestions-comment-bridge.md`](docs/suggestions-comment-bridge.md).
+Copy `suggestions-comment-bridge.yaml.example`, set your own HTTPS `baseUrl`
+and map projects to panes. With no configured URL the integration is disabled.
+Full routing, answer/retry, and security contract:
+[`docs/suggestions-comment-bridge.md`](docs/suggestions-comment-bridge.md).
 
 Suggestions watchdog outbox delivery:
 
@@ -491,15 +497,17 @@ or CRLF in the quote file is treated as text-file framing, not quote content.
 
 ```bash
 amux-suggest --method PATCH \
-  --path '/api/tickets/AI-0014/admin?project=ai' \
-  --body-file /tmp/ai-0014-update.json \
-  --expect-file /tmp/mattias-quote.txt \
-  --read-path '/api/tickets/AI-0014?project=ai'
+  --base-url 'https://tasks.example.com' \
+  --path '/api/tickets/DEMO-0014/admin?project=demo' \
+  --body-file /tmp/demo-0014-update.json \
+  --expect-file /tmp/original-quote.txt \
+  --read-path '/api/tickets/DEMO-0014?project=demo'
 ```
 
 `bin/install-hooks.mjs` installs a `PreToolUse/Bash` guard that rejects direct
-inline curl/Python mutations to the public Suggestions API. Read-only calls
-remain available. The guard is at the authoring boundary because JSON, HTTP,
+inline curl/Python mutations to the configured Suggestions API. With no
+`SUGGEST_BASE_URL` it is inert. Read-only calls remain available. The guard is
+at the authoring boundary because JSON, HTTP,
 and Suggestions storage already preserve Unicode; a retyped ASCII quote cannot
 be reconstructed downstream.
 
@@ -522,8 +530,9 @@ amux log frontend -p 1
 Generated `.agents/CLAUDE.md` and `.agents/AGENTS.md` files teach Claude Code
 and Codex how to use these commands from inside project panes. They also carry
 the shared ownership policy: one active feature per agent, one end-to-end owner
-per feature, self-claim from READY work, targeted checks and owner-driven
-merge/deploy. A project manager is an optional sidecar that watches capacity,
+per feature, targeted checks and owner-driven merge/deploy. When a work board
+is configured, agents may self-claim explicitly claimable work. A project
+manager is an optional sidecar that watches capacity,
 blockers, dropped work and duplicates; it is not a mandatory route for tasks,
 review, merge or delivery. Dormant coding panes stay dormant until a real task
 targets them.
@@ -538,11 +547,13 @@ Common `.env` variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `DISCORD_TOKEN` | required | Discord bot token |
-| `AGENTMUX_YAML` | `./agentmux.yaml` | Config file path |
-| `TMUX_SOCKET` | `/tmp/agentmux.sock` | tmux socket used by agentmux |
+| `DISCORD_TOKEN` | unset | Discord bot token; required only for the bridge |
+| `AGENTMUX_YAML` | `~/.agentmux/agentmux.yaml` | Config file path |
+| `TMUX_SOCKET` | `/tmp/agentmux-tmux.sock` | tmux socket used by agentmux |
 | `TIMEOUT_S` | `600` | Max wait for a pane response |
-| `TTS_VOICE` | `sv-SE-MattiasNeural` | edge-tts voice |
+| `TTS_VOICE` | `en-US-AriaNeural` | edge-tts voice |
+| `AMUX_OPERATOR_NAME` | `the operator` | Human-facing operator label |
+| `SUGGEST_BASE_URL` | unset | Optional self-hosted Suggestions-compatible board |
 | `AGENTMUX_RECORD` | `0` | Save request/response recordings when set to `1` |
 
 See `agentmux.yaml.example` for a fuller project config example.
@@ -553,6 +564,10 @@ See `agentmux.yaml.example` for a fuller project config example.
   and recovery commands.
 - [CLI Reference](docs/cli.md): `amux` commands, log modes, timelines, and
   orchestrator commands.
+- [Public distribution](docs/public-distribution.md): core/integration boundary
+  and the no-private-default contract.
+- [Support](SUPPORT.md): supported surface and a safe diagnostic bundle.
+- [Security](SECURITY.md): private reporting and the explicit autonomy model.
 
 ## Troubleshooting
 
@@ -580,4 +595,4 @@ npm test
 
 ## License
 
-MIT
+[MIT](LICENSE)

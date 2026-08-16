@@ -6,7 +6,7 @@
 #
 # Backend: Gemini 2.5 Pro. Benchmark 2026-05-27: Whisper-1 misheard tech
 # terms ("Gemini"→"Yemeni", "diarization"→"deresation"); Gemini spells
-# Swedish + jargon correctly and is cheaper. Mattias 2026-07-08: accuracy
+# Swedish + jargon correctly and is cheaper. the operator 2026-07-08: accuracy
 # beats latency for voice — never downgrade to flash models.
 #
 # Usage: transcribe-whisper.sh <audio_file> [language]

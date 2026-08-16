@@ -3,12 +3,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAudioOutbox } from "../core/audio-outbox.mjs";
+import { DEFAULT_TTS_VOICE } from "../core/runtime-defaults.mjs";
 
 /**
  * WHAT: Names the Swedish voice used when no explicit voice is requested.
  * WHY: Keeps CLI and tests aligned on one predictable default.
  */
-export const DEFAULT_SPEECH_VOICE = "sv-SE-MattiasNeural";
+export const DEFAULT_SPEECH_VOICE = DEFAULT_TTS_VOICE;
 
 /**
  * WHAT: Defines the maximum length of one spoken mobile update.

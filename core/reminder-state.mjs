@@ -173,7 +173,7 @@ export const DRIFT_SECTIONS = [
       "No --no-verify, no swallowed errors, no skipped tests.",
   },
   // Incident 2026-08-04: the fleet spent a night repairing its own
-  // coordination machinery while Mattias's three product priorities stood
+  // coordination machinery while the operator's three product priorities stood
   // still. The rule existed as prose and was forgotten after /compact —
   // which is exactly the failure this rotation exists to counter, so the
   // incident rule rides the same active channel as the rules it joins.
@@ -182,14 +182,14 @@ export const DRIFT_SECTIONS = [
     section: null,
     label: "prioritet > maskineri (incident 2026-08-04: hitta aldrig på eget scope)",
     directive: "before touching the board or picking work, name which of " +
-      "Mattias's written priorities the task serves — if you cannot, stand " +
-      "still and say so. Write his decisions verbatim to a repo file BEFORE " +
+      "the operator's written priorities the task serves; if you cannot, stand " +
+      "still and say so. Write their decisions verbatim to a repo file BEFORE " +
       "continuing. Never repair tooling/board/bookkeeping in order to " +
       "bookkeep; the receipt is commit + deploy + what the user can now DO.",
   },
 ];
 
-/**
+/*
  * The reminder text sent to the pane. Short by design — long reminders
  * get ignored. Refers to the .agents/CLAUDE.md file because that's where
  * the rules live and are always system-context-loaded.
@@ -207,7 +207,7 @@ export const DRIFT_SECTIONS = [
  * naming one hardcoded rule. Each message stays one-rule short (that's
  * why reminders land at all) while every drift-prone rule gets its turn.
  *
- * Behavior change in 1.20.90 (Mattias 2026-07-11): mention-all,
+ * Behavior change in 1.20.90 (the operator 2026-07-11): mention-all,
  * deep-dive-one. Rotation alone left a rule unmentioned for
  * 40×N turns; now every reminder lists ALL drift-prone rules as
  * one-liners while the rotating rule keeps the re-read + the
@@ -218,6 +218,7 @@ export const DRIFT_SECTIONS = [
  * @param {number} turnCount - user turns since the pane's last refresh
  * @param {number} reminderCount - reminders already sent to this pane
  */
+/** WHAT: Formats one rotating coordination reminder. WHY: Keeps persistent rules visible without repeating every detail. */
 export function formatReminderMessage(turnCount, reminderCount = 0) {
   const idx = reminderCount % DRIFT_SECTIONS.length;
   const rule = DRIFT_SECTIONS[idx];

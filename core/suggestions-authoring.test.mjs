@@ -11,6 +11,8 @@ import {
 
 const mutationId = "11111111-1111-4111-8111-111111111111";
 const exactQuote = "Tycker färgborder här är lite för diskret — behåll ÅÄÖåäö exakt.";
+const SUGGESTIONS_BASE_URL = "https://tasks.example.test";
+process.env.SUGGEST_BASE_URL = SUGGESTIONS_BASE_URL;
 
 const fixture = (comment = exactQuote) => {
   const root = mkdtempSync(join(tmpdir(), "amux-suggest-unicode-"));
@@ -27,7 +29,7 @@ feature("Suggestions authoring boundary", () => {
     when: ["inspecting the AI-0008 heredoc shape", () => inspectSuggestionsMutationCommand(`
 python3 - <<'PY'
 body={"comment":"modell-omladdning pa delade 3090:an, vilket kraver ett GPU-fonster"}
-urllib.request.Request("https://suggest.v1d.io/api/tickets/AI-0008/admin?project=ai",
+urllib.request.Request("https://tasks.example.test/api/tickets/AI-0008/admin?project=ai",
   data=json.dumps(body).encode(), method="PATCH")
 PY`)],
     then: ["the command is denied at the authoring seam", (result) => {
@@ -39,10 +41,10 @@ PY`)],
   unit("keeps read-only calls and the canonical client available", {
     when: ["inspecting safe command forms", () => ({
       read: inspectSuggestionsMutationCommand(
-        "curl 'https://suggest.v1d.io/api/tickets/AI-0014?project=ai'",
+        "curl 'https://tasks.example.test/api/tickets/AI-0014?project=ai'",
       ),
       client: inspectSuggestionsMutationCommand(
-        "amux-suggest --method PATCH --base-url https://suggest.v1d.io --path /api/tickets/AI-0014/admin --body-file /tmp/body.json",
+        "amux-suggest --method PATCH --base-url https://tasks.example.test --path /api/tickets/AI-0014/admin --body-file /tmp/body.json",
       ),
     })],
     then: ["neither is denied", ({ read, client }) => {
@@ -72,7 +74,7 @@ PY`)],
         encoding: "utf8",
         input: JSON.stringify({
           tool_name: "Bash",
-          tool_input: { command: "curl -X PATCH https://suggest.v1d.io/api/tickets/AI-0014/admin -d @body.json" },
+          tool_input: { command: "curl -X PATCH https://tasks.example.test/api/tickets/AI-0014/admin -d @body.json" },
         }),
       },
     )],

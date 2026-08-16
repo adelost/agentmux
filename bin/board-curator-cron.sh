@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # board-curator-cron.sh — periodic ticket-quality pass, delegated to brokers.
 #
-# WHY (Mattias, 2026-07-15): tickets rot in three ways nobody owns between
+# WHY: tickets rot in three ways nobody owns between
 # waves: duplicates accumulate (lsrc:1's retro tickets overlapped SRC-0035/
 # 0036 the same night they were filed), unclear tickets stall workers until
 # a propose-first round-trip, and "done" sometimes isn't (phantom-close,
@@ -31,7 +31,7 @@
 #          entry (script must exist on the running checkout). Run AFTER the
 #          merge has landed on the checkout the crontab points at.
 set -uo pipefail
-export HOME="${HOME:-/home/adelost}"
+export HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
 export PATH="${HOME}/.nvm/versions/node/v22.19.0/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin"
 AMUX="${AMUX:-${HOME}/.nvm/versions/node/v22.19.0/bin/amux}"
 CURL="${CURL:-curl}"
@@ -41,7 +41,10 @@ source "$SCRIPT_DIR/guard-heartbeat.sh"
 
 WATCH_DIR="${WATCH_DIR:-${HOME}/.agentmux/fleet-watch}"
 CONF="${CONF:-${WATCH_DIR}/fleets.conf}"
-BOARD_URL="${BOARD_URL:-https://suggest.v1d.io}"
+BOARD_URL="${BOARD_URL:-${SUGGEST_BASE_URL:-}}"
+if [ -z "$BOARD_URL" ] && [ -f "$HOME/.agentmux/.env" ]; then
+  BOARD_URL="$(sed -n 's/^SUGGEST_BASE_URL=//p' "$HOME/.agentmux/.env" | tail -1)"
+fi
 READ_TOKEN_FILE="${READ_TOKEN_FILE:-${HOME}/.config/agent/suggestions-read-token}"
 CURATE_COOLDOWN_MIN="${CURATE_COOLDOWN_MIN:-55}"   # never more than ~hourly per fleet
 DRY="${DRY:-0}"
@@ -54,6 +57,7 @@ guard_heartbeat_metric boardFailures 0
 fleets=0; briefs=0; board_failures=0
 
 mkdir -p "$WATCH_DIR"
+[ -n "$BOARD_URL" ] || { echo "[$(date -Is)] Suggestions disabled (set SUGGEST_BASE_URL) → skip"; exit 0; }
 [ -f "${WATCH_DIR}/OFF" ] && { echo "[$(date -Is)] global OFF → skip"; exit 0; }
 [ -f "$CONF" ] || { echo "[$(date -Is)] no fleets.conf at $CONF → skip"; exit 0; }
 

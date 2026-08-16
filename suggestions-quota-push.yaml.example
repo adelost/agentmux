@@ -1,7 +1,7 @@
 # Suggestions quota push: sends the local weekly-quota snapshot (Claude +
 # Codex) to the board so the authority owner sees a quota hint there.
 # Copy to ~/.config/agent/suggestions-quota-push.yaml.
-baseUrl: https://suggest.v1d.io
+baseUrl: https://tasks.example.com
 adminCredentialFile: ~/.config/agent/suggestions-admin-token
 
 # Context telemetry shares only this credential/config envelope. Its endpoint,

@@ -24,17 +24,30 @@ const CHANNEL_PACKAGES = {
   wear: "io.agentmux.audioinbox",
 };
 
+function normalizedPublicOrigin(value) {
+  let url;
+  try { url = new URL(String(value || "")); }
+  catch { throw new Error("Link public origin must be an absolute HTTPS origin"); }
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash
+      || url.pathname !== "/") {
+    throw new Error("Link public origin must be an absolute HTTPS origin");
+  }
+  return url.origin;
+}
+
 /** WHAT: Builds the signed release payload for one APK and channel. WHY: Keeps the client contract exactly verifiable per device family. */
-export function buildReleasePayload({ apkBytes, versionCode, versionName, changelog = "", createdAt, expiresAt, channel = "phone" }) {
+export function buildReleasePayload({ apkBytes, versionCode, versionName, changelog = "", createdAt,
+  expiresAt, channel = "phone", publicOrigin }) {
   const packageName = CHANNEL_PACKAGES[channel];
   if (!packageName) throw new Error(`unknown release channel: ${channel}`);
+  const origin = normalizedPublicOrigin(publicOrigin);
   return {
     schemaVersion: 1,
     packageName,
     versionCode,
     versionName,
     apk: {
-      url: `https://link.v1d.io/releases/agentmux-link/${channel}/app-${versionCode}.apk`,
+      url: `${origin}/releases/agentmux-link/${channel}/app-${versionCode}.apk`,
       sizeBytes: apkBytes.length,
       sha256: createHash("sha256").update(apkBytes).digest("hex"),
     },
@@ -72,8 +85,9 @@ export function wranglerPutArgs({ step, file }) {
 }
 
 /** WHAT: Reads the public release back after upload. WHY: Keeps publication acknowledgement behind exact public-byte proof. */
-export async function verifyPublishedRelease({ payload, signature, channel, fetchImpl = fetch }) {
-  const root = `https://link.v1d.io/releases/agentmux-link/${channel}`;
+export async function verifyPublishedRelease({ payload, signature, channel, publicOrigin,
+  fetchImpl = fetch }) {
+  const root = `${normalizedPublicOrigin(publicOrigin)}/releases/agentmux-link/${channel}`;
   const [manifestResponse, signatureResponse, apkResponse] = await Promise.all([
     fetchImpl(`${root}/manifest-v1.json`, { cache: "no-store" }),
     fetchImpl(`${root}/manifest-v1.json.sig`, { cache: "no-store" }),
@@ -104,6 +118,7 @@ async function main() {
   const versionName = argValue("--version-name");
   const changelog = argValue("--changelog") || "";
   const keyPath = argValue("--key") || `${process.env.HOME}/.agentmux/secrets/link-release-ed25519.pem`;
+  const publicOrigin = argValue("--public-origin") || process.env.LINK_PUBLIC_ORIGIN;
   if (!apkPath || !Number.isInteger(versionCode) || !versionName) {
     throw new Error("usage: --apk <path> --version-code N --version-name X [--changelog ...] [--key path] [--dry]");
   }
@@ -118,6 +133,7 @@ async function main() {
     createdAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + 14 * 24 * 3600 * 1000).toISOString(),
     channel,
+    publicOrigin,
   });
   const signature = signRelease(readFileSync(keyPath, "utf8"), payload);
   const outDir = join(process.cwd(), ".link-release");
@@ -133,7 +149,7 @@ async function main() {
   for (const [index, step] of plan.entries()) {
     execFileSync("npx", wranglerPutArgs({ step, file: files[index] }), { stdio: "inherit" });
   }
-  await verifyPublishedRelease({ payload, signature, channel });
+  await verifyPublishedRelease({ payload, signature, channel, publicOrigin });
   console.log(`published ${basename(apkPath)} as ${channel} versionCode ${versionCode}`);
 }
 

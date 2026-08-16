@@ -55,6 +55,7 @@ import { createBridgeLifecycle } from "./bridge.mjs";
 import { runStopAll } from "./stop-all.mjs";
 import { cmdDream, isPidAlive } from "./dream.mjs";
 import { cmdDoctor } from "./doctor.mjs";
+import { cmdTodo } from "./todo.mjs";
 import {
   collectContextTelemetry, contextTelemetrySnapshot,
 } from "../core/suggestions-context-telemetry.mjs";
@@ -77,7 +78,10 @@ import { spawn, execSync } from "child_process";
 import { runOneshot, showRunLog } from "./run.mjs";
 import { executePlan, showPlanLog } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
-import { publishSpeechEvent, synthesizeSpeech } from "./speech.mjs";
+import { DEFAULT_SPEECH_VOICE, publishSpeechEvent, synthesizeSpeech } from "./speech.mjs";
+import {
+  DEFAULT_TMUX_SOCKET, defaultWorkspace, normalizeServiceBaseUrl, operatorName,
+} from "../core/runtime-defaults.mjs";
 import { groupNativeTurns, nativeHistoryRows } from "../channels/native-runtime-watcher.mjs";
 import { cmdRuntime } from "./runtime.mjs";
 import {
@@ -101,9 +105,7 @@ import {
 } from "../core/native-cutover.mjs";
 import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
 import {
-  loadTodos, saveTodos, addTodo, doneTodo, rmTodo, findItem,
-  listActive, listRemindable, listDone, formatActiveList, formatReminderSummary, formatItemLine,
-  DEFAULT_TODOS_PATH, SECTION_NOW, SECTION_PARKED, SECTION_BLOCKED,
+  loadTodos, listRemindable, formatReminderSummary, DEFAULT_TODOS_PATH,
 } from "../core/todos.mjs";
 import {
   CONTRACT_CHECK_ID,
@@ -1478,7 +1480,9 @@ function renderSelfBlock(selfKey, widerBuckets, statuses, nowMs) {
   const status = statuses.get(selfKey) || "unknown";
   let state = "🟡 jobbar";
   if (needsHumanStatus(status)) state = "🔴 väntar på input";
-  else if (isAskToHuman(b.lastAssistantText, b.lastUserText)) state = "🔴 du väntar på svar (från Mattias)";
+  else if (isAskToHuman(b.lastAssistantText, b.lastUserText)) {
+    state = `🔴 du väntar på svar (från ${operatorName()})`;
+  }
   else if (isLiveStatus(status) || isRunningNow(b, nowMs)) state = "🟡 jobbar";
   else if (looksDone(b.lastAssistantText)) state = "✅ klar";
   else state = "⚠️ idle, ev. mer att göra (sa aldrig 'klart')";
@@ -1829,122 +1833,6 @@ async function cmdNotifyUser(args) {
   else console.log(`notifyuser sent → ${result.target}${result.fallback ? " (fallback)" : ""}`);
 }
 
-/** Persistent todo list backed by ~/.openclaw/workspace/memory/tasks.md. */
-async function cmdTodo(args) {
-  const { flags, positional } = parseFlags(args, {
-    all: "boolean",
-    parked: "boolean",
-    blocked: "boolean",
-    dry: "boolean",
-    path: "string",
-  });
-  const path = flags.path || DEFAULT_TODOS_PATH;
-  const sub = positional[0];
-
-  const printList = (parsed) => {
-    console.log(formatActiveList(parsed));
-    if (flags.all) {
-      const done = listDone(parsed, 20);
-      if (done.length) {
-        console.log("\n## Klart (senaste)");
-        for (const it of done) console.log("  " + formatItemLine(it, { includeCreated: true }));
-      }
-    }
-  };
-
-  // No subcommand → list active (+ done if --all)
-  if (!sub) {
-    printList(loadTodos(path));
-    return;
-  }
-
-  switch (sub) {
-    case "list":
-    case "ls": {
-      printList(loadTodos(path));
-      return;
-    }
-    case "add": {
-      const text = positional.slice(1).join(" ").trim();
-      if (!text) {
-        console.error('Usage: amux todo add "text" [--parked|--blocked]');
-        process.exit(1);
-      }
-      const parsed = loadTodos(path);
-      const section = flags.parked ? SECTION_PARKED
-        : flags.blocked ? SECTION_BLOCKED
-        : SECTION_NOW;
-      const { item } = addTodo(parsed, text, { section });
-      if (flags.dry) {
-        console.log(`(dry) would add: ${formatItemLine(item)} → ${section}`);
-        return;
-      }
-      saveTodos(parsed, path);
-      console.log(`added: ${formatItemLine(item)} → ${section}`);
-      return;
-    }
-    case "done":
-    case "do": {
-      const target = positional.slice(1).join(" ").trim();
-      if (!target) {
-        console.error("Usage: amux todo done <id|substring>");
-        process.exit(1);
-      }
-      const parsed = loadTodos(path);
-      const before = findItem(parsed, target);
-      if (!before) {
-        console.error(`No todo found matching "${target}"`);
-        process.exit(1);
-      }
-      const result = doneTodo(parsed, target);
-      if (flags.dry) {
-        console.log(`(dry) would close: ${formatItemLine(result.item)} (was in ${result.fromSection})`);
-        return;
-      }
-      saveTodos(parsed, path);
-      console.log(`closed: ${formatItemLine(result.item)} (was in ${result.fromSection})`);
-      return;
-    }
-    case "rm":
-    case "remove": {
-      const target = positional.slice(1).join(" ").trim();
-      if (!target) {
-        console.error("Usage: amux todo rm <id|substring>");
-        process.exit(1);
-      }
-      const parsed = loadTodos(path);
-      const result = rmTodo(parsed, target);
-      if (!result.found) {
-        console.error(`No todo found matching "${target}"`);
-        process.exit(1);
-      }
-      if (flags.dry) {
-        console.log(`(dry) would remove: ${formatItemLine(result.item)}`);
-        return;
-      }
-      saveTodos(parsed, path);
-      console.log(`removed: ${formatItemLine(result.item)}`);
-      return;
-    }
-    case "edit": {
-      const editor = process.env.EDITOR || "vi";
-      const { spawn } = await import("child_process");
-      const child = spawn(editor, [path], { stdio: "inherit" });
-      await new Promise((resolve) => child.on("close", resolve));
-      return;
-    }
-    case "path": {
-      console.log(path);
-      return;
-    }
-    default: {
-      console.error(`Unknown todo subcommand: ${sub}`);
-      console.error("Usage: amux todo [list|add|done|rm|edit|path] [--all|--parked|--blocked|--dry]");
-      process.exit(1);
-    }
-  }
-}
-
 /**
  * Read todos and send a notifyuser push if any active items exist.
  * Intended for cron at 08:00 daily. Idempotent; safe to run repeatedly.
@@ -2004,7 +1892,8 @@ async function cmdMorningDigest(ctx, args) {
     || `${process.env.HOME}/.agentmux/fleet-watch/fleets.conf`;
   const tokenPath = process.env.SUGGEST_READ_TOKEN_FILE
     || `${process.env.HOME}/.config/agent/suggestions-read-token`;
-  const boardBase = process.env.SUGGEST_BASE_URL || "https://suggest.v1d.io";
+  const boardBase = process.env.SUGGEST_BASE_URL
+    ? normalizeServiceBaseUrl(process.env.SUGGEST_BASE_URL, "Suggestions base URL") : null;
   const boardDecisions = [];
   const boardFailures = [];
   let confText = "";
@@ -2012,7 +1901,7 @@ async function cmdMorningDigest(ctx, args) {
   let readToken = null;
   try { readToken = readFileSync(tokenPath, "utf-8").trim(); } catch { /* surfaced below */ }
   for (const { project } of digestProjects(confText)) {
-    if (!readToken) { boardFailures.push(project); continue; }
+    if (!readToken || !boardBase) { boardFailures.push(project); continue; }
     try {
       const response = await fetch(`${boardBase}/api/tickets?project=${encodeURIComponent(project)}`, {
         headers: { authorization: `Bearer ${readToken}`, "user-agent": "amux-morning-digest" },
@@ -2179,7 +2068,7 @@ const ACTIVE_STATUS = (s) => statusTier(s) >= 2;
  */
 async function cmdMemory(_ctx, subcommand, flags = {}) {
   const workspace = flags.workspace || process.env.OPENCLAW_WORKSPACE
-    || join(process.env.HOME, ".openclaw", "workspace");
+    || defaultWorkspace(process.env.HOME);
   const {
     lintMemory, formatMemoryLint, formatMemoryStatus, readLatestMemoryCompact,
     writeMemoryDailyReport,
@@ -2873,7 +2762,7 @@ async function cmdSyncOffline({ allowManagedTakeover = false } = {}) {
   const { spawnSync } = await import("child_process");
   const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
   const SYNC_SCRIPT = resolve(BRIDGE_DIR, "bin/sync.mjs");
-  const socket = process.env.TMUX_SOCKET || "/tmp/openclaw-claude.sock";
+  const socket = process.env.TMUX_SOCKET || DEFAULT_TMUX_SOCKET;
   const configPath = process.env.AGENT_CONFIG || resolve(process.env.HOME, ".config/agent/agents.yaml");
   const bridgeCtx = { ...createTmuxContext(socket, configPath), bridgeDir: BRIDGE_DIR };
 
@@ -2959,7 +2848,7 @@ async function cmdSay(args, ctx) {
       if (!channelId) { console.error(`No Discord channel bound to ${sender}`); process.exit(1); }
     }
   }
-  const voice = flags.voice || flags.v || process.env.TTS_VOICE || "sv-SE-MattiasNeural";
+  const voice = flags.voice || flags.v || process.env.TTS_VOICE || DEFAULT_SPEECH_VOICE;
   let speech;
   try {
     const audioEvent = publishSpeechEvent(text, channelId);
@@ -3585,7 +3474,7 @@ Bridge controls (talk to the running bridge):
                                   Legacy preference only; never triggers automatic speech
 
 Config source: ~/.agentmux/agentmux.yaml (generated runtime config stays internal)
-Socket: /tmp/openclaw-claude.sock`;
+Socket: ${DEFAULT_TMUX_SOCKET}`;
   console.log(help.replace(/^agent/u, "amux").replace(/^  agent/gmu, "  amux"));
 }
 
@@ -3974,7 +3863,7 @@ export async function dispatch(argv, ctx) {
 
     case "todo":
     case "todos":
-      return cmdTodo(rest);
+      return cmdTodo(rest, { parseFlags });
 
     case "morning-digest":
       return cmdMorningDigest(ctx, rest);

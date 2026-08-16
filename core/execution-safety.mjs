@@ -1,6 +1,6 @@
 // Full autonomous execution for every agentmux launch path.
 //
-// Mattias explicitly authorizes unattended workers to run without approval
+// the operator explicitly authorizes unattended workers to run without approval
 // prompts. Keep that standing authority centralized here so tmux, one-shot
 // commands and the native web runtime cannot drift into different modes.
 

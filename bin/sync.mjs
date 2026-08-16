@@ -7,7 +7,8 @@ import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { Client, GatewayIntentBits } from "discord.js";
-import { parseEnv } from "../lib.mjs";
+import { resolveConfigSources } from "../core/config-sources.mjs";
+import { loadRuntimeEnv } from "../core/runtime-env.mjs";
 import { createState } from "../core/state.mjs";
 import { executeSync } from "../core/sync-discord.mjs";
 import { parseConfig } from "../sync.mjs";
@@ -15,14 +16,12 @@ import { parseConfig } from "../sync.mjs";
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dir, "..");
 
-try {
-  const vars = parseEnv(readFileSync(resolve(ROOT, ".env"), "utf-8"));
-  for (const [k, v] of Object.entries(vars)) if (!process.env[k]) process.env[k] = v;
-} catch {}
+loadRuntimeEnv({ packageRoot: ROOT });
+const configSources = resolveConfigSources({ packageDir: ROOT });
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const AGENTS_YAML = process.env.AGENTS_YAML || resolve(ROOT, "agents.yaml");
-const AGENTMUX_YAML = process.env.AGENTMUX_YAML || resolve(ROOT, "agentmux.yaml");
+const AGENTMUX_YAML = configSources.agentmuxYaml.path;
 const STATE_FILE = process.env.STATE_FILE || "/tmp/agentmux-state.json";
 
 if (!TOKEN) { console.error("DISCORD_TOKEN missing"); process.exit(1); }
