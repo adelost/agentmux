@@ -118,14 +118,23 @@ export function extractActivity(paneContent) {
   return clean.length > 60 ? clean.slice(0, 57) + "…" : clean;
 }
 
+/** WHAT: Parses an explicitly written Discord pane prefix. WHY: Keeps an absent override distinct from an explicit pane zero at routing boundaries. */
+export function parsePaneOverride(text) {
+  const m = text.match(/^\.(\d+)\s+([\s\S]+)$/);
+  if (m) return { pane: parseInt(m[1], 10), prompt: m[2] };
+  return null;
+}
+
 /**
  * Parse optional pane prefix from message text.
  * ".1 fix bug" → { pane: 1, prompt: "fix bug" }
  * "fix bug"    → { pane: 0, prompt: "fix bug" }
+ * WHAT: Parses optional pane prefixes with the legacy pane-zero fallback.
+ * WHY: Keeps existing command consumers independent from configured-channel routing.
  */
 export function parsePane(text) {
-  const m = text.match(/^\.(\d+)\s+([\s\S]+)$/);
-  if (m) return { pane: parseInt(m[1], 10), prompt: m[2] };
+  const override = parsePaneOverride(text);
+  if (override) return override;
   return { pane: 0, prompt: text };
 }
 

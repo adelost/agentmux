@@ -2,8 +2,9 @@
 // Channel-agnostic. Receives channels array, delegates messaging to them.
 
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
-import { buildChannelMap, parsePane } from "./lib.mjs";
+import { buildChannelMap } from "./lib.mjs";
 import { createInboundReconciler, formatRecoveredNotice } from "./core/inbound-reconciler.mjs";
+import { resolveConfiguredInboundTarget } from "./core/inbound-target.mjs";
 import { FLEET_RESTART_RESULT_KEY, formatFleetRestartResult } from "./core/fleet-restart.mjs";
 
 const PIDFILE = process.env.PIDFILE || "/tmp/agentmux.pid";
@@ -101,13 +102,7 @@ export function startBot({
   // output never advances the scan cursor past an unseen human message.
   const resolveInboundTarget = (msg) => {
     const mapping = getMapping(msg?.channelId);
-    if (!mapping) return null;
-    const parsed = parsePane(String(msg?.text || ""));
-    return {
-      agentName: mapping.name,
-      pane: parsed.pane ?? mapping.pane ?? 0,
-      dir: mapping.dir || null,
-    };
+    return resolveConfiguredInboundTarget(mapping, msg?.text);
   };
   const inbound = channels.length
     ? createInboundReconciler({
