@@ -89,6 +89,10 @@ export function createAttachmentHandler({
 
   async function transcribeAudio(msg, att, tmpFiles) {
     try {
+      const cached = typeof msg.getCachedTranscript === "function"
+        ? msg.getCachedTranscript(att.id)
+        : null;
+      if (typeof cached === "string" && cached) return cached;
       let tmpPath = att.durablePath || null;
       if (!tmpPath) {
         const buffer = await downloadAttachment(att);
@@ -108,6 +112,7 @@ export function createAttachmentHandler({
         await msg.reply("*(could not transcribe voice message)*");
         return null;
       }
+      if (typeof msg.saveTranscript === "function") msg.saveTranscript(att.id, text);
       // Reply with the tagged transcript is done by the caller (buildPrompt)
       // so the Discord reply and pane-bound text share one source of truth.
       return text;

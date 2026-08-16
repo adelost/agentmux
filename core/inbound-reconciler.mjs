@@ -51,6 +51,9 @@ function durableMessage(record, store, channel, baseMessage = null) {
     createdTimestamp: record.createdTimestamp,
     resolvedTarget: record.target,
     attachments: (record.attachments || []).map((attachment) => ({ ...attachment })),
+    getCachedTranscript: (attachmentId) => store.transcriptFor(record, attachmentId),
+    saveTranscript: (attachmentId, transcript) =>
+      store.saveTranscript(record, attachmentId, transcript),
     reply,
     send,
     sendTranscriptOnce: transcriptSender(record, store, channel, baseMessage),
@@ -82,11 +85,20 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
     const existing = preparations.get(record.identity);
     if (existing) return existing;
     let tracked;
-    tracked = store.prepareAttachments(record).finally(() => {
+    tracked = Promise.resolve().then(() => store.prepareAttachments(record)).then(
+      (value) => ({ ok: true, value }),
+      (error) => ({ ok: false, error }),
+    ).finally(() => {
       if (preparations.get(record.identity) === tracked) preparations.delete(record.identity);
     });
     preparations.set(record.identity, tracked);
     return tracked;
+  }
+
+  async function preparedRecord(preparation) {
+    const result = await preparation;
+    if (!result.ok) throw result.error;
+    return result.value;
   }
 
   function observe(msg) {
@@ -100,7 +112,7 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
     let current = store.read(record.channelId, record.messageId) || record;
     if (current.status === "completed") return { duplicate: true };
     try {
-      current = await (prepared || prepare(current));
+      current = await preparedRecord(prepared || prepare(current));
       const outcome = await onMessage(durableMessage(current, store, channel, baseMessage));
       if (outcome?.delivered === false) {
         store.fail(current, outcome.reason || "handler did not durably accept the message");
@@ -203,7 +215,7 @@ export function createInboundReconciler({ onMessage, state, store, resolveTarget
       // A cursor may pass an attachment only after its bytes are private and
       // durable. If the bridge dies here, the old cursor intentionally causes
       // a harmless re-fetch instead of relying on an expiring signed URL.
-      await Promise.all(staged);
+      await Promise.all(staged.map(preparedRecord));
       if (!initialSeed && newestId && newestId !== afterId) store.advanceCursor(channelId, newestId);
 
       return drainPending(channel, channelId, fetchedById, newlyObserved);

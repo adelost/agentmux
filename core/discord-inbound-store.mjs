@@ -54,6 +54,8 @@ function attachmentRecord(att, previous = null) {
     sha256: previous?.sha256 || null,
     downloadedAt: previous?.downloadedAt || null,
     bytes: previous?.bytes || null,
+    transcript: previous?.transcript || null,
+    transcribedAt: previous?.transcribedAt || null,
   };
 }
 
@@ -188,6 +190,30 @@ export function createDiscordInboundStore({
     });
   }
 
+  /** WHAT: Reads the exact journaled transcript for one attachment. WHY: A lost Discord acknowledgement must not rerun STT or diverge from the pane prompt. */
+  function transcriptFor(record, attachmentId) {
+    const current = read(record.channelId, record.messageId) || record;
+    const attachment = (current.attachments || [])
+      .find((candidate) => String(candidate.id) === String(attachmentId));
+    return typeof attachment?.transcript === "string" ? attachment.transcript : null;
+  }
+
+  /** WHAT: Journals one completed STT result before any outbound effect. WHY: Discord reply and pane delivery must retry from identical content. */
+  function saveTranscript(record, attachmentId, transcript) {
+    const current = read(record.channelId, record.messageId) || record;
+    const id = String(attachmentId);
+    const text = String(transcript || "");
+    const attachments = (current.attachments || []).map((attachment) =>
+      String(attachment.id) === id
+        ? { ...attachment, transcript: text, transcribedAt: now() }
+        : attachment);
+    if (!attachments.some((attachment) => String(attachment.id) === id)) {
+      throw new Error(`Discord transcript attachment disappeared: ${current.identity}:${id}`);
+    }
+    update(current, { attachments });
+    return text;
+  }
+
   /** WHAT: Begins or resumes one transport-idempotent outbound effect. WHY: Keeps a lost acknowledgement retryable while a completed effect stays suppressed. */
   function beginEffect(record, effect) {
     const current = read(record.channelId, record.messageId) || record;
@@ -274,7 +300,8 @@ export function createDiscordInboundStore({
   }
 
   return {
-    rootDir, observe, read, update, prepareAttachments, beginEffect, completeEffect,
+    rootDir, observe, read, update, prepareAttachments, transcriptFor, saveTranscript,
+    beginEffect, completeEffect,
     complete, fail, list, pending, channelIds, cursor, advanceCursor,
   };
 }

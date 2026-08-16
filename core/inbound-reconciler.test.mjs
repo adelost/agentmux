@@ -136,21 +136,86 @@ describe("Discord inbound reconciliation", () => {
 
   it("keeps the cursor behind attachment bytes that could not be made durable", async () => {
     const root = tempRoot();
+    let releaseSlow;
+    const slowDownload = new Promise((resolve) => { releaseSlow = resolve; });
+    let failureSeen;
+    const laterFailed = new Promise((resolve) => { failureSeen = resolve; });
     const store = createDiscordInboundStore({
       rootDir: root,
-      downloadBuffer: async () => { throw new Error("cdn-offline"); },
+      downloadBuffer: async (url) => {
+        if (url === "slow-cdn") {
+          await slowDownload;
+          return Buffer.from("durable-first");
+        }
+        failureSeen();
+        throw new Error("cdn-offline");
+      },
       sleep: async () => {},
     });
     store.advanceCursor("100", "100");
     const reconciler = createInboundReconciler({
       onMessage: async () => ({ delivered: true }), state: state(), store, resolveTarget: target,
     });
-    const channel = fakeChannel({ "100": [message("103", "100", {
-      attachments: [{ id: "503", name: "proof.png", url: "cdn", contentType: "image/png" }],
-    })] });
-    await expect(reconciler.reconcile(channel, "100")).rejects.toThrow("cdn-offline");
+    const channel = fakeChannel({ "100": [
+      message("102", "100", {
+        attachments: [{ id: "502", name: "slow.png", url: "slow-cdn",
+          contentType: "image/png" }],
+      }),
+      message("103", "100", {
+        attachments: [{ id: "503", name: "proof.png", url: "bad-cdn",
+          contentType: "image/png" }],
+      }),
+    ] });
+    const failure = reconciler.reconcile(channel, "100").catch((error) => error);
+    await laterFailed;
     expect(store.cursor("100")).toBe("100");
+    releaseSlow();
+    expect((await failure).message).toBe("cdn-offline");
     expect(store.read("100", "103")).toMatchObject({ status: "observed" });
+  });
+
+  it("observes a queued attachment failure only when its channel turn runs", async () => {
+    const root = tempRoot();
+    let releaseFirst;
+    const firstBlocked = new Promise((resolve) => { releaseFirst = resolve; });
+    let firstStarted;
+    const firstEntered = new Promise((resolve) => { firstStarted = resolve; });
+    const store = createDiscordInboundStore({
+      rootDir: root,
+      downloadBuffer: async () => { throw new Error("permanent-cdn-failure"); },
+      sleep: async () => {},
+    });
+    const reconciler = createInboundReconciler({
+      onMessage: async (msg) => {
+        if (msg.id === "108") {
+          firstStarted();
+          await firstBlocked;
+        }
+        return { delivered: true };
+      },
+      state: state(), store, resolveTarget: target,
+    });
+    const channel = fakeChannel({});
+    const unhandled = [];
+    const onUnhandled = (error) => unhandled.push(error);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const first = reconciler.enqueue(message("108", "100"), channel);
+      await firstEntered;
+      const second = reconciler.enqueue(message("109", "100", {
+        attachments: [{ id: "509", name: "proof.png", url: "bad-cdn",
+          contentType: "image/png" }],
+      }), channel);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+      releaseFirst();
+      await first;
+      await expect(second).rejects.toThrow("permanent-cdn-failure");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 
   it("keeps the first resolved target when configuration changes during a retry", () => {
@@ -233,7 +298,9 @@ describe("Discord inbound reconciliation", () => {
       return accepted.get(payload.nonce);
     };
     channel.findMessageByNonce = async (_channelId, nonce) => accepted.has(nonce);
-    const transcribe = vi.fn(async () => ({ stdout: "stable transcript", stderr: "" }));
+    const transcribe = vi.fn()
+      .mockResolvedValueOnce({ stdout: "FIRST transcript", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "SECOND transcript", stderr: "" });
     const attachmentHandler = createAttachmentHandler({
       run: transcribe,
       transcribeScript: "/transcribe",
@@ -253,13 +320,17 @@ describe("Discord inbound reconciliation", () => {
     expect(store.read("200", "210")).toMatchObject({
       status: "assets_ready",
       effects: { "transcript-reply": { status: "sending", attempts: 1 } },
+      attachments: [{ id: "610", transcript: "FIRST transcript" }],
     });
 
     clock += 31_000;
     expect(await reconciler.reconcile(channel, "200")).toEqual({ replayed: 0, pending: 0 });
     expect(replyAttempts).toBe(1);
+    expect(transcribe).toHaveBeenCalledTimes(1);
     expect(accepted).toHaveLength(1);
     expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("FIRST transcript");
+    expect(prompts[0]).not.toContain("SECOND transcript");
     expect(store.read("200", "210")).toMatchObject({
       status: "completed",
       effects: { "transcript-reply": { status: "sent", attempts: 2 } },

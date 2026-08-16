@@ -1104,17 +1104,33 @@ feature("single-writer delivery broker", () => {
         lastReason: "not sent: cancellation requested before submit",
       });
       const notices = [];
+      let releaseNotice;
+      const noticeStarted = new Promise((resolve) => {
+        releaseNotice = () => resolve();
+      });
+      let firstNoticeStarted;
+      const firstNotice = new Promise((resolve) => { firstNoticeStarted = resolve; });
       const broker = createDeliveryBroker({ agent: acceptingAgent(), queue,
         intervalMs: 60_000, now: () => clock,
-        notify: async (_candidate, kind) => notices.push(kind) });
-      return { rootDir, queue, job, notices, broker };
+        notify: async (_candidate, kind) => {
+          notices.push(kind);
+          if (notices.length === 1) {
+            firstNoticeStarted();
+            await noticeStarted;
+          }
+        } });
+      return { rootDir, queue, job, notices, broker, firstNotice, releaseNotice };
     }],
-    when: ["the single-writer broker starts", async ({ broker }) => {
-      broker.start();
+    when: ["startup repair and the normal queue kick overlap", async (ctx) => {
+      ctx.broker.start();
+      await ctx.firstNotice;
+      const competingKick = ctx.broker.kickTarget("lsrc", 7);
       await new Promise((resolve) => setTimeout(resolve, 0));
-      await broker.stop();
+      ctx.releaseNotice();
+      await competingKick;
+      await ctx.broker.stop();
     }],
-    then: ["the audit state becomes truthful without another physical send", (_, ctx) => {
+    then: ["the audit state becomes truthful with exactly one terminal notice", (_, ctx) => {
       expect(ctx.notices).toEqual(["unverified"]);
       expect(ctx.queue.read("lsrc", 7, ctx.job.id)).toMatchObject({
         status: "delivered_unverified",

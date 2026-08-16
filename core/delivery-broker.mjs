@@ -92,10 +92,8 @@ export function createDeliveryBroker({
     : (bridgeDir ? createWakeAdmissionGate({ runtimeRoot: bridgeDir, reserveMiB: 512 }) : null);
 
   const lanes = new Map();
-  let timer = null;
-  let started = false;
-  let stopped = false;
-
+  let timer = null, started = false, stopped = false;
+  let startupBarrier = Promise.resolve();
   // Panes share one tmux window. A tiled delivery that cannot render its
   // composer may temporarily zoom the target as a fallback; therefore the
   // in-process critical section remains session-wide even though FIFO
@@ -642,7 +640,10 @@ export function createDeliveryBroker({
 
   function kickTarget(agentName, pane) {
     if (stopped) return Promise.resolve();
-    return runExclusive(agentName, pane, () => drainTarget(agentName, pane));
+    return runExclusive(agentName, pane, async () => {
+      await startupBarrier;
+      return stopped ? undefined : drainTarget(agentName, pane);
+    });
   }
 
   async function kick() {
@@ -682,11 +683,10 @@ export function createDeliveryBroker({
     started = true;
     stopped = false;
     queue.prune();
-    void reconcileRecoveredCancellationTerminals().catch((error) =>
+    startupBarrier = reconcileRecoveredCancellationTerminals().catch((error) =>
       log(`delivery broker terminal reconciliation failed: ${error.message}`));
-    timer = setInterval(() => {
-      kick().catch((error) => log(`delivery broker poll failed: ${error.message}`));
-    }, intervalMs);
+    timer = setInterval(() => kick().catch((error) =>
+      log(`delivery broker poll failed: ${error.message}`)), intervalMs);
     timer.unref?.();
     void kick();
   }
@@ -696,8 +696,8 @@ export function createDeliveryBroker({
     stopped = true;
     if (timer) clearInterval(timer);
     timer = null;
+    await startupBarrier;
     await Promise.allSettled([...lanes.values()]);
   }
-
   return { queue, enqueue, enqueueAndWait, start, stop, kick, kickTarget, runExclusive };
 }
