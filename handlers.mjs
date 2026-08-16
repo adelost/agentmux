@@ -31,7 +31,7 @@ import { MODEL_RECOVERY_STATE_KEY, MODEL_RECOVERY_SETTLE_MS, resumeBrief } from 
 import { queueFleetRestart } from "./core/fleet-restart.mjs";
 import { setPaneModelSelection } from "./core/pane-model-state.mjs";
 import { normalizeClaudeModelName } from "./core/claude-model.mjs";
-
+import { mergeInboundTarget } from "./core/inbound-target.mjs";
 /**
  * Reconcile every configured agent's live tmux session against the
  * regenerated config. Per-agent failures are isolated: one broken agent
@@ -1028,7 +1028,7 @@ export function createHandlers({ agent, attachments, tts, state, getMapping, ove
 
   async function onMessage(msg) {
     if (msg.isBot) return;
-    const mapping = getMapping(msg.channelId);
+    const mapping = mergeInboundTarget(getMapping(msg.channelId), msg.resolvedTarget);
     if (!mapping) return;
 
     // Loop guard: check BEFORE any expensive work (attachment download,

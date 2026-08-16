@@ -11,6 +11,10 @@
  * @property {() => void} stop - Disconnect and cleanup
  * @property {(channelId: string, text: string) => Promise<void>} send - Post text to channel
  * @property {(channelId: string) => Promise<void>} [sendTyping] - Show typing indicator (~10s on Discord). Optional; channels that lack a typing primitive should omit.
+ * @property {(channelId: string, afterId?: string|null) => Promise<{messages: ChannelMessage[], newestId: string|null}>} [fetchMissed] - Read human messages after a durable cursor.
+ * @property {(channelId: string, messageId: string) => Promise<ChannelMessage|null>} [fetchMessage] - Refresh one historical message and its attachment URLs.
+ * @property {(channelId: string, messageId: string, content: string|object) => Promise<void>} [replyTo] - Reply to one historical message.
+ * @property {(channelId: string, nonce: string, afterId: string) => Promise<boolean>} [findMessageByNonce] - Reconcile one idempotent historical send.
  */
 
 /**
@@ -22,7 +26,9 @@
  * @property {string} id - Message ID (for tmp file naming etc.)
  * @property {number} [createdTimestamp] - Transport-authored creation time;
  *   stable delivery cursor across reconnect retries.
- * @property {Array<{id: string, name: string, url: string, contentType: string}>} attachments
+ * @property {Array<{id: string, name: string, url: string, proxyUrl?: string, contentType: string, durablePath?: string|null, sha256?: string|null}>} attachments
+ * @property {{agentName: string, pane: number, dir?: string|null}} [resolvedTarget] - Target persisted before expensive work.
+ * @property {(chunks: string[]) => Promise<boolean>} [sendTranscriptOnce] - Durable transcript effect using transport-idempotent chunk nonces.
  * @property {(content: string|object) => Promise<void>} reply - Reply to this message
  * @property {(content: string|object) => Promise<void>} send - Send to the channel (not as reply)
  * @property {() => () => void} startTyping - Show typing indicator, returns stop function

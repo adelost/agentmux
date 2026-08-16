@@ -4,6 +4,7 @@
 import { writeFileSync } from "fs";
 import { extname } from "path";
 import { splitMessage } from "./lib.mjs";
+import { downloadDiscordAttachment } from "./core/discord-attachment-download.mjs";
 
 // No whitelist needed. All non-audio attachments are downloaded and passed
 // to Claude, which can read most file types (PDF, images, text, archives, etc).
@@ -25,29 +26,8 @@ export function createAttachmentHandler({
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) {
 
-  const retryableDownload = (error) => error?.retryable === true
-    || /(?:Download failed:\s*(?:408|429|5\d\d)|fetch failed|ECONN|ETIMEDOUT|timeout)/iu.test(String(error?.message || error));
-
-  /** WHAT: Retries safe GETs and alternates Discord CDN/proxy endpoints. WHY: A transient 525 must not discard user evidence. */
-  async function downloadAttachment(att) {
-    const urls = [...new Set([att.url, att.proxyUrl].filter(Boolean))];
-    let lastError = new Error("attachment has no download URL");
-    const permanentlyFailed = new Set();
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const candidates = urls.filter((url) => !permanentlyFailed.has(url));
-      if (!candidates.length) break;
-      const url = candidates[attempt % candidates.length];
-      try { return await downloadBuffer(url); }
-      catch (error) {
-        lastError = error;
-        if (!retryableDownload(error)) permanentlyFailed.add(url);
-        if (attempt < 2 && urls.some((candidate) => !permanentlyFailed.has(candidate))) {
-          await sleep(attempt === 0 ? 200 : 600);
-        }
-      }
-    }
-    throw lastError;
-  }
+  const downloadAttachment = (att) =>
+    downloadDiscordAttachment(att, { downloadBuffer, sleep });
 
   /** WHAT: Posts a readable Discord transcript in bounded chunks. WHY: Keeps long voice notes visible without markdown noise or 2000-character failures. */
   async function replyWithTranscript(msg, text, viaFallback) {
@@ -56,6 +36,10 @@ export function createAttachmentHandler({
       ? "-# Gemini was unavailable. Technical terms may be less accurate."
       : "-# Speech-to-text may contain errors.";
     const chunks = splitMessage(`${heading}\n${text}\n${note}`);
+    if (typeof msg.sendTranscriptOnce === "function") {
+      await msg.sendTranscriptOnce(chunks);
+      return;
+    }
     for (let i = 0; i < chunks.length; i++) {
       const send = i === 0 ? msg.reply.bind(msg) : msg.send.bind(msg);
       await send(chunks[i]).catch(() => {});
@@ -105,11 +89,14 @@ export function createAttachmentHandler({
 
   async function transcribeAudio(msg, att, tmpFiles) {
     try {
-      const buffer = await downloadAttachment(att);
-      const ext = (att.name || "voice.ogg").split(".").pop();
-      const tmpPath = `/tmp/discord-voice-${msg.id}.${ext}`;
-      writeTmp(tmpPath, buffer);
-      tmpFiles.push(tmpPath);
+      let tmpPath = att.durablePath || null;
+      if (!tmpPath) {
+        const buffer = await downloadAttachment(att);
+        const ext = (att.name || "voice.ogg").split(".").pop();
+        tmpPath = `/tmp/discord-voice-${msg.id}.${ext}`;
+        writeTmp(tmpPath, buffer);
+        tmpFiles.push(tmpPath);
+      }
       // 300s covers the wrapper's full chain (gemini 2×100s + whisper1 60s).
       // The old 60s cap killed stalled-but-recoverable gemini calls and
       // surfaced them as a bare "Command failed" (2026-07-11, api:3: the
@@ -117,6 +104,7 @@ export function createAttachmentHandler({
       const { stdout } = await run(`'${transcribeScript}' '${tmpPath}'`, 300000);
       const text = stdout.trim();
       if (!text) {
+        if (att.durablePath) throw new Error("transcription returned no text");
         await msg.reply("*(could not transcribe voice message)*");
         return null;
       }
@@ -124,6 +112,10 @@ export function createAttachmentHandler({
       // so the Discord reply and pane-bound text share one source of truth.
       return text;
     } catch (err) {
+      if (att.durablePath) {
+        err.retryable = true;
+        throw err;
+      }
       // exec's message is just "Command failed: <cmd>" — the actionable
       // cause lives in stderr. Surface its tail so the user sees WHY.
       const cause = String(err.stderr || "").trim().split("\n").slice(-2).join(" | ");
@@ -135,6 +127,7 @@ export function createAttachmentHandler({
 
   async function downloadToTmp(msg, att, tmpFiles) {
     try {
+      if (att.durablePath) return att.durablePath;
       const buffer = await downloadAttachment(att);
       const ext = extname(att.name || ".bin") || ".bin";
       const tmpPath = `/tmp/discord-media-${msg.id}-${att.id}${ext}`;

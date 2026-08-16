@@ -3,6 +3,7 @@
 
 import { Client, GatewayIntentBits, Events } from "discord.js";
 import { normalizeDiscordMessage } from "./normalize.mjs";
+import { collectDiscordHistory, findDiscordNonce } from "./discord-history.mjs";
 
 /**
  * @param {{ token: string, onSent?: (channelId: string) => void }} config
@@ -55,26 +56,18 @@ export function createDiscordChannel({ token, onSent }) {
       stamp(channelId);
     },
 
-    /**
-     * REST reconciliation for messages missed by the Gateway during a
-     * disconnect or restart: everything after `afterId`, oldest first,
-     * human-only, age-capped. With no pointer (first boot) nothing is
-     * replayed — only the newest id is returned for initialization.
-     * Returns { messages: ChannelMessage[], newestId: string|null }.
-     */
-    async fetchMissed(channelId, afterId, { limit = 100, maxAgeMs = 60 * 60 * 1000 } = {}) {
+    /** WHAT: Fetches every Discord message after one durable cursor. WHY: Gateway reconnects do not replay history and a one-page scan can skip busy outage windows. */
+    async fetchMissed(channelId, afterId, {
+      limit = 100,
+      maxAgeMs = 7 * 24 * 60 * 60 * 1000,
+    } = {}) {
       const ch = await client.channels.fetch(channelId);
       if (!ch?.messages) return { messages: [], newestId: afterId || null };
-      const coll = afterId
-        ? await ch.messages.fetch({ after: afterId, limit })
-        : await ch.messages.fetch({ limit: 1 });
-      const sorted = [...coll.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-      const newestId = sorted.length ? sorted[sorted.length - 1].id : (afterId || null);
-      if (!afterId) return { messages: [], newestId }; // init pointer only
-      const cutoff = Date.now() - maxAgeMs;
-      const messages = sorted
-        .filter((m) => !m.author.bot && m.createdTimestamp >= cutoff)
-        .map((m) => normalizeDiscordMessage(m, { onSent }));
+      const history = await collectDiscordHistory({
+        fetchPage: (options) => ch.messages.fetch(options), afterId, limit, maxAgeMs,
+      });
+      const messages = history.messages.map((m) => normalizeDiscordMessage(m, { onSent }));
+      const { newestId } = history;
       return { messages, newestId };
     },
 
@@ -85,6 +78,29 @@ export function createDiscordChannel({ token, onSent }) {
       const msg = await ch.messages.fetch(messageId);
       if (!msg || msg.author.bot) return null;
       return normalizeDiscordMessage(msg, { onSent });
+    },
+
+    /** WHAT: Replies to one persisted Discord message. WHY: Restarted transcript work needs reply semantics without retaining a live Gateway object. */
+    async replyTo(channelId, messageId, content) {
+      const ch = await client.channels.fetch(channelId);
+      if (!ch?.messages) throw new Error(`channel ${channelId} cannot fetch messages`);
+      const msg = await ch.messages.fetch(messageId);
+      if (!msg) throw new Error(`message ${channelId}:${messageId} not found`);
+      const result = await msg.reply(content);
+      stamp(channelId);
+      return result;
+    },
+
+    /** WHAT: Finds one prior transcript request by its stable nonce. WHY: Reconciles a Discord send whose acknowledgement was lost before retrying it. */
+    async findMessageByNonce(channelId, nonce, afterId) {
+      const ch = await client.channels.fetch(channelId);
+      if (!ch?.messages) throw new Error(`channel ${channelId} cannot reconcile messages`);
+      return findDiscordNonce({
+        fetchPage: (options) => ch.messages.fetch(options),
+        nonce,
+        afterId,
+        botUserId: client.user?.id || null,
+      });
     },
 
     // Fire-and-forget. Discord shows the indicator for ~10s; the watcher

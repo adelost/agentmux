@@ -45,6 +45,7 @@ import { syncConfiguredAgentHints } from "./core/hints-sync.mjs";
 import { runPendingFleetRestart } from "./core/fleet-restart.mjs";
 import { createDeliveryQueue } from "./core/delivery-queue.mjs";
 import { createDeliveryBroker } from "./core/delivery-broker.mjs";
+import { createDiscordInboundStore } from "./core/discord-inbound-store.mjs";
 import { startLinkConnectorIfConfigured } from "./channels/link-connector-start.mjs";
 import { createPaneSleepWakeLifecycle } from "./core/pane-sleep-wake.mjs";
 import { createPaneSleepRepair } from "./core/pane-sleep-repair.mjs";
@@ -56,16 +57,13 @@ import { cmdSleepWatch } from "./cli/sleep.mjs";
 import { createAudioOutbox } from "./core/audio-outbox.mjs";
 import { DEFAULT_TMUX_SOCKET, DEFAULT_TTS_VOICE, runtimeAgentsPath } from "./core/runtime-defaults.mjs";
 import { ensureRuntimeConfig } from "./core/runtime-config.mjs";
-
 // --- Config ---
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-
 // Secrets/operator config resolve from the pinned external home first;
 // the package-directory copy is only the migration fallback (an
 // `npm install --global` replaces the whole package tree).
 const configSources = resolveConfigSources({ packageDir: __dir });
-
 function loadEnv() {
   try {
     const vars = parseEnv(readFileSync(configSources.envFile.path, "utf-8"));
@@ -76,7 +74,6 @@ function loadEnv() {
 }
 
 loadEnv();
-
 const TOKEN = process.env.DISCORD_TOKEN;
 const AGENTS_YAML = runtimeAgentsPath();
 const AGENTMUX_YAML = configSources.agentmuxYaml.path;
@@ -178,6 +175,7 @@ const attachments = createAttachmentHandler({
   transcribeScript: TRANSCRIBE_SCRIPT,
   downloadBuffer,
 });
+const inboundStore = createDiscordInboundStore({ downloadBuffer });
 const tts = createTTS({ run, state: appState, voice: TTS_VOICE });
 const recorder = createRecorder({
   dir: process.env.AGENTMUX_RECORD === "1" ? resolve(__dir, "test/recordings") : null,
@@ -297,6 +295,7 @@ const deliveryBroker = createDeliveryBroker({
 if (!TOKEN) {
   const localBridge = startBot({
     channels: [], agentsYaml: AGENTS_YAML, whisperUrl: WHISPER_URL, agent, tts, state: appState,
+    inboundStore,
     onMessage: async () => {},
   });
   await localBridge.ready;
@@ -318,6 +317,7 @@ const { getMapping, overrides, channelMap, reloadConfig, ready: bridgeReady } = 
   agent,
   tts,
   state: appState,
+  inboundStore,
   // onMessage is set below after handlers are created (circular dep)
   onMessage: (...args) => handlers.onMessage(...args),
 });

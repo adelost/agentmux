@@ -2,7 +2,7 @@
 // Channel-agnostic. Receives channels array, delegates messaging to them.
 
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
-import { buildChannelMap } from "./lib.mjs";
+import { buildChannelMap, parsePane } from "./lib.mjs";
 import { createInboundReconciler, formatRecoveredNotice } from "./core/inbound-reconciler.mjs";
 import { FLEET_RESTART_RESULT_KEY, formatFleetRestartResult } from "./core/fleet-restart.mjs";
 
@@ -38,7 +38,9 @@ function markReady() {
  * WHAT: Schedules channel startup, reconciliation, health checks, and shutdown.
  * WHY: Keeps the bridge lifecycle under one owner.
  */
-export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, onMessage }) {
+export function startBot({
+  channels, agentsYaml, whisperUrl, agent, tts, state, onMessage, inboundStore = null,
+}) {
   ensureSingleInstance();
 
   // --- Channel map ---
@@ -97,13 +99,31 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
   // Gateway events are the low-latency path. A durable REST reconciliation
   // pass repairs gaps from reconnect/restart windows. Crucially, live bot
   // output never advances the scan cursor past an unseen human message.
-  const inbound = createInboundReconciler({ onMessage, state });
+  const resolveInboundTarget = (msg) => {
+    const mapping = getMapping(msg?.channelId);
+    if (!mapping) return null;
+    const parsed = parsePane(String(msg?.text || ""));
+    return {
+      agentName: mapping.name,
+      pane: parsed.pane ?? mapping.pane ?? 0,
+      dir: mapping.dir || null,
+    };
+  };
+  const inbound = channels.length
+    ? createInboundReconciler({
+      onMessage, state, store: inboundStore, resolveTarget: resolveInboundTarget,
+    })
+    : null;
 
   async function catchUpInbound(channel) {
     if (typeof channel.fetchMissed !== "function") return;
-    for (const [channelId] of channelMap) {
+    const configuredIds = new Set(channelMap.keys());
+    const channelIds = new Set([...configuredIds, ...(inboundStore?.channelIds?.() || [])]);
+    for (const channelId of channelIds) {
       try {
-        const result = await inbound.reconcile(channel, channelId);
+        const result = configuredIds.has(channelId)
+          ? await inbound.reconcile(channel, channelId)
+          : await inbound.drain(channel, channelId);
         if (result?.replayed) {
           console.log(`[catch-up] replayed ${result.replayed} missed human message(s) in #${channelId}`);
           await channel.send(channelId, formatRecoveredNotice(result.replayed));
@@ -115,7 +135,7 @@ export function startBot({ channels, agentsYaml, whisperUrl, agent, tts, state, 
   }
 
   for (const channel of channels) {
-    channel.onMessage((msg) => inbound.enqueue(msg).catch((err) =>
+    channel.onMessage((msg) => inbound.enqueue(msg, channel).catch((err) =>
       console.warn(`inbound delivery failed for #${msg?.channelId || "unknown"}: ${err.message}`)));
   }
 
