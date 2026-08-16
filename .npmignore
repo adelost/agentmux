@@ -6,7 +6,19 @@ agentmux.yaml
 test/recordings/
 test/
 cli.test/
-spikes/
+# Native runtime is a supported CLI surface. Keep its executable closure while
+# excluding canaries, visual tooling, local data and every unrelated spike.
+spikes/*
+!spikes/web-ui/
+spikes/web-ui/*
+!spikes/web-ui/server.mjs
+!spikes/web-ui/runtime-control.mjs
+!spikes/web-ui/runtime-prompt.mjs
+!spikes/web-ui/persistent-claude-runtime.mjs
+!spikes/web-ui/index.html
+!spikes/web-ui/app.js
+!spikes/web-ui/quota-observation.js
+!spikes/web-ui/style.css
 android/
 link/
 .github/
