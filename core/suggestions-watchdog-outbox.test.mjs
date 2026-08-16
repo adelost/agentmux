@@ -264,16 +264,18 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
   it("runs eligibility against the bounded Codex timeline instead of an idle fixture", () => {
     const fakeHome = mkdtempSync(join(tmpdir(), "amux-src0114-real-path-"));
     const originalHome = process.env.HOME;
+    const originalCodexHome = process.env.CODEX_HOME;
     const agentDir = join(fakeHome, "lsrc");
     const paneDir = join(agentDir, ".agents", "6");
     const sessionDir = join(fakeHome, ".codex", "sessions", "2026", "07", "17");
     const now = Date.parse("2026-07-17T12:00:00Z");
     try {
       process.env.HOME = fakeHome;
+      process.env.CODEX_HOME = join(fakeHome, ".codex");
       mkdirSync(paneDir, { recursive: true });
       mkdirSync(sessionDir, { recursive: true });
       writeFileSync(join(sessionDir, "rollout-src0114.jsonl"), [
-        { type: "session_meta", payload: { cwd: paneDir } },
+        { type: "session_meta", payload: { cwd: paneDir, source: "cli", originator: "codex-tui" } },
         { type: "event_msg", timestamp: "2026-07-17T10:00:00Z",
           payload: { type: "task_started", turn_id: "SRC-0114" } },
         { type: "event_msg", timestamp: "2026-07-17T10:00:01Z",
@@ -297,6 +299,8 @@ describe("persistent Suggestions watchdog outbox consumer", () => {
         .toMatchObject({ eligible: true, reason: "sustained-idle" });
     } finally {
       process.env.HOME = originalHome;
+      if (originalCodexHome == null) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = originalCodexHome;
       rmSync(fakeHome, { recursive: true, force: true });
     }
   });

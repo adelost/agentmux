@@ -26,6 +26,7 @@ import { esc } from "../lib.mjs";
 import { createAudioFeedHandlers } from "./audio-feed.mjs";
 import { createVoiceInput } from "./voice-input.mjs";
 import { paneForChannel, phoneTargetChannels } from "./audio-targets.mjs";
+import { DEFAULT_TTS_VOICE } from "../core/runtime-defaults.mjs";
 
 // Minimal mime map for the static PWA bundle. Anything not listed gets
 // application/octet-stream (browsers handle it; this is only for the
@@ -80,7 +81,7 @@ export function createVoicePWA(deps) {
     agentsYamlPath,
     transcribeScript,
     run,
-    ttsVoice = "sv-SE-MattiasNeural",
+    ttsVoice = DEFAULT_TTS_VOICE,
     mirror = null,
     reactivePoke = null,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,

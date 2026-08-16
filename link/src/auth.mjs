@@ -2,6 +2,7 @@
 // Link sessions (docs/link-internet-v1.md). Worker-compatible WebCrypto only.
 
 import { base64Url, pkceChallenge, randomId, safeEqual, sha256Hex } from "./util.mjs";
+import { connectorTargets, linkAuthConfig } from "./config.mjs";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -57,18 +58,19 @@ export function validLinkPrincipal(value) {  if (!value || typeof value !== "obj
   return { identityId: row.id, name: typeof row.name === "string" ? row.name.slice(0, 80) : "", email };
 }
 
-/** WHAT: Builds the v1d authorize URL for one app login. WHY: Keeps the broker contract identical to the proven client shape. */
+/** WHAT: Builds the configured identity-provider URL for one app login. WHY: Keeps the broker contract identical across self-hosted deployments. */
 export async function beginLinkLogin({ env, challenge, client = "android" }) {
+  const auth = linkAuthConfig(env);
   const verifier = randomId(24);
-  const state = await sealState(env.V1D_AUTH_STATE_SECRET, {
+  const state = await sealState(auth.stateSecret, {
     verifier,
     challenge,
     client,
     expiresAt: Date.now() + 10 * 60_000,
   });
-  const target = new URL("/authorize", env.V1D_AUTH_ORIGIN);
-  target.searchParams.set("app_id", env.V1D_AUTH_APP_ID);
-  target.searchParams.set("redirect_uri", env.V1D_AUTH_CALLBACK_URL);
+  const target = new URL("/authorize", auth.origin);
+  target.searchParams.set("app_id", auth.appId);
+  target.searchParams.set("redirect_uri", auth.callbackUrl);
   target.searchParams.set("state", state);
   target.searchParams.set("code_challenge", await pkceChallenge(verifier));
   target.searchParams.set("code_challenge_method", "S256");
@@ -76,10 +78,11 @@ export async function beginLinkLogin({ env, challenge, client = "android" }) {
 }
 
 async function brokerPost(env, path, body) {
-  const response = await fetch(`${env.V1D_AUTH_ORIGIN}${path}`, {
+  const auth = linkAuthConfig(env);
+  const response = await fetch(`${auth.origin}${path}`, {
     method: "POST",
     headers: {
-      authorization: `Basic ${btoa(`${env.V1D_AUTH_APP_ID}:${env.V1D_AUTH_CLIENT_SECRET}`)}`,
+      authorization: `Basic ${btoa(`${auth.appId}:${auth.clientSecret}`)}`,
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
@@ -90,10 +93,11 @@ async function brokerPost(env, path, body) {
   return { ok: true, result };
 }
 
-/** WHAT: Resolves the v1d callback into a verified identity. WHY: Keeps token exchange bound to the sealed transaction. */
+/** WHAT: Resolves the configured callback into a verified identity. WHY: Keeps token exchange bound to the sealed transaction. */
 export async function completeLinkLogin({ env, url }) {
+  const auth = linkAuthConfig(env);
   const code = url.searchParams.get("code");
-  const state = await openState(env.V1D_AUTH_STATE_SECRET, url.searchParams.get("state"));
+  const state = await openState(auth.stateSecret, url.searchParams.get("state"));
   if (!code || !state || typeof state.verifier !== "string" || Date.now() > Number(state.expiresAt || 0)) {
     return { ok: false, reason: "invalid-identity-transaction" };
   }
@@ -101,7 +105,7 @@ export async function completeLinkLogin({ env, url }) {
     grantType: "authorization_code",
     code,
     codeVerifier: state.verifier,
-    redirectUri: env.V1D_AUTH_CALLBACK_URL,
+    redirectUri: auth.callbackUrl,
   });
   if (!exchanged.ok) return exchanged;
   const principal = validLinkPrincipal(exchanged.result?.principal);
@@ -135,8 +139,7 @@ export function requireConnector({ env, request, source }) {
   const match = /^Bearer\s+(\S+)$/u.exec(header.trim());
   const expected = source === "wsl" ? env.CONNECTOR_TOKEN_WSL : env.CONNECTOR_TOKEN_WINDOWS;
   if (!match || !expected || !safeEqual(match[1], expected)) return null;
-  const targets = source === "wsl"
-    ? String(env.CONNECTOR_TARGETS_WSL || "lsrc:3,lsrc:10").split(",").map((t) => t.trim()).filter(Boolean)
-    : ["windows"];
+  const targets = connectorTargets(env, source);
+  if (!targets.length) return null;
   return { connectorId: `${source}-1`, source, targets };
 }

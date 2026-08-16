@@ -1,6 +1,6 @@
 // Persistent todo list backed by tasks.md markdown file.
 //
-// Format reuses the existing `~/.openclaw/workspace/memory/tasks.md`:
+// Format is stored under the standalone AMUX workspace by default:
 //
 //   > summary: ...
 //   > why: ...
@@ -25,10 +25,12 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { dirname } from "path";
+import { defaultTodosPath } from "./runtime-defaults.mjs";
 
+/** WHAT: Resolves the default task file. WHY: Keeps standalone tasks separate from optional OpenClaw storage. */
 export const DEFAULT_TODOS_PATH =
   process.env.AMUX_TODOS_PATH ||
-  `${process.env.HOME}/.openclaw/workspace/memory/tasks.md`;
+  defaultTodosPath(process.env.HOME);
 
 export const SECTION_NOW = "Idag / snart";
 export const SECTION_PARKED = "Parkerat (tar tag i senare)";

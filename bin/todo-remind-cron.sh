@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Cron wrapper for `amux todo-remind`. Intended for crontab at 08:00 daily.
 #
-# Reads ~/.openclaw/workspace/memory/tasks.md and sends a push notification
+# Reads ~/.agentmux/workspace/memory/tasks.md and sends a push notification
 # via notifyuser if any active todos exist. Silent if list is empty.
 #
 # Sample crontab entry:
-#   0 8 * * * /home/adelost/lsrc/agentmux/bin/todo-remind-cron.sh
+#   0 8 * * * /path/to/agentmux/bin/todo-remind-cron.sh
 #
 # Install via: bin/install-todo-cron.sh
 set -euo pipefail
@@ -19,7 +19,10 @@ AGENTMUX_DIR="${AGENTMUX_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 NODE_BIN="${NODE_BIN:-$HOME/.nvm/versions/node/v22.19.0/bin/node}"
 TODO_REMIND_LOG="${TODO_REMIND_LOG:-$HOME/.cache/agentmux-todo-remind.log}"
 mkdir -p "$(dirname "$TODO_REMIND_LOG")"
-TODOS_PATH="${AMUX_TODOS_PATH:-$HOME/.openclaw/workspace/memory/tasks.md}"
+if [ -z "${AMUX_TODOS_PATH:-}" ] && [ -f "$HOME/.agentmux/.env" ]; then
+  AMUX_TODOS_PATH="$(sed -n 's/^AMUX_TODOS_PATH=//p' "$HOME/.agentmux/.env" | tail -1)"
+fi
+TODOS_PATH="${AMUX_TODOS_PATH:-$HOME/.agentmux/workspace/memory/tasks.md}"
 
 notify_failure() {
   local status=$?

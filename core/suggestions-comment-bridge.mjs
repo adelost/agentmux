@@ -18,6 +18,7 @@ import { homedir } from "os";
 import { dirname, resolve } from "path";
 import { spawn } from "child_process";
 import yaml from "js-yaml";
+import { normalizeServiceBaseUrl } from "./runtime-defaults.mjs";
 
 export const SUGGESTIONS_BRIDGE_STATE_VERSION = 3;
 export const DEFAULT_COMMENT_BYTES = 64 * 1024;
@@ -78,24 +79,12 @@ function readYaml(path) {
 
 export function loadSuggestionsBridgeConfig(path, { home = homedir(), allowTestOrigin = false } = {}) {
   const raw = readYaml(path);
-  const baseUrl = assertString(raw.baseUrl ?? "https://suggest.v1d.io", "baseUrl", {
+  const configuredBaseUrl = assertString(raw.baseUrl, "baseUrl", {
     min: 8, max: 2048,
   });
-  let parsedBase;
-  try { parsedBase = new URL(baseUrl); }
-  catch { throw new Error("config: baseUrl must be an absolute HTTP(S) URL"); }
-  if (!new Set(["http:", "https:"]).has(parsedBase.protocol)) {
-    throw new Error("config: baseUrl must be an absolute HTTP(S) URL");
-  }
-  if (parsedBase.username || parsedBase.password) {
-    throw new Error("config: baseUrl must not contain credentials");
-  }
-  parsedBase.pathname = parsedBase.pathname.replace(/\/+$/u, "");
-  parsedBase.search = "";
-  parsedBase.hash = "";
-  if (!allowTestOrigin && parsedBase.href !== "https://suggest.v1d.io/") {
-    throw new Error("config: baseUrl must be exactly https://suggest.v1d.io");
-  }
+  const baseUrl = normalizeServiceBaseUrl(configuredBaseUrl, "config: baseUrl", {
+    allowHttpLoopback: allowTestOrigin,
+  });
 
   if (!isObject(raw.projects) || !Object.keys(raw.projects).length) {
     throw new Error("config: projects must be a non-empty mapping");
@@ -135,7 +124,7 @@ export function loadSuggestionsBridgeConfig(path, { home = homedir(), allowTestO
   const credentialFile = expandHome(raw.credentialFile
     ?? "~/.config/agent/suggestions-read-token", home);
   return {
-    baseUrl: parsedBase.toString().replace(/\/$/u, ""),
+    baseUrl,
     projects,
     maxCommentBytes,
     requestTimeoutMs,
@@ -682,10 +671,9 @@ export async function probeSuggestionsBoard({
   allowTestOrigin = false,
   fetchImpl = globalThis.fetch,
 }) {
-  const baseUrl = new URL(config.baseUrl);
-  if (!allowTestOrigin && baseUrl.href !== "https://suggest.v1d.io/") {
-    throw new Error("probe: Suggestions origin must be exactly https://suggest.v1d.io");
-  }
+  normalizeServiceBaseUrl(config.baseUrl, "probe: Suggestions origin", {
+    allowHttpLoopback: allowTestOrigin,
+  });
   if (!/^[A-Za-z0-9_-]{32,256}$/u.test(readToken ?? "")) {
     throw new Error("probe: a bounded read credential is required");
   }
@@ -793,10 +781,9 @@ export async function pollSuggestionsComments({
   if (typeof fetchImpl !== "function" || typeof deliver !== "function") {
     throw new Error("poller: fetch and deliver functions are required");
   }
-  const baseUrl = new URL(config.baseUrl);
-  if (!allowTestOrigin && baseUrl.href !== "https://suggest.v1d.io/") {
-    throw new Error("poller: Suggestions origin must be exactly https://suggest.v1d.io");
-  }
+  normalizeServiceBaseUrl(config.baseUrl, "poller: Suggestions origin", {
+    allowHttpLoopback: allowTestOrigin,
+  });
   if (!/^[A-Za-z0-9_-]{32,256}$/u.test(readToken ?? "")) {
     throw new Error("poller: a bounded read credential is required");
   }
@@ -1042,7 +1029,7 @@ export function boundedRetryDecision({ schedule, attempts, firstAttemptAt, nowMs
  * Spawn an amux .mjs entrypoint with THE PARENT'S OWN node interpreter.
  * Spawning the script directly makes the kernel follow its
  * '#!/usr/bin/env node' shebang, and under cron PATH has no nvm node →
- * ENOENT → silent delivery loss (Mattias' own ticket comments sat
+ * ENOENT → silent delivery loss (the operator's own ticket comments sat
  * undelivered 4h, 2026-07-15). The child must inherit the parent's
  * interpreter, never re-resolve it from PATH.
  */

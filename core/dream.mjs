@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { readAllTurnsAcrossPanes, parseSinceArg } from "./jsonl-reader.mjs";
 import { collectCommitsSince, reposFromAgents } from "./commit-log.mjs";
+import { defaultWorkspace } from "./runtime-defaults.mjs";
 
 const DEFAULT_TZ = "Europe/Stockholm";
 const DEFAULT_SINCE = "24h";
@@ -148,8 +149,9 @@ export function defaultDailyContent(dateKey) {
   return `<!-- template: daily -->\n> summary: Daily notes for ${dateKey}, auto-created by amux dream.\n> why: Session continuity and nightly agent activity digest.\n\n# ${dateKey}\n`;
 }
 
+/** WHAT: Resolves the digest workspace. WHY: Keeps optional OpenClaw storage separate from AMUX defaults. */
 export function resolveDreamWorkspace(workspaceDir) {
-  return workspaceDir || process.env.OPENCLAW_WORKSPACE || join(process.env.HOME, ".openclaw", "workspace");
+  return workspaceDir || process.env.OPENCLAW_WORKSPACE || defaultWorkspace(process.env.HOME);
 }
 
 export function runDreamDigest({

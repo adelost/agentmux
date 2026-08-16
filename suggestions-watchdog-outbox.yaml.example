@@ -1,5 +1,5 @@
 # Persistent watchdog delivery for every public project visible to this token.
-baseUrl: https://suggest.v1d.io
+baseUrl: https://tasks.example.com
 discoveryProject: source
 
 # By default the project registry is discovered on every run. Set a bounded

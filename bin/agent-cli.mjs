@@ -12,6 +12,7 @@ import { cmdRestarter } from "../cli/restarter.mjs";
 import { cmdRestartReady } from "../cli/restart-ready.mjs";
 import { resolveConfigSources } from "../core/config-sources.mjs";
 import { parseEnv } from "../lib.mjs";
+import { DEFAULT_TMUX_SOCKET } from "../core/runtime-defaults.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 // BRIDGE_DIR = agentmux package root. agentmux.yaml (the user-editable
@@ -20,10 +21,12 @@ const BRIDGE_DIR = process.env.AGENTMUX_BRIDGE_DIR || resolve(__dir, "..");
 const configSources = resolveConfigSources({ packageDir: BRIDGE_DIR });
 try {
   const values = parseEnv(readFileSync(configSources.envFile.path, "utf8"));
-  if (!process.env.STATE_FILE && values.STATE_FILE) process.env.STATE_FILE = values.STATE_FILE;
+  for (const [key, value] of Object.entries(values)) {
+    if (!process.env[key]) process.env[key] = value;
+  }
 } catch { /* CLI commands without bridge secrets remain available. */ }
 
-const SOCKET = process.env.TMUX_SOCKET || "/tmp/openclaw-claude.sock";
+const SOCKET = process.env.TMUX_SOCKET || DEFAULT_TMUX_SOCKET;
 const CONFIG_PATH = process.env.AGENT_CONFIG || resolve(process.env.HOME, ".config/agent/agents.yaml");
 const LAST_FILE = resolve(process.env.HOME, ".config/agent/.last");
 

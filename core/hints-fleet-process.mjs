@@ -3,8 +3,8 @@
 // ownership, merge/review policy, communication discipline, memory logging.
 // Board wire-contracts live in the suggestions repo (docs/AGENT-API.md,
 // docs/AGENT-WORK-PROTOCOL.md); each code repo owns its own truths in its
-// AGENTS.md. Dated (Mattias YYYY-MM-DD) markers cite the human decision
-// behind a rule — they are the authority trail, keep them.
+// AGENTS.md. Installation-specific additions belong below the generated
+// marker in each workspace, never in this public template.
 // Normative sentences below are PINNED by test/agent.test.mjs ("generated
 // agent policy") and heading names by core/reminder-state.mjs
 // DRIFT_SECTIONS — conform edits to those gates or update both sides
@@ -20,10 +20,10 @@ split instead of obeying the older text.
    and review policy, communication discipline, memory logging. Synced
    into every project by amux; edit it in the agentmux repo, never
    per-project.
-2. **The Suggestions repo:** the board. \`docs/AGENT-WORK-PROTOCOL.md\` is
-   normative for ticket states and owner/manager duties toward the board;
-   \`docs/AGENT-API.md\` holds the wire contract. The fleet rules below
-   defer to those documents on board mechanics.
+2. **An optional work-board integration:** when the current repository exposes
+   its own workflow/API documents, those documents own ticket states and wire
+   mechanics. If no board is configured, every board-specific rule below is
+   simply inapplicable; AMUX core never assumes one exists.
 3. **Each code repo:** its own truths (data provenance, gates, commands,
    deploy contracts) in the repo's \`AGENTS.md\` and linked docs. Repo
    docs may pin merge-time INVARIANTS (what must be true); they never
@@ -87,13 +87,12 @@ Concrete pattern: a dedup commit landing between two deploys explains
 a "video count drop" without any race condition. Skipped git log +
 investigation spun up = noise to the user, wasted agent time.
 
-## Multi-agent edit protocol (Mattias 2026-07-16: no file-claims)
+## Multi-agent edit protocol
 
 You and other agents may be editing the same repo in parallel. Do NOT
 claim files or announce ownership before starting; that friction slowed
-the fleet down more than the conflicts it prevented (Mattias 2026-07-16:
-"sluta med claim på filer.. man gör en feature.. och sen löser man
-konflikten"). Build the feature in your own branch/worktree, then resolve
+the fleet down more than the conflicts it prevented. Build the feature in
+your own branch/worktree, then resolve
 any conflict at merge:
 
 1. **Build, don't claim.** Make the feature; don't \`git status\`-STOP on
@@ -120,23 +119,24 @@ trees keyed by exact locks, installs pnpm roots locally via
 keeps Python \`.venv\` local with \`uv sync --locked\`; a skipped root or lock
 drift is a red gate, not a scoping excuse.
 
-## Kommunikationsdisciplin (Mattias 2026-07-10: efter ledger-mätt token-svinn)
+## Kommunikationsdisciplin
 
 1. **Prata bara när (a) en STÖRRE uppgift är KLAR, (b) du genuint behöver
    feedback/beslut, eller (c) något blockerar mottagaren.** Inga "klar med X,
    fortsätter med Y"-status, inga kvittenser, inga artighetsfraser ("tack för
    bra jobb"). Commits + ledger ÄR statuskommunikationen.
-2. **Ingen peer-review mellan agenter (Mattias 2026-07-16):** grön gate ÄR
-   reviewn, ägaren mergar själv; review bara på Mattias-begäran eller röd gate.
+2. **Ingen obligatorisk peer-review mellan agenter:** grön gate ÄR reviewn;
+   använd peer-review när operatören ber om det eller när gaten är röd.
 3. **Delade träd fryses i KORTA koordinerade gate-fönster** (en utsedd
    koordinator äger fönstret), aldrig dagar-långa blanket-fences av en
    annan panels yta.
 
-## Staffing and review economics (Mattias 2026-07-27: self-directed fleet)
+## Staffing and review economics
 
 1. **One owner per feature, end to end.** A direct human request makes its
-   recipient the owner. A capable idle agent may also self-claim one READY
-   board ticket. No broker relay or peer approval is required. The owner
+   recipient the owner. When a work board is configured, a capable idle agent may also self-claim one READY
+   or otherwise explicitly claimable ticket. No broker relay or peer
+   approval is required. The owner
    plans, implements, runs targeted checks, rebases, self-merges, deploys when
    applicable, verifies live, records the completion commit, and cleans up.
    Feature scope follows the full data-to-consumer seam when that is needed for
@@ -159,7 +159,7 @@ drift is a red gate, not a scoping excuse.
    between tool calls. Honor the project's configured concurrency limit; do
    not invent extra parallelism. A board lease alone does not prove a pane is
    free.
-5. **The board is a shared work list, not an orchestration ceremony.** Keep the
+5. **A configured board is a shared work list, not an orchestration ceremony.** Keep the
    minimum durable facts: task, owner, state, blocker/reason, and completion
    commit or PR. Comments route to the current owner. Managers read the
    aggregate view; workers do not need a manager round-trip to claim, update or
@@ -191,8 +191,8 @@ drift is a red gate, not a scoping excuse.
 9. **Record blockers where work is tracked.** Use a concrete reason and the
    dependency/evidence needed to clear it. Do not keep blockers only in a
    manager's memory, and do not call silence or an unstarted owner clock a
-   worker failure. READY, deferred, blocked and done are board states, not
-   prose in a private note.
+   worker failure. When a board is enabled, use its typed states rather than
+   encoding state as prose in a private note.
 10. **Human direction is authoritative and remains direct.** If relaying is
     genuinely necessary, preserve the human quote byte-for-byte and include
     provenance. No manager, memory note or older topology rule may narrow,

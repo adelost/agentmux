@@ -37,12 +37,14 @@ function receiptHookMatches(actual, expectedPath, expectedHash) {
 }
 
 function defaultGuardCanary(path) {
+  const canaryOrigin = "https://suggestions-canary.invalid";
   return spawnSync(process.execPath, [path], {
     encoding: "utf8",
+    env: { ...process.env, SUGGEST_BASE_URL: canaryOrigin },
     input: JSON.stringify({
       tool_name: "Bash",
       tool_input: {
-        command: "curl -X PATCH https://suggest.v1d.io/api/tickets/AI-0001/admin?project=ai",
+        command: `curl -X PATCH ${canaryOrigin}/api/tickets/DEMO-0001/admin?project=demo`,
       },
     }),
   });

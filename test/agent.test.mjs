@@ -4,7 +4,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import {
   buildClaudeLaunchCommand, buildCodexLaunchCommand, createAgent, paneDir,
-  shouldPastePrompt, submitWithDurableFence,
+  shouldPastePrompt, submitWithDurableFence, HINTS_VERSION,
 } from "../agent.mjs";
 import { claudeProjectDir } from "../core/claude-paths.mjs";
 
@@ -418,7 +418,7 @@ feature("generated agent policy", () => {
       return content;
     }],
     then: ["agents self-claim while managers observe only concrete exceptions", (content) => {
-      expect(content).toContain("<!-- amux-hints-version: 1.25.2 -->");
+      expect(content).toContain(`<!-- amux-hints-version: ${HINTS_VERSION} -->`);
       expect(content).toContain("Managers are sidecars, not gateways");
       expect(content).toContain("self-claim one READY");
       expect(content).toContain("Do not wake a fleet to look busy");

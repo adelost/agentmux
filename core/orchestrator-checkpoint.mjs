@@ -10,6 +10,7 @@
 import { isLiveStatus, needsHumanStatus } from "./pane-status.mjs";
 import { isSystemNoiseDirective } from "./system-noise.mjs";
 import { parseSenderHeader } from "./sender-detect.mjs";
+import { operatorName } from "./runtime-defaults.mjs";
 
 /**
  * Bucket timeline rows by `agent:pane` key. Each bucket captures the turn
@@ -97,7 +98,7 @@ export function isRunningNow(bucket, nowMs, withinMs = 60_000) {
   return nowMs - ts <= withinMs;
 }
 
-/**
+/*
  * Heuristic: does this assistant message read like an EXPLICIT ask directed
  * at the human? Matches a trailing question mark plus second-person ask cues
  * ("vill du", "ska jag", "want me to", "säg till", ...).
@@ -110,6 +111,7 @@ export function isRunningNow(bucket, nowMs, withinMs = 60_000) {
  * court; a missed generic waiter shows up as idle instead, which the
  * fleet watchdogs already cover.
  */
+/** WHAT: Returns whether assistant text requests human input. WHY: Keeps human blockers separate from agent-lane waiting. */
 export function isWaitingLikeText(text) {
   if (!text) return false;
   const trimmed = text.trim();
@@ -131,41 +133,46 @@ export function isWaitingLikeText(text) {
     // på review/merge/CI" is an agent-lane state, not a human ask; optional
     // offers ("klart — säg till om ...", "let me know if ...") must not
     // block either, so neither phrase is a cue on its own.
-    /väntar på (dig|ditt|din|mattias)/,
+    /väntar på (dig|ditt|din)/,
     /avvaktar (ditt|dina|din) /,
     /awaiting your /,
     /(please|can you) confirm/,
   ];
-  return cues.some((r) => r.test(tail));
+  const namedOperator = operatorName().toLowerCase();
+  return cues.some((r) => r.test(tail)) || tail.includes(`väntar på ${namedOperator}`);
 }
 
-/**
+/*
  * Provenance-aware needs-you: a waiting-like reply only puts the ball in the
  * HUMAN's court when the conversation partner is the human. When the latest
  * prompt carries an inter-agent envelope ("[from lsrc:2] ..."), a generic
  * second-person question ("Vill du att jag mergar?") is addressed to that
- * agent, not to Mattias. parseSenderHeader covers the canonical
+ * agent, not to the operator. parseSenderHeader covers the canonical
  * auto-prepended envelope; the loose "[from ..." fallback covers
  * hand-written variants ("[from claw:3 · audit]") that the strict routing
  * parser rejects — for CLASSIFICATION a human never types that prefix, so
  * loose is safe here.
  *
  * Inside an agent thread, needs-you survives only when the reply actually
- * ADDRESSES the human (vocative "Mattias, ...") or states that the human's
- * decision is what's pending ("väntar på Mattias besked"). A mere MENTION
- * is not an ask: "Ska jag eskalera detta till Mattias?" asks the peer
+ * ADDRESSES the human (vocative "Operator, ...") or states that the human's
+ * decision is what's pending ("waiting for the operator's decision"). A mere MENTION
+ * is not an ask: "Should I escalate this to the operator?" asks the peer
  * agent, and "buggen drabbar användaren, ska jag fixa?" is about the user,
  * not to the user.
  */
+/** WHAT: Returns whether a reply asks the human operator. WHY: Prevents peer questions from becoming human blockers. */
 export function isAskToHuman(replyText, promptText) {
   if (!isWaitingLikeText(replyText)) return false;
   const prompt = String(promptText || "").trimStart();
   const interAgent = parseSenderHeader(prompt) != null || /^\[from \S+/.test(prompt);
   if (!interAgent) return true;
   const tail = String(replyText).trim().slice(-300);
-  return /(^|[.!?]\s+|\n)\s*(mattias|@?human|användaren)\s*[,:;-]/im.test(tail)
-    || /(väntar på|behöver|kräver|inväntar) (mattias'?s?|human|mänskligt?)\s*(besked|svar|beslut|godkännande|approval|input|blick)/i.test(tail)
-    || /needs (mattias|human) (approval|decision|input|call)/i.test(tail);
+  const escapedName = operatorName().replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const target = `(?:${escapedName}|the operator|@?human|användaren)`;
+  return new RegExp(`(^|[.!?]\\s+|\\n)\\s*${target}\\s*[,:;-]`, "imu").test(tail)
+    || new RegExp(`(väntar på|behöver|kräver|inväntar) ${target}(?:'s|'|s)?\\s*`
+      + "(besked|svar|beslut|godkännande|approval|input|blick)", "iu").test(tail)
+    || new RegExp(`needs ${target} (approval|decision|input|call)`, "iu").test(tail);
 }
 
 /**

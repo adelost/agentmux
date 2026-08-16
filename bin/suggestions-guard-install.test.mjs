@@ -11,7 +11,8 @@ const binDir = dirname(fileURLToPath(import.meta.url));
 const coreDir = resolve(binDir, "..", "core");
 const guard = join(binDir, "suggestions-write-guard.mjs");
 
-const MUTATION = "curl -X PATCH https://suggest.v1d.io/api/tickets/AI-0001/admin?project=ai";
+const SUGGESTIONS_BASE_URL = "https://tasks.example.test";
+const MUTATION = `curl -X PATCH ${SUGGESTIONS_BASE_URL}/api/tickets/DEMO-0001/admin?project=demo`;
 
 // Run the guard the way the hook does: a JSON payload on stdin, and the exit
 // code is the whole contract. Only 2 blocks; the runtime reads everything else
@@ -19,6 +20,7 @@ const MUTATION = "curl -X PATCH https://suggest.v1d.io/api/tickets/AI-0001/admin
 const runGuard = (guardPath, command) => {
   const run = spawnSync(process.execPath, [guardPath], {
     encoding: "utf8",
+    env: { ...process.env, SUGGEST_BASE_URL: SUGGESTIONS_BASE_URL },
     input: JSON.stringify({ tool_name: "Bash", tool_input: { command } }),
   });
   return { status: run.status, stderr: run.stderr ?? "" };
@@ -43,7 +45,7 @@ feature("The installed Suggestions guard cannot quietly stop guarding", () => {
       // one-file copy list did not follow. The installed guard then imported a
       // file that was never installed.
       expect(closure.map((path) => path.slice(coreDir.length + 1)).sort())
-        .toEqual(["mangled-swedish.mjs", "suggestions-authoring.mjs"]);
+        .toEqual(["mangled-swedish.mjs", "runtime-defaults.mjs", "suggestions-authoring.mjs"]);
     }],
   });
 
@@ -58,7 +60,7 @@ feature("The installed Suggestions guard cannot quietly stop guarding", () => {
 
   component("a complete install blocks the inline mutation", {
     given: ["the guard installed with its whole closure", () => installedCopy(
-      ["suggestions-authoring.mjs", "mangled-swedish.mjs"],
+      ["suggestions-authoring.mjs", "mangled-swedish.mjs", "runtime-defaults.mjs"],
     )],
     when: ["a pane tries a direct curl mutation", (ctx) => runGuard(ctx.guardPath, MUTATION)],
     then: ["it is refused with the blocking exit code", (result, ctx) => {

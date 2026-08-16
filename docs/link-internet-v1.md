@@ -1,36 +1,36 @@
 # Agentmux Link Internet V1 — kontrakt och threat model
 
 Mål: Agentmux Link (Android) ska fungera över vanligt internet utan Tailscale,
-offentlig hem-IP eller port-forwarding. En publik mailbox på `link.v1d.io`
+offentlig hem-IP eller port-forwarding. En operatörskonfigurerad HTTPS-mailbox
 är den enda publika ytan; WSL och Windows ansluter utåt som connectors.
 
-Icke-mål i V1: inga roller/membership i v1d-auth, inga Suggestions-tickets,
+Icke-mål i V1: inga roller/membership i identitetsleverantören, inga Suggestions-tickets,
 ingen ny scheduler/supervisor, ingen publik ingress hemma, ingen autonom
 destruktiv restart (gäller #198/#199 redan).
 
 ## Komponenter
 
-- **Link-tjänsten** (Cloudflare Worker + D1 `link_mailbox` + R2 `link-voice`):
+- **Link-tjänsten** (Cloudflare Worker + operatörens D1- och R2-resurser):
   mailbox, auth, sessioner, heartbeats. Äger inga agentdata.
 - **Appen** (Android): Custom Tab-login, PKCE, Keystore-session, chat/PTT,
   ärlig status (queued/online/offline).
 - **WSL-connector** (`channels/link-connector.mjs` i bryggan): pollar utåt,
-  claimar targets den äger (t.ex. lsrc:3, lsrc:10), levererar via durable
+  claimar targets den äger (t.ex. project:3, project:4), levererar via durable
   amux-kö (messageId som idempotency key), postar reply.
 - **Windows-connector** (i Windows-managerns runtime): samma kontrakt för
   target=windows; lever när WSL är död. Konsument, aldrig publik ingress.
 
 ## Auth (två ben)
 
-1. **Link ↔ v1d-auth** (befintligt flöde, samma som skybar):
-   `/authorize?app_id&redirect_uri=https://link.v1d.io/auth/callback&state&code_challenge(S256)`
+1. **Link ↔ konfigurerad identitetsleverantör**:
+   `/authorize?app_id&redirect_uri=<LINK_PUBLIC_ORIGIN>/auth/callback&state&code_challenge(S256)`
    → Google → callback `code` → POST `/token` (redirect_uri + code + verifier)
    → principal (identityId, verifiedEmail). State är förseglad cookie.
    Link är confidential klient; hemligheten är Worker-secret, aldrig i APK.
 2. **App ↔ Link**: appen genererar egen PKCE. `/auth/start?challenge&client=android`
    startar ben 1. Efter callback utfärdar Link en kortlivad engångskod
    (`code`, ≤60 s, single-use) som returneras via verifierad Android App Link
-   (https://link.v1d.io/auth/app-return) eller custom scheme `agentmux://auth`.
+   (`<LINK_PUBLIC_ORIGIN>/auth/app-return`) eller custom scheme `agentmux://auth`.
    Appen byter `code` + sin verifier mot `/auth/exchange` → opaque
    Link-session (30 d, revokerbar). Verifiern lagras krypterad med Android
    Keystore före Custom Tab-start och överlever processåterskapande utan att
@@ -119,12 +119,16 @@ Android TTS är V1-uppspelning; server-MP3 optional fallback.
 
 ## Ops-förkrav (människa/ägare)
 
-1. v1d-auth: registrera klient `agentmux-link` + callback
-   `https://link.v1d.io/auth/callback` (samma ställe som skybars registrering).
-2. `wrangler secret put V1D_AUTH_CLIENT_SECRET` (+ `CONNECTOR_TOKEN_WSL`,
-   `CONNECTOR_TOKEN_WINDOWS`) på link-projektet.
-3. DNS `link.v1d.io` → Worker (custom domain eller pages.dev-substitut i dev).
-4. Allowlist-seed: identityId(r) för tillåtna människor i D1.
+1. Registrera en confidential klient hos identitetsleverantören och sätt callback
+   till `<LINK_PUBLIC_ORIGIN>/auth/callback`.
+2. Kopiera `link/wrangler.toml.example` till den ignorerade lokala
+   `link/wrangler.toml`, fyll i egna D1/R2-resurser, `LINK_AUTH_ORIGIN`,
+   `LINK_AUTH_CALLBACK_URL`, `LINK_AUTH_APP_ID` och connector-targets.
+3. Lägg in `LINK_AUTH_CLIENT_SECRET`, `LINK_AUTH_STATE_SECRET`,
+   `CONNECTOR_TOKEN_WSL` och `CONNECTOR_TOKEN_WINDOWS` som Worker-secrets.
+4. Koppla valfri privat HTTPS-domän till Workern, eller använd den isolerade
+   `workers.dev`-adressen för en egen testinstallation.
+5. Allowlist-seed: identityId(r) för tillåtna människor i D1.
 
 ## Acceptans → mappning
 

@@ -7,6 +7,7 @@ import {
   defaultSuggestionsFleetKeyFile, defaultSuggestionsTokenFile, sendSuggestionsRequest,
 } from "../core/suggestions-authoring.mjs";
 import { detectSenderFromEnv } from "../core/sender-detect.mjs";
+import { normalizeServiceBaseUrl } from "../core/runtime-defaults.mjs";
 
 // A tmux session maps to one Suggestions project ONLY where the pane's work has
 // exactly one home. `ai` was missing here, and the cost was not one extra flag:
@@ -87,10 +88,13 @@ const credential = (path, label) => {
 /** WHAT: Defines the bounded HTTP seam used by amux work. WHY: Reuses durable mutation staging and hides credentials. */
 export function createWorkClient({ baseUrl, sender, fleetToken, adminToken, fetchImpl = fetch,
   stateDir } = {}) {
+  const serviceBaseUrl = normalizeServiceBaseUrl(baseUrl, "Suggestions base URL", {
+    allowHttpLoopback: process.env.NODE_ENV === "test",
+  });
   const headers = (admin = false) => ({ authorization: `Bearer ${admin ? adminToken : fleetToken}`,
     ...(admin ? {} : { "x-agent-id": sender }) });
   const read = async (path, admin = false) => {
-    const response = await fetchImpl(new URL(path, baseUrl), { headers: headers(admin) });
+    const response = await fetchImpl(new URL(path, serviceBaseUrl), { headers: headers(admin) });
     const text = await response.text();
     if (!response.ok) throw new Error(`Suggestions HTTP ${response.status}: ${text.slice(0, 500)}`);
     return parseResponse(text, "Suggestions");
@@ -100,7 +104,7 @@ export function createWorkClient({ baseUrl, sender, fleetToken, adminToken, fetc
     const bodyFile = join(temporary, "body.json");
     writeFileSync(bodyFile, `${JSON.stringify(body, null, 2)}\n`, { mode: 0o600 });
     try {
-      const result = await sendSuggestionsRequest({ baseUrl, path, method, bodyFile,
+      const result = await sendSuggestionsRequest({ baseUrl: serviceBaseUrl, path, method, bodyFile,
         token: admin ? adminToken : fleetToken,
         requestHeaders: admin ? {} : { "x-agent-id": sender }, fetchImpl,
         ...(stateDir ? { stateDir } : {}) });
@@ -304,7 +308,10 @@ export async function runWorkCommand(argv, dependencies = {}) {
   if (!sender) throw new Error("amux work must run inside a configured agent pane");
   const project = projectForWorkSender(sender, parsed.options.project);
   if (!project) throw new Error("cannot infer Suggestions project; pass --project ID");
-  const baseUrl = parsed.options["base-url"] ?? dependencies.baseUrl ?? "https://suggest.v1d.io";
+  const baseUrl = parsed.options["base-url"] ?? dependencies.baseUrl ?? process.env.SUGGEST_BASE_URL;
+  if (!dependencies.client && !baseUrl) {
+    throw new Error("Suggestions is not configured; set SUGGEST_BASE_URL or pass --base-url");
+  }
   const client = dependencies.client ?? createWorkClient({ baseUrl, sender,
     fleetToken: dependencies.fleetToken, adminToken: dependencies.adminToken,
     fetchImpl: dependencies.fetchImpl, stateDir: dependencies.stateDir });

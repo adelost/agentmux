@@ -6,7 +6,7 @@
 // noticed by accident and had to hand-hold ("vi behövde tillfälligt byta
 // till en mindre smart modell.. tänk igenom planen en gång till").
 //
-// Policy (Mattias's calls, 2026-07-10): a MODEL downgrade stops the pane —
+// Policy (the operator's calls, 2026-07-10): a MODEL downgrade stops the pane —
 // work built on a weaker model creates bugs that cost more to find later
 // ("man behöver fixa buggarna sen"). An EFFORT-only drop within the same
 // model ("max→xhigh är nästan okej") warns without stopping: the quality
@@ -48,7 +48,7 @@ export function modelRank(model) {
 // The top Claude tier. A switch BETWEEN these (fable-5 <-> opus-4-8, whether a
 // deliberate /model or a context-pressure fallback) is a sidegrade among
 // frontier models, NOT a drop to a weaker quota/context fallback: notify the
-// human but never stop the pane or gate its briefs. Mattias 2026-07-12: "det är
+// human but never stop the pane or gate its briefs. the operator 2026-07-12: "det är
 // okej nu att använda opus 4.8 ... jag vill veta ... men sen är det okej."
 const FRONTIER_MODELS = ["fable", "mythos", "opus"];
 export function isFrontierModel(model) {

@@ -17,7 +17,7 @@ Install creates `~/.config/agent/suggestions-comment-bridge.yaml` from the
 reusable example if the file is absent:
 
 ```yaml
-baseUrl: https://suggest.v1d.io
+baseUrl: https://tasks.example.com
 credentialFile: ~/.config/agent/suggestions-read-token
 projects:
   source:

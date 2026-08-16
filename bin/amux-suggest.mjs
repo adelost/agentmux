@@ -77,6 +77,10 @@ if (invokedDirectly) try {
   for (const required of ["method", "path", "bodyFile"]) {
     if (!options[required]) throw new Error(`--${required.replace(/[A-Z]/gu, (c) => `-${c.toLowerCase()}`)} is required`);
   }
+  options.baseUrl ??= process.env.SUGGEST_BASE_URL;
+  if (!options.baseUrl) {
+    throw new Error("Suggestions is not configured; set SUGGEST_BASE_URL or pass --base-url");
+  }
   // Before the request, deliberately: a 409/500 from the board is exactly the
   // moment an agent is tempted to start repairing machinery, so the incident
   // reminder must land even when the call fails.

@@ -1,5 +1,5 @@
 # Private Suggestions board. The relay uses a read-only token from a 0600 file.
-baseUrl: https://suggest.v1d.io
+baseUrl: https://tasks.example.com
 credentialFile: ~/.config/agent/suggestions-read-token
 
 # Explicit routing. Pane 2 is the Claude broker; panes 3+ implement.

@@ -4,7 +4,9 @@ Persistent todo list with a daily 08:00 push reminder.
 
 ## File location
 
-Storage: `~/.openclaw/workspace/memory/tasks.md`
+Storage: `~/.agentmux/workspace/memory/tasks.md` by default. Set
+`AMUX_TODOS_PATH` to reuse another file, including an existing OpenClaw task
+list.
 
 Reuses the existing markdown format (Idag / snart, Parkerat, Väntar på, Klart).
 Override path via `AMUX_TODOS_PATH` env var.

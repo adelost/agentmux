@@ -86,7 +86,7 @@ amux asks <agent> --pane N --since 2d
 amux asks --all-repos --summary      # durable overview across removed/current repos
 amux asks --full --since 30d         # exact live reply/line join; prompts are already durable
 \`\`\`
-Use \`asks\` for "what did Mattias ask, where, and did it close?". The first
+Use \`asks\` for "what did the operator ask, where, and did it close?". The first
 run after upgrade imports older durable delivery jobs once. The append-only ask
 ledger survives respawn, clear, rotation, and janitor; missing completion
 history is shown honestly as unresolved \`unverified\`, never silently closed.
@@ -113,7 +113,7 @@ amux claw -p 2 --notify-user "run tests"     # ping human when pane is done/prob
 \`\`\`
 Use this only when the user explicitly asks to be notified, or when something
 is genuinely important and needs the user's attention soon (failure, blocked
-permission, production risk, completed long-running task he asked to track).
+permission, production risk, completed long-running task they asked to track).
 Do not use it for routine progress, minor status updates, or "nice to know"
 messages.
 

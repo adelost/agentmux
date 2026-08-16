@@ -2,7 +2,7 @@
 # fleet-progress-cron.sh — the "nobody's moving and nobody noticed" watchdog.
 #
 # WHY: two failure classes were invisible until a human happened to look
-# (Mattias, 2026-07-14: "det känns inte som att agenterna jobbar"):
+# (the operator, 2026-07-14: "det känns inte som att agenterna jobbar"):
 #   (A) a broker closes a ticket-wave and never dispatches the next one, so
 #       its whole fleet idles with work still in the backlog (skydive:3 sat a
 #       wave-gap for hours; nobody was hung, nobody was working either).
@@ -10,8 +10,8 @@
 #       JSONL receipt) and lingers forever — the FIFO is not blocked (claw:3's
 #       decouple fix), but the job never terminalises so it silently rots.
 #
-# task-keeper watches a REGISTERED lane's own task progress; backlog-pull
-# auto-dispatches the ai-dsl FE lane. Neither sees (A) fleet-wide broker gaps
+# task-keeper watches a registered lane's own task progress; backlog-pull
+# can auto-dispatch one configured writer lane. Neither sees (A) fleet-wide broker gaps
 # or (B) transport wedges. This closes both, fleet-agnostically.
 #
 # WHAT each run (~every 20 min via cron) does:
@@ -33,9 +33,9 @@
 #      a BUSY broker whose review queue quietly ages (SRC-0012 sat 7h+ while
 #      its broker worked other reviews, 2026-07-15). Label a PR "parked" to
 #      intentionally exempt it.
-# REMOVED 2026-08-05 (Mattias, röst): the starvation sweep (D). It read "READY
+# REMOVED 2026-08-05 (the operator, röst): the starvation sweep (D). It read "READY
 # tickets, nothing in_progress" as a fleet that must be pushed, and had no way
-# to represent a human who had deliberately stopped the fleet. During his stop
+# to represent a human who had deliberately stopped the fleet. During that stop
 # order it nudged this pane every 20 minutes and pushed two mobile DMs at 03:40
 # and 07:00 saying the board was starving — while 12 of its 14 READY tickets
 # were the coordination layer's own maintenance. "Ta bort larmet omedelbart.
@@ -57,7 +57,7 @@
 #          stale point-in-time audit can't blind the watch to later tickets)
 # Install: */20 * * * * .../bin/fleet-progress-cron.sh >> ~/.cache/fleet-progress.log 2>&1
 set -uo pipefail
-export HOME="${HOME:-/home/adelost}"
+export HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
 export PATH="${HOME}/.nvm/versions/node/v22.19.0/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin"
 AMUX="${AMUX:-${HOME}/.nvm/versions/node/v22.19.0/bin/amux}"
 CURL="${CURL:-curl}"
@@ -67,21 +67,27 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/guard-heartbeat.sh"
 
 # The agent server runs on a NAMED socket (agent-cli.mjs: TMUX_SOCKET ||
-# /tmp/openclaw-claude.sock). Bare `tmux` only finds it when invoked from
+# /tmp/agentmux-tmux.sock). Bare `tmux` only finds it when invoked from
 # inside that server ($TMUX set) — from cron it hits the default socket,
 # sees no server, and every pane check returns "gone". That killed the
 # entire fleet sweep silently from its FIRST cron run (223 'pane gone'
 # rows, 2026-07-14..15) while manual runs worked. Shadow tmux so every
 # call site targets the right socket in both contexts.
-TMUX_SOCKET="${TMUX_SOCKET:-/tmp/openclaw-claude.sock}"
+if [ -z "${TMUX_SOCKET:-}" ] && [ -f "$HOME/.agentmux/.env" ]; then
+  TMUX_SOCKET="$(sed -n 's/^TMUX_SOCKET=//p' "$HOME/.agentmux/.env" | tail -1)"
+fi
+TMUX_SOCKET="${TMUX_SOCKET:-/tmp/agentmux-tmux.sock}"
 tmux() { command tmux -S "$TMUX_SOCKET" "$@"; }
 
 WATCH_DIR="${WATCH_DIR:-${HOME}/.agentmux/fleet-watch}"   # overridable for tests
 QUEUE_DIR="${QUEUE_DIR:-${HOME}/.agentmux/delivery-queue}"
 CONF="${CONF:-${WATCH_DIR}/fleets.conf}"
-BOARD_URL="${BOARD_URL:-https://suggest.v1d.io}"
+BOARD_URL="${BOARD_URL:-${SUGGEST_BASE_URL:-}}"
+if [ -z "$BOARD_URL" ] && [ -f "$HOME/.agentmux/.env" ]; then
+  BOARD_URL="$(sed -n 's/^SUGGEST_BASE_URL=//p' "$HOME/.agentmux/.env" | tail -1)"
+fi
 READ_TOKEN_FILE="${READ_TOKEN_FILE:-${HOME}/.config/agent/suggestions-read-token}"
-STALE_MIN="${STALE_MIN:-60}"        # fleet quiet this long → broker gap (Mattias: "en timme")
+STALE_MIN="${STALE_MIN:-60}"        # fleet quiet this long → broker gap (the operator: "en timme")
 STUCK_MIN="${STUCK_MIN:-60}"        # queue job non-terminal this long → surface
 ACTIVE_SEC="${ACTIVE_SEC:-150}"     # broker jsonl fresher than this → mid-turn, never interrupt
 COOLDOWN_MIN="${COOLDOWN_MIN:-60}"  # per-fleet re-nudge cooldown
@@ -103,6 +109,7 @@ review_nudges=0
 board_failures=0
 
 mkdir -p "$WATCH_DIR"
+[ -n "$BOARD_URL" ] || { echo "[$(date -Is)] Suggestions disabled (set SUGGEST_BASE_URL) → skip"; exit 0; }
 [ -f "${WATCH_DIR}/OFF" ] && { guard_heartbeat_metric disabled true; echo "[$(date -Is)] global OFF → skip"; exit 0; }
 
 # Single-instance: a nudge to a busy pane can take seconds; under a */20 cron a
@@ -364,7 +371,7 @@ while read -r session pane repo project _rest; do
   [ -f "$warn" ] && escalate=1
 
   repo_label=$(basename "${_repos[0]}")
-  MSG="[fleet-watch, automatisk] Boarden ${project} har ${unfinished} oavslutade tickets (READY=${BOARD_READY}, Pågår=${BOARD_IN_PROGRESS}, needs_detail=${BOARD_NEEDS_DETAIL}, triaging=${BOARD_TRIAGING}) men inga commits i ${repo_label} och brokern har varit idle i ${age_min}min. Reconcile NU: dispatcha READY per prio; verifiera ägare/checkpoint för Pågår; lös needs_detail/triaging. Genuin väntan ska skrivas som en TYPAD deferral på ticketen: dependency, capacity, time, human_decision eller backlog — aldrig fri kommentar, aldrig en READY-ticket som egentligen är parkerad. Om en panel hänger: checkpointa + ge nästa oberoende item. Sätt ALDRIG .OFF själv — den är permanent och bara för Mattias."
+  MSG="[fleet-watch, automatisk] Boarden ${project} har ${unfinished} oavslutade tickets (READY=${BOARD_READY}, Pågår=${BOARD_IN_PROGRESS}, needs_detail=${BOARD_NEEDS_DETAIL}, triaging=${BOARD_TRIAGING}) men inga commits i ${repo_label} och brokern har varit idle i ${age_min}min. Reconcile NU: dispatcha READY per prio; verifiera ägare/checkpoint för Pågår; lös needs_detail/triaging. Genuin väntan ska skrivas som en TYPAD deferral på ticketen: dependency, capacity, time, human_decision eller backlog — aldrig fri kommentar, aldrig en READY-ticket som egentligen är parkerad. Om en panel hänger: checkpointa + ge nästa oberoende item. Sätt ALDRIG .OFF själv — den är permanent och bara för the operator."
 
   if is_reserved "$session"; then
     if [ "$DRY" = "1" ]; then log "$session:$pane: DRY reserved-name → would escalate (${age_min}min)"; continue; fi
