@@ -425,6 +425,32 @@ export function checkGuardCronHeartbeats({ heartbeats, now = Date.now() }) {
     `${rows.length}/${rows.length} fresh · oldest ${oldest.key} ${Math.floor(oldest.ageMs / 60000)}m ago`);
 }
 
+/**
+ * WHAT: Checks the pinned Codex composer vocabulary against the installed binary.
+ * WHY: Keeps a Codex upgrade from surfacing only as "composer is not empty".
+ */
+export function checkCodexVocabulary({ probe, required }) {
+  if (!required) return null;
+  const name = "codex vocabulary";
+  if (probe.error) {
+    return check(name, FAIL, probe.error,
+      "put codex on the bridge's PATH; Codex panes cannot be driven until the empty composer can be verified");
+  }
+  const { installedVersion, verifiedVersion, checked, missing } = probe;
+  if (missing.length) {
+    const list = missing.map((value) => JSON.stringify(value)).join(", ");
+    return check(name, FAIL,
+      `Codex ${installedVersion}: ${missing.length}/${checked} composer strings missing from binary (${list})`,
+      `delivery misreads an empty composer as a human draft; re-read chatwidget.rs + footer.rs at rust-v${installedVersion} and update core/codex-vocabulary.mjs`);
+  }
+  if (installedVersion !== verifiedVersion) {
+    return check(name, WARN,
+      `Codex ${installedVersion} installed, vocabulary verified for ${verifiedVersion}; all ${checked} strings present`,
+      `re-check the composer at rust-v${installedVersion} and bump verifiedCodexVersion in core/codex-vocabulary.mjs`);
+  }
+  return check(name, OK, `Codex ${installedVersion} · ${checked}/${checked} composer strings present in binary`);
+}
+
 /** Worst status wins for the exit code: fail > warn > ok. */
 export function overallStatus(checks) {
   if (checks.some((c) => c.status === FAIL)) return FAIL;

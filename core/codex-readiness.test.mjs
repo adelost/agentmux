@@ -8,7 +8,7 @@ feature("Codex startup readiness", () => {
       ready: await waitForCodexUiReady({
         tmux: {
           captureScreen: async () => ctx.clock >= 25_000
-            ? "› Find and fix a bug in @filename\n\n  gpt-5.6-sol xhigh · /workspace"
+            ? "› Ask Codex to do anything\n\n  gpt-5.6-sol xhigh · /workspace"
             : `replaying transcript ${ctx.clock}`,
           sendKeys: async () => {},
           sendLiteral: async () => {},
@@ -37,7 +37,7 @@ feature("Codex startup readiness", () => {
       ready: await waitForCodexUiReady({
         tmux: {
           captureScreen: async () => ctx.clock >= 45_000
-            ? "› Run /review on my current changes\n\n  gpt-5.6-sol xhigh · /workspace"
+            ? "› Ask a follow-up question\n\n  gpt-5.6-sol xhigh · /workspace"
             : "Resuming session…",
           sendKeys: async () => {},
           sendLiteral: async () => {},

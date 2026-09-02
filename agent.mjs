@@ -50,6 +50,8 @@ import {
   prepareCodexIdle,
   rescueCodexSubmitIfConfirmed,
 } from "./core/codex-tui.mjs";
+import { blockedByNonEmptyComposer, codexDeliveryBlocked } from "./core/codex-delivery-blocked.mjs";
+import { codexVocabularyDrift } from "./core/codex-vocabulary-probe.mjs";
 import {
   codexModelOverride,
   codexProfileCatalog,
@@ -77,12 +79,6 @@ export { buildClaudeLaunchCommand, buildCodexLaunchCommand, buildKimiLaunchComma
 export { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence.mjs";
 const CODEX_SESSION_STATE_KEY = "codex_session_by_pane_profile_v1";
 const CODEX_PROMPT_READY_TIMEOUT_MS = 8_000;
-function codexDeliveryBlocked(message, { zoomRecoverable = false } = {}) {
-  const error = new Error(message);
-  error.code = "AMUX_DELIVERY_BLOCKED";
-  if (zoomRecoverable) error.zoomRecoverable = true;
-  return error;
-}
 // --- Session isolation ---
 /** WHAT: Resolves one pane cwd. WHY: Keeps agent histories isolated across panes. */
 export function paneDir(rootDir, pane) {
@@ -1047,7 +1043,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     // the exact JSONL echo remains the delivery proof.
     const deadline = Date.now() + CODEX_PROMPT_READY_TIMEOUT_MS;
     let lastError = "composer is not ready";
-    const driver = { isBusy, capturePane, captureScreen, sendEscape, sendTab, typeLiteral };
+    const driver = { isBusy, capturePane, captureScreen, sendEscape, sendTab, typeLiteral, codexVocabularyDrift };
 
     while (Date.now() < deadline) {
       const ready = await prepareCodexIdle({
@@ -1099,10 +1095,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
             "Codex prompt delivery blocked: durable draft is not visible; refusing to paste it again",
           );
         }
-        throw codexDeliveryBlocked(
-          `Codex prompt delivery blocked: composer contains a different draft (starts with: ${composer.slice(0, 60)})`,
-          { zoomRecoverable: true },
-        );
+        throw await blockedByNonEmptyComposer({ codexVocabularyDrift }, composer, { head: "composer contains a different draft" });
       }
 
       const busy = Boolean(await isBusy(agentName, pane).catch(() => true));
@@ -1832,7 +1825,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   return {
     ensureReady, sendAndWait, sendOnly,
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
-    promptTransportState,
+    promptTransportState, codexVocabularyDrift,
     capturePane, captureScreen, capturePromptEchoCursor, captureSlashReceiptCursor, waitForSlashReceipt, sendEscape, sendTab, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
     dismissBlockingPrompt, waitForPromptEcho, probeIngest,
     startProgressTimer, getContextPercent, getContext, checkAgent, reconcileSession, paneProcessState: tuiRecovery.paneProcessState,

@@ -27,7 +27,7 @@ const STATUS = `
 │  Warning:                     limits may be stale - run /status again shortly.│
 ╰──────────────────────────────────────────────────────────────────────────╯
 
-› Explain this codebase
+› Ask Codex to do anything
 `;
 
 feature("native Codex status parsing", () => {
@@ -90,8 +90,8 @@ feature("driveCodexStatus", () => {
   unit("verifies command palette, submits and returns parsed native status", {
     given: ["an idle pane through the status command", () => ({
       agent: fakeAgent([
-        "\n› Explain this codebase\n",
-        "\n› Explain this codebase\n",
+        "\n› Ask Codex to do anything\n",
+        "\n› Ask Codex to do anything\n",
         "\n  /status  show current session configuration and token usage\n",
         STATUS,
       ]),
@@ -108,7 +108,7 @@ feature("driveCodexStatus", () => {
 
   unit("unknown palette fails before Enter", {
     given: ["a changed Codex UI", () => ({
-      agent: fakeAgent(["\n› Explain this codebase\n", "\nunknown palette\n"]),
+      agent: fakeAgent(["\n› Ask Codex to do anything\n", "\nunknown palette\n"]),
     })],
     when: ["driving", ({ agent }) => driveCodexStatus({
       agent, name: "claw", pane: 11, sleep: noSleep, timeoutMs: 100,
@@ -124,11 +124,11 @@ feature("driveCodexStatus", () => {
     given: ["scrollback containing an old box, then a submitted command with no new box", () => {
       const old = STATUS;
       const agent = fakeAgent([
-        `${old}\n› Explain this codebase\n`,
-        `${old}\n› Explain this codebase\n`,
+        `${old}\n› Ask Codex to do anything\n`,
+        `${old}\n› Ask Codex to do anything\n`,
         "\n  /status  show current session configuration and token usage\n",
         "\n  /status  show current session configuration and token usage\n",
-        `${old}\n/status\n› Explain this codebase\n`,
+        `${old}\n/status\n› Ask Codex to do anything\n`,
       ]);
       return { agent };
     }],

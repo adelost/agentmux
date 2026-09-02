@@ -13,8 +13,9 @@ import {
   checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkReleaseIdentity, checkSupervisors, checkLedger,
   rescueBridgePidFromHeartbeat, checkBridgeMode, checkContextBridge, checkConfig, overallStatus, formatDoctorReport,
   FAIL, WARN, checkDeliveryQueue, checkNativeRuntimeFleet, checkGuardCronHeartbeats, checkSuggestionsBoard,
-  checkQuotaRecoveryHealth, quotaRecoveryHealthObservation, checkPaneModals,
+  checkQuotaRecoveryHealth, quotaRecoveryHealthObservation, checkPaneModals, checkCodexVocabulary,
 } from "../core/doctor.mjs";
+import { probeCodexVocabulary } from "../core/codex-vocabulary-probe.mjs";
 import {
   checkTmux, checkTmuxClients, checkTmuxPaneGeometry, checkTmuxVersion, observeTmuxFleet,
 } from "../core/doctor-tmux.mjs";
@@ -166,10 +167,11 @@ export async function cmdDoctor(ctx) {
 
   // context bridge coverage: how many configured claude panes have a fresh
   // statusline push (core/context.mjs getContextPushed)
-  let claudePanes = 0, pushing = 0;
+  let claudePanes = 0, pushing = 0, codexPanes = 0;
   for (const a of agents) {
     if (a.backend === "native") continue;
     (a.panes || []).forEach((p, i) => {
+      if (/codex/.test(String(p?.cmd || ""))) codexPanes++;
       if (!/claude/.test(String(p?.cmd || ""))) return;
       claudePanes++;
       try {
@@ -229,6 +231,9 @@ export async function cmdDoctor(ctx) {
       bridgeRunning: pids.length > 0,
     }),
     checkGuardCronHeartbeats({ heartbeats: guardHeartbeats }),
+    // Codex repaints its empty composer between releases; verify the pinned
+    // text against the binary panes run, or delivery misreads it as a draft.
+    checkCodexVocabulary({ probe: probeCodexVocabulary(), required: codexPanes > 0 }),
   ];
 
   const activeChecks = checks.filter(Boolean);

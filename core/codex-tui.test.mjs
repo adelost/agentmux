@@ -35,39 +35,37 @@ function fakeAgent({ frames, busy = false, busyError = null }) {
 const noSleep = () => Promise.resolve();
 
 feature("Codex composer truth", () => {
-  unit("exact rotating placeholders count as an empty composer", {
-    when: ["reading Codex 0.144.x's exact placeholder inventory", () => [
-      "Explain this codebase",
-      "Summarize recent commits",
-      "Implement {feature}",
-      "Find and fix a bug in @filename",
-      "Write tests for @filename",
-      "Improve documentation in @filename",
-      "Run /review on my current changes",
-      "Use /skills to list available skills",
-      "Check recently modified functions for compatibility",
-      "How many files have been modified?",
-      "Will this algorithm scale well?",
+  unit("Codex 0.152.1's exact placeholders count as an empty composer", {
+    when: ["reading both chatwidget.rs placeholders", () => [
       "Ask Codex to do anything",
+      "Ask a follow-up question",
     ].map((hint) => codexComposerText(`\n› ${hint}\n  gpt-5.6-sol xhigh · ~/x\n`))],
-    then: ["all normalize to empty", (values) => expect(values).toEqual(Array(12).fill(""))],
+    then: ["both normalize to empty", (values) => expect(values).toEqual(["", ""])],
   });
 
-  unit("cursor-painted cells in an exact rotating placeholder still count as empty", {
-    given: ["the live claw:11 capture that blocked v1.21.2 delivery", () =>
-      "\n› Impr─ve d─cumentation i──@filename\n  gpt-5.6-sol max · ~/x\n"],
+  unit("a retired 0.144 placeholder is a draft now, not chrome", {
+    given: ["the rotating text Codex stopped painting in 0.152", () =>
+      "\n› Explain this codebase\n  gpt-5.6-sol xhigh · ~/x\n"],
     when: ["reading the composer", (snapshot) => codexComposerText(snapshot)],
-    then: ["the four transient paint cells do not become a fake human draft", (value) =>
+    then: ["it is preserved verbatim: dead vocabulary must not keep clearing composers", (value) =>
+      expect(value).toBe("Explain this codebase")],
+  });
+
+  unit("cursor-painted cells in the exact placeholder still count as empty", {
+    given: ["the claw:11 paint pattern that blocked v1.21.2, on the 0.152 placeholder", () =>
+      "\n› Ask C─dex to d─ anythin─\n  gpt-5.6-sol max · ~/x\n"],
+    when: ["reading the composer", (snapshot) => codexComposerText(snapshot)],
+    then: ["the transient paint cells do not become a fake human draft", (value) =>
       expect(value).toBe("")],
   });
 
   unit("ordinary edits and heavily corrupted text never impersonate a placeholder", {
     when: ["reading non-Codex-owned drafts", () => [
-      codexComposerText("\n› Improve docs in @filename\n"),
-      codexComposerText("\n› ─────── documentation in @filename\n"),
+      codexComposerText("\n› Ask Codex for docs\n"),
+      codexComposerText("\n› ───────── to do anything\n"),
     ]],
     then: ["both drafts are preserved", (values) =>
-      expect(values).toEqual(["Improve docs in @filename", "─────── documentation in @filename"])],
+      expect(values).toEqual(["Ask Codex for docs", "───────── to do anything"])],
   });
 
   unit("a human draft is preserved as non-empty", {
@@ -171,7 +169,7 @@ q to quit   esc/← to edit prev
       const prompt = "send this once";
       const frames = [
         { snapshot: `\n› ${prompt}\n`, busy: false },
-        { snapshot: "\n› Explain this codebase\n", busy: false },
+        { snapshot: "\n› Ask Codex to do anything\n", busy: false },
       ];
       let index = 0;
       let rescues = 0;
@@ -537,7 +535,7 @@ q to quit   esc/← to edit prev
       const frames = [
         "\n› late rows of our draft\n  gpt-5.6-sol xhigh · ~/x\n",
         "\n› [from claw:3]\n  early rows of our draft\n  gpt-5.6-sol xhigh · ~/x\n",
-        "\n› Explain this codebase\n  gpt-5.6-sol xhigh · ~/x\n",
+        "\n› Ask Codex to do anything\n  gpt-5.6-sol xhigh · ~/x\n",
       ];
       let captureIndex = 0;
       let clears = 0;
@@ -559,7 +557,7 @@ q to quit   esc/← to edit prev
     given: ["a human types during the empty confirmation gap", () => {
       const frames = [
         "\n› stale agentmux draft\n",
-        "\n› Explain this codebase\n",
+        "\n› Ask Codex to do anything\n",
         "\n› my private unsent human note\n",
       ];
       let captureIndex = 0;
@@ -608,10 +606,10 @@ q to quit   esc/← to edit prev
     given: ["an empty-looking frame followed by resurfaced draft text", () => {
       const frames = [
         "\n› stale tail\n",
-        "\n› Explain this codebase\n",
+        "\n› Ask Codex to do anything\n",
         "\n› stale prefix resurfaced\n",
-        "\n› Explain this codebase\n",
-        "\n› Explain this codebase\n",
+        "\n› Ask Codex to do anything\n",
+        "\n› Ask Codex to do anything\n",
       ];
       let captureIndex = 0;
       let clears = 0;
@@ -740,7 +738,7 @@ feature("prepareCodexIdle", () => {
         "\ncompleted output\n",
         "\n• No previous message to edit.\n",
         "\n• No previous message to edit.\n",
-        "\n› Improve documentation in @filename\n",
+        "\n› Ask a follow-up question\n",
       ] }),
     })],
     when: ["requiring a visible composer", ({ agent }) => prepareCodexIdle({
@@ -748,7 +746,7 @@ feature("prepareCodexIdle", () => {
     })],
     then: ["it waits and succeeds only on the placeholder", (result, { agent }) => {
       expect(result.ok).toBe(true);
-      expect(result.snapshot).toContain("› Improve documentation");
+      expect(result.snapshot).toContain("› Ask a follow-up question");
       expect(agent.keys).toEqual(["<esc>"]);
     }],
   });
@@ -772,7 +770,7 @@ feature("prepareCodexIdle", () => {
     given: ["transcript view followed by an empty composer", () => ({
       agent: fakeAgent({ frames: [
         "/ T R A N S C R I P T /\nq to quit   esc/← to edit prev\n",
-        "\n› Explain this codebase\n",
+        "\n› Ask Codex to do anything\n",
       ] }),
     })],
     when: ["checking", ({ agent }) => prepareCodexIdle({ agent, name: "claw", pane: 9, sleep: noSleep })],
@@ -789,7 +787,7 @@ feature("prepareCodexIdle", () => {
     given: ["backtrack overlay followed by the recovered composer", () => ({
       agent: fakeAgent({ frames: [
         " ↑/↓ to scroll   pgup/pgdn to page   home/end to jump\n q to quit   esc/← to edit prev   → to edit next   enter to edit message──── 100% ─\n",
-        "\n› Explain this codebase\n",
+        "\n› Ask Codex to do anything\n",
       ] }),
     })],
     when: ["checking", ({ agent }) => prepareCodexIdle({ agent, name: "claw", pane: 9, sleep: noSleep })],
@@ -810,7 +808,7 @@ feature("prepareCodexIdle", () => {
 
   unit("busy-safe command may proceed only when an empty composer is visible", {
     given: ["a working pane with an empty composer", () => ({
-      agent: fakeAgent({ frames: ["\n› Explain this codebase\n"], busy: true }),
+      agent: fakeAgent({ frames: ["\n› Ask Codex to do anything\n"], busy: true }),
     })],
     when: ["checking for an official during-task slash command", ({ agent }) =>
       prepareCodexIdle({ agent, name: "claw", pane: 9, sleep: noSleep, allowBusy: true })],
@@ -835,7 +833,7 @@ feature("prepareCodexIdle", () => {
   unit("busy prompt opens Codex's advertised queue composer with Tab", {
     given: ["a working pane showing the queue hint, followed by its empty queue editor", () => ({
       agent: fakeAgent({
-        frames: ["\n• Working\n\n  tab to queue message\n", "\n› Write tests for @filename\n"],
+        frames: ["\n• Working\n\n  tab to queue message\n", "\n› Ask a follow-up question\n"],
         busy: true,
       }),
     })],
@@ -856,7 +854,7 @@ feature("prepareCodexIdle", () => {
   unit("busy prompt opens the queue while its hint is between paints", {
     given: ["a working prompt pane whose queue hint is temporarily absent", () => ({
       agent: fakeAgent({
-        frames: ["\n• Working\n\nstreaming tool output\n", "\n› Write tests for @filename\n"],
+        frames: ["\n• Working\n\nstreaming tool output\n", "\n› Ask a follow-up question\n"],
         busy: true,
       }),
     })],
@@ -891,7 +889,7 @@ feature("prepareCodexIdle", () => {
 // tmux pane Ratatui soft-wraps its own placeholder / idle-hint rows. Those
 // wraps are application-rendered, so tmux -J cannot rejoin them; the
 // continuation lands at column 0 and codexComposerText stopped collecting.
-// The truncated value ("Summarize recent commit", "Find and fix a bug in @
+// The truncated value ("Ask Codex to do anyth", "Ask Codex to do anyth
 // esc again to edit previo") matched no known placeholder and was treated as
 // a human draft — delivery blocked forever (attempt→blocked, 65 min FIFO rot)
 // and the usage-limit banner made the layout wrap more often.
@@ -902,7 +900,7 @@ feature("narrow-pane Ratatui wrap tolerance (delivery blackhole 2026-07-14)", ()
     "⚠ Heads up, you have less than 10% of your weekly limit left. Run /status",
     "for a breakdown.",
     "",
-    "› Summarize recent commit",
+    "› Ask Codex to do anyth",
     "s",
     "",
     "  gpt-5.6-sol max · ~/lsrc/ai-dsl",
@@ -912,13 +910,13 @@ feature("narrow-pane Ratatui wrap tolerance (delivery blackhole 2026-07-14)", ()
     "• You have 3 usage limit resets available. Run /",
     "usage to use one.",
     "",
-    "› Find and fix a bug in @",
+    "› Ask Codex to do anyth",
     "",
     "  esc again to edit previo",
     "us message",
   ].join("\n");
 
-  unit("a wrap-truncated rotating placeholder is an empty composer", {
+  unit("a wrap-truncated placeholder is an empty composer", {
     when: ["reading the exact ai:4 incident frame", () => codexComposerText(AI4_FRAME)],
     then: ["the composer is verified empty", (value) => expect(value).toBe("")],
   });
@@ -930,21 +928,21 @@ feature("narrow-pane Ratatui wrap tolerance (delivery blackhole 2026-07-14)", ()
 
   unit("a real draft that merely resembles a placeholder still blocks", {
     when: ["reading a frame with a genuine human draft", () => codexComposerText([
-      "› Summarize recent commits and also deploy everything to prod",
+      "› Ask Codex to do anything and also deploy everything to prod",
       "",
       "  gpt-5.6-sol max · ~/lsrc/ai-dsl",
     ].join("\n"))],
     then: ["the draft is preserved verbatim", (value) =>
-      expect(value).toBe("Summarize recent commits and also deploy everything to prod")],
+      expect(value).toBe("Ask Codex to do anything and also deploy everything to prod")],
   });
 
   unit("a short real draft is never mistaken for a placeholder prefix", {
     when: ["reading a frame with a short human draft", () => codexComposerText([
-      "› Summarize rec",
+      "› Ask Codex to",
       "",
       "  gpt-5.6-sol max · ~/lsrc/ai-dsl",
     ].join("\n"))],
-    then: ["the short draft blocks delivery", (value) => expect(value).toBe("Summarize rec")],
+    then: ["the short draft blocks delivery", (value) => expect(value).toBe("Ask Codex to")],
   });
 
   unit("verifiedEmptyCodexComposer accepts a tail hint wrapped mid-word", {

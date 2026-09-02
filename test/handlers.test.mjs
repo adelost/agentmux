@@ -266,7 +266,7 @@ feature("/model dialect routing", () => {
       const driver = vi.fn(async () => ({ ok: true, status: nativeStatus({ effort: "max" }) }));
       const s = setup({ agentsYamlPath: path, codexStatusDriver: driver });
       s.agent.isBusy.mockResolvedValue(false);
-      s.agent.capturePane.mockResolvedValue("\n› Explain this codebase\n");
+      s.agent.capturePane.mockResolvedValue("\n› Ask Codex to do anything\n");
       s.agent.getContextPercent.mockReturnValue({
         percent: 42, tokens: 84000, model: "gpt-5.6-sol", effort: "xhigh",
       });
@@ -290,7 +290,7 @@ feature("/model dialect routing", () => {
       const s = setup({ agentsYamlPath: path, codexStatusDriver: driver });
       s.agent.isBusy.mockResolvedValue(false);
       s.agent.capturePane
-        .mockResolvedValueOnce("\n› Explain this codebase\n")
+        .mockResolvedValueOnce("\n› Ask Codex to do anything\n")
         .mockResolvedValue("\n› keep my local draft\n");
       s.agent.getContextPercent.mockReturnValue({
         percent: 42, tokens: 84000, model: "gpt-5.6-sol", effort: "xhigh",
@@ -365,7 +365,7 @@ feature("Codex native /status and account switching", () => {
         .mockResolvedValueOnce({ ok: true, status: nativeStatus({ account: "two@example.com (Pro)" }) });
       const s = setup({ agentsYamlPath: path, codexStatusDriver: driver });
       s.agent.isBusy.mockResolvedValue(false);
-      s.agent.capturePane.mockResolvedValue("\n› Explain this codebase\n");
+      s.agent.capturePane.mockResolvedValue("\n› Ask Codex to do anything\n");
       s.agent.getContextPercent.mockReturnValue({
         percent: 42, tokens: 84000, model: "gpt-5.6-sol", effort: "xhigh",
       });
