@@ -44,7 +44,7 @@ const EMPTY_COMPOSER_HINTS = new Set([
   // Side-conversation placeholders from the same Codex 0.144.x source list.
   "Check recently modified functions for compatibility",
   "How many files have been modified?",
-  "Will this algorithm scale well?",
+  "Will this algorithm scale well?", "Ask Codex to do anything",
 ]);
 // Codex paints its cursor by temporarily replacing cells with box/block
 // glyphs. A tmux capture can freeze those intermediate cells (observed live

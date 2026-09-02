@@ -48,8 +48,9 @@ feature("Codex composer truth", () => {
       "Check recently modified functions for compatibility",
       "How many files have been modified?",
       "Will this algorithm scale well?",
+      "Ask Codex to do anything",
     ].map((hint) => codexComposerText(`\n› ${hint}\n  gpt-5.6-sol xhigh · ~/x\n`))],
-    then: ["all normalize to empty", (values) => expect(values).toEqual(Array(11).fill(""))],
+    then: ["all normalize to empty", (values) => expect(values).toEqual(Array(12).fill(""))],
   });
 
   unit("cursor-painted cells in an exact rotating placeholder still count as empty", {
