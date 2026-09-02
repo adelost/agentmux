@@ -79,6 +79,7 @@ export const CLAUDE = {
 
 // --- Codex ---------------------------------------------------------------
 
+/** WHAT: Defines the Codex TUI dialect. WHY: Keeps Codex screen parsing from leaking into engine-neutral code. */
 export const CODEX = {
   name: "codex",
 
@@ -96,7 +97,7 @@ export const CODEX = {
     ")\\b"
   ),
 
-  // Codex shows a placeholder ("Find and fix a bug in @filename") in the prompt
+  // Codex shows a placeholder ("Ask Codex to do anything") in the prompt
   // even when idle, so prompt-has-text is NOT a reliable busy signal.
   idleWhenPromptEmpty: false,
 

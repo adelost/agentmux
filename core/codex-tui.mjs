@@ -1,27 +1,32 @@
 // Shared, fail-closed primitives for driving Codex's terminal UI.
 //
 // tmux capture strips colours, so an empty grey Codex placeholder becomes
-// indistinguishable from real text unless we match the exact placeholders we
-// have observed.  Every driver (/model, /status, profile restart) uses this
-// one gate so a UI change cannot make one path type over a human draft while
-// another path still behaves safely.
+// indistinguishable from real text unless we match the exact placeholders
+// Codex paints. Those live in codex-vocabulary.mjs, pinned to a Codex release
+// and verified against the installed binary by codex-vocabulary-probe.mjs.
+// Every driver (/model, /status, profile restart) uses this one gate so a UI
+// change cannot make one path type over a human draft while another path
+// still behaves safely.
 
 import { promptRequiresAtomicPaste } from "./prompt-paste.mjs";
 import { isCodexCommandPaletteRow } from "./codex-composer-chrome.mjs";
+import { CODEX_VOCABULARY, describeNonEmptyComposer } from "./codex-vocabulary.mjs";
 
 // Narrow tmux captures occasionally merge the cursor cell into the gap
 // (observed live as "editoprevious"). Keep the full Codex-owned sentence
 // exact while tolerating at most two non-space paint artefacts at that seam.
-const IDLE_EDIT_HINT = /esc again to edit\S{0,2}\s*previous message/i;
+// footer.rs esc_hint_line: "esc again to edit previous message" after the
+// first Escape, "esc esc to edit previous message" before it.
+const IDLE_EDIT_HINT = /esc (?:again|esc) to edit\S{0,2}\s*previous message/i;
 const NO_PREVIOUS_MESSAGE_HINT = /No previous message to edit\./i;
 // In a NARROW pane Ratatui soft-wraps its own hint text mid-word
 // ("...edit previo" / "us message"). Those wraps are application-rendered,
 // so tmux -J cannot rejoin them and the full-phrase regex above never
 // matches. The opening words are still Codex-owned chrome that only renders
 // at a neutral composer, so their presence alone is a valid receipt.
-const IDLE_EDIT_HINT_PREFIX = /esc again to edit\b/i;
-// A wrap-truncated rotating placeholder ("Summarize recent commit" cut from
-// "Summarize recent commits") must stay distinguishable from a short human
+const IDLE_EDIT_HINT_PREFIX = /esc (?:again|esc) to edit\b/i;
+// A wrap-truncated placeholder ("Ask Codex to do anyth" cut from
+// "Ask Codex to do anything") must stay distinguishable from a short human
 // draft. Require a long exact prefix before treating truncation as empty —
 // the 2026-07-14 delivery blackhole rotted a FIFO head for 65 minutes on
 // exactly this artifact.
@@ -32,20 +37,7 @@ const isWrapTruncatedPlaceholder = (value) =>
   && [...EMPTY_COMPOSER_HINTS].some(
     (hint) => hint.length > value.length && hint.startsWith(value),
   );
-const EMPTY_COMPOSER_HINTS = new Set([
-  "Explain this codebase",
-  "Summarize recent commits",
-  "Implement {feature}",
-  "Find and fix a bug in @filename",
-  "Write tests for @filename",
-  "Improve documentation in @filename",
-  "Run /review on my current changes",
-  "Use /skills to list available skills",
-  // Side-conversation placeholders from the same Codex 0.144.x source list.
-  "Check recently modified functions for compatibility",
-  "How many files have been modified?",
-  "Will this algorithm scale well?", "Ask Codex to do anything",
-]);
+const EMPTY_COMPOSER_HINTS = new Set(CODEX_VOCABULARY.placeholders);
 // Codex paints its cursor by temporarily replacing cells with box/block
 // glyphs. A tmux capture can freeze those intermediate cells (observed live
 // as "Impr─ve d─cumentation i──@filename"). Treat that as an empty rotating
@@ -83,7 +75,8 @@ export function isCodexTranscriptView(text) {
 // send reported "could not identify the Codex composer".
 const CODEX_PAGER_QUIT = /q to quit/i;
 const CODEX_PAGER_NAV = /to edit (?:prev|next|message)/i;
-const CODEX_QUEUE_HINT = /tab to queue message/i;
+// footer.rs paints "Tab to queue message", or "Tab to queue" when narrow.
+const CODEX_QUEUE_HINT = /tab to queue(?: message)?\b/i;
 export function isCodexBacktrackPager(text) {
   const value = String(text || "");
   return CODEX_PAGER_QUIT.test(value) && CODEX_PAGER_NAV.test(value);
@@ -154,7 +147,7 @@ export function codexComposerText(text) {
   // Strip only the exact terminal-owned suffix (anchored at the end), so a
   // human sentence that happens to mention Tab is still preserved.
   const value = parts.join(" ").trim().replace(
-    /\s+tab to queue message(?:\s+\d+%\s+context left)?\s*$/i,
+    /\s+tab to queue(?: message)?(?:\s+\d+%\s+context left)?\s*$/i,
     "",
   );
   // Codex shows "esc again to edit previous message" / "No previous message to
@@ -547,7 +540,7 @@ export async function prepareCodexIdle({
     }
   }
   if (composer) {
-    return fail("compose", `composer is not empty (starts with: ${composer.slice(0, 60)})`);
+    return fail("compose", await describeNonEmptyComposer(agent, composer));
   }
   return { ok: true, snapshot, busy };
 }

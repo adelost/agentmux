@@ -14,7 +14,7 @@ import {
   FAIL, OK, WARN,
   checkBridgeMode, checkBridgeProcess, checkHeartbeatHealth, checkHooksInstalled, checkReleaseIdentity, checkSupervisors,
   rescueBridgePidFromHeartbeat,
-  checkLedger, overallStatus, checkPaneModals,
+  checkLedger, overallStatus, checkPaneModals, checkCodexVocabulary,
 } from "./doctor.mjs";
 import {
   checkTmux, checkTmuxClients, checkTmuxPaneGeometry, checkTmuxVersion,
@@ -871,5 +871,57 @@ feature("pane modals (kimi dialog watch)", () => {
   unit("a broken sweep is a warn, never a crash", {
     when: ["checking", () => checkPaneModals({ modalPanes: null, error: "tmux gone" })],
     then: ["warn row", (row) => expect(row.status).toBe(WARN)],
+  });
+});
+
+feature("Codex composer vocabulary", () => {
+  const probe = (overrides = {}) => ({
+    installedVersion: "0.152.1", verifiedVersion: "0.152.1", checked: 6, missing: [], ...overrides,
+  });
+
+  unit("a fleet without Codex panes shows no row", {
+    when: ["checking with nothing to verify", () => checkCodexVocabulary({ probe: probe(), required: false })],
+    then: ["the row is omitted rather than reporting a vacuous green", (result) => expect(result).toBeNull()],
+  });
+
+  unit("the verified release with every string present is green", {
+    when: ["checking a matching probe", () => checkCodexVocabulary({ probe: probe(), required: true })],
+    then: ["the row names version and coverage", (result) => {
+      expect(result).toMatchObject({ name: "codex vocabulary", status: OK });
+      expect(result.detail).toBe("Codex 0.152.1 · 6/6 composer strings present in binary");
+    }],
+  });
+
+  unit("a Codex upgrade that dropped a placeholder is red and names the delivery symptom", {
+    when: ["checking a probe with one missing string", () => checkCodexVocabulary({
+      probe: probe({ installedVersion: "0.153.0", missing: ["Ask Codex to do anything"] }), required: true,
+    })],
+    then: ["the operator learns what breaks and where to fix it", (result) => {
+      expect(result.status).toBe(FAIL);
+      expect(result.detail).toBe('Codex 0.153.0: 1/6 composer strings missing from binary ("Ask Codex to do anything")');
+      expect(result.hint).toContain("misreads an empty composer as a human draft");
+      expect(result.hint).toContain("core/codex-vocabulary.mjs");
+    }],
+  });
+
+  unit("a newer Codex with every string present is amber until re-verified", {
+    when: ["checking a version-only drift", () => checkCodexVocabulary({
+      probe: probe({ installedVersion: "0.153.0" }), required: true,
+    })],
+    then: ["the row asks for a re-check, not a rewrite", (result) => {
+      expect(result.status).toBe(WARN);
+      expect(result.detail).toBe("Codex 0.153.0 installed, vocabulary verified for 0.152.1; all 6 strings present");
+      expect(result.hint).toContain("rust-v0.153.0");
+    }],
+  });
+
+  unit("an unlocatable Codex is red when Codex panes are configured", {
+    when: ["checking an error probe", () => checkCodexVocabulary({
+      probe: { error: "codex is not on PATH", installedVersion: null, verifiedVersion: "0.152.1", checked: 0, missing: [] },
+      required: true,
+    })],
+    then: ["the error is the detail", (result) => {
+      expect(result).toMatchObject({ status: FAIL, detail: "codex is not on PATH" });
+    }],
   });
 });

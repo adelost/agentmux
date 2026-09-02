@@ -246,7 +246,7 @@ feature("foreignComposerText", () => {
 
   unit("codex's short placeholder hint is NOT foreign", {
     given: ["idle codex composer with its placeholder", () =>
-      "› Find and fix a bug in @filename"],
+      "› Ask Codex to do anything"],
     when: ["inspecting", (raw) => foreignComposerText(raw, "något helt annat här")],
     then: ["null — placeholders and short human drafts are preserved", (text) =>
       expect(text).toBeNull()],
