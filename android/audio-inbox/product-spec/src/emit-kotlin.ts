@@ -1,3 +1,4 @@
+import { adapterFields } from "@v1d/product-spec/foundation";
 import { createHash } from "node:crypto";
 import type {
   CompiledStateAuthority,
@@ -181,10 +182,10 @@ ${fields.map((field) => `    val ${field.name}: ${presentationKotlinType(field)}
 
 internal object ${objectName} {
     fun <T : Any> inputPort(): ProductDataInput<T> = object : ProductDataInput<T>(
-        GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(authority.adapter.inputPortRef)},
+        GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(adapterFields(authority.adapter).inputPortRef)},
     ) {}
     val outputPort: ProductOutputPort<${payload}> = object : ProductOutputPort<${payload}>(
-        GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(authority.adapter.outputPortRef)},
+        GeneratedLinkNativeLegoCatalog.PortIds.${kotlinEnumToken(adapterFields(authority.adapter).outputPortRef)},
     ) {}
     val componentInputs: List<ProductComponentInput<${payload}>> = listOf(
 ${authority.presentation.consumers.map((ref) => `        object : ProductComponentInput<${payload}>(

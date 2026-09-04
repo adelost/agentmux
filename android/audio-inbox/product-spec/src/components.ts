@@ -183,7 +183,7 @@ export const linkComponentInstances = [
     bindings: {
       inputs: {
         model: "target.presentation.model",
-        targetState: targetKindAuthority.authority.adapter.outputPortRef,
+        targetState: targetKindAuthority.presentationPortRef,
       },
       events: { select: "target.service.select" },
     },
@@ -193,7 +193,7 @@ export const linkComponentInstances = [
     bindings: {
       inputs: {
         model: "capture.presentation.model",
-        captureState: capturePhaseAuthority.authority.adapter.outputPortRef,
+        captureState: capturePhaseAuthority.presentationPortRef,
       },
       events: { command: "capture.service.command" },
     },
@@ -203,8 +203,8 @@ export const linkComponentInstances = [
     bindings: {
       inputs: {
         model: "conversation.presentation.model",
-        deliveryState: deliveryPhaseAuthority.authority.adapter.outputPortRef,
-        replyState: replyPhaseAuthority.authority.adapter.outputPortRef,
+        deliveryState: deliveryPhaseAuthority.presentationPortRef,
+        replyState: replyPhaseAuthority.presentationPortRef,
       },
       events: {},
     },
@@ -214,8 +214,8 @@ export const linkComponentInstances = [
     bindings: {
       inputs: {
         model: "conversation.presentation.model",
-        deliveryState: deliveryPhaseAuthority.authority.adapter.outputPortRef,
-        replyState: replyPhaseAuthority.authority.adapter.outputPortRef,
+        deliveryState: deliveryPhaseAuthority.presentationPortRef,
+        replyState: replyPhaseAuthority.presentationPortRef,
       },
       events: { compose: "conversation.service.compose" },
     },
@@ -225,7 +225,7 @@ export const linkComponentInstances = [
     bindings: {
       inputs: {
         model: "playback.presentation.model",
-        playbackState: playbackPhaseAuthority.authority.adapter.outputPortRef,
+        playbackState: playbackPhaseAuthority.presentationPortRef,
       },
       events: { command: "playback.service.command" },
     },
@@ -235,7 +235,7 @@ export const linkComponentInstances = [
     bindings: {
       inputs: {
         model: "session.presentation.model",
-        connectionState: connectionStateAuthority.authority.adapter.outputPortRef,
+        connectionState: connectionStateAuthority.presentationPortRef,
       },
       events: {},
     },
@@ -245,7 +245,7 @@ export const linkComponentInstances = [
     bindings: {
       inputs: {
         model: "session.presentation.model",
-        connectionState: connectionStateAuthority.authority.adapter.outputPortRef,
+        connectionState: connectionStateAuthority.presentationPortRef,
       },
       events: {},
     },
@@ -263,7 +263,7 @@ export const linkComponentInstances = [
     bindings: {
       inputs: {
         model: "updates.presentation.model",
-        updateState: updatePhaseAuthority.authority.adapter.outputPortRef,
+        updateState: updatePhaseAuthority.presentationPortRef,
       },
       events: { command: "updates.service.command" },
     },
@@ -273,7 +273,7 @@ export const linkComponentInstances = [
     bindings: {
       inputs: {
         model: "recovery.presentation.model",
-        recoveryState: recoveryPhaseAuthority.authority.adapter.outputPortRef,
+        recoveryState: recoveryPhaseAuthority.presentationPortRef,
       },
       events: {},
     },

@@ -1,0 +1,60 @@
+%% GENERATED FILE. DO NOT EDIT.
+%% GENERATED FROM product-spec/generated/link-product.json (port bindings) and
+%% product-spec/src/capabilities.ts (STATE_FEEDBACK rows, dashed).
+%% A dashed red domain has no port binding in or out. A dashed edge is state read
+%% or written without a port: the distance between the declared graph and the app.
+graph LR
+  active_playback["active-playback<br/>1 component"]
+  capture["capture<br/>2 nodes"]
+  composer["composer<br/>1 component"]
+  connection["connection<br/>1 component"]
+  conversation["conversation<br/>2 nodes"]
+  dev_host["dev-host<br/>1 component"]
+  dev_preview["dev-preview<br/>1 component"]
+  history["history<br/>2 nodes"]
+  latest["latest<br/>1 component"]
+  link["link<br/>8 nodes"]
+  local_history["local-history<br/>1 component"]
+  navigation["navigation<br/>1 node"]
+  page_host["page-host<br/>1 component"]
+  playback["playback<br/>2 nodes"]
+  preferences["preferences<br/>2 nodes, 1 component"]
+  public_link["public-link<br/>1 component"]
+  recovery["recovery<br/>2 nodes, 1 component"]
+  session["session<br/>2 nodes"]
+  settings_action["settings-action<br/>1 component"]
+  talk["talk<br/>1 component"]
+  target["target<br/>2 nodes, 1 component"]
+  updates["updates<br/>2 nodes, 1 component"]
+  active_playback -->|"playback-command"| playback
+  capture -->|"captured-turn"| conversation
+  capture -->|"capture-status"| link
+  capture -->|"capture-status"| talk
+  composer -->|"compose-turn"| conversation
+  conversation -->|"conversation-status"| composer
+  conversation -->|"conversation-status"| latest
+  conversation -->|"conversation-status"| link
+  dev_host -->|"navigation.route-intent"| navigation
+  history -->|"history-status"| local_history
+  link -->|"playback-phase.payload"| active_playback
+  link -->|"delivery-phase.payload, reply-phase.payload"| composer
+  link -->|"connection-state.payload"| connection
+  link -->|"delivery-phase.payload, reply-phase.payload"| latest
+  link -->|"connection-state.payload"| public_link
+  link -->|"recovery-phase.payload"| recovery
+  link -->|"capture-phase.payload"| talk
+  link -->|"target-kind.payload"| target
+  link -->|"update-phase.payload"| updates
+  navigation -->|"navigation.active-page"| page_host
+  playback -->|"playback-status"| active_playback
+  playback -->|"playback-status"| link
+  recovery -->|"recovery-status"| link
+  session -->|"session-status"| connection
+  session -->|"session-status"| link
+  session -->|"session-status"| public_link
+  settings_action -->|"navigation.route-intent"| navigation
+  talk -->|"capture-command"| capture
+  target -->|"target-directory"| link
+  updates -->|"update-status"| link
+  style dev_preview stroke-dasharray: 5 5,stroke:#c33
+  style preferences stroke-dasharray: 5 5,stroke:#c33

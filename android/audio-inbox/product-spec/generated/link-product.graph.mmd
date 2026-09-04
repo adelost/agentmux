@@ -1,0 +1,139 @@
+%% GENERATED FILE. DO NOT EDIT.
+%% GENERATED FROM product-spec/generated/link-product.json (nodes, components, port bindings).
+%% Read one subgraph at a time; the whole is not meant to be read at once.
+graph LR
+  subgraph active_playback["active-playback"]
+    active_playback(["active-playback<br/><i>component</i>"])
+  end
+  subgraph capture["capture"]
+    capture_presentation["presentation<br/><i>present</i>"]
+    capture_service["service<br/><i>service</i>"]
+  end
+  subgraph composer["composer"]
+    composer(["composer<br/><i>component</i>"])
+  end
+  subgraph connection["connection"]
+    connection(["connection<br/><i>component</i>"])
+  end
+  subgraph conversation["conversation"]
+    conversation_presentation["presentation<br/><i>present</i>"]
+    conversation_service["service<br/><i>service</i>"]
+  end
+  subgraph dev_host["dev-host"]
+    dev_host(["dev-host<br/><i>component</i>"])
+  end
+  subgraph dev_preview["dev-preview"]
+    dev_preview(["dev-preview<br/><i>component</i>"])
+  end
+  subgraph history["history"]
+    history_presentation["presentation<br/><i>present</i>"]
+    history_service["service<br/><i>service</i>"]
+  end
+  subgraph latest["latest"]
+    latest(["latest<br/><i>component</i>"])
+  end
+  subgraph link["link"]
+    link_capture_phase_presentation_adapter["capture-phase.presentation-adapter<br/><i>present</i>"]
+    link_connection_state_presentation_adapter["connection-state.presentation-adapter<br/><i>present</i>"]
+    link_delivery_phase_presentation_adapter["delivery-phase.presentation-adapter<br/><i>present</i>"]
+    link_playback_phase_presentation_adapter["playback-phase.presentation-adapter<br/><i>present</i>"]
+    link_recovery_phase_presentation_adapter["recovery-phase.presentation-adapter<br/><i>present</i>"]
+    link_reply_phase_presentation_adapter["reply-phase.presentation-adapter<br/><i>present</i>"]
+    link_target_kind_presentation_adapter["target-kind.presentation-adapter<br/><i>present</i>"]
+    link_update_phase_presentation_adapter["update-phase.presentation-adapter<br/><i>present</i>"]
+  end
+  subgraph local_history["local-history"]
+    local_history(["local-history<br/><i>component</i>"])
+  end
+  subgraph navigation["navigation"]
+    navigation_service["service<br/><i>service</i>"]
+  end
+  subgraph page_host["page-host"]
+    page_host(["page-host<br/><i>component</i>"])
+  end
+  subgraph playback["playback"]
+    playback_presentation["presentation<br/><i>present</i>"]
+    playback_service["service<br/><i>service</i>"]
+  end
+  subgraph preferences["preferences"]
+    preferences(["preferences<br/><i>component</i>"])
+    preferences_presentation["presentation<br/><i>present</i>"]
+    preferences_service["service<br/><i>service</i>"]
+  end
+  subgraph public_link["public-link"]
+    public_link(["public-link<br/><i>component</i>"])
+  end
+  subgraph recovery["recovery"]
+    recovery(["recovery<br/><i>component</i>"])
+    recovery_presentation["presentation<br/><i>present</i>"]
+    recovery_service["service<br/><i>service</i>"]
+  end
+  subgraph session["session"]
+    session_presentation["presentation<br/><i>present</i>"]
+    session_service["service<br/><i>service</i>"]
+  end
+  subgraph settings_action["settings-action"]
+    settings_action(["settings-action<br/><i>component</i>"])
+  end
+  subgraph talk["talk"]
+    talk(["talk<br/><i>component</i>"])
+  end
+  subgraph target["target"]
+    target(["target<br/><i>component</i>"])
+    target_presentation["presentation<br/><i>present</i>"]
+    target_service["service<br/><i>service</i>"]
+  end
+  subgraph updates["updates"]
+    updates(["updates<br/><i>component</i>"])
+    updates_presentation["presentation<br/><i>present</i>"]
+    updates_service["service<br/><i>service</i>"]
+  end
+  active_playback -->|"playback-command"| playback_service
+  capture_presentation -->|"capture-status"| talk
+  capture_service -->|"capture-status"| capture_presentation
+  capture_service -->|"captured-turn"| conversation_service
+  capture_service -->|"capture-status"| link_capture_phase_presentation_adapter
+  composer -->|"compose-turn"| conversation_service
+  conversation_presentation -->|"conversation-status"| composer
+  conversation_presentation -->|"conversation-status"| latest
+  conversation_service -->|"conversation-status"| conversation_presentation
+  conversation_service -->|"conversation-status"| link_delivery_phase_presentation_adapter
+  conversation_service -->|"conversation-status"| link_reply_phase_presentation_adapter
+  dev_host -->|"navigation.route-intent"| navigation_service
+  history_presentation -->|"history-status"| local_history
+  history_service -->|"history-status"| history_presentation
+  link_capture_phase_presentation_adapter -->|"capture-phase.payload"| talk
+  link_connection_state_presentation_adapter -->|"connection-state.payload"| connection
+  link_connection_state_presentation_adapter -->|"connection-state.payload"| public_link
+  link_delivery_phase_presentation_adapter -->|"delivery-phase.payload"| composer
+  link_delivery_phase_presentation_adapter -->|"delivery-phase.payload"| latest
+  link_playback_phase_presentation_adapter -->|"playback-phase.payload"| active_playback
+  link_recovery_phase_presentation_adapter -->|"recovery-phase.payload"| recovery
+  link_reply_phase_presentation_adapter -->|"reply-phase.payload"| composer
+  link_reply_phase_presentation_adapter -->|"reply-phase.payload"| latest
+  link_target_kind_presentation_adapter -->|"target-kind.payload"| target
+  link_update_phase_presentation_adapter -->|"update-phase.payload"| updates
+  navigation_service -->|"navigation.active-page"| page_host
+  playback_presentation -->|"playback-status"| active_playback
+  playback_service -->|"playback-status"| link_playback_phase_presentation_adapter
+  playback_service -->|"playback-status"| playback_presentation
+  preferences -->|"preference-toggle"| preferences_service
+  preferences_presentation -->|"preferences-status"| preferences
+  preferences_service -->|"preferences-status"| preferences_presentation
+  recovery_presentation -->|"recovery-status"| recovery
+  recovery_service -->|"recovery-status"| link_recovery_phase_presentation_adapter
+  recovery_service -->|"recovery-status"| recovery_presentation
+  session_presentation -->|"session-status"| connection
+  session_presentation -->|"session-status"| public_link
+  session_service -->|"session-status"| link_connection_state_presentation_adapter
+  session_service -->|"session-status"| session_presentation
+  settings_action -->|"navigation.route-intent"| navigation_service
+  talk -->|"capture-command"| capture_service
+  target -->|"target-select"| target_service
+  target_presentation -->|"target-directory"| target
+  target_service -->|"target-directory"| link_target_kind_presentation_adapter
+  target_service -->|"target-directory"| target_presentation
+  updates -->|"update-command"| updates_service
+  updates_presentation -->|"update-status"| updates
+  updates_service -->|"update-status"| link_update_phase_presentation_adapter
+  updates_service -->|"update-status"| updates_presentation
