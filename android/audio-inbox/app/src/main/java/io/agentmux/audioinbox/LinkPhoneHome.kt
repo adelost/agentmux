@@ -78,7 +78,7 @@ internal fun LinkPhoneHome(
     ) {
         val tree = GeneratedLinkHomeComponents.resolve(LocalCircleSurfaceLayout.current.surfaceClass)
         val settingsAction = tree.orderedMounts.firstOrNull {
-            it.component == GeneratedLinkHomeComponent.SETTINGS_ACTION
+            it.component == GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY
         }
         val route = GeneratedLinkRoutes.descriptor(LinkRoute.HOME)
         PhoneScreenHeader(
@@ -97,8 +97,8 @@ internal fun LinkPhoneHome(
         )
         tree.orderedMounts.forEach { mount ->
             when (mount.component) {
-                GeneratedLinkHomeComponent.PAGE_HOST -> Unit
-                GeneratedLinkHomeComponent.TARGET -> LinkStatusRows(
+                GeneratedLinkHomeComponent.NAVIGATION_PAGE_HOST -> Unit
+                GeneratedLinkHomeComponent.TARGET_PICKER -> LinkStatusRows(
                     target = target,
                     session = connection,
                     recoveryDetail = recovery.detail.takeIf {
@@ -107,7 +107,7 @@ internal fun LinkPhoneHome(
                     onSelectTarget = { graph.onTargetSelect(LinkTargetSelectEvent(it)) },
                     icon = LinkNativeBindings.requireIcon("target"),
                 )
-                GeneratedLinkHomeComponent.LATEST -> LazyColumn(
+                GeneratedLinkHomeComponent.CONVERSATION_LATEST -> LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -156,7 +156,7 @@ internal fun LinkPhoneHome(
                         }
                     }
                 }
-                GeneratedLinkHomeComponent.COMPOSER -> RingTextComposer(
+                GeneratedLinkHomeComponent.CONVERSATION_COMPOSER -> RingTextComposer(
                     spec = RingTextInputSpec(
                         value = composer.text,
                         label = "MESSAGE",
@@ -167,7 +167,7 @@ internal fun LinkPhoneHome(
                     ),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                 )
-                GeneratedLinkHomeComponent.TALK -> LinkCaptureControl(
+                GeneratedLinkHomeComponent.CAPTURE_TALK -> LinkCaptureControl(
                     spec = captureSpec,
                     recordedBytes = recordedBytes,
                     recordedLevel = recordedLevel,
@@ -176,7 +176,7 @@ internal fun LinkPhoneHome(
                     onCancel = graph::cancelCapture,
                     onRecover = onRequestMicrophone,
                 )
-                GeneratedLinkHomeComponent.SETTINGS_ACTION -> Unit
+                GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY -> Unit
             }
         }
     }

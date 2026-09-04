@@ -1,12 +1,12 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.componentFamilies
-// Product declarations SHA-256: ac2666eab12e029bbcc15961d131bb644ba80308e1f9a7e4d4a3fe534847bd37
+// Product declarations SHA-256: 83741324ee1b1e69992f0ff1b15fa53aa1ad2818a9aa13c73a0d398f384196f4
 package io.agentmux.linkui.product.generated
 
 import com.adelost.designkit.ui.CircleSurfaceClass
 
 enum class GeneratedLinkSettingsComponent(val id: GeneratedLinkComponentId) {
-    PAGE_HOST(GeneratedLinkComponentId.PAGE_HOST), CONNECTION(GeneratedLinkComponentId.CONNECTION), UPDATES(GeneratedLinkComponentId.UPDATES), DEV_HOST(GeneratedLinkComponentId.DEV_HOST), RECOVERY(GeneratedLinkComponentId.RECOVERY), ACTIVE_PLAYBACK(GeneratedLinkComponentId.ACTIVE_PLAYBACK), PUBLIC_LINK(GeneratedLinkComponentId.PUBLIC_LINK), PREFERENCES(GeneratedLinkComponentId.PREFERENCES), LOCAL_HISTORY(GeneratedLinkComponentId.LOCAL_HISTORY)
+    NAVIGATION_PAGE_HOST(GeneratedLinkComponentId.NAVIGATION_PAGE_HOST), SESSION_CONNECTION(GeneratedLinkComponentId.SESSION_CONNECTION), UPDATES_PANEL(GeneratedLinkComponentId.UPDATES_PANEL), NAVIGATION_DEV_HOST_ENTRY(GeneratedLinkComponentId.NAVIGATION_DEV_HOST_ENTRY), RECOVERY_STATUS(GeneratedLinkComponentId.RECOVERY_STATUS), PLAYBACK_CONTROLS(GeneratedLinkComponentId.PLAYBACK_CONTROLS), SESSION_PUBLIC_LINK(GeneratedLinkComponentId.SESSION_PUBLIC_LINK), PREFERENCES_TOGGLES(GeneratedLinkComponentId.PREFERENCES_TOGGLES), HISTORY_LOCAL(GeneratedLinkComponentId.HISTORY_LOCAL)
 }
 enum class GeneratedLinkSettingsRegion { HOST, CONTENT, RAIL }
 
@@ -42,8 +42,8 @@ object GeneratedLinkSettingsComponents {
     fun resolve(surfaceClass: CircleSurfaceClass): GeneratedLinkSettingsTree = when (surfaceClass) {
         CircleSurfaceClass.ROUND -> GeneratedLinkSettingsTree(listOf(
             GeneratedLinkSettingsMount(
-                id = "page-host",
-                component = GeneratedLinkSettingsComponent.PAGE_HOST,
+                id = "navigation.page-host",
+                component = GeneratedLinkSettingsComponent.NAVIGATION_PAGE_HOST,
                 region = GeneratedLinkSettingsRegion.HOST,
                 order = 0,
                 priority = 0,
@@ -51,8 +51,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "connection",
-                component = GeneratedLinkSettingsComponent.CONNECTION,
+                id = "session.connection",
+                component = GeneratedLinkSettingsComponent.SESSION_CONNECTION,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 1,
                 priority = 0,
@@ -60,8 +60,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "updates",
-                component = GeneratedLinkSettingsComponent.UPDATES,
+                id = "updates.panel",
+                component = GeneratedLinkSettingsComponent.UPDATES_PANEL,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 2,
                 priority = 0,
@@ -69,8 +69,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "dev-host",
-                component = GeneratedLinkSettingsComponent.DEV_HOST,
+                id = "navigation.dev-host-entry",
+                component = GeneratedLinkSettingsComponent.NAVIGATION_DEV_HOST_ENTRY,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 3,
                 priority = 0,
@@ -78,8 +78,8 @@ object GeneratedLinkSettingsComponents {
                 required = false,
             ),
             GeneratedLinkSettingsMount(
-                id = "recovery",
-                component = GeneratedLinkSettingsComponent.RECOVERY,
+                id = "recovery.status",
+                component = GeneratedLinkSettingsComponent.RECOVERY_STATUS,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 4,
                 priority = 0,
@@ -89,8 +89,8 @@ object GeneratedLinkSettingsComponents {
         ))
         CircleSurfaceClass.PHONE_COMPACT -> GeneratedLinkSettingsTree(listOf(
             GeneratedLinkSettingsMount(
-                id = "page-host",
-                component = GeneratedLinkSettingsComponent.PAGE_HOST,
+                id = "navigation.page-host",
+                component = GeneratedLinkSettingsComponent.NAVIGATION_PAGE_HOST,
                 region = GeneratedLinkSettingsRegion.HOST,
                 order = 0,
                 priority = 0,
@@ -98,8 +98,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "active-playback",
-                component = GeneratedLinkSettingsComponent.ACTIVE_PLAYBACK,
+                id = "playback.controls",
+                component = GeneratedLinkSettingsComponent.PLAYBACK_CONTROLS,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 1,
                 priority = 0,
@@ -107,8 +107,8 @@ object GeneratedLinkSettingsComponents {
                 required = false,
             ),
             GeneratedLinkSettingsMount(
-                id = "connection",
-                component = GeneratedLinkSettingsComponent.CONNECTION,
+                id = "session.connection",
+                component = GeneratedLinkSettingsComponent.SESSION_CONNECTION,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 2,
                 priority = 0,
@@ -116,8 +116,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "public-link",
-                component = GeneratedLinkSettingsComponent.PUBLIC_LINK,
+                id = "session.public-link",
+                component = GeneratedLinkSettingsComponent.SESSION_PUBLIC_LINK,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 3,
                 priority = 0,
@@ -125,8 +125,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "preferences",
-                component = GeneratedLinkSettingsComponent.PREFERENCES,
+                id = "preferences.toggles",
+                component = GeneratedLinkSettingsComponent.PREFERENCES_TOGGLES,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 4,
                 priority = 0,
@@ -134,8 +134,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "local-history",
-                component = GeneratedLinkSettingsComponent.LOCAL_HISTORY,
+                id = "history.local",
+                component = GeneratedLinkSettingsComponent.HISTORY_LOCAL,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 5,
                 priority = 0,
@@ -143,8 +143,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "updates",
-                component = GeneratedLinkSettingsComponent.UPDATES,
+                id = "updates.panel",
+                component = GeneratedLinkSettingsComponent.UPDATES_PANEL,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 6,
                 priority = 0,
@@ -152,8 +152,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "dev-host",
-                component = GeneratedLinkSettingsComponent.DEV_HOST,
+                id = "navigation.dev-host-entry",
+                component = GeneratedLinkSettingsComponent.NAVIGATION_DEV_HOST_ENTRY,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 7,
                 priority = 0,
@@ -161,8 +161,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "recovery",
-                component = GeneratedLinkSettingsComponent.RECOVERY,
+                id = "recovery.status",
+                component = GeneratedLinkSettingsComponent.RECOVERY_STATUS,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 8,
                 priority = 0,
@@ -172,8 +172,8 @@ object GeneratedLinkSettingsComponents {
         ))
         CircleSurfaceClass.PHONE_WIDE -> GeneratedLinkSettingsTree(listOf(
             GeneratedLinkSettingsMount(
-                id = "page-host",
-                component = GeneratedLinkSettingsComponent.PAGE_HOST,
+                id = "navigation.page-host",
+                component = GeneratedLinkSettingsComponent.NAVIGATION_PAGE_HOST,
                 region = GeneratedLinkSettingsRegion.HOST,
                 order = 0,
                 priority = 0,
@@ -181,8 +181,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "active-playback",
-                component = GeneratedLinkSettingsComponent.ACTIVE_PLAYBACK,
+                id = "playback.controls",
+                component = GeneratedLinkSettingsComponent.PLAYBACK_CONTROLS,
                 region = GeneratedLinkSettingsRegion.RAIL,
                 order = 1,
                 priority = 0,
@@ -190,8 +190,8 @@ object GeneratedLinkSettingsComponents {
                 required = false,
             ),
             GeneratedLinkSettingsMount(
-                id = "connection",
-                component = GeneratedLinkSettingsComponent.CONNECTION,
+                id = "session.connection",
+                component = GeneratedLinkSettingsComponent.SESSION_CONNECTION,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 2,
                 priority = 0,
@@ -199,8 +199,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "public-link",
-                component = GeneratedLinkSettingsComponent.PUBLIC_LINK,
+                id = "session.public-link",
+                component = GeneratedLinkSettingsComponent.SESSION_PUBLIC_LINK,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 3,
                 priority = 0,
@@ -208,8 +208,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "preferences",
-                component = GeneratedLinkSettingsComponent.PREFERENCES,
+                id = "preferences.toggles",
+                component = GeneratedLinkSettingsComponent.PREFERENCES_TOGGLES,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 4,
                 priority = 0,
@@ -217,8 +217,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "local-history",
-                component = GeneratedLinkSettingsComponent.LOCAL_HISTORY,
+                id = "history.local",
+                component = GeneratedLinkSettingsComponent.HISTORY_LOCAL,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 5,
                 priority = 0,
@@ -226,8 +226,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "updates",
-                component = GeneratedLinkSettingsComponent.UPDATES,
+                id = "updates.panel",
+                component = GeneratedLinkSettingsComponent.UPDATES_PANEL,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 6,
                 priority = 0,
@@ -235,8 +235,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "dev-host",
-                component = GeneratedLinkSettingsComponent.DEV_HOST,
+                id = "navigation.dev-host-entry",
+                component = GeneratedLinkSettingsComponent.NAVIGATION_DEV_HOST_ENTRY,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 7,
                 priority = 0,
@@ -244,8 +244,8 @@ object GeneratedLinkSettingsComponents {
                 required = true,
             ),
             GeneratedLinkSettingsMount(
-                id = "recovery",
-                component = GeneratedLinkSettingsComponent.RECOVERY,
+                id = "recovery.status",
+                component = GeneratedLinkSettingsComponent.RECOVERY_STATUS,
                 region = GeneratedLinkSettingsRegion.CONTENT,
                 order = 8,
                 priority = 0,

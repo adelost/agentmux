@@ -47,24 +47,24 @@
       "artifactRef": "phone-full-ui",
       "includedMounts": [
         {
-          "componentInstanceRef": "page-host",
-          "mountRef": "page-host"
+          "componentInstanceRef": "navigation.page-host",
+          "mountRef": "navigation.page-host"
         },
         {
-          "componentInstanceRef": "target",
-          "mountRef": "target"
+          "componentInstanceRef": "target.picker",
+          "mountRef": "target.picker"
         },
         {
-          "componentInstanceRef": "talk",
-          "mountRef": "talk"
+          "componentInstanceRef": "capture.talk",
+          "mountRef": "capture.talk"
         },
         {
-          "componentInstanceRef": "latest",
-          "mountRef": "latest"
+          "componentInstanceRef": "conversation.latest",
+          "mountRef": "conversation.latest"
         },
         {
-          "componentInstanceRef": "settings-action",
-          "mountRef": "settings-action"
+          "componentInstanceRef": "navigation.settings-entry",
+          "mountRef": "navigation.settings-entry"
         }
       ],
       "omittedMounts": [],
@@ -75,28 +75,28 @@
       "artifactRef": "phone-full-ui",
       "includedMounts": [
         {
-          "componentInstanceRef": "page-host",
-          "mountRef": "page-host"
+          "componentInstanceRef": "navigation.page-host",
+          "mountRef": "navigation.page-host"
         },
         {
-          "componentInstanceRef": "target",
-          "mountRef": "target"
+          "componentInstanceRef": "target.picker",
+          "mountRef": "target.picker"
         },
         {
-          "componentInstanceRef": "latest",
-          "mountRef": "latest"
+          "componentInstanceRef": "conversation.latest",
+          "mountRef": "conversation.latest"
         },
         {
-          "componentInstanceRef": "composer",
-          "mountRef": "composer"
+          "componentInstanceRef": "conversation.composer",
+          "mountRef": "conversation.composer"
         },
         {
-          "componentInstanceRef": "talk",
-          "mountRef": "talk"
+          "componentInstanceRef": "capture.talk",
+          "mountRef": "capture.talk"
         },
         {
-          "componentInstanceRef": "settings-action",
-          "mountRef": "settings-action"
+          "componentInstanceRef": "navigation.settings-entry",
+          "mountRef": "navigation.settings-entry"
         }
       ],
       "omittedMounts": [],
@@ -107,28 +107,28 @@
       "artifactRef": "phone-full-ui",
       "includedMounts": [
         {
-          "componentInstanceRef": "page-host",
-          "mountRef": "page-host"
+          "componentInstanceRef": "navigation.page-host",
+          "mountRef": "navigation.page-host"
         },
         {
-          "componentInstanceRef": "target",
-          "mountRef": "target"
+          "componentInstanceRef": "target.picker",
+          "mountRef": "target.picker"
         },
         {
-          "componentInstanceRef": "latest",
-          "mountRef": "latest"
+          "componentInstanceRef": "conversation.latest",
+          "mountRef": "conversation.latest"
         },
         {
-          "componentInstanceRef": "composer",
-          "mountRef": "composer"
+          "componentInstanceRef": "conversation.composer",
+          "mountRef": "conversation.composer"
         },
         {
-          "componentInstanceRef": "talk",
-          "mountRef": "talk"
+          "componentInstanceRef": "capture.talk",
+          "mountRef": "capture.talk"
         },
         {
-          "componentInstanceRef": "settings-action",
-          "mountRef": "settings-action"
+          "componentInstanceRef": "navigation.settings-entry",
+          "mountRef": "navigation.settings-entry"
         }
       ],
       "omittedMounts": [],
@@ -139,24 +139,24 @@
       "artifactRef": "phone-full-ui",
       "includedMounts": [
         {
-          "componentInstanceRef": "page-host",
-          "mountRef": "page-host"
+          "componentInstanceRef": "navigation.page-host",
+          "mountRef": "navigation.page-host"
         },
         {
-          "componentInstanceRef": "connection",
-          "mountRef": "connection"
+          "componentInstanceRef": "session.connection",
+          "mountRef": "session.connection"
         },
         {
-          "componentInstanceRef": "updates",
-          "mountRef": "updates"
+          "componentInstanceRef": "updates.panel",
+          "mountRef": "updates.panel"
         },
         {
-          "componentInstanceRef": "dev-host",
-          "mountRef": "dev-host"
+          "componentInstanceRef": "navigation.dev-host-entry",
+          "mountRef": "navigation.dev-host-entry"
         },
         {
-          "componentInstanceRef": "recovery",
-          "mountRef": "recovery"
+          "componentInstanceRef": "recovery.status",
+          "mountRef": "recovery.status"
         }
       ],
       "omittedMounts": [],
@@ -167,40 +167,40 @@
       "artifactRef": "phone-full-ui",
       "includedMounts": [
         {
-          "componentInstanceRef": "page-host",
-          "mountRef": "page-host"
+          "componentInstanceRef": "navigation.page-host",
+          "mountRef": "navigation.page-host"
         },
         {
-          "componentInstanceRef": "active-playback",
-          "mountRef": "active-playback"
+          "componentInstanceRef": "playback.controls",
+          "mountRef": "playback.controls"
         },
         {
-          "componentInstanceRef": "connection",
-          "mountRef": "connection"
+          "componentInstanceRef": "session.connection",
+          "mountRef": "session.connection"
         },
         {
-          "componentInstanceRef": "public-link",
-          "mountRef": "public-link"
+          "componentInstanceRef": "session.public-link",
+          "mountRef": "session.public-link"
         },
         {
-          "componentInstanceRef": "preferences",
-          "mountRef": "preferences"
+          "componentInstanceRef": "preferences.toggles",
+          "mountRef": "preferences.toggles"
         },
         {
-          "componentInstanceRef": "local-history",
-          "mountRef": "local-history"
+          "componentInstanceRef": "history.local",
+          "mountRef": "history.local"
         },
         {
-          "componentInstanceRef": "updates",
-          "mountRef": "updates"
+          "componentInstanceRef": "updates.panel",
+          "mountRef": "updates.panel"
         },
         {
-          "componentInstanceRef": "dev-host",
-          "mountRef": "dev-host"
+          "componentInstanceRef": "navigation.dev-host-entry",
+          "mountRef": "navigation.dev-host-entry"
         },
         {
-          "componentInstanceRef": "recovery",
-          "mountRef": "recovery"
+          "componentInstanceRef": "recovery.status",
+          "mountRef": "recovery.status"
         }
       ],
       "omittedMounts": [],
@@ -211,40 +211,40 @@
       "artifactRef": "phone-full-ui",
       "includedMounts": [
         {
-          "componentInstanceRef": "page-host",
-          "mountRef": "page-host"
+          "componentInstanceRef": "navigation.page-host",
+          "mountRef": "navigation.page-host"
         },
         {
-          "componentInstanceRef": "active-playback",
-          "mountRef": "active-playback"
+          "componentInstanceRef": "playback.controls",
+          "mountRef": "playback.controls"
         },
         {
-          "componentInstanceRef": "connection",
-          "mountRef": "connection"
+          "componentInstanceRef": "session.connection",
+          "mountRef": "session.connection"
         },
         {
-          "componentInstanceRef": "public-link",
-          "mountRef": "public-link"
+          "componentInstanceRef": "session.public-link",
+          "mountRef": "session.public-link"
         },
         {
-          "componentInstanceRef": "preferences",
-          "mountRef": "preferences"
+          "componentInstanceRef": "preferences.toggles",
+          "mountRef": "preferences.toggles"
         },
         {
-          "componentInstanceRef": "local-history",
-          "mountRef": "local-history"
+          "componentInstanceRef": "history.local",
+          "mountRef": "history.local"
         },
         {
-          "componentInstanceRef": "updates",
-          "mountRef": "updates"
+          "componentInstanceRef": "updates.panel",
+          "mountRef": "updates.panel"
         },
         {
-          "componentInstanceRef": "dev-host",
-          "mountRef": "dev-host"
+          "componentInstanceRef": "navigation.dev-host-entry",
+          "mountRef": "navigation.dev-host-entry"
         },
         {
-          "componentInstanceRef": "recovery",
-          "mountRef": "recovery"
+          "componentInstanceRef": "recovery.status",
+          "mountRef": "recovery.status"
         }
       ],
       "omittedMounts": [],
@@ -255,12 +255,12 @@
       "artifactRef": "phone-full-ui",
       "includedMounts": [
         {
-          "componentInstanceRef": "page-host",
-          "mountRef": "page-host"
+          "componentInstanceRef": "navigation.page-host",
+          "mountRef": "navigation.page-host"
         },
         {
-          "componentInstanceRef": "dev-preview",
-          "mountRef": "dev-preview"
+          "componentInstanceRef": "dev.preview",
+          "mountRef": "dev.preview"
         }
       ],
       "omittedMounts": [],
@@ -271,12 +271,12 @@
       "artifactRef": "phone-full-ui",
       "includedMounts": [
         {
-          "componentInstanceRef": "page-host",
-          "mountRef": "page-host"
+          "componentInstanceRef": "navigation.page-host",
+          "mountRef": "navigation.page-host"
         },
         {
-          "componentInstanceRef": "dev-preview",
-          "mountRef": "dev-preview"
+          "componentInstanceRef": "dev.preview",
+          "mountRef": "dev.preview"
         }
       ],
       "omittedMounts": [],
@@ -287,12 +287,12 @@
       "artifactRef": "phone-full-ui",
       "includedMounts": [
         {
-          "componentInstanceRef": "page-host",
-          "mountRef": "page-host"
+          "componentInstanceRef": "navigation.page-host",
+          "mountRef": "navigation.page-host"
         },
         {
-          "componentInstanceRef": "dev-preview",
-          "mountRef": "dev-preview"
+          "componentInstanceRef": "dev.preview",
+          "mountRef": "dev.preview"
         }
       ],
       "omittedMounts": [],
@@ -303,24 +303,24 @@
       "artifactRef": "wear-full-ui",
       "includedMounts": [
         {
-          "componentInstanceRef": "page-host",
-          "mountRef": "page-host"
+          "componentInstanceRef": "navigation.page-host",
+          "mountRef": "navigation.page-host"
         },
         {
-          "componentInstanceRef": "target",
-          "mountRef": "target"
+          "componentInstanceRef": "target.picker",
+          "mountRef": "target.picker"
         },
         {
-          "componentInstanceRef": "talk",
-          "mountRef": "talk"
+          "componentInstanceRef": "capture.talk",
+          "mountRef": "capture.talk"
         },
         {
-          "componentInstanceRef": "latest",
-          "mountRef": "latest"
+          "componentInstanceRef": "conversation.latest",
+          "mountRef": "conversation.latest"
         },
         {
-          "componentInstanceRef": "settings-action",
-          "mountRef": "settings-action"
+          "componentInstanceRef": "navigation.settings-entry",
+          "mountRef": "navigation.settings-entry"
         }
       ],
       "omittedMounts": [],
@@ -331,20 +331,20 @@
       "artifactRef": "wear-full-ui",
       "includedMounts": [
         {
-          "componentInstanceRef": "page-host",
-          "mountRef": "page-host"
+          "componentInstanceRef": "navigation.page-host",
+          "mountRef": "navigation.page-host"
         },
         {
-          "componentInstanceRef": "connection",
-          "mountRef": "connection"
+          "componentInstanceRef": "session.connection",
+          "mountRef": "session.connection"
         },
         {
-          "componentInstanceRef": "updates",
-          "mountRef": "updates"
+          "componentInstanceRef": "updates.panel",
+          "mountRef": "updates.panel"
         },
         {
-          "componentInstanceRef": "recovery",
-          "mountRef": "recovery"
+          "componentInstanceRef": "recovery.status",
+          "mountRef": "recovery.status"
         }
       ],
       "omittedMounts": [
@@ -352,8 +352,8 @@
           "capabilities": [
             "ui.dev-host"
           ],
-          "componentInstanceRef": "dev-host",
-          "mountRef": "dev-host",
+          "componentInstanceRef": "navigation.dev-host-entry",
+          "mountRef": "navigation.dev-host-entry",
           "reason": "missing-capability"
         }
       ],
@@ -374,8 +374,8 @@
             "mounts": [
               {
                 "capacity": null,
-                "id": "page-host",
-                "instance": "page-host",
+                "id": "navigation.page-host",
+                "instance": "navigation.page-host",
                 "order": 0,
                 "priority": 0,
                 "region": "host",
@@ -385,8 +385,8 @@
               },
               {
                 "capacity": null,
-                "id": "target",
-                "instance": "target",
+                "id": "target.picker",
+                "instance": "target.picker",
                 "order": 1,
                 "priority": 0,
                 "region": "content",
@@ -396,8 +396,8 @@
               },
               {
                 "capacity": null,
-                "id": "talk",
-                "instance": "talk",
+                "id": "capture.talk",
+                "instance": "capture.talk",
                 "order": 2,
                 "priority": 0,
                 "region": "content",
@@ -407,8 +407,8 @@
               },
               {
                 "capacity": null,
-                "id": "latest",
-                "instance": "latest",
+                "id": "conversation.latest",
+                "instance": "conversation.latest",
                 "order": 3,
                 "priority": 0,
                 "region": "content",
@@ -418,8 +418,8 @@
               },
               {
                 "capacity": null,
-                "id": "settings-action",
-                "instance": "settings-action",
+                "id": "navigation.settings-entry",
+                "instance": "navigation.settings-entry",
                 "order": 4,
                 "priority": 0,
                 "region": "chrome",
@@ -434,8 +434,8 @@
             "mounts": [
               {
                 "capacity": null,
-                "id": "page-host",
-                "instance": "page-host",
+                "id": "navigation.page-host",
+                "instance": "navigation.page-host",
                 "order": 0,
                 "priority": 0,
                 "region": "host",
@@ -445,8 +445,8 @@
               },
               {
                 "capacity": null,
-                "id": "target",
-                "instance": "target",
+                "id": "target.picker",
+                "instance": "target.picker",
                 "order": 1,
                 "priority": 0,
                 "region": "content",
@@ -456,8 +456,8 @@
               },
               {
                 "capacity": null,
-                "id": "latest",
-                "instance": "latest",
+                "id": "conversation.latest",
+                "instance": "conversation.latest",
                 "order": 2,
                 "priority": 0,
                 "region": "content",
@@ -467,8 +467,8 @@
               },
               {
                 "capacity": null,
-                "id": "composer",
-                "instance": "composer",
+                "id": "conversation.composer",
+                "instance": "conversation.composer",
                 "order": 3,
                 "priority": 0,
                 "region": "footer",
@@ -478,8 +478,8 @@
               },
               {
                 "capacity": null,
-                "id": "talk",
-                "instance": "talk",
+                "id": "capture.talk",
+                "instance": "capture.talk",
                 "order": 4,
                 "priority": 0,
                 "region": "footer",
@@ -489,8 +489,8 @@
               },
               {
                 "capacity": null,
-                "id": "settings-action",
-                "instance": "settings-action",
+                "id": "navigation.settings-entry",
+                "instance": "navigation.settings-entry",
                 "order": 5,
                 "priority": 0,
                 "region": "chrome",
@@ -505,8 +505,8 @@
             "mounts": [
               {
                 "capacity": null,
-                "id": "page-host",
-                "instance": "page-host",
+                "id": "navigation.page-host",
+                "instance": "navigation.page-host",
                 "order": 0,
                 "priority": 0,
                 "region": "host",
@@ -516,8 +516,8 @@
               },
               {
                 "capacity": null,
-                "id": "target",
-                "instance": "target",
+                "id": "target.picker",
+                "instance": "target.picker",
                 "order": 1,
                 "priority": 0,
                 "region": "rail",
@@ -527,8 +527,8 @@
               },
               {
                 "capacity": null,
-                "id": "latest",
-                "instance": "latest",
+                "id": "conversation.latest",
+                "instance": "conversation.latest",
                 "order": 2,
                 "priority": 0,
                 "region": "content",
@@ -538,8 +538,8 @@
               },
               {
                 "capacity": null,
-                "id": "composer",
-                "instance": "composer",
+                "id": "conversation.composer",
+                "instance": "conversation.composer",
                 "order": 3,
                 "priority": 0,
                 "region": "footer",
@@ -549,8 +549,8 @@
               },
               {
                 "capacity": null,
-                "id": "talk",
-                "instance": "talk",
+                "id": "capture.talk",
+                "instance": "capture.talk",
                 "order": 4,
                 "priority": 0,
                 "region": "footer",
@@ -560,8 +560,8 @@
               },
               {
                 "capacity": null,
-                "id": "settings-action",
-                "instance": "settings-action",
+                "id": "navigation.settings-entry",
+                "instance": "navigation.settings-entry",
                 "order": 5,
                 "priority": 0,
                 "region": "chrome",
@@ -584,8 +584,8 @@
             "mounts": [
               {
                 "capacity": null,
-                "id": "page-host",
-                "instance": "page-host",
+                "id": "navigation.page-host",
+                "instance": "navigation.page-host",
                 "order": 0,
                 "priority": 0,
                 "region": "host",
@@ -595,8 +595,8 @@
               },
               {
                 "capacity": null,
-                "id": "connection",
-                "instance": "connection",
+                "id": "session.connection",
+                "instance": "session.connection",
                 "order": 1,
                 "priority": 0,
                 "region": "content",
@@ -606,8 +606,8 @@
               },
               {
                 "capacity": null,
-                "id": "updates",
-                "instance": "updates",
+                "id": "updates.panel",
+                "instance": "updates.panel",
                 "order": 2,
                 "priority": 0,
                 "region": "content",
@@ -617,8 +617,8 @@
               },
               {
                 "capacity": null,
-                "id": "dev-host",
-                "instance": "dev-host",
+                "id": "navigation.dev-host-entry",
+                "instance": "navigation.dev-host-entry",
                 "order": 3,
                 "priority": 0,
                 "region": "content",
@@ -629,8 +629,8 @@
               },
               {
                 "capacity": null,
-                "id": "recovery",
-                "instance": "recovery",
+                "id": "recovery.status",
+                "instance": "recovery.status",
                 "order": 4,
                 "priority": 0,
                 "region": "content",
@@ -646,8 +646,8 @@
             "mounts": [
               {
                 "capacity": null,
-                "id": "page-host",
-                "instance": "page-host",
+                "id": "navigation.page-host",
+                "instance": "navigation.page-host",
                 "order": 0,
                 "priority": 0,
                 "region": "host",
@@ -657,8 +657,8 @@
               },
               {
                 "capacity": null,
-                "id": "active-playback",
-                "instance": "active-playback",
+                "id": "playback.controls",
+                "instance": "playback.controls",
                 "order": 1,
                 "priority": 0,
                 "region": "content",
@@ -669,8 +669,8 @@
               },
               {
                 "capacity": null,
-                "id": "connection",
-                "instance": "connection",
+                "id": "session.connection",
+                "instance": "session.connection",
                 "order": 2,
                 "priority": 0,
                 "region": "content",
@@ -680,8 +680,8 @@
               },
               {
                 "capacity": null,
-                "id": "public-link",
-                "instance": "public-link",
+                "id": "session.public-link",
+                "instance": "session.public-link",
                 "order": 3,
                 "priority": 0,
                 "region": "content",
@@ -691,8 +691,8 @@
               },
               {
                 "capacity": null,
-                "id": "preferences",
-                "instance": "preferences",
+                "id": "preferences.toggles",
+                "instance": "preferences.toggles",
                 "order": 4,
                 "priority": 0,
                 "region": "content",
@@ -702,8 +702,8 @@
               },
               {
                 "capacity": null,
-                "id": "local-history",
-                "instance": "local-history",
+                "id": "history.local",
+                "instance": "history.local",
                 "order": 5,
                 "priority": 0,
                 "region": "content",
@@ -713,8 +713,8 @@
               },
               {
                 "capacity": null,
-                "id": "updates",
-                "instance": "updates",
+                "id": "updates.panel",
+                "instance": "updates.panel",
                 "order": 6,
                 "priority": 0,
                 "region": "content",
@@ -724,8 +724,8 @@
               },
               {
                 "capacity": null,
-                "id": "dev-host",
-                "instance": "dev-host",
+                "id": "navigation.dev-host-entry",
+                "instance": "navigation.dev-host-entry",
                 "order": 7,
                 "priority": 0,
                 "region": "content",
@@ -735,8 +735,8 @@
               },
               {
                 "capacity": null,
-                "id": "recovery",
-                "instance": "recovery",
+                "id": "recovery.status",
+                "instance": "recovery.status",
                 "order": 8,
                 "priority": 0,
                 "region": "content",
@@ -752,8 +752,8 @@
             "mounts": [
               {
                 "capacity": null,
-                "id": "page-host",
-                "instance": "page-host",
+                "id": "navigation.page-host",
+                "instance": "navigation.page-host",
                 "order": 0,
                 "priority": 0,
                 "region": "host",
@@ -763,8 +763,8 @@
               },
               {
                 "capacity": null,
-                "id": "active-playback",
-                "instance": "active-playback",
+                "id": "playback.controls",
+                "instance": "playback.controls",
                 "order": 1,
                 "priority": 0,
                 "region": "rail",
@@ -775,8 +775,8 @@
               },
               {
                 "capacity": null,
-                "id": "connection",
-                "instance": "connection",
+                "id": "session.connection",
+                "instance": "session.connection",
                 "order": 2,
                 "priority": 0,
                 "region": "content",
@@ -786,8 +786,8 @@
               },
               {
                 "capacity": null,
-                "id": "public-link",
-                "instance": "public-link",
+                "id": "session.public-link",
+                "instance": "session.public-link",
                 "order": 3,
                 "priority": 0,
                 "region": "content",
@@ -797,8 +797,8 @@
               },
               {
                 "capacity": null,
-                "id": "preferences",
-                "instance": "preferences",
+                "id": "preferences.toggles",
+                "instance": "preferences.toggles",
                 "order": 4,
                 "priority": 0,
                 "region": "content",
@@ -808,8 +808,8 @@
               },
               {
                 "capacity": null,
-                "id": "local-history",
-                "instance": "local-history",
+                "id": "history.local",
+                "instance": "history.local",
                 "order": 5,
                 "priority": 0,
                 "region": "content",
@@ -819,8 +819,8 @@
               },
               {
                 "capacity": null,
-                "id": "updates",
-                "instance": "updates",
+                "id": "updates.panel",
+                "instance": "updates.panel",
                 "order": 6,
                 "priority": 0,
                 "region": "content",
@@ -830,8 +830,8 @@
               },
               {
                 "capacity": null,
-                "id": "dev-host",
-                "instance": "dev-host",
+                "id": "navigation.dev-host-entry",
+                "instance": "navigation.dev-host-entry",
                 "order": 7,
                 "priority": 0,
                 "region": "content",
@@ -841,8 +841,8 @@
               },
               {
                 "capacity": null,
-                "id": "recovery",
-                "instance": "recovery",
+                "id": "recovery.status",
+                "instance": "recovery.status",
                 "order": 8,
                 "priority": 0,
                 "region": "content",
@@ -866,8 +866,8 @@
             "mounts": [
               {
                 "capacity": null,
-                "id": "page-host",
-                "instance": "page-host",
+                "id": "navigation.page-host",
+                "instance": "navigation.page-host",
                 "order": 0,
                 "priority": 0,
                 "region": "host",
@@ -877,8 +877,8 @@
               },
               {
                 "capacity": null,
-                "id": "dev-preview",
-                "instance": "dev-preview",
+                "id": "dev.preview",
+                "instance": "dev.preview",
                 "order": 1,
                 "priority": 0,
                 "region": "content",
@@ -893,8 +893,8 @@
             "mounts": [
               {
                 "capacity": null,
-                "id": "page-host",
-                "instance": "page-host",
+                "id": "navigation.page-host",
+                "instance": "navigation.page-host",
                 "order": 0,
                 "priority": 0,
                 "region": "host",
@@ -904,8 +904,8 @@
               },
               {
                 "capacity": null,
-                "id": "dev-preview",
-                "instance": "dev-preview",
+                "id": "dev.preview",
+                "instance": "dev.preview",
                 "order": 1,
                 "priority": 0,
                 "region": "content",
@@ -920,8 +920,8 @@
             "mounts": [
               {
                 "capacity": null,
-                "id": "page-host",
-                "instance": "page-host",
+                "id": "navigation.page-host",
+                "instance": "navigation.page-host",
                 "order": 0,
                 "priority": 0,
                 "region": "host",
@@ -931,8 +931,8 @@
               },
               {
                 "capacity": null,
-                "id": "dev-preview",
-                "instance": "dev-preview",
+                "id": "dev.preview",
+                "instance": "dev.preview",
                 "order": 1,
                 "priority": 0,
                 "region": "content",
@@ -957,7 +957,7 @@
         }
       },
       "componentTypeRef": "link.page-host",
-      "id": "page-host"
+      "id": "navigation.page-host"
     },
     {
       "bindings": {
@@ -966,11 +966,11 @@
         },
         "inputs": {
           "model": "target.presentation.model",
-          "targetState": "link.target-kind.presentation-adapter.presentation"
+          "targetState": "target.kind.presentation-adapter.presentation"
         }
       },
       "componentTypeRef": "link.target-picker",
-      "id": "target"
+      "id": "target.picker"
     },
     {
       "bindings": {
@@ -978,24 +978,24 @@
           "command": "capture.service.command"
         },
         "inputs": {
-          "captureState": "link.capture-phase.presentation-adapter.presentation",
+          "captureState": "capture.phase.presentation-adapter.presentation",
           "model": "capture.presentation.model"
         }
       },
       "componentTypeRef": "link.talk",
-      "id": "talk"
+      "id": "capture.talk"
     },
     {
       "bindings": {
         "events": {},
         "inputs": {
-          "deliveryState": "link.delivery-phase.presentation-adapter.presentation",
+          "deliveryState": "conversation.delivery-phase.presentation-adapter.presentation",
           "model": "conversation.presentation.model",
-          "replyState": "link.reply-phase.presentation-adapter.presentation"
+          "replyState": "conversation.reply-phase.presentation-adapter.presentation"
         }
       },
       "componentTypeRef": "link.latest-turn",
-      "id": "latest"
+      "id": "conversation.latest"
     },
     {
       "bindings": {
@@ -1003,13 +1003,13 @@
           "compose": "conversation.service.compose"
         },
         "inputs": {
-          "deliveryState": "link.delivery-phase.presentation-adapter.presentation",
+          "deliveryState": "conversation.delivery-phase.presentation-adapter.presentation",
           "model": "conversation.presentation.model",
-          "replyState": "link.reply-phase.presentation-adapter.presentation"
+          "replyState": "conversation.reply-phase.presentation-adapter.presentation"
         }
       },
       "componentTypeRef": "link.composer",
-      "id": "composer"
+      "id": "conversation.composer"
     },
     {
       "bindings": {
@@ -1018,33 +1018,33 @@
         },
         "inputs": {
           "model": "playback.presentation.model",
-          "playbackState": "link.playback-phase.presentation-adapter.presentation"
+          "playbackState": "playback.phase.presentation-adapter.presentation"
         }
       },
       "componentTypeRef": "link.active-playback",
-      "id": "active-playback"
+      "id": "playback.controls"
     },
     {
       "bindings": {
         "events": {},
         "inputs": {
-          "connectionState": "link.connection-state.presentation-adapter.presentation",
+          "connectionState": "session.connection-state.presentation-adapter.presentation",
           "model": "session.presentation.model"
         }
       },
       "componentTypeRef": "link.connection-status",
-      "id": "connection"
+      "id": "session.connection"
     },
     {
       "bindings": {
         "events": {},
         "inputs": {
-          "connectionState": "link.connection-state.presentation-adapter.presentation",
+          "connectionState": "session.connection-state.presentation-adapter.presentation",
           "model": "session.presentation.model"
         }
       },
       "componentTypeRef": "link.public-link",
-      "id": "public-link"
+      "id": "session.public-link"
     },
     {
       "bindings": {
@@ -1056,7 +1056,7 @@
         }
       },
       "componentTypeRef": "link.preferences",
-      "id": "preferences"
+      "id": "preferences.toggles"
     },
     {
       "bindings": {
@@ -1066,7 +1066,7 @@
         }
       },
       "componentTypeRef": "link.local-history",
-      "id": "local-history"
+      "id": "history.local"
     },
     {
       "bindings": {
@@ -1075,22 +1075,22 @@
         },
         "inputs": {
           "model": "updates.presentation.model",
-          "updateState": "link.update-phase.presentation-adapter.presentation"
+          "updateState": "updates.phase.presentation-adapter.presentation"
         }
       },
       "componentTypeRef": "link.updates",
-      "id": "updates"
+      "id": "updates.panel"
     },
     {
       "bindings": {
         "events": {},
         "inputs": {
           "model": "recovery.presentation.model",
-          "recoveryState": "link.recovery-phase.presentation-adapter.presentation"
+          "recoveryState": "recovery.phase.presentation-adapter.presentation"
         }
       },
       "componentTypeRef": "link.recovery-status",
-      "id": "recovery"
+      "id": "recovery.status"
     },
     {
       "bindings": {
@@ -1100,7 +1100,7 @@
         "inputs": {}
       },
       "componentTypeRef": "link.navigation-entry",
-      "id": "settings-action"
+      "id": "navigation.settings-entry"
     },
     {
       "bindings": {
@@ -1110,7 +1110,7 @@
         "inputs": {}
       },
       "componentTypeRef": "link.dev-host-entry",
-      "id": "dev-host"
+      "id": "navigation.dev-host-entry"
     },
     {
       "bindings": {
@@ -1118,7 +1118,7 @@
         "inputs": {}
       },
       "componentTypeRef": "link.dev-preview",
-      "id": "dev-preview"
+      "id": "dev.preview"
     }
   ],
   "componentTypes": [
@@ -1179,7 +1179,7 @@
                 }
               }
             ],
-            "id": "link.target-kind.payload",
+            "id": "target.kind.payload",
             "kind": "snapshot"
           },
           "id": "targetState",
@@ -1272,7 +1272,7 @@
                 }
               }
             ],
-            "id": "link.capture-phase.payload",
+            "id": "capture.phase.payload",
             "kind": "snapshot"
           },
           "id": "captureState",
@@ -1377,7 +1377,7 @@
                 }
               }
             ],
-            "id": "link.delivery-phase.payload",
+            "id": "conversation.delivery-phase.payload",
             "kind": "snapshot"
           },
           "id": "deliveryState",
@@ -1397,7 +1397,7 @@
                 }
               }
             ],
-            "id": "link.reply-phase.payload",
+            "id": "conversation.reply-phase.payload",
             "kind": "snapshot"
           },
           "id": "replyState",
@@ -1481,7 +1481,7 @@
                 }
               }
             ],
-            "id": "link.delivery-phase.payload",
+            "id": "conversation.delivery-phase.payload",
             "kind": "snapshot"
           },
           "id": "deliveryState",
@@ -1501,7 +1501,7 @@
                 }
               }
             ],
-            "id": "link.reply-phase.payload",
+            "id": "conversation.reply-phase.payload",
             "kind": "snapshot"
           },
           "id": "replyState",
@@ -1596,7 +1596,7 @@
                 }
               }
             ],
-            "id": "link.playback-phase.payload",
+            "id": "playback.phase.payload",
             "kind": "snapshot"
           },
           "id": "playbackState",
@@ -1684,7 +1684,7 @@
                 }
               }
             ],
-            "id": "link.connection-state.payload",
+            "id": "session.connection-state.payload",
             "kind": "snapshot"
           },
           "id": "connectionState",
@@ -1745,7 +1745,7 @@
                 }
               }
             ],
-            "id": "link.connection-state.payload",
+            "id": "session.connection-state.payload",
             "kind": "snapshot"
           },
           "id": "connectionState",
@@ -1893,7 +1893,7 @@
                 }
               }
             ],
-            "id": "link.update-phase.payload",
+            "id": "updates.phase.payload",
             "kind": "snapshot"
           },
           "id": "updateState",
@@ -1969,7 +1969,7 @@
                 }
               }
             ],
-            "id": "link.recovery-phase.payload",
+            "id": "recovery.phase.payload",
             "kind": "snapshot"
           },
           "id": "recoveryState",
@@ -2360,20 +2360,21 @@
       {
         "actions": [
           {
-            "contractRef": "link.playback-command",
+            "contractRef": "link.capture-command",
             "effect": "dispatch",
             "id": "command",
             "kind": "event",
-            "sourcePortRef": "active-playback.command",
-            "targetPortRef": "playback.service.command"
+            "sourcePortRef": "capture.talk.command",
+            "targetPortRef": "capture.service.command"
           }
         ],
         "artifactRefs": [
-          "phone-full-ui"
+          "phone-full-ui",
+          "wear-full-ui"
         ],
-        "componentInstanceRef": "active-playback",
+        "componentInstanceRef": "capture.talk",
         "pageRefs": [
-          "settings"
+          "home"
         ]
       },
       {
@@ -2383,14 +2384,14 @@
             "effect": "dispatch",
             "id": "compose",
             "kind": "event",
-            "sourcePortRef": "composer.compose",
+            "sourcePortRef": "conversation.composer.compose",
             "targetPortRef": "conversation.service.compose"
           }
         ],
         "artifactRefs": [
           "phone-full-ui"
         ],
-        "componentInstanceRef": "composer",
+        "componentInstanceRef": "conversation.composer",
         "pageRefs": [
           "home"
         ]
@@ -2402,14 +2403,53 @@
             "effect": "push",
             "id": "open",
             "kind": "route",
-            "sourcePortRef": "dev-host.open",
+            "sourcePortRef": "navigation.dev-host-entry.open",
             "targetPortRef": "navigation.service.openDevHost"
           }
         ],
         "artifactRefs": [
           "phone-full-ui"
         ],
-        "componentInstanceRef": "dev-host",
+        "componentInstanceRef": "navigation.dev-host-entry",
+        "pageRefs": [
+          "settings"
+        ]
+      },
+      {
+        "actions": [
+          {
+            "contractRef": "link.navigation.route-intent",
+            "effect": "push",
+            "id": "open",
+            "kind": "route",
+            "sourcePortRef": "navigation.settings-entry.open",
+            "targetPortRef": "navigation.service.openSettings"
+          }
+        ],
+        "artifactRefs": [
+          "phone-full-ui",
+          "wear-full-ui"
+        ],
+        "componentInstanceRef": "navigation.settings-entry",
+        "pageRefs": [
+          "home"
+        ]
+      },
+      {
+        "actions": [
+          {
+            "contractRef": "link.playback-command",
+            "effect": "dispatch",
+            "id": "command",
+            "kind": "event",
+            "sourcePortRef": "playback.controls.command",
+            "targetPortRef": "playback.service.command"
+          }
+        ],
+        "artifactRefs": [
+          "phone-full-ui"
+        ],
+        "componentInstanceRef": "playback.controls",
         "pageRefs": [
           "settings"
         ]
@@ -2421,56 +2461,16 @@
             "effect": "dispatch",
             "id": "toggle",
             "kind": "event",
-            "sourcePortRef": "preferences.toggle",
+            "sourcePortRef": "preferences.toggles.toggle",
             "targetPortRef": "preferences.service.toggle"
           }
         ],
         "artifactRefs": [
           "phone-full-ui"
         ],
-        "componentInstanceRef": "preferences",
+        "componentInstanceRef": "preferences.toggles",
         "pageRefs": [
           "settings"
-        ]
-      },
-      {
-        "actions": [
-          {
-            "contractRef": "link.navigation.route-intent",
-            "effect": "push",
-            "id": "open",
-            "kind": "route",
-            "sourcePortRef": "settings-action.open",
-            "targetPortRef": "navigation.service.openSettings"
-          }
-        ],
-        "artifactRefs": [
-          "phone-full-ui",
-          "wear-full-ui"
-        ],
-        "componentInstanceRef": "settings-action",
-        "pageRefs": [
-          "home"
-        ]
-      },
-      {
-        "actions": [
-          {
-            "contractRef": "link.capture-command",
-            "effect": "dispatch",
-            "id": "command",
-            "kind": "event",
-            "sourcePortRef": "talk.command",
-            "targetPortRef": "capture.service.command"
-          }
-        ],
-        "artifactRefs": [
-          "phone-full-ui",
-          "wear-full-ui"
-        ],
-        "componentInstanceRef": "talk",
-        "pageRefs": [
-          "home"
         ]
       },
       {
@@ -2480,7 +2480,7 @@
             "effect": "dispatch",
             "id": "select",
             "kind": "event",
-            "sourcePortRef": "target.select",
+            "sourcePortRef": "target.picker.select",
             "targetPortRef": "target.service.select"
           }
         ],
@@ -2488,7 +2488,7 @@
           "phone-full-ui",
           "wear-full-ui"
         ],
-        "componentInstanceRef": "target",
+        "componentInstanceRef": "target.picker",
         "pageRefs": [
           "home"
         ]
@@ -2500,7 +2500,7 @@
             "effect": "dispatch",
             "id": "command",
             "kind": "event",
-            "sourcePortRef": "updates.command",
+            "sourcePortRef": "updates.panel.command",
             "targetPortRef": "updates.service.command"
           }
         ],
@@ -2508,7 +2508,7 @@
           "phone-full-ui",
           "wear-full-ui"
         ],
-        "componentInstanceRef": "updates",
+        "componentInstanceRef": "updates.panel",
         "pageRefs": [
           "settings"
         ]
@@ -2579,7 +2579,7 @@
       }
     ],
     "id": "link.navigation",
-    "pageHostPortRef": "page-host.activePage",
+    "pageHostPortRef": "navigation.page-host.activePage",
     "pages": [
       {
         "back": "system",
@@ -2626,8 +2626,8 @@
         "lifecycleSources": []
       },
       "bindings": {
-        "openDevHost": "dev-host.open",
-        "openSettings": "settings-action.open"
+        "openDevHost": "navigation.dev-host-entry.open",
+        "openSettings": "navigation.settings-entry.open"
       },
       "config": {},
       "id": "navigation.service",
@@ -2639,7 +2639,7 @@
         "lifecycleSources": []
       },
       "bindings": {
-        "command": "talk.command"
+        "command": "capture.talk.command"
       },
       "config": {
         "policy": "link.capture-policy"
@@ -2653,7 +2653,7 @@
         "lifecycleSources": []
       },
       "bindings": {
-        "compose": "composer.compose",
+        "compose": "conversation.composer.compose",
         "turn": "capture.service.captured"
       },
       "config": {
@@ -2668,7 +2668,7 @@
         "lifecycleSources": []
       },
       "bindings": {
-        "command": "active-playback.command"
+        "command": "playback.controls.command"
       },
       "config": {
         "policy": "link.playback-policy"
@@ -2682,7 +2682,7 @@
         "lifecycleSources": []
       },
       "bindings": {
-        "select": "target.select"
+        "select": "target.picker.select"
       },
       "config": {},
       "id": "target.service",
@@ -2714,7 +2714,7 @@
         "lifecycleSources": []
       },
       "bindings": {
-        "toggle": "preferences.toggle"
+        "toggle": "preferences.toggles.toggle"
       },
       "config": {},
       "id": "preferences.service",
@@ -2726,7 +2726,7 @@
         "lifecycleSources": []
       },
       "bindings": {
-        "command": "updates.command"
+        "command": "updates.panel.command"
       },
       "config": {},
       "id": "updates.service",
@@ -2819,64 +2819,64 @@
         "state": "capture.service.status"
       },
       "config": {},
-      "id": "link.capture-phase.presentation-adapter",
-      "nodeTypeRef": "link.capture-phase.presentation-adapter"
+      "id": "capture.phase.presentation-adapter",
+      "nodeTypeRef": "capture.phase.presentation-adapter"
     },
     {
       "bindings": {
         "state": "conversation.service.status"
       },
       "config": {},
-      "id": "link.delivery-phase.presentation-adapter",
-      "nodeTypeRef": "link.delivery-phase.presentation-adapter"
+      "id": "conversation.delivery-phase.presentation-adapter",
+      "nodeTypeRef": "conversation.delivery-phase.presentation-adapter"
     },
     {
       "bindings": {
         "state": "conversation.service.status"
       },
       "config": {},
-      "id": "link.reply-phase.presentation-adapter",
-      "nodeTypeRef": "link.reply-phase.presentation-adapter"
+      "id": "conversation.reply-phase.presentation-adapter",
+      "nodeTypeRef": "conversation.reply-phase.presentation-adapter"
     },
     {
       "bindings": {
         "state": "playback.service.status"
       },
       "config": {},
-      "id": "link.playback-phase.presentation-adapter",
-      "nodeTypeRef": "link.playback-phase.presentation-adapter"
+      "id": "playback.phase.presentation-adapter",
+      "nodeTypeRef": "playback.phase.presentation-adapter"
     },
     {
       "bindings": {
         "state": "target.service.directory"
       },
       "config": {},
-      "id": "link.target-kind.presentation-adapter",
-      "nodeTypeRef": "link.target-kind.presentation-adapter"
+      "id": "target.kind.presentation-adapter",
+      "nodeTypeRef": "target.kind.presentation-adapter"
     },
     {
       "bindings": {
         "state": "session.service.status"
       },
       "config": {},
-      "id": "link.connection-state.presentation-adapter",
-      "nodeTypeRef": "link.connection-state.presentation-adapter"
+      "id": "session.connection-state.presentation-adapter",
+      "nodeTypeRef": "session.connection-state.presentation-adapter"
     },
     {
       "bindings": {
         "state": "updates.service.status"
       },
       "config": {},
-      "id": "link.update-phase.presentation-adapter",
-      "nodeTypeRef": "link.update-phase.presentation-adapter"
+      "id": "updates.phase.presentation-adapter",
+      "nodeTypeRef": "updates.phase.presentation-adapter"
     },
     {
       "bindings": {
         "state": "recovery.service.status"
       },
       "config": {},
-      "id": "link.recovery-phase.presentation-adapter",
-      "nodeTypeRef": "link.recovery-phase.presentation-adapter"
+      "id": "recovery.phase.presentation-adapter",
+      "nodeTypeRef": "recovery.phase.presentation-adapter"
     }
   ],
   "nodeTypes": [
@@ -4487,7 +4487,7 @@
       }
     },
     {
-      "id": "link.capture-phase.presentation-adapter",
+      "id": "capture.phase.presentation-adapter",
       "inputs": [
         {
           "contract": {
@@ -4552,7 +4552,7 @@
                 }
               }
             ],
-            "id": "link.capture-phase.payload",
+            "id": "capture.phase.payload",
             "kind": "snapshot"
           },
           "id": "presentation",
@@ -4569,7 +4569,7 @@
       }
     },
     {
-      "id": "link.delivery-phase.presentation-adapter",
+      "id": "conversation.delivery-phase.presentation-adapter",
       "inputs": [
         {
           "contract": {
@@ -4643,7 +4643,7 @@
                 }
               }
             ],
-            "id": "link.delivery-phase.payload",
+            "id": "conversation.delivery-phase.payload",
             "kind": "snapshot"
           },
           "id": "presentation",
@@ -4660,7 +4660,7 @@
       }
     },
     {
-      "id": "link.reply-phase.presentation-adapter",
+      "id": "conversation.reply-phase.presentation-adapter",
       "inputs": [
         {
           "contract": {
@@ -4734,7 +4734,7 @@
                 }
               }
             ],
-            "id": "link.reply-phase.payload",
+            "id": "conversation.reply-phase.payload",
             "kind": "snapshot"
           },
           "id": "presentation",
@@ -4751,7 +4751,7 @@
       }
     },
     {
-      "id": "link.playback-phase.presentation-adapter",
+      "id": "playback.phase.presentation-adapter",
       "inputs": [
         {
           "contract": {
@@ -4818,7 +4818,7 @@
                 }
               }
             ],
-            "id": "link.playback-phase.payload",
+            "id": "playback.phase.payload",
             "kind": "snapshot"
           },
           "id": "presentation",
@@ -4835,7 +4835,7 @@
       }
     },
     {
-      "id": "link.target-kind.presentation-adapter",
+      "id": "target.kind.presentation-adapter",
       "inputs": [
         {
           "contract": {
@@ -4894,7 +4894,7 @@
                 }
               }
             ],
-            "id": "link.target-kind.payload",
+            "id": "target.kind.payload",
             "kind": "snapshot"
           },
           "id": "presentation",
@@ -4911,7 +4911,7 @@
       }
     },
     {
-      "id": "link.connection-state.presentation-adapter",
+      "id": "session.connection-state.presentation-adapter",
       "inputs": [
         {
           "contract": {
@@ -4962,7 +4962,7 @@
                 }
               }
             ],
-            "id": "link.connection-state.payload",
+            "id": "session.connection-state.payload",
             "kind": "snapshot"
           },
           "id": "presentation",
@@ -4979,7 +4979,7 @@
       }
     },
     {
-      "id": "link.update-phase.presentation-adapter",
+      "id": "updates.phase.presentation-adapter",
       "inputs": [
         {
           "contract": {
@@ -5026,7 +5026,7 @@
                 }
               }
             ],
-            "id": "link.update-phase.payload",
+            "id": "updates.phase.payload",
             "kind": "snapshot"
           },
           "id": "presentation",
@@ -5043,7 +5043,7 @@
       }
     },
     {
-      "id": "link.recovery-phase.presentation-adapter",
+      "id": "recovery.phase.presentation-adapter",
       "inputs": [
         {
           "contract": {
@@ -5088,7 +5088,7 @@
                 }
               }
             ],
-            "id": "link.recovery-phase.payload",
+            "id": "recovery.phase.payload",
             "kind": "snapshot"
           },
           "id": "presentation",
@@ -5111,19 +5111,19 @@
   "portRegistry": {
     "bindings": [
       {
-        "from": "settings-action.open",
+        "from": "navigation.settings-entry.open",
         "kind": "component-event",
         "purpose": "data",
         "to": "navigation.service.openSettings"
       },
       {
-        "from": "dev-host.open",
+        "from": "navigation.dev-host-entry.open",
         "kind": "component-event",
         "purpose": "data",
         "to": "navigation.service.openDevHost"
       },
       {
-        "from": "talk.command",
+        "from": "capture.talk.command",
         "kind": "component-event",
         "purpose": "data",
         "to": "capture.service.command"
@@ -5135,31 +5135,31 @@
         "to": "conversation.service.turn"
       },
       {
-        "from": "composer.compose",
+        "from": "conversation.composer.compose",
         "kind": "component-event",
         "purpose": "data",
         "to": "conversation.service.compose"
       },
       {
-        "from": "active-playback.command",
+        "from": "playback.controls.command",
         "kind": "component-event",
         "purpose": "data",
         "to": "playback.service.command"
       },
       {
-        "from": "target.select",
+        "from": "target.picker.select",
         "kind": "component-event",
         "purpose": "data",
         "to": "target.service.select"
       },
       {
-        "from": "preferences.toggle",
+        "from": "preferences.toggles.toggle",
         "kind": "component-event",
         "purpose": "data",
         "to": "preferences.service.toggle"
       },
       {
-        "from": "updates.command",
+        "from": "updates.panel.command",
         "kind": "component-event",
         "purpose": "data",
         "to": "updates.service.command"
@@ -5222,187 +5222,187 @@
         "from": "capture.service.status",
         "kind": "node-input",
         "purpose": "data",
-        "to": "link.capture-phase.presentation-adapter.state"
+        "to": "capture.phase.presentation-adapter.state"
       },
       {
         "from": "conversation.service.status",
         "kind": "node-input",
         "purpose": "data",
-        "to": "link.delivery-phase.presentation-adapter.state"
+        "to": "conversation.delivery-phase.presentation-adapter.state"
       },
       {
         "from": "conversation.service.status",
         "kind": "node-input",
         "purpose": "data",
-        "to": "link.reply-phase.presentation-adapter.state"
+        "to": "conversation.reply-phase.presentation-adapter.state"
       },
       {
         "from": "playback.service.status",
         "kind": "node-input",
         "purpose": "data",
-        "to": "link.playback-phase.presentation-adapter.state"
+        "to": "playback.phase.presentation-adapter.state"
       },
       {
         "from": "target.service.directory",
         "kind": "node-input",
         "purpose": "data",
-        "to": "link.target-kind.presentation-adapter.state"
+        "to": "target.kind.presentation-adapter.state"
       },
       {
         "from": "session.service.status",
         "kind": "node-input",
         "purpose": "data",
-        "to": "link.connection-state.presentation-adapter.state"
+        "to": "session.connection-state.presentation-adapter.state"
       },
       {
         "from": "updates.service.status",
         "kind": "node-input",
         "purpose": "data",
-        "to": "link.update-phase.presentation-adapter.state"
+        "to": "updates.phase.presentation-adapter.state"
       },
       {
         "from": "recovery.service.status",
         "kind": "node-input",
         "purpose": "data",
-        "to": "link.recovery-phase.presentation-adapter.state"
+        "to": "recovery.phase.presentation-adapter.state"
       },
       {
         "from": "navigation.service.activePage",
         "kind": "component-input",
         "purpose": "data",
-        "to": "page-host.activePage"
+        "to": "navigation.page-host.activePage"
       },
       {
         "from": "target.presentation.model",
         "kind": "component-input",
         "purpose": "data",
-        "to": "target.model"
+        "to": "target.picker.model"
       },
       {
-        "from": "link.target-kind.presentation-adapter.presentation",
+        "from": "target.kind.presentation-adapter.presentation",
         "kind": "component-input",
         "purpose": "data",
-        "to": "target.targetState"
+        "to": "target.picker.targetState"
       },
       {
         "from": "capture.presentation.model",
         "kind": "component-input",
         "purpose": "data",
-        "to": "talk.model"
+        "to": "capture.talk.model"
       },
       {
-        "from": "link.capture-phase.presentation-adapter.presentation",
+        "from": "capture.phase.presentation-adapter.presentation",
         "kind": "component-input",
         "purpose": "data",
-        "to": "talk.captureState"
-      },
-      {
-        "from": "conversation.presentation.model",
-        "kind": "component-input",
-        "purpose": "data",
-        "to": "latest.model"
-      },
-      {
-        "from": "link.delivery-phase.presentation-adapter.presentation",
-        "kind": "component-input",
-        "purpose": "data",
-        "to": "latest.deliveryState"
-      },
-      {
-        "from": "link.reply-phase.presentation-adapter.presentation",
-        "kind": "component-input",
-        "purpose": "data",
-        "to": "latest.replyState"
+        "to": "capture.talk.captureState"
       },
       {
         "from": "conversation.presentation.model",
         "kind": "component-input",
         "purpose": "data",
-        "to": "composer.model"
+        "to": "conversation.latest.model"
       },
       {
-        "from": "link.delivery-phase.presentation-adapter.presentation",
+        "from": "conversation.delivery-phase.presentation-adapter.presentation",
         "kind": "component-input",
         "purpose": "data",
-        "to": "composer.deliveryState"
+        "to": "conversation.latest.deliveryState"
       },
       {
-        "from": "link.reply-phase.presentation-adapter.presentation",
+        "from": "conversation.reply-phase.presentation-adapter.presentation",
         "kind": "component-input",
         "purpose": "data",
-        "to": "composer.replyState"
+        "to": "conversation.latest.replyState"
+      },
+      {
+        "from": "conversation.presentation.model",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "conversation.composer.model"
+      },
+      {
+        "from": "conversation.delivery-phase.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "conversation.composer.deliveryState"
+      },
+      {
+        "from": "conversation.reply-phase.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "conversation.composer.replyState"
       },
       {
         "from": "playback.presentation.model",
         "kind": "component-input",
         "purpose": "data",
-        "to": "active-playback.model"
+        "to": "playback.controls.model"
       },
       {
-        "from": "link.playback-phase.presentation-adapter.presentation",
+        "from": "playback.phase.presentation-adapter.presentation",
         "kind": "component-input",
         "purpose": "data",
-        "to": "active-playback.playbackState"
-      },
-      {
-        "from": "session.presentation.model",
-        "kind": "component-input",
-        "purpose": "data",
-        "to": "connection.model"
-      },
-      {
-        "from": "link.connection-state.presentation-adapter.presentation",
-        "kind": "component-input",
-        "purpose": "data",
-        "to": "connection.connectionState"
+        "to": "playback.controls.playbackState"
       },
       {
         "from": "session.presentation.model",
         "kind": "component-input",
         "purpose": "data",
-        "to": "public-link.model"
+        "to": "session.connection.model"
       },
       {
-        "from": "link.connection-state.presentation-adapter.presentation",
+        "from": "session.connection-state.presentation-adapter.presentation",
         "kind": "component-input",
         "purpose": "data",
-        "to": "public-link.connectionState"
+        "to": "session.connection.connectionState"
+      },
+      {
+        "from": "session.presentation.model",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "session.public-link.model"
+      },
+      {
+        "from": "session.connection-state.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "session.public-link.connectionState"
       },
       {
         "from": "preferences.presentation.model",
         "kind": "component-input",
         "purpose": "data",
-        "to": "preferences.model"
+        "to": "preferences.toggles.model"
       },
       {
         "from": "history.presentation.model",
         "kind": "component-input",
         "purpose": "data",
-        "to": "local-history.model"
+        "to": "history.local.model"
       },
       {
         "from": "updates.presentation.model",
         "kind": "component-input",
         "purpose": "data",
-        "to": "updates.model"
+        "to": "updates.panel.model"
       },
       {
-        "from": "link.update-phase.presentation-adapter.presentation",
+        "from": "updates.phase.presentation-adapter.presentation",
         "kind": "component-input",
         "purpose": "data",
-        "to": "updates.updateState"
+        "to": "updates.panel.updateState"
       },
       {
         "from": "recovery.presentation.model",
         "kind": "component-input",
         "purpose": "data",
-        "to": "recovery.model"
+        "to": "recovery.status.model"
       },
       {
-        "from": "link.recovery-phase.presentation-adapter.presentation",
+        "from": "recovery.phase.presentation-adapter.presentation",
         "kind": "component-input",
         "purpose": "data",
-        "to": "recovery.recoveryState"
+        "to": "recovery.status.recoveryState"
       }
     ],
     "componentPorts": [
@@ -5410,11 +5410,11 @@
         "boundary": "presentation",
         "contractRef": "link.navigation.active-page",
         "direction": "input",
-        "ownerId": "page-host",
+        "ownerId": "navigation.page-host",
         "ownerKind": "component",
         "portId": "activePage",
         "purpose": "data",
-        "ref": "page-host.activePage",
+        "ref": "navigation.page-host.activePage",
         "required": true,
         "typeRef": "link.page-host"
       },
@@ -5422,23 +5422,23 @@
         "boundary": "presentation",
         "contractRef": "link.target-directory",
         "direction": "input",
-        "ownerId": "target",
+        "ownerId": "target.picker",
         "ownerKind": "component",
         "portId": "model",
         "purpose": "data",
-        "ref": "target.model",
+        "ref": "target.picker.model",
         "required": true,
         "typeRef": "link.target-picker"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.target-kind.payload",
+        "contractRef": "target.kind.payload",
         "direction": "input",
-        "ownerId": "target",
+        "ownerId": "target.picker",
         "ownerKind": "component",
         "portId": "targetState",
         "purpose": "data",
-        "ref": "target.targetState",
+        "ref": "target.picker.targetState",
         "required": true,
         "typeRef": "link.target-picker"
       },
@@ -5446,11 +5446,11 @@
         "boundary": "ui-event",
         "contractRef": "link.target-select",
         "direction": "output",
-        "ownerId": "target",
+        "ownerId": "target.picker",
         "ownerKind": "component",
         "portId": "select",
         "purpose": "data",
-        "ref": "target.select",
+        "ref": "target.picker.select",
         "required": true,
         "typeRef": "link.target-picker"
       },
@@ -5458,23 +5458,23 @@
         "boundary": "presentation",
         "contractRef": "link.capture-status",
         "direction": "input",
-        "ownerId": "talk",
+        "ownerId": "capture.talk",
         "ownerKind": "component",
         "portId": "model",
         "purpose": "data",
-        "ref": "talk.model",
+        "ref": "capture.talk.model",
         "required": true,
         "typeRef": "link.talk"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.capture-phase.payload",
+        "contractRef": "capture.phase.payload",
         "direction": "input",
-        "ownerId": "talk",
+        "ownerId": "capture.talk",
         "ownerKind": "component",
         "portId": "captureState",
         "purpose": "data",
-        "ref": "talk.captureState",
+        "ref": "capture.talk.captureState",
         "required": true,
         "typeRef": "link.talk"
       },
@@ -5482,11 +5482,11 @@
         "boundary": "ui-event",
         "contractRef": "link.capture-command",
         "direction": "output",
-        "ownerId": "talk",
+        "ownerId": "capture.talk",
         "ownerKind": "component",
         "portId": "command",
         "purpose": "data",
-        "ref": "talk.command",
+        "ref": "capture.talk.command",
         "required": true,
         "typeRef": "link.talk"
       },
@@ -5494,35 +5494,35 @@
         "boundary": "presentation",
         "contractRef": "link.conversation-status",
         "direction": "input",
-        "ownerId": "latest",
+        "ownerId": "conversation.latest",
         "ownerKind": "component",
         "portId": "model",
         "purpose": "data",
-        "ref": "latest.model",
+        "ref": "conversation.latest.model",
         "required": true,
         "typeRef": "link.latest-turn"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.delivery-phase.payload",
+        "contractRef": "conversation.delivery-phase.payload",
         "direction": "input",
-        "ownerId": "latest",
+        "ownerId": "conversation.latest",
         "ownerKind": "component",
         "portId": "deliveryState",
         "purpose": "data",
-        "ref": "latest.deliveryState",
+        "ref": "conversation.latest.deliveryState",
         "required": true,
         "typeRef": "link.latest-turn"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.reply-phase.payload",
+        "contractRef": "conversation.reply-phase.payload",
         "direction": "input",
-        "ownerId": "latest",
+        "ownerId": "conversation.latest",
         "ownerKind": "component",
         "portId": "replyState",
         "purpose": "data",
-        "ref": "latest.replyState",
+        "ref": "conversation.latest.replyState",
         "required": true,
         "typeRef": "link.latest-turn"
       },
@@ -5530,35 +5530,35 @@
         "boundary": "presentation",
         "contractRef": "link.conversation-status",
         "direction": "input",
-        "ownerId": "composer",
+        "ownerId": "conversation.composer",
         "ownerKind": "component",
         "portId": "model",
         "purpose": "data",
-        "ref": "composer.model",
+        "ref": "conversation.composer.model",
         "required": true,
         "typeRef": "link.composer"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.delivery-phase.payload",
+        "contractRef": "conversation.delivery-phase.payload",
         "direction": "input",
-        "ownerId": "composer",
+        "ownerId": "conversation.composer",
         "ownerKind": "component",
         "portId": "deliveryState",
         "purpose": "data",
-        "ref": "composer.deliveryState",
+        "ref": "conversation.composer.deliveryState",
         "required": true,
         "typeRef": "link.composer"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.reply-phase.payload",
+        "contractRef": "conversation.reply-phase.payload",
         "direction": "input",
-        "ownerId": "composer",
+        "ownerId": "conversation.composer",
         "ownerKind": "component",
         "portId": "replyState",
         "purpose": "data",
-        "ref": "composer.replyState",
+        "ref": "conversation.composer.replyState",
         "required": true,
         "typeRef": "link.composer"
       },
@@ -5566,11 +5566,11 @@
         "boundary": "ui-event",
         "contractRef": "link.compose-turn",
         "direction": "output",
-        "ownerId": "composer",
+        "ownerId": "conversation.composer",
         "ownerKind": "component",
         "portId": "compose",
         "purpose": "data",
-        "ref": "composer.compose",
+        "ref": "conversation.composer.compose",
         "required": true,
         "typeRef": "link.composer"
       },
@@ -5578,23 +5578,23 @@
         "boundary": "presentation",
         "contractRef": "link.playback-status",
         "direction": "input",
-        "ownerId": "active-playback",
+        "ownerId": "playback.controls",
         "ownerKind": "component",
         "portId": "model",
         "purpose": "data",
-        "ref": "active-playback.model",
+        "ref": "playback.controls.model",
         "required": true,
         "typeRef": "link.active-playback"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.playback-phase.payload",
+        "contractRef": "playback.phase.payload",
         "direction": "input",
-        "ownerId": "active-playback",
+        "ownerId": "playback.controls",
         "ownerKind": "component",
         "portId": "playbackState",
         "purpose": "data",
-        "ref": "active-playback.playbackState",
+        "ref": "playback.controls.playbackState",
         "required": true,
         "typeRef": "link.active-playback"
       },
@@ -5602,11 +5602,11 @@
         "boundary": "ui-event",
         "contractRef": "link.playback-command",
         "direction": "output",
-        "ownerId": "active-playback",
+        "ownerId": "playback.controls",
         "ownerKind": "component",
         "portId": "command",
         "purpose": "data",
-        "ref": "active-playback.command",
+        "ref": "playback.controls.command",
         "required": true,
         "typeRef": "link.active-playback"
       },
@@ -5614,23 +5614,23 @@
         "boundary": "presentation",
         "contractRef": "link.session-status",
         "direction": "input",
-        "ownerId": "connection",
+        "ownerId": "session.connection",
         "ownerKind": "component",
         "portId": "model",
         "purpose": "data",
-        "ref": "connection.model",
+        "ref": "session.connection.model",
         "required": true,
         "typeRef": "link.connection-status"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.connection-state.payload",
+        "contractRef": "session.connection-state.payload",
         "direction": "input",
-        "ownerId": "connection",
+        "ownerId": "session.connection",
         "ownerKind": "component",
         "portId": "connectionState",
         "purpose": "data",
-        "ref": "connection.connectionState",
+        "ref": "session.connection.connectionState",
         "required": true,
         "typeRef": "link.connection-status"
       },
@@ -5638,23 +5638,23 @@
         "boundary": "presentation",
         "contractRef": "link.session-status",
         "direction": "input",
-        "ownerId": "public-link",
+        "ownerId": "session.public-link",
         "ownerKind": "component",
         "portId": "model",
         "purpose": "data",
-        "ref": "public-link.model",
+        "ref": "session.public-link.model",
         "required": true,
         "typeRef": "link.public-link"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.connection-state.payload",
+        "contractRef": "session.connection-state.payload",
         "direction": "input",
-        "ownerId": "public-link",
+        "ownerId": "session.public-link",
         "ownerKind": "component",
         "portId": "connectionState",
         "purpose": "data",
-        "ref": "public-link.connectionState",
+        "ref": "session.public-link.connectionState",
         "required": true,
         "typeRef": "link.public-link"
       },
@@ -5662,11 +5662,11 @@
         "boundary": "presentation",
         "contractRef": "link.preferences-status",
         "direction": "input",
-        "ownerId": "preferences",
+        "ownerId": "preferences.toggles",
         "ownerKind": "component",
         "portId": "model",
         "purpose": "data",
-        "ref": "preferences.model",
+        "ref": "preferences.toggles.model",
         "required": true,
         "typeRef": "link.preferences"
       },
@@ -5674,11 +5674,11 @@
         "boundary": "ui-event",
         "contractRef": "link.preference-toggle",
         "direction": "output",
-        "ownerId": "preferences",
+        "ownerId": "preferences.toggles",
         "ownerKind": "component",
         "portId": "toggle",
         "purpose": "data",
-        "ref": "preferences.toggle",
+        "ref": "preferences.toggles.toggle",
         "required": true,
         "typeRef": "link.preferences"
       },
@@ -5686,11 +5686,11 @@
         "boundary": "presentation",
         "contractRef": "link.history-status",
         "direction": "input",
-        "ownerId": "local-history",
+        "ownerId": "history.local",
         "ownerKind": "component",
         "portId": "model",
         "purpose": "data",
-        "ref": "local-history.model",
+        "ref": "history.local.model",
         "required": true,
         "typeRef": "link.local-history"
       },
@@ -5698,23 +5698,23 @@
         "boundary": "presentation",
         "contractRef": "link.update-status",
         "direction": "input",
-        "ownerId": "updates",
+        "ownerId": "updates.panel",
         "ownerKind": "component",
         "portId": "model",
         "purpose": "data",
-        "ref": "updates.model",
+        "ref": "updates.panel.model",
         "required": true,
         "typeRef": "link.updates"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.update-phase.payload",
+        "contractRef": "updates.phase.payload",
         "direction": "input",
-        "ownerId": "updates",
+        "ownerId": "updates.panel",
         "ownerKind": "component",
         "portId": "updateState",
         "purpose": "data",
-        "ref": "updates.updateState",
+        "ref": "updates.panel.updateState",
         "required": true,
         "typeRef": "link.updates"
       },
@@ -5722,11 +5722,11 @@
         "boundary": "ui-event",
         "contractRef": "link.update-command",
         "direction": "output",
-        "ownerId": "updates",
+        "ownerId": "updates.panel",
         "ownerKind": "component",
         "portId": "command",
         "purpose": "data",
-        "ref": "updates.command",
+        "ref": "updates.panel.command",
         "required": true,
         "typeRef": "link.updates"
       },
@@ -5734,23 +5734,23 @@
         "boundary": "presentation",
         "contractRef": "link.recovery-status",
         "direction": "input",
-        "ownerId": "recovery",
+        "ownerId": "recovery.status",
         "ownerKind": "component",
         "portId": "model",
         "purpose": "data",
-        "ref": "recovery.model",
+        "ref": "recovery.status.model",
         "required": true,
         "typeRef": "link.recovery-status"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.recovery-phase.payload",
+        "contractRef": "recovery.phase.payload",
         "direction": "input",
-        "ownerId": "recovery",
+        "ownerId": "recovery.status",
         "ownerKind": "component",
         "portId": "recoveryState",
         "purpose": "data",
-        "ref": "recovery.recoveryState",
+        "ref": "recovery.status.recoveryState",
         "required": true,
         "typeRef": "link.recovery-status"
       },
@@ -5758,11 +5758,11 @@
         "boundary": "ui-event",
         "contractRef": "link.navigation.route-intent",
         "direction": "output",
-        "ownerId": "settings-action",
+        "ownerId": "navigation.settings-entry",
         "ownerKind": "component",
         "portId": "open",
         "purpose": "data",
-        "ref": "settings-action.open",
+        "ref": "navigation.settings-entry.open",
         "required": true,
         "typeRef": "link.navigation-entry"
       },
@@ -5770,11 +5770,11 @@
         "boundary": "ui-event",
         "contractRef": "link.navigation.route-intent",
         "direction": "output",
-        "ownerId": "dev-host",
+        "ownerId": "navigation.dev-host-entry",
         "ownerKind": "component",
         "portId": "open",
         "purpose": "data",
-        "ref": "dev-host.open",
+        "ref": "navigation.dev-host-entry.open",
         "required": true,
         "typeRef": "link.dev-host-entry"
       }
@@ -6257,7 +6257,7 @@
             }
           }
         ],
-        "id": "link.capture-phase.payload",
+        "id": "capture.phase.payload",
         "kind": "snapshot"
       },
       {
@@ -6273,7 +6273,7 @@
             }
           }
         ],
-        "id": "link.delivery-phase.payload",
+        "id": "conversation.delivery-phase.payload",
         "kind": "snapshot"
       },
       {
@@ -6289,7 +6289,7 @@
             }
           }
         ],
-        "id": "link.reply-phase.payload",
+        "id": "conversation.reply-phase.payload",
         "kind": "snapshot"
       },
       {
@@ -6305,7 +6305,7 @@
             }
           }
         ],
-        "id": "link.playback-phase.payload",
+        "id": "playback.phase.payload",
         "kind": "snapshot"
       },
       {
@@ -6321,7 +6321,7 @@
             }
           }
         ],
-        "id": "link.target-kind.payload",
+        "id": "target.kind.payload",
         "kind": "snapshot"
       },
       {
@@ -6337,7 +6337,7 @@
             }
           }
         ],
-        "id": "link.connection-state.payload",
+        "id": "session.connection-state.payload",
         "kind": "snapshot"
       },
       {
@@ -6353,7 +6353,7 @@
             }
           }
         ],
-        "id": "link.update-phase.payload",
+        "id": "updates.phase.payload",
         "kind": "snapshot"
       },
       {
@@ -6369,7 +6369,7 @@
             }
           }
         ],
-        "id": "link.recovery-phase.payload",
+        "id": "recovery.phase.payload",
         "kind": "snapshot"
       }
     ],
@@ -6835,193 +6835,193 @@
         "boundary": "presentation",
         "contractRef": "link.capture-status",
         "direction": "input",
-        "ownerId": "link.capture-phase.presentation-adapter",
+        "ownerId": "capture.phase.presentation-adapter",
         "ownerKind": "node",
         "portId": "state",
         "purpose": "data",
-        "ref": "link.capture-phase.presentation-adapter.state",
+        "ref": "capture.phase.presentation-adapter.state",
         "required": true,
-        "typeRef": "link.capture-phase.presentation-adapter"
+        "typeRef": "capture.phase.presentation-adapter"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.capture-phase.payload",
+        "contractRef": "capture.phase.payload",
         "direction": "output",
-        "ownerId": "link.capture-phase.presentation-adapter",
+        "ownerId": "capture.phase.presentation-adapter",
         "ownerKind": "node",
         "portId": "presentation",
         "purpose": "data",
-        "ref": "link.capture-phase.presentation-adapter.presentation",
+        "ref": "capture.phase.presentation-adapter.presentation",
         "required": true,
-        "typeRef": "link.capture-phase.presentation-adapter"
+        "typeRef": "capture.phase.presentation-adapter"
       },
       {
         "boundary": "presentation",
         "contractRef": "link.conversation-status",
         "direction": "input",
-        "ownerId": "link.delivery-phase.presentation-adapter",
+        "ownerId": "conversation.delivery-phase.presentation-adapter",
         "ownerKind": "node",
         "portId": "state",
         "purpose": "data",
-        "ref": "link.delivery-phase.presentation-adapter.state",
+        "ref": "conversation.delivery-phase.presentation-adapter.state",
         "required": true,
-        "typeRef": "link.delivery-phase.presentation-adapter"
+        "typeRef": "conversation.delivery-phase.presentation-adapter"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.delivery-phase.payload",
+        "contractRef": "conversation.delivery-phase.payload",
         "direction": "output",
-        "ownerId": "link.delivery-phase.presentation-adapter",
+        "ownerId": "conversation.delivery-phase.presentation-adapter",
         "ownerKind": "node",
         "portId": "presentation",
         "purpose": "data",
-        "ref": "link.delivery-phase.presentation-adapter.presentation",
+        "ref": "conversation.delivery-phase.presentation-adapter.presentation",
         "required": true,
-        "typeRef": "link.delivery-phase.presentation-adapter"
+        "typeRef": "conversation.delivery-phase.presentation-adapter"
       },
       {
         "boundary": "presentation",
         "contractRef": "link.conversation-status",
         "direction": "input",
-        "ownerId": "link.reply-phase.presentation-adapter",
+        "ownerId": "conversation.reply-phase.presentation-adapter",
         "ownerKind": "node",
         "portId": "state",
         "purpose": "data",
-        "ref": "link.reply-phase.presentation-adapter.state",
+        "ref": "conversation.reply-phase.presentation-adapter.state",
         "required": true,
-        "typeRef": "link.reply-phase.presentation-adapter"
+        "typeRef": "conversation.reply-phase.presentation-adapter"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.reply-phase.payload",
+        "contractRef": "conversation.reply-phase.payload",
         "direction": "output",
-        "ownerId": "link.reply-phase.presentation-adapter",
+        "ownerId": "conversation.reply-phase.presentation-adapter",
         "ownerKind": "node",
         "portId": "presentation",
         "purpose": "data",
-        "ref": "link.reply-phase.presentation-adapter.presentation",
+        "ref": "conversation.reply-phase.presentation-adapter.presentation",
         "required": true,
-        "typeRef": "link.reply-phase.presentation-adapter"
+        "typeRef": "conversation.reply-phase.presentation-adapter"
       },
       {
         "boundary": "presentation",
         "contractRef": "link.playback-status",
         "direction": "input",
-        "ownerId": "link.playback-phase.presentation-adapter",
+        "ownerId": "playback.phase.presentation-adapter",
         "ownerKind": "node",
         "portId": "state",
         "purpose": "data",
-        "ref": "link.playback-phase.presentation-adapter.state",
+        "ref": "playback.phase.presentation-adapter.state",
         "required": true,
-        "typeRef": "link.playback-phase.presentation-adapter"
+        "typeRef": "playback.phase.presentation-adapter"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.playback-phase.payload",
+        "contractRef": "playback.phase.payload",
         "direction": "output",
-        "ownerId": "link.playback-phase.presentation-adapter",
+        "ownerId": "playback.phase.presentation-adapter",
         "ownerKind": "node",
         "portId": "presentation",
         "purpose": "data",
-        "ref": "link.playback-phase.presentation-adapter.presentation",
+        "ref": "playback.phase.presentation-adapter.presentation",
         "required": true,
-        "typeRef": "link.playback-phase.presentation-adapter"
+        "typeRef": "playback.phase.presentation-adapter"
       },
       {
         "boundary": "presentation",
         "contractRef": "link.target-directory",
         "direction": "input",
-        "ownerId": "link.target-kind.presentation-adapter",
+        "ownerId": "target.kind.presentation-adapter",
         "ownerKind": "node",
         "portId": "state",
         "purpose": "data",
-        "ref": "link.target-kind.presentation-adapter.state",
+        "ref": "target.kind.presentation-adapter.state",
         "required": true,
-        "typeRef": "link.target-kind.presentation-adapter"
+        "typeRef": "target.kind.presentation-adapter"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.target-kind.payload",
+        "contractRef": "target.kind.payload",
         "direction": "output",
-        "ownerId": "link.target-kind.presentation-adapter",
+        "ownerId": "target.kind.presentation-adapter",
         "ownerKind": "node",
         "portId": "presentation",
         "purpose": "data",
-        "ref": "link.target-kind.presentation-adapter.presentation",
+        "ref": "target.kind.presentation-adapter.presentation",
         "required": true,
-        "typeRef": "link.target-kind.presentation-adapter"
+        "typeRef": "target.kind.presentation-adapter"
       },
       {
         "boundary": "presentation",
         "contractRef": "link.session-status",
         "direction": "input",
-        "ownerId": "link.connection-state.presentation-adapter",
+        "ownerId": "session.connection-state.presentation-adapter",
         "ownerKind": "node",
         "portId": "state",
         "purpose": "data",
-        "ref": "link.connection-state.presentation-adapter.state",
+        "ref": "session.connection-state.presentation-adapter.state",
         "required": true,
-        "typeRef": "link.connection-state.presentation-adapter"
+        "typeRef": "session.connection-state.presentation-adapter"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.connection-state.payload",
+        "contractRef": "session.connection-state.payload",
         "direction": "output",
-        "ownerId": "link.connection-state.presentation-adapter",
+        "ownerId": "session.connection-state.presentation-adapter",
         "ownerKind": "node",
         "portId": "presentation",
         "purpose": "data",
-        "ref": "link.connection-state.presentation-adapter.presentation",
+        "ref": "session.connection-state.presentation-adapter.presentation",
         "required": true,
-        "typeRef": "link.connection-state.presentation-adapter"
+        "typeRef": "session.connection-state.presentation-adapter"
       },
       {
         "boundary": "presentation",
         "contractRef": "link.update-status",
         "direction": "input",
-        "ownerId": "link.update-phase.presentation-adapter",
+        "ownerId": "updates.phase.presentation-adapter",
         "ownerKind": "node",
         "portId": "state",
         "purpose": "data",
-        "ref": "link.update-phase.presentation-adapter.state",
+        "ref": "updates.phase.presentation-adapter.state",
         "required": true,
-        "typeRef": "link.update-phase.presentation-adapter"
+        "typeRef": "updates.phase.presentation-adapter"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.update-phase.payload",
+        "contractRef": "updates.phase.payload",
         "direction": "output",
-        "ownerId": "link.update-phase.presentation-adapter",
+        "ownerId": "updates.phase.presentation-adapter",
         "ownerKind": "node",
         "portId": "presentation",
         "purpose": "data",
-        "ref": "link.update-phase.presentation-adapter.presentation",
+        "ref": "updates.phase.presentation-adapter.presentation",
         "required": true,
-        "typeRef": "link.update-phase.presentation-adapter"
+        "typeRef": "updates.phase.presentation-adapter"
       },
       {
         "boundary": "presentation",
         "contractRef": "link.recovery-status",
         "direction": "input",
-        "ownerId": "link.recovery-phase.presentation-adapter",
+        "ownerId": "recovery.phase.presentation-adapter",
         "ownerKind": "node",
         "portId": "state",
         "purpose": "data",
-        "ref": "link.recovery-phase.presentation-adapter.state",
+        "ref": "recovery.phase.presentation-adapter.state",
         "required": true,
-        "typeRef": "link.recovery-phase.presentation-adapter"
+        "typeRef": "recovery.phase.presentation-adapter"
       },
       {
         "boundary": "presentation",
-        "contractRef": "link.recovery-phase.payload",
+        "contractRef": "recovery.phase.payload",
         "direction": "output",
-        "ownerId": "link.recovery-phase.presentation-adapter",
+        "ownerId": "recovery.phase.presentation-adapter",
         "ownerKind": "node",
         "portId": "presentation",
         "purpose": "data",
-        "ref": "link.recovery-phase.presentation-adapter.presentation",
+        "ref": "recovery.phase.presentation-adapter.presentation",
         "required": true,
-        "typeRef": "link.recovery-phase.presentation-adapter"
+        "typeRef": "recovery.phase.presentation-adapter"
       }
     ]
   },
@@ -7049,12 +7049,12 @@
   "stateAuthorities": [
     {
       "adapter": {
-        "inputPortRef": "link.capture-phase.presentation-adapter.state",
-        "nodeInstanceRef": "link.capture-phase.presentation-adapter",
-        "nodeTypeRef": "link.capture-phase.presentation-adapter",
-        "outputPortRef": "link.capture-phase.presentation-adapter.presentation"
+        "inputPortRef": "capture.phase.presentation-adapter.state",
+        "nodeInstanceRef": "capture.phase.presentation-adapter",
+        "nodeTypeRef": "capture.phase.presentation-adapter",
+        "outputPortRef": "capture.phase.presentation-adapter.presentation"
       },
-      "id": "link.capture-phase",
+      "id": "capture.phase",
       "presentation": {
         "cases": {
           "failed": {
@@ -7071,7 +7071,7 @@
           }
         },
         "consumers": [
-          "talk.captureState"
+          "capture.talk.captureState"
         ],
         "contract": {
           "boundary": "presentation",
@@ -7086,7 +7086,7 @@
               }
             }
           ],
-          "id": "link.capture-phase.payload",
+          "id": "capture.phase.payload",
           "kind": "snapshot"
         },
         "fields": [
@@ -7103,7 +7103,7 @@
             }
           }
         ],
-        "id": "link.capture-phase",
+        "id": "capture.phase",
         "stateRef": "link.capture-phase"
       },
       "source": {
@@ -7164,12 +7164,12 @@
     },
     {
       "adapter": {
-        "inputPortRef": "link.delivery-phase.presentation-adapter.state",
-        "nodeInstanceRef": "link.delivery-phase.presentation-adapter",
-        "nodeTypeRef": "link.delivery-phase.presentation-adapter",
-        "outputPortRef": "link.delivery-phase.presentation-adapter.presentation"
+        "inputPortRef": "conversation.delivery-phase.presentation-adapter.state",
+        "nodeInstanceRef": "conversation.delivery-phase.presentation-adapter",
+        "nodeTypeRef": "conversation.delivery-phase.presentation-adapter",
+        "outputPortRef": "conversation.delivery-phase.presentation-adapter.presentation"
       },
-      "id": "link.delivery-phase",
+      "id": "conversation.delivery-phase",
       "presentation": {
         "cases": {
           "failed": {
@@ -7186,8 +7186,8 @@
           }
         },
         "consumers": [
-          "latest.deliveryState",
-          "composer.deliveryState"
+          "conversation.latest.deliveryState",
+          "conversation.composer.deliveryState"
         ],
         "contract": {
           "boundary": "presentation",
@@ -7202,7 +7202,7 @@
               }
             }
           ],
-          "id": "link.delivery-phase.payload",
+          "id": "conversation.delivery-phase.payload",
           "kind": "snapshot"
         },
         "fields": [
@@ -7219,7 +7219,7 @@
             }
           }
         ],
-        "id": "link.delivery-phase",
+        "id": "conversation.delivery-phase",
         "stateRef": "link.delivery-phase"
       },
       "source": {
@@ -7289,12 +7289,12 @@
     },
     {
       "adapter": {
-        "inputPortRef": "link.reply-phase.presentation-adapter.state",
-        "nodeInstanceRef": "link.reply-phase.presentation-adapter",
-        "nodeTypeRef": "link.reply-phase.presentation-adapter",
-        "outputPortRef": "link.reply-phase.presentation-adapter.presentation"
+        "inputPortRef": "conversation.reply-phase.presentation-adapter.state",
+        "nodeInstanceRef": "conversation.reply-phase.presentation-adapter",
+        "nodeTypeRef": "conversation.reply-phase.presentation-adapter",
+        "outputPortRef": "conversation.reply-phase.presentation-adapter.presentation"
       },
-      "id": "link.reply-phase",
+      "id": "conversation.reply-phase",
       "presentation": {
         "cases": {
           "failed": {
@@ -7311,8 +7311,8 @@
           }
         },
         "consumers": [
-          "latest.replyState",
-          "composer.replyState"
+          "conversation.latest.replyState",
+          "conversation.composer.replyState"
         ],
         "contract": {
           "boundary": "presentation",
@@ -7327,7 +7327,7 @@
               }
             }
           ],
-          "id": "link.reply-phase.payload",
+          "id": "conversation.reply-phase.payload",
           "kind": "snapshot"
         },
         "fields": [
@@ -7344,7 +7344,7 @@
             }
           }
         ],
-        "id": "link.reply-phase",
+        "id": "conversation.reply-phase",
         "stateRef": "link.reply-phase"
       },
       "source": {
@@ -7414,12 +7414,12 @@
     },
     {
       "adapter": {
-        "inputPortRef": "link.playback-phase.presentation-adapter.state",
-        "nodeInstanceRef": "link.playback-phase.presentation-adapter",
-        "nodeTypeRef": "link.playback-phase.presentation-adapter",
-        "outputPortRef": "link.playback-phase.presentation-adapter.presentation"
+        "inputPortRef": "playback.phase.presentation-adapter.state",
+        "nodeInstanceRef": "playback.phase.presentation-adapter",
+        "nodeTypeRef": "playback.phase.presentation-adapter",
+        "outputPortRef": "playback.phase.presentation-adapter.presentation"
       },
-      "id": "link.playback-phase",
+      "id": "playback.phase",
       "presentation": {
         "cases": {
           "failed": {
@@ -7448,7 +7448,7 @@
           }
         },
         "consumers": [
-          "active-playback.playbackState"
+          "playback.controls.playbackState"
         ],
         "contract": {
           "boundary": "presentation",
@@ -7463,7 +7463,7 @@
               }
             }
           ],
-          "id": "link.playback-phase.payload",
+          "id": "playback.phase.payload",
           "kind": "snapshot"
         },
         "fields": [
@@ -7484,7 +7484,7 @@
             }
           }
         ],
-        "id": "link.playback-phase",
+        "id": "playback.phase",
         "stateRef": "link.playback-phase"
       },
       "source": {
@@ -7551,12 +7551,12 @@
     },
     {
       "adapter": {
-        "inputPortRef": "link.target-kind.presentation-adapter.state",
-        "nodeInstanceRef": "link.target-kind.presentation-adapter",
-        "nodeTypeRef": "link.target-kind.presentation-adapter",
-        "outputPortRef": "link.target-kind.presentation-adapter.presentation"
+        "inputPortRef": "target.kind.presentation-adapter.state",
+        "nodeInstanceRef": "target.kind.presentation-adapter",
+        "nodeTypeRef": "target.kind.presentation-adapter",
+        "outputPortRef": "target.kind.presentation-adapter.presentation"
       },
-      "id": "link.target-kind",
+      "id": "target.kind",
       "presentation": {
         "cases": {
           "agent": {
@@ -7573,7 +7573,7 @@
           }
         },
         "consumers": [
-          "target.targetState"
+          "target.picker.targetState"
         ],
         "contract": {
           "boundary": "presentation",
@@ -7588,7 +7588,7 @@
               }
             }
           ],
-          "id": "link.target-kind.payload",
+          "id": "target.kind.payload",
           "kind": "snapshot"
         },
         "fields": [
@@ -7605,7 +7605,7 @@
             }
           }
         ],
-        "id": "link.target-kind",
+        "id": "target.kind",
         "stateRef": "link.target-kind"
       },
       "source": {
@@ -7660,12 +7660,12 @@
     },
     {
       "adapter": {
-        "inputPortRef": "link.connection-state.presentation-adapter.state",
-        "nodeInstanceRef": "link.connection-state.presentation-adapter",
-        "nodeTypeRef": "link.connection-state.presentation-adapter",
-        "outputPortRef": "link.connection-state.presentation-adapter.presentation"
+        "inputPortRef": "session.connection-state.presentation-adapter.state",
+        "nodeInstanceRef": "session.connection-state.presentation-adapter",
+        "nodeTypeRef": "session.connection-state.presentation-adapter",
+        "outputPortRef": "session.connection-state.presentation-adapter.presentation"
       },
-      "id": "link.connection-state",
+      "id": "session.connection-state",
       "presentation": {
         "cases": {
           "configuration-required": {
@@ -7685,8 +7685,8 @@
           }
         },
         "consumers": [
-          "connection.connectionState",
-          "public-link.connectionState"
+          "session.connection.connectionState",
+          "session.public-link.connectionState"
         ],
         "contract": {
           "boundary": "presentation",
@@ -7701,7 +7701,7 @@
               }
             }
           ],
-          "id": "link.connection-state.payload",
+          "id": "session.connection-state.payload",
           "kind": "snapshot"
         },
         "fields": [
@@ -7719,7 +7719,7 @@
             }
           }
         ],
-        "id": "link.connection-state",
+        "id": "session.connection-state",
         "stateRef": "link.connection-state"
       },
       "source": {
@@ -7767,12 +7767,12 @@
     },
     {
       "adapter": {
-        "inputPortRef": "link.update-phase.presentation-adapter.state",
-        "nodeInstanceRef": "link.update-phase.presentation-adapter",
-        "nodeTypeRef": "link.update-phase.presentation-adapter",
-        "outputPortRef": "link.update-phase.presentation-adapter.presentation"
+        "inputPortRef": "updates.phase.presentation-adapter.state",
+        "nodeInstanceRef": "updates.phase.presentation-adapter",
+        "nodeTypeRef": "updates.phase.presentation-adapter",
+        "outputPortRef": "updates.phase.presentation-adapter.presentation"
       },
-      "id": "link.update-phase",
+      "id": "updates.phase",
       "presentation": {
         "cases": {
           "available": {
@@ -7807,7 +7807,7 @@
           }
         },
         "consumers": [
-          "updates.updateState"
+          "updates.panel.updateState"
         ],
         "contract": {
           "boundary": "presentation",
@@ -7822,7 +7822,7 @@
               }
             }
           ],
-          "id": "link.update-phase.payload",
+          "id": "updates.phase.payload",
           "kind": "snapshot"
         },
         "fields": [
@@ -7845,7 +7845,7 @@
             }
           }
         ],
-        "id": "link.update-phase",
+        "id": "updates.phase",
         "stateRef": "link.update-phase"
       },
       "source": {
@@ -7894,12 +7894,12 @@
     },
     {
       "adapter": {
-        "inputPortRef": "link.recovery-phase.presentation-adapter.state",
-        "nodeInstanceRef": "link.recovery-phase.presentation-adapter",
-        "nodeTypeRef": "link.recovery-phase.presentation-adapter",
-        "outputPortRef": "link.recovery-phase.presentation-adapter.presentation"
+        "inputPortRef": "recovery.phase.presentation-adapter.state",
+        "nodeInstanceRef": "recovery.phase.presentation-adapter",
+        "nodeTypeRef": "recovery.phase.presentation-adapter",
+        "outputPortRef": "recovery.phase.presentation-adapter.presentation"
       },
-      "id": "link.recovery-phase",
+      "id": "recovery.phase",
       "presentation": {
         "cases": {
           "clean": {
@@ -7910,7 +7910,7 @@
           }
         },
         "consumers": [
-          "recovery.recoveryState"
+          "recovery.status.recoveryState"
         ],
         "contract": {
           "boundary": "presentation",
@@ -7925,7 +7925,7 @@
               }
             }
           ],
-          "id": "link.recovery-phase.payload",
+          "id": "recovery.phase.payload",
           "kind": "snapshot"
         },
         "fields": [
@@ -7940,7 +7940,7 @@
             }
           }
         ],
-        "id": "link.recovery-phase",
+        "id": "recovery.phase",
         "stateRef": "link.recovery-phase"
       },
       "source": {

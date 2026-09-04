@@ -52,20 +52,20 @@ test("the mandatory graph has no parallel list and one binding per data input", 
 test("capture, delivery, reply and playback are typed graph edges", () => {
   const edges = product.portRegistry.bindings.map(({ from, to }) => `${from}->${to}`);
   assert.ok(edges.includes("capture.service.captured->conversation.service.turn"));
-  assert.ok(edges.includes("talk.command->capture.service.command"));
-  assert.ok(edges.includes("composer.compose->conversation.service.compose"));
-  assert.ok(edges.includes("active-playback.command->playback.service.command"));
-  assert.ok(edges.includes("latest.model->conversation.service.status") === false,
+  assert.ok(edges.includes("capture.talk.command->capture.service.command"));
+  assert.ok(edges.includes("conversation.composer.compose->conversation.service.compose"));
+  assert.ok(edges.includes("playback.controls.command->playback.service.command"));
+  assert.ok(edges.includes("conversation.latest.model->conversation.service.status") === false,
     "bindings point from outputs to inputs, never the reverse");
   assert.ok(edges.includes("conversation.service.status->conversation.presentation.source"));
-  assert.ok(edges.includes("conversation.presentation.model->latest.model"));
-  assert.ok(edges.includes("conversation.presentation.model->composer.model"));
+  assert.ok(edges.includes("conversation.presentation.model->conversation.latest.model"));
+  assert.ok(edges.includes("conversation.presentation.model->conversation.composer.model"));
   assert.ok(edges.includes("playback.service.status->playback.presentation.source"));
-  assert.ok(edges.includes("playback.presentation.model->active-playback.model"));
+  assert.ok(edges.includes("playback.presentation.model->playback.controls.model"));
   assert.deepEqual(product.portRegistry.bindings
     .filter(({ kind, from }) => kind === "component-input" && from.includes(".service."))
     .map(({ from, to }) => `${from}->${to}`), [
-    "navigation.service.activePage->page-host.activePage",
+    "navigation.service.activePage->navigation.page-host.activePage",
   ], "only the typed active PageId may cross service-to-page-host directly");
 });
 
@@ -78,7 +78,7 @@ test("pages and artifacts cover exactly the declared screens", () => {
   assert.deepEqual(wear?.serves, ["round"]);
   assert.equal(product.navigation.pageValuesRef, "link.navigation.page");
   assert.equal(product.navigation.activePagePortRef, "navigation.service.activePage");
-  assert.equal(product.navigation.pageHostPortRef, "page-host.activePage");
+  assert.equal(product.navigation.pageHostPortRef, "navigation.page-host.activePage");
   assert.deepEqual(product.navigation.routeIntentContract.fields.map(({ name }) => name), ["target"]);
   assert.deepEqual(product.navigation.artifacts.map(({ artifactRef, entryPageRef, pages }) => ({
     artifactRef,
@@ -103,14 +103,14 @@ test("pages and artifacts cover exactly the declared screens", () => {
         `${sourcePortRef}->${targetPortRef}:${effect}`),
     })), [
     {
-      componentInstanceRef: "dev-host",
+      componentInstanceRef: "navigation.dev-host-entry",
       artifactRefs: ["phone-full-ui"],
-      actions: ["dev-host.open->navigation.service.openDevHost:push"],
+      actions: ["navigation.dev-host-entry.open->navigation.service.openDevHost:push"],
     },
     {
-      componentInstanceRef: "settings-action",
+      componentInstanceRef: "navigation.settings-entry",
       artifactRefs: ["phone-full-ui", "wear-full-ui"],
-      actions: ["settings-action.open->navigation.service.openSettings:push"],
+      actions: ["navigation.settings-entry.open->navigation.service.openSettings:push"],
     },
   ]);
 });
@@ -182,7 +182,7 @@ test("conformance engine goes red on manifest drift", () => {
   };
   assert.ok(productArtifactConformance(product, withoutActivePage).some((finding) =>
     finding.axis === "navigation" && finding.direction === "missing" &&
-      finding.subject === "navigation.service.activePage->page-host.activePage"
+      finding.subject === "navigation.service.activePage->navigation.page-host.activePage"
   ));
   const driftedBack = {
     ...manifest,

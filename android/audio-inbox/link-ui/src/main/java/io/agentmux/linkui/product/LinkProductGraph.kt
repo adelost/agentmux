@@ -6,14 +6,14 @@ import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTargetKind
 import io.agentmux.linkui.LinkCaptureSpec
-import io.agentmux.linkui.product.generated.GeneratedLinkCapturePhaseAuthority
-import io.agentmux.linkui.product.generated.GeneratedLinkConnectionStateAuthority
-import io.agentmux.linkui.product.generated.GeneratedLinkDeliveryPhaseAuthority
-import io.agentmux.linkui.product.generated.GeneratedLinkPlaybackPhaseAuthority
-import io.agentmux.linkui.product.generated.GeneratedLinkRecoveryPhaseAuthority
-import io.agentmux.linkui.product.generated.GeneratedLinkReplyPhaseAuthority
-import io.agentmux.linkui.product.generated.GeneratedLinkTargetKindAuthority
-import io.agentmux.linkui.product.generated.GeneratedLinkUpdatePhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedCapturePhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedSessionConnectionStateAuthority
+import io.agentmux.linkui.product.generated.GeneratedConversationDeliveryPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedPlaybackPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedRecoveryPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedConversationReplyPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedTargetKindAuthority
+import io.agentmux.linkui.product.generated.GeneratedUpdatesPhaseAuthority
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
@@ -196,60 +196,60 @@ open class LinkProductGraph(
         )
 
         mountStateAuthority(
-            GeneratedLinkCapturePhaseAuthority.inputPort<LinkCapturePresentation>(),
-            GeneratedLinkCapturePhaseAuthority.outputPort,
-            GeneratedLinkCapturePhaseAuthority.componentInputs,
+            GeneratedCapturePhaseAuthority.inputPort<LinkCapturePresentation>(),
+            GeneratedCapturePhaseAuthority.outputPort,
+            GeneratedCapturePhaseAuthority.componentInputs,
             { it.phase.wireId() },
-            GeneratedLinkCapturePhaseAuthority::require,
+            GeneratedCapturePhaseAuthority::require,
         )
         mountStateAuthority(
-            GeneratedLinkDeliveryPhaseAuthority.inputPort<LinkConversationPresentation>(),
-            GeneratedLinkDeliveryPhaseAuthority.outputPort,
-            GeneratedLinkDeliveryPhaseAuthority.componentInputs,
+            GeneratedConversationDeliveryPhaseAuthority.inputPort<LinkConversationPresentation>(),
+            GeneratedConversationDeliveryPhaseAuthority.outputPort,
+            GeneratedConversationDeliveryPhaseAuthority.componentInputs,
             { it.deliveryPhase.wireId() },
-            GeneratedLinkDeliveryPhaseAuthority::require,
+            GeneratedConversationDeliveryPhaseAuthority::require,
         )
         mountStateAuthority(
-            GeneratedLinkReplyPhaseAuthority.inputPort<LinkConversationPresentation>(),
-            GeneratedLinkReplyPhaseAuthority.outputPort,
-            GeneratedLinkReplyPhaseAuthority.componentInputs,
+            GeneratedConversationReplyPhaseAuthority.inputPort<LinkConversationPresentation>(),
+            GeneratedConversationReplyPhaseAuthority.outputPort,
+            GeneratedConversationReplyPhaseAuthority.componentInputs,
             { it.replyPhase.wireId() },
-            GeneratedLinkReplyPhaseAuthority::require,
+            GeneratedConversationReplyPhaseAuthority::require,
         )
         mountStateAuthority(
-            GeneratedLinkPlaybackPhaseAuthority.inputPort<LinkPlaybackPresentation>(),
-            GeneratedLinkPlaybackPhaseAuthority.outputPort,
-            GeneratedLinkPlaybackPhaseAuthority.componentInputs,
+            GeneratedPlaybackPhaseAuthority.inputPort<LinkPlaybackPresentation>(),
+            GeneratedPlaybackPhaseAuthority.outputPort,
+            GeneratedPlaybackPhaseAuthority.componentInputs,
             { it.phase.wireId() },
-            GeneratedLinkPlaybackPhaseAuthority::require,
+            GeneratedPlaybackPhaseAuthority::require,
         )
         mountStateAuthority(
-            GeneratedLinkTargetKindAuthority.inputPort<LinkTargetPresentation>(),
-            GeneratedLinkTargetKindAuthority.outputPort,
-            GeneratedLinkTargetKindAuthority.componentInputs,
+            GeneratedTargetKindAuthority.inputPort<LinkTargetPresentation>(),
+            GeneratedTargetKindAuthority.outputPort,
+            GeneratedTargetKindAuthority.componentInputs,
             { it.kind.wireId() },
-            GeneratedLinkTargetKindAuthority::require,
+            GeneratedTargetKindAuthority::require,
         )
         mountStateAuthority(
-            GeneratedLinkConnectionStateAuthority.inputPort<LinkSessionPresentation>(),
-            GeneratedLinkConnectionStateAuthority.outputPort,
-            GeneratedLinkConnectionStateAuthority.componentInputs,
+            GeneratedSessionConnectionStateAuthority.inputPort<LinkSessionPresentation>(),
+            GeneratedSessionConnectionStateAuthority.outputPort,
+            GeneratedSessionConnectionStateAuthority.componentInputs,
             { it.connection.wireId() },
-            GeneratedLinkConnectionStateAuthority::require,
+            GeneratedSessionConnectionStateAuthority::require,
         )
         mountStateAuthority(
-            GeneratedLinkUpdatePhaseAuthority.inputPort<LinkUpdatePresentation>(),
-            GeneratedLinkUpdatePhaseAuthority.outputPort,
-            GeneratedLinkUpdatePhaseAuthority.componentInputs,
+            GeneratedUpdatesPhaseAuthority.inputPort<LinkUpdatePresentation>(),
+            GeneratedUpdatesPhaseAuthority.outputPort,
+            GeneratedUpdatesPhaseAuthority.componentInputs,
             { it.phase.wireId() },
-            GeneratedLinkUpdatePhaseAuthority::require,
+            GeneratedUpdatesPhaseAuthority::require,
         )
         mountStateAuthority(
-            GeneratedLinkRecoveryPhaseAuthority.inputPort<LinkRecoveryPresentation>(),
-            GeneratedLinkRecoveryPhaseAuthority.outputPort,
-            GeneratedLinkRecoveryPhaseAuthority.componentInputs,
+            GeneratedRecoveryPhaseAuthority.inputPort<LinkRecoveryPresentation>(),
+            GeneratedRecoveryPhaseAuthority.outputPort,
+            GeneratedRecoveryPhaseAuthority.componentInputs,
             { it.phase.wireId() },
-            GeneratedLinkRecoveryPhaseAuthority::require,
+            GeneratedRecoveryPhaseAuthority::require,
         )
 
         // The one service-internal edge: a captured turn is delivered to the

@@ -222,8 +222,8 @@ fun linkWatchRows(
     val rows = mutableListOf<RowSpec>()
     GeneratedLinkHomeComponents.resolve(CircleSurfaceClass.ROUND).orderedMounts.forEach { mount ->
         when (mount.component) {
-            GeneratedLinkHomeComponent.PAGE_HOST -> Unit
-            GeneratedLinkHomeComponent.TARGET -> rows += RowSpec(
+            GeneratedLinkHomeComponent.NAVIGATION_PAGE_HOST -> Unit
+            GeneratedLinkHomeComponent.TARGET_PICKER -> rows += RowSpec(
                 key = mount.id,
                 title = "AGENT · ${linkSessionRoute(session)}",
                 sub = selected?.label?.ifBlank { selected.id }?.uppercase() ?: "NO TARGET",
@@ -237,22 +237,22 @@ fun linkWatchRows(
                     }
                 },
             )
-            GeneratedLinkHomeComponent.TALK -> rows += RowSpec(
+            GeneratedLinkHomeComponent.CAPTURE_TALK -> rows += RowSpec(
                 key = mount.id,
                 title = "PUSH TO TALK",
                 sub = if (selected == null) "UNAVAILABLE" else "OPEN RECORDER",
                 icon = LinkNativeBindings.requireIcon("record"),
                 onTap = onOpenCapture.takeIf { selected != null },
             )
-            GeneratedLinkHomeComponent.LATEST -> rows += watchReplyRows(
+            GeneratedLinkHomeComponent.CONVERSATION_LATEST -> rows += watchReplyRows(
                 latest = conversation.turns.lastOrNull(),
                 defaultIcon = LinkNativeBindings.requireIcon("speaker"),
                 onPlay = onPlay,
                 onStop = onStop,
                 onReplay = onReplay,
             )
-            GeneratedLinkHomeComponent.SETTINGS_ACTION -> rows += linkSettingsRow(onOpenSettings)
-            GeneratedLinkHomeComponent.COMPOSER ->
+            GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY -> rows += linkSettingsRow(onOpenSettings)
+            GeneratedLinkHomeComponent.CONVERSATION_COMPOSER ->
                 error("${mount.component.id.wireId} is not a Link home component on round")
         }
     }
@@ -307,8 +307,8 @@ fun linkWatchSettingsRows(
 ): List<RowSpec> = buildList {
     GeneratedLinkSettingsComponents.resolve(CircleSurfaceClass.ROUND).orderedMounts.forEach { mount ->
         when (mount.component) {
-            GeneratedLinkSettingsComponent.PAGE_HOST -> Unit
-            GeneratedLinkSettingsComponent.CONNECTION -> add(
+            GeneratedLinkSettingsComponent.NAVIGATION_PAGE_HOST -> Unit
+            GeneratedLinkSettingsComponent.SESSION_CONNECTION -> add(
                 RowSpec(
                     key = mount.id,
                     title = linkConnectionLabel(session.connection),
@@ -320,7 +320,7 @@ fun linkWatchSettingsRows(
                     },
                 ),
             )
-            GeneratedLinkSettingsComponent.UPDATES -> addAll(
+            GeneratedLinkSettingsComponent.UPDATES_PANEL -> addAll(
                 releaseUpdateRows(
                     state = updates.update,
                     currentVersionName = currentVersionName,
@@ -330,7 +330,7 @@ fun linkWatchSettingsRows(
                     locale = locale,
                 ),
             )
-            GeneratedLinkSettingsComponent.DEV_HOST -> onOpenDevHost?.let { open ->
+            GeneratedLinkSettingsComponent.NAVIGATION_DEV_HOST_ENTRY -> onOpenDevHost?.let { open ->
                 add(
                     RowSpec(
                         mount.id,
@@ -341,7 +341,7 @@ fun linkWatchSettingsRows(
                     ),
                 )
             }
-            GeneratedLinkSettingsComponent.RECOVERY -> if (recovery.phase == LinkRecoveryPhase.QUARANTINED) {
+            GeneratedLinkSettingsComponent.RECOVERY_STATUS -> if (recovery.phase == LinkRecoveryPhase.QUARANTINED) {
                 add(
                     RowSpec(
                         mount.id,

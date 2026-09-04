@@ -1,12 +1,12 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.componentFamilies
-// Product declarations SHA-256: ac2666eab12e029bbcc15961d131bb644ba80308e1f9a7e4d4a3fe534847bd37
+// Product declarations SHA-256: 83741324ee1b1e69992f0ff1b15fa53aa1ad2818a9aa13c73a0d398f384196f4
 package io.agentmux.linkui.product.generated
 
 import com.adelost.designkit.ui.CircleSurfaceClass
 
 enum class GeneratedLinkDevHostComponent(val id: GeneratedLinkComponentId) {
-    PAGE_HOST(GeneratedLinkComponentId.PAGE_HOST), DEV_PREVIEW(GeneratedLinkComponentId.DEV_PREVIEW)
+    NAVIGATION_PAGE_HOST(GeneratedLinkComponentId.NAVIGATION_PAGE_HOST), DEV_PREVIEW(GeneratedLinkComponentId.DEV_PREVIEW)
 }
 enum class GeneratedLinkDevHostRegion { HOST, CONTENT }
 
@@ -42,8 +42,8 @@ object GeneratedLinkDevHostComponents {
     fun resolve(surfaceClass: CircleSurfaceClass): GeneratedLinkDevHostTree = when (surfaceClass) {
         CircleSurfaceClass.ROUND -> GeneratedLinkDevHostTree(listOf(
             GeneratedLinkDevHostMount(
-                id = "page-host",
-                component = GeneratedLinkDevHostComponent.PAGE_HOST,
+                id = "navigation.page-host",
+                component = GeneratedLinkDevHostComponent.NAVIGATION_PAGE_HOST,
                 region = GeneratedLinkDevHostRegion.HOST,
                 order = 0,
                 priority = 0,
@@ -51,7 +51,7 @@ object GeneratedLinkDevHostComponents {
                 required = true,
             ),
             GeneratedLinkDevHostMount(
-                id = "dev-preview",
+                id = "dev.preview",
                 component = GeneratedLinkDevHostComponent.DEV_PREVIEW,
                 region = GeneratedLinkDevHostRegion.CONTENT,
                 order = 1,
@@ -62,8 +62,8 @@ object GeneratedLinkDevHostComponents {
         ))
         CircleSurfaceClass.PHONE_COMPACT -> GeneratedLinkDevHostTree(listOf(
             GeneratedLinkDevHostMount(
-                id = "page-host",
-                component = GeneratedLinkDevHostComponent.PAGE_HOST,
+                id = "navigation.page-host",
+                component = GeneratedLinkDevHostComponent.NAVIGATION_PAGE_HOST,
                 region = GeneratedLinkDevHostRegion.HOST,
                 order = 0,
                 priority = 0,
@@ -71,7 +71,7 @@ object GeneratedLinkDevHostComponents {
                 required = true,
             ),
             GeneratedLinkDevHostMount(
-                id = "dev-preview",
+                id = "dev.preview",
                 component = GeneratedLinkDevHostComponent.DEV_PREVIEW,
                 region = GeneratedLinkDevHostRegion.CONTENT,
                 order = 1,
@@ -82,8 +82,8 @@ object GeneratedLinkDevHostComponents {
         ))
         CircleSurfaceClass.PHONE_WIDE -> GeneratedLinkDevHostTree(listOf(
             GeneratedLinkDevHostMount(
-                id = "page-host",
-                component = GeneratedLinkDevHostComponent.PAGE_HOST,
+                id = "navigation.page-host",
+                component = GeneratedLinkDevHostComponent.NAVIGATION_PAGE_HOST,
                 region = GeneratedLinkDevHostRegion.HOST,
                 order = 0,
                 priority = 0,
@@ -91,7 +91,7 @@ object GeneratedLinkDevHostComponents {
                 required = true,
             ),
             GeneratedLinkDevHostMount(
-                id = "dev-preview",
+                id = "dev.preview",
                 component = GeneratedLinkDevHostComponent.DEV_PREVIEW,
                 region = GeneratedLinkDevHostRegion.CONTENT,
                 order = 1,

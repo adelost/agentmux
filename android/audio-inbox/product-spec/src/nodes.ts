@@ -41,15 +41,15 @@ export const linkNodes = [
     id: "navigation.service", nodeTypeRef: navigationService.id,
     config: {},
     bindings: {
-      openSettings: "settings-action.open",
-      openDevHost: "dev-host.open",
+      openSettings: "navigation.settings-entry.open",
+      openDevHost: "navigation.dev-host-entry.open",
     },
     activation: { kind: "lifetime", lifecycleSources: [] },
   },
   {
     id: "capture.service", nodeTypeRef: captureService.id,
     config: { policy: "link.capture-policy" },
-    bindings: { command: "talk.command" },
+    bindings: { command: "capture.talk.command" },
     activation: { kind: "lifetime", lifecycleSources: [] },
   },
   {
@@ -57,20 +57,20 @@ export const linkNodes = [
     config: { policy: "link.conversation-policy" },
     bindings: {
       turn: "capture.service.captured",
-      compose: "composer.compose",
+      compose: "conversation.composer.compose",
     },
     activation: { kind: "lifetime", lifecycleSources: [] },
   },
   {
     id: "playback.service", nodeTypeRef: playbackService.id,
     config: { policy: "link.playback-policy" },
-    bindings: { command: "active-playback.command" },
+    bindings: { command: "playback.controls.command" },
     activation: { kind: "lifetime", lifecycleSources: [] },
   },
   {
     id: "target.service", nodeTypeRef: targetDirectoryService.id,
     config: {},
-    bindings: { select: "target.select" },
+    bindings: { select: "target.picker.select" },
     activation: { kind: "lifetime", lifecycleSources: [] },
   },
   {
@@ -88,13 +88,13 @@ export const linkNodes = [
   {
     id: "preferences.service", nodeTypeRef: preferencesService.id,
     config: {},
-    bindings: { toggle: "preferences.toggle" },
+    bindings: { toggle: "preferences.toggles.toggle" },
     activation: { kind: "lifetime", lifecycleSources: [] },
   },
   {
     id: "updates.service", nodeTypeRef: updatesService.id,
     config: {},
-    bindings: { command: "updates.command" },
+    bindings: { command: "updates.panel.command" },
     activation: { kind: "lifetime", lifecycleSources: [] },
   },
   {

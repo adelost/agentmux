@@ -1,9 +1,9 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the portable native-Lego catalog
-// Product declarations SHA-256: dbae1d15e69b0dab6c901f5aaff8a6043e0bcc46ac4b47228998760d2ded1574
+// Product declarations SHA-256: 96080f861e9a9fbb95b032b812e0caeb3ecf3d757f6b1628bcdfe983c85c18b8
 package io.agentmux.linkui.product.generated
 
-internal enum class GeneratedLinkNodeId(val wireId: String) { NAVIGATION_SERVICE("navigation.service"), CAPTURE_SERVICE("capture.service"), CONVERSATION_SERVICE("conversation.service"), PLAYBACK_SERVICE("playback.service"), TARGET_SERVICE("target.service"), SESSION_SERVICE("session.service"), HISTORY_SERVICE("history.service"), PREFERENCES_SERVICE("preferences.service"), UPDATES_SERVICE("updates.service"), RECOVERY_SERVICE("recovery.service"), CAPTURE_PRESENTATION("capture.presentation"), CONVERSATION_PRESENTATION("conversation.presentation"), PLAYBACK_PRESENTATION("playback.presentation"), TARGET_PRESENTATION("target.presentation"), SESSION_PRESENTATION("session.presentation"), HISTORY_PRESENTATION("history.presentation"), PREFERENCES_PRESENTATION("preferences.presentation"), UPDATES_PRESENTATION("updates.presentation"), RECOVERY_PRESENTATION("recovery.presentation"), LINK_CAPTURE_PHASE_PRESENTATION_ADAPTER("link.capture-phase.presentation-adapter"), LINK_DELIVERY_PHASE_PRESENTATION_ADAPTER("link.delivery-phase.presentation-adapter"), LINK_REPLY_PHASE_PRESENTATION_ADAPTER("link.reply-phase.presentation-adapter"), LINK_PLAYBACK_PHASE_PRESENTATION_ADAPTER("link.playback-phase.presentation-adapter"), LINK_TARGET_KIND_PRESENTATION_ADAPTER("link.target-kind.presentation-adapter"), LINK_CONNECTION_STATE_PRESENTATION_ADAPTER("link.connection-state.presentation-adapter"), LINK_UPDATE_PHASE_PRESENTATION_ADAPTER("link.update-phase.presentation-adapter"), LINK_RECOVERY_PHASE_PRESENTATION_ADAPTER("link.recovery-phase.presentation-adapter") }
+internal enum class GeneratedLinkNodeId(val wireId: String) { NAVIGATION_SERVICE("navigation.service"), CAPTURE_SERVICE("capture.service"), CONVERSATION_SERVICE("conversation.service"), PLAYBACK_SERVICE("playback.service"), TARGET_SERVICE("target.service"), SESSION_SERVICE("session.service"), HISTORY_SERVICE("history.service"), PREFERENCES_SERVICE("preferences.service"), UPDATES_SERVICE("updates.service"), RECOVERY_SERVICE("recovery.service"), CAPTURE_PRESENTATION("capture.presentation"), CONVERSATION_PRESENTATION("conversation.presentation"), PLAYBACK_PRESENTATION("playback.presentation"), TARGET_PRESENTATION("target.presentation"), SESSION_PRESENTATION("session.presentation"), HISTORY_PRESENTATION("history.presentation"), PREFERENCES_PRESENTATION("preferences.presentation"), UPDATES_PRESENTATION("updates.presentation"), RECOVERY_PRESENTATION("recovery.presentation"), CAPTURE_PHASE_PRESENTATION_ADAPTER("capture.phase.presentation-adapter"), CONVERSATION_DELIVERY_PHASE_PRESENTATION_ADAPTER("conversation.delivery-phase.presentation-adapter"), CONVERSATION_REPLY_PHASE_PRESENTATION_ADAPTER("conversation.reply-phase.presentation-adapter"), PLAYBACK_PHASE_PRESENTATION_ADAPTER("playback.phase.presentation-adapter"), TARGET_KIND_PRESENTATION_ADAPTER("target.kind.presentation-adapter"), SESSION_CONNECTION_STATE_PRESENTATION_ADAPTER("session.connection-state.presentation-adapter"), UPDATES_PHASE_PRESENTATION_ADAPTER("updates.phase.presentation-adapter"), RECOVERY_PHASE_PRESENTATION_ADAPTER("recovery.phase.presentation-adapter") }
 
 internal object GeneratedLinkNativeLegoCatalog {
     object PortIds {
@@ -45,53 +45,53 @@ internal object GeneratedLinkNativeLegoCatalog {
         data object UPDATES_PRESENTATION_MODEL : GeneratedProductOutputPortId { override val value = "updates.presentation.model" }
         data object RECOVERY_PRESENTATION_SOURCE : GeneratedProductInputPortId { override val value = "recovery.presentation.source" }
         data object RECOVERY_PRESENTATION_MODEL : GeneratedProductOutputPortId { override val value = "recovery.presentation.model" }
-        data object LINK_CAPTURE_PHASE_PRESENTATION_ADAPTER_STATE : GeneratedProductInputPortId { override val value = "link.capture-phase.presentation-adapter.state" }
-        data object LINK_CAPTURE_PHASE_PRESENTATION_ADAPTER_PRESENTATION : GeneratedProductOutputPortId { override val value = "link.capture-phase.presentation-adapter.presentation" }
-        data object LINK_DELIVERY_PHASE_PRESENTATION_ADAPTER_STATE : GeneratedProductInputPortId { override val value = "link.delivery-phase.presentation-adapter.state" }
-        data object LINK_DELIVERY_PHASE_PRESENTATION_ADAPTER_PRESENTATION : GeneratedProductOutputPortId { override val value = "link.delivery-phase.presentation-adapter.presentation" }
-        data object LINK_REPLY_PHASE_PRESENTATION_ADAPTER_STATE : GeneratedProductInputPortId { override val value = "link.reply-phase.presentation-adapter.state" }
-        data object LINK_REPLY_PHASE_PRESENTATION_ADAPTER_PRESENTATION : GeneratedProductOutputPortId { override val value = "link.reply-phase.presentation-adapter.presentation" }
-        data object LINK_PLAYBACK_PHASE_PRESENTATION_ADAPTER_STATE : GeneratedProductInputPortId { override val value = "link.playback-phase.presentation-adapter.state" }
-        data object LINK_PLAYBACK_PHASE_PRESENTATION_ADAPTER_PRESENTATION : GeneratedProductOutputPortId { override val value = "link.playback-phase.presentation-adapter.presentation" }
-        data object LINK_TARGET_KIND_PRESENTATION_ADAPTER_STATE : GeneratedProductInputPortId { override val value = "link.target-kind.presentation-adapter.state" }
-        data object LINK_TARGET_KIND_PRESENTATION_ADAPTER_PRESENTATION : GeneratedProductOutputPortId { override val value = "link.target-kind.presentation-adapter.presentation" }
-        data object LINK_CONNECTION_STATE_PRESENTATION_ADAPTER_STATE : GeneratedProductInputPortId { override val value = "link.connection-state.presentation-adapter.state" }
-        data object LINK_CONNECTION_STATE_PRESENTATION_ADAPTER_PRESENTATION : GeneratedProductOutputPortId { override val value = "link.connection-state.presentation-adapter.presentation" }
-        data object LINK_UPDATE_PHASE_PRESENTATION_ADAPTER_STATE : GeneratedProductInputPortId { override val value = "link.update-phase.presentation-adapter.state" }
-        data object LINK_UPDATE_PHASE_PRESENTATION_ADAPTER_PRESENTATION : GeneratedProductOutputPortId { override val value = "link.update-phase.presentation-adapter.presentation" }
-        data object LINK_RECOVERY_PHASE_PRESENTATION_ADAPTER_STATE : GeneratedProductInputPortId { override val value = "link.recovery-phase.presentation-adapter.state" }
-        data object LINK_RECOVERY_PHASE_PRESENTATION_ADAPTER_PRESENTATION : GeneratedProductOutputPortId { override val value = "link.recovery-phase.presentation-adapter.presentation" }
-        data object PAGE_HOST_ACTIVEPAGE : GeneratedProductInputPortId { override val value = "page-host.activePage" }
-        data object TARGET_MODEL : GeneratedProductInputPortId { override val value = "target.model" }
-        data object TARGET_TARGETSTATE : GeneratedProductInputPortId { override val value = "target.targetState" }
-        data object TARGET_SELECT : GeneratedProductOutputPortId { override val value = "target.select" }
-        data object TALK_MODEL : GeneratedProductInputPortId { override val value = "talk.model" }
-        data object TALK_CAPTURESTATE : GeneratedProductInputPortId { override val value = "talk.captureState" }
-        data object TALK_COMMAND : GeneratedProductOutputPortId { override val value = "talk.command" }
-        data object LATEST_MODEL : GeneratedProductInputPortId { override val value = "latest.model" }
-        data object LATEST_DELIVERYSTATE : GeneratedProductInputPortId { override val value = "latest.deliveryState" }
-        data object LATEST_REPLYSTATE : GeneratedProductInputPortId { override val value = "latest.replyState" }
-        data object COMPOSER_MODEL : GeneratedProductInputPortId { override val value = "composer.model" }
-        data object COMPOSER_DELIVERYSTATE : GeneratedProductInputPortId { override val value = "composer.deliveryState" }
-        data object COMPOSER_REPLYSTATE : GeneratedProductInputPortId { override val value = "composer.replyState" }
-        data object COMPOSER_COMPOSE : GeneratedProductOutputPortId { override val value = "composer.compose" }
-        data object ACTIVE_PLAYBACK_MODEL : GeneratedProductInputPortId { override val value = "active-playback.model" }
-        data object ACTIVE_PLAYBACK_PLAYBACKSTATE : GeneratedProductInputPortId { override val value = "active-playback.playbackState" }
-        data object ACTIVE_PLAYBACK_COMMAND : GeneratedProductOutputPortId { override val value = "active-playback.command" }
-        data object CONNECTION_MODEL : GeneratedProductInputPortId { override val value = "connection.model" }
-        data object CONNECTION_CONNECTIONSTATE : GeneratedProductInputPortId { override val value = "connection.connectionState" }
-        data object PUBLIC_LINK_MODEL : GeneratedProductInputPortId { override val value = "public-link.model" }
-        data object PUBLIC_LINK_CONNECTIONSTATE : GeneratedProductInputPortId { override val value = "public-link.connectionState" }
-        data object PREFERENCES_MODEL : GeneratedProductInputPortId { override val value = "preferences.model" }
-        data object PREFERENCES_TOGGLE : GeneratedProductOutputPortId { override val value = "preferences.toggle" }
-        data object LOCAL_HISTORY_MODEL : GeneratedProductInputPortId { override val value = "local-history.model" }
-        data object UPDATES_MODEL : GeneratedProductInputPortId { override val value = "updates.model" }
-        data object UPDATES_UPDATESTATE : GeneratedProductInputPortId { override val value = "updates.updateState" }
-        data object UPDATES_COMMAND : GeneratedProductOutputPortId { override val value = "updates.command" }
-        data object RECOVERY_MODEL : GeneratedProductInputPortId { override val value = "recovery.model" }
-        data object RECOVERY_RECOVERYSTATE : GeneratedProductInputPortId { override val value = "recovery.recoveryState" }
-        data object SETTINGS_ACTION_OPEN : GeneratedProductOutputPortId { override val value = "settings-action.open" }
-        data object DEV_HOST_OPEN : GeneratedProductOutputPortId { override val value = "dev-host.open" }
+        data object CAPTURE_PHASE_PRESENTATION_ADAPTER_STATE : GeneratedProductInputPortId { override val value = "capture.phase.presentation-adapter.state" }
+        data object CAPTURE_PHASE_PRESENTATION_ADAPTER_PRESENTATION : GeneratedProductOutputPortId { override val value = "capture.phase.presentation-adapter.presentation" }
+        data object CONVERSATION_DELIVERY_PHASE_PRESENTATION_ADAPTER_STATE : GeneratedProductInputPortId { override val value = "conversation.delivery-phase.presentation-adapter.state" }
+        data object CONVERSATION_DELIVERY_PHASE_PRESENTATION_ADAPTER_PRESENTATION : GeneratedProductOutputPortId { override val value = "conversation.delivery-phase.presentation-adapter.presentation" }
+        data object CONVERSATION_REPLY_PHASE_PRESENTATION_ADAPTER_STATE : GeneratedProductInputPortId { override val value = "conversation.reply-phase.presentation-adapter.state" }
+        data object CONVERSATION_REPLY_PHASE_PRESENTATION_ADAPTER_PRESENTATION : GeneratedProductOutputPortId { override val value = "conversation.reply-phase.presentation-adapter.presentation" }
+        data object PLAYBACK_PHASE_PRESENTATION_ADAPTER_STATE : GeneratedProductInputPortId { override val value = "playback.phase.presentation-adapter.state" }
+        data object PLAYBACK_PHASE_PRESENTATION_ADAPTER_PRESENTATION : GeneratedProductOutputPortId { override val value = "playback.phase.presentation-adapter.presentation" }
+        data object TARGET_KIND_PRESENTATION_ADAPTER_STATE : GeneratedProductInputPortId { override val value = "target.kind.presentation-adapter.state" }
+        data object TARGET_KIND_PRESENTATION_ADAPTER_PRESENTATION : GeneratedProductOutputPortId { override val value = "target.kind.presentation-adapter.presentation" }
+        data object SESSION_CONNECTION_STATE_PRESENTATION_ADAPTER_STATE : GeneratedProductInputPortId { override val value = "session.connection-state.presentation-adapter.state" }
+        data object SESSION_CONNECTION_STATE_PRESENTATION_ADAPTER_PRESENTATION : GeneratedProductOutputPortId { override val value = "session.connection-state.presentation-adapter.presentation" }
+        data object UPDATES_PHASE_PRESENTATION_ADAPTER_STATE : GeneratedProductInputPortId { override val value = "updates.phase.presentation-adapter.state" }
+        data object UPDATES_PHASE_PRESENTATION_ADAPTER_PRESENTATION : GeneratedProductOutputPortId { override val value = "updates.phase.presentation-adapter.presentation" }
+        data object RECOVERY_PHASE_PRESENTATION_ADAPTER_STATE : GeneratedProductInputPortId { override val value = "recovery.phase.presentation-adapter.state" }
+        data object RECOVERY_PHASE_PRESENTATION_ADAPTER_PRESENTATION : GeneratedProductOutputPortId { override val value = "recovery.phase.presentation-adapter.presentation" }
+        data object NAVIGATION_PAGE_HOST_ACTIVEPAGE : GeneratedProductInputPortId { override val value = "navigation.page-host.activePage" }
+        data object TARGET_PICKER_MODEL : GeneratedProductInputPortId { override val value = "target.picker.model" }
+        data object TARGET_PICKER_TARGETSTATE : GeneratedProductInputPortId { override val value = "target.picker.targetState" }
+        data object TARGET_PICKER_SELECT : GeneratedProductOutputPortId { override val value = "target.picker.select" }
+        data object CAPTURE_TALK_MODEL : GeneratedProductInputPortId { override val value = "capture.talk.model" }
+        data object CAPTURE_TALK_CAPTURESTATE : GeneratedProductInputPortId { override val value = "capture.talk.captureState" }
+        data object CAPTURE_TALK_COMMAND : GeneratedProductOutputPortId { override val value = "capture.talk.command" }
+        data object CONVERSATION_LATEST_MODEL : GeneratedProductInputPortId { override val value = "conversation.latest.model" }
+        data object CONVERSATION_LATEST_DELIVERYSTATE : GeneratedProductInputPortId { override val value = "conversation.latest.deliveryState" }
+        data object CONVERSATION_LATEST_REPLYSTATE : GeneratedProductInputPortId { override val value = "conversation.latest.replyState" }
+        data object CONVERSATION_COMPOSER_MODEL : GeneratedProductInputPortId { override val value = "conversation.composer.model" }
+        data object CONVERSATION_COMPOSER_DELIVERYSTATE : GeneratedProductInputPortId { override val value = "conversation.composer.deliveryState" }
+        data object CONVERSATION_COMPOSER_REPLYSTATE : GeneratedProductInputPortId { override val value = "conversation.composer.replyState" }
+        data object CONVERSATION_COMPOSER_COMPOSE : GeneratedProductOutputPortId { override val value = "conversation.composer.compose" }
+        data object PLAYBACK_CONTROLS_MODEL : GeneratedProductInputPortId { override val value = "playback.controls.model" }
+        data object PLAYBACK_CONTROLS_PLAYBACKSTATE : GeneratedProductInputPortId { override val value = "playback.controls.playbackState" }
+        data object PLAYBACK_CONTROLS_COMMAND : GeneratedProductOutputPortId { override val value = "playback.controls.command" }
+        data object SESSION_CONNECTION_MODEL : GeneratedProductInputPortId { override val value = "session.connection.model" }
+        data object SESSION_CONNECTION_CONNECTIONSTATE : GeneratedProductInputPortId { override val value = "session.connection.connectionState" }
+        data object SESSION_PUBLIC_LINK_MODEL : GeneratedProductInputPortId { override val value = "session.public-link.model" }
+        data object SESSION_PUBLIC_LINK_CONNECTIONSTATE : GeneratedProductInputPortId { override val value = "session.public-link.connectionState" }
+        data object PREFERENCES_TOGGLES_MODEL : GeneratedProductInputPortId { override val value = "preferences.toggles.model" }
+        data object PREFERENCES_TOGGLES_TOGGLE : GeneratedProductOutputPortId { override val value = "preferences.toggles.toggle" }
+        data object HISTORY_LOCAL_MODEL : GeneratedProductInputPortId { override val value = "history.local.model" }
+        data object UPDATES_PANEL_MODEL : GeneratedProductInputPortId { override val value = "updates.panel.model" }
+        data object UPDATES_PANEL_UPDATESTATE : GeneratedProductInputPortId { override val value = "updates.panel.updateState" }
+        data object UPDATES_PANEL_COMMAND : GeneratedProductOutputPortId { override val value = "updates.panel.command" }
+        data object RECOVERY_STATUS_MODEL : GeneratedProductInputPortId { override val value = "recovery.status.model" }
+        data object RECOVERY_STATUS_RECOVERYSTATE : GeneratedProductInputPortId { override val value = "recovery.status.recoveryState" }
+        data object NAVIGATION_SETTINGS_ENTRY_OPEN : GeneratedProductOutputPortId { override val value = "navigation.settings-entry.open" }
+        data object NAVIGATION_DEV_HOST_ENTRY_OPEN : GeneratedProductOutputPortId { override val value = "navigation.dev-host-entry.open" }
     }
     object FiniteValueIds {
         data object LINK_CAPTURE_OPERATION : GeneratedLinkFiniteValueId { override val value = "link.capture-operation" }
