@@ -1,5 +1,7 @@
 import { CIRCLEKIT_ASSET_CATALOG } from "@v1d/circlekit-assets";
 import { defineProduct, defineProductNavigation, type ProductIr } from "@v1d/product-spec";
+import { validateCapabilities } from "@v1d/product-emit/core";
+import { linkCapabilityTable } from "./capabilities.js";
 import { linkComponentInstances, linkComponentTypes } from "./components.js";
 import { linkFiniteValues } from "./finite-values.js";
 import { linkComponentIconRefs } from "./icons.js";
@@ -84,5 +86,15 @@ export interface AgentmuxLinkProductIr extends ProductIr {
 
 export function compileAgentmuxLinkProduct(productSpecVersion: string): AgentmuxLinkProductIr {
   if (productSpecVersion.trim() === "") throw new Error("ProductSpec package version is blank");
+  requireCapabilitiesDeclared();
   return { ...linkProductCore, productSpecVersion };
+}
+
+/** Every context input and effect a Link node spells is a declared row, and every row is used. */
+function requireCapabilitiesDeclared(): void {
+  const diagnostics = validateCapabilities(linkProductCore, linkCapabilityTable);
+  if (diagnostics.length === 0) return;
+  throw new Error(`Link capabilities failed:\n${diagnostics
+    .map(({ rule, declarationId, message }) => `${rule} · ${declarationId} · ${message}`)
+    .join("\n")}`);
 }

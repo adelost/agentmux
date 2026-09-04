@@ -1,3 +1,4 @@
+import { adapterFields } from "@v1d/product-spec/foundation";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -133,7 +134,7 @@ test("every compiler-exposed closed state lineage has one executable authority",
   ]);
   for (const authority of product.stateAuthorities) {
     assert.ok(authority.presentation.consumers.length > 0, `${authority.id} has no component consumer`);
-    assert.ok(product.nodes.some(({ id }) => id === authority.adapter.nodeInstanceRef));
+    assert.ok(product.nodes.some(({ id }) => id === adapterFields(authority.adapter).nodeInstanceRef));
   }
 });
 
