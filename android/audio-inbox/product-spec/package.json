@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@v1d/circlekit-assets": "https://circlekit.pages.dev/npm/v1d/circlekit-assets/0.3.54/v1d-circlekit-assets-0.3.54.tgz",
-    "@v1d/product-emit": "https://circlekit.pages.dev/npm/v1d/product-emit/0.1.15/v1d-product-emit-0.1.15.tgz",
+    "@v1d/product-emit": "https://circlekit.pages.dev/npm/v1d/product-emit/0.1.16/v1d-product-emit-0.1.16.tgz",
     "@v1d/product-spec": "https://circlekit.pages.dev/npm/v1d/product-spec/0.3.52/v1d-product-spec-0.3.52.tgz"
   },
   "devDependencies": {
