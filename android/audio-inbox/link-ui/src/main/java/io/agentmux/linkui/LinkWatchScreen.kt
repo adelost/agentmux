@@ -200,7 +200,7 @@ fun LinkWatchSurface(
             )
         }
     }
-    RenderRingScreen(nav = navigator, onExit = { graph.navigation.back() })
+    RenderRingScreen(nav = navigator, backLabel = "Back", onExit = { graph.navigation.back() })
 }
 
 fun linkWatchRows(

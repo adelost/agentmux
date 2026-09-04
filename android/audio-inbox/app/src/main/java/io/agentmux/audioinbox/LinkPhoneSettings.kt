@@ -73,6 +73,7 @@ internal fun LinkPhoneSettings(
             PhoneScreenHeader(
                 title = settingsRoute.title,
                 onBack = onBack,
+                backLabel = "Back",
                 icon = LinkNativeBindings.requireIcon(settingsRoute.iconAssetRef),
             )
         }

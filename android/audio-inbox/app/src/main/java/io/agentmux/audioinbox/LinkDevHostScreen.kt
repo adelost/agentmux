@@ -57,5 +57,5 @@ internal fun LinkDevHostScreen(
         )
     }
     BackHandler(onBack = onBack)
-    RenderRingScreen(nav = navigator, onExit = onBack)
+    RenderRingScreen(nav = navigator, backLabel = "Back", onExit = onBack)
 }
