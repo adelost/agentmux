@@ -1,8 +1,11 @@
 %% GENERATED FILE. DO NOT EDIT.
 %% GENERATED FROM product-spec/generated/link-product.json (port bindings) and
 %% product-spec/src/capabilities.ts (STATE_FEEDBACK rows, dashed).
-%% A dashed red domain has no port binding in or out. A dashed edge is state read
-%% or written without a port: the distance between the declared graph and the app.
+%% A dashed red domain has no port binding at all, not even inside itself: nothing
+%% reaches it and it reaches nothing. A domain wired only inside itself is an island
+%% and is drawn like any other; islands are modules, not debt. A dashed edge is
+%% state read or written without a port: the distance between the declared graph
+%% and the app.
 graph LR
   capture["capture<br/>3 nodes, 1 component"]
   conversation["conversation<br/>4 nodes, 2 components"]
@@ -17,11 +20,3 @@ graph LR
   updates["updates<br/>3 nodes, 1 component"]
   capture -->|"captured-turn"| conversation
   style dev stroke-dasharray: 5 5,stroke:#c33
-  style history stroke-dasharray: 5 5,stroke:#c33
-  style navigation stroke-dasharray: 5 5,stroke:#c33
-  style playback stroke-dasharray: 5 5,stroke:#c33
-  style preferences stroke-dasharray: 5 5,stroke:#c33
-  style recovery stroke-dasharray: 5 5,stroke:#c33
-  style session stroke-dasharray: 5 5,stroke:#c33
-  style target stroke-dasharray: 5 5,stroke:#c33
-  style updates stroke-dasharray: 5 5,stroke:#c33
