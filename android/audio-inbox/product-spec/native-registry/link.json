@@ -132,6 +132,13 @@
   ],
   "nodes": [
     {
+      "nodeId": "capture.phase.presentation-adapter",
+      "nativePortId": "capture.phase.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
       "nodeId": "capture.presentation",
       "nativePortId": "capture.presentation",
       "profiles": ["phone-full-ui", "wear-full-ui"],
@@ -146,11 +153,25 @@
       "outputPorts": ["captured", "status"]
     },
     {
+      "nodeId": "conversation.delivery-phase.presentation-adapter",
+      "nativePortId": "conversation.delivery-phase.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
       "nodeId": "conversation.presentation",
       "nativePortId": "conversation.presentation",
       "profiles": ["phone-full-ui", "wear-full-ui"],
       "inputPorts": ["source"],
       "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "conversation.reply-phase.presentation-adapter",
+      "nativePortId": "conversation.reply-phase.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
     },
     {
       "nodeId": "conversation.service",
@@ -174,67 +195,18 @@
       "outputPorts": ["status"]
     },
     {
-      "nodeId": "link.capture-phase.presentation-adapter",
-      "nativePortId": "link.capture-phase.presentation-adapter",
-      "profiles": ["phone-full-ui", "wear-full-ui"],
-      "inputPorts": ["state"],
-      "outputPorts": ["presentation"]
-    },
-    {
-      "nodeId": "link.connection-state.presentation-adapter",
-      "nativePortId": "link.connection-state.presentation-adapter",
-      "profiles": ["phone-full-ui", "wear-full-ui"],
-      "inputPorts": ["state"],
-      "outputPorts": ["presentation"]
-    },
-    {
-      "nodeId": "link.delivery-phase.presentation-adapter",
-      "nativePortId": "link.delivery-phase.presentation-adapter",
-      "profiles": ["phone-full-ui", "wear-full-ui"],
-      "inputPorts": ["state"],
-      "outputPorts": ["presentation"]
-    },
-    {
-      "nodeId": "link.playback-phase.presentation-adapter",
-      "nativePortId": "link.playback-phase.presentation-adapter",
-      "profiles": ["phone-full-ui", "wear-full-ui"],
-      "inputPorts": ["state"],
-      "outputPorts": ["presentation"]
-    },
-    {
-      "nodeId": "link.recovery-phase.presentation-adapter",
-      "nativePortId": "link.recovery-phase.presentation-adapter",
-      "profiles": ["phone-full-ui", "wear-full-ui"],
-      "inputPorts": ["state"],
-      "outputPorts": ["presentation"]
-    },
-    {
-      "nodeId": "link.reply-phase.presentation-adapter",
-      "nativePortId": "link.reply-phase.presentation-adapter",
-      "profiles": ["phone-full-ui", "wear-full-ui"],
-      "inputPorts": ["state"],
-      "outputPorts": ["presentation"]
-    },
-    {
-      "nodeId": "link.target-kind.presentation-adapter",
-      "nativePortId": "link.target-kind.presentation-adapter",
-      "profiles": ["phone-full-ui", "wear-full-ui"],
-      "inputPorts": ["state"],
-      "outputPorts": ["presentation"]
-    },
-    {
-      "nodeId": "link.update-phase.presentation-adapter",
-      "nativePortId": "link.update-phase.presentation-adapter",
-      "profiles": ["phone-full-ui", "wear-full-ui"],
-      "inputPorts": ["state"],
-      "outputPorts": ["presentation"]
-    },
-    {
       "nodeId": "navigation.service",
       "nativePortId": "navigation.service",
       "profiles": ["phone-full-ui", "wear-full-ui"],
       "inputPorts": ["openDevHost", "openSettings"],
       "outputPorts": ["activePage"]
+    },
+    {
+      "nodeId": "playback.phase.presentation-adapter",
+      "nativePortId": "playback.phase.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
     },
     {
       "nodeId": "playback.presentation",
@@ -265,6 +237,13 @@
       "outputPorts": ["status"]
     },
     {
+      "nodeId": "recovery.phase.presentation-adapter",
+      "nativePortId": "recovery.phase.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
       "nodeId": "recovery.presentation",
       "nativePortId": "recovery.presentation",
       "profiles": ["phone-full-ui", "wear-full-ui"],
@@ -277,6 +256,13 @@
       "profiles": ["phone-full-ui", "wear-full-ui"],
       "inputPorts": [],
       "outputPorts": ["status"]
+    },
+    {
+      "nodeId": "session.connection-state.presentation-adapter",
+      "nativePortId": "session.connection-state.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
     },
     {
       "nodeId": "session.presentation",
@@ -293,6 +279,13 @@
       "outputPorts": ["status"]
     },
     {
+      "nodeId": "target.kind.presentation-adapter",
+      "nativePortId": "target.kind.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
       "nodeId": "target.presentation",
       "nativePortId": "target.presentation",
       "profiles": ["phone-full-ui", "wear-full-ui"],
@@ -305,6 +298,13 @@
       "profiles": ["phone-full-ui", "wear-full-ui"],
       "inputPorts": ["select"],
       "outputPorts": ["directory"]
+    },
+    {
+      "nodeId": "updates.phase.presentation-adapter",
+      "nativePortId": "updates.phase.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
     },
     {
       "nodeId": "updates.presentation",
@@ -423,27 +423,27 @@
     "activePageBindings": [
       {
         "publisherPortRef": "navigation.service.activePage",
-        "pageHostPortRef": "page-host.activePage"
+        "pageHostPortRef": "navigation.page-host.activePage"
       }
     ],
     "actionGroups": [
       {
         "artifactRef": "phone-full-ui",
-        "componentInstanceRef": "active-playback",
+        "componentInstanceRef": "capture.talk",
         "actions": [
         {
-          "sourcePortRef": "active-playback.command",
-          "targetPortRef": "playback.service.command",
+          "sourcePortRef": "capture.talk.command",
+          "targetPortRef": "capture.service.command",
           "effect": "dispatch"
         }
         ]
       },
       {
         "artifactRef": "phone-full-ui",
-        "componentInstanceRef": "composer",
+        "componentInstanceRef": "conversation.composer",
         "actions": [
         {
-          "sourcePortRef": "composer.compose",
+          "sourcePortRef": "conversation.composer.compose",
           "targetPortRef": "conversation.service.compose",
           "effect": "dispatch"
         }
@@ -451,10 +451,10 @@
       },
       {
         "artifactRef": "phone-full-ui",
-        "componentInstanceRef": "dev-host",
+        "componentInstanceRef": "navigation.dev-host-entry",
         "actions": [
         {
-          "sourcePortRef": "dev-host.open",
+          "sourcePortRef": "navigation.dev-host-entry.open",
           "targetPortRef": "navigation.service.openDevHost",
           "effect": "push"
         }
@@ -462,10 +462,32 @@
       },
       {
         "artifactRef": "phone-full-ui",
-        "componentInstanceRef": "preferences",
+        "componentInstanceRef": "navigation.settings-entry",
         "actions": [
         {
-          "sourcePortRef": "preferences.toggle",
+          "sourcePortRef": "navigation.settings-entry.open",
+          "targetPortRef": "navigation.service.openSettings",
+          "effect": "push"
+        }
+        ]
+      },
+      {
+        "artifactRef": "phone-full-ui",
+        "componentInstanceRef": "playback.controls",
+        "actions": [
+        {
+          "sourcePortRef": "playback.controls.command",
+          "targetPortRef": "playback.service.command",
+          "effect": "dispatch"
+        }
+        ]
+      },
+      {
+        "artifactRef": "phone-full-ui",
+        "componentInstanceRef": "preferences.toggles",
+        "actions": [
+        {
+          "sourcePortRef": "preferences.toggles.toggle",
           "targetPortRef": "preferences.service.toggle",
           "effect": "dispatch"
         }
@@ -473,32 +495,10 @@
       },
       {
         "artifactRef": "phone-full-ui",
-        "componentInstanceRef": "settings-action",
+        "componentInstanceRef": "target.picker",
         "actions": [
         {
-          "sourcePortRef": "settings-action.open",
-          "targetPortRef": "navigation.service.openSettings",
-          "effect": "push"
-        }
-        ]
-      },
-      {
-        "artifactRef": "phone-full-ui",
-        "componentInstanceRef": "talk",
-        "actions": [
-        {
-          "sourcePortRef": "talk.command",
-          "targetPortRef": "capture.service.command",
-          "effect": "dispatch"
-        }
-        ]
-      },
-      {
-        "artifactRef": "phone-full-ui",
-        "componentInstanceRef": "target",
-        "actions": [
-        {
-          "sourcePortRef": "target.select",
+          "sourcePortRef": "target.picker.select",
           "targetPortRef": "target.service.select",
           "effect": "dispatch"
         }
@@ -506,10 +506,10 @@
       },
       {
         "artifactRef": "phone-full-ui",
-        "componentInstanceRef": "updates",
+        "componentInstanceRef": "updates.panel",
         "actions": [
         {
-          "sourcePortRef": "updates.command",
+          "sourcePortRef": "updates.panel.command",
           "targetPortRef": "updates.service.command",
           "effect": "dispatch"
         }
@@ -517,21 +517,10 @@
       },
       {
         "artifactRef": "wear-full-ui",
-        "componentInstanceRef": "settings-action",
+        "componentInstanceRef": "capture.talk",
         "actions": [
         {
-          "sourcePortRef": "settings-action.open",
-          "targetPortRef": "navigation.service.openSettings",
-          "effect": "push"
-        }
-        ]
-      },
-      {
-        "artifactRef": "wear-full-ui",
-        "componentInstanceRef": "talk",
-        "actions": [
-        {
-          "sourcePortRef": "talk.command",
+          "sourcePortRef": "capture.talk.command",
           "targetPortRef": "capture.service.command",
           "effect": "dispatch"
         }
@@ -539,10 +528,21 @@
       },
       {
         "artifactRef": "wear-full-ui",
-        "componentInstanceRef": "target",
+        "componentInstanceRef": "navigation.settings-entry",
         "actions": [
         {
-          "sourcePortRef": "target.select",
+          "sourcePortRef": "navigation.settings-entry.open",
+          "targetPortRef": "navigation.service.openSettings",
+          "effect": "push"
+        }
+        ]
+      },
+      {
+        "artifactRef": "wear-full-ui",
+        "componentInstanceRef": "target.picker",
+        "actions": [
+        {
+          "sourcePortRef": "target.picker.select",
           "targetPortRef": "target.service.select",
           "effect": "dispatch"
         }
@@ -550,10 +550,10 @@
       },
       {
         "artifactRef": "wear-full-ui",
-        "componentInstanceRef": "updates",
+        "componentInstanceRef": "updates.panel",
         "actions": [
         {
-          "sourcePortRef": "updates.command",
+          "sourcePortRef": "updates.panel.command",
           "targetPortRef": "updates.service.command",
           "effect": "dispatch"
         }

@@ -19,16 +19,16 @@ import io.agentmux.linkui.product.generated.GeneratedLinkComponentId
 import io.agentmux.linkui.product.generated.GeneratedLinkComponentTypeId
 import io.agentmux.linkui.product.generated.GeneratedLinkFiniteValueId
 import io.agentmux.linkui.product.generated.GeneratedLinkNativeLegoCatalog.FiniteValueIds
-import io.agentmux.linkui.product.generated.GeneratedLinkCapturePhaseAuthority
-import io.agentmux.linkui.product.generated.GeneratedLinkConnectionStateAuthority
-import io.agentmux.linkui.product.generated.GeneratedLinkDeliveryPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedCapturePhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedSessionConnectionStateAuthority
+import io.agentmux.linkui.product.generated.GeneratedConversationDeliveryPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedLinkNodeId
 import io.agentmux.linkui.product.generated.GeneratedLinkPageId
-import io.agentmux.linkui.product.generated.GeneratedLinkPlaybackPhaseAuthority
-import io.agentmux.linkui.product.generated.GeneratedLinkRecoveryPhaseAuthority
-import io.agentmux.linkui.product.generated.GeneratedLinkReplyPhaseAuthority
-import io.agentmux.linkui.product.generated.GeneratedLinkTargetKindAuthority
-import io.agentmux.linkui.product.generated.GeneratedLinkUpdatePhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedPlaybackPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedRecoveryPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedConversationReplyPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedTargetKindAuthority
+import io.agentmux.linkui.product.generated.GeneratedUpdatesPhaseAuthority
 import kotlin.enums.enumEntries
 
 /** One component instance attested to a native renderer and its host artifacts. */
@@ -134,25 +134,25 @@ object LinkNativeBindings {
     private val phone = setOf(GeneratedLinkArtifactRef.PHONE_FULL_UI)
 
     val components: List<LinkNativeComponentBinding> = listOf(
-        component(GeneratedLinkComponentTypeId.LINK_PAGE_HOST, "page-host", both, GeneratedLinkComponentId.PAGE_HOST),
-        component(GeneratedLinkComponentTypeId.LINK_TARGET_PICKER, "status", both, GeneratedLinkComponentId.TARGET),
-        component(GeneratedLinkComponentTypeId.LINK_LATEST_TURN, "conversation-feed", both, GeneratedLinkComponentId.LATEST),
-        component(GeneratedLinkComponentTypeId.LINK_COMPOSER, "composer", phone, GeneratedLinkComponentId.COMPOSER),
-        component(GeneratedLinkComponentTypeId.LINK_TALK, "capture", both, GeneratedLinkComponentId.TALK),
-        component(GeneratedLinkComponentTypeId.LINK_ACTIVE_PLAYBACK, "active-playback", phone, GeneratedLinkComponentId.ACTIVE_PLAYBACK),
-        component(GeneratedLinkComponentTypeId.LINK_CONNECTION_STATUS, "connection", both, GeneratedLinkComponentId.CONNECTION),
-        component(GeneratedLinkComponentTypeId.LINK_PUBLIC_LINK, "public-link", phone, GeneratedLinkComponentId.PUBLIC_LINK),
-        component(GeneratedLinkComponentTypeId.LINK_PREFERENCES, "preferences", phone, GeneratedLinkComponentId.PREFERENCES),
-        component(GeneratedLinkComponentTypeId.LINK_LOCAL_HISTORY, "local-history", phone, GeneratedLinkComponentId.LOCAL_HISTORY),
-        component(GeneratedLinkComponentTypeId.LINK_UPDATES, "updates", both, GeneratedLinkComponentId.UPDATES),
-        component(GeneratedLinkComponentTypeId.LINK_RECOVERY_STATUS, "recovery", both, GeneratedLinkComponentId.RECOVERY),
+        component(GeneratedLinkComponentTypeId.LINK_PAGE_HOST, "page-host", both, GeneratedLinkComponentId.NAVIGATION_PAGE_HOST),
+        component(GeneratedLinkComponentTypeId.LINK_TARGET_PICKER, "status", both, GeneratedLinkComponentId.TARGET_PICKER),
+        component(GeneratedLinkComponentTypeId.LINK_LATEST_TURN, "conversation-feed", both, GeneratedLinkComponentId.CONVERSATION_LATEST),
+        component(GeneratedLinkComponentTypeId.LINK_COMPOSER, "composer", phone, GeneratedLinkComponentId.CONVERSATION_COMPOSER),
+        component(GeneratedLinkComponentTypeId.LINK_TALK, "capture", both, GeneratedLinkComponentId.CAPTURE_TALK),
+        component(GeneratedLinkComponentTypeId.LINK_ACTIVE_PLAYBACK, "active-playback", phone, GeneratedLinkComponentId.PLAYBACK_CONTROLS),
+        component(GeneratedLinkComponentTypeId.LINK_CONNECTION_STATUS, "connection", both, GeneratedLinkComponentId.SESSION_CONNECTION),
+        component(GeneratedLinkComponentTypeId.LINK_PUBLIC_LINK, "public-link", phone, GeneratedLinkComponentId.SESSION_PUBLIC_LINK),
+        component(GeneratedLinkComponentTypeId.LINK_PREFERENCES, "preferences", phone, GeneratedLinkComponentId.PREFERENCES_TOGGLES),
+        component(GeneratedLinkComponentTypeId.LINK_LOCAL_HISTORY, "local-history", phone, GeneratedLinkComponentId.HISTORY_LOCAL),
+        component(GeneratedLinkComponentTypeId.LINK_UPDATES, "updates", both, GeneratedLinkComponentId.UPDATES_PANEL),
+        component(GeneratedLinkComponentTypeId.LINK_RECOVERY_STATUS, "recovery", both, GeneratedLinkComponentId.RECOVERY_STATUS),
         component(
             GeneratedLinkComponentTypeId.LINK_NAVIGATION_ENTRY,
             "navigation-entry",
             both,
-            GeneratedLinkComponentId.SETTINGS_ACTION,
+            GeneratedLinkComponentId.NAVIGATION_SETTINGS_ENTRY,
         ),
-        component(GeneratedLinkComponentTypeId.LINK_DEV_HOST_ENTRY, "dev-host-entry", phone, GeneratedLinkComponentId.DEV_HOST),
+        component(GeneratedLinkComponentTypeId.LINK_DEV_HOST_ENTRY, "dev-host-entry", phone, GeneratedLinkComponentId.NAVIGATION_DEV_HOST_ENTRY),
         component(GeneratedLinkComponentTypeId.LINK_DEV_PREVIEW, "dev-preview", phone, GeneratedLinkComponentId.DEV_PREVIEW),
     )
 
@@ -256,44 +256,44 @@ object LinkNativeBindings {
             listOf(RecoveryPresentationModelOutput),
         ),
         node(
-            GeneratedLinkNodeId.LINK_CAPTURE_PHASE_PRESENTATION_ADAPTER,
-            listOf(GeneratedLinkCapturePhaseAuthority.inputPort<Any>()),
-            listOf(GeneratedLinkCapturePhaseAuthority.outputPort),
+            GeneratedLinkNodeId.CAPTURE_PHASE_PRESENTATION_ADAPTER,
+            listOf(GeneratedCapturePhaseAuthority.inputPort<Any>()),
+            listOf(GeneratedCapturePhaseAuthority.outputPort),
         ),
         node(
-            GeneratedLinkNodeId.LINK_DELIVERY_PHASE_PRESENTATION_ADAPTER,
-            listOf(GeneratedLinkDeliveryPhaseAuthority.inputPort<Any>()),
-            listOf(GeneratedLinkDeliveryPhaseAuthority.outputPort),
+            GeneratedLinkNodeId.CONVERSATION_DELIVERY_PHASE_PRESENTATION_ADAPTER,
+            listOf(GeneratedConversationDeliveryPhaseAuthority.inputPort<Any>()),
+            listOf(GeneratedConversationDeliveryPhaseAuthority.outputPort),
         ),
         node(
-            GeneratedLinkNodeId.LINK_REPLY_PHASE_PRESENTATION_ADAPTER,
-            listOf(GeneratedLinkReplyPhaseAuthority.inputPort<Any>()),
-            listOf(GeneratedLinkReplyPhaseAuthority.outputPort),
+            GeneratedLinkNodeId.CONVERSATION_REPLY_PHASE_PRESENTATION_ADAPTER,
+            listOf(GeneratedConversationReplyPhaseAuthority.inputPort<Any>()),
+            listOf(GeneratedConversationReplyPhaseAuthority.outputPort),
         ),
         node(
-            GeneratedLinkNodeId.LINK_PLAYBACK_PHASE_PRESENTATION_ADAPTER,
-            listOf(GeneratedLinkPlaybackPhaseAuthority.inputPort<Any>()),
-            listOf(GeneratedLinkPlaybackPhaseAuthority.outputPort),
+            GeneratedLinkNodeId.PLAYBACK_PHASE_PRESENTATION_ADAPTER,
+            listOf(GeneratedPlaybackPhaseAuthority.inputPort<Any>()),
+            listOf(GeneratedPlaybackPhaseAuthority.outputPort),
         ),
         node(
-            GeneratedLinkNodeId.LINK_TARGET_KIND_PRESENTATION_ADAPTER,
-            listOf(GeneratedLinkTargetKindAuthority.inputPort<Any>()),
-            listOf(GeneratedLinkTargetKindAuthority.outputPort),
+            GeneratedLinkNodeId.TARGET_KIND_PRESENTATION_ADAPTER,
+            listOf(GeneratedTargetKindAuthority.inputPort<Any>()),
+            listOf(GeneratedTargetKindAuthority.outputPort),
         ),
         node(
-            GeneratedLinkNodeId.LINK_CONNECTION_STATE_PRESENTATION_ADAPTER,
-            listOf(GeneratedLinkConnectionStateAuthority.inputPort<Any>()),
-            listOf(GeneratedLinkConnectionStateAuthority.outputPort),
+            GeneratedLinkNodeId.SESSION_CONNECTION_STATE_PRESENTATION_ADAPTER,
+            listOf(GeneratedSessionConnectionStateAuthority.inputPort<Any>()),
+            listOf(GeneratedSessionConnectionStateAuthority.outputPort),
         ),
         node(
-            GeneratedLinkNodeId.LINK_UPDATE_PHASE_PRESENTATION_ADAPTER,
-            listOf(GeneratedLinkUpdatePhaseAuthority.inputPort<Any>()),
-            listOf(GeneratedLinkUpdatePhaseAuthority.outputPort),
+            GeneratedLinkNodeId.UPDATES_PHASE_PRESENTATION_ADAPTER,
+            listOf(GeneratedUpdatesPhaseAuthority.inputPort<Any>()),
+            listOf(GeneratedUpdatesPhaseAuthority.outputPort),
         ),
         node(
-            GeneratedLinkNodeId.LINK_RECOVERY_PHASE_PRESENTATION_ADAPTER,
-            listOf(GeneratedLinkRecoveryPhaseAuthority.inputPort<Any>()),
-            listOf(GeneratedLinkRecoveryPhaseAuthority.outputPort),
+            GeneratedLinkNodeId.RECOVERY_PHASE_PRESENTATION_ADAPTER,
+            listOf(GeneratedRecoveryPhaseAuthority.inputPort<Any>()),
+            listOf(GeneratedRecoveryPhaseAuthority.outputPort),
         ),
     )
 
@@ -341,29 +341,29 @@ object LinkNativeBindings {
     )
 
     internal val actionGroups: List<LinkNativeActionGroupBinding> = listOf(
-        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.ACTIVE_PLAYBACK,
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.PLAYBACK_CONTROLS,
             action(ActivePlaybackCommandEvent, PlaybackCommandInput)),
-        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.COMPOSER,
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.CONVERSATION_COMPOSER,
             action(ComposerComposeEvent, ConversationComposeInput)),
-        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.DEV_HOST,
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.NAVIGATION_DEV_HOST_ENTRY,
             action(DevHostOpenEvent, NavigationOpenDevHostInput, LinkNativeActionEffect.PUSH)),
-        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.PREFERENCES,
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.PREFERENCES_TOGGLES,
             action(PreferencesToggleEvent, PreferencesToggleInput)),
-        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.SETTINGS_ACTION,
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.NAVIGATION_SETTINGS_ENTRY,
             action(SettingsActionOpenEvent, NavigationOpenSettingsInput, LinkNativeActionEffect.PUSH)),
-        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.TALK,
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.CAPTURE_TALK,
             action(TalkCommandEvent, CaptureCommandInput)),
-        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.TARGET,
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.TARGET_PICKER,
             action(TargetSelectEvent, TargetSelectInput)),
-        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.UPDATES,
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.UPDATES_PANEL,
             action(UpdatesCommandEvent, UpdatesCommandInput)),
-        actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.SETTINGS_ACTION,
+        actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.NAVIGATION_SETTINGS_ENTRY,
             action(SettingsActionOpenEvent, NavigationOpenSettingsInput, LinkNativeActionEffect.PUSH)),
-        actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.TALK,
+        actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.CAPTURE_TALK,
             action(TalkCommandEvent, CaptureCommandInput)),
-        actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.TARGET,
+        actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.TARGET_PICKER,
             action(TargetSelectEvent, TargetSelectInput)),
-        actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.UPDATES,
+        actionGroup(GeneratedLinkArtifactRef.WEAR_FULL_UI, GeneratedLinkComponentId.UPDATES_PANEL,
             action(UpdatesCommandEvent, UpdatesCommandInput)),
     )
 

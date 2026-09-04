@@ -175,11 +175,11 @@ export const linkComponentTypes = [
 
 export const linkComponentInstances = [
   {
-    id: "page-host", componentTypeRef: pageHostComponentType.id,
+    id: "navigation.page-host", componentTypeRef: pageHostComponentType.id,
     bindings: { inputs: { activePage: "navigation.service.activePage" }, events: {} },
   },
   {
-    id: "target", componentTypeRef: targetPickerComponentType.id,
+    id: "target.picker", componentTypeRef: targetPickerComponentType.id,
     bindings: {
       inputs: {
         model: "target.presentation.model",
@@ -189,7 +189,7 @@ export const linkComponentInstances = [
     },
   },
   {
-    id: "talk", componentTypeRef: talkComponentType.id,
+    id: "capture.talk", componentTypeRef: talkComponentType.id,
     bindings: {
       inputs: {
         model: "capture.presentation.model",
@@ -199,7 +199,7 @@ export const linkComponentInstances = [
     },
   },
   {
-    id: "latest", componentTypeRef: latestTurnComponentType.id,
+    id: "conversation.latest", componentTypeRef: latestTurnComponentType.id,
     bindings: {
       inputs: {
         model: "conversation.presentation.model",
@@ -210,7 +210,7 @@ export const linkComponentInstances = [
     },
   },
   {
-    id: "composer", componentTypeRef: composerComponentType.id,
+    id: "conversation.composer", componentTypeRef: composerComponentType.id,
     bindings: {
       inputs: {
         model: "conversation.presentation.model",
@@ -221,7 +221,7 @@ export const linkComponentInstances = [
     },
   },
   {
-    id: "active-playback", componentTypeRef: activePlaybackComponentType.id,
+    id: "playback.controls", componentTypeRef: activePlaybackComponentType.id,
     bindings: {
       inputs: {
         model: "playback.presentation.model",
@@ -231,7 +231,7 @@ export const linkComponentInstances = [
     },
   },
   {
-    id: "connection", componentTypeRef: connectionStatusComponentType.id,
+    id: "session.connection", componentTypeRef: connectionStatusComponentType.id,
     bindings: {
       inputs: {
         model: "session.presentation.model",
@@ -241,7 +241,7 @@ export const linkComponentInstances = [
     },
   },
   {
-    id: "public-link", componentTypeRef: publicLinkComponentType.id,
+    id: "session.public-link", componentTypeRef: publicLinkComponentType.id,
     bindings: {
       inputs: {
         model: "session.presentation.model",
@@ -251,15 +251,15 @@ export const linkComponentInstances = [
     },
   },
   {
-    id: "preferences", componentTypeRef: preferencesComponentType.id,
+    id: "preferences.toggles", componentTypeRef: preferencesComponentType.id,
     bindings: { inputs: { model: "preferences.presentation.model" }, events: { toggle: "preferences.service.toggle" } },
   },
   {
-    id: "local-history", componentTypeRef: localHistoryComponentType.id,
+    id: "history.local", componentTypeRef: localHistoryComponentType.id,
     bindings: { inputs: { model: "history.presentation.model" }, events: {} },
   },
   {
-    id: "updates", componentTypeRef: updatesComponentType.id,
+    id: "updates.panel", componentTypeRef: updatesComponentType.id,
     bindings: {
       inputs: {
         model: "updates.presentation.model",
@@ -269,7 +269,7 @@ export const linkComponentInstances = [
     },
   },
   {
-    id: "recovery", componentTypeRef: recoveryStatusComponentType.id,
+    id: "recovery.status", componentTypeRef: recoveryStatusComponentType.id,
     bindings: {
       inputs: {
         model: "recovery.presentation.model",
@@ -279,21 +279,21 @@ export const linkComponentInstances = [
     },
   },
   {
-    id: "settings-action", componentTypeRef: navigationEntryComponentType.id,
+    id: "navigation.settings-entry", componentTypeRef: navigationEntryComponentType.id,
     bindings: {
       inputs: {},
       events: { open: "navigation.service.openSettings" },
     },
   },
   {
-    id: "dev-host", componentTypeRef: devHostEntryComponentType.id,
+    id: "navigation.dev-host-entry", componentTypeRef: devHostEntryComponentType.id,
     bindings: {
       inputs: {},
       events: { open: "navigation.service.openDevHost" },
     },
   },
   {
-    id: "dev-preview", componentTypeRef: devPreviewComponentType.id,
+    id: "dev.preview", componentTypeRef: devPreviewComponentType.id,
     bindings: { inputs: {}, events: {} },
   },
 ] as const;

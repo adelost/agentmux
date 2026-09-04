@@ -105,61 +105,61 @@ internal object RecoveryPresentationModelOutput :
     ProductOutputPort<LinkRecoveryPresentation>(PortIds.RECOVERY_PRESENTATION_MODEL)
 
 internal object TargetModelInput :
-    ProductComponentInput<LinkTargetPresentation>(PortIds.TARGET_MODEL)
+    ProductComponentInput<LinkTargetPresentation>(PortIds.TARGET_PICKER_MODEL)
 
 internal object TargetSelectEvent :
-    ProductComponentEvent<LinkTargetSelectEvent, Unit>(PortIds.TARGET_SELECT)
+    ProductComponentEvent<LinkTargetSelectEvent, Unit>(PortIds.TARGET_PICKER_SELECT)
 
 internal object TalkModelInput :
-    ProductComponentInput<LinkCapturePresentation>(PortIds.TALK_MODEL)
+    ProductComponentInput<LinkCapturePresentation>(PortIds.CAPTURE_TALK_MODEL)
 
 internal object TalkCommandEvent :
-    ProductComponentEvent<LinkCaptureCommandEvent, Unit>(PortIds.TALK_COMMAND)
+    ProductComponentEvent<LinkCaptureCommandEvent, Unit>(PortIds.CAPTURE_TALK_COMMAND)
 
 internal object LatestModelInput :
-    ProductComponentInput<LinkConversationPresentation>(PortIds.LATEST_MODEL)
+    ProductComponentInput<LinkConversationPresentation>(PortIds.CONVERSATION_LATEST_MODEL)
 
 internal object ComposerModelInput :
-    ProductComponentInput<LinkConversationPresentation>(PortIds.COMPOSER_MODEL)
+    ProductComponentInput<LinkConversationPresentation>(PortIds.CONVERSATION_COMPOSER_MODEL)
 
 internal object ComposerComposeEvent :
-    ProductComponentEvent<LinkComposeEvent, Unit>(PortIds.COMPOSER_COMPOSE)
+    ProductComponentEvent<LinkComposeEvent, Unit>(PortIds.CONVERSATION_COMPOSER_COMPOSE)
 
 internal object ActivePlaybackModelInput :
-    ProductComponentInput<LinkPlaybackPresentation>(PortIds.ACTIVE_PLAYBACK_MODEL)
+    ProductComponentInput<LinkPlaybackPresentation>(PortIds.PLAYBACK_CONTROLS_MODEL)
 
 internal object ActivePlaybackCommandEvent :
-    ProductComponentEvent<LinkPlaybackCommandEvent, Unit>(PortIds.ACTIVE_PLAYBACK_COMMAND)
+    ProductComponentEvent<LinkPlaybackCommandEvent, Unit>(PortIds.PLAYBACK_CONTROLS_COMMAND)
 
 internal object ConnectionModelInput :
-    ProductComponentInput<LinkSessionPresentation>(PortIds.CONNECTION_MODEL)
+    ProductComponentInput<LinkSessionPresentation>(PortIds.SESSION_CONNECTION_MODEL)
 
 internal object PublicLinkModelInput :
-    ProductComponentInput<LinkSessionPresentation>(PortIds.PUBLIC_LINK_MODEL)
+    ProductComponentInput<LinkSessionPresentation>(PortIds.SESSION_PUBLIC_LINK_MODEL)
 
 internal object PreferencesModelInput :
-    ProductComponentInput<LinkPreferencesPresentation>(PortIds.PREFERENCES_MODEL)
+    ProductComponentInput<LinkPreferencesPresentation>(PortIds.PREFERENCES_TOGGLES_MODEL)
 
 internal object PreferencesToggleEvent :
-    ProductComponentEvent<LinkPreferenceToggleEvent, Unit>(PortIds.PREFERENCES_TOGGLE)
+    ProductComponentEvent<LinkPreferenceToggleEvent, Unit>(PortIds.PREFERENCES_TOGGLES_TOGGLE)
 
 internal object LocalHistoryModelInput :
-    ProductComponentInput<LinkHistoryPresentation>(PortIds.LOCAL_HISTORY_MODEL)
+    ProductComponentInput<LinkHistoryPresentation>(PortIds.HISTORY_LOCAL_MODEL)
 
 internal object UpdatesModelInput :
-    ProductComponentInput<LinkUpdatePresentation>(PortIds.UPDATES_MODEL)
+    ProductComponentInput<LinkUpdatePresentation>(PortIds.UPDATES_PANEL_MODEL)
 
 internal object UpdatesCommandEvent :
-    ProductComponentEvent<LinkUpdateCommandEvent, Unit>(PortIds.UPDATES_COMMAND)
+    ProductComponentEvent<LinkUpdateCommandEvent, Unit>(PortIds.UPDATES_PANEL_COMMAND)
 
 internal object RecoveryModelInput :
-    ProductComponentInput<LinkRecoveryPresentation>(PortIds.RECOVERY_MODEL)
+    ProductComponentInput<LinkRecoveryPresentation>(PortIds.RECOVERY_STATUS_MODEL)
 
 internal object PageHostActivePageInput :
-    ProductComponentInput<LinkRoute>(PortIds.PAGE_HOST_ACTIVEPAGE)
+    ProductComponentInput<LinkRoute>(PortIds.NAVIGATION_PAGE_HOST_ACTIVEPAGE)
 
 internal object SettingsActionOpenEvent :
-    ProductComponentEvent<LinkRouteOpenEvent, Unit>(PortIds.SETTINGS_ACTION_OPEN)
+    ProductComponentEvent<LinkRouteOpenEvent, Unit>(PortIds.NAVIGATION_SETTINGS_ENTRY_OPEN)
 
 internal object DevHostOpenEvent :
-    ProductComponentEvent<LinkRouteOpenEvent, Unit>(PortIds.DEV_HOST_OPEN)
+    ProductComponentEvent<LinkRouteOpenEvent, Unit>(PortIds.NAVIGATION_DEV_HOST_ENTRY_OPEN)

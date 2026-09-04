@@ -79,8 +79,8 @@ internal fun LinkPhoneSettings(
         settingsTree
             .orderedMounts.forEach { mount ->
                 when (mount.component) {
-                    GeneratedLinkSettingsComponent.PAGE_HOST -> Unit
-                    GeneratedLinkSettingsComponent.ACTIVE_PLAYBACK -> playback.activeTurnId
+                    GeneratedLinkSettingsComponent.NAVIGATION_PAGE_HOST -> Unit
+                    GeneratedLinkSettingsComponent.PLAYBACK_CONTROLS -> playback.activeTurnId
                         ?.let { id -> playback.turn?.takeIf { it.turnId == id } }
                         ?.let { active ->
                             item(mount.id) {
@@ -105,7 +105,7 @@ internal fun LinkPhoneSettings(
                                 )
                             }
                         }
-                    GeneratedLinkSettingsComponent.CONNECTION -> item(mount.id) {
+                    GeneratedLinkSettingsComponent.SESSION_CONNECTION -> item(mount.id) {
                         PhoneRow(
                             title = connectionRouteLabel(connection.connectionDetail.orEmpty()),
                             sub = connection.connectionDetail.orEmpty().uppercase()
@@ -117,7 +117,7 @@ internal fun LinkPhoneSettings(
                             },
                         )
                     }
-                    GeneratedLinkSettingsComponent.PUBLIC_LINK -> item(mount.id) {
+                    GeneratedLinkSettingsComponent.SESSION_PUBLIC_LINK -> item(mount.id) {
                         PhoneRow(
                             title = if (publicLink.publicLinkActive) {
                                 "DISCONNECT PUBLIC LINK"
@@ -133,7 +133,7 @@ internal fun LinkPhoneSettings(
                             onTap = onPublicLink,
                         )
                     }
-                    GeneratedLinkSettingsComponent.PREFERENCES -> {
+                    GeneratedLinkSettingsComponent.PREFERENCES_TOGGLES -> {
                         item("${mount.id}.hands-free") {
                             RingChoiceRow(
                                 title = "HANDS-FREE",
@@ -165,14 +165,14 @@ internal fun LinkPhoneSettings(
                             )
                         }
                     }
-                    GeneratedLinkSettingsComponent.LOCAL_HISTORY -> item(mount.id) {
+                    GeneratedLinkSettingsComponent.HISTORY_LOCAL -> item(mount.id) {
                         PhoneRow(
                             title = "LOCAL HISTORY",
                             sub = "${localHistory.retainedTurns} / ${localHistory.maxTurns} TURNS · OLDEST DROPS FIRST",
                             icon = LinkNativeBindings.requireIcon("activity"),
                         )
                     }
-                    GeneratedLinkSettingsComponent.UPDATES -> {
+                    GeneratedLinkSettingsComponent.UPDATES_PANEL -> {
                         updateRows.forEach { row -> item(row.key) { PhoneRow(row) } }
                         if (updateChangelog.isNotBlank()) {
                             item("update-changelog") {
@@ -184,7 +184,7 @@ internal fun LinkPhoneSettings(
                             }
                         }
                     }
-                    GeneratedLinkSettingsComponent.DEV_HOST -> item(mount.id) {
+                    GeneratedLinkSettingsComponent.NAVIGATION_DEV_HOST_ENTRY -> item(mount.id) {
                         PhoneRow(
                             title = "DEV HOST",
                             sub = "RESPONSIVE · WATCH EXACT",
@@ -194,7 +194,7 @@ internal fun LinkPhoneSettings(
                             },
                         )
                     }
-                    GeneratedLinkSettingsComponent.RECOVERY -> if (recovery.phase == LinkRecoveryPhase.QUARANTINED) {
+                    GeneratedLinkSettingsComponent.RECOVERY_STATUS -> if (recovery.phase == LinkRecoveryPhase.QUARANTINED) {
                         item(mount.id) {
                             PhoneRow(
                                 "RECOVERY",
