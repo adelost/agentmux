@@ -410,16 +410,15 @@ export function generateAgentsYaml(
     }
     const codexCount = config.codexCount ?? Math.max(0, config.panes - claudeCount);
     for (let i = 0; i < codexCount; i++) {
-      const pane = config.backend === "native"
-        ? {
-            name: i === 0 ? "codex" : `codex-${i + 1}`,
-            cmd: "native:codex",
-            engine: "codex",
-            ...(config.codexModel ? { model: config.codexModel } : {}),
-            ...(config.effort ? { effort: config.effort } : {}),
-            ...(config.nativeAgentIds?.[paneIdx] ? { nativeAgentId: config.nativeAgentIds[paneIdx] } : {}),
-          }
-        : { name: i === 0 ? "codex" : `codex-${i + 1}`, cmd: DEFAULT_CODEX_CMD };
+      const pane = {
+        name: i === 0 ? "codex" : `codex-${i + 1}`,
+        cmd: config.backend === "native" ? "native:codex" : DEFAULT_CODEX_CMD,
+        ...(config.codexModel ? { model: config.codexModel } : {}),
+        ...(config.effort ? { effort: config.effort } : {}),
+        ...(config.backend === "native" ? { engine: "codex",
+          ...(config.nativeAgentIds?.[paneIdx] ? { nativeAgentId: config.nativeAgentIds[paneIdx] } : {}),
+        } : {}),
+      };
       const label = labelFor(paneIdx);
       if (label) pane.label = label;
       panes.push(pane);

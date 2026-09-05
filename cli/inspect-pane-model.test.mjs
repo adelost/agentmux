@@ -42,6 +42,19 @@ function fixture({ usage = null, override = null, capture = "$ ", command = "nod
 }
 
 feature("model and process evidence in amux ps", () => {
+  component("a dormant pane shows its source-configured model without turning history into intent", {
+    given: ["old session usage, a new YAML model, and no manual override", () =>
+      fixture({ command: "bash", usage: OLD })],
+    when: ["inspecting the generated model field", (ctx) => inspectPane(ctx, {
+      ...agent, panes: [{ cmd: "codex", model: NEXT.model }],
+    }, ctx.pane)],
+    then: ["the next start model is configured, not a claimed live observation", (row) => {
+      expect(row.context).toBeNull();
+      expect(row.modelView.selected).toEqual({ model: NEXT.model, effort: OLD.effort, source: "config" });
+      expect(formatPaneModel(row)).toBe("stopped; gpt-6-astra·max [configured]; last: gpt-5.6-sol·max");
+    }],
+  });
+
   for (const pane of [{ command: "bash" }, { command: "node", dead: true }]) {
     component(`exited ${pane.command} cannot present old usage as a running model`, {
       given: ["a recent old rollout, saved new choice and stale UI", () =>

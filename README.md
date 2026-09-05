@@ -408,6 +408,15 @@ Discord commands:
 Discord accepts the double-slash spelling too (`//status`, `//switch`,
 `//model ...`, `//restart all`), which avoids Discord's own slash-command UI.
 
+For Codex panes, `codexModel` and optional `effort` in `agentmux.yaml` apply
+to tmux as well as native configuration. At tmux startup an explicit launch
+selection wins, then a saved pane `/model` choice, then the configured default,
+and only then session history. A configured model without an effort preserves
+the previous effort. Defaults are not saved as manual pane choices, so later
+config changes still apply. Updating config does not interrupt a running turn
+or wake stopped panes; `amux ps` labels configured and last-observed models
+separately.
+
 ### Two Codex accounts
 
 Profile 1 is the existing `~/.codex` login. Profile 2 is isolated under
