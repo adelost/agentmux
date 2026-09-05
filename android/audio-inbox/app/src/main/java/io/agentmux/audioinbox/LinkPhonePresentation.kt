@@ -20,14 +20,14 @@ internal fun attachmentUrls(text: String): List<String> =
         .toList()
 
 internal fun turnStatusLabel(turn: LinkTurn): String = when {
-    turn.playbackPhase == PlaybackPhase.PLAYING -> "PLAYING"
-    turn.playbackPhase == PlaybackPhase.PAUSED -> "PAUSED"
-    turn.deliveryPhase == DeliveryPhase.FAILED -> "SEND FAILED"
-    turn.replyPhase == ReplyPhase.FAILED -> "REPLY FAILED"
-    turn.replyPhase == ReplyPhase.READY -> "REPLY READY"
-    turn.replyPhase == ReplyPhase.THINKING -> "THINKING"
-    turn.deliveryPhase == DeliveryPhase.QUEUED -> "SENT"
-    else -> "SENDING"
+    turn.playbackPhase == PlaybackPhase.PLAYING -> "Reading aloud"
+    turn.playbackPhase == PlaybackPhase.PAUSED -> "Paused"
+    turn.deliveryPhase == DeliveryPhase.FAILED -> "Not sent"
+    turn.replyPhase == ReplyPhase.FAILED -> "Couldn't get a reply"
+    turn.replyPhase == ReplyPhase.READY -> "Replied"
+    turn.replyPhase == ReplyPhase.THINKING -> "Thinking…"
+    turn.deliveryPhase == DeliveryPhase.QUEUED -> "Sent"
+    else -> "Sending…"
 }
 
 internal fun phoneActivePreviewState(playbackActive: Boolean): LinkState = LinkState(
@@ -35,8 +35,8 @@ internal fun phoneActivePreviewState(playbackActive: Boolean): LinkState = LinkS
     connectionDetail = "PRIVATE RELAY READY",
     connectionObservedAtMs = System.currentTimeMillis(),
     targets = listOf(
-        LinkTarget(id = "demo:1", label = "DEMO ONE"),
-        LinkTarget(id = "demo:2", label = "DEMO TWO"),
+        LinkTarget(id = "demo:1", label = "Implementation worker · available for your next task"),
+        LinkTarget(id = "demo:2", label = "Kimi K3 · a second agent with a deliberately long description"),
     ),
     selectedTargetId = "demo:1",
     turns = listOf(

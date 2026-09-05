@@ -32,6 +32,9 @@ internal fun ConversationTurn(turn: LinkTurn, showPlayer: Boolean, onPlayback: (
                     { onPlayback(PlaybackOperation.RESUME) },
                     { onPlayback(PlaybackOperation.STOP) },
                 )
+            } else {
+                PhoneRow("READ ALOUD", "", RingIcons.Speaker, immediate = true,
+                    onTap = { onPlayback(PlaybackOperation.PLAY) })
             }
             attachmentUrls(turn.replyText).forEach { url ->
                 PhoneRow("OPEN LINK", Uri.parse(url).host.orEmpty(), RingIcons.Link, immediate = true,

@@ -125,7 +125,7 @@ class WearLinkScreenTest {
         val rows = state.watchRows(publicLinkActive = true)
 
         assertEquals("TO alpha", rows[0].title)
-        assertEquals("TRANSCRIPTION-FAILED", rows[2].sub)
+        assertEquals("transcription-failed", rows[2].sub)
     }
 
     @Test
@@ -196,7 +196,7 @@ class WearLinkScreenTest {
             locale = Locale.US,
         )
 
-        assertEquals(listOf("connection", "update", "update-published"), rows.map { it.key })
+        assertEquals(listOf("session.connection", "update", "update-published"), rows.map { it.key })
         assertEquals("PUBLISHED", rows.last().title)
         assertEquals("v1.2.2 · Aug 2, 2026, 7:33 AM", rows.last().sub)
     }
@@ -219,11 +219,11 @@ class WearLinkScreenTest {
 
         assertFalse(
             state.watchSettingsRows(upToDate, "1.2.1")
-                .any { it.key == "dev-host" },
+                .any { it.key == "navigation.dev-host-entry" },
         )
         assertTrue(
             state.watchSettingsRows(upToDate, "1.2.1", onOpenDevHost = {})
-                .any { it.key == "dev-host" && it.sub == "RESPONSIVE · WATCH EXACT" },
+                .any { it.key == "navigation.dev-host-entry" && it.title == "DISPLAY PREVIEW" },
         )
     }
 }

@@ -109,7 +109,7 @@ internal fun LinkPhoneSettings(
                     GeneratedLinkSettingsComponent.SESSION_CONNECTION -> item(mount.id) {
                         PhoneRow(
                             title = connectionRouteLabel(connection.connectionDetail.orEmpty()),
-                            sub = connection.connectionDetail.orEmpty().uppercase()
+                            sub = connection.connectionDetail.orEmpty()
                                     .ifBlank { "Not connected" },
                             icon = if (connection.connection == ConnectionState.CONNECTED) {
                                 LinkNativeBindings.requireIcon("wifi")
@@ -201,7 +201,7 @@ internal fun LinkPhoneSettings(
                         item(mount.id) {
                             PhoneRow(
                                 "RECOVERY",
-                                recovery.detail.orEmpty().uppercase(),
+                                recovery.detail.orEmpty(),
                                 LinkNativeBindings.requireIcon("warning"),
                             )
                         }

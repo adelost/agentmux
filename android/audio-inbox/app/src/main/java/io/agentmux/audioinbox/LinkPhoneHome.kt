@@ -30,6 +30,7 @@ import com.adelost.ringkit.ui.RingTextInputSpec
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.LinkRecoveryPhase
 import io.agentmux.linkcore.LinkTurn
+import io.agentmux.linkcore.linkConnectionLabel
 import io.agentmux.linkui.LinkCaptureControl
 import io.agentmux.linkui.LinkRecipientPicker
 import io.agentmux.linkui.activeTurnId
@@ -132,7 +133,8 @@ internal fun LinkPhoneHome(
                     }
                     if (connection.connection != ConnectionState.CONNECTED && selected != null) {
                         item("connection") {
-                            PhoneRow("CONNECTION", "Reconnecting. Open Settings for details.", RingIcons.Wifi)
+                            PhoneRow(linkConnectionLabel(connection.connection),
+                                "Open Settings for connection details.", RingIcons.Wifi)
                         }
                     }
                     if (recovery.phase == LinkRecoveryPhase.QUARANTINED) {
