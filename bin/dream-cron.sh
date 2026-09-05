@@ -50,7 +50,7 @@ if printf "%s\n" "$dream_output" | grep -q "^Dream skipped: lock-held"; then
 fi
 
 date_key="$(TZ=Europe/Stockholm date +%F)"
-daily_file="$OPENCLAW_WORKSPACE/memory/$date_key.md"
+daily_file="$AMUX_WORKSPACE/memory/$date_key.md"
 
 # Judge the run by its own exit status BEFORE asserting on the daily file. The
 # assertions below describe a SUCCESSFUL run and include the run sentinel, which
@@ -76,7 +76,7 @@ grep -q "<!-- amux-dream-run:$date_key " "$daily_file"
 # configured visible pane curates today's block; old-file backlog is linted
 # and reported without automatic rewrites.
 lint_status=0
-lint_output="$("$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" memory lint --json --report-daily --compacted 0 --workspace "$OPENCLAW_WORKSPACE" 2>&1)" || lint_status=$?
+lint_output="$("$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" memory lint --json --report-daily --compacted 0 --workspace "$AMUX_WORKSPACE" 2>&1)" || lint_status=$?
 printf "%s\n" "$lint_output" >> "$AGENTMUX_DREAM_LOG"
 if ! printf "%s" "$lint_output" | "$NODE_BIN" -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{JSON.parse(s)}catch{process.exit(1)}})'; then
   echo "memory lint returned invalid JSON" >&2

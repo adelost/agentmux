@@ -45,6 +45,20 @@ configured owner exact /compact
 The cron wrapper remains a thin heartbeat entrypoint. It alerts on failure and
 never changes the chosen pane, model or effort.
 
+`amux memory status`, `memory lint` and `doctor` inspect the existing local
+daily `dream-cron.sh` schedule. The deadline is the cron time plus one hour;
+`AMUX_DREAM_GRACE_MS` explicitly adjusts grace (1 minute to 6 hours).
+System timezone or `CRON_TZ` controls scheduling, while Dream's memory filenames
+remain Stockholm dates. A plain cron `TZ` environment variable does not change
+the scheduler timezone. Unsupported or unavailable schedules report WARN rather
+than inventing a deadline. An unconfigured Dream is reported as disabled.
+
+After the deadline, missing/stale results warn even without a failure marker.
+Success requires the current daily sentinel plus the existing run/source/owner
+validated artifact matching the committed summary; a controller's zero-work
+run is also valid. An older failure does not override a later validated success.
+These checks are offline/read-only: they never prompt a pane or rerun Dream.
+
 ## File policy
 
 - `MEMORY.md`: short curated index, never automatically compacted.

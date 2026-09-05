@@ -38,6 +38,8 @@ import {
 } from "../core/suggestions-comment-bridge.mjs";
 import { discoverNativeRuntimes } from "./native-runtime-service.mjs";
 import { checkWorkspaceHealth, observeWorkspaceHealth } from "../core/doctor-workspaces.mjs";
+import { observeDreamHealth } from "../core/dream-health.mjs";
+import { defaultWorkspace } from "../core/runtime-defaults.mjs";
 
 function report(checks) {
   console.log("\namux doctor\n");
@@ -214,6 +216,7 @@ export async function cmdDoctor(ctx, { workspaces = false } = {}) {
 
   const tmuxRequired = Boolean(cfgError) || agents.some((agent) => agent.backend !== "native");
   const checks = [
+    { name: "nightly Dream", ...observeDreamHealth(process.env.OPENCLAW_WORKSPACE || process.env.AMUX_WORKSPACE || defaultWorkspace(home), { configPath: ctx.configPath }), hint: "inspect amux memory status and the existing Dream cron log; no automatic rerun" },
     ...workspaceChecks,
     checkBridgeProcess({ pids, supervised }),
     checkBridgeMode({ mode: readBridgeMode(), running: pids.length > 0 }),

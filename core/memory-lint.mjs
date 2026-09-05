@@ -72,7 +72,8 @@ function latestDreamSentinel(text) {
   return { date: m[1], time: m[2], ok: Number(m[3]), failed: Number(m[4]) };
 }
 
-export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy, home = process.env.HOME } = {}) {
+/** WHAT: Checks workspace memory against policy and optional Dream evidence. WHY: Keeps missing runs visible alongside existing content warnings. */
+export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy, home = process.env.HOME, dreamHealth = null } = {}) {
   const root = workspace;
   const memoryDir = join(root, "memory");
   if (!existsSync(memoryDir)) throw new Error(`${memoryDir}: memory directory not found`);
@@ -314,7 +315,9 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
   // A recorded failure with no successful run for the same day means the night
   // produced no digest. Escalate it to a warning so the morning lint reports a
   // lost night instead of leaving it as a status line nobody acts on.
-  if (dreamGap && !dream) {
+  if (dreamHealth?.status === "warn") {
+    add("warning", "dream_freshness", todayPath, dreamHealth.detail);
+  } else if (!dreamHealth && dreamGap && !dream) {
     add("warning", "dream_gap", todayPath,
       `nightly digest missing (${dreamGap.time}): ${dreamGap.reason}`);
   }
@@ -329,6 +332,7 @@ export function lintMemory(workspace, { now = new Date(), policy: suppliedPolicy
     summary: { warnings: warningCount, info: infoCount, compactable: compactable.length },
     dream,
     dreamGap,
+    dreamHealth,
   };
 }
 
@@ -342,6 +346,7 @@ export function formatMemoryLint(result) {
   return rows.join("\n");
 }
 
+/** WHAT: Formats the memory health summary. WHY: Separates validated Dream results from schedules and stale markers. */
 export function formatMemoryStatus(result) {
   const rows = [
     `Memory status: ${result.summary.warnings} warning(s), ${result.summary.compactable} compactable daily file(s)`,
@@ -353,7 +358,8 @@ export function formatMemoryStatus(result) {
   } else {
     rows.push("Backlog: empty");
   }
-  if (result.dream) rows.push(`Latest dream: ${result.dream.date} ${result.dream.time}, ${result.dream.ok} ok / ${result.dream.failed} failed`);
+  if (result.dreamHealth) rows.push(`Latest dream: ${result.dreamHealth.status.toUpperCase()} ${result.dreamHealth.detail}`);
+  else if (result.dream) rows.push(`Latest dream: ${result.dream.date} ${result.dream.time}, ${result.dream.ok} ok / ${result.dream.failed} failed`);
   else if (result.dreamGap) rows.push(`Latest dream: FAILED ${result.dreamGap.date} ${result.dreamGap.time}, no digest written (${result.dreamGap.reason})`);
   else rows.push("Latest dream: no sentinel in today's file");
   if (result.compact) rows.push(`Latest compact: ${result.compact.date} ${result.compact.hash.slice(0, 12)} (${result.compact.subject})`);

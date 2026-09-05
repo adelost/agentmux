@@ -113,6 +113,7 @@ import {
   loadTodos, listRemindable, formatReminderSummary, DEFAULT_TODOS_PATH,
 } from "../core/todos.mjs";
 import { cmdLint } from "./lint.mjs";
+import { observeDreamHealth } from "../core/dream-health.mjs";
 import {
   askAnchorKey,
   attachAskLineAnchors,
@@ -1993,11 +1994,7 @@ const SHELL_CMDS = /^(bash|zsh|fish|sh|dash)$/;
 const ACTIVE_STATUS = (s) => statusTier(s) >= 2;
 
 
-/**
- * amux doctor — one table over every silent failure mode: dead/hung/stale
- * bridge, broken hooks, dead ledger, unreachable tmux, broken config.
- * Exit code: 0 ok, 1 warnings, 2 failures (cron-friendly).
- */
+/** WHAT: Reports memory health or runs explicit maintenance. WHY: Keeps read-only status separate from compaction effects. */
 async function cmdMemory(_ctx, subcommand, flags = {}) {
   const workspace = flags.workspace || process.env.OPENCLAW_WORKSPACE
     || defaultWorkspace(process.env.HOME);
@@ -2007,13 +2004,13 @@ async function cmdMemory(_ctx, subcommand, flags = {}) {
   } = await import("../core/memory-lint.mjs");
 
   if (subcommand === "status") {
-    const result = lintMemory(workspace);
+    const result = lintMemory(workspace, { dreamHealth: observeDreamHealth(workspace, { configPath: _ctx.configPath }) });
     result.compact = readLatestMemoryCompact(workspace);
     console.log(flags.json ? JSON.stringify(result, null, 2) : formatMemoryStatus(result));
     return;
   }
   if (subcommand === "lint") {
-    const result = lintMemory(workspace);
+    const result = lintMemory(workspace, { dreamHealth: observeDreamHealth(workspace, { configPath: _ctx.configPath }) });
     if (flags.reportDaily) {
       writeMemoryDailyReport(workspace, result, { compacted: Number(flags.compacted) || 0 });
     }
