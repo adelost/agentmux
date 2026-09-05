@@ -24,6 +24,15 @@ class LinkConversationTest {
         val newer = linkConversationTurns(retained + turn("new", "a"), "a")
         assertEquals(selected.first(), newer.single { it.turnId == opened })
         assertEquals("old user text", selected.first().userText)
+        // Exercise the production reducer at capacity, including a late reply
+        // to the evicted turn. It must not resurrect or retarget that exchange.
+        val ledger = LinkStateLedger(LinkState(turns = retained)) { }
+        repeat(50) { ledger.dispatch(LinkAction.Submit(turn("next-$it", "a"))) }
+        assertEquals(50, ledger.value.turns.size)
+        assertNull(linkConversationTurns(ledger.value.turns, "a").firstOrNull { it.turnId == opened })
+        val beforeLateReply = ledger.value
+        ledger.dispatch(LinkAction.Reply(requireNotNull(opened), "a", "Too late"))
+        assertEquals(beforeLateReply, ledger.value)
     }
 
     @Test fun emptyAndLongRowsArePreviewsNotDestructiveTextTransforms() {

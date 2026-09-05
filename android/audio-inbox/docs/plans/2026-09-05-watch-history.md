@@ -57,3 +57,7 @@ physical crown hardware and actual TTS audio are not part of this run.
 
 Remaining product limit: Wear's existing 50-turn window is process-memory
 history, not a restart-persistent archive. Phone keeps its existing persistence.
+The limit is global, not 50 per recipient. This is Link conversation history,
+not a Discord channel archive. Capacity/late-reply regression uses the real
+reducer: after 50 replacements the evicted ID is absent, and a late reply does
+not resurrect it or mutate another message. Full Discord import is not added.
