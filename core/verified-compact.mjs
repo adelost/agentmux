@@ -44,7 +44,10 @@ export async function verifiedClaudeCompact({
   const command = await sendSlash(agent, agentName, pane, "/compact", {
     suppressReceipt: true,
     settleMs,
-    maxRescues: 2,
+    // Claude may persist the local-command receipt only after compacting.
+    // Wait for that exact receipt instead of sending extra Enter mid-compact.
+    receiptTimeoutMs: pollAttempts * pollMs,
+    maxRescues: 0,
     sleep,
   });
   if (!command.delivered || command.via !== "command-receipt") {

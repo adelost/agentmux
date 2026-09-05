@@ -212,18 +212,33 @@ export function dreamCandidateBlocker(status) {
  * its first poll, a capable one gets the whole grace period, and a capable one
  * that never settles ends the walk instead of passing the night along.
  */
-async function selectIdleOwner(ctx, candidates, { ensureReady, attempts, ...idleOptions } = {}) {
+async function selectIdleOwner(ctx, candidates, { ensureReady, prepare, attempts, ...idleOptions } = {}) {
   const skipped = [];
   const reasons = [];
+  let lastError = null;
   for (const candidate of candidates) {
-    await ensureReady(candidate.agent, candidate.pane);
+    try { await ensureReady(candidate.agent, candidate.pane); }
+    catch (error) {
+      lastError = error;
+      skipped.push(`${candidate.agent}:${candidate.pane}`);
+      reasons.push(`${candidate.agent}:${candidate.pane} startup failed: ${error.message}`);
+      continue;
+    }
     const outcome = await waitForOwnerIdle(ctx, candidate, { ...idleOptions, attempts });
-    if (outcome.idle) return { owner: candidate, skipped, reasons };
+    if (outcome.idle) {
+      try { return { owner: candidate, ...(await prepare(candidate)), skipped, reasons }; }
+      catch (error) {
+        lastError = error;
+        skipped.push(`${candidate.agent}:${candidate.pane}`);
+        reasons.push(`${candidate.agent}:${candidate.pane} preparation failed: ${error.message}`);
+        continue;
+      }
+    }
     skipped.push(`${candidate.agent}:${candidate.pane}`);
     reasons.push(`${candidate.agent}:${candidate.pane} ${outcome.blocked || "stayed busy for the whole grace period"}`);
     if (!outcome.blocked) break;
   }
-  return { owner: null, skipped, reasons };
+  return { owner: null, skipped, reasons, lastError };
 }
 
 async function waitForOwnerIdle(ctx, owner, {
@@ -258,6 +273,26 @@ function ownerQuality(owner, dependencies) {
   return dependencies.getContext
     ? dependencies.getContext(owner.paneDir, owner.engine)
     : (dependencies.getQuality || readDreamOwnerQuality)(owner);
+}
+
+/** WHAT: Prepares one configured curator before assigning editorial work. WHY: A failed quality or compact check must not bypass the configured fallback list. */
+async function prepareDreamOwner(ctx, owner, dependencies) {
+  verifyOwnerQuality(owner, ownerQuality(owner, dependencies));
+  const compact = owner.engine === "codex"
+    ? await (dependencies.compactCodex || verifiedCodexCompact)({
+        agent: ctx.agent, agentName: owner.agent, pane: owner.pane, paneDir: owner.paneDir,
+        sleep: dependencies.sleep,
+      })
+    : await (dependencies.compactClaude || verifiedClaudeCompact)({
+        agent: ctx.agent, agentName: owner.agent, pane: owner.pane, paneDir: owner.paneDir,
+        latestIdentity: latestClaudeSessionIdentity, sleep: dependencies.sleep,
+      });
+  if (!compact.ok) throw new Error(`dream-owner-compact-failed:${compact.reason}`);
+  const quality = verifyOwnerQuality(owner, ownerQuality(owner, dependencies));
+  if (quality.sessionId && quality.sessionId !== compact.sessionId) {
+    throw new Error("dream-owner-quality-session-mismatch");
+  }
+  return { compact, quality };
 }
 
 /** WHAT: Builds one fleet summary. WHY: Keeps editorial judgment visible while AMUX owns the memory write. */
@@ -339,12 +374,13 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
 
     const selection = await selectIdleOwner(ctx, candidates, {
       ensureReady: (agent, pane) => ctx.agent.ensureReady(agent, pane),
+      prepare: (candidate) => prepareDreamOwner(ctx, candidate, dependencies),
       attempts: dependencies.idleAttempts,
       pollMs: dependencies.idlePollMs,
       sleep: dependencies.sleep,
       getStatus: dependencies.getStatus,
     });
-    if (!selection.owner) throw new Error(`dream-owner-not-idle:${selection.skipped.join(",")}`);
+    if (!selection.owner) throw selection.lastError || new Error(`dream-owner-not-idle:${selection.skipped.join(",")}`);
     if (selection.skipped.length) {
       const message = `Dream: curator ${selection.reasons.join("; ")};`
         + ` curating with configured fallback ${selection.owner.agent}:${selection.owner.pane}.`;
@@ -356,27 +392,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       }
     }
     owner = selection.owner;
-    const context = ownerQuality(owner, dependencies);
-    verifyOwnerQuality(owner, context);
-
-    const compact = owner.engine === "codex"
-      ? await (dependencies.compactCodex || verifiedCodexCompact)({
-          agent: ctx.agent, agentName: owner.agent, pane: owner.pane, paneDir: owner.paneDir,
-          sleep: dependencies.sleep,
-        })
-      : await (dependencies.compactClaude || verifiedClaudeCompact)({
-          agent: ctx.agent, agentName: owner.agent, pane: owner.pane, paneDir: owner.paneDir,
-          latestIdentity: latestClaudeSessionIdentity, sleep: dependencies.sleep,
-        });
-    if (!compact.ok) throw new Error(`dream-owner-compact-failed:${compact.reason}`);
-
-    const quality = verifyOwnerQuality(
-      owner,
-      ownerQuality(owner, dependencies),
-    );
-    if (quality.sessionId && quality.sessionId !== compact.sessionId) {
-      throw new Error("dream-owner-quality-session-mismatch");
-    }
+    const { compact, quality } = selection;
 
     ensureDreamDailyFile(memPath, dateKey);
     const memoryBefore = readFileSync(memPath, "utf8");
