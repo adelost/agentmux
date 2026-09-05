@@ -301,21 +301,20 @@ feature("formatReminderMessage rotation (1.25.2 behavior)", () => {
   unit("count advances through the section list", {
     given: ["counts 1..4", () => ({ n: 45 })],
     when: ["formatting each", ({ n }) => [1, 2, 3, 4].map((c) => formatReminderMessage(n, c))],
-    then: ["comms, coding-philosophy, recommendation, root-cause in order", ([r1, r2, r3, r4]) => {
+    then: ["comms, scoped verification, recommendation, root-cause in order", ([r1, r2, r3, r4]) => {
       expect(r1).toMatch(/Kommunikationsdisciplin/);
-      expect(r2).toMatch(/coding-philosophy\.md/);
+      expect(r2).toMatch(/fast relevant unit tests/);
       expect(r3).toMatch(/Always lead with a recommendation/);
       expect(r4).toMatch(/Root cause > symptoms/);
     }],
   });
 
-  unit("the 2026-08-04 incident rule rides the rotation", {
-    given: ["the incident slot (last entry)", () => ({ n: 45, count: DRIFT_SECTIONS.length - 1 })],
+  unit("healthy idle replaces the stale incident mandate", {
+    given: ["the healthy idle slot (last entry)", () => ({ n: 45, count: DRIFT_SECTIONS.length - 1 })],
     when: ["formatting", ({ n, count }) => formatReminderMessage(n, count)],
-    then: ["deep-dive targets the incident file and the stand-still directive", (r) => {
-      expect(r).toMatch(/board-incident-reminder\.md/);
-      expect(r).toMatch(/stand still and say so/);
-      expect(r).toMatch(/Never repair tooling\/board\/bookkeeping/);
+    then: ["current task and idle policy, without the revoked mandate", (r) => {
+      expect(r).toMatch(/drained backlog is healthy idle/);
+      expect(r).not.toMatch(/board-incident|stand still|bdd-vitest/);
     }],
   });
 
@@ -325,12 +324,12 @@ feature("formatReminderMessage rotation (1.25.2 behavior)", () => {
     then: ["same message as count 0", (r) => expect(r).toBe(formatReminderMessage(45, 0))],
   });
 
-  unit("whole-file entries (section: null) point at the file without a section clause", {
-    given: ["the coding-philosophy slot", () => ({ n: 45, count: 2 })],
-    when: ["formatting", ({ n, count }) => formatReminderMessage(n, count)],
-    then: ["re-read targets the file itself", (r) => {
-      expect(r).toMatch(/Re-read ~\/\.claude\/coding-philosophy\.md:/);
-      expect(r).not.toMatch(/section of ~\/\.claude\/coding-philosophy\.md/);
+  unit("non-Claude panes reference the actual generated AGENTS file", {
+    given: ["a Codex pane", () => ({ n: 45, count: 2 })],
+    when: ["formatting", ({ n, count }) => formatReminderMessage(n, count, "codex", "/repo")],
+    then: ["re-read targets the engine's authoritative file", (r) => {
+      expect(r).toContain("/repo/.agents/AGENTS.md");
+      expect(r).not.toMatch(/CLAUDE|coding-philosophy/);
     }],
   });
 
@@ -361,7 +360,7 @@ feature("formatReminderMessage mention-all (1.20.90 behavior)", () => {
         expect(msg).toMatch(/Also still in force/);
         expect(msg).toMatch(/Staffing and review economics|self-directed fleet/i);
         expect(msg).toMatch(/kommunikationsdisciplin|Kommunikationsdisciplin/);
-        expect(msg).toMatch(/coding-philosophy\.md/);
+        expect(msg).toMatch(/scoped verification|fast relevant unit tests/);
         expect(msg).toMatch(/lead with a recommendation|Always lead with a recommendation/i);
         expect(msg).toMatch(/root cause > symptoms/i);
       }

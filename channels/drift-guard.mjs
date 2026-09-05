@@ -1,4 +1,4 @@
-// Bridge-side poll loop that sends "re-read your CLAUDE.md" reminders to
+// Bridge-side poll loop that sends "re-read your agent instructions" reminders to
 // panes that have drifted from their rules (attention-weight decay over
 // many turns). Mirrors the shape of channels/auto-compact.mjs — pure
 // decision lives in core/reminder-state.mjs, this is the I/O layer.
@@ -9,7 +9,12 @@
 
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
 import { detectPaneStatus } from "../cli/format.mjs";
-import { panePathFor, countWorkTurnsSince, findLatestCompactTs } from "../core/jsonl-reader.mjs";
+import { panePathFor } from "../core/jsonl-reader.mjs";
+import { readReminderActivity } from "../core/reminder-activity.mjs";
+import { dialectFor } from "../cli/inspect-pane.mjs";
+import { isCodingDialect } from "../core/dialects.mjs";
+import { latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
+import { TERMINAL_DELIVERY_STATES } from "../core/delivery-queue-policy.mjs";
 import {
   loadReminderState,
   saveReminderState,
@@ -20,6 +25,7 @@ import {
 } from "../core/reminder-state.mjs";
 import { readParkState } from "../core/pane-park.mjs";
 
+/** WHAT: Schedules the bridge's idle-pane reminder checks. WHY: Keeps delivery receipts separate from activity and scheduling decisions. */
 export function createDriftGuard({
   agent,
   deliveryBroker = null,
@@ -29,42 +35,35 @@ export function createDriftGuard({
   log = (msg) => console.log(`drift-guard | ${msg}`),
 }) {
   let intervalId = null;
+  let ticking = false;
   let state = loadReminderState(config.statePath);
 
   async function paneStatus(agentConfig, paneIdx) {
     try {
       const content = await agent.capturePane(agentConfig.name, paneIdx, 50);
-      return detectPaneStatus(content);
+      return content ? mergeStatus(detectPaneStatus(content), latestPaneStatesCached().get(`${agentConfig.name}:${paneIdx}`)).status : "unknown";
     } catch {
       return "unknown";
     }
   }
 
-  function readTurnsSinceCutoff(paneDir, cutoffMs) {
-    // countTurnsSince accepts null (count all, capped at 51) or a Date.
-    // For our threshold of ~40 we just care "≥ threshold?" — capped at
-    // 51 is fine because 51 > 40 → action=send still fires.
-    const d = cutoffMs != null ? new Date(cutoffMs) : null;
-    return countWorkTurnsSince(paneDir, d) || { count: 0, latest: null };
-  }
-
-  async function sendReminder(agentConfig, paneIdx, paneKey, turnCount, reminderCount) {
+  async function sendReminder(agentConfig, paneIdx, paneKey, turnCount, reminderCount, dialect, latestWork) {
     const agentName = agentConfig.name;
-    const text = formatReminderMessage(turnCount, reminderCount);
+    const text = formatReminderMessage(turnCount, reminderCount, dialect, agentConfig.dir);
+    const rotationKey = `drift-guard:${paneKey}:${reminderCount}`;
+    const idempotencyKey = `${rotationKey}:${Date.parse(latestWork)}`;
     try {
-      if (deliveryBroker) {
-        const result = await deliveryBroker.enqueueAndWait({
-          agentName,
-          pane: paneIdx,
-          text,
-          source: "drift-guard",
-          idempotencyKey: `drift-guard:${paneKey}:${reminderCount}`,
-        });
-        log(`${result.delivered ? "reminded" : "durably queued reminder for"} ${paneKey} at ${turnCount} turns past refresh`);
-      } else {
-        await agent.sendOnly(agentName, text, paneIdx);
-        log(`reminded ${paneKey} at ${turnCount} turns past refresh`);
-      }
+      // No sendOnly fallback: it can wake a stopped CLI and lacks a receipt.
+      if (!deliveryBroker?.queue?.list) return false;
+      const jobs = deliveryBroker.queue.list(agentName, paneIdx);
+      const rotation = jobs.filter((job) => job.idempotencyKey === rotationKey || job.idempotencyKey?.startsWith(`${rotationKey}:`));
+      if (rotation.some((job) => job.status === "acknowledged")) return true;
+      // A terminal non-receipt may retry only after new real work, not each tick.
+      if (rotation.some((job) => job.idempotencyKey === idempotencyKey)) return false;
+      if (jobs.some((job) => job.source === "drift-guard" && !TERMINAL_DELIVERY_STATES.has(job.status))) return false;
+      const result = await deliveryBroker.enqueueAndWait({ agentName, pane: paneIdx, text, source: "drift-guard", idempotencyKey });
+      log(`${result.delivered ? "reminded" : "unacknowledged reminder for"} ${paneKey} at ${turnCount} turns past refresh`);
+      if (result.delivered !== true) return false;
     } catch (err) {
       log(`send failed for ${paneKey}: ${err.message}`);
       return false;
@@ -88,7 +87,7 @@ export function createDriftGuard({
     return true;
   }
 
-  async function tick() {
+  async function tickOnce() {
     if (!config.enabled) return;
 
     let agents;
@@ -105,20 +104,24 @@ export function createDriftGuard({
       if (a.backend === "native") continue;
       const panes = Array.isArray(a.panes) ? a.panes : [];
       for (let i = 0; i < panes.length; i++) {
-        // Only Claude panes have CLAUDE.md baseline rules; skip shells/make/etc.
-        // Claude panes are named `claude`, `claude-2`, `claude-3`... in config,
-        // but all share `cmd` starting with "claude". Use cmd for robustness.
-        if (!String(panes[i]?.cmd || "").startsWith("claude")) continue;
+        const dialect = dialectFor(a, { index: i });
+        if (!isCodingDialect(dialect)) continue;
 
         const paneKey = `${a.name}:${i}`;
         if (!state[paneKey]) state[paneKey] = { lastReminderTsMs: null, lastCompactTsMs: null };
         const paneState = state[paneKey];
 
+        const status = await paneStatus(a, i);
+        const runtimeState = typeof agent.paneProcessState === "function"
+          ? await agent.paneProcessState(a.name, i).catch(() => null) : null;
+        if (status !== "idle" || !runtimeState?.running || runtimeState.dead || runtimeState.shell) continue;
+
         const paneDir = panePathFor(a, i);
 
         // Step 1: detect new /compact. If so, advance lastCompactTsMs AND
         // skip reminder this tick — the pane just refreshed its rules.
-        const latestCompactTs = findLatestCompactTs(paneDir);
+        const turnActivity = readReminderActivity(paneDir, panes[i].cmd, cutoffFor(paneState));
+        const latestCompactTs = turnActivity.latestCompactTs;
         if (latestCompactTs != null &&
             (paneState.lastCompactTsMs == null || latestCompactTs > paneState.lastCompactTsMs)) {
           paneState.lastCompactTsMs = latestCompactTs;
@@ -126,15 +129,6 @@ export function createDriftGuard({
           log(`reset ${paneKey} on /compact at ${new Date(latestCompactTs).toISOString()}`);
           continue;
         }
-
-        // Step 2: compute effective cutoff (later of reminder/compact).
-        const cutoffMs = cutoffFor(paneState);
-        const turnActivity = readTurnsSinceCutoff(paneDir, cutoffMs);
-
-        // Step 3: check pane status so we don't interrupt active work.
-        const status = await paneStatus(a, i);
-        const runtimeState = typeof agent.paneProcessState === "function"
-          ? await agent.paneProcessState(a.name, i).catch(() => null) : null;
 
         const decision = decideReminderAction({
           turnsSinceCutoff: turnActivity.count,
@@ -156,7 +150,7 @@ export function createDriftGuard({
           // reminderCount picks the DRIFT_SECTIONS rotation slot; legacy
           // state entries without it start at 0 (highest-priority rule).
           const reminderCount = paneState.reminderCount || 0;
-          const sent = await sendReminder(a, i, paneKey, turnActivity.count, reminderCount);
+          const sent = await sendReminder(a, i, paneKey, turnActivity.count, reminderCount, dialect, turnActivity.latest);
           if (recordReminderDelivery(paneState, { delivered: sent, nowMs: now, reminderCount })) {
             stateChanged = true;
           }
@@ -168,6 +162,13 @@ export function createDriftGuard({
       try { saveReminderState(state, config.statePath); }
       catch (err) { log(`state save failed: ${err.message}`); }
     }
+  }
+
+  async function tick() {
+    if (ticking) return;
+    ticking = true;
+    try { await tickOnce(); }
+    finally { ticking = false; }
   }
 
   function start() {

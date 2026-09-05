@@ -1,18 +1,18 @@
 // Drift-guard state persistence + pure decision logic.
 //
-// Long-running Claude panes drift from their CLAUDE.md rules as the
+// Long-running coding panes drift from their generated instructions as the
 // conversation accumulates turns — attention weights favor recent content,
 // so rules stated "long ago" (pre-compact system-context is always present,
 // but its effective weight tunnas). /compact resets this because context
 // shrinks and rules are re-loaded with fresh prominence.
 //
-// This module decides WHEN to send a short "re-read your CLAUDE.md"
+// This module decides WHEN to send a short "re-read your instructions"
 // reminder to a pane. Strategy: count turns since the later of
 // (a) last reminder, (b) last /compact on this pane. If that exceeds a
 // threshold AND the pane is idle, it's time.
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { dirname } from "path";
+import { dirname, join } from "path";
 
 export const REMINDER_STATE_PATH =
   process.env.AMUX_REMINDER_STATE_PATH ||
@@ -78,11 +78,8 @@ export function decideReminderAction({
   if (!Number.isFinite(turnsSinceCutoff) || turnsSinceCutoff < 0) {
     return { action: "none", reason: "invalid turn count" };
   }
-  if (status === "working" || status === "permission" || status === "menu" || status === "resume") {
+  if (status !== "idle") {
     return { action: "none", reason: `pane is ${status}` };
-  }
-  if (status === "unknown") {
-    return { action: "none", reason: "unknown status (conservative)" };
   }
   const activity = isReminderTargetActive({ latestWorkTsMs, nowMs, activeWindowMs, runtimeState });
   if (!activity.active) return { action: "none", reason: activity.reason };
@@ -151,12 +148,13 @@ export const DRIFT_SECTIONS = [
       "No status pings, no acks, no politeness; commits + ledger ARE the status.",
   },
   {
-    file: "~/.claude/coding-philosophy.md",
-    section: null,
-    label: "coding-philosophy.md (deklarativt, Result<T,E>, bdd-vitest, inga tysta fallbacks)",
-    directive: "declarative + data-driven, Result<T,E> for domain errors, " +
-      "bdd-vitest for every change, max ~500 lines/file, no silent fallbacks. " +
-      "Run tests + lint before claiming done.",
+    file: ".agents/CLAUDE.md",
+    section: "Staffing and review economics",
+    label: "scoped verification (fast changed-unit tests, lint, local smoke)",
+    directive: "verify fresh trunk with fast relevant unit tests, strict lint " +
+      "and one local smoke within five minutes. No heavy CI or full-suite " +
+      "ritual without human request. Never add or raise file-size exceptions " +
+      "to make a gate green.",
   },
   {
     file: ".agents/CLAUDE.md",
@@ -172,20 +170,13 @@ export const DRIFT_SECTIONS = [
     directive: "fix the cause, not the symptom. " +
       "No --no-verify, no swallowed errors, no skipped tests.",
   },
-  // Incident 2026-08-04: the fleet spent a night repairing its own
-  // coordination machinery while the operator's three product priorities stood
-  // still. The rule existed as prose and was forgotten after /compact —
-  // which is exactly the failure this rotation exists to counter, so the
-  // incident rule rides the same active channel as the rules it joins.
   {
-    file: "~/.agentmux/board-incident-reminder.md",
-    section: null,
-    label: "prioritet > maskineri (incident 2026-08-04: hitta aldrig på eget scope)",
-    directive: "before touching the board or picking work, name which of " +
-      "the operator's written priorities the task serves; if you cannot, stand " +
-      "still and say so. Write their decisions verbatim to a repo file BEFORE " +
-      "continuing. Never repair tooling/board/bookkeeping in order to " +
-      "bookkeep; the receipt is commit + deploy + what the user can now DO.",
+    file: ".agents/CLAUDE.md",
+    section: "Staffing and review economics",
+    label: "healthy idle (no invented tasks or maintenance loops)",
+    directive: "a drained backlog is healthy idle. Do not invent scope or " +
+      "wake unused panes. Follow the current direct task and leave idle " +
+      "agents alone until real work targets them.",
   },
 ];
 
@@ -219,12 +210,13 @@ export const DRIFT_SECTIONS = [
  * @param {number} reminderCount - reminders already sent to this pane
  */
 /** WHAT: Formats one rotating coordination reminder. WHY: Keeps persistent rules visible without repeating every detail. */
-export function formatReminderMessage(turnCount, reminderCount = 0) {
+export function formatReminderMessage(turnCount, reminderCount = 0, dialect = "claude", rootDir = "") {
   const idx = reminderCount % DRIFT_SECTIONS.length;
   const rule = DRIFT_SECTIONS[idx];
+  const file = join(rootDir, ".agents", dialect === "claude" ? "CLAUDE.md" : "AGENTS.md");
   const where = rule.section
-    ? `the "${rule.section}" section of ${rule.file}`
-    : rule.file;
+    ? `the "${rule.section}" section of ${file}`
+    : file;
   const others = DRIFT_SECTIONS
     .filter((_, i) => i !== idx)
     .map((r) => r.label)

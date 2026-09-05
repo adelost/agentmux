@@ -36,6 +36,7 @@ export async function wakeDeliveryTarget({
 
   // Never type a prompt into a shell merely because this producer omitted
   // the optional wake policy. The durable queue can wait for a real CLI.
+  if (job.source === "drift-guard") return refuse("drift reminder cannot wake a stopped pane");
   if (!wakeGate) return refuse("target CLI is not running");
   const admission = await wakeGate({ agentName: job.agentName, pane: job.pane });
   if (!admission?.ok) return refuse(admission?.reason || "admission");
