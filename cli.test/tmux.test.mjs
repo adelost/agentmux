@@ -1,5 +1,26 @@
 import { feature, unit, expect } from "bdd-vitest";
-import { selectOption } from "../cli/tmux.mjs";
+import { listPanes, selectOption } from "../cli/tmux.mjs";
+
+feature("pane process lifecycle evidence", () => {
+  unit("pane_dead survives enumeration even when the command still says node", {
+    when: ["enumerating one alive and one exited node process", async () => {
+      const commands = [];
+      const panes = await listPanes({ tmux: async (command) => {
+        commands.push(command);
+        return { stdout: "0|120x40|node|0\n1|120x40|node|1\n" };
+      } }, "fixture");
+      return { commands, panes };
+    }],
+    then: ["one read carries independent process-death evidence for both rows", ({ commands, panes }) => {
+      expect(commands).toHaveLength(1);
+      expect(commands[0]).toContain("#{pane_dead}");
+      expect(panes).toEqual([
+        { index: 0, width: 120, height: 40, command: "node", dead: false },
+        { index: 1, width: 120, height: 40, command: "node", dead: true },
+      ]);
+    }],
+  });
+});
 
 feature("menu selection", () => {
   unit("option numbers are 1-based", {

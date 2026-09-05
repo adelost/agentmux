@@ -5,7 +5,7 @@
 //
 // For Codex: read the latest token_count event from
 // ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl which already carries
-// total_token_usage + model_context_window.
+// last_token_usage + model_context_window (not lifetime total_token_usage).
 
 import { readFileSync, readdirSync, statSync, existsSync, openSync, fstatSync, readSync, closeSync } from "fs";
 import { join } from "path";
@@ -295,8 +295,7 @@ function getContextFromCodexJsonl(paneDir) {
   const file = latestCodexSessionFor(paneDir);
   if (!file) return null;
 
-  // token_count events are emitted every turn, so the most recent one lives
-  // in the file's tail — no need to read the whole rollout (can be many MB).
+  // The newest token_count lives in the tail, even in multi-MB rollouts.
   const lines = readTailLines(file);
 
   // Read newest current-context usage/model plus the newest compaction marker.
@@ -327,9 +326,10 @@ function getContextFromCodexJsonl(paneDir) {
     const info = entry.payload.info;
     const last = info?.last_token_usage;
     if (!last) continue;
-    // input_tokens already includes cached_input_tokens (they're a subset).
-    // Add output tokens that contribute to the current turn's context.
-    const tokens = (last.input_tokens || 0) + (last.output_tokens || 0);
+    // Compaction can leave a valid current total with zeroed input/output.
+    const tokens = last.total_tokens ?? (Number.isFinite(last.input_tokens) && Number.isFinite(last.output_tokens)
+      ? last.input_tokens + last.output_tokens : NaN);
+    if (!Number.isFinite(tokens) || tokens < 0) continue;
     const max = info.model_context_window || 256_000;
     const observed = Date.parse(entry?.timestamp || "");
     usage = { percent: Math.round((tokens / max) * 100), tokens, windowTokens: max,

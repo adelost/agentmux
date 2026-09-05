@@ -117,6 +117,43 @@ export function parseCodexStatus(text) {
   return status;
 }
 
+const MODEL_FOOTER_RE = /^\s*(?:•\s+)?(gpt-[\w.-]+)\s+(minimal|low|medium|high|xhigh|max|ultra)\s+·\s+.+$/i;
+
+function tokenCount(value) {
+  const match = String(value || "").match(/^(\d+(?:\.\d+)?)\s*([km])?$/i);
+  return match ? Math.round(Number(match[1]) * ({ k: 1_000, m: 1_000_000 }[match[2]?.toLowerCase()] || 1)) : null;
+}
+
+/** WHAT: Reads Codex's visible selection and status usage without driving its UI. WHY: Separates current selection from historical rollout evidence. */
+export function parseCodexPaneReading(text) {
+  const lines = stripAnsi(String(text || "")).trimEnd().split("\n");
+  const footer = lines.slice(-4).map((line) => line.match(MODEL_FOOTER_RE)).filter(Boolean).at(-1);
+  const status = parseCodexStatus(text);
+  const header = lines.findLastIndex((line) => STATUS_HEADER_RE.test(line));
+  const bottom = lines.findIndex((line, index) => index > header && /^\s*╰─+╯\s*$/.test(line));
+  // A status box followed by an answer is scrollback. Only a box still at the
+  // composer/pager boundary can supply a current selection or fallback usage.
+  const current = bottom >= 0 && Boolean(status?.session) && lines.slice(bottom + 1).every((line) =>
+    !line.trim() || /^\s*›/.test(line) || MODEL_FOOTER_RE.test(line)
+    || /^\s*(?:\? for shortcuts|\d+% context left|q to quit)/i.test(line));
+  const selected = footer
+    ? { model: footer[1], effort: footer[2].toLowerCase(), source: "codex-footer" }
+    : current && status.model?.id
+      ? { model: status.model.id, effort: status.model.effort, source: "codex-status" }
+      : null;
+  const usage = current && (!footer || (footer[1] === status.model?.id && footer[2] === status.model?.effort))
+    ? status.context : null;
+  const context = Number.isFinite(usage?.percentLeft) ? {
+    percent: 100 - usage.percentLeft,
+    tokens: tokenCount(usage.used),
+    windowTokens: tokenCount(usage.total),
+    source: "codex-status",
+    confidence: "reported",
+    observedAt: new Date().toISOString(),
+  } : null;
+  return { selected, context };
+}
+
 function statusMarker(text) {
   const lines = String(text || "").split("\n");
   let lastHeader = -1;

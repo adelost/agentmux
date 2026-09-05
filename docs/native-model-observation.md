@@ -34,6 +34,22 @@ A successful turn without any supported actual-model evidence emits `web:model-o
 Queued work remains durable while the guard is active and drains only after an explicit model choice clears it.
 The delivery broker permanently tests this beyond its normal one-hour pre-submit timeout; a parked native job remains pending rather than becoming a false `NOT SENT` terminal record.
 
+## CLI model visibility
+
+`amux ps` keeps model evidence independent of context usage. `[selected]`
+means the visible Codex footer/current status or native runtime selection;
+`[configured]` means only the saved override for that exact pane. `last:` is
+the latest observed turn, not proof that a new turn ran on that model. Different
+selected and observed models are shown together; matching live labels are coalesced.
+Shell-returned and dead tmux panes show `stopped`, retain labelled history, and
+never present their old context percentage as live usage. Model-bearing idle
+panes remain expanded even with no usage reading. Missing context is `N/A`, not
+0%. Codex compaction totals use `last_token_usage.total_tokens`, not zeroed
+breakdown fields or lifetime totals. A current native status percentage outranks
+reconstructed JSONL usage; a status in scrollback does not. The CLI only reads existing captures,
+session observations and overrides; it does not drive `/status`, restart a
+session, infer a fleet default, or create another cache/poller.
+
 ## Restart semantics
 
 The runtime registry persists requested settings, the latest observation, and the guard. `agents.yaml` supplies model/effort only when a native agent is first provisioned; a bridge restart must not rewind a manual mid-conversation switch.

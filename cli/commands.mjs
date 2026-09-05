@@ -24,7 +24,7 @@ import {
 } from "./tmux.mjs";
 import { extractText, extractLastTurn, classifyLines, extractSegments } from "../core/extract.mjs";
 import { stripAnsi, esc, extractActivity, formatDuration, validateImagePath } from "../lib.mjs";
-import { shortModelName } from "../core/context.mjs";
+import { formatPaneModel, shouldExpandPane } from "./pane-model-view.mjs";
 import { isCodingDialect } from "../core/dialects.mjs";
 import { cmdSearch } from "./search.mjs";
 import { journalInterruptionFromTurns, planRevive, reviveBrief, parseBootMs } from "../core/revive.mjs";
@@ -2228,18 +2228,13 @@ async function cmdPs(ctx, flags = {}) {
     let i = 0;
     while (i < panes.length) {
       const p = panes[i];
-      const expand = showAll
-        || ACTIVE_STATUS(p.status)
-        || (p.context?.percent ?? 0) > 0;
+      const expand = showAll || shouldExpandPane(p);
 
       if (expand) {
         const icon = statusIcon(p.status);
         const ctxCell = formatContextCell(p.context);
         // Show both explicit engine/backend identity and the concrete model.
-        const modelLabel = p.context?.model
-          ? shortModelName(p.context.model) + (p.context.effort ? `·${p.context.effort}` : "")
-          : null;
-        const cmd = (modelLabel || p.command).padEnd(6);
+        const cmd = formatPaneModel(p).padEnd(6);
         const label = a.panes[p.index]?.label;
         // Label wins; otherwise pull the meaningful last-assistant line from
         // jsonl (only now, for this expanded pane). Fall back to the tmux tail.
@@ -2265,15 +2260,15 @@ async function cmdPs(ctx, flags = {}) {
       while (j < panes.length
              && panes[j].command === groupCmd
              && panes[j].status === groupStatus
-             && !ACTIVE_STATUS(panes[j].status)
-             && (panes[j].context?.percent ?? 0) === 0) {
+             && runtime(panes[j]) === runtime(p)
+             && !shouldExpandPane(panes[j])) {
         j++;
       }
       const start = panes[i].index;
       const end = panes[j - 1].index;
       const range = j - i === 1 ? `p${start}` : `p${start}-p${end}`;
       const icon = statusIcon(groupStatus);
-      console.log(`  ${icon} ${range.padEnd(7)} ${runtime(p).padEnd(13)} ${groupCmd.padEnd(6)} ${groupStatus} (${j - i})`);
+      console.log(`  ${icon} ${range.padEnd(7)} ${runtime(p).padEnd(13)} ${groupCmd.padEnd(6)} ${p.modelView?.running === false ? "stopped" : groupStatus} (${j - i})`);
       i = j;
     }
   }

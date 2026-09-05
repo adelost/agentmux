@@ -134,7 +134,7 @@ export async function killSession(ctx, name) {
   await ctx.tmux(`kill-session -t '${esc(name)}'`);
 }
 
-/** List panes in a session. Returns array of { index, command, width, height }. */
+/** WHAT: Reads pane geometry, command and process-death evidence. WHY: Prevents exited node commands from masquerading as live engines. */
 export async function listPanes(ctx, name) {
   if (ctx.agent?.isNativeTarget?.(name, 0)) {
     const entry = loadConfig(ctx.configPath)?.[name];
@@ -152,12 +152,12 @@ export async function listPanes(ctx, name) {
   }
   try {
     const { stdout } = await ctx.tmux(
-      `list-panes -t '${esc(name)}' -F '#{pane_index}|#{pane_width}x#{pane_height}|#{pane_current_command}'`,
+      `list-panes -t '${esc(name)}' -F '#{pane_index}|#{pane_width}x#{pane_height}|#{pane_current_command}|#{pane_dead}'`,
     );
     return stdout.trim().split("\n").map((line) => {
-      const [index, size, command] = line.split("|");
+      const [index, size, command, dead] = line.split("|");
       const [width, height] = size.split("x");
-      return { index: parseInt(index), command, width: parseInt(width), height: parseInt(height) };
+      return { index: parseInt(index), command, dead: dead === "1", width: parseInt(width), height: parseInt(height) };
     });
   } catch {
     return [];

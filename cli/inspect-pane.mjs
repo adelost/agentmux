@@ -11,6 +11,9 @@ import { alternateEngineForCommand, latestAlternateMtime } from "../core/alterna
 import { groupNativeTurns } from "../channels/native-runtime-watcher.mjs";
 import { nativeContextReading } from "../core/suggestions-context-telemetry.mjs";
 import { kimiObservedStatus } from "../core/kimi-status-truth.mjs";
+import { codexModelOverride } from "../core/codex-profiles.mjs";
+import { parseCodexPaneReading } from "../core/codex-status.mjs";
+import { isShellProcess } from "../core/tui-stall-recovery.mjs";
 
 // `node` as a tmux process name is too generic to trust as Codex by itself,
 // so we resolve its dialect via agents.yaml cmd field instead — see
@@ -41,6 +44,11 @@ export async function inspectPane(ctx, agent, pane) {
         status: snapshot.agent.running ? "working" : "idle",
         preview: preview.replace(/\s+/g, " ").trim(),
         context,
+        modelView: {
+          running: true,
+          observed: { model: snapshot.agent.observedModel, effort: snapshot.agent.observedEffort },
+          selected: { model: snapshot.agent.model, effort: snapshot.agent.effort, source: "native-runtime" },
+        },
       };
     } catch {
       return { status: "unknown", preview: "native runtime offline", context: null };
@@ -63,6 +71,8 @@ export async function inspectPane(ctx, agent, pane) {
     : "unknown";
   const lines = stripAnsi(content).split("\n").filter((l) => l.trim());
   const dialect = dialectFor(agent, pane);
+  const running = !dialect ? null : pane.dead || isShellProcess(pane.command) ? false
+    : (CONTEXT_DIALECT[pane.command] || pane.command === "node") ? true : null;
   // Use the worktree pane dir, not agent.dir — same fix as cmdLog (399915f).
   // Claude Code stores its session jsonl per-cwd; each pane runs in
   // .agents/N, so getContextFromPane's max-tokens fallback must read from
@@ -75,13 +85,22 @@ export async function inspectPane(ctx, agent, pane) {
   // parallel tmux probes. Reserve it for the handful that actually display.
   const preview = (lines[lines.length - 1] || "").trim();
   // Claude: status-bar parser (capture-pane already in `content`).
-  // Codex: read directly from codex jsonl (no status-bar equivalent).
+  // Codex: keep turn evidence from JSONL separate from the live UI selection.
   let context = null;
   if (dialect === "claude") {
     context = getContextFromPane(content, paneDir);
   } else if (dialect === "codex" || dialect === "kimi") {
     context = getContextPercent(paneDir, dialect);
   }
+  const override = dialect === "codex" ? codexModelOverride(ctx.state, agent.name, pane.index) : null;
+  const screen = dialect === "codex" && running === true && content ? parseCodexPaneReading(content) : null;
+  const modelView = {
+    running,
+    observed: context?.model ? { model: context.model, effort: context.effort } : null,
+    selected: screen?.selected || (override ? { ...override, source: "override" } : null),
+  };
+  if (running === false) return { status: "unknown", preview, context: null, modelView };
+  context = screen?.context || context;
 
   // Live-activity overlay: tmux-only detection can't tell an active spinner
   // ("✻ Sautéed for X" still counting up) from a frozen one (post-turn
@@ -110,5 +129,5 @@ export async function inspectPane(ctx, agent, pane) {
       }
     }
   }
-  return { status, preview, context };
+  return { status, preview, context, modelView };
 }

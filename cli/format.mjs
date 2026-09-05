@@ -151,10 +151,10 @@ export function formatTokens(n) {
   return String(n);
 }
 
-/** Format "{percent}% {tokens}" into a fixed-width column for agent ps.
+/** WHAT: Formats context usage into a fixed-width ps column. WHY: Keeps missing telemetry distinct from measured zero.
  *  ctx is { percent, tokens } from getContextFromPane, or null. */
 export function formatContextCell(ctx) {
-  if (!ctx) return "          "; // 10 spaces, preserves column alignment
+  if (!ctx || !Number.isFinite(ctx.percent)) return " N/A      ";
   const pct = `${ctx.percent}%`;
   const tok = formatTokens(ctx.tokens);
   return `${pct.padStart(4)} ${tok.padEnd(5)}`;
