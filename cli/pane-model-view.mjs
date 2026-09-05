@@ -13,7 +13,7 @@ export function formatPaneModel(pane) {
   const observed = label(view.observed);
   const parts = [];
   if (view.running === false) parts.push("stopped");
-  if (selected) parts.push(`${selected} [${view.selected.source === "override" ? "configured" : "selected"}]`);
+  if (selected) parts.push(`${selected} [${["override", "config"].includes(view.selected.source) ? "configured" : "selected"}]`);
   if (observed && (observed !== selected || view.running !== true)) parts.push(`last: ${observed}`);
   return parts.join("; ") || pane.command;
 }

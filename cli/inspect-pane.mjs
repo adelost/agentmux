@@ -11,7 +11,7 @@ import { alternateEngineForCommand, latestAlternateMtime } from "../core/alterna
 import { groupNativeTurns } from "../channels/native-runtime-watcher.mjs";
 import { nativeContextReading } from "../core/suggestions-context-telemetry.mjs";
 import { kimiObservedStatus } from "../core/kimi-status-truth.mjs";
-import { codexModelOverride } from "../core/codex-profiles.mjs";
+import { codexModelOverride, resolveCodexModelSelection } from "../core/codex-profiles.mjs";
 import { parseCodexPaneReading } from "../core/codex-status.mjs";
 import { isShellProcess } from "../core/tui-stall-recovery.mjs";
 
@@ -92,12 +92,15 @@ export async function inspectPane(ctx, agent, pane) {
   } else if (dialect === "codex" || dialect === "kimi") {
     context = getContextPercent(paneDir, dialect);
   }
-  const override = dialect === "codex" ? codexModelOverride(ctx.state, agent.name, pane.index) : null;
+  const configured = dialect === "codex" ? resolveCodexModelSelection({
+    override: codexModelOverride(ctx.state, agent.name, pane.index),
+    configured: agent.panes?.[pane.index], previous: context,
+  }) : null;
   const screen = dialect === "codex" && running === true && content ? parseCodexPaneReading(content) : null;
   const modelView = {
     running,
     observed: context?.model ? { model: context.model, effort: context.effort } : null,
-    selected: screen?.selected || (override ? { ...override, source: "override" } : null),
+    selected: screen?.selected || (configured?.source !== "history" ? configured : null),
   };
   if (running === false) return { status: "unknown", preview, context: null, modelView };
   context = screen?.context || context;

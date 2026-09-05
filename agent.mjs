@@ -56,6 +56,7 @@ import {
   codexModelOverride,
   codexProfileCatalog,
   prepareCodexProfile,
+  resolveCodexModelSelection,
   selectedCodexProfile,
   setCodexModelOverride,
 } from "./core/codex-profiles.mjs";
@@ -585,19 +586,16 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
       persistSession({ sessionId: decision.sessionId, status: "ready", rolloutPath: discovered.path });
     }
 
-    let override = launch?.model
-      ? { model: launch.model, effort: launch.effort ?? null }
-      : codexModelOverride(state, name, pane);
-    // First launch after upgrading agentmux has no pane-local state yet.  Pin
-    // the last effective turn before starting so a global config value (the
-    // historical /model bug) cannot silently overwrite every pane on reboot.
-    if (!override && state) {
-      const previous = getContextPercentByDialect(dir, "codex");
-      if (previous?.model) {
-        override = { model: previous.model, effort: previous.effort ?? null };
-        try { setCodexModelOverride(state, name, pane, override.model, override.effort); }
-        catch (err) { console.warn(`startCodex: could not pin ${name}:${pane} model: ${err.message}`); }
-      }
+    const paneOverride = codexModelOverride(state, name, pane);
+    const override = resolveCodexModelSelection({
+      launch, override: paneOverride, configured: agentConfig(name).panes?.[pane],
+      previous: launch?.model || paneOverride ? null : getContextPercentByDialect(dir, "codex"),
+    });
+    // Preserve legacy continuity only when no explicit config/choice exists.
+    // A config default remains a default, so later YAML changes can take effect.
+    if (override?.source === "history" && state) {
+      try { setCodexModelOverride(state, name, pane, override.model, override.effort); }
+      catch (err) { console.warn(`startCodex: could not pin ${name}:${pane} model: ${err.message}`); }
     }
     // Resume only the exact pane/profile-owned session selected above. A bare
     // launch is permitted solely for the fenced first bootstrap.

@@ -71,6 +71,21 @@ export function codexModelOverride(state, name, pane) {
   return { model: String(value.model), effort };
 }
 
+/** WHAT: Resolves explicit launch, pane choice, configured default, then history.
+ *  WHY: Prevents dormant history from overriding config or freezing its default as a manual choice. */
+export function resolveCodexModelSelection({ launch, override, configured, previous } = {}) {
+  if (launch?.model) return { model: launch.model, effort: launch.effort ?? null, source: "launch" };
+  if (override?.model) return { ...override, source: "override" };
+  if (configured?.model) return {
+    model: configured.model,
+    effort: configured.effort ?? previous?.effort ?? null,
+    source: "config",
+  };
+  return previous?.model
+    ? { model: previous.model, effort: previous.effort ?? null, source: "history" }
+    : null;
+}
+
 export function setCodexModelOverride(state, name, pane, model, effort = null) {
   if (!/^[a-z0-9._-]+$/i.test(String(model || ""))) throw new Error(`invalid Codex model: ${model}`);
   const normalizedEffort = effort == null ? null : String(effort).toLowerCase();
