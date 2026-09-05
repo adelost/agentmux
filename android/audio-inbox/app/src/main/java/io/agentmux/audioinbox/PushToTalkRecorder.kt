@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
+import io.agentmux.linkcore.RecorderFinalizer
 import java.io.File
 import java.util.UUID
 import kotlin.math.sqrt
@@ -55,14 +56,19 @@ internal class PushToTalkRecorder(
 
     fun release(): Capture? {
         val current = capture ?: return null
-        val active = recorder ?: return null
-        val valid = runCatching {
-            active.stop()
-            active.release()
-            recorder = null
-            current.file.length() > 0
-        }.getOrDefault(false)
+        val active = recorder
+        recorder = null
         capture = null
+        if (active == null) {
+            current.file.delete()
+            return null
+        }
+        val valid = RecorderFinalizer.finish(
+            recorder = active,
+            stop = MediaRecorder::stop,
+            release = MediaRecorder::release,
+            hasPayload = { current.file.length() > 0 },
+        )
         if (!valid) {
             current.file.delete()
             return null
