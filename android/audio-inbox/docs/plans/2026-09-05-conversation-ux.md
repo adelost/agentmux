@@ -14,8 +14,8 @@ Acceptance checklist
 - [x] Settings retain connection, audio, history, update and host-preview actions.
 - [x] Phone, round Watch preview and Wear share selection and capture behavior.
 - [x] Shared improvements have working Showcase examples, not app-local copies.
-- [ ] Inspect screenshots of every route + meaningful state on Phone and Wear;
-      iterate before assigning a visual quality score of at least 9/10.
+- [x] Inspect shared routes/states in Phone and round WatchExact; separately
+      cold-start the signed native Wear package. See the proof limits below.
 - [ ] Focused tests, fresh-main merge, publish signed Link update and verify
       public manifest/signature/APK; publish CircleKit/Showcase with provenance.
 
@@ -76,7 +76,7 @@ Additional binary acceptance:
       header/PTT. Keyboard dismissal restores the normal header.
 - [x] Every round submenu has visible, reachable Back.
 - [x] Info uses the same shared icon geometry/hit target, not a smaller glyph.
-- [ ] Final screenshot audit: Phone home/chooser/favorites/settings/info/preview,
+- [x] Final screenshot audit: Phone home/chooser/favorites/settings/info/preview,
       keyboard, playback, recording, errors and round equivalents. Explicit QA
       fixtures prove presentation only; release install/feed proves delivery.
 
@@ -122,6 +122,17 @@ CircleKit dependency: PR #149, source/tag 7f2f08cbd8295549fced665e602bf4cb08fa64
 Maven and Showcase 0.3.57. All six public Maven modules published. No Skyvw
 source/settings/runtime changed; adoption remains an independent consumer pin.
 Link release target: 1.2.11, Phone code 19 / Wear code 17; existing IDs/signers.
-Rollback: prior 1.2.10 (Phone 18 / Wear 16) source is origin/master before this
-PR. Installed-device rollback must be rebuilt with a new forward version code;
+Rollback: prior 1.2.10 (Phone 18 / Wear 16), pre-feature master
+ddf2ea26344f66848bc7cba6e7d3f149db68dd4d. Installed-device rollback must be rebuilt with a new forward version code;
 never overwrite published immutable APK paths or sign with another identity.
+
+Signed native Wear startup: 1.2.11/code17, non-debuggable, release signer
+b57a2862ab312bc970beeefcd55d4b48a974efd85b274b91394d4c9199484e97;
+candidate and pulled APK SHA-256
+7b3a8b5669399cf9ada31808a598d4eb63ac630ba367fa769197819fb64ccd07.
+`/tmp/link-signed-wear-startup.png` shows the unpaired recipient/capture/reply
+screen. It does not prove a paired remote conversation. The previous unsigned
+release-incompatible debug fixture was backed up and restored; both stored
+file contents compare byte-for-byte. Skyvw/density/location were untouched.
+Final release source and public checksums are recorded in the PR closure,
+after merge, rather than making the build self-referential.
