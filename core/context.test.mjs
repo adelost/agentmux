@@ -67,6 +67,53 @@ function withSessionJsonl(lines, run, { bridge = null } = {}) {
   }
 }
 
+feature("Codex current-context totals after compaction", () => {
+  for (const [name, last, tokens] of [
+    ["compacted total survives zeroed breakdown", { input_tokens: 0, output_tokens: 0, total_tokens: 88_959 }, 88_959],
+    ["explicit zero is measured zero", { total_tokens: 0 }, 0],
+    ["legacy breakdown includes output, not cached subset twice", { input_tokens: 60_000, cached_input_tokens: 50_000, output_tokens: 4_000 }, 64_000],
+    ["absent usage never becomes zero", {}, null],
+    ["incomplete breakdown never becomes zero", { input_tokens: 0 }, null],
+    ["invalid current total is not lifetime usage", { total_tokens: "88959" }, null],
+  ]) {
+    component(name, {
+      given: ["a rollout with a large lifetime total and the current usage event", () => last],
+      when: ["reading current context", (usage) => {
+        const home = mkdtempSync(join(tmpdir(), "amux-codex-total-"));
+        const paneDir = join(home, "pane");
+        const sessions = join(home, ".codex", "sessions", "2026", "09", "05");
+        mkdirSync(sessions, { recursive: true });
+        writeFileSync(join(sessions, "rollout-test.jsonl"), [
+          { type: "session_meta", payload: { cwd: paneDir } },
+          { type: "event_msg", timestamp: "2026-09-05T04:20:39.078Z", payload: { type: "token_count", info: {
+            model_context_window: 258_400, last_token_usage: usage,
+            total_token_usage: { total_tokens: 2_377_021_156 },
+          } } },
+          { type: "compacted", timestamp: "2026-09-05T04:20:39.088Z" },
+        ].map(JSON.stringify).join("\n") + "\n");
+        const previousHome = process.env.HOME;
+        process.env.HOME = home;
+        resetCodexSessionIndexForTests();
+        try { return getContextPercent(paneDir, "codex"); }
+        finally {
+          if (previousHome === undefined) delete process.env.HOME;
+          else process.env.HOME = previousHome;
+          resetCodexSessionIndexForTests();
+          fsExtra.rmSync(home, { recursive: true, force: true });
+        }
+      }],
+      then: ["current evidence is preserved, or absent rather than invented", (reading) => {
+        if (tokens === null) expect(reading).toBeNull();
+        else {
+          expect(reading.tokens).toBe(tokens);
+          expect(reading.percent).toBe(Math.round(tokens / 258_400 * 100));
+          expect(reading.lastCompactAt).toBe("2026-09-05T04:20:39.088Z");
+        }
+      }],
+    });
+  }
+});
+
 feature("context reading under session limit", () => {
   component("synthetic entries are skipped: percent comes from the newest real turn", {
     given: ["a real fable-5 turn at 351k buried under session-limit spam", () =>
