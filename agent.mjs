@@ -1367,13 +1367,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     // exact 160-character identity check owns idempotency; the old short-head
     // shortcut otherwise preserved a different stale recovery prompt forever.
     if (dialect === "codex" && codexComposerContainsPrompt(raw, prompt)) return;
-    const stale = foreignComposerText(raw, dialect === "codex" ? null : head);
+    const stale = dialect === "codex" ? codexComposerText(raw) : foreignComposerText(raw, head);
     if (!stale) return;
     const busy = await isBusy(agentName, pane);
+    let dir, submittedIdentity = null;
     if (dialect === "codex") {
-      let dir;
       try { dir = paneDir(agentConfig(agentName).dir, pane); } catch { return; }
-      const submittedIdentity = codexPromptPrefixIdentity(dir, stale);
+      submittedIdentity = codexPromptPrefixIdentity(dir, stale);
       const alreadySubmitted = submittedIdentity !== null;
       const agentmuxEnvelope = /^\[(?:from\s+[^\]]+|krasch-recovery)\]/i.test(stale);
       // Never erase a local draft. During work even an agentmux envelope can

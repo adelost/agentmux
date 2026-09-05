@@ -188,6 +188,7 @@ export async function sendSlashVerified(agent, agentName, pane, claudeCmd, opts 
 
 async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
   settleMs = 1200, maxRescues = 2,
+  receiptTimeoutMs = 0,
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   echoCursor: suppliedReceiptCursor = null,
   notBeforeMs: suppliedNotBeforeMs = null,
@@ -224,7 +225,7 @@ async function slashDeliveryAttempts(agent, agentName, pane, claudeCmd, {
     await sleep(settleMs);
     if (hasAuthoritativeReceipt) {
       if (await agent.waitForSlashReceipt(
-        agentName, pane, claudeCmd, 0, receiptOptions,
+        agentName, pane, claudeCmd, receiptTimeoutMs, receiptOptions,
       )) {
         return { delivered: true, rescues: attempt, via: "command-receipt" };
       }

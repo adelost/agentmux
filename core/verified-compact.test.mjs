@@ -3,8 +3,37 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { verifiedClaudeCompact, verifiedCodexCompact } from "./verified-compact.mjs";
+import { sendSlashVerified } from "./delivery.mjs";
 
 feature("verified Claude compact", () => {
+  unit("waits for a delayed exact command receipt instead of rescuing Enter during compact", {
+    when: ["Claude persists its compact receipt after the old 600ms cutoff", async () => {
+      const calls = [];
+      const result = await verifiedClaudeCompact({
+        agent: {
+          capturePromptEchoCursor: async () => ({ positions: { journal: 10 } }),
+          captureSlashReceiptCursor: async () => ({ kind: "test-cursor", positions: { journal: 10 } }),
+          dismissBlockingPrompt: async () => {},
+          sendOnly: async () => calls.push("submit"),
+          sendEnter: async () => calls.push("extra-enter"),
+          waitForSlashReceipt: async (_a, _p, _c, timeout) => {
+            calls.push(timeout);
+            return timeout >= 1_000;
+          },
+        },
+        agentName: "claw", pane: 2, paneDir: "/pane",
+        latestIdentity: () => ({ sessionId: "same-session" }),
+        hasBoundary: () => true, sendSlash: sendSlashVerified,
+        sleep: async () => {}, pollAttempts: 2, pollMs: 1_000,
+      });
+      return { result, calls };
+    }],
+    then: ["the exact receipt and compact boundary authorize the same session without duplicate submit", ({ result, calls }) => {
+      expect(result.ok).toBe(true);
+      expect(calls).toEqual(["submit", 2_000]);
+    }],
+  });
+
   unit("requires command receipt, journal boundary, and unchanged exact session", {
     given: ["an idle pane with one persisted session", () => {
       const identity = { sessionId: "11111111-1111-4111-8111-111111111111" };
