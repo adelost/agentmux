@@ -23,7 +23,7 @@ building one. A gap here is not evidence of a gap in the tool.
 ### Send a task to another pane
 \`\`\`bash
 amux <agent> -p <pane> "prompt"      # -p default 0
-amux claw -p 1 "run the full test suite"
+amux claw -p 1 "check the changed parser's unit tests"
 amux claw -p 1 --stdin < msg.txt     # exact bytes: quotes, backticks, åäö
 \`\`\`
 **Never build the message text in bash.** Backticks, \`$(...)\`, \`$VAR\` and quotes

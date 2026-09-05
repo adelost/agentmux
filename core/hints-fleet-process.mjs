@@ -26,8 +26,8 @@ split instead of obeying the older text.
    simply inapplicable; AMUX core never assumes one exists.
 3. **Each code repo:** its own truths (data provenance, gates, commands,
    deploy contracts) in the repo's \`AGENTS.md\` and linked docs. Repo
-   docs may pin merge-time INVARIANTS (what must be true); they never
-   define process (who does it).
+   and workspace checkout restrictions remain authoritative; this template
+   does not override them or the user's current instructions.
 
 ## Always lead with a recommendation
 
@@ -89,19 +89,17 @@ investigation spun up = noise to the user, wasted agent time.
 
 ## Multi-agent edit protocol
 
-You and other agents may be editing the same repo in parallel. Do NOT
-claim files or announce ownership before starting; that friction slowed
-the fleet down more than the conflicts it prevented. Build the feature in
-your own branch/worktree, then resolve
-any conflict at merge:
+Parallelize where the current user, repo and workspace policy permits.
+AMUX never authorizes extra checkouts against that policy.
 
-1. **Build, don't claim.** Make the feature; don't \`git status\`-STOP on
-   someone else's WIP and don't post a "claim handlers.mjs" announcement.
-   Two agents touching the same file is normal; the merge resolves it.
-2. **Resolve the conflict at merge, not upfront:** rebase onto fresh trunk
-   immediately before merge, run the change-relevant gate green after the
-   rebase, and flag any conflict-resolved hunks in code you did not write for
-   the reviewer to read first. (Staffing rule 6 below is the full merge gate.)
+1. **Respect checkout policy.** Use a branch/worktree only where allowed.
+   In canonical-only workspaces, preserve other agents' WIP and live writers;
+   use sequential handover before overlapping edits or branch changes.
+   Never stash, discard or relocate their work to get around a conflict.
+   Allowed parallel work needs no file-claim ceremony.
+2. **Resolve conflicts with fresh proof:** follow staffing rule 6 below.
+   The owner inspects conflict-resolved hunks, including code they did not
+   write, and flags them in the handoff or an explicitly requested review.
 3. **Version bumps must be unique:** before \`package.json\` bump, check
    \`git log --oneline -3\`: the version you're picking must NOT
    already exist there. Same minor twice (e.g. two 1.16.2 commits)
@@ -110,14 +108,9 @@ any conflict at merge:
 Commit + push within 30 min of starting an edit. Long-running WIP that
 isn't in git is invisible to other agents.
 
-Fresh worktrees do not inherit ignored dependency directories. Before claiming
-a gate, run \`amux worktree-deps <worktree>\` (or the stdlib-only
-\`node /path/to/agentmux/bin/worktree-deps.mjs <worktree>\` during bootstrap),
-then \`amux gate --scoped <worktree>\`. The bootstrap links only immutable npm
-trees keyed by exact locks, installs pnpm roots locally via
-\`corepack pnpm install --frozen-lockfile\` (pnpm's store already dedupes), and
-keeps Python \`.venv\` local with \`uv sync --locked\`; a skipped root or lock
-drift is a red gate, not a scoping excuse.
+For missing dependencies in an authorized checkout, follow the repo's setup
+instructions; \`amux --help\` documents \`worktree-deps\`. Bootstrap success
+does not replace the scoped verification in staffing rule 6.
 
 ## Kommunikationsdisciplin
 
@@ -125,8 +118,7 @@ drift is a red gate, not a scoping excuse.
    feedback/beslut, eller (c) något blockerar mottagaren.** Inga "klar med X,
    fortsätter med Y"-status, inga kvittenser, inga artighetsfraser ("tack för
    bra jobb"). Commits + ledger ÄR statuskommunikationen.
-2. **Ingen obligatorisk peer-review mellan agenter:** grön gate ÄR reviewn;
-   använd peer-review när operatören ber om det eller när gaten är röd.
+2. **Review och verifiering:** följ staffing-reglerna 6 och 7 nedan.
 3. **Delade träd fryses i KORTA koordinerade gate-fönster** (en utsedd
    koordinator äger fönstret), aldrig dagar-långa blanket-fences av en
    annan panels yta.
@@ -165,23 +157,24 @@ drift is a red gate, not a scoping excuse.
    aggregate view; workers do not need a manager round-trip to claim, update or
    finish their own work.
 6. **Merge by fresh proof.** Immediately before merge, fetch and rebase onto
-   current trunk, run only the fast change-relevant tests/lint plus a bounded
-   manual proof, and resolve conflicts in the feature worktree. Heavy CI,
+   current trunk in the allowed checkout. On that exact source run fast
+   changed-unit tests and lint, exercise the actual feature manually, and run
+   one relevant local smoke lasting at most 5 minutes. Heavy CI,
    full-repo suites, browser matrices and perf sweeps run only on explicit
    human request or scheduled/manual infrastructure. A green pre-rebase check
-   proves nothing. For a visual change, run the smallest relevant visual
-   scenario and attach one representative screenshot when useful. Turn a
-   recurring defect into one focused regression gate, not a slow blanket suite.
-   GitHub-hosted CI is optional evidence, never release authority: unavailable
-   workers, billing limits, skipped workflows or provider outages do not block
-   a clean locally gated change. Every deployable repo keeps a documented
-   local-first release path that starts from the exact source SHA, records the
-   rollback SHA, runs the targeted gate and relevant build on this host,
-   deploys, then verifies the live outcome. Hosted automation may mirror that
-   proof, but the release must not depend on it.
+   proves nothing. For visual work, exercise the smallest relevant visual
+   scenario and attach one representative screenshot when useful. Preserve
+   repo correctness and security requirements: never hide a real failure or
+   add file-size exceptions to make a gate green. If a required check cannot
+   fit this budget, report the constraint rather than claim unverified success.
+   GitHub-hosted CI is optional evidence, never release authority; do not add
+   a remote-CI or PR ceremony to a clean locally verified change. For deployment,
+   follow the repo's existing local-first release contract for exact source SHA,
+   rollback SHA, relevant build and live verification. Do not duplicate gates.
 7. **Owners self-merge and self-deliver.** A normal green change does not need
-   peer review. Review only on explicit human request, a red gate, or a
-   clearly high-risk seam. A merged-but-undeployed feature remains open when
+   peer review. Human-requested review is welcome; a red gate or high-risk seam
+   needs resolution, not an automatic peer-review loop.
+   A merged-but-undeployed feature remains open when
    deployment is part of the task. Irreversible or money-spending actions still
    require human approval.
 8. **Report only terminal outcomes.** Inter-agent messages are for a real

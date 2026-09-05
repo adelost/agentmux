@@ -395,7 +395,7 @@ feature("paneDir, session isolation per pane", () => {
 });
 
 feature("generated agent policy", () => {
-  unit("does not reject direct work solely because it crosses a project lane", {
+  unit("allows direct work without overriding canonical checkout restrictions", {
     when: ["generating fresh agent hints", () => {
       const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
       paneDir(root, 0);
@@ -403,9 +403,14 @@ feature("generated agent policy", () => {
       rmSync(root, { recursive: true, force: true });
       return content;
     }],
-    then: ["the obsolete cross-project refusal is absent", (content) => {
+    then: ["direct work respects workspace policy and preserves other writers", (content) => {
       expect(content).not.toContain("Inget cross-projekt-arbete eller -review");
       expect(content).not.toContain("utanför min lane, fråga Mattias");
+      expect(content).toContain("AMUX never authorizes extra checkouts against that policy.");
+      expect(content).toContain("In canonical-only workspaces, preserve other agents' WIP and live writers");
+      expect(content).toContain("use sequential handover before overlapping edits or branch changes");
+      expect(content).not.toContain("your own branch/worktree");
+      expect(content).not.toContain("`git status`-STOP");
     }],
   });
 
@@ -451,7 +456,7 @@ feature("generated agent policy", () => {
     }],
   });
 
-  unit("keeps exhaustive visual suites out of the default PR path", {
+  unit("requires bounded local feature proof without a remote or full-suite ritual", {
     when: ["generating fresh agent hints", () => {
       const root = mkdtempSync(join(tmpdir(), "agentmux-policy-test-"));
       paneDir(root, 0);
@@ -459,18 +464,14 @@ feature("generated agent policy", () => {
       rmSync(root, { recursive: true, force: true });
       return content;
     }],
-    then: ["fast change-relevant gates are required and slow matrices are opt-in", (content) => {
-      expect(content).toMatch(/run the change-relevant gate green after the\s+rebase/u);
-      expect(content).toMatch(/fast change-relevant tests\/lint plus a bounded\s+manual proof/u);
+    then: ["local proof stays small without weakening correctness requirements", (content) => {
+      expect(content).toContain("changed-unit tests and lint, exercise the actual feature manually");
+      expect(content).toContain("one relevant local smoke lasting at most 5 minutes");
       expect(content).toMatch(/Heavy CI,\s+full-repo suites, browser matrices and perf sweeps run only on explicit\s+human request or scheduled\/manual infrastructure/u);
-      expect(content).toMatch(/A green pre-rebase check\s+proves nothing/u);
-      expect(content).toMatch(/smallest relevant visual\s+scenario/u);
-      expect(content).toMatch(/one representative screenshot/u);
-      expect(content).toMatch(/one focused regression gate, not a slow blanket suite/u);
-      expect(content).toMatch(/GitHub-hosted CI is optional evidence, never release authority/u);
-      expect(content).toMatch(/billing limits, skipped workflows or provider outages do not block\s+a clean locally gated change/u);
-      expect(content).toMatch(/local-first release path that starts from the exact source SHA/u);
-      expect(content).toMatch(/Hosted automation may mirror that\s+proof, but the release must not depend on it/u);
+      expect(content).toContain("repo correctness and security requirements: never hide a real failure");
+      expect(content).toContain("GitHub-hosted CI is optional evidence, never release authority");
+      expect(content).not.toContain("amux gate --scoped");
+      expect(content).not.toContain("run the full test suite");
     }],
   });
 
@@ -531,6 +532,8 @@ feature("generated agent policy", () => {
     then: ["the owner self-merges and keeps required delivery in the same flow", (content) => {
       expect(content).toContain("One owner per feature, end to end");
       expect(content).toContain("Owners self-merge and self-deliver");
+      expect(content).toContain("Human-requested review is welcome");
+      expect(content).not.toContain("the reviewer to read first");
       expect(content).toMatch(/merged-but-undeployed feature remains open when\s+deployment is part of the task/u);
       expect(content).toMatch(/Irreversible or money-spending actions still\s+require human approval/u);
     }],
