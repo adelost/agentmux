@@ -70,7 +70,7 @@ Mattias's follow-ups before publication (same 2026-09-05 delivery):
       rejects responses over 128 KiB; do not invent another transport layer.
 - [x] Recording starts immediately, no 200 ms arming sweep. Release before
       500 ms discards rather than sends; shared monotonic timing, same gesture.
-- [ ] Verify empty/whitespace SEND is disabled AND visibly muted. No fake new
+- [x] Verify empty/whitespace SEND is disabled AND visibly muted. No fake new
       validation if the existing atom already rejects it.
 - [x] Inspect restart/audio: retain readable text. The old implementation
       re-fetched TTS on every manual replay. The new disposable cache survives
@@ -102,3 +102,32 @@ no speculative paid speech prefetch, wake word or driving interaction is added.
 Later native/source proof supersedes the initial PTT-unchanged line above:
 the hold/release ownership is preserved, while startup timing and accidental
 short-press policy were deliberately changed by Mattias's subsequent order.
+
+Final integration: public CircleKit 0.3.63 (source 97e5998db7e3d36f38b59e8e46095453c0d76e6c)
+fixes disabled icon tint and disabled accessibility semantics. Anonymous RingKit
+and DesignKit AAR checksums match the publisher's exact final receipt. No local
+staging artifact or CircleKit source fork is consumed. This pin does not claim
+Link category-color adoption; those product palette declarations remain separate.
+
+The first final settings lap failed honestly: removing RingActionCueHost also
+removed explicit information dialogs. Restored the existing host, not a second
+information renderer. The published atom already suppresses IMMEDIATE action
+confirmation; the recording change is holdMs=0, not removal of help. The actual
+pointer test now also rejects a progress overlay during recording. Final Phone
+6/6 (history/empty Send, settings/info/back, four pointer lifecycles) and Wear
+2/2 (history/full reply/empty recipient, real recorder) pass with the public pin.
+
+Inspected final images: /tmp/link-final-phone-conversation.png shows a muted
+empty SEND even with the keyboard open; /tmp/link-final-phone-settings.png has
+distinct READ REPLIES/ANNOUNCEMENTS and aligned info atoms; explicit info is
+readable and closes. /tmp/link-final-wear-recording.png has an unclipped waveform,
+stable press target, release/cancel copy and visible Back. The final Wear history
+and full-reply-end pictures meet the criteria above. These are native debug
+fixtures, not real agent messages or signed-release interaction evidence.
+
+Owner assessment: 9/10 for the demonstrated conversation/recording/history flows
+on these Phone/Wear sizes, not a claim about every device or production service.
+Known limits: Wear history is not restart-persistent, cold speech needs HTTP,
+and the existing serial download owner may still wait for an in-flight request
+when switching during a cold fetch. No Discord import, wake word, new audio
+engine, or native color lookup was introduced.

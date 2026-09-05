@@ -43,6 +43,9 @@ class LinkPttGestureTest {
         compose.waitUntil(3000) { fixture.state.value.capture == CapturePhase.LISTENING }
         Thread.sleep(800) // real microphone time, not the Compose animation clock
         compose.waitForIdle()
+        compose.onAllNodes(SemanticsMatcher.keyIsDefined(
+            androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo,
+        )).assertCountEquals(0) // No arming/confirmation overlay over the microphone.
         assertEquals(1, fixture.begins)
         assertEquals(0, fixture.releases)
         assertTrue(fixture.delivered.isEmpty())
