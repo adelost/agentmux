@@ -19,6 +19,9 @@ export async function recoverSubmittedTui({
   const recoveryKind = job.metadata?.submittedRecoveryKind || null;
   if (job.status !== "submitted" || job.kind !== "prompt"
       || job.metadata?.deliveryTransport === "native" || !job.echoCursor
+      // Missing Codex evidence is ambiguous even after process death or an
+      // empty composer. Never restart, re-Enter or retype across its fence.
+      || job.echoCursor.kind === "codex-prompt-events-v1"
       // One retained-draft Enter is the cheap first stage. If that did not
       // produce a receipt, the exact pane may still be restarted once below.
       || (job.metadata?.submittedRecoveryAt && recoveryKind !== "exact-draft-enter")
@@ -31,7 +34,7 @@ export async function recoverSubmittedTui({
   const runtime = await agent.paneProcessState(job.agentName, job.pane).catch(() => null);
   const transport = await agent.promptTransportState(job.agentName, job.pane, job.text)
     .catch(() => null);
-  if (transport?.busy !== false) return null;
+  if (transport?.busy !== false || transport.dialect === "codex") return null;
   if (await exactEcho(job)) return acknowledge(job, "late-echo-before-dead-tui-recovery");
 
   const current = queue.read(job.agentName, job.pane, job.id) || job;
