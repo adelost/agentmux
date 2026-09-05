@@ -26,7 +26,18 @@ export const SEARCH_HELP = `Usage:
 
 Lexical search over memory and the durable AMUX delivery ledger is the fast, current default.
 --deep adds large raw session archives. --semantic adds the local embedding
-index and always reports its age.`;
+index and always reports its age.
+
+Journal hits show event time (unknown if absent), role and exact source line.
+USER means authored journal input, not proof of a human order or current policy.
+Ranking does not decide which decision supersedes another; expand the source.
+Journals retain the latest 12 distinct matching events per root. Word-AND is
+within one event, never across unrelated turns. Mirror encodings share one hit.
+--context counts physical JSONL neighbors (max 20 per side). Quotes preserve
+whitespace; limits are explicit: 16k characters per event, 32k per expansion.
+Events over 4 MiB are omitted with an explicit incomplete-search warning;
+later events are still searched. There is no journal file-size cap.
+New hits seek directly; older saved hits stream to their line with bounded memory.`;
 
 function formatAge(ms) {
   if (!Number.isFinite(ms)) return "unknown age";

@@ -19,7 +19,11 @@ export function codexUserPrompt(event) {
 
 /** WHAT: Maps supported input records to one logical prompt boundary. WHY: Prevents dual-format journals from doubling turns while preserving repeated authored prompts. */
 export function normalizeCodexUserEvents(events) {
-  const result = [];
+  return [...iterateCodexUserEvents(events)];
+}
+
+/** WHAT: Streams the same logical input normalization. WHY: Lets journal search retain bounded candidates without a second decoder or whole-file array. */
+export function* iterateCodexUserEvents(events) {
   let previous = null;
   for (const event of events) {
     const text = codexUserPrompt(event);
@@ -29,15 +33,14 @@ export function normalizeCodexUserEvents(events) {
       // boundary. Repeated inputs using the same encoding remain distinct.
       if (previous?.source !== source && previous?.text === text) continue;
       previous = { source, text };
-      result.push(source === "event_msg" ? event : {
+      yield source === "event_msg" ? event : {
         ...event, type: "event_msg", payload: { type: "user_message", message: text },
-      });
+      };
       continue;
     }
     if ((event.type === "event_msg" && ["task_started", "task_complete", "turn_aborted"].includes(event.payload?.type))
         || (event.type === "response_item" && (event.payload?.role === "assistant"
           || ["function_call", "custom_tool_call"].includes(event.payload?.type)))) previous = null;
-    result.push(event);
+    yield event;
   }
-  return result;
 }

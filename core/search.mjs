@@ -1,5 +1,5 @@
 // amux search — ONE search engine over every corpus an agent forgets:
-// memory markdown, session jsonl (Claude + OpenClaw), the amux event ledger.
+// memory markdown, session jsonl (Claude + Codex + OpenClaw), the amux event ledger.
 //
 // Born from a benchmark (2026-07-10): the previous workspace search took
 // 1m49s per query (unindexed full scan) and matched substrings ("Tess" hit
@@ -7,10 +7,10 @@
 // boundaries over the SAME corpora: 0.035s with the right files on top.
 // Layers:
 //   L1  exact phrase, word-bounded          (precision)
-//   L2  all-words-in-file AND               (recall for multi-word queries)
+//   L2  word-AND within a document or event (recall for multi-word queries)
 //   L3  semantic over curated roots          (paraphrase; optional, see
 //       search-semantic.mjs — degrades to lexical-only when absent)
-// Hits are merged, deduped per file, and ranked by source weight + layer +
+// Hits are merged by file (documents) or logical event (journals), ranked by source weight + layer +
 // recency. Output contract: ONE line per hit with a stable id; `--show N`
 // expands. Overview first, drill on demand.
 //
@@ -21,16 +21,13 @@
 import { execFileSync } from "child_process";
 import { readFileSync, statSync, existsSync } from "fs";
 import { join, delimiter } from "path";
+import { searchJsonlFiles, expandJsonlHit } from "./search-jsonl.mjs";
+export { renderJsonlLine } from "./search-jsonl.mjs";
 
 const SNIPPET_AROUND = 60;
-// NO file-size cap. rg reads line by line and `-o` prints only the bounded
-// match (snippetPattern), so a multi-GB corpus costs bounded memory — a size
-// guard was never what made this safe. `--max-filesize 8M` lived here from
-// 1.20.57 until 1.25.32 and SKIPPED WHOLE FILES: 43 of 253 session jsonl held
-// 1.6 of 1.7 GB, so 91.6% of all searchable history answered "0 träffar"
-// instead of admitting it was never read — and the oversized files are
-// exactly the long-running panes where the decisions live. Measured cost of
-// removing it over the full 1.7 GB corpus: 47ms -> 122ms.
+// No file-size cutoff: documents use bounded rg snippets; journals use fixed
+// chunks and bounded candidate retention. Oversized individual event gaps are
+// explicit, never a reason to silently drop the rest of a long-lived session.
 
 // ripgrep resolution: a real `rg` on PATH is fastest; when absent, Claude
 // Code's own binary embeds ripgrep and activates it when argv0 is "rg" —
@@ -197,6 +194,7 @@ export function dateFromPath(path) {
 }
 
 function hitDate(hit) {
+  if (hit.path.endsWith(".jsonl")) return hit.date ?? null;
   const fromName = dateFromPath(hit.path);
   if (fromName) return fromName;
   try {
@@ -233,7 +231,8 @@ export function dedupeByFile(hits) {
     const prev = best.get(key);
     if (!prev || h.score > prev.score) best.set(key, { ...h, matches: (prev?.matches || 0) + (h.matches || 1) });
   }
-  return [...best.values()].sort((a, b) => b.score - a.score);
+  return [...best.values()].sort((a, b) => b.score - a.score
+    || (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0) || b.line - a.line);
 }
 
 const QUERY_STOP_WORDS = new Set([
@@ -312,19 +311,12 @@ export function searchEventLedger(query, path, { max = 12 } = {}) {
 export function expandHit(hit, { context = 10 } = {}) {
   let lines;
   try {
+    if (hit.path.endsWith(".jsonl")) return expandJsonlHit(hit, { context });
     lines = readFileSync(hit.path, "utf-8").split("\n");
   } catch (err) {
     return `(kunde inte läsa ${hit.path}: ${err.message})`;
   }
   const idx = hit.line - 1;
-  if (hit.path.endsWith(".jsonl")) {
-    const rendered = [];
-    for (let i = Math.max(0, idx - 2); i <= Math.min(lines.length - 1, idx + 2); i++) {
-      const r = renderJsonlLine(lines[i]);
-      if (r) rendered.push(i === idx ? `▶ ${r}` : `  ${r}`);
-    }
-    return rendered.join("\n") || lines[idx]?.slice(0, 2000) || "";
-  }
   const from = Math.max(0, idx - context);
   const to = Math.min(lines.length - 1, idx + context);
   return lines.slice(from, to + 1)
@@ -332,27 +324,11 @@ export function expandHit(hit, { context = 10 } = {}) {
     .join("\n");
 }
 
-/** Best-effort human rendering of one session-jsonl event line. */
-export function renderJsonlLine(raw) {
-  if (!raw?.trim()) return null;
-  let d;
-  try { d = JSON.parse(raw); } catch { return raw.slice(0, 300); }
-  const ts = (d.timestamp || d.ts || "").slice(0, 16).replace("T", " ");
-  // Claude session event
-  const role = d.message?.role;
-  if (role) {
-    const c = d.message.content;
-    const text = typeof c === "string"
-      ? c
-      : Array.isArray(c) ? c.filter((x) => x?.type === "text").map((x) => x.text).join(" ") : "";
-    if (!text) return null;
-    return `${ts} ${role === "user" ? "USER" : "ASSI"}: ${cleanSnippet(text).slice(0, 500)}`;
-  }
-  // amux ledger event
-  if (d.event) return `${ts} ${d.event} ${d.session ?? ""}:${d.pane ?? ""} ${d.detail || ""}`.trim();
-  // OpenClaw / codex shapes: fall back to any text-ish field
-  const text = d.text || d.content || d.payload?.text || "";
-  return text ? `${ts} ${cleanSnippet(String(text)).slice(0, 500)}` : null;
+/** WHAT: Finds possible journals using fixed strings, not contextual regex. WHY: Avoids pathological regex cost on megabyte lines; escaped Unicode stays eligible for decoding. */
+function journalCandidates(query, root) {
+  const probe = (query.match(/[\p{L}\p{N}_]+/gu) || []).sort((a, b) => b.length - a.length)[0] || "";
+  const out = execRg([...rgBaseArgs(root), "-l", "-0", "-F", "-e", probe, "-e", "\\u", root.path]);
+  return out.split("\0").filter((path) => path.endsWith(".jsonl"));
 }
 
 /**
@@ -361,23 +337,27 @@ export function renderJsonlLine(raw) {
  * WHAT: Returns ranked lexical hits across normalized corpus roots.
  * WHY: Keeps retrieval consistent across memory and session sources.
  */
-export function lexicalSearch(query, roots, { maxPerRoot = 12, includeFileAnd = true } = {}) {
+export function lexicalSearch(query, roots, { maxPerRoot = 12, includeFileAnd = true, onWarning = console.warn } = {}) {
   const now = Date.now();
   const words = query.split(/\s+/).filter(Boolean);
   const all = [];
 
   for (const root of roots) {
+    const events = searchJsonlFiles(query, journalCandidates(query, root), { max: maxPerRoot, includeFileAnd, onWarning });
+    for (const hit of events) all.push(withScore({ ...hit, root: root.name, weight: root.weight }, now));
+    // Explicit file arguments override rg globs, including an exclusion glob.
+    if (root.path.endsWith(".jsonl") && (!existsSync(root.path) || statSync(root.path).isFile())) continue;
+    const documents = { ...root, exclude: [...root.exclude, "*.jsonl"] };
     // L1: whole phrase, word-bounded
-    const l1 = runRg(snippetPattern(query), root, { maxCount: 2 });
-    for (const h of l1.slice(0, maxPerRoot)) {
-      all.push(withScore({ ...h, root: root.name, weight: root.weight, layer: "L1" }, now));
-    }
+    const l1 = runRg(snippetPattern(query), documents, { maxCount: 2 });
+    all.push(...l1.map((hit) => withScore({ ...hit, root: root.name, weight: root.weight, layer: "L1" }, now))
+      .sort((a, b) => b.score - a.score).slice(0, maxPerRoot));
     // L2: multi-word AND at file level (skip when L1 already found plenty)
     if (includeFileAnd && words.length > 1 && l1.length < 3) {
-      const files = filesWithAllWords(words, root).slice(0, 40);
+      const files = filesWithAllWords(words, documents).slice(0, 40);
       if (files.length) {
         const rarest = words.reduce((a, b) => (a.length >= b.length ? a : b));
-        const l2 = runRg(snippetPattern(rarest), root, { maxCount: 1, files });
+        const l2 = runRg(snippetPattern(rarest), documents, { maxCount: 1, files });
         for (const h of l2.slice(0, maxPerRoot)) {
           all.push(withScore({ ...h, root: root.name, weight: root.weight, layer: "L2" }, now));
         }
@@ -396,10 +376,11 @@ export function withScore(hit, now = Date.now()) {
 
 const HOME_RE = () => new RegExp(`^${escapeRegex(process.env.HOME)}/`);
 
+/** WHAT: Formats ranked source locations and snippets. WHY: Keeps event time and drilldown provenance visible without implying decision authority. */
 export function formatHits(hits) {
   return hits.map((h, i) => {
     const shortPath = h.path.replace(HOME_RE(), "~/");
     const layer = h.layer === "sem" ? "≈" : h.layer === "L2" ? "&" : "=";
-    return `#${String(i + 1).padStart(2)} ${(h.date || "").padEnd(10)} ${h.root.padEnd(9)} ${layer} ${shortPath}\n     ${h.snippet.slice(0, 160)}`;
+    return `#${String(i + 1).padStart(2)} ${(h.date || "unknown time").padEnd(10)} ${h.root.padEnd(9)} ${layer} ${shortPath}:${h.line}\n     ${h.snippet.slice(0, 160)}`;
   }).join("\n");
 }
