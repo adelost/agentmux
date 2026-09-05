@@ -12,6 +12,7 @@ import { runtimeAgentsPath } from "../core/runtime-defaults.mjs";
 import { loadRuntimeEnv } from "../core/runtime-env.mjs";
 import { resolveConfigSources } from "../core/config-sources.mjs";
 import { ensureRuntimeConfig } from "../core/runtime-config.mjs";
+import { isDispatchHelp } from "../cli/command-args.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 // BRIDGE_DIR = agentmux package root. agentmux.yaml (the user-editable
@@ -23,16 +24,21 @@ const SOCKET = process.env.TMUX_SOCKET || DEFAULT_TMUX_SOCKET;
 const configSources = resolveConfigSources({ packageDir: BRIDGE_DIR });
 const CONFIG_PATH = runtimeAgentsPath();
 const LAST_FILE = resolve(process.env.HOME, ".config/agent/.last");
+const argv = process.argv.slice(2);
+const helpOnly = isDispatchHelp(argv);
 
-if (existsSync(configSources.agentmuxYaml.path) || existsSync(CONFIG_PATH)) {
-  ensureRuntimeConfig({
-    sourcePath: configSources.agentmuxYaml.path,
-    generatedPath: CONFIG_PATH,
-  });
+// Syntax probes must also bypass config generation, not only the final handler.
+if (!helpOnly) {
+  if (existsSync(configSources.agentmuxYaml.path) || existsSync(CONFIG_PATH)) {
+    ensureRuntimeConfig({
+      sourcePath: configSources.agentmuxYaml.path,
+      generatedPath: CONFIG_PATH,
+    });
+  }
+  ensureConfig(CONFIG_PATH);
 }
-ensureConfig(CONFIG_PATH);
 
-const tmuxCtx = createTmuxContext(SOCKET, CONFIG_PATH);
+const tmuxCtx = helpOnly ? {} : createTmuxContext(SOCKET, CONFIG_PATH);
 const ctx = {
   ...tmuxCtx,
   configPath: CONFIG_PATH,
@@ -42,7 +48,6 @@ const ctx = {
 };
 
 try {
-  const argv = process.argv.slice(2);
   // Runtime config must exist before the command graph is evaluated: several
   // command modules intentionally snapshot environment-backed defaults.
   if (argv[0] === "restarter") {
