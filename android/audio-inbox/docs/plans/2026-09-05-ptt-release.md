@@ -4,13 +4,13 @@ Scope: Link PTT only. No Skyvw changes, alternate recorder or toggle mode.
 
 - [x] Reproduce current Phone/round behavior with one physical DOWN, wait
   through LISTENING recomposition, then the same pointer UP.
-- [ ] Release ends recording and submits exactly once. Cancellation submits
+- [x] Release ends recording and submits exactly once. Cancellation submits
   nothing; leaving the screen never leaves the microphone running.
 - [x] Shared copy says HOLD TO TALK before recording and RELEASE TO SEND
   while recording; waveform/time remain visible without shifting the control.
 - [x] Use explicitly local fixtures, never send a test recording to a person
   or agent. Distinguish simulated transport from real microphone/gesture proof.
-- [ ] Focused tests, named native proof, inspect Phone/round screenshots.
+- [x] Focused tests, named native proof, inspect Phone/round screenshots.
 - [ ] Fresh-trunk merge, immutable Phone/Wear release and public byte verification.
 
 Baseline: existing Phone named DOWN → LISTENING → UP smoke passed. No toggle
@@ -36,6 +36,10 @@ that the ordinary gesture was a toggle. The focused test forces stop failure.
   turn, nonempty MediaRecorder payload, no remaining recorder; short touch
   BEGIN=0 and cancelled recording RELEASE=0/delivered=0. Same test runs in
   responsive composition and the real shared Watch surface.
+- Final native runs: shared gesture 3/3 on Phone, 3/3 on WatchExact (including
+  disposal while held); native Wear 1/1; original Phone full-home smoke 1/1.
+  Targeted JVM: RecorderFinalizer 1/1, capture availability 2/2, graph 1/1;
+  Phone/Wear compileReleaseKotlin green. No full suite or hosted CI.
 - Native Wear Activity/graph/WearVoiceRecorder: one held gesture ends capture
   on UP; a second recording can begin and CANCEL discards it. Demo catalog
   has no authenticated mailbox, so it correctly reports failed delivery.
