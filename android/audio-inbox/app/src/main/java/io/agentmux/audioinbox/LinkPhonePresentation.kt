@@ -11,19 +11,6 @@ import io.agentmux.linkcore.ReplyPhase
 import java.time.Instant
 import kotlin.math.sin
 
-internal fun targetChoices(targets: List<LinkTarget>): List<Pair<String, String>> {
-    val baseLabels = targets.associateWith { it.label.ifBlank { it.id }.uppercase() }
-    val duplicates = baseLabels.values.groupingBy { it }.eachCount()
-    return targets.map { target ->
-        val base = requireNotNull(baseLabels[target])
-        target.id to if (duplicates.getValue(base) > 1) {
-            "$base · ${target.id.uppercase()}"
-        } else {
-            base
-        }
-    }
-}
-
 internal fun attachmentUrls(text: String): List<String> =
     Regex("""https?://[^\s<>()\]"]+""")
         .findAll(text)

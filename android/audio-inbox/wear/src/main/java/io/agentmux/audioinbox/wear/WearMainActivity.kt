@@ -84,12 +84,12 @@ class WearMainActivity : ComponentActivity() {
         requestMicrophone()
         if (!qaPreviewActive) controller.start()
         setContent {
-            RingActionCueHost {
                 CircleHostSurface(
                     isWatchDevice = true,
                     state = CircleHostPreviewState(mode = CircleHostMode.WATCH_EXACT),
                     onStateChange = null,
                 ) {
+                  RingActionCueHost {
                     LinkWatchScreen(
                         graph = productGraph,
                         currentVersionName = updater.currentVersionName,
@@ -97,8 +97,8 @@ class WearMainActivity : ComponentActivity() {
                         recordedBytes = controller::recordedBytes,
                         recordedLevel = controller::recordedLevel,
                     )
+                  }
                 }
-            }
         }
         if (!qaPreviewActive) refreshHandoff()
         updater.start()

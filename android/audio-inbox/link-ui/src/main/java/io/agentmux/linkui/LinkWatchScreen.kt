@@ -18,6 +18,7 @@ import com.adelost.designkit.ui.GraphiteTokens
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.releasekit.ui.releaseUpdateRows
 import com.adelost.ringkit.ui.RenderRingScreen
+import com.adelost.ringkit.ui.BackRing
 import com.adelost.ringkit.ui.RingNavigator
 import com.adelost.ringkit.ui.RingScreen
 import com.adelost.ringkit.ui.RowSpec
@@ -91,6 +92,7 @@ fun LinkWatchSurface(
     val recovery by graph.recovery.collectAsState()
     val showingSettings = route == LinkRoute.SETTINGS
     var captureOpen by remember { mutableStateOf(false) }
+    var recipientOpen by remember { mutableStateOf(false) }
     var captureStarted by remember { mutableStateOf(false) }
     BackHandler(enabled = captureOpen) {
         graph.cancelCapture()
@@ -119,15 +121,24 @@ fun LinkWatchSurface(
                 onCancel = graph::cancelCapture,
                 onRecover = onRequestMicrophone,
             )
+            BackRing(label = "Back", onBack = {
+                graph.cancelCapture()
+                captureStarted = false
+                captureOpen = false
+            }, modifier = Modifier.align(Alignment.TopCenter))
         }
+        return
+    }
+    if (recipientOpen) {
+        LinkRecipientPicker(target, onSelect = {
+            graph.onTargetSelect(LinkTargetSelectEvent(it))
+            recipientOpen = false
+        }, onBack = { recipientOpen = false })
         return
     }
     BackHandler(enabled = showingSettings) { check(graph.navigation.back()) }
     val onOpenSettings = remember(graph) {
         { graph.onSettingsActionOpen(LinkRouteOpenEvent(LinkRoute.SETTINGS)) }
-    }
-    val onSelectTarget = remember(graph) {
-        { targetId: String -> graph.onTargetSelect(LinkTargetSelectEvent(targetId)) }
     }
     // The body ends in a safe-call, so its natural type is `() -> Unit?`: "there
     // was no turn to play" is not a value a row handler may return. Stating the
@@ -191,7 +202,7 @@ fun LinkWatchSurface(
                 target = target,
                 conversation = latest,
                 session = connection,
-                onSelectTarget = onSelectTarget,
+                onOpenRecipients = { recipientOpen = true },
                 onOpenCapture = { captureOpen = true },
                 onPlay = onPlay,
                 onStop = onStop,
@@ -207,7 +218,7 @@ fun linkWatchRows(
     target: LinkTargetPresentation,
     conversation: LinkConversationPresentation,
     session: LinkSessionPresentation,
-    onSelectTarget: (String) -> Unit,
+    onOpenRecipients: () -> Unit,
     onOpenCapture: () -> Unit,
     onPlay: () -> Unit,
     onStop: () -> Unit,
@@ -215,37 +226,21 @@ fun linkWatchRows(
     onOpenSettings: () -> Unit = {},
 ): List<RowSpec> {
     val selected = target.targets.firstOrNull { it.id == target.selectedTargetId }
-    val targetChoices = target.targets
-        .map { it.label.ifBlank { it.id }.uppercase() }
-        .takeIf { it.size >= 2 }
-        .orEmpty()
     val rows = mutableListOf<RowSpec>()
     GeneratedLinkHomeComponents.resolve(CircleSurfaceClass.ROUND).orderedMounts.forEach { mount ->
         when (mount.component) {
             GeneratedLinkHomeComponent.NAVIGATION_PAGE_HOST -> Unit
-            GeneratedLinkHomeComponent.TARGET_PICKER -> rows += RowSpec(
-                key = mount.id,
-                title = "AGENT · ${linkSessionRoute(session)}",
-                sub = selected?.label?.ifBlank { selected.id }?.uppercase() ?: "NO TARGET",
-                icon = LinkNativeBindings.requireIcon("target"),
-                choices = targetChoices,
-                onSelect = targetChoices.takeIf { it.isNotEmpty() }?.let {
-                    { label: String ->
-                        target.targets.firstOrNull {
-                            it.label.ifBlank { it.id }.uppercase() == label
-                        }?.let { onSelectTarget(it.id) }
-                    }
-                },
-            )
+            GeneratedLinkHomeComponent.TARGET_PICKER ->
+                rows += linkRecipientRow(target, onOpenRecipients).copy(key = mount.id)
             GeneratedLinkHomeComponent.CAPTURE_TALK -> rows += RowSpec(
                 key = mount.id,
-                title = "PUSH TO TALK",
-                sub = if (selected == null) "UNAVAILABLE" else "OPEN RECORDER",
+                title = "VOICE MESSAGE",
+                sub = if (selected == null) "Choose a recipient first" else "Hold to talk on the next screen",
                 icon = LinkNativeBindings.requireIcon("record"),
-                onTap = onOpenCapture.takeIf { selected != null },
+                onTap = onOpenCapture.takeIf { selected?.acceptsMessages == true },
             )
             GeneratedLinkHomeComponent.CONVERSATION_LATEST -> rows += watchReplyRows(
-                latest = conversation.turns.lastOrNull(),
+                latest = conversation.turns.lastOrNull { it.targetId == target.selectedTargetId },
                 defaultIcon = LinkNativeBindings.requireIcon("speaker"),
                 onPlay = onPlay,
                 onStop = onStop,
