@@ -151,7 +151,7 @@ internal fun LinkPhoneHome(
                             value = composer.text,
                             label = "Message",
                             enabled = selected?.acceptsMessages == true,
-                            maxLength = 4_000,
+                            maxLength = io.agentmux.linkcore.LinkHistoryPolicy.MAX_COMPOSE_CHARS,
                             onValueChange = graph::onComposerEdited,
                             onSubmit = { graph.onComposerCompose(LinkComposeEvent(composer.text)) },
                         ),

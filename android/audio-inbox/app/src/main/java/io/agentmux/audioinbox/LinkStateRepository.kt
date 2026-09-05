@@ -35,7 +35,7 @@ internal class LinkStateRepository(
     @Synchronized
     fun save(state: LinkState) {
         val turns = JSONArray()
-        state.turns.forEach { turn ->
+        LinkHistoryPolicy.retain(state.turns).forEach { turn ->
             turns.put(
                 JSONObject()
                     .put("turnId", turn.turnId)

@@ -24,6 +24,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
+private const val MIN_CAPTURE_NANOS = 500_000_000L
+
 /** The host-supplied native sinks behind the generated effect-owning service inputs. */
 class LinkProductSinks(
     val captureCommand: (LinkCaptureCommandEvent) -> Unit,
@@ -57,8 +59,10 @@ open class LinkProductGraph(
     capturedTurns: Flow<LinkCapturedTurn>,
     val navigation: LinkNavigationController,
     private val sinks: LinkProductSinks,
+    private val monotonicNanos: () -> Long = System::nanoTime,
 ) {
     private val runtime = LinkProductPortRuntime(processScope)
+    private var captureBeganAtNanos: Long? = null
 
     val target: StateFlow<LinkTargetPresentation>
     val capture: StateFlow<LinkCapturePresentation>
@@ -302,7 +306,24 @@ open class LinkProductGraph(
     fun cancelCapture() = onTalkCommand(LinkCaptureCommandEvent(CaptureOperation.CANCEL))
 
     fun onTalkCommand(event: LinkCaptureCommandEvent) {
-        talkCommand.emit(event)
+        when (event.operation) {
+            CaptureOperation.BEGIN -> {
+                if (captureBeganAtNanos != null) return
+                talkCommand.emit(event)
+                captureBeganAtNanos = monotonicNanos().takeIf { state.value.capture == CapturePhase.LISTENING }
+            }
+            CaptureOperation.RELEASE -> {
+                val started = captureBeganAtNanos ?: return
+                captureBeganAtNanos = null
+                val operation = if (monotonicNanos() - started < MIN_CAPTURE_NANOS)
+                    CaptureOperation.CANCEL else CaptureOperation.RELEASE
+                talkCommand.emit(LinkCaptureCommandEvent(operation))
+            }
+            CaptureOperation.CANCEL -> {
+                captureBeganAtNanos = null
+                talkCommand.emit(event)
+            }
+        }
     }
 
     fun onComposerCompose(event: LinkComposeEvent) {

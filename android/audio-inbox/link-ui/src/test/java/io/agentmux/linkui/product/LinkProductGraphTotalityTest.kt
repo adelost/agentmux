@@ -5,6 +5,8 @@ import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
 import io.agentmux.linkcore.LinkState
 import io.agentmux.linkcore.LinkTargetKind
+import io.agentmux.linkcore.CaptureOperation
+import io.agentmux.linkcore.CapturePhase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -18,6 +20,8 @@ class LinkProductGraphTotalityTest {
     fun servicesFlowThroughFinalPresentationsIntoComponents() {
         val state = MutableStateFlow(LinkState())
         val playback = mutableListOf<LinkPlaybackCommandEvent>()
+        val captures = mutableListOf<CaptureOperation>()
+        var clock = 0L
         val graph = LinkProductGraph(
             processScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
             state = state,
@@ -35,7 +39,11 @@ class LinkProductGraphTotalityTest {
                 artifact = io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef.PHONE_FULL_UI,
             ),
             sinks = LinkProductSinks(
-                captureCommand = {},
+                captureCommand = { event ->
+                    captures += event.operation
+                    state.value = state.value.copy(capture = if (event.operation == CaptureOperation.BEGIN)
+                        CapturePhase.LISTENING else CapturePhase.IDLE)
+                },
                 capturedTurn = {},
                 compose = {},
                 playbackCommand = { playback += it },
@@ -43,6 +51,7 @@ class LinkProductGraphTotalityTest {
                 preferenceToggle = {},
                 updateCommand = {},
             ),
+            monotonicNanos = { clock },
         )
 
         try {
@@ -64,6 +73,16 @@ class LinkProductGraphTotalityTest {
             state.value = state.value.copy(turns = listOf(older, older.copy(turnId = "newer")))
             action.onTap!!()
             assertEquals(listOf(LinkPlaybackCommandEvent(io.agentmux.linkcore.PlaybackOperation.PLAY, "older")), playback)
+            assertEquals(true, graph.beginCapture()) // no startup delay
+            clock += 499_000_000L
+            graph.releaseCapture()
+            assertEquals(listOf(CaptureOperation.BEGIN, CaptureOperation.CANCEL), captures)
+            graph.beginCapture()
+            clock += 500_000_000L
+            graph.releaseCapture()
+            graph.releaseCapture() // duplicate UP is not a second submission
+            assertEquals(listOf(CaptureOperation.BEGIN, CaptureOperation.CANCEL,
+                CaptureOperation.BEGIN, CaptureOperation.RELEASE), captures)
         } finally {
             graph.close()
         }

@@ -177,6 +177,7 @@ internal class LinkCoordinator(
         }
 
     fun submitText(raw: String): String? {
+        if (raw.length > io.agentmux.linkcore.LinkHistoryPolicy.MAX_COMPOSE_CHARS) return null
         val text = raw.trim()
         val target = targetForSelection() ?: return null
         if (text.isEmpty()) return null

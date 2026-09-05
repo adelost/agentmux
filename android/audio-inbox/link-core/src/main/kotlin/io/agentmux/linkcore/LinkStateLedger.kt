@@ -10,7 +10,7 @@ class LinkStateLedger(
     initial: LinkState,
     private val persist: (LinkState) -> Unit,
 ) {
-    private val mutable = MutableStateFlow(initial)
+    private val mutable = MutableStateFlow(initial.copy(turns = LinkHistoryPolicy.retain(initial.turns)))
     val state = mutable.asStateFlow()
     val value: LinkState get() = mutable.value
 

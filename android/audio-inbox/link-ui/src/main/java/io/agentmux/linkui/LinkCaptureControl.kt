@@ -57,8 +57,8 @@ data class LinkCaptureSpec(
 )
 
 /**
- * The only Link PTT renderer. CircleKit owns both the 200 ms arming progress
- * and the active waveform; Phone and Wear provide state and recorder ports.
+ * The only Link recording renderer. Begin immediately, with no arming sweep.
+ * The shared graph discards accidental short presses; CircleKit owns the waveform.
  */
 @Composable
 fun LinkCaptureControl(
@@ -112,6 +112,7 @@ fun LinkCaptureControl(
             }
             else -> RingPressLifecycle(
                 spec = RingPressLifecycleSpec(
+                    holdMs = 0L,
                     label = when (spec.phase) {
                         CapturePhase.LISTENING -> "RELEASE TO SEND"
                         CapturePhase.FINALIZING -> "SENDING"
@@ -127,7 +128,7 @@ fun LinkCaptureControl(
                     sub = when (availability) {
                         LinkCaptureAvailability.Ready -> VoiceUploadPolicy.warning(bytes, spec.byteLimit)
                             ?.let { if (bytes > (spec.byteLimit ?: Long.MAX_VALUE)) "OVER 5 MB" else "5 MB SOON" }
-                            .orEmpty() // A size warning must not move the pressed control either.
+                            ?: if (recording) "SLIDE AWAY TO CANCEL" else ""
                         is LinkCaptureAvailability.Blocked -> availability.detail
                         is LinkCaptureAvailability.Recoverable -> availability.detail
                     },

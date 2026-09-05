@@ -68,14 +68,16 @@ class LinkPttGestureTest {
         val anchor = node.fetchSemanticsNode().boundsInRoot.center
         compose.onRoot().performTouchInput { down(anchor); advanceEventTime(40); up() }
         compose.waitForIdle()
-        assertEquals(0, fixture.begins)
+        assertEquals(1, fixture.begins)
+        assertEquals(1, fixture.cancels)
+        assertTrue(fixture.delivered.isEmpty())
         compose.onRoot().performTouchInput { down(anchor) }
         compose.waitUntil(3000) { fixture.state.value.capture == CapturePhase.LISTENING }
         Thread.sleep(400)
         compose.onRoot().performTouchInput { cancel() }
         compose.waitUntil(3000) { fixture.state.value.capture == CapturePhase.IDLE }
-        assertEquals(1, fixture.begins)
-        assertEquals(1, fixture.cancels)
+        assertEquals(2, fixture.begins)
+        assertEquals(2, fixture.cancels)
         assertEquals(0, fixture.releases)
         assertTrue(fixture.delivered.isEmpty())
         assertNull(fixture.recorder.release())
@@ -86,6 +88,22 @@ class LinkPttGestureTest {
         compose.onRoot().performTouchInput { down(anchor) }
         compose.waitUntil(3000) { fixture.state.value.capture == CapturePhase.LISTENING }
         compose.runOnUiThread { fixture.mounted = false }
+        compose.waitUntil(3000) { fixture.state.value.capture == CapturePhase.IDLE }
+        compose.onRoot().performTouchInput { up() }
+        assertEquals(1, fixture.cancels)
+        assertEquals(0, fixture.releases)
+        assertTrue(fixture.delivered.isEmpty())
+        assertNull(fixture.recorder.release())
+    }
+
+    @Test fun slidingAwayDiscardsTheRecordingWithoutSending() = withCapture { fixture ->
+        val bounds = compose.onNodeWithContentDescription("HOLD TO TALK").fetchSemanticsNode().boundsInRoot
+        compose.onRoot().performTouchInput { down(bounds.center) }
+        compose.waitUntil(3000) { fixture.state.value.capture == CapturePhase.LISTENING }
+        Thread.sleep(600)
+        compose.onRoot().performTouchInput {
+            moveTo(androidx.compose.ui.geometry.Offset(bounds.left - bounds.width, bounds.center.y))
+        }
         compose.waitUntil(3000) { fixture.state.value.capture == CapturePhase.IDLE }
         compose.onRoot().performTouchInput { up() }
         assertEquals(1, fixture.cancels)

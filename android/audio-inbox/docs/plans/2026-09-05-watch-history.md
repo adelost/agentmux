@@ -61,3 +61,20 @@ The limit is global, not 50 per recipient. This is Link conversation history,
 not a Discord channel archive. Capacity/late-reply regression uses the real
 reducer: after 50 replacements the evicted ID is absent, and a late reply does
 not resurrect it or mutate another message. Full Discord import is not added.
+
+Mattias's follow-ups before publication (same 2026-09-05 delivery):
+- [ ] Bound text as well as turn count. Shared policy: 12,000 UTF-16 characters
+      per message/reply including explicit local-shortening marker, 256,000
+      total retained text characters; evict oldest whole exchanges first.
+      Preserve the existing 4,000-character composer cap. Public HTTP already
+      rejects responses over 128 KiB; do not invent another transport layer.
+- [ ] Recording starts immediately, no 200 ms arming sweep. Release before
+      500 ms discards rather than sends; shared monotonic timing, same gesture.
+- [ ] Verify empty/whitespace SEND is disabled AND visibly muted. No fake new
+      validation if the existing atom already rejects it.
+- [ ] Inspect restart/audio: retain readable text, regenerate reply audio when
+      manually requested; do not promise persistent cached audio or erase text
+      to hide failures. Prove a local-only replay after service restart.
+- [ ] Keep standard conversation concise: message/reply, genuine pending/error
+      status, no tool-call/debug transcript in the main feed. Auto-read remains
+      the existing option and single player, not a driving mode or wake-word feature.
