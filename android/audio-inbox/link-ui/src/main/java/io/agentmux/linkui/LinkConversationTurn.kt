@@ -45,7 +45,7 @@ fun LinkConversationTurn(
         }
         listOf(turn.deliveryError, turn.replyError, turn.playbackError)
             .filter(String::isNotBlank)
-            .forEach { RingRow("", it, onTap = null, icon = RingIcons.Warning) }
+            .forEach { RingRow("", linkConversationError(it), onTap = null, icon = RingIcons.Warning) }
     }
 }
 

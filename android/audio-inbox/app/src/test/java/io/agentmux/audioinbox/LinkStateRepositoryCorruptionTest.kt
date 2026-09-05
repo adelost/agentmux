@@ -7,6 +7,17 @@ import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.ReplyPhase
 
 class LinkStateRepositoryCorruptionTest {
+    @Test fun `oversized old history is rejected before JSON parsing without another huge copy`() {
+        val preferences = TestPreferences()
+        preferences.data[AppContract.KEY_LINK_STATE_V2] = "x".repeat(
+            io.agentmux.linkcore.LinkHistoryPolicy.MAX_ENCODED_HISTORY_CHARS + 1)
+        val restored = LinkStateRepository(preferences).load()
+        assertTrue(restored.turns.isEmpty())
+        assertTrue(restored.recoveryError.contains("Oversized"))
+        assertTrue(!preferences.data.containsKey(AppContract.KEY_LINK_STATE_V2))
+        assertTrue(!preferences.data.containsKey(AppContract.KEY_LINK_STATE_V2_QUARANTINE))
+    }
+
     @Test
     fun `corrupt v2 is quarantined and never reinterpreted as legacy`() {
         val preferences = TestPreferences()

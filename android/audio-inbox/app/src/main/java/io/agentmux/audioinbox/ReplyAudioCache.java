@@ -41,6 +41,7 @@ final class ReplyAudioCache {
             received.delete();
             throw new IOException("Audio response is empty or too large");
         }
+        prune(now, received.length(), 1); // Reserve the pending file before copying bytes.
         File temporary = File.createTempFile("pending-", ".part", directory);
         try {
             Files.copy(received.toPath(), temporary.toPath(), StandardCopyOption.REPLACE_EXISTING);
@@ -54,9 +55,11 @@ final class ReplyAudioCache {
         return received;
     }
 
-    private void prune(long now) {
+    private void prune(long now) throws IOException { prune(now, 0, 0); }
+
+    private void prune(long now, long reservedBytes, int reservedFiles) throws IOException {
         File[] files = directory.listFiles();
-        if (files == null) return;
+        if (files == null) throw new IOException("Cannot read audio cache");
         Arrays.sort(files, Comparator.comparingLong(File::lastModified).reversed());
         long bytes = 0;
         int count = 0;
@@ -64,8 +67,9 @@ final class ReplyAudioCache {
             long age = now - file.lastModified();
             long size = file.length();
             if (!file.getName().endsWith(".audio") || size <= 0 || size > MAX_FILE_BYTES ||
-                age < 0 || age >= TTL_MS || count >= MAX_FILES || bytes + size > MAX_BYTES) {
-                file.delete();
+                age < 0 || age >= TTL_MS || count >= MAX_FILES - reservedFiles ||
+                bytes + size > MAX_BYTES - reservedBytes) {
+                if (!file.delete()) throw new IOException("Cannot prune audio cache");
             } else {
                 count++;
                 bytes += size;

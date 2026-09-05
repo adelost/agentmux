@@ -83,3 +83,9 @@ fun attachmentUrls(text: String): List<String> =
         .distinct()
         .take(4)
         .toList()
+
+/** Keep the server receipt intact in state; only recognized copy is simplified. */
+fun linkConversationError(detail: String): String = when {
+    detail.contains("transcription empty", ignoreCase = true) -> "No speech detected. Try again."
+    else -> detail
+}

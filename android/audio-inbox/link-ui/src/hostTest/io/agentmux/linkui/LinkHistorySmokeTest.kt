@@ -50,6 +50,13 @@ class LinkHistorySmokeTest {
                 compose.onNodeWithContentDescription("Back").performClick()
                 compose.onNodeWithContentDescription("Back").performClick()
             } else {
+                compose.onNodeWithContentDescription("Send message").assertIsNotEnabled()
+                compose.onNode(hasSetTextAction()).performTextReplacement("  \n ")
+                compose.onNodeWithContentDescription("Send message").assertIsNotEnabled()
+                compose.onNode(hasSetTextAction()).performTextReplacement("Local draft, never sent")
+                compose.onNodeWithContentDescription("Send message").assertIsEnabled()
+                compose.onNode(hasSetTextAction()).performTextClearance()
+                compose.onNodeWithContentDescription("Send message").assertIsNotEnabled()
                 compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(0)
                 compose.onNodeWithText("Show the earlier plan").assertExists()
                 shot("conversation")

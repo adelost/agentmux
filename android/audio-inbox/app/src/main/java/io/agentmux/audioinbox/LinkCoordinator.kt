@@ -177,8 +177,7 @@ internal class LinkCoordinator(
         }
 
     fun submitText(raw: String): String? {
-        if (raw.length > io.agentmux.linkcore.LinkHistoryPolicy.MAX_COMPOSE_CHARS) return null
-        val text = raw.trim()
+        val text = raw.takeIf { it.length <= io.agentmux.linkcore.LinkHistoryPolicy.MAX_COMPOSE_CHARS }?.trim() ?: return null
         val target = targetForSelection() ?: return null
         if (text.isEmpty()) return null
         val turnId = UUID.randomUUID().toString()

@@ -57,7 +57,7 @@ class LinkUxSmokeTest {
             compose.waitForIdle()
             shot("settings-top")
             if (!round) {
-                compose.onNodeWithContentDescription("ABOUT AUTO-PLAY REPLIES").performClick()
+                compose.onNodeWithContentDescription("ABOUT READ REPLIES").performClick()
                 shot("info", 250)
                 compose.onNodeWithContentDescription("Close information").performClick()
                 compose.onNode(hasScrollToIndexAction()).performScrollToNode(
@@ -142,6 +142,56 @@ class LinkUxSmokeTest {
                     command(AppContract.ACTION_STOP_AUDIO)
                     prefs.edit().apply { listOf("a", "b", "c").forEach { remove("turn-playback:ux-$it") } }.commit()
                 }
+            }
+        }
+    }
+
+    @Test fun savedReplyReplaysOfflineAfterAudioServiceRestart() {
+        val context = instrumentation.targetContext
+        val prefs = context.getSharedPreferences(AppContract.PREFS, 0)
+        val historyPrefs = context.getSharedPreferences("link-restart-proof", 0)
+        val turn = io.agentmux.linkcore.LinkTurn("restart-proof", "local-fixture", "LOCAL TEST",
+            "A question", replyText = "A retained reply for local audio proof.", createdAtMs = 1,
+            replyPhase = io.agentmux.linkcore.ReplyPhase.READY)
+        val repository = LinkStateRepository(historyPrefs)
+        repository.save(io.agentmux.linkcore.LinkState(turns = listOf(turn)))
+        val launch = Intent(context, MainActivity::class.java).putExtra("qa_state", "active")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        ActivityScenario.launch<MainActivity>(launch).use {
+            val http = ReplyAudioHttpFixture(expectedRequests = 1)
+            fun state() = prefs.getString("turn-playback:${turn.turnId}", "")
+            fun play() {
+                val restored = LinkStateRepository(historyPrefs).load().turns.single()
+                assertEquals(turn.replyText, restored.replyText)
+                context.startForegroundService(Intent(context, AudioInboxService::class.java)
+                    .setAction(AppContract.ACTION_REPLAY_REPLY)
+                    .putExtra(AppContract.EXTRA_TURN_ID, restored.turnId)
+                    .putExtra(AppContract.EXTRA_TEXT, restored.replyText)
+                    .putExtra(AppContract.EXTRA_SERVER, http.url))
+            }
+            try {
+                play()
+                compose.waitUntil(8000) { state() == "playing" }
+                assertEquals(1, http.requests.get())
+                http.close() // No server remains to disguise an accidental re-fetch.
+                context.startService(Intent(context, AudioInboxService::class.java)
+                    .setAction(AppContract.ACTION_STOP_AUDIO))
+                compose.waitUntil(3000) { state() == "stopped" }
+                context.stopService(Intent(context, AudioInboxService::class.java))
+                val manager = context.getSystemService(android.app.ActivityManager::class.java)
+                compose.waitUntil(5000) {
+                    manager.getRunningServices(100).none { it.service.className == AudioInboxService::class.java.name }
+                }
+                val started = android.os.SystemClock.elapsedRealtime()
+                play()
+                compose.waitUntil(8000) { state() == "playing" }
+                android.util.Log.i("LinkAudioProof", "offline replay after service restart: ${android.os.SystemClock.elapsedRealtime() - started} ms; HTTP requests=${http.requests.get()}")
+                assertEquals(1, http.requests.get())
+            } finally {
+                http.close()
+                context.stopService(Intent(context, AudioInboxService::class.java))
+                historyPrefs.edit().clear().commit()
+                prefs.edit().remove("turn-playback:${turn.turnId}").commit()
             }
         }
     }

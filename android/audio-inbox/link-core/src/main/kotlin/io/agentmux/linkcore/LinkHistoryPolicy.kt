@@ -10,6 +10,8 @@ object LinkHistoryPolicy {
     const val MAX_MESSAGE_CHARS = 12_000
     const val MAX_HISTORY_CHARS = 256_000
     const val MAX_COMPOSE_CHARS = 4_000
+    // JSON may escape one retained character into six. Leave room for row keys.
+    const val MAX_ENCODED_HISTORY_CHARS = 2_000_000
     const val SHORTENED = "\n\n[Message shortened on this device]"
 
     /** UTF-16 character budgets, not an estimate of the whole process heap. */

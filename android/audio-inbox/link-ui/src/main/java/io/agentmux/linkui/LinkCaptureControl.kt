@@ -1,6 +1,7 @@
 package io.agentmux.linkui
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -95,7 +96,8 @@ fun LinkCaptureControl(
         // at BEGIN moves the held control away from the original finger.
         RingAudioCaptureFeedback(
             RingAudioCaptureFeedbackSpec(elapsedMs, levels.toList(), active = recording),
-            modifier = if (recording) Modifier else Modifier.alpha(0f).clearAndSetSemantics { },
+            modifier = Modifier.widthIn(max = diameter * 2f).then(
+                if (recording) Modifier else Modifier.alpha(0f).clearAndSetSemantics { }),
         )
         when (val availability = spec.availability) {
             is LinkCaptureAvailability.Recoverable -> {
