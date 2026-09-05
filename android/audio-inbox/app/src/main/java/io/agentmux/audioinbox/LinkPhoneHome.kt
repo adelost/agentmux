@@ -96,8 +96,8 @@ internal fun LinkPhoneHome(
                 graph.onSettingsActionOpen(LinkRouteOpenEvent(LinkRoute.SETTINGS))
             }) else emptyList(),
         )
-        tree.orderedMounts.forEach { mount ->
-            when (mount.component) {
+        LinkHomeRegions(tree) { component ->
+            when (component) {
                 GeneratedLinkHomeComponent.NAVIGATION_PAGE_HOST,
                 GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY -> Unit
                 GeneratedLinkHomeComponent.TARGET_PICKER ->
@@ -110,11 +110,8 @@ internal fun LinkPhoneHome(
                         item("empty") {
                             RingMessage(
                                 RingMessageSpec(
-                                    author = "CONVERSATION",
-                                    body = if (selected == null) "Choose who you'd like to talk to."
-                                        else "What would you like to do?",
-                                    status = if (selected == null) "Connection is in Settings."
-                                        else "Write below, or hold the microphone to talk.",
+                                    author = "",
+                                    body = if (selected == null) "Choose a recipient" else "No messages yet",
                                 ),
                                 modifier = Modifier.padding(horizontal = 24.dp),
                             )
@@ -123,8 +120,7 @@ internal fun LinkPhoneHome(
                         items(turns, key = LinkTurn::turnId) { turn ->
                             ConversationTurn(
                                 turn = turn,
-                                showPlayer = turn.replyText.isNotBlank() &&
-                                    (turn == turns.last() || turn.turnId == playback.activeTurnId),
+                                showPlayer = false,
                                 onPlayback = { operation ->
                                     graph.onActivePlaybackCommand(LinkPlaybackCommandEvent(operation, turn.turnId))
                                 },
@@ -141,6 +137,7 @@ internal fun LinkPhoneHome(
                         item("recovery") { PhoneRow("HISTORY", recovery.detail.orEmpty(), RingIcons.Warning) }
                     }
                 }
+                GeneratedLinkHomeComponent.PLAYBACK_CONTROLS -> LinkActivePlayback(graph, playback)
                 GeneratedLinkHomeComponent.CONVERSATION_COMPOSER -> RingTextComposer(
                     spec = RingTextInputSpec(
                         value = composer.text,

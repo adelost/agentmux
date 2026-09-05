@@ -56,8 +56,9 @@ internal fun LinkPlaybackControls(
     onStop: () -> Unit,
 ) = RingPlaybackControls(
     spec = RingPlaybackSpec(
-        title = "READ ALOUD",
+        title = turn.targetId,
         state = when (turn.playbackPhase) {
+            PlaybackPhase.QUEUED -> RingPlaybackState.LOADING
             PlaybackPhase.PLAYING -> RingPlaybackState.PLAYING
             PlaybackPhase.PAUSED -> RingPlaybackState.PAUSED
             PlaybackPhase.PLAYED -> RingPlaybackState.COMPLETE

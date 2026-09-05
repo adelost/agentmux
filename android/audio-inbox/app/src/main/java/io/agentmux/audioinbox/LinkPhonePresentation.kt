@@ -30,13 +30,13 @@ internal fun turnStatusLabel(turn: LinkTurn): String = when {
     else -> "Sending…"
 }
 
-internal fun phoneActivePreviewState(playbackActive: Boolean): LinkState = LinkState(
+internal fun phoneActivePreviewState(playbackActive: Boolean, scenario: String? = null): LinkState = LinkState(
     connection = ConnectionState.CONNECTED,
     connectionDetail = "PRIVATE RELAY READY",
     connectionObservedAtMs = System.currentTimeMillis(),
     targets = listOf(
         LinkTarget(id = "demo:1", label = "Implementation worker · available for your next task"),
-        LinkTarget(id = "demo:2", label = "Kimi K3 · a second agent with a deliberately long description"),
+        LinkTarget(id = "demo:2", label = "Second window · a deliberately long description that stays readable"),
     ),
     selectedTargetId = "demo:1",
     turns = listOf(
@@ -56,7 +56,19 @@ internal fun phoneActivePreviewState(playbackActive: Boolean): LinkState = LinkS
         ),
     ),
     activePlaybackTurnId = "qa-turn".takeIf { playbackActive },
-)
+).let { state ->
+    when (scenario) {
+        null -> state
+        "offline" -> state.copy(connection = ConnectionState.DISCONNECTED, targets = emptyList(),
+            selectedTargetId = "", turns = emptyList())
+        "waiting" -> state.copy(turns = state.turns.map { it.copy(replyText = "", replyPhase = ReplyPhase.THINKING) })
+        "error" -> state.copy(turns = state.turns.map { it.copy(replyText = "",
+            deliveryPhase = DeliveryPhase.FAILED, deliveryError = "No connection. Message not sent.") })
+        "loading" -> state.copy(activePlaybackTurnId = "qa-turn",
+            turns = state.turns.map { it.copy(playbackPhase = PlaybackPhase.QUEUED) })
+        else -> error("Unknown Link preview scenario: $scenario")
+    }
+}
 
 /** The fixed settings-page update preview the qa_state/qa_page extras have always shown. */
 internal fun phoneQaUpdateState(): UpdateState = UpdateState.Available(

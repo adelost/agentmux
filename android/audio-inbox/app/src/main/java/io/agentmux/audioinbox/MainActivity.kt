@@ -78,7 +78,7 @@ class MainActivity : ComponentActivity() {
         )
         productGraph = if (qaActive) {
             PhoneLinkProductGraph.qa(
-                qaState = MutableStateFlow(phoneActivePreviewState(qaPlayback)),
+                qaState = MutableStateFlow(phoneActivePreviewState(qaPlayback, intent.getStringExtra("qa_case"))),
                 updateState = if (qaPage == QA_PAGE_SETTINGS) {
                     MutableStateFlow(phoneQaUpdateState())
                 } else {

@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.componentFamilies
-// Product declarations SHA-256: 83741324ee1b1e69992f0ff1b15fa53aa1ad2818a9aa13c73a0d398f384196f4
+// Product declarations SHA-256: e580fc89ea2a079c4a899175e4094a261f6b37f163ff62445bdf3ce67e6eab1c
 package io.agentmux.linkui.product.generated
 
 enum class GeneratedLinkComponentFamilyRef(val wireId: String) { LINK_HOME("link.home"), LINK_SETTINGS("link.settings"), LINK_DEV_HOST("link.dev-host") }
@@ -21,7 +21,7 @@ object GeneratedLinkComponentFamilies {
         GeneratedLinkComponentFamilyBinding(
             route = GeneratedLinkPageId.HOME,
             family = GeneratedLinkComponentFamilyRef.LINK_HOME,
-            components = setOf(GeneratedLinkComponentId.NAVIGATION_PAGE_HOST, GeneratedLinkComponentId.TARGET_PICKER, GeneratedLinkComponentId.CAPTURE_TALK, GeneratedLinkComponentId.CONVERSATION_LATEST, GeneratedLinkComponentId.NAVIGATION_SETTINGS_ENTRY, GeneratedLinkComponentId.CONVERSATION_COMPOSER),
+            components = setOf(GeneratedLinkComponentId.NAVIGATION_PAGE_HOST, GeneratedLinkComponentId.TARGET_PICKER, GeneratedLinkComponentId.CAPTURE_TALK, GeneratedLinkComponentId.CONVERSATION_LATEST, GeneratedLinkComponentId.NAVIGATION_SETTINGS_ENTRY, GeneratedLinkComponentId.PLAYBACK_CONTROLS, GeneratedLinkComponentId.CONVERSATION_COMPOSER),
         ),
         GeneratedLinkComponentFamilyBinding(
             route = GeneratedLinkPageId.SETTINGS,

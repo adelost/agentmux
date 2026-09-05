@@ -254,6 +254,7 @@ private class PhoneCaptureAdapter(
 
     private fun begin() {
         clear()
+        coordinator.pauseAudio()
         val capture = recorder.begin()
         if (capture == null) {
             coordinator.capture(CapturePhase.FAILED)

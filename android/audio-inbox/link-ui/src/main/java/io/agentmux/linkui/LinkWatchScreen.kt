@@ -262,7 +262,7 @@ fun linkWatchRows(
             GeneratedLinkHomeComponent.CAPTURE_TALK -> rows += RowSpec(
                 key = mount.id,
                 title = "VOICE MESSAGE",
-                sub = if (selected == null) "Choose a recipient first" else "Hold to talk on the next screen",
+                sub = if (selected == null) "Choose a recipient" else "",
                 icon = LinkNativeBindings.requireIcon("record"),
                 onTap = onOpenCapture.takeIf { selected?.acceptsMessages == true },
             )
@@ -275,6 +275,7 @@ fun linkWatchRows(
                 onOpenReply = onOpenReply,
             )
             GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY -> rows += linkSettingsRow(onOpenSettings)
+            GeneratedLinkHomeComponent.PLAYBACK_CONTROLS,
             GeneratedLinkHomeComponent.CONVERSATION_COMPOSER ->
                 error("${mount.component.id.wireId} is not a Link home component on round")
         }
@@ -297,9 +298,9 @@ private fun watchReplyRows(
     add(
         RowSpec(
             key = "latest",
-            title = latest.respondingTarget.ifBlank { latest.targetId }.uppercase(),
+            title = "REPLY",
             sub = when {
-                latest.replyText.isNotBlank() -> "Read reply"
+                latest.replyText.isNotBlank() -> latest.targetId
                 latest.deliveryPhase == DeliveryPhase.FAILED -> latest.deliveryError.ifBlank { "DELIVERY FAILED" }
                 else -> "WAITING FOR REPLY"
             },
@@ -310,11 +311,11 @@ private fun watchReplyRows(
     if (latest.replyText.isBlank()) return@buildList
     add(
         when (latest.playbackPhase) {
-            PlaybackPhase.PLAYING -> RowSpec("playback", "STOP REPLY", "PLAYING", RingIcons.Stop, onTap = onStop)
-            PlaybackPhase.FAILED -> RowSpec("playback", "RETRY PLAYBACK", latest.playbackError.ifBlank { "PLAYBACK FAILED" }.uppercase().take(54), RingIcons.Refresh, onTap = onReplay)
+            PlaybackPhase.PLAYING -> RowSpec("playback", "STOP", "Playing", RingIcons.Stop, onTap = onStop)
+            PlaybackPhase.FAILED -> RowSpec("playback", "TRY AGAIN", latest.playbackError.ifBlank { "Audio unavailable" }, RingIcons.Refresh, onTap = onReplay)
             PlaybackPhase.STOPPED, PlaybackPhase.PLAYED, PlaybackPhase.SKIPPED ->
-                RowSpec("playback", "REPLAY", "PLAY LATEST REPLY", RingIcons.Refresh, onTap = onReplay)
-            else -> RowSpec("playback", "PLAY REPLY", "LATEST RESPONSE", RingIcons.Play, onTap = onPlay)
+                RowSpec("playback", "PLAY", "", RingIcons.Play, onTap = onReplay)
+            else -> RowSpec("playback", "PLAY", "", RingIcons.Play, onTap = onPlay)
         },
     )
 }

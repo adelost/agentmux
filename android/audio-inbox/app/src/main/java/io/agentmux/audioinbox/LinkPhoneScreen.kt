@@ -7,7 +7,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adelost.designkit.ui.CircleSurfaceClass
 import com.adelost.designkit.ui.LocalCircleSurfaceLayout
 import com.adelost.ringkit.ui.CircleHostPreviewPort
-import com.adelost.ringkit.ui.RingActionCueHost
+import io.agentmux.linkui.LinkInteractionHost
 import io.agentmux.linkui.LinkWatchSurface
 import io.agentmux.linkui.product.LinkRoute
 import io.agentmux.linkui.product.LinkRouteOpenEvent
@@ -33,7 +33,7 @@ internal fun LinkPhoneScreen(
     BackHandler(route != LinkRoute.HOME) {
         check(graph.navigation.back())
     }
-    RingActionCueHost {
+    LinkInteractionHost {
         when {
             route == LinkRoute.DEV_HOST -> {
                 check(

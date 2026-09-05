@@ -106,6 +106,7 @@ internal class WearMailboxController(
     fun beginCapture(): Boolean {
         val selected = selectedTarget() ?: return false
         if (!selected.acceptsMessages) return false
+        stopPlayback()
         val capture = recorder.begin()
         if (capture == null) {
             dispatch(LinkAction.Capture(CapturePhase.FAILED))
@@ -171,6 +172,7 @@ internal class WearMailboxController(
 
     fun playTurn(turnId: String) {
         val turn = ledger.value.turns.firstOrNull { it.turnId == turnId } ?: return
+        stopPlayback()
         dispatch(LinkAction.Playback(turn.turnId, PlaybackPhase.QUEUED))
         tts.play(turn.turnId, turn.replyText)
     }

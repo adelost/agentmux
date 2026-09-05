@@ -2,7 +2,6 @@ package io.agentmux.audioinbox;
 
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -10,7 +9,6 @@ import android.os.Looper;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
-import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
@@ -74,16 +72,25 @@ public final class AudioInboxService extends MediaSessionService {
             claims,
             workExecutor,
             new DirectReplyLoader.Listener() {
-                public void onReserved() {
+                public void onReplace() { stopAllAudio(false); }
+                public void onReserved(String turnId) {
                     directAvailable = true;
                     playbackQueue.setConnected(true);
+                    store.saveTurnPlayback(turnId, "queued");
                 }
-                public void onReady(AudioEventClaims.Entry item) {
-                    main.post(() -> queueItem(item));
+                public void onCancelled(String turnId) { store.saveTurnPlayback(turnId, "stopped"); }
+                public void onReady(AudioEventClaims.Entry item, long epoch) {
+                    main.post(() -> {
+                        if (directLoader.acceptReady(item.eventId, epoch)) queueItem(item);
+                        else claims.releaseAndDelete(getCacheDir(), item.eventId);
+                    });
                 }
-                public void onFailed(String turnId, String eventId) {
-                    store.saveTurnPlayback(turnId, "failed");
-                    refreshDirectAvailability();
+                public void onFailed(String turnId, long epoch) {
+                    main.post(() -> {
+                        if (!directLoader.accepts(epoch)) return;
+                        store.saveTurnPlayback(turnId, "failed");
+                        refreshDirectAvailability();
+                    });
                 }
             }
         );
@@ -262,7 +269,7 @@ public final class AudioInboxService extends MediaSessionService {
     }
 
     private void queueItem(AudioEventClaims.Entry item) {
-        if ((!item.direct && (!enabled || !connected))
+        if (!claims.isReserved(item.eventId) || (!item.direct && (!enabled || !connected))
             || item.expiresAt <= System.currentTimeMillis()) {
             claims.releaseAndDelete(getCacheDir(), item.eventId);
             return;
@@ -337,16 +344,7 @@ public final class AudioInboxService extends MediaSessionService {
             maybeStartNext();
             return;
         }
-        MediaMetadata metadata = new MediaMetadata.Builder()
-            .setTitle(item.text)
-            .setArtist(item.targetLabel)
-            .build();
-        MediaItem mediaItem = new MediaItem.Builder()
-            .setMediaId(item.eventId)
-            .setUri(Uri.fromFile(item.mediaFile))
-            .setMediaMetadata(metadata)
-            .build();
-        player.setMediaItem(mediaItem);
+        player.setMediaItem(AudioPlaybackMedia.item(item));
         player.prepare();
         player.play();
         if (item.direct) store.saveTurnPlayback(item.turnId, "playing");
@@ -412,6 +410,11 @@ public final class AudioInboxService extends MediaSessionService {
     }
 
     private void stopAllAudio() {
+        stopAllAudio(true);
+    }
+
+    private void stopAllAudio(boolean releaseIdleService) {
+        directLoader.cancelPending();
         String activeId = playbackQueue.active();
         if (activeId != null) {
             AudioEventClaims.Entry item = claims.removeQueued(activeId);
@@ -421,9 +424,9 @@ public final class AudioInboxService extends MediaSessionService {
             claims.release(activeId);
             if (item != null) {
                 claims.rotateReplayFile(item.mediaFile);
-                workExecutor.execute(() -> receipts.terminal(
-                    item, "stopped", "stopped by user", httpClient, connected
-                ));
+                if (item.direct) store.saveTurnPlayback(item.turnId, "stopped");
+                else workExecutor.execute(() -> receipts.terminal(
+                    item, "stopped", "stopped by user", httpClient, connected));
             }
         }
         for (AudioEventClaims.Entry item : claims.queuedEntries()) {
@@ -436,7 +439,7 @@ public final class AudioInboxService extends MediaSessionService {
         replaying = false;
         startingId = null;
         audioFocus.abandon();
-        refreshDirectAvailability();
+        if (releaseIdleService) refreshDirectAvailability();
         store.updateConnection(connected ? "Connected" : "Disconnected", connected);
     }
     private void discardBroadcastItems() {

@@ -87,6 +87,10 @@
           "mountRef": "conversation.latest"
         },
         {
+          "componentInstanceRef": "playback.controls",
+          "mountRef": "playback.controls"
+        },
+        {
           "componentInstanceRef": "conversation.composer",
           "mountRef": "conversation.composer"
         },
@@ -117,6 +121,10 @@
         {
           "componentInstanceRef": "conversation.latest",
           "mountRef": "conversation.latest"
+        },
+        {
+          "componentInstanceRef": "playback.controls",
+          "mountRef": "playback.controls"
         },
         {
           "componentInstanceRef": "conversation.composer",
@@ -467,9 +475,21 @@
               },
               {
                 "capacity": null,
+                "id": "playback.controls",
+                "instance": "playback.controls",
+                "order": 3,
+                "priority": 0,
+                "region": "footer",
+                "requirement": {
+                  "fallback": "omit",
+                  "kind": "optional"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "conversation.composer",
                 "instance": "conversation.composer",
-                "order": 3,
+                "order": 4,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -480,7 +500,7 @@
                 "capacity": null,
                 "id": "capture.talk",
                 "instance": "capture.talk",
-                "order": 4,
+                "order": 5,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -491,7 +511,7 @@
                 "capacity": null,
                 "id": "navigation.settings-entry",
                 "instance": "navigation.settings-entry",
-                "order": 5,
+                "order": 6,
                 "priority": 0,
                 "region": "chrome",
                 "requirement": {
@@ -538,9 +558,21 @@
               },
               {
                 "capacity": null,
+                "id": "playback.controls",
+                "instance": "playback.controls",
+                "order": 3,
+                "priority": 0,
+                "region": "footer",
+                "requirement": {
+                  "fallback": "omit",
+                  "kind": "optional"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "conversation.composer",
                 "instance": "conversation.composer",
-                "order": 3,
+                "order": 4,
                 "priority": 0,
                 "region": "footer",
                 "requirement": {
@@ -551,9 +583,9 @@
                 "capacity": null,
                 "id": "capture.talk",
                 "instance": "capture.talk",
-                "order": 4,
+                "order": 5,
                 "priority": 0,
-                "region": "footer",
+                "region": "rail",
                 "requirement": {
                   "kind": "required"
                 }
@@ -562,7 +594,7 @@
                 "capacity": null,
                 "id": "navigation.settings-entry",
                 "instance": "navigation.settings-entry",
-                "order": 5,
+                "order": 6,
                 "priority": 0,
                 "region": "chrome",
                 "requirement": {
@@ -2451,6 +2483,7 @@
         ],
         "componentInstanceRef": "playback.controls",
         "pageRefs": [
+          "home",
           "settings"
         ]
       },

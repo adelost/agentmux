@@ -128,7 +128,7 @@ internal fun LinkPhoneSettings(
                             sub = if (publicLink.publicLinkActive) {
                                 "Online account connected"
                             } else {
-                                "Talk to your agents away from your home network"
+                                ""
                             },
                             icon = LinkNativeBindings.requireIcon("link"),
                             onTap = onPublicLink,
@@ -138,10 +138,11 @@ internal fun LinkPhoneSettings(
                         item("${mount.id}.hands-free") {
                             RingChoiceRow(
                                 title = "INCOMING AUDIO",
-                                hint = "Play audio explicitly sent to this device, even while Link is in the background.",
+                                hint = "Play audio sent to this device, including in the background.",
                                 selected = if (preferences.handsFree) "ON" else "OFF",
                                 options = listOf("OFF", "ON"),
                                 role = CircleChoiceRole.TOGGLE,
+                                infoSelected = true,
                                 onSelect = {
                                     graph.onPreferencesToggle(
                                         LinkPreferenceToggleEvent(LinkPreferenceKey.HANDS_FREE, it == "ON"),
@@ -153,11 +154,12 @@ internal fun LinkPhoneSettings(
                         }
                         item("${mount.id}.read-replies") {
                             RingChoiceRow(
-                                title = "READ REPLIES ALOUD",
-                                hint = "Read new conversation replies aloud automatically. Off keeps replies silent until you press Play.",
+                                title = "AUTO-PLAY REPLIES",
+                                hint = "Read new replies aloud. Off: press Play to listen.",
                                 selected = if (preferences.speakReplies) "ON" else "OFF",
                                 options = listOf("OFF", "ON"),
                                 role = CircleChoiceRole.TOGGLE,
+                                infoSelected = true,
                                 onSelect = {
                                     graph.onPreferencesToggle(
                                         LinkPreferenceToggleEvent(LinkPreferenceKey.SPEAK_REPLIES, it == "ON"),
@@ -171,7 +173,7 @@ internal fun LinkPhoneSettings(
                     GeneratedLinkSettingsComponent.HISTORY_LOCAL -> item(mount.id) {
                         PhoneRow(
                             title = "LOCAL HISTORY",
-                            sub = "${localHistory.retainedTurns} messages saved on this device. Keeps the latest ${localHistory.maxTurns}.",
+                            sub = "${localHistory.retainedTurns} saved · ${localHistory.maxTurns} limit",
                             icon = LinkNativeBindings.requireIcon("activity"),
                         )
                     }

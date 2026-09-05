@@ -10,9 +10,11 @@ import java.util.concurrent.ExecutorService;
 /** Validates and fetches one direct reply without coupling it to the feed. */
 final class DirectReplyLoader {
     interface Listener {
-        void onReserved();
-        void onReady(AudioEventClaims.Entry item);
-        void onFailed(String turnId, String eventId);
+        void onReplace();
+        void onReserved(String turnId);
+        void onReady(AudioEventClaims.Entry item, long epoch);
+        void onCancelled(String turnId);
+        void onFailed(String turnId, long epoch);
     }
 
     private final Context context;
@@ -20,6 +22,24 @@ final class DirectReplyLoader {
     private final AudioEventClaims claims;
     private final ExecutorService executor;
     private final Listener listener;
+    private final PlaybackRequestEpoch requests = new PlaybackRequestEpoch();
+    private final java.util.Map<String, String> pending = new java.util.HashMap<>();
+
+    synchronized void cancelPending() {
+        requests.invalidate();
+        pending.forEach((eventId, turnId) -> {
+            claims.releaseAndDelete(context.getCacheDir(), eventId);
+            listener.onCancelled(turnId);
+        });
+        pending.clear();
+    }
+
+    synchronized boolean acceptReady(String eventId, long epoch) {
+        pending.remove(eventId);
+        return requests.accepts(epoch) && claims.isReserved(eventId);
+    }
+
+    boolean accepts(long epoch) { return requests.accepts(epoch); }
 
     DirectReplyLoader(
         Context context,
@@ -35,7 +55,7 @@ final class DirectReplyLoader {
         this.listener = listener;
     }
 
-    boolean prepare(Intent intent, boolean explicitReplay) {
+    synchronized boolean prepare(Intent intent, boolean explicitReplay) {
         String turnId = intent.getStringExtra(AppContract.EXTRA_TURN_ID);
         String text = intent.getStringExtra(AppContract.EXTRA_TEXT);
         String server = intent.getStringExtra(AppContract.EXTRA_SERVER);
@@ -44,22 +64,32 @@ final class DirectReplyLoader {
             || text.length() > 1500 || !ServerDiscovery.isAllowedServer(server)) return false;
         String previous = preferences.getString("turn-playback:" + turnId, "");
         if (!explicitReplay && ("stopped".equals(previous) || "played".equals(previous))) return true;
+        if (explicitReplay) {
+            cancelPending();
+            listener.onReplace();
+        }
+        long epoch = requests.current();
         String eventId = "direct-" + turnId + (explicitReplay
             ? "-replay-" + System.currentTimeMillis()
             : "");
         if (!claims.reserve(eventId)) return true;
-        listener.onReserved();
-        executor.execute(() -> fetch(eventId, turnId, text, server, label));
+        pending.put(eventId, turnId);
+        listener.onReserved(turnId);
+        executor.execute(() -> fetch(eventId, turnId, text, server, label, epoch));
         return true;
     }
 
-    private void fetch(String eventId, String turnId, String text, String server, String label) {
+    private void fetch(String eventId, String turnId, String text, String server, String label, long epoch) {
         try {
             AudioInboxHttpClient client = new AudioInboxHttpClient(
                 server,
                 AppContract.consumerId(preferences)
             );
             File media = client.fetchTts(context.getCacheDir(), eventId, text);
+            if (!requests.accepts(epoch)) {
+                claims.releaseAndDelete(context.getCacheDir(), eventId);
+                return;
+            }
             listener.onReady(new AudioEventClaims.Entry(
                 eventId,
                 text,
@@ -69,10 +99,13 @@ final class DirectReplyLoader {
                 true,
                 turnId,
                 label == null || label.isBlank() ? "Agent reply" : label
-            ));
+            ), epoch);
         } catch (Exception error) {
             claims.releaseAndDelete(context.getCacheDir(), eventId);
-            listener.onFailed(turnId, eventId);
+            synchronized (this) {
+                pending.remove(eventId);
+                if (requests.accepts(epoch)) listener.onFailed(turnId, epoch);
+            }
         }
     }
 }
