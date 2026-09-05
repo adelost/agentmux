@@ -28,7 +28,7 @@ android {
         applicationId = "io.agentmux.audioinbox"
         minSdk = 26
         targetSdk = 35
-        versionCode = 20
+        versionCode = 21
         versionName = linkVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -73,6 +73,7 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+    sourceSets.getByName("androidTest").java.srcDir("../link-ui/src/hostTest")
 }
 
 dependencies {

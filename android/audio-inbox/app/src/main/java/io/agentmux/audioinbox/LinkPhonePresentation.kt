@@ -1,5 +1,7 @@
 package io.agentmux.audioinbox
 
+import io.agentmux.linkui.withHistoryPreview
+
 import com.adelost.releasekit.UpdateState
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
@@ -10,25 +12,6 @@ import io.agentmux.linkcore.PlaybackPhase
 import io.agentmux.linkcore.ReplyPhase
 import java.time.Instant
 import kotlin.math.sin
-
-internal fun attachmentUrls(text: String): List<String> =
-    Regex("""https?://[^\s<>()\]"]+""")
-        .findAll(text)
-        .map { it.value.trimEnd('.', ',', ';') }
-        .distinct()
-        .take(4)
-        .toList()
-
-internal fun turnStatusLabel(turn: LinkTurn): String = when {
-    turn.playbackPhase == PlaybackPhase.PLAYING -> "Reading aloud"
-    turn.playbackPhase == PlaybackPhase.PAUSED -> "Paused"
-    turn.deliveryPhase == DeliveryPhase.FAILED -> "Not sent"
-    turn.replyPhase == ReplyPhase.FAILED -> "Couldn't get a reply"
-    turn.replyPhase == ReplyPhase.READY -> "Replied"
-    turn.replyPhase == ReplyPhase.THINKING -> "Thinking…"
-    turn.deliveryPhase == DeliveryPhase.QUEUED -> "Sent"
-    else -> "Sending…"
-}
 
 internal fun phoneActivePreviewState(playbackActive: Boolean, scenario: String? = null): LinkState = LinkState(
     connection = ConnectionState.CONNECTED,
@@ -59,6 +42,7 @@ internal fun phoneActivePreviewState(playbackActive: Boolean, scenario: String? 
 ).let { state ->
     when (scenario) {
         null -> state
+        "history" -> state.withHistoryPreview()
         "offline" -> state.copy(connection = ConnectionState.DISCONNECTED, targets = emptyList(),
             selectedTargetId = "", turns = emptyList())
         "waiting" -> state.copy(turns = state.turns.map { it.copy(replyText = "", replyPhase = ReplyPhase.THINKING) })

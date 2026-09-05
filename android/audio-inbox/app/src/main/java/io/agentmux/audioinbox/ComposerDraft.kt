@@ -14,7 +14,8 @@ internal data class ComposerDraft(
     val pendingRevision: Long = -1,
 ) {
     fun edited(value: String): ComposerDraft =
-        copy(text = value, editRevision = editRevision + 1)
+        if (value.length > io.agentmux.linkcore.LinkHistoryPolicy.MAX_COMPOSE_CHARS) this
+        else copy(text = value, editRevision = editRevision + 1)
 
     fun submitted(turnId: String): ComposerDraft =
         copy(pendingTurnId = turnId, pendingRevision = editRevision)

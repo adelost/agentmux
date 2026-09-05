@@ -37,7 +37,13 @@ sealed interface LinkAction {
  * WHY: Keeps phone and watch behavior identical without sharing Android UI code.
  */
 object LinkReducer {
-    fun reduce(state: LinkState, action: LinkAction): LinkState = when (action) {
+    fun reduce(state: LinkState, action: LinkAction): LinkState {
+        val next = transition(state, action)
+        return if (next.turns === state.turns) next
+        else next.copy(turns = LinkHistoryPolicy.retain(next.turns))
+    }
+
+    private fun transition(state: LinkState, action: LinkAction): LinkState = when (action) {
         is LinkAction.Connection -> state.copy(
             connection = action.state,
             connectionDetail = action.detail,
@@ -61,7 +67,7 @@ object LinkReducer {
             } ?: 0,
         )
         is LinkAction.Submit -> state.copy(
-            turns = LinkHistoryPolicy.retain(state.turns + action.turn),
+            turns = state.turns + action.turn,
         )
         is LinkAction.Accepted -> state.mapTurn(action.turnId) {
             it.copy(

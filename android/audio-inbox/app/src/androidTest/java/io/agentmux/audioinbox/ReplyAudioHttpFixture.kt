@@ -8,15 +8,17 @@ import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 /** Real local HTTP + decodable silence; no agent request or paid speech call. */
-internal class ReplyAudioHttpFixture : AutoCloseable {
+internal class ReplyAudioHttpFixture(private val expectedRequests: Int = 3) : AutoCloseable {
     private val server = ServerSocket(0)
     val url = "http://127.0.0.1:${server.localPort}"
     val thirdRequested = CountDownLatch(1)
     val finishThird = CountDownLatch(1)
+    val requests = java.util.concurrent.atomic.AtomicInteger()
     private val worker = thread(name = "link-audio-http-proof") {
         try {
-        repeat(3) { index ->
+        repeat(expectedRequests) { index ->
             server.accept().use { socket ->
+                requests.incrementAndGet()
                 socket.soTimeout = 8000
                 val input = socket.getInputStream().bufferedReader()
                 var size = 0

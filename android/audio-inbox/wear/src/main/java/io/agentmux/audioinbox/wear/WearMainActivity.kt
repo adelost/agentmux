@@ -28,6 +28,7 @@ import io.agentmux.linkcore.ReplyPhase
 import io.agentmux.audioinbox.update.LinkReleaseCatalogs
 import io.agentmux.audioinbox.update.LinkUpdater
 import io.agentmux.linkui.LinkWatchScreen
+import io.agentmux.linkui.withHistoryPreview
 import io.agentmux.linkui.product.LinkNavigationController
 import io.agentmux.linkui.product.LinkRoute
 import io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef
@@ -54,7 +55,9 @@ class WearMainActivity : ComponentActivity() {
             intent.getStringExtra(QA_STATE_EXTRA) == QA_STATE_ACTIVE
         controller = WearMailboxController(
             context = this,
-            initialState = if (qaPreviewActive) activePreviewState() else LinkState(),
+            initialState = if (qaPreviewActive) activePreviewState().let {
+                if (intent.getStringExtra("qa_case") == "history") it.withHistoryPreview() else it
+            } else LinkState(),
         )
         updater = LinkUpdater(
             context = this,
@@ -187,7 +190,7 @@ internal fun activePreviewState(): LinkState = LinkState(
             userText = "Status?",
             replyText = "Wear Link is ready.",
             respondingTarget = "demo:1",
-            createdAtMs = 1L,
+            createdAtMs = System.currentTimeMillis() - 12_000,
             deliveryPhase = DeliveryPhase.QUEUED,
             replyPhase = ReplyPhase.READY,
             playbackPhase = PlaybackPhase.STOPPED,

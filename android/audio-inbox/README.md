@@ -33,15 +33,30 @@ show recent turns without making that projection the server authority.
 `POST /api/tts` and plays it through Media3/ExoPlayer. It is not Android TTS,
 does not change the prompt and does not ask the model to generate audio.
 
-**Hands-free** starts `AudioInboxService`, subscribes to the explicit audio
+**Announcements** starts `AudioInboxService`, subscribes to the explicit audio
 feed and reports receipts in this order:
 
 `received → queued → playback-started → played|failed`
 
 Playback starts only after the server accepts `playback-started`. Turning
-hands-free off closes that feed and stops its playback. Explicit `amux say`
+announcements off closes that feed and stops its playback. Explicit `amux say`
 remains a separate user-requested channel; Link never opens a background
 microphone.
+
+Recording starts on press; release sends once, and a press shorter than 500 ms
+is discarded. Sliding outside the control cancels. Text Send is disabled for
+empty or whitespace-only drafts. These rules are shared across the native hosts.
+
+History keeps at most 50 exchanges globally, filtered by the exact recipient ID.
+Phone persists them; Wear currently keeps them for the process lifetime only.
+This is not a Discord archive. Each message/reply is capped at 12,000 UTF-16
+characters with a visible shortening marker, and total retained text at 256,000
+characters. Older exchanges are evicted first; the composer accepts 4,000.
+
+Phone reply audio is disposable cache data: exact server+text identity, 24-hour
+expiry, at most 10 files/32 MiB. Playback uses a separate copy, so finishing a
+reply does not delete the reusable cache entry. First-time speech still needs
+the server; this is not offline generation. Wear retains its native TTS engine.
 
 Private transport currently uses:
 

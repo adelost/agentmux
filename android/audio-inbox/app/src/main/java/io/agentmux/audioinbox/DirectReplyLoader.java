@@ -22,6 +22,7 @@ final class DirectReplyLoader {
     private final AudioEventClaims claims;
     private final ExecutorService executor;
     private final Listener listener;
+    private final ReplyAudioCache cache;
     private final PlaybackRequestEpoch requests = new PlaybackRequestEpoch();
     private final java.util.Map<String, String> pending = new java.util.HashMap<>();
 
@@ -54,6 +55,7 @@ final class DirectReplyLoader {
         this.claims = claims;
         this.executor = executor;
         this.listener = listener;
+        this.cache = new ReplyAudioCache(context.getCacheDir());
     }
 
     synchronized boolean prepare(Intent intent, boolean explicitReplay) {
@@ -87,7 +89,9 @@ final class DirectReplyLoader {
                 server,
                 AppContract.consumerId(preferences)
             );
-            File media = client.fetchTts(context.getCacheDir(), eventId, text);
+            File media = cache.materialize(server, text,
+                new File(context.getCacheDir(), "audio-" + eventId + ".mp3"),
+                () -> client.fetchTts(context.getCacheDir(), eventId, text));
             if (!requests.accepts(epoch)) {
                 claims.releaseAndDelete(context.getCacheDir(), eventId);
                 return;

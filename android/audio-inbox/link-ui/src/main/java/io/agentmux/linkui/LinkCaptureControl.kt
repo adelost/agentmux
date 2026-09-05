@@ -1,6 +1,7 @@
 package io.agentmux.linkui
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,8 +58,8 @@ data class LinkCaptureSpec(
 )
 
 /**
- * The only Link PTT renderer. CircleKit owns both the 200 ms arming progress
- * and the active waveform; Phone and Wear provide state and recorder ports.
+ * The only Link recording renderer. Begin immediately, with no arming sweep.
+ * The shared graph discards accidental short presses; CircleKit owns the waveform.
  */
 @Composable
 fun LinkCaptureControl(
@@ -95,7 +96,8 @@ fun LinkCaptureControl(
         // at BEGIN moves the held control away from the original finger.
         RingAudioCaptureFeedback(
             RingAudioCaptureFeedbackSpec(elapsedMs, levels.toList(), active = recording),
-            modifier = if (recording) Modifier else Modifier.alpha(0f).clearAndSetSemantics { },
+            modifier = Modifier.widthIn(max = diameter * 2f).then(
+                if (recording) Modifier else Modifier.alpha(0f).clearAndSetSemantics { }),
         )
         when (val availability = spec.availability) {
             is LinkCaptureAvailability.Recoverable -> {
@@ -112,6 +114,7 @@ fun LinkCaptureControl(
             }
             else -> RingPressLifecycle(
                 spec = RingPressLifecycleSpec(
+                    holdMs = 0L,
                     label = when (spec.phase) {
                         CapturePhase.LISTENING -> "RELEASE TO SEND"
                         CapturePhase.FINALIZING -> "SENDING"
@@ -127,7 +130,7 @@ fun LinkCaptureControl(
                     sub = when (availability) {
                         LinkCaptureAvailability.Ready -> VoiceUploadPolicy.warning(bytes, spec.byteLimit)
                             ?.let { if (bytes > (spec.byteLimit ?: Long.MAX_VALUE)) "OVER 5 MB" else "5 MB SOON" }
-                            .orEmpty() // A size warning must not move the pressed control either.
+                            ?: if (recording) "SLIDE AWAY TO CANCEL" else ""
                         is LinkCaptureAvailability.Blocked -> availability.detail
                         is LinkCaptureAvailability.Recoverable -> availability.detail
                     },

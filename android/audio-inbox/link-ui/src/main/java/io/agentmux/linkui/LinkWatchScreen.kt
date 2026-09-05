@@ -50,7 +50,6 @@ import io.agentmux.linkui.product.generated.GeneratedLinkHomeComponents
 import io.agentmux.linkui.product.generated.GeneratedLinkSettingsComponent
 import io.agentmux.linkui.product.generated.GeneratedLinkSettingsComponents
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.flowOf
 import java.time.ZoneId
 import java.util.Locale
 
@@ -94,7 +93,8 @@ fun LinkWatchSurface(
     val showingSettings = route == LinkRoute.SETTINGS
     var captureOpen by remember { mutableStateOf(false) }
     var recipientOpen by remember { mutableStateOf(false) }
-    var replyOpen by remember { mutableStateOf(false) }
+    var conversationOpen by remember(target.selectedTargetId) { mutableStateOf(false) }
+    var initialTurnId by remember(target.selectedTargetId) { mutableStateOf<String?>(null) }
     var captureStarted by remember { mutableStateOf(false) }
     BackHandler(enabled = captureOpen) {
         graph.cancelCapture()
@@ -139,46 +139,13 @@ fun LinkWatchSurface(
         }, onBack = { recipientOpen = false })
         return
     }
-    if (replyOpen) {
-        val turn = latest.turns.lastOrNull { it.targetId == target.selectedTargetId }
-        val replyNavigator = remember(turn) {
-            RingNavigator(RingScreen.Rows("REPLY", flowOf(listOf(
-                RowSpec("reply", turn?.respondingTarget.orEmpty().ifBlank { turn?.targetId.orEmpty() },
-                    turn?.replyText.orEmpty(), icon = null),
-            ))))
-        }
-        BackHandler { replyOpen = false }
-        RingRoundBackHost(onBack = { replyOpen = false }) {
-            RenderRingScreen(replyNavigator, backLabel = "Back", onExit = { replyOpen = false })
-        }
+    if (conversationOpen) {
+        LinkWatchConversation(graph, initialTurnId, onBack = { conversationOpen = false })
         return
     }
     BackHandler(enabled = showingSettings) { check(graph.navigation.back()) }
     val onOpenSettings = remember(graph) {
         { graph.onSettingsActionOpen(LinkRouteOpenEvent(LinkRoute.SETTINGS)) }
-    }
-    // The body ends in a safe-call, so its natural type is `() -> Unit?`: "there
-    // was no turn to play" is not a value a row handler may return. Stating the
-    // contract here makes the compiler coerce it, instead of letting the
-    // nullability travel into every call site.
-    val onPlay: () -> Unit = remember(graph) {
-        {
-            graph.latest.value.turns.lastOrNull {
-                it.targetId == graph.target.value.selectedTargetId && it.replyText.isNotBlank()
-            }?.turnId?.let { turnId ->
-                graph.onActivePlaybackCommand(LinkPlaybackCommandEvent(PlaybackOperation.PLAY, turnId))
-            }
-        }
-    }
-    val onStop: () -> Unit = remember(graph) {
-        {
-            (
-                graph.activePlayback.value.activeTurnId
-                    ?: graph.latest.value.turns.lastOrNull { it.replyText.isNotBlank() }?.turnId
-                )?.let { turnId ->
-                graph.onActivePlaybackCommand(LinkPlaybackCommandEvent(PlaybackOperation.STOP, turnId))
-            }
-        }
     }
     val items = remember { MutableStateFlow(emptyList<RowSpec>()) }
     val navigator = remember(showingSettings) {
@@ -223,11 +190,18 @@ fun LinkWatchSurface(
                 session = connection,
                 onOpenRecipients = { recipientOpen = true },
                 onOpenCapture = { captureOpen = true },
-                onPlay = onPlay,
-                onStop = onStop,
-                onReplay = onPlay,
+                onPlayback = { operation, id ->
+                    graph.onActivePlaybackCommand(LinkPlaybackCommandEvent(operation, id))
+                },
                 onOpenSettings = onOpenSettings,
-                onOpenReply = { replyOpen = true },
+                onOpenReply = {
+                    initialTurnId = linkConversationTurns(latest.turns, target.selectedTargetId).lastOrNull()?.turnId
+                    conversationOpen = true
+                },
+                onOpenHistory = {
+                    initialTurnId = null
+                    conversationOpen = true
+                },
             )
         }
     }
@@ -246,11 +220,10 @@ fun linkWatchRows(
     session: LinkSessionPresentation,
     onOpenRecipients: () -> Unit,
     onOpenCapture: () -> Unit,
-    onPlay: () -> Unit,
-    onStop: () -> Unit,
-    onReplay: () -> Unit,
+    onPlayback: (PlaybackOperation, String) -> Unit,
     onOpenSettings: () -> Unit = {},
     onOpenReply: () -> Unit = {},
+    onOpenHistory: () -> Unit = {},
 ): List<RowSpec> {
     val selected = target.targets.firstOrNull { it.id == target.selectedTargetId }
     val rows = mutableListOf<RowSpec>()
@@ -266,14 +239,21 @@ fun linkWatchRows(
                 icon = LinkNativeBindings.requireIcon("record"),
                 onTap = onOpenCapture.takeIf { selected?.acceptsMessages == true },
             )
-            GeneratedLinkHomeComponent.CONVERSATION_LATEST -> rows += watchReplyRows(
-                latest = conversation.turns.lastOrNull { it.targetId == target.selectedTargetId },
-                defaultIcon = LinkNativeBindings.requireIcon("speaker"),
-                onPlay = onPlay,
-                onStop = onStop,
-                onReplay = onReplay,
-                onOpenReply = onOpenReply,
-            )
+            GeneratedLinkHomeComponent.CONVERSATION_LATEST -> {
+                val turns = linkConversationTurns(conversation.turns, target.selectedTargetId)
+                rows += watchReplyRows(
+                    latest = turns.lastOrNull(),
+                    defaultIcon = LinkNativeBindings.requireIcon("speaker"),
+                    onPlayback = onPlayback,
+                    onOpenReply = onOpenReply,
+                )
+                rows += RowSpec("history", "HISTORY",
+                    if (turns.isEmpty()) "No messages yet" else "Recent messages",
+                    icon = RingIcons.Activity,
+                    onTap = onOpenHistory,
+                    actionTiming = com.adelost.designkit.ui.CircleActionTiming.IMMEDIATE,
+                )
+            }
             GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY -> rows += linkSettingsRow(onOpenSettings)
             GeneratedLinkHomeComponent.PLAYBACK_CONTROLS,
             GeneratedLinkHomeComponent.CONVERSATION_COMPOSER ->
@@ -286,9 +266,7 @@ fun linkWatchRows(
 private fun watchReplyRows(
     latest: LinkTurn?,
     defaultIcon: androidx.compose.ui.graphics.vector.ImageVector,
-    onPlay: () -> Unit,
-    onStop: () -> Unit,
-    onReplay: () -> Unit,
+    onPlayback: (PlaybackOperation, String) -> Unit,
     onOpenReply: () -> Unit,
 ): List<RowSpec> = buildList {
     if (latest == null) {
@@ -309,15 +287,7 @@ private fun watchReplyRows(
         ),
     )
     if (latest.replyText.isBlank()) return@buildList
-    add(
-        when (latest.playbackPhase) {
-            PlaybackPhase.PLAYING -> RowSpec("playback", "STOP", "Playing", RingIcons.Stop, onTap = onStop)
-            PlaybackPhase.FAILED -> RowSpec("playback", "TRY AGAIN", latest.playbackError.ifBlank { "Audio unavailable" }, RingIcons.Refresh, onTap = onReplay)
-            PlaybackPhase.STOPPED, PlaybackPhase.PLAYED, PlaybackPhase.SKIPPED ->
-                RowSpec("playback", "PLAY", "", RingIcons.Play, onTap = onReplay)
-            else -> RowSpec("playback", "PLAY", "", RingIcons.Play, onTap = onPlay)
-        },
-    )
+    linkReadAloudRow(latest, onPlayback)?.let(::add)
 }
 
 fun linkWatchSettingsRows(

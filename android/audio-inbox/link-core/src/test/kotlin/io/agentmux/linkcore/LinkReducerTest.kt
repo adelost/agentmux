@@ -6,6 +6,31 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LinkReducerTest {
+    @Test fun `megabyte text and aggregate history are bounded before persistence and presentation`() {
+        val huge = "x".repeat(1_048_576)
+        var saved = LinkState()
+        val ledger = LinkStateLedger(LinkState()) { saved = it }
+        repeat(55) { index ->
+            val id = "large-$index"
+            ledger.dispatch(LinkAction.Submit(turn(id, "agent").copy(userText = huge)))
+            ledger.dispatch(LinkAction.Reply(id, "agent", huge))
+        }
+        assertEquals(saved, ledger.value)
+        assertTrue(saved.turns.size < LinkHistoryPolicy.MAX_LOCAL_TURNS)
+        assertTrue(saved.turns.sumOf(LinkHistoryPolicy::textSize) <= LinkHistoryPolicy.MAX_HISTORY_CHARS)
+        assertEquals("large-54", saved.turns.last().turnId)
+        saved.turns.forEach {
+            assertTrue(it.userText.length <= LinkHistoryPolicy.MAX_MESSAGE_CHARS)
+            assertTrue(it.replyText.length <= LinkHistoryPolicy.MAX_MESSAGE_CHARS)
+            assertTrue(it.replyText.endsWith(LinkHistoryPolicy.SHORTENED))
+        }
+        val cut = LinkHistoryPolicy.MAX_MESSAGE_CHARS - LinkHistoryPolicy.SHORTENED.length
+        val unicode = "x".repeat(cut - 1) + "😀" + huge
+        val bounded = LinkHistoryPolicy.boundedText(unicode)
+        assertEquals("x".repeat(cut - 1) + LinkHistoryPolicy.SHORTENED, bounded)
+        assertEquals(bounded, LinkHistoryPolicy.boundedText(bounded))
+    }
+
     @Test fun `one playback owner survives switching and late stop of the old reply`() {
         var state = LinkState(turns = listOf(turn("a", "agent:1"), turn("b", "agent:2")))
         state = LinkReducer.reduce(state, LinkAction.Playback("a", PlaybackPhase.QUEUED))

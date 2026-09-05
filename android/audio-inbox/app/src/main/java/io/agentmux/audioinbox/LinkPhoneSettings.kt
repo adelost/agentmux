@@ -1,5 +1,8 @@
 package io.agentmux.audioinbox
 
+import io.agentmux.linkui.LinkPlaybackControls
+import io.agentmux.linkui.linkAudioPreferences
+
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,7 +19,6 @@ import com.adelost.releasekit.updateTargetChangelog
 import com.adelost.ringkit.ui.PhoneScreenHeader
 import com.adelost.ringkit.ui.RingChoiceRow
 import io.agentmux.linkcore.ConnectionState
-import io.agentmux.linkcore.LinkPreferenceKey
 import io.agentmux.linkcore.LinkRecoveryPhase
 import io.agentmux.linkcore.LinkUpdateOperation
 import io.agentmux.linkcore.PlaybackOperation
@@ -135,45 +137,30 @@ internal fun LinkPhoneSettings(
                         )
                     }
                     GeneratedLinkSettingsComponent.PREFERENCES_TOGGLES -> {
-                        item("${mount.id}.hands-free") {
-                            RingChoiceRow(
-                                title = "INCOMING AUDIO",
-                                hint = "Play audio sent to this device, including in the background.",
-                                selected = if (preferences.handsFree) "ON" else "OFF",
-                                options = listOf("OFF", "ON"),
-                                role = CircleChoiceRole.TOGGLE,
-                                infoSelected = true,
-                                onSelect = {
-                                    graph.onPreferencesToggle(
-                                        LinkPreferenceToggleEvent(LinkPreferenceKey.HANDS_FREE, it == "ON"),
-                                    )
-                                },
-                                icon = LinkNativeBindings.requireIcon("speaker"),
-                                modifier = phoneRowModifier(),
-                            )
-                        }
-                        item("${mount.id}.read-replies") {
-                            RingChoiceRow(
-                                title = "AUTO-PLAY REPLIES",
-                                hint = "Read new replies aloud. Off: press Play to listen.",
-                                selected = if (preferences.speakReplies) "ON" else "OFF",
-                                options = listOf("OFF", "ON"),
-                                role = CircleChoiceRole.TOGGLE,
-                                infoSelected = true,
-                                onSelect = {
-                                    graph.onPreferencesToggle(
-                                        LinkPreferenceToggleEvent(LinkPreferenceKey.SPEAK_REPLIES, it == "ON"),
-                                    )
-                                },
-                                icon = LinkNativeBindings.requireIcon("speaker"),
-                                modifier = phoneRowModifier(),
-                            )
+                        linkAudioPreferences(preferences.speakReplies, preferences.handsFree).forEach { preference ->
+                            item("${mount.id}.${preference.key}") {
+                                RingChoiceRow(
+                                    title = preference.title,
+                                    hint = preference.hint,
+                                    selected = if (preference.enabled) "ON" else "OFF",
+                                    options = listOf("OFF", "ON"),
+                                    role = CircleChoiceRole.TOGGLE,
+                                    infoSelected = true,
+                                    onSelect = {
+                                        graph.onPreferencesToggle(
+                                            LinkPreferenceToggleEvent(preference.key, it == "ON"),
+                                        )
+                                    },
+                                    icon = LinkNativeBindings.requireIcon("speaker"),
+                                    modifier = phoneRowModifier(),
+                                )
+                            }
                         }
                     }
                     GeneratedLinkSettingsComponent.HISTORY_LOCAL -> item(mount.id) {
                         PhoneRow(
                             title = "LOCAL HISTORY",
-                            sub = "${localHistory.retainedTurns} saved · ${localHistory.maxTurns} limit",
+                            sub = "${localHistory.retainedTurns} recent · up to ${localHistory.maxTurns}",
                             icon = LinkNativeBindings.requireIcon("activity"),
                         )
                     }

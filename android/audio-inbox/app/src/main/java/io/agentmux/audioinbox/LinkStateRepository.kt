@@ -18,6 +18,12 @@ internal class LinkStateRepository(
     @Synchronized
     fun load(): LinkState {
         val encoded = preferences.getString(AppContract.KEY_LINK_STATE_V2, null)
+        if (encoded != null && encoded.length > LinkHistoryPolicy.MAX_ENCODED_HISTORY_CHARS) {
+            // Do not parse or duplicate a pathological old cache into quarantine.
+            preferences.edit().remove(AppContract.KEY_LINK_STATE_V2).apply()
+            return LinkState(recoveryError = "Oversized local history was cleared for safety.",
+                handsFree = preferences.getBoolean(AppContract.KEY_ENABLED, false))
+        }
         if (!encoded.isNullOrBlank()) {
             return runCatching { parse(JSONObject(encoded)) }.getOrElse {
                 preferences.edit()
@@ -35,7 +41,7 @@ internal class LinkStateRepository(
     @Synchronized
     fun save(state: LinkState) {
         val turns = JSONArray()
-        state.turns.forEach { turn ->
+        LinkHistoryPolicy.retain(state.turns).forEach { turn ->
             turns.put(
                 JSONObject()
                     .put("turnId", turn.turnId)
