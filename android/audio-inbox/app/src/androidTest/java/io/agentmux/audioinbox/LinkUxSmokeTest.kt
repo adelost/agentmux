@@ -9,6 +9,8 @@ import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import org.junit.Rule
 import org.junit.Test
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 
 /** Named actions exercise real hosts and typed sinks. Preview data stays explicit. */
 class LinkUxSmokeTest {
@@ -43,6 +45,11 @@ class LinkUxSmokeTest {
             if (!round) {
                 compose.onNode(hasSetTextAction()).performTextInput("A draft stays here while I read.")
                 shot("composer")
+                if (landscape) scenario.onActivity { activity ->
+                    activity.window.insetsController?.hide(android.view.WindowInsets.Type.ime())
+                }
+                compose.waitUntil(3000) { compose.onAllNodesWithContentDescription("Open Link settings")
+                    .fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription("Open Link settings").performClick()
             } else {
                 compose.onNode(hasContentDescription("SETTINGS", substring = true)).performScrollTo().performClick()
@@ -94,6 +101,48 @@ class LinkUxSmokeTest {
             shot("recording")
             compose.onNodeWithContentDescription("LISTENING").performTouchInput { up() }
             compose.onNodeWithText("HOLD TO TALK").assertExists()
+        }
+    }
+
+    @Test fun realAudioOwnerReplacesPausesAndCancelsLateHttp() {
+        if (round || landscape) return // One native transport proof, not a host matrix.
+        val context = instrumentation.targetContext
+        val prefs = context.getSharedPreferences(AppContract.PREFS, 0)
+        fun state(id: String) = prefs.getString("turn-playback:ux-$id", "")
+        fun command(action: String) = context.startService(Intent(context, AudioInboxService::class.java).setAction(action))
+        val launch = Intent(context, MainActivity::class.java).putExtra("qa_state", "active")
+            .putExtra("qa_host", "RESPONSIVE").putExtra("qa_orientation", "DEG_0")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        ActivityScenario.launch<MainActivity>(launch).use {
+            ReplyAudioHttpFixture().use { http ->
+                fun play(id: String) = context.startForegroundService(Intent(context, AudioInboxService::class.java)
+                    .setAction(AppContract.ACTION_REPLAY_REPLY)
+                    .putExtra(AppContract.EXTRA_TURN_ID, "ux-$id")
+                    .putExtra(AppContract.EXTRA_TEXT, "Audio proof $id")
+                    .putExtra(AppContract.EXTRA_SERVER, http.url))
+                try {
+                    play("a")
+                    compose.waitUntil(8000) { state("a") == "playing" }
+                    play("b")
+                    compose.waitUntil(8000) { state("b") == "playing" }
+                    assertEquals("stopped", state("a"))
+                    command(AppContract.ACTION_PAUSE_AUDIO)
+                    compose.waitUntil(2000) { state("b") == "paused" }
+                    command(AppContract.ACTION_RESUME_AUDIO)
+                    compose.waitUntil(2000) { state("b") == "playing" }
+                    play("c")
+                    assertTrue(http.thirdRequested.await(8, java.util.concurrent.TimeUnit.SECONDS))
+                    assertEquals("stopped", state("b"))
+                    command(AppContract.ACTION_STOP_AUDIO)
+                    compose.waitUntil(2000) { state("c") == "stopped" }
+                    http.finishThird.countDown()
+                    Thread.sleep(700)
+                    assertEquals("stopped", state("c"))
+                } finally {
+                    command(AppContract.ACTION_STOP_AUDIO)
+                    prefs.edit().apply { listOf("a", "b", "c").forEach { remove("turn-playback:ux-$it") } }.commit()
+                }
+            }
         }
     }
 

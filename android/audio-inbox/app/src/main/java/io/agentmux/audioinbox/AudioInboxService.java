@@ -101,6 +101,9 @@ public final class AudioInboxService extends MediaSessionService {
             .setAudioAttributes(attributes, false)
             .build();
         player.addListener(new Player.Listener() {
+            @Override public void onIsPlayingChanged(boolean playing) {
+                if (playing) updateActiveTurnState("playing");
+            }
             @Override
             public void onPlaybackStateChanged(int playbackState) {
                 if (playbackState == Player.STATE_ENDED) finishActiveAsPlayed();
@@ -130,8 +133,6 @@ public final class AudioInboxService extends MediaSessionService {
                     }
                 } else if (!playbackQueue.ensureFocusForActive()) {
                     player.pause();
-                } else {
-                    updateActiveTurnState("playing");
                 }
             }
         });
@@ -164,7 +165,7 @@ public final class AudioInboxService extends MediaSessionService {
             return START_STICKY;
         }
         if (AppContract.ACTION_PAUSE_AUDIO.equals(action)) {
-            if (player.isPlaying()) player.pause();
+            player.pause();
             return START_STICKY;
         }
         if (AppContract.ACTION_RESUME_AUDIO.equals(action)) { player.play(); return START_STICKY; }
@@ -346,7 +347,6 @@ public final class AudioInboxService extends MediaSessionService {
         player.setMediaItem(AudioPlaybackMedia.item(item));
         player.prepare();
         player.play();
-        if (item.direct) store.saveTurnPlayback(item.turnId, "playing");
         store.updateConnection("Playing", true);
     }
 

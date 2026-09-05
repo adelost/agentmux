@@ -1,12 +1,15 @@
 package io.agentmux.audioinbox
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -18,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adelost.designkit.ui.LocalCircleSurfaceLayout
@@ -78,86 +82,89 @@ internal fun LinkPhoneHome(
     LaunchedEffect(selected?.id, turns.size, turns.lastOrNull()?.replyText) {
         if (turns.isNotEmpty()) listState.animateScrollToItem(turns.lastIndex)
     }
-    Column(
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.widthIn(max = 640.dp).fillMaxSize().imePadding(),
-    ) {
-        val tree = GeneratedLinkHomeComponents.resolve(LocalCircleSurfaceLayout.current.surfaceClass)
-        val route = GeneratedLinkRoutes.descriptor(LinkRoute.HOME)
-        PhoneScreenHeader(
-            title = route.title,
-            onBack = null,
-            backLabel = "Back",
-            icon = LinkNativeBindings.requireIcon(route.iconAssetRef),
-            actions = if (tree.orderedMounts.any {
-                it.component == GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY
-            }) listOf(linkSettingsHeaderAction {
-                graph.onSettingsActionOpen(LinkRouteOpenEvent(LinkRoute.SETTINGS))
-            }) else emptyList(),
-        )
-        LinkHomeRegions(tree) { component ->
-            when (component) {
-                GeneratedLinkHomeComponent.NAVIGATION_PAGE_HOST,
-                GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY -> Unit
-                GeneratedLinkHomeComponent.TARGET_PICKER ->
-                    PhoneRow(linkRecipientRow(target) { choosingRecipient = true })
-                GeneratedLinkHomeComponent.CONVERSATION_LATEST -> LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                ) {
-                    if (turns.isEmpty()) {
-                        item("empty") {
-                            RingMessage(
-                                RingMessageSpec(
-                                    author = "",
-                                    body = if (selected == null) "Choose a recipient" else "No messages yet",
-                                ),
-                                modifier = Modifier.padding(horizontal = 24.dp),
-                            )
+    BoxWithConstraints(Modifier.widthIn(max = 640.dp).fillMaxSize().imePadding()) {
+        val compactEditing = maxHeight < 260.dp && WindowInsets.ime.getBottom(LocalDensity.current) > 0
+        Column(
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            val tree = GeneratedLinkHomeComponents.resolve(LocalCircleSurfaceLayout.current.surfaceClass)
+            val route = GeneratedLinkRoutes.descriptor(LinkRoute.HOME)
+            if (!compactEditing) PhoneScreenHeader(
+                title = route.title,
+                onBack = null,
+                backLabel = "Back",
+                icon = LinkNativeBindings.requireIcon(route.iconAssetRef),
+                actions = if (tree.orderedMounts.any {
+                    it.component == GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY
+                }) listOf(linkSettingsHeaderAction {
+                    graph.onSettingsActionOpen(LinkRouteOpenEvent(LinkRoute.SETTINGS))
+                }) else emptyList(),
+            )
+            LinkHomeRegions(tree) { component ->
+                when (component) {
+                    GeneratedLinkHomeComponent.NAVIGATION_PAGE_HOST,
+                    GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY -> Unit
+                    GeneratedLinkHomeComponent.TARGET_PICKER ->
+                        PhoneRow(linkRecipientRow(target) { choosingRecipient = true })
+                    GeneratedLinkHomeComponent.CONVERSATION_LATEST -> LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                    ) {
+                        if (turns.isEmpty()) {
+                            item("empty") {
+                                RingMessage(
+                                    RingMessageSpec(
+                                        author = "",
+                                        body = if (selected == null) "Choose a recipient" else "No messages yet",
+                                    ),
+                                    modifier = Modifier.padding(horizontal = 24.dp),
+                                )
+                            }
+                        } else {
+                            items(turns, key = LinkTurn::turnId) { turn ->
+                                ConversationTurn(
+                                    turn = turn,
+                                    onPlayback = { operation ->
+                                        graph.onActivePlaybackCommand(LinkPlaybackCommandEvent(operation, turn.turnId))
+                                    },
+                                )
+                            }
                         }
-                    } else {
-                        items(turns, key = LinkTurn::turnId) { turn ->
-                            ConversationTurn(
-                                turn = turn,
-                                onPlayback = { operation ->
-                                    graph.onActivePlaybackCommand(LinkPlaybackCommandEvent(operation, turn.turnId))
-                                },
-                            )
+                        if (connection.connection != ConnectionState.CONNECTED && selected != null) {
+                            item("connection") {
+                                PhoneRow(linkConnectionLabel(connection.connection),
+                                    "Open Settings for connection details.", RingIcons.Wifi)
+                            }
+                        }
+                        if (recovery.phase == LinkRecoveryPhase.QUARANTINED) {
+                            item("recovery") { PhoneRow("HISTORY", recovery.detail.orEmpty(), RingIcons.Warning) }
                         }
                     }
-                    if (connection.connection != ConnectionState.CONNECTED && selected != null) {
-                        item("connection") {
-                            PhoneRow(linkConnectionLabel(connection.connection),
-                                "Open Settings for connection details.", RingIcons.Wifi)
-                        }
-                    }
-                    if (recovery.phase == LinkRecoveryPhase.QUARANTINED) {
-                        item("recovery") { PhoneRow("HISTORY", recovery.detail.orEmpty(), RingIcons.Warning) }
-                    }
+                    GeneratedLinkHomeComponent.PLAYBACK_CONTROLS -> LinkActivePlayback(graph, playback)
+                    GeneratedLinkHomeComponent.CONVERSATION_COMPOSER -> RingTextComposer(
+                        spec = RingTextInputSpec(
+                            value = composer.text,
+                            label = "Message",
+                            enabled = selected?.acceptsMessages == true,
+                            maxLength = 4_000,
+                            onValueChange = graph::onComposerEdited,
+                            onSubmit = { graph.onComposerCompose(LinkComposeEvent(composer.text)) },
+                        ),
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                    )
+                    GeneratedLinkHomeComponent.CAPTURE_TALK -> if (!compactEditing) LinkCaptureControl(
+                        spec = captureSpec,
+                        recordedBytes = recordedBytes,
+                        recordedLevel = recordedLevel,
+                        onBegin = graph::beginCapture,
+                        onRelease = graph::releaseCapture,
+                        onCancel = graph::cancelCapture,
+                        onRecover = onRequestMicrophone,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
                 }
-                GeneratedLinkHomeComponent.PLAYBACK_CONTROLS -> LinkActivePlayback(graph, playback)
-                GeneratedLinkHomeComponent.CONVERSATION_COMPOSER -> RingTextComposer(
-                    spec = RingTextInputSpec(
-                        value = composer.text,
-                        label = "Message",
-                        enabled = selected?.acceptsMessages == true,
-                        maxLength = 4_000,
-                        onValueChange = graph::onComposerEdited,
-                        onSubmit = { graph.onComposerCompose(LinkComposeEvent(composer.text)) },
-                    ),
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
-                )
-                GeneratedLinkHomeComponent.CAPTURE_TALK -> LinkCaptureControl(
-                    spec = captureSpec,
-                    recordedBytes = recordedBytes,
-                    recordedLevel = recordedLevel,
-                    onBegin = graph::beginCapture,
-                    onRelease = graph::releaseCapture,
-                    onCancel = graph::cancelCapture,
-                    onRecover = onRequestMicrophone,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
             }
         }
     }

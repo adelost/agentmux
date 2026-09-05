@@ -354,7 +354,7 @@ fun linkWatchSettingsRows(
                     onInstall = onInstallUpdate,
                     zoneId = zoneId,
                     locale = locale,
-                ),
+                ).map { it.copy(multiline = true) },
             )
             GeneratedLinkSettingsComponent.NAVIGATION_DEV_HOST_ENTRY -> onOpenDevHost?.let { open ->
                 add(
@@ -364,6 +364,7 @@ fun linkWatchSettingsRows(
                         "Phone layout or watch-size preview",
                         LinkNativeBindings.requireIcon("phone"),
                         onTap = open,
+                        multiline = true,
                     ),
                 )
             }
