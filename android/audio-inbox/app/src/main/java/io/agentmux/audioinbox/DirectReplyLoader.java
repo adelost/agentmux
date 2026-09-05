@@ -40,6 +40,7 @@ final class DirectReplyLoader {
     }
 
     boolean accepts(long epoch) { return requests.accepts(epoch); }
+    synchronized boolean hasPending() { return !pending.isEmpty(); }
 
     DirectReplyLoader(
         Context context,
@@ -61,7 +62,8 @@ final class DirectReplyLoader {
         String server = intent.getStringExtra(AppContract.EXTRA_SERVER);
         String label = intent.getStringExtra(AppContract.EXTRA_TARGET_LABEL);
         if (turnId == null || turnId.isBlank() || text == null || text.isBlank()
-            || text.length() > 1500 || !ServerDiscovery.isAllowedServer(server)) return false;
+            || text.length() > AppContract.MAX_REPLY_AUDIO_CHARACTERS
+            || !ServerDiscovery.isAllowedServer(server)) return false;
         String previous = preferences.getString("turn-playback:" + turnId, "");
         if (!explicitReplay && ("stopped".equals(previous) || "played".equals(previous))) return true;
         if (explicitReplay) {

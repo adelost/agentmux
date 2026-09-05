@@ -19,21 +19,15 @@ import io.agentmux.linkcore.PlaybackOperation
 import io.agentmux.linkcore.PlaybackPhase
 
 @Composable
-internal fun ConversationTurn(turn: LinkTurn, showPlayer: Boolean, onPlayback: (PlaybackOperation) -> Unit) {
+internal fun ConversationTurn(turn: LinkTurn, onPlayback: (PlaybackOperation) -> Unit) {
     val context = LocalContext.current
     Column(Modifier.padding(horizontal = 24.dp)) {
         RingMessage(RingMessageSpec("YOU", turn.userText.ifBlank { "Voice message" }, turnStatusLabel(turn)))
         if (turn.replyText.isNotBlank()) {
             RingMessage(RingMessageSpec(turn.respondingTarget.ifBlank { turn.targetId }, turn.replyText))
-            if (showPlayer) {
-                LinkPlaybackControls(
-                    turn, { onPlayback(PlaybackOperation.PLAY) },
-                    { onPlayback(PlaybackOperation.PAUSE) },
-                    { onPlayback(PlaybackOperation.RESUME) },
-                    { onPlayback(PlaybackOperation.STOP) },
-                )
-            } else {
-                PhoneRow("READ ALOUD", "", RingIcons.Speaker, immediate = true,
+            if (turn.playbackPhase !in setOf(PlaybackPhase.QUEUED, PlaybackPhase.PLAYING, PlaybackPhase.PAUSED)) {
+                PhoneRow("READ ALOUD", if (turn.playbackPhase == PlaybackPhase.FAILED && turn.playbackError.isBlank())
+                    "Audio unavailable · tap to retry" else "", RingIcons.Speaker, immediate = true,
                     onTap = { onPlayback(PlaybackOperation.PLAY) })
             }
             attachmentUrls(turn.replyText).forEach { url ->
@@ -43,7 +37,7 @@ internal fun ConversationTurn(turn: LinkTurn, showPlayer: Boolean, onPlayback: (
         }
         listOf(turn.deliveryError, turn.replyError, turn.playbackError)
             .filter(String::isNotBlank)
-            .forEach { PhoneRow("COULDN'T COMPLETE", it, RingIcons.Warning) }
+            .forEach { PhoneRow("", it, RingIcons.Warning) }
     }
 }
 

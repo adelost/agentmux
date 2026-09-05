@@ -5,6 +5,8 @@ import android.content.SharedPreferences;
 import java.util.UUID;
 
 final class AppContract {
+    // The existing /tts endpoint rejects longer requests; never silently truncate a reply.
+    static final int MAX_REPLY_AUDIO_CHARACTERS = 1500;
     static final String PREFS = "audio-inbox";
     static final String KEY_ENABLED = "handsFree";
     static final String KEY_SERVER = "serverUrl";

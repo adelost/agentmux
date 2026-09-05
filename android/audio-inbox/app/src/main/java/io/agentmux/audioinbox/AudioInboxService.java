@@ -14,10 +14,9 @@ import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.session.MediaSession;
 import androidx.media3.session.MediaSessionService;
-
 import org.json.JSONObject;
-
 import java.io.File;
+
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -138,7 +137,7 @@ public final class AudioInboxService extends MediaSessionService {
         });
         mediaSession = new MediaSession.Builder(this, player)
             .setId("agent-audio-inbox")
-            .setCallback(new AudioSessionCallback(this::stopAllAudio))
+            .setCallback(new AudioSessionCallback(() -> stopAllAudio(true)))
             .build();
         notifier.attach(mediaSession, player);
         progressPublisher = PlaybackProgressPublisher.start(main, player, claims, playbackQueue);
@@ -170,7 +169,7 @@ public final class AudioInboxService extends MediaSessionService {
         }
         if (AppContract.ACTION_RESUME_AUDIO.equals(action)) { player.play(); return START_STICKY; }
         if (AppContract.ACTION_STOP_AUDIO.equals(action)) {
-            stopAllAudio();
+            stopAllAudio(true);
             return START_STICKY;
         }
         if (AppContract.ACTION_START.equals(action)
@@ -409,10 +408,6 @@ public final class AudioInboxService extends MediaSessionService {
         receipts.failed(eventId, AudioReceiptWriter.safe(error.getMessage()), httpClient, connected);
     }
 
-    private void stopAllAudio() {
-        stopAllAudio(true);
-    }
-
     private void stopAllAudio(boolean releaseIdleService) {
         directLoader.cancelPending();
         String activeId = playbackQueue.active();
@@ -463,7 +458,7 @@ public final class AudioInboxService extends MediaSessionService {
     }
 
     private void refreshDirectAvailability() {
-        boolean hasDirect = claims.queuedEntries().stream().anyMatch(item -> item.direct);
+        boolean hasDirect = directLoader.hasPending() || claims.queuedEntries().stream().anyMatch(item -> item.direct);
         directAvailable = hasDirect;
         playbackQueue.setConnected(connected || hasDirect);
         if (!enabled && !hasDirect) stopForegroundAndSelf();

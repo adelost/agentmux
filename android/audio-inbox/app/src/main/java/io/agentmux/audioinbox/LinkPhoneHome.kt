@@ -120,7 +120,6 @@ internal fun LinkPhoneHome(
                         items(turns, key = LinkTurn::turnId) { turn ->
                             ConversationTurn(
                                 turn = turn,
-                                showPlayer = false,
                                 onPlayback = { operation ->
                                     graph.onActivePlaybackCommand(LinkPlaybackCommandEvent(operation, turn.turnId))
                                 },

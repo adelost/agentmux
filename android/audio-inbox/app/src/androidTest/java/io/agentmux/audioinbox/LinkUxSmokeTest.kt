@@ -52,7 +52,7 @@ class LinkUxSmokeTest {
             if (!round) {
                 compose.onNodeWithContentDescription("ABOUT AUTO-PLAY REPLIES").performClick()
                 shot("info", 250)
-                Thread.sleep(3500)
+                compose.onNodeWithContentDescription("Close information").performClick()
                 compose.onNode(hasScrollToIndexAction()).performScrollToNode(
                     hasContentDescription("DISPLAY PREVIEW", substring = true))
                 shot("settings-bottom")
@@ -78,6 +78,22 @@ class LinkUxSmokeTest {
                 compose.mainClock.advanceTimeBy(800)
                 shot(state)
             }
+        }
+    }
+
+    @Test fun heldMicrophoneShowsLiveFeedbackAndReleases() {
+        if (round) return // Watch opens its dedicated capture surface first.
+        val launch = Intent(instrumentation.targetContext, MainActivity::class.java)
+            .putExtra("qa_state", "active").putExtra("qa_host", "RESPONSIVE")
+            .putExtra("qa_orientation", if (landscape) "DEG_90" else "DEG_0")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        ActivityScenario.launch<MainActivity>(launch).use {
+            compose.onNodeWithContentDescription("HOLD TO TALK").performTouchInput { down(center) }
+            Thread.sleep(900)
+            compose.onNodeWithText("LISTENING").assertExists()
+            shot("recording")
+            compose.onNodeWithContentDescription("LISTENING").performTouchInput { up() }
+            compose.onNodeWithText("HOLD TO TALK").assertExists()
         }
     }
 

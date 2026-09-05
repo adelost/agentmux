@@ -287,7 +287,9 @@ internal class LinkCoordinator(
 
     fun playReply(turnId: String, explicitReplay: Boolean = true) {
         val turn = ledger.value.turns.firstOrNull { it.turnId == turnId } ?: return
-        audioActions.playReply(turn, explicitReplay)
+        audioActions.playReply(turn, explicitReplay)?.let { reason ->
+            dispatch(LinkAction.PlaybackFailed(turnId, reason))
+        }
     }
 
     fun pauseAudio() = audioActions.pause()
@@ -484,11 +486,7 @@ internal class LinkCoordinator(
     }
 
     private fun syncPlayback(key: String) {
-        val turnId = key.substringAfter("turn-playback:")
-        val phase = runCatching {
-            PlaybackPhase.valueOf(preferences.getString(key, "").orEmpty().uppercase())
-        }.getOrNull() ?: return
-        dispatch(LinkAction.Playback(turnId, phase))
+        preferences.playbackAction(key)?.let(::dispatch)
     }
 
     override fun close() {
