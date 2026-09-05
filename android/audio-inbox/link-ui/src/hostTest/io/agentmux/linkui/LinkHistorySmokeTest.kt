@@ -32,6 +32,8 @@ class LinkHistorySmokeTest {
                 row("HISTORY").performScrollTo().performClick()
                 compose.onNodeWithContentDescription("Back").assertIsDisplayed()
                 row("Show the earlier plan").performScrollTo()
+                compose.onAllNodes(hasScrollAction()).onFirst()
+                    .performSemanticsAction(SemanticsActions.ScrollBy) { scroll -> scroll(0f, 80f) }
                 shot("history")
                 row("Show the earlier plan").performClick()
                 compose.onNodeWithContentDescription("Back").assertIsDisplayed()
@@ -52,7 +54,8 @@ class LinkHistorySmokeTest {
                 compose.onNodeWithText("Show the earlier plan").assertExists()
                 shot("conversation")
             }
-            row("TO demo:1").performScrollTo().performClick()
+            if (host == "phone") row("TO demo:1").performClick()
+            else row("TO demo:1").performScrollTo().performClick()
             row("demo:2").performClick()
             if (host != "phone") {
                 row("HISTORY").performScrollTo().performClick()

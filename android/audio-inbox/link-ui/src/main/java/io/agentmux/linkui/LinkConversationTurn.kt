@@ -3,11 +3,9 @@ package io.agentmux.linkui
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.designkit.ui.CircleActionTiming
 import com.adelost.ringkit.ui.RingRow

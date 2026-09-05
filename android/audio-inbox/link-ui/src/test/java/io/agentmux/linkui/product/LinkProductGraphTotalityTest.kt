@@ -16,9 +16,11 @@ import org.junit.Test
 class LinkProductGraphTotalityTest {
     @Test
     fun servicesFlowThroughFinalPresentationsIntoComponents() {
+        val state = MutableStateFlow(LinkState())
+        val playback = mutableListOf<LinkPlaybackCommandEvent>()
         val graph = LinkProductGraph(
             processScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
-            state = MutableStateFlow(LinkState()),
+            state = state,
             updateState = MutableStateFlow(
                 UpdateState.UpToDate("test", publishedAtEpochMillis = null),
             ),
@@ -36,7 +38,7 @@ class LinkProductGraphTotalityTest {
                 captureCommand = {},
                 capturedTurn = {},
                 compose = {},
-                playbackCommand = {},
+                playbackCommand = { playback += it },
                 targetSelect = {},
                 preferenceToggle = {},
                 updateCommand = {},
@@ -52,6 +54,16 @@ class LinkProductGraphTotalityTest {
             assertEquals(LinkRoute.SETTINGS, graph.activePage.value)
             graph.onDevHostOpen(LinkRouteOpenEvent(LinkRoute.DEV_HOST))
             assertEquals(LinkRoute.DEV_HOST, graph.activePage.value)
+            val older = io.agentmux.linkcore.LinkTurn("older", "same-id", "Old label", "Question",
+                createdAtMs = 1L, replyText = "Earlier reply")
+            state.value = state.value.copy(turns = listOf(older), selectedTargetId = "same-id")
+            val selected = io.agentmux.linkui.linkConversationTurns(graph.latest.value.turns, "same-id").single()
+            val action = io.agentmux.linkui.linkReadAloudRow(selected) { operation, id ->
+                graph.onActivePlaybackCommand(LinkPlaybackCommandEvent(operation, id))
+            }!!
+            state.value = state.value.copy(turns = listOf(older, older.copy(turnId = "newer")))
+            action.onTap!!()
+            assertEquals(listOf(LinkPlaybackCommandEvent(io.agentmux.linkcore.PlaybackOperation.PLAY, "older")), playback)
         } finally {
             graph.close()
         }

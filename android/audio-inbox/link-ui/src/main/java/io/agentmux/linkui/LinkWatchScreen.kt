@@ -50,7 +50,6 @@ import io.agentmux.linkui.product.generated.GeneratedLinkHomeComponents
 import io.agentmux.linkui.product.generated.GeneratedLinkSettingsComponent
 import io.agentmux.linkui.product.generated.GeneratedLinkSettingsComponents
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.flowOf
 import java.time.ZoneId
 import java.util.Locale
 
@@ -243,13 +242,13 @@ fun linkWatchRows(
             GeneratedLinkHomeComponent.CONVERSATION_LATEST -> {
                 val turns = linkConversationTurns(conversation.turns, target.selectedTargetId)
                 rows += watchReplyRows(
-                latest = turns.lastOrNull(),
-                defaultIcon = LinkNativeBindings.requireIcon("speaker"),
-                onPlayback = onPlayback,
-                onOpenReply = onOpenReply,
-            )
+                    latest = turns.lastOrNull(),
+                    defaultIcon = LinkNativeBindings.requireIcon("speaker"),
+                    onPlayback = onPlayback,
+                    onOpenReply = onOpenReply,
+                )
                 rows += RowSpec("history", "HISTORY",
-                    if (turns.isEmpty()) "No messages yet" else "${turns.size} recent ${if (turns.size == 1) "exchange" else "exchanges"}",
+                    if (turns.isEmpty()) "No messages yet" else "Recent messages",
                     icon = RingIcons.Activity,
                     onTap = onOpenHistory,
                     actionTiming = com.adelost.designkit.ui.CircleActionTiming.IMMEDIATE,
