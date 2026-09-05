@@ -152,3 +152,34 @@ test("a missing configured workspace is a visible coverage gap", () => {
   expect(rows[0]).toMatchObject({ name: "workspace scan", status: "warn" });
   expect(rows[0].detail).toContain("configured workspace missing");
 });
+
+test("current main with an orphan unmerged index is red without any operation marker", () => {
+  const { root, git, agents } = fixture();
+  const blob = git(["rev-parse", "HEAD:tracked"]);
+  execFileSync("git", ["-C", root, "update-index", "--index-info"], {
+    input: `0 ${"0".repeat(40)}\ttracked\n`
+      + [1, 2, 3].map((stage) => `100644 ${blob} ${stage}\ttracked\n`).join(""),
+  });
+  const index = join(root, ".git", "index");
+  const before = { bytes: readFileSync(index), mtime: statSync(index).mtimeMs };
+  const observation = observeWorkspaceHealth(agents);
+  expect(git(["rev-parse", "HEAD"])).toBe(git(["rev-parse", "origin/main"]));
+  expect(observation.repositories[0].canonical.operation).toBeNull();
+  expect(checkWorkspaceHealth(observation)).toEqual([expect.objectContaining({
+    name: "workspace conflicts", status: "fail",
+    detail: `${root}: 1 unresolved paths (3 index entries): "tracked"`,
+  })]);
+  expect(readFileSync(index)).toEqual(before.bytes);
+  expect(statSync(index).mtimeMs).toBe(before.mtime);
+});
+
+test("ordinary staged WIP stays healthy and the staged index remains untouched", () => {
+  const { root, git, agents } = fixture();
+  writeFileSync(join(root, "tracked"), "normal staged work\n");
+  git(["add", "tracked"]);
+  const index = join(root, ".git", "index");
+  const before = readFileSync(index);
+  expect(checkWorkspaceHealth(observeWorkspaceHealth(agents)).every((row) => row.status === "ok")).toBe(true);
+  expect(readFileSync(index)).toEqual(before);
+  expect(git(["show", ":tracked"])).toBe("normal staged work");
+});

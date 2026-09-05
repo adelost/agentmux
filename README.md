@@ -211,6 +211,9 @@ registered paths, and the main working tree's branch/behind count. Ordinary
 feature worktrees are not required to track trunk. Operation age is the marker's
 mtime, not proof that a process has hung. Trunk comparisons use local
 remote-tracking refs, so fetch explicitly when you need current remote state.
+Unresolved index entries are checked separately with `git ls-files --unmerged -z`,
+including when HEAD matches trunk and no operation marker remains. Normal staged
+WIP is not a conflict; conflict counts imply neither an age nor an owner.
 The scan has a 15-second budget (plus the current bounded Git read); incomplete
 coverage is a warning. It never fetches, refreshes indexes, resets, stashes,
 removes worktrees, or starts a background poller.
