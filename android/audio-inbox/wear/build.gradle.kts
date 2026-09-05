@@ -71,6 +71,7 @@ android {
         compose = true
         buildConfig = true
     }
+    sourceSets.getByName("androidTest").java.srcDir("../link-ui/src/hostTest")
 }
 
 dependencies {

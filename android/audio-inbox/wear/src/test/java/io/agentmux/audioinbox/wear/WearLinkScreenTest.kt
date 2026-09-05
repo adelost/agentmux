@@ -40,7 +40,7 @@ class WearLinkScreenTest {
     fun unavailableStateIsConciseCanonicalRows() {
         val rows = unavailableState().watchRows()
 
-        assertEquals(listOf("target.picker", "capture.talk", "latest", "settings"), rows.map { it.key })
+        assertEquals(listOf("target.picker", "capture.talk", "latest", "history", "settings"), rows.map { it.key })
         assertEquals("CHOOSE RECIPIENT", rows[0].title)
         assertEquals("Who would you like to talk to?", rows[0].sub)
         assertTrue(rows[0].choices.isEmpty())
@@ -88,7 +88,7 @@ class WearLinkScreenTest {
             onReplay = { replayed = true },
         )
 
-        assertEquals(listOf("target.picker", "capture.talk", "latest", "playback", "settings"), rows.map { it.key })
+        assertEquals(listOf("target.picker", "capture.talk", "latest", "playback", "history", "settings"), rows.map { it.key })
         assertEquals("TO beta", rows[0].title)
         assertTrue(rows[0].choices.isEmpty())
         rows[0].onTap!!.invoke()
@@ -232,7 +232,6 @@ private fun LinkState.watchRows(
     publicLinkActive: Boolean = false,
     onOpenRecipients: () -> Unit = {},
     onOpenCapture: () -> Unit = {},
-    onPlay: () -> Unit = {},
     onStop: () -> Unit = {},
     onReplay: () -> Unit = {},
 ): List<RowSpec> = linkWatchRows(
@@ -241,9 +240,9 @@ private fun LinkState.watchRows(
     session = toSessionPresentation(publicLinkActive),
     onOpenRecipients = onOpenRecipients,
     onOpenCapture = onOpenCapture,
-    onPlay = onPlay,
-    onStop = onStop,
-    onReplay = onReplay,
+    onPlayback = { operation, _ ->
+        if (operation == io.agentmux.linkcore.PlaybackOperation.STOP) onStop() else onReplay()
+    },
 )
 
 private fun LinkState.watchSettingsRows(

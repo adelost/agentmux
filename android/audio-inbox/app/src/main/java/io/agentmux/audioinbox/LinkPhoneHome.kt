@@ -36,6 +36,8 @@ import io.agentmux.linkcore.LinkRecoveryPhase
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.linkConnectionLabel
 import io.agentmux.linkui.LinkCaptureControl
+import io.agentmux.linkui.LinkConversationTurn
+import io.agentmux.linkui.linkConversationTurns
 import io.agentmux.linkui.LinkRecipientPicker
 import io.agentmux.linkui.activeTurnId
 import io.agentmux.linkui.linkRecipientRow
@@ -76,7 +78,7 @@ internal fun LinkPhoneHome(
         )
         return
     }
-    val turns = latest.turns.filter { it.targetId == target.selectedTargetId }
+    val turns = linkConversationTurns(latest.turns, target.selectedTargetId)
     val selected = target.targets.firstOrNull { it.id == target.selectedTargetId }
     val listState = rememberLazyListState()
     LaunchedEffect(selected?.id, turns.size, turns.lastOrNull()?.replyText) {
@@ -124,8 +126,9 @@ internal fun LinkPhoneHome(
                             }
                         } else {
                             items(turns, key = LinkTurn::turnId) { turn ->
-                                ConversationTurn(
+                                LinkConversationTurn(
                                     turn = turn,
+                                    modifier = Modifier.padding(horizontal = 24.dp),
                                     onPlayback = { operation ->
                                         graph.onActivePlaybackCommand(LinkPlaybackCommandEvent(operation, turn.turnId))
                                     },

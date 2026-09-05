@@ -73,6 +73,7 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+    sourceSets.getByName("androidTest").java.srcDir("../link-ui/src/hostTest")
 }
 
 dependencies {
