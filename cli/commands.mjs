@@ -3395,7 +3395,7 @@ Usage:
   agent dream                     Write/update nightly pane digest in workspace memory
     --since T                     Window to summarize (default: 24h)
     --dry                         Preview pane work, do nothing
-  agent janitor [--dry] [--days N] Trim oversized fields in aged session jsonl; never delete records\n  agent trim [--dry]              Reclaim pre-checkpoint bytes from inactive oversized Claude/Codex sessions\n  agent doctor                    Health check: bridge, Suggestions board/sync, hooks, ledger, tmux (exit 0/1/2)\n  agent revive                    Post-boot: classify interrupted panes (ledger + Codex/Kimi journals) and selectively revive only them; --all for legacy whole-fleet respawn, --dry to preview\n  agent memory status             Memory warnings, compact backlog, latest dream
+  agent janitor [--dry] [--days N] Trim oversized fields in aged session jsonl; never delete records\n  agent trim [--dry]              Reclaim pre-checkpoint bytes from inactive oversized Claude/Codex sessions\n  agent doctor [--workspaces]     Health: services + Git workspaces; --workspaces checks only Git (exit 0/1/2)\n  agent revive                    Post-boot: classify interrupted panes (ledger + Codex/Kimi journals) and selectively revive only them; --all for legacy whole-fleet respawn, --dry to preview\n  agent memory status             Memory warnings, compact backlog, latest dream
   agent queue                     List live durable delivery jobs (id, target, age, state, attempts, reason, preview)
   agent sleep <name|:nr> [-p N]   Sleep one 24h-idle Claude pane after exact compact, nonce, and clean-state receipts
   agent wake <name|:nr> [-p N]    Wake the exact recorded session through release and memory admission
@@ -3701,7 +3701,8 @@ export async function dispatch(argv, ctx) {
     }
 
     case "doctor": {
-      return cmdDoctor(ctx);
+      const { flags } = parseFlags(rest, { workspaces: "boolean" });
+      return cmdDoctor(ctx, flags);
     }
 
     case "quota":
