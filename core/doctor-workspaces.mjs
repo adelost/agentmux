@@ -14,6 +14,15 @@ function optionalGit(path, args) {
   }
 }
 
+/** Stage 1/2/3 entries expose conflicts even after every operation marker is gone. */
+function readUnmergedIndex(path) {
+  const entries = readWorkspaceGit(path, ["ls-files", "--unmerged", "-z"]).split("\0").filter(Boolean);
+  return {
+    entries: entries.length,
+    paths: [...new Set(entries.map((entry) => entry.slice(entry.indexOf("\t") + 1)))],
+  };
+}
+
 /** Use the remote's default branch; only fall back when main/master is unambiguous. */
 function remoteTrunk(path) {
   const target = optionalGit(path, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]);
@@ -47,6 +56,8 @@ export function observeWorkspaceHealth(agents, { budgetMs = 15_000 } = {}) {
         if (!tree.present || tree.bare) continue;
         try { tree.operation = observeWorktreeOperation(tree.path); }
         catch (error) { issues.push(`${tree.path}: Git operation unreadable (${error.code || error.message})`); }
+        try { tree.unmerged = readUnmergedIndex(tree.path); }
+        catch (error) { issues.push(`${tree.path}: Git index unreadable (${String(error.stderr || error.code || error.message).trim().split("\n")[0]})`); }
       }
       if (canonical?.head && canonical.present && repo.trunk) {
         const counts = readWorkspaceGit(root, ["rev-list", "--left-right", "--count", `${canonical.head}...${repo.trunk.ref}`]).trim();
@@ -73,6 +84,13 @@ export function checkWorkspaceHealth({ repositories, issues = [] }, { now = Date
     }
     for (const tree of worktrees) {
       if (tree.present === false) rows.push(check("workspace path", WARN, `${tree.path}: registered worktree missing`, "inspect git worktree list --porcelain; verify ownership before manual cleanup"));
+      if (tree.unmerged?.entries) {
+        const { entries, paths } = tree.unmerged;
+        const names = paths.slice(0, 8).map((path) => JSON.stringify(path)).join(", ");
+        rows.push(check("workspace conflicts", FAIL,
+          `${tree.path}: ${paths.length} unresolved paths (${entries} index entries): ${names}${paths.length > 8 ? `; +${paths.length - 8} more` : ""}`,
+          "inspect git ls-files --unmerged in this path; coordinate conflict resolution with the owner before staging changes"));
+      }
       if (!tree.operation) continue;
       const { name, markerPath, mtimeMs } = tree.operation;
       const ageMs = Math.max(0, now - mtimeMs);
@@ -93,6 +111,6 @@ export function checkWorkspaceHealth({ repositories, issues = [] }, { now = Date
     }
   }
   if (!rows.length) rows.push(check("workspaces", OK,
-    `${repositories.length} repositories checked; no duplicate trunk, stale operation or canonical drift against local remote-tracking refs`));
+    `${repositories.length} repositories checked; no unresolved index, duplicate trunk, stale operation or canonical drift against local remote-tracking refs`));
   return rows;
 }
