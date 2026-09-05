@@ -97,7 +97,7 @@ class WearLinkScreenTest {
         assertNotNull(rows[1].onTap)
         rows[1].onTap?.invoke()
         assertTrue(openedCapture)
-        assertEquals("REPLAY", rows[3].title)
+        assertEquals("PLAY", rows[3].title)
         rows[3].onTap?.invoke()
         assertTrue(replayed)
     }
@@ -152,8 +152,8 @@ class WearLinkScreenTest {
 
         val rows = state.watchRows(publicLinkActive = true, onReplay = { retried = true })
 
-        assertEquals("RETRY PLAYBACK", rows[3].title)
-        assertEquals("TTS UNAVAILABLE", rows[3].sub)
+        assertEquals("TRY AGAIN", rows[3].title)
+        assertEquals("TTS unavailable", rows[3].sub)
         rows[3].onTap?.invoke()
         assertTrue(retried)
     }
