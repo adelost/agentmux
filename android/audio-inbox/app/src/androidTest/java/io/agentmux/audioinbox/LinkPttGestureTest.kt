@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
@@ -79,6 +81,19 @@ class LinkPttGestureTest {
         assertNull(fixture.recorder.release())
     }
 
+    @Test fun unmountingHeldControlCancelsWithoutSending() = withCapture { fixture ->
+        val anchor = compose.onNodeWithContentDescription("HOLD TO TALK").fetchSemanticsNode().boundsInRoot.center
+        compose.onRoot().performTouchInput { down(anchor) }
+        compose.waitUntil(3000) { fixture.state.value.capture == CapturePhase.LISTENING }
+        compose.runOnUiThread { fixture.mounted = false }
+        compose.waitUntil(3000) { fixture.state.value.capture == CapturePhase.IDLE }
+        compose.onRoot().performTouchInput { up() }
+        assertEquals(1, fixture.cancels)
+        assertEquals(0, fixture.releases)
+        assertTrue(fixture.delivered.isEmpty())
+        assertNull(fixture.recorder.release())
+    }
+
     private fun withCapture(check: (CaptureFixture) -> Unit) {
         val launch = Intent(instrumentation.targetContext, MainActivity::class.java)
             .putExtra("qa_state", "active")
@@ -94,12 +109,14 @@ class LinkPttGestureTest {
                         onStateChange = null,
                     ) {
                         LinkInteractionHost {
+                            if (fixture.mounted) {
                             if (round) LinkWatchScreen(fixture.graph, "PTT LOCAL TEST", {},
                                 fixture.recorder::currentBytes, fixture.recorder::currentLevel)
                             else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 val spec by fixture.graph.captureSpec.collectAsState()
                                 LinkCaptureControl(spec, fixture.recorder::currentBytes, fixture.recorder::currentLevel,
                                     fixture.graph::beginCapture, fixture.graph::releaseCapture, fixture.graph::cancelCapture)
+                            }
                             }
                         }
                     }
@@ -127,6 +144,7 @@ class LinkPttGestureTest {
 }
 
 private class CaptureFixture(activity: MainActivity, round: Boolean) {
+    var mounted by mutableStateOf(true)
     val recorder = PushToTalkRecorder(activity)
     val state = MutableStateFlow(LinkState(targets = listOf(LinkTarget("local:ptt", "LOCAL TEST ONLY")),
         selectedTargetId = "local:ptt", connection = ConnectionState.CONNECTED))
