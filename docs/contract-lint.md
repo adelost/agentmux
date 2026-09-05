@@ -318,6 +318,14 @@ The PR gate is therefore:
 amux lint --changed --strict
 ```
 
+Strict mode cannot disable mandatory file-size checks. Unknown check names are
+errors. Size findings (STYLE010–014) cannot be suppressed or recorded in a
+baseline, including during `--update-baseline`. A selectable diff base such as
+`AMUX_LINT_BASE_REF` changes file selection, never the policy-history anchor:
+that anchor is the locally known trunk. Unknown trunk or unreadable/malformed
+trunk policy fails strict/changed verification. A known trunk without a policy
+has the default 500-line cap; adding the first policy is not an exemption path.
+
 Only changed source files enter the ratchet. Within those files, STYLE001 and
 STYLE002 inspect only target lines added by the branch or local diff, so legacy
 punctuation on untouched lines does not block unrelated work. File size checks

@@ -20,6 +20,9 @@ const STYLE_SUGGESTIONS = {
   STYLE014: "restore the trunk lint policy; legacy cap history cannot be reset",
 };
 
+/** WHAT: Checks mandatory size findings. WHY: Prevents baselines from suppressing structural guards. */
+export const isMandatorySizeFinding = ({ code }) => /^STYLE01[0-4]$/.test(code);
+
 function emptyLintPolicy(configPath, defaultWhatVerbs) {
   return {
     allowedWhatVerbs: defaultWhatVerbs,
@@ -56,6 +59,10 @@ function parseLintPolicy(source, path, defaultWhatVerbs) {
     doc = yaml.load(source) || {};
   } catch (error) {
     policy.configFindings.push(configFinding(path, `invalid YAML: ${error.message}`));
+    return policy;
+  }
+  if (typeof doc !== "object" || Array.isArray(doc)) {
+    policy.configFindings.push(configFinding(path, "lint policy must be a YAML mapping"));
     return policy;
   }
   const verbs = doc?.contract?.allowedWhatVerbs;
@@ -129,9 +136,9 @@ function gitContext(root, options = {}) {
   const repoRootRaw = gitOutput(start, ["rev-parse", "--show-toplevel"]);
   if (!repoRootRaw) return null;
   const repoRoot = resolve(repoRootRaw);
-  const explicit = options.baseRef
+  const explicit = !options.policy && (options.baseRef
     || process.env.AMUX_LINT_BASE_REF
-    || (process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : null);
+    || (process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : null));
   if (explicit) {
     if (!gitOutput(repoRoot, ["rev-parse", "--verify", `${explicit}^{commit}`])) {
       throw new Error(`amux lint: base ref '${explicit}' is unavailable; changed-file lint refuses to guess`);
@@ -399,17 +406,27 @@ function configCapLine(policy, capPath) {
 }
 
 function readBasePolicy(root, policy, options = {}) {
-  const context = gitContext(root, options);
-  if (!context?.baseRef) return null;
+  // Diff selection is caller-selectable; policy history is always actual trunk.
+  const context = gitContext(root, { policy: true });
+  if (!context?.baseRef) {
+    if (options.strict || options.changed) throw new Error("amux lint: policy trunk is unknown; cannot verify file-size history");
+    return null;
+  }
   const configDir = policy.configPath
     ? relative(context.repoRoot, dirname(policy.configPath)).replaceAll("\\", "/")
     : "";
   for (const name of [".amux-lint.yml", ".amux-lint.yaml"]) {
     const configRel = configDir ? `${configDir}/${name}` : name;
+    const entry = gitOutput(context.repoRoot, ["ls-tree", context.baseRef, "--", configRel]);
+    if (entry === null) throw new Error(`amux lint: cannot read policy tree at ${context.baseRef}`);
+    if (!entry) continue;
     const source = gitOutput(context.repoRoot, ["show", `${context.baseRef}:${configRel}`]);
-    if (source !== null) return parseLintPolicy(source, resolve(context.repoRoot, configRel), []);
+    if (source === null) throw new Error(`amux lint: cannot read trunk policy ${configRel}`);
+    const baseline = parseLintPolicy(source, resolve(context.repoRoot, configRel), []);
+    if (baseline.configFindings.length) throw new Error(`amux lint: invalid trunk policy ${configRel}: ${baseline.configFindings[0].msg}`);
+    return baseline;
   }
-  return null;
+  return emptyLintPolicy(null, []);
 }
 
 function sizeFinding(code, msg, path, line) {

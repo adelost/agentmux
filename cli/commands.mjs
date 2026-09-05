@@ -112,12 +112,7 @@ import { latestPaneSessionIdentity } from "../core/native-session-identity.mjs";
 import {
   loadTodos, listRemindable, formatReminderSummary, DEFAULT_TODOS_PATH,
 } from "../core/todos.mjs";
-import {
-  CONTRACT_CHECK_ID,
-  formatLintReport,
-  lintRoots,
-  resolvePathTarget,
-} from "../core/contract-lint.mjs";
+import { cmdLint } from "./lint.mjs";
 import {
   askAnchorKey,
   attachAskLineAnchors,
@@ -3097,84 +3092,6 @@ async function cmdResume(ctx) {
   await cmdAttach(last, ctx);
 }
 
-async function cmdLint(args, ctx) {
-  const { flags, positional } = parseFlags(args, FLAG_SPECS.lint);
-  if (flags.help || flags.h) {
-    console.log(`Usage: amux lint [target...] [--all-agents] [--changed] [--strict]
-
-Targets:
-  (none)                    Current working directory
-  . / path [path...]        One or more file/dir paths (scoped multi-root scan)
-  <agent>                   Agent name from agentmux config
-
-Options:
-  --all-agents              Lint every configured agent directory
-  --changed                 Only files changed relative to HEAD
-  --strict                  Exit non-zero when active error/debt findings exist
-  --baseline <path>         Suppress findings already recorded in baseline
-  --update-baseline         Write current findings to baseline
-  --only contract           Run only one check (currently: contract)
-  --skip contract           Skip one check
-  --limit N                 Findings per root to print (default: 80)`);
-    return;
-  }
-
-  const only = flags.only ? String(flags.only) : null;
-  const skip = flags.skip ? new Set(String(flags.skip).split(",").map((s) => s.trim()).filter(Boolean)) : new Set();
-  if ((only && only !== CONTRACT_CHECK_ID) || skip.has(CONTRACT_CHECK_ID)) {
-    console.log("amux lint\nNo checks enabled.");
-    return;
-  }
-
-  let roots;
-  if (flags["all-agents"]) {
-    roots = listAgents(ctx.configPath).map((agent) => agent.dir);
-  } else if (positional.length === 0) {
-    roots = [process.cwd()];
-  } else {
-    // Multiple targets lint as multiple roots under one combined baseline, so a
-    // repo can scope to its real source trees (e.g. `src/ai_tools ui/src`) instead
-    // of scanning the whole repo or keeping a separate baseline per directory.
-    roots = positional.map((target) => {
-      const pathTarget = resolvePathTarget(target, process.cwd());
-      return existsSync(pathTarget) ? pathTarget : getAgent(ctx.configPath, target).dir;
-    });
-  }
-
-  if (!roots.length) {
-    console.log("amux lint\nNo roots to scan.");
-    return;
-  }
-
-  let baselinePath = flags.baseline ? resolvePathTarget(flags.baseline, process.cwd()) : null;
-  if (flags["update-baseline"] && !baselinePath) {
-    if (roots.length !== 1) {
-      console.error("amux lint: --update-baseline needs an explicit --baseline <path> when linting multiple roots (or --all-agents)");
-      process.exit(1);
-    }
-    baselinePath = join(roots[0], ".amux-lint-baseline.json");
-  }
-
-  const results = lintRoots(roots, {
-    changed: !!flags.changed,
-    baselinePath,
-    updateBaseline: !!flags["update-baseline"],
-  });
-  if (flags["update-baseline"] && baselinePath) {
-    console.log(`Updated baseline: ${baselinePath}\n`);
-  }
-  console.log(formatLintReport(results, {
-    baselinePath,
-    limit: flags.limit || 80,
-  }));
-
-  const blocking = results.reduce(
-    (n, result) => n + result.activeFindings.filter((f) => f.sev !== "warn").length,
-    0,
-  );
-  if (flags.strict && blocking > 0) process.exit(1);
-}
-
 /** WHAT: Makes one checkout's tracked npm/uv roots runnable. WHY: Fresh worktrees have no ignored deps. */
 export function cmdWorktreeDeps(args) {
   const { flags, positional } = parseFlags(args, FLAG_SPECS["worktree-deps"]);
@@ -3471,18 +3388,6 @@ const FLAG_SPECS = {
   label: { clear: "boolean" },
   labels: {},
   queue: { all: "boolean", limit: "number", json: "boolean", reason: "string" },
-  lint: {
-    "all-agents": "boolean",
-    changed: "boolean",
-    strict: "boolean",
-    baseline: "string",
-    "update-baseline": "boolean",
-    only: "string",
-    skip: "string",
-    limit: "number",
-    help: "boolean",
-    h: "boolean",
-  },
   "worktree-deps": { check: "boolean", dry: "boolean" },
   gate: { scoped: "boolean", dry: "boolean" }, proof: { config: "string", output: "string" },
   edit: {},

@@ -5,7 +5,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { basename, extname, isAbsolute, join, relative, resolve } from "path";
-import { changedSourceLineNumbers, changedSourcePaths, lintFileSizes, lintStringStyle, loadLintPolicy } from "./lint-ratchet.mjs";
+import { changedSourceLineNumbers, changedSourcePaths, isMandatorySizeFinding, lintFileSizes, lintStringStyle, loadLintPolicy } from "./lint-ratchet.mjs";
 import { changedSymbols } from "./lint-symbol-scope.mjs";
 
 // WHAT: Names the contract check used by CLI include and exclude filters.
@@ -562,7 +562,7 @@ export function loadBaseline(path) {
 export function writeBaseline(path, results) {
   const fingerprints = [];
   for (const result of results) {
-    for (const finding of result.findings) {
+    for (const finding of result.findings.filter((f) => !isMandatorySizeFinding(f))) {
       fingerprints.push(findingFingerprint(finding, result.root));
     }
   }
@@ -580,7 +580,7 @@ export function lintRoots(roots, options = {}) {
   const baseline = loadBaseline(options.baselinePath);
   return results.map((result) => ({
     ...result,
-    activeFindings: result.findings.filter((finding) => !baseline.has(findingFingerprint(finding, result.root))),
+    activeFindings: result.findings.filter((f) => isMandatorySizeFinding(f) || !baseline.has(findingFingerprint(f, result.root))),
   }));
 }
 
