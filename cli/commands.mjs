@@ -3701,7 +3701,8 @@ export async function dispatch(argv, ctx) {
     }
 
     case "doctor": {
-      return cmdDoctor(ctx);
+      const { flags } = parseFlags(rest, { workspaces: "boolean" });
+      return cmdDoctor(ctx, flags);
     }
 
     case "quota":

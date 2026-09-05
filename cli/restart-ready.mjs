@@ -6,13 +6,13 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
   renameSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { discoverGitRoots, observeWorktreeOperation } from "../core/git-workspaces.mjs";
 import { listAgents } from "./config.mjs";
 import { getPaneStatus } from "./tmux.mjs";
 import { readLastTurns } from "../core/jsonl-reader.mjs";
@@ -184,49 +184,6 @@ function git(cwd, args, { allowFailure = false } = {}) {
   }
 }
 
-function resolveGitPath(worktree, path) {
-  return isAbsolute(path) ? path : resolve(worktree, path);
-}
-
-function worktreeOperation(path) {
-  for (const [name, gitPathName] of [
-    ["rebase", "rebase-merge"],
-    ["rebase", "rebase-apply"],
-    ["merge", "MERGE_HEAD"],
-    ["cherry-pick", "CHERRY_PICK_HEAD"],
-    ["revert", "REVERT_HEAD"],
-  ]) {
-    const gitPath = git(path, ["rev-parse", "--git-path", gitPathName], { allowFailure: true });
-    if (gitPath && existsSync(resolveGitPath(path, gitPath))) return name;
-  }
-  return null;
-}
-
-function discoverGitRoots(seeds, { maxDepth = 3, maxEntries = 2_000 } = {}) {
-  const roots = new Set();
-  const seen = new Set();
-  let visited = 0;
-  const walk = (path, depth) => {
-    const absolute = resolve(path);
-    if (depth > maxDepth || visited >= maxEntries || seen.has(absolute) || !existsSync(absolute)) return;
-    seen.add(absolute);
-    visited++;
-    if (existsSync(join(absolute, ".git"))) {
-      roots.add(absolute);
-      return;
-    }
-    let entries;
-    try { entries = readdirSync(absolute, { withFileTypes: true }); }
-    catch { return; }
-    for (const entry of entries) {
-      if (!entry.isDirectory() || ["node_modules", ".git", "build", "dist", ".cache"].includes(entry.name)) continue;
-      walk(join(absolute, entry.name), depth + 1);
-    }
-  };
-  for (const seed of seeds) walk(seed, 0);
-  return roots;
-}
-
 function collectWorktrees(agents, paneRows) {
   const roots = new Set();
   const seeds = [...agents.map((agent) => agent.dir), ...paneRows.map((pane) => pane.path)];
@@ -250,7 +207,7 @@ function collectWorktrees(agents, paneRows) {
     return {
       path,
       dirty: Boolean(status),
-      operation: status === null ? "status-unavailable" : worktreeOperation(path),
+      operation: status === null ? "status-unavailable" : observeWorktreeOperation(path)?.name || null,
     };
   });
 }

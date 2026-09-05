@@ -203,6 +203,18 @@ warn because they can resurrect at tmux's fallback size. Geometry is not a
 prompt-ingestion or delivery-health signal. Exit codes 0/1/2 make it
 cron-friendly.
 
+`amux doctor --workspaces` runs only the read-only Git checks, also included
+in ordinary `amux doctor`. It reuses restart inventory discovery under configured
+agent directories and Git's own worktree registry. It names duplicate checkouts
+of the remote default branch, operation markers older than 24 hours, missing
+registered paths, and the main working tree's branch/behind count. Ordinary
+feature worktrees are not required to track trunk. Operation age is the marker's
+mtime, not proof that a process has hung. Trunk comparisons use local
+remote-tracking refs, so fetch explicitly when you need current remote state.
+The scan has a 15-second budget (plus the current bounded Git read); incomplete
+coverage is a warning. It never fetches, refreshes indexes, resets, stashes,
+removes worktrees, or starts a background poller.
+
 The bridge writes a 30s heartbeat (`~/.agentmux/bridge-heartbeat.json`).
 `bin/bridge-watchdog-cron.sh` (install: `bash bin/install-bridge-watchdog.sh`,
 runs every minute) kills a bridge after its five-minute stale-heartbeat

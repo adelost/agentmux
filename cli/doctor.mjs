@@ -37,9 +37,21 @@ import {
   probeSuggestionsBoard,
 } from "../core/suggestions-comment-bridge.mjs";
 import { discoverNativeRuntimes } from "./native-runtime-service.mjs";
+import { checkWorkspaceHealth, observeWorkspaceHealth } from "../core/doctor-workspaces.mjs";
+
+function report(checks) {
+  console.log("\namux doctor\n");
+  console.log(formatDoctorReport(checks));
+  console.log("");
+  const overall = overallStatus(checks);
+  if (overall === FAIL) process.exit(2);
+  if (overall === WARN) process.exit(1);
+}
 
 /** WHAT: Reports every silent bridge, tmux, and config failure mode in one table. WHY: Keeps operators from chasing invisible breakage across scattered logs. */
-export async function cmdDoctor(ctx) {
+export async function cmdDoctor(ctx, { workspaces = false } = {}) {
+  const workspaceChecks = checkWorkspaceHealth(observeWorkspaceHealth(listAgents(ctx.configPath)));
+  if (workspaces) return report(workspaceChecks);
   const home = process.env.HOME;
   const repoDir = dirname(dirname(fileURLToPath(import.meta.url)));
   // bridge process + supervision
@@ -202,6 +214,7 @@ export async function cmdDoctor(ctx) {
 
   const tmuxRequired = Boolean(cfgError) || agents.some((agent) => agent.backend !== "native");
   const checks = [
+    ...workspaceChecks,
     checkBridgeProcess({ pids, supervised }),
     checkBridgeMode({ mode: readBridgeMode(), running: pids.length > 0 }),
     checkSupervisors({ pids: supervisorPids, crashLooping }),
@@ -237,12 +250,7 @@ export async function cmdDoctor(ctx) {
   ];
 
   const activeChecks = checks.filter(Boolean);
-  console.log("\namux doctor\n");
-  console.log(formatDoctorReport(activeChecks));
-  const overall = overallStatus(activeChecks);
-  console.log("");
-  if (overall === FAIL) process.exit(2);
-  if (overall === WARN) process.exit(1);
+  report(activeChecks);
 }
 
 /**
