@@ -439,7 +439,7 @@ feature("single-writer delivery broker", () => {
     }],
   });
 
-  component("a submitted exact draft receives one bounded recovery Enter after one minute", {
+  component("a submitted Codex draft waits for its receipt without another Enter", {
     given: ["a live idle Codex composer that retained the exact prompt after its first Enter", () => {
       const rootDir = tempRoot();
       let clock = 100_000;
@@ -469,18 +469,18 @@ feature("single-writer delivery broker", () => {
       ctx.advance();
       await ctx.broker.kickTarget("skydive", 6);
     }],
-    then: ["only Enter is retried and the durable job closes on JSONL", (_, ctx) => {
-      expect(ctx.enters()).toBe(1);
+    then: ["no Enter is retried and the durable job closes only on JSONL", (_, ctx) => {
+      expect(ctx.enters()).toBe(0);
       expect(ctx.agent.sends).toHaveLength(0);
       expect(ctx.queue.read("skydive", 6, ctx.job.id)).toMatchObject({
         status: "acknowledged",
-        metadata: { submittedRecoveryKind: "exact-draft-enter" },
+        submittedAt: 1_000,
       });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });
 
-  component("a submitted prompt is resent once when its coding process is proven dead", {
+  component("a dead Codex process cannot authorize resending a submitted prompt", {
     given: ["a cursor-backed submit fence followed by Codex returning to its shell", () => {
       const rootDir = tempRoot();
       let clock = 100_000;
@@ -506,26 +506,24 @@ feature("single-writer delivery broker", () => {
       return { rootDir, queue, job, agent, broker, restarts: () => restarts,
         advance: () => { clock += 1_001; } };
     }],
-    when: ["exact resume reopens the fence and the same durable job drains", async (ctx) => {
+    when: ["the broker rechecks the dead pane repeatedly", async (ctx) => {
       await ctx.broker.kickTarget("skydive", 6);
       ctx.advance();
       await ctx.broker.kickTarget("skydive", 6);
       ctx.advance();
       await ctx.broker.kickTarget("skydive", 6);
     }],
-    then: ["one exact restart and one physical resend reach JSONL", (_, ctx) => {
-      expect(ctx.restarts()).toBe(1);
-      expect(ctx.agent.sends.map((send) => send.text)).toEqual(["keep altitude centered"]);
+    then: ["death proves no non-ingestion, so the submit fence survives", (_, ctx) => {
+      expect(ctx.restarts()).toBe(0);
+      expect(ctx.agent.sends).toHaveLength(0);
       expect(ctx.queue.read("skydive", 6, ctx.job.id)).toMatchObject({
-        status: "acknowledged",
-        attempts: 1,
-        metadata: { submittedRecoveryKind: "dead-process-resend" },
+        status: "submitted", submittedAt: 1_000,
       });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });
 
-  component("a live idle pane is restarted once when a submitted prompt never reaches JSONL", {
+  component("a live idle Codex pane is not restarted when its submit receipt is missing", {
     given: ["a live coding process, an empty idle composer, and no authoritative receipt", () => {
       const rootDir = tempRoot();
       let clock = 130_000;
@@ -549,27 +547,26 @@ feature("single-writer delivery broker", () => {
       return { rootDir, queue, job, agent, broker, restarts: () => restarts, restartOptions,
         advance: () => { clock += 1_001; } };
     }],
-    when: ["the bounded idle timeout resumes the pane and the durable job drains", async (ctx) => {
+    when: ["the old idle timeout is crossed repeatedly", async (ctx) => {
       await ctx.broker.kickTarget("lsrc", 4);
       ctx.advance();
       await ctx.broker.kickTarget("lsrc", 4);
       ctx.advance();
       await ctx.broker.kickTarget("lsrc", 4);
     }],
-    then: ["one exact restart and one resend acknowledge the original job", (_, ctx) => {
-      expect(ctx.restarts()).toBe(1);
-      expect(ctx.restartOptions).toEqual([{ expectedDraft: null }]);
-      expect(ctx.agent.sends.map((send) => send.text)).toEqual(["continue the ticket"]);
+    then: ["an empty composer never establishes non-ingestion", (_, ctx) => {
+      expect(ctx.restarts()).toBe(0);
+      expect(ctx.restartOptions).toEqual([]);
+      expect(ctx.agent.sends).toHaveLength(0);
       expect(ctx.queue.read("lsrc", 4, ctx.job.id)).toMatchObject({
-        status: "acknowledged",
-        metadata: { submittedRecoveryKind: "live-idle-resend" },
+        status: "submitted", submittedAt: 1_000,
       });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],
   });
 
-  component("one retained-draft Enter escalates to one exact pane restart", {
-    given: ["the exact draft remains after its bounded recovery Enter", () => {
+  component("a retained Codex draft never escalates a submit fence to restart or resend", {
+    given: ["the exact draft remains after a submitted prompt", () => {
       const rootDir = tempRoot();
       let clock = 100_000;
       const queue = createDeliveryQueue({ rootDir, now: () => clock });
@@ -601,14 +598,13 @@ feature("single-writer delivery broker", () => {
       ctx.advance(1_001);
       await ctx.broker.kickTarget("skydive", 6);
     }],
-    then: ["the original draft is authorized for one exact restart and resend", (_, ctx) => {
-      expect(ctx.enters()).toBe(1);
-      expect(ctx.restarts()).toBe(1);
-      expect(ctx.restartOptions).toEqual([{ expectedDraft: "retry in order" }]);
-      expect(ctx.agent.sends.map((send) => send.text)).toEqual(["retry in order"]);
+    then: ["the original ambiguous submit receives no physical recovery action", (_, ctx) => {
+      expect(ctx.enters()).toBe(0);
+      expect(ctx.restarts()).toBe(0);
+      expect(ctx.restartOptions).toEqual([]);
+      expect(ctx.agent.sends).toHaveLength(0);
       expect(ctx.queue.read("skydive", 6, ctx.job.id)).toMatchObject({
-        status: "acknowledged",
-        metadata: { submittedRecoveryKind: "live-idle-resend" },
+        status: "submitted", submittedAt: 1_000,
       });
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],

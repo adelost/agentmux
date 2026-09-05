@@ -35,7 +35,7 @@ describe("Codex submit turn boundary", () => {
     },
   );
 
-  it("returns a proven non-ingested submit to pending and preserves cancellation", async () => {
+  it("terminalizes an ambiguous first submit without resetting its cursor or cancellation", async () => {
     const fx = fixture();
     try {
       appendFileSync(fx.file, `${event("turn_aborted", 11_000)}\n`);
@@ -48,21 +48,23 @@ describe("Codex submit turn boundary", () => {
         update: (_current, patch) => { stored = { ...stored, ...patch }; return stored; },
       };
       const onRecovered = vi.fn();
+      const terminalizeUnverified = vi.fn(async (current, decision) => ({
+        ...current, status: "delivered_unverified", ...decision,
+      }));
       const result = await recoverClosedCodexSubmit({
         job, queue, now: () => 80_000,
         agent: { promptTransportState: async () => ({ state: "empty-idle", busy: false }) },
-        exactEcho: async () => false, acknowledge: vi.fn(), onRecovered,
+        exactEcho: async () => false, acknowledge: vi.fn(), onRecovered, terminalizeUnverified,
       });
-      expect(result).toMatchObject({ status: "pending", submittedAt: null, echoCursor: null,
-        cancelRequestStatus: "requested", metadata: {
-          submittedRecoveryKind: "closed-codex-turn-resend",
-          submittedRecoveryCount: 1,
-        } });
-      expect(onRecovered).toHaveBeenCalledOnce();
+      expect(result).toMatchObject({ status: "delivered_unverified", submittedAt: 10_000, echoCursor: fx.cursor,
+        cancelRequestedAt: 10_500, ambiguity: "closed-codex-submit-unverified" });
+      expect(stored).toBe(job);
+      expect(terminalizeUnverified).toHaveBeenCalledOnce();
+      expect(onRecovered).not.toHaveBeenCalled();
     } finally { fx.cleanup(); }
   });
 
-  it("permits one recovery and terminalizes the next closed turn without redispatch", async () => {
+  it("recognizes legacy resend history but never permits another recovery", async () => {
     const fx = fixture();
     try {
       appendFileSync(fx.file, `${event("task_complete", 11_000)}\n`);

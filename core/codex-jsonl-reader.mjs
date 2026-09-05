@@ -18,6 +18,7 @@ import { createHash } from "crypto";
 import { describeCustomExec, describeToolCall } from "./tool-display.mjs";
 import { codexSessionDirs } from "./codex-profiles.mjs";
 import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
+import { codexUserPrompt, normalizeCodexUserEvents } from "./codex-user-events.mjs";
 
 // Content-addressed line identity for the watcher's posted-set dedupe. Codex
 // rollout events carry no stable id (no uuid, no payload.id), so we key on a
@@ -82,7 +83,7 @@ function parseJsonl(filePath) {
     const content = readFileSync(filePath, "utf-8");
     const events = [];
     for (const line of content.split("\n")) parseLineWithHash(line, events);
-    return events;
+    return normalizeCodexUserEvents(events);
   } catch {
     return [];
   }
@@ -135,7 +136,7 @@ function parseJsonlTail(filePath, maxBytes) {
 function parseJsonlText(content) {
   const events = [];
   for (const line of String(content || "").split("\n")) parseLineWithHash(line, events);
-  return events;
+  return normalizeCodexUserEvents(events);
 }
 
 // Session_meta lives on line 1 of every rollout. In real codex sessions it
@@ -256,12 +257,6 @@ function latestSessionFor(paneDir, { sessionDirs = codexSessionDirs() } = {}) {
 
 const CODEX_PROMPT_CURSOR_KIND = "codex-prompt-events-v1";
 
-function codexPromptEventMatches(event, needle) {
-  return event?.type === "event_msg"
-    && event.payload?.type === "user_message"
-    && event.payload.message === needle;
-}
-
 /**
  * Capture the identities of every currently visible occurrence of one exact
  * prompt. A later receipt must contain a NEW event identity, so repeated
@@ -292,12 +287,12 @@ export function isPromptInCodexJsonl(paneDir, promptText, { notBeforeMs = 0, cur
   const eventCursor = cursor?.kind === CODEX_PROMPT_CURSOR_KIND;
   if (eventCursor) {
     return hasJsonlEventAfterCursor([file], cursor, (event) =>
-      codexPromptEventMatches(event, needle));
+      codexUserPrompt(event) === needle);
   }
   const events = parseOperationalJsonl(file);
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
-    if (!codexPromptEventMatches(e, needle)) continue;
+    if (codexUserPrompt(e) !== needle) continue;
     if (notBeforeMs) {
       const eventMs = Date.parse(e.timestamp || "");
       if (!Number.isFinite(eventMs) || eventMs < notBeforeMs) continue;

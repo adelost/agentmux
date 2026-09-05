@@ -1,15 +1,14 @@
-// A completed Codex turn is an authoritative boundary for a prompt submitted
-// while that turn was active. If the exact user event is still absent after
-// the boundary and the composer is empty, the prompt was not ingested.
+// A completed Codex turn permits a bounded ambiguity verdict, not a resend.
+// Missing prompt evidence cannot prove non-ingestion after a submit fence.
 
 import { hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 
 const CODEX_PROMPT_CURSOR_KIND = "codex-prompt-events-v1";
 const MIN_RECOVERY_AGE_MS = 60_000;
-/** WHAT: Names the one allowed closed-turn recovery. WHY: Keeps every delivery seam on the same persisted recovery marker. */
+/** WHAT: Names the legacy closed-turn resend marker. WHY: Keeps prior ambiguous submissions recognizable during cancellation and receipt reconciliation. */
 export const CLOSED_CODEX_RECOVERY_KIND = "closed-codex-turn-resend";
 
-/** WHAT: Checks whether a prompt already consumed its one safe Codex resend. WHY: A later task boundary must terminalize ambiguity instead of typing the prompt again. */
+/** WHAT: Checks for the legacy Codex resend marker. WHY: Keeps prior attempts visible without authorizing another physical delivery. */
 export function hasClosedCodexRecovery(job) {
   return job?.metadata?.submittedRecoveryKind === CLOSED_CODEX_RECOVERY_KIND;
 }
@@ -29,11 +28,11 @@ export function hasCodexTurnBoundaryAfterSubmit(cursor, submittedAt) {
 }
 
 /**
- * WHAT: Returns a Codex submit to the durable pending lane after a closed turn proves non-ingestion.
- * WHY: Prevents one swallowed Enter from fencing every later message for an hour.
+ * WHAT: Resolves a closed Codex submit with an exact receipt or an explicit ambiguity verdict.
+ * WHY: Prevents missing evidence from authorizing duplicate execution after submit.
  */
 export async function recoverClosedCodexSubmit({
-  job, agent, queue, exactEcho, acknowledge, terminalizeUnverified = null, now, onRecovered,
+  job, agent, queue, exactEcho, acknowledge, terminalizeUnverified = null, now,
 }) {
   const submittedAt = Number(job.submittedAt || job.submitFenceAt || 0);
   if (job.status !== "submitted" || job.kind !== "prompt"
@@ -55,35 +54,9 @@ export async function recoverClosedCodexSubmit({
     return acknowledge(current, "late-echo-after-codex-turn-boundary");
   }
 
-  // The first closed turn is the one bounded recovery. A second closed turn
-  // proves that the recovery itself crossed a submit boundary without an
-  // exact JSONL user event. Returning to pending again would reset submittedAt
-  // forever and physically retype the same prompt once per completed turn.
-  if (hasClosedCodexRecovery(current)) {
-    if (typeof terminalizeUnverified !== "function") return null;
-    return terminalizeUnverified(current, {
-      ambiguity: "closed-codex-recovery-exhausted",
-      reason: "Codex closed the one bounded recovery turn without an exact JSONL prompt receipt; delivery is consumed/unverified and will not be redispatched",
-    });
-  }
-
-  const recovered = queue.update(current, {
-    status: "pending",
-    draftOwned: false,
-    submittedAt: null,
-    submitFenceAt: null,
-    echoCursor: null,
-    echoNotBeforeMs: null,
-    nextAttemptAt: now(),
-    cancelRequestStatus: current.cancelRequestedAt ? "requested" : current.cancelRequestStatus,
-    metadata: {
-      ...(current.metadata || {}),
-      submittedRecoveryAt: now(),
-      submittedRecoveryKind: CLOSED_CODEX_RECOVERY_KIND,
-      submittedRecoveryCount: 1,
-    },
-    lastReason: "Codex closed the active turn without ingesting this prompt; retrying from a fresh receipt cursor",
+  if (typeof terminalizeUnverified !== "function") return null;
+  return terminalizeUnverified(current, {
+    ambiguity: hasClosedCodexRecovery(current) ? "closed-codex-recovery-exhausted" : "closed-codex-submit-unverified",
+    reason: "Codex closed a turn without an exact JSONL prompt receipt; delivery remains unverified and will not be redispatched",
   });
-  onRecovered(recovered);
-  return recovered;
 }
