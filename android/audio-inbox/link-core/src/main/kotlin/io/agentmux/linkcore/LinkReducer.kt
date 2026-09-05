@@ -80,10 +80,18 @@ object LinkReducer {
                 replyError = "",
             )
         }
-        is LinkAction.Playback -> state.mapTurn(action.turnId) {
-            it.copy(playbackPhase = action.phase, playbackError = "")
-        }.copy(
+        is LinkAction.Playback -> state.copy(
+            turns = state.turns.map { turn ->
+                when {
+                    turn.turnId == action.turnId -> turn.copy(playbackPhase = action.phase, playbackError = "")
+                    action.phase == PlaybackPhase.PLAYING &&
+                        turn.playbackPhase in setOf(PlaybackPhase.PLAYING, PlaybackPhase.PAUSED) ->
+                        turn.copy(playbackPhase = PlaybackPhase.STOPPED)
+                    else -> turn
+                }
+            },
             activePlaybackTurnId = when (action.phase) {
+                PlaybackPhase.QUEUED -> state.activePlaybackTurnId ?: action.turnId
                 PlaybackPhase.PLAYING, PlaybackPhase.PAUSED -> action.turnId
                 else -> state.activePlaybackTurnId?.takeUnless { it == action.turnId }
             },
@@ -102,7 +110,7 @@ object LinkReducer {
         }
         is LinkAction.PlaybackFailed -> state.mapTurn(action.turnId) {
             it.copy(playbackPhase = PlaybackPhase.FAILED, playbackError = action.reason)
-        }
+        }.copy(activePlaybackTurnId = state.activePlaybackTurnId?.takeUnless { it == action.turnId })
         is LinkAction.HandsFree -> state.copy(handsFree = action.enabled)
         LinkAction.ResetSession -> LinkState()
     }

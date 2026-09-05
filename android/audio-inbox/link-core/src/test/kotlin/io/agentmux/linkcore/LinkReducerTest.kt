@@ -6,6 +6,21 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LinkReducerTest {
+    @Test fun `one playback owner survives switching and late stop of the old reply`() {
+        var state = LinkState(turns = listOf(turn("a", "agent:1"), turn("b", "agent:2")))
+        state = LinkReducer.reduce(state, LinkAction.Playback("a", PlaybackPhase.QUEUED))
+        assertEquals("a", state.activePlaybackTurnId)
+        state = LinkReducer.reduce(state, LinkAction.Playback("a", PlaybackPhase.PLAYING))
+        state = LinkReducer.reduce(state, LinkAction.Playback("b", PlaybackPhase.PLAYING))
+        assertEquals(1, state.turns.count { it.playbackPhase == PlaybackPhase.PLAYING })
+        assertEquals(PlaybackPhase.STOPPED, state.turns[0].playbackPhase)
+        state = LinkReducer.reduce(state, LinkAction.Playback("a", PlaybackPhase.STOPPED))
+        assertEquals("b", state.activePlaybackTurnId)
+        state = LinkReducer.reduce(state, LinkAction.Playback("b", PlaybackPhase.PAUSED))
+        assertEquals("b", state.activePlaybackTurnId)
+        state = LinkReducer.reduce(state, LinkAction.PlaybackFailed("b", "Offline"))
+        assertNull(state.activePlaybackTurnId)
+    }
     @Test
     fun `session reset clears private conversation state`() {
         val initial = LinkState(

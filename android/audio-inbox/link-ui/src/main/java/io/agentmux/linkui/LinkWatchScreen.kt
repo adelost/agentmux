@@ -18,6 +18,7 @@ import com.adelost.designkit.ui.GraphiteTokens
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.releasekit.ui.releaseUpdateRows
 import com.adelost.ringkit.ui.RenderRingScreen
+import com.adelost.ringkit.ui.RingRoundBackHost
 import com.adelost.ringkit.ui.RingNavigator
 import com.adelost.ringkit.ui.RingScreen
 import com.adelost.ringkit.ui.RowSpec
@@ -49,6 +50,7 @@ import io.agentmux.linkui.product.generated.GeneratedLinkHomeComponents
 import io.agentmux.linkui.product.generated.GeneratedLinkSettingsComponent
 import io.agentmux.linkui.product.generated.GeneratedLinkSettingsComponents
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
 import java.time.ZoneId
 import java.util.Locale
 
@@ -91,6 +93,8 @@ fun LinkWatchSurface(
     val recovery by graph.recovery.collectAsState()
     val showingSettings = route == LinkRoute.SETTINGS
     var captureOpen by remember { mutableStateOf(false) }
+    var recipientOpen by remember { mutableStateOf(false) }
+    var replyOpen by remember { mutableStateOf(false) }
     var captureStarted by remember { mutableStateOf(false) }
     BackHandler(enabled = captureOpen) {
         graph.cancelCapture()
@@ -106,6 +110,11 @@ fun LinkWatchSurface(
         }
     }
     if (captureOpen) {
+        RingRoundBackHost(onBack = {
+            graph.cancelCapture()
+            captureStarted = false
+            captureOpen = false
+        }) {
         Box(
             modifier = Modifier.fillMaxSize().background(GraphiteTokens.Canvas),
             contentAlignment = Alignment.Center,
@@ -120,14 +129,33 @@ fun LinkWatchSurface(
                 onRecover = onRequestMicrophone,
             )
         }
+        }
+        return
+    }
+    if (recipientOpen) {
+        LinkRecipientPicker(target, onSelect = {
+            graph.onTargetSelect(LinkTargetSelectEvent(it))
+            recipientOpen = false
+        }, onBack = { recipientOpen = false })
+        return
+    }
+    if (replyOpen) {
+        val turn = latest.turns.lastOrNull { it.targetId == target.selectedTargetId }
+        val replyNavigator = remember(turn) {
+            RingNavigator(RingScreen.Rows("REPLY", flowOf(listOf(
+                RowSpec("reply", turn?.respondingTarget.orEmpty().ifBlank { turn?.targetId.orEmpty() },
+                    turn?.replyText.orEmpty(), icon = null),
+            ))))
+        }
+        BackHandler { replyOpen = false }
+        RingRoundBackHost(onBack = { replyOpen = false }) {
+            RenderRingScreen(replyNavigator, backLabel = "Back", onExit = { replyOpen = false })
+        }
         return
     }
     BackHandler(enabled = showingSettings) { check(graph.navigation.back()) }
     val onOpenSettings = remember(graph) {
         { graph.onSettingsActionOpen(LinkRouteOpenEvent(LinkRoute.SETTINGS)) }
-    }
-    val onSelectTarget = remember(graph) {
-        { targetId: String -> graph.onTargetSelect(LinkTargetSelectEvent(targetId)) }
     }
     // The body ends in a safe-call, so its natural type is `() -> Unit?`: "there
     // was no turn to play" is not a value a row handler may return. Stating the
@@ -135,7 +163,9 @@ fun LinkWatchSurface(
     // nullability travel into every call site.
     val onPlay: () -> Unit = remember(graph) {
         {
-            graph.latest.value.turns.lastOrNull { it.replyText.isNotBlank() }?.turnId?.let { turnId ->
+            graph.latest.value.turns.lastOrNull {
+                it.targetId == graph.target.value.selectedTargetId && it.replyText.isNotBlank()
+            }?.turnId?.let { turnId ->
                 graph.onActivePlaybackCommand(LinkPlaybackCommandEvent(PlaybackOperation.PLAY, turnId))
             }
         }
@@ -191,67 +221,61 @@ fun LinkWatchSurface(
                 target = target,
                 conversation = latest,
                 session = connection,
-                onSelectTarget = onSelectTarget,
+                onOpenRecipients = { recipientOpen = true },
                 onOpenCapture = { captureOpen = true },
                 onPlay = onPlay,
                 onStop = onStop,
                 onReplay = onPlay,
                 onOpenSettings = onOpenSettings,
+                onOpenReply = { replyOpen = true },
             )
         }
     }
-    RenderRingScreen(nav = navigator, backLabel = "Back", onExit = { graph.navigation.back() })
+    if (showingSettings) {
+        RingRoundBackHost(onBack = { graph.navigation.back() }) {
+            RenderRingScreen(nav = navigator, backLabel = "Back", onExit = { graph.navigation.back() })
+        }
+    } else {
+        RenderRingScreen(nav = navigator, backLabel = "Back", onExit = { graph.navigation.back() })
+    }
 }
 
 fun linkWatchRows(
     target: LinkTargetPresentation,
     conversation: LinkConversationPresentation,
     session: LinkSessionPresentation,
-    onSelectTarget: (String) -> Unit,
+    onOpenRecipients: () -> Unit,
     onOpenCapture: () -> Unit,
     onPlay: () -> Unit,
     onStop: () -> Unit,
     onReplay: () -> Unit,
     onOpenSettings: () -> Unit = {},
+    onOpenReply: () -> Unit = {},
 ): List<RowSpec> {
     val selected = target.targets.firstOrNull { it.id == target.selectedTargetId }
-    val targetChoices = target.targets
-        .map { it.label.ifBlank { it.id }.uppercase() }
-        .takeIf { it.size >= 2 }
-        .orEmpty()
     val rows = mutableListOf<RowSpec>()
     GeneratedLinkHomeComponents.resolve(CircleSurfaceClass.ROUND).orderedMounts.forEach { mount ->
         when (mount.component) {
             GeneratedLinkHomeComponent.NAVIGATION_PAGE_HOST -> Unit
-            GeneratedLinkHomeComponent.TARGET_PICKER -> rows += RowSpec(
-                key = mount.id,
-                title = "AGENT · ${linkSessionRoute(session)}",
-                sub = selected?.label?.ifBlank { selected.id }?.uppercase() ?: "NO TARGET",
-                icon = LinkNativeBindings.requireIcon("target"),
-                choices = targetChoices,
-                onSelect = targetChoices.takeIf { it.isNotEmpty() }?.let {
-                    { label: String ->
-                        target.targets.firstOrNull {
-                            it.label.ifBlank { it.id }.uppercase() == label
-                        }?.let { onSelectTarget(it.id) }
-                    }
-                },
-            )
+            GeneratedLinkHomeComponent.TARGET_PICKER ->
+                rows += linkRecipientRow(target, onOpenRecipients).copy(key = mount.id)
             GeneratedLinkHomeComponent.CAPTURE_TALK -> rows += RowSpec(
                 key = mount.id,
-                title = "PUSH TO TALK",
-                sub = if (selected == null) "UNAVAILABLE" else "OPEN RECORDER",
+                title = "VOICE MESSAGE",
+                sub = if (selected == null) "Choose a recipient" else "",
                 icon = LinkNativeBindings.requireIcon("record"),
-                onTap = onOpenCapture.takeIf { selected != null },
+                onTap = onOpenCapture.takeIf { selected?.acceptsMessages == true },
             )
             GeneratedLinkHomeComponent.CONVERSATION_LATEST -> rows += watchReplyRows(
-                latest = conversation.turns.lastOrNull(),
+                latest = conversation.turns.lastOrNull { it.targetId == target.selectedTargetId },
                 defaultIcon = LinkNativeBindings.requireIcon("speaker"),
                 onPlay = onPlay,
                 onStop = onStop,
                 onReplay = onReplay,
+                onOpenReply = onOpenReply,
             )
             GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY -> rows += linkSettingsRow(onOpenSettings)
+            GeneratedLinkHomeComponent.PLAYBACK_CONTROLS,
             GeneratedLinkHomeComponent.CONVERSATION_COMPOSER ->
                 error("${mount.component.id.wireId} is not a Link home component on round")
         }
@@ -265,6 +289,7 @@ private fun watchReplyRows(
     onPlay: () -> Unit,
     onStop: () -> Unit,
     onReplay: () -> Unit,
+    onOpenReply: () -> Unit,
 ): List<RowSpec> = buildList {
     if (latest == null) {
         add(RowSpec("latest", "LATEST REPLY", "NO REPLY YET", defaultIcon))
@@ -273,23 +298,24 @@ private fun watchReplyRows(
     add(
         RowSpec(
             key = "latest",
-            title = latest.respondingTarget.ifBlank { latest.targetId }.uppercase(),
+            title = "REPLY",
             sub = when {
-                latest.replyText.isNotBlank() -> latest.replyText
+                latest.replyText.isNotBlank() -> latest.targetId
                 latest.deliveryPhase == DeliveryPhase.FAILED -> latest.deliveryError.ifBlank { "DELIVERY FAILED" }
                 else -> "WAITING FOR REPLY"
-            }.uppercase().take(54),
+            },
             icon = defaultIcon,
+            onTap = onOpenReply.takeIf { latest.replyText.isNotBlank() },
         ),
     )
     if (latest.replyText.isBlank()) return@buildList
     add(
         when (latest.playbackPhase) {
-            PlaybackPhase.PLAYING -> RowSpec("playback", "STOP REPLY", "PLAYING", RingIcons.Stop, onTap = onStop)
-            PlaybackPhase.FAILED -> RowSpec("playback", "RETRY PLAYBACK", latest.playbackError.ifBlank { "PLAYBACK FAILED" }.uppercase().take(54), RingIcons.Refresh, onTap = onReplay)
+            PlaybackPhase.PLAYING -> RowSpec("playback", "STOP", "Playing", RingIcons.Stop, onTap = onStop)
+            PlaybackPhase.FAILED -> RowSpec("playback", "TRY AGAIN", latest.playbackError.ifBlank { "Audio unavailable" }, RingIcons.Refresh, onTap = onReplay)
             PlaybackPhase.STOPPED, PlaybackPhase.PLAYED, PlaybackPhase.SKIPPED ->
-                RowSpec("playback", "REPLAY", "PLAY LATEST REPLY", RingIcons.Refresh, onTap = onReplay)
-            else -> RowSpec("playback", "PLAY REPLY", "LATEST RESPONSE", RingIcons.Play, onTap = onPlay)
+                RowSpec("playback", "PLAY", "", RingIcons.Play, onTap = onReplay)
+            else -> RowSpec("playback", "PLAY", "", RingIcons.Play, onTap = onPlay)
         },
     )
 }
@@ -328,16 +354,17 @@ fun linkWatchSettingsRows(
                     onInstall = onInstallUpdate,
                     zoneId = zoneId,
                     locale = locale,
-                ),
+                ).map { it.copy(multiline = true) },
             )
             GeneratedLinkSettingsComponent.NAVIGATION_DEV_HOST_ENTRY -> onOpenDevHost?.let { open ->
                 add(
                     RowSpec(
                         mount.id,
-                        "DEV HOST",
-                        "RESPONSIVE · WATCH EXACT",
+                        "DISPLAY PREVIEW",
+                        "Phone layout or watch-size preview",
                         LinkNativeBindings.requireIcon("phone"),
                         onTap = open,
+                        multiline = true,
                     ),
                 )
             }
@@ -373,7 +400,7 @@ fun linkSessionRoute(session: LinkSessionPresentation): String {
 fun linkSessionSettingsDetail(session: LinkSessionPresentation): String =
     when (session.connection) {
         ConnectionState.CONNECTED ->
-            session.connectionDetail.orEmpty().uppercase().take(42).ifBlank { "READY" }
+            session.connectionDetail.orEmpty().ifBlank { "Connected" }
         ConnectionState.CONNECTING -> "LOOKING FOR LINK"
         ConnectionState.DISCONNECTED -> "OPEN PHONE TO CONNECT"
         ConnectionState.CONFIGURATION_REQUIRED -> "LOG IN ON PHONE"

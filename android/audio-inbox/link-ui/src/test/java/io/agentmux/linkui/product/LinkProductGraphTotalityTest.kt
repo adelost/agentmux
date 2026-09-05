@@ -48,6 +48,10 @@ class LinkProductGraphTotalityTest {
             assertEquals(DeliveryPhase.NONE, graph.latest.value.deliveryPhase)
             assertEquals(LinkTargetKind.NONE, graph.target.value.kind)
             assertEquals(LinkRoute.HOME, graph.activePage.value)
+            graph.onSettingsActionOpen(LinkRouteOpenEvent(LinkRoute.SETTINGS))
+            assertEquals(LinkRoute.SETTINGS, graph.activePage.value)
+            graph.onDevHostOpen(LinkRouteOpenEvent(LinkRoute.DEV_HOST))
+            assertEquals(LinkRoute.DEV_HOST, graph.activePage.value)
         } finally {
             graph.close()
         }

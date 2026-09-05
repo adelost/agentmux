@@ -182,13 +182,15 @@ fun LinkState.toPlaybackPresentation(): LinkPlaybackPresentation {
 }
 
 fun LinkState.toTargetPresentation(kindOf: (String) -> LinkTargetKind?): LinkTargetPresentation {
-    val available = targets.filter { it.available }
-    val selected = available.firstOrNull { it.id == selectedTargetId } ?: available.firstOrNull()
+    // Display the same selected address the sender uses, even if it goes
+    // offline. Silently showing the next online agent can misaddress a turn.
+    val selected = targets.firstOrNull { it.id == selectedTargetId }
+        ?: targets.firstOrNull()
     return LinkTargetPresentation(
         selectedTargetId = selected?.id,
         kind = selected?.let { kindOf(it.id) } ?: LinkTargetKind.NONE,
-        availableCount = available.size,
-        targets = available,
+        availableCount = targets.count { it.available },
+        targets = targets,
     )
 }
 

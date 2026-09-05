@@ -15,9 +15,9 @@
  *
  */
 export const linkPagePresentations = [
-  { id: "home", title: "AGENTMUX LINK", iconAssetRef: "link" },
-  { id: "settings", title: "LINK SETTINGS", iconAssetRef: "gear" },
-  { id: "dev-host", title: "DEV HOST", iconAssetRef: "phone" },
+  { id: "home", title: "LINK", iconAssetRef: "link" },
+  { id: "settings", title: "SETTINGS", iconAssetRef: "gear" },
+  { id: "dev-host", title: "DISPLAY PREVIEW", iconAssetRef: "phone" },
 ] as const;
 
 /**
@@ -29,7 +29,7 @@ export const linkSettingsActionPresentation = {
   id: "open-settings",
   rowKey: "settings",
   title: "SETTINGS",
-  detail: "CONNECTION & AUDIO",
+  detail: "Connection, sound & updates",
   a11y: "Open Link settings",
   iconAssetRef: "gear",
 } as const;

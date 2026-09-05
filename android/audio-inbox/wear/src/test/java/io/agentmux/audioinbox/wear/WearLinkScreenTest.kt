@@ -40,9 +40,9 @@ class WearLinkScreenTest {
     fun unavailableStateIsConciseCanonicalRows() {
         val rows = unavailableState().watchRows()
 
-        assertEquals(listOf("target", "talk", "latest", "settings"), rows.map { it.key })
-        assertEquals("AGENT · SIGN IN", rows[0].title)
-        assertEquals("NO TARGET", rows[0].sub)
+        assertEquals(listOf("target.picker", "capture.talk", "latest", "settings"), rows.map { it.key })
+        assertEquals("CHOOSE RECIPIENT", rows[0].title)
+        assertEquals("Who would you like to talk to?", rows[0].sub)
         assertTrue(rows[0].choices.isEmpty())
         assertNull(rows[1].onTap)
         assertFalse(rows[1].holdToConfirm)
@@ -57,7 +57,7 @@ class WearLinkScreenTest {
 
     @Test
     fun connectedStateExposesChoiceHoldAndPlaybackThroughRowData() {
-        var selected = ""
+        var pickerOpened = false
         var openedCapture = false
         var replayed = false
         val state = LinkState(
@@ -83,22 +83,21 @@ class WearLinkScreenTest {
         )
 
         val rows = state.watchRows(
-            onSelectTarget = { selected = it },
+            onOpenRecipients = { pickerOpened = true },
             onOpenCapture = { openedCapture = true },
             onReplay = { replayed = true },
         )
 
-        assertEquals(listOf("target", "talk", "latest", "playback", "settings"), rows.map { it.key })
-        assertEquals("AGENT · PRIVATE", rows[0].title)
-        assertEquals("BETA", rows[0].sub)
-        assertEquals(listOf("ALPHA", "BETA"), rows[0].choices)
-        rows[0].onSelect?.invoke("ALPHA")
-        assertEquals("alpha", selected)
+        assertEquals(listOf("target.picker", "capture.talk", "latest", "playback", "settings"), rows.map { it.key })
+        assertEquals("TO beta", rows[0].title)
+        assertTrue(rows[0].choices.isEmpty())
+        rows[0].onTap!!.invoke()
+        assertTrue(pickerOpened)
         assertFalse(rows[1].holdToConfirm)
         assertNotNull(rows[1].onTap)
         rows[1].onTap?.invoke()
         assertTrue(openedCapture)
-        assertEquals("REPLAY", rows[3].title)
+        assertEquals("PLAY", rows[3].title)
         rows[3].onTap?.invoke()
         assertTrue(replayed)
     }
@@ -125,8 +124,8 @@ class WearLinkScreenTest {
 
         val rows = state.watchRows(publicLinkActive = true)
 
-        assertEquals("AGENT · PUBLIC", rows[0].title)
-        assertEquals("TRANSCRIPTION-FAILED", rows[2].sub)
+        assertEquals("TO alpha", rows[0].title)
+        assertEquals("transcription-failed", rows[2].sub)
     }
 
     @Test
@@ -153,8 +152,8 @@ class WearLinkScreenTest {
 
         val rows = state.watchRows(publicLinkActive = true, onReplay = { retried = true })
 
-        assertEquals("RETRY PLAYBACK", rows[3].title)
-        assertEquals("TTS UNAVAILABLE", rows[3].sub)
+        assertEquals("TRY AGAIN", rows[3].title)
+        assertEquals("TTS unavailable", rows[3].sub)
         rows[3].onTap?.invoke()
         assertTrue(retried)
     }
@@ -197,7 +196,7 @@ class WearLinkScreenTest {
             locale = Locale.US,
         )
 
-        assertEquals(listOf("connection", "update", "update-published"), rows.map { it.key })
+        assertEquals(listOf("session.connection", "update", "update-published"), rows.map { it.key })
         assertEquals("PUBLISHED", rows.last().title)
         assertEquals("v1.2.2 · Aug 2, 2026, 7:33 AM", rows.last().sub)
     }
@@ -220,18 +219,18 @@ class WearLinkScreenTest {
 
         assertFalse(
             state.watchSettingsRows(upToDate, "1.2.1")
-                .any { it.key == "dev-host" },
+                .any { it.key == "navigation.dev-host-entry" },
         )
         assertTrue(
             state.watchSettingsRows(upToDate, "1.2.1", onOpenDevHost = {})
-                .any { it.key == "dev-host" && it.sub == "RESPONSIVE · WATCH EXACT" },
+                .any { it.key == "navigation.dev-host-entry" && it.title == "DISPLAY PREVIEW" },
         )
     }
 }
 
 private fun LinkState.watchRows(
     publicLinkActive: Boolean = false,
-    onSelectTarget: (String) -> Unit = {},
+    onOpenRecipients: () -> Unit = {},
     onOpenCapture: () -> Unit = {},
     onPlay: () -> Unit = {},
     onStop: () -> Unit = {},
@@ -240,7 +239,7 @@ private fun LinkState.watchRows(
     target = toTargetPresentation { null },
     conversation = toConversationPresentation(),
     session = toSessionPresentation(publicLinkActive),
-    onSelectTarget = onSelectTarget,
+    onOpenRecipients = onOpenRecipients,
     onOpenCapture = onOpenCapture,
     onPlay = onPlay,
     onStop = onStop,

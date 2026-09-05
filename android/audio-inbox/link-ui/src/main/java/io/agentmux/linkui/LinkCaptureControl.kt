@@ -12,6 +12,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.adelost.designkit.ui.RingIcons
+import com.adelost.designkit.ui.LocalCircleSurfaceLayout
+import com.adelost.designkit.ui.CircleSurfaceClass
 import com.adelost.ringkit.ui.IconRing
 import com.adelost.ringkit.ui.RingAudioCaptureFeedback
 import com.adelost.ringkit.ui.RingAudioCaptureFeedbackSpec
@@ -67,6 +69,7 @@ fun LinkCaptureControl(
     onRecover: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    val diameter = if (LocalCircleSurfaceLayout.current.surfaceClass == CircleSurfaceClass.ROUND) 72.dp else 56.dp
     var elapsedMs by remember { mutableLongStateOf(0L) }
     var bytes by remember { mutableLongStateOf(0L) }
     val levels = remember { mutableStateListOf<Float>() }
@@ -104,7 +107,7 @@ fun LinkCaptureControl(
                     label = availability.label,
                     sub = availability.detail,
                     onTap = recover,
-                    diameter = 72.dp,
+                    diameter = diameter,
                 )
             }
             else -> RingPressLifecycle(
@@ -131,7 +134,7 @@ fun LinkCaptureControl(
                     onRelease = onRelease,
                     onCancel = onCancel,
                 ),
-                diameter = 72.dp,
+                diameter = diameter,
             )
         }
     }

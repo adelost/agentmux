@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the declared route identity (title and icon per screen)
-// Product declarations SHA-256: 505eb28b27b81c9432aade659b5767082c914f06e900911eb05219a1fb066ee4
+// Product declarations SHA-256: 3e6765af21db604669c0439cc4633ff24f982312ca2bd565f392e435d1086de5
 package io.agentmux.linkui.product.generated
 
 enum class GeneratedLinkPageId(val wireId: String) {
@@ -17,9 +17,9 @@ data class GeneratedLinkRouteDescriptor(
 
 object GeneratedLinkRoutes {
     fun descriptor(route: GeneratedLinkPageId): GeneratedLinkRouteDescriptor = when (route) {
-        GeneratedLinkPageId.HOME -> GeneratedLinkRouteDescriptor(route, "AGENTMUX LINK", "link")
-        GeneratedLinkPageId.SETTINGS -> GeneratedLinkRouteDescriptor(route, "LINK SETTINGS", "gear")
-        GeneratedLinkPageId.DEV_HOST -> GeneratedLinkRouteDescriptor(route, "DEV HOST", "phone")
+        GeneratedLinkPageId.HOME -> GeneratedLinkRouteDescriptor(route, "LINK", "link")
+        GeneratedLinkPageId.SETTINGS -> GeneratedLinkRouteDescriptor(route, "SETTINGS", "gear")
+        GeneratedLinkPageId.DEV_HOST -> GeneratedLinkRouteDescriptor(route, "DISPLAY PREVIEW", "phone")
     }
 }
 
@@ -37,7 +37,7 @@ object GeneratedLinkChromeActions {
         "open-settings",
         "settings",
         "SETTINGS",
-        "CONNECTION & AUDIO",
+        "Connection, sound & updates",
         "Open Link settings",
         "gear",
     )

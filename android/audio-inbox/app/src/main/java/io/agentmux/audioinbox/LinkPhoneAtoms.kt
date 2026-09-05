@@ -47,6 +47,7 @@ internal fun PhoneRow(row: RowSpec) {
         holdMs = row.holdMs,
         actionTiming = row.actionTiming,
         hint = row.hint,
+        multiline = row.multiline,
         modifier = phoneRowModifier(),
     )
 }

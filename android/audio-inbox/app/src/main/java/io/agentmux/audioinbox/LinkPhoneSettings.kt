@@ -109,8 +109,8 @@ internal fun LinkPhoneSettings(
                     GeneratedLinkSettingsComponent.SESSION_CONNECTION -> item(mount.id) {
                         PhoneRow(
                             title = connectionRouteLabel(connection.connectionDetail.orEmpty()),
-                            sub = connection.connectionDetail.orEmpty().uppercase()
-                                .ifBlank { "NO CONNECTION" },
+                            sub = connection.connectionDetail.orEmpty()
+                                    .ifBlank { "Not connected" },
                             icon = if (connection.connection == ConnectionState.CONNECTED) {
                                 LinkNativeBindings.requireIcon("wifi")
                             } else {
@@ -121,14 +121,14 @@ internal fun LinkPhoneSettings(
                     GeneratedLinkSettingsComponent.SESSION_PUBLIC_LINK -> item(mount.id) {
                         PhoneRow(
                             title = if (publicLink.publicLinkActive) {
-                                "DISCONNECT PUBLIC LINK"
+                                "SIGN OUT"
                             } else {
-                                "CONNECT PUBLIC LINK"
+                                "CONNECT ONLINE"
                             },
                             sub = if (publicLink.publicLinkActive) {
-                                "OPTIONAL FALLBACK · CONNECTED"
+                                "Online account connected"
                             } else {
-                                "OPTIONAL OUTSIDE TAILSCALE"
+                                ""
                             },
                             icon = LinkNativeBindings.requireIcon("link"),
                             onTap = onPublicLink,
@@ -137,10 +137,12 @@ internal fun LinkPhoneSettings(
                     GeneratedLinkSettingsComponent.PREFERENCES_TOGGLES -> {
                         item("${mount.id}.hands-free") {
                             RingChoiceRow(
-                                title = "HANDS-FREE",
+                                title = "INCOMING AUDIO",
+                                hint = "Play audio sent to this device, including in the background.",
                                 selected = if (preferences.handsFree) "ON" else "OFF",
                                 options = listOf("OFF", "ON"),
                                 role = CircleChoiceRole.TOGGLE,
+                                infoSelected = true,
                                 onSelect = {
                                     graph.onPreferencesToggle(
                                         LinkPreferenceToggleEvent(LinkPreferenceKey.HANDS_FREE, it == "ON"),
@@ -152,10 +154,12 @@ internal fun LinkPhoneSettings(
                         }
                         item("${mount.id}.read-replies") {
                             RingChoiceRow(
-                                title = "READ REPLIES",
+                                title = "AUTO-PLAY REPLIES",
+                                hint = "Read new replies aloud. Off: press Play to listen.",
                                 selected = if (preferences.speakReplies) "ON" else "OFF",
                                 options = listOf("OFF", "ON"),
                                 role = CircleChoiceRole.TOGGLE,
+                                infoSelected = true,
                                 onSelect = {
                                     graph.onPreferencesToggle(
                                         LinkPreferenceToggleEvent(LinkPreferenceKey.SPEAK_REPLIES, it == "ON"),
@@ -169,7 +173,7 @@ internal fun LinkPhoneSettings(
                     GeneratedLinkSettingsComponent.HISTORY_LOCAL -> item(mount.id) {
                         PhoneRow(
                             title = "LOCAL HISTORY",
-                            sub = "${localHistory.retainedTurns} / ${localHistory.maxTurns} TURNS · OLDEST DROPS FIRST",
+                            sub = "${localHistory.retainedTurns} saved · ${localHistory.maxTurns} limit",
                             icon = LinkNativeBindings.requireIcon("activity"),
                         )
                     }
@@ -179,7 +183,7 @@ internal fun LinkPhoneSettings(
                             item("update-changelog") {
                                 PhoneRow(
                                     "WHAT'S NEW",
-                                    updateChangelog.uppercase(),
+                                    updateChangelog,
                                     LinkNativeBindings.requireIcon("download"),
                                 )
                             }
@@ -187,8 +191,8 @@ internal fun LinkPhoneSettings(
                     }
                     GeneratedLinkSettingsComponent.NAVIGATION_DEV_HOST_ENTRY -> item(mount.id) {
                         PhoneRow(
-                            title = "DEV HOST",
-                            sub = "RESPONSIVE · WATCH EXACT",
+                            title = "DISPLAY PREVIEW",
+                            sub = "Phone layout or watch-size preview",
                             icon = LinkNativeBindings.requireIcon("phone"),
                             onTap = {
                                 graph.onDevHostOpen(LinkRouteOpenEvent(LinkRoute.DEV_HOST))
@@ -199,7 +203,7 @@ internal fun LinkPhoneSettings(
                         item(mount.id) {
                             PhoneRow(
                                 "RECOVERY",
-                                recovery.detail.orEmpty().uppercase(),
+                                recovery.detail.orEmpty(),
                                 LinkNativeBindings.requireIcon("warning"),
                             )
                         }

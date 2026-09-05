@@ -24,7 +24,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -128,7 +127,9 @@ internal class PhoneLinkProductGraph private constructor(
                 updateState = updateState,
                 microphoneGranted = MutableStateFlow(true),
                 speakReplies = speakReplies,
-                capturedTurns = emptyFlow(),
+                // A mounted recorder is an idle event source, not a completed
+                // stream. Completion unmounts the real generated output port.
+                capturedTurns = MutableSharedFlow(),
                 captureByteCount = { 0L },
                 sinks = LinkProductSinks(
                     captureCommand = { event ->
@@ -253,6 +254,7 @@ private class PhoneCaptureAdapter(
 
     private fun begin() {
         clear()
+        coordinator.pauseAudio()
         val capture = recorder.begin()
         if (capture == null) {
             coordinator.capture(CapturePhase.FAILED)

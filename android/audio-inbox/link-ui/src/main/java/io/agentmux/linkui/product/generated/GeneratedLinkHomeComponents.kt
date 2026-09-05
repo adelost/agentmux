@@ -1,12 +1,12 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.componentFamilies
-// Product declarations SHA-256: 83741324ee1b1e69992f0ff1b15fa53aa1ad2818a9aa13c73a0d398f384196f4
+// Product declarations SHA-256: e580fc89ea2a079c4a899175e4094a261f6b37f163ff62445bdf3ce67e6eab1c
 package io.agentmux.linkui.product.generated
 
 import com.adelost.designkit.ui.CircleSurfaceClass
 
 enum class GeneratedLinkHomeComponent(val id: GeneratedLinkComponentId) {
-    NAVIGATION_PAGE_HOST(GeneratedLinkComponentId.NAVIGATION_PAGE_HOST), TARGET_PICKER(GeneratedLinkComponentId.TARGET_PICKER), CAPTURE_TALK(GeneratedLinkComponentId.CAPTURE_TALK), CONVERSATION_LATEST(GeneratedLinkComponentId.CONVERSATION_LATEST), NAVIGATION_SETTINGS_ENTRY(GeneratedLinkComponentId.NAVIGATION_SETTINGS_ENTRY), CONVERSATION_COMPOSER(GeneratedLinkComponentId.CONVERSATION_COMPOSER)
+    NAVIGATION_PAGE_HOST(GeneratedLinkComponentId.NAVIGATION_PAGE_HOST), TARGET_PICKER(GeneratedLinkComponentId.TARGET_PICKER), CAPTURE_TALK(GeneratedLinkComponentId.CAPTURE_TALK), CONVERSATION_LATEST(GeneratedLinkComponentId.CONVERSATION_LATEST), NAVIGATION_SETTINGS_ENTRY(GeneratedLinkComponentId.NAVIGATION_SETTINGS_ENTRY), PLAYBACK_CONTROLS(GeneratedLinkComponentId.PLAYBACK_CONTROLS), CONVERSATION_COMPOSER(GeneratedLinkComponentId.CONVERSATION_COMPOSER)
 }
 enum class GeneratedLinkHomeRegion { HOST, CONTENT, CHROME, FOOTER, RAIL }
 
@@ -116,10 +116,19 @@ object GeneratedLinkHomeComponents {
                 required = true,
             ),
             GeneratedLinkHomeMount(
+                id = "playback.controls",
+                component = GeneratedLinkHomeComponent.PLAYBACK_CONTROLS,
+                region = GeneratedLinkHomeRegion.FOOTER,
+                order = 3,
+                priority = 0,
+                capacity = null,
+                required = false,
+            ),
+            GeneratedLinkHomeMount(
                 id = "conversation.composer",
                 component = GeneratedLinkHomeComponent.CONVERSATION_COMPOSER,
                 region = GeneratedLinkHomeRegion.FOOTER,
-                order = 3,
+                order = 4,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -128,7 +137,7 @@ object GeneratedLinkHomeComponents {
                 id = "capture.talk",
                 component = GeneratedLinkHomeComponent.CAPTURE_TALK,
                 region = GeneratedLinkHomeRegion.FOOTER,
-                order = 4,
+                order = 5,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -137,7 +146,7 @@ object GeneratedLinkHomeComponents {
                 id = "navigation.settings-entry",
                 component = GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY,
                 region = GeneratedLinkHomeRegion.CHROME,
-                order = 5,
+                order = 6,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -172,10 +181,19 @@ object GeneratedLinkHomeComponents {
                 required = true,
             ),
             GeneratedLinkHomeMount(
+                id = "playback.controls",
+                component = GeneratedLinkHomeComponent.PLAYBACK_CONTROLS,
+                region = GeneratedLinkHomeRegion.FOOTER,
+                order = 3,
+                priority = 0,
+                capacity = null,
+                required = false,
+            ),
+            GeneratedLinkHomeMount(
                 id = "conversation.composer",
                 component = GeneratedLinkHomeComponent.CONVERSATION_COMPOSER,
                 region = GeneratedLinkHomeRegion.FOOTER,
-                order = 3,
+                order = 4,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -183,8 +201,8 @@ object GeneratedLinkHomeComponents {
             GeneratedLinkHomeMount(
                 id = "capture.talk",
                 component = GeneratedLinkHomeComponent.CAPTURE_TALK,
-                region = GeneratedLinkHomeRegion.FOOTER,
-                order = 4,
+                region = GeneratedLinkHomeRegion.RAIL,
+                order = 5,
                 priority = 0,
                 capacity = null,
                 required = true,
@@ -193,7 +211,7 @@ object GeneratedLinkHomeComponents {
                 id = "navigation.settings-entry",
                 component = GeneratedLinkHomeComponent.NAVIGATION_SETTINGS_ENTRY,
                 region = GeneratedLinkHomeRegion.CHROME,
-                order = 5,
+                order = 6,
                 priority = 0,
                 capacity = null,
                 required = true,

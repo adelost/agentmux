@@ -11,19 +11,6 @@ import io.agentmux.linkcore.ReplyPhase
 import java.time.Instant
 import kotlin.math.sin
 
-internal fun targetChoices(targets: List<LinkTarget>): List<Pair<String, String>> {
-    val baseLabels = targets.associateWith { it.label.ifBlank { it.id }.uppercase() }
-    val duplicates = baseLabels.values.groupingBy { it }.eachCount()
-    return targets.map { target ->
-        val base = requireNotNull(baseLabels[target])
-        target.id to if (duplicates.getValue(base) > 1) {
-            "$base · ${target.id.uppercase()}"
-        } else {
-            base
-        }
-    }
-}
-
 internal fun attachmentUrls(text: String): List<String> =
     Regex("""https?://[^\s<>()\]"]+""")
         .findAll(text)
@@ -33,23 +20,23 @@ internal fun attachmentUrls(text: String): List<String> =
         .toList()
 
 internal fun turnStatusLabel(turn: LinkTurn): String = when {
-    turn.playbackPhase == PlaybackPhase.PLAYING -> "PLAYING"
-    turn.playbackPhase == PlaybackPhase.PAUSED -> "PAUSED"
-    turn.deliveryPhase == DeliveryPhase.FAILED -> "SEND FAILED"
-    turn.replyPhase == ReplyPhase.FAILED -> "REPLY FAILED"
-    turn.replyPhase == ReplyPhase.READY -> "REPLY READY"
-    turn.replyPhase == ReplyPhase.THINKING -> "THINKING"
-    turn.deliveryPhase == DeliveryPhase.QUEUED -> "SENT"
-    else -> "SENDING"
+    turn.playbackPhase == PlaybackPhase.PLAYING -> "Reading aloud"
+    turn.playbackPhase == PlaybackPhase.PAUSED -> "Paused"
+    turn.deliveryPhase == DeliveryPhase.FAILED -> "Not sent"
+    turn.replyPhase == ReplyPhase.FAILED -> "Couldn't get a reply"
+    turn.replyPhase == ReplyPhase.READY -> "Replied"
+    turn.replyPhase == ReplyPhase.THINKING -> "Thinking…"
+    turn.deliveryPhase == DeliveryPhase.QUEUED -> "Sent"
+    else -> "Sending…"
 }
 
-internal fun phoneActivePreviewState(playbackActive: Boolean): LinkState = LinkState(
+internal fun phoneActivePreviewState(playbackActive: Boolean, scenario: String? = null): LinkState = LinkState(
     connection = ConnectionState.CONNECTED,
     connectionDetail = "PRIVATE RELAY READY",
     connectionObservedAtMs = System.currentTimeMillis(),
     targets = listOf(
-        LinkTarget(id = "demo:1", label = "DEMO ONE"),
-        LinkTarget(id = "demo:2", label = "DEMO TWO"),
+        LinkTarget(id = "demo:1", label = "Implementation worker · available for your next task"),
+        LinkTarget(id = "demo:2", label = "Second window · a deliberately long description that stays readable"),
     ),
     selectedTargetId = "demo:1",
     turns = listOf(
@@ -69,7 +56,19 @@ internal fun phoneActivePreviewState(playbackActive: Boolean): LinkState = LinkS
         ),
     ),
     activePlaybackTurnId = "qa-turn".takeIf { playbackActive },
-)
+).let { state ->
+    when (scenario) {
+        null -> state
+        "offline" -> state.copy(connection = ConnectionState.DISCONNECTED, targets = emptyList(),
+            selectedTargetId = "", turns = emptyList())
+        "waiting" -> state.copy(turns = state.turns.map { it.copy(replyText = "", replyPhase = ReplyPhase.THINKING) })
+        "error" -> state.copy(turns = state.turns.map { it.copy(replyText = "",
+            deliveryPhase = DeliveryPhase.FAILED, deliveryError = "No connection. Message not sent.") })
+        "loading" -> state.copy(activePlaybackTurnId = "qa-turn",
+            turns = state.turns.map { it.copy(playbackPhase = PlaybackPhase.QUEUED) })
+        else -> error("Unknown Link preview scenario: $scenario")
+    }
+}
 
 /** The fixed settings-page update preview the qa_state/qa_page extras have always shown. */
 internal fun phoneQaUpdateState(): UpdateState = UpdateState.Available(

@@ -15,7 +15,7 @@ import androidx.lifecycle.lifecycleScope
 import com.adelost.designkit.ui.CircleHostMode
 import com.adelost.designkit.ui.CircleHostPreviewState
 import com.adelost.designkit.ui.CircleHostSurface
-import com.adelost.ringkit.ui.RingActionCueHost
+import io.agentmux.linkui.LinkInteractionHost
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
 import io.agentmux.linkcore.LinkAction
@@ -84,12 +84,12 @@ class WearMainActivity : ComponentActivity() {
         requestMicrophone()
         if (!qaPreviewActive) controller.start()
         setContent {
-            RingActionCueHost {
                 CircleHostSurface(
                     isWatchDevice = true,
                     state = CircleHostPreviewState(mode = CircleHostMode.WATCH_EXACT),
                     onStateChange = null,
                 ) {
+                LinkInteractionHost {
                     LinkWatchScreen(
                         graph = productGraph,
                         currentVersionName = updater.currentVersionName,
@@ -97,8 +97,8 @@ class WearMainActivity : ComponentActivity() {
                         recordedBytes = controller::recordedBytes,
                         recordedLevel = controller::recordedLevel,
                     )
+                  }
                 }
-            }
         }
         if (!qaPreviewActive) refreshHandoff()
         updater.start()
