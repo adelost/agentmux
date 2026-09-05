@@ -97,9 +97,9 @@ class LinkUxSmokeTest {
         ActivityScenario.launch<MainActivity>(launch).use {
             compose.onNodeWithContentDescription("HOLD TO TALK").performTouchInput { down(center) }
             Thread.sleep(900)
-            compose.onNodeWithText("LISTENING").assertExists()
+            compose.onNodeWithText("RELEASE TO SEND").assertExists()
             shot("recording")
-            compose.onNodeWithContentDescription("LISTENING").performTouchInput { up() }
+            compose.onRoot().performTouchInput { up() }
             compose.onNodeWithText("HOLD TO TALK").assertExists()
         }
     }

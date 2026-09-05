@@ -1,6 +1,7 @@
-package io.agentmux.audioinbox.wear
+package io.agentmux.linkcore
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -15,8 +16,10 @@ class RecorderFinalizerTest {
 
         assertFalse(valid)
         assertTrue(broken.released)
+        assertEquals(1, broken.releaseCount)
         assertTrue(nextValid)
         assertTrue(next.released)
+        assertEquals(1, next.releaseCount)
     }
 
     private fun finish(recorder: FakeRecorder): Boolean = RecorderFinalizer.finish(
@@ -30,6 +33,7 @@ class RecorderFinalizerTest {
         private val throwOnStop: Boolean,
     ) {
         var released = false
+        var releaseCount = 0
 
         fun stop() {
             if (throwOnStop) throw IllegalStateException("stop failed")
@@ -37,6 +41,7 @@ class RecorderFinalizerTest {
 
         fun release() {
             released = true
+            releaseCount++
         }
     }
 }

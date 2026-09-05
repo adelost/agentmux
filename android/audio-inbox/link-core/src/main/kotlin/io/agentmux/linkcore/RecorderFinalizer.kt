@@ -1,4 +1,4 @@
-package io.agentmux.audioinbox.wear
+package io.agentmux.linkcore
 
 /**
  * Closes one recorder exactly once even when stop fails.
@@ -6,7 +6,7 @@ package io.agentmux.audioinbox.wear
  * The generic seam keeps the failure contract unit-testable without an
  * Android MediaRecorder instance.
  */
-internal object RecorderFinalizer {
+object RecorderFinalizer {
     fun <T> finish(
         recorder: T,
         stop: (T) -> Unit,

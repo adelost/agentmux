@@ -10,6 +10,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.designkit.ui.LocalCircleSurfaceLayout
@@ -88,15 +90,13 @@ fun LinkCaptureControl(
         }
     }
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
-        if (spec.phase == CapturePhase.LISTENING) {
-            RingAudioCaptureFeedback(
-                RingAudioCaptureFeedbackSpec(
-                    elapsedMs = elapsedMs,
-                    levels = levels.toList(),
-                    active = true,
-                ),
-            )
-        }
+        val recording = spec.phase == CapturePhase.LISTENING
+        // Keep the atom's measured space, including font metrics. Inserting it
+        // at BEGIN moves the held control away from the original finger.
+        RingAudioCaptureFeedback(
+            RingAudioCaptureFeedbackSpec(elapsedMs, levels.toList(), active = recording),
+            modifier = if (recording) Modifier else Modifier.alpha(0f).clearAndSetSemantics { },
+        )
         when (val availability = spec.availability) {
             is LinkCaptureAvailability.Recoverable -> {
                 val recover = requireNotNull(onRecover) {
@@ -113,7 +113,7 @@ fun LinkCaptureControl(
             else -> RingPressLifecycle(
                 spec = RingPressLifecycleSpec(
                     label = when (spec.phase) {
-                        CapturePhase.LISTENING -> "LISTENING"
+                        CapturePhase.LISTENING -> "RELEASE TO SEND"
                         CapturePhase.FINALIZING -> "SENDING"
                         CapturePhase.FAILED -> "TRY AGAIN"
                         CapturePhase.IDLE -> when (availability) {
@@ -127,6 +127,7 @@ fun LinkCaptureControl(
                     sub = when (availability) {
                         LinkCaptureAvailability.Ready -> VoiceUploadPolicy.warning(bytes, spec.byteLimit)
                             ?.let { if (bytes > (spec.byteLimit ?: Long.MAX_VALUE)) "OVER 5 MB" else "5 MB SOON" }
+                            .orEmpty() // A size warning must not move the pressed control either.
                         is LinkCaptureAvailability.Blocked -> availability.detail
                         is LinkCaptureAvailability.Recoverable -> availability.detail
                     },
