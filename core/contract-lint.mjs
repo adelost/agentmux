@@ -495,10 +495,7 @@ function isSkippedPath(path) {
   return path.split(/[\\/]+/).some((part) => SKIP_DIRS.has(part));
 }
 
-/**
- * WHAT: Collects supported source files under one lint target.
- * WHY: Keeps trunk-relative selection and directory traversal on one path identity.
- */
+/** WHAT: Collects supported source files under one lint target. WHY: Keeps trunk-relative selection and traversal on one path identity. */
 export function collectSourceFiles(root, options = {}) {
   const resolvedRoot = resolve(expandHome(root));
   if (!existsSync(resolvedRoot)) return [];
@@ -525,8 +522,11 @@ export function collectSourceFiles(root, options = {}) {
 export function lintRoot(root, options = {}) {
   const resolvedRoot = resolve(expandHome(root));
   const files = collectSourceFiles(resolvedRoot, options);
+  // A selected diff base may narrow symbol checks, never the mandatory size gate.
+  // The trunk selector also includes staged, working and untracked source files.
+  const sizeFiles = options.strict && options.changed ? collectSourceFiles(resolvedRoot, { ...options, policy: true }) : files;
   const lintConfig = options.lintConfig || loadLintConfig(resolvedRoot);
-  const findings = lintFileSizes(resolvedRoot, files, lintConfig, options);
+  const findings = lintFileSizes(resolvedRoot, sizeFiles, lintConfig, options);
   let symbols = 0;
   for (const file of files) {
     const source = readFileSync(file, "utf-8");
@@ -536,7 +536,7 @@ export function lintRoot(root, options = {}) {
     findings.push(...fileFindings);
     symbols += sourceSymbols.length;
   }
-  return { root: resolvedRoot, files, symbols, findings };
+  return { root: resolvedRoot, files: [...new Set([...files, ...sizeFiles])], symbols, findings };
 }
 
 /** WHAT: Formats a line-stable baseline key for one finding. WHY: Keeps unrelated line shifts from reopening accepted legacy debt. */

@@ -36,8 +36,18 @@ describe("mandatory trunk-anchored size guards", () => {
     const root = fixture(501); grow(root, 502); git(root, "add", "."); git(root, "commit", "-m", "increase");
     vi.stubEnv("AMUX_LINT_BASE_REF", "HEAD");
     const result = lintRoot(root, { changed: true, strict: true, baseRef: "HEAD" });
-    expect(result.files).toEqual([]);
+    expect(result.files).toEqual([join(root, "large.mjs")]);
     expect(result.findings.some((f) => f.code === "STYLE011")).toBe(true);
+  });
+  it("checks actual file growth against trunk even when HEAD hides the diff and no policy changed", () => {
+    const root = fixture();
+    writeFileSync(join(root, "large.mjs"), "// source\n".repeat(501));
+    git(root, "add", "."); git(root, "commit", "-m", "oversized without policy");
+    vi.stubEnv("AMUX_LINT_BASE_REF", "HEAD");
+    const result = lintRoot(root, { changed: true, strict: true, baseRef: "HEAD" });
+    expect(result.findings.some((f) => f.code === "STYLE010")).toBe(true);
+    expect(result.files).toEqual([join(root, "large.mjs")]);
+    expect(result.symbols).toBe(0);
   });
   it("does not suppress size guards through new or pre-existing baselines", () => {
     const root = fixture(501); grow(root, 502);
