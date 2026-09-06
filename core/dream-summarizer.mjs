@@ -1,5 +1,6 @@
 // Bounded journal input for the operator-selected nightly Dream pane.
 
+import { statSync } from "node:fs";
 import { readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 import { readLastTurnsKimi } from "./kimi-jsonl-reader.mjs";
 import {
@@ -33,9 +34,17 @@ function readPaneHistory(engine, paneDir, { since, limit }) {
     return readRecentTurnsAcrossClaudeSessions(paneDir, { since, limit });
   }
   const reader = engine === "codex" ? readLastTurnsCodex : readLastTurnsKimi;
-  return reader(paneDir, {
-    limit, tailBytes: 512 * 1024, headless: true,
-  }) || { turns: [] };
+  // A compact event can alone exceed the small watcher tail. Grow only until
+  // an attributable work turn is visible; never read an unbounded journal.
+  const maxBytes = 8 * 1024 * 1024;
+  for (let tailBytes = 512 * 1024; tailBytes <= maxBytes; tailBytes *= 2) {
+    const result = reader(paneDir, { limit, tailBytes, headless: true }) || { turns: [] };
+    if (engine !== "codex" || !result.jsonlFile) return result;
+    const stat = statSync(result.jsonlFile);
+    const work = result.turns.filter((turn) => isDreamActivityTurn(turn.userPrompt));
+    if (work.length || stat.size <= tailBytes || stat.mtimeMs <= since.getTime()) return result;
+    if (tailBytes === maxBytes) throw new Error("dream-history-window-exhausted: no attributable work in 8MiB tail");
+  }
 }
 
 function afterCursor(turn, cursorMs) {
