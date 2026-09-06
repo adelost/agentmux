@@ -95,9 +95,13 @@ export function writeClaudeStatuslineBridge(data, {
     })();
   const effort = normalizeClaudeEffort(data?.effort?.level);
   const model = normalizeModel(data?.model?.id);
+  const remaining = finitePercent(data?.context_window?.remaining_percentage)
+    ?? (freshDelegate ? finitePercent(previous.remaining_percentage) : null)
+    ?? (finitePercent(data?.context_window?.used_percentage) == null ? null : 100 - finitePercent(data.context_window.used_percentage));
   const record = {
     session_id: sessionId,
     ...(used == null ? {} : { used_pct: used }),
+    ...(remaining == null ? {} : { remaining_percentage: remaining }),
     effort,
     model,
     timestamp: nowSeconds(),

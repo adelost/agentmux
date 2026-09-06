@@ -44,6 +44,7 @@ describe("Claude statusline effort bridge", () => {
       model: "claude-fable-5",
       effort: "xhigh",
       timestamp: 99,
+      remaining_percentage: 88,
     });
     expect(JSON.parse(readFileSync(result.path, "utf8"))).toEqual(result.record);
   });
