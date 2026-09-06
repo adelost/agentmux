@@ -12,18 +12,30 @@ export function normalizeClaudeEffort(value) {
   return EFFORT_TOKEN.test(effort) ? effort : null;
 }
 
-/** WHAT: Reads quality from the current Claude footer. WHY: Separates live model evidence from expired idle context caches. */
-export function readClaudeScreenQuality(screen) {
+/** WHAT: Reads the current Claude footer. WHY: Keeps live context/model evidence out of earlier scrollback. */
+export function readClaudeScreenStatus(screen) {
   const lines = String(screen || "").trimEnd().split("\n");
   const prompt = lines.findLastIndex((line) => /^\s*❯/u.test(line));
   if (prompt < 0) return null;
-  for (const line of lines.slice(Math.max(prompt + 1, lines.length - 15))) {
+  const footer = lines.slice(Math.max(prompt + 1, lines.length - 15));
+  for (const line of footer) {
     if (!/[█▓▒░│|]/u.test(line) || !/\b\d{1,3}\s*%/u.test(line)) continue;
     const model = line.match(/(?:^|[│|]\s*)(claude-[\w.\[\]-]+|(?:Fable|Mythos|Opus|Sonnet|Haiku)\s+\d+(?:[.\-]\d+)*(?:\s*\(1M context\))?)(?=\s*[│|])/iu)?.[1];
     const effort = normalizeClaudeEffort(line.match(/\b(?:thinking|effort)\s*:\s*([\w-]+)\b/iu)?.[1]);
-    if (model && effort) return { model, effort, source: "claude-live-statusline" };
+    const percent = Number(line.match(/\b(\d{1,3})\s*%/u)?.[1]);
+    if (model && Number.isFinite(percent) && percent <= 100) {
+      const counter = footer.findLast((entry) => /^\s*\d+\s+tokens\s*$/u.test(entry));
+      const tokens = counter ? Number(counter.trim().split(/\s/u)[0]) : null;
+      return { model, effort, percent, tokens, source: "claude-live-statusline" };
+    }
   }
   return null;
+}
+
+/** WHAT: Reads actual effort for Dream. WHY: Keeps context visibility separate from the curator's quality fence. */
+export function readClaudeScreenQuality(screen) {
+  const status = readClaudeScreenStatus(screen);
+  return status?.effort ? { model: status.model, effort: status.effort, source: status.source } : null;
 }
 
 function normalizeModel(value) {
@@ -41,6 +53,7 @@ function cleanSessionId(value) {
 }
 
 function finitePercent(value) {
+  if (value == null || value === "" || typeof value === "boolean") return null;
   const percent = Number(value);
   return Number.isFinite(percent) && percent >= 0 && percent <= 100
     ? Math.round(percent)
@@ -59,6 +72,7 @@ export function decorateClaudeStatusline(output, effort) {
 export function writeClaudeStatuslineBridge(data, {
   directory = tmpdir(),
   nowSeconds = () => Math.floor(Date.now() / 1000),
+  delegatedSince = null,
 } = {}) {
   const sessionId = cleanSessionId(data?.session_id);
   if (!sessionId) return null;
@@ -69,7 +83,11 @@ export function writeClaudeStatuslineBridge(data, {
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) previous = parsed;
   } catch { /* the delegate may not publish context metrics */ }
 
-  const used = finitePercent(previous.used_pct)
+  // A delegate may report a scaled percentage. Keep it only when THIS
+  // invocation produced it; never timestamp yesterday's cache as fresh.
+  const freshDelegate = Number.isFinite(delegatedSince)
+    && previous.session_id === sessionId && Number(previous.timestamp) >= delegatedSince;
+  const used = (freshDelegate ? finitePercent(previous.used_pct) : null)
     ?? finitePercent(data?.context_window?.used_percentage)
     ?? (() => {
       const remaining = finitePercent(data?.context_window?.remaining_percentage);
@@ -78,7 +96,6 @@ export function writeClaudeStatuslineBridge(data, {
   const effort = normalizeClaudeEffort(data?.effort?.level);
   const model = normalizeModel(data?.model?.id);
   const record = {
-    ...previous,
     session_id: sessionId,
     ...(used == null ? {} : { used_pct: used }),
     effort,

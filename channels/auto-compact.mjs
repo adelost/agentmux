@@ -119,6 +119,7 @@ export function createAutoCompact({
   // was a no-op and we stop re-firing. Cleared on "cancel" (context fell below
   // threshold / pane went active).
   const compactFloors = new Map();
+  const contextSessions = new Map();
   // paneKey → ms of the last WARNING posted to Discord. Bounds the user-facing
   // warning rate per pane: a pane that flickers status (codex stream redraws,
   // a flapping capture) makes decide() oscillate warn↔cancel, which would re-post
@@ -190,7 +191,8 @@ export function createAutoCompact({
       : dialect === "claude"
         ? getContextFromPane(content, paneDir) || getContextPercent(paneDir, "claude")
         : null;
-    const contextPercent = ctxInfo?.percent ?? null;
+    const contextPercent = ctxInfo?.source === "claude-jsonl" && !Number.isFinite(Date.parse(ctxInfo.observedAt))
+      ? null : ctxInfo?.percent ?? null;
 
     // Housekeeping writes must not masquerade as operator activity. The shared
     // reader escalates bounded tails and trusts journal mtime only when the
@@ -201,7 +203,7 @@ export function createAutoCompact({
     // Asked of the SAME captured tail the status came from, so the latch and
     // the classifier can never disagree about whether the banner is on screen.
     const limitBannerVisible = Boolean(content) && LIMIT_BANNER.test(content);
-    return { status, contextPercent, paneInMode, paneHeight, lastActivityMs,
+    return { status, contextPercent, contextSession: ctxInfo?.sessionId ?? null, paneInMode, paneHeight, lastActivityMs,
              limitBannerVisible };
   }
 
@@ -229,11 +231,9 @@ export function createAutoCompact({
       const authoritative = compactReceiptIsAuthoritative(dialect);
       log(`${authoritative ? "fired" : "requested"} /compact on ${paneKey} (was ${contextPercent}%)${result.rescues ? ` (rescued x${result.rescues})` : ""}`);
 
-      // Composer consumption proves only that the request was submitted. Codex
-      // emits its own `compacted` journal event later, and Kimi's slash receipt
-      // is not part of the verified-slash transport, so neither may be
-      // announced as completed here. Both are still compacted; whether it
-      // worked is settled by the compactFloors outcome check on the next tick.
+      // No current engine's slash ACK proves compaction. Claude can return a
+      // no-op too; actual journal events own the completion notice. Keep the
+      // floor to prevent another request while context remains unchanged.
       if (!authoritative) return;
 
       const channelId = findChannelForPane(agentsYamlPath, agentName, paneIdx);
@@ -345,8 +345,14 @@ export function createAutoCompact({
         const paneKey = `${a.name}:${i}`;
         if (compacting.has(paneKey)) continue;
 
-        const { status, contextPercent, paneInMode, paneHeight, lastActivityMs,
+        const { status, contextPercent, contextSession, paneInMode, paneHeight, lastActivityMs,
                 limitBannerVisible } = await inspect(a, i);
+
+        if (contextSession && contextSessions.has(paneKey) && contextSessions.get(paneKey) !== contextSession) {
+          warnings.delete(paneKey);
+          compactFloors.delete(paneKey);
+        }
+        if (contextSession) contextSessions.set(paneKey, contextSession);
 
         // Quota-silence watch runs for EVERY pane (the classic producer is
         // codex, which the compact logic below deliberately skips).
@@ -382,7 +388,7 @@ export function createAutoCompact({
         });
 
         if (decision.action === "warn") {
-          warnings.set(paneKey, { warned_at: now });
+          warnings.set(paneKey, { warned_at: now, sessionId: contextSession });
           // Rate-limit the Discord post (not the state machine): a status-
           // flickering pane re-enters "warn" every poll, which would spam the
           // channel. Post at most once per warnCooldownMs per pane.

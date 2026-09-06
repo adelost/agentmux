@@ -23,20 +23,20 @@ describe("Claude statusline effort bridge", () => {
     expect(normalizeClaudeEffort("../../max")).toBeNull();
   });
 
-  it("adds model and effort to the existing GSD context bridge atomically", () => {
+  it("adds model and effort to a freshly delegated GSD context bridge atomically", () => {
     const root = mkdtempSync(join(tmpdir(), "amux-claude-effort-"));
     roots.push(root);
     writeFileSync(join(root, "claude-ctx-session-1.json"), JSON.stringify({
       session_id: "session-1",
       used_pct: 41,
-      timestamp: 1,
+      timestamp: 99,
     }));
     const result = writeClaudeStatuslineBridge({
       session_id: "session-1",
       model: { id: "claude-fable-5" },
       effort: { level: "xhigh" },
       context_window: { used_percentage: 12 },
-    }, { directory: root, nowSeconds: () => 99 });
+    }, { directory: root, nowSeconds: () => 99, delegatedSince: 99 });
 
     expect(result.record).toMatchObject({
       session_id: "session-1",
@@ -46,6 +46,16 @@ describe("Claude statusline effort bridge", () => {
       timestamp: 99,
     });
     expect(JSON.parse(readFileSync(result.path, "utf8"))).toEqual(result.record);
+  });
+
+  it("does not freshen an old delegated percent, or invent zero when data is absent", () => {
+    const root = mkdtempSync(join(tmpdir(), "amux-claude-effort-"));
+    roots.push(root);
+    writeFileSync(join(root, "claude-ctx-stale.json"), JSON.stringify({ session_id: "stale", used_pct: 92, timestamp: 1 }));
+    expect(writeClaudeStatuslineBridge({ session_id: "stale", context_window: { used_percentage: 0 } },
+      { directory: root, nowSeconds: () => 99, delegatedSince: 98 }).record.used_pct).toBe(0);
+    expect(writeClaudeStatuslineBridge({ session_id: "stale", context_window: { used_percentage: null } },
+      { directory: root, nowSeconds: () => 100 }).record).not.toHaveProperty("used_pct");
   });
 
   it("falls back to Claude's official percent and rejects unsafe session ids", () => {
@@ -71,6 +81,9 @@ describe("Claude statusline effort bridge", () => {
     roots.push(root);
     const hooks = join(root, "hooks");
     mkdirSync(hooks, { recursive: true });
+    writeFileSync(join(root, "claude-ctx-session-e2e.json"), JSON.stringify({
+      session_id: "session-e2e", used_pct: 92, timestamp: Math.floor(Date.now() / 1000),
+    }));
     writeFileSync(join(hooks, "gsd-statusline.js"), [
       "process.stdin.resume();",
       "process.stdin.on('end', () => process.stdout.write('Fable 5 · █░ 12%'));",

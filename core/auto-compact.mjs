@@ -190,7 +190,7 @@ export function decideAutoCompactAction({
 
   // No/unknown context% — can't decide.
   if (contextPercent == null || !Number.isFinite(contextPercent)) {
-    return { action: "none", reason: "no context data" };
+    return { action: existing ? "cancel" : "none", reason: "no context data" };
   }
 
   // Below threshold — pane doesn't need compacting; drop any stale warning.

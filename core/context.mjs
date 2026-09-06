@@ -13,7 +13,7 @@ import { tmpdir } from "os";
 import { claudeProjectDir } from "./claude-paths.mjs";
 import { codexSessionDirs } from "./codex-profiles.mjs";
 import { getContextFromKimiJsonl } from "./kimi-jsonl-reader.mjs";
-import { normalizeClaudeEffort } from "./claude-statusline.mjs";
+import { normalizeClaudeEffort, readClaudeScreenStatus } from "./claude-statusline.mjs";
 /**
  * Read only the last `maxBytes` of a file and return its complete trailing
  * lines (the partial leading line is dropped). Claude session jsonl grows to
@@ -62,39 +62,17 @@ function readTailLines(filePath, maxBytes = 1024 * 1024) {
 
 const CLAUDE_DEFAULT_MAX = 200_000;
 
-// Per-model overrides for context window. Claude Code on Opus/Sonnet opts in
-// to the 1M-context beta via header; the jsonl records only the model ID, not
-// the beta flag, so we key off model name. This table is now ONLY for
-// exceptions to the family heuristic below — you should rarely need to touch
-// it, because new dated Opus/Sonnet variants resolve to 1M automatically.
+// Existing family/window policy; statusline percentages override estimates.
 const CLAUDE_MODEL_MAX = {
   // (empty — opus/sonnet handled by family heuristic, haiku by family floor)
 };
 
-// Family → context window. Opus, Sonnet and Fable (4.x and forward) run the
-// 1M-context beta under Claude Code; Haiku tops out at 200k. Keying off the
-// family rather than an exact-version allowlist means future models
-// (claude-opus-4-9, claude-sonnet-5-0, …) get the right window with no code
-// change — that allowlist staleness is exactly what made an opus-4-8 pane
-// misread 288k/200k as 100% and fire false auto-compacts. The failure
-// direction is now safe: an unknown future Opus we wrongly assume is 1M only
-// ever UNDER-reports % (a late compact, harmless) rather than the false-100%
-// that destroys live context, and the self-correcting ceiling
-// (max = max(declared, total)) still caps >100%.
 const CLAUDE_FAMILY_MAX = [
   [/^claude-(opus|sonnet|fable)-/, 1_000_000],
   [/^claude-haiku-/, 200_000],
 ];
 
-// Unknown claude-* FAMILY (a name not in the table above — fable was the
-// second burn after opus-4-8) defaults to 1M, not 200k. Rationale: every new
-// big model under Claude Code has shipped with the 1M window, and the failure
-// directions are asymmetric — assuming 1M for a true-200k model means amux
-// never auto-compacts it (Claude Code's own compaction still protects the
-// pane), while assuming 200k for a true-1M model fires a false /compact that
-// destroys live context (observed: fable pane at 174k read as 87% and got
-// force-compacted mid-task). Only haiku is known-small, and it is matched
-// explicitly above. Non-claude / missing model strings keep the 200k default.
+// Unknown Claude families keep the existing conservative 1M estimate.
 const CLAUDE_UNKNOWN_FAMILY_MAX = 1_000_000;
 
 const totalUsageTokens = (u) =>
@@ -191,19 +169,25 @@ function readLatestClaudeModel(paneDir) {
 
 // --- Claude path: encoding truth lives in core/claude-paths.mjs ---------
 
-function getContextFromClaudeJsonl(paneDir) {
+function readClaudeContextState(paneDir) {
   const session = newestSessionFile(paneDir);
-  if (!session) return null;
+  if (!session) return { session: null, usage: null, compactMs: null };
   const lines = readTailLines(session.path);
-  if (!lines.length) return null;
-
-  // Walk backwards for the most recent REAL usage block (synthetic
-  // session-limit entries are skipped — see isSyntheticUsageEntry).
+  let usage = null, compactMs = null;
+  // A boundary invalidates every earlier usage, including preserved messages
+  // re-appended after it. Never substitute file mtime for observation time.
   for (let i = lines.length - 1; i >= Math.max(0, lines.length - USAGE_SCAN_MAX_LINES); i--) {
     try {
       const entry = JSON.parse(lines[i]);
+      if (entry?.isSidechain || (entry?.sessionId && entry.sessionId !== session.sessionId)) continue;
+      if (entry?.type === "system" && entry?.subtype === "compact_boundary") {
+        compactMs = Date.parse(entry.timestamp || "");
+        if (!Number.isFinite(compactMs)) compactMs = Infinity;
+        if (!usage || !(Date.parse(usage.observedAt) > compactMs)) usage = null;
+        break;
+      }
       const u = entry?.message?.usage;
-      if (!u) continue;
+      if (usage || !u) continue;
       if (isSyntheticUsageEntry(entry.message)) continue;
       const total = totalUsageTokens(u);
       // Pick max from the model on this same entry. Self-correcting safety
@@ -213,15 +197,20 @@ function getContextFromClaudeJsonl(paneDir) {
       const declared = claudeMaxForModel(entry.message?.model);
       const max = Math.max(declared, total);
       const observed = Date.parse(entry?.timestamp || "");
-      return { percent: Math.round((total / max) * 100), tokens: total, windowTokens: max,
+      usage = { percent: Math.round((total / max) * 100), tokens: total, windowTokens: max,
         model: entry.message?.model ?? null,
-        observedAt: new Date(Number.isFinite(observed) ? observed : session.mtimeMs).toISOString(),
+        sessionId: session.sessionId,
+        observedAt: Number.isFinite(observed) ? new Date(observed).toISOString() : null,
         source: "claude-jsonl", confidence: "estimated" };
     } catch {
       // malformed line, try the next
     }
   }
-  return null;
+  return { session, usage, compactMs };
+}
+
+function getContextFromClaudeJsonl(paneDir) {
+  return readClaudeContextState(paneDir).usage;
 }
 
 // --- Codex path --------------------------------------------------------
@@ -452,7 +441,7 @@ const STATUSLINE_BRIDGE_FRESH_MS = 2 * 60 * 60 * 1000;
  * WHY: Keeps displayed percent authoritative over reconstructed estimates.
  */
 export function getContextPushed(paneDir) {
-  const session = newestSessionFile(paneDir);
+  const { session, usage, compactMs } = readClaudeContextState(paneDir);
   if (!session) return null;
   let data;
   try {
@@ -460,19 +449,16 @@ export function getContextPushed(paneDir) {
   } catch {
     return null; // no bridge file — this pane's statusline doesn't push
   }
-  const percent = Number(data?.used_pct);
+  if (data?.session_id != null && data.session_id !== session.sessionId) return null;
+  const percent = data?.used_pct;
+  const observedMs = Number(data?.timestamp) * 1000;
   const ageMs = Date.now() - Number(data?.timestamp) * 1000;
   if (!Number.isFinite(percent) || percent < 0 || percent > 100) return null;
-  if (!Number.isFinite(ageMs) || ageMs > STATUSLINE_BRIDGE_FRESH_MS) return null;
-  let tokens = null, model = null, windowTokens = null;
-  try {
-    const jsonl = getContextFromClaudeJsonl(paneDir);
-    tokens = jsonl?.tokens ?? null;
-    model = jsonl?.model ?? null;
-    windowTokens = jsonl?.windowTokens ?? null;
-  } catch { /* display-only — percent stands alone */ }
-  return { percent: Math.round(percent), tokens, windowTokens,
-    model: typeof data?.model === "string" && data.model.length <= 160 ? data.model : model,
+  if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > STATUSLINE_BRIDGE_FRESH_MS) return null;
+  if (compactMs != null && observedMs <= compactMs) return null;
+  return { percent: Math.round(percent), tokens: usage?.tokens ?? null, windowTokens: usage?.windowTokens ?? null,
+    sessionId: session.sessionId,
+    model: typeof data?.model === "string" && data.model.length <= 160 ? data.model : usage?.model ?? null,
     effort: normalizeClaudeEffort(data?.effort),
     observedAt: new Date(Number(data.timestamp) * 1000).toISOString(),
     source: "claude-statusline", confidence: "reported" };
@@ -565,8 +551,18 @@ export function shortModelName(model) {
  * @param {string} paneContent - Output from tmux capture-pane (ANSI-stripped)
  * @param {string|null} paneDir - The pane's cwd, for model fallback. Optional.
  * @returns {{ percent: number, tokens: number } | null}
+ * WHAT: Reads one pane's context evidence.
+ * WHY: Keeps live footer values separate from historical journal estimates.
  */
 export function getContextFromPane(paneContent, paneDir = null) {
+  // A current footer beats an older pushed snapshot. Missing post-compact
+  // usage stays unknown, even when the footer explicitly reports zero.
+  const visible = readClaudeScreenStatus(paneContent);
+  if (visible) {
+    const state = paneDir ? readClaudeContextState(paneDir) : null;
+    return { ...visible, tokens: visible.tokens ?? state?.usage?.tokens ?? null, sessionId: state?.session?.sessionId ?? null,
+      observedAt: new Date().toISOString(), confidence: "reported" };
+  }
   // Pushed truth first: Claude Code's own rendered percent via the
   // statusline bridge file. Parsing the pane image below is the fallback
   // for panes whose statusline doesn't push.

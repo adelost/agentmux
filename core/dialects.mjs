@@ -21,15 +21,13 @@ const CLAUDE_PROGRESS_LINE_ANY = new RegExp(`(^|\\s)[${CLAUDE_PROGRESS_ICONS}] [
 // Past-tense completion lines are noise (they appear briefly after the turn ends)
 const CLAUDE_COMPLETED_LINE = new RegExp(`^[${CLAUDE_PROGRESS_ICONS}] [A-Z][a-z]+ed for \\d`);
 
+/** WHAT: Defines the Claude TUI dialect. WHY: Keeps transport acknowledgement separate from compaction completion. */
 export const CLAUDE = {
   name: "claude",
 
-  // Claude's composer consumption of `/compact` is a reliable enough signal to
-  // announce completion. Codex and Kimi are not: Codex emits its own journal
-  // event later, and Kimi's slash receipt is not part of the verified-slash
-  // transport. Those two still GET compacted; the outcome check (did context
-  // actually drop) is what verifies them, not the transport.
-  compactReceiptIsAuthoritative: true,
+  // A consumed slash may answer "Not enough messages to compact". Only the
+  // journal boundary/summary proves completion, never the transport ACK.
+  compactReceiptIsAuthoritative: false,
 
   // UI glyphs
   promptChar: "❯",         // user prompt marker

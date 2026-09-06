@@ -5,7 +5,7 @@ fileSize:
     cli/commands.mjs: 3839
     core/codex-jsonl-reader.mjs: 835
     core/codex-tui.mjs: 546
-    core/context.mjs: 639
+    core/context.mjs: 635
     core/contract-lint.mjs: 640
     core/delivery-broker.mjs: 703
     core/delivery-queue.mjs: 596

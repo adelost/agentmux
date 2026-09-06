@@ -18,6 +18,7 @@ function setupFakeClaudeContext({ model, input = 0, cacheRead = 0, cacheCreate =
   mkdirSync(projectDir, { recursive: true });
 
   const event = {
+    timestamp: "2026-07-08T16:49:00.000Z",
     type: "assistant",
     message: {
       role: "assistant",
