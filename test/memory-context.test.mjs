@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { emitMemoryContext, readMemoryContext } from "../core/memory-context.mjs";
 
 const roots = [];
@@ -20,6 +21,21 @@ function fixture() {
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("bounded memory references", () => {
+  it("emits through the actual hook with its detected structured pane address", () => {
+    const f = fixture();
+    const result = spawnSync(process.execPath, [resolve(import.meta.dirname, "../bin/amux-hook.mjs")], {
+      cwd: f.root, encoding: "utf8", timeout: 5000,
+      input: JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "session-hook-wire", cwd: f.root }),
+      env: { HOME: f.root, PATH: process.env.PATH, OPENCLAW_WORKSPACE: f.root,
+        AMUX_AGENT_NAME: "example", AMUX_PANE: "3" },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("[amux memory references, version ");
+    expect(result.stdout).toContain("Own pane example:3:");
+    expect(result.stdout).not.toContain("DO_NOT_INJECT_PRIVATE_CONTENT");
+    expect(readdirSync(join(f.root, ".agentmux", "memory-context"))).toHaveLength(1);
+  });
+
   it("retains dated source/hash pointers but never injects private diary text", () => {
     const f = fixture();
     const before = readFileSync(f.file);

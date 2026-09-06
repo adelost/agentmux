@@ -50,7 +50,7 @@ try {
       console.error(`[amux-hook] resume-hint skipped: ${err.message}`);
     }
     try {
-      emitMemoryContext(payload, pane);
+      emitMemoryContext(payload, pane.key);
     } catch (err) {
       console.error(`[amux-hook] memory-context skipped: ${err.message}`);
     }
