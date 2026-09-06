@@ -112,14 +112,25 @@ function clipUtf8(value, maxBytes) {
   return `${clipped}...`;
 }
 
+function assistantText(items, maxBytes) {
+  const texts = items.filter((item) => item.type === "text")
+    .map((item) => String(item.content || "").replace(/\u0000/g, "").trim()).filter(Boolean);
+  const all = texts.join("\n");
+  if (Buffer.byteLength(all) <= maxBytes) return all;
+  // A long work turn can reverse an earlier finding. Budget the latest actual
+  // assistant text first, never present the clipped commentary as its outcome.
+  const marker = texts.length > 1
+    ? "[Earlier assistant text omitted; latest text follows]\n"
+    : "[Assistant text truncated]\n";
+  return marker + clipUtf8(texts.at(-1), maxBytes - Buffer.byteLength(marker));
+}
+
 function sourcePayload(source, maxBytes) {
   const perTurn = Math.max(160, Math.floor((maxBytes - 512) / source.entries.length));
   const turns = source.entries.map((turn) => ({
     at: turn.timestamp,
     user: clipUtf8(turn.userPrompt, Math.floor(perTurn * 0.35)),
-    assistant: clipUtf8((turn.items || [])
-      .filter((item) => item.type === "text")
-      .map((item) => item.content).join("\n"), Math.floor(perTurn * 0.55)),
+    assistant: assistantText(turn.items || [], Math.floor(perTurn * 0.55)),
   }));
   return {
     pane: `${source.agent}:${source.pane}`,
