@@ -44,7 +44,7 @@ process.stdin.on("end", () => {
   }
   if (!rendered) {
     const model = data?.model?.display_name || "Claude";
-    const percent = Number(data?.context_window?.used_percentage);
+    const percent = data?.context_window?.used_percentage;
     rendered = Number.isFinite(percent) ? `${model} · ${Math.round(percent)}%` : model;
   }
 

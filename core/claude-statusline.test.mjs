@@ -59,6 +59,19 @@ describe("Claude statusline effort bridge", () => {
       { directory: root, nowSeconds: () => 100 }).record).not.toHaveProperty("used_pct");
   });
 
+  it("the real CLI renders missing context as unknown, not zero", () => {
+    const root = mkdtempSync(join(tmpdir(), "amux-claude-effort-"));
+    roots.push(root);
+    const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "claude-statusline.mjs")], {
+      input: JSON.stringify({ session_id: "unknown", model: { display_name: "Fable 5.1" },
+        context_window: { used_percentage: null } }),
+      encoding: "utf8", env: { ...process.env, CLAUDE_CONFIG_DIR: root, TMPDIR: root },
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("Fable 5.1");
+    expect(JSON.parse(readFileSync(join(root, "claude-ctx-unknown.json"), "utf8"))).not.toHaveProperty("used_pct");
+  });
+
   it("falls back to Claude's official percent and rejects unsafe session ids", () => {
     const root = mkdtempSync(join(tmpdir(), "amux-claude-effort-"));
     roots.push(root);
