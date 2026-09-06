@@ -269,15 +269,17 @@ function verifyOwnerQuality(owner, context) {
   };
 }
 
-function ownerQuality(owner, dependencies) {
+function ownerQuality(ctx, owner, dependencies) {
   return dependencies.getContext
     ? dependencies.getContext(owner.paneDir, owner.engine)
-    : (dependencies.getQuality || readDreamOwnerQuality)(owner);
+    : (dependencies.getQuality || readDreamOwnerQuality)(owner, {
+        captureScreen: (agent, pane) => ctx.agent.captureScreen(agent, pane),
+      });
 }
 
 /** WHAT: Prepares one configured curator before assigning editorial work. WHY: A failed quality or compact check must not bypass the configured fallback list. */
 async function prepareDreamOwner(ctx, owner, dependencies) {
-  verifyOwnerQuality(owner, ownerQuality(owner, dependencies));
+  const before = verifyOwnerQuality(owner, await ownerQuality(ctx, owner, dependencies));
   const compact = owner.engine === "codex"
     ? await (dependencies.compactCodex || verifiedCodexCompact)({
         agent: ctx.agent, agentName: owner.agent, pane: owner.pane, paneDir: owner.paneDir,
@@ -288,8 +290,9 @@ async function prepareDreamOwner(ctx, owner, dependencies) {
         latestIdentity: latestClaudeSessionIdentity, sleep: dependencies.sleep,
       });
   if (!compact.ok) throw new Error(`dream-owner-compact-failed:${compact.reason}`);
-  const quality = verifyOwnerQuality(owner, ownerQuality(owner, dependencies));
-  if (quality.sessionId && quality.sessionId !== compact.sessionId) {
+  const quality = verifyOwnerQuality(owner, await ownerQuality(ctx, owner, dependencies));
+  if ((before.sessionId && before.sessionId !== compact.sessionId)
+      || (quality.sessionId && quality.sessionId !== compact.sessionId)) {
     throw new Error("dream-owner-quality-session-mismatch");
   }
   return { compact, quality };

@@ -12,6 +12,20 @@ export function normalizeClaudeEffort(value) {
   return EFFORT_TOKEN.test(effort) ? effort : null;
 }
 
+/** WHAT: Reads quality from the current Claude footer. WHY: Separates live model evidence from expired idle context caches. */
+export function readClaudeScreenQuality(screen) {
+  const lines = String(screen || "").trimEnd().split("\n");
+  const prompt = lines.findLastIndex((line) => /^\s*❯/u.test(line));
+  if (prompt < 0) return null;
+  for (const line of lines.slice(Math.max(prompt + 1, lines.length - 15))) {
+    if (!/[█▓▒░│|]/u.test(line) || !/\b\d{1,3}\s*%/u.test(line)) continue;
+    const model = line.match(/(?:^|[│|]\s*)(claude-[\w.\[\]-]+|(?:Fable|Mythos|Opus|Sonnet|Haiku)\s+\d+(?:[.\-]\d+)*(?:\s*\(1M context\))?)(?=\s*[│|])/iu)?.[1];
+    const effort = normalizeClaudeEffort(line.match(/\b(?:thinking|effort)\s*:\s*([\w-]+)\b/iu)?.[1]);
+    if (model && effort) return { model, effort, source: "claude-live-statusline" };
+  }
+  return null;
+}
+
 function normalizeModel(value) {
   if (typeof value !== "string") return null;
   const model = value.trim();

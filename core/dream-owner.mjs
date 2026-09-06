@@ -8,7 +8,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { validateDreamSummary } from "./dream-summarizer.mjs";
 import { latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
-import { getContextPercent } from "./context.mjs";
+import { latestClaudeSessionIdentity } from "./native-session-identity.mjs";
+import { readClaudeScreenQuality } from "./claude-statusline.mjs";
 import { latestCodexModelObservation } from "./native-model-observation.mjs";
 
 const CODING_ENGINE = /(?:^|[\s/])(claude|codex)(?:\s|$)/u;
@@ -105,9 +106,11 @@ export function resolveDreamCandidates(config) {
 export function readDreamOwnerQuality(owner, {
   latestCodexIdentity = latestCodexSessionIdentity,
   readCodexLines = readTailLines,
-  readContext = getContextPercent,
+  latestClaudeIdentity = latestClaudeSessionIdentity,
+  captureScreen,
 } = {}) {
-  if (owner.engine !== "codex") return readContext(owner.paneDir, owner.engine);
+  if (owner.engine === "claude") return readLiveClaudeQuality(owner, captureScreen, latestClaudeIdentity);
+  if (owner.engine !== "codex") return null;
   const identity = latestCodexIdentity(owner.paneDir);
   if (!identity?.sessionId || !identity?.path) return null;
   const observation = latestCodexModelObservation(readCodexLines(identity.path));
@@ -119,6 +122,18 @@ export function readDreamOwnerQuality(owner, {
     source: observation.source,
     sourcePath: identity.path,
   };
+}
+
+async function readLiveClaudeQuality(owner, captureScreen, latestIdentity) {
+  const before = latestIdentity(owner.paneDir);
+  if (!before?.sessionId || !before?.path || !captureScreen) return null;
+  let screen;
+  try { screen = await captureScreen(owner.agent, owner.pane); }
+  catch { return null; }
+  const after = latestIdentity(owner.paneDir);
+  if (after?.sessionId !== before.sessionId || after?.path !== before.path) return null;
+  const quality = readClaudeScreenQuality(screen);
+  return quality ? { ...quality, sessionId: before.sessionId, sourcePath: before.path } : null;
 }
 
 /** WHAT: Stores the bounded source packet before delivery. WHY: Keeps the visible prompt short while preserving exact audit input. */
