@@ -22,6 +22,8 @@ The full execution and failure contract is in `docs/DREAM-POLICY.md`.
 amux dream                  # visible configured-pane fleet digest
 amux dream --dry            # source inventory + exact prompt, no side effects
 amux memory status          # sizes, warnings, backlog and latest run
+amux memory context         # small dated references, no diary contents
+amux memory context -p project:3 --json # exact pane commands + file versions
 amux memory lint [--json]   # read-only policy findings
 amux memory compact --dry   # inspect old daily-file compaction candidates
 ```
@@ -58,6 +60,24 @@ Success requires the current daily sentinel plus the existing run/source/owner
 validated artifact matching the committed summary; a controller's zero-work
 run is also valid. An older failure does not override a later validated success.
 These checks are offline/read-only: they never prompt a pane or rerun Dream.
+
+## Retrieval after startup or compaction
+
+`amux memory context` is a read-only entry for every CLI harness. It exposes
+today/yesterday paths and versions, not copied diary text. Read only the material
+relevant to the actual request. Large/unreadable sources remain explicit;
+the command does not claim that a digest or the reader's understanding is correct.
+
+The existing Claude `SessionStart` hook emits the same bounded reference card.
+On `UserPromptSubmit`, it emits again only when daily versions changed, keyed to
+the exact pane and session. It neither wakes idle panes nor creates model turns.
+An emitted pointer is not proof the model read the file. Other harnesses can use
+the CLI; automatic next-turn hooks for them are not implemented by this change.
+See the [Claude hook output contract](https://code.claude.com/docs/en/hooks).
+
+An independently installed legacy startup hook that still reads complete daily
+files must be changed at its own source to references-only. The AMUX installer
+preserves unrelated hooks and cannot silently remove their private configuration.
 
 ## File policy
 

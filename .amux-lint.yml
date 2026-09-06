@@ -2,7 +2,7 @@ fileSize:
   caps:
     agent.mjs: 1832
     channels/jsonl-watcher.mjs: 953
-    cli/commands.mjs: 3839
+    cli/commands.mjs: 3802
     core/codex-jsonl-reader.mjs: 835
     core/codex-tui.mjs: 546
     core/context.mjs: 635

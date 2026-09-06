@@ -83,7 +83,7 @@ import { executePlan, showPlanLog } from "./plan.mjs";
 import { showEvents } from "./events.mjs";
 import { DEFAULT_SPEECH_VOICE, publishSpeechEvent, synthesizeSpeech } from "./speech.mjs";
 import {
-  DEFAULT_TMUX_SOCKET, defaultWorkspace, normalizeServiceBaseUrl, operatorName, runtimeAgentsPath,
+  DEFAULT_TMUX_SOCKET, normalizeServiceBaseUrl, operatorName, runtimeAgentsPath,
 } from "../core/runtime-defaults.mjs";
 import { loadSourceYaml, saveSourceAndRegenerate, sourceConfigPath } from "./source-config.mjs";
 export { loadSourceYaml, saveSourceAndRegenerate } from "./source-config.mjs";
@@ -113,7 +113,7 @@ import {
   loadTodos, listRemindable, formatReminderSummary, DEFAULT_TODOS_PATH,
 } from "../core/todos.mjs";
 import { cmdLint } from "./lint.mjs";
-import { observeDreamHealth } from "../core/dream-health.mjs";
+import { cmdMemory } from "./memory.mjs";
 import {
   askAnchorKey,
   attachAskLineAnchors,
@@ -1994,48 +1994,6 @@ const SHELL_CMDS = /^(bash|zsh|fish|sh|dash)$/;
 const ACTIVE_STATUS = (s) => statusTier(s) >= 2;
 
 
-/** WHAT: Reports memory health or runs explicit maintenance. WHY: Keeps read-only status separate from compaction effects. */
-async function cmdMemory(_ctx, subcommand, flags = {}) {
-  const workspace = flags.workspace || process.env.OPENCLAW_WORKSPACE
-    || defaultWorkspace(process.env.HOME);
-  const {
-    lintMemory, formatMemoryLint, formatMemoryStatus, readLatestMemoryCompact,
-    writeMemoryDailyReport,
-  } = await import("../core/memory-lint.mjs");
-
-  if (subcommand === "status") {
-    const result = lintMemory(workspace, { dreamHealth: observeDreamHealth(workspace, { configPath: _ctx.configPath }) });
-    result.compact = readLatestMemoryCompact(workspace);
-    console.log(flags.json ? JSON.stringify(result, null, 2) : formatMemoryStatus(result));
-    return;
-  }
-  if (subcommand === "lint") {
-    const result = lintMemory(workspace, { dreamHealth: observeDreamHealth(workspace, { configPath: _ctx.configPath }) });
-    if (flags.reportDaily) {
-      writeMemoryDailyReport(workspace, result, { compacted: Number(flags.compacted) || 0 });
-    }
-    console.log(flags.json ? JSON.stringify(result, null, 2) : formatMemoryLint(result));
-    if (result.summary.warnings > 0) process.exitCode = 1;
-    return;
-  }
-  if (subcommand === "compact") {
-    const { compactMemory, formatMemoryCompact } = await import("../core/memory-compact.mjs");
-    const result = await compactMemory(workspace, {
-      dryRun: !!flags.dry,
-      maxFiles: Number.isFinite(flags.max) ? flags.max : undefined,
-    });
-    console.log(flags.json ? JSON.stringify(result, null, 2) : formatMemoryCompact(result));
-    if (result.failed.length > 0) process.exitCode = 1;
-    return;
-  }
-
-  console.error(`Usage:
-  amux memory status [--json] [--workspace PATH]
-  amux memory lint [--json] [--report-daily] [--compacted N] [--workspace PATH]
-  amux memory compact --dry [--json] [--max N] [--workspace PATH]`);
-  process.exitCode = 1;
-}
-
 export { deliveryQueueDisplayRows, formatDeliveryQueueTable, listDeliveryQueueJobs, requestDeliveryQueueCancellation } from "./queue-format.mjs";
 
 function cmdQueue(positional, flags, ctx) {
@@ -2743,10 +2701,12 @@ async function cmdSay(args, ctx) {
     c: "string", channel: "string",
     p: "string", pane: "string",
     voice: "string", v: "string",
+    stdin: "boolean",
   });
-  const text = positional.join(" ").trim();
+  if (flags.stdin && positional.length) throw new Error("amux say accepts --stdin or positional text, not both");
+  const text = flags.stdin ? await readPromptFromStdin() : positional.join(" ").trim();
   if (!text) {
-    console.error(`Usage: amux say "text" [-c <channelId>] [-p <agent>:<pane>] [--voice <name>]`);
+    console.error(`Usage: amux say "text" or amux say --stdin < speech.txt [-c <channelId>] [-p <agent>:<pane>] [--voice <name>]`);
     process.exit(1);
   }
 
@@ -3253,6 +3213,7 @@ Usage:
     --json                        Machine-readable output
   agent queue cancel JOB_ID --reason TEXT
                                   Request pre-submit cancellation; broker decides safely
+  agent memory context            Dated memory references, no diary text (--json, -p agent:pane)
   agent memory lint               Structured memory lint (--json, exit 1 on warnings)
   agent memory compact --dry      Preview old daily-file backlog (automatic model rewrite disabled)
   agent search "term"             Fast lexical search of memory + ledger; --show N expands
@@ -3273,6 +3234,7 @@ Usage:
     -p <agent>:<pane>             Explicit agent:pane channel mapping
     --dry                         Print target without posting
   agent say "text"                Explicitly send one spoken MP3; never automatic
+    --stdin                       Read exact UTF-8 speech from a file or pipe
     -c <channelId>                Explicit Discord channel ID
     -p <agent>:<pane>             Explicit agent:pane channel mapping
     --voice <name>                Override the configured edge-tts voice
@@ -3587,6 +3549,7 @@ export async function dispatch(argv, ctx) {
       const { flags } = parseFlags(rest.slice(1), {
         dry: "boolean", json: "boolean", max: "number", workspace: "string",
         reportDaily: "boolean", "report-daily": "boolean", compacted: "number",
+        p: "string", pane: "string",
       });
       if (flags["report-daily"]) flags.reportDaily = true;
       return cmdMemory(ctx, subcommand, flags);

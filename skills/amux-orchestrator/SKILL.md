@@ -88,6 +88,13 @@ by manipulating its journal or deleting its receipt fence.
 
 ## Close with an honest overview
 
+When the user asks to hear the overview (speech/TTS, `amux say`, or a hands-free
+listening request), deliver a short spoken response, not just text acknowledging
+the request. Use `amux say --stdin < /absolute/path/speech.txt`, matching the
+requested language with the configured voice or `--voice`. Check the send result.
+Continue important replies in that requested spoken conversation without making
+the user repeat the command; ordinary voice input alone does not enable TTS.
+
 Report completed-and-available work separately from banked, still-working and
 genuinely blocked work. Link the owner's existing proof instead of copying the
 entire log. Explain only interventions actually made and unresolved material

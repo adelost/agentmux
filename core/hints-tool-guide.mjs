@@ -39,12 +39,18 @@ receipt. Unknown post-submit outcome is not permission to resend or delete fence
   force compact/respawn through active work.
 - \`amux memory status\` and \`amux dream --help\`: the existing memory/digest
   workflow. A scheduled invocation is not proof of a saved digest.
+- \`amux memory context\`: short current memory references and versions for any
+  engine. Retrieve relevant sections on demand; do not inject whole daily files.
 - \`amux wait PROJECT -p N -t 45\`: bounded waiting at a real handoff.
 - Lifecycle commands (restart/stop/serve/runtime/emulator/esc/select) affect
   other work: read help, verify the target and coordinate its owner. Never
   replace a manual bridge with a detached daemon without authorization.
 
 ## User-visible evidence
+
+For explicitly requested speech/TTS, use \`amux say --stdin < speech.txt\`.
+Hands-free requests to hear the answer are not requests for shorter text only.
+Use the requested language/voice and verify delivery; no automatic voice surprises.
 
 Post requested images using \`amux image /absolute/path/image.png\` or
 \`[image: /absolute/path/image.png]\`; a saved path alone is not delivery.

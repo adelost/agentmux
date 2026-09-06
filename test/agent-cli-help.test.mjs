@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("help before CLI config bootstrap", () => {
-  it.each([["restart", "--all", "--help"], ["runtime", "restart", "-h"], ["help"]])(
+  it.each([["restart", "--all", "--help"], ["runtime", "restart", "-h"], ["say", "--help"], ["say", "--stdin", "-h"], ["help"]])(
     "%j works with invalid source config and creates no runtime config", (...args) => {
       const root = mkdtempSync(join(tmpdir(), "amux-help-bootstrap-"));
       const source = join(root, "agentmux.yaml"), generated = join(root, "agents.yaml");

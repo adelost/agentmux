@@ -3,6 +3,7 @@
 const LIFECYCLE_COMMANDS = new Set([
   "restart", "reload", "sync", "stop", "serve", "runtime", "services",
   "add", "rm", "reconcile", "revive", "sleep", "wake", "sleep-watch", "cutover",
+  "say",
 ]);
 
 /** WHAT: Checks lifecycle/global help arguments. WHY: Prevents syntax probes from invoking lifecycle or config effects. */

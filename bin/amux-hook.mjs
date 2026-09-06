@@ -17,6 +17,7 @@ import { appendEvent, buildEvent } from "../core/events.mjs";
 import { detectPaneAddress } from "../core/sender-detect.mjs";
 import { buildResumeHint, shouldEmitResumeHint } from "../core/resume-hint.mjs";
 import { capturePaneHookAsk } from "../core/ask-ledger.mjs";
+import { emitMemoryContext } from "../core/memory-context.mjs";
 
 try {
   const exec = (cmd) => execSync(cmd, { timeout: 3000, encoding: "utf-8" });
@@ -47,6 +48,11 @@ try {
       }
     } catch (err) {
       console.error(`[amux-hook] resume-hint skipped: ${err.message}`);
+    }
+    try {
+      emitMemoryContext(payload, pane);
+    } catch (err) {
+      console.error(`[amux-hook] memory-context skipped: ${err.message}`);
     }
   }
 } catch (err) {
