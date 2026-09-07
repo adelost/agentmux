@@ -7,6 +7,7 @@ import { readMemoryContext } from "./memory-context.mjs";
 import { latestCodexSessionIdentity, readLastTurnsCodex } from "./codex-jsonl-reader.mjs";
 import { latestKimiSessionIdentity, readLastTurnsKimi } from "./kimi-jsonl-reader.mjs";
 import { isWorkDirective } from "./system-noise.mjs";
+import { createDeliveryQueue } from "./delivery-queue.mjs";
 
 const READERS = {
   codex: { identity: latestCodexSessionIdentity, read: readLastTurnsCodex },
@@ -14,6 +15,31 @@ const READERS = {
 };
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const IDLE_MS = 30 * 60_000;
+
+/** WHAT: Returns the exact submitted receipt text. WHY: Keeps original ask bytes separate from an augmented physical payload without weakening equality. */
+export function deliveryMemoryReceiptText(job) {
+  return job.metadata?.memoryContext?.hinted ? job.text : job.verifyText;
+}
+
+/** WHAT: Resolves an original response query through its stored delivery. WHY: Keeps phone and Link replies tied to the same exact pane session and payload as receipt verification. */
+export function resolveMemoryResponsePrompt({
+  agentName, pane, promptText, dir, dialect, queue = null,
+  identity = READERS[dialect]?.identity,
+}) {
+  if (!promptText || !identity) return promptText;
+  try {
+    const session = identity(dir);
+    if (!session) return promptText;
+    const jobs = (queue || createDeliveryQueue({ initialize: false })).list(agentName, pane);
+    const match = jobs.filter((job) => {
+      const context = job.metadata?.memoryContext;
+      return context?.hinted && context.sessionId === session.sessionId
+        && context.sessionPath === session.path
+        && job.verifyText?.trim() === promptText.trim();
+    }).sort((a, b) => b.createdAt - a.createdAt)[0];
+    return match?.text || promptText;
+  } catch { return promptText; }
+}
 
 /** WHAT: Reads one engine's existing orientation identity. WHY: Keeps memory lookup from creating a pane or crossing into another session. */
 export function createPaneMemorySnapshot({ configFor, dialectFor, workspace, readers = READERS } = {}) {

@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { appendFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
 import { createDeliveryBroker } from "../core/delivery-broker.mjs";
-import { createDeliveryMemoryContext, createPaneMemorySnapshot } from "../core/delivery-memory-context.mjs";
+import { createDeliveryMemoryContext, createPaneMemorySnapshot, resolveMemoryResponsePrompt } from "../core/delivery-memory-context.mjs";
 import { readMemoryContext } from "../core/memory-context.mjs";
+import { captureCodexPromptEchoCursor, isPromptInCodexJsonl, extractFromCodexJsonl } from "../core/codex-jsonl-reader.mjs";
 
 const roots = [];
 function fixture(engine = "codex") {
@@ -23,7 +24,7 @@ function fixture(engine = "codex") {
     memorySnapshot: () => ({ engine, sessionId, sessionPath: join(root, sessionId), compactEpoch,
       context: readMemoryContext(root, { now: new Date(clock), pane: "example:2" }) }),
     capturePromptEchoCursor: async () => ({ kind: "test", positions: {} }),
-    waitForPromptEcho: async (_name, _pane, text) => accepts && sends.some((sent) => sent.includes(text)),
+    waitForPromptEcho: async (_name, _pane, text) => accepts && sends.some((sent) => sent === text),
     dismissBlockingPrompt: async () => {},
     sendOnly: async (_name, text, _pane, options) => {
       await options.onPasteStarted?.(); await options.onDrafted?.();
@@ -46,9 +47,45 @@ function fixture(engine = "codex") {
     compact: () => { compactEpoch = new Date(clock + 1).toISOString(); },
     accepts: (value) => { accepts = value; } };
 }
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { vi.unstubAllEnvs(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("lazy memory through the existing delivery contract", () => {
+  it("uses exact native journal receipts and resolves a phone/Link query back to that payload", async () => {
+    const f = fixture();
+    vi.stubEnv("HOME", f.root);
+    const dir = join(f.root, ".agents", "2"), home = join(f.root, ".codex");
+    vi.stubEnv("AMUX_CODEX_PROFILE_1_HOME", home);
+    const sessions = join(home, "sessions"); mkdirSync(sessions, { recursive: true });
+    const path = join(sessions, "rollout-canary.jsonl");
+    const sessionId = "019f5ffa-d70c-73b3-98b5-c4cfae1534d3";
+    const record = (row) => appendFileSync(path, JSON.stringify(row) + "\n");
+    record({ type: "session_meta", payload: { id: sessionId, cwd: dir, source: "cli", originator: "codex-tui" } });
+    const snapshot = f.agent.memorySnapshot;
+    f.agent.memorySnapshot = () => ({ ...snapshot(), sessionId, sessionPath: path });
+    f.agent.capturePromptEchoCursor = async (_a, _p, text) => captureCodexPromptEchoCursor(dir, text);
+    f.agent.waitForPromptEcho = async (_a, _p, text, _ms, options) => isPromptInCodexJsonl(dir, text, options);
+    const send = f.agent.sendOnly;
+    f.agent.sendOnly = async (...args) => {
+      const result = await send(...args);
+      record({ type: "event_msg", payload: { type: "user_message", message: args[1] } });
+      record({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "exact reply" }] } });
+      return result;
+    };
+    const original = "real query [amux-phone-turn:unique-id]";
+    const job = await f.deliver(original);
+    expect(job.status).toBe("acknowledged");
+    expect(isPromptInCodexJsonl(dir, original, { cursor: job.echoCursor })).toBe(false);
+    expect(isPromptInCodexJsonl(dir, job.text, { cursor: job.echoCursor })).toBe(true);
+    const args = { agentName: "example", pane: 2, promptText: original, dir, dialect: "codex", queue: f.queue };
+    const physical = resolveMemoryResponsePrompt(args);
+    expect(physical).toBe(job.text);
+    expect(extractFromCodexJsonl(dir, physical)?.items).toContainEqual({ type: "text", content: "exact reply" });
+    expect(resolveMemoryResponsePrompt({ ...args, pane: 3 })).toBe(original);
+    expect(resolveMemoryResponsePrompt({ ...args, identity: () => ({ sessionId: "other", path }) })).toBe(original);
+    expect(resolveMemoryResponsePrompt({ ...args, promptText: "real query" })).toBe("real query");
+    expect(f.sends).toHaveLength(1);
+  });
+
   it.each(["codex", "kimi"])("%s gets a bounded pointer in one real delivery and keeps exact request/receipt bytes", async (engine) => {
     const f = fixture(engine);
     const original = "Hej åäö! Read this literal `x` and $value.\nDo not start any work.";
@@ -108,6 +145,18 @@ describe("lazy memory through the existing delivery contract", () => {
     expect(existsSync(f.stateDir)).toBe(true);
     await f.deliver("next request sees changed memory");
     expect(f.sends.at(-1)).toContain("[amux orientation,");
+  });
+
+  it("repairs an old augmented unverified verdict only from exact echo, without redispatch", async () => {
+    const f = fixture(); f.accepts(false);
+    const job = await f.deliver("already consumed original");
+    f.queue.update(job, { status: "delivered_unverified", terminalAt: 1 });
+    await f.broker().kickTarget("example", 2);
+    expect(f.queue.read("example", 2, job.id).status).toBe("delivered_unverified");
+    f.accepts(true); await f.broker().kickTarget("example", 2);
+    expect(f.queue.read("example", 2, job.id).status).toBe("acknowledged");
+    expect(f.sends).toHaveLength(1);
+    expect(existsSync(f.stateDir)).toBe(true);
   });
 
   it("never rewrites slashes, machine hints or an owned draft", () => {

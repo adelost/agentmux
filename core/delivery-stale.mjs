@@ -38,7 +38,14 @@ export async function reportStaleDeliveryJobs({ agentName, pane, queue, now, que
 async function reconcileLateEchoWatch({ agentName, pane, queue, now, exactEcho, acknowledge }) {
   if (typeof exactEcho !== "function" || typeof acknowledge !== "function") return;
   for (const job of queue.list(agentName, pane)) {
-    if (job.status !== DELIVERED_UNVERIFIED_STATE || !job.lateEchoWatchUntil) continue;
+    if (job.status !== DELIVERED_UNVERIFIED_STATE) continue;
+    // An old broker compared an augmented prompt with its unaugmented ask.
+    // Repair only from the exact physical payload after the original cursor.
+    if (job.metadata?.memoryContext?.hinted && job.echoCursor) {
+      if (await exactEcho(job)) await acknowledge(job, "late-memory-payload-echo");
+      continue;
+    }
+    if (!job.lateEchoWatchUntil) continue;
     if (Number(job.lateEchoWatchUntil) <= now()) {
       // The watch lapsed with no receipt: close it honestly so the deferred
       // warning (already scheduled via unverifiedNoticeNextAttemptAt) reports

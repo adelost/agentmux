@@ -77,7 +77,10 @@ See the [Claude hook output contract](https://code.claude.com/docs/en/hooks).
 For tmux Codex and Kimi, the existing durable delivery broker attaches a short
 pointer to `amux memory context` to the next real prompt. It does not enqueue an orientation turn.
 The original ask/verification text stays unchanged; the complete physical payload
-is persisted before paste and remains identical across retries. Only an actual
+is persisted before paste and remains identical across retries. Receipt checks
+compare the complete physical text, not just its original-message prefix. Phone
+and Link response queries resolve that same stored payload within the exact
+session; no substring match is used to loosen delivery proof. Only an actual
 delivery receipt advances the orientation stamp. The stamp belongs to one pane
 and exact session, not to a model/profile label. Refresh happens after memory or
 observed compact-epoch changes, or after 30 minutes without an AMUX delivery.
