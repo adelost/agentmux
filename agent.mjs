@@ -30,7 +30,7 @@ import {
 import { createKimiAgentRuntime, kimiComposerHasCollapsedPaste, kimiJournal } from "./core/kimi-agent-runtime.mjs";
 import { createKimiIngestProbe } from "./core/kimi-ingest-probe.mjs";
 import { createPromptEcho } from "./core/prompt-echo.mjs";
-import { createPaneMemorySnapshot } from "./core/delivery-memory-context.mjs";
+import { createPaneMemorySnapshot, resolveMemoryResponsePrompt } from "./core/delivery-memory-context.mjs";
 import { createClaudeSubmitRescue } from "./core/claude-submit-rescue.mjs";
 import { getContextPercent as getContextPercentByDialect, getContextFromPane } from "./core/context.mjs";
 import { findBlockingPrompt } from "./core/dismiss.mjs";
@@ -899,7 +899,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const config = agentConfig(agentName);
     const dir = paneDir(config.dir, pane);
     const dialect = paneDialectName(agentName, pane);
-
+    promptText = resolveMemoryResponsePrompt({ agentName, pane, promptText, dir, dialect });
     // Dispatch to the pane's actual dialect, not trial-and-error. Otherwise
     // cdx and claw (which can share pane dirs like .agents/0/) would read
     // each other's jsonl files.
@@ -952,7 +952,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     const config = agentConfig(agentName);
     const dir = paneDir(config.dir, pane);
     const dialect = paneDialectName(agentName, pane);
-
+    promptText = resolveMemoryResponsePrompt({ agentName, pane, promptText, dir, dialect });
     if (dialect === "codex") {
       const codex = extractFromCodexJsonl(dir, promptText);
       return Boolean(codex?.items?.some((item) => item.type === "text" && item.content?.trim()));

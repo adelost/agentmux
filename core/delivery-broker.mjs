@@ -23,7 +23,7 @@ import {
 } from "./delivery-queue.mjs";
 import { recoverHiddenDeliveryTui, recoverSubmittedTui } from "./tui-stall-recovery.mjs";
 import { needsZoomFallback, terminalizeSlashRejection } from "./slash-ingest-guard.mjs";
-import { createDeliveryMemoryContext } from "./delivery-memory-context.mjs";
+import { createDeliveryMemoryContext, deliveryMemoryReceiptText } from "./delivery-memory-context.mjs";
 const ACTIVE_RETRY_MS = 1_000;
 const BLOCKED_RETRY_MS = 3_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
@@ -146,7 +146,7 @@ export function createDeliveryBroker({
       return await agent.waitForPromptEcho(
         job.agentName,
         job.pane,
-        job.verifyText,
+        deliveryMemoryReceiptText(job),
         0,
         job.echoCursor
           ? { cursor: job.echoCursor }
@@ -459,7 +459,7 @@ export function createDeliveryBroker({
     const attemptDelivery = async () => {
       try {
         return await deliverToPane(agent, job.agentName, job.pane, job.text, {
-          verifyText: job.verifyText,
+          verifyText: deliveryMemoryReceiptText(job),
           attempts: 1,
           echoTimeoutMs: 3_000,
           echoCursor: job.echoCursor,
