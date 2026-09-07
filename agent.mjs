@@ -1122,7 +1122,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   }
 
   async function sendPrompt(agentName, prompt, pane, {
-    knownDrafted = false,
+    knownDrafted = false, maintenanceGuard = null,
     onPasteStarted = null,
     onDrafted = null,
     onSubmitting = null,
@@ -1131,7 +1131,8 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     assertClaudeQuotaAvailable(agentName, pane, { prompt, configPath });
     const target = `${agentName}:.${pane}`;
     const notBeforeMs = Date.now();
-    await exitCopyMode(target);
+    if (maintenanceGuard && await t.paneInMode(target)) throw new Error("maintenance-copy-mode-active");
+    if (!maintenanceGuard) await exitCopyMode(target);
     const dialect = await livePaneDialectName(agentName, pane);
     let alreadyComposed = await promptAlreadyInComposer(agentName, pane, prompt, {
       ownedDraft: knownDrafted,
@@ -1156,16 +1157,13 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     // sitting unsubmitted in the composer, typing it again would double the
     // text. Skip straight to the submit path instead.
     if (shouldPastePrompt({ knownDrafted, alreadyComposed })) {
-      // Recovery must run before the empty-composer readiness gate. v1.21.2
-      // accidentally reversed these calls, so the gate rejected the stale
-      // text that this function was specifically built to clear.
-      await clearForeignComposerText(agentName, pane, target, prompt, dialect);
+      // Normal delivery may recover a draft; unattended maintenance must not clear one.
+      if (maintenanceGuard) await maintenanceGuard("paste");
+      else await clearForeignComposerText(agentName, pane, target, prompt, dialect);
       if (dialect === "codex") {
-        const ready = await waitForCodexPromptReady(agentName, pane);
+        const ready = maintenanceGuard ? { busy: false } : await waitForCodexPromptReady(agentName, pane);
         busyAtSend = Boolean(ready?.busy);
-        // Persist only provisional ownership before the first pane write.
-        // A crash here must fence a duplicate paste, but the broker may not
-        // call this an exact draft until the live composer proves it below.
+        // Provisional ownership fences duplicate paste, not proof of an exact draft.
         if (onPasteStarted) await onPasteStarted();
       } else if (dialect === "kimi") {
         busyAtSend = Boolean((await waitForKimiPromptReady(agentName, pane))?.busy);
@@ -1209,16 +1207,15 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     if ((dialect === "codex" && !busyAtSend) || dialect === "kimi") {
       busyAtSend = Boolean(await isBusy(agentName, pane));
     }
-    // The first callback persists an ambiguous at-most-once fence BEFORE the
-    // physical key. If the process dies after Enter but before the second
-    // callback, restart must never retype or claim NOT SENT.
+    // Persist ambiguity before Enter; a crash must never authorize a second paste.
+    if (maintenanceGuard) await maintenanceGuard("submit");
     await submitWithDurableFence({
       onSubmitting,
       sendEnter: () => dialect === "kimi" ? submitKimiPromptNow(target, { busy: busyAtSend }) : t.sendEnter(target),
       onSubmitted,
     });
-    await maybeSendCodexSubmitEnter(agentName, pane, target, prompt, { notBeforeMs });
-    await maybeRescueClaudeSubmit(agentName, pane, target, prompt);
+    if (!maintenanceGuard) await maybeSendCodexSubmitEnter(agentName, pane, target, prompt, { notBeforeMs });
+    if (!maintenanceGuard) await maybeRescueClaudeSubmit(agentName, pane, target, prompt);
     if (dialect === "kimi") {
       await maybeRescueKimiSubmit(agentName, pane, target, prompt, { notBeforeMs });
     }
@@ -1636,7 +1633,7 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
   }
 
   async function sendOnly(agentName, prompt, pane, options = {}) {
-    await ensureReady(agentName, pane);
+    if (!options.existingOnly) await ensureReady(agentName, pane);
     return sendPrompt(agentName, prompt, pane, options);
   }
 

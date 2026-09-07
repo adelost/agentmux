@@ -349,8 +349,41 @@ deliberately needs another tmux layout.
 
 `dream.agent` and `dream.pane` select the existing Claude/Codex pane that
 curates the nightly fleet digest. AMUX verifies an exact compact receipt and
-posts the full prompt to that pane's Discord channel; there is no hidden model
-or fallback.
+posts the full prompt to that pane's Discord channel; there is no hidden model.
+Only explicitly configured `dream.candidates` may replace an unavailable curator.
+
+Dream also runs a separate nightly context-budget pass, including when there is
+no new digest work or the curator fails. It uses tokens, not file bytes or the
+bridge's unchanged 60-percent daytime trigger. Defaults are more than 80,000
+tokens and at least 30 minutes idle. Change them in the source YAML:
+
+```yaml
+dream:
+  agent: api
+  pane: 0
+  compact:
+    maxTokens: 80000
+    idleMinutes: 30
+```
+
+Set `dream.compact: false` to disable this pass. Preview with
+`amux compact --nightly --dry`, run with `amux compact --nightly`, or name one
+pane with `amux compact --nightly api -p 0`. It never starts stopped engines,
+switches models, uses an API fallback, or clears sessions. Working/unknown,
+drafted, queued, unmeasured and low-quality contexts are skipped. Claude and
+Codex have exact compact adapters; Kimi/native are explicitly unsupported here.
+The existing delivery lease and final live revalidation protect each attempt.
+Each exact session gets at most one attempt per night, including after a crash.
+`~/.agentmux/nightly-compact/YYYY-MM-DD/` records per-pane intent, before/after tokens
+and actual receipt outcome. A failed or blocked budget pass exits nonzero so the
+existing cron failure notification also covers maintenance, not just the digest.
+A compact still above budget or without a new token
+measurement is unresolved, never reported as within budget or blindly retried.
+The budget is a target, not a guarantee about the engine's native summarizer.
+Dream's own curator is already compacted before its task; its fresh activity
+keeps the later nightly pass from compacting it again. The thin memory hook
+refreshes references on the next real Claude turn; other harnesses can use
+`amux memory context` and `amux search` without loading full daily files.
 
 Start the bridge:
 

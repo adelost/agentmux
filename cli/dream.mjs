@@ -22,6 +22,7 @@ import {
 } from "../core/dream-owner.mjs";
 import { verifiedClaudeCompact, verifiedCodexCompact } from "../core/verified-compact.mjs";
 import { defaultWorkspace } from "../core/runtime-defaults.mjs";
+import { runNightlyCompact } from "./nightly-compact.mjs";
 
 const DREAM_LOCK_PATH = () => join(defaultWorkspace(process.env.HOME), ".dream.lock");
 
@@ -332,6 +333,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
   const batch = buildDreamBatch(observed.sources, dateKey, dependencies.batchOptions);
 
   if (flags.dry) {
+    await (dependencies.nightlyCompact || runNightlyCompact)(ctx, flags, { agents, runtimeConfig });
     console.log(`Dream owner: ${owner.agent}:${owner.pane} (${owner.engine}).`);
     if (candidates.length > 1) {
       console.log(`Configured fallbacks, tried in order: ${candidates.slice(1)
@@ -478,8 +480,12 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
     }
     throw error;
   } finally {
-    runDreamJanitor(flags);
-    lock.release();
+    try {
+      const maintenance = await (dependencies.nightlyCompact || runNightlyCompact)(ctx, flags, { agents, runtimeConfig });
+      if (maintenance?.unresolved) { console.error(`Nightly compact unresolved: ${maintenance.unresolved}`); process.exitCode = 1; }
+    }
+    catch (error) { console.error(`Nightly compact failed: ${error.message}`); process.exitCode = 1; }
+    finally { runDreamJanitor(flags); lock.release(); }
   }
 }
 
