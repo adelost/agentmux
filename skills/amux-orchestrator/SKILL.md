@@ -44,6 +44,16 @@ diagnostic. Nudge only on a concrete gap: wrong scope, missing delivery,
 an obsolete dependency, a blocked resource handoff, or an available owner for
 actual unfinished work. Keep the existing end-to-end owner where possible.
 
+Treat cross-pane prompts as execution, not as a passive bulletin board.
+For a request to "sync everyone", read the overview and relevant journals,
+then put changed criteria in the existing task record. Do not loop over the
+pane list sending that record: "no action needed" inside a prompt does not
+prevent a model turn. If the operator is working with one model or named
+reviewer, keep that participant scope; do not recruit dormant providers for
+acknowledgements or independent reads. In particular, a previous FYI left
+unanswered is not a dropped implementation task to reawaken later. This is
+the read-only path under the staffing policy, not a new approval ceremony.
+
 A useful brief names the new evidence, the next bounded outcome, what is already
 done, and the boundary that must remain untouched. Write its exact UTF-8 text to
 a file with the file-editing tool, then send it through

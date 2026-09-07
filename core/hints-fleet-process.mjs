@@ -139,7 +139,13 @@ does not replace the scoped verification in staffing rule 6.
    Normal tasks, decisions, reviews, merges and deploys do not flow through the
    manager. Do not make every worker report through one pane.
 3. **Do not wake a fleet to look busy.** A durable task wakes its exact owner;
-   otherwise dormant panes stay dormant. A pane returning after seven or more
+   otherwise dormant panes stay dormant. "Sync/check all panels" authorizes
+   reading their status and evidence, not sending prompts to all of them.
+   Even FYI, criteria-only and "no action needed" messages activate a model
+   and can spend quota. Store shared criteria for the next natural turn;
+   contact only an owner who needs a concrete action or handoff. Respect the
+   operator's chosen models and participants: an available idle panel or
+   unused provider is not permission to activate it. A pane returning after seven or more
    days first re-anchors with \`amux done --week\`, \`amux asks --open\`, this
    generated policy and the repository's current instructions before acting.
    \`amux reconcile\` repairs configured service/shell panes; it is not a
