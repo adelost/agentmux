@@ -71,9 +71,26 @@ the command does not claim that a digest or the reader's understanding is correc
 The existing Claude `SessionStart` hook emits the same bounded reference card.
 On `UserPromptSubmit`, it emits again only when daily versions changed, keyed to
 the exact pane and session. It neither wakes idle panes nor creates model turns.
-An emitted pointer is not proof the model read the file. Other harnesses can use
-the CLI; automatic next-turn hooks for them are not implemented by this change.
+An emitted pointer is not proof the model read the file.
 See the [Claude hook output contract](https://code.claude.com/docs/en/hooks).
+
+For tmux Codex and Kimi, the existing durable delivery broker attaches a short
+pointer to `amux memory context` to the next real prompt. It does not enqueue an orientation turn.
+The original ask/verification text stays unchanged; the complete physical payload
+is persisted before paste and remains identical across retries. Only an actual
+delivery receipt advances the orientation stamp. The stamp belongs to one pane
+and exact session, not to a model/profile label. Refresh happens after memory or
+observed compact-epoch changes, or after 30 minutes without an AMUX delivery.
+The delivery pointer is at most 512 bytes; the CLI's reference card is at most
+2 KiB. No diary contents are attached. Keeping the prompt itself smaller matters:
+native Codex compaction can retain historical user messages rather than replacing
+all of them with a summary. Detailed retrieval belongs in tool output, on demand.
+
+Direct terminal typing in Codex/Kimi bypasses the AMUX broker: use the existing
+`amux memory context` entry then. Native runtime next-turn injection is not wired
+here. Neither limitation justifies starting or replacing those sessions.
+Unknown identities skip automatic context; unreadable optional memory never
+blocks the real message. This is an orientation aid, not proof of understanding.
 
 An independently installed legacy startup hook that still reads complete daily
 files must be changed at its own source to references-only. The AMUX installer

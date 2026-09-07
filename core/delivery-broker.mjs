@@ -23,6 +23,7 @@ import {
 } from "./delivery-queue.mjs";
 import { recoverHiddenDeliveryTui, recoverSubmittedTui } from "./tui-stall-recovery.mjs";
 import { needsZoomFallback, terminalizeSlashRejection } from "./slash-ingest-guard.mjs";
+import { createDeliveryMemoryContext } from "./delivery-memory-context.mjs";
 const ACTIVE_RETRY_MS = 1_000;
 const BLOCKED_RETRY_MS = 3_000;
 const MAX_BLOCKED_RETRY_MS = 60_000;
@@ -81,16 +82,14 @@ export function createDeliveryBroker({
   wakeAdmission = null,
   wakeLifecycle = null,
   bridgeDir = null,
+  memoryContextOptions = {},
 } = {}) {
   if (!agent) throw new Error("delivery broker requires agent");
   if (!queue) throw new Error("delivery broker requires queue");
-
-  // A durable message may wake exactly its target pane, but only after
-  // admission proves release identity and memory headroom; otherwise the
-  // message stays queued with a classified reason, never false-ACKed.
+  const memoryContext = createDeliveryMemoryContext({ agent, queue, now, log, ...memoryContextOptions });
+  // Exact-target wake still requires release identity and memory admission.
   const wakeGate = typeof wakeAdmission === "function" ? wakeAdmission
     : (bridgeDir ? createWakeAdmissionGate({ runtimeRoot: bridgeDir, reserveMiB: 512 }) : null);
-
   const lanes = new Map();
   let timer = null, started = false, stopped = false;
   let startupBarrier = Promise.resolve();
@@ -121,6 +120,7 @@ export function createDeliveryBroker({
       lastReason: null,
     });
     queueEvent(acknowledged, "acknowledged", { via });
+    memoryContext.acknowledged(acknowledged);
     if (acknowledged.noticeSentAt) {
       await notify(acknowledged, "recovered").catch((error) =>
         log(`delivery broker recovery notice failed for ${acknowledged.id}: ${error.message}`));
@@ -455,7 +455,7 @@ export function createDeliveryBroker({
     const gated = await gateIngestProbe(job, { drafted, ownsPaneDraft });
     job = gated.job;
     if (!gated.proceed) return maybeNotifyBlocked(job);
-
+    job = memoryContext.prepare(job);
     const attemptDelivery = async () => {
       try {
         return await deliverToPane(agent, job.agentName, job.pane, job.text, {

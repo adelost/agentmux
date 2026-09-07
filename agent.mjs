@@ -30,6 +30,7 @@ import {
 import { createKimiAgentRuntime, kimiComposerHasCollapsedPaste, kimiJournal } from "./core/kimi-agent-runtime.mjs";
 import { createKimiIngestProbe } from "./core/kimi-ingest-probe.mjs";
 import { createPromptEcho } from "./core/prompt-echo.mjs";
+import { createPaneMemorySnapshot } from "./core/delivery-memory-context.mjs";
 import { createClaudeSubmitRescue } from "./core/claude-submit-rescue.mjs";
 import { getContextPercent as getContextPercentByDialect, getContextFromPane } from "./core/context.mjs";
 import { findBlockingPrompt } from "./core/dismiss.mjs";
@@ -80,7 +81,6 @@ export { buildClaudeLaunchCommand, buildCodexLaunchCommand, buildKimiLaunchComma
 export { shouldPastePrompt, submitWithDurableFence } from "./core/delivery-fence.mjs";
 const CODEX_SESSION_STATE_KEY = "codex_session_by_pane_profile_v1";
 const CODEX_PROMPT_READY_TIMEOUT_MS = 8_000;
-// --- Session isolation ---
 /** WHAT: Resolves one pane cwd. WHY: Keeps agent histories isolated across panes. */
 export function paneDir(rootDir, pane) {
   const dir = join(rootDir, ".agents", String(pane));
@@ -1816,9 +1816,9 @@ export function createAgent({ tmuxSocket, configPath, timeout, delay, run, tmuxE
     restartCodex,
     restartKimi,
   });
-
   return {
     ensureReady, sendAndWait, sendOnly,
+    memorySnapshot: createPaneMemorySnapshot({ configFor: agentConfig, dialectFor: paneDialectName }),
     getResponse, getResponseSegments, getResponseStream, getResponseStreamWithRaw, hasResponseForPrompt, isBusy,
     promptTransportState, codexVocabularyDrift,
     capturePane, captureScreen, capturePromptEchoCursor, captureSlashReceiptCursor, waitForSlashReceipt, sendEscape, sendTab, clearInputLine, sendEnter, typeLiteral, zoomPaneForPicker, restorePaneZoom, paneHistorySize,
