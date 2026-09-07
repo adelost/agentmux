@@ -5,6 +5,7 @@ import yaml from "js-yaml";
 import { randomUUID } from "crypto";
 import { resolveTmuxLayout } from "./core/layout.mjs";
 import { resolveClaudeModel } from "./core/claude-model.mjs";
+import { nightlyCompactPolicy } from "./core/nightly-compact.mjs";
 import {
   CLAUDE_AUTONOMOUS_FLAGS,
   CODEX_AUTONOMOUS_FLAGS,
@@ -158,6 +159,7 @@ export function parseConfig(yamlContent, { requireGuild = false } = {}) {
     const pane = Number(doc.dream?.pane);
     validateDreamPane(agent, pane, "dream");
     dream = { agent, pane };
+    if (doc.dream.compact !== undefined) dream.compact = nightlyCompactPolicy(doc.dream.compact);
 
     // Optional ordered fallback curators. Validated here, at the same bar as the
     // primary, so a typo fails `amux sync` instead of quietly shrinking the list

@@ -67,9 +67,9 @@ export function createDeliveryQueue({
   now = () => Date.now(),
   uuid = () => randomUUID(),
   validateTarget = null,
-  onListJobRead = null,
+  onListJobRead = null, initialize = true,
 } = {}) {
-  ensurePrivateDir(rootDir);
+  if (initialize) ensurePrivateDir(rootDir);
 
   const dirFor = (agentName, pane) => join(rootDir, targetKey(agentName, pane));
   const pathFor = (agentName, pane, id) => join(dirFor(agentName, pane), `${id}.json`);

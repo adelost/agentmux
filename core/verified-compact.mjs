@@ -3,6 +3,7 @@
 import { hasClaudeCompactBoundaryAfterSubmit } from "./claude-submit-boundary.mjs";
 import { latestCodexSessionIdentity } from "./codex-jsonl-reader.mjs";
 import { sendSlashVerified } from "./delivery.mjs";
+import { compactAccessBlocker } from "./nightly-compact.mjs";
 import {
   captureJsonlAppendCursor, hasJsonlEventAfterCursor,
 } from "./jsonl-append-cursor.mjs";
@@ -29,6 +30,7 @@ export async function verifiedClaudeCompact({
   pollAttempts = 120,
   pollMs = 1_000,
   settleMs = 200,
+  command = "/compact",
 } = {}) {
   const before = latestIdentity(paneDir);
   if (!before?.sessionId) return { ok: false, reason: "pre-compact-session-missing" };
@@ -41,7 +43,7 @@ export async function verifiedClaudeCompact({
     return { ok: false, reason: "compact-cursor-missing" };
   }
   const submittedAt = now();
-  const command = await sendSlash(agent, agentName, pane, "/compact", {
+  const sent = await sendSlash(agent, agentName, pane, command, {
     suppressReceipt: true,
     settleMs,
     // Claude may persist the local-command receipt only after compacting.
@@ -50,7 +52,10 @@ export async function verifiedClaudeCompact({
     maxRescues: 0,
     sleep,
   });
-  if (!command.delivered || command.via !== "command-receipt") {
+  const screen = await agent.captureScreen?.(agentName, pane).catch(() => "");
+  const blocked = compactAccessBlocker(screen);
+  if (blocked) return { ok: false, reason: blocked };
+  if (!sent.delivered || sent.via !== "command-receipt") {
     return { ok: false, reason: "compact-command-unverified" };
   }
   const boundary = await waitFor(
@@ -70,7 +75,7 @@ export async function verifiedClaudeCompact({
     cursor,
     submittedAt,
     sessionId: after.sessionId,
-    commandReceipt: command.via,
+    commandReceipt: sent.via,
     compactBoundary: true,
   };
 }
@@ -87,6 +92,7 @@ export async function verifiedCodexCompact({
   pollAttempts = 180,
   pollMs = 1_000,
   settleMs = 200,
+  maxRescues = 2,
 } = {}) {
   const before = latestIdentity(paneDir);
   if (!before?.sessionId || !before?.path) {
@@ -99,7 +105,7 @@ export async function verifiedCodexCompact({
   const command = await sendSlash(agent, agentName, pane, "/compact", {
     suppressReceipt: true,
     settleMs,
-    maxRescues: 2,
+    maxRescues,
     sleep,
   });
   if (!command.delivered) return { ok: false, reason: "compact-command-unverified" };
