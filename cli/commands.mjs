@@ -3166,7 +3166,7 @@ const FLAG_SPECS = {
   },
   compact: { dry: "boolean", nightly: "boolean", help: "boolean", h: "boolean", force: "boolean", "min-tokens": "number", p: "number", m: "string", message: "string" },
   dream: {
-    since: "string", workspace: "string", dry: "boolean", q: "boolean", quiet: "boolean",
+    since: "string", workspace: "string", dry: "boolean", q: "boolean", quiet: "boolean", recover: "string", "source-sha256": "string", "memory-sha256": "string",
     retry: "boolean", "defer-sentinel": "boolean", deferSentinel: "boolean", help: "boolean", h: "boolean",
   },
   janitor: { dry: "boolean", days: "number" },

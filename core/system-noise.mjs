@@ -16,7 +16,7 @@ const NOISE_PATTERNS = [
   // Slash-command wrappers: the CLI logs "/compact" etc. as a user turn...
   /^<(local-command|command-name|command-message|command-args|command-stdout|command-stderr|command-contents)\b/i,
   // ...and sometimes as the bare command itself.
-  /^\/(compact|model)\s*$/,
+  /^\/(?:compact(?:\s|$)|model\s*$)/,
   /^\[amux (resume|compact) hint\]/i,
   /^\[AMUX AUTOMATIC QUOTA RECOVERY\b/i,
   /^\[AMUX AUTOMATIC CRASH RECOVERY\b/i,
