@@ -7,6 +7,7 @@ import {
   panePathFor, readRecentTurnsAcrossClaudeSessions,
 } from "./jsonl-reader.mjs";
 import { isDreamActivityTurn, validDreamCursor } from "./dream-eligibility.mjs";
+import { CODEX_DREAM_SCAN_BYTES } from "./codex-dream-history.mjs";
 
 /** WHAT: Defines the per-pane turn ceiling. WHY: Prevents old chatter from dominating the summary. */
 export const DREAM_SOURCE_TURNS = 8;
@@ -43,7 +44,11 @@ function readPaneHistory(engine, paneDir, { since, limit }) {
     const stat = statSync(result.jsonlFile);
     const work = result.turns.filter((turn) => isDreamActivityTurn(turn.userPrompt));
     if (work.length || stat.size <= tailBytes || stat.mtimeMs <= since.getTime()) return result;
-    if (tailBytes === maxBytes) throw new Error("dream-history-window-exhausted: no attributable work in 8MiB tail");
+    if (tailBytes === maxBytes) {
+      const recovered = reader(paneDir, { limit, dreamHistory: true });
+      if (recovered.turns.some((turn) => isDreamActivityTurn(turn.userPrompt)) || stat.size <= CODEX_DREAM_SCAN_BYTES) return recovered;
+      throw new Error("dream-history-window-exhausted: no attributable work in bounded 64MiB recovery");
+    }
   }
 }
 

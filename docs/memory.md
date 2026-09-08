@@ -67,6 +67,17 @@ These checks are offline/read-only: they never prompt a pane or rerun Dream.
 today/yesterday paths and versions, not copied diary text. Read only the material
 relevant to the actual request. Large/unreadable sources remain explicit;
 the command does not claim that a digest or the reader's understanding is correct.
+File availability and digest validation are reported separately. The digest
+field reuses the existing controller-artifact verifier; a file or copied success
+marker alone is not a validated run. Even a valid bounded digest is not proof
+that every fact reached a long-term note.
+
+When recovery establishes a material correction, the active agent saves it in
+the existing topic note when authorized, with its event date and original source.
+It then checks the saved result through normal retrieval. Dream supplements this
+write-back; it is not the only chance to preserve an already verified correction.
+The shared `context-recovery` skill owns that workflow. Read-only requests remain
+read-only, and personal notes stay in the private workspace rather than this repo.
 
 The existing Claude `SessionStart` hook emits the same bounded reference card.
 On `UserPromptSubmit`, it emits again only when daily versions changed, keyed to

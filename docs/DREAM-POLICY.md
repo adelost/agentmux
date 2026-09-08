@@ -34,6 +34,11 @@ the list exists to provide.
 1. Read bounded journal tails from configured Claude, Codex and Kimi panes.
    Only turns newer than each pane's successful Dream receipt are eligible.
    Dream prompts, compact commands and system plumbing are excluded.
+   If Codex's normal 8 MiB adaptive tail cannot attribute any work, reuse the
+   search JSONL stream over at most 64 MiB of disk history, retaining at most
+   8 MiB of authored/lifecycle events. Known oversized compact/tool-output
+   records are not conversation input; oversized unclassified records still
+   fail explicitly. No journal is changed and model input budgets do not grow.
 2. Keep at most eight turns and 5 KiB per pane, at most 48 panes, and at most
    96 KiB total input. Every omission and unreadable journal remains explicit.
 3. Require the owner pane to be idle. The first candidate keeps the full grace

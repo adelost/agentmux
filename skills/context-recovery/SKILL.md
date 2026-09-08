@@ -44,6 +44,19 @@ When retrieval is incomplete, report what was searched and what remains
 unknown. Ask one precise question only if that missing fact prevents safe
 progress. Never substitute a plausible memory or invent a quotation.
 
+## Close a verified memory gap
+
+Finding the original conversation is not the same as updating durable memory.
+When a source proves a material note stale or incomplete, and the current task
+and workspace permit memory writes, repair that existing note before finishing.
+Keep the event date, a retrievable original source and the corrected current
+state; distinguish a draft from a sent message and an interpretation from a fact.
+Link detailed context from the existing compact index instead of enlarging it.
+Read back the changed note and check that the normal search can find it. Do not
+claim the whole memory is complete from that one repair. During read-only work,
+report the exact gap without silently writing; do not wait for Dream as the only
+way to preserve a correction already established in the current conversation.
+
 ## Keep the next recovery small
 
 Use the task's existing durable record; do not create a second backlog.
