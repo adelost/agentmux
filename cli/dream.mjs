@@ -4,6 +4,7 @@ import {
   existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync,
 } from "fs";
 import { dirname, join } from "path";
+import { createHash } from "node:crypto";
 import { findChannelForPane, listAgents, loadConfig } from "./config.mjs";
 import { notifyUser, sendToChannelId } from "./send-notify.mjs";
 import { getPaneStatus, sendToPane } from "./tmux.mjs";
@@ -17,12 +18,15 @@ import {
   buildDreamBatch, collectDreamSources, dreamSummaryBlock, upsertDreamSummary,
 } from "../core/dream-summarizer.mjs";
 import {
-  dreamOwnerPrompt, readDreamOwnerQuality, readDreamOwnerResult, resolveDreamCandidates,
+  dreamOwnerPrompt, readDreamOwnerQuality, resolveDreamCandidates,
   writeDreamOwnerInput,
 } from "../core/dream-owner.mjs";
 import { verifiedClaudeCompact, verifiedCodexCompact } from "../core/verified-compact.mjs";
 import { defaultWorkspace } from "../core/runtime-defaults.mjs";
 import { runNightlyCompact } from "./nightly-compact.mjs";
+import { waitForDreamOwnerResult } from "../core/dream-result.mjs";
+import { recoverDreamRun } from "../core/dream-recovery.mjs";
+export { waitForDreamOwnerResult } from "../core/dream-result.mjs";
 
 const DREAM_LOCK_PATH = () => join(defaultWorkspace(process.env.HOME), ".dream.lock");
 
@@ -146,34 +150,13 @@ function previousDateKey(dateKey) {
   return atNoonUtc.toISOString().slice(0, 10);
 }
 
-function ownerResponseText(response) {
-  return (response?.items || [])
-    .filter((item) => item.type === "text")
-    .map((item) => String(item.content || "").trim())
-    .filter(Boolean)
-    .join("\n")
-    .trim();
-}
-
-/** WHAT: Reads file, response, and idle truth until complete. WHY: Prevents prompt delivery alone from becoming a Dream receipt. */
-export async function waitForDreamOwnerResult({
-  ctx, owner, prompt, outputPath, dateKey, runId, sourceSha256,
-  attempts = 450, pollMs = 2_000, sleep = wait,
-}) {
-  const expected = `DREAM_OK ${dateKey} ${runId}`;
-  let last = { ok: false, reason: "dream-output-missing" };
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    last = readDreamOwnerResult(outputPath, dateKey, runId, owner, sourceSha256);
-    if (last.ok) {
-      const busy = await ctx.agent.isBusy(owner.agent, owner.pane).catch(() => true);
-      const response = await ctx.agent.getResponseStreamWithRaw(
-        owner.agent, owner.pane, prompt,
-      ).catch(() => null);
-      if (!busy && ownerResponseText(response) === expected) return last;
-    }
-    if (attempt + 1 < attempts) await sleep(pollMs);
-  }
-  return { ok: false, reason: last.reason || "dream-owner-response-missing" };
+/** WHAT: Stores a verified product through one compare-before-write path. WHY: Keeps recovery from bypassing the normal memory and receipt ordering. */
+export function commitDreamProduct({ memPath, memoryBefore, product, dateKey, included, omitted,
+  receipts, receiptTargets = included, receiptPath, now, recordReceipts = recordDreamReceipts }) {
+  if (readFileSync(memPath, "utf8") !== memoryBefore) throw new Error("dream-owner-touched-memory-before-controller-commit");
+  const block = dreamSummaryBlock(product.content, dateKey, included, omitted);
+  atomicWrite(memPath, upsertDreamSummary(memoryBefore, dateKey, block));
+  recordReceipts(receipts, receiptTargets, { path: receiptPath, dateKey, now });
 }
 
 /** WHAT: Routes the exact instruction synchronously. WHY: Prevents Dream from acting through an invisible brief. */
@@ -303,7 +286,22 @@ async function prepareDreamOwner(ctx, owner, dependencies) {
 export async function cmdDream(ctx, flags = {}, dependencies = {}) {
   if (flags.help || flags.h) {
     console.log("Usage: amux dream [--quiet] [--dry] [--since 24h|ISO] [--workspace PATH] [--defer-sentinel]");
+    console.log("Finish an existing run without a model turn: --recover INPUT.json --source-sha256 SHA [--memory-sha256 PRE_RUN_SHA] [--dry]");
     return { help: true };
+  }
+  if (flags.recover) {
+    const lock = flags.dry ? { acquired: true, release() {} } : acquireDreamLock();
+    if (!lock.acquired) return { skipped: "lock-held" };
+    try {
+      const result = await recoverDreamRun(ctx, flags, { commit: commitDreamProduct });
+      if (result.recovered) {
+        const time = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm", hour: "2-digit", minute: "2-digit" }).format(new Date());
+        writeDreamRunSentinel(result.path, result.dateKey, time, result.included, result.unreadable);
+        if (result.unreadable) process.exitCode = 1;
+      }
+      console.log(JSON.stringify(result));
+      return result;
+    } finally { lock.release(); }
   }
   const readReceipts = dependencies.readReceipts || readDreamReceipts;
   const collectSources = dependencies.collectSources || collectDreamSources;
@@ -405,6 +403,8 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       schemaVersion: 1,
       dateKey,
       createdAt: now.toISOString(),
+      workspace: workspaceDir,
+      memoryBeforeSha256: createHash("sha256").update(memoryBefore).digest("hex"),
       owner: { agent: owner.agent, pane: owner.pane, engine: owner.engine },
       compact: {
         sessionId: compact.sessionId, boundary: compact.compactBoundary,
@@ -446,12 +446,8 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       sleep: dependencies.sleep,
     });
     if (!product.ok) throw new Error(`dream-owner-product-invalid:${product.reason}`);
-    if (readFileSync(memPath, "utf8") !== memoryBefore) {
-      throw new Error("dream-owner-touched-memory-before-controller-commit");
-    }
-    const block = dreamSummaryBlock(product.content, dateKey, batch.included, batch.omitted);
-    atomicWrite(memPath, upsertDreamSummary(memoryBefore, dateKey, block));
-    recordReceipts(receipts, batch.included, { path: receiptPath, dateKey, now });
+    commitDreamProduct({ memPath, memoryBefore, product, dateKey, included: batch.included,
+      omitted: batch.omitted, receipts, receiptPath, now, recordReceipts });
 
     if (!flags.deferSentinel && !flags["defer-sentinel"]) {
       writeDreamRunSentinel(memPath, dateKey, timeStr, batch.included.length, observed.unreadable.length);

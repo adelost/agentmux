@@ -16,11 +16,12 @@ feature("isSystemNoiseDirective", () => {
     when: ["classifying bare command turns", () => ([
       isSystemNoiseDirective("/compact"),
       isSystemNoiseDirective("/model"),
+      isSystemNoiseDirective("/compact Keep under 80000 tokens; preserve decisions and source paths."),
       // ...but a sentence MENTIONING /compact is a real directive.
       isSystemNoiseDirective("kör /compact på alla panes över 70%"),
     ])],
     then: ["exact turns are noise, the sentence is not", (result) =>
-      expect(result).toEqual([true, true, false])],
+      expect(result).toEqual([true, true, true, false])],
   });
 
   unit("harness banners are noise", {

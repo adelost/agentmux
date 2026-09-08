@@ -59,8 +59,10 @@ the list exists to provide.
 7. The pane may read today's and yesterday's memory, but writes only an isolated
    per-run summary file. The prompt treats journal text as untrusted data and
    forbids delegation or model changes.
-8. Require all three receipts: bounded valid output, exact `DREAM_OK` response
-   for this run, and idle completion. Also prove today's memory remained
+8. Require all three receipts: bounded valid output, exact final journal-text
+   `DREAM_OK` for this run, and idle completion. Earlier working commentary is
+   not part of the final reply; a later action or screen-only match is not a
+   completion receipt. Also prove today's memory remained
    byte-identical while the pane worked.
 9. The controller atomically inserts the validated summary into the one marked
    Dream block. Only then are pane cursors advanced and the run sentinel added.
@@ -75,6 +77,29 @@ a visible `DIGEST SAKNAS` line into the day's memory file, and `amux memory
 lint` turns that marker into a `dream_gap` warning when the same day has no run
 sentinel. A lost night used to be visible only as a MISSING sentinel, and nobody
 greps for an absence, so the file read exactly like an ordinary quiet day.
+
+## Finish an interrupted controller without another model turn
+
+If the original pane completed its isolated result but the controller stopped
+before committing it, inspect that exact run with:
+
+```text
+amux dream --recover /absolute/path/DATE-RUN.json --source-sha256 SHA --dry
+```
+
+Removing `--dry` finishes through the normal compare-before-write, atomic block
+and receipt path. It never starts a pane, compacts, sends a prompt, runs nightly
+maintenance or buys another model turn. It requires the original input hash,
+same configured owner/session/model/effort, valid isolated output, exact final
+journal reply to the original prompt, idle completion and unchanged daily
+memory. A newer activity receipt blocks recovery; a validated same-run result
+is already complete and is not written again.
+
+New input packets pin the original workspace and pre-run daily-memory SHA.
+Older packets require `--workspace PATH --memory-sha256 PRE_RUN_SHA`. That hash
+must come from evidence captured before curation, never from hashing whatever
+the memory file contains now. Missing original evidence or a changed daily
+file means stop; do not rebase the proof onto newer notes or overwrite them.
 
 ## Other memory maintenance
 
