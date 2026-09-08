@@ -16,6 +16,9 @@ describe("Dream activity behind large Codex compaction records", () => {
       writeFileSync(join(dir, "rollout.jsonl"), [
         { type: "session_meta", payload: { cwd, id: "fixture", source: "cli", originator: "codex-tui" } },
         { type: "event_msg", timestamp: "2026-09-06T03:30:00Z", payload: { type: "user_message", message: "Finish launch" } },
+        { type: "response_item", timestamp: "2026-09-06T03:30:10Z", payload: { type: "message", role: "assistant",
+          content: [{ type: "output_text", text: "Earlier investigation. ".repeat(500) }] } },
+        { type: "response_item", timestamp: "2026-09-06T03:30:20Z", payload: { type: "function_call", name: "read", arguments: "{}" } },
         { type: "response_item", timestamp: "2026-09-06T03:31:00Z", payload: { type: "message", role: "assistant",
           content: [{ type: "output_text", text: "Merged S4. Public launch remains blocked." }] } },
         { type: "event_msg", timestamp: "2026-09-06T03:32:00Z", payload: { type: "task_complete" } },
@@ -23,18 +26,12 @@ describe("Dream activity behind large Codex compaction records", () => {
       ].map(JSON.stringify).join("\n") + "\n");
       const result = collectDreamSources([{ name: "ai", dir: join(root, "repo"), panes: [{ engine: "codex" }] }],
         Date.parse("2026-09-05T04:00:00Z"));
-      if (size < 8 * 1024 * 1024) {
-        expect(result.unreadable).toEqual([]);
-        expect(result.sources).toHaveLength(1);
-        expect(result.sources[0]).toMatchObject({ agent: "ai", pane: 0, turns: 1, activityCursor: "2026-09-06T03:30:00Z" });
-        const batch = buildDreamBatch(result.sources, "2026-09-06");
-        expect(batch.payload.panes[0].turns[0].assistant).toContain("Public launch remains blocked");
-        expect(Buffer.byteLength(batch.sourceText)).toBeLessThan(5120);
-      } else {
-        expect(result.sources).toEqual([]);
-        expect(result.unreadable).toEqual([{ agent: "ai", pane: 0, engine: "codex",
-          reason: "dream-history-window-exhausted: no attributable work in 8MiB tail" }]);
-      }
+      expect(result.unreadable).toEqual([]);
+      expect(result.sources).toHaveLength(1);
+      expect(result.sources[0]).toMatchObject({ agent: "ai", pane: 0, turns: 1, activityCursor: "2026-09-06T03:30:00Z" });
+      const batch = buildDreamBatch(result.sources, "2026-09-06");
+      expect(batch.payload.panes[0].turns[0].assistant).toContain("Public launch remains blocked");
+      expect(Buffer.byteLength(batch.sourceText)).toBeLessThan(5120);
     } finally {
       if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
       rmSync(root, { recursive: true, force: true });

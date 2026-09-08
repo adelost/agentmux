@@ -10,7 +10,7 @@ const MAX_TEXT = 16_000;
 const MAX_OUTPUT = 32_000;
 
 /** WHAT: Streams numbered JSONL records from a byte position. WHY: Bounds memory and makes expansion independent of the journal's total size. */
-export function* readSearchRecords(path, { byteOffset = 0, line = 1, endLine = Infinity } = {}) {
+export function* readSearchRecords(path, { byteOffset = 0, line = 1, endLine = Infinity, endByteOffset = Infinity } = {}) {
   const fd = fs.openSync(path, "r");
   const buffer = Buffer.alloc(CHUNK_BYTES);
   let position = byteOffset;
@@ -18,7 +18,7 @@ export function* readSearchRecords(path, { byteOffset = 0, line = 1, endLine = I
   let parts = [];
   let length = 0;
   try {
-    const endOffset = fs.fstatSync(fd).size;
+    const endOffset = Math.min(fs.fstatSync(fd).size, endByteOffset);
     while (line <= endLine) {
       const count = fs.readSync(fd, buffer, 0, Math.min(buffer.length, Math.max(0, endOffset - position)), position);
       if (!count) {

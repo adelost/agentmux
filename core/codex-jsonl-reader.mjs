@@ -7,11 +7,6 @@
 //                     token_count, reasoning, function_call, exec_command_end)
 //   - response_item  (message with role=user/assistant/developer,
 //                     function_call with name+arguments)
-//
-// Busy detection uses the task_started/task_complete turn_id pair. Content
-// extraction uses response_item 'message' events with role=assistant plus
-// function_call events.
-
 import { readdirSync, readFileSync, statSync, existsSync, openSync, readSync, closeSync, fstatSync } from "fs";
 import { dirname, join } from "path";
 import { createHash } from "crypto";
@@ -19,6 +14,7 @@ import { describeCustomExec, describeToolCall } from "./tool-display.mjs";
 import { codexSessionDirs } from "./codex-profiles.mjs";
 import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { codexUserPrompt, normalizeCodexUserEvents } from "./codex-user-events.mjs";
+import { readCodexDreamEvents } from "./codex-dream-history.mjs";
 
 // Content-addressed line identity for the watcher's posted-set dedupe. Codex
 // rollout events carry no stable id (no uuid, no payload.id), so we key on a
@@ -805,7 +801,7 @@ export function readLastTurnsCodex(paneDir, opts = {}) {
   const file = latestSessionFor(paneDir);
   if (!file) return null;
 
-  const events = (tailBytes && !since && !grep)
+  const events = opts.dreamHistory ? normalizeCodexUserEvents(readCodexDreamEvents(file)) : (tailBytes && !since && !grep)
     ? parseJsonlTail(file, tailBytes)
     : parseJsonl(file);
   if (events.length === 0) return { turns: [], compactions: [], jsonlFile: file };

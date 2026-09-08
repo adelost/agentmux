@@ -60,9 +60,9 @@ export function dreamDeadline(now, schedule) {
 }
 
 /** WHAT: Checks the controller's existing Dream artifacts. WHY: Prevents cron starts or stale marker text from counting as success. */
-export function readDreamSuccess(workspace, dateKey, { home, now = new Date() } = {}) {
-  let text;
-  try { text = readFileSync(join(workspace, "memory", `${dateKey}.md`), "utf8"); }
+export function readDreamSuccess(workspace, dateKey, { home, now = new Date(), dailyText } = {}) {
+  let text = dailyText;
+  try { text ??= readFileSync(join(workspace, "memory", `${dateKey}.md`), "utf8"); }
   catch (error) { return { ok: false, reason: error.code === "ENOENT" ? "daily result missing" : `daily result unreadable: ${error.code}` }; }
   const runs = [...text.matchAll(/<!-- amux-dream-run:(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}) \((\d+) panes ok \/ (\d+) failed\) -->/g)];
   const run = runs.filter((m) => m[1] === dateKey).at(-1);
