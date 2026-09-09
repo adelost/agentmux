@@ -1,7 +1,7 @@
 // Dream command: one configured, compacted fleet curator plus session housekeeping.
 
 import {
-  existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync,
+  existsSync, mkdirSync, readFileSync, renameSync, writeFileSync,
 } from "fs";
 import { dirname, join } from "path";
 import { createHash } from "node:crypto";
@@ -26,47 +26,10 @@ import { defaultWorkspace } from "../core/runtime-defaults.mjs";
 import { runNightlyCompact } from "./nightly-compact.mjs";
 import { waitForDreamOwnerResult } from "../core/dream-result.mjs";
 import { recoverDreamRun } from "../core/dream-recovery.mjs";
+import { acquireDreamLock } from "../core/dream-lock.mjs";
+import { claimScheduledDream } from "../core/dream-schedule.mjs";
+export { isPidAlive } from "../core/dream-lock.mjs";
 export { waitForDreamOwnerResult } from "../core/dream-result.mjs";
-
-const DREAM_LOCK_PATH = () => join(defaultWorkspace(process.env.HOME), ".dream.lock");
-
-/** WHAT: Checks whether a pid answers signal 0. WHY: Keeps stale locks from suppressing future nights. */
-export function isPidAlive(pid) {
-  if (!Number.isFinite(pid) || pid <= 0) return false;
-  try { process.kill(pid, 0); return true; }
-  catch (error) { return error?.code === "EPERM"; }
-}
-
-function acquireDreamLock() {
-  const lockPath = DREAM_LOCK_PATH();
-  mkdirSync(dirname(lockPath), { recursive: true });
-  const startedAt = new Date().toISOString();
-  const token = `${process.pid}|${startedAt}`;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      writeFileSync(lockPath, token, { flag: "wx" });
-      return {
-        acquired: true,
-        release() {
-          try { if (readFileSync(lockPath, "utf8") === token) unlinkSync(lockPath); } catch {}
-        },
-      };
-    } catch (error) {
-      if (error?.code !== "EEXIST") throw error;
-      let owner = "";
-      try { owner = readFileSync(lockPath, "utf8").trim(); } catch {}
-      const [pidText, ownerStartedAt = "unknown"] = owner.split("|");
-      const ownerPid = Number(pidText);
-      if (isPidAlive(ownerPid)) {
-        console.log(`Dream skipped: lock-held pid=${ownerPid} started=${ownerStartedAt}`);
-        return { acquired: false, release() {} };
-      }
-      try { unlinkSync(lockPath); } catch {}
-    }
-  }
-  console.log("Dream skipped: lock-held pid=unknown started=unknown");
-  return { acquired: false, release() {} };
-}
 
 function dailyMemoryHeader(dateKey) {
   return [
@@ -326,11 +289,14 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
   const candidates = dependencies.candidates
     || (dependencies.owner ? [dependencies.owner] : resolveDreamCandidates(runtimeConfig));
   let owner = candidates[0];
-  const receipts = readReceipts(receiptPath);
-  const observed = collectSources(agents, since.getTime(), { receipts });
-  const batch = buildDreamBatch(observed.sources, dateKey, dependencies.batchOptions);
+  const collect = () => {
+    const receipts = readReceipts(receiptPath);
+    const observed = collectSources(agents, since.getTime(), { receipts });
+    return { receipts, observed, batch: buildDreamBatch(observed.sources, dateKey, dependencies.batchOptions) };
+  };
 
   if (flags.dry) {
+    const { observed, batch } = collect();
     await (dependencies.nightlyCompact || runNightlyCompact)(ctx, flags, { agents, runtimeConfig });
     console.log(`Dream owner: ${owner.agent}:${owner.pane} (${owner.engine}).`);
     if (candidates.length > 1) {
@@ -365,7 +331,21 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
 
   const lock = acquireDreamLock();
   if (!lock.acquired) return { skipped: "lock-held" };
+  let runMaintenance = true;
   try {
+    if (process.env.AMUX_SCHEDULED_DREAM_DATE) {
+      if (process.env.AMUX_SCHEDULED_DREAM_DATE !== dateKey) throw new Error("scheduled-dream-date-changed");
+      // Recheck under the manual controller's lock, not just before spawn.
+      const admission = claimScheduledDream(workspaceDir, dateKey, { now,
+        token: process.env.AMUX_SCHEDULED_DREAM_TOKEN, mode: process.env.AMUX_SCHEDULED_DREAM_MODE,
+        since: since.toISOString() });
+      if (admission.skipped) {
+        runMaintenance = false;
+        console.log(`Dream skipped: ${admission.skipped}`);
+        return admission;
+      }
+    }
+    const { receipts, observed, batch } = collect();
     if (!batch.included.length) {
       if (!flags.quiet && !flags.q) console.log("Dream: no new journal-backed work; owner pane untouched.");
       if (!flags.deferSentinel && !flags["defer-sentinel"]) {
@@ -477,11 +457,11 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
     throw error;
   } finally {
     try {
-      const maintenance = await (dependencies.nightlyCompact || runNightlyCompact)(ctx, flags, { agents, runtimeConfig });
+      const maintenance = runMaintenance && await (dependencies.nightlyCompact || runNightlyCompact)(ctx, flags, { agents, runtimeConfig });
       if (maintenance?.unresolved) { console.error(`Nightly compact unresolved: ${maintenance.unresolved}`); process.exitCode = 1; }
     }
     catch (error) { console.error(`Nightly compact failed: ${error.message}`); process.exitCode = 1; }
-    finally { runDreamJanitor(flags); lock.release(); }
+    finally { if (runMaintenance) runDreamJanitor(flags); lock.release(); }
   }
 }
 

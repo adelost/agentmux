@@ -46,6 +46,8 @@ configured owner exact /compact
 
 The cron wrapper remains a thin heartbeat entrypoint. It alerts on failure and
 never changes the chosen pane, model or effort.
+The guarded ten-minute missed-night trigger and durable attempt semantics are
+documented in [Dream policy](DREAM-POLICY.md#missed-schedule-after-downtime).
 
 `amux memory status`, `memory lint` and `doctor` inspect the existing local
 daily `dream-cron.sh` schedule. The deadline is the cron time plus one hour;

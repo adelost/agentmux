@@ -78,6 +78,31 @@ lint` turns that marker into a `dream_gap` warning when the same day has no run
 sentinel. A lost night used to be visible only as a MISSING sentinel, and nobody
 greps for an absence, so the file read exactly like an ordinary quiet day.
 
+## Missed schedule after downtime
+
+The existing daily `dream-cron.sh` remains the time authority. Install the
+cheap recovery trigger from that same installed package with
+`node bin/install-dream-catchup.mjs` (`--dry` previews). It preserves the old
+crontab privately and adds `dream-catchup.sh` every ten minutes. Before the
+scheduled time, after validated success, or after an attempted night it does
+not call a model, reindex search, notify repeatedly, or start engines.
+
+Both entrypoints use one workspace/date intent, claimed inside the same
+kernel-backed controller lock as manual Dream. Source cursors and history are
+read after acquiring that lock. A missed attempt reads from 24 hours before
+the scheduled invocation, not 24 hours before a late startup. Only the current
+scheduled day is eligible; this is not an automatic rewrite of missed old days.
+All existing curator and idle/queue/quality/compact fences still apply.
+
+`~/.agentmux/dream-schedule/<workspace-hash>/YYYY-MM-DD.json` preserves the
+attempt and its exit status. A saved digest with an unsuccessful 80k pass is
+`maintenance-unresolved`, not a successful whole night. A crash leaves the
+intent in place. No automatic quota retries or intent deletion are allowed.
+Prepared input, partial result or a prior failure requires inspection of that
+exact run. Existing recovery can finish a completed curator before the first
+memory commit; a crash partway through block/cursor/sentinel writes can still
+require manual reconciliation and must not start a new curator to hide it.
+
 ## Finish an interrupted controller without another model turn
 
 If the original pane completed its isolated result but the controller stopped
