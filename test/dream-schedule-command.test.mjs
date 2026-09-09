@@ -16,6 +16,21 @@ function environment(key, value) {
 afterEach(() => { for (const fn of restore.splice(0).reverse()) fn(); for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }); });
 
 describe("actual Dream scheduling seam", () => {
+  it("does not write a gap or run maintenance when a scheduled child starts after midnight", async () => {
+    const home = mkdtempSync(join(tmpdir(), "dream-midnight-")); roots.push(home); environment("HOME", home);
+    environment("AMUX_JANITOR_ENABLED", "false"); environment("AMUX_SCHEDULED_DREAM_DATE", "2026-09-08");
+    environment("AMUX_SCHEDULED_DREAM_TOKEN", "late-child");
+    const workspace = join(home, "workspace"); mkdirSync(workspace);
+    let effects = 0;
+    const result = await cmdDream({ configPath: "unused" }, { workspace }, {
+      now: new Date("2026-09-08T22:00:01Z"), agents: [], runtimeConfig: {},
+      owner: { agent: "test", pane: 0, engine: "codex" },
+      readReceipts: () => { effects++; return {}; }, collectSources: () => { effects++; return { sources: [], unreadable: [] }; },
+      nightlyCompact: async () => { effects++; return {}; },
+    });
+    expect(result.skipped).toBe("scheduled-date-changed");
+    expect(effects).toBe(0); expect(readdirSync(workspace)).toEqual([]);
+  });
   it("loads the configured runtime path under the actual minimal cron environment", () => {
     const home = mkdtempSync(join(tmpdir(), "dream-cron-env-")); roots.push(home);
     const workspace = join(home, "workspace"); mkdirSync(workspace);

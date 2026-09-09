@@ -283,6 +283,10 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
   }).format(now);
   const workspaceDir = flags.workspace || process.env.OPENCLAW_WORKSPACE
     || defaultWorkspace(process.env.HOME);
+  if (process.env.AMUX_SCHEDULED_DREAM_DATE && process.env.AMUX_SCHEDULED_DREAM_DATE !== dateKey) {
+    console.log("Dream skipped: scheduled-date-changed");
+    return { skipped: "scheduled-date-changed" };
+  }
   const memPath = join(workspaceDir, "memory", `${dateKey}.md`);
   const agents = dependencies.agents || listAgents(ctx.configPath);
   const runtimeConfig = dependencies.runtimeConfig || loadConfig(ctx.configPath);
@@ -334,7 +338,6 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
   let runMaintenance = true;
   try {
     if (process.env.AMUX_SCHEDULED_DREAM_DATE) {
-      if (process.env.AMUX_SCHEDULED_DREAM_DATE !== dateKey) throw new Error("scheduled-dream-date-changed");
       // Recheck under the manual controller's lock, not just before spawn.
       const admission = claimScheduledDream(workspaceDir, dateKey, { now,
         token: process.env.AMUX_SCHEDULED_DREAM_TOKEN, mode: process.env.AMUX_SCHEDULED_DREAM_MODE,

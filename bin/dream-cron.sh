@@ -50,8 +50,8 @@ dream_output="$("$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" dream --quiet --wo
 if [ -n "$dream_output" ]; then
   printf "%s\n" "$dream_output" >> "$AGENTMUX_DREAM_LOG"
 fi
-if printf "%s\n" "$dream_output" | grep -q "^Dream skipped: lock-held"; then
-  printf "%s OK amux dream skipped; another run holds the lock\n" "$(date -Is)" >> "$AGENTMUX_DREAM_LOG"
+if printf "%s\n" "$dream_output" | grep -q "^Dream skipped:"; then
+  printf "%s OK amux dream skipped before model admission\n" "$(date -Is)" >> "$AGENTMUX_DREAM_LOG"
   trap - EXIT
   exit 0
 fi
