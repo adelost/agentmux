@@ -74,6 +74,16 @@ describe("cron scripts never write logs to the HOME root", () => {
     expect(invoked.indexOf("search --reindex")).toBeGreaterThan(invoked.indexOf("dream --quiet"));
   });
 
+  it("a scheduled child skipped across midnight does not lint, notify or reindex", () => {
+    const calls = join(fx.home, "calls.log");
+    writeFileSync(fx.node, "#!/bin/bash\nprintf '%s\\n' \"$*\" >> \"$CALLS\"\necho 'Dream skipped: scheduled-date-changed'\n");
+    const result = run("dream-cron.sh", { CALLS: calls, OPENCLAW_WORKSPACE: join(fx.home, "workspace") });
+    expect(result.status).toBe(0);
+    const invoked = readFileSync(calls, "utf8");
+    expect(invoked).toContain("dream --quiet");
+    expect(invoked).not.toMatch(/search --reindex|memory lint|notifyuser/u);
+  });
+
   it("dream cron never invokes the retired hidden memory compactor", () => {
     const dateKey = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date());
     const workspace = join(fx.home, "workspace");
