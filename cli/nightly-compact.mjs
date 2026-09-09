@@ -63,7 +63,7 @@ export async function observeNightlyPane(ctx, target, { queue, now = Date.now } 
   });
   const after = latestPaneSessionIdentity(engine, paneDir);
   const stable = before?.sessionId && before.sessionId === after?.sessionId && before.path === after?.path;
-  const activity = latestConversationActivityMs(paneDir, engine);
+  const activity = latestConversationActivityMs(paneDir, engine, { recoverCodexHistory: true });
   let queued = null;
   try { queued = queue.list(agent.name, pane.index).filter((job) => !TERMINAL_DELIVERY_STATES.has(job.status)).length; }
   catch { /* unknown queue state never authorizes a compact */ }

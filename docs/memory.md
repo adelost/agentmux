@@ -46,6 +46,11 @@ configured owner exact /compact
 
 The cron wrapper remains a thin heartbeat entrypoint. It alerts on failure and
 never changes the chosen pane, model or effort.
+The nightly compact idle check uses the existing bounded Dream history reader
+when Codex compact records hide the last authored turn from the small tail.
+It verifies an unchanged journal stamp and exact source path; exhausted,
+unreadable or changing history stays unknown. Regular polling does not acquire
+this larger cold-path scan, and the 80k/idle/once-per-night rules do not change.
 The guarded ten-minute missed-night trigger and durable attempt semantics are
 documented in [Dream policy](DREAM-POLICY.md#missed-schedule-after-downtime).
 
