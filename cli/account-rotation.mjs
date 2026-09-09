@@ -20,7 +20,8 @@ import {
   selectedRuntimeProfile,
   setRuntimeProfile,
 } from "../core/runtime-account-profiles.mjs";
-import { verifiedClaudeCompact } from "../core/verified-compact.mjs";
+import { readClaudeQuota } from "../core/claude-account-quota.mjs";
+import { assertRotationContinuity, readRotationContinuity } from "../core/rotation-continuity.mjs";
 
 const paneKey = (agentName, pane) => `${agentName}:${pane}`;
 
@@ -54,6 +55,11 @@ async function observePane(ctx, entry, catalog, target, deps) {
   const pending = pendingRuntimeProfile(ctx.state, agentName, pane);
   const identity = running || pending ? deps.latestIdentity(paneDir) : null;
   const liveDeliveryJobs = liveDeliveryCount(ctx.deliveryQueue, agentName, pane);
+  let continuity = null, continuityError = null;
+  if (identity) {
+    try { continuity = deps.readContinuity(identity); }
+    catch (error) { continuityError = error.message; }
+  }
   let verdict = classifyClaudeRotationPane({
     processState,
     busy,
@@ -77,12 +83,16 @@ async function observePane(ctx, entry, catalog, target, deps) {
       verdict = { allow: false, mode: "blocked", reason: "pending-process-ambiguous" };
     }
   }
+  if (verdict.allow && verdict.mode !== "dormant" && !continuity) {
+    verdict = { allow: false, mode: "blocked", reason: continuityError || "rotation-session-unproven" };
+  }
   return {
     ...entry,
     key: paneKey(agentName, pane),
     paneDir,
     processState,
     identity,
+    continuity,
     pending,
     currentProfile: selectedRuntimeProfile({
       state: ctx.state,
@@ -116,7 +126,7 @@ function report(output, status, target, rows, reason = null) {
   }
 }
 
-/** WHAT: Routes Claude fleet account changes through exact compact receipts. WHY: Prevents account switching from losing or duplicating live work. */
+/** WHAT: Routes Claude account changes through exact persisted sessions. WHY: Prevents exhausted source quota from blocking rotation while preserving drafts, queues and continuity. */
 export async function rotateClaudeFleet(ctx, requested, {
   dry = false,
 } = {}, dependencies = {}) {
@@ -126,7 +136,9 @@ export async function rotateClaudeFleet(ctx, requested, {
     latestIdentity: dependencies.latestIdentity || latestClaudeSessionIdentity,
     authenticated: dependencies.authenticated || runtimeProfileAuthenticated,
     prepare: dependencies.prepare || prepareRuntimeProfile,
-    compact: dependencies.compact || verifiedClaudeCompact,
+    access: dependencies.access || ((profile) => readClaudeQuota({ profile, refresh: !dry })),
+    readContinuity: dependencies.readContinuity || readRotationContinuity,
+    assertContinuity: dependencies.assertContinuity || assertRotationContinuity,
     output: dependencies.output || console.log,
     setExitCode: dependencies.setExitCode || ((code) => { process.exitCode = code; }),
   };
@@ -138,7 +150,13 @@ export async function rotateClaudeFleet(ctx, requested, {
     deps.setExitCode(1);
     return { status: "BLOCKED", reason, rows: [] };
   }
-  deps.prepare(target, deps.catalog);
+  const access = await deps.access(target);
+  if (!access?.ok) {
+    const reason = `target-access-unverified:${access?.error || "unknown"}`;
+    report(deps.output, "BLOCKED", target, [], reason);
+    deps.setExitCode(1);
+    return { status: "BLOCKED", reason, rows: [] };
+  }
 
   const panes = configuredClaudePanes(deps.agents);
   const leaseSet = acquireFleetLeases(ctx.deliveryQueue, panes);
@@ -166,39 +184,27 @@ export async function rotateClaudeFleet(ctx, requested, {
       return { status: "DRY-RUN", rows };
     }
 
-    for (const pane of observed.filter((item) => item.mode === "running" && !item.pending)) {
-      const compact = await deps.compact({
-        agent: ctx.agent,
-        agentName: pane.agentName,
-        pane: pane.pane,
-        paneDir: pane.paneDir,
-        latestIdentity: deps.latestIdentity,
-      });
-      if (!compact.ok) {
-        const rows = [{ ...pane, status: "failed", reason: compact.reason }];
-        report(deps.output, "BLOCKED", target, rows, "compact-failed");
-        deps.setExitCode(1);
-        return { status: "BLOCKED", reason: "compact-failed", rows };
-      }
-      pane.compact = compact;
-      const rechecked = await observePane(ctx, pane, deps.catalog, target, deps);
-      if (!rechecked.allow || rechecked.identity?.sessionId !== compact.sessionId) {
-        const reason = rechecked.allow ? "post-compact-session-changed" : rechecked.reason;
-        const rows = [{ ...pane, status: "failed", reason }];
-        report(deps.output, "BLOCKED", target, rows, "post-compact-preflight-failed");
-        deps.setExitCode(1);
-        return { status: "BLOCKED", reason: "post-compact-preflight-failed", rows };
-      }
-    }
-
+    deps.prepare(target, deps.catalog);
     const rows = [];
     for (const pane of observed) {
+      // The fleet may take time to restart. Check EACH pane again immediately
+      // before selecting or stopping it, under the same delivery lease.
+      const rechecked = await observePane(ctx, pane, deps.catalog, target, deps);
+      let reason = !rechecked.allow ? rechecked.reason : rechecked.mode !== pane.mode ? "rotation-pane-changed" : null;
+      if (!reason && pane.mode !== "dormant") {
+        try { deps.assertContinuity(pane.continuity, rechecked.identity); }
+        catch (error) { reason = error.message; }
+      }
+      if (reason) {
+        rows.push({ ...pane, status: "failed", reason });
+        continue;
+      }
       if (pane.mode === "dormant") {
         setRuntimeProfile(ctx.state, pane.agentName, pane.pane, "claude", target.id);
         rows.push({ ...pane, status: "selected-for-next-wake", reason: null });
         continue;
       }
-      const sessionId = pane.compact?.sessionId || pane.pending?.sessionId;
+      const sessionId = pane.pending?.sessionId || pane.identity.sessionId;
       const transition = pane.pending || beginRuntimeProfileTransition(ctx.state, {
         agentName: pane.agentName,
         pane: pane.pane,
@@ -211,6 +217,7 @@ export async function rotateClaudeFleet(ctx, requested, {
         await ctx.agent.restartClaudeAccount(pane.agentName, pane.pane, {
           profile: target,
           resumeSessionId: sessionId,
+          continuity: pane.continuity,
         });
         completeRuntimeProfileTransition(ctx.state, transition, target.id);
         rows.push({ ...pane, status: "switched", reason: null });

@@ -59,6 +59,24 @@ function fixture() {
 }
 
 feature("exact TUI crash recovery", () => {
+  component("an explicit account resume cannot replace a different session", {
+    given: ["an idle composer with no matching persisted session", () => {
+      const respawns = [];
+      const recovery = createTuiStallRecovery({
+        tmux: { respawnPane: async (...args) => respawns.push(args) },
+        configFor: () => ({ dir: "/missing/rotation-test", panes: [{ cmd: "claude" }] }),
+        paneDirectory: root => root, isBusy: async () => false,
+        promptTransportState: async () => ({ state: "empty-idle" }),
+      });
+      return { respawns, recovery };
+    }],
+    when: ["requesting an old session after preflight", async fx => fx.recovery.restartClaudeAccount("claw", 0, {
+      resumeSessionId: "11111111-1111-4111-8111-111111111111",
+    }).catch(error => error)],
+    then: ["no pane is killed", (error, fx) => {
+      expect(error.message).toContain("persisted session changed"); expect(fx.respawns).toEqual([]);
+    }],
+  });
   component("a progressing large Claude resume is not cut off at the old 30 second wrapper timeout", {
     given: ["a replay that keeps painting until its composer appears after 35 seconds", () => {
       let clock = 0;

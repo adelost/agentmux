@@ -3,6 +3,9 @@
 `amux` is the command-line interface for controlling agentmux sessions. `ax` is
 installed as a shorter alias for the same binary.
 
+Subscription status, isolated login and explicit account switching are in
+[the account profile guide](accounts.md).
+
 ## Session Overview
 
 ```bash

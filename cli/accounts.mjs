@@ -21,6 +21,7 @@ export async function runQuotaCommand(args, {
   readSnapshot = readQuotaSnapshot,
   output = console.log,
 } = {}) {
+  if (args.length === 1 && ["--help", "-h"].includes(args[0])) { output(usage); return { help: true }; }
   const allowed = new Set(["--all", "--json"]);
   const invalid = args.find((arg) => !allowed.has(arg));
   if (invalid) throw new Error(`unknown quota option: ${invalid}`);
@@ -41,6 +42,7 @@ export async function cmdAccounts(args, ctxOrOptions = null, suppliedOptions = {
     prepare = prepareRuntimeProfile,
     rotate = rotateClaudeFleet,
   } = options;
+  if (args.length === 1 && ["--help", "-h"].includes(args[0])) { output(usage); return { help: true }; }
   if (!args.length || args[0] === "status" || args[0] === "list") {
     return runQuotaCommand([], { readSnapshot, output });
   }

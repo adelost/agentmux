@@ -1,5 +1,8 @@
 import { expect, feature, unit } from "bdd-vitest";
-import { vi } from "vitest";
+import { afterEach, vi } from "vitest";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { rotateClaudeFleet } from "./account-rotation.mjs";
 import {
   beginRuntimeProfileTransition,
@@ -10,8 +13,16 @@ const catalog = [
   { provider: "claude", id: "1", key: "claude:1", home: "/profiles/one" },
   { provider: "claude", id: "2", key: "claude:2", home: "/profiles/two" },
 ];
+const roots = [];
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 function fixture({ busy = false, restart = async () => ({ ok: true }) } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "amux-rotation-"));
+  roots.push(root);
+  const cwd = join(root, ".agents/0"), sessionId = "11111111-1111-4111-8111-111111111111";
+  mkdirSync(cwd, { recursive: true });
+  const path = join(root, `${sessionId}.jsonl`);
+  writeFileSync(path, `${JSON.stringify({ type: "user", sessionId, cwd })}\n`);
   const values = {};
   const state = {
     get: (key, fallback) => values[key] ?? fallback,
@@ -51,25 +62,24 @@ function fixture({ busy = false, restart = async () => ({ ok: true }) } = {}) {
     agents,
     catalog,
     authenticated: () => true,
-    prepare: () => {},
+    prepare: vi.fn(),
+    access: vi.fn(async () => ({ ok: true })),
     compact,
-    latestIdentity: () => ({
-      sessionId: "11111111-1111-4111-8111-111111111111",
-    }),
+    latestIdentity: () => ({ sessionId, cwd, path }),
     output: (line) => output.push(line),
     setExitCode: () => {},
   };
-  return { ctx, deps, state, agents, compact, output, releases };
+  return { ctx, deps, state, agents, compact, output, releases, path };
 }
 
 feature("Claude fleet account rotation", () => {
-  unit("compacts and restarts only the running pane while selecting sleepers", {
+  unit("restarts only the running pane without a source model turn while selecting sleepers", {
     given: ["one idle running pane and one sleeping pane", () => fixture()],
     when: ["rotating to profile 2", (ctx) =>
       rotateClaudeFleet(ctx.ctx, "2", {}, ctx.deps)],
-    then: ["both selections change but only live work is compacted", (result, ctx) => {
+    then: ["both selections change without any compaction", (result, ctx) => {
       expect(result.status).toBe("RECOVERED");
-      expect(ctx.compact).toHaveBeenCalledTimes(1);
+      expect(ctx.compact).not.toHaveBeenCalled();
       expect(result.rows.map((row) => row.status)).toEqual([
         "switched",
         "selected-for-next-wake",
@@ -96,6 +106,7 @@ feature("Claude fleet account rotation", () => {
       expect(result.status).toBe("BLOCKED");
       expect(result.reason).toBe("preflight-failed");
       expect(ctx.compact).not.toHaveBeenCalled();
+      expect(ctx.deps.prepare).not.toHaveBeenCalled();
       expect(ctx.state.get("account_profile_by_pane_v1", {})).toEqual({});
     }],
   });
@@ -107,11 +118,59 @@ feature("Claude fleet account rotation", () => {
     then: ["the result describes both actions without performing them", (result, ctx) => {
       expect(result.status).toBe("DRY-RUN");
       expect(ctx.compact).not.toHaveBeenCalled();
+      expect(ctx.deps.prepare).not.toHaveBeenCalled();
       expect(ctx.state.get("account_profile_by_pane_v1", {})).toEqual({});
       expect(result.rows.map((row) => row.status)).toEqual([
         "would-running",
         "would-dormant",
       ]);
+    }],
+  });
+
+  unit("source subscription exhaustion cannot deadlock rotation", {
+    given: ["a source account on which every model call fails", () => {
+      const fx = fixture();
+      fx.deps.compact = vi.fn(async () => { throw new Error("source-quota-exhausted"); });
+      return fx;
+    }],
+    when: ["switching to an accessible target", fx => rotateClaudeFleet(fx.ctx, "2", {}, fx.deps)],
+    then: ["exact resume succeeds without calling the source model", (result, fx) => {
+      expect(result.status).toBe("RECOVERED"); expect(fx.deps.compact).not.toHaveBeenCalled();
+    }],
+  });
+
+  unit("provider-disabled target blocks before any process or profile mutation", {
+    given: ["a target with credential files but no subscription access", () => {
+      const fx = fixture(); fx.deps.access = async () => ({ ok: false, error: "http_403" });
+      fx.ctx.agent.restartClaudeAccount = vi.fn(); return fx;
+    }],
+    when: ["requesting rotation", fx => rotateClaudeFleet(fx.ctx, "2", {}, fx.deps)],
+    then: ["authentication failure stays explicit", (result, fx) => {
+      expect(result.reason).toBe("target-access-unverified:http_403");
+      expect(fx.deps.prepare).not.toHaveBeenCalled(); expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
+    }],
+  });
+
+  unit("a journal append during preflight prevents that pane restart", {
+    given: ["a new turn appearing after the first observation", () => {
+      const fx = fixture(); fx.deps.prepare = () => appendFileSync(fx.path, '{"type":"user"}\n');
+      fx.ctx.agent.restartClaudeAccount = vi.fn(); return fx;
+    }],
+    when: ["requesting rotation", fx => rotateClaudeFleet(fx.ctx, "2", {}, fx.deps)],
+    then: ["the changed session is not killed", (result, fx) => {
+      expect(result.status).toBe("BLOCKED"); expect(result.rows[0].reason).toBe("rotation-session-changed");
+      expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
+    }],
+  });
+
+  unit("incomplete journal tails never authorize a restart", {
+    given: ["a torn final JSONL row", () => {
+      const fx = fixture(); appendFileSync(fx.path, '{"type":'); fx.ctx.agent.restartClaudeAccount = vi.fn(); return fx;
+    }],
+    when: ["requesting rotation", fx => rotateClaudeFleet(fx.ctx, "2", {}, fx.deps)],
+    then: ["the transcript is not treated as durable continuity", (result, fx) => {
+      expect(result.rows[0].reason).toBe("rotation-journal-incomplete");
+      expect(fx.ctx.agent.restartClaudeAccount).not.toHaveBeenCalled();
     }],
   });
 
