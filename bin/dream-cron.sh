@@ -18,8 +18,14 @@ if [ -z "${OPENCLAW_WORKSPACE:-}" ] && [ -f "$HOME/.agentmux/.env" ]; then
   OPENCLAW_WORKSPACE="$(sed -n 's/^OPENCLAW_WORKSPACE=//p' "$HOME/.agentmux/.env" | tail -1)"
 fi
 AMUX_WORKSPACE="${OPENCLAW_WORKSPACE:-${AMUX_WORKSPACE:-$HOME/.agentmux/workspace}}"
+export AMUX_WORKSPACE
 AGENTMUX_DREAM_LOG="${AGENTMUX_DREAM_LOG:-$HOME/.cache/agentmux-dream.log}"
 mkdir -p "$(dirname "$AGENTMUX_DREAM_LOG")"
+
+# One durable scheduled attempt; the child below retains the existing runner.
+if [ "${1:-}" != "--run-scheduled" ]; then
+  exec "$NODE_BIN" "$AGENTMUX_DIR/bin/dream-schedule.mjs" "$@"
+fi
 
 finalize() {
   local status=$?
@@ -40,16 +46,17 @@ finalize() {
 trap finalize EXIT
 
 dream_status=0
-dream_output="$("$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" dream --quiet --workspace "$AMUX_WORKSPACE" 2>&1)" || dream_status=$?
+dream_output="$("$NODE_BIN" "$AGENTMUX_DIR/bin/agent-cli.mjs" dream --quiet --workspace "$AMUX_WORKSPACE" --since "${AMUX_SCHEDULED_DREAM_SINCE:-24h}" 2>&1)" || dream_status=$?
 if [ -n "$dream_output" ]; then
   printf "%s\n" "$dream_output" >> "$AGENTMUX_DREAM_LOG"
 fi
 if printf "%s\n" "$dream_output" | grep -q "^Dream skipped: lock-held"; then
   printf "%s OK amux dream skipped; another run holds the lock\n" "$(date -Is)" >> "$AGENTMUX_DREAM_LOG"
+  trap - EXIT
   exit 0
 fi
 
-date_key="$(TZ=Europe/Stockholm date +%F)"
+date_key="${AMUX_SCHEDULED_DREAM_DATE:-$(TZ=Europe/Stockholm date +%F)}"
 daily_file="$AMUX_WORKSPACE/memory/$date_key.md"
 
 # Judge the run by its own exit status BEFORE asserting on the daily file. The
@@ -60,6 +67,8 @@ if [ "$dream_status" -ne 0 ]; then
   printf "%s ERROR dream pass exit=%s\n" "$(date -Is)" "$dream_status" >> "$AGENTMUX_DREAM_LOG"
   if grep -q "<!-- amux-dream-failed:$date_key " "$daily_file" 2>/dev/null; then
     printf "%s OK gap recorded in %s\n" "$(date -Is)" "$daily_file" >> "$AGENTMUX_DREAM_LOG"
+  elif grep -q "<!-- amux-dream-run:$date_key " "$daily_file" 2>/dev/null; then
+    printf "%s WARN run marker present; overall pass failed. Inspect nightly compact and the schedule receipt.\n" "$(date -Is)" >> "$AGENTMUX_DREAM_LOG"
   else
     printf "%s ERROR dream failed and left NO gap marker in %s\n" "$(date -Is)" "$daily_file" >> "$AGENTMUX_DREAM_LOG"
   fi

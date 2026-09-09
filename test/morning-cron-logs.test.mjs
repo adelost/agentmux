@@ -30,7 +30,7 @@ describe("cron scripts never write logs to the HOME root", () => {
   beforeEach(() => { fx = setup(); });
   afterEach(() => { rmSync(fx.home, { recursive: true, force: true }); });
 
-  const run = (script, extraEnv = {}) => spawnSync("bash", [join(REPO, "bin", script)], {
+  const run = (script, extraEnv = {}) => spawnSync("bash", [join(REPO, "bin", script), ...(script === "dream-cron.sh" ? ["--run-scheduled"] : [])], {
     encoding: "utf-8",
     env: { PATH: "/usr/bin:/bin", HOME: fx.home, NODE_BIN: fx.node, ...extraEnv },
   });
