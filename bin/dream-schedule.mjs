@@ -3,8 +3,10 @@ import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runScheduledDream } from "../core/dream-schedule.mjs";
+import { loadRuntimeEnv } from "../core/runtime-env.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
+loadRuntimeEnv({ packageRoot: root });
 try {
   const args = process.argv.slice(2);
   if (args.some((arg) => !["--catch-up", "--dry"].includes(arg))) throw new Error("Usage: dream-cron.sh [--catch-up] [--dry]");

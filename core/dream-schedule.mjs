@@ -57,7 +57,7 @@ export function claimScheduledDream(workspace, dateKey, { home = process.env.HOM
   return { path, record };
 }
 
-/** WHAT: Runs at most one automatic attempt per scheduled day. WHY: Prevents quota loops and duplicate prompts across cron races, restarts and failed attempts. */
+/** WHAT: Schedules at most one automatic attempt per day. WHY: Prevents quota loops and duplicate prompts across cron races, restarts and failed attempts. */
 export async function runScheduledDream({ workspace, home = process.env.HOME, now = new Date(), dry = false,
   mode = "scheduled", healthOptions = {}, observe = observeDreamHealth, run,
 }) {

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { acquireDreamLock } from "../core/dream-lock.mjs";
@@ -15,6 +16,21 @@ function environment(key, value) {
 afterEach(() => { for (const fn of restore.splice(0).reverse()) fn(); for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }); });
 
 describe("actual Dream scheduling seam", () => {
+  it("loads the configured runtime path under the actual minimal cron environment", () => {
+    const home = mkdtempSync(join(tmpdir(), "dream-cron-env-")); roots.push(home);
+    const workspace = join(home, "workspace"); mkdirSync(workspace);
+    mkdirSync(join(home, ".agentmux")); mkdirSync(join(home, ".local/bin"), { recursive: true });
+    const config = join(home, "generated.yaml");
+    writeFileSync(config, "dream: {agent: test, pane: 0}\n");
+    writeFileSync(join(home, ".agentmux/.env"), `AGENTS_YAML=${config}\nOPENCLAW_WORKSPACE=${workspace}\n`);
+    writeFileSync(join(home, ".local/bin/crontab"), "#!/bin/sh\nprintf 'CRON_TZ=Europe/Stockholm\\n0 0 * * * /fake/dream-cron.sh\\n'\n", { mode: 0o755 });
+    const result = spawnSync("/bin/bash", [new URL("../bin/dream-catchup.sh", import.meta.url).pathname, "--dry"], {
+      env: { HOME: home, PATH: "/usr/bin:/bin", NODE_BIN: process.execPath }, encoding: "utf8",
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).due).toBe(true);
+    expect(readdirSync(workspace)).toEqual([]);
+  });
   it("does not collect stale sources while another controller owns the lock", async () => {
     const home = mkdtempSync(join(tmpdir(), "dream-lock-source-")); roots.push(home); environment("HOME", home);
     environment("AMUX_JANITOR_ENABLED", "false");
