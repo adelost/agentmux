@@ -7,6 +7,7 @@ import { loadConfig } from "../cli/config.mjs";
 import { defaultWorkspace, runtimeAgentsPath } from "./runtime-defaults.mjs";
 import { localDateKey } from "./memory-policy.mjs";
 import { readDreamOwnerResult } from "./dream-owner.mjs";
+import { dreamSnapshotReference, verifyDreamSnapshot } from "./dream-snapshot.mjs";
 
 const result = (state, detail, extra = {}) => ({ state, status: state === "warn" ? "warn" : "ok", detail, ...extra });
 
@@ -77,7 +78,9 @@ export function readDreamSuccess(workspace, dateKey, { home, now = new Date(), d
   const end = text.indexOf(`<!-- /amux-dream-summary:${dateKey} -->`, start);
   if (start < 0 || end < start) return { ok: false, reason: "committed summary block missing" };
   const block = text.slice(start, end);
-  const receipt = block.match(/ · run `([0-9a-f-]{36})` · source `([0-9a-f]{64})`\./);
+  const snapshot = dreamSnapshotReference(block, dateKey);
+  const receipt = snapshot ? [null, snapshot.runId, snapshot.sourceSha]
+    : block.match(/ · run `([0-9a-f-]{36})` · source `([0-9a-f]{64})`\./);
   if (!receipt) return { ok: false, reason: "summary run/source receipt missing" };
   try {
     const path = join(home, ".agentmux", "dream-input", `${dateKey}-${receipt[1]}`);
@@ -87,7 +90,13 @@ export function readDreamSuccess(workspace, dateKey, { home, now = new Date(), d
       return { ok: false, reason: "input identity/date mismatch" };
     }
     const product = readDreamOwnerResult(`${path}.summary.md`, dateKey, receipt[1], input.owner, receipt[2]);
-    if (!product.ok || !block.includes(product.content)) return { ok: false, reason: product.reason || "committed product mismatch" };
+    if (!product.ok) return { ok: false, reason: product.reason };
+    if (snapshot) {
+      const snapshotPath = verifyDreamSnapshot(workspace, dateKey, snapshot, product.content);
+      return snapshotPath ? { ok: true, time: run[2], runId: receipt[1], panes: +run[3], snapshotPath }
+        : { ok: false, reason: "committed snapshot mismatch" };
+    }
+    if (!block.includes(product.content)) return { ok: false, reason: "committed product mismatch" };
     return { ok: true, time: run[2], runId: receipt[1], panes: +run[3] };
   } catch (error) { return { ok: false, reason: `result artifacts unreadable: ${error.code || error.message}` }; }
 }

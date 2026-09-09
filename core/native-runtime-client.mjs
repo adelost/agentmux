@@ -8,6 +8,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, extname } from "node:path";
 import { loadConfig } from "../cli/config.mjs";
 import { unparkPane } from "./pane-park.mjs";
+import { contextShape, readNativeHistory, responseSegments } from "./native-runtime-observation.mjs";
 
 const DEFAULT_RUNTIME_URL = "http://127.0.0.1:8811";
 const ATTACHMENT_PATTERN = /\[(image|file) attached:\s+([^\]\n]+)\]/gi;
@@ -36,35 +37,6 @@ function paneEngine(pane) {
   if (["claude", "codex"].includes(pane?.engine)) return pane.engine;
   const match = String(pane?.cmd || "").match(NATIVE_COMMAND);
   return match?.[1]?.toLowerCase() ?? null;
-}
-
-function contextShape(context) {
-  if (!context || !Number.isFinite(context.percent)) return null;
-  return {
-    percent: Math.round(context.percent),
-    tokens: Number.isFinite(context.usedTokens) ? context.usedTokens : null,
-    model: context.model ?? null,
-    effort: context.effort ?? null,
-    source: "native-runtime",
-  };
-}
-
-function responseSegments(events = []) {
-  let current = [];
-  let latest = [];
-  for (const event of events) {
-    if (event?.type === "web" && event.subtype === "user") current = [];
-    if (event?.type === "assistant") {
-      const text = (Array.isArray(event.message?.content) ? event.message.content : [])
-        .filter((item) => typeof item?.text === "string"
-          && ["text", "input_text", "output_text"].includes(item.type))
-        .map((item) => item.text.trim())
-        .filter(Boolean);
-      current.push(...text);
-    }
-    if (event?.type === "web" && event.subtype === "turn-done") latest = [...current];
-  }
-  return current.length ? current : latest;
 }
 
 /**
@@ -438,15 +410,9 @@ export function createNativeRuntimeClient({
   }
 
   async function history(name, pane = 0) {
-    let resolved = await ensureTarget(name, pane);
-    try {
-      return await api(resolved.runtimeUrl, `/api/agents/${resolved.agent.id}/history`);
-    } catch (error) {
-      if (error.status !== 404) throw error;
-      targetCache.delete(`${name}:${Number(pane)}`);
-      resolved = await ensureTarget(name, pane);
-      return api(resolved.runtimeUrl, `/api/agents/${resolved.agent.id}/history`);
-    }
+    const spec = target(name, pane, { strict: true });
+    if (!spec) throw new NativeRuntimeError(`${name}:${pane} is not native`, { code: "not-native" });
+    return readNativeHistory(spec, api, NativeRuntimeError);
   }
 
   async function getContext(name, pane = 0) {

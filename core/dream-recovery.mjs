@@ -50,7 +50,8 @@ export async function recoverDreamRun(ctx, flags, { commit, getQuality = readDre
         || !quality?.effort || quality.effort.toLowerCase() === "low") throw new Error("dream-recovery-session-quality-mismatch");
   };
   await verifySession();
-  const input = { path, outputPath: path.replace(/\.json$/u, ".summary.md"), runId, sha256, bytes: bytes.length };
+  const input = { path, outputPath: path.replace(/\.json$/u, ".summary.md"), runId, sha256, bytes: bytes.length,
+    memoryFormat: document.memoryFormat };
   const previous = new Date(`${dateKey}T12:00:00Z`);
   previous.setUTCDate(previous.getUTCDate() - 1);
   const prompt = dreamOwnerPrompt({ owner, input, memPath,

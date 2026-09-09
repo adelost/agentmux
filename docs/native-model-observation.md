@@ -54,4 +54,11 @@ session, infer a fleet default, or create another cache/poller.
 
 The runtime registry persists requested settings, the latest observation, and the guard. `agents.yaml` supplies model/effort only when a native agent is first provisioned; a bridge restart must not rewind a manual mid-conversation switch.
 
+History, context, busy-state and delivery-receipt reads only observe existing
+targets. They resolve the exact configured native ID or unique pane address,
+check project/engine identity and fence the session across the history read.
+They never create/adopt an agent, change its permissions/model/effort or repair
+a 404 through provisioning. Missing, ambiguous or changing targets stay explicit
+errors. Provisioning remains confined to explicit readiness/delivery paths.
+
 Each turn snapshots model and effort before asynchronous engine initialization. A setting changed during an active turn therefore applies deterministically to the following turn for both Claude and Codex.
