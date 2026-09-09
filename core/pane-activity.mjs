@@ -20,10 +20,26 @@ const DEFAULT_READERS = Object.freeze({
   kimi: readLastTurnsKimi,
 });
 
+function journalStamp(stat, path) {
+  const value = stat(path);
+  return [value.dev, value.ino, value.size, value.mtimeMs].join(":");
+}
+
+function recoverColdCodexTurn(reader, paneDir, path, stat) {
+  if (!path) return null;
+  try {
+    const before = journalStamp(stat, path);
+    const result = reader(paneDir, { limit: 1, dreamHistory: true });
+    if (result?.jsonlFile !== path || journalStamp(stat, path) !== before) return null;
+    return result?.turns?.at(-1) || null;
+  } catch { return null; } // exhausted/unreadable history does not authorize maintenance
+}
+
 /** WHAT: Returns the newest real conversational turn. WHY: Keeps journal maintenance writes from posing as operator activity. */
 export function latestConversationActivityMs(paneDir, dialect, {
   readers = DEFAULT_READERS,
   stat = statSync,
+  recoverCodexHistory = false,
 } = {}) {
   const reader = readers[dialect];
   if (typeof reader !== "function") return null;
@@ -38,6 +54,13 @@ export function latestConversationActivityMs(paneDir, dialect, {
     if (newest || !result) break;
   }
   if (!result) return null;
+
+  // Nightly maintenance is a cold path. Reuse Dream's bounded streaming reader
+  // when a large compact hides authored activity; normal polling stays <=1 MiB.
+  if (!newest && dialect === "codex" && recoverCodexHistory) {
+    newest = recoverColdCodexTurn(reader, paneDir, result.jsonlFile, stat);
+    if (!newest) return null;
+  }
 
   const turnMs = newest?.timestamp ? Date.parse(newest.timestamp) : NaN;
   let fileMtimeMs = NaN;

@@ -8,6 +8,8 @@ import { latestCodexSessionIdentity, readLastTurnsCodex } from "./codex-jsonl-re
 import { latestKimiSessionIdentity, readLastTurnsKimi } from "./kimi-jsonl-reader.mjs";
 import { isWorkDirective } from "./system-noise.mjs";
 import { createDeliveryQueue } from "./delivery-queue.mjs";
+import { hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
+import { codexUserPrompt } from "./codex-user-events.mjs";
 
 const READERS = {
   codex: { identity: latestCodexSessionIdentity, read: readLastTurnsCodex },
@@ -15,6 +17,30 @@ const READERS = {
 };
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const IDLE_MS = 30 * 60_000;
+
+function sameSession(left, right) {
+  return Boolean(left?.sessionId && left.sessionId === right?.sessionId && left.path === right.path);
+}
+
+function receivedInNewCodexSession(job, dir, session) {
+  const context = job.metadata?.memoryContext;
+  const cursor = job.echoCursor;
+  const start = Number(job.echoNotBeforeMs), end = Number(job.acknowledgedAt);
+  // /new creates its rollout lazily. Preparation can still name the old file;
+  // only an acknowledged exact event in the actual new file can bridge it.
+  if (context?.engine !== "codex" || job.kind !== "prompt" || job.status !== "acknowledged"
+      || context.sessionId === session.sessionId || context.sessionPath === session.path
+      || cursor?.kind !== "codex-prompt-events-v1"
+      || !Number.isFinite(cursor.positions?.[context.sessionPath])
+      || !Number.isFinite(start) || start <= 0 || !Number.isFinite(end) || end < start
+      || !sameSession(session, latestCodexSessionIdentity(dir))) return false;
+  const received = hasJsonlEventAfterCursor([session.path], cursor, (event) => {
+    const at = Date.parse(event.timestamp || "");
+    // Same-host pre-paste/ACK bounds also reject old events copied by resume.
+    return at >= start && at <= end && codexUserPrompt(event) === job.text?.trim();
+  });
+  return received && sameSession(session, latestCodexSessionIdentity(dir));
+}
 
 /** WHAT: Returns the exact submitted receipt text. WHY: Keeps original ask bytes separate from an augmented physical payload without weakening equality. */
 export function deliveryMemoryReceiptText(job) {
@@ -33,11 +59,11 @@ export function resolveMemoryResponsePrompt({
     const jobs = (queue || createDeliveryQueue({ initialize: false })).list(agentName, pane);
     const match = jobs.filter((job) => {
       const context = job.metadata?.memoryContext;
-      return context?.hinted && context.sessionId === session.sessionId
-        && context.sessionPath === session.path
-        && job.verifyText?.trim() === promptText.trim();
+      if (!context?.hinted || job.verifyText?.trim() !== promptText.trim()) return false;
+      return (context.sessionId === session.sessionId && context.sessionPath === session.path)
+        || (dialect === "codex" && receivedInNewCodexSession(job, dir, session));
     }).sort((a, b) => b.createdAt - a.createdAt)[0];
-    return match?.text || promptText;
+    return sameSession(session, identity(dir)) ? match?.text || promptText : promptText;
   } catch { return promptText; }
 }
 

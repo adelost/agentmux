@@ -46,6 +46,11 @@ configured owner exact /compact
 
 The cron wrapper remains a thin heartbeat entrypoint. It alerts on failure and
 never changes the chosen pane, model or effort.
+The nightly compact idle check uses the existing bounded Dream history reader
+when Codex compact records hide the last authored turn from the small tail.
+It verifies an unchanged journal stamp and exact source path; exhausted,
+unreadable or changing history stays unknown. Regular polling does not acquire
+this larger cold-path scan, and the 80k/idle/once-per-night rules do not change.
 The guarded ten-minute missed-night trigger and durable attempt semantics are
 documented in [Dream policy](DREAM-POLICY.md#missed-schedule-after-downtime).
 
@@ -114,6 +119,13 @@ The delivery pointer is at most 512 bytes; the CLI's reference card is at most
 2 KiB. No diary contents are attached. Keeping the prompt itself smaller matters:
 native Codex compaction can retain historical user messages rather than replacing
 all of them with a summary. Detailed retrieval belongs in tool output, on demand.
+
+Codex can create a `/new` rollout only when its first prompt arrives, after
+orientation was prepared against the previous saved session. Response lookup may
+bridge those identities only with an acknowledged exact physical prompt in the
+current pane-owned rollout, after the stored append cursor and within the same-host
+pre-paste/acknowledgement interval. Copied old events and changing identities do
+not qualify. This does not resend anything or rewrite the original receipt.
 
 Direct terminal typing in Codex/Kimi bypasses the AMUX broker: use the existing
 `amux memory context` entry then. Native runtime next-turn injection is not wired
