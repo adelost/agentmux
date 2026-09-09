@@ -110,9 +110,13 @@ attempt and its exit status. A saved digest with an unsuccessful 80k pass is
 `maintenance-unresolved`, not a successful whole night. A crash leaves the
 intent in place. No automatic quota retries or intent deletion are allowed.
 Prepared input, partial result or a prior failure requires inspection of that
-exact run. Existing recovery can finish a completed curator before the first
-memory commit; a crash partway through block/cursor/sentinel writes can still
-require manual reconciliation and must not start a new curator to hide it.
+exact run. New runs persist a controller commit intent after exact terminal
+proof, before daily memory changes. Recovery can finish block/cursor/sentinel
+writes without contacting the curator again. The existing block and snapshot
+must match exactly; later notes outside the block are preserved. Missing old
+commit intents still require the original session proof and pre-write hash.
+Health exposes digest validation and the scheduled maintenance outcome
+separately. A saved digest never clears an unresolved compact pass.
 
 ## Finish an interrupted controller without another model turn
 
@@ -128,7 +132,8 @@ and receipt path. It never starts a pane, compacts, sends a prompt, runs nightly
 maintenance or buys another model turn. It requires the original input hash,
 same configured owner/session/model/effort, valid isolated output, exact final
 journal reply to the original prompt, idle completion and unchanged daily
-memory. A newer activity receipt blocks recovery; a validated same-run result
+memory, unless a durable controller commit intent already proves completion.
+A newer activity receipt blocks recovery; a validated same-run result
 is already complete and is not written again.
 
 New input packets pin the original workspace and pre-run daily-memory SHA.

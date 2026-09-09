@@ -1,5 +1,5 @@
 // Scheduling admission only. The existing Dream controller owns all model work.
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync,
   readdirSync, realpathSync, renameSync, writeFileSync,
@@ -7,6 +7,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { observeDreamHealth, readDreamSuccess } from "./dream-health.mjs";
 import { localDateKey } from "./memory-policy.mjs";
+import { dreamAttemptPath } from "./dream-schedule-state.mjs";
 
 /** WHAT: Checks already completed or uncertain work. WHY: Prevents a missed cron check from resending an existing manual or interrupted run. */
 export function scheduledDreamEvidence(workspace, dateKey, { home = process.env.HOME, now = new Date() } = {}) {
@@ -28,11 +29,6 @@ export function scheduledDreamEvidence(workspace, dateKey, { home = process.env.
   return null;
 }
 
-function attemptFile(workspace, home, dateKey) {
-  const key = createHash("sha256").update(realpathSync(workspace)).digest("hex").slice(0, 24);
-  return join(home, ".agentmux", "dream-schedule", key, `${dateKey}.json`);
-}
-
 /** WHAT: Stores the scheduled attempt inside the controller lock. WHY: Prevents lock contention from consuming a night without an actual admitted attempt. */
 export function claimScheduledDream(workspace, dateKey, { home = process.env.HOME, now = new Date(),
   token, mode, since,
@@ -40,7 +36,7 @@ export function claimScheduledDream(workspace, dateKey, { home = process.env.HOM
   if (!token || dateKey !== localDateKey(now)) throw new Error("scheduled-dream-identity-invalid");
   const prior = scheduledDreamEvidence(workspace, dateKey, { home, now });
   if (prior) return { skipped: prior };
-  const path = attemptFile(workspace, home, dateKey);
+  const path = dreamAttemptPath(workspace, home, dateKey);
   const record = { schemaVersion: 1, dateKey, workspace: realpathSync(workspace), mode, token,
     since, startedAt: now.toISOString(), pid: process.pid, state: "started" };
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -68,7 +64,7 @@ export async function runScheduledDream({ workspace, home = process.env.HOME, no
   const dateKey = health.dateKey;
   const prior = scheduledDreamEvidence(workspace, dateKey, { home, now });
   if (prior) return { skipped: prior, dateKey };
-  const path = attemptFile(workspace, home, dateKey);
+  const path = dreamAttemptPath(workspace, home, dateKey);
   if (existsSync(path)) return { skipped: "already-attempted", dateKey, path };
   // Anchor the source window to the missed invocation, not the late wake-up.
   const since = new Date(health.startMs - 86_400_000).toISOString();

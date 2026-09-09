@@ -9,6 +9,7 @@ import { dreamOwnerPrompt, readDreamOwnerQuality, resolveDreamCandidates } from 
 import { defaultDreamReceiptPath, isDreamActivityTurn, readDreamReceipts } from "./dream-eligibility.mjs";
 import { readDreamSuccess } from "./dream-health.mjs";
 import { waitForDreamOwnerResult } from "./dream-result.mjs";
+import { resumeDreamCommit } from "./dream-commit.mjs";
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -38,6 +39,9 @@ export async function recoverDreamRun(ctx, flags, { commit, getQuality = readDre
   if (document.memoryBeforeSha256 && flags["memory-sha256"] && flags["memory-sha256"] !== document.memoryBeforeSha256) {
     throw new Error("dream-recovery-pre-run-memory-hash-mismatch");
   }
+  const resumed = resumeDreamCommit({ path, sha256, document, workspace, memPath, dateKey, runId,
+    expectedMemory, dry: !!flags.dry });
+  if (resumed) return resumed;
   const memoryBefore = readFileSync(memPath, "utf8");
   if (hash(memoryBefore) !== expectedMemory) throw new Error("dream-recovery-memory-changed");
   const owner = resolveDreamCandidates(loadConfig(ctx.configPath)).find(candidate =>
@@ -76,7 +80,7 @@ export async function recoverDreamRun(ctx, flags, { commit, getQuality = readDre
   await verifySession();
   if (hash(readFileSync(memPath)) !== expectedMemory) throw new Error("dream-recovery-memory-changed");
   if (!flags.dry) commit({ memPath, memoryBefore, product, dateKey, included, omitted: document.omitted,
-    receipts, receiptTargets, receiptPath, now });
+    receipts, receiptTargets, receiptPath, now, input, unreadable: document.unreadable });
   return { recovered: !flags.dry, dryRun: !!flags.dry, dateKey, runId, path: memPath,
     included: included.length, receipts: receiptTargets.length, unreadable: document.unreadable.length };
 }
