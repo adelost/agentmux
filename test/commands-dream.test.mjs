@@ -48,8 +48,8 @@ function ownerDependencies(fx, events = []) {
       return { ok: true, sessionId: "session-1", compactBoundary: true };
     },
     writeInput: () => ({
-      path: "/tmp/dream-input.json", outputPath: "/tmp/dream-output.md",
-      runId: "run-1", sha256: "a".repeat(64), bytes: 100,
+      path: join(fx.root, "dream-input.json"), outputPath: join(fx.root, "dream-output.md"),
+      runId: "bb6f9c40-0198-49d0-92ea-abba0ae509f5", sha256: "a".repeat(64), bytes: 100,
     }),
     mirrorPrompt: async () => {
       events.push("mirror");
@@ -112,7 +112,10 @@ feature("amux dream configured-pane orchestration", () => {
         recordReceipts: (_state, targets) => {
           events.push(`receipt:${targets.length}`);
           const path = join(fx.workspace, "memory", "2026-07-21.md");
-          expect(readFileSync(path, "utf8")).toContain("Fixen mergades");
+          const daily = readFileSync(path, "utf8");
+          const snapshot = daily.match(/\]\((dream\/[^)]+\.md)\)/u)?.[1];
+          expect(snapshot).toBeTruthy();
+          expect(readFileSync(join(fx.workspace, "memory", snapshot), "utf8")).toContain("Fixen mergades");
         },
       });
       return { fx, result, events };

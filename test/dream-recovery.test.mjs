@@ -12,7 +12,7 @@ const hash = value => createHash("sha256").update(value).digest("hex");
 const roots = [], oldHome = process.env.HOME;
 afterEach(() => { process.env.HOME = oldHome; for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-function fixture({ legacy = false } = {}) {
+function fixture({ legacy = false, memoryFormat } = {}) {
   const root = mkdtempSync(join(tmpdir(), "dream-recovery-"));
   roots.push(root); process.env.HOME = root;
   const workspace = join(root, "workspace"), dateKey = "2026-09-08";
@@ -24,7 +24,7 @@ function fixture({ legacy = false } = {}) {
   writeFileSync(configPath, JSON.stringify({ dream: { agent: "example", pane: 0 },
     example: { dir: workspace, panes: [{ engine: "codex" }] } }));
   const quality = { sessionId: "exact-session", model: "gpt-6-astra", effort: "xhigh" };
-  const document = { schemaVersion: 1, dateKey, createdAt: "2026-09-08T00:00:00Z",
+  const document = { schemaVersion: 1, memoryFormat, dateKey, createdAt: "2026-09-08T00:00:00Z",
     owner: { agent: "example", pane: 0, engine: "codex" }, compact: { ...quality, boundary: true },
     payload: { panes: [
       { pane: "source:2", turns: [{ user: "Fix the current bug", at: "2026-09-07T20:00:00Z" }] },
@@ -38,6 +38,8 @@ function fixture({ legacy = false } = {}) {
     isBusy: vi.fn(async () => false),
     getResponseStreamWithRaw: vi.fn(async (_a, _p, prompt) => {
       expect(prompt).toContain(input.path); expect(prompt).toContain(input.sha256);
+      if (memoryFormat === 2) expect(prompt).toContain("Följ även dagsfilernas relevanta Dream-länkar");
+      else expect(prompt).not.toContain("Följ även dagsfilernas relevanta Dream-länkar");
       return { source: "codex-jsonl", items: [
         { type: "text", content: "Working commentary" },
         { type: "text", content: `DREAM_OK ${dateKey} ${input.runId}` },
@@ -53,14 +55,16 @@ function fixture({ legacy = false } = {}) {
 }
 
 describe("no-model Dream completion", () => {
-  it("previews without writes, then commits the same product before only real-work cursors", async () => {
-    const fx = fixture();
+  it.each([undefined, 2])("previews and commits format %s using the original prompt and only real-work cursors", async (memoryFormat) => {
+    const fx = fixture({ memoryFormat });
     expect(await fx.run({ dry: true })).toMatchObject({ dryRun: true, included: 2, receipts: 1 });
     expect(fx.commit).not.toHaveBeenCalled();
     expect(readFileSync(fx.memPath, "utf8")).toBe(fx.memoryBefore);
     expect(await fx.run()).toMatchObject({ recovered: true, included: 2, receipts: 1 });
     expect(readFileSync(fx.memPath, "utf8")).toContain(fx.memoryBefore.trim());
-    expect(readFileSync(fx.memPath, "utf8")).toContain(fx.output.trim());
+    const snapshot = join(fx.root, "workspace", "memory", "dream", `2026-09-08-${fx.input.runId}.md`);
+    expect(readFileSync(snapshot, "utf8")).toContain(fx.output.trim());
+    expect(readFileSync(fx.memPath, "utf8")).toContain(`dream/2026-09-08-${fx.input.runId}.md`);
     expect(Object.keys(readDreamReceipts().panes)).toEqual(["source:2"]);
     expect(hash(readFileSync(fx.input.path))).toBe(fx.input.sha256);
     expect(readFileSync(fx.input.outputPath, "utf8")).toBe(fx.output);

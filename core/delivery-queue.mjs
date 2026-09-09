@@ -24,6 +24,7 @@ import { createHash, randomUUID } from "crypto";
 import { homedir } from "os";
 import { basename, dirname, join } from "path";
 import { appendAskLedger, captureDeliveryAsk, defaultAskLedgerPath } from "./ask-ledger.mjs";
+import { acquireFileLease } from "./file-lease.mjs";
 
 export * from "./delivery-queue-policy.mjs";
 import {
@@ -429,45 +430,10 @@ export function createDeliveryQueue({
     return restored;
   }
 
-  function acquireLease(path) {
-    const token = `${process.pid}:${uuid()}`;
-
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        writeFileSync(path, `${JSON.stringify({ pid: process.pid, token, acquiredAt: now() })}\n`, {
-          flag: "wx",
-          mode: 0o600,
-        });
-        return {
-          release() {
-            try {
-              const current = parseJson(path);
-              if (current.token === token) unlinkSync(path);
-            } catch {}
-          },
-        };
-      } catch (error) {
-        if (error?.code !== "EEXIST") throw error;
-        let owner = null;
-        try { owner = parseJson(path); } catch {}
-        let alive = false;
-        if (Number(owner?.pid) > 0) {
-          try { process.kill(Number(owner.pid), 0); alive = true; }
-          catch (probeError) { alive = probeError?.code === "EPERM"; }
-        }
-        if (alive) return null;
-        // A killed bridge cannot release its lease. Remove only a lock whose
-        // recorded owner is absent, then retry the atomic create once.
-        try { unlinkSync(path); } catch {}
-      }
-    }
-    return null;
-  }
-
   function acquireTargetLease(agentName, pane) {
     const dir = dirFor(agentName, pane);
     ensurePrivateDir(dir);
-    return acquireLease(join(dir, ".consumer.lock"));
+    return acquireFileLease(join(dir, ".consumer.lock"));
   }
 
   // All configured panes for one agent live in the same tmux window. Zoom is
@@ -475,7 +441,7 @@ export function createDeliveryQueue({
   // hide each other's composers. This lease makes the bridge single-writer
   // per tmux session, including across duplicate bridge processes.
   function acquireSessionLease(agentName) {
-    return acquireLease(join(rootDir, `.session-${encodeURIComponent(agentName)}.lock`));
+    return acquireFileLease(join(rootDir, `.session-${encodeURIComponent(agentName)}.lock`));
   }
 
   function prune({ acknowledgedOlderThanMs = 7 * 24 * 60 * 60 * 1000 } = {}) {

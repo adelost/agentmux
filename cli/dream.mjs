@@ -15,7 +15,7 @@ import {
   defaultDreamReceiptPath, readDreamReceipts, recordDreamReceipts,
 } from "../core/dream-eligibility.mjs";
 import {
-  buildDreamBatch, collectDreamSources, dreamSummaryBlock, upsertDreamSummary,
+  buildDreamBatch, collectDreamSources, upsertDreamSummary,
 } from "../core/dream-summarizer.mjs";
 import {
   dreamOwnerPrompt, readDreamOwnerQuality, resolveDreamCandidates,
@@ -28,6 +28,7 @@ import { waitForDreamOwnerResult } from "../core/dream-result.mjs";
 import { recoverDreamRun } from "../core/dream-recovery.mjs";
 import { acquireDreamLock } from "../core/dream-lock.mjs";
 import { claimScheduledDream } from "../core/dream-schedule.mjs";
+import { publishDreamSnapshot } from "../core/dream-snapshot.mjs";
 export { isPidAlive } from "../core/dream-lock.mjs";
 export { waitForDreamOwnerResult } from "../core/dream-result.mjs";
 
@@ -117,8 +118,9 @@ function previousDateKey(dateKey) {
 export function commitDreamProduct({ memPath, memoryBefore, product, dateKey, included, omitted,
   receipts, receiptTargets = included, receiptPath, now, recordReceipts = recordDreamReceipts }) {
   if (readFileSync(memPath, "utf8") !== memoryBefore) throw new Error("dream-owner-touched-memory-before-controller-commit");
-  const block = dreamSummaryBlock(product.content, dateKey, included, omitted);
-  atomicWrite(memPath, upsertDreamSummary(memoryBefore, dateKey, block));
+  const snapshot = publishDreamSnapshot(memPath, product.content, dateKey, included, omitted);
+  if (readFileSync(memPath, "utf8") !== memoryBefore) throw new Error("dream-owner-touched-memory-before-controller-commit");
+  atomicWrite(memPath, upsertDreamSummary(memoryBefore, dateKey, snapshot.block));
   recordReceipts(receipts, receiptTargets, { path: receiptPath, dateKey, now });
 }
 
@@ -321,6 +323,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
       input: {
         path: "<durable-local-input>", outputPath: "<isolated-summary-output>",
         sha256: "<sha256>", bytes: 0, runId: "<run-id>",
+        memoryFormat: 2,
       },
       memPath,
       previousMemPath: join(workspaceDir, "memory", `${previousDateKey(dateKey)}.md`),
@@ -384,6 +387,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
     const memoryBefore = readFileSync(memPath, "utf8");
     const input = (dependencies.writeInput || writeDreamOwnerInput)({
       schemaVersion: 1,
+      memoryFormat: 2,
       dateKey,
       createdAt: now.toISOString(),
       workspace: workspaceDir,

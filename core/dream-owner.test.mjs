@@ -79,7 +79,7 @@ feature("configured Dream owner", () => {
   unit("banks exact local input and exposes the full memory-edit brief", {
     given: ["one temporary operator store", () => mkdtempSync(join(tmpdir(), "amux-dream-owner-"))],
     when: ["writing input and building the prompt", (root) => {
-      const input = writeDreamOwnerInput({ dateKey: "2026-08-01", payload: { panes: [] } }, {
+      const input = writeDreamOwnerInput({ dateKey: "2026-08-01", memoryFormat: 2, payload: { panes: [] } }, {
         rootDir: root, runId: "run-1",
       });
       const prompt = dreamOwnerPrompt({
@@ -95,6 +95,9 @@ feature("configured Dream owner", () => {
       expect(prompt).toContain(input.sha256);
       expect(prompt).toContain(input.outputPath);
       expect(prompt).toContain("Ändra INTE någon minnesfil");
+      expect(prompt).toContain("Följ även dagsfilernas relevanta Dream-länkar");
+      expect(prompt).toContain("När resultatfilen är durabelt skriven");
+      expect(input.memoryFormat).toBe(2);
       expect(prompt).toContain("DREAM_OK 2026-08-01 run-1");
       rmSync(root, { recursive: true, force: true });
     }],

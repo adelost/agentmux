@@ -64,10 +64,14 @@ the list exists to provide.
    not part of the final reply; a later action or screen-only match is not a
    completion receipt. Also prove today's memory remained
    byte-identical while the pane worked.
-9. The controller atomically inserts the validated summary into the one marked
-   Dream block. Only then are pane cursors advanced and the run sentinel added.
+9. The controller publishes the validated result without replacement as a
+   read-only `memory/dream/DATE-RUN.md` snapshot, then atomically inserts its
+   hash-bound link into the one marked daily Dream block. Only then are pane
+   cursors advanced and the run sentinel added. Later manual notes belong
+   outside that block; the verified product is never a live status scratchpad.
 
-Any failure leaves Dream receipts unchanged. `amux dream --dry` performs source
+Failure before commit leaves Dream receipts unchanged. Partial-commit recovery
+has the explicit boundary described below. `amux dream --dry` performs source
 collection and prints the exact visible prompt template, but does not compact,
 send, call a model, or write memory.
 
@@ -93,6 +97,13 @@ read after acquiring that lock. A missed attempt reads from 24 hours before
 the scheduled invocation, not 24 hours before a late startup. Only the current
 scheduled day is eligible; this is not an automatic rewrite of missed old days.
 All existing curator and idle/queue/quality/compact fences still apply.
+
+The controller and delivery queue share the same `flock`-backed lease primitive.
+Lease files retain their inode; process exit releases ownership without a stale
+reaper unlinking another process's lock. A live legacy PID holder blocks takeover.
+Linux/WSL needs the local `flock` utility; missing kernel-lock support fails closed.
+When upgrading an old unlink-based queue consumer, drain/restart that consumer
+before running the new one. Mixed old/new consumer protocols are not supported.
 
 `~/.agentmux/dream-schedule/<workspace-hash>/YYYY-MM-DD.json` preserves the
 attempt and its exit status. A saved digest with an unsuccessful 80k pass is

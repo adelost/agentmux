@@ -1,6 +1,6 @@
 # amux memory
 
-## Current design (2026-08-01)
+## Current design (2026-09-09)
 
 AMUX owns deterministic collection, bounds, receipts and atomic writes. One
 operator-selected AMUX pane owns the nightly editorial judgment. No hidden
@@ -39,7 +39,7 @@ visible until a similarly transparent, operator-owned curation flow exists.
 configured owner exact /compact
   -> visible Dream prompt
   -> isolated validated summary
-  -> controller-owned atomic daily block
+  -> immutable Markdown snapshot + atomic daily reference
   -> read-only memory lint
   -> incremental search reindex
 ```
@@ -63,6 +63,15 @@ validated artifact matching the committed summary; a controller's zero-work
 run is also valid. An older failure does not override a later validated success.
 These checks are offline/read-only: they never prompt a pane or rerun Dream.
 
+New runs store the exact verified result in `memory/dream/DATE-RUN.md`, linked
+from the daily Dream block. The snapshot is published without replacement,
+read-only, with its hash, run and source identity in the daily reference.
+Later notes and corrections belong in the editable daily file outside that
+block. They do not invalidate the original result or pretend to have been part
+of the night's source. Snapshot edits still fail verification. Existing inline
+Dream blocks retain their original strict verification until explicitly migrated;
+an edited legacy block must not be silently blessed or overwritten.
+
 ## Retrieval after startup or compaction
 
 `amux memory context` is a read-only entry for every CLI harness. It exposes
@@ -73,6 +82,10 @@ File availability and digest validation are reported separately. The digest
 field reuses the existing controller-artifact verifier; a file or copied success
 marker alone is not a validated run. Even a valid bounded digest is not proof
 that every fact reached a long-term note.
+Verified snapshot paths appear in this same bounded reference card. Normal
+memory search includes the Markdown snapshots; they are not a second database.
+New Dream prompts explicitly follow relevant daily Dream links and later
+corrections. Old run recovery preserves the original prompt bytes.
 
 When recovery establishes a material correction, the active agent saves it in
 the existing topic note when authorized, with its event date and original source.
