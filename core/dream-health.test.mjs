@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { dreamAttemptPath } from "./dream-schedule-state.mjs";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { parseDreamSchedule, dreamDeadline, readDreamSuccess, observeDreamHealth } from "./dream-health.mjs";
@@ -33,6 +34,16 @@ function success(fx) {
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("on-demand Dream deadline and artifact guard", () => {
+  it.each(["maintenance-unresolved", "started"])("keeps a validated digest separate from %s nightly maintenance", state => {
+    const fx = fixture(); success(fx);
+    const path = dreamAttemptPath(fx.workspace, fx.home, "2026-09-05");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ schemaVersion: 1, workspace: fx.workspace, dateKey: "2026-09-05", state, exitCode: 1 }));
+    const health = observeDreamHealth(fx.workspace, fx.options);
+    expect(health.success.ok).toBe(true);
+    expect(health.status).toBe("warn");
+    expect(health.detail).toContain(`maintenance ${state}`);
+  });
   it("warns about a missing run without needing a failure marker", () => {
     const fx = fixture(), health = observeDreamHealth(fx.workspace, fx.options);
     expect(health.status).toBe("warn"); expect(health.detail).toContain("missing/stale");

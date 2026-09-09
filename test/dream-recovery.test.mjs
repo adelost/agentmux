@@ -55,6 +55,42 @@ function fixture({ legacy = false, memoryFormat } = {}) {
 }
 
 describe("no-model Dream completion", () => {
+  it("finishes after the daily write, preserving later notes without contacting the curator again", async () => {
+    const fx = fixture({ memoryFormat: 2 });
+    fx.commit.mockImplementation(options => commitDreamProduct({ ...options,
+      recordReceipts: () => { throw new Error("simulated-controller-crash"); } }));
+    await expect(fx.run()).rejects.toThrow("simulated-controller-crash");
+    const afterBlock = readFileSync(fx.memPath, "utf8");
+    expect(afterBlock).toContain(`dream/2026-09-08-${fx.input.runId}.md`);
+    expect(readDreamReceipts().panes).toEqual({});
+    writeFileSync(fx.memPath, afterBlock + "\nA later decision from another owner.\n");
+    fx.getQuality.mockClear(); fx.ctx.agent.getResponseStreamWithRaw.mockClear();
+    expect(await fx.run({ dry: true })).toMatchObject({ commitReceipt: true, dryRun: true });
+    expect(readDreamReceipts().panes).toEqual({});
+    expect(await fx.run()).toMatchObject({ recovered: true, commitReceipt: true });
+    expect(readFileSync(fx.memPath, "utf8")).toBe(afterBlock + "\nA later decision from another owner.\n");
+    expect(Object.keys(readDreamReceipts().panes)).toEqual(["source:2"]);
+    expect(fx.getQuality).not.toHaveBeenCalled();
+    expect(fx.ctx.agent.getResponseStreamWithRaw).not.toHaveBeenCalled();
+  });
+  it("can repeat post-cursor recovery idempotently before the sentinel is written", async () => {
+    const fx = fixture({ memoryFormat: 2 });
+    await fx.run();
+    const receipts = readFileSync(defaultDreamReceiptPath(), "utf8");
+    const memory = readFileSync(fx.memPath, "utf8");
+    expect(await fx.run()).toMatchObject({ commitReceipt: true, recovered: true });
+    expect(readFileSync(defaultDreamReceiptPath(), "utf8")).toBe(receipts);
+    expect(readFileSync(fx.memPath, "utf8")).toBe(memory);
+  });
+  it("refuses a changed committed block or product even with the durable intent present", async () => {
+    const fx = fixture({ memoryFormat: 2 }); await fx.run();
+    const memory = readFileSync(fx.memPath, "utf8");
+    writeFileSync(fx.memPath, memory.replace("Nightly fleet summary", "Edited summary"));
+    await expect(fx.run()).rejects.toThrow("memory-changed");
+    writeFileSync(fx.memPath, memory);
+    writeFileSync(fx.input.outputPath, fx.output.replace("Verified work", "A different claim"));
+    await expect(fx.run()).rejects.toThrow("intent-invalid");
+  });
   it.each([undefined, 2])("previews and commits format %s using the original prompt and only real-work cursors", async (memoryFormat) => {
     const fx = fixture({ memoryFormat });
     expect(await fx.run({ dry: true })).toMatchObject({ dryRun: true, included: 2, receipts: 1 });

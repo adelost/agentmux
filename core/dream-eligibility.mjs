@@ -1,7 +1,7 @@
 // Durable activity boundary for the stateless nightly fleet summarizer.
 
 import {
-  chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync,
+  chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync,
 } from "fs";
 import { randomUUID } from "crypto";
 import { homedir } from "os";
@@ -46,8 +46,11 @@ export function readDreamReceipts(path = defaultDreamReceiptPath()) {
 function writeDreamReceipts(state, path) {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  const fd = openSync(temporary, "wx", 0o600);
+  try { writeFileSync(fd, `${JSON.stringify(state, null, 2)}\n`); fsyncSync(fd); } finally { closeSync(fd); }
   renameSync(temporary, path);
+  const directory = openSync(dirname(path), "r");
+  try { fsyncSync(directory); } finally { closeSync(directory); }
   try { chmodSync(path, 0o600); } catch {}
 }
 

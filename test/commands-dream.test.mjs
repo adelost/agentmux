@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs
 import { tmpdir } from "os";
 import { join } from "path";
 import { cmdDream } from "../cli/commands.mjs";
+import { writeDreamOwnerInput } from "../core/dream-owner.mjs";
 
 function activeSource() {
   return {
@@ -47,10 +48,7 @@ function ownerDependencies(fx, events = []) {
       events.push("compact");
       return { ok: true, sessionId: "session-1", compactBoundary: true };
     },
-    writeInput: () => ({
-      path: join(fx.root, "dream-input.json"), outputPath: join(fx.root, "dream-output.md"),
-      runId: "bb6f9c40-0198-49d0-92ea-abba0ae509f5", sha256: "a".repeat(64), bytes: 100,
-    }),
+    writeInput: document => writeDreamOwnerInput(document, { rootDir: fx.root }),
     mirrorPrompt: async () => {
       events.push("mirror");
       return { channelId: "channel-3", messages: 1 };
@@ -100,10 +98,10 @@ feature("amux dream configured-pane orchestration", () => {
         workspace: fx.workspace, quiet: true, deferSentinel: true,
       }, {
         ...deps,
-        waitForResult: async ({ outputPath, dateKey, runId }) => {
+        waitForResult: async ({ outputPath, dateKey, runId, sourceSha256 }) => {
           events.push("product");
           const content = [
-            `> Kuraterad av claw:3 efter verifierad kompaktering · run \`${runId}\` · source \`${"a".repeat(64)}\`.`,
+            `> Kuraterad av claw:3 efter verifierad kompaktering · run \`${runId}\` · source \`${sourceSha256}\`.`,
             "- Fixen mergades och verifierades.", "",
           ].join("\n");
           writeFileSync(outputPath, content);
@@ -232,9 +230,9 @@ feature("amux dream configured-pane orchestration", () => {
             events.push(`send:${agent}:${pane}`);
             return { delivered: true, pending: false, unverified: false };
           },
-          waitForResult: async ({ outputPath, dateKey, runId }) => {
+          waitForResult: async ({ outputPath, dateKey, runId, sourceSha256 }) => {
             const content = [
-              `> Kuraterad av claw:7 efter verifierad kompaktering · run \`${runId}\` · source \`${"a".repeat(64)}\`.`,
+              `> Kuraterad av claw:7 efter verifierad kompaktering · run \`${runId}\` · source \`${sourceSha256}\`.`,
               "- Natten kurerades av reservpanelen.", "",
             ].join("\n");
             writeFileSync(outputPath, content);
@@ -289,9 +287,9 @@ feature("amux dream configured-pane orchestration", () => {
           events.push(`send:${agent}:${pane}`);
           return { delivered: true, pending: false, unverified: false };
         },
-        waitForResult: async ({ outputPath, dateKey, runId }) => {
+        waitForResult: async ({ outputPath, dateKey, runId, sourceSha256 }) => {
           const content = [
-            `> Kuraterad av claw:3 efter verifierad kompaktering · run \`${runId}\` · source \`${"a".repeat(64)}\`.`,
+            `> Kuraterad av claw:3 efter verifierad kompaktering · run \`${runId}\` · source \`${sourceSha256}\`.`,
             "- Primaren vantade ut sin egen upptagenhet.", "",
           ].join("\n");
           writeFileSync(outputPath, content);
@@ -335,9 +333,9 @@ feature("amux dream configured-pane orchestration", () => {
           events.push(`send:${agent}:${pane}`);
           return { delivered: true, pending: false, unverified: false };
         },
-        waitForResult: async ({ outputPath, dateKey, runId }) => {
+        waitForResult: async ({ outputPath, dateKey, runId, sourceSha256 }) => {
           const content = [
-            `> Kuraterad av claw:7 efter verifierad kompaktering · run \`${runId}\` · source \`${"a".repeat(64)}\`.`,
+            `> Kuraterad av claw:7 efter verifierad kompaktering · run \`${runId}\` · source \`${sourceSha256}\`.`,
             "- Reservpanelen vantades ut i stallet for att hoppas over.", "",
           ].join("\n");
           writeFileSync(outputPath, content);

@@ -8,6 +8,7 @@ import { defaultWorkspace, runtimeAgentsPath } from "./runtime-defaults.mjs";
 import { localDateKey } from "./memory-policy.mjs";
 import { readDreamOwnerResult } from "./dream-owner.mjs";
 import { dreamSnapshotReference, verifyDreamSnapshot } from "./dream-snapshot.mjs";
+import { readDreamAttempt } from "./dream-schedule-state.mjs";
 
 const result = (state, detail, extra = {}) => ({ state, status: state === "warn" ? "warn" : "ok", detail, ...extra });
 
@@ -137,6 +138,12 @@ export function observeDreamHealth(workspace, {
     if (!config.dream) return result("warn", "Dream cron exists but no curator is configured");
     const { dateKey } = dreamDeadline(now, schedule);
     const success = readDreamSuccess(workspace, dateKey, { home, now });
-    return assessDreamHealth({ now, schedule, success });
+    const health = assessDreamHealth({ now, schedule, success });
+    const maintenance = readDreamAttempt(workspace, home, dateKey);
+    if (success.ok && maintenance && (maintenance.state !== "completed" || maintenance.exitCode !== 0)) {
+      return { ...health, state: "warn", status: "warn", maintenance,
+        detail: `${health.detail}; nightly maintenance ${maintenance.state} (exit ${maintenance.exitCode ?? "unknown"})` };
+    }
+    return { ...health, maintenance };
   } catch (error) { return result("warn", `Dream health unverified: ${error.message}`); }
 }

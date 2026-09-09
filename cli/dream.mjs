@@ -1,7 +1,7 @@
 // Dream command: one configured, compacted fleet curator plus session housekeeping.
 
 import {
-  existsSync, mkdirSync, readFileSync, renameSync, writeFileSync,
+  existsSync, mkdirSync, readFileSync, writeFileSync,
 } from "fs";
 import { dirname, join } from "path";
 import { createHash } from "node:crypto";
@@ -15,7 +15,7 @@ import {
   defaultDreamReceiptPath, readDreamReceipts, recordDreamReceipts,
 } from "../core/dream-eligibility.mjs";
 import {
-  buildDreamBatch, collectDreamSources, upsertDreamSummary,
+  buildDreamBatch, collectDreamSources,
 } from "../core/dream-summarizer.mjs";
 import {
   dreamOwnerPrompt, readDreamOwnerQuality, resolveDreamCandidates,
@@ -28,7 +28,8 @@ import { waitForDreamOwnerResult } from "../core/dream-result.mjs";
 import { recoverDreamRun } from "../core/dream-recovery.mjs";
 import { acquireDreamLock } from "../core/dream-lock.mjs";
 import { claimScheduledDream } from "../core/dream-schedule.mjs";
-import { publishDreamSnapshot } from "../core/dream-snapshot.mjs";
+import { commitDreamProduct, writeDreamAtomic } from "../core/dream-commit.mjs";
+export { commitDreamProduct } from "../core/dream-commit.mjs";
 export { isPidAlive } from "../core/dream-lock.mjs";
 export { waitForDreamOwnerResult } from "../core/dream-result.mjs";
 
@@ -62,9 +63,7 @@ function ensureDreamDailyFile(memPath, dateKey) {
 }
 
 function atomicWrite(path, content) {
-  const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, content.endsWith("\n") ? content : `${content}\n`);
-  renameSync(temporary, path);
+  writeDreamAtomic(path, content.endsWith("\n") ? content : `${content}\n`);
 }
 
 function upsertDailyMarker(memPath, dateKey, block, blockRe) {
@@ -112,16 +111,6 @@ function previousDateKey(dateKey) {
   const atNoonUtc = new Date(`${dateKey}T12:00:00Z`);
   atNoonUtc.setUTCDate(atNoonUtc.getUTCDate() - 1);
   return atNoonUtc.toISOString().slice(0, 10);
-}
-
-/** WHAT: Stores a verified product through one compare-before-write path. WHY: Keeps recovery from bypassing the normal memory and receipt ordering. */
-export function commitDreamProduct({ memPath, memoryBefore, product, dateKey, included, omitted,
-  receipts, receiptTargets = included, receiptPath, now, recordReceipts = recordDreamReceipts }) {
-  if (readFileSync(memPath, "utf8") !== memoryBefore) throw new Error("dream-owner-touched-memory-before-controller-commit");
-  const snapshot = publishDreamSnapshot(memPath, product.content, dateKey, included, omitted);
-  if (readFileSync(memPath, "utf8") !== memoryBefore) throw new Error("dream-owner-touched-memory-before-controller-commit");
-  atomicWrite(memPath, upsertDreamSummary(memoryBefore, dateKey, snapshot.block));
-  recordReceipts(receipts, receiptTargets, { path: receiptPath, dateKey, now });
 }
 
 /** WHAT: Routes the exact instruction synchronously. WHY: Prevents Dream from acting through an invisible brief. */
@@ -434,7 +423,7 @@ export async function cmdDream(ctx, flags = {}, dependencies = {}) {
     });
     if (!product.ok) throw new Error(`dream-owner-product-invalid:${product.reason}`);
     commitDreamProduct({ memPath, memoryBefore, product, dateKey, included: batch.included,
-      omitted: batch.omitted, receipts, receiptPath, now, recordReceipts });
+      omitted: batch.omitted, receipts, receiptPath, now, recordReceipts, input, unreadable: observed.unreadable });
 
     if (!flags.deferSentinel && !flags["defer-sentinel"]) {
       writeDreamRunSentinel(memPath, dateKey, timeStr, batch.included.length, observed.unreadable.length);
