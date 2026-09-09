@@ -120,6 +120,13 @@ The delivery pointer is at most 512 bytes; the CLI's reference card is at most
 native Codex compaction can retain historical user messages rather than replacing
 all of them with a summary. Detailed retrieval belongs in tool output, on demand.
 
+Codex can create a `/new` rollout only when its first prompt arrives, after
+orientation was prepared against the previous saved session. Response lookup may
+bridge those identities only with an acknowledged exact physical prompt in the
+current pane-owned rollout, after the stored append cursor and within the same-host
+pre-paste/acknowledgement interval. Copied old events and changing identities do
+not qualify. This does not resend anything or rewrite the original receipt.
+
 Direct terminal typing in Codex/Kimi bypasses the AMUX broker: use the existing
 `amux memory context` entry then. Native runtime next-turn injection is not wired
 here. Neither limitation justifies starting or replacing those sessions.

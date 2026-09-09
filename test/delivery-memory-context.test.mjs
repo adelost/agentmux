@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { appendFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { appendFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createDeliveryQueue } from "../core/delivery-queue.mjs";
@@ -50,16 +50,20 @@ function fixture(engine = "codex") {
 afterEach(() => { vi.unstubAllEnvs(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("lazy memory through the existing delivery contract", () => {
-  it("uses exact native journal receipts and resolves a phone/Link query back to that payload", async () => {
+  it.each([false, true])("resolves exact phone/Link replies, including a lazily created new thread: %s", async (newThread) => {
     const f = fixture();
     vi.stubEnv("HOME", f.root);
     const dir = join(f.root, ".agents", "2"), home = join(f.root, ".codex");
     vi.stubEnv("AMUX_CODEX_PROFILE_1_HOME", home);
     const sessions = join(home, "sessions"); mkdirSync(sessions, { recursive: true });
-    const path = join(sessions, "rollout-canary.jsonl");
+    let path = join(sessions, "rollout-canary.jsonl");
     const sessionId = "019f5ffa-d70c-73b3-98b5-c4cfae1534d3";
+    const newSessionId = "01a0875a-9bc8-7a11-ad64-54dd5831d1b0";
+    const oldPath = path;
+    const timestamp = "2026-09-07T06:00:00.000Z";
     const record = (row) => appendFileSync(path, JSON.stringify(row) + "\n");
     record({ type: "session_meta", payload: { id: sessionId, cwd: dir, source: "cli", originator: "codex-tui" } });
+    utimesSync(path, 1, 1);
     const snapshot = f.agent.memorySnapshot;
     f.agent.memorySnapshot = () => ({ ...snapshot(), sessionId, sessionPath: path });
     f.agent.capturePromptEchoCursor = async (_a, _p, text) => captureCodexPromptEchoCursor(dir, text);
@@ -67,7 +71,11 @@ describe("lazy memory through the existing delivery contract", () => {
     const send = f.agent.sendOnly;
     f.agent.sendOnly = async (...args) => {
       const result = await send(...args);
-      record({ type: "event_msg", payload: { type: "user_message", message: args[1] } });
+      if (newThread) {
+        path = join(sessions, "rollout-new-thread.jsonl");
+        record({ type: "session_meta", payload: { id: newSessionId, cwd: dir, source: "cli", originator: "codex-tui" } });
+      }
+      record({ timestamp, type: "event_msg", payload: { type: "user_message", message: args[1] } });
       record({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "exact reply" }] } });
       return result;
     };
@@ -79,10 +87,23 @@ describe("lazy memory through the existing delivery contract", () => {
     const args = { agentName: "example", pane: 2, promptText: original, dir, dialect: "codex", queue: f.queue };
     const physical = resolveMemoryResponsePrompt(args);
     expect(physical).toBe(job.text);
+    expect(job.metadata.memoryContext.sessionPath).toBe(oldPath);
     expect(extractFromCodexJsonl(dir, physical)?.items).toContainEqual({ type: "text", content: "exact reply" });
     expect(resolveMemoryResponsePrompt({ ...args, pane: 3 })).toBe(original);
     expect(resolveMemoryResponsePrompt({ ...args, identity: () => ({ sessionId: "other", path }) })).toBe(original);
     expect(resolveMemoryResponsePrompt({ ...args, promptText: "real query" })).toBe("real query");
+    if (newThread) {
+      // A new-session mapping needs a durable exact receipt, not just a recent
+      // saved file or an old occurrence of the same message copied into it.
+      for (const patch of [{ status: "submitted" }, { echoCursor: null },
+        { echoNotBeforeMs: Date.parse(timestamp) + 1 }, { acknowledgedAt: Date.parse(timestamp) - 1 }]) {
+        expect(resolveMemoryResponsePrompt({ ...args, queue: { list: () => [{ ...job, ...patch }] } })).toBe(original);
+      }
+      let calls = 0;
+      expect(resolveMemoryResponsePrompt({ ...args, identity: () => ({
+        sessionId: ++calls === 1 ? newSessionId : "changed-again", path,
+      }) })).toBe(original);
+    }
     expect(f.sends).toHaveLength(1);
   });
 
