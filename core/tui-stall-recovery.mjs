@@ -16,6 +16,7 @@ import {
   runtimeProfileLaunchHome,
 } from "./runtime-account-profiles.mjs";
 import { esc } from "../lib.mjs";
+import { assertRotationContinuity } from "./rotation-continuity.mjs";
 
 const TUI_ESCAPE_AFTER_MS = 2 * 60_000;
 const TUI_RESTART_AFTER_MS = 5 * 60_000;
@@ -103,6 +104,10 @@ export function createTuiStallRecovery({
     if (!resumeSessionId) {
       throw new Error(`Claude continuity blocked for ${agentName}:${pane}: exact persisted session not found`);
     }
+    if (launch.resumeSessionId && identity?.sessionId !== launch.resumeSessionId) {
+      throw new Error(`Claude continuity blocked for ${agentName}:${pane}: persisted session changed`);
+    }
+    if (launch.continuity) assertRotationContinuity(launch.continuity, identity);
     const target = `${agentName}:.${pane}`;
     await tmux.respawnPane(target, { kill: true, cwd: dir });
     const shellDeadline = now() + 5_000;

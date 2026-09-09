@@ -2,6 +2,11 @@ import { feature, unit, expect } from "bdd-vitest";
 import { cmdAccounts, runQuotaCommand } from "./accounts.mjs";
 
 feature("account subscription CLI", () => {
+  unit("help is offline and does not refresh credentials", {
+    given: ["read functions forbidden", () => ({ output: () => {}, readSnapshot: () => { throw new Error("network forbidden"); } })],
+    when: ["reading both help entries", async options => [await runQuotaCommand(["--help"], options), await cmdAccounts(["--help"], options)]],
+    then: ["both return help without quota collection", results => expect(results).toEqual([{ help: true }, { help: true }])],
+  });
   unit("renders all account rows by default and emits JSON only on request", {
     given: ["a six-account snapshot and output capture", () => {
       const snapshot = { schemaVersion: 2, accounts: [], claude: { ok: false, error: "x" },
