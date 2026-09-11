@@ -194,6 +194,12 @@ Permission asks and session starts also surface in `amux timeline` as
 
 ### Health: doctor + bridge watchdog
 
+The release installer keeps shared, editable skills under `~/.agentmux/skills`.
+Codex and Claude link there, rather than into the installed npm package. Editing
+a skill therefore cannot change the release hashes and block agent startup.
+An upgrade preserves differing previous copies under `~/.agentmux/skill-backups`
+before refreshing them. Independent provider skills are left in place.
+
 `amux doctor` surfaces every silent failure mode in one table: bridge
 dead/hung/unsupervised, bridge running OLDER code than the repo (restart
 needed), hooks broken, ledger stale, tmux unreachable, panes below 60x20,

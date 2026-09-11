@@ -8,6 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AMUX_ENV_VAR } from "./config-sources.mjs";
+import { installReleaseSkills } from "./release-skills.mjs";
 import {
   observeReleaseIdentity, readReleaseManifest, RELEASE_MANIFEST_NAME, releaseReceiptPath,
 } from "./release-identity.mjs";
@@ -19,6 +20,7 @@ const INSTALLER_FILES = [
   "bin/install-release.mjs",
   "core/release-install.mjs",
   "core/release-identity.mjs",
+  "core/release-skills.mjs",
 ];
 const MODULE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -253,6 +255,9 @@ export function installRelease({ repoRoot, sourceSha, home = homedir() }) {
       throw new Error("npm global agentmux still resolves to a mutable git checkout");
     }
     restoreRuntimeConfig(configs, packageRoot, home);
+    const skills = installReleaseSkills({ packageRoot, home });
+    for (const backup of skills.backups) console.log(`Previous skill copy preserved: ${backup}`);
+    for (const path of skills.preserved) console.log(`Independent skill preserved: ${path}`);
     run(process.execPath, [join(packageRoot, "bin", "install-hooks.mjs")], {
       env: { ...process.env, HOME: home },
       stdio: "inherit",
@@ -284,6 +289,7 @@ export function installRelease({ repoRoot, sourceSha, home = homedir() }) {
       }])),
       restoredConfig: configs.map((file) => file.name),
       configHome: join(home, ".agentmux"),
+      skills,
     };
     const identity = observeReleaseIdentity({
       runtimeRoot: packageRoot,
