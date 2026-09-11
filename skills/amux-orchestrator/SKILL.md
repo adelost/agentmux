@@ -85,6 +85,23 @@ command authority. Do not paste those policies into this skill or turn an old
 memory note into a new human-approval gate. Ordinary coordination does not add
 a second test suite, reviewer, benchmark, or approval hop.
 
+## Reconsider the plan briefly
+
+During existing follow-through, use a safe checkpoint about once per active hour
+to spend at most two minutes asking what actually delayed the last outcome:
+implementation, rework, waiting, or administration. Review sooner when a repeated
+failure or new evidence changes the next step. This cadence is a trial default,
+not a proven optimum or a reason to interrupt a build or create another timer.
+Choose at most one useful change: reuse an existing capability, remove a redundant
+step, fix a mistaken assumption, or shorten a resource handoff. A small reversible
+improvement needs a reason, not a research paper. Keep required checks and owners.
+Note the change and expected benefit in the existing task row only when something
+changes; use subsequent comparable delivery receipts to check elapsed time,
+rework and available token usage, distinguishing waiting and cached input. Do not
+add a measurement system or infer a speedup percentage from unlike tasks. Keep,
+adjust or drop the change based on the observed benefit and quality. Consult
+research for a concrete unresolved bottleneck, not at every follow-up.
+
 ## Inspect AMUX only when the transport is relevant
 
 The bridge connects Discord/CLI input to a durable queue and the addressed
