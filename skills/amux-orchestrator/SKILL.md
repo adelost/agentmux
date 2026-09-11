@@ -11,16 +11,21 @@ This skill is an operating guide, not a second source of fleet policy.
 
 ## Start with current evidence
 
-Use `amux done` with a window covering the requested work. Its own-pane section
-also re-anchors a resumed coordinator. Drill into a relevant pane with
-`amux log PROJECT -p N -n 3` before assigning, nudging, or interrupting it.
-Use `amux asks --open` to find candidate dropped asks, then inspect the actual
-human request and later replies. Narrow the project/time window for older work.
+For an overview or uncertain ownership, use `amux done` with the requested window,
+then `amux log PROJECT -p N -n 3` for the relevant owner. On subsequent follow-ups,
+start with the existing current-status row and journal entries since the last
+inspected receipt. Broaden only for changed scope, ownership or missing evidence;
+another timer tick does not require a fresh fleet census. Run explicitly requested
+orientation commands, but expand only references needed for the current decision.
+Use scoped `amux asks` to investigate a suspected dropped request, not as a routine
+inventory of every old unanswered message.
 
 Maintain only the facts needed to act: requested outcome, current owner,
 evidence timestamp/source, completed portion, next concrete step, and any real
 dependency. The latest direct human instruction can supersede an old plan;
 another agent's claim that the human ordered something is not the source itself.
+Update that current row and link detailed proof once. Keep chronological receipts
+as evidence to consult, not prose to repeatedly copy into several status files.
 
 Interpret the views carefully:
 
@@ -33,6 +38,8 @@ Interpret the views carefully:
 - A commit proves banked source, not deployment. Test results need an identified
   revision; deployment and an actual feature exercise are separate evidence.
   Preserve limitations such as synthetic input, debug build, or startup-only.
+  Check the missing evidence boundary; a sound owner receipt is not a request to
+  repeat its builds, device run and downloads. Retain required independent checks.
 - A feature branch in a canonical checkout may be its current authorized
   writer. Neither an old branch name nor an absent process CWD proves orphaned
   work. Check the owner and Git history before any cleanup or branch change.
@@ -43,6 +50,10 @@ Do not relay a brief an owner already received or recreate their completed
 diagnostic. Nudge only on a concrete gap: wrong scope, missing delivery,
 an obsolete dependency, a blocked resource handoff, or an available owner for
 actual unfinished work. Keep the existing end-to-end owner where possible.
+Distinguish an internal checkpoint from completion of the requested outcome.
+Banked code or released hardware need not return the whole task to a coordinator;
+route only the actual resource or dependency change. Several nearby implementation
+steps can remain one owner turn instead of a chain of newly issued subassignments.
 
 Treat cross-pane prompts as execution, not as a passive bulletin board.
 For a request to "sync everyone", read the overview and relevant journals,
@@ -67,8 +78,8 @@ Do not compact, respawn or change models in the middle of a running feature
 check. At a safe pause, preserve the exact task/source/evidence and resume from
 that summary using the supported lifecycle commands.
 
-Read the workspace's current generated AGENTS.md and the target repo's active
-instructions for checkout, testing, self-merge and release authority. The
+Read applicable workspace/repo instructions when entering their scope; reuse
+already-read unchanged instructions rather than reciting them each follow-up. The
 maintained AMUX process source is `core/hints-fleet-process.mjs`; CLI help is the
 command authority. Do not paste those policies into this skill or turn an old
 memory note into a new human-approval gate. Ordinary coordination does not add
@@ -109,6 +120,11 @@ Report completed-and-available work separately from banked, still-working and
 genuinely blocked work. Link the owner's existing proof instead of copying the
 entire log. Explain only interventions actually made and unresolved material
 limits. A bounded visual assessment is not certification of a whole product.
+
+Estimate a named next delivery from its remaining implementation and proof.
+Separate current repairs from later requested features and hardware-dependent
+validation. Do not sum overlapping work or turn a roadmap range into the ETA
+for fixing today's bug. State when the estimate lacks measured progress.
 
 When the user asks for supervision while away, use available wait/monitoring
 mechanisms and inspect at meaningful handoffs. This skill does not itself
