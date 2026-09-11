@@ -14,8 +14,10 @@ search rank does not establish current permission, ownership or completion.
 
 1. Use the supplied compaction summary and the current human request. In AMUX,
    `amux done` identifies the current pane and the next journal command.
-2. Read that pane's last relevant turns with `amux log PROJECT -p N -n 3`.
-   Do not use a global "last session" belonging to another engine or person.
+2. Resolve the specific gap with that pane's relevant turns, using
+   `amux log PROJECT -p N --since T` or `--grep` when a receipt is already known.
+   Use the last three turns when there is no narrower anchor; do not read a
+   different engine's global "last session".
 3. Recover the minimum state: outcome; latest decision with source/time;
    completed portion and evidence; remaining next step; real dependency;
    current owner/source checkout; authorized effects and rollback boundary.
@@ -25,6 +27,8 @@ search rank does not establish current permission, ownership or completion.
 
 If the latest request changes direction, explicitly supersede the relevant
 old plan. Do not silently carry old approval requirements into the new task.
+Once the missing fact and current authority are established, resume the work.
+Recovery is not a fresh audit of every completed delivery after each compaction.
 
 ## Find an earlier agreement
 
@@ -39,6 +43,12 @@ later relevant corrections. `amux asks --grep "topic"` and a scoped
 `amux log PROJECT -p N --grep "term"` can locate those. Read both sides of a
 conflict before classifying it. A newer unrelated note does not supersede an
 older decision; preserve scope and explain what changed.
+
+Inspect the size and shape of retrieved material before printing it. A single
+human turn may contain an entire pasted transcript. When the journal path and
+timestamp are known, extract that relevant entry/role or range directly rather
+than returning tool logs and quoted history again. Preserve exact wording where
+it determines scope or permission; narrow retrieval instead of silently clipping it.
 
 When retrieval is incomplete, report what was searched and what remains
 unknown. Ask one precise question only if that missing fact prevents safe
@@ -59,12 +69,11 @@ way to preserve a correction already established in the current conversation.
 
 ## Keep the next recovery small
 
-Use the task's existing durable record; do not create a second backlog.
-At a meaningful milestone or before a supported compact, update a concise
-checkpoint with the seven state items above and links to evidence. Store
-large logs, timing tables, images and failed experiments outside the digest.
-Keep original history recoverable. Mark replaced decisions as superseded
-with a pointer to their replacement, not as a second active instruction.
+Update the task's existing concise checkpoint, including its last inspected
+journal timestamp and evidence links. Keep historical logs and detailed proof
+outside the current-status section; append another receipt only when it records
+a distinct decision or outcome. Mark replaced decisions with a pointer to the
+replacement while preserving original history. Do not duplicate the backlog.
 
 Daily notes are an index/digest, not mandatory wholesale startup input. Read
 their summaries/headings and sections relevant to this request; current
