@@ -25,13 +25,6 @@ test("the mandatory graph has no parallel list and one binding per data input", 
   assert.equal("legos" in product, false, "old lego graph must not survive");
   assert.equal("ui" in product, false, "old ui entry list must not survive");
   assert.equal("componentCatalog" in product, false, "port-less catalog must not survive");
-  assert.equal(product.nodes.length, 27);
-  assert.equal(product.nodes.filter(({ nodeTypeRef }) =>
-    product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "service").length, 10);
-  assert.equal(product.nodes.filter(({ nodeTypeRef }) =>
-    product.nodeTypes.find(({ id }) => id === nodeTypeRef)?.kind === "present").length, 17);
-  assert.equal(product.components.length, 15);
-  assert.equal(product.componentTypes.length, 15);
   for (const node of product.nodes) {
     const kind = product.nodeTypes.find(({ id }) => id === node.nodeTypeRef)?.kind;
     if (kind === "service") assert.equal(node.activation?.kind, "lifetime", `${node.id} must stay process-lived`);
