@@ -18,7 +18,7 @@
 
 /** WHAT: Defines the Codex composer text pinned to one release. WHY: Keeps placeholder knowledge in one copy the probe can verify. */
 export const CODEX_VOCABULARY = Object.freeze({
-  verifiedCodexVersion: "0.152.1",
+  verifiedCodexVersion: "0.154.0",
   // Painted alone on the › row while the composer is empty, idle and busy.
   placeholders: Object.freeze([
     "Ask Codex to do anything",

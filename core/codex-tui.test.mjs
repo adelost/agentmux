@@ -35,12 +35,22 @@ function fakeAgent({ frames, busy = false, busyError = null }) {
 const noSleep = () => Promise.resolve();
 
 feature("Codex composer truth", () => {
-  unit("Codex 0.152.1's exact placeholders count as an empty composer", {
+  unit("Codex 0.154.0's exact placeholders count as an empty composer", {
     when: ["reading both chatwidget.rs placeholders", () => [
       "Ask Codex to do anything",
       "Ask a follow-up question",
     ].map((hint) => codexComposerText(`\n› ${hint}\n  gpt-5.6-sol xhigh · ~/x\n`))],
     then: ["both normalize to empty", (values) => expect(values).toEqual(["", ""])],
+  });
+
+  unit("Codex 0.154.0's multi-word model footer stays out of the composer", {
+    when: ["reading the joined and separate empty-composer footer", () => [
+      codexComposerText("\n› Ask Codex to do anything Luna Reserve xhigh · ~/lsrc/skydive\n"),
+      codexComposerText("\n› Ask Codex to do anything\n  Luna Reserve xhigh · ~/lsrc/skydive\n"),
+      codexComposerText("\n› Ask Codex to do anything Luna Reserve\n"),
+    ]],
+    then: ["the known placeholder is empty while an incomplete human draft remains", (values) =>
+      expect(values).toEqual(["", "", "Ask Codex to do anything Luna Reserve"])],
   });
 
   unit("a retired 0.144 placeholder is a draft now, not chrome", {

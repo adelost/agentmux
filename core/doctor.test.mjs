@@ -876,7 +876,7 @@ feature("pane modals (kimi dialog watch)", () => {
 
 feature("Codex composer vocabulary", () => {
   const probe = (overrides = {}) => ({
-    installedVersion: "0.152.1", verifiedVersion: "0.152.1", checked: 6, missing: [], ...overrides,
+    installedVersion: "0.154.0", verifiedVersion: "0.154.0", checked: 6, missing: [], ...overrides,
   });
 
   unit("a fleet without Codex panes shows no row", {
@@ -888,7 +888,7 @@ feature("Codex composer vocabulary", () => {
     when: ["checking a matching probe", () => checkCodexVocabulary({ probe: probe(), required: true })],
     then: ["the row names version and coverage", (result) => {
       expect(result).toMatchObject({ name: "codex vocabulary", status: OK });
-      expect(result.detail).toBe("Codex 0.152.1 · 6/6 composer strings present in binary");
+      expect(result.detail).toBe("Codex 0.154.0 · 6/6 composer strings present in binary");
     }],
   });
 
@@ -910,14 +910,14 @@ feature("Codex composer vocabulary", () => {
     })],
     then: ["the row asks for a re-check, not a rewrite", (result) => {
       expect(result.status).toBe(WARN);
-      expect(result.detail).toBe("Codex 0.153.0 installed, vocabulary verified for 0.152.1; all 6 strings present");
+      expect(result.detail).toBe("Codex 0.153.0 installed, vocabulary verified for 0.154.0; all 6 strings present");
       expect(result.hint).toContain("rust-v0.153.0");
     }],
   });
 
   unit("an unlocatable Codex is red when Codex panes are configured", {
     when: ["checking an error probe", () => checkCodexVocabulary({
-      probe: { error: "codex is not on PATH", installedVersion: null, verifiedVersion: "0.152.1", checked: 0, missing: [] },
+      probe: { error: "codex is not on PATH", installedVersion: null, verifiedVersion: "0.154.0", checked: 0, missing: [] },
       required: true,
     })],
     then: ["the error is the detail", (result) => {

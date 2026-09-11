@@ -15,7 +15,7 @@ import {
 const CHUNK = 8 * 1024 * 1024;
 
 const probeOf = (overrides = {}) => ({
-  installedVersion: "0.152.1", verifiedVersion: "0.152.1", checked: 6, missing: [], ...overrides,
+  installedVersion: "0.154.0", verifiedVersion: "0.154.0", checked: 6, missing: [], ...overrides,
 });
 
 const fakeInstall = (version) => ({
@@ -29,9 +29,9 @@ function withTempDir(run) {
 }
 
 feature("Codex composer vocabulary", () => {
-  unit("the pinned text is exactly what Codex 0.152.1 paints into an empty composer", {
+  unit("the pinned text is exactly what Codex 0.154.0 paints into an empty composer", {
     then: ["placeholders and version are the chatwidget.rs literals", () => {
-      expect(CODEX_VOCABULARY.verifiedCodexVersion).toBe("0.152.1");
+      expect(CODEX_VOCABULARY.verifiedCodexVersion).toBe("0.154.0");
       expect([...CODEX_VOCABULARY.placeholders]).toEqual([
         "Ask Codex to do anything",
         "Ask a follow-up question",
@@ -95,7 +95,7 @@ feature("Codex install discovery", () => {
       mkdirSync(native, { recursive: true });
       mkdirSync(join(dir, "bin"), { recursive: true });
       writeFileSync(join(pkg, "bin", "codex.js"), "#!/usr/bin/env node\n");
-      writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@openai/codex", version: "0.152.1" }));
+      writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@openai/codex", version: "0.154.0" }));
       writeFileSync(join(native, "codex"), "ELF Ask Codex to do anything");
       symlinkSync(join(pkg, "bin", "codex.js"), join(dir, "bin", "codex"));
       const result = locateInstalledCodex({ env: { PATH: join(dir, "bin") } });
@@ -103,7 +103,7 @@ feature("Codex install discovery", () => {
     })],
     then: ["version and binary path are the installed ones", ({ result, native }) => {
       expect(result.error).toBeUndefined();
-      expect(result.version).toBe("0.152.1");
+      expect(result.version).toBe("0.154.0");
       expect(result.binaryPath).toBe(native);
     }],
   });
@@ -113,7 +113,7 @@ feature("Codex install discovery", () => {
       const pkg = join(dir, "pkg");
       mkdirSync(join(pkg, "bin"), { recursive: true });
       writeFileSync(join(pkg, "bin", "codex"), "");
-      writeFileSync(join(pkg, "package.json"), JSON.stringify({ version: "0.152.1" }));
+      writeFileSync(join(pkg, "package.json"), JSON.stringify({ version: "0.154.0" }));
       return locateInstalledCodex({ env: { PATH: join(pkg, "bin") } });
     })],
     then: ["the missing binary is named", (result) => {
@@ -129,7 +129,7 @@ feature("Codex vocabulary probe", () => {
     })],
     then: ["the probe carries the error and no false facts", (probe) => {
       expect(probe).toEqual({
-        error: "codex is not on PATH", installedVersion: null, verifiedVersion: "0.152.1", checked: 0, missing: [],
+        error: "codex is not on PATH", installedVersion: null, verifiedVersion: "0.154.0", checked: 0, missing: [],
       });
     }],
   });
@@ -146,7 +146,7 @@ feature("Codex vocabulary probe", () => {
     })],
     then: ["the probe names it against the installed version", (probe) => {
       expect(probe).toMatchObject({
-        installedVersion: "0.153.0", verifiedVersion: "0.152.1", checked: 6, missing: ["Ask Codex to do anything"],
+      installedVersion: "0.153.0", verifiedVersion: "0.154.0", checked: 6, missing: ["Ask Codex to do anything"],
       });
     }],
   });
@@ -157,7 +157,7 @@ feature("Codex vocabulary probe", () => {
       const scan = () => { scans++; return { found: [], missing: [] }; };
       let id = "size:1";
       const probe = () => probeCodexVocabulary({
-        locate: () => fakeInstall("0.152.1"), identity: () => id, scan, cache: true,
+        locate: () => fakeInstall("0.154.0"), identity: () => id, scan, cache: true,
       });
       probe(); probe();
       id = "size:2";
@@ -178,14 +178,14 @@ feature("Naming Codex vocabulary drift", () => {
       installedVersion: "0.153.0", missing: ["Ask Codex to do anything"],
     }))],
     then: ["the sentence carries both versions and the literal", (text) => {
-      expect(text).toBe('Codex 0.153.0 no longer contains 1/6 known composer strings ("Ask Codex to do anything"); the vocabulary was verified for 0.152.1');
+      expect(text).toBe('Codex 0.153.0 no longer contains 1/6 known composer strings ("Ask Codex to do anything"); the vocabulary was verified for 0.154.0');
     }],
   });
 
   unit("a newer Codex with every string present is still flagged as unverified", {
     when: ["describing a version-only drift", () => describeCodexVocabularyDrift(probeOf({ installedVersion: "0.153.0" }))],
     then: ["the sentence says verified-for, not broken", (text) => {
-      expect(text).toBe("Codex 0.153.0 is installed but the composer vocabulary was verified for 0.152.1 (all 6 strings still present)");
+      expect(text).toBe("Codex 0.153.0 is installed but the composer vocabulary was verified for 0.154.0 (all 6 strings still present)");
     }],
   });
 
@@ -206,13 +206,13 @@ feature("Describing a non-empty composer", () => {
 
   unit("drift is appended with the pointer to doctor", {
     when: ["describing with a drifting probe", () => describeNonEmptyComposer(
-      { codexVocabularyDrift: async () => "Codex 0.153.0 is installed but the composer vocabulary was verified for 0.152.1 (all 6 strings still present)" },
+      { codexVocabularyDrift: async () => "Codex 0.153.0 is installed but the composer vocabulary was verified for 0.154.0 (all 6 strings still present)" },
       "Ask Codex to build anything",
     )],
     then: ["the sentence names the drift and the likely cause", (text) => {
       expect(text).toBe(
         "composer is not empty (starts with: Ask Codex to build anything); "
-        + "Codex 0.153.0 is installed but the composer vocabulary was verified for 0.152.1 (all 6 strings still present); "
+        + "Codex 0.153.0 is installed but the composer vocabulary was verified for 0.154.0 (all 6 strings still present); "
         + "an unrecognised empty-composer placeholder is the likely cause, see amux doctor",
       );
     }],

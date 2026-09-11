@@ -19,6 +19,10 @@ import { CODEX_VOCABULARY, describeNonEmptyComposer } from "./codex-vocabulary.m
 // first Escape, "esc esc to edit previous message" before it.
 const IDLE_EDIT_HINT = /esc (?:again|esc) to edit\S{0,2}\s*previous message/i;
 const NO_PREVIOUS_MESSAGE_HINT = /No previous message to edit\./i;
+// Codex 0.154 can paint a multi-word model label and its worktree footer on
+// the same logical row as the empty-composer placeholder. Keep this chrome
+// separate from editable text without accepting an arbitrary human suffix.
+const CODEX_MODEL_FOOTER = /^\s*(?:•\s+)?\S+(?:\s+\S+)*\s+(?:minimal|low|medium|high|xhigh|max|ultra)\s+·\s+(?:~|\/)\S.*$/i;
 // In a NARROW pane Ratatui soft-wraps its own hint text mid-word
 // ("...edit previo" / "us message"). Those wraps are application-rendered,
 // so tmux -J cannot rejoin them and the full-phrase regex above never
@@ -45,6 +49,16 @@ const EMPTY_COMPOSER_HINTS = new Set(CODEX_VOCABULARY.placeholders);
 // Codex-owned hint and the number of painted cells stays tightly bounded.
 const TUI_PAINT_CELL = /^[\u2500-\u259f]$/u;
 const MAX_PLACEHOLDER_PAINT_CELLS = 6;
+
+function stripInlineModelFooter(value) {
+  const candidate = String(value || "").trim();
+  for (const placeholder of EMPTY_COMPOSER_HINTS) {
+    if (!candidate.startsWith(`${placeholder} `)) continue;
+    const suffix = candidate.slice(placeholder.length).trim();
+    if (CODEX_MODEL_FOOTER.test(suffix)) return placeholder;
+  }
+  return candidate;
+}
 
 function matchesPaintedPlaceholder(value, placeholder) {
   const actual = [...String(value || "")];
@@ -119,7 +133,7 @@ export function codexComposerText(text) {
   // footer shape.
   const assistantAfter = lines.slice(index + 1).some((candidate) => {
     if (!/^\s*•\s+/.test(candidate)) return false;
-    return !/^\s*•\s+\S+\s+(?:minimal|low|medium|high|xhigh|max|ultra)\s+·\s+/.test(candidate);
+    return !CODEX_MODEL_FOOTER.test(candidate);
   });
   if (assistantAfter) return null;
   const parts = [lines[index].replace(/^\s*[›❯>]\s*/, "").trim()];
@@ -137,7 +151,7 @@ export function codexComposerText(text) {
     // composer content; retaining it made the durable broker classify its own
     // exact recovered draft as a different human edit.
     if (CODEX_QUEUE_HINT.test(candidate) || /\b\d+%\s+context left\b/i.test(candidate)) break;
-    if (/^\s*(?:•\s+)?\S+\s+(?:minimal|low|medium|high|xhigh|max|ultra)\s+·\s+/.test(candidate)) break;
+    if (CODEX_MODEL_FOOTER.test(candidate)) break;
     if (/^\s*[•›❯>]/.test(candidate)) break;
     if (!/^\s{2,}\S/.test(candidate)) break;
     parts.push(candidate.trim());
@@ -146,10 +160,10 @@ export function codexComposerText(text) {
   // logical line even though a normal pane capture shows them separately.
   // Strip only the exact terminal-owned suffix (anchored at the end), so a
   // human sentence that happens to mention Tab is still preserved.
-  const value = parts.join(" ").trim().replace(
+  const value = stripInlineModelFooter(parts.join(" ").trim().replace(
     /\s+tab to queue(?: message)?(?:\s+\d+%\s+context left)?\s*$/i,
     "",
-  );
+  ));
   // Codex shows "esc again to edit previous message" / "No previous message to
   // edit." ONLY while the composer is neutral (no unsent draft). A narrow tmux
   // capture can glue that hint onto the placeholder row, producing a joined
