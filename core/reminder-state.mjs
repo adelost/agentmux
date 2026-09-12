@@ -166,12 +166,11 @@ export const DRIFT_SECTIONS = [
   {
     file: ".agents/CLAUDE.md",
     section: "First line is the outcome",
-    label: "first line is the outcome (SUMMARY rad 1, GOAL/NOW/LEFT rad 2 under arbete)",
+    label: "first line is the outcome (SUMMARY rad 1, sedan GOAL, NOW, LEFT på egna rader under arbete)",
     directive: "line 1 is the outcome in one sentence, prefixed SUMMARY: during " +
-      "multi-reply work. Line 2 during multi-reply work: GOAL, NOW, LEFT on one " +
-      "line in caps, and stop if NOW does not serve GOAL. Otherwise line 2 is " +
-      "your next step or the one decision you need. Then details. " +
-      "Nothing before line 1.",
+      "multi-reply work. Then GOAL, NOW and LEFT, one per line in caps, and stop " +
+      "if NOW does not serve GOAL. Otherwise line 2 is your next step or the one " +
+      "decision you need. Then details. Nothing before line 1.",
   },
   {
     file: ".agents/CLAUDE.md",
