@@ -65,6 +65,27 @@ acknowledgements or independent reads. In particular, a previous FYI left
 unanswered is not a dropped implementation task to reawaken later. This is
 the read-only path under the staffing policy, not a new approval ceremony.
 
+### Handoff stall rule
+
+Treat `enqueued`, `pending`, and broker retry counts as transport states, not
+as evidence that a worker started. A handoff is received only when the target
+has an authoritative acknowledgement and a live owner/process check. For a
+pre-submit job (`pending`, `pasting`, or `drafted`), two failed attempts or ten
+minutes without acknowledgement, together with a stopped target, an identity
+or checkout refusal, or no fresh target activity, is a concrete stall. Stop
+that job's retries, request its normal pre-submit cancellation, and choose one
+verified idle owner (or take the work yourself). Send the replacement once and
+record its receipt; do not wait for a periodic status prompt or for the human
+to authorize routine recovery. The 30-minute checkpoint starts at the
+replacement's acknowledgement.
+
+An already `submitted` prompt has left the verified composer and must never be
+duplicated merely because its JSONL receipt is late. Inspect the target's live
+process and fresh journal activity; keep the at-most-once fence until a
+durable not-sent outcome exists. Human escalation is reserved for a real
+product decision, physical access, or missing permission, not an ordinary
+handoff stall.
+
 A useful brief names the new evidence, the next bounded outcome, what is already
 done, and the boundary that must remain untouched. Write its exact UTF-8 text to
 a file with the file-editing tool, then send it through
