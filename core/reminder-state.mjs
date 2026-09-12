@@ -166,9 +166,11 @@ export const DRIFT_SECTIONS = [
   {
     file: ".agents/CLAUDE.md",
     section: "First line is the outcome",
-    label: "first line is the outcome (rad 1 utfall, rad 2 nästa steg/beslut)",
-    directive: "line 1 is the outcome in one sentence, line 2 your own next " +
-      "step or the one decision you need, then details. Nothing before line 1.",
+    label: "first line is the outcome (rad 1 utfall, rad 2 Goal/Now/Left under arbete)",
+    directive: "line 1 is the outcome in one sentence. Line 2 during multi-reply " +
+      "work: Goal, Now, Left on one line, and stop if Now does not serve Goal. " +
+      "Otherwise line 2 is your next step or the one decision you need. " +
+      "Then details. Nothing before line 1.",
   },
   {
     file: ".agents/CLAUDE.md",

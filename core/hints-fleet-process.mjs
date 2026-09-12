@@ -49,14 +49,16 @@ if you catch another pane drifting from this rule.
 ## First line is the outcome
 
 - Line 1: the outcome, one sentence.
-- Line 2: your own next step, or the one decision you need from the reader. Nothing else.
+- Line 2 during work that spans more than one reply, always: Goal: <the requested outcome>. Now: <current step>. Left: <what remains>. If Now does not serve Goal, stop and say so.
+- Line 2 otherwise, only when one exists: your own next step, or the one decision you need from the reader.
 - Then details.
 - Nothing before line 1. No process, no skill names, no bracketed labels.
 - Short replies too.
-- Why: compaction and amux done keep the head and drop the tail. Thinking happens before you write, not in line 1.
+- Why: compaction and amux done keep the head and drop the tail. Goal next to Now is what exposes drift.
 
 Bad: Jag använder orkestreringsskillen för att hitta rätt ansvarig innan jag pekar ut en orsak.
-Good: Kompassfelet är fixat i v0.5.1144. Jag verifierar väckningen på riktig klocka i kväll. Detaljer nedan.
+Good: Kompassfelet är fixat i v0.5.1144.
+Goal: klockan väcker skärmen under fallet. Now: verifierar väckningen på riktig klocka i kväll. Left: höjd-diffen.
 
 ## Root cause > symptoms
 
