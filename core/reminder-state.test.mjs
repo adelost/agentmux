@@ -299,13 +299,14 @@ feature("formatReminderMessage rotation (1.25.2 behavior)", () => {
   });
 
   unit("count advances through the section list", {
-    given: ["counts 1..4", () => ({ n: 45 })],
-    when: ["formatting each", ({ n }) => [1, 2, 3, 4].map((c) => formatReminderMessage(n, c))],
-    then: ["comms, scoped verification, recommendation, root-cause in order", ([r1, r2, r3, r4]) => {
+    given: ["counts 1..5", () => ({ n: 45 })],
+    when: ["formatting each", ({ n }) => [1, 2, 3, 4, 5].map((c) => formatReminderMessage(n, c))],
+    then: ["comms, scoped verification, recommendation, first-line outcome, root-cause in order", ([r1, r2, r3, r4, r5]) => {
       expect(r1).toMatch(/Kommunikationsdisciplin/);
       expect(r2).toMatch(/fast relevant unit tests/);
       expect(r3).toMatch(/Always lead with a recommendation/);
-      expect(r4).toMatch(/Root cause > symptoms/);
+      expect(r4).toMatch(/First line is the outcome/);
+      expect(r5).toMatch(/Root cause > symptoms/);
     }],
   });
 
