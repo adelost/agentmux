@@ -10,6 +10,7 @@ import {
   cutoffFor,
   formatReminderMessage,
   recordReminderDelivery,
+  reminderSectionNames,
   DRIFT_SECTIONS,
 } from "./reminder-state.mjs";
 
@@ -348,6 +349,49 @@ feature("formatReminderMessage rotation (1.25.2 behavior)", () => {
         expect(msg).toContain(rule.file);
         expect(msg).not.toMatch(/silently/i);
       }
+    }],
+  });
+});
+
+feature("formatReminderMessage --section override (1.25.53 behavior)", () => {
+  unit("a named section is pinned regardless of reminderCount", {
+    given: ["a count that would rotate elsewhere (0 → staffing)", () => ({ n: 40, count: 0 })],
+    when: ["formatting with the section pinned", ({ n, count }) =>
+      formatReminderMessage(n, count, "claude", "", "First line is the outcome")],
+    then: ["the message targets First line is the outcome, not the rotation slot", (r) => {
+      expect(r).toMatch(/First line is the outcome/);
+      expect(r).not.toMatch(/Re-read the "Staffing and review economics"/);
+    }],
+  });
+
+  unit("the pinned message equals the rotation message at that section's index", {
+    given: ["First line is the outcome sits at rotation index 4", () => ({})],
+    when: ["formatting pinned vs rotated", () => ({
+      pinned: formatReminderMessage(40, 0, "claude", "", "First line is the outcome"),
+      rotated: formatReminderMessage(40, 4),
+    })],
+    then: ["identical text (same directive body, same mention-all tail)", ({ pinned, rotated }) =>
+      expect(pinned).toBe(rotated)],
+  });
+
+  unit("an unknown section throws with the deduped list of valid names", {
+    given: ["a name no section uses", () => ({})],
+    when: ["resolving it", () => () => formatReminderMessage(40, 0, "claude", "", "No Such Section")],
+    then: ["it throws, lists a real section, and does not repeat a shared name", (call) => {
+      expect(call).toThrow(/Unknown reminder section "No Such Section"/);
+      expect(call).toThrow(/First line is the outcome/);
+      const msg = (() => { try { call(); } catch (e) { return e.message; } })();
+      expect((msg.match(/Staffing and review economics/g) || []).length).toBe(1);
+    }],
+  });
+
+  unit("reminderSectionNames lists each section once, in rotation order", {
+    given: ["the drift sections", () => ({})],
+    when: ["reading the valid names", () => reminderSectionNames()],
+    then: ["deduped, first-seen order, covers the targetable sections", (names) => {
+      expect(new Set(names).size).toBe(names.length);
+      expect(names).toContain("First line is the outcome");
+      expect(names[0]).toBe("Staffing and review economics");
     }],
   });
 });

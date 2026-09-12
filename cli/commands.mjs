@@ -2175,11 +2175,23 @@ async function cmdPs(ctx, flags = {}) {
  *   amux remind <agent> -p N        — one pane, unconditional
  *   amux remind --all               — every live, recently used Claude pane
  *   amux remind --stale             — only panes past the turn threshold
+ *   amux remind ... --section "Name" — pin a named section instead of rotating
  *
  */
 async function cmdRemind(ctx, flags = {}, positional = []) {
-  const { loadReminderState, saveReminderState, parseReminderConfig, formatReminderMessage, cutoffFor, isReminderTargetActive } =
+  const { loadReminderState, saveReminderState, parseReminderConfig, formatReminderMessage, cutoffFor, isReminderTargetActive, reminderSectionNames } =
     await import("../core/reminder-state.mjs");
+
+  // Validate --section once up front so `--all --section <bad>` fails before
+  // any pane is woken, not after a partial broadcast.
+  const section = typeof flags.section === "string" && flags.section ? flags.section : null;
+  if (section && !reminderSectionNames().includes(section)) {
+    console.error(
+      `Unknown reminder section "${section}". Valid sections: ` +
+      reminderSectionNames().map((s) => `"${s}"`).join(", ") + ".",
+    );
+    process.exit(1);
+  }
   const { countWorkTurnsSince, panePathFor } = await import("../core/jsonl-reader.mjs");
   const { readParkState } = await import("../core/pane-park.mjs");
 
@@ -2202,7 +2214,8 @@ async function cmdRemind(ctx, flags = {}, positional = []) {
       console.error(`Usage:
   amux remind <agent> -p <pane>    # one pane
   amux remind --all                # all live, recently used Claude panes
-  amux remind --stale              # only panes past threshold (${threshold} turns)`);
+  amux remind --stale              # only panes past threshold (${threshold} turns)
+  amux remind <agent> -p <pane> --section "First line is the outcome"   # pin a named section`);
       process.exit(1);
     }
     const name = resolveAgent(positional[0], ctx.configPath);
@@ -2257,14 +2270,18 @@ async function cmdRemind(ctx, flags = {}, positional = []) {
       // source tag so the reminder reads the same in Discord as in the pane.
       // reminderCount rotates DRIFT_SECTIONS; the shared state file keeps
       // the rotation continuous between manual remind and the bridge poll.
+      // --section pins one named section and leaves the rotation counter
+      // untouched, so it does not skip the pane's place in the cycle.
       const reminderCount = paneState.reminderCount || 0;
-      const result = await sendToPane(ctx, a.name, paneIdx, formatReminderMessage(turnCount, reminderCount));
+      const result = await sendToPane(ctx, a.name, paneIdx, formatReminderMessage(turnCount, reminderCount, "claude", "", section));
       if (!result?.delivered) {
         console.error(`failed ${paneKey}: ${result?.blocked ? "blocked by park-guard" : "delivery not acknowledged"}`);
         failed++;
         continue;
       }
-      state[paneKey] = { ...paneState, lastReminderTsMs: nowMs, reminderCount: reminderCount + 1 };
+      state[paneKey] = section
+        ? { ...paneState, lastReminderTsMs: nowMs }
+        : { ...paneState, lastReminderTsMs: nowMs, reminderCount: reminderCount + 1 };
       sent++;
       console.log(`reminded ${paneKey} (${turnCount} turns)`);
     } catch (err) {
@@ -3178,6 +3195,7 @@ const FLAG_SPECS = {
     all: "boolean",                   // broadcast to every claude pane
     stale: "boolean",                 // only panes currently over threshold
     threshold: "number",              // override turn threshold for this run
+    section: "string",                // pin a named section instead of rotating
   },
   label: { clear: "boolean" },
   labels: {},
