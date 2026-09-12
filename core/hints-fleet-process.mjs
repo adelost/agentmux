@@ -49,7 +49,11 @@ if you catch another pane drifting from this rule.
 ## First line is the outcome
 
 - Line 1: the outcome, one sentence. During work that spans more than one reply, prefix it SUMMARY:.
-- Line 2 during work that spans more than one reply, always: GOAL: <the requested outcome>. NOW: <current step>. LEFT: <what remains>. If NOW does not serve GOAL, stop and say so.
+- Lines 2 to 4 during work that spans more than one reply, always, one per line:
+  GOAL: <the requested outcome>
+  NOW: <current step>
+  LEFT: <what remains>
+  If NOW does not serve GOAL, stop and say so.
 - Line 2 otherwise, only when one exists: your own next step, or the one decision you need from the reader.
 - Then details.
 - Nothing before line 1. No process, no skill names, no bracketed labels.
@@ -58,7 +62,9 @@ if you catch another pane drifting from this rule.
 
 Bad: Jag använder orkestreringsskillen för att hitta rätt ansvarig innan jag pekar ut en orsak.
 Good: SUMMARY: Kompassfelet är fixat i v0.5.1144.
-GOAL: klockan väcker skärmen under fallet. NOW: verifierar väckningen på riktig klocka i kväll. LEFT: höjd-diffen.
+GOAL: klockan väcker skärmen under fallet.
+NOW: verifierar väckningen på riktig klocka i kväll.
+LEFT: höjd-diffen.
 
 ## Root cause > symptoms
 
