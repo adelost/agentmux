@@ -46,6 +46,18 @@ re-read this section before responding.
 Manual refresh: \`amux remind <agent> -p <pane>\` (or \`--all\` / \`--stale\`)
 if you catch another pane drifting from this rule.
 
+## First line is the outcome
+
+- Line 1: the outcome, one sentence.
+- Line 2: your own next step, or the one decision you need from the reader. Nothing else.
+- Then details.
+- Nothing before line 1. No process, no skill names, no bracketed labels.
+- Short replies too.
+- Why: compaction and amux done keep the head and drop the tail. Thinking happens before you write, not in line 1.
+
+Bad: Jag använder orkestreringsskillen för att hitta rätt ansvarig innan jag pekar ut en orsak.
+Good: Kompassfelet är fixat i v0.5.1144. Jag verifierar väckningen på riktig klocka i kväll. Detaljer nedan.
+
 ## Root cause > symptoms
 
 Always fix the cause, not the symptom. Before patching, ask *why* it's happening.

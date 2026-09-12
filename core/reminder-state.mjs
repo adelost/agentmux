@@ -165,6 +165,13 @@ export const DRIFT_SECTIONS = [
   },
   {
     file: ".agents/CLAUDE.md",
+    section: "First line is the outcome",
+    label: "first line is the outcome (rad 1 utfall, rad 2 nästa steg/beslut)",
+    directive: "line 1 is the outcome in one sentence, line 2 your own next " +
+      "step or the one decision you need, then details. Nothing before line 1.",
+  },
+  {
+    file: ".agents/CLAUDE.md",
     section: "Root cause > symptoms",
     label: "root cause > symptoms (aldrig --no-verify)",
     directive: "fix the cause, not the symptom. " +
