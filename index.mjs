@@ -36,6 +36,9 @@ import { createJsonlWatcher } from "./channels/jsonl-watcher.mjs";
 import { createNativeRuntimeWatcher } from "./channels/native-runtime-watcher.mjs";
 import { createPlaywrightWatchdog } from "./channels/playwright-watchdog.mjs";
 import { parsePlaywrightWatchdogConfig } from "./core/playwright-watchdog.mjs";
+import { createPermissionWatchdog } from "./channels/permission-watchdog.mjs";
+import { parsePermissionWatchdogConfig } from "./core/permission-watchdog.mjs";
+import { notifyUser as notifyUserDm } from "./cli/send-notify.mjs";
 import { startHeartbeat } from "./core/heartbeat.mjs";
 import { startMemoryGuard } from "./core/memory-guard.mjs";
 import { blockedDeliveryNotice } from "./core/delivery-notices.mjs";
@@ -394,6 +397,19 @@ const playwrightWatchdog = createPlaywrightWatchdog({
   config: playwrightWatchdogConfig,
 });
 playwrightWatchdog.start();
+
+// Permission watchdog: a pane cannot answer its own Claude Code permission
+// prompt. Answer the one provably harmless rm-on-"$VAR"/... pattern after two
+// minutes, alert the human about everything else (docs/permission-watchdog.md).
+const permissionWatchdog = createPermissionWatchdog({
+  agent,
+  deliveryBroker,
+  agentsYamlPath: AGENTS_YAML,
+  discord,
+  notifyUser: notifyUserDm,
+  config: parsePermissionWatchdogConfig(),
+});
+permissionWatchdog.start();
 
 // jsonl-watcher: the single mirror path. fs.watch on each pane's project
 // dir, posts every complete turn to the bound Discord channel, persistent
