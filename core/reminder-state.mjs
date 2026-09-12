@@ -217,10 +217,34 @@ export const DRIFT_SECTIONS = [
  *
  * @param {number} turnCount - user turns since the pane's last refresh
  * @param {number} reminderCount - reminders already sent to this pane
+ * @param {string|null} section - pin this section by name instead of rotating
  */
+/** Unique section names that a --section override may target, in rotation order. */
+export function reminderSectionNames() {
+  return [...new Set(DRIFT_SECTIONS.map((r) => r.section).filter(Boolean))];
+}
+
+/**
+ * Resolve a --section name to its DRIFT_SECTIONS index, or throw with the
+ * list of valid names. A name shared by several entries (e.g. the staffing
+ * rules) resolves to the first, matching the rotation's own order.
+ */
+function sectionIndexOrThrow(section) {
+  const idx = DRIFT_SECTIONS.findIndex((r) => r.section === section);
+  if (idx === -1) {
+    throw new Error(
+      `Unknown reminder section "${section}". Valid sections: ` +
+      reminderSectionNames().map((s) => `"${s}"`).join(", ") + ".",
+    );
+  }
+  return idx;
+}
+
 /** WHAT: Formats one rotating coordination reminder. WHY: Keeps persistent rules visible without repeating every detail. */
-export function formatReminderMessage(turnCount, reminderCount = 0, dialect = "claude", rootDir = "") {
-  const idx = reminderCount % DRIFT_SECTIONS.length;
+export function formatReminderMessage(turnCount, reminderCount = 0, dialect = "claude", rootDir = "", section = null) {
+  const idx = section != null
+    ? sectionIndexOrThrow(section)
+    : reminderCount % DRIFT_SECTIONS.length;
   const rule = DRIFT_SECTIONS[idx];
   const file = join(rootDir, ".agents", dialect === "claude" ? "CLAUDE.md" : "AGENTS.md");
   const where = rule.section
