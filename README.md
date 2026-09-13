@@ -102,6 +102,12 @@ composer cleanup require two consistent live observations, while a fresh exact
 JSONL event always wins over tmux repaint. `amux doctor` reports queue health
 alongside bridge and tmux health.
 
+Claude's exact user-interruption journal event ends its interrupted turn even
+when a rejected tool has no later assistant reply. It is an idle observation,
+not a receipt for a pending prompt. Ordinary tool errors, quoted interruption
+text and later user or assistant activity retain the existing busy guards;
+delivery recovery still requires its exact history and live-pane checks.
+
 A blocked CLI handoff returns one durable recovery notice to its recorded
 sender after two refused wakes or ten minutes of unsuccessful pre-submit
 delivery. The original task stays in its FIFO; AMUX never assigns it to another

@@ -7,6 +7,7 @@ import { readAlternateTurns } from "./alternate-session-reader.mjs";
 import { describeToolCall } from "./tool-display.mjs";
 import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { isSystemNoiseDirective, isWorkDirective } from "./system-noise.mjs";
+import { readClaudeTurnLifecycle, userPromptText } from "./claude-turn-lifecycle.mjs";
 // Long sessions require bounded tail reads to stay below Node string limits.
 const DEFAULT_JSONL_WINDOW_BYTES = 8 * 1024 * 1024; // 8 MiB tail: thousands of turns
 const MAX_JSONL_WINDOW_BYTES = 128 * 1024 * 1024; // hard cap, well under the string limit
@@ -157,19 +158,6 @@ function parseJsonl(filePath) {
  */
 function parseJsonlTail(filePath, maxBytes) {
   return parseJsonlText(readTailWindow(filePath, maxBytes).text);
-}
-
-/**
- * Extract the string user content from an event. Returns null if the content
- * is a tool_result array (which is technically a user event but contains tool
- * output rather than a new prompt) or missing.
- */
-function userPromptText(event) {
-  if (event?.type !== "user") return null;
-  const content = event.message?.content;
-  if (typeof content === "string") return content;
-  // Array content in a user event usually means tool_result, not a prompt
-  return null;
 }
 
 // stop_reasons that mean "claude is done with this turn".
@@ -422,6 +410,8 @@ function describeJsonlToolCall(toolUse) {
  *   true  = claude is busy
  *   false = claude is idle (turn complete)
  *   null  = can't tell (no jsonl, no matching prompt) → caller should fall back
+ * WHAT: Reads Claude turn activity from its persisted journal.
+ * WHY: Prevents interrupted tool turns from blocking exact delivery recovery.
  */
 export function isBusyFromJsonl(paneDir, promptText = null) {
   const projectDir = claudeProjectDir(paneDir);
@@ -458,26 +448,9 @@ export function isBusyFromJsonl(paneDir, promptText = null) {
   // wrapper-only events qualify; ordinary user text remains a real turn.
   if (isLocalCommandOnlyPrompt(userPromptText(events[userIdx]))) return false;
 
-  // Walk forward from the user prompt, tracking the last assistant event.
-  // Break when we hit a *new* user prompt (not a tool_result). That's the
-  // start of the next turn.
-  let lastAssistant = null;
-  let pendingToolResult = false;
-  let nextTurnExists = false;
-
-  for (let i = userIdx + 1; i < events.length; i++) {
-    const e = events[i];
-    if (e.type === "user") {
-      if (userPromptText(e) !== null) { nextTurnExists = true; break; }
-      // Otherwise it's a tool_result. Claude will respond with a new
-      // assistant message; until that arrives, we're still busy.
-      pendingToolResult = true;
-      continue;
-    }
-    if (e.type !== "assistant") continue;
-    lastAssistant = e;
-    pendingToolResult = false;
-  }
+  const { lastAssistant, pendingToolResult, nextTurnExists, interrupted } =
+    readClaudeTurnLifecycle(events, userIdx);
+  if (interrupted) return false;
 
   // If a later user prompt exists in the jsonl, claude accepted new input
   // which proves our turn finished, regardless of what stop_reason says.
