@@ -2137,21 +2137,21 @@ feature("single-writer delivery broker", () => {
       ctx.afterSuccess = reopened.read("watch", 3, ctx.job.id);
       ctx.targetsAfterSuccess = reopened.targets();
     }],
-    then: ["the parked job is never dropped or re-notified inside its window, across the restart", (_, ctx) => {
+    then: ["the parked job survives and only a successful retry counts as a sent warning", (_, ctx) => {
       expect(ctx.agent.sends).toHaveLength(0);
       expect(ctx.afterFailure).toMatchObject({
         status: "pending",
         attempts: 0,
-        noticeSentAt: 4_000_000,
+        noticeSentAt: null,
         nextAttemptAt: 4_000_000 + 5 * 60_000,
       });
       expect(ctx.targetsAfterFailure).toEqual([{ agentName: "watch", pane: 3 }]);
       expect(ctx.afterSuccess).toMatchObject({
         status: "pending",
         attempts: 0,
-        noticeSentAt: 4_000_000,
+        noticeSentAt: 4_060_000,
       });
-      expect(ctx.calls()).toBe(1);
+      expect(ctx.calls()).toBe(2);
       expect(ctx.targetsAfterSuccess).toEqual([{ agentName: "watch", pane: 3 }]);
       rmSync(ctx.rootDir, { recursive: true, force: true });
     }],

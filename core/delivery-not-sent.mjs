@@ -3,7 +3,7 @@
 // A job that never reached Enter gets a bounded safety budget (attempts and
 // age). When the budget ends without an authoritative receipt the message is
 // never dropped silently: a pre-submit timeout PARKS the head with a fresh
-// budget (FIFO and message preserved, one notice per park cycle), while
+// retry budget, preserving its lifetime blocker and counters, while
 // sender cancels and proven-not-ingesting followers stay terminal.
 // The single writer lease means only the broker ever runs these transitions.
 
@@ -23,7 +23,7 @@ const PRE_SUBMIT_PARK_MS = 5 * 60_000;
 
 /** WHAT: Builds the pre-submit NOT SENT transitions over the broker's seams. WHY: Keeps parking and cancellation policy out of the delivery loop. */
 export function createDeliveryNotSent({
-  queue, agent, now, notify, log, queueEvent, exactEcho, acknowledge, notifyTerminal,
+  queue, agent, now, queueEvent, exactEcho, acknowledge, notifyTerminal, maybeNotifyBlocked,
 }) {
   const cancellationRequested = (job) => job.cancelRequestStatus === "requested";
 
@@ -132,19 +132,22 @@ export function createDeliveryNotSent({
 
   /** WHAT: Parks one exhausted head instead of dropping its message. WHY: Keeps the FIFO intact while the stall stays visible. */
   async function parkPreSubmitTimeout(current) {
+    const previous = current.metadata?.preSubmitPark;
     const parked = queue.update(current, {
       status: current.draftOwned ? "pasting" : "pending",
       attempts: 0,
       firstAttemptAt: null,
       nextAttemptAt: now() + PRE_SUBMIT_PARK_MS,
-      noticeSentAt: now(),
-      lastReason: "composer stayed unsafe for a full receipt budget; message kept in queue, "
-        + `retry continues in ${Math.floor(PRE_SUBMIT_PARK_MS / 60_000)} min (park, not drop)`,
+      lastReason: current.lastReason || "pre-submit retry budget exhausted; message remains queued",
+      metadata: { preSubmitPark: {
+        count: Number(previous?.count || 0) + 1,
+        attempts: Number(previous?.attempts || 0) + Number(current.attempts || 0),
+        firstAttemptAt: previous?.firstAttemptAt || current.firstAttemptAt || current.createdAt,
+        parkedAt: now(),
+      } },
     });
     queueEvent(parked, "parked_pre_submit", { reason: "pre-submit-timeout" });
-    await notify(parked, "blocked").catch((error) =>
-      log(`delivery broker park notice failed for ${parked.id}: ${error.message}`));
-    return parked;
+    return maybeNotifyBlocked(parked);
   }
 
   /** WHAT: Ends or parks one pre-submit job with the receipt re-read at the boundary. WHY: Prevents a stale observer from overwriting a late acknowledgement. */

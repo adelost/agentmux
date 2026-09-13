@@ -6,6 +6,53 @@ import { verifiedClaudeCompact, verifiedCodexCompact } from "./verified-compact.
 import { sendSlashVerified } from "./delivery.mjs";
 
 feature("verified Claude compact", () => {
+  unit("accepts the observed 145-second nightly receipt without another model call", {
+    when: ["the command and boundary arrive later than the former two-minute wait", async () => {
+      let clock = 1_000, submits = 0, rescues;
+      const result = await verifiedClaudeCompact({
+        agent: { capturePromptEchoCursor: async () => ({ positions: { journal: 10 } }) },
+        agentName: "claw", pane: 2, paneDir: "/pane",
+        latestIdentity: () => ({ sessionId: "same-session" }), now: () => clock,
+        sendSlash: async (_agent, _name, _pane, _command, options) => {
+          submits += 1;
+          rescues = options.maxRescues;
+          clock += Math.min(145_000, options.receiptTimeoutMs);
+          return { delivered: options.receiptTimeoutMs >= 145_000, via: "command-receipt" };
+        },
+        hasBoundary: () => clock >= 146_000,
+        sleep: async (ms) => { clock += ms; },
+      });
+      return { result, submits, rescues };
+    }],
+    then: ["one exact command and its boundary suffice", ({ result, submits, rescues }) => {
+      expect(result.ok).toBe(true);
+      expect(submits).toBe(1);
+      expect(rescues).toBe(0);
+    }],
+  });
+
+  unit("shares a single five-minute budget across command and missing boundary", {
+    when: ["a nearly timed-out command has no matching journal boundary", async () => {
+      let clock = 1_000;
+      const result = await verifiedClaudeCompact({
+        agent: { capturePromptEchoCursor: async () => ({ positions: { journal: 10 } }) },
+        agentName: "claw", pane: 2, paneDir: "/pane",
+        latestIdentity: () => ({ sessionId: "same-session" }), now: () => clock,
+        sendSlash: async () => {
+          clock += 299_000;
+          return { delivered: true, via: "command-receipt" };
+        },
+        hasBoundary: () => false,
+        sleep: async (ms) => { clock += ms; },
+      });
+      return { result, elapsed: clock - 1_000 };
+    }],
+    then: ["no success or second full wait is invented", ({ result, elapsed }) => {
+      expect(result).toEqual({ ok: false, reason: "compact-boundary-missing" });
+      expect(elapsed).toBeLessThanOrEqual(300_000);
+    }],
+  });
+
   unit("waits for a delayed exact command receipt instead of rescuing Enter during compact", {
     when: ["Claude persists its compact receipt after the old 600ms cutoff", async () => {
       const calls = [];

@@ -161,7 +161,7 @@ export function createDeliveryBroker({
     queue, now, notify, log, blockedRetryMs, resolveNotificationChannel,
   });
   const { stalePreSubmit, terminalizeNotSent, yieldSupersededMaintenance } = createDeliveryNotSent({
-    queue, agent, now, notify, log, queueEvent, exactEcho, acknowledge, notifyTerminal,
+    queue, agent, now, queueEvent, exactEcho, acknowledge, notifyTerminal, maybeNotifyBlocked,
   });
   const gateIngestProbe = createIngestProbeGate({
     agent, queue, queueEvent, now, blockedRetryMs,
@@ -616,8 +616,8 @@ export function createDeliveryBroker({
         // All pre-delivery terminal paths run in one ordered pass under the
         // same writer lease as pane delivery.
         await runDeliveryPreflight({
-          agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal,
-          exactEcho, acknowledge,
+          agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal, agent,
+          exactEcho, acknowledge, notifyBlocked: maybeNotifyBlocked,
         });
 
         // Every non-terminal head, including `submitted`, retains FIFO until

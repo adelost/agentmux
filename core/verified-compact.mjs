@@ -27,7 +27,7 @@ export async function verifiedClaudeCompact({
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   sendSlash = sendSlashVerified,
   hasBoundary = hasClaudeCompactBoundaryAfterSubmit,
-  pollAttempts = 120,
+  pollAttempts = 300,
   pollMs = 1_000,
   settleMs = 200,
   command = "/compact",
@@ -43,11 +43,13 @@ export async function verifiedClaudeCompact({
     return { ok: false, reason: "compact-cursor-missing" };
   }
   const submittedAt = now();
+  const deadline = submittedAt + pollAttempts * pollMs;
   const sent = await sendSlash(agent, agentName, pane, command, {
     suppressReceipt: true,
     settleMs,
     // Claude may persist the local-command receipt only after compacting.
-    // Wait for that exact receipt instead of sending extra Enter mid-compact.
+    // A real nightly compact took 145s. Share one bounded five-minute wait
+    // with the boundary check; never send extra Enter while it is running.
     receiptTimeoutMs: pollAttempts * pollMs,
     maxRescues: 0,
     sleep,
@@ -59,7 +61,7 @@ export async function verifiedClaudeCompact({
     return { ok: false, reason: "compact-command-unverified" };
   }
   const boundary = await waitFor(
-    pollAttempts,
+    Math.max(1, Math.min(pollAttempts, Math.floor((deadline - now()) / pollMs) + 1)),
     pollMs,
     sleep,
     () => hasBoundary(cursor, submittedAt),

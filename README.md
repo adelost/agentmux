@@ -102,6 +102,14 @@ composer cleanup require two consistent live observations, while a fresh exact
 JSONL event always wins over tmux repaint. `amux doctor` reports queue health
 alongside bridge and tmux health.
 
+A blocked CLI handoff returns one durable recovery notice to its recorded
+sender after two refused wakes or ten minutes of unsuccessful pre-submit
+delivery. The original task stays in its FIFO; AMUX never assigns it to another
+model or treats an ambiguous submission as NOT SENT. A transient first failure
+does not wake the sender. Installation-identity refusals name the AMUX package,
+not the project's checkout. Parking preserves that cause and lifetime attempt
+count, and a failed Discord warning remains retryable across bridge restarts.
+
 ### Native runtime canary (no tmux)
 
 AMUX Code can own selected agents directly through Claude's stream-json mode
@@ -380,6 +388,9 @@ drafted, queued, unmeasured and low-quality contexts are skipped. Claude and
 Codex have exact compact adapters; Kimi/native are explicitly unsupported here.
 The existing delivery lease and final live revalidation protect each attempt.
 Each exact session gets at most one attempt per night, including after a crash.
+Claude's exact command receipt can appear only after compaction finishes. Its
+command and compact-boundary checks share one five-minute budget, with no
+rescue Enter; a late or ambiguous outcome is not permission to compact again.
 `~/.agentmux/nightly-compact/YYYY-MM-DD/` records per-pane intent, before/after tokens
 and actual receipt outcome. A failed or blocked budget pass exits nonzero so the
 existing cron failure notification also covers maintenance, not just the digest.

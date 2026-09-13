@@ -5,6 +5,7 @@
 // a missing bound channel parks the notice instead of dropping it.
 
 import { DELIVERED_UNVERIFIED_STATE, isNotSentDeliveryJob } from "./delivery-queue.mjs";
+import { deliveryBlockerDetail } from "./delivery-handoff.mjs";
 
 const NOTICE_AFTER_MS = 10_000;
 
@@ -18,7 +19,7 @@ export function blockedDeliveryNotice(job) {
       : reason === "guard-state-stale"
         ? "minnesvaktens mätning är för gammal"
         : reason.startsWith("identity-")
-          ? "den installerade release-identiteten kan inte verifieras"
+          ? `release-identiteten är fel: ${deliveryBlockerDetail(job)}`
           : "panelen är inte redo för säker leverans";
   return "⚠️ Meddelandet är säkert köat men panelen kan inte ta emot det ännu: "
     + `${detail}. Det ligger kvar över omstarter och skickas i ordning när spärren har släppt.`;
@@ -36,10 +37,17 @@ export function createDeliveryNotices({
   /** WHAT: Posts one blocked notice per job after its grace window. WHY: Keeps stalls visible without a notification drip. */
   async function maybeNotifyBlocked(job) {
     if (job.noticeSentAt || now() - Number(job.createdAt || 0) < NOTICE_AFTER_MS) return job;
-    const noticed = queue.update(job, { noticeSentAt: now() });
-    await notify(noticed, "blocked").catch((error) =>
-      log(`delivery broker blocked notice failed for ${noticed.id}: ${error.message}`));
-    return noticed;
+    if (Number(job.blockedNoticeNextAttemptAt || 0) > now()) return job;
+    const attempted = queue.update(job, { blockedNoticeAttempts: Number(job.blockedNoticeAttempts || 0) + 1 });
+    try {
+      await notify(attempted, "blocked");
+      return queue.update(attempted, { noticeSentAt: now(), blockedNoticeNextAttemptAt: null,
+        blockedNoticeLastReason: null });
+    } catch (error) {
+      log(`delivery broker blocked notice failed for ${job.id}: ${error.message}`);
+      return queue.update(attempted, { blockedNoticeNextAttemptAt: now() + blockedRetryMs(attempted),
+        blockedNoticeLastReason: error.message });
+    }
   }
 
   /** WHAT: Maps a terminal job to its notice kind. WHY: Separates unverified submits from not-sent refusals. */

@@ -2,6 +2,7 @@
 // must become LOUD, never auto-terminal. Ambiguity is preserved by contract.
 
 import { DELIVERED_UNVERIFIED_STATE } from "./delivery-queue-policy.mjs";
+import { reportBlockedHandoffs } from "./delivery-handoff.mjs";
 
 const STALE_WARN_MS = 20 * 60_000;
 const PHYSICAL_STATES = new Set(["pasting", "submitting"]);
@@ -61,7 +62,7 @@ async function reconcileLateEchoWatch({ agentName, pane, queue, now, exactEcho, 
 }
 
 /** WHAT: Dispatches cancellation requests, terminal notices, and stale reporting before delivery. WHY: Keeps every pre-delivery terminal path in one ordered pass. */
-export async function runDeliveryPreflight({ agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal, exactEcho = null, acknowledge = null }) {
+export async function runDeliveryPreflight({ agentName, pane, queue, now, queueEvent, log, terminalizeNotSent, notifyTerminal, exactEcho = null, acknowledge = null, notifyBlocked = null, agent = null }) {
   const cancellationRequests = queue.pendingCancellationRequests?.(agentName, pane) || [];
   for (const request of cancellationRequests) await terminalizeNotSent(request);
   await reconcileLateEchoWatch({ agentName, pane, queue, now, exactEcho, acknowledge });
@@ -69,5 +70,12 @@ export async function runDeliveryPreflight({ agentName, pane, queue, now, queueE
     || queue.pendingUnverifiedNotices?.(agentName, pane) || [])
     .filter((job) => Number(job.unverifiedNoticeNextAttemptAt || 0) <= now());
   for (const notice of notices) await notifyTerminal(notice);
+  await reportBlockedHandoffs({ agentName, pane, queue, now, exactEcho, acknowledge, log, agent });
+  if (notifyBlocked) {
+    for (const job of queue.list(agentName, pane)) {
+      if (["pending", "pasting", "drafted"].includes(job.status) && job.lastReason
+          && (job.attempts > 0 || job.metadata?.preSubmitPark)) await notifyBlocked(job);
+    }
+  }
   return reportStaleDeliveryJobs({ agentName, pane, queue, now, queueEvent, log });
 }

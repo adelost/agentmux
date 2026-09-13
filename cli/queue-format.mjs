@@ -57,7 +57,7 @@ export function deliveryQueueDisplayRows(jobs, { now = Date.now() } = {}) {
     target: `${job.agentName}:${job.pane}`,
     age: queueAge(job.createdAt, now),
     state: queueDisplayState(job),
-    attempts: Number(job.attempts || 0),
+    attempts: Number(job.attempts || 0) + Number(job.metadata?.preSubmitPark?.attempts || 0),
     reason: queueCell(queueReason(job), 52),
     preview: queueCell(job.text, 60),
   }));
