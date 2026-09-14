@@ -15,7 +15,7 @@ const TURN = MGR.slice(
 const MAIN = MGR.slice(MGR.indexOf("async function main"));
 
 feature("windows manager source contract", () => {
-  unit("bots, strangers, empty text, and restarter-owned commands are skipped", {
+  unit("bots and strangers are skipped before any input is accepted", {
     then: ["all four skip conditions guard the accepted path", () => {
       expect(DISCORD).toContain("message.author?.bot === true");
       expect(DISCORD).toContain("String(message.author?.id) !== String(config.authorizedUserId)");
@@ -105,8 +105,8 @@ feature("windows manager source contract", () => {
       const poll = MAIN.indexOf("pollManagerChannel({");
       expect(reconcile).toBeGreaterThan(-1);
       expect(poll).toBeGreaterThan(reconcile);
-      expect(MGR).toContain('action.status = "blocked"');
-      expect(MGR).toContain("state.lastSeenId = String(action.messageId)");
+      expect(DISCORD).toContain('action.status = "blocked"');
+      expect(DISCORD).toContain("state.lastSeenId = String(action.messageId)");
     }],
   });
 

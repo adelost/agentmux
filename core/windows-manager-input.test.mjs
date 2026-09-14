@@ -19,7 +19,8 @@ feature("windows manager Discord input", () => {
   unit("text, commands, empty messages, and voice notes classify without guessing", {
     then: ["only one bounded Discord voice attachment becomes voice input", () => {
       expect(classifyManagerInput({ content: " hej " })).toEqual({ kind: "text", text: "hej" });
-      expect(classifyManagerInput({ content: "//status" })).toEqual({ kind: "skip", reason: "restarter-command" });
+      // The manager is the only live listener, so //commands are text for its local parser.
+      expect(classifyManagerInput({ content: "//status" })).toEqual({ kind: "text", text: "//status" });
       expect(classifyManagerInput({ content: "", attachments: [] })).toEqual({ kind: "skip", reason: "empty-or-unsupported" });
       expect(classifyManagerInput(VOICE)).toEqual({
         kind: "voice",

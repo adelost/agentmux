@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, feature, unit } from "bdd-vitest";
 import { createMockProvider } from "../core/windows-manager.mjs";
-import { pollManagerChannel, readManagerConfig, reconcileManagerStartup } from "./windows-manager.mjs";
+import { reconcileManagerStartup } from "../core/windows-manager-discord.mjs";
+import { pollManagerChannel, readManagerConfig } from "./windows-manager.mjs";
 
 const CONFIG = { channelId: "123456789012345678", authorizedUserId: "111111111111111111" };
 const NOW = 1_000_000;
@@ -108,9 +109,10 @@ feature("windows manager smoke", () => {
       try {
         const state = { schemaVersion: 1, lastSeenId: null, lastAction: null, lastStatusMs: null };
         expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(1);
-        expect(harness.executed).toEqual(["get_status", "restart_wsl"]);
+        expect(harness.executed).toEqual(["get_status", "restart_wsl", "get_status"]);
         expect(harness.chats()).toBe(0);
-        expect(harness.sent[0]).toContain("AMUX RECOVERED lokal recovery");
+        expect(harness.sent[0]).toContain("AMUX startar om WSL nu");
+        expect(harness.sent.at(-1)).toContain("AMUX RECOVERED lokal recovery");
         expect(state.lastSeenId).toBe("105");
       } finally {
         harness.cleanup();
@@ -185,14 +187,14 @@ feature("windows manager smoke", () => {
           { id: "202", content: "Men förhelvet.. starata om du omedelbums..", author: { id: CONFIG.authorizedUserId, bot: false } },
         ];
         expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(1);
-        expect(harness.executed).toEqual(["get_status", "get_status", "restart_wsl"]);
+        expect(harness.executed).toEqual(["get_status", "get_status", "restart_wsl", "get_status"]);
         // The previous local answer names WSL, but the explicit model target
         // must not inherit it or execute any further tool.
         harness.deps.listMessages = async () => [
           { id: "203", content: "starta om modellerna då", author: { id: CONFIG.authorizedUserId, bot: false } },
         ];
         expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(1);
-        expect(harness.executed).toEqual(["get_status", "get_status", "restart_wsl"]);
+        expect(harness.executed).toEqual(["get_status", "get_status", "restart_wsl", "get_status"]);
         expect(harness.chats()).toBe(1);
       } finally {
         harness.cleanup();
@@ -248,13 +250,12 @@ feature("windows manager smoke", () => {
     }],
   });
 
-  unit("bots, strangers, and restarter commands never reach the provider", {
-    then: ["all skipped with the cursor advanced and zero journal entries", async () => {
+  unit("bots and strangers never reach the provider", {
+    then: ["both skipped silently with the cursor advanced and zero journal entries", async () => {
       const harness = makeHarness({
         messages: [
           { id: "101", content: "hej", author: { id: CONFIG.authorizedUserId, bot: true } },
-          { id: "102", content: "hej", author: { id: "999999999999999999", bot: false } },
-          { id: "103", content: "//status", author: { id: CONFIG.authorizedUserId, bot: false } },
+          { id: "102", content: "//restart-wsl", author: { id: "999999999999999999", bot: false } },
         ],
         scripted: [],
       });
@@ -265,9 +266,107 @@ feature("windows manager smoke", () => {
         expect(harness.chats()).toBe(0);
         expect(harness.executed).toEqual([]);
         expect(harness.sent).toEqual([]);
-        expect(state.lastSeenId).toBe("103");
+        expect(state.lastSeenId).toBe("102");
         expect(state.lastAction).toBeNull();
-        expect(harness.writes).toHaveLength(3);
+      } finally {
+        harness.cleanup();
+      }
+    }],
+  });
+
+  // The manager is the only live listener on the rescue channel; the PowerShell
+  // restarter that once owned //commands last polled 2026-08-01. Skipping them
+  // silently dropped three //restart-wsl orders (2026-09-12..14) with no reply.
+  unit("the authorized human's //commands run locally and always get an answer", {
+    then: ["//status runs the probe and an unknown //command explains the vocabulary", async () => {
+      const harness = makeHarness({
+        messages: [
+          { id: "103", content: "//status", author: { id: CONFIG.authorizedUserId, bot: false } },
+          { id: "104", content: "//reboot", author: { id: CONFIG.authorizedUserId, bot: false } },
+        ],
+        scripted: [],
+      });
+      try {
+        const state = { schemaVersion: 1, lastSeenId: null, lastAction: null, lastStatusMs: null };
+        expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(2);
+        expect(harness.chats()).toBe(0);
+        expect(harness.executed).toEqual(["get_status"]);
+        expect(harness.sent[0]).toBe("AMUX READY reason=ok");
+        expect(harness.sent[1]).toContain("AMUX BLOCKED okänt kommando //reboot");
+        expect(harness.sent[1]).toContain("//restart-wsl");
+        expect(state.lastSeenId).toBe("104");
+      } finally {
+        harness.cleanup();
+      }
+    }],
+  });
+
+  unit("an authorized message the manager cannot read is answered, not dropped", {
+    then: ["an image-only message names why nothing ran", async () => {
+      const harness = makeHarness({
+        messages: [{ id: "106", content: "", attachments: [{ url: "https://cdn.discordapp.com/a.png" }], author: { id: CONFIG.authorizedUserId, bot: false } }],
+        scripted: [],
+      });
+      try {
+        const state = { schemaVersion: 1, lastSeenId: null, lastAction: null, lastStatusMs: null };
+        expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(0);
+        expect(harness.sent).toEqual(["AMUX BLOCKED kan inte läsa meddelandet (empty-or-unsupported). Skriv text eller skicka ett röstmeddelande."]);
+        expect(state.lastSeenId).toBe("106");
+      } finally {
+        harness.cleanup();
+      }
+    }],
+  });
+
+  unit("//restart-wsl announces the restart before it runs and reports whether WSL really rebooted", {
+    then: ["notice with the old boot, one restart, a fresh status, and the boot change in the answer", async () => {
+      const harness = makeHarness({
+        messages: [{ id: "107", content: "//restart-wsl", author: { id: CONFIG.authorizedUserId, bot: false } }],
+        scripted: [],
+      });
+      const boots = ["aaaaaaaa-1111", "bbbbbbbb-2222"];
+      const sentBeforeRestart = [];
+      harness.deps.executeTool = async (name) => {
+        harness.executed.push(name);
+        if (name === "restart_wsl") {
+          sentBeforeRestart.push(...harness.sent);
+          return { ok: true, stage: "wsl-recovered", detail: "revive ok" };
+        }
+        const bootId = boots.shift();
+        return { ok: true, stage: name, detail: `AMUX READY boot=${bootId}`, observation: { wsl: "online", wslReachable: true, bootId } };
+      };
+      try {
+        const state = { schemaVersion: 1, lastSeenId: null, lastAction: null, lastStatusMs: null };
+        expect(await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps })).toBe(1);
+        expect(harness.executed).toEqual(["get_status", "restart_wsl", "get_status"]);
+        expect(harness.chats()).toBe(0);
+        expect(sentBeforeRestart).toHaveLength(1);
+        expect(sentBeforeRestart[0]).toContain("AMUX startar om WSL nu");
+        expect(sentBeforeRestart[0]).toContain("aaaaaaaa-1111");
+        expect(harness.sent.at(-1)).toContain("WSL är omstartat: boot aaaaaaaa-1111 -> bbbbbbbb-2222");
+        expect(harness.sent.at(-1)).toContain("AMUX RECOVERED");
+      } finally {
+        harness.cleanup();
+      }
+    }],
+  });
+
+  unit("a restart that leaves the same boot says plainly that WSL did not restart", {
+    then: ["the unchanged boot id is reported instead of a vague stage", async () => {
+      const harness = makeHarness({
+        messages: [{ id: "108", content: "starta om wsl", author: { id: CONFIG.authorizedUserId, bot: false } }],
+        scripted: [],
+      });
+      harness.deps.executeTool = async (name) => {
+        harness.executed.push(name);
+        if (name === "restart_wsl") return { ok: false, stage: "wsl-stop", detail: "timeout" };
+        return { ok: true, stage: name, detail: "AMUX READY", observation: { wsl: "online", wslReachable: true, bootId: "aaaaaaaa-1111" } };
+      };
+      try {
+        const state = { schemaVersion: 1, lastSeenId: null, lastAction: null, lastStatusMs: null };
+        await pollManagerChannel({ config: CONFIG, state, history: [], deps: harness.deps });
+        expect(harness.sent.at(-1)).toContain("WSL startades INTE om: samma boot aaaaaaaa-1111");
+        expect(harness.sent.at(-1)).toContain("AMUX PARTIAL");
       } finally {
         harness.cleanup();
       }

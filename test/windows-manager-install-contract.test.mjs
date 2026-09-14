@@ -1,11 +1,28 @@
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, feature, unit } from "bdd-vitest";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const INSTALLER = readFileSync(join(ROOT, "bin", "windows-manager-install.ps1"), "utf8");
-const MANAGER_ENTRY = readFileSync(join(ROOT, "bin", "windows-manager.mjs"), "utf8");
+
+// A module the installer does not copy crashes the Windows manager at import
+// time, which silences the rescue channel. 2026-08-16 added a transitive import
+// (windows-manager-link -> runtime-defaults) that the entry-only check missed.
+function stagedRuntimeClosure(entry) {
+  const seen = new Set();
+  const pending = [entry];
+  while (pending.length) {
+    const path = pending.pop();
+    if (seen.has(path)) continue;
+    seen.add(path);
+    const source = readFileSync(join(ROOT, path), "utf8");
+    for (const [, specifier] of source.matchAll(/^import[^;]*?from "(\.{1,2}\/[^"]+)"/gmu)) {
+      pending.push(posix.normalize(posix.join(posix.dirname(path), specifier)));
+    }
+  }
+  return [...seen];
+}
 
 feature("windows manager install source contract", () => {
   unit("channel and user are validated as Discord snowflakes", {
@@ -52,11 +69,10 @@ feature("windows manager install source contract", () => {
   });
 
   unit("the installed runtime closes over every manager core import", {
-    then: ["no entrypoint import can be omitted from the copy manifest", () => {
-      const coreImports = [...MANAGER_ENTRY.matchAll(/from "\.\.\/core\/([^"]+)"/gu)]
-        .map((match) => `core/${match[1]}`);
-      expect(coreImports.length).toBeGreaterThan(0);
-      for (const runtimePath of coreImports) expect(INSTALLER).toContain(`"${runtimePath}"`);
+    then: ["no direct or transitive import can be omitted from the copy manifest", () => {
+      const runtimePaths = stagedRuntimeClosure("bin/windows-manager.mjs");
+      expect(runtimePaths.length).toBeGreaterThan(1);
+      for (const runtimePath of runtimePaths) expect(INSTALLER).toContain(`name = "${runtimePath}"`);
     }],
   });
 

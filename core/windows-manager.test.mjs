@@ -31,23 +31,23 @@ feature("windows manager core", () => {
       expect(planLocalRescueTurn("WSL har kraschat")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
       expect(planLocalRescueTurn("WSL krash")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
       expect(planLocalRescueTurn("Ok, WSL har kraschat och behöver startas om"))
-        .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl"] });
+        .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl", "get_status"] });
       expect(planLocalRescueTurn("Kan du starta om WSL?"))
-        .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl"] });
+        .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl", "get_status"] });
       // STT/typo variants of the same WSL order land on the same local intent.
       for (const typo of ["starata om wsl nu", "startaom wsl", "staratta om wsl", "start om wsl nu"]) {
         expect(planLocalRescueTurn(typo))
-          .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl"] });
+          .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl", "get_status"] });
       }
       expect(planLocalRescueTurn("starta projektet")).toBeNull();
       expect(planLocalRescueTurn("kan du starta om datorn")).toBeNull();
       // The rescue channel gives a direct objectless imperative one documented
       // default target: WSL. It does not need a model or previous prose.
       expect(planLocalRescueTurn("starta om nu"))
-        .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl"] });
+        .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl", "get_status"] });
       const incident = "Men förhelvet.. starata om du omedelbums..";
       expect(planLocalRescueTurn(incident))
-        .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl"] });
+        .toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl", "get_status"] });
       // Explicit targets never borrow WSL from prior manager prose. This is the
       // exact 2026-07-31 regression that restarted WSL after a model request.
       expect(planLocalRescueTurn("starta om modellerna då")).toBeNull();
@@ -60,6 +60,39 @@ feature("windows manager core", () => {
       expect(planLocalRescueTurn("Hej! Hur restartar vi?")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
       expect(planLocalRescueTurn("hej")).toBeNull();
       expect(planLocalRescueTurn("kan du skriva kod?")).toBeNull();
+    }],
+  });
+
+  unit("every //command maps to a local plan or an explicit refusal", {
+    then: ["the documented vocabulary runs locally and nothing starting with // reaches the provider", () => {
+      expect(planLocalRescueTurn("//status")).toEqual({ kind: "status", tools: ["get_status"] });
+      expect(planLocalRescueTurn("//logs")).toEqual({ kind: "logs", tools: ["get_logs"] });
+      expect(planLocalRescueTurn("//recover")).toEqual({ kind: "recovery", tools: ["get_status", "recover"] });
+      expect(planLocalRescueTurn("//start-wsl")).toEqual({ kind: "start-wsl", tools: ["get_status", "start_wsl"] });
+      expect(planLocalRescueTurn("//start-bridge")).toEqual({ kind: "start-bridge", tools: ["get_status", "start_bridge"] });
+      expect(planLocalRescueTurn("//restart")).toEqual({ kind: "start-bridge", tools: ["get_status", "start_bridge"] });
+      for (const order of ["//restart-wsl", "//RESTART-WSL", "//hardrestart", "//restart-wsl --receipt ab12cd34"]) {
+        expect(planLocalRescueTurn(order)).toEqual({ kind: "restart-wsl", tools: ["get_status", "restart_wsl", "get_status"] });
+      }
+      for (const unknown of ["//reboot", "//status extra", "//"]) {
+        const plan = planLocalRescueTurn(unknown);
+        expect(plan.kind).toBe("unsupported");
+        expect(plan.tools).toEqual([]);
+        expect(plan.answer).toContain("AMUX BLOCKED okänt kommando");
+      }
+    }],
+  });
+
+  unit("a restart answer states whether the boot identity changed", {
+    then: ["changed, unchanged and missing boots read differently", () => {
+      const status = (bootId) => ({ ok: true, stage: "get_status", detail: "s", observation: { bootId } });
+      const restart = { ok: true, stage: "wsl-recovered", detail: "revive ok" };
+      expect(formatLocalRescueAnswer({ kind: "restart-wsl" }, [status("a1"), restart, status("b2")], "RECOVERED"))
+        .toBe("WSL är omstartat: boot a1 -> b2.\nAMUX RECOVERED lokal recovery\nsteg=3 fel=0\nwsl-recovered: revive ok\nget_status: s");
+      expect(formatLocalRescueAnswer({ kind: "restart-wsl" }, [status("a1"), restart, status("a1")], "RECOVERED"))
+        .toContain("WSL startades INTE om: samma boot a1.");
+      expect(formatLocalRescueAnswer({ kind: "restart-wsl" }, [status("a1"), restart, status(undefined)], "PARTIAL"))
+        .toContain("WSL svarar inte efter omstarten: boot före a1");
     }],
   });
 
@@ -202,13 +235,15 @@ feature("windows manager core", () => {
       expect(planToolCall({ name: "restart_wsl", observation: { wsl: "unknown" } }))
         .toEqual({ allow: false, reason: "explicit-human-restart-required" });
       expect(planToolCall({ name: "restart_wsl", observation: { wsl: "unknown" }, explicitHumanRestart: true }))
-        .toEqual({ allow: true, reason: "explicit-human-restart" });
+        .toMatchObject({ allow: true, reason: "explicit-human-restart" });
       // The hang signature itself authorizes the explicit human restart order.
       expect(planToolCall({ name: "restart_wsl", observation: { wsl: "unresponsive" }, explicitHumanRestart: true }))
-        .toEqual({ allow: true, reason: "explicit-human-restart" });
+        .toMatchObject({ allow: true, reason: "explicit-human-restart" });
       // The human order is unconditional: a healthy WSL may be restarted on command too.
       expect(planToolCall({ name: "restart_wsl", observation: { wsl: "online" }, explicitHumanRestart: true }))
-        .toEqual({ allow: true, reason: "explicit-human-restart" });
+        .toMatchObject({ allow: true, reason: "explicit-human-restart" });
+      expect(planToolCall({ name: "restart_wsl", observation: { wsl: "online", bootId: "a1" }, explicitHumanRestart: true }).notice)
+        .toContain("AMUX startar om WSL nu på ditt kommando. Före: wsl=online boot=a1.");
       const nowMs = 1_000_000;
       expect(planToolCall({ name: "recover", lastStatusMs: nowMs - 59_000, nowMs }))
         .toEqual({ allow: true, reason: "ok" });
