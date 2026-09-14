@@ -30,6 +30,8 @@ feature("amux dream --help end to end", () => {
         env: {
           PATH: "/usr/bin:/bin",
           HOME: fx.home,
+          // Keeps a checkout package .env from naming the live AGENTS_YAML.
+          AGENTMUX_BRIDGE_DIR: fx.home,
           OPENCLAW_WORKSPACE: fx.workspace,
           AMUX_JANITOR_ENABLED: "false",
         },

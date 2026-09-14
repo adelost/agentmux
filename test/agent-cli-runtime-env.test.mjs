@@ -5,6 +5,10 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const repo = resolve(import.meta.dirname, "..");
+// A clean home is not enough: a checkout's package .env may name the live
+// AGENTS_YAML. On 2026-09-14 that rewrote the running bridge's fleet to this
+// test's empty one, and the broker cancelled every queued claw:0 delivery.
+// Each spawn therefore also points the package root at its temp directory.
 
 describe("agent CLI runtime config ordering", () => {
   it("loads the operator todo path before evaluating command defaults", () => {
@@ -20,7 +24,7 @@ describe("agent CLI runtime config ordering", () => {
     writeFileSync(join(home, ".agentmux", "agentmux.yaml"),
       "agents:\n  demo:\n    dir: /tmp/demo\n    codex: 1\n");
     writeFileSync(todoPath, "# Tasks\n\n## Idag / snart\n- [ ] Operator path loaded <!-- id:1 -->\n");
-    const env = { ...process.env, HOME: home };
+    const env = { ...process.env, HOME: home, AGENTMUX_BRIDGE_DIR: root };
     delete env.AMUX_TODOS_PATH;
     delete env.AMUX_DISCORD_ENV;
     delete env.AGENTMUX_YAML;
@@ -56,7 +60,7 @@ describe("agent CLI runtime config ordering", () => {
     writeFileSync(join(home, ".agentmux", "agentmux.yaml"), "agents: {}\n");
     writeFileSync(join(fakeBin, "codex"), "#!/bin/sh\nexit 0\n");
     chmodSync(join(fakeBin, "codex"), 0o755);
-    const env = { ...process.env, HOME: home, PATH: fakeBin };
+    const env = { ...process.env, HOME: home, PATH: fakeBin, AGENTMUX_BRIDGE_DIR: root };
     for (const key of ["AMUX_DISCORD_ENV", "AGENTMUX_YAML", "AGENTS_YAML", "AGENT_CONFIG"]) {
       delete env[key];
     }
