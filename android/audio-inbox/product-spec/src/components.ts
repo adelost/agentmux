@@ -4,6 +4,7 @@ import {
   captureStatusContract,
   composeTurnContract,
   conversationStatusContract,
+  historyClearContract,
   historyStatusContract,
   playbackCommandContract,
   playbackStatusContract,
@@ -107,7 +108,7 @@ export const localHistoryComponentType = defineComponentType({
   id: "link.local-history",
   requiredCapabilities: componentTree,
   inputs: [componentPort("model", historyStatusContract)],
-  outputs: [],
+  outputs: [componentPort("clear", historyClearContract)],
 });
 export const updatesComponentType = defineComponentType({
   id: "link.updates",
@@ -258,7 +259,7 @@ export const linkComponentInstances = [
   },
   {
     id: "history.local", componentTypeRef: localHistoryComponentType.id,
-    bindings: { inputs: { model: "history.presentation.model" }, events: {} },
+    bindings: { inputs: { model: "history.presentation.model" }, events: { clear: "history.service.clear" } },
   },
   {
     id: "updates.panel", componentTypeRef: updatesComponentType.id,

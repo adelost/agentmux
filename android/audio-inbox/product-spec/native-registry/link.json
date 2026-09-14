@@ -127,6 +127,10 @@
       "nativeSymbol": "RingIcons.Target"
     },
     {
+      "iconId": "trash",
+      "nativeSymbol": "RingIcons.Trash"
+    },
+    {
       "iconId": "warning",
       "nativeSymbol": "RingIcons.Warning"
     },
@@ -196,7 +200,7 @@
       "nodeId": "history.service",
       "nativePortId": "history.service",
       "profiles": ["phone-full-ui", "wear-full-ui"],
-      "inputPorts": [],
+      "inputPorts": ["clear"],
       "outputPorts": ["status"]
     },
     {
@@ -486,6 +490,17 @@
         {
           "sourcePortRef": "conversation.composer.compose",
           "targetPortRef": "conversation.service.compose",
+          "effect": "dispatch"
+        }
+        ]
+      },
+      {
+        "artifactRef": "phone-full-ui",
+        "componentInstanceRef": "history.local",
+        "actions": [
+        {
+          "sourcePortRef": "history.local.clear",
+          "targetPortRef": "history.service.clear",
           "effect": "dispatch"
         }
         ]

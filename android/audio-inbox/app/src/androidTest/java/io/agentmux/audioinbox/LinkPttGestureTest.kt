@@ -208,6 +208,6 @@ private class CaptureFixture(activity: MainActivity, round: Boolean) {
         }, capturedTurn = { turn ->
             delivered += turn
             state.update { it.copy(capture = CapturePhase.IDLE) }
-        }, compose = {}, playbackCommand = {}, targetSelect = {}, preferenceToggle = {}, updateCommand = {}),
+        }, compose = {}, playbackCommand = {}, targetSelect = {}, preferenceToggle = {}, historyClear = {}, updateCommand = {}),
     )
 }

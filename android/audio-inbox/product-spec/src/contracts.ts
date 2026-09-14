@@ -96,7 +96,16 @@ export const sessionStatusContract = {
 
 export const historyStatusContract = {
   id: "link.history-status", kind: "state", boundary: "presentation",
-  fields: [field("retainedTurns", "integer"), field("maxTurns", "integer")],
+  fields: [
+    field("retainedTurns", "integer"), field("maxTurns", "integer"),
+    // The selected recipient and how many of its settled turns a clear would remove.
+    field("targetId", "string", { nullable: true }), field("clearableTurns", "integer"),
+  ],
+} as const;
+/** Forget one recipient's settled turns on this device only. */
+export const historyClearContract = {
+  id: "link.history-clear", kind: "event", boundary: "ui-event",
+  fields: [field("targetId", "string")],
 } as const;
 
 export const preferencesStatusContract = {

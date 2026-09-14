@@ -29,6 +29,8 @@ sealed interface LinkAction {
     data class ReplyFailed(val turnId: String, val reason: String) : LinkAction
     data class PlaybackFailed(val turnId: String, val reason: String) : LinkAction
     data class HandsFree(val enabled: Boolean) : LinkAction
+    /** Forgets one recipient's settled turns on this device; nothing is sent anywhere. */
+    data class ClearConversation(val targetId: String) : LinkAction
     data object ResetSession : LinkAction
 }
 
@@ -119,6 +121,9 @@ object LinkReducer {
             it.copy(playbackPhase = PlaybackPhase.FAILED, playbackError = action.reason)
         }.copy(activePlaybackTurnId = state.activePlaybackTurnId?.takeUnless { it == action.turnId })
         is LinkAction.HandsFree -> state.copy(handsFree = action.enabled)
+        is LinkAction.ClearConversation -> state.copy(
+            turns = state.turns.filterNot { it.targetId == action.targetId && it.isSettled() },
+        )
         LinkAction.ResetSession -> LinkState()
     }
 
@@ -127,3 +132,16 @@ object LinkReducer {
         transform: (LinkTurn) -> LinkTurn,
     ): LinkState = copy(turns = turns.map { if (it.turnId == turnId) transform(it) else it })
 }
+
+/** Turns clearing this recipient would remove. */
+fun LinkState.clearableTurns(targetId: String): Int = turns.count { it.targetId == targetId && it.isSettled() }
+
+/**
+ * A turn is settled once nothing more can arrive for it: not sending, not
+ * waiting for a reply, not being read aloud. Clearing keeps unsettled turns so
+ * a reply still on its way is never dropped on the floor.
+ */
+private fun LinkTurn.isSettled(): Boolean =
+    deliveryPhase != DeliveryPhase.SENDING &&
+        !(deliveryPhase == DeliveryPhase.QUEUED && replyPhase == ReplyPhase.THINKING) &&
+        playbackPhase !in setOf(PlaybackPhase.QUEUED, PlaybackPhase.PLAYING, PlaybackPhase.PAUSED)

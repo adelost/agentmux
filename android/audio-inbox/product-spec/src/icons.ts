@@ -15,6 +15,7 @@ export const linkComponentIconRefs = [
   { id: "component.public-link", assetRef: "link", artifacts: ["phone-full-ui"] },
   { id: "component.preferences", assetRef: "speaker", artifacts: ["phone-full-ui"] },
   { id: "component.local-history", assetRef: "activity", artifacts: ["phone-full-ui"] },
+  { id: "component.local-history-clear", assetRef: "trash", artifacts: ["phone-full-ui"] },
   { id: "component.updates", assetRef: "download", artifacts: ALL_ARTIFACTS },
   { id: "component.settings-action", assetRef: "gear", artifacts: ALL_ARTIFACTS },
   { id: "component.dev-host", assetRef: "phone", artifacts: ["phone-full-ui"] },

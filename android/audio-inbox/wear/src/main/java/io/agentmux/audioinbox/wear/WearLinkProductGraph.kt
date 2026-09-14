@@ -103,6 +103,7 @@ internal class WearLinkProductGraph private constructor(
                                 error("Wear has no wake word preference surface")
                         }
                     },
+                    historyClear = { error("Wear has no local history surface") },
                     updateCommand = { event ->
                         when (event.operation) {
                             LinkUpdateOperation.CHECK -> updater.start()
