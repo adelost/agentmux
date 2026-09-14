@@ -24,6 +24,17 @@ class WakeSessionTest {
     }
 
     @Test
+    fun whatTheMicrophoneHearsShowsOnlyWhileAQuestionIsCapturedAndClearsWhenItIsSent() {
+        val heard = WakeHearing(level = 0.6f, heardSpeech = true, sendsInMs = 1_700)
+        val listening = WakeStatus().reduce(WakeEvent.Start)
+        assertEquals(null, listening.reduce(WakeEvent.Heard(heard)).hearing)
+        val capturing = listening.reduce(WakeEvent.Detected(0.97f)).reduce(WakeEvent.Heard(heard))
+        assertEquals(heard, capturing.hearing)
+        assertEquals(null, capturing.reduce(WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "t1")).hearing)
+        assertEquals(null, capturing.reduce(WakeEvent.CaptureEnded(UtteranceEnd.NO_SPEECH, null)).hearing)
+    }
+
+    @Test
     fun aFailedSendReturnsToListeningAndSaysWhy() {
         val status = sent().after(TurnStage.SEND_FAILED, "offline")
         assertEquals(WakePhase.LISTENING to "Could not send · offline", status.phase to status.detail)

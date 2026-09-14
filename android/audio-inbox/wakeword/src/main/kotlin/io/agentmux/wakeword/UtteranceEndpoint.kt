@@ -4,7 +4,8 @@ package io.agentmux.wakeword
 data class EndpointPolicy(
     val speechProbability: Float = 0.5f,
     val waitForSpeechMs: Int = 5_000,
-    val trailingSilenceMs: Int = 1_200,
+    /** Mattias 2026-09-14 asked for two to three seconds; 1.2 s sent questions mid-thought. */
+    val trailingSilenceMs: Int = 2_500,
     val maxUtteranceMs: Int = 30_000,
 )
 
@@ -34,6 +35,10 @@ data class UtteranceProgress(
                 silenceAfterSpeechMs = if (speechMs > 0) silenceAfterSpeechMs + chunkMs else 0,
             )
         }
+
+    /** How long until a paused question is sent; null before anything was said and while the speaker talks. */
+    fun sendsInMs(policy: EndpointPolicy): Int? =
+        if (speechMs > 0 && silenceAfterSpeechMs > 0) (policy.trailingSilenceMs - silenceAfterSpeechMs).coerceAtLeast(0) else null
 
     fun end(policy: EndpointPolicy): UtteranceEnd = when {
         speechMs == 0 && elapsedMs >= policy.waitForSpeechMs -> UtteranceEnd.NO_SPEECH
