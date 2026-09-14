@@ -63,6 +63,21 @@ feature("extractFromJsonl: simple text response", () => {
   });
 });
 
+// 2026-09-14: a Link message to a working Claude pane arrived mid-turn. Claude records it only as a
+// queued_command attachment, so the reply was never found and Link showed "Thinking…" forever.
+feature("extractFromJsonl: a prompt that arrived mid-turn", () => {
+  unit("the reply is what the agent said after the queued command, up to the next prompt", {
+    given: ["a turn that received a phone message while a tool ran", () => setupFakeProject("mid-turn-queued-command.jsonl")],
+    when: ["extracting for the phone prompt", ({ paneDir }) =>
+      extractFromJsonl(paneDir, "QA fran Link-emulatorn 1.2.16: svara MOTTAGET\n\n[amux-phone-turn:7994abad-ff4b-4df1-b9c5-8503e8208e1e]")],
+    then: ["the tool call and MOTTAGET, not the earlier or later turn text", (result, { cleanup }) => {
+      expect(result).not.toBeNull();
+      expect(result.items.filter((item) => item.type === "text")).toEqual([{ type: "text", content: "MOTTAGET" }]);
+      cleanup();
+    }],
+  });
+});
+
 feature("extractFromJsonl: code fences preserved", () => {
   unit("keeps ```python ... ``` intact in the text item", {
     given: ["a project with code-fenced response", () => setupFakeProject("code-fenced.jsonl")],

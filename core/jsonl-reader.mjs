@@ -306,6 +306,19 @@ function findUserPromptIndex(events, promptText) {
   return -1;
 }
 
+function isQueuedCommand(event) {
+  return event?.type === "attachment" && event.attachment?.type === "queued_command";
+}
+
+/** Index of the last queued_command attachment recording this exact prompt, or -1. */
+function findMidTurnPromptIndex(events, promptText) {
+  if (!promptText?.trim()) return -1;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (isQueuedCommand(events[i]) && promptEventMatches(events[i], promptText)) return i;
+  }
+  return -1;
+}
+
 /**
  * Format a tool_use block into a compact one-line string suitable for Discord.
  * Claude: { name: "Bash", input: { command: "ls" } } -> "Run ls"
@@ -448,15 +461,19 @@ export function extractFromJsonl(paneDir, promptText = null) {
   const { jsonl, events } = found;
   if (events.length === 0) return null;
 
+  // A prompt that reaches a working pane is recorded only as a queued_command
+  // attachment inside the running turn; the reply is what follows it.
   const userIdx = findUserPromptIndex(events, promptText);
-  if (userIdx === -1) return null;
+  const anchorIdx = userIdx === -1 ? findMidTurnPromptIndex(events, promptText) : userIdx;
+  if (anchorIdx === -1) return null;
 
-  // Walk forward from the user event, collecting assistant content until
-  // we hit the next real user prompt (tool_result user events are skipped).
+  // Walk forward from the prompt, collecting assistant content until the next
+  // real user prompt or mid-turn prompt (tool_result user events are skipped).
   const items = [];
-  for (let i = userIdx + 1; i < events.length; i++) {
+  for (let i = anchorIdx + 1; i < events.length; i++) {
     const e = events[i];
 
+    if (isQueuedCommand(e)) break;
     if (e.type === "user") {
       // Tool-result user events don't end the turn; real new prompts do.
       if (userPromptText(e) !== null) break;

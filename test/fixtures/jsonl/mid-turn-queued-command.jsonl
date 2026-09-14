@@ -1,0 +1,11 @@
+{"type": "user", "timestamp": "2026-09-14T17:50:00.000Z", "message": {"role": "user", "content": "build the release"}}
+{"type": "assistant", "timestamp": "2026-09-14T17:50:01.000Z", "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Building now."}, {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "make release", "description": "Build release"}}]}}
+{"type": "queue-operation", "operation": "enqueue", "timestamp": "2026-09-14T17:51:34.173Z", "content": "QA fran Link-emulatorn 1.2.16: svara MOTTAGET\n\n[amux-phone-turn:7994abad-ff4b-4df1-b9c5-8503e8208e1e]"}
+{"type": "queue-operation", "operation": "remove", "timestamp": "2026-09-14T17:51:42.026Z", "content": "QA fran Link-emulatorn 1.2.16: svara MOTTAGET\n\n[amux-phone-turn:7994abad-ff4b-4df1-b9c5-8503e8208e1e]"}
+{"type": "user", "timestamp": "2026-09-14T17:51:42.100Z", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}}
+{"type": "attachment", "timestamp": "2026-09-14T17:51:42.101Z", "attachment": {"type": "queued_command", "prompt": "QA fran Link-emulatorn 1.2.16: svara MOTTAGET\n\n[amux-phone-turn:7994abad-ff4b-4df1-b9c5-8503e8208e1e]"}}
+{"type": "assistant", "timestamp": "2026-09-14T17:51:50.000Z", "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t2", "name": "Bash", "input": {"command": "watch reply", "description": "Wait for reply"}}]}}
+{"type": "user", "timestamp": "2026-09-14T17:51:51.000Z", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t2", "content": "started"}]}}
+{"type": "assistant", "timestamp": "2026-09-14T17:51:52.000Z", "message": {"role": "assistant", "stop_reason": "end_turn", "content": [{"type": "text", "text": "MOTTAGET"}]}}
+{"type": "user", "timestamp": "2026-09-14T17:55:00.000Z", "message": {"role": "user", "content": "<task-notification>done</task-notification>"}}
+{"type": "assistant", "timestamp": "2026-09-14T17:55:01.000Z", "message": {"role": "assistant", "stop_reason": "end_turn", "content": [{"type": "text", "text": "Unrelated later work."}]}}
