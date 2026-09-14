@@ -68,6 +68,7 @@ internal class PhoneLinkProductGraph private constructor(
     fun onComposerEdited(text: String) = composer.edit(text)
 
     fun replyAudio(turn: LinkTurn): LinkReplyAudio = coordinator.replyAudio(turn)
+    val savedReplyAudio: StateFlow<Int> get() = coordinator.savedReplyAudio
 
     init {
         processScope.launch {

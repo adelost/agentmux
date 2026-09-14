@@ -47,6 +47,33 @@ public class ReplyAudioCacheTest {
         assertTrue(java.util.Arrays.stream(files).mapToLong(File::length).sum() <= ReplyAudioCache.MAX_BYTES);
     }
 
+    // The conversation asks which replies are saved while speech is still being made; that answer must not wait on the network.
+    @Test public void aReplyBeingSpokenNeitherBlocksTheSavedCheckNorIsAskedForTwice() throws Exception {
+        ReplyAudioCache cache = new ReplyAudioCache(folder.getRoot());
+        java.util.concurrent.CountDownLatch serverAnswers = new java.util.concurrent.CountDownLatch(1);
+        AtomicInteger requests = new AtomicInteger();
+        ReplyAudioCache.Fetch slowServer = () -> {
+            requests.incrementAndGet();
+            serverAnswers.await();
+            File made = File.createTempFile("tts-", ".mp3", folder.getRoot());
+            Files.write(made.toPath(), new byte[] {4, 5, 6});
+            return made;
+        };
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(3);
+        var prefetch = pool.submit(() -> cache.materialize("server", "Reply", new File(folder.getRoot(), "prefetch.mp3"), slowServer));
+        while (requests.get() == 0) Thread.sleep(5);
+        var tap = pool.submit(() -> cache.materialize("server", "Reply", new File(folder.getRoot(), "tap.mp3"), slowServer));
+
+        var savedCheck = pool.submit(() -> cache.saved("server", "Reply"));
+        assertNull(savedCheck.get(1, java.util.concurrent.TimeUnit.SECONDS));
+
+        serverAnswers.countDown();
+        prefetch.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertArrayEquals(new byte[] {4, 5, 6}, Files.readAllBytes(tap.get(5, java.util.concurrent.TimeUnit.SECONDS).toPath()));
+        assertEquals(1, requests.get());
+        pool.shutdownNow();
+    }
+
     // Mattias 2026-09-14: keep the ten newest across restarts; an older one is pruned, not failed.
     @Test public void theTenNewestSurviveARestartAndTheEleventhOldestIsPruned() throws Exception {
         AtomicLong now = new AtomicLong(1_700_000_000_000L);

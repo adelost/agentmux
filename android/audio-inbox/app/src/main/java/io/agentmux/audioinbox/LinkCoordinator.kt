@@ -39,7 +39,7 @@ internal class LinkCoordinator(
     private val mutableAccepted = MutableSharedFlow<AcceptedDraft>(extraBufferCapacity = 16)
     private val targetDirectory = LinkTargetDirectory()
     private val audioActions = LinkAudioActions(context, targetDirectory::target)
-    private val replyAudioIndex = LinkReplyAudioIndex(DirectReplyLoader.replyAudio(context))
+    private val replyAudioIndex = LinkReplyAudioIndex.onDevice(context, AppContract.consumerId(preferences))
     private val linkSessions = KeystoreSessionStore(preferences)
     private val wearSessions = LinkWearSessionPublisher(context)
     private val publicEvents = PublicMailboxFeed(linkSessions, { ledger.value }, ::applyPublicSync)
@@ -153,6 +153,7 @@ internal class LinkCoordinator(
     }
 
     val state = ledger.state
+    val savedReplyAudio = replyAudioIndex.saved
     val acceptedDrafts = mutableAccepted.asSharedFlow()
 
     init {
@@ -472,7 +473,9 @@ internal class LinkCoordinator(
         targetDirectory.target(ledger.value.selectedTargetId)
 
     private fun dispatch(action: LinkAction) {
+        val before = ledger.value
         ledger.dispatch(action)
+        landedReply(before, ledger.value, action)?.let { replyAudioIndex.prepare(it, targetDirectory.target(it.targetId)) }
     }
 
     private fun syncConnection() {
@@ -488,6 +491,7 @@ internal class LinkCoordinator(
         preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener)
         PlaybackProgressBus.removeListener(playbackProgressListener)
         discovery.shutdownNow()
+        replyAudioIndex.close()
         publicEvents.close()
         linkAuth.close()
         controller.close()

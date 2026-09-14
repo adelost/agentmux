@@ -58,9 +58,19 @@ final class DirectReplyLoader {
         this.cache = replyAudio(context);
     }
 
-    /** Kept in app storage, not the cache directory, so the OS does not drop it and a restart keeps it. */
-    static ReplyAudioCache replyAudio(Context context) {
-        return new ReplyAudioCache(context.getFilesDir());
+    private static ReplyAudioCache replyAudio;
+
+    /** Kept in app storage, not the cache directory, so the OS does not drop it and a restart keeps it.
+     * One instance per process: a tap and the prefetch of the same reply then share one server request. */
+    static synchronized ReplyAudioCache replyAudio(Context context) {
+        if (replyAudio == null) replyAudio = new ReplyAudioCache(context.getApplicationContext().getFilesDir());
+        return replyAudio;
+    }
+
+    /** The same rule for a tap and a prefetch: something to say, short enough, and a server Link may call. */
+    static boolean canReadAloud(String text, String server) {
+        return text != null && !text.isBlank() && text.length() <= AppContract.MAX_REPLY_AUDIO_CHARACTERS
+            && ServerDiscovery.isAllowedServer(server);
     }
 
     synchronized boolean prepare(Intent intent, boolean explicitReplay) {
@@ -68,9 +78,7 @@ final class DirectReplyLoader {
         String text = intent.getStringExtra(AppContract.EXTRA_TEXT);
         String server = intent.getStringExtra(AppContract.EXTRA_SERVER);
         String label = intent.getStringExtra(AppContract.EXTRA_TARGET_LABEL);
-        if (turnId == null || turnId.isBlank() || text == null || text.isBlank()
-            || text.length() > AppContract.MAX_REPLY_AUDIO_CHARACTERS
-            || !ServerDiscovery.isAllowedServer(server)) return false;
+        if (turnId == null || turnId.isBlank() || !canReadAloud(text, server)) return false;
         String previous = preferences.getString("turn-playback:" + turnId, "");
         if (!explicitReplay && ("stopped".equals(previous) || "played".equals(previous))) return true;
         if (explicitReplay) {

@@ -66,6 +66,7 @@ internal fun LinkPhoneHome(
     val recovery by graph.recovery.collectAsStateWithLifecycle()
     val composer by graph.composerDraft.collectAsStateWithLifecycle()
     val captureSpec by graph.captureSpec.collectAsStateWithLifecycle()
+    val savedReplyAudio by graph.savedReplyAudio.collectAsStateWithLifecycle()
     var choosingRecipient by remember { mutableStateOf(false) }
     if (choosingRecipient) {
         LinkRecipientPicker(
@@ -129,8 +130,8 @@ internal fun LinkPhoneHome(
                             items(turns, key = LinkTurn::turnId) { turn ->
                                 LinkConversationTurn(
                                     turn = turn,
-                                    // Playing any reply can prune the oldest saved one, so every row re-reads on any playback change.
-                                    audio = remember(turn.turnId, turn.replyText, playbackRevision) { graph.replyAudio(turn) },
+                                    // Playing or prefetching any reply can prune the oldest saved one, so every row re-reads on either change.
+                                    audio = remember(turn.turnId, turn.replyText, playbackRevision, savedReplyAudio) { graph.replyAudio(turn) },
                                     modifier = Modifier.padding(horizontal = 24.dp),
                                     onPlayback = { operation ->
                                         graph.onActivePlaybackCommand(LinkPlaybackCommandEvent(operation, turn.turnId))

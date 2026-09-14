@@ -8,6 +8,10 @@ import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.function.LongSupplier;
 
 /** The ten newest generated replies, kept on disk across restarts (Mattias 2026-09-14: "de tio senaste").
@@ -19,6 +23,7 @@ final class ReplyAudioCache {
     interface Fetch { File get() throws Exception; }
     private final File directory;
     private final LongSupplier clock;
+    private final Map<String, CompletableFuture<File>> inFlight = new HashMap<>();
 
     ReplyAudioCache(File storageDir) { this(storageDir, System::currentTimeMillis); }
     ReplyAudioCache(File storageDir, LongSupplier clock) {
@@ -32,21 +37,62 @@ final class ReplyAudioCache {
         return cached.isFile() && cached.length() > 0 ? cached : null;
     }
 
-    synchronized File materialize(String server, String text, File destination, Fetch fetch) throws Exception {
-        if (!directory.isDirectory() && !directory.mkdirs()) throw new IOException("Cannot open audio cache");
-        long now = clock.getAsLong();
-        prune(now);
-        File cached = new File(directory, key(server, text) + ".audio");
-        if (cached.isFile()) {
-            Files.copy(cached.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            return destination;
+    /** A playback copy of the kept audio; AudioEventClaims may delete the copy, never the kept file. */
+    File materialize(String server, String text, File destination, Fetch fetch) throws Exception {
+        File kept = keep(server, text, fetch);
+        synchronized (this) {
+            if (!kept.isFile()) throw new IOException("Audio was pruned before playback");
+            Files.copy(kept.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING);
         }
-        File received = fetch.get();
+        return destination;
+    }
+
+    /** Keeps the audio for this server and text, asking the server at most once even when a tap races a prefetch.
+     * The network wait happens outside the lock, so saved() answers immediately while speech is being made. */
+    File keep(String server, String text, Fetch fetch) throws Exception {
+        String key = key(server, text);
+        CompletableFuture<File> making;
+        boolean mine = false;
+        synchronized (this) {
+            File cached = new File(directory, key + ".audio");
+            if (cached.isFile() && cached.length() > 0) return cached;
+            making = inFlight.get(key);
+            if (making == null) {
+                making = new CompletableFuture<>();
+                inFlight.put(key, making);
+                mine = true;
+            }
+        }
+        if (!mine) return awaitOther(making);
+        try {
+            File kept = store(key, fetch.get());
+            making.complete(kept);
+            return kept;
+        } catch (Exception error) {
+            making.completeExceptionally(error);
+            throw error;
+        } finally {
+            synchronized (this) { inFlight.remove(key); }
+        }
+    }
+
+    private static File awaitOther(CompletableFuture<File> making) throws Exception {
+        try {
+            return making.get();
+        } catch (ExecutionException failed) {
+            throw failed.getCause() instanceof Exception ? (Exception) failed.getCause() : failed;
+        }
+    }
+
+    private synchronized File store(String key, File received) throws Exception {
+        if (!directory.isDirectory() && !directory.mkdirs()) throw new IOException("Cannot open audio cache");
         if (received.length() <= 0 || received.length() > MAX_FILE_BYTES) {
             received.delete();
             throw new IOException("Audio response is empty or too large");
         }
+        long now = clock.getAsLong();
         prune(now, received.length(), 1); // Reserve the pending file before copying bytes.
+        File cached = new File(directory, key + ".audio");
         File temporary = File.createTempFile("pending-", ".part", directory);
         try {
             Files.copy(received.toPath(), temporary.toPath(), StandardCopyOption.REPLACE_EXISTING);
@@ -55,9 +101,10 @@ final class ReplyAudioCache {
             if (!cached.setLastModified(now)) throw new IOException("Cannot date cached audio");
         } finally {
             temporary.delete();
+            received.delete();
         }
         prune(now);
-        return received;
+        return cached;
     }
 
     private void prune(long now) throws IOException { prune(now, 0, 0); }
