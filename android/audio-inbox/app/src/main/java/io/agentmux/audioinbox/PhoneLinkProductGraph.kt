@@ -39,6 +39,7 @@ internal class PhoneLinkProductGraph private constructor(
     updateState: StateFlow<UpdateState>,
     microphoneGranted: StateFlow<Boolean>,
     speakReplies: StateFlow<Boolean>,
+    wakeWordEnabled: StateFlow<Boolean>,
     capturedTurns: Flow<LinkCapturedTurn>,
     captureByteCount: () -> Long,
     sinks: LinkProductSinks,
@@ -50,6 +51,8 @@ internal class PhoneLinkProductGraph private constructor(
     updateState = updateState,
     microphoneGranted = microphoneGranted,
     speakReplies = speakReplies,
+    wakeWordEnabled = wakeWordEnabled,
+    wakeStatus = LinkWakeStatus.status,
     publicLinkActive = coordinator::publicLoggedIn,
     targetKindOf = coordinator::targetKind,
     captureByteCount = captureByteCount,
@@ -82,6 +85,7 @@ internal class PhoneLinkProductGraph private constructor(
             updater: LinkUpdater,
             navigation: LinkNavigationController,
             microphoneGranted: StateFlow<Boolean>,
+            wakeWord: LinkWakeWordControl,
         ): PhoneLinkProductGraph {
             val captures = PhoneCaptureAdapter(coordinator, recorder)
             val composer = ComposerDraftStore()
@@ -93,6 +97,7 @@ internal class PhoneLinkProductGraph private constructor(
                 updateState = updater.state,
                 microphoneGranted = microphoneGranted,
                 speakReplies = speakReplies,
+                wakeWordEnabled = wakeWord.enabled,
                 capturedTurns = captures.captured,
                 captureByteCount = recorder::currentBytes,
                 sinks = LinkProductSinks(
@@ -103,7 +108,7 @@ internal class PhoneLinkProductGraph private constructor(
                     },
                     playbackCommand = coordinatorPlayback(coordinator),
                     targetSelect = { event -> coordinator.selectTarget(event.targetId) },
-                    preferenceToggle = phonePreferenceToggle(coordinator, speakReplies),
+                    preferenceToggle = phonePreferenceToggle(coordinator, speakReplies, wakeWord::setEnabled),
                     updateCommand = updaterCommands(updater),
                 ),
                 composer = composer,
@@ -119,6 +124,7 @@ internal class PhoneLinkProductGraph private constructor(
             navigation: LinkNavigationController,
         ): PhoneLinkProductGraph {
             val composer = ComposerDraftStore()
+            val wakeWordEnabled = MutableStateFlow(false)
             val speakReplies = MutableStateFlow(coordinator.speaksReplies())
             return PhoneLinkProductGraph(
                 coordinator = coordinator,
@@ -127,6 +133,7 @@ internal class PhoneLinkProductGraph private constructor(
                 updateState = updateState,
                 microphoneGranted = MutableStateFlow(true),
                 speakReplies = speakReplies,
+                wakeWordEnabled = wakeWordEnabled,
                 // A mounted recorder is an idle event source, not a completed
                 // stream. Completion unmounts the real generated output port.
                 capturedTurns = MutableSharedFlow(),
@@ -154,7 +161,7 @@ internal class PhoneLinkProductGraph private constructor(
                     targetSelect = { event ->
                         qaState.update { it.copy(selectedTargetId = event.targetId) }
                     },
-                    preferenceToggle = phonePreferenceToggle(coordinator, speakReplies),
+                    preferenceToggle = phonePreferenceToggle(coordinator, speakReplies) { wakeWordEnabled.value = it },
                     updateCommand = updaterCommands(updater),
                 ),
                 composer = composer,
@@ -176,6 +183,7 @@ internal class PhoneLinkProductGraph private constructor(
         private fun phonePreferenceToggle(
             coordinator: LinkCoordinator,
             speakReplies: MutableStateFlow<Boolean>,
+            setWakeWord: (Boolean) -> Unit,
         ): (LinkPreferenceToggleEvent) -> Unit = { event ->
             when (event.key) {
                 LinkPreferenceKey.HANDS_FREE -> coordinator.setHandsFree(event.enabled)
@@ -183,6 +191,7 @@ internal class PhoneLinkProductGraph private constructor(
                     coordinator.setSpeakReplies(event.enabled)
                     speakReplies.value = event.enabled
                 }
+                LinkPreferenceKey.WAKE_WORD -> setWakeWord(event.enabled)
             }
         }
 

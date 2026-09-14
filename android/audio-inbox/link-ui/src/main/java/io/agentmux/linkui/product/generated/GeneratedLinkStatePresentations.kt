@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.stateAuthorities
-// Product declarations SHA-256: 75f86032a2c5f67a6d940a6fa85406fdc56bdb512b2411b78397da135b7a4cf1
+// Product declarations SHA-256: 38f1e737140887bcd7e32950ef22f30be06b58ff6cb10512a4e523c632bd66bd
 package io.agentmux.linkui.product.generated
 
 import io.agentmux.linkui.product.ProductComponentInput
@@ -63,6 +63,15 @@ internal enum class GeneratedLinkUpdatePhaseValue(val wireId: String) {
 internal enum class GeneratedLinkRecoveryPhaseValue(val wireId: String) {
     CLEAN("clean"),
     QUARANTINED("quarantined"),
+}
+internal enum class GeneratedLinkWakePhaseValue(val wireId: String) {
+    OFF("off"),
+    LISTENING("listening"),
+    CAPTURING("capturing"),
+    SENDING("sending"),
+    THINKING("thinking"),
+    SPEAKING("speaking"),
+    BLOCKED("blocked"),
 }
 internal data class GeneratedCapturePhasePresentation(
     val phase: GeneratedLinkCapturePhaseValue,
@@ -303,6 +312,37 @@ internal object GeneratedRecoveryPhaseAuthority {
 
     fun require(stateId: String): GeneratedRecoveryPhasePresentation = requireNotNull(cases[stateId]) {
         "Unknown recovery.phase state '$stateId'"
+    }
+}
+
+internal data class GeneratedWakePhasePresentation(
+    val phase: GeneratedLinkWakePhaseValue,
+)
+
+internal object GeneratedWakePhaseAuthority {
+    fun <T : Any> inputPort(): ProductDataInput<T> = object : ProductDataInput<T>(
+        GeneratedLinkNativeLegoCatalog.PortIds.WAKE_PHASE_PRESENTATION_ADAPTER_STATE,
+    ) {}
+    val outputPort: ProductOutputPort<GeneratedWakePhasePresentation> = object : ProductOutputPort<GeneratedWakePhasePresentation>(
+        GeneratedLinkNativeLegoCatalog.PortIds.WAKE_PHASE_PRESENTATION_ADAPTER_PRESENTATION,
+    ) {}
+    val componentInputs: List<ProductComponentInput<GeneratedWakePhasePresentation>> = listOf(
+        object : ProductComponentInput<GeneratedWakePhasePresentation>(
+            GeneratedLinkNativeLegoCatalog.PortIds.WAKE_STATUS_WAKESTATE,
+        ) {},
+    )
+    private val cases: Map<String, GeneratedWakePhasePresentation> = mapOf(
+        "off" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.OFF),
+        "listening" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.LISTENING),
+        "capturing" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.CAPTURING),
+        "sending" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.SENDING),
+        "thinking" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.THINKING),
+        "speaking" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.SPEAKING),
+        "blocked" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.BLOCKED),
+    )
+
+    fun require(stateId: String): GeneratedWakePhasePresentation = requireNotNull(cases[stateId]) {
+        "Unknown wake.phase state '$stateId'"
     }
 }
 

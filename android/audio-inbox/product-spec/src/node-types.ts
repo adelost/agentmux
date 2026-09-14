@@ -29,6 +29,7 @@ import {
   targetKindAuthority,
   updatePhaseAuthority,
 } from "./state-authorities.js";
+import { linkWakeWord } from "./link-wake-word.js";
 
 const runtime = <
   const ContextInputs extends readonly string[],
@@ -174,4 +175,5 @@ export const linkNodeTypes = [
   connectionStateAuthority.adapter.type,
   updatePhaseAuthority.adapter.type,
   recoveryPhaseAuthority.adapter.type,
+  ...linkWakeWord.nodeTypes,
 ] as const;

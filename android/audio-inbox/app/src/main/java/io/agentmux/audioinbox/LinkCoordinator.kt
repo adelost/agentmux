@@ -1,6 +1,6 @@
 package io.agentmux.audioinbox
 
-import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
@@ -30,17 +30,17 @@ import java.util.concurrent.atomic.AtomicInteger
 private const val RECOVERED_AUDIO_TTL_MS = 10 * 60_000L
 
 internal class LinkCoordinator(
-    private val activity: Activity,
+    private val context: Context,
 ) : AutoCloseable {
     private val preferences: SharedPreferences =
-        activity.getSharedPreferences(AppContract.PREFS, Activity.MODE_PRIVATE)
+        context.getSharedPreferences(AppContract.PREFS, Context.MODE_PRIVATE)
     private val repository = LinkStateRepository(preferences)
     private val ledger = LinkStateLedger(repository.load(), repository::save)
     private val mutableAccepted = MutableSharedFlow<AcceptedDraft>(extraBufferCapacity = 16)
     private val targetDirectory = LinkTargetDirectory()
-    private val audioActions = LinkAudioActions(activity, targetDirectory::target)
+    private val audioActions = LinkAudioActions(context, targetDirectory::target)
     private val linkSessions = KeystoreSessionStore(preferences)
-    private val wearSessions = LinkWearSessionPublisher(activity)
+    private val wearSessions = LinkWearSessionPublisher(context)
     private val publicEvents = PublicMailboxFeed(linkSessions, { ledger.value }, ::applyPublicSync)
     private val discovery: ExecutorService = Executors.newFixedThreadPool(2)
     private val pendingDiscovery = AtomicInteger(2)
@@ -48,7 +48,7 @@ internal class LinkCoordinator(
     private val voiceTurns = ConcurrentHashMap.newKeySet<String>()
     @Volatile private var recoveredPlaybackApplied = false
     private val linkAuth = LinkAuthController(
-        activity,
+        context,
         linkSessions,
         object : LinkAuthController.Listener {
             override fun onLogin(credentials: LinkSessionCredentials) {
@@ -68,7 +68,6 @@ internal class LinkCoordinator(
         },
     )
     private val controller = ConversationController(
-        activity,
         AppContract.consumerId(preferences),
         linkSessions,
         object : ConversationController.Listener {
@@ -140,7 +139,7 @@ internal class LinkCoordinator(
             if (key == AppContract.KEY_CONNECTION) syncConnection()
         }
     private val playbackProgressListener = PlaybackProgressBus.Listener { value ->
-        activity.runOnUiThread {
+        MainThread.run {
             dispatch(
                 LinkAction.PlaybackProgress(
                     value.turnId(),
@@ -242,11 +241,11 @@ internal class LinkCoordinator(
         }
         preferences.edit().putBoolean(AppContract.KEY_ENABLED, enabled).apply()
         dispatch(LinkAction.HandsFree(enabled))
-        val intent = Intent(activity, AudioInboxService::class.java).apply {
+        val intent = Intent(context, AudioInboxService::class.java).apply {
             action = if (enabled) AppContract.ACTION_START else AppContract.ACTION_STOP
         }
-        if (enabled && Build.VERSION.SDK_INT >= 26) activity.startForegroundService(intent)
-        else activity.startService(intent)
+        if (enabled && Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent)
+        else context.startService(intent)
     }
 
     fun setSpeakReplies(enabled: Boolean) {
@@ -435,7 +434,7 @@ internal class LinkCoordinator(
     private fun discoveryFinished() {
         if (pendingDiscovery.decrementAndGet() != 0 || recoveredPlaybackApplied) return
         recoveredPlaybackApplied = true
-        activity.runOnUiThread(::recoverReplyPlayback)
+        MainThread.run(::recoverReplyPlayback)
     }
 
     private fun recoverReplyPlayback() {
@@ -473,16 +472,7 @@ internal class LinkCoordinator(
 
     private fun syncConnection() {
         val raw = preferences.getString(AppContract.KEY_CONNECTION, null) ?: return
-        val state = when {
-            raw.startsWith("Playing", ignoreCase = true) -> ConnectionState.CONNECTED
-            raw.startsWith("Connected", ignoreCase = true) -> ConnectionState.CONNECTED
-            raw.startsWith("Connecting", ignoreCase = true) -> ConnectionState.CONNECTING
-            raw.startsWith("Off", ignoreCase = true) -> ConnectionState.OFF
-            raw.startsWith("Configuration", ignoreCase = true) ->
-                ConnectionState.CONFIGURATION_REQUIRED
-            else -> ConnectionState.DISCONNECTED
-        }
-        dispatch(LinkAction.Connection(state, raw, System.currentTimeMillis()))
+        dispatch(LinkAction.Connection(connectionStateOfReceipt(raw), raw, System.currentTimeMillis()))
     }
 
     private fun syncPlayback(key: String) {

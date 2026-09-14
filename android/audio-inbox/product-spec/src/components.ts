@@ -28,6 +28,7 @@ import {
   targetKindAuthority,
   updatePhaseAuthority,
 } from "./state-authorities.js";
+import { linkWakeWord } from "./link-wake-word.js";
 
 const componentTree = ["ui.component-tree"] as const;
 
@@ -171,6 +172,7 @@ export const linkComponentTypes = [
   navigationEntryComponentType,
   devHostEntryComponentType,
   devPreviewComponentType,
+  linkWakeWord.componentType,
 ] as const;
 
 export const linkComponentInstances = [
@@ -296,4 +298,5 @@ export const linkComponentInstances = [
     id: "dev.preview", componentTypeRef: devPreviewComponentType.id,
     bindings: { inputs: {}, events: {} },
   },
+  linkWakeWord.component,
 ] as const;

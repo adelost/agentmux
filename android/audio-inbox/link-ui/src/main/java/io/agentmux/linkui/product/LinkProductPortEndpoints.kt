@@ -67,6 +67,9 @@ internal object UpdatesStatusOutput :
 internal object RecoveryStatusOutput :
     ProductOutputPort<LinkRecoveryPresentation>(PortIds.RECOVERY_SERVICE_STATUS)
 
+internal object WakeStatusOutput :
+    ProductOutputPort<LinkWakePresentation>(PortIds.WAKE_SERVICE_STATUS)
+
 internal object CapturePresentationSourceInput :
     ProductDataInput<LinkCapturePresentation>(PortIds.CAPTURE_PRESENTATION_SOURCE)
 internal object CapturePresentationModelOutput :
@@ -103,6 +106,11 @@ internal object RecoveryPresentationSourceInput :
     ProductDataInput<LinkRecoveryPresentation>(PortIds.RECOVERY_PRESENTATION_SOURCE)
 internal object RecoveryPresentationModelOutput :
     ProductOutputPort<LinkRecoveryPresentation>(PortIds.RECOVERY_PRESENTATION_MODEL)
+
+internal object WakePresentationSourceInput :
+    ProductDataInput<LinkWakePresentation>(PortIds.WAKE_PRESENTATION_SOURCE)
+internal object WakePresentationModelOutput :
+    ProductOutputPort<LinkWakePresentation>(PortIds.WAKE_PRESENTATION_MODEL)
 
 internal object TargetModelInput :
     ProductComponentInput<LinkTargetPresentation>(PortIds.TARGET_PICKER_MODEL)
@@ -154,6 +162,9 @@ internal object UpdatesCommandEvent :
 
 internal object RecoveryModelInput :
     ProductComponentInput<LinkRecoveryPresentation>(PortIds.RECOVERY_STATUS_MODEL)
+
+internal object WakeModelInput :
+    ProductComponentInput<LinkWakePresentation>(PortIds.WAKE_STATUS_MODEL)
 
 internal object PageHostActivePageInput :
     ProductComponentInput<LinkRoute>(PortIds.NAVIGATION_PAGE_HOST_ACTIVEPAGE)

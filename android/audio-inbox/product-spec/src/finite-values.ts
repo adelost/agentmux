@@ -1,4 +1,5 @@
 import { finiteValues } from "@v1d/product-spec";
+import { linkWakeWord } from "./link-wake-word.js";
 
 export const linkCaptureOperations = finiteValues("link.capture-operation", ["begin", "release", "cancel"]);
 export const linkCapturePhases = finiteValues("link.capture-phase", ["idle", "listening", "finalizing", "failed"]);
@@ -12,7 +13,7 @@ export const linkTargetKinds = finiteValues("link.target-kind", ["none", "agent"
 export const linkConnectionStates = finiteValues("link.connection-state", [
   "off", "connecting", "connected", "disconnected", "configuration-required",
 ]);
-export const linkPreferenceKeys = finiteValues("link.preference-key", ["hands-free", "speak-replies"]);
+export const linkPreferenceKeys = finiteValues("link.preference-key", ["hands-free", "speak-replies", "wake-word"]);
 export const linkUpdateOperations = finiteValues("link.update-operation", ["check", "retry", "install"]);
 export const linkUpdatePhases = finiteValues("link.update-phase", [
   "idle", "checking", "up-to-date", "unavailable", "available",
@@ -33,4 +34,5 @@ export const linkFiniteValues = [
   linkUpdateOperations,
   linkUpdatePhases,
   linkRecoveryPhases,
+  linkWakeWord.phases,
 ] as const;

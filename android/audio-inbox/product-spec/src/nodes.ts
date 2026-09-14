@@ -29,9 +29,10 @@ import {
   targetKindAuthority,
   updatePhaseAuthority,
 } from "./state-authorities.js";
+import { linkWakeWord } from "./link-wake-word.js";
 
 /**
- * Ten effect-owning services followed by ten final presentations. Every Link service is process-lived: the
+ * Eleven effect-owning services (the last is the wake-word feature) and their presentations. Every Link service is process-lived: the
  * coordinator already owns them for the whole app lifetime, so none carries a
  * demand port and none is leased. Capture is operation-scoped state inside the
  * process-lived service, exactly like the recorder it wraps.
@@ -147,6 +148,7 @@ export const linkNodes = [
   connectionStateAuthority.adapter.node,
   updatePhaseAuthority.adapter.node,
   recoveryPhaseAuthority.adapter.node,
+  ...linkWakeWord.nodes,
 ] as const;
 
 export const linkConfigs = [

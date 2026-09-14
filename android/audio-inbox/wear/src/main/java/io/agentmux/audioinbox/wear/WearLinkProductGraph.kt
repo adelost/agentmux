@@ -1,5 +1,6 @@
 package io.agentmux.audioinbox.wear
 
+import io.agentmux.wakeword.WakeStatus
 import com.adelost.releasekit.UpdateState
 import io.agentmux.audioinbox.update.LinkUpdater
 import io.agentmux.linkcore.CaptureOperation
@@ -43,6 +44,9 @@ internal class WearLinkProductGraph private constructor(
     updateState = updateState,
     microphoneGranted = microphoneGranted,
     speakReplies = MutableStateFlow(false),
+    // Wear keeps push-to-talk; the wake word is a phone-only service.
+    wakeWordEnabled = MutableStateFlow(false),
+    wakeStatus = MutableStateFlow(WakeStatus()),
     // The watch replicates targets from the phone without route provenance.
     publicLinkActive = controller::hasSession,
     targetKindOf = { null },
@@ -95,6 +99,8 @@ internal class WearLinkProductGraph private constructor(
                                 error("Wear has no hands-free preference surface")
                             LinkPreferenceKey.SPEAK_REPLIES ->
                                 error("Wear has no speak-replies preference surface")
+                            LinkPreferenceKey.WAKE_WORD ->
+                                error("Wear has no wake word preference surface")
                         }
                     },
                     updateCommand = { event ->

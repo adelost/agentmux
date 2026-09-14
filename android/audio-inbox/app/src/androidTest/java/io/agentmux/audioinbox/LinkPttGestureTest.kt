@@ -179,6 +179,7 @@ private class CaptureFixture(activity: MainActivity, round: Boolean) {
         processScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate), state = state,
         updateState = MutableStateFlow(UpdateState.UpToDate("test", publishedAtEpochMillis = null)),
         microphoneGranted = MutableStateFlow(true), speakReplies = MutableStateFlow(false),
+        wakeWordEnabled = MutableStateFlow(false), wakeStatus = MutableStateFlow(io.agentmux.wakeword.WakeStatus()),
         publicLinkActive = { false }, targetKindOf = { null },
         captureByteCount = recorder::currentBytes, captureByteLimit = { null }, capturedTurns = captured,
         navigation = LinkNavigationController(if (round) GeneratedLinkArtifactRef.WEAR_FULL_UI else GeneratedLinkArtifactRef.PHONE_FULL_UI),

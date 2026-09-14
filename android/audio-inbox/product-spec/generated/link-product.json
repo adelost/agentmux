@@ -195,6 +195,10 @@
           "mountRef": "preferences.toggles"
         },
         {
+          "componentInstanceRef": "wake.status",
+          "mountRef": "wake.status"
+        },
+        {
           "componentInstanceRef": "history.local",
           "mountRef": "history.local"
         },
@@ -237,6 +241,10 @@
         {
           "componentInstanceRef": "preferences.toggles",
           "mountRef": "preferences.toggles"
+        },
+        {
+          "componentInstanceRef": "wake.status",
+          "mountRef": "wake.status"
         },
         {
           "componentInstanceRef": "history.local",
@@ -734,9 +742,20 @@
               },
               {
                 "capacity": null,
+                "id": "wake.status",
+                "instance": "wake.status",
+                "order": 5,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "history.local",
                 "instance": "history.local",
-                "order": 5,
+                "order": 6,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -747,7 +766,7 @@
                 "capacity": null,
                 "id": "updates.panel",
                 "instance": "updates.panel",
-                "order": 6,
+                "order": 7,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -758,7 +777,7 @@
                 "capacity": null,
                 "id": "navigation.dev-host-entry",
                 "instance": "navigation.dev-host-entry",
-                "order": 7,
+                "order": 8,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -769,7 +788,7 @@
                 "capacity": null,
                 "id": "recovery.status",
                 "instance": "recovery.status",
-                "order": 8,
+                "order": 9,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -840,9 +859,20 @@
               },
               {
                 "capacity": null,
+                "id": "wake.status",
+                "instance": "wake.status",
+                "order": 5,
+                "priority": 0,
+                "region": "content",
+                "requirement": {
+                  "kind": "required"
+                }
+              },
+              {
+                "capacity": null,
                 "id": "history.local",
                 "instance": "history.local",
-                "order": 5,
+                "order": 6,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -853,7 +883,7 @@
                 "capacity": null,
                 "id": "updates.panel",
                 "instance": "updates.panel",
-                "order": 6,
+                "order": 7,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -864,7 +894,7 @@
                 "capacity": null,
                 "id": "navigation.dev-host-entry",
                 "instance": "navigation.dev-host-entry",
-                "order": 7,
+                "order": 8,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -875,7 +905,7 @@
                 "capacity": null,
                 "id": "recovery.status",
                 "instance": "recovery.status",
-                "order": 8,
+                "order": 9,
                 "priority": 0,
                 "region": "content",
                 "requirement": {
@@ -1151,6 +1181,17 @@
       },
       "componentTypeRef": "link.dev-preview",
       "id": "dev.preview"
+    },
+    {
+      "bindings": {
+        "events": {},
+        "inputs": {
+          "model": "wake.presentation.model",
+          "wakeState": "wake.phase.presentation-adapter.presentation"
+        }
+      },
+      "componentTypeRef": "link.wake-word",
+      "id": "wake.status"
     }
   ],
   "componentTypes": [
@@ -1807,6 +1848,12 @@
                 "name": "speakReplies",
                 "nullable": false,
                 "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "wakeWord",
+                "nullable": false,
+                "value": "boolean"
               }
             ],
             "id": "link.preferences-status",
@@ -2119,6 +2166,67 @@
       "requiredCapabilities": [
         "ui.component-tree"
       ]
+    },
+    {
+      "id": "link.wake-word",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "detail",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "detections",
+                "nullable": false,
+                "value": "integer"
+              }
+            ],
+            "id": "link.wake-status",
+            "kind": "state"
+          },
+          "id": "model",
+          "required": true
+        },
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-phase"
+                }
+              }
+            ],
+            "id": "wake.phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "wakeState",
+          "required": true
+        }
+      ],
+      "outputs": [],
+      "requiredCapabilities": [
+        "ui.component-tree"
+      ]
     }
   ],
   "configs": [
@@ -2213,7 +2321,8 @@
       "id": "link.preference-key",
       "values": [
         "hands-free",
-        "speak-replies"
+        "speak-replies",
+        "wake-word"
       ]
     },
     {
@@ -2244,6 +2353,18 @@
       "values": [
         "clean",
         "quarantined"
+      ]
+    },
+    {
+      "id": "link.wake-phase",
+      "values": [
+        "off",
+        "listening",
+        "capturing",
+        "sending",
+        "thinking",
+        "speaking",
+        "blocked"
       ]
     },
     {
@@ -2383,6 +2504,13 @@
       ],
       "assetRef": "phone",
       "id": "component.dev-preview"
+    },
+    {
+      "artifacts": [
+        "phone-full-ui"
+      ],
+      "assetRef": "record",
+      "id": "component.wake-word"
     }
   ],
   "id": "agentmux-link",
@@ -2910,6 +3038,32 @@
       "config": {},
       "id": "recovery.phase.presentation-adapter",
       "nodeTypeRef": "recovery.phase.presentation-adapter"
+    },
+    {
+      "activation": {
+        "kind": "lifetime",
+        "lifecycleSources": []
+      },
+      "bindings": {},
+      "config": {},
+      "id": "wake.service",
+      "nodeTypeRef": "link.wake"
+    },
+    {
+      "bindings": {
+        "source": "wake.service.status"
+      },
+      "config": {},
+      "id": "wake.presentation",
+      "nodeTypeRef": "link.present.wake"
+    },
+    {
+      "bindings": {
+        "state": "wake.service.status"
+      },
+      "config": {},
+      "id": "wake.phase.presentation-adapter",
+      "nodeTypeRef": "wake.phase.presentation-adapter"
     }
   ],
   "nodeTypes": [
@@ -3595,6 +3749,12 @@
               {
                 "clockDomain": "none",
                 "name": "speakReplies",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "wakeWord",
                 "nullable": false,
                 "value": "boolean"
               }
@@ -4335,6 +4495,12 @@
                 "name": "speakReplies",
                 "nullable": false,
                 "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "wakeWord",
+                "nullable": false,
+                "value": "boolean"
               }
             ],
             "id": "link.preferences-status",
@@ -4359,6 +4525,12 @@
               {
                 "clockDomain": "none",
                 "name": "speakReplies",
+                "nullable": false,
+                "value": "boolean"
+              },
+              {
+                "clockDomain": "none",
+                "name": "wakeWord",
                 "nullable": false,
                 "value": "boolean"
               }
@@ -5136,6 +5308,209 @@
         "lifetime": "call",
         "stateOwner": "none"
       }
+    },
+    {
+      "id": "link.wake",
+      "inputs": [],
+      "kind": "service",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "detail",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "detections",
+                "nullable": false,
+                "value": "integer"
+              }
+            ],
+            "id": "link.wake-status",
+            "kind": "state"
+          },
+          "id": "status",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "monotonic",
+        "contextInputs": [
+          "microphone.permission",
+          "audio.focus",
+          "wake-word.model"
+        ],
+        "durability": "transient",
+        "effects": [
+          "audio.capture",
+          "storage.write",
+          "transport.send"
+        ],
+        "lifetime": "process",
+        "stateOwner": "external"
+      }
+    },
+    {
+      "id": "link.present.wake",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "detail",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "detections",
+                "nullable": false,
+                "value": "integer"
+              }
+            ],
+            "id": "link.wake-status",
+            "kind": "state"
+          },
+          "id": "source",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "detail",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "detections",
+                "nullable": false,
+                "value": "integer"
+              }
+            ],
+            "id": "link.wake-status",
+            "kind": "state"
+          },
+          "id": "model",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
+    },
+    {
+      "id": "wake.phase.presentation-adapter",
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-phase"
+                }
+              },
+              {
+                "clockDomain": "none",
+                "name": "detail",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "detections",
+                "nullable": false,
+                "value": "integer"
+              }
+            ],
+            "id": "link.wake-status",
+            "kind": "state"
+          },
+          "id": "state",
+          "purpose": "data"
+        }
+      ],
+      "kind": "present",
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "presentation",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "phase",
+                "nullable": false,
+                "value": {
+                  "finite": true,
+                  "ref": "link.wake-phase"
+                }
+              }
+            ],
+            "id": "wake.phase.payload",
+            "kind": "snapshot"
+          },
+          "id": "presentation",
+          "purpose": "data"
+        }
+      ],
+      "runtime": {
+        "clockDomain": "none",
+        "contextInputs": [],
+        "durability": "transient",
+        "effects": [],
+        "lifetime": "call",
+        "stateOwner": "none"
+      }
     }
   ],
   "palette": {
@@ -5300,6 +5675,18 @@
         "to": "recovery.phase.presentation-adapter.state"
       },
       {
+        "from": "wake.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "wake.presentation.source"
+      },
+      {
+        "from": "wake.service.status",
+        "kind": "node-input",
+        "purpose": "data",
+        "to": "wake.phase.presentation-adapter.state"
+      },
+      {
         "from": "navigation.service.activePage",
         "kind": "component-input",
         "purpose": "data",
@@ -5436,6 +5823,18 @@
         "kind": "component-input",
         "purpose": "data",
         "to": "recovery.status.recoveryState"
+      },
+      {
+        "from": "wake.presentation.model",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "wake.status.model"
+      },
+      {
+        "from": "wake.phase.presentation-adapter.presentation",
+        "kind": "component-input",
+        "purpose": "data",
+        "to": "wake.status.wakeState"
       }
     ],
     "componentPorts": [
@@ -5810,6 +6209,30 @@
         "ref": "navigation.dev-host-entry.open",
         "required": true,
         "typeRef": "link.dev-host-entry"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.wake-status",
+        "direction": "input",
+        "ownerId": "wake.status",
+        "ownerKind": "component",
+        "portId": "model",
+        "purpose": "data",
+        "ref": "wake.status.model",
+        "required": true,
+        "typeRef": "link.wake-word"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "wake.phase.payload",
+        "direction": "input",
+        "ownerId": "wake.status",
+        "ownerKind": "component",
+        "portId": "wakeState",
+        "purpose": "data",
+        "ref": "wake.status.wakeState",
+        "required": true,
+        "typeRef": "link.wake-word"
       }
     ],
     "contracts": [
@@ -6210,6 +6633,12 @@
             "name": "speakReplies",
             "nullable": false,
             "value": "boolean"
+          },
+          {
+            "clockDomain": "none",
+            "name": "wakeWord",
+            "nullable": false,
+            "value": "boolean"
           }
         ],
         "id": "link.preferences-status",
@@ -6403,6 +6832,50 @@
           }
         ],
         "id": "recovery.phase.payload",
+        "kind": "snapshot"
+      },
+      {
+        "boundary": "presentation",
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "phase",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.wake-phase"
+            }
+          },
+          {
+            "clockDomain": "none",
+            "name": "detail",
+            "nullable": true,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "detections",
+            "nullable": false,
+            "value": "integer"
+          }
+        ],
+        "id": "link.wake-status",
+        "kind": "state"
+      },
+      {
+        "boundary": "presentation",
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "phase",
+            "nullable": false,
+            "value": {
+              "finite": true,
+              "ref": "link.wake-phase"
+            }
+          }
+        ],
+        "id": "wake.phase.payload",
         "kind": "snapshot"
       }
     ],
@@ -7055,6 +7528,66 @@
         "ref": "recovery.phase.presentation-adapter.presentation",
         "required": true,
         "typeRef": "recovery.phase.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.wake-status",
+        "direction": "output",
+        "ownerId": "wake.service",
+        "ownerKind": "node",
+        "portId": "status",
+        "purpose": "data",
+        "ref": "wake.service.status",
+        "required": true,
+        "typeRef": "link.wake"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.wake-status",
+        "direction": "input",
+        "ownerId": "wake.presentation",
+        "ownerKind": "node",
+        "portId": "source",
+        "purpose": "data",
+        "ref": "wake.presentation.source",
+        "required": true,
+        "typeRef": "link.present.wake"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.wake-status",
+        "direction": "output",
+        "ownerId": "wake.presentation",
+        "ownerKind": "node",
+        "portId": "model",
+        "purpose": "data",
+        "ref": "wake.presentation.model",
+        "required": true,
+        "typeRef": "link.present.wake"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "link.wake-status",
+        "direction": "input",
+        "ownerId": "wake.phase.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "state",
+        "purpose": "data",
+        "ref": "wake.phase.presentation-adapter.state",
+        "required": true,
+        "typeRef": "wake.phase.presentation-adapter"
+      },
+      {
+        "boundary": "presentation",
+        "contractRef": "wake.phase.payload",
+        "direction": "output",
+        "ownerId": "wake.phase.presentation-adapter",
+        "ownerKind": "node",
+        "portId": "presentation",
+        "purpose": "data",
+        "ref": "wake.phase.presentation-adapter.presentation",
+        "required": true,
+        "typeRef": "wake.phase.presentation-adapter"
       }
     ]
   },
@@ -8006,6 +8539,122 @@
           "values": [
             "clean",
             "quarantined"
+          ]
+        }
+      }
+    },
+    {
+      "adapter": {
+        "inputPortRef": "wake.phase.presentation-adapter.state",
+        "nodeInstanceRef": "wake.phase.presentation-adapter",
+        "nodeTypeRef": "wake.phase.presentation-adapter",
+        "outputPortRef": "wake.phase.presentation-adapter.presentation"
+      },
+      "id": "wake.phase",
+      "presentation": {
+        "cases": {
+          "blocked": {
+            "phase": "blocked"
+          },
+          "capturing": {
+            "phase": "capturing"
+          },
+          "listening": {
+            "phase": "listening"
+          },
+          "off": {
+            "phase": "off"
+          },
+          "sending": {
+            "phase": "sending"
+          },
+          "speaking": {
+            "phase": "speaking"
+          },
+          "thinking": {
+            "phase": "thinking"
+          }
+        },
+        "consumers": [
+          "wake.status.wakeState"
+        ],
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "phase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.wake-phase"
+              }
+            }
+          ],
+          "id": "wake.phase.payload",
+          "kind": "snapshot"
+        },
+        "fields": [
+          {
+            "name": "phase",
+            "value": {
+              "id": "link.wake-phase",
+              "values": [
+                "off",
+                "listening",
+                "capturing",
+                "sending",
+                "thinking",
+                "speaking",
+                "blocked"
+              ]
+            }
+          }
+        ],
+        "id": "wake.phase",
+        "stateRef": "link.wake-phase"
+      },
+      "source": {
+        "contract": {
+          "boundary": "presentation",
+          "fields": [
+            {
+              "clockDomain": "none",
+              "name": "phase",
+              "nullable": false,
+              "value": {
+                "finite": true,
+                "ref": "link.wake-phase"
+              }
+            },
+            {
+              "clockDomain": "none",
+              "name": "detail",
+              "nullable": true,
+              "value": "string"
+            },
+            {
+              "clockDomain": "none",
+              "name": "detections",
+              "nullable": false,
+              "value": "integer"
+            }
+          ],
+          "id": "link.wake-status",
+          "kind": "state"
+        },
+        "portRef": "wake.service.status",
+        "stateField": "phase",
+        "states": {
+          "id": "link.wake-phase",
+          "values": [
+            "off",
+            "listening",
+            "capturing",
+            "sending",
+            "thinking",
+            "speaking",
+            "blocked"
           ]
         }
       }

@@ -78,6 +78,11 @@
       "componentId": "link.updates",
       "rendererId": "updates",
       "profiles": ["phone-full-ui", "wear-full-ui"]
+    },
+    {
+      "componentId": "link.wake-word",
+      "rendererId": "wake-word",
+      "profiles": ["phone-full-ui"]
     }
   ],
   "icons": [
@@ -319,6 +324,27 @@
       "profiles": ["phone-full-ui", "wear-full-ui"],
       "inputPorts": ["command"],
       "outputPorts": ["status"]
+    },
+    {
+      "nodeId": "wake.phase.presentation-adapter",
+      "nativePortId": "wake.phase.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
+      "nodeId": "wake.presentation",
+      "nativePortId": "wake.presentation",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["source"],
+      "outputPorts": ["model"]
+    },
+    {
+      "nodeId": "wake.service",
+      "nativePortId": "wake.service",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": [],
+      "outputPorts": ["status"]
     }
   ],
   "finiteValues": [
@@ -352,7 +378,7 @@
     },
     {
       "id": "link.preference-key",
-      "values": ["hands-free", "speak-replies"]
+      "values": ["hands-free", "speak-replies", "wake-word"]
     },
     {
       "id": "link.recovery-phase",
@@ -373,6 +399,10 @@
     {
       "id": "link.update-phase",
       "values": ["available", "checking", "downloading", "failed", "idle", "install-failed", "installing", "ready-to-install", "unavailable", "up-to-date"]
+    },
+    {
+      "id": "link.wake-phase",
+      "values": ["blocked", "capturing", "listening", "off", "sending", "speaking", "thinking"]
     }
   ],
   "navigation": {

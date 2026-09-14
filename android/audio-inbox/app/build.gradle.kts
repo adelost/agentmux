@@ -31,7 +31,12 @@ android {
         versionCode = 21
         versionName = linkVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // ONNX Runtime ships ~30 MB per ABI. Phones are arm64; x86_64 keeps the emulator QA path.
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
+
+    // Compress native libraries in the APK so the wake word runtime does not triple the download.
+    packaging { jniLibs { useLegacyPackaging = true } }
 
     signingConfigs {
         if (
@@ -74,6 +79,8 @@ android {
         unitTests.isReturnDefaultValues = true
     }
     sourceSets.getByName("androidTest").java.srcDir("../link-ui/src/hostTest")
+    // The wake word models live beside the app-agnostic engine that reads them.
+    sourceSets.getByName("main").assets.srcDir("../wakeword/models")
 }
 
 dependencies {
@@ -82,6 +89,8 @@ dependencies {
     implementation(project(":link-transport"))
     implementation(project(":link-ui"))
     implementation(project(":link-update-android"))
+    implementation(project(":wakeword"))
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
     implementation("com.google.android.gms:play-services-wearable:20.0.1")
     implementation("io.v1d.circlekit:designkit:$circleKitVersion")
     implementation("io.v1d.circlekit:ringkit:$circleKitVersion")

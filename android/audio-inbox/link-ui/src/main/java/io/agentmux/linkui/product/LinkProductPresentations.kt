@@ -1,5 +1,7 @@
 package io.agentmux.linkui.product
 
+import io.agentmux.wakeword.WakePhase
+import io.agentmux.wakeword.WakeStatus
 import com.adelost.releasekit.UpdateState
 import io.agentmux.linkcore.CaptureOperation
 import io.agentmux.linkcore.CapturePhase
@@ -86,6 +88,14 @@ data class LinkHistoryPresentation(
 data class LinkPreferencesPresentation(
     val handsFree: Boolean,
     val speakReplies: Boolean,
+    val wakeWord: Boolean,
+)
+
+/** wake.presentation.model — the hands-free wake word status row's model. */
+data class LinkWakePresentation(
+    val phase: WakePhase,
+    val detail: String?,
+    val detections: Int,
 )
 
 /** updates.presentation.model — the updates component's model. */
@@ -206,11 +216,18 @@ fun LinkState.toHistoryPresentation(): LinkHistoryPresentation = LinkHistoryPres
     maxTurns = LinkHistoryPolicy.MAX_LOCAL_TURNS,
 )
 
-fun LinkState.toPreferencesPresentation(speakReplies: Boolean): LinkPreferencesPresentation =
+fun LinkState.toPreferencesPresentation(speakReplies: Boolean, wakeWord: Boolean): LinkPreferencesPresentation =
     LinkPreferencesPresentation(
         handsFree = handsFree,
         speakReplies = speakReplies,
+        wakeWord = wakeWord,
     )
+
+fun WakeStatus.toWakePresentation(): LinkWakePresentation = LinkWakePresentation(
+    phase = phase,
+    detail = detail.takeIf { it.isNotBlank() },
+    detections = detections,
+)
 
 /** The ONE ReleaseKit-to-product phase mapping; exhaustive by compiler. */
 fun UpdateState.wirePhase(): LinkUpdatePhase = when (this) {

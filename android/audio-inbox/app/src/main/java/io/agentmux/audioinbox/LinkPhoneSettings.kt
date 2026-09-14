@@ -24,6 +24,8 @@ import io.agentmux.linkcore.LinkUpdateOperation
 import io.agentmux.linkcore.PlaybackOperation
 import io.agentmux.linkui.activeTurnId
 import io.agentmux.linkui.product.LinkNativeBindings
+import io.agentmux.linkui.product.LinkWakePresentation
+import io.agentmux.wakeword.WakePhase
 import io.agentmux.linkui.product.LinkPlaybackCommandEvent
 import io.agentmux.linkui.product.LinkPreferenceToggleEvent
 import io.agentmux.linkui.product.LinkRoute
@@ -51,6 +53,7 @@ internal fun LinkPhoneSettings(
     val localHistory by graph.localHistory.collectAsStateWithLifecycle()
     val updates by graph.updates.collectAsStateWithLifecycle()
     val recovery by graph.recovery.collectAsStateWithLifecycle()
+    val wake by graph.wake.collectAsStateWithLifecycle()
     val updateRows = releaseUpdateRows(
         state = updates.update,
         currentVersionName = currentVersionName,
@@ -137,7 +140,7 @@ internal fun LinkPhoneSettings(
                         )
                     }
                     GeneratedLinkSettingsComponent.PREFERENCES_TOGGLES -> {
-                        linkAudioPreferences(preferences.speakReplies, preferences.handsFree).forEach { preference ->
+                        linkAudioPreferences(preferences.speakReplies, preferences.handsFree, preferences.wakeWord).forEach { preference ->
                             item("${mount.id}.${preference.key}") {
                                 RingChoiceRow(
                                     title = preference.title,
@@ -155,6 +158,15 @@ internal fun LinkPhoneSettings(
                                     modifier = phoneRowModifier(),
                                 )
                             }
+                        }
+                    }
+                    GeneratedLinkSettingsComponent.WAKE_STATUS -> if (preferences.wakeWord || wake.phase != WakePhase.OFF) {
+                        item(mount.id) {
+                            PhoneRow(
+                                title = wakePhaseTitle(wake.phase).uppercase(),
+                                sub = wakeStatusDetail(wake),
+                                icon = LinkNativeBindings.requireIcon(if (wake.phase == WakePhase.BLOCKED) "warning" else "record"),
+                            )
                         }
                     }
                     GeneratedLinkSettingsComponent.HISTORY_LOCAL -> item(mount.id) {
@@ -206,3 +218,9 @@ internal fun connectionRouteLabel(detail: String): String = when {
         detail.contains("private", ignoreCase = true) -> "PRIVATE LINK"
     else -> "CONNECTION"
 }
+
+/** The status row says why listening stopped and how often "computer" was heard, for tuning on the real phone. */
+internal fun wakeStatusDetail(wake: LinkWakePresentation): String = listOfNotNull(
+    wake.detail,
+    "Heard ${wake.detections} times".takeIf { wake.detections > 0 },
+).joinToString(" · ").ifBlank { "Say \"computer\", then your question" }

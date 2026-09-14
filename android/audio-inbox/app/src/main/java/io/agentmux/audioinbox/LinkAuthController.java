@@ -1,6 +1,6 @@
 package io.agentmux.audioinbox;
 
-import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 
@@ -40,14 +40,15 @@ final class LinkAuthController {
     private final Listener listener;
     private final ExecutorService work;
 
-    LinkAuthController(Activity activity, KeystoreSessionStore store, Listener listener) {
+    LinkAuthController(Context context, KeystoreSessionStore store, Listener listener) {
         this(
             new Host() {
                 public void open(String url) {
-                    activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                    context.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                 }
                 public void onUi(Runnable operation) {
-                    activity.runOnUiThread(operation);
+                    MainThread.run(operation);
                 }
             },
             store,

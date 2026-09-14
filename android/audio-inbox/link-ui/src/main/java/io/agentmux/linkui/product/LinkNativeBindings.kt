@@ -26,6 +26,8 @@ import io.agentmux.linkui.product.generated.GeneratedLinkNodeId
 import io.agentmux.linkui.product.generated.GeneratedLinkPageId
 import io.agentmux.linkui.product.generated.GeneratedPlaybackPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedRecoveryPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedWakePhaseAuthority
+import io.agentmux.wakeword.WakePhase
 import io.agentmux.linkui.product.generated.GeneratedConversationReplyPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedTargetKindAuthority
 import io.agentmux.linkui.product.generated.GeneratedUpdatesPhaseAuthority
@@ -154,6 +156,7 @@ object LinkNativeBindings {
         ),
         component(GeneratedLinkComponentTypeId.LINK_DEV_HOST_ENTRY, "dev-host-entry", phone, GeneratedLinkComponentId.NAVIGATION_DEV_HOST_ENTRY),
         component(GeneratedLinkComponentTypeId.LINK_DEV_PREVIEW, "dev-preview", phone, GeneratedLinkComponentId.DEV_PREVIEW),
+        component(GeneratedLinkComponentTypeId.LINK_WAKE_WORD, "wake-word", phone, GeneratedLinkComponentId.WAKE_STATUS),
     )
 
     val icons: List<LinkNativeIconBinding> = listOf(
@@ -210,6 +213,13 @@ object LinkNativeBindings {
             listOf(UpdatesStatusOutput),
         ),
         node(GeneratedLinkNodeId.RECOVERY_SERVICE, emptyList(), listOf(RecoveryStatusOutput)),
+        node(GeneratedLinkNodeId.WAKE_SERVICE, emptyList(), listOf(WakeStatusOutput)),
+        node(GeneratedLinkNodeId.WAKE_PRESENTATION, listOf(WakePresentationSourceInput), listOf(WakePresentationModelOutput)),
+        node(
+            GeneratedLinkNodeId.WAKE_PHASE_PRESENTATION_ADAPTER,
+            listOf(GeneratedWakePhaseAuthority.inputPort<Any>()),
+            listOf(GeneratedWakePhaseAuthority.outputPort),
+        ),
         node(
             GeneratedLinkNodeId.CAPTURE_PRESENTATION,
             listOf(CapturePresentationSourceInput),
@@ -314,6 +324,7 @@ object LinkNativeBindings {
         finiteValues(FiniteValueIds.LINK_UPDATE_OPERATION, wireValues<LinkUpdateOperation>()),
         finiteValues(FiniteValueIds.LINK_UPDATE_PHASE, wireValues<LinkUpdatePhase>()),
         finiteValues(FiniteValueIds.LINK_RECOVERY_PHASE, wireValues<LinkRecoveryPhase>()),
+        finiteValues(FiniteValueIds.LINK_WAKE_PHASE, wireValues<WakePhase>()),
     )
 
     internal val navigationArtifacts: List<LinkNativeNavigationArtifactBinding> = listOf(

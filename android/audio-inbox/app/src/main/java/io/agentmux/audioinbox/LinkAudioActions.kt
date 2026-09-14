@@ -1,6 +1,6 @@
 package io.agentmux.audioinbox
 
-import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Build
@@ -10,7 +10,7 @@ import io.agentmux.linkcore.PlaybackPhase
 
 /** Starts and controls reply playback through the Link foreground service. */
 internal class LinkAudioActions(
-    private val activity: Activity,
+    private val context: Context,
     private val targetForId: (String) -> ConversationTarget?,
 ) {
     fun playReply(turn: LinkTurn, explicitReplay: Boolean): String? {
@@ -19,7 +19,7 @@ internal class LinkAudioActions(
         if (turn.replyText.length > AppContract.MAX_REPLY_AUDIO_CHARACTERS) {
             return "This reply is too long for audio. The full text is above."
         }
-        val intent = Intent(activity, AudioInboxService::class.java).apply {
+        val intent = Intent(context, AudioInboxService::class.java).apply {
             action = if (explicitReplay) AppContract.ACTION_REPLAY_REPLY
             else AppContract.ACTION_PLAY_REPLY
             putExtra(AppContract.EXTRA_TURN_ID, turn.turnId)
@@ -30,8 +30,8 @@ internal class LinkAudioActions(
                 turn.respondingTarget.ifBlank { target.id },
             )
         }
-        if (Build.VERSION.SDK_INT >= 26) activity.startForegroundService(intent)
-        else activity.startService(intent)
+        if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent)
+        else context.startService(intent)
         return null
     }
 
@@ -42,7 +42,7 @@ internal class LinkAudioActions(
     fun stop() = send(AppContract.ACTION_STOP_AUDIO)
 
     private fun send(actionName: String) {
-        activity.startService(Intent(activity, AudioInboxService::class.java).apply {
+        context.startService(Intent(context, AudioInboxService::class.java).apply {
             action = actionName
         })
     }

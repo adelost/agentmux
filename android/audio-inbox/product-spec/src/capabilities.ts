@@ -15,7 +15,7 @@ export const linkCapabilityTable: CapabilityTable = {
   capabilities: [
     ...capabilityRows("PERMISSION", ["microphone.permission"]),
     ...capabilityRows("NETWORK", ["network.connectivity"]),
-    ...capabilityRows("PLATFORM", ["audio.focus", "transport.route-policy"]),
+    ...capabilityRows("PLATFORM", ["audio.focus", "transport.route-policy", "wake-word.model"]),
     ...capabilityRows("STORAGE", ["keystore.session", "storage.preferences", "storage.state-repository"]),
   ],
   effects: [

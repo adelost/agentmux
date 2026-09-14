@@ -40,8 +40,18 @@ feed and reports receipts in this order:
 
 Playback starts only after the server accepts `playback-started`. Turning
 announcements off closes that feed and stops its playback. Explicit `amux say`
-remains a separate user-requested channel; Link never opens a background
-microphone.
+remains a separate user-requested channel.
+
+**Wake word** is off by default and phone-only. When turned on, the foreground
+`WakeWordService` owns one microphone, shows an ongoing notification with Stop,
+and runs `computer` detection on device. After the word it records the question
+until 1.2 s of silence (Silero VAD, 30 s cap), encodes the same AAC/MPEG-4 file
+as push-to-talk and submits it through the shared conversation owner to the
+selected target. It plays short tones while waiting, reads the reply aloud with
+`POST /api/tts` and then listens again. Every stop reason is shown in the
+notification and the Settings status row. Reading aloud from the background
+needs Link's battery use set to Unrestricted; Settings asks for it. Without the
+toggle Link never opens a background microphone.
 
 Recording starts on press; release sends once, and a press shorter than 500 ms
 is discarded. Sliding outside the control cancels. Text Send is disabled for
@@ -76,6 +86,10 @@ Public Link uses the `/auth/*` and `/api/link/*` routes on `link.v1d.io`.
 - `link-transport`: Android-free public mailbox client and conversation port
   shared byte-for-byte by Phone and Wear.
 - `link-session-android`: the single Android Keystore-backed session store.
+- `wakeword`: app-agnostic, Android-free wake word engine (openWakeWord
+  detector, Silero VAD endpoint, phase reducer) and its ONNX models. The
+  product declares it with `product-spec/src/wake-word.ts`, a reusable
+  `defineWakeWordFeature(prefix)` building block.
 - `link-update-android`: the single Link adapter onto CircleKit ReleaseKit;
   Phone and Wear inject only their channel and installed version.
 - `app`: Phone hosts, private relay adapter, recording, playback and the

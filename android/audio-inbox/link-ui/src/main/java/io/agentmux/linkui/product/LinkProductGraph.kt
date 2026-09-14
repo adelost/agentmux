@@ -14,6 +14,8 @@ import io.agentmux.linkui.product.generated.GeneratedRecoveryPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedConversationReplyPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedTargetKindAuthority
 import io.agentmux.linkui.product.generated.GeneratedUpdatesPhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedWakePhaseAuthority
+import io.agentmux.wakeword.WakeStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
@@ -52,6 +54,8 @@ open class LinkProductGraph(
     updateState: StateFlow<UpdateState>,
     microphoneGranted: StateFlow<Boolean>,
     speakReplies: StateFlow<Boolean>,
+    wakeWordEnabled: StateFlow<Boolean>,
+    wakeStatus: StateFlow<WakeStatus>,
     publicLinkActive: () -> Boolean,
     targetKindOf: (String) -> LinkTargetKind?,
     captureByteCount: () -> Long,
@@ -75,6 +79,7 @@ open class LinkProductGraph(
     val localHistory: StateFlow<LinkHistoryPresentation>
     val updates: StateFlow<LinkUpdatePresentation>
     val recovery: StateFlow<LinkRecoveryPresentation>
+    val wake: StateFlow<LinkWakePresentation>
     val activePage: StateFlow<LinkRoute>
 
     /** The capture control's host-neutral spec, derived beside the talk model. */
@@ -149,9 +154,9 @@ open class LinkProductGraph(
         )
         runtime.observe(
             PreferencesStatusOutput,
-            combine(state, speakReplies) { current, replies ->
-                current.toPreferencesPresentation(replies)
-            }.hot { state.value.toPreferencesPresentation(speakReplies.value) },
+            combine(state, speakReplies, wakeWordEnabled) { current, replies, wakeWord ->
+                current.toPreferencesPresentation(replies, wakeWord)
+            }.hot { state.value.toPreferencesPresentation(speakReplies.value, wakeWordEnabled.value) },
         )
         runtime.observe(
             UpdatesStatusOutput,
@@ -160,6 +165,10 @@ open class LinkProductGraph(
         runtime.observe(
             RecoveryStatusOutput,
             state.map { it.toRecoveryPresentation() }.hot { state.value.toRecoveryPresentation() },
+        )
+        runtime.observe(
+            WakeStatusOutput,
+            wakeStatus.map { it.toWakePresentation() }.hot { wakeStatus.value.toWakePresentation() },
         )
 
         runtime.observe(
@@ -197,6 +206,10 @@ open class LinkProductGraph(
         runtime.observe(
             RecoveryPresentationModelOutput,
             runtime.connected(RecoveryPresentationSourceInput, processScope),
+        )
+        runtime.observe(
+            WakePresentationModelOutput,
+            runtime.connected(WakePresentationSourceInput, processScope),
         )
 
         mountStateAuthority(
@@ -255,6 +268,13 @@ open class LinkProductGraph(
             { it.phase.wireId() },
             GeneratedRecoveryPhaseAuthority::require,
         )
+        mountStateAuthority(
+            GeneratedWakePhaseAuthority.inputPort<LinkWakePresentation>(),
+            GeneratedWakePhaseAuthority.outputPort,
+            GeneratedWakePhaseAuthority.componentInputs,
+            { it.phase.wireId() },
+            GeneratedWakePhaseAuthority::require,
+        )
 
         // The one service-internal edge: a captured turn is delivered to the
         // conversation service through its generated binding, never directly.
@@ -280,6 +300,7 @@ open class LinkProductGraph(
         localHistory = runtime.connected(LocalHistoryModelInput, processScope)
         updates = runtime.connected(UpdatesModelInput, processScope)
         recovery = runtime.connected(RecoveryModelInput, processScope)
+        wake = runtime.connected(WakeModelInput, processScope)
         activePage = runtime.connected(PageHostActivePageInput, processScope)
 
         talkCommand = runtime.componentEvent(TalkCommandEvent, processScope)

@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var updater: LinkUpdater
     private lateinit var host: LinkHostController
     private lateinit var productGraph: PhoneLinkProductGraph
+    private lateinit var wakeWord: LinkWakeWordControl
     private val microphoneGranted = MutableStateFlow(false)
     private val microphonePermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -42,7 +43,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.statusBarColor = GraphiteTokens.Canvas.toArgb()
         window.navigationBarColor = GraphiteTokens.Canvas.toArgb()
-        coordinator = LinkCoordinator(this)
+        coordinator = LinkRuntime.acquire(this)
         host = LinkHostController(this) { requestedOrientation = requestedOrientationFor(it) }
         if (BuildConfig.DEBUG) {
             host.applyQa(
@@ -55,6 +56,7 @@ class MainActivity : ComponentActivity() {
         microphoneGranted.value = hasMicrophonePermission()
         coordinator.handlePublicAuth(intent?.data)
         recorder = PushToTalkRecorder(this)
+        wakeWord = LinkWakeWordControl(this, ::requestMicrophone)
         updater = LinkUpdater(
             context = this,
             scope = lifecycleScope,
@@ -95,6 +97,7 @@ class MainActivity : ComponentActivity() {
                 updater = updater,
                 navigation = navigation,
                 microphoneGranted = microphoneGranted,
+                wakeWord = wakeWord,
             )
         }
         setContent {
@@ -117,6 +120,13 @@ class MainActivity : ComponentActivity() {
         }
         requestRuntimePermissions()
         updater.start()
+        if (BuildConfig.DEBUG) intent?.getStringExtra(WakeWordService.EXTRA_QA_WAV)?.let { wav ->
+            startForegroundService(
+                Intent(this, WakeWordService::class.java)
+                    .setAction(WakeWordService.ACTION_START)
+                    .putExtra(WakeWordService.EXTRA_QA_WAV, wav),
+            )
+        }
     }
 
     override fun onStop() {
@@ -131,6 +141,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         microphoneGranted.value = hasMicrophonePermission()
         if (::updater.isInitialized) updater.resumeInstallerStatus()
+        if (::wakeWord.isInitialized) wakeWord.resume()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -156,7 +167,7 @@ class MainActivity : ComponentActivity() {
         // work runs on lifecycleScope, which this activity cancels for us.
         productGraph.close()
         recorder.cancel()
-        coordinator.close()
+        LinkRuntime.release(coordinator)
         super.onDestroy()
     }
 

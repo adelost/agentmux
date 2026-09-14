@@ -101,7 +101,7 @@ export const historyStatusContract = {
 
 export const preferencesStatusContract = {
   id: "link.preferences-status", kind: "state", boundary: "presentation",
-  fields: [field("handsFree", "boolean"), field("speakReplies", "boolean")],
+  fields: [field("handsFree", "boolean"), field("speakReplies", "boolean"), field("wakeWord", "boolean")],
 } as const;
 export const preferenceToggleContract = {
   id: "link.preference-toggle", kind: "event", boundary: "ui-event",

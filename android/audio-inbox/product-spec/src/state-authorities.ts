@@ -23,6 +23,7 @@ import {
   linkTargetKinds,
   linkUpdatePhases,
 } from "./finite-values.js";
+import { linkWakeWord } from "./link-wake-word.js";
 
 const capturePhasePresentation = defineStatePresentation(linkCapturePhases, {
   id: "capture.phase",
@@ -161,4 +162,5 @@ export const linkStateAuthorityDefinitions = [
   connectionStateAuthority,
   updatePhaseAuthority,
   recoveryPhaseAuthority,
+  linkWakeWord.phaseAuthority,
 ] as const;

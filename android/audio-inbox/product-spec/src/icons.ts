@@ -20,4 +20,5 @@ export const linkComponentIconRefs = [
   { id: "component.dev-host", assetRef: "phone", artifacts: ["phone-full-ui"] },
   { id: "component.recovery", assetRef: "warning", artifacts: ALL_ARTIFACTS },
   { id: "component.dev-preview", assetRef: "phone", artifacts: ["phone-full-ui"] },
+  { id: "component.wake-word", assetRef: "record", artifacts: ["phone-full-ui"] },
 ] as const;

@@ -1,7 +1,5 @@
 package io.agentmux.audioinbox;
 
-import android.app.Activity;
-
 import java.io.File;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -28,18 +26,17 @@ final class ConversationController implements AutoCloseable {
     private final ExecutorService replies = Executors.newFixedThreadPool(REPLY_WORKERS);
     private final List<ConversationTransport> transports;
 
-    ConversationController(Activity activity, String consumerId, Listener listener) {
-        this(activity::runOnUiThread, List.of(new TailnetConversationTransport(consumerId)), listener);
+    ConversationController(String consumerId, Listener listener) {
+        this(MainThread::run, List.of(new TailnetConversationTransport(consumerId)), listener);
     }
 
     ConversationController(
-        Activity activity,
         String consumerId,
         KeystoreSessionStore sessions,
         Listener listener
     ) {
         this(
-            activity::runOnUiThread,
+            MainThread::run,
             List.of(
                 new PublicConversationTransport(sessions),
                 new TailnetConversationTransport(consumerId)

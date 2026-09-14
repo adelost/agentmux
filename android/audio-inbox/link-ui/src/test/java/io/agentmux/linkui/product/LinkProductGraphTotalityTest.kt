@@ -30,6 +30,8 @@ class LinkProductGraphTotalityTest {
             ),
             microphoneGranted = MutableStateFlow(false),
             speakReplies = MutableStateFlow(false),
+            wakeWordEnabled = MutableStateFlow(false),
+            wakeStatus = MutableStateFlow(io.agentmux.wakeword.WakeStatus()),
             publicLinkActive = { false },
             targetKindOf = { null },
             captureByteCount = { 0L },

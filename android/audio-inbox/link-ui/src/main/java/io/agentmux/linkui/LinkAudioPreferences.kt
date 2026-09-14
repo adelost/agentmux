@@ -10,9 +10,11 @@ data class LinkAudioPreference(
     val enabled: Boolean,
 )
 
-fun linkAudioPreferences(readReplies: Boolean, announcements: Boolean) = listOf(
+fun linkAudioPreferences(readReplies: Boolean, announcements: Boolean, wakeWord: Boolean) = listOf(
     LinkAudioPreference(LinkPreferenceKey.SPEAK_REPLIES, "READ REPLIES",
         "Read answers to your messages automatically. Off: tap Play when you want to listen.", readReplies),
     LinkAudioPreference(LinkPreferenceKey.HANDS_FREE, "ANNOUNCEMENTS",
         "Play separate audio updates sent to this device, including in the background. This does not control your replies.", announcements),
+    LinkAudioPreference(LinkPreferenceKey.WAKE_WORD, "WAKE WORD",
+        "Say \"computer\", then your question. Link listens in the background, sends it to the selected target and reads the reply aloud.", wakeWord),
 )

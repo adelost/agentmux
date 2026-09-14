@@ -8,10 +8,11 @@ enum class LinkTargetKind {
     PUBLIC,
 }
 
-/** The two durable user preferences behind the typed preferences port. */
+/** The durable user preferences behind the typed preferences port. */
 enum class LinkPreferenceKey {
     HANDS_FREE,
     SPEAK_REPLIES,
+    WAKE_WORD,
 }
 
 /** User operations accepted by the typed updates port. */

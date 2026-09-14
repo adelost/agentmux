@@ -39,7 +39,12 @@ sealed interface WakeEvent {
     data object Stop : WakeEvent
     data class Blocked(val reason: String) : WakeEvent
     data class Detected(val score: Float) : WakeEvent
-    data class CaptureEnded(val end: UtteranceEnd, val turnId: String?) : WakeEvent
+    /** A finished capture; [turnId] is null when the host could not submit it, with [failure] saying why. */
+    data class CaptureEnded(
+        val end: UtteranceEnd,
+        val turnId: String?,
+        val failure: String = "Could not send the question",
+    ) : WakeEvent
     data class TurnChanged(val progress: TurnProgress) : WakeEvent
 }
 
@@ -76,7 +81,7 @@ private fun WakeStatus.captureEnded(event: WakeEvent.CaptureEnded): WakeStatus {
     if (phase != WakePhase.CAPTURING) return this
     return when {
         event.end == UtteranceEnd.NO_SPEECH -> listening("Heard the wake word but no question")
-        event.turnId == null -> listening("Could not send the question")
+        event.turnId == null -> listening(event.failure)
         else -> copy(phase = WakePhase.SENDING, turnId = event.turnId, detail = "")
     }
 }

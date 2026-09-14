@@ -22,6 +22,7 @@ android {
 
 dependencies {
     api(project(":link-core"))
+    api(project(":wakeword"))
     implementation("io.v1d.circlekit:designkit:$circleKitVersion")
     implementation("io.v1d.circlekit:ringkit:$circleKitVersion")
     api("io.v1d.circlekit:releasekit-ui:$circleKitVersion")
