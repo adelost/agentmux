@@ -59,6 +59,37 @@ export function describeRestartOutcome(toolResults) {
   return `WSL är omstartat: boot ${before} -> ${after}.`;
 }
 
+// Tools that change Windows or WSL run at most once per order; reads may repeat.
+const OBSERVE_ONLY_TOOLS = new Set(["get_status", "get_logs"]);
+// Tools that can give WSL a new boot, with the //command the human knows them by.
+const BOOT_ORDER_COMMANDS = Object.freeze({ restart_wsl: "//restart-wsl", start_wsl: "//start-wsl", recover: "//recover" });
+const BOOT_ORDER_WINDOW_MS = 30 * 60_000;
+const ORDER_MEMORY = 20;
+
+/** WHAT: Checks whether this order already ran a tool that changes the system. WHY: Prevents a redelivered message from restarting WSL a second time. */
+export function hasRunOrder(state, { messageId, tool }) {
+  if (OBSERVE_ONLY_TOOLS.has(tool)) return false;
+  return (state?.managerOrders || []).some((order) => order.messageId === String(messageId) && order.tool === tool);
+}
+
+/** WHAT: Tracks a system-changing tool for its order before it runs. WHY: Keeps the once-only fence and the boot attribution in persisted state. */
+export function rememberOrder(state, { messageId, tool, nowMs }) {
+  if (OBSERVE_ONLY_TOOLS.has(tool)) return state;
+  const orders = [...(state.managerOrders || []), { messageId: String(messageId), tool, bootId: state.lastBootId || null, atMs: nowMs }];
+  state.managerOrders = orders.slice(-ORDER_MEMORY);
+  return state;
+}
+
+/** WHAT: Formats the line for a WSL boot change, or null when nothing needs saying. WHY: Prevents an unordered WSL restart from passing unnoticed without echoing an already reported one. */
+export function planBootNotice({ fromBootId, toBootId, orders = [], nowMs, observer }) {
+  if (!fromBootId || !toBootId || fromBootId === toBootId) return null;
+  const order = [...orders].reverse().find((entry) => BOOT_ORDER_COMMANDS[entry.tool]
+    && entry.bootId === fromBootId && nowMs - entry.atMs <= BOOT_ORDER_WINDOW_MS);
+  if (!order) return `WSL har startat om (inte via //restart-wsl): boot ${fromBootId} -> ${toBootId}.`;
+  // A turn that sees its own order's new boot reports it in its answer; only the watcher speaks up later.
+  return observer === "watch" ? `WSL är uppe igen efter ${BOOT_ORDER_COMMANDS[order.tool]}: boot ${fromBootId} -> ${toBootId}.` : null;
+}
+
 // What each rescue-tool stage means for the human, and what to type next.
 const RESTART_STEP_HELP = Object.freeze({
   "wsl-recovered": { said: "WSL, bryggan och de avbrutna panelerna är uppe igen.", next: null },

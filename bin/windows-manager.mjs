@@ -23,10 +23,11 @@ import {
   planRescueCommand,
   planToolCall,
   redactSecrets,
-  trackManagerBootId,
 } from "../core/windows-manager.mjs";
+import { hasRunOrder, rememberOrder } from "../core/windows-manager-commands.mjs";
 import { mapRecoveryChainResults } from "../core/windows-recovery.mjs";
 import { pollManagerDiscord, reconcileManagerStartup } from "../core/windows-manager-discord.mjs";
+import { createRunningBootReader, noteBootObservation, startWslBootWatch } from "../core/windows-manager-boot.mjs";
 import { claimManagerSingleton, createVoiceTranscriber } from "../core/windows-manager-input.mjs";
 import { createSerialTurnLane, startWindowsManagerPhone } from "../core/windows-manager-phone-runtime.mjs";
 import { startWindowsManagerLink } from "../core/windows-manager-link.mjs";
@@ -131,7 +132,7 @@ async function executeToolDefault(name, { rootDir, logPath, beforeBootId = null 
 /** WHAT: Dispatches one user turn through provider, tools, and final answer. WHY: Separates turn flow from Discord and process I/O. */
 export async function runManagerTurn({ userText, messageId, state, history = [], deps }) {
   let observation = await deps.observe();
-  trackManagerBootId(state, observation);
+  await noteBootObservation(state, observation, { deps, observer: "turn" });
   const messages = planManagerTurn({ userText, observation, history, contractVersion: MANAGER_CONTRACT_VERSION });
   const local = planLocalRescueTurn(userText);
   const reply = local ? { ok: true, text: local.answer || "local-rescue" } : await deps.provider.chat(messages);
@@ -151,7 +152,12 @@ export async function runManagerTurn({ userText, messageId, state, history = [],
       toolResults.push({ ok: false, stage: name, detail: `refused:${verdict.reason}` });
       continue;
     }
+    if (hasRunOrder(state, { messageId, tool: name })) {
+      toolResults.push({ ok: false, stage: name, detail: "refused:already-executed" });
+      continue;
+    }
     state.lastAction = planAcceptedAction({ messageId, command: name, generation: deps.generation, nowMs: deps.nowMs() });
+    rememberOrder(state, { messageId, tool: name, nowMs: deps.nowMs() });
     deps.saveState(state);
     if (verdict.notice) await deps.sendMessage(verdict.notice).catch((error) => deps.log?.(`restart notice failed: ${error?.message || error}`));
     const executed = await deps.executeTool(name, { observation, beforeBootId: state.prevBootId || null });
@@ -160,7 +166,7 @@ export async function runManagerTurn({ userText, messageId, state, history = [],
     deps.log?.(`tool ${name} ok=${result.ok} stage=${result.stage} detail=${String(result.detail || "").slice(0, 400)}`);
     if (result.observation) {
       observation = result.observation;
-      trackManagerBootId(state, observation);
+      await noteBootObservation(state, observation, { deps, observer: "turn" });
       state.lastStatusMs = deps.nowMs();
     }
     state.lastAction.status = result.ok ? "completed" : "failed";
@@ -252,6 +258,7 @@ async function main() {
     saveState: (next) => writeJsonAtomic(statePath, next),
     observe: observeDefault,
     executeTool: (name, context = {}) => executeToolDefault(name, { rootDir, logPath, beforeBootId: context.beforeBootId }),
+    readRunningBootId: createRunningBootReader({ rootDir, run: runBounded, readJson }),
     log: (line) => logLine(logPath, line),
     listMessages: async (after) => {
       const route = `/channels/${config.channelId}/messages?limit=50${after ? `&after=${after}` : ""}`;
@@ -270,6 +277,7 @@ async function main() {
   };
   await startWindowsManagerPhone({ config, rootDir, transcribePath: TRANSCRIBE_PATH, state, deps, history, serializeTurn, runManagerTurn, log: (line) => logLine(logPath, line) });
   startWindowsManagerLink({ state, deps, history, serializeTurn, runManagerTurn, log: (line) => logLine(logPath, line) });
+  startWslBootWatch({ state, deps, serializeTurn, log: (line) => logLine(logPath, line) });
   const pollSeconds = Math.min(Math.max(Number(config.pollSeconds) || 5, 2), 60);
   for (;;) {
     try {
