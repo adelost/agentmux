@@ -151,6 +151,23 @@ class LinkReducerTest {
         assertEquals("turn-54", state.turns.last().turnId)
     }
 
+    // Mattias 2026-09-14: "någon knapp där för att ja, kasta föregående ... de som är då cachade på mobilen."
+    @Test fun `clearing a conversation drops its settled turns on this phone and keeps anything still on its way`() {
+        val answered = turn("answered", "lsrc:3").copy(deliveryPhase = DeliveryPhase.QUEUED, replyPhase = ReplyPhase.READY)
+        val notSent = turn("not-sent", "lsrc:3").copy(deliveryPhase = DeliveryPhase.FAILED)
+        val sending = turn("sending", "lsrc:3").copy(deliveryPhase = DeliveryPhase.SENDING)
+        val thinking = turn("thinking", "lsrc:3").copy(deliveryPhase = DeliveryPhase.QUEUED, replyPhase = ReplyPhase.THINKING)
+        val playing = answered.copy(turnId = "playing", playbackPhase = PlaybackPhase.PLAYING)
+        val otherRecipient = answered.copy(turnId = "other", targetId = "claw:1")
+        val state = LinkState(turns = listOf(answered, notSent, sending, thinking, playing, otherRecipient), activePlaybackTurnId = "playing")
+
+        val cleared = LinkReducer.reduce(state, LinkAction.ClearConversation("lsrc:3"))
+
+        assertEquals(listOf("sending", "thinking", "playing", "other"), cleared.turns.map { it.turnId })
+        assertEquals("playing", cleared.activePlaybackTurnId)
+        assertEquals(2, state.clearableTurns("lsrc:3"))
+    }
+
     private fun turn(id: String, target: String) = LinkTurn(
         turnId = id,
         targetId = target,

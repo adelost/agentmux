@@ -89,6 +89,7 @@ graph LR
   n_conversation_service -->|"conversation-status"| n_conversation_delivery_phase_presentation_adapter
   n_conversation_service -->|"conversation-status"| n_conversation_presentation
   n_conversation_service -->|"conversation-status"| n_conversation_reply_phase_presentation_adapter
+  n_history_local -->|"history-clear"| n_history_service
   n_history_presentation -->|"history-status"| n_history_local
   n_history_service -->|"history-status"| n_history_presentation
   n_navigation_dev_host_entry -->|"navigation.route-intent"| n_navigation_service

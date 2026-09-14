@@ -172,6 +172,7 @@ object LinkNativeBindings {
         icon("play", "RingIcons.Play", RingIcons.Play),
         icon("wifi", "RingIcons.Wifi", RingIcons.Wifi),
         icon("activity", "RingIcons.Activity", RingIcons.Activity),
+        icon("trash", "RingIcons.Trash", RingIcons.Trash),
         icon("download", "RingIcons.Download", RingIcons.Download),
         icon("warning", "RingIcons.Warning", RingIcons.Warning),
     )
@@ -203,7 +204,7 @@ object LinkNativeBindings {
             listOf(TargetDirectoryOutput),
         ),
         node(GeneratedLinkNodeId.SESSION_SERVICE, emptyList(), listOf(SessionStatusOutput)),
-        node(GeneratedLinkNodeId.HISTORY_SERVICE, emptyList(), listOf(HistoryStatusOutput)),
+        node(GeneratedLinkNodeId.HISTORY_SERVICE, listOf(HistoryClearInput), listOf(HistoryStatusOutput)),
         node(
             GeneratedLinkNodeId.PREFERENCES_SERVICE,
             listOf(PreferencesToggleInput),
@@ -368,6 +369,8 @@ object LinkNativeBindings {
             action(DevHostOpenEvent, NavigationOpenDevHostInput, LinkNativeActionEffect.PUSH)),
         actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.PREFERENCES_TOGGLES,
             action(PreferencesToggleEvent, PreferencesToggleInput)),
+        actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.HISTORY_LOCAL,
+            action(LocalHistoryClearEvent, HistoryClearInput)),
         actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.NAVIGATION_SETTINGS_ENTRY,
             action(SettingsActionOpenEvent, NavigationOpenSettingsInput, LinkNativeActionEffect.PUSH)),
         actionGroup(GeneratedLinkArtifactRef.PHONE_FULL_UI, GeneratedLinkComponentId.CAPTURE_TALK,

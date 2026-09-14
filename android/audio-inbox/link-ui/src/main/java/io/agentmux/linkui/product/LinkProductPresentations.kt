@@ -9,6 +9,7 @@ import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.ConnectionState
 import io.agentmux.linkcore.DeliveryPhase
 import io.agentmux.linkcore.LinkHistoryPolicy
+import io.agentmux.linkcore.clearableTurns
 import io.agentmux.linkcore.LinkPreferenceKey
 import io.agentmux.linkcore.LinkRecoveryPhase
 import io.agentmux.linkcore.LinkState
@@ -83,6 +84,9 @@ data class LinkSessionPresentation(
 data class LinkHistoryPresentation(
     val retainedTurns: Int,
     val maxTurns: Int,
+    /** The selected recipient, and how many of its turns a clear would remove. */
+    val targetId: String?,
+    val clearableTurns: Int,
 )
 
 /** preferences.presentation.model — the preferences component's model. */
@@ -126,6 +130,9 @@ data class LinkTargetSelectEvent(val targetId: String)
 
 /** preferences.toggle → preferences.service.toggle. */
 data class LinkPreferenceToggleEvent(val key: LinkPreferenceKey, val enabled: Boolean)
+
+/** local-history.clear → history.service.clear. */
+data class LinkHistoryClearEvent(val targetId: String)
 
 /** updates.command → updates.service.command. */
 data class LinkUpdateCommandEvent(val operation: LinkUpdateOperation)
@@ -216,6 +223,8 @@ fun LinkState.toSessionPresentation(publicLinkActive: Boolean): LinkSessionPrese
 fun LinkState.toHistoryPresentation(): LinkHistoryPresentation = LinkHistoryPresentation(
     retainedTurns = turns.size,
     maxTurns = LinkHistoryPolicy.MAX_LOCAL_TURNS,
+    targetId = selectedTargetId.takeIf { it.isNotBlank() },
+    clearableTurns = if (selectedTargetId.isBlank()) 0 else clearableTurns(selectedTargetId),
 )
 
 fun LinkState.toPreferencesPresentation(speakReplies: Boolean, wakeWord: Boolean): LinkPreferencesPresentation =

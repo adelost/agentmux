@@ -300,6 +300,7 @@ internal class LinkCoordinator(
     fun pauseAudio() = audioActions.pause()
     fun resumeAudio() = audioActions.resume()
     fun stopAudio() = audioActions.stop()
+    fun clearConversation(targetId: String) = dispatch(LinkAction.ClearConversation(targetId))
 
     private fun discoverTargets() {
         val savedServer = preferences.getString(AppContract.KEY_SERVER, "").orEmpty()

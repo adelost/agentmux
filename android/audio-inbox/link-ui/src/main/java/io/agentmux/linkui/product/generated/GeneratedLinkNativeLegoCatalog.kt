@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the portable native-Lego catalog
-// Product declarations SHA-256: 8a445c2338b56c74b3f1b92b3e63df939c1937c54a093cfcbb9f455042291f8c
+// Product declarations SHA-256: b03ca0945d7a024db68c3153b48b9b0c90e4e7670ca11b7b6216ef62be196c26
 package io.agentmux.linkui.product.generated
 
 internal enum class GeneratedLinkNodeId(val wireId: String) { NAVIGATION_SERVICE("navigation.service"), CAPTURE_SERVICE("capture.service"), CONVERSATION_SERVICE("conversation.service"), PLAYBACK_SERVICE("playback.service"), TARGET_SERVICE("target.service"), SESSION_SERVICE("session.service"), HISTORY_SERVICE("history.service"), PREFERENCES_SERVICE("preferences.service"), UPDATES_SERVICE("updates.service"), RECOVERY_SERVICE("recovery.service"), CAPTURE_PRESENTATION("capture.presentation"), CONVERSATION_PRESENTATION("conversation.presentation"), PLAYBACK_PRESENTATION("playback.presentation"), TARGET_PRESENTATION("target.presentation"), SESSION_PRESENTATION("session.presentation"), HISTORY_PRESENTATION("history.presentation"), PREFERENCES_PRESENTATION("preferences.presentation"), UPDATES_PRESENTATION("updates.presentation"), RECOVERY_PRESENTATION("recovery.presentation"), CAPTURE_PHASE_PRESENTATION_ADAPTER("capture.phase.presentation-adapter"), CONVERSATION_DELIVERY_PHASE_PRESENTATION_ADAPTER("conversation.delivery-phase.presentation-adapter"), CONVERSATION_REPLY_PHASE_PRESENTATION_ADAPTER("conversation.reply-phase.presentation-adapter"), PLAYBACK_PHASE_PRESENTATION_ADAPTER("playback.phase.presentation-adapter"), TARGET_KIND_PRESENTATION_ADAPTER("target.kind.presentation-adapter"), SESSION_CONNECTION_STATE_PRESENTATION_ADAPTER("session.connection-state.presentation-adapter"), UPDATES_PHASE_PRESENTATION_ADAPTER("updates.phase.presentation-adapter"), RECOVERY_PHASE_PRESENTATION_ADAPTER("recovery.phase.presentation-adapter"), WAKE_SERVICE("wake.service"), WAKE_PRESENTATION("wake.presentation"), WAKE_PHASE_PRESENTATION_ADAPTER("wake.phase.presentation-adapter"), WAKE_PHRASE_PRESENTATION_ADAPTER("wake.phrase.presentation-adapter") }
@@ -21,6 +21,7 @@ internal object GeneratedLinkNativeLegoCatalog {
         data object TARGET_SERVICE_SELECT : GeneratedProductInputPortId { override val value = "target.service.select" }
         data object TARGET_SERVICE_DIRECTORY : GeneratedProductOutputPortId { override val value = "target.service.directory" }
         data object SESSION_SERVICE_STATUS : GeneratedProductOutputPortId { override val value = "session.service.status" }
+        data object HISTORY_SERVICE_CLEAR : GeneratedProductInputPortId { override val value = "history.service.clear" }
         data object HISTORY_SERVICE_STATUS : GeneratedProductOutputPortId { override val value = "history.service.status" }
         data object PREFERENCES_SERVICE_TOGGLE : GeneratedProductInputPortId { override val value = "preferences.service.toggle" }
         data object PREFERENCES_SERVICE_STATUS : GeneratedProductOutputPortId { override val value = "preferences.service.status" }
@@ -92,6 +93,7 @@ internal object GeneratedLinkNativeLegoCatalog {
         data object PREFERENCES_TOGGLES_MODEL : GeneratedProductInputPortId { override val value = "preferences.toggles.model" }
         data object PREFERENCES_TOGGLES_TOGGLE : GeneratedProductOutputPortId { override val value = "preferences.toggles.toggle" }
         data object HISTORY_LOCAL_MODEL : GeneratedProductInputPortId { override val value = "history.local.model" }
+        data object HISTORY_LOCAL_CLEAR : GeneratedProductOutputPortId { override val value = "history.local.clear" }
         data object UPDATES_PANEL_MODEL : GeneratedProductInputPortId { override val value = "updates.panel.model" }
         data object UPDATES_PANEL_UPDATESTATE : GeneratedProductInputPortId { override val value = "updates.panel.updateState" }
         data object UPDATES_PANEL_COMMAND : GeneratedProductOutputPortId { override val value = "updates.panel.command" }

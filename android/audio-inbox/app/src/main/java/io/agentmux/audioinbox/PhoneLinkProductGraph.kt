@@ -5,6 +5,8 @@ import io.agentmux.linkcore.CaptureOperation
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.LinkPreferenceKey
 import io.agentmux.linkcore.LinkState
+import io.agentmux.linkcore.LinkReducer
+import io.agentmux.linkcore.LinkAction
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkui.LinkReplyAudio
 import io.agentmux.linkcore.LinkUpdateOperation
@@ -114,6 +116,7 @@ internal class PhoneLinkProductGraph private constructor(
                     playbackCommand = coordinatorPlayback(coordinator),
                     targetSelect = { event -> coordinator.selectTarget(event.targetId) },
                     preferenceToggle = phonePreferenceToggle(coordinator, speakReplies, wakeWord::setEnabled),
+                    historyClear = { event -> coordinator.clearConversation(event.targetId) },
                     updateCommand = updaterCommands(updater),
                 ),
                 composer = composer,
@@ -167,6 +170,7 @@ internal class PhoneLinkProductGraph private constructor(
                         qaState.update { it.copy(selectedTargetId = event.targetId) }
                     },
                     preferenceToggle = phonePreferenceToggle(coordinator, speakReplies) { wakeWordEnabled.value = it },
+                    historyClear = { event -> qaState.update { LinkReducer.reduce(it, LinkAction.ClearConversation(event.targetId)) } },
                     updateCommand = updaterCommands(updater),
                 ),
                 composer = composer,

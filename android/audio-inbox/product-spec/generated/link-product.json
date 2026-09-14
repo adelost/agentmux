@@ -1122,7 +1122,9 @@
     },
     {
       "bindings": {
-        "events": {},
+        "events": {
+          "clear": "history.service.clear"
+        },
         "inputs": {
           "model": "history.presentation.model"
         }
@@ -1914,6 +1916,18 @@
                 "name": "maxTurns",
                 "nullable": false,
                 "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "targetId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "clearableTurns",
+                "nullable": false,
+                "value": "integer"
               }
             ],
             "id": "link.history-status",
@@ -1923,7 +1937,25 @@
           "required": true
         }
       ],
-      "outputs": [],
+      "outputs": [
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "targetId",
+                "nullable": false,
+                "value": "string"
+              }
+            ],
+            "id": "link.history-clear",
+            "kind": "event"
+          },
+          "id": "clear",
+          "required": true
+        }
+      ],
       "requiredCapabilities": [
         "ui.component-tree"
       ]
@@ -2508,6 +2540,13 @@
     },
     {
       "artifacts": [
+        "phone-full-ui"
+      ],
+      "assetRef": "trash",
+      "id": "component.local-history-clear"
+    },
+    {
+      "artifacts": [
         "phone-full-ui",
         "wear-full-ui"
       ],
@@ -2593,6 +2632,25 @@
         "componentInstanceRef": "conversation.composer",
         "pageRefs": [
           "home"
+        ]
+      },
+      {
+        "actions": [
+          {
+            "contractRef": "link.history-clear",
+            "effect": "dispatch",
+            "id": "clear",
+            "kind": "event",
+            "sourcePortRef": "history.local.clear",
+            "targetPortRef": "history.service.clear"
+          }
+        ],
+        "artifactRefs": [
+          "phone-full-ui"
+        ],
+        "componentInstanceRef": "history.local",
+        "pageRefs": [
+          "settings"
         ]
       },
       {
@@ -2903,7 +2961,9 @@
         "kind": "lifetime",
         "lifecycleSources": []
       },
-      "bindings": {},
+      "bindings": {
+        "clear": "history.local.clear"
+      },
       "config": {},
       "id": "history.service",
       "nodeTypeRef": "link.history"
@@ -3713,7 +3773,25 @@
     },
     {
       "id": "link.history",
-      "inputs": [],
+      "inputs": [
+        {
+          "contract": {
+            "boundary": "ui-event",
+            "fields": [
+              {
+                "clockDomain": "none",
+                "name": "targetId",
+                "nullable": false,
+                "value": "string"
+              }
+            ],
+            "id": "link.history-clear",
+            "kind": "event"
+          },
+          "id": "clear",
+          "purpose": "data"
+        }
+      ],
       "kind": "service",
       "outputs": [
         {
@@ -3731,6 +3809,18 @@
                 "name": "maxTurns",
                 "nullable": false,
                 "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "targetId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "clearableTurns",
+                "nullable": false,
+                "value": "integer"
               }
             ],
             "id": "link.history-status",
@@ -3745,7 +3835,8 @@
         "contextInputs": [],
         "durability": "durable",
         "effects": [
-          "storage.read"
+          "storage.read",
+          "storage.write"
         ],
         "lifetime": "process",
         "stateOwner": "external"
@@ -4480,6 +4571,18 @@
                 "name": "maxTurns",
                 "nullable": false,
                 "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "targetId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "clearableTurns",
+                "nullable": false,
+                "value": "integer"
               }
             ],
             "id": "link.history-status",
@@ -4504,6 +4607,18 @@
               {
                 "clockDomain": "none",
                 "name": "maxTurns",
+                "nullable": false,
+                "value": "integer"
+              },
+              {
+                "clockDomain": "none",
+                "name": "targetId",
+                "nullable": true,
+                "value": "string"
+              },
+              {
+                "clockDomain": "none",
+                "name": "clearableTurns",
                 "nullable": false,
                 "value": "integer"
               }
@@ -5721,6 +5836,12 @@
         "to": "target.service.select"
       },
       {
+        "from": "history.local.clear",
+        "kind": "component-event",
+        "purpose": "data",
+        "to": "history.service.clear"
+      },
+      {
         "from": "preferences.toggles.toggle",
         "kind": "component-event",
         "purpose": "data",
@@ -6299,6 +6420,18 @@
         "typeRef": "link.local-history"
       },
       {
+        "boundary": "ui-event",
+        "contractRef": "link.history-clear",
+        "direction": "output",
+        "ownerId": "history.local",
+        "ownerKind": "component",
+        "portId": "clear",
+        "purpose": "data",
+        "ref": "history.local.clear",
+        "required": true,
+        "typeRef": "link.local-history"
+      },
+      {
         "boundary": "presentation",
         "contractRef": "link.update-status",
         "direction": "input",
@@ -6763,6 +6896,19 @@
         "kind": "state"
       },
       {
+        "boundary": "ui-event",
+        "fields": [
+          {
+            "clockDomain": "none",
+            "name": "targetId",
+            "nullable": false,
+            "value": "string"
+          }
+        ],
+        "id": "link.history-clear",
+        "kind": "event"
+      },
+      {
         "boundary": "presentation",
         "fields": [
           {
@@ -6774,6 +6920,18 @@
           {
             "clockDomain": "none",
             "name": "maxTurns",
+            "nullable": false,
+            "value": "integer"
+          },
+          {
+            "clockDomain": "none",
+            "name": "targetId",
+            "nullable": true,
+            "value": "string"
+          },
+          {
+            "clockDomain": "none",
+            "name": "clearableTurns",
             "nullable": false,
             "value": "integer"
           }
@@ -7257,6 +7415,18 @@
         "ref": "session.service.status",
         "required": true,
         "typeRef": "link.session"
+      },
+      {
+        "boundary": "ui-event",
+        "contractRef": "link.history-clear",
+        "direction": "input",
+        "ownerId": "history.service",
+        "ownerKind": "node",
+        "portId": "clear",
+        "purpose": "data",
+        "ref": "history.service.clear",
+        "required": true,
+        "typeRef": "link.history"
       },
       {
         "boundary": "presentation",

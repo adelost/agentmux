@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the portable native-Lego port bindings
-// Product declarations SHA-256: 8a445c2338b56c74b3f1b92b3e63df939c1937c54a093cfcbb9f455042291f8c
+// Product declarations SHA-256: b03ca0945d7a024db68c3153b48b9b0c90e4e7670ca11b7b6216ef62be196c26
 package io.agentmux.linkui.product.generated
 
 internal object GeneratedLinkNativeLegoPortBindings {
@@ -12,6 +12,7 @@ internal object GeneratedLinkNativeLegoPortBindings {
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.CONVERSATION_COMPOSER_COMPOSE, GeneratedLinkNativeLegoCatalog.PortIds.CONVERSATION_SERVICE_COMPOSE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.PLAYBACK_CONTROLS_COMMAND, GeneratedLinkNativeLegoCatalog.PortIds.PLAYBACK_SERVICE_COMMAND, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.TARGET_PICKER_SELECT, GeneratedLinkNativeLegoCatalog.PortIds.TARGET_SERVICE_SELECT, GeneratedProductPortPurpose.DATA),
+        GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.HISTORY_LOCAL_CLEAR, GeneratedLinkNativeLegoCatalog.PortIds.HISTORY_SERVICE_CLEAR, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.PREFERENCES_TOGGLES_TOGGLE, GeneratedLinkNativeLegoCatalog.PortIds.PREFERENCES_SERVICE_TOGGLE, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.COMPONENT_EVENT, GeneratedLinkNativeLegoCatalog.PortIds.UPDATES_PANEL_COMMAND, GeneratedLinkNativeLegoCatalog.PortIds.UPDATES_SERVICE_COMMAND, GeneratedProductPortPurpose.DATA),
         GeneratedProductPortBinding(GeneratedProductPortBindingKind.NODE_INPUT, GeneratedLinkNativeLegoCatalog.PortIds.CAPTURE_SERVICE_STATUS, GeneratedLinkNativeLegoCatalog.PortIds.CAPTURE_PRESENTATION_SOURCE, GeneratedProductPortPurpose.DATA),

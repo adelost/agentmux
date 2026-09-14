@@ -42,6 +42,7 @@ class LinkProductGraphTotalityTest {
                 playbackCommand = { playback += it },
                 targetSelect = {},
                 preferenceToggle = {},
+                historyClear = {},
                 updateCommand = {},
             ),
             clock = { clock },
@@ -85,7 +86,7 @@ class LinkProductGraphTotalityTest {
     fun aFreshLinkShowsUnsentCommandsAsIdleAndNothingNeedsAttention() {
         val graph = graph(
             state = MutableStateFlow(LinkState()),
-            sinks = LinkProductSinks({}, {}, {}, {}, {}, {}, {}),
+            sinks = LinkProductSinks({}, {}, {}, {}, {}, {}, {}, {}),
         )
         try {
             val ports = runBlocking { graph.inspections.first() }

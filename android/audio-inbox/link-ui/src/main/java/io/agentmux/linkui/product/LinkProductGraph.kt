@@ -37,6 +37,7 @@ class LinkProductSinks(
     val playbackCommand: (LinkPlaybackCommandEvent) -> Unit,
     val targetSelect: (LinkTargetSelectEvent) -> Unit,
     val preferenceToggle: (LinkPreferenceToggleEvent) -> Unit,
+    val historyClear: (LinkHistoryClearEvent) -> Unit,
     val updateCommand: (LinkUpdateCommandEvent) -> Unit,
 )
 
@@ -105,6 +106,7 @@ open class LinkProductGraph(
     private val activePlaybackCommand: ProductComponentEventEmitter<LinkPlaybackCommandEvent, Unit>
     private val targetSelect: ProductComponentEventEmitter<LinkTargetSelectEvent, Unit>
     private val preferencesToggle: ProductComponentEventEmitter<LinkPreferenceToggleEvent, Unit>
+    private val localHistoryClear: ProductComponentEventEmitter<LinkHistoryClearEvent, Unit>
     private val updatesCommand: ProductComponentEventEmitter<LinkUpdateCommandEvent, Unit>
     private val settingsActionOpen: ProductComponentEventEmitter<LinkRouteOpenEvent, Unit>
     private val devHostOpen: ProductComponentEventEmitter<LinkRouteOpenEvent, Unit>
@@ -288,6 +290,7 @@ open class LinkProductGraph(
         runtime.bindInput(PlaybackCommandInput) { event -> sinks.playbackCommand(event) }
         runtime.bindInput(TargetSelectInput) { event -> sinks.targetSelect(event) }
         runtime.bindInput(PreferencesToggleInput) { event -> sinks.preferenceToggle(event) }
+        runtime.bindInput(HistoryClearInput) { event -> sinks.historyClear(event) }
         runtime.bindInput(UpdatesCommandInput) { event -> sinks.updateCommand(event) }
 
         target = runtime.connected(TargetModelInput, processScope)
@@ -309,6 +312,7 @@ open class LinkProductGraph(
         activePlaybackCommand = runtime.componentEvent(ActivePlaybackCommandEvent, processScope)
         targetSelect = runtime.componentEvent(TargetSelectEvent, processScope)
         preferencesToggle = runtime.componentEvent(PreferencesToggleEvent, processScope)
+        localHistoryClear = runtime.componentEvent(LocalHistoryClearEvent, processScope)
         updatesCommand = runtime.componentEvent(UpdatesCommandEvent, processScope)
         settingsActionOpen = runtime.componentEvent(SettingsActionOpenEvent, processScope)
         devHostOpen = runtime.componentEvent(DevHostOpenEvent, processScope)
@@ -362,6 +366,10 @@ open class LinkProductGraph(
 
     fun onPreferencesToggle(event: LinkPreferenceToggleEvent) {
         preferencesToggle.emit(event)
+    }
+
+    fun onLocalHistoryClear(event: LinkHistoryClearEvent) {
+        localHistoryClear.emit(event)
     }
 
     fun onUpdatesCommand(event: LinkUpdateCommandEvent) {

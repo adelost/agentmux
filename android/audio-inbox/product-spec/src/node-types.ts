@@ -5,6 +5,7 @@ import {
   captureStatusContract,
   composeTurnContract,
   conversationStatusContract,
+  historyClearContract,
   historyStatusContract,
   playbackCommandContract,
   playbackStatusContract,
@@ -95,12 +96,12 @@ export const sessionService = service({
   runtime: runtime("external", "process", "durable", "wall", ["network.connectivity", "keystore.session"], ["transport.poll", "transport.auth"]),
 } as const);
 
-/** Local history retention truth; the retention policy constant stays native. */
+/** Local history retention truth and its one clear; the retention policy constant stays native. */
 export const historyService = service({
   id: "link.history",
-  inputs: [],
+  inputs: [port("clear", historyClearContract)],
   outputs: [port("status", historyStatusContract)],
-  runtime: runtime("external", "process", "durable", "none", [], ["storage.read"]),
+  runtime: runtime("external", "process", "durable", "none", [], ["storage.read", "storage.write"]),
 } as const);
 
 /** Durable user preferences behind typed toggles; SharedPreferences stays native. */

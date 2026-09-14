@@ -32,6 +32,7 @@ import io.agentmux.wakeword.WakePhrases
 import androidx.compose.ui.platform.LocalContext
 import io.agentmux.linkui.product.LinkPlaybackCommandEvent
 import io.agentmux.linkui.product.LinkPreferenceToggleEvent
+import io.agentmux.linkui.linkClearConversationRow
 import io.agentmux.linkui.product.LinkRoute
 import io.agentmux.linkui.product.LinkRouteOpenEvent
 import io.agentmux.linkui.product.LinkUpdateCommandEvent
@@ -189,12 +190,16 @@ internal fun LinkPhoneSettings(
                             )
                         }
                     }
-                    GeneratedLinkSettingsComponent.HISTORY_LOCAL -> item(mount.id) {
-                        PhoneRow(
-                            title = "LOCAL HISTORY",
-                            sub = "${localHistory.retainedTurns} recent · up to ${localHistory.maxTurns}",
-                            icon = LinkNativeBindings.requireIcon("activity"),
-                        )
+                    GeneratedLinkSettingsComponent.HISTORY_LOCAL -> {
+                        item(mount.id) {
+                            PhoneRow(
+                                title = "LOCAL HISTORY",
+                                sub = "${localHistory.retainedTurns} recent · up to ${localHistory.maxTurns}",
+                                icon = LinkNativeBindings.requireIcon("activity"),
+                            )
+                        }
+                        linkClearConversationRow(localHistory, LinkNativeBindings.requireIcon("trash"), graph::onLocalHistoryClear)
+                            ?.let { row -> item(row.key) { PhoneRow(row) } }
                     }
                     GeneratedLinkSettingsComponent.UPDATES_PANEL -> {
                         updateRows.forEach { row -> item(row.key) { PhoneRow(row) } }

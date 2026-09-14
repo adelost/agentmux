@@ -83,7 +83,7 @@ export const linkNodes = [
   {
     id: "history.service", nodeTypeRef: historyService.id,
     config: {},
-    bindings: {},
+    bindings: { clear: "history.local.clear" },
     activation: { kind: "lifetime", lifecycleSources: [] },
   },
   {

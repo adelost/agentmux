@@ -49,6 +49,9 @@ internal object TargetDirectoryOutput :
 internal object SessionStatusOutput :
     ProductOutputPort<LinkSessionPresentation>(PortIds.SESSION_SERVICE_STATUS)
 
+internal object HistoryClearInput :
+    ProductInputPort<LinkHistoryClearEvent, Unit>(PortIds.HISTORY_SERVICE_CLEAR)
+
 internal object HistoryStatusOutput :
     ProductOutputPort<LinkHistoryPresentation>(PortIds.HISTORY_SERVICE_STATUS)
 
@@ -153,6 +156,9 @@ internal object PreferencesToggleEvent :
 
 internal object LocalHistoryModelInput :
     ProductComponentInput<LinkHistoryPresentation>(PortIds.HISTORY_LOCAL_MODEL)
+
+internal object LocalHistoryClearEvent :
+    ProductComponentEvent<LinkHistoryClearEvent, Unit>(PortIds.HISTORY_LOCAL_CLEAR)
 
 internal object UpdatesModelInput :
     ProductComponentInput<LinkUpdatePresentation>(PortIds.UPDATES_PANEL_MODEL)
