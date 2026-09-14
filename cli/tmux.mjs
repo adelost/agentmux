@@ -9,6 +9,7 @@ import { join } from "path";
 import { promisify } from "util";
 import { createAgent } from "../agent.mjs";
 import { esc, stripAnsi } from "../lib.mjs";
+import { isShellProcess } from "../core/tui-stall-recovery.mjs";
 import { appendEvent, latestPaneStatesCached, mergeStatus } from "../core/events.mjs";
 import {
   CLEARLINE_RECIPE,
@@ -480,6 +481,7 @@ export async function selectOption(ctx, name, pane, choice) {
     throw new Error(`menu option must be a 1-based positive integer (got ${choice})`);
   }
   const target = `${name}:.${pane}`;
+  await assertEngineInForeground(ctx, target);
   // Move to top first (20 ups), then down to choice
   for (let i = 0; i < 20; i++) {
     await ctx.tmux(`send-keys -t '${esc(target)}' Up`);
@@ -490,4 +492,20 @@ export async function selectOption(ctx, name, pane, choice) {
     await ctx.tmux(`send-keys -t '${esc(target)}' Down`);
   }
   await ctx.tmux(`send-keys -t '${esc(target)}' Enter`);
+}
+
+/**
+ * WHAT: Refuses menu keys unless a live engine owns the pane's foreground.
+ * WHY: At a shell prompt, Up×20 + Enter runs an old line from the fleet's shared
+ *      bash history. On 2026-09-14 that started lsrc:0's `claude --resume` inside api:0.
+ */
+async function assertEngineInForeground(ctx, target) {
+  const result = await ctx.tmux(`display-message -p -t '${esc(target)}' '#{pane_dead}|#{pane_current_command}'`);
+  const [dead, command = ""] = String(result?.stdout ?? "").trim().split("|");
+  if (dead !== "0" || !command) {
+    throw new Error(`${target} has no readable live process; no menu keys sent`);
+  }
+  if (isShellProcess(command)) {
+    throw new Error(`${target} is at a ${command} prompt, not a menu; no keys sent (arrow keys would replay shell history)`);
+  }
 }

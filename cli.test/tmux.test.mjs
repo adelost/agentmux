@@ -27,8 +27,12 @@ feature("menu selection", () => {
     when: ["selecting the first and second options", async () => {
       const first = [];
       const second = [];
-      await selectOption({ tmux: async (cmd) => first.push(cmd) }, "api", 0, 1);
-      await selectOption({ tmux: async (cmd) => second.push(cmd) }, "api", 0, 2);
+      const claudeMenu = (sent) => async (cmd) => {
+        sent.push(cmd);
+        return cmd.startsWith("display-message") ? { stdout: "0|claude\n" } : { stdout: "" };
+      };
+      await selectOption({ tmux: claudeMenu(first) }, "api", 0, 1);
+      await selectOption({ tmux: claudeMenu(second) }, "api", 0, 2);
       return { first, second };
     }],
     then: ["the first option needs no Down key and the second needs one", ({ first, second }) => {
@@ -36,6 +40,22 @@ feature("menu selection", () => {
       expect(second.filter((cmd) => cmd.endsWith(" Down"))).toHaveLength(1);
       expect(first.at(-1)).toMatch(/ Enter$/);
       expect(second.at(-1)).toMatch(/ Enter$/);
+    }],
+  });
+
+  unit("a pane back at its shell gets no keys, so shell history never runs", {
+    when: ["selecting option 2 while bash owns the pane", async () => {
+      const sent = [];
+      const tmux = async (cmd) => {
+        sent.push(cmd);
+        return cmd.startsWith("display-message") ? { stdout: "0|bash\n" } : { stdout: "" };
+      };
+      const error = await selectOption({ tmux }, "api", 0, 2).catch((caught) => caught);
+      return { sent, error };
+    }],
+    then: ["the call fails and no send-keys reached the pane", ({ sent, error }) => {
+      expect(error?.message).toContain("bash prompt");
+      expect(sent.filter((cmd) => cmd.startsWith("send-keys"))).toHaveLength(0);
     }],
   });
 });
