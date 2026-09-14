@@ -39,13 +39,10 @@ fun LinkConversationTurn(
             if (showPlayAction && turn.playbackPhase !in setOf(PlaybackPhase.QUEUED, PlaybackPhase.PLAYING, PlaybackPhase.PAUSED)) {
                 val row = linkReadAloudRow(turn, audio)
                 val play = if (row.tappable) ({ onPlayback(PlaybackOperation.PLAY) }) else null
-                if (row.muted) {
-                    RingRow(row.title, row.sub, icon = RingIcons.Speaker, accent = CircleAccent.CLOUD,
-                        actionTiming = CircleActionTiming.IMMEDIATE, onTap = play)
-                } else {
-                    RingRow(row.title, row.sub, icon = RingIcons.Speaker, accent = linkSenderAccent(sender),
-                        actionTiming = CircleActionTiming.IMMEDIATE, onTap = play)
-                }
+                RingRow(row.length, "", onTap = play,
+                    icon = if (row.icon == ReadAloudIcon.REFRESH) RingIcons.Refresh else RingIcons.Speaker,
+                    accent = if (row.muted) CircleAccent.CLOUD else linkSenderAccent(sender),
+                    actionTiming = CircleActionTiming.IMMEDIATE)
             }
             if (openLinks) attachmentUrls(turn.replyText).forEach { url ->
                 RingRow("OPEN LINK", Uri.parse(url).host.orEmpty(), icon = RingIcons.Link,
