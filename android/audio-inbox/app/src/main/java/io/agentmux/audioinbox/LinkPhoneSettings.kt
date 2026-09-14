@@ -244,11 +244,8 @@ internal fun connectionRouteLabel(detail: String): String = when {
     else -> "CONNECTION"
 }
 
-/** The status row says why listening stopped and how often the phrase was heard, for tuning on the real phone. */
-internal fun wakeStatusDetail(wake: LinkWakePresentation): String = listOfNotNull(
-    wake.detail,
-    "Detections ${wake.detections}".takeIf { wake.detections > 0 },
-).joinToString(" · ").ifBlank { wakeHint(wake.phrase) }
+/** The status row's title already names the phrase; below it only why listening stopped, if it did. */
+internal fun wakeStatusDetail(wake: LinkWakePresentation): String = wake.detail.orEmpty()
 
 /** The picker shows exactly what to say. */
 internal fun wakePhraseLabel(phrase: WakePhrase): String = phrase.spoken.uppercase()
