@@ -87,5 +87,16 @@ fun attachmentUrls(text: String): List<String> =
 /** Keep the server receipt intact in state; only recognized copy is simplified. */
 fun linkConversationError(detail: String): String = when {
     detail.contains("transcription empty", ignoreCase = true) -> "No speech detected. Try again."
+    SERVER_UNAVAILABLE.containsMatchIn(detail) -> "Server unavailable. Try again."
+    CONNECTION_LOST.containsMatchIn(detail) -> "Connection lost. Try again."
     else -> detail
 }
+
+/** A proxy answered but the Link server behind it did not (restart, crash). */
+private val SERVER_UNAVAILABLE = Regex("""\bHTTP 50[234]\b""")
+
+/** The network dropped the request or the reply stream; the server never explained anything. */
+private val CONNECTION_LOST = Regex(
+    """connection abort|connection reset|timed? ?out|feed closed before completion|unable to resolve host|failed to connect|unexpected end of stream""",
+    RegexOption.IGNORE_CASE,
+)
