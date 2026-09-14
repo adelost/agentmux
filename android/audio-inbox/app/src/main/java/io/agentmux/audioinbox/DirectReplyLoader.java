@@ -14,7 +14,7 @@ final class DirectReplyLoader {
         void onReserved(String turnId);
         void onReady(AudioEventClaims.Entry item, long epoch);
         void onCancelled(String turnId);
-        void onFailed(String turnId, long epoch);
+        void onFailed(String turnId, long epoch, String reason);
     }
 
     private final Context context;
@@ -55,7 +55,12 @@ final class DirectReplyLoader {
         this.claims = claims;
         this.executor = executor;
         this.listener = listener;
-        this.cache = new ReplyAudioCache(context.getCacheDir());
+        this.cache = replyAudio(context);
+    }
+
+    /** Kept in app storage, not the cache directory, so the OS does not drop it and a restart keeps it. */
+    static ReplyAudioCache replyAudio(Context context) {
+        return new ReplyAudioCache(context.getFilesDir());
     }
 
     synchronized boolean prepare(Intent intent, boolean explicitReplay) {
@@ -110,7 +115,7 @@ final class DirectReplyLoader {
             claims.releaseAndDelete(context.getCacheDir(), eventId);
             synchronized (this) {
                 pending.remove(eventId);
-                if (requests.accepts(epoch)) listener.onFailed(turnId, epoch);
+                if (requests.accepts(epoch)) listener.onFailed(turnId, epoch, AudioReceiptWriter.safe(error.getMessage()));
             }
         }
     }

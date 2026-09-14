@@ -5,6 +5,8 @@ import io.agentmux.linkcore.CaptureOperation
 import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.LinkPreferenceKey
 import io.agentmux.linkcore.LinkState
+import io.agentmux.linkcore.LinkTurn
+import io.agentmux.linkui.LinkReplyAudio
 import io.agentmux.linkcore.LinkUpdateOperation
 import io.agentmux.linkcore.PlaybackOperation
 import io.agentmux.linkui.product.LinkCapturedTurn
@@ -64,6 +66,8 @@ internal class PhoneLinkProductGraph private constructor(
     val composerDraft: StateFlow<ComposerDraft> get() = composer.draft
 
     fun onComposerEdited(text: String) = composer.edit(text)
+
+    fun replyAudio(turn: LinkTurn): LinkReplyAudio = coordinator.replyAudio(turn)
 
     init {
         processScope.launch {

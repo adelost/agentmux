@@ -64,8 +64,11 @@ This is not a Discord archive. Each message/reply is capped at 12,000 UTF-16
 characters with a visible shortening marker, and total retained text at 256,000
 characters. Older exchanges are evicted first; the composer accepts 4,000.
 
-Phone reply audio is disposable cache data: exact server+text identity, 24-hour
-expiry, at most 10 files/32 MiB. Playback uses a separate copy, so finishing a
+Phone keeps the ten newest generated replies in app storage across restarts:
+exact server+text identity, at most 10 files/32 MiB, oldest pruned first. A
+reply with saved audio shows its length, a pruned one shows AUDIO EXPIRED (tap
+to regenerate when its route has speech), and only a real failure asks to retry
+with its reason. Long replies are read as their SUMMARY line or first paragraph. Playback uses a separate copy, so finishing a
 reply does not delete the reusable cache entry. First-time speech still needs
 the server; this is not offline generation. Wear retains its native TTS engine.
 

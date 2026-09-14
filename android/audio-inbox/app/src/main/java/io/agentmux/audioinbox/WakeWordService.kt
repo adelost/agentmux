@@ -17,7 +17,6 @@ import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.WakeWordDetector
 import io.agentmux.wakeword.WakeWordModels
 import io.agentmux.wakeword.listensForWakeWord
-import io.agentmux.wakeword.spokenReply
 import io.agentmux.linkui.LinkWakePhrase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,7 +31,6 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
 
-private const val MORE_ON_SCREEN = "Hela svaret finns i Link."
 private const val THINKING_TONE_LIMIT_MS = 30_000L
 
 /**
@@ -170,15 +168,15 @@ class WakeWordService : Service(), WakeLoopListener {
             val tracked = LinkWakeStatus.status.value.turnId ?: return@collect
             val turn = state.turns.firstOrNull { it.turnId == tracked }
             if (turn != null && turn.awaitsReadAloud() && readAloudRequested.add(tracked)) {
-                readAloud(held, tracked, spokenReply(turn.replyText, MORE_ON_SCREEN).text)
+                readAloud(held, tracked)
             }
             LinkWakeStatus.apply(WakeEvent.TurnChanged(turn.wakeProgress()))
         }
     }
 
     /** Starting playback from the background is refused unless Link is exempt from battery optimization. */
-    private fun readAloud(held: LinkCoordinator, turnId: String, spokenText: String) {
-        runCatching { held.playReply(turnId, explicitReplay = false, spokenText = spokenText) }.onFailure { error ->
+    private fun readAloud(held: LinkCoordinator, turnId: String) {
+        runCatching { held.playReply(turnId, explicitReplay = false) }.onFailure { error ->
             val reason = if (wakeBatteryRestricted(this)) "set Link's battery use to Unrestricted" else error.message.orEmpty()
             LinkWakeStatus.apply(WakeEvent.TurnChanged(TurnProgress(TurnStage.SPEAK_FAILED, reason.take(100))))
             earcons?.failed()

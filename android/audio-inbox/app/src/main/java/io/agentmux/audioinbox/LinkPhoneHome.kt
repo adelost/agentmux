@@ -125,9 +125,12 @@ internal fun LinkPhoneHome(
                                 )
                             }
                         } else {
+                            val playbackRevision = turns.map { it.playbackPhase }
                             items(turns, key = LinkTurn::turnId) { turn ->
                                 LinkConversationTurn(
                                     turn = turn,
+                                    // Playing any reply can prune the oldest saved one, so every row re-reads on any playback change.
+                                    audio = remember(turn.turnId, turn.replyText, playbackRevision) { graph.replyAudio(turn) },
                                     modifier = Modifier.padding(horizontal = 24.dp),
                                     onPlayback = { operation ->
                                         graph.onActivePlaybackCommand(LinkPlaybackCommandEvent(operation, turn.turnId))

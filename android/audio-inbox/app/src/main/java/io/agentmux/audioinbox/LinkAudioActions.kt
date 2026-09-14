@@ -7,16 +7,16 @@ import android.os.Build
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.LinkAction
 import io.agentmux.linkcore.PlaybackPhase
+import io.agentmux.linkui.readAloudText
 
 /** Starts and controls reply playback through the Link foreground service. */
 internal class LinkAudioActions(
     private val context: Context,
     private val targetForId: (String) -> ConversationTarget?,
 ) {
-    /** [spokenText] replaces the written reply for listeners who cannot look at the screen. */
-    fun playReply(turn: LinkTurn, explicitReplay: Boolean, spokenText: String? = null): String? {
+    fun playReply(turn: LinkTurn, explicitReplay: Boolean): String? {
         val target = targetForId(turn.targetId) ?: return "Recipient is unavailable."
-        val text = spokenText ?: turn.replyText
+        val text = turn.readAloudText()
         if (text.isBlank()) return "No reply to read."
         if (text.length > AppContract.MAX_REPLY_AUDIO_CHARACTERS) {
             return "This reply is too long for audio. The full text is above."
@@ -51,8 +51,11 @@ internal class LinkAudioActions(
 }
 
 /** Decode the service receipt at the existing persistence boundary. */
-internal fun SharedPreferences.playbackAction(key: String): LinkAction.Playback? {
+internal fun SharedPreferences.playbackAction(key: String): LinkAction? {
     val phase = runCatching { PlaybackPhase.valueOf(getString(key, "").orEmpty().uppercase()) }
         .getOrNull() ?: return null
-    return LinkAction.Playback(key.substringAfter("turn-playback:"), phase)
+    val turnId = key.substringAfter("turn-playback:")
+    val reason = getString("turn-playback-detail:$turnId", "").orEmpty()
+    return if (phase == PlaybackPhase.FAILED && reason.isNotBlank()) LinkAction.PlaybackFailed(turnId, reason)
+    else LinkAction.Playback(turnId, phase)
 }

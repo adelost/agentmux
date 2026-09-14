@@ -10,21 +10,26 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.function.LongSupplier;
 
-/** Bounded disposable TTS cache. Playback gets its own copy: AudioEventClaims
- * may delete that copy without deleting audio retained for a later replay. */
+/** The ten newest generated replies, kept on disk across restarts (Mattias 2026-09-14: "de tio senaste").
+ * Playback gets its own copy: AudioEventClaims may delete that copy without deleting audio retained for a later replay. */
 final class ReplyAudioCache {
     static final long MAX_BYTES = 32L * 1024 * 1024;
     static final long MAX_FILE_BYTES = 10L * 1024 * 1024;
-    static final long TTL_MS = 24L * 60 * 60 * 1000;
     static final int MAX_FILES = 10;
     interface Fetch { File get() throws Exception; }
     private final File directory;
     private final LongSupplier clock;
 
-    ReplyAudioCache(File cacheDir) { this(cacheDir, System::currentTimeMillis); }
-    ReplyAudioCache(File cacheDir, LongSupplier clock) {
-        this.directory = new File(cacheDir, "reply-audio");
+    ReplyAudioCache(File storageDir) { this(storageDir, System::currentTimeMillis); }
+    ReplyAudioCache(File storageDir, LongSupplier clock) {
+        this.directory = new File(storageDir, "reply-audio");
         this.clock = clock;
+    }
+
+    /** The kept audio for exactly this server and text, or null once it has been pruned or never made. */
+    synchronized File saved(String server, String text) throws Exception {
+        File cached = new File(directory, key(server, text) + ".audio");
+        return cached.isFile() && cached.length() > 0 ? cached : null;
     }
 
     synchronized File materialize(String server, String text, File destination, Fetch fetch) throws Exception {
@@ -57,6 +62,7 @@ final class ReplyAudioCache {
 
     private void prune(long now) throws IOException { prune(now, 0, 0); }
 
+
     private void prune(long now, long reservedBytes, int reservedFiles) throws IOException {
         File[] files = directory.listFiles();
         if (files == null) throw new IOException("Cannot read audio cache");
@@ -64,10 +70,9 @@ final class ReplyAudioCache {
         long bytes = 0;
         int count = 0;
         for (File file : files) {
-            long age = now - file.lastModified();
             long size = file.length();
             if (!file.getName().endsWith(".audio") || size <= 0 || size > MAX_FILE_BYTES ||
-                age < 0 || age >= TTL_MS || count >= MAX_FILES - reservedFiles ||
+                count >= MAX_FILES - reservedFiles ||
                 bytes + size > MAX_BYTES - reservedBytes) {
                 if (!file.delete()) throw new IOException("Cannot prune audio cache");
             } else {

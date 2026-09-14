@@ -30,13 +30,11 @@ public class ReplyAudioCacheTest {
         assertEquals(3, requests.get());
     }
 
-    @Test public void expiryAndByteBudgetBoundRetainedAudio() throws Exception {
+    @Test public void byteBudgetBoundsRetainedAudio() throws Exception {
         AtomicLong now = new AtomicLong(1_700_000_000_000L);
         ReplyAudioCache cache = new ReplyAudioCache(folder.getRoot(), now::get);
         File output = new File(folder.getRoot(), "playing.mp3");
-        AtomicInteger requests = new AtomicInteger();
         ReplyAudioCache.Fetch fetch = () -> {
-            requests.incrementAndGet();
             try (var file = new java.io.RandomAccessFile(output, "rw")) { file.setLength(9 * 1024 * 1024); }
             return output;
         };
@@ -46,11 +44,24 @@ public class ReplyAudioCacheTest {
         }
         File[] files = new File(folder.getRoot(), "reply-audio").listFiles();
         assertNotNull(files);
-        assertTrue(files.length <= ReplyAudioCache.MAX_FILES);
         assertTrue(java.util.Arrays.stream(files).mapToLong(File::length).sum() <= ReplyAudioCache.MAX_BYTES);
-        now.addAndGet(ReplyAudioCache.TTL_MS);
-        cache.materialize("server", "Reply 11", output, fetch);
-        assertEquals(13, requests.get());
-        assertEquals(1, new File(folder.getRoot(), "reply-audio").listFiles().length);
+    }
+
+    // Mattias 2026-09-14: keep the ten newest across restarts; an older one is pruned, not failed.
+    @Test public void theTenNewestSurviveARestartAndTheEleventhOldestIsPruned() throws Exception {
+        AtomicLong now = new AtomicLong(1_700_000_000_000L);
+        File output = new File(folder.getRoot(), "playing.mp3");
+        ReplyAudioCache.Fetch fetch = () -> {
+            java.nio.file.Files.write(output.toPath(), new byte[] { 1, 2, 3 });
+            return output;
+        };
+        ReplyAudioCache beforeRestart = new ReplyAudioCache(folder.getRoot(), now::get);
+        for (int i = 0; i < 11; i++) {
+            now.addAndGet(60L * 60 * 1000 * 30); // hours apart: age alone never prunes
+            beforeRestart.materialize("server", "Reply " + i, output, fetch);
+        }
+        ReplyAudioCache afterRestart = new ReplyAudioCache(folder.getRoot(), now::get);
+        assertNull(afterRestart.saved("server", "Reply 0"));
+        for (int i = 1; i < 11; i++) assertNotNull("Reply " + i, afterRestart.saved("server", "Reply " + i));
     }
 }

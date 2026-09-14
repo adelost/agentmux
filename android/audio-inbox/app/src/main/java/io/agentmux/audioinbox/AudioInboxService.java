@@ -84,10 +84,10 @@ public final class AudioInboxService extends MediaSessionService {
                         else claims.releaseAndDelete(getCacheDir(), item.eventId);
                     });
                 }
-                public void onFailed(String turnId, long epoch) {
+                public void onFailed(String turnId, long epoch, String reason) {
                     main.post(() -> {
                         if (!directLoader.accepts(epoch)) return;
-                        store.saveTurnPlayback(turnId, "failed");
+                        store.saveTurnPlaybackFailure(turnId, reason);
                         refreshDirectAvailability();
                     });
                 }

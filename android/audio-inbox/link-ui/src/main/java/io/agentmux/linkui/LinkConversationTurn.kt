@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.adelost.designkit.ui.RingIcons
+import com.adelost.designkit.ui.CircleAccent
 import com.adelost.designkit.ui.CircleActionTiming
 import com.adelost.ringkit.ui.RingRow
 import com.adelost.ringkit.ui.RingMessage
@@ -22,6 +23,7 @@ import io.agentmux.linkcore.PlaybackPhase
 fun LinkConversationTurn(
     turn: LinkTurn,
     onPlayback: (PlaybackOperation) -> Unit,
+    audio: LinkReplyAudio = LinkReplyAudio.NotGenerated,
     modifier: Modifier = Modifier,
     showPlayAction: Boolean = true,
     openLinks: Boolean = true,
@@ -32,10 +34,15 @@ fun LinkConversationTurn(
         if (turn.replyText.isNotBlank()) {
             RingMessage(RingMessageSpec(turn.respondingTarget.ifBlank { turn.targetId }, turn.replyText))
             if (showPlayAction && turn.playbackPhase !in setOf(PlaybackPhase.QUEUED, PlaybackPhase.PLAYING, PlaybackPhase.PAUSED)) {
-                RingRow("READ ALOUD", if (turn.playbackPhase == PlaybackPhase.FAILED && turn.playbackError.isBlank())
-                    "Audio unavailable · tap to retry" else "", icon = RingIcons.Speaker,
-                    actionTiming = CircleActionTiming.IMMEDIATE,
-                    onTap = { onPlayback(PlaybackOperation.PLAY) })
+                val row = linkReadAloudRow(turn, audio)
+                val play = if (row.tappable) ({ onPlayback(PlaybackOperation.PLAY) }) else null
+                if (row.muted) {
+                    RingRow(row.title, row.sub, icon = RingIcons.Speaker, accent = CircleAccent.CLOUD,
+                        actionTiming = CircleActionTiming.IMMEDIATE, onTap = play)
+                } else {
+                    RingRow(row.title, row.sub, icon = RingIcons.Speaker,
+                        actionTiming = CircleActionTiming.IMMEDIATE, onTap = play)
+                }
             }
             if (openLinks) attachmentUrls(turn.replyText).forEach { url ->
                 RingRow("OPEN LINK", Uri.parse(url).host.orEmpty(), icon = RingIcons.Link,

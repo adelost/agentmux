@@ -39,6 +39,7 @@ internal class LinkCoordinator(
     private val mutableAccepted = MutableSharedFlow<AcceptedDraft>(extraBufferCapacity = 16)
     private val targetDirectory = LinkTargetDirectory()
     private val audioActions = LinkAudioActions(context, targetDirectory::target)
+    private val replyAudioIndex = LinkReplyAudioIndex(DirectReplyLoader.replyAudio(context))
     private val linkSessions = KeystoreSessionStore(preferences)
     private val wearSessions = LinkWearSessionPublisher(context)
     private val publicEvents = PublicMailboxFeed(linkSessions, { ledger.value }, ::applyPublicSync)
@@ -286,12 +287,14 @@ internal class LinkCoordinator(
         )
     }
 
-    fun playReply(turnId: String, explicitReplay: Boolean = true, spokenText: String? = null) {
+    fun playReply(turnId: String, explicitReplay: Boolean = true) {
         val turn = ledger.value.turns.firstOrNull { it.turnId == turnId } ?: return
-        audioActions.playReply(turn, explicitReplay, spokenText)?.let { reason ->
+        audioActions.playReply(turn, explicitReplay)?.let { reason ->
             dispatch(LinkAction.PlaybackFailed(turnId, reason))
         }
     }
+
+    fun replyAudio(turn: LinkTurn): io.agentmux.linkui.LinkReplyAudio = replyAudioIndex.audioFor(turn, targetDirectory.target(turn.targetId))
 
     fun pauseAudio() = audioActions.pause()
     fun resumeAudio() = audioActions.resume()

@@ -39,7 +39,17 @@ final class AudioInboxStore {
 
     void saveTurnPlayback(String turnId, String state) {
         if (turnId == null || turnId.isBlank()) return;
-        preferences.edit().putString("turn-playback:" + turnId, state).apply();
+        preferences.edit().remove("turn-playback-detail:" + turnId).putString("turn-playback:" + turnId, state).apply();
+        broadcastStatus();
+    }
+
+    /** A failed read-aloud keeps its reason, so the row shows why instead of a bare "unavailable". */
+    void saveTurnPlaybackFailure(String turnId, String reason) {
+        if (turnId == null || turnId.isBlank()) return;
+        preferences.edit()
+            .putString("turn-playback-detail:" + turnId, reason == null ? "" : reason)
+            .putString("turn-playback:" + turnId, "failed")
+            .apply();
         broadcastStatus();
     }
 
