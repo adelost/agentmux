@@ -10,11 +10,11 @@ import com.adelost.ringkit.ui.RingNavigator
 import com.adelost.ringkit.ui.RingScreen
 import com.adelost.ringkit.ui.RowSpec
 import com.adelost.ringkit.ui.circleHostPreviewScreen
-import io.agentmux.linkui.linkProductPortRows
+import com.adelost.ringkit.ports.circlePortScreen
 import io.agentmux.linkui.product.LinkNativeBindings
 import io.agentmux.linkui.product.LinkRoute
 import io.agentmux.linkui.product.generated.GeneratedLinkRoutes
-import io.agentmux.linkui.product.ProductPortInspection
+import com.adelost.ringkit.ports.CirclePortInspection
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -25,7 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 @Composable
 internal fun LinkDevHostScreen(
     port: CircleHostPreviewPort,
-    inspections: Flow<List<ProductPortInspection>>,
+    inspections: Flow<List<CirclePortInspection>>,
     onBack: () -> Unit,
 ) {
     val items = remember { MutableStateFlow(emptyList<RowSpec>()) }
@@ -52,7 +52,7 @@ internal fun LinkDevHostScreen(
                 title = "PRODUCT PORTS",
                 sub = "SERVICE · COMPONENT GRAPH",
                 icon = LinkNativeBindings.requireIcon("activity"),
-                onTap = { navigator.push(linkProductPortRows(inspections, navigator::push)) },
+                onTap = { navigator.push(circlePortScreen(inspections, navigator::push, title = "PRODUCT PORTS")) },
             ),
         )
     }

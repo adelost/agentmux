@@ -11,6 +11,7 @@ import com.adelost.designkit.ui.CircleAccent
 import com.adelost.designkit.ui.CircleActionTiming
 import com.adelost.ringkit.ui.RingRow
 import com.adelost.ringkit.ui.RingMessage
+import com.adelost.ringkit.ui.RingMessageSide
 import com.adelost.ringkit.ui.RingMessageSpec
 import com.adelost.ringkit.ui.RingPlaybackControls
 import com.adelost.ringkit.ui.RingPlaybackSpec
@@ -30,9 +31,11 @@ fun LinkConversationTurn(
 ) {
     val context = LocalContext.current
     Column(modifier) {
-        RingMessage(RingMessageSpec("YOU", turn.userText.ifBlank { "Voice message" }, turnStatusLabel(turn)))
+        val sender = turn.respondingTarget.ifBlank { turn.targetId }
+        RingMessage(RingMessageSpec("YOU", turn.userText.ifBlank { "Voice message" }, turnStatusLabel(turn),
+            accent = CircleAccent.NEUTRAL, side = RingMessageSide.END))
         if (turn.replyText.isNotBlank()) {
-            RingMessage(RingMessageSpec(turn.respondingTarget.ifBlank { turn.targetId }, turn.replyText))
+            RingMessage(RingMessageSpec(sender, turn.replyText, accent = linkSenderAccent(sender)))
             if (showPlayAction && turn.playbackPhase !in setOf(PlaybackPhase.QUEUED, PlaybackPhase.PLAYING, PlaybackPhase.PAUSED)) {
                 val row = linkReadAloudRow(turn, audio)
                 val play = if (row.tappable) ({ onPlayback(PlaybackOperation.PLAY) }) else null
@@ -40,7 +43,7 @@ fun LinkConversationTurn(
                     RingRow(row.title, row.sub, icon = RingIcons.Speaker, accent = CircleAccent.CLOUD,
                         actionTiming = CircleActionTiming.IMMEDIATE, onTap = play)
                 } else {
-                    RingRow(row.title, row.sub, icon = RingIcons.Speaker,
+                    RingRow(row.title, row.sub, icon = RingIcons.Speaker, accent = linkSenderAccent(sender),
                         actionTiming = CircleActionTiming.IMMEDIATE, onTap = play)
                 }
             }

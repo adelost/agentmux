@@ -334,9 +334,9 @@ internal class LinkProductPortRuntime(
         }
     }
 
-    fun inspectionFlow(refreshMs: Long = 1_000L): Flow<List<ProductPortInspection>> = inspector.flow(refreshMs)
+    fun inspectionFlow(refreshMs: Long = 1_000L): Flow<List<com.adelost.ringkit.ports.CirclePortInspection>> = inspector.flow(refreshMs)
 
-    fun inspections(nowMs: Long = wallClockMs()): List<ProductPortInspection> = inspector.inspections(nowMs)
+    fun inspections(nowMs: Long = wallClockMs()): List<com.adelost.ringkit.ports.CirclePortInspection> = inspector.inspections(nowMs)
 
     private fun publish(id: GeneratedProductPortId, value: Any, quality: ProductPortQuality) {
         publish(mapOf(id to ProductPortValue(value, wallClockMs(), quality)))

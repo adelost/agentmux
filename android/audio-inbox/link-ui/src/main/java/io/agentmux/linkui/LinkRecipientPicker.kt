@@ -5,6 +5,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import android.content.Context
 import androidx.activity.compose.BackHandler
+import com.adelost.designkit.ui.CircleAccent
 import com.adelost.designkit.ui.CircleActionTiming
 import com.adelost.designkit.ui.RingIcons
 import com.adelost.ringkit.ui.RingSelectionOption
@@ -32,6 +33,7 @@ fun linkRecipientOptions(target: LinkTargetPresentation): List<RingSelectionOpti
                 "Replies may be delayed".takeIf { !recipient.available && recipient.acceptsMessages },
             ).joinToString("\n"),
             enabled = recipient.acceptsMessages,
+            accent = linkSenderAccent(recipient.id),
         )
     }
 
@@ -47,6 +49,7 @@ fun linkRecipientRow(target: LinkTargetPresentation, onOpen: () -> Unit): RowSpe
             else -> ""
         },
         icon = RingIcons.Target,
+        accent = selected?.let { linkSenderAccent(it.id) } ?: CircleAccent.NEUTRAL,
         onTap = onOpen,
         actionTiming = CircleActionTiming.IMMEDIATE,
         multiline = true,
@@ -76,7 +79,7 @@ fun LinkRecipientPicker(
                 RowSpec(recipient.id, recipient.id,
                     listOf(if (favorite) "FAVORITE · tap to remove" else "Tap to add to favorites", recipient.label)
                         .filter { it.isNotBlank() }.joinToString("\n"),
-                    icon = if (favorite) RingIcons.Star else RingIcons.Target,
+                    icon = if (favorite) RingIcons.Star else RingIcons.Target, accent = linkSenderAccent(recipient.id),
                     multiline = true, actionTiming = CircleActionTiming.IMMEDIATE,
                     onTap = {
                         favorites = if (recipient.id in favorites) favorites - recipient.id else favorites + recipient.id

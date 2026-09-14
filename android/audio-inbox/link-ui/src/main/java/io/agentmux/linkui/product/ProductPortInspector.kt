@@ -1,6 +1,10 @@
 package io.agentmux.linkui.product
 
+import com.adelost.ringkit.ports.CirclePortInspection
+import com.adelost.ringkit.ports.CirclePortQuality
+import com.adelost.ringkit.ports.CirclePortRole
 import io.agentmux.linkui.product.generated.GeneratedProductPort
+import io.agentmux.linkui.product.generated.GeneratedProductPortBoundary
 import io.agentmux.linkui.product.generated.GeneratedProductPortBindingKind
 import io.agentmux.linkui.product.generated.GeneratedProductPortDirection
 import io.agentmux.linkui.product.generated.GeneratedProductPortId
@@ -16,30 +20,29 @@ internal class ProductPortInspector(
     private val demandOwners: () -> Map<String, Set<String>>,
     private val wallClockMs: () -> Long,
 ) {
-    fun flow(refreshMs: Long): Flow<List<ProductPortInspection>> = flow {
+    fun flow(refreshMs: Long): Flow<List<CirclePortInspection>> = flow {
         while (true) {
             emit(inspections())
             delay(refreshMs)
         }
     }
 
-    fun inspections(nowMs: Long = wallClockMs()): List<ProductPortInspection> {
+    fun inspections(nowMs: Long = wallClockMs()): List<CirclePortInspection> {
         val current = currentValues()
         val owners = demandOwners()
         return graph.declarations.values.map { port ->
             val value = inspectionValue(port, current, owners)
-            ProductPortInspection(
+            CirclePortInspection(
                 id = port.id.value,
-                ownerKind = port.ownerKind.name,
                 ownerId = port.ownerId,
+                role = portRole(port),
+                contractRef = port.contractRef,
                 direction = port.direction.name,
                 boundary = port.boundary.name,
-                contractRef = port.contractRef,
                 required = port.required,
+                quality = CirclePortQuality.valueOf(value.quality.name),
                 value = value.value?.toString(),
-                observedAtEpochMs = value.observedAtEpochMs,
                 ageMs = value.observedAtEpochMs?.let { (nowMs - it).coerceAtLeast(0L) },
-                quality = value.quality,
                 demandOwners = if (port.purpose == GeneratedProductPortPurpose.DEMAND) {
                     owners[port.ownerId].orEmpty()
                 } else {
@@ -49,6 +52,12 @@ internal class ProductPortInspector(
                     .mapTo(linkedSetOf()) { "${it.kind}:${it.from.value}->${it.to.value}" },
             )
         }
+    }
+
+    private fun portRole(port: GeneratedProductPort): CirclePortRole = when {
+        port.purpose == GeneratedProductPortPurpose.DEMAND -> CirclePortRole.DEMAND
+        port.boundary == GeneratedProductPortBoundary.UI_EVENT -> CirclePortRole.COMMAND
+        else -> CirclePortRole.DATA
     }
 
     private fun inspectionValue(

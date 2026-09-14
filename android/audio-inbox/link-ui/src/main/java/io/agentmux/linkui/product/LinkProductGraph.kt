@@ -104,7 +104,7 @@ open class LinkProductGraph(
         }
     }
 
-    val inspections: Flow<List<ProductPortInspection>> = runtime.inspectionFlow()
+    val inspections: Flow<List<com.adelost.ringkit.ports.CirclePortInspection>> = runtime.inspectionFlow()
 
     private val talkCommand: ProductComponentEventEmitter<LinkCaptureCommandEvent, Unit>
     private val composerCompose: ProductComponentEventEmitter<LinkComposeEvent, Unit>
