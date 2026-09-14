@@ -23,6 +23,8 @@ import java.util.concurrent.Executors;
 public final class AudioInboxService extends MediaSessionService {
     static final String ACTION_REPLAY = "io.agentmux.audioinbox.REPLAY";
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final FeedConnectionReceipts feedReceipts =
+        new FeedConnectionReceipts(main, (receipt, up) -> this.store.updateConnection(receipt, up));
     private final ExecutorService workExecutor = Executors.newSingleThreadExecutor();
     private final AudioEventClaims claims = new AudioEventClaims();
     private SharedPreferences preferences;
@@ -58,12 +60,7 @@ public final class AudioInboxService extends MediaSessionService {
         feedLoop = new AudioFeedLoop(new AudioFeedLoop.Listener() {
             public void onConnected(boolean value) { setConnected(value); }
             public void onEvent(JSONObject event) { acceptEvent(event); }
-            public void onError(String detail) {
-                if (enabled) store.updateConnection(
-                    "Disconnected: " + AudioReceiptWriter.safe(detail),
-                    false
-                );
-            }
+            public void onError(String detail) { main.post(() -> feedReceipts.failed(AudioReceiptWriter.safe(detail))); }
         });
         directLoader = new DirectReplyLoader(
             this,
@@ -363,7 +360,7 @@ public final class AudioInboxService extends MediaSessionService {
         if (!wasReplay && item != null) store.saveHistory("Played · " + item.text);
         if (item != null && item.direct) store.saveTurnPlayback(item.turnId, "played");
         if (wasReplay) {
-            store.updateConnection(connected ? "Connected" : "Disconnected", connected);
+            feedReceipts.settle(enabled, connected);
             return;
         }
         if (item != null) claims.rotateReplayFile(item.mediaFile);
@@ -376,7 +373,7 @@ public final class AudioInboxService extends MediaSessionService {
             });
         }
         refreshDirectAvailability();
-        store.updateConnection(connected ? "Connected" : "Disconnected", connected);
+        feedReceipts.settle(enabled, connected);
         maybeStartNext();
     }
 
@@ -435,7 +432,7 @@ public final class AudioInboxService extends MediaSessionService {
         startingId = null;
         audioFocus.abandon();
         if (releaseIdleService) refreshDirectAvailability();
-        store.updateConnection(connected ? "Connected" : "Disconnected", connected);
+        feedReceipts.settle(enabled, connected);
     }
     private void discardBroadcastItems() {
         for (AudioEventClaims.Entry item : claims.queuedEntries()) {
@@ -477,8 +474,13 @@ public final class AudioInboxService extends MediaSessionService {
             playbackQueue.setConnected(value || directAvailable);
             AudioEventClaims.Entry active = claims.queued(playbackQueue.active());
             if (!value && (active == null || !active.direct) && player.getPlayWhenReady()) player.pause();
-            store.updateConnection(value ? "Connected" : "Disconnected", value);
-            if (value) maybeStartNext();
+            if (!value) {
+                feedReceipts.lost(() -> enabled && !connected);
+                return;
+            }
+            feedReceipts.connected();
+            feedReceipts.settle(enabled, true);
+            maybeStartNext();
         });
     }
 
