@@ -7,6 +7,8 @@ import { dirname, join } from "node:path";
 import { component, expect, feature } from "bdd-vitest";
 import {
   RELEASE_MANIFEST_NAME,
+  checkReleaseIdentity,
+  identityDecision,
   observeReleaseIdentity,
   releaseReceiptPath,
 } from "./release-identity.mjs";
@@ -171,7 +173,10 @@ feature("installed release identity", () => {
     }],
   });
 
-  component("a newer remote master makes an otherwise valid installed receipt red", {
+  // 2026-09-14 Mattias: "Se annars till att det här ska funka... så det
+  // förhoppningsvis håller sig stabilt". Merges land on master without a
+  // release all the time; drift refused every post-boot revive after a reboot.
+  component("a newer remote master warns but still lets panes revive on the installed release", {
     given: ["an immutable release followed by one uninstalled master merge", () => fixture()],
     when: ["comparing the receipt with the remote branch identity", (ctx) => ({
       ctx,
@@ -183,10 +188,19 @@ feature("installed release identity", () => {
         runGuardCanary: () => ({ status: 2, stderr: "BLOCKED" }),
       }),
     })],
-    then: ["doctor-facing identity reports master drift instead of trusting installed version", ({ ctx, result }) => {
-      expect(result.ok).toBe(false);
-      expect(result.issues.map((issue) => issue.code)).toContain("master-drift");
-      ctx.cleanup();
+    then: ["revive is allowed, and doctor and the revive log both name the drift and the fix", ({ ctx, result }) => {
+      try {
+        expect(result.issues).toEqual([]);
+        expect(result.warnings.map((warning) => warning.code)).toEqual(["master-drift"]);
+        const decision = identityDecision(result);
+        expect(decision.allowRevive).toBe(true);
+        expect(decision.warning).toContain(`installed ${SOURCE_SHA.slice(0, 12)} is behind remote master ${"c".repeat(12)}`);
+        expect(decision.warning).toContain("install-release.mjs --sha");
+        const doctor = checkReleaseIdentity(result);
+        expect(doctor.status).toBe("warn");
+        expect(doctor.detail).toContain("behind remote master");
+        expect(doctor.hint).toContain("install-release.mjs --sha");
+      } finally { ctx.cleanup(); }
     }],
   });
 });

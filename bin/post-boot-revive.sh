@@ -31,6 +31,10 @@ if ! node "$DIR/bin/verify-release-identity.mjs" > "$STATE_DIR/revive-identity.j
   echo "[$(date '+%F %T')] post-boot revive REFUSED: release identity failed: ${reason:-unknown}: ${detail:-see $STATE_DIR/revive-identity.json}; fix: node bin/install-release.mjs --sha <origin/master sha>, then amux revive; panels untouched, recovery channel stays up" >&2
   exit 1
 fi
+# A warning (master has unreleased merges) never blocks: the installed
+# release is intact, so panes revive on it and the log says how to update.
+warning="$(identity_field warning)"
+[ -n "$warning" ] && echo "[$(date '+%F %T')] post-boot revive WARN: ${warning}; revive continues on the installed release" >&2
 
 # The revive storm is a proven automatic heavy starter (it launches the whole
 # fleet at once). Admission is a live meminfo sample, not the polled state file.

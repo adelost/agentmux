@@ -21,6 +21,9 @@ function setup() {
     "  printf '%s\\n' \"${AMUX_TEST_IDENTITY_JSON:-}\"",
     "  exit 42",
     "fi",
+    "if [[ \"$*\" == *\"verify-release-identity\"* && -n \"${AMUX_TEST_IDENTITY_JSON:-}\" ]]; then",
+    "  printf '%s\\n' \"$AMUX_TEST_IDENTITY_JSON\"",
+    "fi",
     "if [[ \"$*\" == *\"memory-guard\"* && \"${AMUX_TEST_MEMORY_DOWN:-false}\" == \"true\" ]]; then",
     "  exit 43",
     "fi",
@@ -83,23 +86,51 @@ feature("post-boot revive launcher", () => {
   // 2026-09-11 the Discord rescue answer only said "release identity failed (see
   // ~/.agentmux/revive-identity.json)", a WSL path the human on Windows cannot open.
   integration("a refused revive names the identity reason and the fix in its own line", {
-    given: ["an identity gate that reports master drift", setup],
+    given: ["an identity gate that reports a linked checkout", setup],
     when: ["running post-boot revive", (ctx) => ({
       ctx,
       result: ctx.run({
         AMUX_TEST_IDENTITY_DOWN: "true",
         AMUX_TEST_IDENTITY_JSON: JSON.stringify({
           allowRevive: false,
-          reason: "master-drift",
-          detail: "installed 5cb92acf396c is behind remote master 215a611c0722",
+          reason: "linked-checkout",
+          detail: "global package resolves into a git working tree",
         }, null, 2),
       }),
     })],
     then: ["reason, detail and the install-then-revive fix are in stderr", ({ ctx, result }) => {
       try {
         expect(result.status).toBe(1);
-        expect(result.stderr).toContain("REFUSED: release identity failed: master-drift: installed 5cb92acf396c is behind remote master 215a611c0722");
+        expect(result.stderr).toContain("REFUSED: release identity failed: linked-checkout: global package resolves into a git working tree");
         expect(result.stderr).toContain("fix: node bin/install-release.mjs --sha <origin/master sha>, then amux revive");
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  // 2026-09-14: master drift refused every revive after a reboot, although the
+  // installed release itself was intact. Drift is a warning; panes come back.
+  integration("an installed release behind master revives the panes and logs the drift with its fix", {
+    given: ["an identity gate that allows revive with a master-drift warning", setup],
+    when: ["running post-boot revive", (ctx) => ({
+      ctx,
+      result: ctx.run({
+        AMUX_TEST_IDENTITY_JSON: JSON.stringify({
+          allowRevive: true,
+          reason: "ok",
+          detail: "",
+          warning: "master-drift: installed 5cb92acf396c is behind remote master 215a611c0722; fix: install fetched master: node bin/install-release.mjs --sha <40-char origin/master SHA>",
+          warnings: [{ code: "master-drift", detail: "installed 5cb92acf396c is behind remote master 215a611c0722" }],
+        }, null, 2),
+      }),
+    })],
+    then: ["revive runs to its boot marker and the warning names installed, master and the fix", ({ ctx, result }) => {
+      try {
+        expect(result.status).toBe(0);
+        const calls = readFileSync(join(ctx.home, "revive-calls"), "utf-8").trim().split("\n");
+        expect(calls.at(-1)).toContain("bin/agent-cli.mjs revive");
+        expect(result.stderr).toContain("post-boot revive WARN: master-drift: installed 5cb92acf396c is behind remote master 215a611c0722; fix: install fetched master: node bin/install-release.mjs --sha <40-char origin/master SHA>");
+        expect(readFileSync(join(ctx.home, ".agentmux", "revive-boot-id"), "utf-8").trim())
+          .toBe(readFileSync("/proc/sys/kernel/random/boot_id", "utf-8").trim());
       } finally { ctx.cleanup(); }
     }],
   });

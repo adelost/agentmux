@@ -131,8 +131,10 @@ export function observeReleaseIdentity({
   if (receipt?.sourceRemote) {
     try {
       remoteMasterSha = readRemoteMaster(receipt.sourceRemote, receipt.sourceRef);
+      // Drift means master has unreleased merges, not that these bytes are
+      // untrusted: it warns so a reboot still revives panes on the release.
       if (remoteMasterSha !== receipt.sourceSha) {
-        issues.push({ code: "master-drift", detail: `installed ${String(receipt.sourceSha || "missing").slice(0, 12)} is behind remote master ${remoteMasterSha.slice(0, 12)}` });
+        warnings.push({ code: "master-drift", detail: `installed ${String(receipt.sourceSha || "missing").slice(0, 12)} is behind remote master ${remoteMasterSha.slice(0, 12)}` });
       }
     } catch (error) {
       warnings.push({ code: "master-unverified", detail: `remote master could not be verified: ${error.message}` });
@@ -194,6 +196,19 @@ export function observeReleaseIdentity({
   };
 }
 
+const INSTALL_MASTER_HINT = "install fetched master: node bin/install-release.mjs --sha <40-char origin/master SHA>";
+const WARNING_HINTS = {
+  "master-drift": INSTALL_MASTER_HINT,
+  "master-unverified": "verify network access to remote master, then rerun amux doctor",
+};
+
+/** WHAT: Formats the first identity warning with its fix. WHY: Keeps doctor and the revive log on one repair text. */
+function describeIdentityWarning(identity) {
+  const warning = identity?.warnings?.[0];
+  if (!warning) return "";
+  return `${warning.code}: ${warning.detail}; fix: ${WARNING_HINTS[warning.code] || "rerun amux doctor"}`;
+}
+
 /** WHAT: Maps an observed release identity to the two recovery permissions. WHY: Prevents a failed identity from mutating panes while the bridge recovers. */
 export function identityDecision(identity) {
   const ok = Boolean(identity?.ok);
@@ -202,18 +217,20 @@ export function identityDecision(identity) {
     allowRevive: ok,
     reason: ok ? "ok" : (identity?.issues?.[0]?.code || "identity-unobservable"),
     detail: ok ? "" : (identity?.issues?.[0]?.detail || "release identity could not be observed"),
+    warning: ok ? describeIdentityWarning(identity) : "",
   };
 }
 
 /** WHAT: Formats installed release identity for doctor. WHY: Keeps mutable package and hook drift visible to operators. */
 export function checkReleaseIdentity(identity) {
   if (identity?.ok) {
-    if (identity.warnings?.length) {
+    const warning = identity.warnings?.[0];
+    if (warning) {
       return {
         name: "release identity",
         status: "warn",
-        detail: identity.warnings[0].detail,
-        hint: "verify network access to remote master, then rerun amux doctor",
+        detail: warning.detail,
+        hint: WARNING_HINTS[warning.code] || "rerun amux doctor",
       };
     }
     return {
@@ -227,6 +244,6 @@ export function checkReleaseIdentity(identity) {
     name: "release identity",
     status: "fail",
     detail: identity?.issues?.[0]?.detail || "release identity could not be observed",
-    hint: "install fetched master: node bin/install-release.mjs --sha <40-char origin/master SHA>",
+    hint: INSTALL_MASTER_HINT,
   };
 }
