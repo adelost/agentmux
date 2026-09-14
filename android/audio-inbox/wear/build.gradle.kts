@@ -29,7 +29,7 @@ android {
         applicationId = "io.agentmux.audioinbox"
         minSdk = 30
         targetSdk = 35
-        versionCode = 21
+        versionCode = 22
         versionName = linkVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
