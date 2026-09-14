@@ -586,6 +586,44 @@ feature("GET /api/events: SSE stream", () => {
     }],
   });
 
+  component("a reply that takes long keeps the phone's connection alive", {
+    given: ["server whose pane stays idle with no reply yet", async () => {
+      const agent = { isBusy: async () => false, getResponse: async () => "", sendOnly: async () => {} };
+      const root = mkdtempSync(join(tmpdir(), "voice-pwa-keepalive-"));
+      const path = join(root, "agents.yaml");
+      writeFileSync(path, AGENTS_YAML);
+      const pwa = createVoicePWA({
+        port: 0, host: "127.0.0.1", token: "t",
+        agent, agentsYamlPath: path,
+        transcribeScript: "/fake", run: async () => ({ stdout: "", stderr: "" }),
+        pollIntervalMs: 20, keepaliveMs: 60,
+      });
+      const { url } = await pwa.start();
+      return { pwa, url, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+    }],
+    when: ["the phone waits on a prompt that has not been answered", async ({ url }) => {
+      const controller = new AbortController();
+      const res = await fetch(`${url}/api/events/claw/0?prompt=${encodeURIComponent("not answered yet")}`, { signal: controller.signal });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline && (buf.match(/: keepalive/g) || []).length < 2) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value);
+      }
+      controller.abort();
+      return buf;
+    }],
+    then: ["the silent wait carries repeated keepalive comments", async (stream, { pwa, cleanup }) => {
+      expect((stream.match(/: keepalive/g) || []).length).toBeGreaterThanOrEqual(2);
+      expect(stream).not.toContain("event: done");
+      await pwa.stop();
+      cleanup();
+    }],
+  });
+
   component("invalid pane → 400 (not a stream)", {
     given: ["server", async () => {
       const s = setupServer();

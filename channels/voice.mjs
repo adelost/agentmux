@@ -51,6 +51,9 @@ const MIME = {
 };
 
 const DEFAULT_POLL_INTERVAL_MS = 1500;
+// A phone waiting minutes for a reply sits behind carrier NAT and the tailnet
+// proxy; a silent stream gets cut ("Software caused connection abort").
+const DEFAULT_KEEPALIVE_MS = 15_000;
 
 /**
  * Create (but don't start) the Voice PWA HTTP server.
@@ -85,6 +88,7 @@ export function createVoicePWA(deps) {
     mirror = null,
     reactivePoke = null,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
+    keepaliveMs = DEFAULT_KEEPALIVE_MS,
     staticDir = null,
     audioOutbox = null,
   } = deps;
@@ -300,6 +304,9 @@ export function createVoicePWA(deps) {
     const prompt = String(url.searchParams.get("prompt") || "").slice(0, 5000) || null;
 
     req.on("close", () => { closed = true; });
+    // SSE comment lines keep the connection alive; every client ignores them.
+    const keepalive = setInterval(() => { if (!closed && !res.writableEnded) res.write(": keepalive\n\n"); }, keepaliveMs);
+    res.on("close", () => clearInterval(keepalive));
 
     while (!closed) {
       let status = "unknown";
@@ -347,6 +354,7 @@ export function createVoicePWA(deps) {
       await new Promise((r) => setTimeout(r, pollIntervalMs));
     }
 
+    clearInterval(keepalive);
     if (!res.writableEnded) res.end();
   }
 
