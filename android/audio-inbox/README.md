@@ -49,9 +49,10 @@ until 1.2 s of silence (Silero VAD, 30 s cap), encodes the same AAC/MPEG-4 file
 as push-to-talk and submits it through the shared conversation owner to the
 selected target. It plays short tones while waiting, reads the reply aloud with
 `POST /api/tts` and then listens again. Every stop reason is shown in the
-notification and the Settings status row. Reading aloud from the background
-needs Link's battery use set to Unrestricted; Settings asks for it. Without the
-toggle Link never opens a background microphone.
+notification and the Settings status row. Turning it on asks for Unrestricted
+battery use so the phone does not stop the listening service; Stop in the
+notification turns the preference off. Without the toggle Link never opens a
+background microphone.
 
 Recording starts on press; release sends once, and a press shorter than 500 ms
 is discarded. Sliding outside the control cancels. Text Send is disabled for

@@ -61,6 +61,7 @@ internal class LinkWakeWordControl(
 
     /** Restores listening after the process was gone; the Activity is visible, so the start is allowed. */
     fun resume() {
+        mutableEnabled.value = preferences.getBoolean(KEY_WAKE_WORD, false)
         if (mutableEnabled.value && microphoneGranted() && LinkWakeStatus.status.value.phase == WakePhase.OFF) start()
     }
 

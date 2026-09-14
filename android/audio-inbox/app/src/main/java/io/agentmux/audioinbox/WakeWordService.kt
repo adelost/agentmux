@@ -54,7 +54,11 @@ class WakeWordService : Service(), WakeLoopListener {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> start(intent.getStringExtra(EXTRA_QA_WAV))
-            ACTION_STOP -> stop(null)
+            ACTION_STOP -> {
+                // Stop from the notification means off, so reopening Link does not restart listening.
+                getSharedPreferences(AppContract.PREFS, MODE_PRIVATE).edit().putBoolean(KEY_WAKE_WORD, false).apply()
+                stop(null)
+            }
             // A system restart of a microphone service is not user-visible; say so instead of listening blind.
             else -> stop("Open Link to start listening again")
         }

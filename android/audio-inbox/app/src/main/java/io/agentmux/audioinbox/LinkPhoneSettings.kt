@@ -222,5 +222,5 @@ internal fun connectionRouteLabel(detail: String): String = when {
 /** The status row says why listening stopped and how often "computer" was heard, for tuning on the real phone. */
 internal fun wakeStatusDetail(wake: LinkWakePresentation): String = listOfNotNull(
     wake.detail,
-    "Heard ${wake.detections} times".takeIf { wake.detections > 0 },
+    "Detections ${wake.detections}".takeIf { wake.detections > 0 },
 ).joinToString(" · ").ifBlank { "Say \"computer\", then your question" }
