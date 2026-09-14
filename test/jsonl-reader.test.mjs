@@ -408,6 +408,62 @@ feature("isPromptInJsonl: matches queue-operation and attachment events", () => 
       cleanup();
     }],
   });
+
+  // Live claw:0 shape, 2026-09-14: Claude turned the first pasted .jpg path
+  // into an image attachment, so the receipt text lost that path and gained
+  // "[Image #N]". The unmatched receipt held claw:0's lane for an hour.
+  const SENT_WITH_IMAGE_PATHS = [
+    "[from claw:1]", "", "Specen:", "   /home/u/specs/SPEC.md", "Bilderna:",
+    "  /home/u/assets/1/a.jpg", "  /home/u/assets/2/b.jpg", "Inget svar behövs.", "",
+  ].join("\n");
+  const receivedWithImagePaths = (sentSpec = "/home/u/specs/SPEC.md") => [
+    "[Image #8][from claw:1]", "", "Specen:", "  ", sentSpec, "Bilderna:",
+    " ", "/home/u/assets/2/b.jpg", "Inget svar behövs.",
+  ].join("\n");
+  const imagePart = { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "/9j/" } };
+  const receiptAfterCursor = (event) => {
+    const ctx = setupFakeProject("simple-text.jsonl");
+    ctx.cursor = captureClaudePromptEchoCursor(ctx.paneDir, SENT_WITH_IMAGE_PATHS);
+    appendFileSync(join(ctx.projectDir, "session-abc123.jsonl"), `${JSON.stringify(event)}\n`);
+    return ctx;
+  };
+  const checkReceipt = ({ paneDir, cursor }) => isPromptInJsonl(paneDir, SENT_WITH_IMAGE_PATHS, { cursor });
+
+  unit("a queued prompt whose image path became an attachment acknowledges", {
+    given: ["Claude's queue record with [Image #8] instead of the first path", () => receiptAfterCursor({
+      type: "queue-operation", operation: "enqueue", timestamp: "2026-09-14T16:09:05Z",
+      content: receivedWithImagePaths(),
+    })],
+    when: ["verifying the sent text", checkReceipt],
+    then: ["the delivery is acknowledged", (r, { cleanup }) => { expect(r).toBe(true); cleanup(); }],
+  });
+
+  unit("a user turn stored as text plus image parts acknowledges", {
+    given: ["Claude's user record with an image content part", () => receiptAfterCursor({
+      type: "user", timestamp: "2026-09-14T16:26:51Z",
+      message: { content: [{ type: "text", text: receivedWithImagePaths() }, imagePart] },
+    })],
+    when: ["verifying the sent text", checkReceipt],
+    then: ["the delivery is acknowledged", (r, { cleanup }) => { expect(r).toBe(true); cleanup(); }],
+  });
+
+  unit("a queued-command attachment with content parts acknowledges", {
+    given: ["Claude's queued_command record whose prompt is an array", () => receiptAfterCursor({
+      type: "attachment", timestamp: "2026-09-14T16:09:05Z",
+      attachment: { type: "queued_command", prompt: [{ type: "text", text: receivedWithImagePaths() }, imagePart] },
+    })],
+    when: ["verifying the sent text", checkReceipt],
+    then: ["the delivery is acknowledged", (r, { cleanup }) => { expect(r).toBe(true); cleanup(); }],
+  });
+
+  unit("an image attachment does not hide a difference in the remaining text", {
+    given: ["a receipt whose non-image path differs", () => receiptAfterCursor({
+      type: "user", timestamp: "2026-09-14T16:26:51Z",
+      message: { content: [{ type: "text", text: receivedWithImagePaths("/home/u/specs/OTHER.md") }, imagePart] },
+    })],
+    when: ["verifying the sent text", checkReceipt],
+    then: ["the delivery stays unacknowledged", (r, { cleanup }) => { expect(r).toBe(false); cleanup(); }],
+  });
 });
 
 feature("isBusyFromJsonl: compacted session with null stop_reason", () => {

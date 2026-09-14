@@ -8,6 +8,7 @@ import { describeToolCall } from "./tool-display.mjs";
 import { captureJsonlAppendCursor, hasJsonlEventAfterCursor } from "./jsonl-append-cursor.mjs";
 import { isSystemNoiseDirective, isWorkDirective } from "./system-noise.mjs";
 import { readClaudeTurnLifecycle, userPromptText } from "./claude-turn-lifecycle.mjs";
+import { normalizePrompt, promptAppearsInEvents, promptEventMatches } from "./claude-prompt-text.mjs";
 // Long sessions require bounded tail reads to stay below Node string limits.
 const DEFAULT_JSONL_WINDOW_BYTES = 8 * 1024 * 1024; // 8 MiB tail: thousands of turns
 const MAX_JSONL_WINDOW_BYTES = 128 * 1024 * 1024; // hard cap, well under the string limit
@@ -176,32 +177,6 @@ function parseJsonlTail(filePath, maxBytes) {
 const TERMINAL_STOP_REASONS = new Set(["end_turn", "stop_sequence", "refusal"]);
 
 /**
- * Extract any prompt-like text from a single jsonl event. Claude Code records
- * the same prompt in several places depending on timing:
- *
- *   { type: "user", message: { content: "..." } }            // direct user event
- *   { type: "queue-operation", operation: "enqueue",         // sent while busy
- *     content: "..." }
- *   { type: "attachment", attachment: { type: "queued_command",
- *     prompt: "..." } }                                       // queue ack
- *
- * All three are legitimate "agent received the prompt" signals.
- */
-function extractPromptFromEvent(event) {
-  if (!event) return null;
-  if (event.type === "user" && typeof event.message?.content === "string") {
-    return event.message.content;
-  }
-  if (event.type === "queue-operation" && event.operation === "enqueue" && typeof event.content === "string") {
-    return event.content;
-  }
-  if (event.type === "attachment" && event.attachment?.type === "queued_command" && typeof event.attachment.prompt === "string") {
-    return event.attachment.prompt;
-  }
-  return null;
-}
-
-/**
  * Check if a given prompt has been written to Claude's jsonl for this pane.
  * Reliable echo-confirmation signal. No pane width or wordwrap involved.
  * Matches user events, queue-operations, and attachment queue-acks.
@@ -330,56 +305,6 @@ function findUserPromptIndex(events, promptText) {
   }
   return -1;
 }
-
-/**
- * Normalise a prompt for comparison: strip wrappers that differ between
- * "what handlers know" and "what's stored in jsonl" so equivalent prompts
- * match even when one side has decoration the other doesn't.
- *
- * Stripped:
- *   - leading "[from <agent>:<pane>] " ax-meta header
- *   - leading "[transcribed voice ...] " voice-PWA disclaimer
- *   - trailing "\n[tts on — ...]" hint suffix
- *   - leading/trailing whitespace
- *
- * Without this, an exact-match search misses turns where one path added a
- * prefix the other didn't, falling all the way through to tmux extraction
- * which then ships pane-chrome to Discord. See getResponseStreamWithRaw
- * fallback path for the downstream effect.
- */
-function normalizePrompt(text) {
-  if (!text) return "";
-  let s = String(text).replace(/\r\n?/g, "\n").trim();
-  // ax-meta: "[from project:0] actual prompt". Strip repeated envelopes too:
-  // a caller may already include provenance and the CLI then adds its own.
-  s = s.replace(/^(?:\[from\s+[^:]+:\d+\]\s*)+/i, "");
-  // voice-PWA disclaimer
-  s = s.replace(/^\[transcribed voice[^\]]*\]\s*/i, "");
-  // TTS hint suffix
-  s = s.replace(/\s*\n\s*\[tts on[^\]]*\]\s*$/i, "");
-  return s.replace(/\s+/g, " ").trim();
-}
-
-/**
- * True if the prompt appears anywhere in events (user, queue-operation,
- * attachment). Tries exact match first, then a normalised-both-sides match
- * so wrapper-decoration doesn't cause a false miss.
- */
-function promptEventMatches(event, promptText) {
-  const needle = promptText?.trim();
-  if (!needle) return false;
-  const fuzzyNeedle = normalizePrompt(needle);
-  const text = extractPromptFromEvent(event);
-  if (!text) return false;
-  const trimmed = text.trim();
-  return trimmed === needle
-    || Boolean(fuzzyNeedle && normalizePrompt(trimmed) === fuzzyNeedle);
-}
-
-function promptAppearsInEvents(events, promptText) {
-  return events.some((event) => promptEventMatches(event, promptText));
-}
-
 
 /**
  * Format a tool_use block into a compact one-line string suitable for Discord.
