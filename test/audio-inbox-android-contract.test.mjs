@@ -51,24 +51,27 @@ feature("Android audio inbox source contract", () => {
       expect(notifier).toContain("session.getPlatformToken()");
       expect(notifier).toContain('"Stop"');
       expect(notifier).toContain("AppContract.ACTION_STOP_AUDIO");
-      const phone = read(
-        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/LinkPhoneScreen.kt",
+      // Phone and watch share one turn renderer since d0fab5a moved it into link-ui.
+      const turn = read(
+        "android/audio-inbox/link-ui/src/main/java/io/agentmux/linkui/LinkConversationTurn.kt",
       );
-      expect(phone).toContain("PlaybackPhase.PAUSED -> RingPlaybackState.PAUSED");
-      expect(phone).toContain("PlaybackPhase.PAUSED -> onResume");
-      expect(phone).toContain("RingPlaybackControls(");
+      expect(turn).toContain("PlaybackPhase.PAUSED -> RingPlaybackState.PAUSED");
+      expect(turn).toContain("PlaybackPhase.PAUSED -> onResume");
+      expect(turn).toContain("RingPlaybackControls(");
       expect(read("channels/voice.mjs")).toContain('path === "/api/audio/send"');
+      // One push-to-talk control for phone and watch since #243 (68fed2e).
       const ptt = read(
-        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/PttDisc.kt",
+        "android/audio-inbox/link-ui/src/main/java/io/agentmux/linkui/LinkCaptureControl.kt",
       );
       expect(ptt).toContain("RingPressLifecycle(");
       expect(ptt).toContain("RingPressLifecycleSpec(");
-      expect(ptt).toContain("onBegin = onBegin");
+      // Begin may be gated (hands-free owns the microphone), but must still reach the caller.
+      expect(ptt).toMatch(/onBegin = \{[^}]*onBegin\(\)/);
       expect(ptt).toContain("onRelease = onRelease");
       expect(ptt).toContain("onCancel = onCancel");
       expect(discovery).toContain('"agentmux-windows-manager-audio"');
       expect(read(
-        "android/audio-inbox/app/src/main/java/io/agentmux/audioinbox/LinkPhoneSettings.kt",
+        "android/audio-inbox/link-ui/src/main/java/io/agentmux/linkui/LinkAudioPreferences.kt",
       )).toContain('"READ REPLIES"');
       expect(read(
         "android/audio-inbox/link-core/src/main/kotlin/io/agentmux/linkcore/LinkState.kt",
@@ -113,6 +116,12 @@ feature("Android audio inbox source contract", () => {
         "android/audio-inbox/link-session-android/src/main/java/io/agentmux/audioinbox/",
         ROOT,
       );
+      // Shared Link UI (phone and watch) lives here since d0fab5a and #249.
+      const uiDirectory = new URL(
+        "android/audio-inbox/link-ui/src/main/java/io/agentmux/linkui/",
+        ROOT,
+      );
+      const productDirectory = new URL("product/", uiDirectory);
       const counts = Object.fromEntries(
         [
           ...readdirSync(appDirectory).map((name) => [appDirectory, name]),
@@ -120,6 +129,8 @@ feature("Android audio inbox source contract", () => {
           ...readdirSync(wearDirectory).map((name) => [wearDirectory, name]),
           ...readdirSync(transportDirectory).map((name) => [transportDirectory, name]),
           ...readdirSync(sessionDirectory).map((name) => [sessionDirectory, name]),
+          ...readdirSync(uiDirectory).map((name) => [uiDirectory, name]),
+          ...readdirSync(productDirectory).map((name) => [productDirectory, name]),
         ]
           .filter(([, name]) => name.endsWith(".java") || name.endsWith(".kt"))
           .map(([directory, name]) => {
@@ -134,7 +145,8 @@ feature("Android audio inbox source contract", () => {
         "MainActivity.kt": expect.any(Number),
         "LinkPhoneScreen.kt": expect.any(Number),
         "LinkState.kt": expect.any(Number),
-        "WearLinkScreen.kt": expect.any(Number),
+        "LinkWatchScreen.kt": expect.any(Number),
+        "LinkConversationTurn.kt": expect.any(Number),
         "ServerDiscovery.java": expect.any(Number),
       }));
       expect(Math.max(...Object.values(counts))).toBeLessThanOrEqual(500);
