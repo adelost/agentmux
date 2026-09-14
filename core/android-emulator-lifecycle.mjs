@@ -145,6 +145,48 @@ export function readGuestIdle(serial, { adb = resolveAndroidTools().adb, exec = 
   return parseGuestIdle(power, uptime);
 }
 
+// Names adb can know one emulator by: its console serial, or its adb port after `adb connect`.
+function adbNamesFor(emulator) {
+  return [emulator.serial, `localhost:${emulator.port + 1}`, `127.0.0.1:${emulator.port + 1}`];
+}
+
+/** WHAT: Reads an emulator's best adb state from `adb devices`. WHY: Separates an emulator adb cannot reach from one whose idle signal is only missing. */
+export function readAdbDeviceState(emulator, { adb = resolveAndroidTools().adb, exec = execFileSync } = {}) {
+  const listing = exec(adb, ["devices"], { encoding: "utf8", timeout: 10_000 });
+  const names = new Set(adbNamesFor(emulator));
+  const states = String(listing).split(/\r?\n/u).map((line) => line.trim().split(/\s+/u))
+    .filter(([name]) => names.has(name)).map(([, state]) => state);
+  return states.includes("device") ? "device" : states[0] || "absent";
+}
+
+/** WHAT: Collects other processes that name an emulator by any adb name. WHY: Keeps a waiting adb client or test from losing its emulator. */
+export function processesNamingEmulator(rows, emulator) {
+  const names = adbNamesFor(emulator).map((name) => name.replaceAll(".", "\\."));
+  const pattern = new RegExp(`(?:^|[\\s=])(?:${names.join("|")})(?:\\s|$)`, "u");
+  return rows.filter((row) => pattern.test(row.command));
+}
+
+/** WHAT: Dispatches an identity-bound SIGTERM to an emulator adb cannot reach. WHY: Keeps a wedged guest from holding its memory when `adb emu kill` has no device to talk to. */
+export async function terminateUnreachableAndroidEmulator(emulator, {
+  readRows = readProcessRows,
+  kill = (pid) => process.kill(pid, "SIGTERM"),
+  wait = sleep,
+  verifyTimeoutMs = 30_000,
+} = {}) {
+  if (!currentProcessMatches(emulator, readRows())) return { stopped: false, reason: "process-identity-changed" };
+  try {
+    kill(emulator.pid);
+  } catch (error) {
+    return { stopped: false, reason: `terminate-failed:${error.code || error.message}` };
+  }
+  const deadline = Date.now() + verifyTimeoutMs;
+  while (Date.now() < deadline) {
+    if (!currentProcessMatches(emulator, readRows())) return { stopped: true };
+    await wait(250);
+  }
+  return { stopped: false, reason: "terminate-exit-not-observed" };
+}
+
 function effectiveIdleMs(guestIdleMs, entry, now) {
   if (!Number.isFinite(entry?.lastUseAt)) return guestIdleMs;
   return Math.min(guestIdleMs, Math.max(0, now - entry.lastUseAt));
@@ -178,6 +220,17 @@ export async function gracefulStopAndroidEmulator(emulator, {
   return { stopped: false, reason: "graceful-exit-not-observed" };
 }
 
+// adb states that no client can drive: the serial is gone or offline.
+function unreachableAdbState(readAdbState, emulator) {
+  let adbState;
+  try {
+    adbState = readAdbState(emulator);
+  } catch {
+    return null;
+  }
+  return adbState === "absent" || adbState === "offline" ? adbState : null;
+}
+
 /** WHAT: Schedules every emulator for idle arming or stop. WHY: Keeps reaping bounded, durable and two-observation safe. */
 export async function sweepAndroidEmulators({
   now = Date.now(),
@@ -190,6 +243,8 @@ export async function sweepAndroidEmulators({
   readRows = readProcessRows,
   readIdle = readGuestIdle,
   stop = gracefulStopAndroidEmulator,
+  readAdbState = readAdbDeviceState,
+  stopUnreachable = terminateUnreachableAndroidEmulator,
 } = {}) {
   const processRows = rows || readRows();
   const emulators = headlessEmulatorsFromRows(processRows)
@@ -211,14 +266,35 @@ export async function sweepAndroidEmulators({
       lastSeenAt: now,
       status: "awake",
     };
+    const sameGeneration = previous.pid === emulator.pid && previous.serial === emulator.serial;
     let guest;
     try {
       guest = readIdle(emulator.serial);
     } catch (error) {
       entry.armedAt = null;
       entry.blockedReason = `observation-failed:${error.message}`;
-      state.emulators[emulator.avd] = entry;
-      results.push({ ...emulator, action: "blocked", reason: entry.blockedReason });
+      entry.observationFailedSince = sameGeneration && Number.isFinite(previous.observationFailedSince)
+        ? previous.observationFailedSince
+        : now;
+      const unreachable = !dryRun && now - entry.observationFailedSince >= idleMs
+        && !processesNamingEmulator(processRows, emulator).length
+        ? unreachableAdbState(readAdbState, emulator)
+        : null;
+      if (!unreachable) {
+        state.emulators[emulator.avd] = entry;
+        results.push({ ...emulator, action: "blocked", reason: entry.blockedReason });
+        continue;
+      }
+      const stopReason = `adb-unreachable-${unreachable}`;
+      const outcome = await stopUnreachable(emulator);
+      if (outcome.stopped) {
+        state.emulators[emulator.avd] = { ...entry, pid: null, status: "asleep", stoppedAt: Date.now(), stopReason };
+        results.push({ ...emulator, action: "stopped", reason: stopReason });
+      } else {
+        entry.blockedReason = `${stopReason}:${outcome.reason}`;
+        state.emulators[emulator.avd] = entry;
+        results.push({ ...emulator, action: "blocked", reason: entry.blockedReason });
+      }
       continue;
     }
 
@@ -226,6 +302,7 @@ export async function sweepAndroidEmulators({
     entry.guestIdleMs = guest.idleMs;
     entry.observedIdleMs = observedIdleMs;
     entry.blockedReason = null;
+    entry.observationFailedSince = null;
     if (observedIdleMs < idleMs) {
       entry.armedAt = null;
       state.emulators[emulator.avd] = entry;
@@ -240,7 +317,6 @@ export async function sweepAndroidEmulators({
       continue;
     }
 
-    const sameGeneration = previous.pid === emulator.pid && previous.serial === emulator.serial;
     if (!sameGeneration || !Number.isFinite(previous.armedAt)) {
       entry.armedAt = now;
       entry.status = "arming";
