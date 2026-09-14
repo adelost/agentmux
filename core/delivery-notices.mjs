@@ -25,6 +25,44 @@ export function blockedDeliveryNotice(job) {
     + `${detail}. Det ligger kvar över omstarter och skickas i ordning när spärren har släppt.`;
 }
 
+/** WHAT: Maps a broker notice state to its Discord copy, or null for an unknown state. WHY: Keeps delivery wording out of bridge startup wiring. */
+export function deliveryStateNotice(job, state, extra = {}) {
+  if (state === "stalled") {
+    const behind = Number(extra?.queuedBehind || 0);
+    return "⚠️ Meddelandet skickades in till panelen men har inte fått något historikkvitto ännu " +
+      "(panelen verkar upptagen med en lång tur). AMUX bevakar vidare och skickar inte om det, " +
+      "för att inte skapa en dubblett." +
+      (behind > 0 ? ` ${behind} meddelande(n) väntar i kö bakom det.` : "");
+  }
+  if (state === "blocked") return blockedDeliveryNotice(job);
+  if (state === "recovered") return "✅ Det tidigare blockerade kömeddelandet har nu levererats.";
+  if (state === "unverified") {
+    return job.metadata?.deliveryAmbiguity === "submitting-fence"
+      ? "⚠️ Leveransen stannade mellan den durabla submit-fencen och slutkvittot. Enter kan ha skickats; " +
+        "AMUX vet inte säkert och skickar därför inte om. Kontrollera agenten och composern om instruktionen är kritisk."
+      : "⚠️ Meddelandet lämnade composern men fick inget exakt historikkvitto inom en timme. " +
+        "AMUX skickar inte om det eftersom det kan skapa en dubblett; kontrollera agenthistoriken om instruktionen är kritisk.";
+  }
+  if (state === "not-sent") {
+    return job.metadata?.deliveryCancellation === "sender-request"
+      ? "⚠️ Meddelandet avbröts före submit och skickades inte. Composern lämnades orörd; skicka en ny instruktion om arbetet ändå behövs."
+      : "⚠️ Meddelandet skickades inte. Composern förblev osäker för länge eller efter för många försök, så AMUX har stoppat automatiken " +
+        "för att inte skriva över eller blanda innehåll. Kontrollera/rensa composern och skicka instruktionen igen om den fortfarande behövs.";
+  }
+  return null;
+}
+
+/** WHAT: Builds the broker's notify callback that posts state copy to the job's Discord channel. WHY: Prevents a notice from vanishing when no channel is bound; the throw lets the broker retry. */
+export function createDiscordDeliveryNotify({ discord, resolveChannel }) {
+  return async (job, state, extra = {}) => {
+    if (!discord) return;
+    const channelId = job.metadata?.channelId || resolveChannel(job);
+    if (!channelId) throw new Error(`no Discord channel bound to ${job.agentName}:${job.pane}`);
+    const text = deliveryStateNotice(job, state, extra);
+    if (text) await discord.send(channelId, text);
+  };
+}
+
 /** WHAT: Builds the broker's blocked/terminal notice operations. WHY: Keeps Discord reporting out of the delivery loop. */
 export function createDeliveryNotices({
   queue,

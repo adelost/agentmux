@@ -41,7 +41,7 @@ import { parsePermissionWatchdogConfig } from "./core/permission-watchdog.mjs";
 import { notifyUser as notifyUserDm } from "./cli/send-notify.mjs";
 import { startHeartbeat } from "./core/heartbeat.mjs";
 import { startBridgeMemoryGuard } from "./core/memory-relief.mjs";
-import { blockedDeliveryNotice } from "./core/delivery-notices.mjs";
+import { createDiscordDeliveryNotify } from "./core/delivery-notices.mjs";
 import { readReleaseManifest } from "./core/release-identity.mjs";
 import { resolveConfigSources } from "./core/config-sources.mjs";
 import { syncConfiguredAgentHints } from "./core/hints-sync.mjs";
@@ -241,43 +241,10 @@ const deliveryBroker = createDeliveryBroker({
   wakeLifecycle: paneSleepWakeLifecycle,
   resolveNotificationChannel: (job) => TOKEN
     ? findChannelForPane(AGENTS_YAML, job.agentName, job.pane) : null,
-  notify: async (job, state, extra = {}) => {
-    if (!discord) return;
-    const channelId = job.metadata?.channelId
-      || findChannelForPane(AGENTS_YAML, job.agentName, job.pane);
-    if (!channelId) throw new Error(`no Discord channel bound to ${job.agentName}:${job.pane}`);
-    if (state === "stalled") {
-      const behind = Number(extra?.queuedBehind || 0);
-      await discord.send(
-        channelId,
-        "⚠️ Meddelandet skickades in till panelen men har inte fått något historikkvitto ännu " +
-        "(panelen verkar upptagen med en lång tur). AMUX bevakar vidare och skickar inte om det, " +
-        "för att inte skapa en dubblett." +
-        (behind > 0 ? ` ${behind} meddelande(n) väntar i kö bakom det.` : ""),
-      );
-    } else if (state === "blocked") {
-      await discord.send(channelId, blockedDeliveryNotice(job));
-    } else if (state === "recovered") {
-      await discord.send(channelId, "✅ Det tidigare blockerade kömeddelandet har nu levererats.");
-    } else if (state === "unverified") {
-      await discord.send(
-        channelId,
-        job.metadata?.deliveryAmbiguity === "submitting-fence"
-          ? "⚠️ Leveransen stannade mellan den durabla submit-fencen och slutkvittot. Enter kan ha skickats; " +
-            "AMUX vet inte säkert och skickar därför inte om. Kontrollera agenten och composern om instruktionen är kritisk."
-          : "⚠️ Meddelandet lämnade composern men fick inget exakt historikkvitto inom en timme. " +
-            "AMUX skickar inte om det eftersom det kan skapa en dubblett; kontrollera agenthistoriken om instruktionen är kritisk.",
-      );
-    } else if (state === "not-sent") {
-      await discord.send(
-        channelId,
-        job.metadata?.deliveryCancellation === "sender-request"
-          ? "⚠️ Meddelandet avbröts före submit och skickades inte. Composern lämnades orörd; skicka en ny instruktion om arbetet ändå behövs."
-          : "⚠️ Meddelandet skickades inte. Composern förblev osäker för länge eller efter för många försök, så AMUX har stoppat automatiken " +
-            "för att inte skriva över eller blanda innehåll. Kontrollera/rensa composern och skicka instruktionen igen om den fortfarande behövs.",
-      );
-    }
-  },
+  notify: createDiscordDeliveryNotify({
+    discord,
+    resolveChannel: (job) => findChannelForPane(AGENTS_YAML, job.agentName, job.pane),
+  }),
   log: (message) => console.warn(`[delivery-broker] ${message}`),
 });
 
@@ -454,7 +421,7 @@ const voicePwa = createVoicePWA({
 });
 voicePwa.start()
   .then(({ url }) => {
-    const staticNote = voicePwaStaticDir ? ` (PWA: ${voicePwaStaticDir})` : " (api only — build voice-pwa for the UI)";
+    const staticNote = voicePwaStaticDir ? ` (PWA: ${voicePwaStaticDir})` : " (api only; build voice-pwa for the UI)";
     console.log(`voice-pwa | listening at ${url}${staticNote}`);
   })
   .catch((err) => console.error(`voice-pwa | failed to start: ${err.message}`));
