@@ -12,9 +12,9 @@ data class LinkAudioPreference(
 
 fun linkAudioPreferences(readReplies: Boolean, announcements: Boolean, wakeWord: Boolean) = listOf(
     LinkAudioPreference(LinkPreferenceKey.SPEAK_REPLIES, "READ REPLIES",
-        "Read answers to your messages automatically. Off: tap Play when you want to listen.", readReplies),
+        "• Replies play by themselves\n• Off: tap the speaker", readReplies),
     LinkAudioPreference(LinkPreferenceKey.HANDS_FREE, "ANNOUNCEMENTS",
-        "Play separate audio updates sent to this device, including in the background. This does not control your replies.", announcements),
+        "• Plays updates sent to this phone\n• Not your replies", announcements),
     LinkAudioPreference(LinkPreferenceKey.WAKE_WORD, "WAKE WORD",
-        "Say the wake word, then your question. Link sends it and reads the answer aloud.", wakeWord),
+        "• Say the wake phrase, then ask\n• The answer is read aloud", wakeWord),
 )
