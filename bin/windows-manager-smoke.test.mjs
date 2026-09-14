@@ -326,6 +326,8 @@ feature("windows manager smoke", () => {
       });
       const boots = ["aaaaaaaa-1111", "bbbbbbbb-2222"];
       const sentBeforeRestart = [];
+      const logged = [];
+      harness.deps.log = (line) => logged.push(line);
       harness.deps.executeTool = async (name) => {
         harness.executed.push(name);
         if (name === "restart_wsl") {
@@ -345,6 +347,8 @@ feature("windows manager smoke", () => {
         expect(sentBeforeRestart[0]).toContain("aaaaaaaa-1111");
         expect(harness.sent.at(-1)).toContain("WSL är omstartat: boot aaaaaaaa-1111 -> bbbbbbbb-2222");
         expect(harness.sent.at(-1)).toContain("AMUX RECOVERED");
+        // Every tool outcome lands in manager.log so //logs shows what the restart did.
+        expect(logged.some((line) => line.startsWith("tool restart_wsl ok=true stage=wsl-recovered detail=revive ok"))).toBe(true);
       } finally {
         harness.cleanup();
       }

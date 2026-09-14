@@ -5,7 +5,7 @@
 
 import { spawn } from "node:child_process";
 import { classifyRecovery } from "./windows-bridge.mjs";
-import { describeRestartOutcome, formatRestartNotice, isSlashCommand, planSlashCommand, restartWslPlan } from "./windows-manager-commands.mjs";
+import { describeRestartOutcome, explainRestartStep, formatRestartNotice, isSlashCommand, planSlashCommand, restartWslPlan } from "./windows-manager-commands.mjs";
 
 /** WHAT: Names the manager contract version. WHY: Keeps runbook, tools, and runtime on one explicit contract. */
 export const MANAGER_CONTRACT_VERSION = 1;
@@ -61,6 +61,7 @@ export function formatLocalRescueAnswer(plan, toolResults, outcome) {
     // Tool order is status, restart, status: keep the restart's own detail next to the fresh status.
     return [
       describeRestartOutcome(results),
+      ...explainRestartStep(results[1]),
       `AMUX ${outcome} lokal recovery`,
       `steg=${results.length} fel=${failed.length}`,
       ...results.slice(1).map((result) => `${result?.stage || "steg"}: ${String(result?.detail || "")}`),

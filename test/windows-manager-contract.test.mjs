@@ -80,8 +80,9 @@ feature("windows manager source contract", () => {
       expect(MGR).toContain('"manager.log"');
       expect(MGR).not.toContain('"state.json"');
       expect(MGR).not.toContain('"process.json"');
-      expect(MGR.match(/restarter\.log/gu)).toHaveLength(1);
-      expect(MGR).toContain('tailFile(join(rootDir, "restarter.log"), 24)');
+      // The PowerShell restarter last wrote restarter.log on 2026-08-01; //logs shows only live logs.
+      expect(MGR).not.toContain("restarter.log");
+      expect(MGR).toContain("tailFile(logPath, 40)");
     }],
   });
 

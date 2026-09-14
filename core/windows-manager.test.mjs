@@ -88,11 +88,34 @@ feature("windows manager core", () => {
       const status = (bootId) => ({ ok: true, stage: "get_status", detail: "s", observation: { bootId } });
       const restart = { ok: true, stage: "wsl-recovered", detail: "revive ok" };
       expect(formatLocalRescueAnswer({ kind: "restart-wsl" }, [status("a1"), restart, status("b2")], "RECOVERED"))
-        .toBe("WSL är omstartat: boot a1 -> b2.\nAMUX RECOVERED lokal recovery\nsteg=3 fel=0\nwsl-recovered: revive ok\nget_status: s");
+        .toBe("WSL är omstartat: boot a1 -> b2.\nWSL, bryggan och de avbrutna panelerna är uppe igen.\nAMUX RECOVERED lokal recovery\nsteg=3 fel=0\nwsl-recovered: revive ok\nget_status: s");
       expect(formatLocalRescueAnswer({ kind: "restart-wsl" }, [status("a1"), restart, status("a1")], "RECOVERED"))
         .toContain("WSL startades INTE om: samma boot a1.");
       expect(formatLocalRescueAnswer({ kind: "restart-wsl" }, [status("a1"), restart, status(undefined)], "PARTIAL"))
         .toContain("WSL svarar inte efter omstarten: boot före a1");
+    }],
+  });
+
+  unit("a failed restart step is explained in plain Swedish with the next step", {
+    then: ["each rescue stage maps to what happened and what to type next", () => {
+      const status = (bootId) => ({ ok: true, stage: "get_status", detail: "s", observation: { bootId } });
+      const refused = { ok: false, stage: "post-boot-revive", detail: "post-boot revive REFUSED: release identity failed: master-drift: installed x is behind remote master y" };
+      const revived = formatLocalRescueAnswer({ kind: "restart-wsl" }, [status("a1"), refused, status("b2")], "PARTIAL").split("\n");
+      expect(revived[0]).toBe("WSL är omstartat: boot a1 -> b2.");
+      expect(revived[1]).toBe("WSL och bryggan är uppe, men panelerna återupptogs inte: post-boot revive REFUSED: release identity failed: master-drift: installed x is behind remote master y");
+      expect(revived[2]).toBe("Nästa steg: panelerna startar när du skriver till dem. Följ fix-raden ovan och kör amux revive för att väcka de avbrutna.");
+      const stop = formatLocalRescueAnswer({ kind: "restart-wsl" }, [status("a1"), { ok: false, stage: "wsl-stop", detail: "timeout" }, status("a1")], "PARTIAL");
+      expect(stop).toContain("wsl --shutdown misslyckades: timeout");
+      expect(stop).toContain("Nästa steg: skriv //status. Svarar WSL inte, starta om datorn.");
+      const bridge = formatLocalRescueAnswer({ kind: "restart-wsl" }, [status("a1"), { ok: false, stage: "wsl-start", detail: "heartbeat-timeout" }, status("b2")], "PARTIAL");
+      expect(bridge).toContain("WSL stängdes men bryggan kom inte igång: heartbeat-timeout");
+      expect(bridge).toContain("Nästa steg: skriv //start-bridge, sedan //status.");
+      const timeout = formatLocalRescueAnswer({ kind: "restart-wsl" }, [status("a1"), { ok: false, stage: "restart-wsl", detail: "timeout-570000ms" }, status("b2")], "PARTIAL");
+      expect(timeout).toContain("Omstarten gav inget svar i tid: timeout-570000ms");
+      expect(timeout).toContain("Nästa steg: skriv //status och //logs.");
+      const done = formatLocalRescueAnswer({ kind: "restart-wsl" }, [status("a1"), { ok: true, stage: "wsl-recovered", detail: "ok" }, status("b2")], "RECOVERED");
+      expect(done).toContain("WSL, bryggan och de avbrutna panelerna är uppe igen.");
+      expect(done).not.toContain("Nästa steg");
     }],
   });
 

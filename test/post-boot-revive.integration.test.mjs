@@ -18,6 +18,7 @@ function setup() {
     "#!/usr/bin/env bash",
     "echo \"$*\" >> \"$HOME/revive-calls\"",
     "if [[ \"$*\" == *\"verify-release-identity\"* && \"${AMUX_TEST_IDENTITY_DOWN:-false}\" == \"true\" ]]; then",
+    "  printf '%s\\n' \"${AMUX_TEST_IDENTITY_JSON:-}\"",
     "  exit 42",
     "fi",
     "if [[ \"$*\" == *\"memory-guard\"* && \"${AMUX_TEST_MEMORY_DOWN:-false}\" == \"true\" ]]; then",
@@ -75,6 +76,30 @@ feature("post-boot revive launcher", () => {
         expect(result.stderr).toContain("post-boot revive REFUSED: release identity failed");
         expect(() => readFileSync(join(ctx.home, ".agentmux", "revive-boot-id")))
           .toThrow();
+      } finally { ctx.cleanup(); }
+    }],
+  });
+
+  // 2026-09-11 the Discord rescue answer only said "release identity failed (see
+  // ~/.agentmux/revive-identity.json)", a WSL path the human on Windows cannot open.
+  integration("a refused revive names the identity reason and the fix in its own line", {
+    given: ["an identity gate that reports master drift", setup],
+    when: ["running post-boot revive", (ctx) => ({
+      ctx,
+      result: ctx.run({
+        AMUX_TEST_IDENTITY_DOWN: "true",
+        AMUX_TEST_IDENTITY_JSON: JSON.stringify({
+          allowRevive: false,
+          reason: "master-drift",
+          detail: "installed 5cb92acf396c is behind remote master 215a611c0722",
+        }, null, 2),
+      }),
+    })],
+    then: ["reason, detail and the install-then-revive fix are in stderr", ({ ctx, result }) => {
+      try {
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain("REFUSED: release identity failed: master-drift: installed 5cb92acf396c is behind remote master 215a611c0722");
+        expect(result.stderr).toContain("fix: node bin/install-release.mjs --sha <origin/master sha>, then amux revive");
       } finally { ctx.cleanup(); }
     }],
   });

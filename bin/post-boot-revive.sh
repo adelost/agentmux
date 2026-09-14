@@ -20,8 +20,15 @@ echo "[$(date '+%F %T')] post-boot revive starting ($BOOT_ID)"
 # Panel revive is the one step that mutates panes, and the only step gated on
 # a verified release identity: a wrong/forged/linked install keeps the bridge
 # as the recovery channel but never writes into 60 panes.
+# One JSON string field from the identity report, without node: the remote
+# rescue answer must carry the reason even when node itself is what broke.
+identity_field() {
+  sed -n "s/^[[:space:]]*\"$1\":[[:space:]]*\"\(.*\)\",\{0,1\}[[:space:]]*$/\1/p" "$STATE_DIR/revive-identity.json" | head -n 1
+}
 if ! node "$DIR/bin/verify-release-identity.mjs" > "$STATE_DIR/revive-identity.json" 2>&1; then
-  echo "[$(date '+%F %T')] post-boot revive REFUSED: release identity failed (see $STATE_DIR/revive-identity.json); panels untouched, recovery channel stays up" >&2
+  reason="$(identity_field reason)"
+  detail="$(identity_field detail)"
+  echo "[$(date '+%F %T')] post-boot revive REFUSED: release identity failed: ${reason:-unknown}: ${detail:-see $STATE_DIR/revive-identity.json}; fix: node bin/install-release.mjs --sha <origin/master sha>, then amux revive; panels untouched, recovery channel stays up" >&2
   exit 1
 fi
 
