@@ -8,6 +8,7 @@ describe("identity decision", () => {
       allowRevive: true,
       reason: "ok",
       detail: "",
+      warning: "",
     });
 
     const refused = identityDecision({
