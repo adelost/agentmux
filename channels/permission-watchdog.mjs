@@ -1,12 +1,33 @@
 import { classifyPermissionPrompt, detectPermissionPrompt, formatPermissionAlert } from "../core/permission-watchdog.mjs";
 import { listAgents, findChannelForPane } from "../cli/config.mjs";
+import { execFileSync } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname } from "node:path";
 
 /**
- * WHAT: Watches every tmux pane for a Claude Code permission prompt that has
- * blocked it for longer than config.promptAgeMs, answers the one provably
- * harmless pattern itself and alerts the human about every other one.
- * WHY: A pane cannot answer its own prompt; without this nothing in amux
- * noticed a paid run sitting behind a rm confirmation for 21 minutes.
+ * WHAT: Checks whether git keeps a file at or under a literal rm prefix.
+ * WHY: Keeps tracked and uncommitted work from auto-approved deletes.
+ */
+export function gitKeepsFilesUnder(path) {
+  // Kept means tracked, or untracked and not ignored. Outside a repository git
+  // knows nothing; any other git failure counts as kept, so unknown never deletes.
+  let dir = path;
+  while (dir !== "/" && !existsSync(dir)) dir = dirname(dir);
+  // A folder means its contents; anything else is a name prefix ("2026-09-1*").
+  const spec = dir === path && statSync(path).isDirectory() ? `${path}/` : `${path}*`;
+  try {
+    const out = execFileSync("git", ["-C", dir, "ls-files", "--cached", "--others", "--exclude-standard", "--", spec], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 20 });
+    return out.trim().length > 0;
+  } catch (err) {
+    if (err.code === "ENOBUFS") return true;
+    return !/not a git repository/u.test(String(err.stderr || ""));
+  }
+}
+
+/**
+ * WHAT: Schedules pane scans that answer safe rm prompts and alert on the rest.
+ * WHY: Keeps a pane from waiting on a prompt it cannot answer itself.
  */
 export function createPermissionWatchdog({
   agent,
@@ -17,7 +38,11 @@ export function createPermissionWatchdog({
   notifyUser = null,
   log = (msg) => console.log(`permission-watchdog | ${msg}`),
   now = Date.now,
+  home = homedir(),
+  holdsKeptFiles = gitKeepsFilesUnder,
 }) {
+  // Safe rm prompts are answered after config.answerAgeMs, every other prompt
+  // alerts the human after config.promptAgeMs.
   const seen = new Map();     // paneKey -> { signature, firstSeenAt }
   const handled = new Map();  // paneKey -> signature already answered/alerted
   let intervalId = null;
@@ -59,15 +84,17 @@ export function createPermissionWatchdog({
       return null;
     }
     const ageMs = at - prev.firstSeenAt;
-    if (ageMs < config.promptAgeMs || handled.get(paneKey) === prompt.signature) return null;
+    if (handled.get(paneKey) === prompt.signature) return null;
+    const decision = classifyPermissionPrompt(prompt, { home, holdsKeptFiles });
+    const answerable = decision.action === "answer" && config.autoAnswer;
+    if (ageMs < (answerable ? config.answerAgeMs : config.promptAgeMs)) return null;
     handled.set(paneKey, prompt.signature);
 
-    const decision = classifyPermissionPrompt(prompt);
-    if (decision.action === "answer" && config.autoAnswer) {
+    if (answerable) {
       try {
         await answer(agentConfig.name, paneIdx, decision.keys);
         log(`answered "${decision.keys}" in ${paneKey} after ${Math.round(ageMs / 1000)}s: ${decision.why}`);
-        await post(agentConfig.name, paneIdx, `Permission watchdog: svarade ja i ${paneKey} efter ${Math.round(ageMs / 60_000)} min. ${decision.why}. Skäl i frågan: ${prompt.reason}`);
+        await post(agentConfig.name, paneIdx, `Permission watchdog: svarade ja i ${paneKey} efter ${Math.round(ageMs / 1000)} s. ${decision.why}. Skäl i frågan: ${prompt.reason}`);
         return { paneKey, action: "answered" };
       } catch (err) {
         log(`answer failed for ${paneKey}: ${err.message}`);
@@ -103,7 +130,7 @@ export function createPermissionWatchdog({
   function start() {
     if (!config.enabled) { log("disabled (AMUX_PERMISSION_WATCHDOG_ENABLED=false)"); return; }
     if (intervalId) return;
-    log(`enabled | prompt-age=${Math.round(config.promptAgeMs / 1000)}s poll=${Math.round(config.pollMs / 1000)}s auto-answer=${config.autoAnswer}`);
+    log(`enabled | answer-age=${Math.round(config.answerAgeMs / 1000)}s prompt-age=${Math.round(config.promptAgeMs / 1000)}s poll=${Math.round(config.pollMs / 1000)}s auto-answer=${config.autoAnswer}`);
     tick().catch((err) => log(`initial tick failed: ${err.message}`));
     intervalId = setInterval(() => { tick().catch((err) => log(`tick failed: ${err.message}`)); }, config.pollMs);
   }

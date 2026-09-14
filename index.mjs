@@ -399,8 +399,8 @@ const playwrightWatchdog = createPlaywrightWatchdog({
 playwrightWatchdog.start();
 
 // Permission watchdog: a pane cannot answer its own Claude Code permission
-// prompt. Answer the one provably harmless rm-on-"$VAR"/... pattern after two
-// minutes, alert the human about everything else (docs/permission-watchdog.md).
+// prompt. Answer safe rm prompts after seconds, alert the human about
+// everything else after two minutes (docs/permission-watchdog.md).
 const permissionWatchdog = createPermissionWatchdog({
   agent,
   deliveryBroker,

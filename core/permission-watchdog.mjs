@@ -6,33 +6,43 @@
 // mode still asks for that one, the pane cannot answer itself and nothing in
 // amux read the screen. Mattias: "får inte hända igen".
 
+/**
+ * WHAT: Defines watchdog timing: fast answers for safe rm, slow human alerts.
+ * WHY: Keeps a safe prompt from blocking a pane while a real decision waits for Mattias.
+ */
 export const DEFAULT_PERMISSION_WATCHDOG_CONFIG = {
   enabled: true,
   autoAnswer: true,
-  pollMs: 30_000,
+  pollMs: 10_000,
+  answerAgeMs: 10_000,
   promptAgeMs: 120_000,
 };
 
+/**
+ * WHAT: Parses watchdog switches and delays from the environment.
+ * WHY: Keeps tuning in env from requiring a code change.
+ */
 export function parsePermissionWatchdogConfig(env = process.env) {
   const int = (v, d) => { const n = parseInt(v ?? "", 10); return Number.isFinite(n) && n > 0 ? n : d; };
+  const d = DEFAULT_PERMISSION_WATCHDOG_CONFIG;
   return {
     enabled: env.AMUX_PERMISSION_WATCHDOG_ENABLED !== "false",
     autoAnswer: env.AMUX_PERMISSION_WATCHDOG_AUTO_ANSWER !== "false",
-    pollMs: int(env.AMUX_PERMISSION_WATCHDOG_POLL_MS, DEFAULT_PERMISSION_WATCHDOG_CONFIG.pollMs),
-    promptAgeMs: int(env.AMUX_PERMISSION_WATCHDOG_PROMPT_AGE_MS, DEFAULT_PERMISSION_WATCHDOG_CONFIG.promptAgeMs),
+    pollMs: int(env.AMUX_PERMISSION_WATCHDOG_POLL_MS, d.pollMs),
+    answerAgeMs: int(env.AMUX_PERMISSION_WATCHDOG_ANSWER_AGE_MS, d.answerAgeMs),
+    promptAgeMs: int(env.AMUX_PERMISSION_WATCHDOG_PROMPT_AGE_MS, d.promptAgeMs),
   };
 }
 
 const strip = (s) => String(s || "").replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
 
 /**
- * WHAT: Finds an ACTIVE Claude Code permission prompt at the bottom of a pane.
- * WHY: The same text lingers in scrollback after it was answered; only a prompt
- * with "Do you want to proceed?" and its numbered options in the last lines,
- * and no composer prompt below them, is something anyone should act on.
- * Returns null or { signature, reason, command, options }.
+ * WHAT: Extracts the active Claude Code permission prompt at a pane's bottom.
+ * WHY: Keeps answered prompts in scrollback from being answered again.
  */
 export function detectPermissionPrompt(paneText) {
+  // Requires the question, numbered options and "Esc to cancel" in the last
+  // lines with no composer below. Returns null or { signature, reason, command, options }.
   const lines = strip(paneText).split(/\r?\n/).map((l) => l.trimEnd());
   const nonEmpty = lines.map((l, i) => ({ l, i })).filter((x) => x.l.trim());
   const tail = nonEmpty.slice(-14);
@@ -47,40 +57,83 @@ export function detectPermissionPrompt(paneText) {
   if (lines.slice(lastOptionIdx + 1).some((l) => /^\s*[❯›>]\s*$/u.test(l) || /^\s*[❯›>]\s+\S/u.test(l))) return null;
 
   const askIdx = lines.findIndex((l, i) => i <= lastOptionIdx && /Do you want to proceed\?/u.test(l));
+  const unbox = (l) => l.replace(/^\s*│\s?/u, "").trim();
+  // Newer Claude Code draws the reason inside the box and wraps its target onto
+  // the next box line; older builds print it as a plain line under the box.
+  const boxedReasonIdx = lines.findIndex((l, i) => i < askIdx && /^\s*│\s*Dangerous rm operation/u.test(l));
+  const bodyEnd = boxedReasonIdx >= 0 ? boxedReasonIdx : askIdx;
   // Command box: lines starting with "│" above the question; the box may carry
   // a trailing description line ("Relaunch the v8 training ...").
-  const command = lines.slice(0, askIdx).filter((l) => /^\s*│/u.test(l)).map((l) => l.replace(/^\s*│\s?/u, "")).join("\n").trim();
-  // Reason: the last non-empty, non-box, non-title line before the question.
-  const reason = lines.slice(0, askIdx).map((l) => l.trim()).filter((l) => l && !/^│/u.test(l) && !/^Bash command$/u.test(l) && !/^[─┌┐└┘]+$/u.test(l)).at(-1) || "";
+  const command = lines.slice(0, bodyEnd).filter((l) => /^\s*│/u.test(l)).map((l) => l.replace(/^\s*│\s?/u, "")).join("\n").trim();
+  // Reason: the boxed reason with its wrapped lines, else the last non-empty,
+  // non-box, non-title line before the question.
+  const reason = boxedReasonIdx >= 0
+    ? lines.slice(boxedReasonIdx, askIdx).filter((l) => /^\s*│/u.test(l)).map(unbox).filter(Boolean).join(" ")
+    : lines.slice(0, askIdx).map((l) => l.trim()).filter((l) => l && !/^│/u.test(l) && !/^Bash command$/u.test(l) && !/^[─┌┐└┘]+$/u.test(l)).at(-1) || "";
   const signature = `${reason}\n${command}`.slice(0, 600);
   return { signature, reason, command, options };
 }
 
+const RM_REASON = /^Dangerous rm operation on (possibly-empty variable path(?: inside command substitution)?|statically-unresolvable target):\s*(.+)$/u;
+const MIN_DEPTH = 3;
+const notify = (why) => ({ action: "notify", why });
+
 /**
- * WHAT: Decides whether a prompt may be answered "yes" without a human.
- * WHY: Exactly one pattern is known to be a false alarm: rm on "$VAR"/... where
- * the same block sets VAR to a literal absolute path deep enough that nothing
- * important sits at that level. Everything else is a human decision.
- * Returns { action: "answer", keys } or { action: "notify", why }.
+ * WHAT: Checks whether a permission prompt may be answered yes without a human.
+ * WHY: Keeps safe rm prompts from blocking panes and every other prompt with Mattias.
  */
-export function classifyPermissionPrompt({ reason = "", command = "" } = {}) {
-  const m = /possibly-empty variable path:\s*(.+)$/u.exec(reason);
-  if (!m) return { action: "notify", why: "not the variable-path rm check" };
-  const targets = m[1].trim().split(/\s+/u);
-  const vars = new Set();
-  for (const t of targets) {
-    const v = /^"?\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?"?\/\S+$/u.exec(t);
-    if (!v) return { action: "notify", why: `rm target is not "$VAR"/something: ${t}` };
-    vars.add(v[1]);
+export function classifyPermissionPrompt({ reason = "", command = "" } = {}, { home, holdsKeptFiles }) {
+  // Claude Code asks about rm targets it cannot resolve statically even in bypass
+  // mode (Mattias 2026-09-14: amux approves rm automatically). A target is safe once
+  // it resolves to a deep literal path that is not home, a top folder in home or on
+  // a drive, and holds nothing git keeps. Returns { action: "answer", keys, why } or
+  // { action: "notify", why }.
+  const m = RM_REASON.exec(reason.trim());
+  if (!m) return notify("not a Claude Code dangerous-rm check");
+  if (/inside command substitution/u.test(m[1])) return notify("rm target comes from command substitution");
+  const paths = [];
+  for (const target of m[2].trim().split(/\s+/u)) {
+    const resolved = resolveRmTarget(target, command, home);
+    if (resolved.why) return notify(resolved.why);
+    const unsafe = unsafeRmPath(resolved.path, home, holdsKeptFiles);
+    if (unsafe) return notify(unsafe);
+    paths.push(resolved.path);
   }
-  for (const v of vars) {
-    const assign = new RegExp(`(?:^|[;\\n]|&&|\\|\\|)\\s*${v}=("?)(\\/[^\\s"';&|]+)\\1(?=\\s|;|$)`, "u").exec(command);
-    if (!assign) return { action: "notify", why: `${v} is not assigned to a literal absolute path in the same command` };
-    const path = assign[2];
-    if (/\$/u.test(path)) return { action: "notify", why: `${v} is assigned from another variable` };
-    if (path.split("/").filter(Boolean).length < 3) return { action: "notify", why: `${v}=${path} is too close to the filesystem root` };
+  return { action: "answer", keys: "1", why: `rm-målen är djupa mappar utan filer som git behåller (${paths.join(", ")})` };
+}
+
+/** Resolves an rm target to its literal folder prefix: variables from literal
+ * assignments in the same command, ~ as home, cut at the first glob. */
+function resolveRmTarget(target, command, home) {
+  let t = target.replace(/["']/gu, "");
+  if (/\$\(|`/u.test(t)) return { why: "rm target comes from command substitution" };
+  for (const [, name] of t.matchAll(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/gu)) {
+    const assign = new RegExp(`(?:^|[;\\n]|&&|\\|\\|)\\s*${name}=("?)(\\/[^\\s"';&|]+)\\1(?=\\s|;|$)`, "u").exec(command);
+    if (!assign) return { why: `${name} is not assigned to a literal absolute path in the same command` };
+    if (/\$/u.test(assign[2])) return { why: `${name} is assigned from another variable` };
+    t = t.replace(new RegExp(`\\$\\{?${name}\\}?(?![A-Za-z0-9_])`, "gu"), assign[2]);
   }
-  return { action: "answer", keys: "1", why: `rm targets stay under a literal path set in the same command (${[...vars].join(", ")})` };
+  if (/\$/u.test(t)) return { why: `rm target is still a variable: ${target}` };
+  if (t === "~" || t.startsWith("~/")) t = home + t.slice(1);
+  const literal = t.split(/[*?[]/u)[0].replace(/\/+$/u, "");
+  if (literal.startsWith("/")) return { path: literal };
+  // A relative target is only as safe as the folder it runs in.
+  const cd = [...command.matchAll(/(?:^|[;\n]|&&)\s*cd\s+("?)(\/[^\s"';&|]+)\1/gu)].at(-1);
+  if (!cd) return { why: `relative rm target without a literal cd in the command: ${target}` };
+  if (!literal || literal === ".") return { why: "rm target is the whole working directory" };
+  return { path: `${cd[2].replace(/\/+$/u, "")}/${literal.replace(/^\.\//u, "")}` };
+}
+
+function unsafeRmPath(path, home, holdsKeptFiles) {
+  const segments = path.split("/").filter((s) => s && s !== ".");
+  if (segments.includes("..")) return `rm target climbs out with ..: ${path}`;
+  if (segments.length < MIN_DEPTH) return `${path} is too close to the filesystem root`;
+  const homeSegments = String(home || "").split("/").filter(Boolean);
+  const underHome = homeSegments.length && homeSegments.every((s, i) => segments[i] === s);
+  if (underHome && segments.length <= homeSegments.length + 1) return `${path} is home or a top folder in it`;
+  if (segments[0] === "mnt" && segments.length <= 3) return `${path} is a drive or a top folder on it`;
+  if (holdsKeptFiles(path)) return `${path} holds files git keeps (tracked, or untracked and not ignored)`;
+  return null;
 }
 
 export function formatPermissionAlert({ paneKey, ageMs, reason, command, why }) {
