@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM the portable native-Lego catalog
-// Product declarations SHA-256: 81d3ca8a19c39c3075b5d47d3ac73dfcb3ab8d1e9fe33777810539f920040675
+// Product declarations SHA-256: 007f344e2ffcc5c10c50e82e252418c4f515fb1f64cef834efd2ff9eb09dc540
 package io.agentmux.linkui.product.generated
 
 internal enum class GeneratedLinkNodeId(val wireId: String) { NAVIGATION_SERVICE("navigation.service"), CAPTURE_SERVICE("capture.service"), CONVERSATION_SERVICE("conversation.service"), PLAYBACK_SERVICE("playback.service"), TARGET_SERVICE("target.service"), SESSION_SERVICE("session.service"), HISTORY_SERVICE("history.service"), PREFERENCES_SERVICE("preferences.service"), UPDATES_SERVICE("updates.service"), RECOVERY_SERVICE("recovery.service"), CAPTURE_PRESENTATION("capture.presentation"), CONVERSATION_PRESENTATION("conversation.presentation"), PLAYBACK_PRESENTATION("playback.presentation"), TARGET_PRESENTATION("target.presentation"), SESSION_PRESENTATION("session.presentation"), HISTORY_PRESENTATION("history.presentation"), PREFERENCES_PRESENTATION("preferences.presentation"), UPDATES_PRESENTATION("updates.presentation"), RECOVERY_PRESENTATION("recovery.presentation"), CAPTURE_PHASE_PRESENTATION_ADAPTER("capture.phase.presentation-adapter"), CONVERSATION_DELIVERY_PHASE_PRESENTATION_ADAPTER("conversation.delivery-phase.presentation-adapter"), CONVERSATION_REPLY_PHASE_PRESENTATION_ADAPTER("conversation.reply-phase.presentation-adapter"), PLAYBACK_PHASE_PRESENTATION_ADAPTER("playback.phase.presentation-adapter"), TARGET_KIND_PRESENTATION_ADAPTER("target.kind.presentation-adapter"), SESSION_CONNECTION_STATE_PRESENTATION_ADAPTER("session.connection-state.presentation-adapter"), UPDATES_PHASE_PRESENTATION_ADAPTER("updates.phase.presentation-adapter"), RECOVERY_PHASE_PRESENTATION_ADAPTER("recovery.phase.presentation-adapter"), WAKE_SERVICE("wake.service"), WAKE_PRESENTATION("wake.presentation"), WAKE_PHASE_PRESENTATION_ADAPTER("wake.phase.presentation-adapter") }
@@ -129,7 +129,7 @@ internal object GeneratedLinkNativeLegoCatalog {
         GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_UPDATE_OPERATION, setOf("check", "retry", "install")),
         GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_UPDATE_PHASE, setOf("idle", "checking", "up-to-date", "unavailable", "available", "downloading", "ready-to-install", "installing", "install-failed", "failed")),
         GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_RECOVERY_PHASE, setOf("clean", "quarantined")),
-        GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_WAKE_PHASE, setOf("off", "listening", "capturing", "sending", "thinking", "speaking", "blocked")),
+        GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_WAKE_PHASE, setOf("off", "listening", "capturing", "sending", "thinking", "speaking", "follow-up", "blocked")),
         GeneratedLinkFiniteValueDeclaration(FiniteValueIds.LINK_NAVIGATION_PAGE, setOf("home", "settings", "dev-host"))
     )
     val ports: List<GeneratedProductPort> = GeneratedLinkNativeLegoPortData.ports

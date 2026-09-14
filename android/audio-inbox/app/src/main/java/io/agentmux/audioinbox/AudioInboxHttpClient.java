@@ -25,8 +25,10 @@ final class AudioInboxHttpClient {
     private final String consumerId;
     private final String language;
 
+    // No language hint: the bridge's transcriber default (Swedish) applies, exactly as for Discord
+    // voice notes and the public mailbox. The phone UI locale says nothing about the spoken language.
     AudioInboxHttpClient(String serverUrl, String consumerId) {
-        this(serverUrl, consumerId, Locale.getDefault().getLanguage());
+        this(serverUrl, consumerId, null);
     }
 
     AudioInboxHttpClient(String serverUrl, String consumerId, String language) {

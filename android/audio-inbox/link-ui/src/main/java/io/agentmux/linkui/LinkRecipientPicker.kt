@@ -25,6 +25,8 @@ fun linkRecipientOptions(target: LinkTargetPresentation): List<RingSelectionOpti
             id = recipient.id,
             title = recipient.id,
             detail = listOfNotNull(
+                // The check icon alone did not say which row is the current recipient.
+                "TALKING TO NOW".takeIf { recipient.id == target.selectedTargetId },
                 recipient.label.takeIf { it.isNotBlank() && it != recipient.id },
                 "Unavailable".takeIf { !recipient.acceptsMessages },
                 "Replies may be delayed".takeIf { !recipient.available && recipient.acceptsMessages },
@@ -70,8 +72,11 @@ fun LinkRecipientPicker(
         val navigator = remember { RingNavigator(RingScreen.Rows("FAVORITES", rows)) }
         LaunchedEffect(target.targets, favorites) {
             rows.value = target.targets.map { recipient ->
-                RowSpec(recipient.id, recipient.id, recipient.label,
-                    icon = if (recipient.id in favorites) RingIcons.Check else RingIcons.Target,
+                val favorite = recipient.id in favorites
+                RowSpec(recipient.id, recipient.id,
+                    listOf(if (favorite) "FAVORITE · tap to remove" else "Tap to add to favorites", recipient.label)
+                        .filter { it.isNotBlank() }.joinToString("\n"),
+                    icon = if (favorite) RingIcons.Star else RingIcons.Target,
                     multiline = true, actionTiming = CircleActionTiming.IMMEDIATE,
                     onTap = {
                         favorites = if (recipient.id in favorites) favorites - recipient.id else favorites + recipient.id

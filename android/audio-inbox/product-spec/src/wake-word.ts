@@ -29,7 +29,7 @@ export const WAKE_WORD_EFFECTS = ["audio.capture", "storage.write", "transport.s
 
 export function defineWakeWordFeature<const Product extends string>(product: Product) {
   const phases = finiteValues(`${product}.wake-phase`, [
-    "off", "listening", "capturing", "sending", "thinking", "speaking", "blocked",
+    "off", "listening", "capturing", "sending", "thinking", "speaking", "follow-up", "blocked",
   ]);
 
   const statusContract = {

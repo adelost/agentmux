@@ -17,6 +17,8 @@ import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.WakeWordDetector
 import io.agentmux.wakeword.WakeWordModels
 import io.agentmux.wakeword.listensForWakeWord
+import io.agentmux.wakeword.spokenReply
+import io.agentmux.linkui.LinkWakePhrase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -30,11 +32,11 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
 
-private const val WAKE_THRESHOLD = 0.5f
+private const val MORE_ON_SCREEN = "Hela svaret finns i Link."
 private const val THINKING_TONE_LIMIT_MS = 30_000L
 
 /**
- * WHAT: Foreground microphone service for hands-free Link: "computer", a question, a spoken reply.
+ * WHAT: Foreground microphone service for hands-free Link: the wake phrase, a question, a spoken answer, a follow-up.
  * WHY: Questions go through the same process-wide conversation owner as push-to-talk,
  * so they work with the screen locked and appear in the normal history.
  */
@@ -92,9 +94,11 @@ class WakeWordService : Service(), WakeLoopListener {
                             source = source,
                             detector = WakeWordDetector(models),
                             vad = vad,
-                            threshold = WAKE_THRESHOLD,
+                            threshold = LinkWakePhrase.threshold,
                             policy = EndpointPolicy(),
                             detectionAllowed = { LinkWakeStatus.status.value.listensForWakeWord() },
+                            followUpWindow = { LinkWakeStatus.status.value.takeIf { it.phase == WakePhase.FOLLOW_UP }?.followUps },
+                            followUpPolicy = EndpointPolicy(waitForSpeechMs = 4_000),
                             listener = this,
                         ).also { loop = it }.run()
                     }
@@ -110,25 +114,31 @@ class WakeWordService : Service(), WakeLoopListener {
     private fun openModels() = WakeWordModels(
         melspectrogram = OnnxFloatModel.load(assetBytes("melspectrogram.onnx")),
         embedding = OnnxFloatModel.load(assetBytes("embedding_model.onnx")),
-        classifier = OnnxFloatModel.load(assetBytes("computer_v1.onnx")),
+        classifier = OnnxFloatModel.load(assetBytes(LinkWakePhrase.modelAsset)),
     )
 
     private fun openSource(qaWav: String?): WakePcmSource =
-        if (BuildConfig.DEBUG && qaWav != null) WavFixturePcmSource(File(qaWav)) else MicrophonePcmSource.open(this)
+        if (BuildConfig.DEBUG && qaWav != null) {
+            WavFixturePcmSource(qaWav) { LinkWakeStatus.status.value.phase }
+        } else {
+            MicrophonePcmSource.open(this)
+        }
 
     private fun assetBytes(name: String): ByteArray = assets.open(name).use { it.readBytes() }
 
     override fun onDetected(score: Float) = MainThread.run {
-        LinkWakeStatus.status.value.turnId?.let(readAloudRequested::remove)
+        val interrupted = LinkWakeStatus.status.value.phase == WakePhase.SPEAKING
         LinkWakeStatus.apply(WakeEvent.Detected(score))
+        if (interrupted) coordinator?.stopAudio()
         earcons?.heard()
     }
 
     override fun onQuestion(end: UtteranceEnd, pcm: ShortArray, startedAtMs: Long) {
         if (end == UtteranceEnd.NO_SPEECH) {
             MainThread.run {
+                val afterWakePhrase = LinkWakeStatus.status.value.phase == WakePhase.CAPTURING
                 LinkWakeStatus.apply(WakeEvent.CaptureEnded(end, null))
-                earcons?.failed()
+                if (afterWakePhrase) earcons?.failed()
             }
             return
         }
@@ -145,7 +155,7 @@ class WakeWordService : Service(), WakeLoopListener {
         val failure = when {
             encodingError != null -> "Could not encode the question · ${encodingError.message.orEmpty().take(80)}"
             held.selectedTarget() == null -> "No target selected in Link"
-            !held.submitAudio(capture) -> "The selected target is unavailable"
+            !held.submitAudio(capture, handsFree = true) -> "The selected target is unavailable"
             else -> null
         }
         if (failure != null) capture.file.delete()
@@ -159,16 +169,16 @@ class WakeWordService : Service(), WakeLoopListener {
         held.state.collect { state ->
             val tracked = LinkWakeStatus.status.value.turnId ?: return@collect
             val turn = state.turns.firstOrNull { it.turnId == tracked }
-            if (turn != null && turn.awaitsReadAloud() && !held.speaksReplies() && readAloudRequested.add(tracked)) {
-                readAloud(held, tracked)
+            if (turn != null && turn.awaitsReadAloud() && readAloudRequested.add(tracked)) {
+                readAloud(held, tracked, spokenReply(turn.replyText, MORE_ON_SCREEN).text)
             }
             LinkWakeStatus.apply(WakeEvent.TurnChanged(turn.wakeProgress()))
         }
     }
 
     /** Starting playback from the background is refused unless Link is exempt from battery optimization. */
-    private fun readAloud(held: LinkCoordinator, turnId: String) {
-        runCatching { held.playReply(turnId, explicitReplay = false) }.onFailure { error ->
+    private fun readAloud(held: LinkCoordinator, turnId: String, spokenText: String) {
+        runCatching { held.playReply(turnId, explicitReplay = false, spokenText = spokenText) }.onFailure { error ->
             val reason = if (wakeBatteryRestricted(this)) "set Link's battery use to Unrestricted" else error.message.orEmpty()
             LinkWakeStatus.apply(WakeEvent.TurnChanged(TurnProgress(TurnStage.SPEAK_FAILED, reason.take(100))))
             earcons?.failed()
@@ -185,6 +195,7 @@ class WakeWordService : Service(), WakeLoopListener {
             LinkWakeStatus.status.map { it.phase }.distinctUntilChanged().collect { phase ->
                 thinkingTones?.cancel()
                 if (phase == WakePhase.THINKING) thinkingTones = launch { tickWhileThinking() }
+                if (phase == WakePhase.FOLLOW_UP) earcons?.followUp()
             }
         }
     }

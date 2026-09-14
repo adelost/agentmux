@@ -402,7 +402,7 @@
     },
     {
       "id": "link.wake-phase",
-      "values": ["blocked", "capturing", "listening", "off", "sending", "speaking", "thinking"]
+      "values": ["blocked", "capturing", "follow-up", "listening", "off", "sending", "speaking", "thinking"]
     }
   ],
   "navigation": {

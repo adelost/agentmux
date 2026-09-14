@@ -51,8 +51,9 @@ object LinkReducer {
         )
         is LinkAction.Targets -> {
             val next = action.targets.distinctBy(LinkTarget::id)
+            // Discovery publishes an empty catalog while routes reconnect; that is not the user unchoosing.
             val selected = state.selectedTargetId.takeIf { id ->
-                next.any { it.id == id }
+                next.isEmpty() || next.any { it.id == id }
             } ?: next.firstOrNull()?.id.orEmpty()
             state.copy(targets = next, selectedTargetId = selected)
         }

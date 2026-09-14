@@ -7,7 +7,8 @@ import io.agentmux.wakeword.UtteranceProgress
 import io.agentmux.wakeword.WAKE_CHUNK_SAMPLES
 import io.agentmux.wakeword.WakeWordDetector
 
-private const val PREROLL_CHUNKS = 4
+// The phrase's last syllable and the confirmation beep: neither is part of the question.
+private const val WAKE_TAIL_CHUNKS = 4
 
 /** What the microphone thread reports to the service's main-thread reducer. */
 internal interface WakeLoopListener {
@@ -27,6 +28,9 @@ internal class WakeListeningLoop(
     private val threshold: Float,
     private val policy: EndpointPolicy,
     private val detectionAllowed: () -> Boolean,
+    /** The open follow-up window's number, or null when none is open. */
+    private val followUpWindow: () -> Int?,
+    private val followUpPolicy: EndpointPolicy,
     private val listener: WakeLoopListener,
 ) {
     @Volatile private var running = true
@@ -37,8 +41,8 @@ internal class WakeListeningLoop(
 
     fun run() {
         val chunk = ShortArray(WAKE_CHUNK_SAMPLES)
-        val preroll = ArrayDeque<ShortArray>()
         var question: QuestionCapture? = null
+        var lastFollowUp = followUpWindow() ?: 0
         while (running) {
             if (!source.read(chunk)) {
                 if (running) listener.onSourceStopped()
@@ -53,15 +57,19 @@ internal class WakeListeningLoop(
                 }
                 continue
             }
-            preroll.addLast(chunk.copyOf())
-            while (preroll.size > PREROLL_CHUNKS) preroll.removeFirst()
+            val window = followUpWindow()
+            if (window != null && window > lastFollowUp) {
+                lastFollowUp = window
+                vad.reset()
+                question = QuestionCapture(vad, followUpPolicy, skipChunks = 0).also { it.accept(chunk) }
+                continue
+            }
             if (!detectionAllowed()) continue
             val score = detector.score(chunk)
             if (score >= threshold) {
                 listener.onDetected(score)
                 vad.reset()
-                question = QuestionCapture(preroll.toList(), vad, policy)
-                preroll.clear()
+                question = QuestionCapture(vad, policy, skipChunks = WAKE_TAIL_CHUNKS)
             }
         }
     }
@@ -69,18 +77,22 @@ internal class WakeListeningLoop(
 
 /** The PCM of one spoken question and its end-of-speech counters. */
 private class QuestionCapture(
-    preroll: List<ShortArray>,
     private val vad: SileroSpeechProbability,
     private val policy: EndpointPolicy,
+    private var skipChunks: Int,
 ) {
     val startedAtMs = System.currentTimeMillis()
-    private val chunks = preroll.toMutableList()
+    private val chunks = mutableListOf<ShortArray>()
     private var progress = UtteranceProgress()
     var end = UtteranceEnd.NONE
         private set
 
     /** True once the question is finished. */
     fun accept(chunk: ShortArray): Boolean {
+        if (skipChunks > 0) {
+            skipChunks -= 1
+            return false
+        }
         chunks += chunk.copyOf()
         progress = progress.advance(vad.probability(chunk), policy)
         end = progress.end(policy)

@@ -13,17 +13,19 @@ internal class LinkAudioActions(
     private val context: Context,
     private val targetForId: (String) -> ConversationTarget?,
 ) {
-    fun playReply(turn: LinkTurn, explicitReplay: Boolean): String? {
+    /** [spokenText] replaces the written reply for listeners who cannot look at the screen. */
+    fun playReply(turn: LinkTurn, explicitReplay: Boolean, spokenText: String? = null): String? {
         val target = targetForId(turn.targetId) ?: return "Recipient is unavailable."
-        if (turn.replyText.isBlank()) return "No reply to read."
-        if (turn.replyText.length > AppContract.MAX_REPLY_AUDIO_CHARACTERS) {
+        val text = spokenText ?: turn.replyText
+        if (text.isBlank()) return "No reply to read."
+        if (text.length > AppContract.MAX_REPLY_AUDIO_CHARACTERS) {
             return "This reply is too long for audio. The full text is above."
         }
         val intent = Intent(context, AudioInboxService::class.java).apply {
             action = if (explicitReplay) AppContract.ACTION_REPLAY_REPLY
             else AppContract.ACTION_PLAY_REPLY
             putExtra(AppContract.EXTRA_TURN_ID, turn.turnId)
-            putExtra(AppContract.EXTRA_TEXT, turn.replyText)
+            putExtra(AppContract.EXTRA_TEXT, text)
             putExtra(AppContract.EXTRA_SERVER, target.serverUrl)
             putExtra(
                 AppContract.EXTRA_TARGET_LABEL,

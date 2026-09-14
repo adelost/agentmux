@@ -6,6 +6,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LinkReducerTest {
+    @Test fun `a chosen recipient survives a momentarily empty catalog during discovery`() {
+        val chosen = LinkState(
+            targets = listOf(LinkTarget("lsrc:3", "THREE"), LinkTarget("claw:1", "ONE")),
+            selectedTargetId = "claw:1",
+        )
+        val empty = LinkReducer.reduce(chosen, LinkAction.Targets(emptyList()))
+        val restored = LinkReducer.reduce(empty, LinkAction.Targets(chosen.targets))
+        assertEquals("claw:1", restored.selectedTargetId)
+    }
+
     @Test fun `megabyte text and aggregate history are bounded before persistence and presentation`() {
         val huge = "x".repeat(1_048_576)
         var saved = LinkState()

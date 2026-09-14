@@ -19,6 +19,7 @@ import com.adelost.releasekit.updateTargetChangelog
 import com.adelost.ringkit.ui.PhoneScreenHeader
 import com.adelost.ringkit.ui.RingChoiceRow
 import io.agentmux.linkcore.ConnectionState
+import io.agentmux.linkcore.LinkPreferenceKey
 import io.agentmux.linkcore.LinkRecoveryPhase
 import io.agentmux.linkcore.LinkUpdateOperation
 import io.agentmux.linkcore.PlaybackOperation
@@ -154,7 +155,9 @@ internal fun LinkPhoneSettings(
                                             LinkPreferenceToggleEvent(preference.key, it == "ON"),
                                         )
                                     },
-                                    icon = LinkNativeBindings.requireIcon("speaker"),
+                                    icon = LinkNativeBindings.requireIcon(
+                                        if (preference.key == LinkPreferenceKey.WAKE_WORD) "record" else "speaker",
+                                    ),
                                     modifier = phoneRowModifier(),
                                 )
                             }
@@ -219,8 +222,8 @@ internal fun connectionRouteLabel(detail: String): String = when {
     else -> "CONNECTION"
 }
 
-/** The status row says why listening stopped and how often "computer" was heard, for tuning on the real phone. */
+/** The status row says why listening stopped and how often the phrase was heard, for tuning on the real phone. */
 internal fun wakeStatusDetail(wake: LinkWakePresentation): String = listOfNotNull(
     wake.detail,
     "Detections ${wake.detections}".takeIf { wake.detections > 0 },
-).joinToString(" · ").ifBlank { "Say \"computer\", then your question" }
+).joinToString(" · ").ifBlank { wakeHint() }

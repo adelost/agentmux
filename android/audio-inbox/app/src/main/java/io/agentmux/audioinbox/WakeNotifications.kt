@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import io.agentmux.linkui.LinkWakePhrase
 import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.WakeStatus
 
@@ -30,7 +31,7 @@ internal object WakeNotifications {
         return Notification.Builder(context, WAKE_CHANNEL)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle(wakePhaseTitle(status.phase))
-            .setContentText(status.detail.ifBlank { "Say \"computer\", then your question" })
+            .setContentText(status.detail.ifBlank { wakeHint() })
             .setContentIntent(open)
             .setOngoing(true)
             .addAction(Notification.Action.Builder(null, "Stop", stop).build())
@@ -44,10 +45,13 @@ internal object WakeNotifications {
 
 internal fun wakePhaseTitle(phase: WakePhase): String = when (phase) {
     WakePhase.OFF -> "Wake word off"
-    WakePhase.LISTENING -> "Listening for \"computer\""
+    WakePhase.LISTENING -> "Listening for \"${LinkWakePhrase.spoken}\""
     WakePhase.CAPTURING -> "Listening to your question"
     WakePhase.SENDING -> "Sending your question"
     WakePhase.THINKING -> "Waiting for the reply"
     WakePhase.SPEAKING -> "Reading the reply"
+    WakePhase.FOLLOW_UP -> "Ask a follow-up"
     WakePhase.BLOCKED -> "Wake word stopped"
 }
+
+internal fun wakeHint(): String = "Say \"${LinkWakePhrase.spoken}\", then your question"

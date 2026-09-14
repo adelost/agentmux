@@ -8,6 +8,7 @@ enum class WakePhase {
     SENDING,
     THINKING,
     SPEAKING,
+    FOLLOW_UP,
     BLOCKED,
 }
 
@@ -32,6 +33,8 @@ data class WakeStatus(
     val detail: String = "",
     val lastDetectionScore: Float = 0f,
     val detections: Int = 0,
+    /** Increments each time a spoken reply opens a follow-up window; the microphone loop starts one capture per value. */
+    val followUps: Int = 0,
 )
 
 sealed interface WakeEvent {
@@ -48,16 +51,17 @@ sealed interface WakeEvent {
     data class TurnChanged(val progress: TurnProgress) : WakeEvent
 }
 
-/** The detector runs while nobody is speaking to or from the phone. */
-fun WakeStatus.listensForWakeWord(): Boolean = phase == WakePhase.LISTENING || phase == WakePhase.THINKING
+/** The detector runs while waiting and while a reply is read, so the word can interrupt it. */
+fun WakeStatus.listensForWakeWord(): Boolean =
+    phase == WakePhase.LISTENING || phase == WakePhase.THINKING || phase == WakePhase.SPEAKING
 
 /**
  * WHAT: Pure transition function of the hands-free loop.
  * WHY: Every stop reason stays visible as a detail, so a silent wake word never has to be guessed at.
  */
 fun WakeStatus.reduce(event: WakeEvent): WakeStatus = when (event) {
-    WakeEvent.Start -> WakeStatus(WakePhase.LISTENING, detections = detections)
-    WakeEvent.Stop -> WakeStatus(WakePhase.OFF, detections = detections)
+    WakeEvent.Start -> WakeStatus(WakePhase.LISTENING, detections = detections, followUps = followUps)
+    WakeEvent.Stop -> WakeStatus(WakePhase.OFF, detections = detections, followUps = followUps)
     is WakeEvent.Blocked -> copy(phase = WakePhase.BLOCKED, turnId = null, detail = event.reason)
     is WakeEvent.Detected -> if (listensForWakeWord()) {
         copy(
@@ -78,8 +82,9 @@ private fun WakeStatus.tracksTurn(): Boolean =
     turnId != null && (phase == WakePhase.SENDING || phase == WakePhase.THINKING || phase == WakePhase.SPEAKING)
 
 private fun WakeStatus.captureEnded(event: WakeEvent.CaptureEnded): WakeStatus {
-    if (phase != WakePhase.CAPTURING) return this
+    if (phase != WakePhase.CAPTURING && phase != WakePhase.FOLLOW_UP) return this
     return when {
+        event.end == UtteranceEnd.NO_SPEECH && phase == WakePhase.FOLLOW_UP -> listening("")
         event.end == UtteranceEnd.NO_SPEECH -> listening("Heard the wake word but no question")
         event.turnId == null -> listening(event.failure)
         else -> copy(phase = WakePhase.SENDING, turnId = event.turnId, detail = "")
@@ -90,7 +95,7 @@ private fun WakeStatus.followTurn(progress: TurnProgress): WakeStatus = when (pr
     TurnStage.SENDING -> copy(phase = WakePhase.SENDING)
     TurnStage.THINKING -> copy(phase = WakePhase.THINKING)
     TurnStage.SPEAKING -> copy(phase = WakePhase.SPEAKING)
-    TurnStage.SPOKEN -> listening("")
+    TurnStage.SPOKEN -> copy(phase = WakePhase.FOLLOW_UP, turnId = null, detail = "", followUps = followUps + 1)
     TurnStage.SEND_FAILED -> listening("Could not send · ${progress.error}")
     TurnStage.REPLY_FAILED -> listening("No reply · ${progress.error}")
     TurnStage.SPEAK_FAILED -> listening("Could not read the reply · ${progress.error}")

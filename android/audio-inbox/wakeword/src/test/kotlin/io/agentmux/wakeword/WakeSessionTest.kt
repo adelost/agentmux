@@ -13,12 +13,12 @@ class WakeSessionTest {
         reduce(WakeEvent.TurnChanged(TurnProgress(stage, error)))
 
     @Test
-    fun aQuestionTravelsThroughThinkingAndSpeakingBackToListening() {
+    fun aQuestionTravelsThroughThinkingAndSpeakingIntoAFollowUpWindow() {
         val phases = listOf(TurnStage.SENDING, TurnStage.THINKING, TurnStage.SPEAKING, TurnStage.SPOKEN)
             .runningFold(sent()) { status, stage -> status.after(stage) }
             .map { it.phase }
         assertEquals(
-            listOf(WakePhase.SENDING, WakePhase.SENDING, WakePhase.THINKING, WakePhase.SPEAKING, WakePhase.LISTENING),
+            listOf(WakePhase.SENDING, WakePhase.SENDING, WakePhase.THINKING, WakePhase.SPEAKING, WakePhase.FOLLOW_UP),
             phases,
         )
     }
@@ -36,9 +36,23 @@ class WakeSessionTest {
     }
 
     @Test
-    fun theWakeWordStaysIgnoredWhileTheReplyIsSpoken() {
-        val speaking = sent().after(TurnStage.SPEAKING)
-        assertEquals(speaking, speaking.reduce(WakeEvent.Detected(0.9f)))
+    fun theWakeWordInterruptsAReplyBeingRead() {
+        val interrupted = sent().after(TurnStage.SPEAKING).reduce(WakeEvent.Detected(0.9f))
+        assertEquals(WakePhase.CAPTURING to null, interrupted.phase to interrupted.turnId)
+    }
+
+    @Test
+    fun silenceInTheFollowUpWindowReturnsQuietlyToTheWakeWord() {
+        val window = sent().after(TurnStage.SPOKEN)
+        assertEquals(WakePhase.FOLLOW_UP to 1, window.phase to window.followUps)
+        val quiet = window.reduce(WakeEvent.CaptureEnded(UtteranceEnd.NO_SPEECH, null))
+        assertEquals(WakePhase.LISTENING to "", quiet.phase to quiet.detail)
+    }
+
+    @Test
+    fun aFollowUpQuestionIsSentWithoutTheWakeWord() {
+        val followUp = sent().after(TurnStage.SPOKEN).reduce(WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "t2"))
+        assertEquals(WakePhase.SENDING to "t2", followUp.phase to followUp.turnId)
     }
 
     @Test

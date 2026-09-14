@@ -4,29 +4,32 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WakeWordDetectorTest {
-    @Test
-    fun spokenComputerScoresAboveTheDefaultThreshold() {
-        computerModels().use { models ->
-            val best = wavChunks("computer-question-en.wav").maxOf(WakeWordDetector(models)::score)
-            println("computer-question-en max score $best")
-            assertTrue("max score $best", best >= 0.9f)
-        }
+    private val threshold = WakePhrases.HEY_JARVIS.threshold
+
+    private fun bestScore(fixture: String): Float = heyJarvisModels().use { models ->
+        wavChunks(fixture).maxOf(WakeWordDetector(models)::score).also { println("$fixture max score $it") }
     }
 
     @Test
-    fun swedishSentenceWithoutTheWordStaysQuiet() {
-        computerModels().use { models ->
-            val best = wavChunks("swedish-no-wake-word.wav").maxOf(WakeWordDetector(models)::score)
-            println("swedish-no-wake-word max score $best")
-            assertTrue("max score $best", best < 0.1f)
-        }
+    fun aSwedishVoiceOverBrownNoiseWakesLink() {
+        assertTrue(bestScore("hey-jarvis-question-sv-noise.wav") >= threshold)
     }
 
     @Test
-    fun resetForgetsTheWakeWordSoItCannotRetrigger() {
-        computerModels().use { models ->
+    fun theWeakestMeasuredSwedishVoiceStillClearsTheThreshold() {
+        assertTrue(bestScore("hey-jarvis-question-sv-soft.wav") >= threshold)
+    }
+
+    @Test
+    fun aSwedishSentenceWithoutThePhraseStaysQuiet() {
+        assertTrue(bestScore("swedish-no-wake-word.wav") < 0.1f)
+    }
+
+    @Test
+    fun resetForgetsThePhraseSoItCannotRetrigger() {
+        heyJarvisModels().use { models ->
             val detector = WakeWordDetector(models)
-            wavChunks("computer-question-en.wav").forEach { detector.score(it) }
+            wavChunks("hey-jarvis-question-sv-noise.wav").forEach { detector.score(it) }
             detector.reset()
             val afterReset = List(20) { detector.score(ShortArray(WAKE_CHUNK_SAMPLES)) }.max()
             assertTrue("score after reset $afterReset", afterReset < 0.1f)

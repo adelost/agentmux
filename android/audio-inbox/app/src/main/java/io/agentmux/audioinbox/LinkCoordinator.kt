@@ -46,6 +46,7 @@ internal class LinkCoordinator(
     private val pendingDiscovery = AtomicInteger(2)
     private val drafts = ConcurrentHashMap<String, String>()
     private val voiceTurns = ConcurrentHashMap.newKeySet<String>()
+    private val handsFreeTurns = ConcurrentHashMap.newKeySet<String>() // their read-aloud belongs to the wake loop
     @Volatile private var recoveredPlaybackApplied = false
     private val linkAuth = LinkAuthController(
         context,
@@ -105,7 +106,7 @@ internal class LinkCoordinator(
                         System.currentTimeMillis(),
                     ),
                 )
-                if (preferences.getBoolean(AppContract.KEY_SPEAK_REPLIES, false)) {
+                if (turnId !in handsFreeTurns && preferences.getBoolean(AppContract.KEY_SPEAK_REPLIES, false)) {
                     playReply(turnId, explicitReplay = false)
                 }
             }
@@ -198,9 +199,10 @@ internal class LinkCoordinator(
         return turnId
     }
 
-    fun submitAudio(capture: PushToTalkRecorder.Capture): Boolean {
+    fun submitAudio(capture: PushToTalkRecorder.Capture, handsFree: Boolean = false): Boolean {
         val target = targetForSelection() ?: return false
         voiceTurns.add(capture.turnId)
+        if (handsFree) handsFreeTurns.add(capture.turnId)
         dispatch(
             LinkAction.Submit(
                 LinkTurn(
@@ -284,9 +286,9 @@ internal class LinkCoordinator(
         )
     }
 
-    fun playReply(turnId: String, explicitReplay: Boolean = true) {
+    fun playReply(turnId: String, explicitReplay: Boolean = true, spokenText: String? = null) {
         val turn = ledger.value.turns.firstOrNull { it.turnId == turnId } ?: return
-        audioActions.playReply(turn, explicitReplay)?.let { reason ->
+        audioActions.playReply(turn, explicitReplay, spokenText)?.let { reason ->
             dispatch(LinkAction.PlaybackFailed(turnId, reason))
         }
     }
