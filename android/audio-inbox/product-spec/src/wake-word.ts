@@ -31,6 +31,8 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
   const phases = finiteValues(`${product}.wake-phase`, [
     "off", "listening", "capturing", "sending", "thinking", "speaking", "follow-up", "blocked",
   ]);
+  // The phrases whose models ship in `:wakeword` (WakePhrases.offered), default first.
+  const phrases = finiteValues(`${product}.wake-phrase`, ["hey-jarvis", "hey-marvin", "alexa"]);
 
   const statusContract = {
     id: `${product}.wake-status`, kind: "state", boundary: "presentation",
@@ -38,6 +40,7 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
       field("phase", finiteValueRef(phases.id)),
       field("detail", "string", { nullable: true }),
       field("detections", "integer"),
+      field("phrase", finiteValueRef(phrases.id)),
     ],
   } as const;
 
@@ -72,12 +75,24 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
     presentation: phasePresentation,
   });
 
+  const phrasePresentation = defineStatePresentation(phrases, {
+    id: "wake.phrase",
+    fields: [statePresentationField("phrase", phrases)],
+    cases: mapFiniteCases(phrases, (phrase) => ({ phrase })),
+  });
+  const phraseAuthority = defineStateAuthority({
+    id: phrasePresentation.id,
+    source: { portRef: "wake.service.status", contract: statusContract, stateField: "phrase", states: phrases },
+    presentation: phrasePresentation,
+  });
+
   const componentType = defineComponentType({
     id: `${product}.wake-word`,
     requiredCapabilities: ["ui.component-tree"],
     inputs: [
       componentPort("model", statusContract),
       componentPort("wakeState", phaseAuthority.authority.presentation.contract),
+      componentPort("wakePhrase", phraseAuthority.authority.presentation.contract),
     ],
     outputs: [],
   });
@@ -93,24 +108,31 @@ export function defineWakeWordFeature<const Product extends string>(product: Pro
       config: {}, bindings: { source: "wake.service.status" },
     },
     phaseAuthority.adapter.node,
+    phraseAuthority.adapter.node,
   ] as const;
 
   const component = {
     id: "wake.status", componentTypeRef: componentType.id,
     bindings: {
-      inputs: { model: "wake.presentation.model", wakeState: phaseAuthority.presentationPortRef },
+      inputs: {
+        model: "wake.presentation.model",
+        wakeState: phaseAuthority.presentationPortRef,
+        wakePhrase: phraseAuthority.presentationPortRef,
+      },
       events: {},
     },
   } as const;
 
   return {
     phases,
+    phrases,
     statusContract,
     service: wakeService,
     presentation,
     phaseAuthority,
+    phraseAuthority,
     componentType,
-    nodeTypes: [wakeService, presentation, phaseAuthority.adapter.type] as const,
+    nodeTypes: [wakeService, presentation, phaseAuthority.adapter.type, phraseAuthority.adapter.type] as const,
     nodes,
     component,
   };

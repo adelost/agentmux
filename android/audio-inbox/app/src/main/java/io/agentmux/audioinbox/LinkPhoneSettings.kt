@@ -27,6 +27,9 @@ import io.agentmux.linkui.activeTurnId
 import io.agentmux.linkui.product.LinkNativeBindings
 import io.agentmux.linkui.product.LinkWakePresentation
 import io.agentmux.wakeword.WakePhase
+import io.agentmux.wakeword.WakePhrase
+import io.agentmux.wakeword.WakePhrases
+import androidx.compose.ui.platform.LocalContext
 import io.agentmux.linkui.product.LinkPlaybackCommandEvent
 import io.agentmux.linkui.product.LinkPreferenceToggleEvent
 import io.agentmux.linkui.product.LinkRoute
@@ -164,9 +167,23 @@ internal fun LinkPhoneSettings(
                         }
                     }
                     GeneratedLinkSettingsComponent.WAKE_STATUS -> if (preferences.wakeWord || wake.phase != WakePhase.OFF) {
+                        item("${mount.id}.phrase") {
+                            val context = LocalContext.current
+                            RingChoiceRow(
+                                title = "WAKE PHRASE",
+                                selected = wakePhraseLabel(wake.phrase),
+                                options = WakePhrases.offered.map(::wakePhraseLabel),
+                                role = CircleChoiceRole.STEPPED,
+                                onSelect = { label ->
+                                    LinkWakePhraseChoice.choose(context, WakePhrases.offered.first { wakePhraseLabel(it) == label })
+                                },
+                                icon = LinkNativeBindings.requireIcon("record"),
+                                modifier = phoneRowModifier(),
+                            )
+                        }
                         item(mount.id) {
                             PhoneRow(
-                                title = wakePhaseTitle(wake.phase).uppercase(),
+                                title = wakePhaseTitle(wake.phase, wake.phrase).uppercase(),
                                 sub = wakeStatusDetail(wake),
                                 icon = LinkNativeBindings.requireIcon(if (wake.phase == WakePhase.BLOCKED) "warning" else "record"),
                             )
@@ -226,4 +243,7 @@ internal fun connectionRouteLabel(detail: String): String = when {
 internal fun wakeStatusDetail(wake: LinkWakePresentation): String = listOfNotNull(
     wake.detail,
     "Detections ${wake.detections}".takeIf { wake.detections > 0 },
-).joinToString(" · ").ifBlank { wakeHint() }
+).joinToString(" · ").ifBlank { wakeHint(wake.phrase) }
+
+/** The picker shows exactly what to say. */
+internal fun wakePhraseLabel(phrase: WakePhrase): String = phrase.spoken.uppercase()

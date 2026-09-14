@@ -10,6 +10,8 @@ import android.os.PowerManager
 import android.provider.Settings
 import io.agentmux.wakeword.WakeEvent
 import io.agentmux.wakeword.WakePhase
+import io.agentmux.wakeword.WakePhrase
+import io.agentmux.wakeword.WakePhrases
 import io.agentmux.wakeword.WakeStatus
 import io.agentmux.wakeword.reduce
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 internal const val KEY_WAKE_WORD = "wakeWord"
+private const val KEY_WAKE_PHRASE = "wakePhrase"
 
 /** The one process-wide hands-free status, written by the service and read by settings and the notification. */
 internal object LinkWakeStatus {
@@ -31,6 +34,20 @@ internal object LinkWakeStatus {
     }
 }
 
+/** The chosen wake phrase: stored beside the other Link preferences and applied to a running loop at once. */
+internal object LinkWakePhraseChoice {
+    fun choose(context: Context, phrase: WakePhrase) {
+        context.getSharedPreferences(AppContract.PREFS, Context.MODE_PRIVATE).edit().putString(KEY_WAKE_PHRASE, phrase.id).apply()
+        LinkWakeStatus.apply(WakeEvent.PhraseChosen(phrase))
+    }
+
+    /** Never chosen, or an id a later build no longer offers: the default phrase. */
+    fun restore(context: Context) {
+        val stored = context.getSharedPreferences(AppContract.PREFS, Context.MODE_PRIVATE).getString(KEY_WAKE_PHRASE, null)
+        LinkWakeStatus.apply(WakeEvent.PhraseChosen(WakePhrases.byId(stored) ?: WakePhrases.offered.first()))
+    }
+}
+
 /**
  * WHAT: The phone's WAKE WORD preference: permission, battery exemption and the listening service.
  * WHY: A microphone service may only start while Link is on screen; this runs from the settings toggle and on resume.
@@ -42,6 +59,10 @@ internal class LinkWakeWordControl(
     private val preferences = context.getSharedPreferences(AppContract.PREFS, Context.MODE_PRIVATE)
     private val mutableEnabled = MutableStateFlow(preferences.getBoolean(KEY_WAKE_WORD, false))
     val enabled: StateFlow<Boolean> = mutableEnabled.asStateFlow()
+
+    init {
+        LinkWakePhraseChoice.restore(context)
+    }
 
     fun setEnabled(on: Boolean) {
         if (on && !microphoneGranted()) {

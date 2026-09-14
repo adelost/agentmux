@@ -15,6 +15,7 @@ import io.agentmux.linkui.product.generated.GeneratedConversationReplyPhaseAutho
 import io.agentmux.linkui.product.generated.GeneratedTargetKindAuthority
 import io.agentmux.linkui.product.generated.GeneratedUpdatesPhaseAuthority
 import io.agentmux.linkui.product.generated.GeneratedWakePhaseAuthority
+import io.agentmux.linkui.product.generated.GeneratedWakePhraseAuthority
 import io.agentmux.wakeword.WakeStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
@@ -267,6 +268,13 @@ open class LinkProductGraph(
             GeneratedWakePhaseAuthority.componentInputs,
             { it.phase.wireId() },
             GeneratedWakePhaseAuthority::require,
+        )
+        mountStateAuthority(
+            GeneratedWakePhraseAuthority.inputPort<LinkWakePresentation>(),
+            GeneratedWakePhraseAuthority.outputPort,
+            GeneratedWakePhraseAuthority.componentInputs,
+            { it.phrase.id },
+            GeneratedWakePhraseAuthority::require,
         )
 
         // The one service-internal edge: a captured turn is delivered to the

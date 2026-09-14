@@ -1,6 +1,7 @@
 package io.agentmux.linkui.product
 
 import io.agentmux.wakeword.WakePhase
+import io.agentmux.wakeword.WakePhrase
 import io.agentmux.wakeword.WakeStatus
 import com.adelost.releasekit.UpdateState
 import io.agentmux.linkcore.CaptureOperation
@@ -96,6 +97,7 @@ data class LinkWakePresentation(
     val phase: WakePhase,
     val detail: String?,
     val detections: Int,
+    val phrase: WakePhrase,
 )
 
 /** updates.presentation.model — the updates component's model. */
@@ -227,6 +229,7 @@ fun WakeStatus.toWakePresentation(): LinkWakePresentation = LinkWakePresentation
     phase = phase,
     detail = detail.takeIf { it.isNotBlank() },
     detections = detections,
+    phrase = phrase,
 )
 
 /** The ONE ReleaseKit-to-product phase mapping; exhaustive by compiler. */

@@ -68,6 +68,7 @@ graph LR
   end
   subgraph wake["wake"]
     n_wake_phase_presentation_adapter["phase.presentation-adapter<br/><i>present</i>"]
+    n_wake_phrase_presentation_adapter["phrase.presentation-adapter<br/><i>present</i>"]
     n_wake_presentation["presentation<br/><i>present</i>"]
     n_wake_service["service<br/><i>service</i>"]
     n_wake_status(["status<br/><i>component</i>"])
@@ -122,6 +123,8 @@ graph LR
   n_updates_service -->|"update-status"| n_updates_phase_presentation_adapter
   n_updates_service -->|"update-status"| n_updates_presentation
   n_wake_phase_presentation_adapter -->|"phase.payload"| n_wake_status
+  n_wake_phrase_presentation_adapter -->|"phrase.payload"| n_wake_status
   n_wake_presentation -->|"wake-status"| n_wake_status
   n_wake_service -->|"wake-status"| n_wake_phase_presentation_adapter
+  n_wake_service -->|"wake-status"| n_wake_phrase_presentation_adapter
   n_wake_service -->|"wake-status"| n_wake_presentation

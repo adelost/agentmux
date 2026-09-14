@@ -35,4 +35,5 @@ export const linkFiniteValues = [
   linkUpdatePhases,
   linkRecoveryPhases,
   linkWakeWord.phases,
+  linkWakeWord.phrases,
 ] as const;
