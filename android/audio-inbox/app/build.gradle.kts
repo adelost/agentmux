@@ -28,7 +28,7 @@ android {
         applicationId = "io.agentmux.audioinbox"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
+        versionCode = 27
         versionName = linkVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // ONNX Runtime ships ~30 MB per ABI. Phones are arm64; x86_64 keeps the emulator QA path.
