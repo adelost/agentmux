@@ -431,42 +431,9 @@ const nativeRuntimeWatcher = createNativeRuntimeWatcher({
   discord,
   state: appState,
 });
-// The watcher can post immediately during its startup audit. Wait until the
-// Discord client and inbound reconciliation are ready so the first post does
-// not fail against a cold channel cache and burn a retry cycle.
-await bridgeReady;
-const legacyRecovery = await handlers.recoverLegacyDeliveries(discord);
-if (legacyRecovery.recovered || legacyRecovery.remaining) {
-  console.log(`[delivery-recovery] queued ${legacyRecovery.recovered}, remaining ${legacyRecovery.remaining}`);
-}
-deliveryBroker.start();
-jsonlWatcher.start();
-nativeRuntimeWatcher.start();
-
-// Compact-then-sleep controller. It starts after the transport and watchers,
-// waits through bridge startup, and then re-gates every candidate locally.
-// Only proven-done, clean, unattached Claude panes idle for 24h are eligible;
-// each sleep has an exact compact boundary + nonce receipt. New durable input
-// wakes exactly its recorded session through the broker lifecycle above.
-if (process.env.AMUX_PANE_SLEEP_ENABLED !== "false") {
-  setTimeout(() => {
-    void cmdSleepWatch({
-      agent,
-      deliveryQueue,
-      socket: TMUX_SOCKET,
-      configPath: AGENTS_YAML,
-      bridgeDir: __dir,
-    }, { once: false, apply: true }, {
-      queue: deliveryQueue,
-      // A refused automatic candidate is expected and must not set the
-      // foreground bridge's eventual process exit code.
-      exit: () => {},
-    })
-      .catch((error) => console.error(`pane-sleep | controller failed: ${error.message}`));
-  }, 60_000);
-  console.log("pane-sleep | enabled | idle=24h | compact receipt required | max=2/5m");
-}
-
+// Link must not wait for Discord: inbound reconciliation took 3.5 minutes on
+// 2026-09-14 and every phone send got HTTP 502 meanwhile. The broker queue
+// accepts jobs before it starts, and a mirror post that fails is only logged.
 // Static PWA bundle is served from the same Node process so the whole
 // app lives behind one Tailscale Serve tunnel. Override with
 // VOICE_PWA_STATIC_DIR if the PWA lives somewhere other than
@@ -504,6 +471,43 @@ voicePwa.start()
     console.log(`voice-pwa | listening at ${url}${staticNote}`);
   })
   .catch((err) => console.error(`voice-pwa | failed to start: ${err.message}`));
+
+// The watcher can post immediately during its startup audit. Wait until the
+// Discord client and inbound reconciliation are ready so the first post does
+// not fail against a cold channel cache and burn a retry cycle.
+await bridgeReady;
+const legacyRecovery = await handlers.recoverLegacyDeliveries(discord);
+if (legacyRecovery.recovered || legacyRecovery.remaining) {
+  console.log(`[delivery-recovery] queued ${legacyRecovery.recovered}, remaining ${legacyRecovery.remaining}`);
+}
+deliveryBroker.start();
+jsonlWatcher.start();
+nativeRuntimeWatcher.start();
+
+// Compact-then-sleep controller. It starts after the transport and watchers,
+// waits through bridge startup, and then re-gates every candidate locally.
+// Only proven-done, clean, unattached Claude panes idle for 24h are eligible;
+// each sleep has an exact compact boundary + nonce receipt. New durable input
+// wakes exactly its recorded session through the broker lifecycle above.
+if (process.env.AMUX_PANE_SLEEP_ENABLED !== "false") {
+  setTimeout(() => {
+    void cmdSleepWatch({
+      agent,
+      deliveryQueue,
+      socket: TMUX_SOCKET,
+      configPath: AGENTS_YAML,
+      bridgeDir: __dir,
+    }, { once: false, apply: true }, {
+      queue: deliveryQueue,
+      // A refused automatic candidate is expected and must not set the
+      // foreground bridge's eventual process exit code.
+      exit: () => {},
+    })
+      .catch((error) => console.error(`pane-sleep | controller failed: ${error.message}`));
+  }, 60_000);
+  console.log("pane-sleep | enabled | idle=24h | compact receipt required | max=2/5m");
+}
+
 
 // Outbound Link connector (docs/link-internet-v1.md): polls the public
 // mailbox for the panes this bridge owns and carries replies back.

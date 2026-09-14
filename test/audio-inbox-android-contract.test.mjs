@@ -12,6 +12,15 @@ feature("Android audio inbox source contract", () => {
     }],
   });
 
+  unit("Link answers phones while the bridge still waits on Discord", {
+    then: ["the voice server starts before Discord readiness is awaited", () => {
+      // 2026-09-14: inbound reconciliation took 3.5 min and every phone send got HTTP 502.
+      const startup = read("index.mjs");
+      expect(startup.indexOf("voicePwa.start()")).toBeGreaterThan(-1);
+      expect(startup.indexOf("voicePwa.start()")).toBeLessThan(startup.indexOf("await bridgeReady;"));
+    }],
+  });
+
   unit("the playback service is private and Tailnet discovery is explicit", {
     then: ["manifest and startup wiring preserve the intended boundary", () => {
       const manifest = read("android/audio-inbox/app/src/main/AndroidManifest.xml");
