@@ -12,7 +12,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import com.adelost.ringkit.ports.CirclePortRole
+import com.adelost.ringkit.ports.CirclePortStatus
+import com.adelost.ringkit.ports.needsAttention
+import com.adelost.ringkit.ports.status
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LinkProductGraphTotalityTest {
@@ -22,24 +29,8 @@ class LinkProductGraphTotalityTest {
         val playback = mutableListOf<LinkPlaybackCommandEvent>()
         val captures = mutableListOf<CaptureOperation>()
         var clock = 0L
-        val graph = LinkProductGraph(
-            processScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+        val graph = graph(
             state = state,
-            updateState = MutableStateFlow(
-                UpdateState.UpToDate("test", publishedAtEpochMillis = null),
-            ),
-            microphoneGranted = MutableStateFlow(false),
-            speakReplies = MutableStateFlow(false),
-            wakeWordEnabled = MutableStateFlow(false),
-            wakeStatus = MutableStateFlow(io.agentmux.wakeword.WakeStatus()),
-            publicLinkActive = { false },
-            targetKindOf = { null },
-            captureByteCount = { 0L },
-            captureByteLimit = { null },
-            capturedTurns = MutableSharedFlow(),
-            navigation = LinkNavigationController(
-                artifact = io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef.PHONE_FULL_UI,
-            ),
             sinks = LinkProductSinks(
                 captureCommand = { event ->
                     captures += event.operation
@@ -53,7 +44,7 @@ class LinkProductGraphTotalityTest {
                 preferenceToggle = {},
                 updateCommand = {},
             ),
-            monotonicNanos = { clock },
+            clock = { clock },
         )
 
         try {
@@ -89,4 +80,47 @@ class LinkProductGraphTotalityTest {
             graph.close()
         }
     }
+
+    @Test
+    fun aFreshLinkShowsUnsentCommandsAsIdleAndNothingNeedsAttention() {
+        val graph = graph(
+            state = MutableStateFlow(LinkState()),
+            sinks = LinkProductSinks({}, {}, {}, {}, {}, {}, {}),
+        )
+        try {
+            val ports = runBlocking { graph.inspections.first() }
+            val commands = ports.filter { it.role == CirclePortRole.COMMAND }
+            assertTrue(commands.isNotEmpty())
+            assertEquals(emptyList<String>(), commands.filter { it.status() != CirclePortStatus.IDLE }.map { "${it.id}=${it.status()}" })
+            assertEquals(emptyList<String>(), ports.filter { it.needsAttention() }.map { it.id })
+        } finally {
+            graph.close()
+        }
+    }
+
+    private fun graph(
+        state: MutableStateFlow<LinkState>,
+        sinks: LinkProductSinks,
+        clock: () -> Long = { 0L },
+    ) = LinkProductGraph(
+        processScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+        state = state,
+        updateState = MutableStateFlow(
+            UpdateState.UpToDate("test", publishedAtEpochMillis = null),
+        ),
+        microphoneGranted = MutableStateFlow(false),
+        speakReplies = MutableStateFlow(false),
+        wakeWordEnabled = MutableStateFlow(false),
+        wakeStatus = MutableStateFlow(io.agentmux.wakeword.WakeStatus()),
+        publicLinkActive = { false },
+        targetKindOf = { null },
+        captureByteCount = { 0L },
+        captureByteLimit = { null },
+        capturedTurns = MutableSharedFlow(),
+        navigation = LinkNavigationController(
+            artifact = io.agentmux.linkui.product.generated.GeneratedLinkArtifactRef.PHONE_FULL_UI,
+        ),
+        sinks = sinks,
+        monotonicNanos = clock,
+    )
 }

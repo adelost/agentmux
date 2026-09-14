@@ -398,11 +398,15 @@ internal class LinkProductPortRuntime(
         check(componentEventEmitters.putIfAbsent(id, token) == null) {
             "Product component event ${id.value} already has a native emitter"
         }
+        markBound(id)
     }
 
     @Synchronized
     private fun removeComponentEvent(id: GeneratedProductPortId, token: Any) {
-        if (componentEventEmitters[id] === token) componentEventEmitters.remove(id)
+        if (componentEventEmitters[id] === token) {
+            componentEventEmitters.remove(id)
+            markUnbound(id)
+        }
     }
 
     @Synchronized
