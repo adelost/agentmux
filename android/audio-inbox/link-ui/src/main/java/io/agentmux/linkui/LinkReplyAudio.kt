@@ -22,16 +22,18 @@ sealed interface LinkReplyAudio {
     data class Expired(val regenerable: Boolean) : LinkReplyAudio
 }
 
-/** The READ ALOUD row for a reply: fresh audio is loud, pruned audio is grey, only real failures ask for a retry. */
-data class LinkReadAloudRow(val title: String, val sub: String, val tappable: Boolean, val muted: Boolean)
+/** The picture on a reply's read-aloud control: play the speech, or make it again. */
+enum class ReadAloudIcon { SPEAKER, REFRESH }
+
+/** A reply's read-aloud control is a picture, never a label: at most the audio's length beside it. */
+data class LinkReadAloudRow(val icon: ReadAloudIcon, val length: String, val tappable: Boolean, val muted: Boolean)
 
 fun linkReadAloudRow(turn: LinkTurn, audio: LinkReplyAudio): LinkReadAloudRow = when {
-    turn.playbackPhase == PlaybackPhase.FAILED ->
-        LinkReadAloudRow("READ ALOUD", if (turn.playbackError.isBlank()) "Audio unavailable · tap to retry" else "Tap to retry", true, false)
-    audio is LinkReplyAudio.Saved -> LinkReadAloudRow("READ ALOUD", clockDuration(audio.durationMs), true, false)
-    audio is LinkReplyAudio.Expired && audio.regenerable -> LinkReadAloudRow("AUDIO EXPIRED", "Tap to regenerate", true, true)
-    audio is LinkReplyAudio.Expired -> LinkReadAloudRow("AUDIO EXPIRED", "", false, true)
-    else -> LinkReadAloudRow("READ ALOUD", "", true, false)
+    turn.playbackPhase == PlaybackPhase.FAILED -> LinkReadAloudRow(ReadAloudIcon.REFRESH, "", true, false)
+    audio is LinkReplyAudio.Saved -> LinkReadAloudRow(ReadAloudIcon.SPEAKER, clockDuration(audio.durationMs), true, false)
+    audio is LinkReplyAudio.Expired && audio.regenerable -> LinkReadAloudRow(ReadAloudIcon.REFRESH, "", true, true)
+    audio is LinkReplyAudio.Expired -> LinkReadAloudRow(ReadAloudIcon.SPEAKER, "", false, true)
+    else -> LinkReadAloudRow(ReadAloudIcon.SPEAKER, "", true, false)
 }
 
 private fun clockDuration(ms: Long): String {
