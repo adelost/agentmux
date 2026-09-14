@@ -133,10 +133,11 @@ export function createVoicePWA(deps) {
   function listPhoneTargets() {
     const primary = String(deps.audioDiscovery?.target || "").trim();
     const targets = [];
-    for (const channel of phoneTargetChannels(deps.audioDiscovery)) {
-      const owner = paneForChannel(loadAgents(), channel);
+    const agents = loadAgents();
+    for (const channel of phoneTargetChannels(deps.audioDiscovery, agents)) {
+      const owner = paneForChannel(agents, channel);
       if (!owner) continue;
-      const entry = loadAgents()[owner.name];
+      const entry = agents[owner.name];
       targets.push({
         id: `${owner.name}:${owner.pane}`,
         label: entry?.panes?.[owner.pane]?.label || `${owner.name}:${owner.pane}`,

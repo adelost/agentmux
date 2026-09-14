@@ -101,9 +101,9 @@ export function createVoiceInput({
     try { body = await parseJsonBody(req, MAX_AUDIO_BYTES + 1024 * 1024); }
     catch (error) { return json(res, 400, { error: error.message }); }
     const target = String(body.audioTarget || body.target || "").trim();
-    // Any explicitly listed phone channel is addressable; the primary target
-    // stays first in discovery. Unknown channels keep the hard refusal.
-    if (!phoneTargetChannels(audioDiscovery).includes(target)) {
+    // Every channel the fleet maps to a pane is addressable; the primary target
+    // stays first in discovery. Unmapped channels keep the hard refusal.
+    if (!phoneTargetChannels(audioDiscovery, loadAgents()).includes(target)) {
       return json(res, 403, { error: "PTT target is not a configured audio inbox" });
     }
     if (!TURN_ID_PATTERN.test(String(body.idempotencyKey || ""))) {

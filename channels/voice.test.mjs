@@ -360,8 +360,8 @@ feature("POST /api/audio/send: native phone PTT", () => {
     }],
   });
 
-  component("unconfigured target is rejected before transcription or delivery", {
-    given: ["server configured for another channel", async () => {
+  component("a channel no pane owns is rejected before transcription or delivery", {
+    given: ["server whose fleet maps chan-0 and chan-1", async () => {
       const root = mkdtempSync(join(tmpdir(), "voice-ptt-reject-"));
       const s = setupServer({
         audioOutbox: createAudioOutbox({ journalPath: join(root, "audio.jsonl") }),
@@ -370,10 +370,10 @@ feature("POST /api/audio/send: native phone PTT", () => {
       const { url } = await s.pwa.start();
       return { s, url, cleanup: () => rmSync(root, { recursive: true, force: true }) };
     }],
-    when: ["phone requests another target", async ({ url }) => request(`${url}/api/audio/send`, {
+    when: ["phone requests an unmapped channel", async ({ url }) => request(`${url}/api/audio/send`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ audio: "YQ==", target: "chan-0", idempotencyKey: "turn-wrong" }),
+      body: JSON.stringify({ audio: "YQ==", target: "chan-9", idempotencyKey: "turn-wrong" }),
     })],
     then: ["request is refused without a pane write", async (response, ctx) => {
       expect(response.status).toBe(403);
@@ -425,6 +425,63 @@ claw:
       expect(sent.body.destination).toEqual({ agent: "claw", pane: 1 });
       expect(ctx.enqueued).toHaveLength(1);
       expect(ctx.enqueued[0]).toMatchObject({ agentName: "claw", pane: 1 });
+      await ctx.s.pwa.stop(); ctx.s.cleanup(); ctx.cleanup();
+    }],
+  });
+
+  // Mattias 2026-09-14 via claw:1: "man ska kunna välja alla ... favoriter markerade ... i toppen".
+  // A bridge started before an .env edit keeps its old AUDIO_INBOX_TARGETS, so TALK TO
+  // showed two panes while the fleet had 65 channels. The channel map is the target truth.
+  component("every pane with a Discord channel is a phone target, configured ones first", {
+    given: ["a fleet of three channels and an operator env naming only two", async () => {
+      const root = mkdtempSync(join(tmpdir(), "voice-ptt-fleet-"));
+      const enqueued = [];
+      const s = setupServer({
+        agentsYaml: `
+claw:
+  dir: /tmp/claw
+  discord:
+    "11111111111111111111": 0
+    "22222222222222222222": 1
+  panes:
+    - name: claude
+    - name: claude-2
+lsrc:
+  dir: /tmp/lsrc
+  discord:
+    "33333333333333333333": 0
+  panes:
+    - name: claude
+`,
+        audioOutbox: createAudioOutbox({ journalPath: join(root, "audio.jsonl") }),
+        audioDiscovery: { serverId: "test", target: "22222222222222222222", targets: ["33333333333333333333"] },
+        deliveryBroker: { enqueue: (job) => enqueued.push(job) },
+      });
+      const { url } = await s.pwa.start();
+      return { s, url, enqueued, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+    }],
+    when: ["discovery is fetched and a turn targets the pane the env never named", async ({ url }) => {
+      const config = await request(`${url}/api/audio/config`);
+      const sent = await request(`${url}/api/audio/send`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "hej claw:0", target: "11111111111111111111", idempotencyKey: "turn-fleet-1" }),
+      });
+      const unknown = await request(`${url}/api/audio/send`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "hej", target: "99999999999999999999", idempotencyKey: "turn-fleet-2" }),
+      });
+      return { config, sent, unknown };
+    }],
+    then: ["all three panes are listed primary first, the unnamed pane receives the turn, unmapped channels refuse", async ({ config, sent, unknown }, ctx) => {
+      expect(config.status).toBe(200);
+      expect(config.body.targets.map((target) => target.id)).toEqual(["claw:1", "lsrc:0", "claw:0"]);
+      expect(config.body.targets.filter((target) => target.favorite).map((target) => target.id)).toEqual(["claw:1"]);
+      expect(sent.status).toBe(200);
+      expect(sent.body.destination).toEqual({ agent: "claw", pane: 0 });
+      expect(unknown.status).toBe(403);
+      expect(ctx.enqueued).toHaveLength(1);
       await ctx.s.pwa.stop(); ctx.s.cleanup(); ctx.cleanup();
     }],
   });
@@ -639,7 +696,11 @@ feature("explicit audio phone feed", () => {
         serverId: "abyss-wsl",
         target: "1502949109491961917",
         defaultTarget: null,
-        targets: [],
+        // Every mapped pane is selectable (Mattias 2026-09-14); the unmapped primary is not a target.
+        targets: [
+          { id: "claw:0", label: "orchestration driver", kind: "agent", agent: "claw", pane: 0, audioTarget: "chan-0", favorite: false },
+          { id: "claw:1", label: "claw:1", kind: "agent", agent: "claw", pane: 1, audioTarget: "chan-1", favorite: false },
+        ],
       });
       expect(result.missing.status).toBe(503);
       await ctx.configured.pwa.stop();
