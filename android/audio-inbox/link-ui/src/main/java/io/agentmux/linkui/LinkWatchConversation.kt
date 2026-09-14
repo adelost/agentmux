@@ -15,9 +15,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.unit.dp
 import com.adelost.designkit.ui.GraphiteTokens
+import com.adelost.designkit.ui.LocalRoundBackLayer
 import com.adelost.designkit.ui.LocalRoundChromeReservation
-import com.adelost.designkit.ui.MenuDesign
 import com.adelost.designkit.ui.roundSafeRectHorizontalInsetsDp
+import com.adelost.designkit.ui.roundTitleTopPadding
 import com.adelost.ringkit.ui.*
 import io.agentmux.linkcore.LinkTurn
 import io.agentmux.linkcore.PlaybackPhase
@@ -68,7 +69,9 @@ private fun WatchTurnReader(
     // A stable readable rectangle, not an inset based on the centre of a long
     // off-screen paragraph. CircleKit accounts for BOTH the circle and Back.
     BoxWithConstraints(Modifier.fillMaxSize().background(GraphiteTokens.Canvas)) {
-        val verticalInset = MenuDesign.roundTitleTopPadding
+        // Start below CircleKit's top escape layer when it is mounted (0.3.82),
+        // mirrored at the bottom so the straight edges stay inside the circle.
+        val verticalInset = roundTitleTopPadding(LocalRoundBackLayer.current)
         val insets = roundSafeRectHorizontalInsetsDp(
             viewportWidthDp = maxWidth.value,
             viewportHeightDp = maxHeight.value,
