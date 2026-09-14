@@ -12,13 +12,15 @@ class WakeSessionTest {
     private fun WakeStatus.after(stage: TurnStage, error: String = "") =
         reduce(WakeEvent.TurnChanged(TurnProgress(stage, error)))
 
+    // Mattias 2026-09-15: "man ska säga sin wake up-fras och så spelas det in och sen så skickas det och så får man
+    // svaret. Och vill man ha nåt mer så säger man ... wake up-ordet igen". No follow-up window after a reply.
     @Test
-    fun aQuestionTravelsThroughThinkingAndSpeakingIntoAFollowUpWindow() {
+    fun aQuestionTravelsThroughThinkingAndSpeakingBackToWaitingForTheWakeWord() {
         val phases = listOf(TurnStage.SENDING, TurnStage.THINKING, TurnStage.SPEAKING, TurnStage.SPOKEN)
             .runningFold(sent()) { status, stage -> status.after(stage) }
             .map { it.phase }
         assertEquals(
-            listOf(WakePhase.SENDING, WakePhase.SENDING, WakePhase.THINKING, WakePhase.SPEAKING, WakePhase.FOLLOW_UP),
+            listOf(WakePhase.SENDING, WakePhase.SENDING, WakePhase.THINKING, WakePhase.SPEAKING, WakePhase.LISTENING),
             phases,
         )
     }
@@ -60,17 +62,26 @@ class WakeSessionTest {
     }
 
     @Test
-    fun silenceInTheFollowUpWindowReturnsQuietlyToTheWakeWord() {
-        val window = sent().after(TurnStage.SPOKEN)
-        assertEquals(WakePhase.FOLLOW_UP to 1, window.phase to window.followUps)
-        val quiet = window.reduce(WakeEvent.CaptureEnded(UtteranceEnd.NO_SPEECH, null))
-        assertEquals(WakePhase.LISTENING to "", quiet.phase to quiet.detail)
+    fun afterASpokenReplyNothingIsSentUntilTheWakeWordIsHeardAgain() {
+        val waiting = sent().after(TurnStage.SPOKEN)
+        assertEquals(WakePhase.LISTENING to "", waiting.phase to waiting.detail)
+        assertEquals(waiting, waiting.reduce(WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "t2")))
+        val asked = waiting.reduce(WakeEvent.Detected(0.9f)).reduce(WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "t2"))
+        assertEquals(WakePhase.SENDING to "t2", asked.phase to asked.turnId)
     }
 
     @Test
-    fun aFollowUpQuestionIsSentWithoutTheWakeWord() {
-        val followUp = sent().after(TurnStage.SPOKEN).reduce(WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "t2"))
-        assertEquals(WakePhase.SENDING to "t2", followUp.phase to followUp.turnId)
+    fun aQuestionCancelledWhileHeardIsNeverSent() {
+        val cancelled = WakeStatus().reduce(WakeEvent.Start).reduce(WakeEvent.Detected(0.9f)).reduce(WakeEvent.QuestionCancelled)
+        assertEquals(WakePhase.LISTENING to QUESTION_CANCELLED, cancelled.phase to cancelled.detail)
+        assertEquals(cancelled, cancelled.reduce(WakeEvent.CaptureEnded(UtteranceEnd.COMPLETE, "t1")))
+    }
+
+    @Test
+    fun aQuestionAlreadySendingCannotBeCancelled() {
+        val sending = sent()
+        assertEquals(false, sending.questionCancellable())
+        assertEquals(sending, sending.reduce(WakeEvent.QuestionCancelled))
     }
 
     @Test

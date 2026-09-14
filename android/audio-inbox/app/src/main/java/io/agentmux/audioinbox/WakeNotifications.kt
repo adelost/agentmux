@@ -50,7 +50,6 @@ internal fun wakePhaseTitle(phase: WakePhase, phrase: WakePhrase): String = when
     WakePhase.SENDING -> "Sending your question"
     WakePhase.THINKING -> "Waiting for the reply"
     WakePhase.SPEAKING -> "Reading the reply"
-    WakePhase.FOLLOW_UP -> "Ask a follow-up"
     WakePhase.BLOCKED -> "Wake word stopped"
 }
 

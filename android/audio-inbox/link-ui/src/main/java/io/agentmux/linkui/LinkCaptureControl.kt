@@ -29,6 +29,7 @@ import io.agentmux.linkcore.CapturePhase
 import io.agentmux.linkcore.VoiceUploadPolicy
 import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.WakeStatus
+import io.agentmux.wakeword.questionCancellable
 import kotlinx.coroutines.delay
 
 /** Why the same recorder control is ready, recoverable, or unavailable. */
@@ -77,6 +78,8 @@ fun LinkCaptureControl(
     onRelease: () -> Unit,
     onCancel: () -> Unit,
     onRecover: (() -> Unit)? = null,
+    /** Drops a hands-free question still being heard; null on hosts without a wake word. */
+    onCancelHandsFree: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val diameter = if (LocalCircleSurfaceLayout.current.surfaceClass == CircleSurfaceClass.ROUND) 72.dp else 56.dp
@@ -148,7 +151,7 @@ fun LinkCaptureControl(
                         is LinkCaptureAvailability.Recoverable -> availability.detail
                     },
                     // While hands-free hears or sends a question, holding would fight it for the microphone.
-                    onBegin = { spec.wake.phase !in HANDS_FREE_OWNS_MICROPHONE && onBegin() },
+                    onBegin = { handsFreeTap(spec.wake, onCancelHandsFree) ?: onBegin() },
                     onRelease = onRelease,
                     onCancel = onCancel,
                 ),
@@ -158,6 +161,16 @@ fun LinkCaptureControl(
     }
 }
 
-private val HANDS_FREE_OWNS_MICROPHONE = setOf(WakePhase.CAPTURING, WakePhase.FOLLOW_UP, WakePhase.SENDING)
+private val HANDS_FREE_OWNS_MICROPHONE = setOf(WakePhase.CAPTURING, WakePhase.SENDING)
+
+/**
+ * What a press on the talk ring does while hands-free owns the microphone: a question still being heard is
+ * cancelled, a question already sending is left alone. Null means hold-to-talk may begin as usual.
+ */
+internal fun handsFreeTap(wake: WakeStatus, cancel: (() -> Unit)?): Boolean? = when {
+    wake.phase !in HANDS_FREE_OWNS_MICROPHONE -> null
+    wake.questionCancellable() && cancel != null -> false.also { cancel() }
+    else -> false
+}
 private const val AUDIO_LEVEL_COUNT = 24
 private const val AUDIO_LEVEL_SAMPLE_MS = 100L

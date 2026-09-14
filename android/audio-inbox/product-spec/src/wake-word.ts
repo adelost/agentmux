@@ -29,7 +29,7 @@ export const WAKE_WORD_EFFECTS = ["audio.capture", "storage.write", "transport.s
 
 export function defineWakeWordFeature<const Product extends string>(product: Product) {
   const phases = finiteValues(`${product}.wake-phase`, [
-    "off", "listening", "capturing", "sending", "thinking", "speaking", "follow-up", "blocked",
+    "off", "listening", "capturing", "sending", "thinking", "speaking", "blocked",
   ]);
   // The phrases whose models ship in `:wakeword` (WakePhrases.offered), default first.
   const phrases = finiteValues(`${product}.wake-phrase`, ["hey-jarvis", "hey-marvin", "alexa"]);

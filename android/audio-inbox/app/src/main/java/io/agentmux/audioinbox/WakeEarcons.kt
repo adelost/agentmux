@@ -11,7 +11,6 @@ internal class WakeEarcons : AutoCloseable {
     fun heard() = tones.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
     fun sent() = tones.startTone(ToneGenerator.TONE_PROP_ACK, 150)
     fun thinking() = quiet.startTone(ToneGenerator.TONE_PROP_BEEP, 60)
-    fun followUp() = quiet.startTone(ToneGenerator.TONE_PROP_BEEP2, 120)
     fun failed() = tones.startTone(ToneGenerator.TONE_PROP_NACK, 200)
 
     override fun close() {

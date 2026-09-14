@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.stateAuthorities
-// Product declarations SHA-256: d41485975b7a728a6eeeb9a1062a208d3bffd289d6b7881249cbab07b6feaddd
+// Product declarations SHA-256: 7da6705c816614b8794617bef5658429c3810730193904a687a0b4efce9e2f99
 package io.agentmux.linkui.product.generated
 
 import io.agentmux.linkui.product.ProductComponentInput
@@ -71,7 +71,6 @@ internal enum class GeneratedLinkWakePhaseValue(val wireId: String) {
     SENDING("sending"),
     THINKING("thinking"),
     SPEAKING("speaking"),
-    FOLLOW_UP("follow-up"),
     BLOCKED("blocked"),
 }
 internal enum class GeneratedLinkWakePhraseValue(val wireId: String) {
@@ -344,7 +343,6 @@ internal object GeneratedWakePhaseAuthority {
         "sending" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.SENDING),
         "thinking" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.THINKING),
         "speaking" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.SPEAKING),
-        "follow-up" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.FOLLOW_UP),
         "blocked" to GeneratedWakePhasePresentation(phase = GeneratedLinkWakePhaseValue.BLOCKED),
     )
 

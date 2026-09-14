@@ -19,6 +19,7 @@ import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.WakeWordDetector
 import io.agentmux.wakeword.WakeWordModels
 import io.agentmux.wakeword.listensForWakeWord
+import io.agentmux.wakeword.questionCancellable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -36,7 +37,7 @@ import java.util.concurrent.Executors
 private const val THINKING_TONE_LIMIT_MS = 30_000L
 
 /**
- * WHAT: Foreground microphone service for hands-free Link: the wake phrase, a question, a spoken answer, a follow-up.
+ * WHAT: Foreground microphone service for hands-free Link: the wake phrase, a question, a spoken answer, then the wake phrase again.
  * WHY: Questions go through the same process-wide conversation owner as push-to-talk,
  * so they work with the screen locked and appear in the normal history.
  */
@@ -57,6 +58,7 @@ class WakeWordService : Service(), WakeLoopListener {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> start(intent.getStringExtra(EXTRA_QA_WAV))
+            ACTION_CANCEL_QUESTION -> cancelQuestion()
             ACTION_STOP -> {
                 // Stop from the notification means off, so reopening Link does not restart listening.
                 getSharedPreferences(AppContract.PREFS, MODE_PRIVATE).edit().putBoolean(KEY_WAKE_WORD, false).apply()
@@ -107,15 +109,20 @@ class WakeWordService : Service(), WakeLoopListener {
             openModels(phrase).use { models ->
                 SileroSpeechProbability.load(assetBytes("silero_vad.onnx")).use { vad ->
                     openSource(qaWav).use { source ->
+                        val detector = WakeWordDetector(models)
                         WakeListeningLoop(
                             source = source,
-                            detector = WakeWordDetector(models),
-                            vad = vad,
+                            detector = object : WakeChunkScorer {
+                                override fun score(chunk: ShortArray) = detector.score(chunk)
+                                override fun reset() = detector.reset()
+                            },
+                            vad = object : SpeechChunkProbability {
+                                override fun probability(chunk: ShortArray) = vad.probability(chunk)
+                                override fun reset() = vad.reset()
+                            },
                             threshold = phrase.threshold,
                             policy = EndpointPolicy(),
                             detectionAllowed = { LinkWakeStatus.status.value.listensForWakeWord() },
-                            followUpWindow = { LinkWakeStatus.status.value.takeIf { it.phase == WakePhase.FOLLOW_UP }?.followUps },
-                            followUpPolicy = EndpointPolicy(waitForSpeechMs = 4_000),
                             listener = this,
                         ).also { loop = it }.run()
                     }
@@ -152,6 +159,14 @@ class WakeWordService : Service(), WakeLoopListener {
 
     override fun onHearing(hearing: WakeHearing) = MainThread.run { LinkWakeStatus.apply(WakeEvent.Heard(hearing)) }
 
+    /** The talk ring was tapped while a question was heard: drop it before anything is encoded or sent. */
+    private fun cancelQuestion() {
+        if (!LinkWakeStatus.status.value.questionCancellable()) return
+        loop?.cancelQuestion()
+        LinkWakeStatus.apply(WakeEvent.QuestionCancelled)
+        earcons?.failed()
+    }
+
     override fun onQuestion(end: UtteranceEnd, pcm: ShortArray, startedAtMs: Long) {
         if (end == UtteranceEnd.NO_SPEECH) {
             MainThread.run {
@@ -171,6 +186,11 @@ class WakeWordService : Service(), WakeLoopListener {
 
     private fun submit(end: UtteranceEnd, capture: PushToTalkRecorder.Capture, encodingError: Throwable?) {
         val held = coordinator ?: return
+        // Cancelled while it was being encoded: the question never becomes a turn.
+        if (!LinkWakeStatus.status.value.questionCancellable()) {
+            capture.file.delete()
+            return
+        }
         val failure = when {
             encodingError != null -> "Could not encode the question · ${encodingError.message.orEmpty().take(80)}"
             held.selectedTarget() == null -> "No target selected in Link"
@@ -218,7 +238,6 @@ class WakeWordService : Service(), WakeLoopListener {
             LinkWakeStatus.status.map { it.phase }.distinctUntilChanged().collect { phase ->
                 thinkingTones?.cancel()
                 if (phase == WakePhase.THINKING) thinkingTones = launch { tickWhileThinking() }
-                if (phase == WakePhase.FOLLOW_UP) earcons?.followUp()
             }
         }
     }
@@ -260,6 +279,7 @@ class WakeWordService : Service(), WakeLoopListener {
     companion object {
         const val ACTION_START = "io.agentmux.audioinbox.WAKE_START"
         const val ACTION_STOP = "io.agentmux.audioinbox.WAKE_STOP"
+        const val ACTION_CANCEL_QUESTION = "io.agentmux.audioinbox.WAKE_CANCEL_QUESTION"
         const val EXTRA_QA_WAV = "qa_wake_wav"
     }
 }
