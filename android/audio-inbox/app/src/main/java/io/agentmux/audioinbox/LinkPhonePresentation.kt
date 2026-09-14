@@ -29,7 +29,7 @@ internal fun phoneActivePreviewState(playbackActive: Boolean, scenario: String? 
             targetLabel = "DEMO ONE",
             userText = "Voice transcript: polish the shared Link experience.",
             replyText = "The phone and watch now keep conversation primary and setup secondary.",
-            respondingTarget = "DEMO ONE",
+            respondingTarget = "demo:1",
             createdAtMs = System.currentTimeMillis() - 12_000,
             deliveryPhase = DeliveryPhase.QUEUED,
             replyPhase = ReplyPhase.READY,
