@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Thin Windows-native manager loop for the _windows_ channel. Prompt text and
 // decisions live in core/; this file only does Discord I/O, bounded process
-// runs, journaling, and the poll loop. //commands stay owned by the restarter.
+// runs, journaling, and the poll loop. //commands run through the local parser.
 
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -26,7 +26,7 @@ import {
   trackManagerBootId,
 } from "../core/windows-manager.mjs";
 import { mapRecoveryChainResults } from "../core/windows-recovery.mjs";
-import { pollManagerDiscord } from "../core/windows-manager-discord.mjs";
+import { pollManagerDiscord, reconcileManagerStartup } from "../core/windows-manager-discord.mjs";
 import { claimManagerSingleton, createVoiceTranscriber } from "../core/windows-manager-input.mjs";
 import { createSerialTurnLane, startWindowsManagerPhone } from "../core/windows-manager-phone-runtime.mjs";
 import { startWindowsManagerLink } from "../core/windows-manager-link.mjs";
@@ -134,7 +134,7 @@ export async function runManagerTurn({ userText, messageId, state, history = [],
   trackManagerBootId(state, observation);
   const messages = planManagerTurn({ userText, observation, history, contractVersion: MANAGER_CONTRACT_VERSION });
   const local = planLocalRescueTurn(userText);
-  const reply = local ? { ok: true, text: "local-rescue" } : await deps.provider.chat(messages);
+  const reply = local ? { ok: true, text: local.answer || "local-rescue" } : await deps.provider.chat(messages);
   const persistSession = (r) => { if (r?.sessionId) { state.codexSessionId = r.sessionId; deps.saveState(state); } };
   persistSession(reply);
   if (!reply?.ok) return { answer: formatProviderFallback(reply?.reason), toolResults: [], outcome: "PARTIAL", observation };
@@ -153,6 +153,7 @@ export async function runManagerTurn({ userText, messageId, state, history = [],
     }
     state.lastAction = planAcceptedAction({ messageId, command: name, generation: deps.generation, nowMs: deps.nowMs() });
     deps.saveState(state);
+    if (verdict.notice) await deps.sendMessage(verdict.notice).catch((error) => deps.log?.(`restart notice failed: ${error?.message || error}`));
     const executed = await deps.executeTool(name, { observation, beforeBootId: state.prevBootId || null });
     toolResults.push(...(Array.isArray(executed) ? executed : [executed]));
     const result = toolResults[toolResults.length - 1];
@@ -188,18 +189,6 @@ export async function runManagerTurn({ userText, messageId, state, history = [],
 /** WHAT: Routes one Discord poll through filters, journal, turn, and cursor. WHY: Keeps crash fencing and message ownership in one place. */
 export async function pollManagerChannel({ config, state, history = [], deps }) {
   return pollManagerDiscord({ config, state, history, deps, runTurn: runManagerTurn });
-}
-
-/** WHAT: Turns a leftover started action into a blocked fence. WHY: Prevents any ambiguous manager action from running twice. */
-export function reconcileManagerStartup(state, { nowMs = Date.now() } = {}) {
-  const action = state?.lastAction;
-  if (!action || action.status !== "started") return { state, fenced: false };
-  action.status = "blocked";
-  action.completedAt = new Date(nowMs).toISOString();
-  action.stage = "crashed-mid-action";
-  state.lastAction = action;
-  state.lastSeenId = String(action.messageId);
-  return { state, fenced: true, fencedMessageId: String(action.messageId) };
 }
 
 function loadConfig() {

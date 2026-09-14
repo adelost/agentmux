@@ -38,13 +38,22 @@ amux restarter start-supervised
 
 ## Discord commands
 
+The Windows manager (`bin/windows-manager.mjs`) is the only listener on the rescue channel. The
+PowerShell restarter that first owned these commands last polled on 2026-08-01; while the manager
+still skipped `//` text as "restarter-owned", three `//restart-wsl` orders got no reply and no
+restart (2026-09-12 to 2026-09-14). The manager's local parser now runs every command below
+without the model, and answers an unknown `//command` with the list instead of staying silent.
+
 - `//status` — Windows/WSL/bridge/release/memory status with boot identity.
-- `//logs` — bounded, redacted tails from Windows and WSL.
-- `//start-wsl` — one bounded WSL start; never shuts WSL down.
-- `//start-bridge` — starts the WSL bridge only when absent, in a visible Windows terminal.
+- `//logs` — bounded, redacted tails from Windows.
+- `//start-wsl` — one bounded WSL start, only when WSL is proven offline; never shuts WSL down.
+- `//start-bridge` — starts the WSL bridge only when absent.
+- `//restart` — legacy alias for `//start-bridge`; never shuts WSL down.
 - `//recover` — status → start missing WSL → start missing bridge → verify.
-- `//restart` — explicit legacy bridge-only rescue; never shuts WSL down.
-- `//restart-wsl --receipt ID` — exactly one fenced shutdown/start from a fresh receipt.
+- `//restart-wsl` (or `//hardrestart`) — the authorized human's explicit order is the fence: the
+  manager posts `AMUX startar om WSL nu` with the current boot before exactly one shutdown/start,
+  then reads status again and answers `WSL är omstartat: boot A -> B` or
+  `WSL startades INTE om: samma boot A`. A trailing `--receipt ID` is accepted and not checked.
 
 Create the receipt immediately before a planned restart:
 

@@ -5,6 +5,7 @@
 
 import { spawn } from "node:child_process";
 import { classifyRecovery } from "./windows-bridge.mjs";
+import { describeRestartOutcome, formatRestartNotice, isSlashCommand, planSlashCommand, restartWslPlan } from "./windows-manager-commands.mjs";
 
 /** WHAT: Names the manager contract version. WHY: Keeps runbook, tools, and runtime on one explicit contract. */
 export const MANAGER_CONTRACT_VERSION = 1;
@@ -31,6 +32,7 @@ const LOCAL_RECOVERY = /(?:\bwsl\b.*(?:\bkra(?:sch|sh)\w*|\b(?:nere|offline|dog|
 export function planLocalRescueTurn(userText) {
   const text = String(userText || "").trim().replace(/\s+/gu, " ");
   if (!text) return null;
+  if (isSlashCommand(text)) return planSlashCommand(text);
   if (LOCAL_STATUS.test(text)) return { kind: "status", tools: ["get_status"] };
   if (LOCAL_LOGS.test(text)) return { kind: "logs", tools: ["get_logs"] };
   if (/^(?:hej[!,.]?\s+)?hur\b/iu.test(text)) {
@@ -41,7 +43,7 @@ export function planLocalRescueTurn(userText) {
   // made "starta om modellerna" inherit WSL from an earlier status answer.
   if (RESTART_VERB_ONLY.test(text) && NON_WSL_RESTART_TARGET.test(text)) return null;
   if (LOCAL_RESTART_WSL.test(text) || DIRECT_RESTART_WSL.test(text)) {
-    return { kind: "restart-wsl", tools: ["get_status", "restart_wsl"] };
+    return restartWslPlan();
   }
   if (LOCAL_RECOVERY.test(text)) return { kind: "recovery", tools: ["get_status", "recover"] };
   return null;
@@ -55,6 +57,15 @@ export function formatLocalRescueAnswer(plan, toolResults, outcome) {
   }
   const failed = results.filter((result) => result?.ok !== true);
   const finalDetail = String(results.at(-1)?.detail || "recovery-unavailable");
+  if (plan?.kind === "restart-wsl") {
+    // Tool order is status, restart, status: keep the restart's own detail next to the fresh status.
+    return [
+      describeRestartOutcome(results),
+      `AMUX ${outcome} lokal recovery`,
+      `steg=${results.length} fel=${failed.length}`,
+      ...results.slice(1).map((result) => `${result?.stage || "steg"}: ${String(result?.detail || "")}`),
+    ].join("\n");
+  }
   return [
     `AMUX ${outcome} lokal recovery`,
     `steg=${results.length} fel=${failed.length}`,
@@ -122,7 +133,7 @@ export function buildRunbookContext({ contractVersion } = {}) {
 Kontraktsversion: ${contractVersion ?? MANAGER_CONTRACT_VERSION}.
 Du lever när WSL är död: du körs av node.exe direkt på Windowsvärden och når kanalen utan WSL.
 Din uppgift är att observera, klassificera och återställa WSL- och bryggfel inom hårda gränser.
-Deterministiska //kommandon ägs av restarter-pollern och är aldrig dina.
+Deterministiska //kommandon körs av den lokala parsern och är aldrig dina.
 
 FELKLASSER
 1. WSL OOM/hang/omstart: WSL svarar inte eller har startat om. Bryggen kan vara felfri men oåtkomlig.
@@ -201,8 +212,9 @@ export function parseToolCalls(text) {
 export function planToolCall({ name, observation = null, lastStatusMs = null, nowMs = Date.now(), explicitHumanRestart = false } = {}) {
   if (!TOOL_NAMES.has(name)) return { allow: false, reason: "unknown-tool" };
   if (name === "restart_wsl") {
+    // The announcement travels with the permission so the human hears it before the minutes-long restart.
     return explicitHumanRestart
-      ? { allow: true, reason: "explicit-human-restart" }
+      ? { allow: true, reason: "explicit-human-restart", notice: formatRestartNotice(observation) }
       : { allow: false, reason: "explicit-human-restart-required" };
   }
   if (name === "start_wsl") {

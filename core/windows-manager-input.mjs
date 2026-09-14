@@ -10,7 +10,6 @@ const DISCORD_MEDIA_HOSTS = new Set(["cdn.discordapp.com", "media.discordapp.net
 /** WHAT: Builds one authorized Discord input plan. WHY: Keeps voice and text in one explicit input seam. */
 export function classifyManagerInput(message) {
   const text = String(message?.content || "").trim();
-  if (text.startsWith("//")) return { kind: "skip", reason: "restarter-command" };
   if (text) return { kind: "text", text };
   const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
   const voice = (Number(message?.flags) & VOICE_FLAG) === VOICE_FLAG;

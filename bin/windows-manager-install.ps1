@@ -174,6 +174,8 @@ if ($Install) {
     @{ from = (Join-Path $scriptDir "windows-rescue-tool.ps1"); name = "bin/windows-rescue-tool.ps1" },
     @{ from = (Join-Path $scriptDir "windows-restarter-io.ps1"); name = "bin/windows-restarter-io.ps1" },
     @{ from = (Join-Path $repoRoot "core\windows-manager.mjs"); name = "core/windows-manager.mjs" },
+    @{ from = (Join-Path $repoRoot "core\windows-manager-commands.mjs"); name = "core/windows-manager-commands.mjs" },
+    @{ from = (Join-Path $repoRoot "core\runtime-defaults.mjs"); name = "core/runtime-defaults.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-manager-discord.mjs"); name = "core/windows-manager-discord.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-manager-input.mjs"); name = "core/windows-manager-input.mjs" },
     @{ from = (Join-Path $repoRoot "core\windows-manager-phone.mjs"); name = "core/windows-manager-phone.mjs" },

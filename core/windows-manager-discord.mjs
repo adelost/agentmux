@@ -21,6 +21,8 @@ export async function pollManagerDiscord({ config, state, history = [], deps, ru
       || String(message.author?.id) !== String(config.authorizedUserId);
     const input = unauthorized ? { kind: "skip", reason: "unauthorized" } : classifyManagerInput(message);
     if (input.kind === "skip") {
+      // Only the authorized human hears why a message did nothing; bots and strangers stay silent.
+      if (!unauthorized) await deps.sendMessage(`AMUX BLOCKED kan inte läsa meddelandet (${input.reason}). Skriv text eller skicka ett röstmeddelande.`);
       state.lastSeenId = String(message.id);
       deps.saveState(state);
       continue;
@@ -49,4 +51,16 @@ export async function pollManagerDiscord({ config, state, history = [], deps, ru
     handled += 1;
   }
   return handled;
+}
+
+/** WHAT: Turns a leftover started action into a blocked fence. WHY: Prevents any ambiguous manager action from running twice. */
+export function reconcileManagerStartup(state, { nowMs = Date.now() } = {}) {
+  const action = state?.lastAction;
+  if (!action || action.status !== "started") return { state, fenced: false };
+  action.status = "blocked";
+  action.completedAt = new Date(nowMs).toISOString();
+  action.stage = "crashed-mid-action";
+  state.lastAction = action;
+  state.lastSeenId = String(action.messageId);
+  return { state, fenced: true, fencedMessageId: String(action.messageId) };
 }
