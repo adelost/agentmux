@@ -109,7 +109,7 @@ async function executeToolDefault(name, { rootDir, logPath, beforeBootId = null 
     return { ok: true, stage: "get_status", detail: formatWindowsStatus(observation), observation };
   }
   if (name === "get_logs") {
-    const redacted = redactSecrets(`== restarter ==\n${tailFile(join(rootDir, "restarter.log"), 24)}\n== manager ==\n${tailFile(logPath, 24)}`);
+    const redacted = redactSecrets(`== manager ==\n${tailFile(logPath, 40)}`);
     return { ok: true, stage: "get_logs", detail: redacted.length > 1750 ? redacted.slice(-1749) : redacted };
   }
   const plan = planRescueCommand({ name, beforeBootId });
@@ -157,6 +157,7 @@ export async function runManagerTurn({ userText, messageId, state, history = [],
     const executed = await deps.executeTool(name, { observation, beforeBootId: state.prevBootId || null });
     toolResults.push(...(Array.isArray(executed) ? executed : [executed]));
     const result = toolResults[toolResults.length - 1];
+    deps.log?.(`tool ${name} ok=${result.ok} stage=${result.stage} detail=${String(result.detail || "").slice(0, 400)}`);
     if (result.observation) {
       observation = result.observation;
       trackManagerBootId(state, observation);

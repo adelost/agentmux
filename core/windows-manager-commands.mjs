@@ -58,3 +58,23 @@ export function describeRestartOutcome(toolResults) {
   if (before === after) return `WSL startades INTE om: samma boot ${before}.`;
   return `WSL är omstartat: boot ${before} -> ${after}.`;
 }
+
+// What each rescue-tool stage means for the human, and what to type next.
+const RESTART_STEP_HELP = Object.freeze({
+  "wsl-recovered": { said: "WSL, bryggan och de avbrutna panelerna är uppe igen.", next: null },
+  "wsl-stop": { said: "wsl --shutdown misslyckades", next: "skriv //status. Svarar WSL inte, starta om datorn." },
+  "wsl-start": { said: "WSL stängdes men bryggan kom inte igång", next: "skriv //start-bridge, sedan //status." },
+  "post-boot-revive": {
+    said: "WSL och bryggan är uppe, men panelerna återupptogs inte",
+    next: "panelerna startar när du skriver till dem. Följ fix-raden ovan och kör amux revive för att väcka de avbrutna.",
+  },
+  "restart-wsl": { said: "Omstarten gav inget svar i tid", next: "skriv //status och //logs." },
+});
+
+/** WHAT: Maps the restart tool result to plain lines and a next step. WHY: Prevents a stage code from being the only troubleshooting a human on a phone gets. */
+export function explainRestartStep(result) {
+  const help = RESTART_STEP_HELP[result?.stage];
+  if (!help) return result && result.ok !== true ? [`Omstarten stoppade i steget ${result.stage}: ${String(result.detail || "")}`, "Nästa steg: skriv //logs."] : [];
+  if (result.ok === true) return help.next ? [help.said, `Nästa steg: ${help.next}`] : [help.said];
+  return [`${help.said}: ${String(result.detail || "okänd orsak")}`, `Nästa steg: ${help.next}`];
+}
