@@ -149,6 +149,7 @@ describe("Android emulator idle lifecycle", () => {
         tools: { emulator: process.execPath, adb: "/bin/true" },
         readRows: () => [],
         exec: () => "wear34\n",
+        admitBoot: async () => ({ ok: true }),
         spawnProcess,
       });
       const options = spawnProcess.mock.calls[0]?.[2];
@@ -158,6 +159,59 @@ describe("Android emulator idle lifecycle", () => {
     } finally {
       if (original === undefined) delete process.env.DISPLAY;
       else process.env.DISPLAY = original;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // 2026-09-14 21:17: boots kept coming while the host was blocked, and no pane
+  // could wake. A new guest now starts only if memory still admits panes after it.
+  it("refuses a cold boot the memory guard would not admit, after trying relief, and spawns nothing", async () => {
+    const root = mkdtempSync(join(tmpdir(), "amux-emulator-admission-"));
+    const statePath = join(root, "state.json");
+    writeFileSync(statePath, `${JSON.stringify({ version: 1, emulators: {} })}\n`);
+    const spawnProcess = vi.fn(() => ({ pid: 4242, unref: () => {} }));
+    const verdicts = [{ ok: false, reason: "memory-projected-blocked" }, { ok: false, reason: "memory-projected-blocked" }];
+    let reliefs = 0;
+    try {
+      await expect(ensureAndroidEmulator("wear34", {
+        statePath,
+        port: 5554,
+        tools: { emulator: process.execPath, adb: "/bin/true" },
+        readRows: () => [],
+        exec: () => "wear34\n",
+        admitBoot: async () => verdicts.shift(),
+        relieve: async () => { reliefs += 1; return "stoppade 0 inaktiva Gradle-processer"; },
+        spawnProcess,
+      })).rejects.toThrow(/memory guard refused booting wear34: memory-projected-blocked/u);
+      expect(reliefs).toBe(1);
+      expect(spawnProcess).not.toHaveBeenCalled();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("boots once relief has made room", async () => {
+    const root = mkdtempSync(join(tmpdir(), "amux-emulator-admission-ok-"));
+    const statePath = join(root, "state.json");
+    writeFileSync(statePath, `${JSON.stringify({ version: 1, emulators: {} })}\n`);
+    const spawnProcess = vi.fn(() => ({ pid: 4242, unref: () => {} }));
+    const verdicts = [{ ok: false, reason: "memory-projected-blocked" }, { ok: true, reason: "ok" }];
+    try {
+      const result = await ensureAndroidEmulator("wear34", {
+        statePath,
+        port: 5554,
+        waitForBoot: false,
+        logPath: join(root, "emulator.log"),
+        tools: { emulator: process.execPath, adb: "/bin/true" },
+        readRows: () => [],
+        exec: () => "wear34\n",
+        admitBoot: async () => verdicts.shift(),
+        relieve: async () => "stoppade 2 inaktiva Gradle-processer (6.0 GiB)",
+        spawnProcess,
+      });
+      expect(result).toMatchObject({ reused: false, pid: 4242 });
+      expect(spawnProcess).toHaveBeenCalledTimes(1);
+    } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });

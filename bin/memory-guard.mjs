@@ -4,6 +4,8 @@
 //   node bin/memory-guard.mjs poll
 //     Sample once, advance the durable state, print it. (The bridge normally
 //     polls in-process; this is the manual/debug path.)
+//   node bin/memory-guard.mjs relieve
+//     Stop the Gradle daemons Gradle reports IDLE; BUSY builds keep running.
 //   node bin/memory-guard.mjs check --class pane-revive [--reserve-mib N]
 //     Admission decision for an AUTOMATIC heavy start from a LIVE meminfo
 //     sample — exit 0 allows, exit 1 refuses with a classified reason on
@@ -14,6 +16,7 @@ import { readFileSync } from "node:fs";
 import {
   canStartHeavy, classifyMemory, parseMeminfo, pollMemoryGuardOnce,
 } from "../core/memory-guard.mjs";
+import { formatMemoryRelief, relieveIdleGradleDaemons } from "../core/memory-relief.mjs";
 
 const [command, ...rest] = process.argv.slice(2);
 
@@ -30,6 +33,10 @@ function bootId() {
 if (command === "poll") {
   const { state, previousLevel, changed } = pollMemoryGuardOnce();
   console.log(JSON.stringify({ ...state, previousLevel, changed }, null, 2));
+} else if (command === "relieve") {
+  const relief = await relieveIdleGradleDaemons();
+  console.log(formatMemoryRelief(relief));
+  if (rest.includes("--json")) console.log(JSON.stringify(relief, null, 2));
 } else if (command === "check") {
   const heavyClass = argValue("--class");
   const reserveMiB = Number(argValue("--reserve-mib", "0")) || 0;
@@ -51,6 +58,6 @@ if (command === "poll") {
   }
   console.log(`memory-guard allowed ${heavyClass}: ${verdict.reason}`);
 } else {
-  console.error("Usage: node bin/memory-guard.mjs poll | check --class <class> [--reserve-mib N]");
+  console.error("Usage: node bin/memory-guard.mjs poll | relieve [--json] | check --class <class> [--reserve-mib N]");
   process.exit(2);
 }

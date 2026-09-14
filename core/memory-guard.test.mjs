@@ -125,6 +125,24 @@ feature("memory admission guard", () => {
     }],
   });
 
+  // 2026-09-14 21:17: a third emulator booted with ~13 GiB available and full
+  // swap; the host went blocked and no pane could wake. A heavy start must not
+  // itself push the host into the level that refuses pane wakes.
+  unit("refuses a heavy start whose own reserve would leave the host blocked", {
+    then: ["the projected sample is classified with the same rules as the live one", () => {
+      const at = (availableGiB, swapFreeGiB) => ({ bootId: "b1", observedAt: 1_000, level: "normal", sample: sample(availableGiB, swapFreeGiB) });
+      // 13 GiB minus a 4 GiB guest is 9 GiB (18.75%) with swap exhausted: blocked.
+      expect(canStartHeavy(at(13, 0.2), { class: "emulator", reserveMiB: 4096, nowMs: 1_000, bootId: "b1" }))
+        .toMatchObject({ ok: false, reason: "memory-projected-blocked" });
+      // The same boot with swap headroom only reaches warn and may start.
+      expect(canStartHeavy(at(13, 4), { class: "emulator", reserveMiB: 4096, nowMs: 1_000, bootId: "b1" }))
+        .toMatchObject({ ok: true });
+      // Pane wakes keep their floor-only rule; the projection guards heavy starters.
+      expect(canStartHeavy(at(13, 0.2), { class: "pane-revive", reserveMiB: 4096, nowMs: 1_000, bootId: "b1" }))
+        .toMatchObject({ ok: true });
+    }],
+  });
+
   unit("persists one atomic state file with boot identity and freshness", {
     then: ["the written file round-trips and staleness is measurable", () => {
       const root = mkdtempSync(join(tmpdir(), "amux-memguard-"));
@@ -173,6 +191,38 @@ feature("memory admission guard", () => {
         expect(alerts).toHaveLength(1);
         expect(alerts[0]).toMatchObject({ to: "blocked" });
         expect(alerts[0].from).toBeNull();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }],
+  });
+
+  unit("asks for relief while memory stays blocked, at most once per interval", {
+    then: ["blocked polls call onPressure, throttled; normal polls never do", () => {
+      const root = mkdtempSync(join(tmpdir(), "amux-memguard-pressure-"));
+      try {
+        let available = 5;
+        let clock = 0;
+        const pressure = [];
+        const ticks = [];
+        const stop = startMemoryGuard({
+          intervalMs: 3_600_000,
+          pressureIntervalMs: 300_000,
+          path: join(root, "memory-guard.json"),
+          readMeminfo: () => meminfo({ availableGiB: available, swapFreeGiB: 4 }),
+          bootId: "boot-pressure",
+          nowMs: 10_000,
+          clock: () => clock,
+          schedule: (tick) => { ticks.push(tick); return () => {}; },
+          onTransition: () => {},
+          onPressure: (event) => { pressure.push(event.state.level); },
+          log: () => {},
+        });
+        clock = 60_000; ticks[0]();
+        clock = 301_000; ticks[0]();
+        available = 30; clock = 700_000; ticks[0]();
+        stop();
+        expect(pressure).toEqual(["blocked", "blocked"]);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
