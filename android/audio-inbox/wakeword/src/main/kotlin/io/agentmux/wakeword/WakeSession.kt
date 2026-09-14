@@ -40,6 +40,7 @@ data class WakeStatus(
     val followUps: Int = 0,
     /** Only while a question is being captured; null otherwise. */
     val hearing: WakeHearing? = null,
+    val phrase: WakePhrase = WakePhrases.HEY_JARVIS,
 )
 
 sealed interface WakeEvent {
@@ -48,6 +49,8 @@ sealed interface WakeEvent {
     data class Blocked(val reason: String) : WakeEvent
     data class Detected(val score: Float) : WakeEvent
     data class Heard(val hearing: WakeHearing) : WakeEvent
+    /** The user picked another phrase; the microphone loop reloads its model. */
+    data class PhraseChosen(val phrase: WakePhrase) : WakeEvent
     /** A finished capture; [turnId] is null when the host could not submit it, with [failure] saying why. */
     data class CaptureEnded(
         val end: UtteranceEnd,
@@ -66,8 +69,9 @@ fun WakeStatus.listensForWakeWord(): Boolean =
  * WHY: Every stop reason stays visible as a detail, so a silent wake word never has to be guessed at.
  */
 fun WakeStatus.reduce(event: WakeEvent): WakeStatus = when (event) {
-    WakeEvent.Start -> WakeStatus(WakePhase.LISTENING, detections = detections, followUps = followUps)
-    WakeEvent.Stop -> WakeStatus(WakePhase.OFF, detections = detections, followUps = followUps)
+    WakeEvent.Start -> WakeStatus(WakePhase.LISTENING, detections = detections, followUps = followUps, phrase = phrase)
+    WakeEvent.Stop -> WakeStatus(WakePhase.OFF, detections = detections, followUps = followUps, phrase = phrase)
+    is WakeEvent.PhraseChosen -> copy(phrase = event.phrase)
     is WakeEvent.Blocked -> copy(phase = WakePhase.BLOCKED, turnId = null, detail = event.reason, hearing = null)
     is WakeEvent.Detected -> if (listensForWakeWord()) {
         copy(

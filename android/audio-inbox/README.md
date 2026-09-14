@@ -44,7 +44,8 @@ remains a separate user-requested channel.
 
 **Wake word** is off by default and phone-only. When turned on, the foreground
 `WakeWordService` owns one microphone, shows an ongoing notification with Stop,
-and runs `computer` detection on device. After the word it records the question
+and runs wake phrase detection on device (Hey Jarvis, Hey Marvin or Alexa, picked
+in Settings). After the phrase it records the question
 until 2.5 s of silence (Silero VAD, 30 s cap), encodes the same AAC/MPEG-4 file
 as push-to-talk and submits it through the shared conversation owner to the
 selected target. It plays short tones while waiting, reads the reply aloud with

@@ -1,6 +1,6 @@
 // GENERATED FILE. DO NOT EDIT.
 // GENERATED FROM ProductConfig.stateAuthorities
-// Product declarations SHA-256: 0439140f92443c24a9e2dfabb51e644840619598fbee9b0c30b90b723d3501f8
+// Product declarations SHA-256: d41485975b7a728a6eeeb9a1062a208d3bffd289d6b7881249cbab07b6feaddd
 package io.agentmux.linkui.product.generated
 
 import io.agentmux.linkui.product.ProductComponentInput
@@ -73,6 +73,11 @@ internal enum class GeneratedLinkWakePhaseValue(val wireId: String) {
     SPEAKING("speaking"),
     FOLLOW_UP("follow-up"),
     BLOCKED("blocked"),
+}
+internal enum class GeneratedLinkWakePhraseValue(val wireId: String) {
+    HEY_JARVIS("hey-jarvis"),
+    HEY_MARVIN("hey-marvin"),
+    ALEXA("alexa"),
 }
 internal data class GeneratedCapturePhasePresentation(
     val phase: GeneratedLinkCapturePhaseValue,
@@ -345,6 +350,33 @@ internal object GeneratedWakePhaseAuthority {
 
     fun require(stateId: String): GeneratedWakePhasePresentation = requireNotNull(cases[stateId]) {
         "Unknown wake.phase state '$stateId'"
+    }
+}
+
+internal data class GeneratedWakePhrasePresentation(
+    val phrase: GeneratedLinkWakePhraseValue,
+)
+
+internal object GeneratedWakePhraseAuthority {
+    fun <T : Any> inputPort(): ProductDataInput<T> = object : ProductDataInput<T>(
+        GeneratedLinkNativeLegoCatalog.PortIds.WAKE_PHRASE_PRESENTATION_ADAPTER_STATE,
+    ) {}
+    val outputPort: ProductOutputPort<GeneratedWakePhrasePresentation> = object : ProductOutputPort<GeneratedWakePhrasePresentation>(
+        GeneratedLinkNativeLegoCatalog.PortIds.WAKE_PHRASE_PRESENTATION_ADAPTER_PRESENTATION,
+    ) {}
+    val componentInputs: List<ProductComponentInput<GeneratedWakePhrasePresentation>> = listOf(
+        object : ProductComponentInput<GeneratedWakePhrasePresentation>(
+            GeneratedLinkNativeLegoCatalog.PortIds.WAKE_STATUS_WAKEPHRASE,
+        ) {},
+    )
+    private val cases: Map<String, GeneratedWakePhrasePresentation> = mapOf(
+        "hey-jarvis" to GeneratedWakePhrasePresentation(phrase = GeneratedLinkWakePhraseValue.HEY_JARVIS),
+        "hey-marvin" to GeneratedWakePhrasePresentation(phrase = GeneratedLinkWakePhraseValue.HEY_MARVIN),
+        "alexa" to GeneratedWakePhrasePresentation(phrase = GeneratedLinkWakePhraseValue.ALEXA),
+    )
+
+    fun require(stateId: String): GeneratedWakePhrasePresentation = requireNotNull(cases[stateId]) {
+        "Unknown wake.phrase state '$stateId'"
     }
 }
 

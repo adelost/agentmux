@@ -14,11 +14,11 @@ import io.agentmux.wakeword.UtteranceEnd
 import io.agentmux.wakeword.WAKE_SAMPLE_RATE
 import io.agentmux.wakeword.WakeEvent
 import io.agentmux.wakeword.WakeHearing
+import io.agentmux.wakeword.WakePhrase
 import io.agentmux.wakeword.WakePhase
 import io.agentmux.wakeword.WakeWordDetector
 import io.agentmux.wakeword.WakeWordModels
 import io.agentmux.wakeword.listensForWakeWord
-import io.agentmux.linkui.LinkWakePhrase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,6 +26,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.io.File
@@ -49,6 +50,7 @@ class WakeWordService : Service(), WakeLoopListener {
     private var wakeLock: PowerManager.WakeLock? = null
     private var thinkingTones: Job? = null
     private val readAloudRequested = mutableSetOf<String>()
+    private var qaWav: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -68,6 +70,8 @@ class WakeWordService : Service(), WakeLoopListener {
 
     private fun start(qaWav: String?) {
         if (micThread != null) return
+        this.qaWav = qaWav
+        LinkWakePhraseChoice.restore(this)
         val status = LinkWakeStatus.apply(WakeEvent.Start)
         try {
             startForeground(WAKE_NOTIFICATION_ID, WakeNotifications.build(this, status), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
@@ -81,19 +85,33 @@ class WakeWordService : Service(), WakeLoopListener {
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "agentmux-link:wake-word").apply { acquire() }
         observeStatus()
         observeTurns(held)
-        micThread = Thread({ listen(qaWav) }, "link-wake-word").apply { start() }
+        startListening()
     }
 
-    private fun listen(qaWav: String?) {
+    private fun startListening() {
+        val phrase = LinkWakeStatus.status.value.phrase
+        micThread = Thread({ listen(phrase, qaWav) }, "link-wake-word").apply { start() }
+    }
+
+    /** A new phrase needs its own model: the microphone loop closes and opens again with it. */
+    private fun relisten() {
+        if (micThread == null) return
+        loop?.stop()
+        micThread?.join(1_000)
+        loop = null
+        startListening()
+    }
+
+    private fun listen(phrase: WakePhrase, qaWav: String?) {
         try {
-            openModels().use { models ->
+            openModels(phrase).use { models ->
                 SileroSpeechProbability.load(assetBytes("silero_vad.onnx")).use { vad ->
                     openSource(qaWav).use { source ->
                         WakeListeningLoop(
                             source = source,
                             detector = WakeWordDetector(models),
                             vad = vad,
-                            threshold = LinkWakePhrase.threshold,
+                            threshold = phrase.threshold,
                             policy = EndpointPolicy(),
                             detectionAllowed = { LinkWakeStatus.status.value.listensForWakeWord() },
                             followUpWindow = { LinkWakeStatus.status.value.takeIf { it.phase == WakePhase.FOLLOW_UP }?.followUps },
@@ -110,10 +128,10 @@ class WakeWordService : Service(), WakeLoopListener {
         }
     }
 
-    private fun openModels() = WakeWordModels(
+    private fun openModels(phrase: WakePhrase) = WakeWordModels(
         melspectrogram = OnnxFloatModel.load(assetBytes("melspectrogram.onnx")),
         embedding = OnnxFloatModel.load(assetBytes("embedding_model.onnx")),
-        classifier = OnnxFloatModel.load(assetBytes(LinkWakePhrase.modelAsset)),
+        classifier = OnnxFloatModel.load(assetBytes(phrase.modelAsset)),
     )
 
     private fun openSource(qaWav: String?): WakePcmSource =
@@ -192,6 +210,9 @@ class WakeWordService : Service(), WakeLoopListener {
             LinkWakeStatus.status.map { it.copy(hearing = null) }.distinctUntilChanged().collect { status ->
                 if (micThread != null) WakeNotifications.update(this@WakeWordService, status)
             }
+        }
+        scope.launch {
+            LinkWakeStatus.status.map { it.phrase }.distinctUntilChanged().drop(1).collect { relisten() }
         }
         scope.launch {
             LinkWakeStatus.status.map { it.phase }.distinctUntilChanged().collect { phase ->

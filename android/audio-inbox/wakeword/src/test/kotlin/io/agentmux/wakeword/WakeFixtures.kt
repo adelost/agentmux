@@ -4,10 +4,10 @@ import java.io.File
 
 internal fun modelBytes(name: String): ByteArray = File("models/$name").readBytes()
 
-internal fun heyJarvisModels() = WakeWordModels(
+internal fun wakeModels(phrase: WakePhrase) = WakeWordModels(
     melspectrogram = OnnxFloatModel.load(modelBytes("melspectrogram.onnx")),
     embedding = OnnxFloatModel.load(modelBytes("embedding_model.onnx")),
-    classifier = OnnxFloatModel.load(modelBytes(WakePhrases.HEY_JARVIS.modelAsset)),
+    classifier = OnnxFloatModel.load(modelBytes(phrase.modelAsset)),
 )
 
 /** 16 kHz mono 16-bit WAV fixture split into whole 80 ms chunks, followed by one second of silence. */

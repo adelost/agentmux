@@ -163,4 +163,5 @@ export const linkStateAuthorityDefinitions = [
   updatePhaseAuthority,
   recoveryPhaseAuthority,
   linkWakeWord.phaseAuthority,
+  linkWakeWord.phraseAuthority,
 ] as const;

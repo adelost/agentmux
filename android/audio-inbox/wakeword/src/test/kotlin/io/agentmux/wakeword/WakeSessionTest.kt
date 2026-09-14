@@ -24,6 +24,13 @@ class WakeSessionTest {
     }
 
     @Test
+    fun theChosenPhraseSurvivesTurningListeningOffAndOn() {
+        val chosen = WakeStatus().reduce(WakeEvent.PhraseChosen(WakePhrases.ALEXA))
+        assertEquals(WakePhrases.ALEXA, chosen.reduce(WakeEvent.Start).reduce(WakeEvent.Stop).reduce(WakeEvent.Start).phrase)
+        assertEquals(WakePhrases.HEY_JARVIS, WakeStatus().phrase)
+    }
+
+    @Test
     fun whatTheMicrophoneHearsShowsOnlyWhileAQuestionIsCapturedAndClearsWhenItIsSent() {
         val heard = WakeHearing(level = 0.6f, heardSpeech = true, sendsInMs = 1_700)
         val listening = WakeStatus().reduce(WakeEvent.Start)

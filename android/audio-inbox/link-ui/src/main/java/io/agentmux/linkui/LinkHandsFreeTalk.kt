@@ -7,29 +7,19 @@ import io.agentmux.wakeword.WakeStatus
 data class LinkHandsFreeTalk(val label: String, val sub: String, val centerValue: String?, val recording: Boolean)
 
 /**
- * WHAT: The talk ring's words for each hands-free phase, including the countdown before a paused question is sent.
- * WHY: Mattias 2026-09-14: see when the wake word activates and listens, like holding the button, and see the timeout.
- * Null means hands-free is off or stopped, so the ring is plain HOLD TO TALK.
+ * WHAT: The talk ring's one word per hands-free phase; the waveform and the countdown digit carry the rest.
+ * WHY: Mattias 2026-09-14: see when the wake word activates and listens, like holding the button, and see the
+ * timeout, "inte för mycket onödig text". Null means hands-free is off or stopped: plain HOLD TO TALK.
  */
 fun linkHandsFreeTalk(wake: WakeStatus): LinkHandsFreeTalk? {
-    val hearing = wake.hearing
-    val secondsLeft = hearing?.sendsInMs?.let { (it + 999) / 1_000 }
+    val secondsLeft = wake.hearing?.sendsInMs?.let { (it + 999) / 1_000 }
     return when (wake.phase) {
         WakePhase.OFF, WakePhase.BLOCKED -> null
         WakePhase.LISTENING, WakePhase.THINKING, WakePhase.SPEAKING ->
-            LinkHandsFreeTalk("HOLD TO TALK", "OR SAY \"${LinkWakePhrase.spoken.uppercase()}\"", null, recording = false)
-        // The silence ran out: the question is being packed for sending, so never show "SENDING IN 0 S".
-        WakePhase.CAPTURING, WakePhase.FOLLOW_UP -> if (secondsLeft == 0) sending else LinkHandsFreeTalk(
-            label = "LISTENING",
-            sub = when {
-                secondsLeft != null -> "SENDING IN $secondsLeft S"
-                hearing?.heardSpeech == true -> "PAUSE TO SEND"
-                wake.phase == WakePhase.FOLLOW_UP -> "ASK A FOLLOW-UP"
-                else -> "SPEAK NOW"
-            },
-            centerValue = secondsLeft?.toString(),
-            recording = true,
-        )
+            LinkHandsFreeTalk("HOLD TO TALK", "\"${wake.phrase.spoken.uppercase()}\"", null, recording = false)
+        // The silence ran out: the question is being packed for sending, so never show a 0.
+        WakePhase.CAPTURING, WakePhase.FOLLOW_UP -> if (secondsLeft == 0) sending
+        else LinkHandsFreeTalk("LISTENING", "", secondsLeft?.toString(), recording = true)
         WakePhase.SENDING -> sending
     }
 }

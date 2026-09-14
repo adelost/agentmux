@@ -6,8 +6,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import io.agentmux.linkui.LinkWakePhrase
 import io.agentmux.wakeword.WakePhase
+import io.agentmux.wakeword.WakePhrase
 import io.agentmux.wakeword.WakeStatus
 
 internal const val WAKE_NOTIFICATION_ID = 4_107
@@ -30,8 +30,8 @@ internal object WakeNotifications {
         )
         return Notification.Builder(context, WAKE_CHANNEL)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle(wakePhaseTitle(status.phase))
-            .setContentText(status.detail.ifBlank { wakeHint() })
+            .setContentTitle(wakePhaseTitle(status.phase, status.phrase))
+            .setContentText(status.detail.ifBlank { wakeHint(status.phrase) })
             .setContentIntent(open)
             .setOngoing(true)
             .addAction(Notification.Action.Builder(null, "Stop", stop).build())
@@ -43,9 +43,9 @@ internal object WakeNotifications {
     }
 }
 
-internal fun wakePhaseTitle(phase: WakePhase): String = when (phase) {
+internal fun wakePhaseTitle(phase: WakePhase, phrase: WakePhrase): String = when (phase) {
     WakePhase.OFF -> "Wake word off"
-    WakePhase.LISTENING -> "Listening for \"${LinkWakePhrase.spoken}\""
+    WakePhase.LISTENING -> "Listening for \"${phrase.spoken}\""
     WakePhase.CAPTURING -> "Listening to your question"
     WakePhase.SENDING -> "Sending your question"
     WakePhase.THINKING -> "Waiting for the reply"
@@ -54,4 +54,4 @@ internal fun wakePhaseTitle(phase: WakePhase): String = when (phase) {
     WakePhase.BLOCKED -> "Wake word stopped"
 }
 
-internal fun wakeHint(): String = "Say \"${LinkWakePhrase.spoken}\", then your question"
+internal fun wakeHint(phrase: WakePhrase): String = "Say \"${phrase.spoken}\", then your question"

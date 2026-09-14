@@ -333,6 +333,13 @@
       "outputPorts": ["presentation"]
     },
     {
+      "nodeId": "wake.phrase.presentation-adapter",
+      "nativePortId": "wake.phrase.presentation-adapter",
+      "profiles": ["phone-full-ui", "wear-full-ui"],
+      "inputPorts": ["state"],
+      "outputPorts": ["presentation"]
+    },
+    {
       "nodeId": "wake.presentation",
       "nativePortId": "wake.presentation",
       "profiles": ["phone-full-ui", "wear-full-ui"],
@@ -403,6 +410,10 @@
     {
       "id": "link.wake-phase",
       "values": ["blocked", "capturing", "follow-up", "listening", "off", "sending", "speaking", "thinking"]
+    },
+    {
+      "id": "link.wake-phrase",
+      "values": ["alexa", "hey-jarvis", "hey-marvin"]
     }
   ],
   "navigation": {
