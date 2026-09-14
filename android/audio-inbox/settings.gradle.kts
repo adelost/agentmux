@@ -35,5 +35,6 @@ include(
     ":link-transport",
     ":link-ui",
     ":link-update-android",
+    ":wakeword",
     ":wear",
 )
