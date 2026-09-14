@@ -130,6 +130,57 @@ describe("Android emulator idle lifecycle", () => {
     }
   });
 
+  it("stops an emulator adb has not reached for a whole idle limit, unless a process still names it", async () => {
+    // Guard log 2026-08-08 23:00 to 08-09 09:20: wear34 pid 2008971 read
+    // "device 'emulator-5554' not found" on 63 sweeps in a row and held its
+    // guest memory for ten hours, because a failed observation only blocked.
+    const root = mkdtempSync(join(tmpdir(), "amux-emulator-unreachable-"));
+    const statePath = join(root, "state.json");
+    const rows = parseProcessRows(PROCESS_TEXT).slice(0, 1);
+    const readIdle = () => { throw new Error("adb: device 'emulator-5554' not found"); };
+    const stopUnreachable = vi.fn(async () => ({ stopped: true }));
+    const sweep = (now, extra = {}) => sweepAndroidEmulators({
+      now, idleMs: 60_000, statePath, rows, readIdle, stopUnreachable, readAdbState: () => "absent", ...extra,
+    });
+    try {
+      expect((await sweep(100_000)).results[0].action).toBe("blocked");
+      expect((await sweep(150_000)).results[0].action).toBe("blocked");
+      const named = [...rows, ...parseProcessRows("88 3 adb -s emulator-5554 wait-for-device")];
+      expect((await sweep(161_000, { rows: named })).results[0].action).toBe("blocked");
+      const connected = [...rows, ...parseProcessRows("89 3 adb -s localhost:5555 shell input tap 1 1")];
+      expect((await sweep(161_500, { rows: connected })).results[0].action).toBe("blocked");
+      expect((await sweep(162_000, { readAdbState: () => "device" })).results[0].action).toBe("blocked");
+      expect(stopUnreachable).not.toHaveBeenCalled();
+
+      const stopped = await sweep(163_000);
+      expect(stopped.results[0]).toMatchObject({ action: "stopped", reason: "adb-unreachable-absent" });
+      expect(stopUnreachable).toHaveBeenCalledTimes(1);
+      expect(readAndroidEmulatorState(statePath).emulators.wear34).toMatchObject({ status: "asleep", stopReason: "adb-unreachable-absent" });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("restarts the unreachable clock for a new emulator generation and after a good observation", async () => {
+    const root = mkdtempSync(join(tmpdir(), "amux-emulator-generation-"));
+    const statePath = join(root, "state.json");
+    const [row] = parseProcessRows(PROCESS_TEXT);
+    const fail = () => { throw new Error("device offline"); };
+    const stopUnreachable = vi.fn(async () => ({ stopped: true }));
+    const sweep = (now, rows, readIdle = fail) => sweepAndroidEmulators({
+      now, idleMs: 60_000, statePath, rows, readIdle, stopUnreachable, readAdbState: () => "offline",
+    });
+    try {
+      await sweep(100_000, [row]);
+      await sweep(161_000, [{ ...row, pid: row.pid + 1 }]);
+      await sweep(170_000, [{ ...row, pid: row.pid + 1 }], () => ({ idleMs: 1_000, uptimeMs: 2_000, lastUserActivityMs: 1_000 }));
+      expect((await sweep(200_000, [{ ...row, pid: row.pid + 1 }])).results[0].action).toBe("blocked");
+      expect(stopUnreachable).not.toHaveBeenCalled();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("hands the spawned emulator an environment with no display handle", async () => {
     // The wiring, not the helper: a passing headlessEmulatorEnv() unit test
     // proves nothing if the spawn call stops passing it. Deleting `env:` from
